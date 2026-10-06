@@ -1,0 +1,18 @@
+{
+  "name": "@sanoma/workflows",
+  "version": "0.0.0",
+  "description": "Business processes as TypeScript functions, run durably on DBOS",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@dbos-inc/dbos-sdk": "^5.2.11",
+    "oxc-parser": "^0.153.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@sanoma/testing": "workspace:*"
+  }
+}

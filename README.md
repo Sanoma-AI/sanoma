@@ -2,7 +2,7 @@
 
 Open core of Sanoma. Business as Code keeps a company's operational configuration (card limits, time-off policies, access, onboarding steps) in typed code and applies it to vendors like Mercury, Gusto and Okta, with a generated UI over every resource. An agent drafts each change, policies decide who must approve, and a ledger records what happened. This TypeScript monorepo holds the open parts: schema, planner, Cedar policies, ledger format, MCP server, local studio, CLI, first-party connectors and modules.
 
-Status: repository skeleton only; no code yet.
+Status: early. `packages/workflows` runs business processes written as TypeScript on [DBOS](https://dbos.dev): each vendor call is a durable step, approvals and sleeps survive restarts, and a lint keeps workflow code safe to replay. Try it with the [marketing example](examples/marketing/).
 
 ## Contents
 

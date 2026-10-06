@@ -1,0 +1,11 @@
+{
+  "name": "@sanoma/testing",
+  "version": "0.0.0",
+  "description": "Fake vendors and helpers for testing workflows without vendor accounts",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@sanoma/workflows": "workspace:*"
+  }
+}

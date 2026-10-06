@@ -1,0 +1,11 @@
+{
+  "name": "@sanoma/connector-bluesky",
+  "version": "0.0.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@sanoma/workflows": "workspace:*",
+    "zod": "^4.6.5"
+  }
+}
