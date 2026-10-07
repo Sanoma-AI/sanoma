@@ -32,7 +32,23 @@ export default defineWorkflow({
 });
 ```
 
-Drivers implement the operations and hold the credentials. `startWorker({ workflows, drivers, databaseUrl })` runs workflows and recovers interrupted runs. `SanomaClient` starts runs, lists them and records approval decisions.
+Drivers implement the operations and hold the credentials. A policy is checked before every operation call, and a ledger records what happened.
+
+```ts
+import { allow, approve, defineConfig, definePolicy, jsonlLedger } from "@sanoma/workflows";
+
+const policy = definePolicy(({ effect, run }) => {
+  if (effect !== "money") return allow();
+  const financeApproved = run.approvals.some((a) => a.status === "approved" && a.decidedBy === "finance-lead");
+  return financeApproved ? allow() : approve("finance-lead");
+});
+
+export default defineConfig({ workflows: [refund], drivers, policy, ledger: jsonlLedger(".sanoma/ledger") });
+```
+
+A policy returns `allow()`, `deny(reason)` (the run fails) or `approve(who)` (the run waits for that person). It sees the operation, its input, who started the run and the run's approvals so far, and it must decide the same way on every replay: no clock, randomness or network. The ledger gets one record for the start of the run, each operation call with its decision and the vendor's reply, each approval requested and decided, and how the run ended, in a JSONL file per run.
+
+`startWorker(config)` runs workflows and recovers interrupted runs. `SanomaClient` starts runs as a named person, lists them, records approval decisions and reads a run's ledger.
 
 Status: early (0.x). The API may change between minor versions.
 
