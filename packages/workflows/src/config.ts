@@ -1,11 +1,20 @@
 import type { WorkflowDefinition } from "./define.ts";
 import type { LedgerStore } from "./ledger.ts";
-import type { Driver } from "./op.ts";
+import type { Connector, Driver } from "./op.ts";
 import type { Policy } from "./policy.ts";
 
-/** A project's `sanoma.config.ts`: what the worker runs, with which drivers, under which policy. */
+/**
+ * What a worker runs, with which drivers, under which policy: the argument to `startWorker`.
+ * A project usually keeps it in `sanoma.config.ts` and passes it in; nothing loads that file automatically.
+ */
 export interface SanomaConfig {
   workflows: WorkflowDefinition<any, any>[];
+  /**
+   * The connectors (from `defineConnector`) whose operations the drivers implement. The worker
+   * takes each operation's effect, schemas and retry setting from here, not from the workflow,
+   * and refuses a workflow that declares an operation differently.
+   */
+  connectors: Connector<any, any>[];
   drivers: Driver[];
   /** Checked before every operation call. Without one, every call is allowed. */
   policy?: Policy;

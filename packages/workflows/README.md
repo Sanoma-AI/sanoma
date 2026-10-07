@@ -43,8 +43,16 @@ const policy = definePolicy(({ effect, run }) => {
   return financeApproved ? allow() : approve("finance-lead");
 });
 
-export default defineConfig({ workflows: [refund], drivers, policy, ledger: jsonlLedger(".sanoma/ledger") });
+export default defineConfig({
+  workflows: [refund],
+  connectors: [shop],
+  drivers,
+  policy,
+  ledger: jsonlLedger(".sanoma/ledger"),
+});
 ```
+
+The worker takes each operation's effect, schemas and retry setting from `connectors`, not from the workflow, and refuses a workflow or driver that names an operation those connectors don't declare.
 
 A policy returns `allow()`, `deny(reason)` (the run fails) or `approve(who)` (the run waits for that person). It sees the operation, its input, who started the run and the run's approvals so far, and it must decide the same way on every replay: no clock, randomness or network. The ledger gets one record for the start of the run, each operation call with its decision and the vendor's reply, each approval requested and decided, and how the run ended, in a JSONL file per run.
 

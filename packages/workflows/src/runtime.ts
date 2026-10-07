@@ -9,7 +9,7 @@ import type {
   WorkflowDefinition,
 } from "./define.ts";
 import { type LedgerRecord, type LedgerStore, memoryLedger } from "./ledger.ts";
-import { type Driver, isOp, type Op } from "./op.ts";
+import { type Connector, type Driver, isOp, type Op } from "./op.ts";
 import { allow, type Decision, type Policy, PolicyDeniedError } from "./policy.ts";
 
 export type { ApprovalState } from "./define.ts";
@@ -54,6 +54,9 @@ export interface WorkerOptions extends SanomaConfig {
 // drivers, policy and ledger from here at call time; a relaunch in the same process
 // picks up new ones.
 let drivers = new Map<string, Driver["ops"][string]>();
+// The operations as the config's connectors declare them. A workflow's `uses` names an
+// operation; the worker calls it with these effects, schemas and retry settings.
+let trusted = new Map<string, Op>();
 let policy: Policy | undefined;
 let ledger: LedgerStore = memoryLedger();
 // Bumped on stop. A run function left over from a stopped worker (DBOS abandons them on
@@ -68,11 +71,20 @@ export interface Worker {
 
 /** Registers the workflows, connects to Postgres and recovers any runs that were interrupted. */
 export async function startWorker(options: WorkerOptions): Promise<Worker> {
-  drivers = indexDrivers(options.drivers);
+  // Check everything before touching the module state a running worker reads.
+  if (!Array.isArray(options.connectors)) {
+    throw new Error(
+      "startWorker needs `connectors`: the defineConnector objects whose operations the drivers implement",
+    );
+  }
+  const ops = indexConnectors(options.connectors);
+  const impls = indexDrivers(options.drivers, ops);
+  for (const wf of options.workflows) checkUses(wf, ops, impls);
+  trusted = ops;
+  drivers = impls;
   policy = options.policy;
   ledger = options.ledger ?? memoryLedger();
   for (const wf of options.workflows) {
-    checkDrivers(wf, drivers);
     if (!registered.has(wf.name)) registered.set(wf.name, register(wf));
   }
   DBOS.setConfig({
@@ -163,19 +175,53 @@ function register(wf: WorkflowDefinition<any, any>) {
   );
 }
 
-function indexDrivers(list: Driver[]) {
-  const map = new Map<string, Driver["ops"][string]>();
-  for (const d of list) {
-    for (const [key, fn] of Object.entries(d.ops)) map.set(`${d.vendor}.${key}`, fn);
+function indexConnectors(list: Connector<any, any>[]) {
+  const map = new Map<string, Op>();
+  for (const connector of list) {
+    for (const resource of Object.values(connector as Record<string, Record<string, unknown>>)) {
+      for (const op of Object.values(resource)) {
+        if (!isOp(op)) continue;
+        const seen = map.get(op.id);
+        if (seen && seen !== op) throw new Error(`Two connectors in \`connectors\` declare ${op.id}`);
+        map.set(op.id, op);
+      }
+    }
   }
   return map;
 }
 
-function checkDrivers(wf: WorkflowDefinition<any, any>, map: Map<string, unknown>) {
-  const missing = (wf.uses as readonly Use[]).filter((u): u is Op => isOp(u) && !map.has(u.id)).map((u) => u.id);
-  if (missing.length) {
-    throw new Error(`Workflow "${wf.name}" uses operations with no driver: ${missing.join(", ")}`);
+function indexDrivers(list: Driver[], ops: Map<string, Op>) {
+  const map = new Map<string, Driver["ops"][string]>();
+  for (const d of list) {
+    for (const [key, fn] of Object.entries(d.ops)) {
+      const id = `${d.vendor}.${key}`;
+      if (!ops.has(id)) {
+        throw new Error(`Driver "${d.vendor}" implements ${id}, which no connector in \`connectors\` declares`);
+      }
+      map.set(id, fn);
+    }
   }
+  return map;
+}
+
+/**
+ * Every operation a workflow uses must be one the config's connectors declare, with a driver.
+ * The workflow normally imports the same connector object; a copy is accepted only if it
+ * declares the same effect and retry setting, and the worker's declaration is used either way.
+ */
+function checkUses(wf: WorkflowDefinition<any, any>, ops: Map<string, Op>, impls: Map<string, unknown>) {
+  const problems: string[] = [];
+  for (const op of (wf.uses as readonly Use[]).filter(isOp)) {
+    const known = ops.get(op.id);
+    if (!known) problems.push(`${op.id} is not declared by any connector in \`connectors\``);
+    else if (known !== op && (known.effect !== op.effect || known.idempotent !== op.idempotent)) {
+      problems.push(
+        `${op.id} is declared with effect "${op.effect}"${op.idempotent ? " (idempotent)" : ""}, ` +
+          `but its connector says "${known.effect}"${known.idempotent ? " (idempotent)" : ""}`,
+      );
+    } else if (!impls.has(op.id)) problems.push(`${op.id} has no driver`);
+  }
+  if (problems.length) throw new Error(`Workflow "${wf.name}": ${problems.join("; ")}`);
 }
 
 function buildCtx(wf: WorkflowDefinition<any, any>, run: Run): any {
@@ -184,7 +230,7 @@ function buildCtx(wf: WorkflowDefinition<any, any>, run: Run): any {
   for (const op of uses.filter(isOp)) {
     const vendor = (tree[op.vendor] ??= {});
     const resource = (vendor[op.resource] ??= {});
-    resource[op.name] = (input: unknown) => callOp(run, op, input);
+    resource[op.name] = (input: unknown) => callOp(run, op.id, input);
   }
   for (const [v, resources] of Object.entries(tree)) {
     for (const [r, ops] of Object.entries(resources as Record<string, object>))
@@ -226,10 +272,12 @@ async function decide(run: Run, op: Op, input: unknown): Promise<Decision> {
   return decision;
 }
 
-async function callOp(run: Run, op: Op, input: unknown) {
+async function callOp(run: Run, id: string, input: unknown) {
+  // The worker's declaration, never the workflow's: its effect, schemas and retry setting.
+  const op = trusted.get(id);
+  const fn = drivers.get(id);
+  if (!op || !fn) throw new Error(`No connector or driver for ${id} in this worker`);
   const parsed = op.input.parse(input);
-  const fn = drivers.get(op.id);
-  if (!fn) throw new Error(`No driver for ${op.id}`);
   // The policy runs outside a step, so it is asked again on replay; it must decide the same way.
   const decision = await decide(run, op, parsed);
   const call = { type: "op.called", op: op.id, effect: op.effect, input: parsed, decision } as const;

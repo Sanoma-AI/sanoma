@@ -2,6 +2,9 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { bluesky } from "@sanoma/connector-bluesky";
+import { ghost } from "@sanoma/connector-ghost";
+import { resend } from "@sanoma/connector-resend";
 import { fakeMarketingVendors } from "@sanoma/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -31,7 +34,15 @@ let worker: Worker;
 let client: SanomaClient;
 
 const start = (options: Partial<WorkerOptions> = {}) =>
-  startWorker({ workflows: [announce], drivers: vendors.drivers, databaseUrl, appName, ledger, ...options });
+  startWorker({
+    workflows: [announce],
+    connectors: [ghost, resend, bluesky],
+    drivers: vendors.drivers,
+    databaseUrl,
+    appName,
+    ledger,
+    ...options,
+  });
 const ops = () => vendors.state.calls.map((c) => c.op);
 const inSeconds = (s: number) => new Date(Date.now() + s * 1000).toISOString();
 const types = (records: LedgerRecord[]) => records.map((r) => (r.type === "op.called" ? `${r.type} ${r.op}` : r.type));
