@@ -1,3 +1,4 @@
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { parseSync } from "oxc-parser";
 
 export interface LintProblem {
@@ -7,37 +8,37 @@ export interface LintProblem {
 }
 
 /**
- * Workflows are replayed by re-running the function and reading step results back,
- * so the code must do the same thing every time. Anything that reads the clock,
- * randomness, the network or the environment has to go through `ctx`.
+ * A workflow must call vendors through `ctx`, so the policy sees every call. These are the
+ * import rules oxlint's built-in rules cannot express; the clock, randomness, the network
+ * and the environment are oxlint's (`@sanoma/workflows/oxlint`).
  */
-const FORBIDDEN_GLOBALS: Record<string, string> = {
-  Date: "use `await ctx.now()` for the time, and `ctx.sleep({ until })` to wait for a date",
-  fetch: "call the vendor through a connector operation listed in `uses`",
-  setTimeout: "use `ctx.sleep`",
-  setInterval: "use `ctx.sleep` in a loop",
-  setImmediate: "use `ctx.sleep`",
-  queueMicrotask: "await the work directly",
-  process: "pass configuration as workflow input",
-  performance: "use `await ctx.now()`",
-  crypto: "derive ids from `ctx.runId`",
-  require: "import from `@sanoma/*` or another workflow file",
-  eval: "not allowed in workflows",
-  Function: "not allowed in workflows",
-  WebSocket: "call the vendor through a connector operation listed in `uses`",
-  XMLHttpRequest: "call the vendor through a connector operation listed in `uses`",
-};
+const THROUGH_CTX = "a workflow must call vendors through ctx, so the policy sees every call";
 
-const ALLOWED_IMPORT = /^(@sanoma\/|\.\.?\/|zod$)/;
+const ALLOWED_PACKAGE = /^(@sanoma\/workflows|@sanoma\/connector-[a-z0-9-]+|zod)$/;
+const RELATIVE = /^\.\.?\//;
+
+/** Packages refused by name, with the reason. */
+const REFUSED_PACKAGES: [RegExp, string][] = [
+  [/^@sanoma\/testing(\/|$)/, `fakes and test helpers belong in tests; ${THROUGH_CTX}`],
+  [/^@sanoma\/app(\/|$)/, "the app starts runs and decides approvals, so a workflow could approve itself"],
+  [/^@sanoma\/connector-[^/]+\/(fake|driver)(\/|$)/, `${THROUGH_CTX}; import the connector itself`],
+];
 
 /** Runtime entry points a workflow or policy could use to start runs or approve its own approvals. */
 const FORBIDDEN_IMPORTS: Record<string, string> = {
-  SanomaClient: "a workflow must not start runs or decide approvals",
-  startWorker: "a workflow must not start a worker",
+  SanomaClient: "a workflow must not start runs or decide approvals (it could approve itself); ask with `ctx.approval`",
+  startWorker: "a workflow must not start a worker; it already runs inside one",
+  startApp: "a workflow must not start the app, which decides approvals; ask with `ctx.approval`",
 };
 
-export function lintWorkflow(source: string, filename = "workflow.ts"): LintProblem[] {
-  const { program, errors } = parseSync(filename, source, { sourceType: "module", lang: "ts" });
+/**
+ * Checks a workflow or policy file's imports. Allowed: `@sanoma/workflows` (without
+ * `SanomaClient`, `startWorker` or `startApp`), `@sanoma/connector-<vendor>`, `zod`, and
+ * relative files. With `filename`, a relative import must stay inside the file's nearest
+ * `workflows/` or `policies/` directory, or its own directory when it has neither.
+ */
+export function lintWorkflow(source: string, filename?: string): LintProblem[] {
+  const { program, errors } = parseSync(filename ?? "workflow.ts", source, { sourceType: "module", lang: "ts" });
   const lineStarts = [0];
   for (let i = 0; i < source.length; i++) if (source[i] === "\n") lineStarts.push(i + 1);
   const at = (offset: number) => {
@@ -49,100 +50,81 @@ export function lintWorkflow(source: string, filename = "workflow.ts"): LintProb
     ...at(e.labels?.[0]?.start ?? 0),
     message: `syntax: ${e.message}`,
   }));
-  const declared = new Set<string>();
+  const root = filename === undefined ? undefined : treeOf(filename);
 
-  const visit = (node: any, parent: any) => {
-    if (!node || typeof node !== "object") return;
-    if (Array.isArray(node)) {
-      for (const n of node) visit(n, parent);
+  const checkSource = (node: any) => {
+    const spec: string = node.source.value;
+    const refusal = whyRefused(spec, filename, root);
+    if (refusal) {
+      problems.push({ ...at(node.source.start), message: `import "${spec}" is not allowed in a workflow: ${refusal}` });
       return;
     }
-    switch (node.type) {
-      case "ImportDeclaration":
-      case "ExportNamedDeclaration":
-      case "ExportAllDeclaration":
-        if (node.source && !ALLOWED_IMPORT.test(node.source.value)) {
-          problems.push({
-            ...at(node.source.start),
-            message: `import "${node.source.value}" is not allowed in a workflow; import from \`@sanoma/*\` or another workflow file`,
-          });
-        }
-        if (node.source?.value === "@sanoma/workflows") {
-          for (const spec of node.specifiers ?? []) {
-            const name = spec.imported?.name ?? spec.local?.name ?? spec.imported?.value;
-            if (spec.type !== "ImportDefaultSpecifier" && name in FORBIDDEN_IMPORTS) {
-              problems.push({
-                ...at(spec.start),
-                message: `${name} is not allowed in a workflow: ${FORBIDDEN_IMPORTS[name]}`,
-              });
-            }
-          }
-        }
-        break;
-      case "ImportExpression":
-        problems.push({ ...at(node.start), message: "dynamic import is not allowed in a workflow" });
-        break;
-      case "Identifier":
-        if (node.name in FORBIDDEN_GLOBALS && !declared.has(node.name) && isReference(node, parent)) {
-          problems.push({
-            ...at(node.start),
-            message: `${node.name} is not allowed in a workflow: ${FORBIDDEN_GLOBALS[node.name]}`,
-          });
-        }
-        break;
-      case "MemberExpression":
-        if (
-          node.object?.type === "Identifier" &&
-          node.object.name === "Math" &&
-          !node.computed &&
-          node.property?.name === "random"
-        ) {
-          problems.push({
-            ...at(node.start),
-            message: "Math.random is not allowed in a workflow: derive values from `ctx.runId` or the input",
-          });
-        }
-        break;
+    if (spec !== "@sanoma/workflows") return;
+    if (node.type === "ExportAllDeclaration") {
+      problems.push({
+        ...at(node.start),
+        message: `export * from "@sanoma/workflows" is not allowed in a workflow: it would re-export SanomaClient`,
+      });
     }
-    for (const [key, child] of Object.entries(node)) {
-      if (key !== "type" && key !== "start" && key !== "end" && child && typeof child === "object") visit(child, node);
+    for (const s of node.specifiers ?? []) {
+      if (s.type === "ImportNamespaceSpecifier") {
+        problems.push({
+          ...at(s.start),
+          message: `import * from "@sanoma/workflows" is not allowed in a workflow: import the names you use, so SanomaClient stays out`,
+        });
+        continue;
+      }
+      const name = s.imported?.name ?? s.imported?.value ?? s.local?.name ?? s.local?.value;
+      if (s.type !== "ImportDefaultSpecifier" && Object.hasOwn(FORBIDDEN_IMPORTS, name)) {
+        problems.push({ ...at(s.start), message: `${name} is not allowed in a workflow: ${FORBIDDEN_IMPORTS[name]}` });
+      }
     }
   };
 
-  collectDeclarations(program, declared);
-  visit(program, null);
+  const visit = (node: any) => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const n of node) visit(n);
+      return;
+    }
+    if (
+      (node.type === "ImportDeclaration" ||
+        node.type === "ExportNamedDeclaration" ||
+        node.type === "ExportAllDeclaration") &&
+      node.source
+    ) {
+      checkSource(node);
+    } else if (node.type === "ImportExpression") {
+      problems.push({ ...at(node.start), message: "dynamic import is not allowed in a workflow" });
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key !== "type" && key !== "start" && key !== "end" && child && typeof child === "object") visit(child);
+    }
+  };
+
+  visit(program);
   return problems.toSorted((a, b) => a.line - b.line || a.column - b.column);
 }
 
-/** Names the file declares itself (so a local `process` or `crypto` is fine). */
-function collectDeclarations(node: any, out: Set<string>) {
-  if (!node || typeof node !== "object") return;
-  if (Array.isArray(node)) return node.forEach((n) => collectDeclarations(n, out));
-  if (node.type === "VariableDeclarator" && node.id?.type === "Identifier") out.add(node.id.name);
-  if ((node.type === "FunctionDeclaration" || node.type === "ClassDeclaration") && node.id) out.add(node.id.name);
-  if (
-    node.type === "ImportSpecifier" ||
-    node.type === "ImportDefaultSpecifier" ||
-    node.type === "ImportNamespaceSpecifier"
-  ) {
-    out.add(node.local.name);
+function whyRefused(spec: string, filename: string | undefined, root: string | undefined): string | undefined {
+  if (RELATIVE.test(spec)) {
+    if (filename === undefined || root === undefined) return undefined;
+    const rel = relative(root, join(dirname(filename), spec));
+    if (rel !== "" && rel.split(sep)[0] !== ".." && !isAbsolute(rel)) return undefined;
+    const where =
+      basename(root) === "workflows" || basename(root) === "policies" ? `${basename(root)}/` : "this directory";
+    return `it reaches outside ${where}, toward the config and its drivers; ${THROUGH_CTX}`;
   }
-  for (const [key, child] of Object.entries(node))
-    if (key !== "type" && child && typeof child === "object") collectDeclarations(child, out);
+  for (const [pattern, reason] of REFUSED_PACKAGES) if (pattern.test(spec)) return reason;
+  if (ALLOWED_PACKAGE.test(spec)) return undefined;
+  return "import only from `@sanoma/workflows`, a `@sanoma/connector-*` package, zod, or a file beside this one";
 }
 
-/** True when an identifier reads a variable, not when it names a property or key. */
-function isReference(node: any, parent: any): boolean {
-  if (!parent) return true;
-  if (parent.type === "MemberExpression" && parent.property === node && !parent.computed) return false;
-  if (
-    (parent.type === "Property" || parent.type === "ObjectProperty") &&
-    parent.key === node &&
-    !parent.computed &&
-    !parent.shorthand
-  )
-    return false;
-  if ((parent.type === "MethodDefinition" || parent.type === "PropertyDefinition") && parent.key === node) return false;
-  if (parent.type?.startsWith("TS")) return false;
-  return true;
+/** The file's nearest `workflows/` or `policies/` ancestor directory, else its own directory. */
+function treeOf(filename: string): string {
+  for (let dir = dirname(filename); ; dir = dirname(dir)) {
+    const name = basename(dir);
+    if (name === "workflows" || name === "policies") return dir;
+    if (dirname(dir) === dir) return dirname(filename);
+  }
 }

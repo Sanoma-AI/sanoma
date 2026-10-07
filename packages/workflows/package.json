@@ -20,6 +20,7 @@
   },
   "files": [
     "dist",
+    "oxlint.json",
     "README.md",
     "LICENSE"
   ],
@@ -31,7 +32,12 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./lint": {
+      "types": "./dist/lint.d.ts",
+      "default": "./dist/lint.js"
+    },
+    "./oxlint": "./oxlint.json"
   },
   "publishConfig": {
     "access": "public"

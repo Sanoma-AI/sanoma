@@ -1,0 +1,84 @@
+{
+  "$schema": "../../node_modules/oxlint/configuration_schema.json",
+  "overrides": [
+    {
+      "files": ["workflows/**", "policies/**"],
+      "rules": {
+        "no-restricted-globals": [
+          "error",
+          {
+            "name": "Date",
+            "message": "Workflows are replayed: use `await ctx.now()` for the time and `ctx.sleep({ until })` to wait for a date."
+          },
+          {
+            "name": "fetch",
+            "message": "A workflow must call vendors through ctx, so the policy sees every call: use a connector operation listed in `uses`."
+          },
+          {
+            "name": "WebSocket",
+            "message": "A workflow must call vendors through ctx, so the policy sees every call: use a connector operation listed in `uses`."
+          },
+          {
+            "name": "XMLHttpRequest",
+            "message": "A workflow must call vendors through ctx, so the policy sees every call: use a connector operation listed in `uses`."
+          },
+          { "name": "setTimeout", "message": "Workflows are replayed: use `ctx.sleep`." },
+          { "name": "setInterval", "message": "Workflows are replayed: use `ctx.sleep` in a loop." },
+          { "name": "setImmediate", "message": "Workflows are replayed: use `ctx.sleep`." },
+          { "name": "queueMicrotask", "message": "Workflows are replayed: await the work directly." },
+          { "name": "performance", "message": "Workflows are replayed: use `await ctx.now()`." },
+          {
+            "name": "process",
+            "message": "Workflows are replayed: pass configuration as workflow input; drivers read the environment."
+          },
+          { "name": "crypto", "message": "Workflows are replayed: derive ids from `ctx.runId`." },
+          {
+            "name": "require",
+            "message": "Import from `@sanoma/workflows`, a `@sanoma/connector-*` package, zod or a file in this directory."
+          },
+          { "name": "eval", "message": "Not allowed in a workflow or policy." },
+          { "name": "Function", "message": "Not allowed in a workflow or policy." },
+          {
+            "name": "globalThis",
+            "message": "Reaching globals through globalThis would bypass these rules: use `ctx`."
+          },
+          { "name": "global", "message": "Reaching globals through global would bypass these rules: use `ctx`." }
+        ],
+        "no-restricted-properties": [
+          "error",
+          {
+            "object": "Math",
+            "property": "random",
+            "message": "Workflows are replayed: derive values from `ctx.runId` or the input."
+          }
+        ],
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "@sanoma/testing",
+                "message": "Fakes and test helpers belong in tests. A workflow must call vendors through ctx, so the policy sees every call."
+              },
+              {
+                "name": "@sanoma/app",
+                "message": "The app starts runs and decides approvals: a workflow could approve itself."
+              },
+              {
+                "name": "@sanoma/workflows",
+                "importNames": ["SanomaClient", "startWorker", "startApp"],
+                "message": "A workflow must not start runs, start a worker or decide approvals (it could approve itself): ask with `ctx.approval`."
+              }
+            ],
+            "patterns": [
+              {
+                "group": ["@sanoma/connector-*/fake", "@sanoma/connector-*/driver"],
+                "message": "A workflow must call vendors through ctx, so the policy sees every call: import the connector itself, `@sanoma/connector-<vendor>`."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
