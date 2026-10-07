@@ -1,9 +1,17 @@
 import { DBOSClient } from "@dbos-inc/dbos-sdk";
 import { z } from "zod";
-import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, mayDecide, statusOf, topicOf } from "./approvals.ts";
+import {
+  APPROVALS_EVENT,
+  ApprovalMessage,
+  decisionEventOf,
+  mayDecide,
+  statusOf,
+  topicOf,
+  notApprover,
+} from "./approvals.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { type ApprovalState, Principal, type WorkflowDefinition } from "./define.ts";
-import { SanomaError } from "./errors.ts";
+import { SanomaError, invalidInput } from "./errors.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { RunArgs } from "./run.ts";
 
@@ -151,11 +159,7 @@ export class SanomaClient {
       );
     }
     if (!mayDecide(target, msg.by)) {
-      const who =
-        typeof target.approver === "string"
-          ? `is not the approver for ${target.id}; ${target.approver} is`
-          : `is not in group ${target.approver.group}, which decides ${target.id}`;
-      throw new SanomaError("not_approver", `"${msg.by.id}" ${who}`, {
+      throw new SanomaError("not_approver", `${notApprover(target, msg.by)} (${target.id})`, {
         runId,
         approvalId: target.id,
         approver: target.approver,
@@ -227,11 +231,5 @@ const alreadyDecided = (runId: string, a: ApprovalState) =>
 function valid<T>(schema: z.ZodType<T>, value: unknown, what: string): T {
   const parsed = schema.safeParse(value);
   if (parsed.success) return parsed.data;
-  throw new SanomaError("invalid_input", `${what}: ${z.prettifyError(parsed.error)}`, {
-    issues: parsed.error.issues.map(({ path, message, code }) => ({
-      path: path.filter((p) => typeof p !== "symbol"),
-      message,
-      code,
-    })),
-  });
+  throw invalidInput(what, parsed.error.issues);
 }

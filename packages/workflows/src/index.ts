@@ -29,7 +29,10 @@ export {
   allow,
   allowAll,
   approve,
-  Decision,
+  approvedFor,
+  type Decision,
+  DecisionSchema,
+  sameApprover,
   definePolicy,
   deny,
   type Policy,
@@ -37,10 +40,19 @@ export {
   type PolicyOp,
   type RecordedDecision,
 } from "./policy.ts";
-export { errorCode, PolicyDeniedError, RejectedError, SanomaError, type ErrorCode, type ErrorInfo } from "./errors.ts";
+export {
+  errorCode,
+  type ErrorCode,
+  type ErrorInfo,
+  type InputIssue,
+  invalidInput,
+  PolicyDeniedError,
+  RejectedError,
+  SanomaError,
+} from "./errors.ts";
 export { jsonlLedger, memoryLedger, type LedgerRecord, type LedgerStore } from "./ledger.ts";
 export { ApprovalMessage, APPROVALS_EVENT, decisionEventOf, mayDecide } from "./approvals.ts";
-export { RUNTIME_VERSION } from "./version.ts";
+export { RUNTIME_VERSION, STEP_LAYOUT } from "./version.ts";
 export type { RunArgs } from "./run.ts";
 export { startWorker, type Worker } from "./worker.ts";
 export { SanomaClient, type RunStatus, type RunSummary, type StartOptions } from "./client.ts";

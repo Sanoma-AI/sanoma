@@ -348,7 +348,7 @@ describe("announce under a policy", () => {
     await c().decide(runId, { decision: "approve", by: { id: "marketing-lead" } });
 
     await expect(c().result(runId)).rejects.toThrow(
-      'The policy returned {"kind":"approve"} for ghost.post.publish: approve needs an approver',
+      'The policy returned {"kind":"approve"} for ghost.post.publish: needs an approver: a name, or { group: "name" }',
     );
     expect(app.ops()).toEqual(["ghost.post.create", "resend.broadcast.create"]);
     expect((await c().ledger(runId)).at(-1)).toMatchObject({ type: "run.failed" });

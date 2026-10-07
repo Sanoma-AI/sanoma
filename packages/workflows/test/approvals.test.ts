@@ -66,7 +66,7 @@ describe("approvals a workflow asks for", () => {
     const wrong = await caught(c().decide(runId, { decision: "approve", by: { id: "intern" } }));
     expect(errorCode(wrong)).toBe("not_approver");
     expect(wrong).toMatchObject({
-      message: '"intern" is not the approver for approval-1; marketing-lead is',
+      message: "intern is not the approver; marketing-lead is (approval-1)",
       data: { runId, approvalId: "approval-1", approver: "marketing-lead" },
     });
     expect((await c().approvals(runId))[0]).toMatchObject({ status: "pending", refused: [] });
@@ -237,7 +237,7 @@ describe("approvals a policy asks for", () => {
     const wrong = await caught(c().decide(runId, { decision: "approve", by: outsider }));
     expect(errorCode(wrong)).toBe("not_approver");
     expect(wrong).toMatchObject({
-      message: '"bob" is not in group marketing, which decides approval-1',
+      message: "bob is not in group marketing (approval-1)",
       data: { approvalId: "approval-1", approver: { group: "marketing" } },
     });
     // A person whose id is the group's name is not in it.

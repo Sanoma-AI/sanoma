@@ -9,6 +9,14 @@ import { z } from "zod";
 /** This package's version. A unit test keeps it equal to package.json. */
 export const RUNTIME_VERSION = "0.1.0";
 
+/**
+ * The sequence of DBOS calls the runtime makes around each `ctx` call: policy step, approval
+ * events and messages, the driver step. Bump it whenever that sequence changes, even without a
+ * package release, so a run in flight on the old layout is not replayed against the new one.
+ * 2: calls run in program order; a decision event per approval (2026-10-07).
+ */
+export const STEP_LAYOUT = 2;
+
 let dbosVersion: string | undefined;
 
 /** The installed DBOS SDK's version, read from its package.json (which its exports don't expose). */
@@ -55,7 +63,7 @@ export function computeVersion(config: {
     )
     .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   const hash = createHash("sha256")
-    .update(JSON.stringify([appName, RUNTIME_VERSION, installedDbosVersion(), ...workflows]))
+    .update(JSON.stringify([appName, RUNTIME_VERSION, STEP_LAYOUT, installedDbosVersion(), ...workflows]))
     .digest("hex");
   return `${appName}@${hash}`;
 }

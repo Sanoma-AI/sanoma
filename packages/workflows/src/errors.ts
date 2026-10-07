@@ -12,7 +12,8 @@ export type ErrorCode =
   | "already_decided"
   | "run_not_found"
   | "driver_failed"
-  | "invalid_input";
+  | "invalid_input"
+  | "run_ended";
 
 const CODES: ReadonlySet<string> = new Set<ErrorCode>([
   "policy_denied",
@@ -23,6 +24,7 @@ const CODES: ReadonlySet<string> = new Set<ErrorCode>([
   "run_not_found",
   "driver_failed",
   "invalid_input",
+  "run_ended",
 ]);
 
 /**
@@ -76,6 +78,28 @@ export class RejectedError extends SanomaError {
 }
 
 export const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/** A zod issue as the ledger and an API can carry it: no symbols in the path. */
+export interface InputIssue {
+  path: (string | number)[];
+  message: string;
+  code: string;
+}
+
+/** An `invalid_input` error from zod issues, with the issues in `data` and a one-line message. */
+export function invalidInput(
+  what: string,
+  zodIssues: readonly { path: PropertyKey[]; message: string; code: string }[],
+  data: Record<string, unknown> = {},
+): SanomaError {
+  const issues: InputIssue[] = zodIssues.map(({ path, message, code }) => ({
+    path: path.filter((p): p is string | number => typeof p !== "symbol"),
+    message,
+    code,
+  }));
+  const said = issues.map((i) => (i.path.length ? `${i.path.join(".")}: ${i.message}` : i.message)).join("; ");
+  return new SanomaError("invalid_input", `${what}: ${said}`, { ...data, issues });
+}
 
 /** What the ledger keeps of an error. */
 export interface ErrorInfo {

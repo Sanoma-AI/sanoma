@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ApprovalState, Approver, Principal } from "./define.ts";
+import { type ApprovalState, Approver, Covers, type Principal } from "./define.ts";
 import type { Effect, Op } from "./op.ts";
 
 /** An operation as a policy sees it: plain data, without its schemas. */
@@ -54,29 +54,21 @@ export type RecordedDecision = (
 ) & { policyVersion?: string };
 
 const ReasonList = z.array(z.string(), { error: "reasons must be a list of strings" }).optional();
-const coversError = "covers must be a list of operations";
 
 /**
  * Checks a policy's answer. Parsing also copies it, so nothing else the policy returned is kept,
  * and turns `covers` into op ids.
  */
-export const Decision: z.ZodType<RecordedDecision> = z.discriminatedUnion(
+export const DecisionSchema: z.ZodType<RecordedDecision> = z.discriminatedUnion(
   "kind",
   [
     z.object({ kind: z.literal("allow"), reasons: ReasonList }),
     z.object({ kind: z.literal("deny"), reason: z.string({ error: "deny needs a reason" }), reasons: ReasonList }),
     z.object({
       kind: z.literal("approve"),
-      approver: z.union([z.string().regex(/\S/), z.object({ group: z.string().regex(/\S/) })], {
-        error: 'approve needs an approver: a name, or { group: "name" }',
-      }),
+      approver: Approver,
       title: z.string({ error: "the title must be a string" }).optional(),
-      covers: z
-        .array(
-          z.object({ id: z.string() }, { error: coversError }).transform((op) => op.id),
-          { error: coversError },
-        )
-        .optional(),
+      covers: Covers,
     }),
   ],
   { error: "not a decision" },
@@ -130,3 +122,18 @@ export function definePolicy(
 
 /** Allows every operation call. A config says so explicitly: `policy: allowAll`. */
 export const allowAll: Policy = definePolicy(() => allow());
+
+/** True when the two name the same approver: the same id, or the same group. */
+export const sameApprover = (a: Approver, b: Approver): boolean =>
+  typeof a === "string" || typeof b === "string" ? a === b : a.group === b.group;
+
+/**
+ * True when an approval in the run was approved, covers the operation, and was addressed to
+ * `approver`. Check all three: a workflow can request an approval covering any operation from
+ * anyone it names, so an approval's `covers` alone does not say the right person approved.
+ */
+export function approvedFor(approvals: readonly ApprovalState[], opId: string, approver: Approver): boolean {
+  return approvals.some(
+    (a) => a.status === "approved" && a.covers.includes(opId) && sameApprover(a.approver, approver),
+  );
+}

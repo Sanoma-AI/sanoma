@@ -1,7 +1,14 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { z } from "zod";
-import { type ApprovalRequest, type ApprovalResult, type ApprovalState, Approver, Principal } from "./define.ts";
-import { RejectedError } from "./errors.ts";
+import {
+  type ApprovalRequest,
+  type ApprovalResult,
+  type ApprovalState,
+  Approver,
+  Covers,
+  Principal,
+} from "./define.ts";
+import { invalidInput, RejectedError } from "./errors.ts";
 import { entry, write } from "./ledger.ts";
 import { warn } from "./log.ts";
 import type { Run } from "./run.ts";
@@ -52,8 +59,6 @@ function senderOf(raw: unknown): string | undefined {
   return typeof id === "string" && id ? id : undefined;
 }
 
-const Covers = z.array(z.object({ id: z.string() }).transform((op) => op.id)).optional();
-
 /** A policy's hold: the call held, and the other operations (by id) the policy said the approval covers. */
 export interface HeldCall {
   op: string;
@@ -72,9 +77,9 @@ export async function awaitApproval(
   held?: HeldCall,
 ): Promise<ApprovalResult> {
   const approver = Approver.safeParse(req?.approver);
-  if (!approver.success) throw new Error(`ctx.approval("${title}") needs an approver: a name, or { group: "name" }`);
+  if (!approver.success) throw invalidInput(`ctx.approval("${title}")`, approver.error.issues, { title });
   const named = Covers.safeParse(req.covers);
-  if (!named.success) throw new Error(`ctx.approval("${title}"): covers must be a list of operations`);
+  if (!named.success) throw invalidInput(`ctx.approval("${title}") covers`, named.error.issues, { title });
   const covers = held ? [...new Set([held.op, ...(held.covers ?? [])])] : (named.data ?? []);
 
   const all = run.approvals;
@@ -135,9 +140,8 @@ export async function awaitApproval(
       continue;
     }
     Object.assign(state, { status: statusOf(msg.decision), decidedBy: msg.by.id, decidedAt: at, note: msg.note });
-    // The list first, so whoever sees the decision event also sees the list with it.
+    // The list first, then the ledger, then the decision event: whoever sees the event sees both.
     await DBOS.setEvent(APPROVALS_EVENT, all);
-    await DBOS.setEvent(decisionEventOf(state.id), state);
     await write(
       run,
       entry(
@@ -146,6 +150,7 @@ export async function awaitApproval(
         { key: state.id, at },
       ),
     );
+    await DBOS.setEvent(decisionEventOf(state.id), state);
     if (msg.decision === "reject") throw new RejectedError(title, msg.by, msg.note, state.id);
     return { approvedBy: msg.by.id, at, note: msg.note };
   }

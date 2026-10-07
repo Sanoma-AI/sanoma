@@ -26,6 +26,16 @@ export const Approver: z.ZodType<Approver> = z.union(
   { error: 'needs an approver: a name, or { group: "name" }' },
 );
 
+/** `covers` as given (operations), parsed to their ids. */
+export const Covers = z
+  .array(
+    z.object({ id: z.string() }, { error: "covers must be a list of operations" }).transform((op) => op.id),
+    {
+      error: "covers must be a list of operations",
+    },
+  )
+  .optional();
+
 export interface ApprovalRequest {
   /** Who must approve: a person's id, or `{ group }` for anyone in it. Phase 4 replaces this with a Cedar decision. */
   approver: Approver;

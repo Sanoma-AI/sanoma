@@ -22,7 +22,7 @@ type WorkerConfig = Parameters<typeof startWorker>[0];
 type Filled = "databaseUrl" | "ledger";
 
 /**
- * Starts a worker for a test. `appName` defaults to "sanoma-test", `databaseUrl` to
+ * Starts a worker for a test. `appName` is required and names the file's database; `databaseUrl` defaults to
  * `testDatabaseUrl(appName)`, and `ledger` to a fresh in-memory ledger; everything else is
  * passed to `startWorker` as given. Stop the worker in `afterAll`.
  */

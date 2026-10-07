@@ -1,10 +1,10 @@
 import { DBOS, DBOSWorkflowConflictError, Error as DBOSErrors } from "@dbos-inc/dbos-sdk";
 import { approverLabel, awaitApproval } from "./approvals.ts";
 import { type ApprovalRequest, SleepRequest, type Use, type WorkflowDefinition } from "./define.ts";
-import { errorCode, errorInfo, errorMessage, PolicyDeniedError, SanomaError } from "./errors.ts";
+import { errorCode, errorInfo, errorMessage, invalidInput, PolicyDeniedError, SanomaError } from "./errors.ts";
 import { entry, skipped, write, writeFailure } from "./ledger.ts";
 import { type CallContext, isOp, type Op } from "./op.ts";
-import { Decision, type PolicyCall, type RecordedDecision } from "./policy.ts";
+import { DecisionSchema, type PolicyCall, type RecordedDecision } from "./policy.ts";
 import type { Run } from "./run.ts";
 
 // What DBOS throws into a run whose worker is shutting down. Verified for DBOS 5.2: a
@@ -68,10 +68,23 @@ export function lastTry(err: unknown): unknown {
  * starts once the one before it has settled, so the order is the order the workflow made them.
  */
 function serial<T>(run: Run, call: () => Promise<T>): Promise<T> {
-  const next = run.tail.then(call);
-  // A failure rejects its caller, but the calls queued after it still run.
+  // A failure rejects its caller; the calls queued after it still run, since the workflow may
+  // have caught it. Once the workflow body itself has ended, nothing queued may touch a vendor.
+  const next = run.tail.then(() => {
+    ended(run);
+    return call();
+  });
   run.tail = next.catch(() => {});
   return next;
+}
+
+/** Throws once the workflow body has returned or thrown: a call left queued must not run then. */
+export function ended(run: Run) {
+  if (run.ended) {
+    throw new SanomaError("run_ended", `run ${run.id} has ended; a call queued behind its failure was not made`, {
+      runId: run.id,
+    });
+  }
 }
 
 /** The run's `ctx`: the operations and built-ins its workflow `uses`, and nothing else. */
@@ -110,7 +123,7 @@ function strict<T extends object>(obj: T, path: string, workflow: string): T {
 
 /** Checks a policy's answer, and copies it so nothing else the policy returned is recorded. */
 export function checkDecision(decision: unknown, opId: string): RecordedDecision {
-  const parsed = Decision.safeParse(decision);
+  const parsed = DecisionSchema.safeParse(decision);
   if (parsed.success) return parsed.data;
   const why = parsed.error.issues[0]?.message ?? "not a decision";
   throw new Error(
@@ -178,6 +191,9 @@ async function callOp(run: Run, id: string, input: unknown) {
     await writeFailure(run, entry(run, { ...call, error: errorInfo(err), durationMs: 0 }, { seq }), err);
     throw err;
   }
+  // The policy step is where a call queued behind a failure first yields; if the workflow body
+  // ended meanwhile, stop here: a decision was recorded, but nothing reached the vendor.
+  ended(run);
   if (decision.kind === "approve") {
     const title = decision.title ?? `${op.id} needs ${approverLabel(decision.approver)}`;
     try {
@@ -240,20 +256,6 @@ function checkSleep(req: unknown): SleepRequest {
  * An `invalid_input` error naming each problem, with zod's issues as plain JSON in `data`
  * (the shape `SanomaClient` uses), so they survive the trip through DBOS.
  */
-function invalidInput(
-  what: string,
-  zodIssues: readonly { path: PropertyKey[]; message: string; code: string }[],
-  data: Record<string, unknown> = {},
-): SanomaError {
-  const issues = zodIssues.map(({ path, message, code }) => ({
-    path: path.filter((p) => typeof p !== "symbol"),
-    message,
-    code,
-  }));
-  const said = issues.map((i) => (i.path.length ? `${i.path.join(".")}: ${i.message}` : i.message)).join("; ");
-  return new SanomaError("invalid_input", `${what}: ${said}`, { ...data, issues });
-}
-
 async function sleep(raw: unknown) {
   const req = checkSleep(raw);
   let ms: number;

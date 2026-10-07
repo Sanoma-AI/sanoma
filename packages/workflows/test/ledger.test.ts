@@ -140,6 +140,7 @@ const runOn = (ledger: LedgerStore): Run => ({
   approvals: [],
   seq: 0,
   tail: Promise.resolve(),
+  ended: false,
   state: { app: "acme", ops: new Map(), drivers: new Map(), policy: allowAll, ledger, stopped: false },
 });
 

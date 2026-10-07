@@ -36,14 +36,14 @@ export default defineWorkflow({
 Drivers implement the operations and hold the credentials. A policy is checked before every operation call, and a ledger records what happened.
 
 ```ts
-import { allow, approve, defineConfig, definePolicy, jsonlLedger } from "@sanoma/workflows";
+import { allow, approve, approvedFor, defineConfig, definePolicy, jsonlLedger } from "@sanoma/workflows";
 
 const policy = definePolicy(
   ({ op, effect, run }) => {
     if (effect !== "money") return allow();
-    // An approval that covers this operation, not just any approval in the run.
-    const approved = run.approvals.some((a) => a.status === "approved" && a.covers.includes(op.id));
-    return approved ? allow() : approve("finance-lead");
+    // Approved by finance-lead for this operation: not any approval, and not one a workflow
+    // addressed to someone else.
+    return approvedFor(run.approvals, op.id, "finance-lead") ? allow() : approve("finance-lead");
   },
   { version: "2026-10-07" },
 );
@@ -102,7 +102,7 @@ const run = await client.run(runId); // run.status: "queued" | "running" | "wait
 
 An approval comes from the workflow (`ctx.approval(title, { approver, covers?, links?, details? })`) or from the policy holding a call (`approve(approver, { title?, covers? })`; `approve(approver, title)` still works). Each is in `run.approvals` with its `status`, so a later policy call can see it.
 
-`covers` says which operations an approval stands for, as op ids in the approval's state. A policy hold covers the operation it held, plus any `covers` the policy adds; a workflow's approval covers the operations it names, or none. The idiomatic policy check is `a.status === "approved" && a.covers.includes(op.id)`: approving one publish does not let a different publish through unless the approval said so. Covers name operations, not inputs: an approval that covers `shop.order.refund` covers every later refund call in the run. A policy that needs one approval per call compares `a.input` too.
+`covers` says which operations an approval stands for, as op ids in the approval's state. A policy hold covers the operation it held, plus any `covers` the policy adds; a workflow's approval covers the operations it names, or none. The idiomatic policy check is `approvedFor(run.approvals, op.id, approver)`: approved, covering this operation, and addressed to the approver the policy would name. The last part matters: a workflow can request an approval covering any operation from anyone it names, so a check on `covers` alone would let a workflow launder a sign-off through its own `ctx.approval`. Covers name operations, not inputs: an approval that covers `shop.order.refund` covers every later refund call in the run. A policy that needs one approval per call compares `a.input` too.
 
 The approver is a person's id (`"finance-lead"`), or `{ group: "finance" }` for anyone whose principal lists that group in `groups`. A group's name is not a person: `{ id: "finance" }` is not in the group `finance`. `mayDecide(approval, principal)` is the check the run and the client both use. A policy hold's default title is `<op id> needs <approver>`, the approver shown as `group finance` for a group.
 

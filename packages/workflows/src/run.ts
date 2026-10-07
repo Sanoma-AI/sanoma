@@ -46,5 +46,7 @@ export interface Run {
    * at a time, in program order, even under `Promise.all`. Never rejects.
    */
   tail: Promise<unknown>;
+  /** Set when the workflow body has returned or thrown. A call still queued then is refused. */
+  ended: boolean;
   state: WorkerState;
 }
