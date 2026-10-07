@@ -20,7 +20,18 @@ const registered = new Map<
 >();
 
 /** Registers the workflows, connects to Postgres and recovers any runs that were interrupted. */
-export async function startWorker(config: SanomaConfig, options: { logLevel?: string } = {}): Promise<Worker> {
+export interface WorkerOptions {
+  logLevel?: string;
+  /**
+   * Make this worker's version the app's latest, so runs queued without a version come here.
+   * A brand-new version becomes the latest on its own; set this only when deliberately starting
+   * a worker on a version seen before (a rollback). Off by default, because an old instance
+   * restarting during a rolling deploy would otherwise take the new workers' runs.
+   */
+  promote?: boolean;
+}
+
+export async function startWorker(config: SanomaConfig, options: WorkerOptions = {}): Promise<Worker> {
   // Check everything before touching the state a running worker reads.
   const resolved = resolveConfig(config);
   for (const wf of resolved.workflows) {
@@ -63,9 +74,16 @@ export async function startWorker(config: SanomaConfig, options: { logLevel?: st
     throw err;
   }
   // DBOS gives runs queued without a version only to the app's latest version, which is the
-  // newest one registered. A worker started on code seen before (a rollback) must take them too.
-  if ((await DBOS.getLatestApplicationVersion()).versionName !== resolved.version) {
-    await DBOS.setLatestApplicationVersion(resolved.version);
+  // newest one registered. A worker started on code seen before (a rollback) is not it.
+  const latest = (await DBOS.getLatestApplicationVersion()).versionName;
+  if (latest !== resolved.version) {
+    if (options.promote) await DBOS.setLatestApplicationVersion(resolved.version);
+    else {
+      warn(
+        `this worker runs version ${resolved.version} but the app's latest is ${latest}; ` +
+          "runs queued without a version go to the latest. Start with { promote: true } to take them here",
+      );
+    }
   }
   await DBOS.registerQueue(resolved.queueName);
   await warnAboutStrandedRuns(resolved);

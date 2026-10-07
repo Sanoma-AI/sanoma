@@ -8,7 +8,7 @@ npm install --save-dev @sanoma/testing
 
 ## A worker for a test
 
-`startTestWorker(config)` calls `startWorker` with test defaults: `appName` "sanoma-test", `databaseUrl` from `testDatabaseUrl(appName)`, and a fresh in-memory ledger. Pass any of them to override it.
+`startTestWorker(config)` calls `startWorker` with test defaults: `databaseUrl` from `testDatabaseUrl(appName)` and a fresh in-memory ledger. `appName` is required and should be unique to the test file, since it names the file's database; two files sharing one would recover each other's runs.
 
 `testDatabaseUrl(suffix)` is `SANOMA_TEST_DATABASE_URL` (default `postgresql://postgres:dbos@localhost:5433/sanoma_test`) with `_<suffix>` appended to the database name. Give each test file its own suffix, so files don't recover each other's runs. DBOS creates the database if it is missing.
 

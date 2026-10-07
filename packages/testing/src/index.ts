@@ -19,7 +19,7 @@ export function testDatabaseUrl(suffix: string): string {
 }
 
 type WorkerConfig = Parameters<typeof startWorker>[0];
-type Filled = "appName" | "databaseUrl" | "ledger";
+type Filled = "databaseUrl" | "ledger";
 
 /**
  * Starts a worker for a test. `appName` defaults to "sanoma-test", `databaseUrl` to
@@ -29,10 +29,10 @@ type Filled = "appName" | "databaseUrl" | "ledger";
 export function startTestWorker(
   config: Omit<WorkerConfig, Filled> & Partial<Pick<WorkerConfig, Filled>>,
 ): ReturnType<typeof startWorker> {
-  const appName = config.appName ?? "sanoma-test";
+  const { appName } = config;
+  if (!appName) throw new Error("startTestWorker needs an `appName` unique to the test file, which names its database");
   return startWorker({
     ...config,
-    appName,
     databaseUrl: config.databaseUrl ?? testDatabaseUrl(appName),
     ledger: config.ledger ?? memoryLedger(),
   });

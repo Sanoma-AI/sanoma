@@ -74,6 +74,12 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       "The config needs `connectors`: the defineConnector objects whose operations the drivers implement",
     );
   }
+  if (!Array.isArray(config.workflows)) {
+    throw new Error("The config needs `workflows`: an array of defineWorkflow definitions");
+  }
+  if (!Array.isArray(config.drivers)) {
+    throw new Error("The config needs `drivers`: an array of defineDriver implementations");
+  }
   if (typeof config.policy !== "function") {
     throw new Error("The config needs a `policy`; use `allowAll` to allow every operation call");
   }

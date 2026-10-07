@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import type { Use, WorkflowDefinition } from "./define.ts";
 import { isOp } from "./op.ts";
+import { z } from "zod";
 
 /** This package's version. A unit test keeps it equal to package.json. */
 export const RUNTIME_VERSION = "0.1.0";
@@ -42,10 +43,34 @@ export function computeVersion(config: {
   const appName = config.appName ?? "sanoma";
   if (config.version !== undefined) return `${appName}@${config.version}`;
   const workflows = config.workflows
-    .map((wf) => [wf.name, wf.run.toString(), (wf.uses as readonly Use[]).filter(isOp).map((op) => op.id)] as const)
+    .map(
+      (wf) =>
+        [
+          wf.name,
+          wf.run.toString(),
+          (wf.uses as readonly Use[]).filter(isOp).map((op) => op.id),
+          // The input schema is parsed outside steps on replay, so a change to it must change the version.
+          inputSchemaOf(wf),
+        ] as const,
+    )
     .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   const hash = createHash("sha256")
     .update(JSON.stringify([appName, RUNTIME_VERSION, installedDbosVersion(), ...workflows]))
     .digest("hex");
   return `${appName}@${hash}`;
+}
+
+/*
+ * What the hash covers: each workflow's name, the source text of its `run` function, the ids
+ * of the operations it uses, and its input schema. What it cannot cover: functions `run` calls
+ * that live elsewhere (their source is not reachable from the definition), op schemas, drivers
+ * and the policy. A project that edits such helpers between deploys should set `version` in
+ * the config (a git commit) instead of relying on the hash.
+ */
+function inputSchemaOf(wf: WorkflowDefinition<any, any>): unknown {
+  try {
+    return z.toJSONSchema(wf.input, { io: "input", unrepresentable: "any" });
+  } catch {
+    return String(wf.input);
+  }
 }
