@@ -351,6 +351,37 @@ describe("the call a policy sees", () => {
   });
 });
 
+describe("a call queued behind a refused one", () => {
+  // Both calls are made at once; the publish is refused, which ends the run.
+  const both = defineWorkflow({
+    name: "both",
+    trigger: "manual",
+    input: z.object({ id: z.string() }),
+    uses: [ghost.post.publish, bluesky.post.create],
+    run: async (ctx, { id }) => Promise.all([ctx.ghost.post.publish({ id }), ctx.bluesky.post.create({ text: "too" })]),
+  });
+  const policy = definePolicy(({ op }) => (op.id === "ghost.post.publish" ? deny("not today") : allow()));
+  const app = useApp(databaseUrl, "call-ended", () => ({ workflows: [both], policy }));
+  const c = () => app.client;
+
+  it("never reaches its vendor once the run has failed", async () => {
+    const runId = await c().start(both, { id: "p1" }, { startedBy: alice });
+    expect(errorCode(await failure(c().result(runId)))).toBe("policy_denied");
+    // Time for the queued call to run, had it been going to.
+    await new Promise((r) => setTimeout(r, 300));
+
+    // Its policy step may have run (a decision, no side effect), but never the vendor's step.
+    const steps = ((await app.raw.listWorkflowSteps(runId)) ?? []).map((s) => s.name);
+    expect(steps).not.toContain("bluesky.post.create");
+    expect(app.ops()).toEqual([]);
+    expect(app.vendors.bluesky.state.posts).toEqual([]);
+    const records = await c().ledger(runId);
+    expect(records.some((r) => r.type === "op.called" && r.op === "bluesky.post.create" && "output" in r)).toBe(false);
+    expect(types(records)).toEqual(["run.started", "op.called ghost.post.publish", "run.failed"]);
+    expect(records.at(-1)).toMatchObject({ type: "run.failed", error: { code: "policy_denied" } });
+  });
+});
+
 describe("a ledger store that fails for a while", () => {
   // Each record's first two appends fail; the third succeeds.
   const store = memoryLedger();
