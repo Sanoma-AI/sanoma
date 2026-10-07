@@ -83,6 +83,15 @@ importers:
 
   packages/testing:
     devDependencies:
+      '@sanoma/connector-bluesky':
+        specifier: workspace:*
+        version: link:../../connectors/bluesky
+      '@sanoma/connector-ghost':
+        specifier: workspace:*
+        version: link:../../connectors/ghost
+      '@sanoma/connector-resend':
+        specifier: workspace:*
+        version: link:../../connectors/resend
       '@sanoma/workflows':
         specifier: workspace:*
         version: link:../workflows
