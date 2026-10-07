@@ -6,7 +6,7 @@
     "prepare": "lefthook install",
     "db:up": "docker compose up -d --wait",
     "db:down": "docker compose down",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && pnpm --filter @sanoma/app run typecheck:ui",
     "build": "pnpm --filter @sanoma/workflows run build && pnpm -r --filter \"./packages/*\" --filter \"./connectors/*\" --filter \"!@sanoma/workflows\" run build",
     "lint": "oxlint --deny-warnings",
     "format": "oxfmt",

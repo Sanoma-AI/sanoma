@@ -1,0 +1,23 @@
+{
+  // The page, checked on its own: the root tsconfig is for Node and does not cover ui/.
+  "compilerOptions": {
+    "target": "es2024",
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    // The page imports the API's types from ../src, which reach @sanoma/workflows' source.
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@sanoma/workflows": ["../../workflows/src/index.ts"]
+    }
+  },
+  "include": [".", "../vite.config.ts"]
+}
