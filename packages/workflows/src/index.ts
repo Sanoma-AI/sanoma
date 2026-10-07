@@ -32,5 +32,5 @@ export { RUNTIME_VERSION } from "./version.ts";
 export type { RunArgs } from "./run.ts";
 export { startWorker, type Worker } from "./worker.ts";
 export { SanomaClient, type RunStatus, type RunSummary, type StartOptions } from "./client.ts";
-export { lintWorkflow, type LintProblem } from "./lint.ts";
+// lintWorkflow lives at `@sanoma/workflows/lint`, so the runtime never loads oxc-parser.
 export { defineDriver, defineFake, type DriverImpl, type Fake, type FakeCall, type FakeOptions } from "./op.ts";

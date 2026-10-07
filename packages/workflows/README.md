@@ -1,6 +1,6 @@
 # @sanoma/workflows
 
-Business processes as TypeScript functions, run durably on [DBOS](https://dbos.dev) with Postgres. Each vendor call is a recorded step, and approvals and sleeps survive worker restarts. A lint (`lintWorkflow`) checks that workflow code is safe to replay.
+Business processes as TypeScript functions, run durably on [DBOS](https://dbos.dev) with Postgres. Each vendor call is a recorded step, and approvals and sleeps survive worker restarts. An oxlint config and `lintWorkflow` check that workflow code is safe to replay and cannot get around the policy.
 
 ```sh
 npm install @sanoma/workflows zod
@@ -81,6 +81,39 @@ Every run is stamped with the application version of the worker that runs it, `<
 When a worker starts, it warns about unfinished runs it will not pick up, naming them: runs started on another version, and runs queued on another queue. Run the version that started them, or fork each onto the current version with `DBOSClient.forkWorkflow(id, step, { applicationVersion, queueName })` and cancel the original.
 
 Queues used to be one `sanoma` queue for every app and are now `sanoma:<appName>`, so runs queued before the change are never started. On a local database, `pnpm db:down && pnpm db:up` resets it.
+
+## Keeping workflows replay-safe
+
+A run is replayed after a restart by calling the function again and reading each step's result back, so workflows and policies must do the same thing every time, and must reach vendors only through `ctx` so the policy sees every call. Two checks enforce that on files under `workflows/` and `policies/`.
+
+oxlint, with the rules this package ships in `oxlint.json`, refuses the clock (`Date`, `performance`), randomness (`Math.random`, `crypto`), the network (`fetch`, `WebSocket`), timers, `process`, `globalThis`, and imports of `@sanoma/testing`, `@sanoma/app`, `@sanoma/connector-*/fake`, `@sanoma/connector-*/driver` and `SanomaClient`, `startWorker` or `startApp`. Each message names the `ctx` replacement. Extend it from your `.oxlintrc.json` (oxlint resolves `extends` as a path, not a package name; the `workflows/**` and `policies/**` globs resolve against your config):
+
+```json
+{
+  "extends": ["./node_modules/@sanoma/workflows/oxlint.json"]
+}
+```
+
+`lintWorkflow` from `@sanoma/workflows/lint` checks what oxlint can't express: imports come only from `@sanoma/workflows`, a `@sanoma/connector-<vendor>` package, zod, or a relative file that stays inside the file's `workflows/` or `policies/` directory (so not `../sanoma.config.ts`, which holds the drivers); no namespace import of `@sanoma/workflows`; no dynamic `import()`. Run it over those directories in a test:
+
+```ts
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { lintWorkflow } from "@sanoma/workflows/lint";
+import { expect, it } from "vitest";
+
+const files = ["workflows", "policies"].flatMap((dir) =>
+  readdirSync(dir)
+    .filter((f) => f.endsWith(".ts"))
+    .map((f) => join(dir, f)),
+);
+
+it.each(files)("%s has no problems", (file) => {
+  expect(lintWorkflow(readFileSync(file, "utf8"), file)).toEqual([]);
+});
+```
+
+`@sanoma/workflows/lint` is a separate entry so the runtime never loads its parser.
 
 Status: early (0.x). The API may change between minor versions.
 
