@@ -39,9 +39,20 @@ let client: SanomaClient;
 // Sends messages the way any process with database access could, without SanomaClient's checks.
 let raw: DBOSClient;
 
+/** Posts twice at once, so a policy that holds each call has two approvals pending together. */
+const twin = defineWorkflow({
+  name: "twin",
+  trigger: "manual",
+  input: z.object({}),
+  uses: [bluesky.post.create],
+  run: async (ctx) => Promise.all(["one", "two"].map((text) => ctx.bluesky.post.create({ text }))),
+});
+
+// Every worker registers the same workflows. DBOS versions an app by its registered
+// workflows, and only a worker on the latest version takes runs from the queue.
 const start = (options: Partial<WorkerOptions> = {}) =>
   startWorker({
-    workflows: [announce],
+    workflows: [announce, twin],
     connectors: [ghost, resend, bluesky],
     drivers: vendors.drivers,
     databaseUrl,
@@ -235,15 +246,6 @@ describe("announce", () => {
   });
 });
 
-/** Posts twice at once, so a policy that holds each call has two approvals pending together. */
-const twin = defineWorkflow({
-  name: "twin",
-  trigger: "manual",
-  input: z.object({}),
-  uses: [bluesky.post.create],
-  run: async (ctx) => Promise.all(["one", "two"].map((text) => ctx.bluesky.post.create({ text }))),
-});
-
 describe("announce under a policy", () => {
   // Deterministic: each decision depends on the call alone. The test picks a policy per run by actor.
   const byActor: Record<string, Policy> = {
@@ -271,7 +273,7 @@ describe("announce under a policy", () => {
 
   beforeAll(async () => {
     await worker.stop();
-    worker = await start({ workflows: [announce, twin], policy, ledger: policyLedger });
+    worker = await start({ policy, ledger: policyLedger });
     policyClient = await SanomaClient.connect(databaseUrl, { appName, ledger: policyLedger });
   });
 
