@@ -7,7 +7,7 @@ export default defineConfig({
   resolve: {
     // Run tests against source, not dist/. Keep in sync with `paths` in tsconfig.json.
     alias: [
-      { find: /^@sanoma\/(workflows|testing)$/, replacement: src("./packages/$1/src/index.ts") },
+      { find: /^@sanoma\/(workflows|testing|app)$/, replacement: src("./packages/$1/src/index.ts") },
       { find: /^@sanoma\/connector-([a-z0-9-]+)$/, replacement: src("./connectors/$1/src/index.ts") },
     ],
   },

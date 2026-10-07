@@ -57,6 +57,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/workflows
 
+  packages/app:
+    devDependencies:
+      '@sanoma/workflows':
+        specifier: workspace:*
+        version: link:../workflows
+
   packages/testing:
     devDependencies:
       '@sanoma/workflows':

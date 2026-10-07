@@ -1,0 +1,52 @@
+{
+  "name": "@sanoma/app",
+  "version": "0.1.0",
+  "description": "A small web UI over a Sanoma config: runs, approvals, the ledger and a start form",
+  "keywords": [
+    "approvals",
+    "audit",
+    "dashboard",
+    "sanoma",
+    "workflows"
+  ],
+  "homepage": "https://github.com/Sanoma-AI/sanoma/tree/main/packages/app#readme",
+  "bugs": "https://github.com/Sanoma-AI/sanoma/issues",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sanoma-AI/sanoma.git",
+    "directory": "packages/app"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "prepack": "pnpm run clean && pnpm run build"
+  },
+  "devDependencies": {
+    "@sanoma/workflows": "workspace:*"
+  },
+  "peerDependencies": {
+    "@sanoma/workflows": "^0.1.0"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

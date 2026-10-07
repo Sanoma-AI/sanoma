@@ -19,6 +19,7 @@
     "paths": {
       "@sanoma/workflows": ["./packages/workflows/src/index.ts"],
       "@sanoma/testing": ["./packages/testing/src/index.ts"],
+      "@sanoma/app": ["./packages/app/src/index.ts"],
       "@sanoma/connector-*": ["./connectors/*/src/index.ts"]
     }
   },
