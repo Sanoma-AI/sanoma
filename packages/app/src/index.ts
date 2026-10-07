@@ -9,6 +9,7 @@ import { describeConfig, resolveConfig, SanomaClient, type SanomaConfig } from "
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import type { AppContext, ResolveActor } from "./context.ts";
 import { actorFromHeader } from "./default-actor.ts";
+import { hostName, isLoopback, refuseHost } from "./loopback.ts";
 
 export {
   ACTOR_HEADER,
@@ -70,7 +71,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     description,
     client,
     resolveActor: options.resolveActor ?? actorFromHeader,
-    loopbackOnly: isLoopbackAddress(host),
+    loopbackOnly: isLoopback(host),
   };
 
   const server = createServer((req, res) => {
@@ -85,6 +86,10 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   });
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
+    // Static files are answered here, before Start sees the request, so the Host rule runs here too.
+    if (app.loopbackOnly && !isLoopback(hostName(req.headers.host ?? ""))) {
+      return sendNodeResponse(res, refuseHost(req.headers.host ?? ""));
+    }
     if (await serveStatic(clientDir, req, res)) return;
     const request = new NodeRequest({ req, res });
     await sendNodeResponse(res, await entry.fetch(request, { context: { app } }));
@@ -188,10 +193,6 @@ async function isFile(path: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function isLoopbackAddress(host: string): boolean {
-  return host === "localhost" || host === "::1" || /^127\.\d+\.\d+\.\d+$/.test(host);
 }
 
 function urlHost({ address, family }: AddressInfo): string {

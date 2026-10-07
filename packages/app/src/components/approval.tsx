@@ -86,8 +86,8 @@ export function ApprovalCard({
             {approval.refused.length} message{approval.refused.length === 1 ? "" : "s"} ignored
           </summary>
           <ul className="refused">
-            {approval.refused.map((r) => (
-              <li key={r.at}>
+            {approval.refused.map((r, i) => (
+              <li key={`${r.at}-${i}`}>
                 {r.by ?? "someone"}: {r.reason} (<When at={r.at} />)
               </li>
             ))}

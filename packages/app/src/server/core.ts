@@ -71,8 +71,8 @@ async function readLedger(runId: string, hasStore: boolean): Promise<Pick<RunDet
   try {
     return { ledger: await getApp().client.ledger(runId) };
   } catch (err) {
-    // A JSONL ledger whose directory no run has written to yet throws; the run still shows.
-    console.error(`sanoma app: could not read the ledger of run ${runId}:`, err);
+    // A JSONL ledger whose directory no run has written to yet throws; the run still shows, and
+    // the page gets the reason. Not logged: the page polls, and this is expected.
     return { ledger: [], ledgerError: messageOf(err) };
   }
 }
@@ -80,7 +80,13 @@ async function readLedger(runId: string, hasStore: boolean): Promise<Pick<RunDet
 export async function startRun(actor: Principal, body: StartRunRequest): Promise<StartRunResponse> {
   const { client, resolved } = getApp();
   const workflow = resolved.workflows.find((wf) => wf.name === body.workflow);
-  if (!workflow) throw new ApiError(404, { error: `No workflow named "${body.workflow}"` });
+  if (!workflow) {
+    throw new ApiError(404, {
+      error: `No workflow named "${body.workflow}"`,
+      code: "invalid_input",
+      issues: [{ path: ["workflow"], message: `No workflow named "${body.workflow}"`, code: "invalid_value" }],
+    });
+  }
   try {
     return { runId: await client.start(workflow, body.input, { startedBy: actor }) };
   } catch (err) {
@@ -145,8 +151,16 @@ export async function respond(where: string, handler: () => Promise<Response>): 
   }
 }
 
-/** The request's JSON body, or a 400. */
+/**
+ * The request's JSON body, or a 400. The content type must say JSON: a browser cannot send that
+ * from a plain form or a simple cross-site request without a preflight, so with a cookie-based
+ * `resolveActor` this is what keeps the API from being driven by another site.
+ */
 export async function readJson(request: Request): Promise<unknown> {
+  const type = request.headers.get("content-type") ?? "";
+  if (!/^application\/json\b/i.test(type)) {
+    throw new ApiError(415, { error: "Send JSON with content-type: application/json", code: "invalid_input" });
+  }
   const text = await request.text();
   if (!text.trim()) throw new ApiError(400, { error: "The body is empty; send JSON", code: "invalid_input" });
   try {

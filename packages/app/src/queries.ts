@@ -19,6 +19,11 @@ export const runQuery = (id: string) =>
   queryOptions({
     queryKey: ["run", id],
     queryFn: () => getRun({ data: { id } }),
-    // A missing run is not polled; it will not appear.
-    refetchInterval: (query) => (query.state.data === null ? false : POLL_MS),
+    // A missing run is not polled, and a finished one has nothing left to change.
+    refetchInterval: (query) => {
+      const run = query.state.data?.run;
+      return !run || run.status === "finished" || run.status === "failed" || run.status === "cancelled"
+        ? false
+        : POLL_MS;
+    },
   });

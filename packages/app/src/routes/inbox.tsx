@@ -5,8 +5,12 @@ import { ApprovalCard } from "../components/approval.tsx";
 import { Notice } from "../components/common.tsx";
 import { runsQuery } from "../queries.ts";
 
+// The API's largest page. A pending approval on an older run than that is not shown here; the
+// client has no query for pending approvals alone yet.
+const INBOX_RUNS = 500;
+
 export const Route = createFileRoute("/inbox")({
-  loader: ({ context }) => context.queryClient.ensureQueryData(runsQuery()),
+  loader: ({ context }) => context.queryClient.ensureQueryData(runsQuery(INBOX_RUNS)),
   head: () => ({ meta: [{ title: "Inbox · Sanoma" }] }),
   component: InboxPage,
 });
@@ -14,7 +18,7 @@ export const Route = createFileRoute("/inbox")({
 /** Every pending approval across the recent runs, newest first. */
 function InboxPage() {
   const { actor } = useActor();
-  const { data: runs, error } = useQuery(runsQuery());
+  const { data: runs, error } = useQuery(runsQuery(INBOX_RUNS));
   const pending = (runs ?? [])
     .flatMap((run) => run.approvals.filter((a) => a.status === "pending").map((approval) => ({ run, approval })))
     .toSorted((a, b) => b.approval.requestedAt - a.approval.requestedAt);

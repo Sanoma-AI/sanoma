@@ -48,7 +48,7 @@ The page uses server functions; scripts (and later Slack or access-request callb
 - `POST /api/runs` with `{ "workflow": name, "input": {...} }`: 201 `{ runId }`.
 - `POST /api/runs/:id/approvals/:approvalId` with `{ "decision": "approve" | "reject", "note"?: string }`: the approval's state.
 
-Errors are `{ error, code?, issues?, approver? }`. Branch on `code`, never on `error`: `invalid_input` is 400 (with `issues` when the input or the body does not match its schema), `not_approver` 403 (with `approver`), `run_not_found` and `no_pending_approval` 404, `already_decided` 409. An unknown workflow is 404 without a code; anything unexpected is 500.
+Errors are `{ error, code?, issues?, approver? }`. Branch on `code`, never on `error`: `invalid_input` is 400 (with `issues` when the input or the body does not match its schema), `not_approver` 403 (with `approver`), `run_not_found` and `no_pending_approval` 404, `already_decided` 409. An unknown workflow is 404 with `invalid_input` and an issue at `workflow`; a body without `content-type: application/json` is 415; anything unexpected is 500.
 
 ## Developing
 
