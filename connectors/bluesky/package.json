@@ -30,6 +30,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./fake": {
+      "types": "./dist/fake.d.ts",
+      "default": "./dist/fake.js"
     }
   },
   "publishConfig": {
