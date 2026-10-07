@@ -44,3 +44,4 @@ export {
 } from "./runtime.ts";
 export { SanomaClient, type ClientOptions, type RunStep, type RunSummary, type StartOptions } from "./client.ts";
 export { lintWorkflow, type LintProblem } from "./lint.ts";
+export { defineDriver, defineFake, type DriverImpl, type Fake, type FakeCall, type FakeOptions } from "./op.ts";

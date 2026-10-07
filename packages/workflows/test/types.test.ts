@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { defineConnector, defineWorkflow } from "../src/index.ts";
+import { defineConnector, defineDriver, defineWorkflow } from "../src/index.ts";
 
 // These assertions are checked by `pnpm typecheck`; the runtime test only keeps vitest happy.
 const shop = defineConnector("shop", {
@@ -29,7 +29,60 @@ export const wf = defineWorkflow({
   },
 });
 
+export const shopDriver = defineDriver(shop, {
+  order: {
+    get: async ({ id }, call) => ({ total: id.length + call.attempt }),
+    refund: async () => ({ ok: true }),
+  },
+});
+
+const wrongInput = () =>
+  defineDriver(shop, {
+    order: {
+      // @ts-expect-error the input is the connector's: `id` is a string
+      get: async (input: { id: number }) => ({ total: input.id }),
+      refund: async () => ({ ok: true }),
+    },
+  });
+
+const wrongOutput = () =>
+  defineDriver(shop, {
+    order: {
+      // @ts-expect-error the output is the connector's: `total` is a number
+      get: async () => ({ total: "12" }),
+      refund: async () => ({ ok: true }),
+    },
+  });
+
+const incomplete = () =>
+  defineDriver(shop, {
+    // @ts-expect-error a driver implements every operation: refund is missing
+    order: { get: async () => ({ total: 1 }) },
+  });
+
+const undeclared = () =>
+  defineDriver(shop, {
+    order: {
+      get: async () => ({ total: 1 }),
+      refund: async () => ({ ok: true }),
+      // @ts-expect-error the connector does not declare order.cancel
+      cancel: async () => ({ ok: true }),
+    },
+  });
+
 describe("types", () => {
+  it("keys a driver's operations by resource and name", () => {
+    expect(shopDriver.vendor).toBe("shop");
+    expect(Object.keys(shopDriver.ops)).toEqual(["order.get", "order.refund"]);
+    expect(wrongInput).not.toThrow();
+    expect(wrongOutput).not.toThrow();
+  });
+
+  it("refuses a driver that is incomplete or implements undeclared operations", () => {
+    expect(incomplete).toThrow('defineDriver("shop"): it does not implement shop.order.refund');
+    expect(undeclared).toThrow(/it implements shop\.order\.cancel, which the connector does not declare/);
+  });
+
   it("builds operation ids from vendor, resource and name", () => {
     expect(shop.order.refund.id).toBe("shop.order.refund");
     expect(shop.order.refund.effect).toBe("money");
