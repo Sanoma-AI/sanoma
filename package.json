@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prepare": "lefthook install",
     "db:up": "docker compose up -d --wait",
     "db:down": "docker compose down",
     "typecheck": "tsc -p tsconfig.json",
@@ -14,6 +15,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.4",
+    "lefthook": "^2.1.17",
     "oxfmt": "^0.72.0",
     "oxlint": "^1.87.0",
     "typescript": "^7.0.2",

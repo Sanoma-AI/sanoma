@@ -1,0 +1,11 @@
+# Runs on staged files only. Install happens on `pnpm install` (the prepare script).
+pre-commit:
+  parallel: true
+  jobs:
+    - name: format
+      glob: "*.{ts,mts,cts,js,mjs,cjs,json,jsonc,md,yml,yaml}"
+      run: pnpm exec oxfmt --no-error-on-unmatched-pattern {staged_files}
+      stage_fixed: true
+    - name: lint
+      glob: "*.{ts,mts,cts,js,mjs,cjs}"
+      run: pnpm exec oxlint --deny-warnings {staged_files}
