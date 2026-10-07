@@ -93,23 +93,14 @@ export async function decide(actor: Principal, call: DecideCall): Promise<Approv
   const { client } = getApp();
   const note = call.note?.trim() || undefined;
   try {
-    const sent = await client.decide(
+    return await client.decide(
       call.runId,
       note === undefined ? { decision: call.decision, by: actor } : { decision: call.decision, by: actor, note },
       call.approvalId,
+      { timeoutSeconds: 5 },
     );
-    return (await settled(call.runId, call.approvalId)) ?? sent;
   } catch (err) {
     throw asApiError(err);
-  }
-}
-
-async function settled(runId: string, approvalId: string): Promise<ApprovalState | undefined> {
-  const deadline = Date.now() + 5_000;
-  for (;;) {
-    const approval = (await getApp().client.approvals(runId)).find((a) => a.id === approvalId);
-    if (!approval || approval.status !== "pending" || Date.now() > deadline) return approval;
-    await new Promise((r) => setTimeout(r, 100));
   }
 }
 
