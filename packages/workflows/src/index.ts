@@ -44,6 +44,7 @@ export {
   errorCode,
   type ErrorCode,
   type ErrorInfo,
+  errorMessage,
   type InputIssue,
   invalidInput,
   PolicyDeniedError,
@@ -55,7 +56,7 @@ export { ApprovalMessage, APPROVALS_EVENT, decisionEventOf, mayDecide } from "./
 export { RUNTIME_VERSION, STEP_LAYOUT } from "./version.ts";
 export type { RunArgs } from "./run.ts";
 export { startWorker, type Worker } from "./worker.ts";
-export { SanomaClient, type RunStatus, type RunSummary, type StartOptions } from "./client.ts";
+export { SanomaClient, type RunsFilter, type RunStatus, type RunSummary, type StartOptions } from "./client.ts";
 // lintWorkflow lives at `@sanoma/workflows/lint`, so the runtime never loads oxc-parser.
 export { defineDriver, type DriverImpl, type OpIdOf } from "./op.ts";
 // defineFake lives at `@sanoma/workflows/fake`: test tooling, not runtime.

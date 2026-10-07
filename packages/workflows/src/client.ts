@@ -1,4 +1,4 @@
-import { DBOSClient } from "@dbos-inc/dbos-sdk";
+import { DBOSClient, type WorkflowStatusString } from "@dbos-inc/dbos-sdk";
 import { z } from "zod";
 import {
   APPROVALS_EVENT,
@@ -40,6 +40,24 @@ export function runStatus(dbosStatus: string, approvals: readonly ApprovalState[
       // A status a later DBOS adds: not ended as far as we know.
       return "running";
   }
+}
+
+/** The DBOS statuses each run status comes from. `running` and `waiting` are both PENDING, told apart by the approvals. */
+const DBOS_STATUSES: Record<RunStatus, WorkflowStatusString[]> = {
+  queued: ["ENQUEUED", "DELAYED"],
+  running: ["PENDING"],
+  waiting: ["PENDING"],
+  finished: ["SUCCESS"],
+  failed: ["ERROR", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"],
+  cancelled: ["CANCELLED"],
+};
+
+/** Which runs `SanomaClient.runs` lists. */
+export interface RunsFilter {
+  /** At most this many, newest first. Defaults to 20. */
+  limit?: number;
+  /** Only runs with this status. */
+  status?: RunStatus;
 }
 
 export interface RunSummary {
@@ -110,14 +128,23 @@ export class SanomaClient {
     return this.config.ledger.read(runId);
   }
 
-  async runs(limit = 20): Promise<RunSummary[]> {
+  /**
+   * The app's runs, newest first: the latest `limit` (a number, or `{ limit }`), or those with
+   * a `status`. `running` and `waiting` read every unfinished run, since only the approvals tell
+   * them apart, and keep the first `limit` with that status.
+   */
+  async runs(filter: number | RunsFilter = 20): Promise<RunSummary[]> {
+    const { limit = 20, status } = typeof filter === "number" ? { limit: filter } : filter;
+    const split = status === "running" || status === "waiting";
     const rows = await this.dbos.listWorkflows({
-      limit,
+      limit: split ? undefined : limit,
+      status: status && DBOS_STATUSES[status],
       sortDesc: true,
       applicationName: this.config.appName,
       loadInput: false,
     });
-    return Promise.all(rows.map((r) => this.summarize(r)));
+    const runs = await Promise.all(rows.map((r) => this.summarize(r)));
+    return split ? runs.filter((r) => r.status === status).slice(0, limit) : runs;
   }
 
   async run(runId: string): Promise<RunSummary | undefined> {

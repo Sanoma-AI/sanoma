@@ -86,6 +86,22 @@ describe("SanomaClient", () => {
     expect((await c().run(runId))?.status).toBe("finished");
   });
 
+  it("lists runs by status: one waiting on an approval, and not once it has finished", async () => {
+    const runId = await c().start(announce, input, { startedBy: alice });
+    await waitFor(pending(c, runId));
+    const waiting = await c().runs({ status: "waiting" });
+    expect(waiting.map((r) => r.runId)).toContain(runId);
+    expect(waiting.every((r) => r.status === "waiting")).toBe(true);
+    expect((await c().runs({ status: "running" })).map((r) => r.runId)).not.toContain(runId);
+
+    await c().decide(runId, { decision: "approve", by: lead });
+    await c().result(runId);
+    expect((await c().runs({ status: "waiting" })).map((r) => r.runId)).not.toContain(runId);
+    const finished = await c().runs({ status: "finished", limit: 50 });
+    expect(finished.map((r) => r.runId)).toContain(runId);
+    expect(finished.every((r) => r.status === "finished")).toBe(true);
+  });
+
   it("checks the config on connect, the way the worker does", async () => {
     await expect(SanomaClient.connect({ ...app.config, policy: undefined as never })).rejects.toThrow(
       "The config needs a `policy`; use `allowAll` to allow every operation call",
