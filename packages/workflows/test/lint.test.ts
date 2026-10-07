@@ -6,8 +6,30 @@ const messages = (src: string) => lintWorkflow(src).map((p) => p.message);
 
 describe("lintWorkflow", () => {
   it("passes the example workflow", () => {
-    const src = readFileSync(new URL("../../../examples/marketing/workflows/announce.ts", import.meta.url), "utf8");
+    const src = readFileSync(new URL("./fixtures/announce.ts", import.meta.url), "utf8");
     expect(lintWorkflow(src)).toEqual([]);
+  });
+
+  it("checks policy files the same way, since policies are replayed too", () => {
+    const policy = `
+      import { allow, definePolicy, deny } from "@sanoma/workflows";
+      export default definePolicy(({ effect }) => {
+        const hour = new Date(Date.now()).getUTCHours();
+        return effect === "send" && hour < 9 ? deny("no email before 9") : allow();
+      });
+    `;
+    expect(lintWorkflow(policy, "policy.ts")).toEqual([
+      expect.objectContaining({ line: 4, message: expect.stringMatching(/^Date .*ctx\.now/) }),
+      expect.objectContaining({ line: 4, message: expect.stringMatching(/^Date /) }),
+    ]);
+    expect(
+      lintWorkflow(`
+        import { allow, approve, definePolicy } from "@sanoma/workflows";
+        export default definePolicy(({ effect, run }) =>
+          effect === "publish" && !run.approvals.some((a) => a.approver === "lead") ? approve("lead") : allow(),
+        );
+      `),
+    ).toEqual([]);
   });
 
   it("refuses the clock, randomness and the network, naming the ctx replacement", () => {

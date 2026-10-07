@@ -1,15 +1,40 @@
 import { DBOSClient } from "@dbos-inc/dbos-sdk";
+import { resolveDatabaseUrl } from "./config.ts";
 import type { WorkflowDefinition } from "./define.ts";
-import { APPROVALS_EVENT, type ApprovalMessage, type ApprovalState, QUEUE } from "./runtime.ts";
+import type { LedgerRecord, LedgerStore } from "./ledger.ts";
+import {
+  APPROVALS_EVENT,
+  type ApprovalMessage,
+  type ApprovalState,
+  defaultActor,
+  QUEUE,
+  type RunArgs,
+} from "./runtime.ts";
 
 export interface RunSummary {
   runId: string;
   workflow: string;
   status: string;
+  /** Who started the run, as passed to `start`. */
+  startedBy?: string;
   createdAt: number;
   updatedAt?: number;
   approvals: ApprovalState[];
   error?: string;
+}
+
+export interface ClientOptions {
+  /** Defaults to "sanoma"; must match the worker's. */
+  appName?: string;
+  /** The worker's ledger store, so `ledger(runId)` can read it. */
+  ledger?: LedgerStore;
+}
+
+export interface StartOptions {
+  /** Recorded as the run's actor in the ledger and passed to the policy. Defaults to `$USER`, else "unknown". */
+  startedBy?: string;
+  /** Use this run id instead of a new one. Starting the same id twice returns the existing run. */
+  runId?: string;
 }
 
 export interface RunStep {
@@ -24,27 +49,49 @@ export interface RunStep {
 export class SanomaClient {
   private readonly dbos: DBOSClient;
   private readonly appName: string;
+  private readonly store?: LedgerStore;
 
-  private constructor(dbos: DBOSClient, appName: string) {
+  private constructor(dbos: DBOSClient, appName: string, store?: LedgerStore) {
     this.dbos = dbos;
     this.appName = appName;
+    this.store = store;
   }
 
-  static async connect(databaseUrl: string, appName = "sanoma") {
+  /**
+   * Connects to the runtime's Postgres. `options` may be just the app name (the older form).
+   * Without `databaseUrl`, uses `SANOMA_DATABASE_URL`, then the local docker compose database.
+   */
+  static async connect(databaseUrl?: string, options: ClientOptions | string = {}) {
+    const { appName = "sanoma", ledger } = typeof options === "string" ? { appName: options } : options;
     return new SanomaClient(
-      await DBOSClient.create({ systemDatabaseUrl: databaseUrl, applicationName: appName }),
+      await DBOSClient.create({ systemDatabaseUrl: resolveDatabaseUrl({ databaseUrl }), applicationName: appName }),
       appName,
+      ledger,
     );
   }
 
   /** Validates the input against the workflow's schema, then queues a run for the worker. */
-  async start(workflow: WorkflowDefinition<any, any>, input: unknown, runId?: string): Promise<string> {
+  async start(workflow: WorkflowDefinition<any, any>, input: unknown, options: StartOptions = {}): Promise<string> {
     const parsed = workflow.input.parse(input);
+    const startedBy = options.startedBy ?? defaultActor();
+    const args: RunArgs = { input: parsed, startedBy };
     const handle = await this.dbos.enqueue(
-      { queueName: QUEUE, workflowName: workflow.name, workflowID: runId, applicationName: this.appName },
-      parsed,
+      {
+        queueName: QUEUE,
+        workflowName: workflow.name,
+        workflowID: options.runId,
+        applicationName: this.appName,
+        authenticatedUser: startedBy,
+      },
+      args,
     );
     return handle.workflowID;
+  }
+
+  /** The run's audit record, in order. Needs the worker's ledger store, passed to `connect`. */
+  async ledger(runId: string): Promise<LedgerRecord[]> {
+    if (!this.store) throw new Error("This client has no ledger store: pass `ledger` to SanomaClient.connect");
+    return this.store.read(runId);
   }
 
   async runs(limit = 20): Promise<RunSummary[]> {
@@ -105,12 +152,14 @@ export class SanomaClient {
     status: string;
     createdAt: number;
     updatedAt?: number;
+    authenticatedUser?: string;
     error?: unknown;
-  }) {
+  }): Promise<RunSummary> {
     return {
       runId: r.workflowID,
       workflow: r.workflowName,
       status: r.status,
+      startedBy: r.authenticatedUser || undefined,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
       approvals: await this.approvals(r.workflowID),

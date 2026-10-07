@@ -13,6 +13,9 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@sanoma/connector-bluesky": "workspace:*",
+    "@sanoma/connector-ghost": "workspace:*",
+    "@sanoma/connector-resend": "workspace:*",
     "@sanoma/testing": "workspace:*"
   }
 }

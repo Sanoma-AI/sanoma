@@ -11,6 +11,19 @@ export interface ApprovalRequest {
   details?: string;
 }
 
+/** One approval in a run, as the run sees it. Published as the run's "approvals" event. */
+export interface ApprovalState extends ApprovalRequest {
+  id: string;
+  title: string;
+  status: "pending" | "approved" | "rejected";
+  requestedAt: number;
+  decidedBy?: string;
+  decidedAt?: number;
+  note?: string;
+  /** Decisions sent by someone other than the named approver, which were ignored. */
+  refused: { by: string; at: number }[];
+}
+
 export interface ApprovalResult {
   approvedBy: string;
   at: number;
