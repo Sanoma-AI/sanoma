@@ -13,6 +13,11 @@ export interface OpSpec<I extends z.ZodType = z.ZodType, O extends z.ZodType = z
   /** Safe to retry: the vendor dedupes repeated calls. Otherwise a failed call stops the run. */
   idempotent?: boolean;
   description?: string;
+  /**
+   * The resource instance a call acts on, from its parsed input, such as a post's id. The
+   * policy sees it as `target`, so it can decide per instance. Must be deterministic.
+   */
+  target?: (input: any) => string;
 }
 
 /** One vendor operation, such as `ghost.post.publish`. Declares the contract only; drivers implement it. */
@@ -25,6 +30,8 @@ export interface Op<V extends string = string, R extends string = string, N exte
   readonly effect: Effect;
   readonly idempotent: boolean;
   readonly description?: string;
+  /** From the spec: the resource instance a call acts on. */
+  readonly target?: (input: any) => string;
   readonly input: z.ZodType<any, I>;
   readonly output: z.ZodType<O>;
 }
@@ -52,6 +59,7 @@ export function defineConnector<const V extends string, const S extends Specs>(v
         effect: spec.effect,
         idempotent: spec.idempotent ?? false,
         description: spec.description,
+        ...(spec.target === undefined ? {} : { target: spec.target }),
         input: spec.input,
         output: spec.output,
       } satisfies Op);

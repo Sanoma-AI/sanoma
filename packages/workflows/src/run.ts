@@ -22,6 +22,8 @@ export interface WorkerState {
   /** The drivers' functions, by operation id. */
   drivers: Map<string, DriverFn>;
   policy: Policy;
+  /** The policy's `version`, recorded with each of its decisions. */
+  policyVersion?: string;
   ledger: LedgerStore;
   /**
    * Set when the worker stops. DBOS abandons a stopped worker's run functions, which then fail
@@ -39,5 +41,10 @@ export interface Run {
   approvals: ApprovalState[];
   /** The next ledger `seq`. Advanced only outside steps, so a replay counts the same way. */
   seq: number;
+  /**
+   * The last `ctx` call queued. Each call waits for the one before it, so a run's calls run one
+   * at a time, in program order, even under `Promise.all`. Never rejects.
+   */
+  tail: Promise<unknown>;
   state: WorkerState;
 }

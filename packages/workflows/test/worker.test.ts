@@ -1,7 +1,6 @@
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
-import { fakeMarketingVendors } from "@sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
@@ -14,9 +13,10 @@ import {
   startWorker,
 } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
+import { marketingFakes } from "./harness.ts";
 
 // These configs are refused before the worker connects, so no database is needed.
-const vendors = fakeMarketingVendors();
+const vendors = marketingFakes();
 const config = (options: Partial<SanomaConfig>): SanomaConfig => ({
   workflows: [announce],
   connectors: [ghost, resend, bluesky],

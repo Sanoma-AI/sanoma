@@ -4,6 +4,7 @@ import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.
 import type { WorkflowDefinition } from "./define.ts";
 import { errorInfo, errorMessage } from "./errors.ts";
 import { entry, memoryLedger, skipped, write, writeFailure } from "./ledger.ts";
+import { warn } from "./log.ts";
 import type { Run, RunArgs, WorkerState } from "./run.ts";
 
 export interface Worker {
@@ -17,8 +18,6 @@ const registered = new Map<
   string,
   { definition: WorkflowDefinition<any, any>; fn: (args: RunArgs) => Promise<unknown> }
 >();
-
-const warn = (message: string) => console.warn(`sanoma: ${message}`);
 
 /** Registers the workflows, connects to Postgres and recovers any runs that were interrupted. */
 export async function startWorker(config: SanomaConfig, options: { logLevel?: string } = {}): Promise<Worker> {
@@ -40,20 +39,29 @@ export async function startWorker(config: SanomaConfig, options: { logLevel?: st
     ops: resolved.ops,
     drivers: resolved.drivers,
     policy: resolved.policy,
+    ...(resolved.policyVersion === undefined ? {} : { policyVersion: resolved.policyVersion }),
     ledger: resolved.ledger ?? memoryLedger(),
     stopped: false,
   };
-  current = state;
   for (const wf of resolved.workflows) {
     if (!registered.has(wf.name)) registered.set(wf.name, { definition: wf, fn: register(wf) });
   }
-  DBOS.setConfig({
-    name: resolved.appName,
-    systemDatabaseUrl: resolved.databaseUrl,
-    logLevel: options.logLevel ?? "warn",
-    applicationVersion: resolved.version,
-  });
-  await DBOS.launch();
+  // Runs recovered during launch start before it returns, so they must already find this
+  // state. If the launch fails, a worker still running in the process gets its own back.
+  const previous = current;
+  current = state;
+  try {
+    DBOS.setConfig({
+      name: resolved.appName,
+      systemDatabaseUrl: resolved.databaseUrl,
+      logLevel: options.logLevel ?? "warn",
+      applicationVersion: resolved.version,
+    });
+    await DBOS.launch();
+  } catch (err) {
+    current = previous;
+    throw err;
+  }
   // DBOS gives runs queued without a version only to the app's latest version, which is the
   // newest one registered. A worker started on code seen before (a rollback) must take them too.
   if ((await DBOS.getLatestApplicationVersion()).versionName !== resolved.version) {
@@ -102,7 +110,15 @@ function register(wf: WorkflowDefinition<any, any>) {
     async ({ input, startedBy }: RunArgs) => {
       const state = current;
       if (!state) throw new Error(`Run of "${wf.name}" started with no worker running`);
-      const run: Run = { id: DBOS.workflowID!, workflow: wf.name, actor: startedBy, approvals: [], seq: 0, state };
+      const run: Run = {
+        id: DBOS.workflowID!,
+        workflow: wf.name,
+        actor: startedBy,
+        approvals: [],
+        seq: 0,
+        tail: Promise.resolve(),
+        state,
+      };
       await write(run, entry(run, { type: "run.started", input }));
       let output: unknown;
       try {

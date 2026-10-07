@@ -1,10 +1,17 @@
+import { z } from "zod";
 import type { ApprovalState, Principal } from "./define.ts";
 import type { Effect, Op } from "./op.ts";
 
-/** What a policy sees for each operation a run calls. */
+/** An operation as a policy sees it: plain data, without its schemas. */
+export type PolicyOp = Pick<Op, "id" | "vendor" | "resource" | "name" | "effect">;
+
+/** What a policy sees for each operation a run calls. Plain data, so a test can build one by hand. */
 export interface PolicyCall {
-  op: Op;
+  op: PolicyOp;
+  /** The same as `op.effect`. */
   effect: Effect;
+  /** The resource instance the call acts on, from the operation's `target`, when it declares one. */
+  target?: string;
   /** The operation's input, already checked against its schema. */
   input: unknown;
   /** Who started the run. */
@@ -16,13 +23,39 @@ export interface PolicyCall {
   run: { id: string; workflow: string; approvals: readonly ApprovalState[] };
 }
 
+/**
+ * A policy's answer. `reasons` say why, for whoever reads the ledger; they change nothing
+ * about what happens to the call.
+ */
 export type Decision =
-  | { kind: "allow" }
-  | { kind: "deny"; reason: string }
+  | { kind: "allow"; reasons?: string[] }
+  | { kind: "deny"; reason: string; reasons?: string[] }
   | { kind: "approve"; approver: string; title?: string };
 
-export const allow = (): Decision => ({ kind: "allow" });
-export const deny = (reason: string): Decision => ({ kind: "deny", reason });
+/** A decision as the ledger records it: with the `version` of the policy that made it, when it has one. */
+export type RecordedDecision = Decision & { policyVersion?: string };
+
+const ReasonList = z.array(z.string(), { error: "reasons must be a list of strings" }).optional();
+
+/** Checks a policy's answer. Parsing also copies it, so nothing else the policy returned is kept. */
+export const Decision: z.ZodType<Decision> = z.discriminatedUnion(
+  "kind",
+  [
+    z.object({ kind: z.literal("allow"), reasons: ReasonList }),
+    z.object({ kind: z.literal("deny"), reason: z.string({ error: "deny needs a reason" }), reasons: ReasonList }),
+    z.object({
+      kind: z.literal("approve"),
+      approver: z.string({ error: "approve needs an approver" }).regex(/\S/, "approve needs an approver"),
+      title: z.string({ error: "the title must be a string" }).optional(),
+    }),
+  ],
+  { error: "not a decision" },
+);
+
+export const allow = (reasons?: string[]): Decision =>
+  reasons === undefined ? { kind: "allow" } : { kind: "allow", reasons };
+export const deny = (reason: string, reasons?: string[]): Decision =>
+  reasons === undefined ? { kind: "deny", reason } : { kind: "deny", reason, reasons };
 export const approve = (approver: string, title?: string): Decision =>
   title === undefined ? { kind: "approve", approver } : { kind: "approve", approver, title };
 

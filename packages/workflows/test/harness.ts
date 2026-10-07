@@ -4,8 +4,11 @@ import { join } from "node:path";
 import { DBOSClient } from "@dbos-inc/dbos-sdk";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
+import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
+import { fakeGhost } from "@sanoma/connector-ghost/fake";
 import { resend } from "@sanoma/connector-resend";
-import { fakeMarketingVendors } from "@sanoma/testing";
+import { fakeResend } from "@sanoma/connector-resend/fake";
+import type { FakeCall } from "@sanoma/workflows/fake";
 import { afterAll, beforeAll, beforeEach } from "vitest";
 import { allowAll, jsonlLedger, SanomaClient, type SanomaConfig, startWorker, type Worker } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
@@ -20,7 +23,16 @@ export async function waitFor(check: () => Promise<boolean> | boolean, timeoutMs
 
 export const inSeconds = (s: number) => new Date(Date.now() + s * 1000).toISOString();
 
-type Vendors = ReturnType<typeof fakeMarketingVendors>;
+/** The fakes the announce workflow calls, logging into one list so the order across vendors shows. */
+export function marketingFakes() {
+  const calls: FakeCall[] = [];
+  const blog = fakeGhost({ calls });
+  const email = fakeResend({ calls });
+  const social = fakeBluesky({ calls });
+  return { calls, ghost: blog, resend: email, bluesky: social, drivers: [blog.driver, email.driver, social.driver] };
+}
+
+export type Vendors = ReturnType<typeof marketingFakes>;
 
 const defined = <T>(x: T | undefined, what: string): T => {
   if (x === undefined) throw new Error(`${what} is not started`);
@@ -52,7 +64,7 @@ export function useApp(
   appName: string,
   overrides: (vendors: Vendors) => Partial<SanomaConfig> = () => ({}),
 ): App {
-  const vendors = fakeMarketingVendors();
+  const vendors = marketingFakes();
   const ledgerDir = mkdtempSync(join(tmpdir(), `sanoma-ledger-${appName}-`));
   let config: SanomaConfig;
   let worker: Worker | undefined;
@@ -84,7 +96,11 @@ export function useApp(
     rmSync(ledgerDir, { recursive: true, force: true });
   });
 
-  beforeEach(() => vendors.reset());
+  beforeEach(() => {
+    vendors.ghost.reset();
+    vendors.resend.reset();
+    vendors.bluesky.reset();
+  });
 
   return {
     vendors,
@@ -100,7 +116,7 @@ export function useApp(
     get raw() {
       return defined(raw, "raw client");
     },
-    ops: () => vendors.state.calls.map((c) => c.op),
+    ops: () => vendors.calls.map((c) => c.op),
     async restart() {
       await defined(worker, "worker").stop();
       worker = await startWorker(config);

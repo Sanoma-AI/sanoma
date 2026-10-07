@@ -139,6 +139,7 @@ const runOn = (ledger: LedgerStore): Run => ({
   actor: { id: "alice", groups: ["ops"] },
   approvals: [],
   seq: 0,
+  tail: Promise.resolve(),
   state: { app: "acme", ops: new Map(), drivers: new Map(), policy: allowAll, ledger, stopped: false },
 });
 
@@ -166,6 +167,29 @@ describe("writing a run's records", () => {
     await write(run, entry(run, { type: "run.started", input: null }));
     expect(calls()).toBe(3);
     expect(await store.read(run.id)).toHaveLength(1);
+  });
+
+  it("does not retry what would fail again: a record that isn't JSON, or a store error marked retryable: false", async () => {
+    const { store, calls } = flaky(0);
+    const run = runOn(store);
+    await expect(write(run, entry(run, { type: "run.started", input: 1n }))).rejects.toThrow(
+      "can't be written as JSON",
+    );
+    expect(calls()).toBe(0);
+
+    let tries = 0;
+    const corrupt: LedgerStore = {
+      read: store.read,
+      async append() {
+        tries++;
+        throw Object.assign(new Error("corrupt ledger line"), { retryable: false });
+      },
+    };
+    const started = Date.now();
+    const other = runOn(corrupt);
+    await expect(write(other, entry(other, { type: "run.started", input: null }))).rejects.toThrow("corrupt");
+    expect(tries).toBe(1);
+    expect(Date.now() - started).toBeLessThan(50);
   });
 
   it("gives up after three retries, and a failure record then throws both errors", async () => {

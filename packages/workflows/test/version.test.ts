@@ -3,7 +3,7 @@ import { DBOSClient } from "@dbos-inc/dbos-sdk";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
-import { fakeMarketingVendors, testDatabaseUrl } from "@sanoma/testing";
+import { testDatabaseUrl } from "@sanoma/testing";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -17,9 +17,9 @@ import {
   startWorker,
 } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
-import { inSeconds, waitFor } from "./harness.ts";
+import { inSeconds, marketingFakes, waitFor } from "./harness.ts";
 
-const vendors = fakeMarketingVendors();
+const vendors = marketingFakes();
 // Two builds of one workflow. Only the body's source is hashed, not what it closes over.
 const shout = {
   trigger: "manual",
@@ -69,7 +69,7 @@ describe("the application version", () => {
     });
     expect(versionOf({ workflows: [loudlyAgain] })).toBe(loud);
 
-    const drivers = fakeMarketingVendors().drivers.map((d) => ({ ...d, ops: { ...d.ops } }));
+    const drivers = marketingFakes().drivers.map((d) => ({ ...d, ops: { ...d.ops } }));
     expect(versionOf({ drivers })).toBe(versionOf({}));
     expect(versionOf({ policy: () => ({ kind: "deny", reason: "no" }) })).toBe(versionOf({}));
     expect(versionOf({ workflows: [] })).not.toBe(versionOf({}));

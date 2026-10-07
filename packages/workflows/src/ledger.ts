@@ -3,8 +3,9 @@ import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Principal } from "./define.ts";
 import { type ErrorInfo, errorMessage } from "./errors.ts";
+import { warn } from "./log.ts";
 import type { Effect } from "./op.ts";
-import type { Decision } from "./policy.ts";
+import type { RecordedDecision } from "./policy.ts";
 import type { Run } from "./run.ts";
 
 /**
@@ -33,7 +34,8 @@ export type LedgerRecord = {
       op: string;
       effect: Effect;
       input: unknown;
-      decision: Decision;
+      /** The policy's decision, with its `reasons` and the policy's `policyVersion` when there are any. */
+      decision: RecordedDecision;
       output?: unknown;
       error?: ErrorInfo;
       durationMs: number;
@@ -59,13 +61,20 @@ export type LedgerRecord = {
 );
 
 export interface LedgerStore {
-  /** Adds a record, unless one with the same id is already stored. */
+  /**
+   * Adds a record, unless one with the same id is already stored. A failed append is tried
+   * again, up to three times; throw an error with `retryable: false` for a failure that would
+   * only happen again, such as a corrupt file.
+   */
   append(record: LedgerRecord): Promise<void>;
   /** A run's records in `seq` order. */
   read(runId: string): Promise<LedgerRecord[]>;
 }
 
 const bySeq = (a: LedgerRecord, b: LedgerRecord) => a.seq - b.seq;
+
+/** An error that trying again would only repeat. */
+const final = (message: string, cause: unknown) => Object.assign(new Error(message, { cause }), { retryable: false });
 
 /** JSON for a record, or an error that names the record when it can't be written as JSON (a BigInt, a cycle). */
 function serialize(record: LedgerRecord): string {
@@ -74,7 +83,7 @@ function serialize(record: LedgerRecord): string {
   } catch (cause) {
     const op = record.type === "op.called" ? ` (${record.op})` : "";
     const why = cause instanceof Error ? cause.message : String(cause);
-    throw new Error(`Ledger record ${record.id}${op} can't be written as JSON: ${why}`, { cause });
+    throw final(`Ledger record ${record.id}${op} can't be written as JSON: ${why}`, cause);
   }
 }
 
@@ -87,7 +96,7 @@ function warnIfDifferent(stored: LedgerRecord, line: string) {
     (k) => JSON.stringify((stored as Record<string, unknown>)[k]) !== JSON.stringify(later[k]),
   );
   if (differs.length) {
-    console.warn(`sanoma ledger: kept the first record ${stored.id}; a later write differed in ${differs.join(", ")}`);
+    warn(`ledger: kept the first record ${stored.id}; a later write differed in ${differs.join(", ")}`);
   }
 }
 
@@ -107,7 +116,7 @@ async function load(path: string): Promise<{ records: LedgerRecord[]; tornAt?: n
     try {
       records.push(JSON.parse(line) as LedgerRecord);
     } catch (cause) {
-      throw new Error(`${path}:${i + 1}: corrupt ledger line`, { cause });
+      throw final(`${path}:${i + 1}: corrupt ledger line`, cause);
     }
   });
   return complete.length < text.length ? { records, tornAt: Buffer.byteLength(complete) } : { records };
@@ -138,7 +147,7 @@ export function jsonlLedger(dir: string): LedgerStore {
           if (stored) return warnIfDifferent(stored, line);
           await mkdir(root, { recursive: true });
           if (tornAt !== undefined) {
-            console.warn(`sanoma ledger: ${path} ended in a cut-off line; removed it before appending ${record.id}`);
+            warn(`ledger: ${path} ended in a cut-off line; removed it before appending ${record.id}`);
             await truncate(path, tornAt);
           }
           await appendFile(path, `${line}\n`);
@@ -211,12 +220,14 @@ export function entry(run: Run, body: Body, opts: { seq?: number; key?: string; 
 const RETRY_DELAYS_MS = [50, 200, 800];
 
 async function append(run: Run, record: LedgerRecord) {
+  // A record that can't be written as JSON never will be: fail before the first try.
+  serialize(record);
   for (let i = 0; ; i++) {
     try {
       return await run.state.ledger.append(record);
     } catch (err) {
       const wait = RETRY_DELAYS_MS[i];
-      if (wait === undefined) throw err;
+      if (wait === undefined || (err as { retryable?: unknown } | null)?.retryable === false) throw err;
       await delay(wait);
     }
   }
@@ -246,5 +257,5 @@ export async function writeFailure(run: Run, record: LedgerRecord, original: unk
 
 /** Says that a record was deliberately not written, and why. */
 export function skipped(record: LedgerRecord, why: string) {
-  console.warn(`sanoma: did not write ${record.type} ${record.id}: ${why}`);
+  warn(`did not write ${record.type} ${record.id}: ${why}`);
 }

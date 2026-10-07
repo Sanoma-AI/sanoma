@@ -18,13 +18,24 @@ export {
   type ApprovalState,
   type Builtin,
   type Ctx,
-  type SleepRequest,
+  SleepRequest,
   type Use,
   type WorkflowDefinition,
 } from "./define.ts";
 export { defineConfig, resolveConfig, resolveDatabaseUrl, type ResolvedConfig, type SanomaConfig } from "./config.ts";
 export { describeConfig, type ConfigDescription, type OpEntry, type WorkflowEntry } from "./describe.ts";
-export { allow, allowAll, approve, definePolicy, deny, type Decision, type Policy, type PolicyCall } from "./policy.ts";
+export {
+  allow,
+  allowAll,
+  approve,
+  Decision,
+  definePolicy,
+  deny,
+  type Policy,
+  type PolicyCall,
+  type PolicyOp,
+  type RecordedDecision,
+} from "./policy.ts";
 export { errorCode, PolicyDeniedError, RejectedError, SanomaError, type ErrorCode, type ErrorInfo } from "./errors.ts";
 export { jsonlLedger, memoryLedger, type LedgerRecord, type LedgerStore } from "./ledger.ts";
 export { ApprovalMessage, APPROVALS_EVENT, mayDecide } from "./approvals.ts";
