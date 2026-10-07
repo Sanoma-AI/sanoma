@@ -9,8 +9,11 @@ export interface PolicyCall {
   input: unknown;
   /** Who started the run. */
   actor: string;
-  /** The run so far. `approvals` is the run's own list, including approvals the policy asked for earlier. */
-  run: { id: string; workflow: string; approvals: ApprovalState[] };
+  /**
+   * The run so far: a copy of its approvals, including those the policy asked for earlier.
+   * A policy request has `requestedBy: "policy"` and the `op` it held.
+   */
+  run: { id: string; workflow: string; approvals: readonly ApprovalState[] };
 }
 
 export type Decision =
@@ -27,7 +30,9 @@ export const approve = (approver: string, title?: string): Decision =>
  * Decides whether a run may make an operation call: allow it, deny it (the run fails),
  * or hold it until someone approves. Runs are replayed after a restart, so a policy must
  * decide the same way every time from the call alone: no clock, randomness or network.
- * `lintWorkflow` checks a policy file for these too.
+ * `lintWorkflow` checks a policy file for these too. Each decision is recorded once made,
+ * and a replay reuses it, but a call interrupted before that is decided again. A policy
+ * must not have side effects.
  */
 export type Policy = (call: PolicyCall) => Decision | Promise<Decision>;
 

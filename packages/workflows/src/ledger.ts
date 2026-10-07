@@ -7,9 +7,11 @@ import type { Decision } from "./policy.ts";
  * The audit record of a run: who started it, every operation call with the policy's
  * decision, every approval, and how it ended. Records are append-only.
  *
- * `id` is deterministic (`<runId>:<type>:<seq>`, or `<runId>:<type>:<approvalId>` for
- * approvals) so that when DBOS replays a run after a restart, the records it writes
- * again have the same ids and the store skips them. `seq` orders a run's records.
+ * `id` is deterministic (`<runId>:<type>:<seq>`, `<runId>:<type>:<approvalId>` for an
+ * approval requested or decided, `<runId>:approval.refused:<approvalId>:refused:<n>` for
+ * the nth message an approval ignored) so that when DBOS replays a run after a restart,
+ * the records it writes again have the same ids and the store skips them. `seq` orders a
+ * run's records.
  */
 export type LedgerRecord = {
   id: string;
@@ -29,8 +31,22 @@ export type LedgerRecord = {
       output?: unknown;
       error?: string;
       durationMs: number;
+      /** Which try produced the output or the final error, from 1. Idempotent operations are retried. */
+      attempt?: number;
+      /** The approval that held the call, when its rejection stopped it. */
+      approval?: string;
     }
-  | { type: "approval.requested"; approval: string; title: string; approver: string }
+  | {
+      type: "approval.requested";
+      approval: string;
+      title: string;
+      approver: string;
+      requestedBy: "workflow" | "policy";
+      /** The operation call held, for a policy request. */
+      op?: string;
+    }
+  /** A message the approval ignored: from someone other than the approver, or not a decision. */
+  | { type: "approval.refused"; approval: string; by?: string; reason: string }
   | { type: "approval.decided"; approval: string; decision: "approve" | "reject"; by: string; note?: string }
   | { type: "run.finished"; output: unknown }
   | { type: "run.failed"; error: string }

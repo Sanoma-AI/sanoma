@@ -44,4 +44,10 @@ describe("startWorker", () => {
     );
     await expect(startWorker(config({ drivers }))).rejects.toThrow(/bluesky\.post\.create has no driver/);
   });
+
+  it("refuses two different workflows with one name", async () => {
+    await expect(startWorker(config({ workflows: [announce, { ...announce }] }))).rejects.toThrow(
+      /Two different workflow definitions are named "announce"/,
+    );
+  });
 });

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { DBOSClient } from "@dbos-inc/dbos-sdk";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,10 +8,13 @@ import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
 import { fakeMarketingVendors } from "@sanoma/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   allow,
   approve,
+  type Decision,
   definePolicy,
+  defineWorkflow,
   deny,
   jsonlLedger,
   type LedgerRecord,
@@ -32,6 +36,8 @@ const ledgerDir = mkdtempSync(join(tmpdir(), "sanoma-ledger-"));
 const ledger = jsonlLedger(ledgerDir);
 let worker: Worker;
 let client: SanomaClient;
+// Sends messages the way any process with database access could, without SanomaClient's checks.
+let raw: DBOSClient;
 
 const start = (options: Partial<WorkerOptions> = {}) =>
   startWorker({
@@ -64,10 +70,12 @@ const pending =
 beforeAll(async () => {
   worker = await start();
   client = await SanomaClient.connect(databaseUrl, { appName, ledger });
+  raw = await DBOSClient.create({ systemDatabaseUrl: databaseUrl, applicationName: appName });
 });
 
 afterAll(async () => {
   await client?.close();
+  await raw?.destroy();
   await worker?.stop();
   rmSync(ledgerDir, { recursive: true, force: true });
 });
@@ -177,6 +185,32 @@ describe("announce", () => {
     });
     expect(new Set(records.map((r) => r.id)).size).toBe(records.length);
     expect(records.map((r) => r.seq)).toEqual(records.map((_, i) => i));
+    expect(types(records)).not.toContain("run.failed");
+  });
+
+  it("ignores a message that is not a decision, records it, and keeps waiting", async () => {
+    const runId = await client.start(announce, { title: "Garbled", body: "<p>x</p>", launchAt: inSeconds(1) });
+    await waitFor(pending(runId));
+
+    await raw.send(runId, { decision: "yes please", by: "marketing-lead" }, "approval-1");
+    await raw.send(runId, "approve", "approval-1");
+    await waitFor(async () => (await client.approvals(runId))[0]?.refused.length === 2);
+    const [approval] = await client.approvals(runId);
+    expect(approval).toMatchObject({ status: "pending", requestedBy: "workflow" });
+    expect(approval?.refused).toEqual([
+      { by: "marketing-lead", at: expect.any(Number), reason: "not a valid decision message" },
+      { at: expect.any(Number), reason: "not a valid decision message" },
+    ]);
+    expect(ops()).toHaveLength(2);
+
+    await client.decide(runId, { decision: "approve", by: "marketing-lead" });
+    await client.result(runId);
+    const records = await client.ledger(runId);
+    expect(records.filter((r) => r.type === "approval.refused")).toEqual([
+      expect.objectContaining({ id: `${runId}:approval.refused:approval-1:refused:1`, by: "marketing-lead" }),
+      expect.objectContaining({ id: `${runId}:approval.refused:approval-1:refused:2`, reason: expect.any(String) }),
+    ]);
+    expect(records.at(-1)?.type).toBe("run.finished");
   });
 
   it("stops before publishing anything when the approver rejects", async () => {
@@ -201,6 +235,15 @@ describe("announce", () => {
   });
 });
 
+/** Posts twice at once, so a policy that holds each call has two approvals pending together. */
+const twin = defineWorkflow({
+  name: "twin",
+  trigger: "manual",
+  input: z.object({}),
+  uses: [bluesky.post.create],
+  run: async (ctx) => Promise.all(["one", "two"].map((text) => ctx.bluesky.post.create({ text }))),
+});
+
 describe("announce under a policy", () => {
   // Deterministic: each decision depends on the call alone. The test picks a policy per run by actor.
   const byActor: Record<string, Policy> = {
@@ -209,6 +252,17 @@ describe("announce under a policy", () => {
       effect === "publish" && !run.approvals.some((a) => a.approver === "marketing-lead" && a.status === "approved")
         ? approve("marketing-lead")
         : allow(),
+    "approve-nobody": ({ effect }) => (effect === "publish" ? ({ kind: "approve" } as unknown as Decision) : allow()),
+    "hold-each": ({ op, input, run }) =>
+      run.approvals.some(
+        (a) =>
+          a.requestedBy === "policy" &&
+          a.op === op.id &&
+          a.status === "approved" &&
+          JSON.stringify(a.input) === JSON.stringify(input),
+      )
+        ? allow()
+        : approve("lead"),
   };
   const policy = definePolicy((call) => byActor[call.actor]?.(call) ?? allow());
   const policyLedger = memoryLedger();
@@ -217,7 +271,7 @@ describe("announce under a policy", () => {
 
   beforeAll(async () => {
     await worker.stop();
-    worker = await start({ policy, ledger: policyLedger });
+    worker = await start({ workflows: [announce, twin], policy, ledger: policyLedger });
     policyClient = await SanomaClient.connect(databaseUrl, { appName, ledger: policyLedger });
   });
 
@@ -262,7 +316,7 @@ describe("announce under a policy", () => {
     const held = (await c().approvals(runId))[1];
     expect(held).toMatchObject({ title: "ghost.post.publish needs marketing-lead", approver: "marketing-lead" });
 
-    await c().decide(runId, { decision: "approve", by: "intern" });
+    await raw.send(runId, { decision: "approve", by: "intern" }, "approval-2");
     await waitFor(async () => (await c().approvals(runId))[1]?.refused.length === 1);
     expect((await c().approvals(runId))[1]?.status).toBe("pending");
     expect(ops()).toHaveLength(2);
@@ -279,15 +333,77 @@ describe("announce under a policy", () => {
       "approval.requested",
       "approval.decided",
       "approval.requested",
+      "approval.refused",
       "approval.decided",
       "op.called ghost.post.publish",
       "op.called resend.broadcast.send",
       "op.called bluesky.post.create",
       "run.finished",
     ]);
-    expect(records[7]).toMatchObject({ decision: { kind: "approve", approver: "marketing-lead" } });
-    expect(records[9]).toMatchObject({ op: "bluesky.post.create", decision: { kind: "allow" } });
-    expect(records[6]).toMatchObject({ approval: "approval-2", by: "marketing-lead" });
+    expect(records[5]).toMatchObject({ approval: "approval-2", requestedBy: "policy", op: "ghost.post.publish" });
+    expect(records[6]).toMatchObject({ approval: "approval-2", by: "intern", reason: "intern is not the approver" });
+    expect(records[7]).toMatchObject({ approval: "approval-2", by: "marketing-lead" });
+    expect(records[8]).toMatchObject({ decision: { kind: "approve", approver: "marketing-lead" }, attempt: 1 });
+    expect(records[10]).toMatchObject({ op: "bluesky.post.create", decision: { kind: "allow" } });
+  });
+
+  it("records the held call as stopped when the policy's approver rejects it", async () => {
+    const runId = await c().start(
+      announce,
+      { title: "Held, then rejected", body: "<p>x</p>", launchAt: inSeconds(1), approver: "editor" },
+      { startedBy: "lead-publishes" },
+    );
+    await waitFor(pending(runId, 1, c));
+    await c().decide(runId, { decision: "approve", by: "editor" });
+    await waitFor(pending(runId, 2, c));
+    expect((await c().approvals(runId))[1]).toMatchObject({
+      requestedBy: "policy",
+      op: "ghost.post.publish",
+      input: { id: expect.any(String) },
+    });
+    await c().decide(runId, { decision: "reject", by: "marketing-lead", note: "not today" });
+
+    await expect(c().result(runId)).rejects.toThrow(/rejected by marketing-lead: not today/);
+    expect(ops()).toEqual(["ghost.post.create", "resend.broadcast.create"]);
+    const records = await c().ledger(runId);
+    expect(records.at(-2)).toMatchObject({
+      type: "op.called",
+      op: "ghost.post.publish",
+      decision: { kind: "approve", approver: "marketing-lead" },
+      approval: "approval-2",
+      error: expect.stringMatching(/rejected by marketing-lead/),
+    });
+    expect(records.at(-1)).toMatchObject({ type: "run.failed" });
+  });
+
+  it("fails the run, naming the operation, when the policy returns a malformed decision", async () => {
+    const runId = await c().start(
+      announce,
+      { title: "Malformed", body: "<p>x</p>", launchAt: inSeconds(1) },
+      { startedBy: "approve-nobody" },
+    );
+    await waitFor(pending(runId, 1, c));
+    await c().decide(runId, { decision: "approve", by: "marketing-lead" });
+
+    await expect(c().result(runId)).rejects.toThrow(
+      'The policy returned {"kind":"approve"} for ghost.post.publish: approve needs an approver',
+    );
+    expect(ops()).toEqual(["ghost.post.create", "resend.broadcast.create"]);
+    expect((await c().ledger(runId)).at(-1)).toMatchObject({ type: "run.failed" });
+  });
+
+  it("gives calls held at the same time their own approvals", async () => {
+    const runId = await c().start(twin, {}, { startedBy: "hold-each" });
+    await waitFor(async () => (await c().approvals(runId)).filter((a) => a.status === "pending").length === 2);
+    const held = await c().approvals(runId);
+    expect(held.map((a) => a.id)).toEqual(["approval-1", "approval-2"]);
+    expect(held.map((a) => (a.input as { text: string }).text).toSorted()).toEqual(["one", "two"]);
+    expect(ops()).toEqual([]);
+
+    await c().decide(runId, { decision: "approve", by: "lead" }, "approval-2");
+    await c().decide(runId, { decision: "approve", by: "lead" }, "approval-1");
+    await c().result(runId);
+    expect(vendors.state.social.map((p) => p.text).toSorted()).toEqual(["one", "two"]);
   });
 
   it("does not wait again when the approver already approved earlier in the run", async () => {
@@ -304,5 +420,41 @@ describe("announce under a policy", () => {
     expect(ops()).toHaveLength(5);
     const decisions = (await c().ledger(runId)).flatMap((r) => (r.type === "op.called" ? [r.decision.kind] : []));
     expect(decisions).toEqual(["allow", "allow", "allow", "allow", "allow"]);
+  });
+});
+
+describe("announce with a vendor that replies off-contract", () => {
+  let publishes = 0;
+
+  beforeAll(async () => {
+    await worker.stop();
+    const drivers = vendors.drivers.map((d) =>
+      d.vendor === "ghost"
+        ? {
+            ...d,
+            ops: {
+              ...d.ops,
+              "post.publish": async () => {
+                publishes++;
+                return { id: 42 };
+              },
+            },
+          }
+        : d,
+    );
+    worker = await start({ drivers });
+  });
+
+  it("does not retry an idempotent call whose reply fails the output schema", async () => {
+    const runId = await client.start(announce, { title: "Off contract", body: "<p>x</p>", launchAt: inSeconds(1) });
+    await waitFor(pending(runId));
+    await client.decide(runId, { decision: "approve", by: "marketing-lead" });
+
+    await expect(client.result(runId)).rejects.toThrow(/expected string/i);
+    expect(publishes).toBe(1);
+    const records = await client.ledger(runId);
+    expect(records.at(-2)).toMatchObject({ type: "op.called", op: "ghost.post.publish", attempt: 1 });
+    expect(records.at(-2)).not.toHaveProperty("output");
+    expect(records.at(-1)).toMatchObject({ type: "run.failed" });
   });
 });

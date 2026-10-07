@@ -15,13 +15,22 @@ export interface ApprovalRequest {
 export interface ApprovalState extends ApprovalRequest {
   id: string;
   title: string;
+  /** Who asked: the workflow (`ctx.approval`), or the policy holding an operation call. */
+  requestedBy: "workflow" | "policy";
+  /** For a policy request: the operation call held, by op id. */
+  op?: string;
+  /** For a policy request: the held call's input. */
+  input?: unknown;
   status: "pending" | "approved" | "rejected";
   requestedAt: number;
   decidedBy?: string;
   decidedAt?: number;
   note?: string;
-  /** Decisions sent by someone other than the named approver, which were ignored. */
-  refused: { by: string; at: number }[];
+  /**
+   * Messages that were ignored: decisions sent by someone other than the named approver,
+   * and messages that were not a decision. `by` is the sender, when the message named one.
+   */
+  refused: { by?: string; at: number; reason: string }[];
 }
 
 export interface ApprovalResult {
