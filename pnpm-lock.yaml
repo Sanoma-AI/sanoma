@@ -54,36 +54,6 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
-  examples/marketing:
-    dependencies:
-      '@sanoma/cli':
-        specifier: workspace:*
-        version: link:../../packages/cli
-      '@sanoma/connector-bluesky':
-        specifier: workspace:*
-        version: link:../../connectors/bluesky
-      '@sanoma/connector-ghost':
-        specifier: workspace:*
-        version: link:../../connectors/ghost
-      '@sanoma/connector-resend':
-        specifier: workspace:*
-        version: link:../../connectors/resend
-      '@sanoma/testing':
-        specifier: workspace:*
-        version: link:../../packages/testing
-      '@sanoma/workflows':
-        specifier: workspace:*
-        version: link:../../packages/workflows
-      zod:
-        specifier: ^4.6.5
-        version: 4.6.5
-
-  packages/cli:
-    dependencies:
-      '@sanoma/workflows':
-        specifier: workspace:*
-        version: link:../workflows
-
   packages/testing:
     dependencies:
       '@sanoma/workflows':

@@ -10,8 +10,7 @@
     "lint": "oxlint --deny-warnings",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
-    "test": "vitest run",
-    "lint:workflows": "node packages/cli/src/main.ts lint examples/*/workflows/*.ts"
+    "test": "vitest run"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",

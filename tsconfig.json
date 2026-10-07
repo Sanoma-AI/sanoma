@@ -14,5 +14,5 @@
     "erasableSyntaxOnly": true,
     "skipLibCheck": true
   },
-  "include": ["packages/*/src", "packages/*/test", "connectors/*/src", "examples/*"]
+  "include": ["packages/*/src", "packages/*/test", "connectors/*/src"]
 }
