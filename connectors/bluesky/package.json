@@ -1,13 +1,50 @@
 {
   "name": "@sanoma/connector-bluesky",
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "Bluesky (AT Protocol) operations for Sanoma workflows",
+  "keywords": [
+    "atproto",
+    "bluesky",
+    "connector",
+    "sanoma",
+    "social"
+  ],
+  "homepage": "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/bluesky#readme",
+  "bugs": "https://github.com/Sanoma-AI/sanoma/issues",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sanoma-AI/sanoma.git",
+    "directory": "connectors/bluesky"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "prepack": "pnpm run build"
   },
   "dependencies": {
     "@sanoma/workflows": "workspace:*",
     "zod": "^4.6.5"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

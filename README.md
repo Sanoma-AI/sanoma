@@ -28,7 +28,10 @@ pnpm db:up          # Postgres for DBOS on port 5433
 pnpm test           # vitest, runs against the TypeScript sources
 pnpm typecheck
 pnpm lint && pnpm format:check
+pnpm build          # compiles each package to dist/ for publishing
 ```
+
+Inside the repo, `@sanoma/*` imports resolve to each package's `src/` (via `paths` in `tsconfig.json` and aliases in `vitest.config.ts`), so tests and typechecks need no build. Published packages ship only the compiled `dist/`.
 
 ## License
 
