@@ -1,26 +1,37 @@
 # sanoma
 
-Open core of Sanoma. Business as Code keeps a company's operational configuration (card limits, time-off policies, access, onboarding steps) in typed code and applies it to vendors like Mercury, Gusto and Okta, with a generated UI over every resource. An agent drafts each change, policies decide who must approve, and a ledger records what happened. This TypeScript monorepo holds the open parts: schema, planner, Cedar policies, ledger format, MCP server, local studio, CLI, first-party connectors and modules.
+Open core of Sanoma. Business as Code keeps a company's operational configuration (card limits, time-off policies, access, onboarding steps) in typed code and applies it to vendors like Mercury, Gusto and Okta. An agent drafts each change, policies decide who must approve, and a ledger records what happened. This TypeScript monorepo holds the open parts.
 
-Status: early. `packages/workflows` runs business processes written as TypeScript on [DBOS](https://dbos.dev): each vendor call is a durable step, approvals and sleeps survive restarts, and a lint keeps workflow code safe to replay. Try it with the [marketing example](examples/marketing/).
+Status: early. Business processes are written as TypeScript workflows that run on [DBOS](https://dbos.dev): each vendor call is a durable step, approvals and sleeps survive restarts, and a lint keeps workflow code safe to replay.
 
-## Contents
+## Packages
 
-- `packages/schema`
-- `packages/sdk`
-- `packages/planner`
-- `packages/policy` (TypeScript policies compiled to Cedar)
-- `packages/ledger` (record format and local store)
-- `packages/workflows`
-- `packages/mcp` (MCP server)
-- `packages/ui`
-- `packages/studio` (local studio)
-- `packages/cli`
-- `packages/testing`
-- `connectors/` (first-party connectors)
-- `modules/`
+| Package                                           | What it is                                                   |
+| ------------------------------------------------- | ------------------------------------------------------------ |
+| [`@sanoma/workflows`](packages/workflows)         | Define connectors and workflows, run them durably, lint them |
+| [`@sanoma/testing`](packages/testing)             | Fake vendors for testing workflows without vendor accounts   |
+| [`@sanoma/connector-ghost`](connectors/ghost)     | Ghost operations (posts)                                     |
+| [`@sanoma/connector-resend`](connectors/resend)   | Resend operations (broadcasts)                               |
+| [`@sanoma/connector-bluesky`](connectors/bluesky) | Bluesky operations (posts)                                   |
+
+The other directories under `packages/` and `modules/` are placeholders for parts that are not written yet.
 
 Community connectors live in their authors' own repos (`sanoma-connector-<vendor>`) and are listed in [`Sanoma-AI/registry`](https://github.com/Sanoma-AI/registry).
+
+## Develop
+
+Needs Node 24 or later, pnpm, and Docker for the workflow tests.
+
+```sh
+pnpm install
+pnpm db:up          # Postgres for DBOS on port 5433
+pnpm test           # vitest, runs against the TypeScript sources
+pnpm typecheck
+pnpm lint && pnpm format:check
+pnpm build          # compiles each package to dist/ for publishing
+```
+
+Inside the repo, `@sanoma/*` imports resolve to each package's `src/` (via `paths` in `tsconfig.json` and aliases in `vitest.config.ts`), so tests and typechecks need no build. Published packages ship only the compiled `dist/`.
 
 ## License
 

@@ -12,7 +12,15 @@
     "rewriteRelativeImportExtensions": false,
     "verbatimModuleSyntax": true,
     "erasableSyntaxOnly": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    // Inside the repo, @sanoma/* resolves to source so nothing needs building first.
+    // Published packages resolve to dist/ through their package.json exports.
+    // Keep in sync with resolve.alias in vitest.config.ts.
+    "paths": {
+      "@sanoma/workflows": ["./packages/workflows/src/index.ts"],
+      "@sanoma/testing": ["./packages/testing/src/index.ts"],
+      "@sanoma/connector-*": ["./connectors/*/src/index.ts"]
+    }
   },
-  "include": ["packages/*/src", "packages/*/test", "connectors/*/src", "examples/*"]
+  "include": ["packages/*/src", "packages/*/test", "connectors/*/src"]
 }

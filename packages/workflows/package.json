@@ -1,21 +1,52 @@
 {
   "name": "@sanoma/workflows",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Business processes as TypeScript functions, run durably on DBOS",
+  "keywords": [
+    "approvals",
+    "business-as-code",
+    "dbos",
+    "durable-execution",
+    "sanoma",
+    "workflows"
+  ],
+  "homepage": "https://github.com/Sanoma-AI/sanoma/tree/main/packages/workflows#readme",
+  "bugs": "https://github.com/Sanoma-AI/sanoma/issues",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sanoma-AI/sanoma.git",
+    "directory": "packages/workflows"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "prepack": "pnpm run build"
   },
   "dependencies": {
     "@dbos-inc/dbos-sdk": "^5.2.11",
     "oxc-parser": "^0.153.0",
     "zod": "^4.6.5"
   },
-  "devDependencies": {
-    "@sanoma/connector-bluesky": "workspace:*",
-    "@sanoma/connector-ghost": "workspace:*",
-    "@sanoma/connector-resend": "workspace:*",
-    "@sanoma/testing": "workspace:*"
+  "engines": {
+    "node": ">=24"
   }
 }
