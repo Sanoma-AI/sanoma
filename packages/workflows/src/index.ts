@@ -43,4 +43,4 @@ export {
   type WorkerOptions,
 } from "./runtime.ts";
 export { SanomaClient, type ClientOptions, type RunStep, type RunSummary, type StartOptions } from "./client.ts";
-export { lintWorkflow, type LintProblem } from "./lint.ts";
+// lintWorkflow lives at `@sanoma/workflows/lint`, so the runtime never loads oxc-parser.
