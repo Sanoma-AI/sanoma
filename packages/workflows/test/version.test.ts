@@ -125,7 +125,9 @@ describe("workers on one database", () => {
 
   it("warns at startup about unfinished runs on another version or another queue, naming them", async () => {
     const before = config("version-warn", { version: "one" });
-    let worker = await startWorker(before);
+    // On a reused database "one" is older than "two" from the last run, so this start is a
+    // rollback: it must promote itself to take the runs queued below.
+    let worker = await startWorker(before, { promote: true });
     const client = await SanomaClient.connect(before);
     const raw = await DBOSClient.create({ systemDatabaseUrl: databaseUrl, applicationName: "version-warn" });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
