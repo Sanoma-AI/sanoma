@@ -106,7 +106,10 @@ describe("announce", () => {
     expect(ops()).toEqual(["ghost.post.create", "resend.broadcast.create"]);
     expect(Object.values(vendors.state.posts)[0]?.status).toBe("draft");
 
-    await client.decide(runId, { decision: "approve", by: "intern" });
+    await expect(client.decide(runId, { decision: "approve", by: "intern" })).rejects.toThrow(
+      '"intern" is not the approver for approval-1; marketing-lead is',
+    );
+    await raw.send(runId, { decision: "approve", by: "intern" }, "approval-1");
     await waitFor(async () => (await client.approvals(runId))[0]?.refused.length === 1);
     expect((await client.approvals(runId))[0]?.status).toBe("pending");
     expect(ops()).toHaveLength(2);
@@ -239,6 +242,12 @@ describe("announce", () => {
     const records = await client.ledger(runId);
     expect(records.at(-2)).toMatchObject({ type: "approval.decided", decision: "reject", note: "wrong date" });
     expect(records.at(-1)).toMatchObject({ type: "run.failed", error: expect.stringMatching(/rejected/) });
+  });
+
+  it("says when a run does not exist, rather than waiting on it or reading no records", async () => {
+    const missing = randomUUID();
+    await expect(client.result(missing)).rejects.toThrow(`No run ${missing}`);
+    await expect(client.ledger(missing)).rejects.toThrow(`No run ${missing}`);
   });
 
   it("refuses input that doesn't match the workflow's schema before queueing", async () => {

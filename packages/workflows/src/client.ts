@@ -91,6 +91,7 @@ export class SanomaClient {
   /** The run's audit record, in order. Needs the worker's ledger store, passed to `connect`. */
   async ledger(runId: string): Promise<LedgerRecord[]> {
     if (!this.store) throw new Error("This client has no ledger store: pass `ledger` to SanomaClient.connect");
+    await this.mustExist(runId);
     return this.store.read(runId);
   }
 
@@ -126,16 +127,33 @@ export class SanomaClient {
     return (await this.dbos.getEvent<ApprovalState[]>(runId, APPROVALS_EVENT, 0)) ?? [];
   }
 
-  /** Sends a decision on the run's pending approval (or the one named). The run checks who sent it. */
+  /**
+   * Sends a decision on the run's pending approval (or the one named), as `message.by`.
+   * Throws without sending when `by` is not the approver. The run checks the sender again.
+   */
   async decide(runId: string, message: ApprovalMessage, approvalId?: string): Promise<ApprovalState> {
     const pending = (await this.approvals(runId)).filter((a) => a.status === "pending");
     const target = approvalId ? pending.find((a) => a.id === approvalId) : pending[0];
     if (!target) throw new Error(`Run ${runId} has no pending approval${approvalId ? ` "${approvalId}"` : ""}`);
+    if (message.by !== target.approver) {
+      throw new Error(`"${message.by}" is not the approver for ${target.id}; ${target.approver} is`);
+    }
     await this.dbos.send(runId, message, target.id);
+    // Best effort: if someone else's decision landed first, this one will never be read.
+    const now = (await this.approvals(runId)).find((a) => a.id === target.id);
+    const status = message.decision === "approve" ? "approved" : "rejected";
+    if (
+      now &&
+      now.status !== "pending" &&
+      (now.status !== status || now.decidedBy !== message.by || now.note !== message.note)
+    ) {
+      throw new Error(`${target.id} on run ${runId} was already ${now.status} by ${now.decidedBy}`);
+    }
     return target;
   }
 
   async result(runId: string, timeoutMs = 30_000): Promise<unknown> {
+    await this.mustExist(runId);
     return Promise.race([
       this.dbos.retrieveWorkflow(runId).getResult(),
       new Promise((_, reject) => setTimeout(() => reject(new Error(`Run ${runId} still running`)), timeoutMs).unref()),
@@ -144,6 +162,10 @@ export class SanomaClient {
 
   close() {
     return this.dbos.destroy();
+  }
+
+  private async mustExist(runId: string) {
+    if (!(await this.dbos.getWorkflow(runId))) throw new Error(`No run ${runId}`);
   }
 
   private async summarize(r: {
