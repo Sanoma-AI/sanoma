@@ -37,11 +37,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
-    "prepack": "pnpm run build"
+    "prepack": "pnpm run clean && pnpm run build"
   },
   "dependencies": {
-    "@sanoma/workflows": "workspace:*",
     "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@sanoma/workflows": "workspace:*"
+  },
+  "peerDependencies": {
+    "@sanoma/workflows": "^0.1.0"
   },
   "engines": {
     "node": ">=24"

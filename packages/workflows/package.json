@@ -39,7 +39,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
-    "prepack": "pnpm run build"
+    "prepack": "pnpm run clean && pnpm run build"
   },
   "dependencies": {
     "@dbos-inc/dbos-sdk": "^5.2.11",
