@@ -10,7 +10,7 @@ export {
   type Use,
   type WorkflowDefinition,
 } from "./define.ts";
-export { defineConfig, type SanomaConfig } from "./config.ts";
+export { defineConfig, resolveDatabaseUrl, type SanomaConfig } from "./config.ts";
 export { describeConfig, type ConfigDescription, type OpEntry, type WorkflowEntry } from "./describe.ts";
 export {
   allow,
