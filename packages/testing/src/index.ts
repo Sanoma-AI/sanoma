@@ -1,8 +1,4 @@
-import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
-import { fakeGhost } from "@sanoma/connector-ghost/fake";
-import { fakeResend } from "@sanoma/connector-resend/fake";
 import { memoryLedger, startWorker } from "@sanoma/workflows";
-import type { FakeCall } from "@sanoma/workflows/fake";
 
 export { fakeBluesky, type FakeBlueskyPost, type FakeBlueskyState } from "@sanoma/connector-bluesky/fake";
 export { fakeGhost, type FakeGhostPost, type FakeGhostState } from "@sanoma/connector-ghost/fake";
@@ -40,39 +36,4 @@ export function startTestWorker(
     databaseUrl: config.databaseUrl ?? testDatabaseUrl(appName),
     ledger: config.ledger ?? memoryLedger(),
   });
-}
-
-/**
- * Fake Ghost, Resend and Bluesky behind one object, logging into one call list. Pass `file`
- * to keep their state on disk, one file per vendor beside it (`x.json` becomes
- * `x.ghost.json`, `x.resend.json` and `x.bluesky.json`).
- *
- * @deprecated Use `fakeGhost`, `fakeResend` and `fakeBluesky` (from here or from
- * `@sanoma/connector-<vendor>/fake`), passing them one `calls` array to keep a shared log.
- */
-export function fakeMarketingVendors(options: { file?: string } = {}) {
-  const calls: FakeCall[] = [];
-  const file = (vendor: string) => options.file?.replace(/(\.json)?$/, `.${vendor}.json`);
-  const ghost = fakeGhost({ file: file("ghost"), calls });
-  const resend = fakeResend({ file: file("resend"), calls });
-  const bluesky = fakeBluesky({ file: file("bluesky"), calls });
-  return {
-    drivers: [ghost.driver, resend.driver, bluesky.driver],
-    /** The current state, re-read from disk when a file is used. */
-    get state() {
-      return {
-        calls,
-        posts: ghost.state.posts,
-        broadcasts: resend.state.broadcasts,
-        social: bluesky.state.posts,
-      };
-    },
-    /** The ids of the operations called so far, in order. */
-    ops: () => calls.map((c) => c.op),
-    reset() {
-      ghost.reset();
-      resend.reset();
-      bluesky.reset();
-    },
-  };
 }

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { type CallContext, DriverError } from "@sanoma/workflows";
-import { type FakeCall, fakeBluesky, fakeGhost, fakeMarketingVendors, fakeResend } from "../src/index.ts";
+import { type FakeCall, fakeBluesky, fakeGhost, fakeResend } from "../src/index.ts";
 
 // No database: the fakes are called the way the runtime calls a driver.
 const call = (idempotencyKey: string, attempt = 1): CallContext => ({
@@ -14,6 +14,7 @@ const call = (idempotencyKey: string, attempt = 1): CallContext => ({
 });
 const draft = { title: "Hello world", html: "<p>Hi</p>", status: "draft" as const };
 const dir = mkdtempSync(join(tmpdir(), "sanoma-fakes-"));
+const vendorFile = (vendor: string) => join(dir, `vendors.${vendor}.json`);
 
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -134,16 +135,20 @@ describe("fakes", () => {
     expect(calls.map((c) => c.op)).toEqual(["bluesky.post.create"]);
   });
 
-  it("still come together as fakeMarketingVendors", async () => {
-    const vendors = fakeMarketingVendors({ file: join(dir, "vendors.json") });
-    const [ghost, resend, bluesky] = vendors.drivers;
-    await ghost?.ops["post.create"]?.(draft, call("r:0"));
-    await resend?.ops["broadcast.create"]?.({ audience: "news", subject: "Hi", html: "" }, call("r:1"));
-    await bluesky?.ops["post.create"]?.({ text: "x" }, call("r:2"));
-    expect(vendors.ops()).toEqual(["ghost.post.create", "resend.broadcast.create", "bluesky.post.create"]);
-    expect(Object.values(fakeMarketingVendors({ file: join(dir, "vendors.json") }).state.posts)).toHaveLength(1);
-    expect(vendors.state.social.map((p) => p.text)).toEqual(["x"]);
-    vendors.reset();
-    expect(vendors.state).toEqual({ calls: [], posts: {}, broadcasts: {}, social: [] });
+  it("compose: three vendors on one log, each keeping its own file", async () => {
+    const calls: FakeCall[] = [];
+    const ghost = fakeGhost({ calls, file: vendorFile("ghost") });
+    const resend = fakeResend({ calls, file: vendorFile("resend") });
+    const bluesky = fakeBluesky({ calls, file: vendorFile("bluesky") });
+    await ghost.driver.ops["post.create"]!(draft, call("r:0"));
+    await resend.driver.ops["broadcast.create"]!({ audience: "news", subject: "Hi", html: "" }, call("r:1"));
+    await bluesky.driver.ops["post.create"]!({ text: "x" }, call("r:2"));
+    expect(calls.map((c) => c.op)).toEqual(["ghost.post.create", "resend.broadcast.create", "bluesky.post.create"]);
+    expect(Object.values(fakeGhost({ file: vendorFile("ghost") }).state.posts)).toHaveLength(1);
+    expect(Object.values(fakeResend({ file: vendorFile("resend") }).state.broadcasts)).toHaveLength(1);
+    expect(bluesky.state.posts.map((p) => p.text)).toEqual(["x"]);
+    for (const fake of [ghost, resend, bluesky]) fake.reset();
+    expect(calls).toEqual([]);
+    expect(fakeBluesky({ file: vendorFile("bluesky") }).state.posts).toEqual([]);
   });
 });

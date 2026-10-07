@@ -53,10 +53,8 @@ A call that repeats an earlier call's idempotency key gets the earlier reply and
 
 Options: `{ file }` keeps the state and the replies in a JSON file, so they survive a worker restart and another process can read them. `{ calls }` logs into the array you pass, so several fakes share one ordered log.
 
-To write a fake for another connector, use `defineFake(connector, { initial, ops })` from `@sanoma/workflows`. `ops` gets the state and implements every operation, typed by the connector.
+To write a fake for another connector, use `defineFake(connector, { initial, ops })` from `@sanoma/workflows/fake`. `ops` gets the state and implements every operation, typed by the connector.
 
-## `fakeMarketingVendors` (deprecated)
-
-`fakeMarketingVendors({ file? })` puts the three fakes behind one object: `drivers`, `state` (`calls`, `posts`, `broadcasts`, `social`), `ops()` and `reset()`. With `file`, each vendor keeps its own file beside it (`x.json` becomes `x.ghost.json`, `x.resend.json` and `x.bluesky.json`). Use the fakes directly instead, with one `calls` array.
+`fakeMarketingVendors` is gone: compose the fakes you need, passing them one `calls` array, as in the example above.
 
 Status: early (0.x). License: Apache-2.0.
