@@ -26,7 +26,8 @@ export default defineWorkflow({
   uses: [shop.order.get, shop.order.refund, "approval"],
   run: async (ctx, { id }) => {
     const order = await ctx.shop.order.get({ id });
-    await ctx.approval(`Refund ${order.total}`, { approver: "finance-lead" });
+    // Covers the refund below, so the policy lets it through without asking again.
+    await ctx.approval(`Refund ${order.total}`, { approver: "finance-lead", covers: [shop.order.refund] });
     return ctx.shop.order.refund({ id });
   },
 });
@@ -40,8 +41,8 @@ import { allow, approve, defineConfig, definePolicy, jsonlLedger } from "@sanoma
 const policy = definePolicy(
   ({ op, effect, run }) => {
     if (effect !== "money") return allow();
-    // Approved for this operation, not just any approval by that person.
-    const approved = run.approvals.some((a) => a.requestedBy === "policy" && a.op === op.id && a.status === "approved");
+    // An approval that covers this operation, not just any approval in the run.
+    const approved = run.approvals.some((a) => a.status === "approved" && a.covers.includes(op.id));
     return approved ? allow() : approve("finance-lead");
   },
   { version: "2026-10-07" },
@@ -59,7 +60,7 @@ export default defineConfig({
 
 A config must name its policy. `policy: allowAll` allows every operation call, and says so. `resolveConfig(config)` checks a config and derives what the runtime uses from it: the app name, database, version and queue (`sanoma:<appName>`), and the operations and drivers by id. It throws, with one message, whatever the worker would refuse: a workflow or driver naming an operation the `connectors` don't declare, a workflow redeclaring an operation with another effect, an operation with no driver, two workflows with one name, no policy. `startWorker`, `describeConfig` and `SanomaClient.connect` all call it, so they fail the same way. The worker takes each operation's effect, schemas and retry setting from `connectors`, never from the workflow.
 
-A policy returns `allow()`, `deny(reason)` (the run fails) or `approve(who)` (the run waits for that person). `allow(reasons)` and `deny(reason, reasons)` may add a list of reasons for whoever reads the ledger. The policy must decide the same way on every replay: no clock, randomness or network. What it sees is plain data, so a test can build one by hand:
+A policy returns `allow()`, `deny(reason)` (the run fails) or `approve(who)` (the run waits for that person, or for anyone in `{ group }`; see [Approvals](#approvals)). `allow(reasons)` and `deny(reason, reasons)` may add a list of reasons for whoever reads the ledger. The policy must decide the same way on every replay: no clock, randomness or network. What it sees is plain data, so a test can build one by hand:
 
 ```ts
 interface PolicyCall {
@@ -82,20 +83,30 @@ const shop = defineConnector("shop", {
 });
 ```
 
-A policy's answer is checked; anything else (`{ kind: "approve" }` with no approver, say) fails the run with a message naming the operation. The ledger gets one record for the start of the run, each operation call with its decision and the vendor's reply, each approval requested and decided, each message an approval ignored (`approval.refused`: sent by someone other than the approver, or not a decision), and how the run ended, in a JSONL file per run. A decision is recorded with its `reasons` and, for a policy from `definePolicy(fn, { version })`, its `policyVersion`. Every record carries `v: 1`, the `app` and the `actor`; an error is recorded as `{ code?, name, message }`. A ledger store's failed append is tried again up to three times; a store throws an error with `retryable: false` for a failure that would only repeat.
+A policy's answer is checked; anything else (`{ kind: "approve" }` with no approver, say) fails the run with a message naming the operation. The ledger gets one record for the start of the run, each operation call with its decision and the vendor's reply, each approval requested and decided, each message an approval ignored (`approval.refused`: sent by someone who may not decide it, or not a decision), and how the run ended, in a JSONL file per run. A decision is recorded with its `reasons` and, for a policy from `definePolicy(fn, { version })`, its `policyVersion`. Every record carries `v: 1`, the `app` and the `actor`; an error is recorded as `{ code?, name, message }`. A ledger store's failed append is tried again up to three times; a store throws an error with `retryable: false` for a failure that would only repeat.
 
 People are `Principal`s: `{ id, groups? }`. A run is started as one and a decision is sent as one:
 
 ```ts
 const client = await SanomaClient.connect(config);
 const runId = await client.start(refund, { id: "ord_1" }, { startedBy: { id: "alice", groups: ["support"] } });
-await client.decide(runId, { decision: "approve", by: { id: "finance-lead" } });
+const approval = await client.decide(runId, { decision: "approve", by: { id: "finance-lead" } }); // status: "approved"
 const run = await client.run(runId); // run.status: "queued" | "running" | "waiting" | "finished" | "failed" | "cancelled"
 ```
 
 `startedBy` is required. Errors the runtime and the client throw carry a `code` (`policy_denied`, `approval_rejected`, `not_approver`, `no_pending_approval`, `already_decided`, `run_not_found`, `driver_failed`, `invalid_input`) and `data`. Read it with `errorCode(err)`, not `instanceof`: a run's error comes back from the database as a copy, so `errorCode(await client.result(runId).catch((e) => e))` is `"policy_denied"` for a denied call.
 
 `startWorker(config, { logLevel })` runs workflows and recovers interrupted runs. `SanomaClient` starts runs, lists them, records approval decisions and reads a run's ledger. `describeConfig(config)` returns the same config as plain JSON (its version, each workflow's input as JSON Schema and the operations it may call, each operation's effect and contract), which is what a UI renders from.
+
+### Approvals
+
+An approval comes from the workflow (`ctx.approval(title, { approver, covers?, links?, details? })`) or from the policy holding a call (`approve(approver, { title?, covers? })`; `approve(approver, title)` still works). Each is in `run.approvals` with its `status`, so a later policy call can see it.
+
+`covers` says which operations an approval stands for, as op ids in the approval's state. A policy hold covers the operation it held, plus any `covers` the policy adds; a workflow's approval covers the operations it names, or none. The idiomatic policy check is `a.status === "approved" && a.covers.includes(op.id)`: approving one publish does not let a different publish through unless the approval said so. Covers name operations, not inputs: an approval that covers `shop.order.refund` covers every later refund call in the run. A policy that needs one approval per call compares `a.input` too.
+
+The approver is a person's id (`"finance-lead"`), or `{ group: "finance" }` for anyone whose principal lists that group in `groups`. A group's name is not a person: `{ id: "finance" }` is not in the group `finance`. `mayDecide(approval, principal)` is the check the run and the client both use. A policy hold's default title is `<op id> needs <approver>`, the approver shown as `group finance` for a group.
+
+`client.decide(runId, { decision, by, note? }, approvalId?, { timeoutSeconds? })` refuses without sending when `by` may not decide (`not_approver`, naming the approver or group), when there is nothing pending (`no_pending_approval`, `run_not_found`) or when the approval is decided already (`already_decided`). Otherwise it sends the decision and waits for the run to read it, then returns the approval as decided: the run publishes it on the event `decisionEventOf(approvalId)`. If someone else's decision reached the run first, it throws `already_decided` with who decided and how. If the run does not read the decision within `timeoutSeconds` (30 by default), for instance because no worker is running, it returns the approval still `pending`; the decision stays queued and the run reads it when it next runs. The run checks the sender again and records anything it refuses as `approval.refused`.
 
 ### Calls run one at a time
 
