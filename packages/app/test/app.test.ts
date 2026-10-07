@@ -135,7 +135,10 @@ describe("the API", () => {
     expect(runId).toEqual(expect.any(String));
 
     const runs = await call<RunSummary[]>("/api/runs?limit=50");
-    expect(runs.body.find((r) => r.runId === runId)).toMatchObject({ workflow: "announce", startedBy: "alice" });
+    expect(runs.body.find((r) => r.runId === runId)).toMatchObject({
+      workflow: "announce",
+      startedBy: { id: "alice" },
+    });
 
     const held = await waitFor(
       () => detail(runId),
@@ -165,7 +168,7 @@ describe("the API", () => {
 
     const finished = await waitFor(
       () => detail(runId),
-      (d) => d.run.status === "SUCCESS",
+      (d) => d.run.status === "finished",
     );
     const ledger = finished.ledger ?? [];
     expect(ledger.map((r) => r.type)).toEqual([
@@ -179,7 +182,7 @@ describe("the API", () => {
       "op.called",
       "run.finished",
     ]);
-    expect(ledger[0]).toMatchObject({ type: "run.started", actor: "alice" });
+    expect(ledger[0]).toMatchObject({ type: "run.started", actor: { id: "alice" } });
     expect(ledger[4]).toMatchObject({ decision: "approve", by: "marketing-lead", note: "ship it" });
     const calls = ledger.flatMap((r) => (r.type === "op.called" ? [[r.op, r.decision.kind]] : []));
     expect(calls).toEqual([

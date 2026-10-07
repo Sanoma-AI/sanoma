@@ -1,105 +1,112 @@
 import { DBOSClient } from "@dbos-inc/dbos-sdk";
-import { resolveDatabaseUrl } from "./config.ts";
-import type { WorkflowDefinition } from "./define.ts";
-import type { LedgerRecord, LedgerStore } from "./ledger.ts";
-import {
-  APPROVALS_EVENT,
-  type ApprovalMessage,
-  type ApprovalState,
-  defaultActor,
-  QUEUE,
-  type RunArgs,
-} from "./runtime.ts";
+import { z } from "zod";
+import { APPROVALS_EVENT, ApprovalMessage, mayDecide, statusOf, topicOf } from "./approvals.ts";
+import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
+import { type ApprovalState, Principal, type WorkflowDefinition } from "./define.ts";
+import { SanomaError } from "./errors.ts";
+import type { LedgerRecord } from "./ledger.ts";
+import type { RunArgs } from "./run.ts";
+
+/**
+ * Where a run is: waiting on the queue, running, waiting for an approval, or ended.
+ * `waiting` is `running` with an approval pending.
+ */
+export type RunStatus = "queued" | "running" | "waiting" | "finished" | "failed" | "cancelled";
+
+/** A run's status from DBOS's, and whether it has an approval pending. */
+export function runStatus(dbosStatus: string, approvals: readonly ApprovalState[]): RunStatus {
+  switch (dbosStatus) {
+    case "ENQUEUED":
+    case "DELAYED":
+      return "queued";
+    case "PENDING":
+      return approvals.some((a) => a.status === "pending") ? "waiting" : "running";
+    case "SUCCESS":
+      return "finished";
+    case "ERROR":
+    case "MAX_RECOVERY_ATTEMPTS_EXCEEDED":
+      return "failed";
+    case "CANCELLED":
+      return "cancelled";
+    default:
+      // A status a later DBOS adds: not ended as far as we know.
+      return "running";
+  }
+}
 
 export interface RunSummary {
   runId: string;
   workflow: string;
-  status: string;
+  status: RunStatus;
   /** Who started the run, as passed to `start`. */
-  startedBy?: string;
+  startedBy?: Principal;
   createdAt: number;
   updatedAt?: number;
   approvals: ApprovalState[];
   error?: string;
 }
 
-export interface ClientOptions {
-  /** Defaults to "sanoma"; must match the worker's. */
-  appName?: string;
-  /** The worker's ledger store, so `ledger(runId)` can read it. */
-  ledger?: LedgerStore;
-}
-
 export interface StartOptions {
-  /** Recorded as the run's actor in the ledger and passed to the policy. Defaults to `$USER`, else "unknown". */
-  startedBy?: string;
+  /** Recorded as the run's actor in the ledger and passed to the policy. */
+  startedBy: Principal;
   /** Use this run id instead of a new one. Starting the same id twice returns the existing run. */
   runId?: string;
 }
 
-export interface RunStep {
-  name: string;
-  output: unknown;
-  error: string | null;
-  startedAt?: number;
-  completedAt?: number;
-}
-
-/** Talks to the runtime from another process (the CLI), through the shared Postgres. */
+/** Talks to the runtime from another process (the app, a script), through the shared Postgres. */
 export class SanomaClient {
   private readonly dbos: DBOSClient;
-  private readonly appName: string;
-  private readonly store?: LedgerStore;
+  private readonly config: ResolvedConfig;
 
-  private constructor(dbos: DBOSClient, appName: string, store?: LedgerStore) {
+  private constructor(dbos: DBOSClient, config: ResolvedConfig) {
     this.dbos = dbos;
-    this.appName = appName;
-    this.store = store;
+    this.config = config;
   }
 
   /**
-   * Connects to the runtime's Postgres. `options` may be just the app name (the older form).
-   * Without `databaseUrl`, uses `SANOMA_DATABASE_URL`, then the local docker compose database.
+   * Connects to the runtime's Postgres for the config's app. Checks the config first and throws
+   * what the worker would refuse. Reads ledgers from the config's ledger store.
    */
-  static async connect(databaseUrl?: string, options: ClientOptions | string = {}) {
-    const { appName = "sanoma", ledger } = typeof options === "string" ? { appName: options } : options;
-    return new SanomaClient(
-      await DBOSClient.create({ systemDatabaseUrl: resolveDatabaseUrl({ databaseUrl }), applicationName: appName }),
-      appName,
-      ledger,
-    );
+  static async connect(config: SanomaConfig): Promise<SanomaClient> {
+    const resolved = resolveConfig(config);
+    const dbos = await DBOSClient.create({
+      systemDatabaseUrl: resolved.databaseUrl,
+      applicationName: resolved.appName,
+    });
+    return new SanomaClient(dbos, resolved);
   }
 
   /** Validates the input against the workflow's schema, then queues a run for the worker. */
-  async start(workflow: WorkflowDefinition<any, any>, input: unknown, options: StartOptions = {}): Promise<string> {
-    const parsed = workflow.input.parse(input);
-    const startedBy = options.startedBy ?? defaultActor();
+  async start(workflow: WorkflowDefinition<any, any>, input: unknown, options: StartOptions): Promise<string> {
+    const parsed = valid(workflow.input, input, `The input does not match ${workflow.name}'s schema`);
+    const startedBy = valid(Principal, options?.startedBy, '`startedBy` must be a principal, such as { id: "alice" }');
     const args: RunArgs = { input: parsed, startedBy };
     const handle = await this.dbos.enqueue(
       {
-        queueName: QUEUE,
+        queueName: this.config.queueName,
         workflowName: workflow.name,
         workflowID: options.runId,
-        applicationName: this.appName,
-        authenticatedUser: startedBy,
+        applicationName: this.config.appName,
+        authenticatedUser: startedBy.id,
+        authenticatedRoles: startedBy.groups ?? [],
       },
       args,
     );
     return handle.workflowID;
   }
 
-  /** The run's audit record, in order. Needs the worker's ledger store, passed to `connect`. */
+  /** The run's audit record, in order. Needs the config's ledger store. */
   async ledger(runId: string): Promise<LedgerRecord[]> {
-    if (!this.store) throw new Error("This client has no ledger store: pass `ledger` to SanomaClient.connect");
+    if (!this.config.ledger) throw new Error("This client has no ledger store: the config has no `ledger`");
     await this.mustExist(runId);
-    return this.store.read(runId);
+    return this.config.ledger.read(runId);
   }
 
   async runs(limit = 20): Promise<RunSummary[]> {
     const rows = await this.dbos.listWorkflows({
       limit,
       sortDesc: true,
-      applicationName: this.appName,
+      applicationName: this.config.appName,
       loadInput: false,
     });
     return Promise.all(rows.map((r) => this.summarize(r)));
@@ -110,44 +117,47 @@ export class SanomaClient {
     return row && this.summarize(row);
   }
 
-  async steps(runId: string): Promise<RunStep[]> {
-    const steps = (await this.dbos.listWorkflowSteps(runId)) ?? [];
-    return steps
-      .filter((s) => !s.name.startsWith("DBOS."))
-      .map((s) => ({
-        name: s.name,
-        output: s.output,
-        error: s.error ? String(s.error.message ?? s.error) : null,
-        startedAt: s.startedAtEpochMs,
-        completedAt: s.completedAtEpochMs,
-      }));
-  }
-
   async approvals(runId: string): Promise<ApprovalState[]> {
     return (await this.dbos.getEvent<ApprovalState[]>(runId, APPROVALS_EVENT, 0)) ?? [];
   }
 
   /**
    * Sends a decision on the run's pending approval (or the one named), as `message.by`.
-   * Throws without sending when `by` is not the approver. The run checks the sender again.
+   * Throws without sending when `by` may not decide it. The run checks the sender again.
    */
   async decide(runId: string, message: ApprovalMessage, approvalId?: string): Promise<ApprovalState> {
-    const pending = (await this.approvals(runId)).filter((a) => a.status === "pending");
-    const target = approvalId ? pending.find((a) => a.id === approvalId) : pending[0];
-    if (!target) throw new Error(`Run ${runId} has no pending approval${approvalId ? ` "${approvalId}"` : ""}`);
-    if (message.by !== target.approver) {
-      throw new Error(`"${message.by}" is not the approver for ${target.id}; ${target.approver} is`);
+    const msg = valid(ApprovalMessage, message, "Not a decision");
+    await this.mustExist(runId);
+    const all = await this.approvals(runId);
+    const target = approvalId ? all.find((a) => a.id === approvalId) : all.find((a) => a.status === "pending");
+    if (target && target.status !== "pending") throw alreadyDecided(runId, target);
+    if (!target) {
+      throw new SanomaError(
+        "no_pending_approval",
+        `Run ${runId} has no pending approval${approvalId ? ` "${approvalId}"` : ""}`,
+        { runId, ...(approvalId ? { approvalId } : {}) },
+      );
     }
-    await this.dbos.send(runId, message, target.id);
+    if (!mayDecide(target, msg.by)) {
+      throw new SanomaError(
+        "not_approver",
+        `"${msg.by.id}" is not the approver for ${target.id}; ${target.approver} is`,
+        {
+          runId,
+          approvalId: target.id,
+          approver: target.approver,
+        },
+      );
+    }
+    await this.dbos.send(runId, msg, topicOf(target.id));
     // Best effort: if someone else's decision landed first, this one will never be read.
     const now = (await this.approvals(runId)).find((a) => a.id === target.id);
-    const status = message.decision === "approve" ? "approved" : "rejected";
     if (
       now &&
       now.status !== "pending" &&
-      (now.status !== status || now.decidedBy !== message.by || now.note !== message.note)
+      (now.status !== statusOf(msg.decision) || now.decidedBy !== msg.by.id || now.note !== msg.note)
     ) {
-      throw new Error(`${target.id} on run ${runId} was already ${now.status} by ${now.decidedBy}`);
+      throw alreadyDecided(runId, now);
     }
     return target;
   }
@@ -165,7 +175,7 @@ export class SanomaClient {
   }
 
   private async mustExist(runId: string) {
-    if (!(await this.dbos.getWorkflow(runId))) throw new Error(`No run ${runId}`);
+    if (!(await this.dbos.getWorkflow(runId))) throw new SanomaError("run_not_found", `No run ${runId}`, { runId });
   }
 
   private async summarize(r: {
@@ -175,17 +185,41 @@ export class SanomaClient {
     createdAt: number;
     updatedAt?: number;
     authenticatedUser?: string;
+    authenticatedRoles?: string[];
     error?: unknown;
   }): Promise<RunSummary> {
+    const approvals = await this.approvals(r.workflowID);
+    const groups = r.authenticatedRoles ?? [];
     return {
       runId: r.workflowID,
       workflow: r.workflowName,
-      status: r.status,
-      startedBy: r.authenticatedUser || undefined,
+      status: runStatus(r.status, approvals),
+      startedBy: r.authenticatedUser ? { id: r.authenticatedUser, ...(groups.length ? { groups } : {}) } : undefined,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
-      approvals: await this.approvals(r.workflowID),
+      approvals,
       error: r.error ? String((r.error as Error).message ?? r.error) : undefined,
     };
   }
+}
+
+const alreadyDecided = (runId: string, a: ApprovalState) =>
+  new SanomaError("already_decided", `${a.id} on run ${runId} was already ${a.status} by ${a.decidedBy}`, {
+    runId,
+    approvalId: a.id,
+    status: a.status,
+    decidedBy: a.decidedBy,
+  });
+
+/** The value, parsed by the schema, or an `invalid_input` error carrying zod's issues. */
+function valid<T>(schema: z.ZodType<T>, value: unknown, what: string): T {
+  const parsed = schema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  throw new SanomaError("invalid_input", `${what}: ${z.prettifyError(parsed.error)}`, {
+    issues: parsed.error.issues.map(({ path, message, code }) => ({
+      path: path.filter((p) => typeof p !== "symbol"),
+      message,
+      code,
+    })),
+  });
 }

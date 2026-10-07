@@ -46,7 +46,7 @@ export function RunsPage() {
                     <td>
                       <RunStatus status={run.status} />
                     </td>
-                    <td>{run.startedBy ?? <span className="muted">unknown</span>}</td>
+                    <td>{run.startedBy?.id ?? <span className="muted">unknown</span>}</td>
                     <td>
                       <When at={run.createdAt} />
                     </td>
@@ -59,7 +59,7 @@ export function RunsPage() {
                         <span className="muted">-</span>
                       )}
                     </td>
-                    <td className="error-cell">{run.status === "ERROR" && run.error ? run.error : ""}</td>
+                    <td className="error-cell">{run.status === "failed" && run.error ? run.error : ""}</td>
                   </tr>
                 );
               })}

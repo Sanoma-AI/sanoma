@@ -1,12 +1,26 @@
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
+import { fakeMarketingVendors } from "@sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { allow, defineConfig, describeConfig, defineConnector, definePolicy, defineWorkflow } from "../src/index.ts";
+import {
+  allow,
+  allowAll,
+  defineConfig,
+  describeConfig,
+  defineConnector,
+  definePolicy,
+  defineWorkflow,
+} from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
 
-const base = defineConfig({ workflows: [announce], connectors: [ghost, resend, bluesky], drivers: [] });
+const base = defineConfig({
+  workflows: [announce],
+  connectors: [ghost, resend, bluesky],
+  drivers: fakeMarketingVendors().drivers,
+  policy: allowAll,
+});
 
 describe("describeConfig", () => {
   it("describes each workflow: its input as JSON Schema, the operations it may call, and its built-ins", () => {
@@ -52,11 +66,16 @@ describe("describeConfig", () => {
     });
   });
 
-  it("says whether a policy is configured, and names the app", () => {
+  it("says whether a policy other than allowAll is configured, and its version, and names the app and version", () => {
     expect(describeConfig(base).policy).toEqual({ defined: false });
     expect(describeConfig(base).appName).toBe("sanoma");
-    const gated = defineConfig({ ...base, appName: "acme", policy: definePolicy(() => allow()) });
-    expect(describeConfig(gated)).toMatchObject({ appName: "acme", policy: { defined: true } });
+    expect(describeConfig(base).version).toMatch(/^sanoma@[0-9a-f]{64}$/);
+    const gated = defineConfig({ ...base, appName: "acme", version: "abc", policy: definePolicy(() => allow()) });
+    expect(describeConfig(gated)).toMatchObject({ appName: "acme", version: "acme@abc", policy: { defined: true } });
+    const versioned = definePolicy(() => allow(), { version: "2026-10-07" });
+    expect(versioned.version).toBe("2026-10-07");
+    expect(describeConfig({ ...base, policy: versioned }).policy).toEqual({ defined: true, version: "2026-10-07" });
+    expect(() => definePolicy(() => allow(), { version: "" })).toThrow("`version` must be a non-empty string");
   });
 
   it("is plain JSON: it round-trips through JSON.stringify unchanged", () => {
@@ -75,7 +94,10 @@ describe("describeConfig", () => {
       uses: [odd.thing.get],
       run: async () => {},
     });
+    const drivers = [{ vendor: "odd", ops: { "thing.get": async () => new Map() } }];
     // `unrepresentable: "any"` keeps custom types as {}; only a schema that throws is reported.
-    expect(() => describeConfig(defineConfig({ workflows: [wf], connectors: [odd], drivers: [] }))).not.toThrow();
+    expect(() =>
+      describeConfig(defineConfig({ workflows: [wf], connectors: [odd], drivers, policy: allowAll })),
+    ).not.toThrow();
   });
 });

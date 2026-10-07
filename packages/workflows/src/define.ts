@@ -1,5 +1,19 @@
-import type { z } from "zod";
+import { z } from "zod";
 import type { Op } from "./op.ts";
+
+/**
+ * Who is acting: the person or service that starts a run or decides an approval. `id` is
+ * whatever the deployment identifies people by; `groups` are the roles it vouches for.
+ */
+export interface Principal {
+  id: string;
+  groups?: string[];
+}
+
+export const Principal: z.ZodType<Principal> = z.object({
+  id: z.string().regex(/\S/, "id must not be blank"),
+  groups: z.array(z.string()).optional(),
+});
 
 export type Builtin = "approval" | "sleep";
 export type Use = Op | Builtin;

@@ -1,7 +1,11 @@
 import { appendFile, mkdir, readFile, stat, truncate } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import type { Principal } from "./define.ts";
+import { type ErrorInfo, errorMessage } from "./errors.ts";
 import type { Effect } from "./op.ts";
 import type { Decision } from "./policy.ts";
+import type { Run } from "./run.ts";
 
 /**
  * The audit record of a run: who started it, every operation call with the policy's
@@ -11,14 +15,16 @@ import type { Decision } from "./policy.ts";
  * approval requested or decided, `<runId>:approval.refused:<approvalId>:refused:<n>` for
  * the nth message an approval ignored) so that when DBOS replays a run after a restart,
  * the records it writes again have the same ids and the store skips them. `seq` orders a
- * run's records.
+ * run's records. `v` is the record format's version; `app` is the config's `appName`.
  */
 export type LedgerRecord = {
+  v: 1;
+  app: string;
   id: string;
   runId: string;
   seq: number;
   at: number;
-  actor: string;
+  actor: Principal;
   workflow: string;
 } & (
   | { type: "run.started"; input: unknown }
@@ -29,7 +35,7 @@ export type LedgerRecord = {
       input: unknown;
       decision: Decision;
       output?: unknown;
-      error?: string;
+      error?: ErrorInfo;
       durationMs: number;
       /** Which try produced the output or the final error, from 1. Idempotent operations are retried. */
       attempt?: number;
@@ -49,7 +55,7 @@ export type LedgerRecord = {
   | { type: "approval.refused"; approval: string; by?: string; reason: string }
   | { type: "approval.decided"; approval: string; decision: "approve" | "reject"; by: string; note?: string }
   | { type: "run.finished"; output: unknown }
-  | { type: "run.failed"; error: string }
+  | { type: "run.failed"; error: ErrorInfo }
 );
 
 export interface LedgerStore {
@@ -180,4 +186,65 @@ export function memoryLedger(): LedgerStore {
       return [...(runs.get(runId)?.values() ?? [])].map((r) => structuredClone(r)).toSorted(bySeq);
     },
   };
+}
+
+type Common = "v" | "app" | "id" | "runId" | "seq" | "at" | "actor" | "workflow";
+type Body = LedgerRecord extends infer R ? (R extends LedgerRecord ? Omit<R, Common> : never) : never;
+
+/** A record of the run, with the next `seq` unless one is given. */
+export function entry(run: Run, body: Body, opts: { seq?: number; key?: string; at?: number } = {}): LedgerRecord {
+  const seq = opts.seq ?? run.seq++;
+  return {
+    v: 1,
+    app: run.state.app,
+    id: `${run.id}:${body.type}:${opts.key ?? seq}`,
+    runId: run.id,
+    seq,
+    at: opts.at ?? Date.now(),
+    actor: run.actor,
+    workflow: run.workflow,
+    ...body,
+  } as LedgerRecord;
+}
+
+// Waits between tries of a failed append. Safe to repeat: append is idempotent by id.
+const RETRY_DELAYS_MS = [50, 200, 800];
+
+async function append(run: Run, record: LedgerRecord) {
+  for (let i = 0; ; i++) {
+    try {
+      return await run.state.ledger.append(record);
+    } catch (err) {
+      const wait = RETRY_DELAYS_MS[i];
+      if (wait === undefined) throw err;
+      await delay(wait);
+    }
+  }
+}
+
+/*
+ * Every ledger write happens outside DBOS steps. When DBOS replays a run after a restart,
+ * it re-runs the workflow function and these writes happen again with the same ids, so
+ * the store keeps one of each and fills in any the interrupted run never got to write.
+ */
+export async function write(run: Run, record: LedgerRecord) {
+  await append(run, record);
+}
+
+/** Records a failure. If the ledger fails too, throws both, so neither is lost. */
+export async function writeFailure(run: Run, record: LedgerRecord, original: unknown) {
+  try {
+    await append(run, record);
+  } catch (ledgerError) {
+    throw new AggregateError(
+      [original, ledgerError],
+      `${errorMessage(original)} (and the ledger could not record ${record.id}: ${errorMessage(ledgerError)})`,
+      { cause: ledgerError },
+    );
+  }
+}
+
+/** Says that a record was deliberately not written, and why. */
+export function skipped(record: LedgerRecord, why: string) {
+  console.warn(`sanoma: did not write ${record.type} ${record.id}: ${why}`);
 }

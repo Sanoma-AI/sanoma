@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import type { ApprovalState, Decision, Effect } from "@sanoma/workflows";
+import type { ApprovalState, Decision, Effect, RunStatus as RunStatusName } from "@sanoma/workflows";
 import type { DecideRequest } from "../src/api.ts";
 import { ago, api, ApiError, errorText, fullTime, runHref } from "./lib.ts";
 
@@ -8,22 +8,17 @@ export function EffectBadge({ effect }: { effect: Effect }) {
   return <span className={`badge effect-${effect}`}>{effect}</span>;
 }
 
-const STATUS: Record<string, { label: string; tone: string }> = {
-  ENQUEUED: { label: "queued", tone: "waiting" },
-  PENDING: { label: "running", tone: "running" },
-  SUCCESS: { label: "finished", tone: "good" },
-  ERROR: { label: "failed", tone: "bad" },
-  CANCELLED: { label: "cancelled", tone: "muted" },
-  MAX_RECOVERY_ATTEMPTS_EXCEEDED: { label: "gave up", tone: "bad" },
+const STATUS_TONE: Record<RunStatusName, string> = {
+  queued: "waiting",
+  running: "running",
+  waiting: "waiting",
+  finished: "good",
+  failed: "bad",
+  cancelled: "muted",
 };
 
-export function RunStatus({ status }: { status: string }) {
-  const s = STATUS[status] ?? { label: status.toLowerCase(), tone: "muted" };
-  return (
-    <span className={`badge tone-${s.tone}`} title={status}>
-      {s.label}
-    </span>
-  );
+export function RunStatus({ status }: { status: RunStatusName }) {
+  return <span className={`badge tone-${STATUS_TONE[status]}`}>{status}</span>;
 }
 
 const APPROVAL_TONE = { pending: "waiting", approved: "good", rejected: "bad" } as const;

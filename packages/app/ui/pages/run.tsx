@@ -22,7 +22,7 @@ export function RunPage({ id }: { id: string }) {
       {error && <Notice tone="bad">Could not refresh: {error}</Notice>}
       <dl className="facts">
         <dt>Started by</dt>
-        <dd>{run.startedBy ?? "unknown"}</dd>
+        <dd>{run.startedBy?.id ?? "unknown"}</dd>
         <dt>Started</dt>
         <dd>
           <When at={run.createdAt} />
@@ -75,7 +75,7 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
       kind = "started";
       body = (
         <>
-          <p>Started by {record.actor}</p>
+          <p>Started by {record.actor.id}</p>
           <Expandable label="Input" value={record.input} />
         </>
       );
@@ -91,7 +91,7 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
               {record.durationMs} ms{record.attempt && record.attempt > 1 ? `, attempt ${record.attempt}` : ""}
             </span>
           </p>
-          {record.error && <p className="error-text">{record.error}</p>}
+          {record.error && <p className="error-text">{record.error.message}</p>}
           <Expandable label="Input" value={record.input} />
           {"output" in record && <Expandable label="Output" value={record.output} />}
         </>
@@ -140,7 +140,7 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
     case "run.failed":
       kind = "failed";
       tone = "bad";
-      body = <p className="error-text">{record.error}</p>;
+      body = <p className="error-text">{record.error.message}</p>;
       break;
   }
   return (

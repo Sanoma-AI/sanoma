@@ -3,14 +3,15 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { type ApprovalState, describeConfig, errorCode, SanomaClient, type SanomaConfig } from "@sanoma/workflows";
 import {
-  type ApprovalState,
-  describeConfig,
-  resolveDatabaseUrl,
-  SanomaClient,
-  type SanomaConfig,
-} from "@sanoma/workflows";
-import { ACTOR_HEADER, type DecideRequest, type ErrorResponse, type RunDetail, type StartRunResponse } from "./api.ts";
+  ACTOR_HEADER,
+  type DecideRequest,
+  type ErrorResponse,
+  type InputIssue,
+  type RunDetail,
+  type StartRunResponse,
+} from "./api.ts";
 
 export interface AppOptions {
   /** Defaults to 0: any free port, which `App.url` reports. 4321 is the suggested fixed port. */
@@ -39,10 +40,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   const description = describeConfig(config);
   const uiDir = resolve(options.uiDir ?? defaultUiDir());
   const host = options.host ?? "127.0.0.1";
-  const client = await SanomaClient.connect(resolveDatabaseUrl(config), {
-    appName: config.appName,
-    ledger: config.ledger,
-  });
+  const client = await SanomaClient.connect(config);
 
   const routes: Route[] = [
     route("GET", "/api/config", async () => ok(description)),
@@ -79,16 +77,12 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     const workflow = config.workflows.find((wf) => wf.name === body.workflow);
     if (!workflow) throw new HttpError(404, `No workflow named "${body.workflow}"`);
     try {
-      const runId = await client.start(workflow, body.input, { startedBy: actor });
+      const runId = await client.start(workflow, body.input, { startedBy: { id: actor } });
       return { status: 201, body: { runId } satisfies StartRunResponse };
     } catch (err) {
-      if (isSchemaError(err)) {
+      if (errorCode(err) === "invalid_input") {
         throw new HttpError(400, `The input does not match ${workflow.name}'s schema`, {
-          issues: err.issues.map(({ path, message, code }) => ({
-            path: path.filter((p) => typeof p !== "symbol"),
-            message,
-            code,
-          })),
+          issues: (err as { data: { issues: InputIssue[] } }).data.issues,
         });
       }
       throw err;
@@ -119,17 +113,16 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     try {
       await client.decide(
         runId,
-        note === undefined ? { decision, by: actor } : { decision, by: actor, note },
+        note === undefined ? { decision, by: { id: actor } } : { decision, by: { id: actor }, note },
         approvalId,
       );
     } catch (err) {
-      // SanomaClient refuses before sending; these are its messages.
+      // SanomaClient refuses before sending, with these codes.
+      const code = errorCode(err);
       const message = errorMessage(err);
-      if (message.includes("is not the approver")) throw new HttpError(403, message, { approver: approval.approver });
-      if (message.includes("has no pending approval") || message.startsWith("No run ")) {
-        throw new HttpError(404, message);
-      }
-      if (message.includes("was already")) throw new HttpError(409, message);
+      if (code === "not_approver") throw new HttpError(403, message, { approver: approval.approver });
+      if (code === "no_pending_approval" || code === "run_not_found") throw new HttpError(404, message);
+      if (code === "already_decided") throw new HttpError(409, message);
       throw err;
     }
     return ok((await settled(client, runId, approvalId)) ?? approval);
@@ -326,13 +319,6 @@ async function settled(client: SanomaClient, runId: string, approvalId: string):
     if (!approval || approval.status !== "pending" || Date.now() > deadline) return approval;
     await new Promise((r) => setTimeout(r, 100));
   }
-}
-
-// Matched by name, since the workflow's schema may come from another copy of zod.
-function isSchemaError(err: unknown): err is Error & {
-  issues: { path: PropertyKey[]; message: string; code?: string }[];
-} {
-  return err instanceof Error && err.name === "ZodError" && Array.isArray((err as { issues?: unknown }).issues);
 }
 
 // --- The page ----------------------------------------------------------------------------------

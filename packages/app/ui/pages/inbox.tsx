@@ -26,7 +26,7 @@ export function InboxPage({ actor }: { actor: string }) {
         {pending.map(({ run, approval }) => (
           <div key={`${run.runId}/${approval.id}`}>
             <p className="card-label">
-              {run.workflow}, started by {run.startedBy ?? "unknown"}
+              {run.workflow}, started by {run.startedBy?.id ?? "unknown"}
             </p>
             <ApprovalCard runId={run.runId} approval={approval} onDecided={reload} showRun />
           </div>

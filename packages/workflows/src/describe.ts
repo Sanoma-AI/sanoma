@@ -1,7 +1,8 @@
 import { z } from "zod";
-import type { SanomaConfig } from "./config.ts";
+import { resolveConfig, type SanomaConfig } from "./config.ts";
 import type { Builtin, Use } from "./define.ts";
 import { isOp, type Effect } from "./op.ts";
+import { allowAll } from "./policy.ts";
 
 /** What a workflow is, read from its definition: enough to draw a start form and show what it may call. */
 export interface WorkflowEntry {
@@ -36,33 +37,31 @@ export interface OpEntry {
  */
 export interface ConfigDescription {
   appName: string;
+  /** The application version runs started now are stamped with. */
+  version: string;
   workflows: WorkflowEntry[];
   ops: OpEntry[];
-  policy: { defined: boolean };
+  /** `defined` is false for `allowAll`. */
+  policy: { defined: boolean; version?: string };
 }
 
+/** Describes a config. Throws what `startWorker` would refuse (see `resolveConfig`); there is no partial description. */
 export function describeConfig(config: SanomaConfig): ConfigDescription {
-  const ops: OpEntry[] = [];
-  for (const connector of config.connectors) {
-    for (const resource of Object.values(connector) as Record<string, any>[]) {
-      for (const op of Object.values(resource)) {
-        ops.push({
-          id: op.id,
-          vendor: op.vendor,
-          resource: op.resource,
-          name: op.name,
-          effect: op.effect,
-          idempotent: op.idempotent,
-          description: op.description,
-          input: toJsonSchema(op.input, `${op.id} input`),
-          output: toJsonSchema(op.output, `${op.id} output`),
-        });
-      }
-    }
-  }
+  const resolved = resolveConfig(config);
+  const ops: OpEntry[] = [...resolved.ops.values()].map((op) => ({
+    id: op.id,
+    vendor: op.vendor,
+    resource: op.resource,
+    name: op.name,
+    effect: op.effect,
+    idempotent: op.idempotent,
+    description: op.description,
+    input: toJsonSchema(op.input, `${op.id} input`),
+    output: toJsonSchema(op.output, `${op.id} output`),
+  }));
   ops.sort((a, b) => a.id.localeCompare(b.id));
 
-  const workflows: WorkflowEntry[] = config.workflows.map((wf) => ({
+  const workflows: WorkflowEntry[] = resolved.workflows.map((wf) => ({
     name: wf.name,
     title: wf.title,
     trigger: wf.trigger,
@@ -73,10 +72,14 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
   workflows.sort((a, b) => a.name.localeCompare(b.name));
 
   return {
-    appName: config.appName ?? "sanoma",
+    appName: resolved.appName,
+    version: resolved.version,
     workflows,
     ops,
-    policy: { defined: config.policy !== undefined },
+    policy: {
+      defined: resolved.policy !== allowAll,
+      ...(resolved.policyVersion === undefined ? {} : { version: resolved.policyVersion }),
+    },
   };
 }
 

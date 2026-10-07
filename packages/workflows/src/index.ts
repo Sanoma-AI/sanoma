@@ -12,6 +12,7 @@ export {
 } from "./op.ts";
 export {
   defineWorkflow,
+  Principal,
   type ApprovalRequest,
   type ApprovalResult,
   type ApprovalState,
@@ -21,26 +22,14 @@ export {
   type Use,
   type WorkflowDefinition,
 } from "./define.ts";
-export { defineConfig, resolveDatabaseUrl, type SanomaConfig } from "./config.ts";
+export { defineConfig, resolveConfig, resolveDatabaseUrl, type ResolvedConfig, type SanomaConfig } from "./config.ts";
 export { describeConfig, type ConfigDescription, type OpEntry, type WorkflowEntry } from "./describe.ts";
-export {
-  allow,
-  approve,
-  definePolicy,
-  deny,
-  PolicyDeniedError,
-  type Decision,
-  type Policy,
-  type PolicyCall,
-} from "./policy.ts";
+export { allow, allowAll, approve, definePolicy, deny, type Decision, type Policy, type PolicyCall } from "./policy.ts";
+export { errorCode, PolicyDeniedError, RejectedError, SanomaError, type ErrorCode, type ErrorInfo } from "./errors.ts";
 export { jsonlLedger, memoryLedger, type LedgerRecord, type LedgerStore } from "./ledger.ts";
-export {
-  RejectedError,
-  startWorker,
-  type ApprovalMessage,
-  type RunArgs,
-  type Worker,
-  type WorkerOptions,
-} from "./runtime.ts";
-export { SanomaClient, type ClientOptions, type RunStep, type RunSummary, type StartOptions } from "./client.ts";
+export { ApprovalMessage, APPROVALS_EVENT, mayDecide } from "./approvals.ts";
+export { RUNTIME_VERSION } from "./version.ts";
+export type { RunArgs } from "./run.ts";
+export { startWorker, type Worker } from "./worker.ts";
+export { SanomaClient, type RunStatus, type RunSummary, type StartOptions } from "./client.ts";
 export { lintWorkflow, type LintProblem } from "./lint.ts";

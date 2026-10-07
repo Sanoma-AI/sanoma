@@ -3,7 +3,9 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFile
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { jsonlLedger, type LedgerRecord, type LedgerStore, memoryLedger } from "../src/index.ts";
+import { allowAll, jsonlLedger, type LedgerRecord, type LedgerStore, memoryLedger } from "../src/index.ts";
+import { entry, write, writeFailure } from "../src/ledger.ts";
+import type { Run } from "../src/run.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "sanoma-ledger-unit-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -13,10 +15,19 @@ const rec = (
   seq: number,
   type: "run.started" | "run.finished" = "run.started",
   payload: unknown = { seq },
-): LedgerRecord =>
-  type === "run.started"
-    ? { id: `${runId}:${type}:${seq}`, runId, seq, at: seq, actor: "a", workflow: "w", type, input: payload }
-    : { id: `${runId}:${type}:${seq}`, runId, seq, at: seq, actor: "a", workflow: "w", type, output: payload };
+): LedgerRecord => {
+  const header = {
+    v: 1,
+    app: "test",
+    id: `${runId}:${type}:${seq}`,
+    runId,
+    seq,
+    at: seq,
+    actor: { id: "a" },
+    workflow: "w",
+  } as const;
+  return type === "run.started" ? { ...header, type, input: payload } : { ...header, type, output: payload };
+};
 
 describe.each<[string, () => LedgerStore]>([
   ["jsonlLedger", () => jsonlLedger(join(dir, "store"))],
@@ -104,5 +115,68 @@ describe("jsonlLedger on a damaged file", () => {
   it("says when the directory does not exist, rather than reading no records", async () => {
     const missing = join(dir, "no-such-dir");
     await expect(jsonlLedger(missing).read("r1")).rejects.toThrow(`Ledger directory ${missing} does not exist`);
+  });
+});
+
+/** A store whose first `failures` appends throw. */
+const flaky = (failures: number) => {
+  const store = memoryLedger();
+  let calls = 0;
+  return {
+    calls: () => calls,
+    store: {
+      read: store.read,
+      async append(record: LedgerRecord) {
+        if (++calls <= failures) throw new Error(`disk full (${calls})`);
+        await store.append(record);
+      },
+    } satisfies LedgerStore,
+  };
+};
+const runOn = (ledger: LedgerStore): Run => ({
+  id: randomUUID(),
+  workflow: "w",
+  actor: { id: "alice", groups: ["ops"] },
+  approvals: [],
+  seq: 0,
+  state: { app: "acme", ops: new Map(), drivers: new Map(), policy: allowAll, ledger, stopped: false },
+});
+
+describe("writing a run's records", () => {
+  it("stamps the format version, the app and the run's actor, and counts seq", () => {
+    const run = runOn(memoryLedger());
+    expect(entry(run, { type: "run.started", input: 1 }, { at: 5 })).toEqual({
+      v: 1,
+      app: "acme",
+      id: `${run.id}:run.started:0`,
+      runId: run.id,
+      seq: 0,
+      at: 5,
+      actor: { id: "alice", groups: ["ops"] },
+      workflow: "w",
+      type: "run.started",
+      input: 1,
+    });
+    expect(entry(run, { type: "run.finished", output: 2 }).seq).toBe(1);
+  });
+
+  it("retries a failed append, so a store failing twice then succeeding loses nothing", async () => {
+    const { store, calls } = flaky(2);
+    const run = runOn(store);
+    await write(run, entry(run, { type: "run.started", input: null }));
+    expect(calls()).toBe(3);
+    expect(await store.read(run.id)).toHaveLength(1);
+  });
+
+  it("gives up after three retries, and a failure record then throws both errors", async () => {
+    const { store, calls } = flaky(10);
+    const run = runOn(store);
+    await expect(write(run, entry(run, { type: "run.started", input: null }))).rejects.toThrow("disk full (4)");
+    expect(calls()).toBe(4);
+    const original = new Error("the vendor said no");
+    const record = entry(run, { type: "run.failed", error: { name: "Error", message: original.message } });
+    await expect(writeFailure(run, record, original)).rejects.toThrow(
+      `the vendor said no (and the ledger could not record ${record.id}: disk full (8))`,
+    );
   });
 });

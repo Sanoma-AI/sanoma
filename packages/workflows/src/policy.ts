@@ -1,4 +1,4 @@
-import type { ApprovalState } from "./define.ts";
+import type { ApprovalState, Principal } from "./define.ts";
 import type { Effect, Op } from "./op.ts";
 
 /** What a policy sees for each operation a run calls. */
@@ -8,7 +8,7 @@ export interface PolicyCall {
   /** The operation's input, already checked against its schema. */
   input: unknown;
   /** Who started the run. */
-  actor: string;
+  actor: Principal;
   /**
    * The run so far: a copy of its approvals, including those the policy asked for earlier.
    * A policy request has `requestedBy: "policy"` and the `op` it held.
@@ -34,22 +34,23 @@ export const approve = (approver: string, title?: string): Decision =>
  * and a replay reuses it, but a call interrupted before that is decided again. A policy
  * must not have side effects.
  */
-export type Policy = (call: PolicyCall) => Decision | Promise<Decision>;
+export type Policy = ((call: PolicyCall) => Decision | Promise<Decision>) & {
+  /** Names this version of the policy, from `definePolicy(fn, { version })`. */
+  readonly version?: string;
+};
 
-export function definePolicy(policy: Policy): Policy {
+/** A policy, optionally named with a version so a reader can tell which rules decided a call. */
+export function definePolicy(
+  policy: (call: PolicyCall) => Decision | Promise<Decision>,
+  options: { version?: string } = {},
+): Policy {
   if (typeof policy !== "function") throw new Error("definePolicy expects a function of the call");
-  return Object.freeze(policy);
-}
-
-/** Thrown into the run when the policy denies an operation call. The run fails with it. */
-export class PolicyDeniedError extends Error {
-  override readonly name = "PolicyDeniedError";
-  readonly op: string;
-  readonly reason: string;
-
-  constructor(op: string, reason: string) {
-    super(`${op} was denied by policy: ${reason}`);
-    this.op = op;
-    this.reason = reason;
+  if (options.version !== undefined && (typeof options.version !== "string" || !options.version.trim())) {
+    throw new Error("definePolicy: `version` must be a non-empty string");
   }
+  const defined = (call: PolicyCall) => policy(call);
+  return Object.freeze(options.version === undefined ? defined : Object.assign(defined, { version: options.version }));
 }
+
+/** Allows every operation call. A config says so explicitly: `policy: allowAll`. */
+export const allowAll: Policy = definePolicy(() => allow());
