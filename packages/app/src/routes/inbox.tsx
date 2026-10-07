@@ -1,13 +1,24 @@
-import type { RunSummary } from "@sanoma/workflows";
-import { ApprovalCard, Notice } from "../components.tsx";
-import { usePoll } from "../lib.ts";
+import { useQuery } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
+import { useActor } from "../actor.ts";
+import { ApprovalCard } from "../components/approval.tsx";
+import { Notice } from "../components/common.tsx";
+import { runsQuery } from "../queries.ts";
+
+export const Route = createFileRoute("/inbox")({
+  loader: ({ context }) => context.queryClient.ensureQueryData(runsQuery()),
+  head: () => ({ meta: [{ title: "Inbox · Sanoma" }] }),
+  component: InboxPage,
+});
 
 /** Every pending approval across the recent runs, newest first. */
-export function InboxPage({ actor }: { actor: string }) {
-  const { data: runs, error, reload } = usePoll<RunSummary[]>("/api/runs?limit=50");
+function InboxPage() {
+  const { actor } = useActor();
+  const { data: runs, error } = useQuery(runsQuery());
   const pending = (runs ?? [])
     .flatMap((run) => run.approvals.filter((a) => a.status === "pending").map((approval) => ({ run, approval })))
     .toSorted((a, b) => b.approval.requestedAt - a.approval.requestedAt);
+  // Names only: a group approver needs the deployment to vouch for groups, which a typed name cannot.
   const mine = pending.filter(({ approval }) => approval.approver === actor).length;
 
   return (
@@ -16,11 +27,11 @@ export function InboxPage({ actor }: { actor: string }) {
         <h1>Inbox</h1>
         {runs && (
           <p className="muted">
-            {pending.length} waiting, {mine} for you
+            {pending.length} waiting{actor ? `, ${mine} for you` : ""}
           </p>
         )}
       </header>
-      {error && <Notice tone="bad">Could not load approvals: {error}</Notice>}
+      {error && <Notice tone="bad">Could not load approvals: {error.message}</Notice>}
       {runs && pending.length === 0 && <Notice>Nothing is waiting for a decision.</Notice>}
       <div className="cards">
         {pending.map(({ run, approval }) => (
@@ -28,7 +39,7 @@ export function InboxPage({ actor }: { actor: string }) {
             <p className="card-label">
               {run.workflow}, started by {run.startedBy?.id ?? "unknown"}
             </p>
-            <ApprovalCard runId={run.runId} approval={approval} onDecided={reload} showRun />
+            <ApprovalCard runId={run.runId} approval={approval} showRun />
           </div>
         ))}
       </div>

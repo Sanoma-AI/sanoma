@@ -1,19 +1,27 @@
-import type { RunSummary } from "@sanoma/workflows";
-import { Notice, RunStatus, When } from "../components.tsx";
-import { runHref, usePoll } from "../lib.ts";
+import { useQuery } from "@tanstack/react-query";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { Notice, plural, RunStatusBadge, When } from "../../components/common.tsx";
+import { runsQuery } from "../../queries.ts";
 
-export function RunsPage() {
-  const { data: runs, error } = usePoll<RunSummary[]>("/api/runs?limit=50");
+export const Route = createFileRoute("/runs/")({
+  loader: ({ context }) => context.queryClient.ensureQueryData(runsQuery()),
+  head: () => ({ meta: [{ title: "Runs · Sanoma" }] }),
+  component: RunsPage,
+});
+
+function RunsPage() {
+  const { data: runs, error } = useQuery(runsQuery());
+  const navigate = useNavigate();
 
   return (
     <section>
       <header className="page-head">
         <h1>Runs</h1>
-        <a className="button" href="#/start">
+        <Link className="button" to="/start">
           Start a run
-        </a>
+        </Link>
       </header>
-      {error && <Notice tone="bad">Could not load runs: {error}</Notice>}
+      {error && <Notice tone="bad">Could not load runs: {error.message}</Notice>}
       {runs && runs.length === 0 && <Notice>No runs yet. Start one, or have a worker start one.</Notice>}
       {runs && runs.length > 0 && (
         <div className="table-wrap">
@@ -35,16 +43,16 @@ export function RunsPage() {
                   <tr
                     key={run.runId}
                     className="clickable"
-                    onClick={() => (location.hash = runHref(run.runId))}
+                    onClick={() => void navigate({ to: "/runs/$id", params: { id: run.runId } })}
                     title={run.runId}
                   >
                     <td>
-                      <a href={runHref(run.runId)} onClick={(e) => e.stopPropagation()}>
+                      <Link to="/runs/$id" params={{ id: run.runId }} onClick={(e) => e.stopPropagation()}>
                         {run.workflow}
-                      </a>
+                      </Link>
                     </td>
                     <td>
-                      <RunStatus status={run.status} />
+                      <RunStatusBadge status={run.status} />
                     </td>
                     <td>{run.startedBy?.id ?? <span className="muted">unknown</span>}</td>
                     <td>
@@ -52,9 +60,7 @@ export function RunsPage() {
                     </td>
                     <td>
                       {pending > 0 ? (
-                        <span className="badge tone-waiting">
-                          {pending} approval{pending === 1 ? "" : "s"}
-                        </span>
+                        <span className="badge tone-waiting">{plural(pending, "approval")}</span>
                       ) : (
                         <span className="muted">-</span>
                       )}

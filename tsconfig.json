@@ -27,5 +27,8 @@
       "@sanoma/connector-*": ["./connectors/*/src/index.ts"]
     }
   },
-  "include": ["packages/*/src", "packages/*/test", "connectors/*/src"]
+  "include": ["packages/*/src", "packages/*/test", "connectors/*/src"],
+  // The app's routes and components (JSX, DOM) are checked by packages/app/tsconfig.json
+  // (`typecheck:ui`). Its Node entry, src/index.ts, is still checked here through its tests.
+  "exclude": ["packages/app/src"]
 }

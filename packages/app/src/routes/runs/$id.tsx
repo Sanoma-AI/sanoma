@@ -1,14 +1,25 @@
-import type { ApprovalState, LedgerRecord } from "@sanoma/workflows";
+import type { LedgerRecord } from "@sanoma/workflows";
+import { useQuery } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import type { RunDetail } from "../../src/api.ts";
-import { ApprovalCard, DecisionBadge, EffectBadge, Expandable, Notice, RunStatus, When } from "../components.tsx";
-import { usePoll } from "../lib.ts";
+import { approverName } from "../../api.ts";
+import { ApprovalCard } from "../../components/approval.tsx";
+import { DecisionBadge, EffectBadge, Expandable, Notice, RunStatusBadge, When } from "../../components/common.tsx";
+import { runQuery } from "../../queries.ts";
 
-export function RunPage({ id }: { id: string }) {
-  const { data, error, missing, reload } = usePoll<RunDetail>(`/api/runs/${encodeURIComponent(id)}`);
+export const Route = createFileRoute("/runs/$id")({
+  loader: ({ context, params }) => context.queryClient.ensureQueryData(runQuery(params.id)),
+  head: ({ params }) => ({ meta: [{ title: `Run ${params.id} · Sanoma` }] }),
+  component: RunPage,
+});
 
-  if (missing) return <Notice tone="bad">No run {id}.</Notice>;
-  if (!data) return error ? <Notice tone="bad">Could not load the run: {error}</Notice> : <Notice>Loading…</Notice>;
+function RunPage() {
+  const { id } = Route.useParams();
+  const { data, error } = useQuery(runQuery(id));
+
+  if (data === null) return <Notice tone="bad">No run {id}.</Notice>;
+  if (!data)
+    return error ? <Notice tone="bad">Could not load the run: {error.message}</Notice> : <Notice>Loading…</Notice>;
 
   const { run, ledger, ledgerError, approvals } = data;
   const titles = new Map(approvals.map((a) => [a.id, a.title]));
@@ -16,10 +27,10 @@ export function RunPage({ id }: { id: string }) {
     <section>
       <header className="page-head">
         <h1>
-          {run.workflow} <RunStatus status={run.status} />
+          {run.workflow} <RunStatusBadge status={run.status} />
         </h1>
       </header>
-      {error && <Notice tone="bad">Could not refresh: {error}</Notice>}
+      {error && <Notice tone="bad">Could not refresh: {error.message}</Notice>}
       <dl className="facts">
         <dt>Started by</dt>
         <dd>{run.startedBy?.id ?? "unknown"}</dd>
@@ -56,8 +67,8 @@ export function RunPage({ id }: { id: string }) {
         <aside>
           <h2>Approvals</h2>
           {approvals.length === 0 && <Notice>None asked for.</Notice>}
-          {approvals.map((approval: ApprovalState) => (
-            <ApprovalCard key={approval.id} runId={run.runId} approval={approval} onDecided={reload} />
+          {approvals.map((approval) => (
+            <ApprovalCard key={approval.id} runId={run.runId} approval={approval} />
           ))}
         </aside>
       </div>
@@ -65,6 +76,7 @@ export function RunPage({ id }: { id: string }) {
   );
 }
 
+/** One ledger record: what happened, when, and its details. */
 function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<string, string> }) {
   const title = (approval: string) => titles.get(approval) ?? approval;
   let kind = "";
@@ -102,7 +114,7 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
       tone = "waiting";
       body = (
         <p>
-          “{record.title}” asked of {record.approver}
+          “{record.title}” asked of {approverName(record.approver)}
           {record.requestedBy === "policy" ? (
             <>
               {" "}
