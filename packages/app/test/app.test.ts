@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
-import { fakeMarketingVendors } from "@sanoma/testing";
+import { fakeBluesky, fakeGhost, fakeResend } from "@sanoma/testing";
 import {
   allow,
   approve,
@@ -41,7 +41,7 @@ const policy = definePolicy(({ effect, run }) =>
 const config = defineConfig({
   workflows: [announce],
   connectors: [ghost, resend, bluesky],
-  drivers: fakeMarketingVendors().drivers,
+  drivers: [fakeGhost().driver, fakeResend().driver, fakeBluesky().driver],
   policy,
   ledger: memoryLedger(),
   appName: "sanoma-app-test",
