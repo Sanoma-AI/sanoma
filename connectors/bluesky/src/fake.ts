@@ -1,4 +1,4 @@
-import { defineFake, type FakeOptions } from "@sanoma/workflows";
+import { defineFake, type FakeOptions } from "@sanoma/workflows/fake";
 import { bluesky } from "./index.ts";
 
 export interface FakeBlueskyPost {

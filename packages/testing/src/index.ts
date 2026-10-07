@@ -1,12 +1,13 @@
 import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
 import { fakeGhost } from "@sanoma/connector-ghost/fake";
 import { fakeResend } from "@sanoma/connector-resend/fake";
-import { type FakeCall, memoryLedger, startWorker } from "@sanoma/workflows";
+import { memoryLedger, startWorker } from "@sanoma/workflows";
+import type { FakeCall } from "@sanoma/workflows/fake";
 
 export { fakeBluesky, type FakeBlueskyPost, type FakeBlueskyState } from "@sanoma/connector-bluesky/fake";
 export { fakeGhost, type FakeGhostPost, type FakeGhostState } from "@sanoma/connector-ghost/fake";
 export { fakeResend, type FakeResendBroadcast, type FakeResendState } from "@sanoma/connector-resend/fake";
-export type { Fake, FakeCall, FakeOptions } from "@sanoma/workflows";
+export type { Fake, FakeCall, FakeOptions } from "@sanoma/workflows/fake";
 
 /**
  * The Postgres URL for one test file: `SANOMA_TEST_DATABASE_URL` (default

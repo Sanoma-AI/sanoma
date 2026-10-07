@@ -33,6 +33,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./fake": {
+      "types": "./dist/fake.d.ts",
+      "default": "./dist/fake.js"
+    },
     "./lint": {
       "types": "./dist/lint.d.ts",
       "default": "./dist/lint.js"

@@ -18,6 +18,8 @@
     // Keep in sync with resolve.alias in vitest.config.ts.
     "paths": {
       "@sanoma/workflows": ["./packages/workflows/src/index.ts"],
+      "@sanoma/workflows/fake": ["./packages/workflows/src/fake.ts"],
+      "@sanoma/workflows/lint": ["./packages/workflows/src/lint.ts"],
       "@sanoma/testing": ["./packages/testing/src/index.ts"],
       "@sanoma/app": ["./packages/app/src/index.ts"],
       // Before the bare pattern: TypeScript takes the first of two patterns with equal prefixes.

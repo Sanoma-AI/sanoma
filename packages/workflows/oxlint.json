@@ -72,7 +72,12 @@
             ],
             "patterns": [
               {
-                "group": ["@sanoma/connector-*/fake", "@sanoma/connector-*/driver"],
+                "group": [
+                  "@sanoma/connector-*/fake",
+                  "@sanoma/connector-*/driver",
+                  "@sanoma/workflows/fake",
+                  "@sanoma/workflows/lint"
+                ],
                 "message": "A workflow must call vendors through ctx, so the policy sees every call: import the connector itself, `@sanoma/connector-<vendor>`."
               }
             ]
