@@ -25,6 +25,31 @@ defineWorkflow({
 });
 ```
 
-This package declares the operations only. A driver that calls Ghost is not included yet; for tests, use the fakes in `@sanoma/testing`.
+This package declares the operations only. A driver that calls Ghost is not included yet.
+
+## Testing
+
+`@sanoma/connector-ghost/fake` is an in-memory Ghost: pass its driver to the worker, then check `state.posts` and `calls`.
+
+```ts
+import { ghost } from "@sanoma/connector-ghost";
+import { fakeGhost } from "@sanoma/connector-ghost/fake";
+
+const fake = fakeGhost(); // or fakeGhost({ file: ".sanoma/ghost.json" }) to keep the state on disk
+const worker = await startWorker({ connectors: [ghost], drivers: [fake.driver] /* , ... */ });
+
+// ...run a workflow, then:
+Object.values(fake.state.posts).map((p) => p.status); // ["published"]
+fake.calls.map((c) => c.op); // ["ghost.post.create", "ghost.post.publish"]
+```
+
+A repeated idempotency key gets the first reply and changes nothing, as a real vendor that dedupes would. To test what a workflow does when Ghost misbehaves, set up the next call to an operation before the run makes it:
+
+- `fake.failNext("ghost.post.publish", err?)` throws `err` (default: a retryable `DriverError`).
+- `fake.loseReply("ghost.post.publish")` publishes, then throws, as if the reply was lost.
+- `fake.rateLimit("ghost.post.publish")` throws a `DriverError` with status 429.
+- `const release = fake.hold("ghost.post.publish")` makes the call wait until `release()`.
+
+`fake.reset()` empties it between tests. Pass `{ calls }` with one array to several fakes to see their calls in one order.
 
 License: Apache-2.0.

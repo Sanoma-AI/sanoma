@@ -9,6 +9,7 @@ export default defineConfig({
     alias: [
       { find: /^@sanoma\/(workflows|testing|app)$/, replacement: src("./packages/$1/src/index.ts") },
       { find: /^@sanoma\/connector-([a-z0-9-]+)$/, replacement: src("./connectors/$1/src/index.ts") },
+      { find: /^@sanoma\/connector-([a-z0-9-]+)\/fake$/, replacement: src("./connectors/$1/src/fake.ts") },
     ],
   },
   test: {

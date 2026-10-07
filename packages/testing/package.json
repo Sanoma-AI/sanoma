@@ -40,9 +40,15 @@
     "prepack": "pnpm run clean && pnpm run build"
   },
   "devDependencies": {
+    "@sanoma/connector-bluesky": "workspace:*",
+    "@sanoma/connector-ghost": "workspace:*",
+    "@sanoma/connector-resend": "workspace:*",
     "@sanoma/workflows": "workspace:*"
   },
   "peerDependencies": {
+    "@sanoma/connector-bluesky": "^0.1.0",
+    "@sanoma/connector-ghost": "^0.1.0",
+    "@sanoma/connector-resend": "^0.1.0",
     "@sanoma/workflows": "^0.1.0"
   },
   "engines": {
