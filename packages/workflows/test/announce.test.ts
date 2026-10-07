@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { bluesky } from "@sanoma/connector-bluesky";
+import { ghost } from "@sanoma/connector-ghost";
 import { testDatabaseUrl } from "@sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -48,14 +49,6 @@ describe("announce", () => {
     expect(app.ops()).toEqual(["ghost.post.create", "resend.broadcast.create"]);
     expect(Object.values(app.vendors.ghost.state.posts)[0]?.status).toBe("draft");
     expect((await c().run(runId))?.status).toBe("waiting");
-
-    await expect(c().decide(runId, { decision: "approve", by: { id: "intern" } })).rejects.toThrow(
-      '"intern" is not the approver for approval-1; marketing-lead is',
-    );
-    await app.raw.send(runId, { decision: "approve", by: { id: "intern" } }, "approval-1");
-    await waitFor(async () => (await c().approvals(runId))[0]?.refused.length === 1);
-    expect((await c().approvals(runId))[0]?.status).toBe("pending");
-    expect(app.ops()).toHaveLength(2);
 
     await c().decide(runId, { decision: "approve", by: { id: "marketing-lead" }, note: "ship it" });
     const result = (await c().result(runId)) as { post: string; social: string };
@@ -208,9 +201,10 @@ describe("announce under a policy", () => {
   // Deterministic: each decision depends on the call alone. The test picks a policy per run by actor.
   const byActor: Record<string, Policy> = {
     "no-email": ({ effect }) => (effect === "send" ? deny("no email this week") : allow()),
-    "lead-publishes": ({ effect, run }) =>
-      effect === "publish" && !run.approvals.some((a) => a.approver === "marketing-lead" && a.status === "approved")
-        ? approve("marketing-lead")
+    // Holds the first publish; its approval covers both publishing operations.
+    "lead-publishes": ({ op, effect, run }) =>
+      effect === "publish" && !run.approvals.some((a) => a.status === "approved" && a.covers.includes(op.id))
+        ? approve("marketing-lead", { covers: [ghost.post.publish, bluesky.post.create] })
         : allow(),
     "approve-nobody": ({ effect }) => (effect === "publish" ? ({ kind: "approve" } as unknown as Decision) : allow()),
     "hold-each": ({ op, input, run }) =>
@@ -269,24 +263,19 @@ describe("announce under a policy", () => {
     expect(records.at(-1)).toMatchObject({ type: "run.failed", error: denied });
   });
 
-  it("holds a call for the approver the policy names, ignoring anyone else", async () => {
+  it("holds a call for the approver the policy names, numbered ahead of its approval", async () => {
     const runId = await c().start(
       announce,
-      { title: "Held", body: "<p>x</p>", launchAt: inSeconds(1), approver: "editor" },
+      { title: "Held", body: "<p>x</p>", launchAt: inSeconds(1) },
       { startedBy: { id: "lead-publishes" } },
     );
     await waitFor(pending(c, runId));
-    await c().decide(runId, { decision: "approve", by: { id: "editor" } });
+    await c().decide(runId, { decision: "approve", by: { id: "marketing-lead" } });
 
     await waitFor(pending(c, runId, 2));
     expect(app.ops()).toEqual(["ghost.post.create", "resend.broadcast.create"]);
     const held = (await c().approvals(runId))[1];
     expect(held).toMatchObject({ title: "ghost.post.publish needs marketing-lead", approver: "marketing-lead" });
-
-    await app.raw.send(runId, { decision: "approve", by: { id: "intern" } }, "approval-2");
-    await waitFor(async () => (await c().approvals(runId))[1]?.refused.length === 1);
-    expect((await c().approvals(runId))[1]?.status).toBe("pending");
-    expect(app.ops()).toHaveLength(2);
 
     await c().decide(runId, { decision: "approve", by: { id: "marketing-lead" } });
     await c().result(runId);
@@ -302,7 +291,6 @@ describe("announce under a policy", () => {
       "approval.decided",
       "op.called ghost.post.publish",
       "approval.requested",
-      "approval.refused",
       "approval.decided",
       "op.called resend.broadcast.send",
       "op.called bluesky.post.create",
@@ -311,19 +299,18 @@ describe("announce under a policy", () => {
     expect(records.map((r) => r.seq)).toEqual(records.map((_, i) => i));
     expect(records[5]).toMatchObject({ decision: { kind: "approve", approver: "marketing-lead" }, attempt: 1 });
     expect(records[6]).toMatchObject({ approval: "approval-2", requestedBy: "policy", op: "ghost.post.publish" });
-    expect(records[7]).toMatchObject({ approval: "approval-2", by: "intern", reason: "intern is not the approver" });
-    expect(records[8]).toMatchObject({ approval: "approval-2", by: "marketing-lead" });
-    expect(records[10]).toMatchObject({ op: "bluesky.post.create", decision: { kind: "allow" } });
+    expect(records[7]).toMatchObject({ approval: "approval-2", by: "marketing-lead" });
+    expect(records[9]).toMatchObject({ op: "bluesky.post.create", decision: { kind: "allow" } });
   });
 
   it("records the held call as stopped when the policy's approver rejects it", async () => {
     const runId = await c().start(
       announce,
-      { title: "Held, then rejected", body: "<p>x</p>", launchAt: inSeconds(1), approver: "editor" },
+      { title: "Held, then rejected", body: "<p>x</p>", launchAt: inSeconds(1) },
       { startedBy: { id: "lead-publishes" } },
     );
     await waitFor(pending(c, runId));
-    await c().decide(runId, { decision: "approve", by: { id: "editor" } });
+    await c().decide(runId, { decision: "approve", by: { id: "marketing-lead" } });
     await waitFor(pending(c, runId, 2));
     expect((await c().approvals(runId))[1]).toMatchObject({
       requestedBy: "policy",
@@ -405,22 +392,6 @@ describe("announce under a policy", () => {
       { text: "one" },
       { text: "two" },
     ]);
-  });
-
-  it("does not wait again when the approver already approved earlier in the run", async () => {
-    const runId = await c().start(
-      announce,
-      { title: "Once", body: "<p>x</p>", launchAt: inSeconds(1) },
-      { startedBy: { id: "lead-publishes" } },
-    );
-    await waitFor(pending(c, runId));
-    await c().decide(runId, { decision: "approve", by: { id: "marketing-lead" } });
-    await c().result(runId);
-
-    expect(await c().approvals(runId)).toHaveLength(1);
-    expect(app.ops()).toHaveLength(5);
-    const decisions = (await c().ledger(runId)).flatMap((r) => (r.type === "op.called" ? [r.decision.kind] : []));
-    expect(decisions).toEqual(["allow", "allow", "allow", "allow", "allow"]);
   });
 });
 

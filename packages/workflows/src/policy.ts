@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ApprovalState, Principal } from "./define.ts";
+import type { ApprovalState, Approver, Principal } from "./define.ts";
 import type { Effect, Op } from "./op.ts";
 
 /** An operation as a policy sees it: plain data, without its schemas. */
@@ -30,23 +30,53 @@ export interface PolicyCall {
 export type Decision =
   | { kind: "allow"; reasons?: string[] }
   | { kind: "deny"; reason: string; reasons?: string[] }
-  | { kind: "approve"; approver: string; title?: string };
+  | ApproveDecision;
 
-/** A decision as the ledger records it: with the `version` of the policy that made it, when it has one. */
-export type RecordedDecision = Decision & { policyVersion?: string };
+/**
+ * Hold the call until the approver decides: a person's id, or `{ group }` for anyone in it.
+ * The approval covers the held operation, and `covers` adds others, so a policy can let their
+ * later calls through once it is approved.
+ */
+interface ApproveDecision {
+  kind: "approve";
+  approver: Approver;
+  title?: string;
+  covers?: Op[];
+}
+
+/**
+ * A decision as checked and as the ledger records it: `covers` by op id, and the `version` of
+ * the policy that made it, when it has one.
+ */
+export type RecordedDecision = (
+  | Exclude<Decision, ApproveDecision>
+  | (Omit<ApproveDecision, "covers"> & { covers?: string[] })
+) & { policyVersion?: string };
 
 const ReasonList = z.array(z.string(), { error: "reasons must be a list of strings" }).optional();
+const coversError = "covers must be a list of operations";
 
-/** Checks a policy's answer. Parsing also copies it, so nothing else the policy returned is kept. */
-export const Decision: z.ZodType<Decision> = z.discriminatedUnion(
+/**
+ * Checks a policy's answer. Parsing also copies it, so nothing else the policy returned is kept,
+ * and turns `covers` into op ids.
+ */
+export const Decision: z.ZodType<RecordedDecision> = z.discriminatedUnion(
   "kind",
   [
     z.object({ kind: z.literal("allow"), reasons: ReasonList }),
     z.object({ kind: z.literal("deny"), reason: z.string({ error: "deny needs a reason" }), reasons: ReasonList }),
     z.object({
       kind: z.literal("approve"),
-      approver: z.string({ error: "approve needs an approver" }).regex(/\S/, "approve needs an approver"),
+      approver: z.union([z.string().regex(/\S/), z.object({ group: z.string().regex(/\S/) })], {
+        error: 'approve needs an approver: a name, or { group: "name" }',
+      }),
       title: z.string({ error: "the title must be a string" }).optional(),
+      covers: z
+        .array(
+          z.object({ id: z.string() }, { error: coversError }).transform((op) => op.id),
+          { error: coversError },
+        )
+        .optional(),
     }),
   ],
   { error: "not a decision" },
@@ -56,8 +86,21 @@ export const allow = (reasons?: string[]): Decision =>
   reasons === undefined ? { kind: "allow" } : { kind: "allow", reasons };
 export const deny = (reason: string, reasons?: string[]): Decision =>
   reasons === undefined ? { kind: "deny", reason } : { kind: "deny", reason, reasons };
-export const approve = (approver: string, title?: string): Decision =>
-  title === undefined ? { kind: "approve", approver } : { kind: "approve", approver, title };
+
+/**
+ * Holds the call for `approver`. The second argument is the title, or `{ title?, covers? }`:
+ * `covers` lists other operations the approval also stands for.
+ */
+export function approve(approver: Approver, options?: string | { title?: string; covers?: Op[] }): Decision {
+  const { title, covers }: { title?: string; covers?: Op[] } =
+    typeof options === "string" ? { title: options } : (options ?? {});
+  return {
+    kind: "approve",
+    approver,
+    ...(title === undefined ? {} : { title }),
+    ...(covers === undefined ? {} : { covers }),
+  };
+}
 
 /**
  * Decides whether a run may make an operation call: allow it, deny it (the run fails),

@@ -1,7 +1,7 @@
 import { appendFile, mkdir, readFile, stat, truncate } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import type { Principal } from "./define.ts";
+import type { Approver, Principal } from "./define.ts";
 import { type ErrorInfo, errorMessage } from "./errors.ts";
 import { warn } from "./log.ts";
 import type { Effect } from "./op.ts";
@@ -48,8 +48,10 @@ export type LedgerRecord = {
       type: "approval.requested";
       approval: string;
       title: string;
-      approver: string;
+      approver: Approver;
       requestedBy: "workflow" | "policy";
+      /** The operations the approval stands for, by id. */
+      covers: string[];
       /** The operation call held, for a policy request. */
       op?: string;
     }

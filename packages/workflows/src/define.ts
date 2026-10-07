@@ -18,19 +18,37 @@ export const Principal: z.ZodType<Principal> = z.object({
 export type Builtin = "approval" | "sleep";
 export type Use = Op | Builtin;
 
+/** Who may decide an approval: one person, by `Principal.id`, or anyone in a group, by `Principal.groups`. */
+export type Approver = string | { group: string };
+
+export const Approver: z.ZodType<Approver> = z.union(
+  [z.string().regex(/\S/), z.object({ group: z.string().regex(/\S/) })],
+  { error: 'needs an approver: a name, or { group: "name" }' },
+);
+
 export interface ApprovalRequest {
-  /** Who must approve, by name. Phase 4 replaces this with a Cedar decision. */
-  approver: string;
+  /** Who must approve: a person's id, or `{ group }` for anyone in it. Phase 4 replaces this with a Cedar decision. */
+  approver: Approver;
+  /**
+   * The operations the approval stands for, so a policy can let their calls through once it
+   * is approved (`a.covers.includes(op.id)`). None unless given.
+   */
+  covers?: Op[];
   links?: string[];
   details?: string;
 }
 
 /** One approval in a run, as the run sees it. Published as the run's "approvals" event. */
-export interface ApprovalState extends ApprovalRequest {
+export interface ApprovalState extends Omit<ApprovalRequest, "covers"> {
   id: string;
   title: string;
   /** Who asked: the workflow (`ctx.approval`), or the policy holding an operation call. */
   requestedBy: "workflow" | "policy";
+  /**
+   * The operations the approval stands for, by id. A policy hold covers the call it held and
+   * any `covers` the policy added; a workflow's approval covers the `covers` it named, or none.
+   */
+  covers: string[];
   /** For a policy request: the operation call held, by op id. */
   op?: string;
   /** For a policy request: the held call's input. */
@@ -41,7 +59,7 @@ export interface ApprovalState extends ApprovalRequest {
   decidedAt?: number;
   note?: string;
   /**
-   * Messages that were ignored: decisions sent by someone other than the named approver,
+   * Messages that were ignored: decisions sent by someone who may not decide the approval,
    * and messages that were not a decision. `by` is the sender, when the message named one.
    */
   refused: { by?: string; at: number; reason: string }[];
@@ -89,7 +107,7 @@ type CtxOps<O extends Op> = {
 };
 
 interface ApprovalCtx {
-  /** Waits, durably, until the named approver approves. Throws `RejectedError` if they reject. */
+  /** Waits, durably, until the approver (or someone in the approver group) approves. Throws `RejectedError` on a rejection. */
   approval(title: string, request: ApprovalRequest): Promise<ApprovalResult>;
 }
 

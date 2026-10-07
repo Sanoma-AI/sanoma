@@ -1,6 +1,6 @@
 import { DBOSClient } from "@dbos-inc/dbos-sdk";
 import { z } from "zod";
-import { APPROVALS_EVENT, ApprovalMessage, mayDecide, statusOf, topicOf } from "./approvals.ts";
+import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, mayDecide, statusOf, topicOf } from "./approvals.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { type ApprovalState, Principal, type WorkflowDefinition } from "./define.ts";
 import { SanomaError } from "./errors.ts";
@@ -122,10 +122,22 @@ export class SanomaClient {
   }
 
   /**
-   * Sends a decision on the run's pending approval (or the one named), as `message.by`.
-   * Throws without sending when `by` may not decide it. The run checks the sender again.
+   * Sends a decision on the run's pending approval (or the one named), as `message.by`, and
+   * waits for the run to read it. Returns the approval as decided. Throws without sending when
+   * `by` may not decide it (`not_approver`), when there is nothing to decide
+   * (`no_pending_approval`, `run_not_found`), or when it is decided already (`already_decided`),
+   * and throws `already_decided` too when another decision reached the run first.
+   *
+   * If the run does not read the decision within `timeoutSeconds` (30 by default; the worker
+   * may be down), returns the approval as it stands, still `pending`: the decision stays
+   * queued for the run, which reads it when it next runs.
    */
-  async decide(runId: string, message: ApprovalMessage, approvalId?: string): Promise<ApprovalState> {
+  async decide(
+    runId: string,
+    message: ApprovalMessage,
+    approvalId?: string,
+    options: { timeoutSeconds?: number } = {},
+  ): Promise<ApprovalState> {
     const msg = valid(ApprovalMessage, message, "Not a decision");
     await this.mustExist(runId);
     const all = await this.approvals(runId);
@@ -139,27 +151,27 @@ export class SanomaClient {
       );
     }
     if (!mayDecide(target, msg.by)) {
-      throw new SanomaError(
-        "not_approver",
-        `"${msg.by.id}" is not the approver for ${target.id}; ${target.approver} is`,
-        {
-          runId,
-          approvalId: target.id,
-          approver: target.approver,
-        },
-      );
+      const who =
+        typeof target.approver === "string"
+          ? `is not the approver for ${target.id}; ${target.approver} is`
+          : `is not in group ${target.approver.group}, which decides ${target.id}`;
+      throw new SanomaError("not_approver", `"${msg.by.id}" ${who}`, {
+        runId,
+        approvalId: target.id,
+        approver: target.approver,
+      });
     }
     await this.dbos.send(runId, msg, topicOf(target.id));
-    // Best effort: if someone else's decision landed first, this one will never be read.
-    const now = (await this.approvals(runId)).find((a) => a.id === target.id);
-    if (
-      now &&
-      now.status !== "pending" &&
-      (now.status !== statusOf(msg.decision) || now.decidedBy !== msg.by.id || now.note !== msg.note)
-    ) {
+    // DBOSClient does not LISTEN for events: it polls, every 10 s unless told otherwise.
+    const decided = await this.dbos.getEvent<ApprovalState>(runId, decisionEventOf(target.id), {
+      timeoutSeconds: options.timeoutSeconds ?? 30,
+      pollingIntervalMs: 100,
+    });
+    const now = decided ?? (await this.approvals(runId)).find((a) => a.id === target.id) ?? target;
+    if (now.status !== "pending" && (now.status !== statusOf(msg.decision) || now.decidedBy !== msg.by.id)) {
       throw alreadyDecided(runId, now);
     }
-    return target;
+    return now;
   }
 
   async result(runId: string, timeoutMs = 30_000): Promise<unknown> {

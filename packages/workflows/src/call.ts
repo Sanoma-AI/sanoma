@@ -1,5 +1,5 @@
 import { DBOS, DBOSWorkflowConflictError, Error as DBOSErrors } from "@dbos-inc/dbos-sdk";
-import { awaitApproval } from "./approvals.ts";
+import { approverLabel, awaitApproval } from "./approvals.ts";
 import { type ApprovalRequest, SleepRequest, type Use, type WorkflowDefinition } from "./define.ts";
 import { errorCode, errorInfo, errorMessage, PolicyDeniedError, SanomaError } from "./errors.ts";
 import { entry, skipped, write, writeFailure } from "./ledger.ts";
@@ -109,7 +109,7 @@ function strict<T extends object>(obj: T, path: string, workflow: string): T {
 }
 
 /** Checks a policy's answer, and copies it so nothing else the policy returned is recorded. */
-export function checkDecision(decision: unknown, opId: string): Decision {
+export function checkDecision(decision: unknown, opId: string): RecordedDecision {
   const parsed = Decision.safeParse(decision);
   if (parsed.success) return parsed.data;
   const why = parsed.error.issues[0]?.message ?? "not a decision";
@@ -179,9 +179,10 @@ async function callOp(run: Run, id: string, input: unknown) {
     throw err;
   }
   if (decision.kind === "approve") {
-    const title = decision.title ?? `${op.id} needs ${decision.approver}`;
+    const title = decision.title ?? `${op.id} needs ${approverLabel(decision.approver)}`;
     try {
-      await awaitApproval(run, title, { approver: decision.approver }, { op: op.id, input: parsed });
+      const held = { op: op.id, input: parsed, ...(decision.covers ? { covers: decision.covers } : {}) };
+      await awaitApproval(run, title, { approver: decision.approver }, held);
     } catch (err) {
       if (errorCode(err) === "approval_rejected") {
         const approval = (err as SanomaError).data.approvalId as string;

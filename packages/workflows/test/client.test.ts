@@ -61,43 +61,14 @@ describe("SanomaClient", () => {
   });
 
   it("says run_not_found for a run that does not exist, rather than waiting on it or reading no records", async () => {
+    // A decision for a missing run: approvals.test.ts.
     const missing = randomUUID();
-    for (const call of [
-      () => c().result(missing),
-      () => c().ledger(missing),
-      () => c().decide(missing, { decision: "approve", by: lead }),
-    ]) {
+    for (const call of [() => c().result(missing), () => c().ledger(missing)]) {
       const err = await caught(call());
       expect(errorCode(err)).toBe("run_not_found");
       expect(err).toMatchObject({ message: `No run ${missing}`, data: { runId: missing } });
     }
     expect(await c().run(missing)).toBeUndefined();
-  });
-
-  it("refuses a decision as not_approver, no_pending_approval or already_decided, with no message sent", async () => {
-    const runId = await c().start(announce, input, { startedBy: alice });
-    await waitFor(pending(c, runId));
-
-    const wrong = await caught(c().decide(runId, { decision: "approve", by: { id: "intern" } }));
-    expect(errorCode(wrong)).toBe("not_approver");
-    expect(wrong).toMatchObject({ data: { runId, approvalId: "approval-1", approver: "marketing-lead" } });
-    const unknown = await caught(c().decide(runId, { decision: "approve", by: lead }, "approval-9"));
-    expect(errorCode(unknown)).toBe("no_pending_approval");
-    const garbled = await caught(c().decide(runId, { decision: "maybe", by: lead } as never));
-    expect(errorCode(garbled)).toBe("invalid_input");
-    expect((await c().approvals(runId))[0]).toMatchObject({ status: "pending", refused: [] });
-
-    await c().decide(runId, { decision: "approve", by: lead });
-    await waitFor(async () => (await c().approvals(runId))[0]?.status === "approved");
-    const again = await caught(c().decide(runId, { decision: "reject", by: lead }, "approval-1"));
-    expect(errorCode(again)).toBe("already_decided");
-    expect(again).toMatchObject({
-      data: { approvalId: "approval-1", status: "approved", decidedBy: "marketing-lead" },
-    });
-
-    await c().result(runId);
-    const none = await caught(c().decide(runId, { decision: "approve", by: lead }));
-    expect(errorCode(none)).toBe("no_pending_approval");
   });
 
   it("lists the app's runs with their status and who started them", async () => {

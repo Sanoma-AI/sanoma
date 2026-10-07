@@ -17,7 +17,6 @@ export default defineWorkflow({
     body: z.string().min(1),
     launchAt: z.iso.datetime({ offset: true }),
     audience: z.string().default("newsletter"),
-    approver: z.string().default("marketing-lead"),
   }),
   uses: [
     ghost.post.create,
@@ -28,11 +27,15 @@ export default defineWorkflow({
     "approval",
     "sleep",
   ],
-  run: async (ctx, { title, body, launchAt, audience, approver }) => {
+  run: async (ctx, { title, body, launchAt, audience }) => {
     const post = await ctx.ghost.post.create({ title, html: body, status: "draft" });
     const email = await ctx.resend.broadcast.create({ audience, subject: title, html: body });
 
-    await ctx.approval("Review launch copy", { approver, links: [post.url], details: `Email to "${audience}"` });
+    await ctx.approval("Review launch copy", {
+      approver: "marketing-lead",
+      links: [post.url],
+      details: `Email to "${audience}"`,
+    });
     await ctx.sleep({ until: launchAt });
 
     const published = await ctx.ghost.post.publish({ id: post.id });

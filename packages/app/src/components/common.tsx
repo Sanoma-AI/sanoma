@@ -1,4 +1,4 @@
-import type { ApprovalState, Decision, Effect, RunStatus } from "@sanoma/workflows";
+import type { ApprovalState, Effect, RecordedDecision, RunStatus } from "@sanoma/workflows";
 import { useEffect, useState, type ReactNode } from "react";
 import { approverName } from "../api.ts";
 
@@ -30,7 +30,7 @@ export function ApprovalStatusBadge({ status }: { status: ApprovalState["status"
 }
 
 /** The policy's decision on an operation call. */
-export function DecisionBadge({ decision }: { decision: Decision }) {
+export function DecisionBadge({ decision }: { decision: RecordedDecision }) {
   const tone = decision.kind === "allow" ? "good" : decision.kind === "deny" ? "bad" : "waiting";
   const approver = decision.kind === "approve" ? approverName(decision.approver) : undefined;
   const title =

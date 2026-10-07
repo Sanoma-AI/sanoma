@@ -16,6 +16,7 @@ export {
   type ApprovalRequest,
   type ApprovalResult,
   type ApprovalState,
+  type Approver,
   type Builtin,
   type Ctx,
   SleepRequest,
@@ -38,7 +39,7 @@ export {
 } from "./policy.ts";
 export { errorCode, PolicyDeniedError, RejectedError, SanomaError, type ErrorCode, type ErrorInfo } from "./errors.ts";
 export { jsonlLedger, memoryLedger, type LedgerRecord, type LedgerStore } from "./ledger.ts";
-export { ApprovalMessage, APPROVALS_EVENT, mayDecide } from "./approvals.ts";
+export { ApprovalMessage, APPROVALS_EVENT, decisionEventOf, mayDecide } from "./approvals.ts";
 export { RUNTIME_VERSION } from "./version.ts";
 export type { RunArgs } from "./run.ts";
 export { startWorker, type Worker } from "./worker.ts";

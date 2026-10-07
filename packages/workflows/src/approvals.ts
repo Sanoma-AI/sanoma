@@ -1,8 +1,9 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { z } from "zod";
-import { type ApprovalRequest, type ApprovalResult, type ApprovalState, Principal } from "./define.ts";
+import { type ApprovalRequest, type ApprovalResult, type ApprovalState, Approver, Principal } from "./define.ts";
 import { RejectedError } from "./errors.ts";
 import { entry, write } from "./ledger.ts";
+import { warn } from "./log.ts";
 import type { Run } from "./run.ts";
 
 // The wire contract between a run waiting on approvals and whoever decides them. The client
@@ -12,7 +13,7 @@ import type { Run } from "./run.ts";
 export const APPROVALS_EVENT = "approvals";
 /** The `recv` topic a decision on an approval is sent to. */
 export const topicOf = (approvalId: string) => approvalId;
-/** The DBOS event an approval's decision is published on, once made. */
+/** The DBOS event an approval's decision is published on, as its decided `ApprovalState`, once made. */
 export const decisionEventOf = (approvalId: string) => `approval:${approvalId}`;
 
 /** A decision, as sent to a run. */
@@ -25,10 +26,24 @@ export type ApprovalMessage = z.infer<typeof ApprovalMessage>;
 
 export const statusOf = (decision: ApprovalMessage["decision"]) => (decision === "approve" ? "approved" : "rejected");
 
-/** True when `by` may decide the approval. Pure: everything it reads is already recorded. */
+/**
+ * True when `by` may decide the approval: `by.id` is the approver, or `by.groups` holds the
+ * approver group. Pure: everything it reads is already recorded.
+ */
 export function mayDecide(approval: Pick<ApprovalState, "approver">, by: Principal): boolean {
-  return approval.approver === by.id;
+  const { approver } = approval;
+  return typeof approver === "string" ? approver === by.id : (by.groups?.includes(approver.group) ?? false);
 }
+
+/** Who may decide, as text: the person's id, or "group <name>". */
+export const approverLabel = (approver: Approver) =>
+  typeof approver === "string" ? approver : `group ${approver.group}`;
+
+/** Why `by` may not decide the approval, naming who may. */
+export const notApprover = (approval: Pick<ApprovalState, "approver">, by: Principal) =>
+  typeof approval.approver === "string"
+    ? `${by.id} is not the approver; ${approval.approver} is`
+    : `${by.id} is not in group ${approval.approver.group}`;
 
 /** The sender's id, from a message that may not be a valid decision. */
 function senderOf(raw: unknown): string | undefined {
@@ -37,29 +52,41 @@ function senderOf(raw: unknown): string | undefined {
   return typeof id === "string" && id ? id : undefined;
 }
 
-const warn = (message: string) => console.warn(`sanoma: ${message}`);
+const Covers = z.array(z.object({ id: z.string() }).transform((op) => op.id)).optional();
 
-/** Waits, durably, for the approver's decision. Throws `RejectedError` on a rejection. */
+/** A policy's hold: the call held, and the other operations (by id) the policy said the approval covers. */
+export interface HeldCall {
+  op: string;
+  input: unknown;
+  covers?: string[];
+}
+
+/**
+ * Waits, durably, for a decision from someone who may make it. Throws `RejectedError` on a
+ * rejection. Without `held`, the workflow asked (`ctx.approval`); with it, the policy did.
+ */
 export async function awaitApproval(
   run: Run,
   title: string,
   req: ApprovalRequest,
-  heldCall?: { op: string; input: unknown },
+  held?: HeldCall,
 ): Promise<ApprovalResult> {
-  if (typeof req?.approver !== "string" || !req.approver.trim()) {
-    throw new Error(`ctx.approval("${title}") needs an approver`);
-  }
+  const approver = Approver.safeParse(req?.approver);
+  if (!approver.success) throw new Error(`ctx.approval("${title}") needs an approver: a name, or { group: "name" }`);
+  const named = Covers.safeParse(req.covers);
+  if (!named.success) throw new Error(`ctx.approval("${title}"): covers must be a list of operations`);
+  const covers = held ? [...new Set([held.op, ...(held.covers ?? [])])] : (named.data ?? []);
+
   const all = run.approvals;
-  // Take the id and join the list before any await, so two approvals requested at once
-  // (calls held by the policy inside Promise.all) get different ids and recv topics.
   const state: ApprovalState = {
     id: `approval-${all.length + 1}`,
     title,
-    approver: req.approver,
+    approver: approver.data,
     ...(req.links === undefined ? {} : { links: req.links }),
     ...(req.details === undefined ? {} : { details: req.details }),
-    requestedBy: heldCall ? "policy" : "workflow",
-    ...(heldCall ? { op: heldCall.op, input: heldCall.input } : {}),
+    requestedBy: held ? "policy" : "workflow",
+    covers,
+    ...(held ? { op: held.op, input: held.input } : {}),
     status: "pending",
     requestedAt: 0,
     refused: [],
@@ -77,7 +104,8 @@ export async function awaitApproval(
         title,
         approver: state.approver,
         requestedBy: state.requestedBy,
-        ...(heldCall ? { op: heldCall.op } : {}),
+        covers,
+        ...(held ? { op: held.op } : {}),
       },
       { key: state.id, at: state.requestedAt },
     ),
@@ -85,7 +113,7 @@ export async function awaitApproval(
   for (;;) {
     const raw = await DBOS.recv<unknown>(topicOf(state.id), { timeoutSeconds: 24 * 60 * 60 });
     if (raw === null || raw === undefined) {
-      warn(`run ${run.id}: approval ${state.id} ("${title}") is still waiting for ${state.approver}`);
+      warn(`run ${run.id}: approval ${state.id} ("${title}") is still waiting for ${approverLabel(state.approver)}`);
       continue;
     }
     const at = await DBOS.now();
@@ -93,7 +121,7 @@ export async function awaitApproval(
     const msg = parsed.success ? parsed.data : undefined;
     if (!msg || !mayDecide(state, msg.by)) {
       const by = msg?.by.id ?? senderOf(raw);
-      const reason = msg ? `${msg.by.id} is not the approver` : "not a valid decision message";
+      const reason = msg ? notApprover(state, msg.by) : "not a valid decision message";
       state.refused.push(by === undefined ? { at, reason } : { by, at, reason });
       await DBOS.setEvent(APPROVALS_EVENT, all);
       await write(
@@ -107,7 +135,9 @@ export async function awaitApproval(
       continue;
     }
     Object.assign(state, { status: statusOf(msg.decision), decidedBy: msg.by.id, decidedAt: at, note: msg.note });
+    // The list first, so whoever sees the decision event also sees the list with it.
     await DBOS.setEvent(APPROVALS_EVENT, all);
+    await DBOS.setEvent(decisionEventOf(state.id), state);
     await write(
       run,
       entry(

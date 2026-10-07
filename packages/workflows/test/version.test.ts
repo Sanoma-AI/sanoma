@@ -110,11 +110,11 @@ describe("workers on one database", () => {
       try {
         const runId = await client.start(
           announce,
-          { title: appName, body: "<p>x</p>", launchAt: inSeconds(-1), approver: "lead" },
+          { title: appName, body: "<p>x</p>", launchAt: inSeconds(-1) },
           { startedBy: { id: "alice" } },
         );
         await waitFor(async () => (await client.approvals(runId)).length === 1);
-        await client.decide(runId, { decision: "approve", by: { id: "lead" } });
+        await client.decide(runId, { decision: "approve", by: { id: "marketing-lead" } });
         expect(await client.result(runId)).toMatchObject({ post: expect.stringContaining(appName) });
       } finally {
         await client.close();
