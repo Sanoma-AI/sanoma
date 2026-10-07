@@ -9,7 +9,7 @@ import type {
   WorkflowDefinition,
 } from "./define.ts";
 import { type LedgerRecord, type LedgerStore, memoryLedger } from "./ledger.ts";
-import { type Connector, type Driver, isOp, type Op } from "./op.ts";
+import { type CallContext, type Connector, type Driver, isOp, type Op } from "./op.ts";
 import { allow, approve, type Decision, deny, type Policy, PolicyDeniedError } from "./policy.ts";
 
 export type { ApprovalState } from "./define.ts";
@@ -410,7 +410,8 @@ async function callOp(run: Run, id: string, input: unknown) {
       async () => {
         const at = Date.now();
         attempt = DBOS.stepStatus?.currentAttempt ?? 1;
-        const output = op.output.parse(await fn(parsed));
+        const context: CallContext = { idempotencyKey: `${run.id}:${seq}`, runId: run.id, opId: op.id, attempt };
+        const output = op.output.parse(await fn(parsed, context));
         return { output, at, durationMs: Date.now() - at, attempt };
       },
       {

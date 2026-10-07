@@ -2,6 +2,19 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Driver } from "@sanoma/workflows";
 
+/**
+ * The Postgres URL for one test file: `SANOMA_TEST_DATABASE_URL` (default
+ * `postgresql://postgres:dbos@localhost:5433/sanoma_test`) with `_<suffix>` appended to the
+ * database name. One database per file keeps files from recovering each other's runs. DBOS
+ * creates the database if it is missing.
+ */
+export function testDatabaseUrl(suffix: string): string {
+  const base = process.env.SANOMA_TEST_DATABASE_URL ?? "postgresql://postgres:dbos@localhost:5433/sanoma_test";
+  const url = new URL(base);
+  url.pathname = `${url.pathname}_${suffix.replace(/[^a-z0-9_]/gi, "_")}`;
+  return url.toString();
+}
+
 export interface FakeCall {
   op: string;
   input: unknown;

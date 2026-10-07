@@ -1,4 +1,15 @@
-export { defineConnector, isOp, type Connector, type Driver, type Effect, type Op, type OpSpec } from "./op.ts";
+export {
+  type CallContext,
+  type Connector,
+  type Driver,
+  type DriverFn,
+  defineConnector,
+  DriverError,
+  type Effect,
+  isOp,
+  type Op,
+  type OpSpec,
+} from "./op.ts";
 export {
   defineWorkflow,
   type ApprovalRequest,
