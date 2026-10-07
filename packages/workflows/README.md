@@ -57,7 +57,7 @@ The worker takes each operation's effect, schemas and retry setting from `connec
 
 A policy returns `allow()`, `deny(reason)` (the run fails) or `approve(who)` (the run waits for that person). It sees the operation, its input, who started the run and the run's approvals so far, and it must decide the same way on every replay: no clock, randomness or network. The ledger gets one record for the start of the run, each operation call with its decision and the vendor's reply, each approval requested and decided, each message an approval ignored (`approval.refused`: sent by someone other than the approver, or not a decision), and how the run ended, in a JSONL file per run.
 
-`startWorker(config)` runs workflows and recovers interrupted runs. `SanomaClient` starts runs as a named person, lists them, records approval decisions and reads a run's ledger.
+`startWorker(config)` runs workflows and recovers interrupted runs. `SanomaClient` starts runs as a named person, lists them, records approval decisions and reads a run's ledger. `describeConfig(config)` returns the same config as plain JSON (each workflow's input as JSON Schema and the operations it may call, each operation's effect and contract), which is what a UI renders from.
 
 Status: early (0.x). The API may change between minor versions.
 
