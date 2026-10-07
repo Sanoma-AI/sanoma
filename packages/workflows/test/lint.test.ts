@@ -65,6 +65,20 @@ describe("lintWorkflow", () => {
     ]);
   });
 
+  it("refuses the runtime's client and worker, which a workflow could use to approve itself", () => {
+    expect(
+      messages(`
+        import { defineWorkflow, SanomaClient } from "@sanoma/workflows";
+        import { startWorker as go } from "@sanoma/workflows";
+        export { SanomaClient as C } from "@sanoma/workflows";
+      `),
+    ).toEqual([
+      expect.stringMatching(/^SanomaClient is not allowed in a workflow: .*decide approvals/),
+      expect.stringMatching(/^startWorker is not allowed in a workflow/),
+      expect.stringMatching(/^SanomaClient is not allowed in a workflow/),
+    ]);
+  });
+
   it("allows property names and local bindings that share a forbidden name", () => {
     expect(
       messages(`

@@ -30,6 +30,12 @@ const FORBIDDEN_GLOBALS: Record<string, string> = {
 
 const ALLOWED_IMPORT = /^(@sanoma\/|\.\.?\/|zod$)/;
 
+/** Runtime entry points a workflow or policy could use to start runs or approve its own approvals. */
+const FORBIDDEN_IMPORTS: Record<string, string> = {
+  SanomaClient: "a workflow must not start runs or decide approvals",
+  startWorker: "a workflow must not start a worker",
+};
+
 export function lintWorkflow(source: string, filename = "workflow.ts"): LintProblem[] {
   const { program, errors } = parseSync(filename, source, { sourceType: "module", lang: "ts" });
   const lineStarts = [0];
@@ -60,6 +66,17 @@ export function lintWorkflow(source: string, filename = "workflow.ts"): LintProb
             ...at(node.source.start),
             message: `import "${node.source.value}" is not allowed in a workflow; import from \`@sanoma/*\` or another workflow file`,
           });
+        }
+        if (node.source?.value === "@sanoma/workflows") {
+          for (const spec of node.specifiers ?? []) {
+            const name = spec.imported?.name ?? spec.local?.name ?? spec.imported?.value;
+            if (spec.type !== "ImportDefaultSpecifier" && name in FORBIDDEN_IMPORTS) {
+              problems.push({
+                ...at(spec.start),
+                message: `${name} is not allowed in a workflow: ${FORBIDDEN_IMPORTS[name]}`,
+              });
+            }
+          }
         }
         break;
       case "ImportExpression":
