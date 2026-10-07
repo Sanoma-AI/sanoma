@@ -113,7 +113,8 @@ function buildCtx(wf: WorkflowDefinition<any, any>): any {
     resource[op.name] = (input: unknown) => callOp(op, input);
   }
   for (const [v, resources] of Object.entries(tree)) {
-    for (const [r, ops] of Object.entries(resources as Record<string, object>)) resources[r] = strict(ops, `ctx.${v}.${r}`, wf.name);
+    for (const [r, ops] of Object.entries(resources as Record<string, object>))
+      resources[r] = strict(ops, `ctx.${v}.${r}`, wf.name);
     tree[v] = strict(resources, `ctx.${v}`, wf.name);
   }
   const approvals: ApprovalState[] = [];
@@ -121,7 +122,8 @@ function buildCtx(wf: WorkflowDefinition<any, any>): any {
     runId: DBOS.workflowID,
     now: () => DBOS.now(),
   };
-  if (uses.includes("approval")) builtins.approval = (title: string, req: ApprovalRequest) => approval(approvals, title, req);
+  if (uses.includes("approval"))
+    builtins.approval = (title: string, req: ApprovalRequest) => awaitApproval(approvals, title, req);
   if (uses.includes("sleep")) builtins.sleep = (req: SleepRequest) => sleep(req);
   return strict({ ...tree, ...builtins }, "ctx", wf.name);
 }
@@ -147,7 +149,7 @@ async function callOp(op: Op, input: unknown) {
   });
 }
 
-async function approval(all: ApprovalState[], title: string, req: ApprovalRequest): Promise<ApprovalResult> {
+async function awaitApproval(all: ApprovalState[], title: string, req: ApprovalRequest): Promise<ApprovalResult> {
   const state: ApprovalState = {
     id: `approval-${all.length + 1}`,
     title,

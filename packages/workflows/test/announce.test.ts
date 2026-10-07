@@ -40,7 +40,11 @@ beforeEach(() => vendors.reset());
 describe("announce", () => {
   it("drafts, waits for the named approver, sleeps until launch, then publishes", async () => {
     const launchAt = inSeconds(3);
-    const runId = await client.start(announce, { title: "Acme Pro is here", body: "<p>Hello</p>", launchAt }, randomUUID());
+    const runId = await client.start(
+      announce,
+      { title: "Acme Pro is here", body: "<p>Hello</p>", launchAt },
+      randomUUID(),
+    );
 
     await waitFor(pending(runId));
     expect(ops()).toEqual(["ghost.post.create", "resend.broadcast.create"]);
@@ -88,7 +92,11 @@ describe("announce", () => {
   });
 
   it("stops before publishing anything when the approver rejects", async () => {
-    const runId = await client.start(announce, { title: "Nope", body: "<p>x</p>", launchAt: inSeconds(1) }, randomUUID());
+    const runId = await client.start(
+      announce,
+      { title: "Nope", body: "<p>x</p>", launchAt: inSeconds(1) },
+      randomUUID(),
+    );
     await waitFor(pending(runId));
     await client.decide(runId, { decision: "reject", by: "marketing-lead", note: "wrong date" });
 
@@ -98,6 +106,6 @@ describe("announce", () => {
   });
 
   it("refuses input that doesn't match the workflow's schema before queueing", async () => {
-    await expect(client.start(announce, { title: "", body: "x", launchAt: "tomorrow" })).rejects.toThrow();
+    await expect(client.start(announce, { title: "", body: "x", launchAt: "tomorrow" })).rejects.toThrow(/launchAt/);
   });
 });

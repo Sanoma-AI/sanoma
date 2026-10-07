@@ -31,7 +31,10 @@ export class SanomaClient {
   }
 
   static async connect(databaseUrl: string, appName = "sanoma") {
-    return new SanomaClient(await DBOSClient.create({ systemDatabaseUrl: databaseUrl, applicationName: appName }), appName);
+    return new SanomaClient(
+      await DBOSClient.create({ systemDatabaseUrl: databaseUrl, applicationName: appName }),
+      appName,
+    );
   }
 
   /** Validates the input against the workflow's schema, then queues a run for the worker. */
@@ -45,7 +48,12 @@ export class SanomaClient {
   }
 
   async runs(limit = 20): Promise<RunSummary[]> {
-    const rows = await this.dbos.listWorkflows({ limit, sortDesc: true, applicationName: this.appName, loadInput: false });
+    const rows = await this.dbos.listWorkflows({
+      limit,
+      sortDesc: true,
+      applicationName: this.appName,
+      loadInput: false,
+    });
     return Promise.all(rows.map((r) => this.summarize(r)));
   }
 
@@ -91,7 +99,14 @@ export class SanomaClient {
     return this.dbos.destroy();
   }
 
-  private async summarize(r: { workflowID: string; workflowName: string; status: string; createdAt: number; updatedAt?: number; error?: unknown }) {
+  private async summarize(r: {
+    workflowID: string;
+    workflowName: string;
+    status: string;
+    createdAt: number;
+    updatedAt?: number;
+    error?: unknown;
+  }) {
     return {
       runId: r.workflowID,
       workflow: r.workflowName,

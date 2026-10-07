@@ -21,7 +21,8 @@ interface ProjectConfig {
 // DBOS's Postgres driver warns about its own query pattern on every connection; it isn't actionable here.
 process.removeAllListeners("warning");
 process.on("warning", (w) => {
-  if (!(w.name === "DeprecationWarning" && w.message.includes("client.query()"))) console.warn(`${w.name}: ${w.message}`);
+  if (!(w.name === "DeprecationWarning" && w.message.includes("client.query()")))
+    console.warn(`${w.name}: ${w.message}`);
 });
 
 const HELP = `sanoma: business processes as code
@@ -91,7 +92,9 @@ function printRun(r: RunSummary) {
   console.log(`${r.runId}  ${r.workflow}  ${r.status}  ${time(r.createdAt)}`);
   for (const a of r.approvals) {
     const who = a.status === "pending" ? `waiting for ${a.approver}` : `${a.status} by ${a.decidedBy}`;
-    console.log(`  ${a.id}  "${a.title}"  ${who}${a.refused.length ? `  (ignored: ${a.refused.map((x) => x.by).join(", ")})` : ""}`);
+    console.log(
+      `  ${a.id}  "${a.title}"  ${who}${a.refused.length ? `  (ignored: ${a.refused.map((x) => x.by).join(", ")})` : ""}`,
+    );
   }
   if (r.error) console.log(`  error: ${r.error}`);
 }
@@ -153,7 +156,9 @@ async function main() {
       return withClient(async (client) => {
         const decision = command === "approve" ? "approve" : "reject";
         const target = await client.decide(runId, { decision, by: values.as!, note: values.note });
-        console.log(`sent ${decision} for "${target.title}" as ${values.as}; the run accepts it only from ${target.approver}`);
+        console.log(
+          `sent ${decision} for "${target.title}" as ${values.as}; the run accepts it only from ${target.approver}`,
+        );
       });
     }
     case "lint": {

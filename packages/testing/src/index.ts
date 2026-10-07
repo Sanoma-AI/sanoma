@@ -11,10 +11,21 @@ export interface FakeCall {
 interface FakeState {
   seq: number;
   calls: FakeCall[];
-  posts: Record<string, { id: string; title: string; html: string; slug: string; status: "draft" | "published"; publishedAt: string | null }>;
+  posts: Record<
+    string,
+    { id: string; title: string; html: string; slug: string; status: "draft" | "published"; publishedAt: string | null }
+  >;
   broadcasts: Record<string, { id: string; audience: string; subject: string; html: string; status: "draft" | "sent" }>;
   social: { uri: string; text: string }[];
 }
+
+const postOut = (p: FakeState["posts"][string]) => ({
+  id: p.id,
+  url: `https://blog.example.test/${p.slug}/`,
+  slug: p.slug,
+  status: p.status,
+  publishedAt: p.publishedAt,
+});
 
 const empty = (): FakeState => ({ seq: 0, calls: [], posts: {}, broadcasts: {}, social: [] });
 
@@ -40,13 +51,6 @@ export function fakeMarketingVendors(options: { file?: string } = {}) {
     state.calls.push({ op, input, at: new Date().toISOString() });
   };
   const nextId = (prefix: string) => `${prefix}_${String(++state.seq).padStart(4, "0")}`;
-  const postOut = (p: FakeState["posts"][string]) => ({
-    id: p.id,
-    url: `https://blog.example.test/${p.slug}/`,
-    slug: p.slug,
-    status: p.status,
-    publishedAt: p.publishedAt,
-  });
 
   const drivers: Driver[] = [
     {
@@ -55,7 +59,10 @@ export function fakeMarketingVendors(options: { file?: string } = {}) {
         "post.create": async (input: { title: string; html: string }) => {
           record("ghost.post.create", input);
           const id = nextId("post");
-          const slug = input.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+          const slug = input.title
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-|-$/g, "");
           state.posts[id] = { id, title: input.title, html: input.html, slug, status: "draft", publishedAt: null };
           save();
           return postOut(state.posts[id]);
@@ -64,7 +71,8 @@ export function fakeMarketingVendors(options: { file?: string } = {}) {
           record("ghost.post.publish", input);
           const post = state.posts[input.id];
           if (!post) throw new Error(`ghost: no post ${input.id}`);
-          if (post.status !== "published") Object.assign(post, { status: "published", publishedAt: new Date().toISOString() });
+          if (post.status !== "published")
+            Object.assign(post, { status: "published", publishedAt: new Date().toISOString() });
           save();
           return postOut(post);
         },

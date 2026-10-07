@@ -16,13 +16,7 @@ export interface OpSpec<I extends z.ZodType = z.ZodType, O extends z.ZodType = z
 }
 
 /** One vendor operation, such as `ghost.post.publish`. Declares the contract only; drivers implement it. */
-export interface Op<
-  V extends string = string,
-  R extends string = string,
-  N extends string = string,
-  I = any,
-  O = any,
-> {
+export interface Op<V extends string = string, R extends string = string, N extends string = string, I = any, O = any> {
   readonly kind: "op";
   readonly id: `${V}.${R}.${N}`;
   readonly vendor: V;

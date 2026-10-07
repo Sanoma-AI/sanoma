@@ -2,7 +2,9 @@
   "name": "@sanoma/example-marketing",
   "private": true,
   "type": "module",
-  "scripts": { "sanoma": "sanoma" },
+  "scripts": {
+    "sanoma": "sanoma"
+  },
   "dependencies": {
     "@sanoma/cli": "workspace:*",
     "@sanoma/connector-bluesky": "workspace:*",

@@ -67,12 +67,23 @@ export function lintWorkflow(source: string, filename = "workflow.ts"): LintProb
         break;
       case "Identifier":
         if (node.name in FORBIDDEN_GLOBALS && !declared.has(node.name) && isReference(node, parent)) {
-          problems.push({ ...at(node.start), message: `${node.name} is not allowed in a workflow: ${FORBIDDEN_GLOBALS[node.name]}` });
+          problems.push({
+            ...at(node.start),
+            message: `${node.name} is not allowed in a workflow: ${FORBIDDEN_GLOBALS[node.name]}`,
+          });
         }
         break;
       case "MemberExpression":
-        if (node.object?.type === "Identifier" && node.object.name === "Math" && !node.computed && node.property?.name === "random") {
-          problems.push({ ...at(node.start), message: "Math.random is not allowed in a workflow: derive values from `ctx.runId` or the input" });
+        if (
+          node.object?.type === "Identifier" &&
+          node.object.name === "Math" &&
+          !node.computed &&
+          node.property?.name === "random"
+        ) {
+          problems.push({
+            ...at(node.start),
+            message: "Math.random is not allowed in a workflow: derive values from `ctx.runId` or the input",
+          });
         }
         break;
     }
@@ -83,7 +94,7 @@ export function lintWorkflow(source: string, filename = "workflow.ts"): LintProb
 
   collectDeclarations(program, declared);
   visit(program, null);
-  return problems.sort((a, b) => a.line - b.line || a.column - b.column);
+  return problems.toSorted((a, b) => a.line - b.line || a.column - b.column);
 }
 
 /** Names the file declares itself (so a local `process` or `crypto` is fine). */
@@ -92,17 +103,28 @@ function collectDeclarations(node: any, out: Set<string>) {
   if (Array.isArray(node)) return node.forEach((n) => collectDeclarations(n, out));
   if (node.type === "VariableDeclarator" && node.id?.type === "Identifier") out.add(node.id.name);
   if ((node.type === "FunctionDeclaration" || node.type === "ClassDeclaration") && node.id) out.add(node.id.name);
-  if (node.type === "ImportSpecifier" || node.type === "ImportDefaultSpecifier" || node.type === "ImportNamespaceSpecifier") {
+  if (
+    node.type === "ImportSpecifier" ||
+    node.type === "ImportDefaultSpecifier" ||
+    node.type === "ImportNamespaceSpecifier"
+  ) {
     out.add(node.local.name);
   }
-  for (const [key, child] of Object.entries(node)) if (key !== "type" && child && typeof child === "object") collectDeclarations(child, out);
+  for (const [key, child] of Object.entries(node))
+    if (key !== "type" && child && typeof child === "object") collectDeclarations(child, out);
 }
 
 /** True when an identifier reads a variable, not when it names a property or key. */
 function isReference(node: any, parent: any): boolean {
   if (!parent) return true;
   if (parent.type === "MemberExpression" && parent.property === node && !parent.computed) return false;
-  if ((parent.type === "Property" || parent.type === "ObjectProperty") && parent.key === node && !parent.computed && !parent.shorthand) return false;
+  if (
+    (parent.type === "Property" || parent.type === "ObjectProperty") &&
+    parent.key === node &&
+    !parent.computed &&
+    !parent.shorthand
+  )
+    return false;
   if ((parent.type === "MethodDefinition" || parent.type === "PropertyDefinition") && parent.key === node) return false;
   if (parent.type?.startsWith("TS")) return false;
   return true;

@@ -2,8 +2,10 @@
   "name": "@sanoma/cli",
   "version": "0.0.0",
   "license": "Apache-2.0",
+  "bin": {
+    "sanoma": "./src/main.ts"
+  },
   "type": "module",
-  "bin": { "sanoma": "./src/main.ts" },
   "dependencies": {
     "@sanoma/workflows": "workspace:*"
   }
