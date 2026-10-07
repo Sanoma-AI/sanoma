@@ -1,4 +1,6 @@
 {
+  // The library entry only: startApp and the API's shapes. `vite build` builds the app itself
+  // into dist/client and dist/server.
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "rootDir": "src",
@@ -9,5 +11,6 @@
     "rewriteRelativeImportExtensions": true,
     "paths": {}
   },
-  "include": ["src"]
+  "include": [],
+  "files": ["src/index.ts"]
 }
