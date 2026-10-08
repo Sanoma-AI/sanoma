@@ -103,14 +103,27 @@ afterAll(async () => {
   await worker?.stop();
 });
 
-async function call<T = ErrorResponse>(path: string, init: { method?: string; body?: unknown; actor?: string } = {}) {
-  const headers: Record<string, string> = {};
-  if (init.body !== undefined) headers["content-type"] = "application/json";
+interface CallInit {
+  method?: string;
+  /** Sent as JSON, unless `contentType` is given: then sent as it is, the way another client might. */
+  body?: unknown;
+  contentType?: string;
+  actor?: string;
+  headers?: Record<string, string>;
+  /** The app to ask; the file's own by default. */
+  base?: string;
+}
+
+async function call<T = ErrorResponse>(path: string, init: CallInit = {}) {
+  const json = init.contentType === undefined && init.body !== undefined;
+  const headers: Record<string, string> = { ...init.headers };
+  const contentType = json ? "application/json" : init.contentType;
+  if (contentType !== undefined) headers["content-type"] = contentType;
   if (init.actor !== undefined) headers["x-sanoma-actor"] = init.actor;
-  const res = await fetch(new URL(path, app.url), {
+  const res = await fetch(new URL(path, init.base ?? app.url), {
     method: init.method ?? "GET",
     headers,
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    body: json ? JSON.stringify(init.body) : (init.body as string | undefined),
   });
   return { status: res.status, body: (await res.json()) as T };
 }
@@ -134,13 +147,18 @@ async function page(path: string, base = app.url) {
   return { status: res.status, html, text: html.replaceAll("<!-- -->", "") };
 }
 
-/** A request the way a client other than ours might send it: any content type, any body. */
-const raw = (path: string, contentType: string | undefined, body: string | undefined) =>
-  fetch(new URL(path, app.url), {
-    method: "POST",
-    headers: { "x-sanoma-actor": "marketing-lead", ...(contentType ? { "content-type": contentType } : {}) },
-    body,
-  }).then(async (res) => ({ status: res.status, body: (await res.json()) as ErrorResponse }));
+/** A request's status, sent as written: no normalising of the path, and any Host header. */
+function rawStatus(base: string, path: string, headers?: Record<string, string>) {
+  const { hostname, port } = new URL(base);
+  return new Promise<number>((done, fail) => {
+    httpRequest({ host: hostname, port, path, headers }, (r) => {
+      r.resume();
+      done(r.statusCode ?? 0);
+    })
+      .on("error", fail)
+      .end();
+  });
+}
 const input = (title: string) => ({
   title,
   body: "<p>Hello</p>",
@@ -197,10 +215,15 @@ describe("the API", () => {
 
   it("takes only a JSON body, on both routes that change something", async () => {
     for (const path of ["/api/runs", "/api/runs/does-not-exist/approvals/approval-1"]) {
-      const form = await raw(path, "application/x-www-form-urlencoded", "decision=approve");
+      const asLead = { method: "POST", actor: "marketing-lead" };
+      const form = await call(path, {
+        ...asLead,
+        contentType: "application/x-www-form-urlencoded",
+        body: "decision=approve",
+      });
       expect(form.status, path).toBe(415);
       expect(form.body.code, path).toBe("invalid_input");
-      const empty = await raw(path, "application/json", undefined);
+      const empty = await call(path, { ...asLead, contentType: "application/json" });
       expect(empty.status, path).toBe(400);
       expect(empty.body).toMatchObject({ code: "invalid_input", error: expect.stringMatching(/empty/) });
     }
@@ -440,15 +463,14 @@ describe("the page", () => {
   });
 
   it("renders a run, and answers a run that does not exist with not-found", async () => {
-    const found = await fetch(new URL(`/runs/${runId}`, app.url));
+    const found = await page(`/runs/${runId}`);
     expect(found.status).toBe(200);
-    const html = await found.text();
-    expect(html).toMatch(/<h2[^>]*>Ledger<\/h2>/);
+    expect(found.html).toMatch(/<h2[^>]*>Ledger<\/h2>/);
     // The workflow's own approval covers no operation, and says so.
-    expect(html).toMatch(/Lets through<\/dt><dd[^>]*><span[^>]*>no operation by itself/);
-    const missing = await fetch(new URL("/runs/does-not-exist", app.url));
+    expect(found.html).toMatch(/Lets through<\/dt><dd[^>]*><span[^>]*>no operation by itself/);
+    const missing = await page("/runs/does-not-exist");
     expect(missing.status).toBe(404);
-    expect(await missing.text()).toMatch(/No run (<!-- -->)?does-not-exist/);
+    expect(missing.text).toContain("No run does-not-exist");
   });
 
   it("serves the built assets, hashed ones as immutable, and nothing outside them", async () => {
@@ -458,16 +480,7 @@ describe("the page", () => {
     expect(res.headers.get("content-type")).toMatch(/javascript/);
     expect(res.headers.get("cache-control")).toMatch(/immutable/);
     // A raw request, so the client doesn't normalise the dots away.
-    const status = await new Promise<number>((done, fail) => {
-      const url = new URL(app.url);
-      httpRequest({ host: url.hostname, port: url.port, path: "/assets/%2e%2e/%2e%2e/package.json" }, (r) => {
-        r.resume();
-        done(r.statusCode ?? 0);
-      })
-        .on("error", fail)
-        .end();
-    });
-    expect(status).not.toBe(200);
+    expect(await rawStatus(app.url, "/assets/%2e%2e/%2e%2e/package.json")).not.toBe(200);
   });
 
   it("keeps the runtime out of the browser bundle", () => {
@@ -478,19 +491,7 @@ describe("the page", () => {
   });
 
   it("refuses requests addressed to a name other than this machine's", async () => {
-    const status = await new Promise<number>((done, fail) => {
-      const url = new URL(app.url);
-      httpRequest(
-        { host: url.hostname, port: url.port, path: "/api/config", headers: { host: "attacker.example:80" } },
-        (r) => {
-          r.resume();
-          done(r.statusCode ?? 0);
-        },
-      )
-        .on("error", fail)
-        .end();
-    });
-    expect(status).toBe(403);
+    expect(await rawStatus(app.url, "/api/config", { host: "attacker.example:80" })).toBe(403);
   });
 });
 
@@ -509,11 +510,12 @@ describe("an app with its own resolveActor", () => {
   afterAll(() => hosted?.close());
 
   const post = (user?: string) =>
-    fetch(new URL("/api/runs", hosted.url), {
+    call<ErrorResponse & { runId?: string }>("/api/runs", {
       method: "POST",
-      headers: { "content-type": "application/json", ...(user ? { "x-test-user": user } : {}) },
-      body: JSON.stringify({ workflow: "announce", input: input("Hosted") }),
-    }).then(async (res) => ({ status: res.status, body: (await res.json()) as ErrorResponse & { runId?: string } }));
+      base: hosted.url,
+      headers: user ? { "x-test-user": user } : {},
+      body: { workflow: "announce", input: input("Hosted") },
+    });
 
   it("starts runs as the principal it resolves, groups included", async () => {
     const started = await post("sso-user");
@@ -604,23 +606,8 @@ describe("an app on every interface", () => {
   it("answers a request addressed to any name, since it was asked to listen beyond this machine", async () => {
     const open = await startApp(config, { host: "0.0.0.0" });
     try {
-      const status = await new Promise<number>((done, fail) => {
-        httpRequest(
-          {
-            host: "127.0.0.1",
-            port: new URL(open.url).port,
-            path: "/api/config",
-            headers: { host: "sanoma.example:80" },
-          },
-          (r) => {
-            r.resume();
-            done(r.statusCode ?? 0);
-          },
-        )
-          .on("error", fail)
-          .end();
-      });
-      expect(status).toBe(200);
+      const base = `http://127.0.0.1:${new URL(open.url).port}`;
+      expect(await rawStatus(base, "/api/config", { host: "sanoma.example:80" })).toBe(200);
     } finally {
       await open.close();
     }
@@ -639,11 +626,7 @@ describe("an app reading a jsonl ledger", () => {
     await jsonl?.close();
     rmSync(dir, { recursive: true, force: true });
   });
-  const read = () =>
-    fetch(new URL(`/api/runs/${runId}`, jsonl.url)).then(async (res) => ({
-      status: res.status,
-      body: (await res.json()) as RunDetail,
-    }));
+  const read = () => call<RunDetail>(`/api/runs/${runId}`, { base: jsonl.url });
 
   it("says a run that has started has no records there: the app reads another ledger than the worker", async () => {
     const { status, body } = await read();
