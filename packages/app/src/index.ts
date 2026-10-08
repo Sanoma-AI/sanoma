@@ -66,7 +66,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     );
   }
   if (loaded.status === "rejected") {
-    if (connected.status === "fulfilled") await connected.value.close();
+    if (connected.status === "fulfilled") await closeQuietly(connected.value);
     throw loaded.reason;
   }
   if (connected.status === "rejected") throw connected.reason;
@@ -108,7 +108,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       });
     });
   } catch (err) {
-    await client.close();
+    await closeQuietly(client);
     throw err;
   }
 
@@ -124,13 +124,20 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
             server.closeAllConnections();
           });
         } finally {
-          await client.close();
+          await closeQuietly(client);
         }
       })();
       return closing;
     },
   };
 }
+
+/**
+ * Closes the client, logging a failure rather than throwing it: it would replace the error that
+ * made startApp or close() stop, which is the one the caller needs.
+ */
+const closeQuietly = (client: SanomaClient) =>
+  client.close().catch((err: unknown) => console.error("sanoma app: closing the client also failed:", err));
 
 /** Published, this module is dist/index.js beside dist/server. In the repo it runs from src/, and `vite build` writes ../dist. */
 function defaultDistDir(): string {
