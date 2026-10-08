@@ -141,7 +141,7 @@ Queues used to be one `sanoma` queue for every app and are now `sanoma:<appName>
 
 A run is replayed after a restart by calling the function again and reading each step's result back, so workflows and policies must do the same thing every time, and must reach vendors only through `ctx` so the policy sees every call. Two checks guard against getting that wrong by accident, on files under `workflows/` and `policies/`. They are not a sandbox: they read the source, and code written to get around them can.
 
-oxlint, with the rules this package ships in `oxlint.json`, refuses the clock (`Date`, `performance`), randomness (`Math.random`, `crypto`), the network (`fetch`, `WebSocket`), timers, `process`, `globalThis`, and imports of `@sanoma/testing`, `@sanoma/app`, `@sanoma/connector-*/fake` and `@sanoma/connector-*/driver`. From `@sanoma/workflows` it allows only `defineWorkflow`, `definePolicy`, `allow`, `deny`, `approve`, `approvedFor`, `allowAll`, `mayDecide`, `errorCode`, `DriverError` and types: the rest could start runs or approve the run's own approvals (`SanomaClient`, `startWorker`), forge the audit record (`jsonlLedger`, `memoryLedger`: a store keeps the first record per id) or read credentials. Each message names the `ctx` replacement. Extend it from your `.oxlintrc.json` (oxlint resolves `extends` as a path, not a package name; the `workflows/**` and `policies/**` globs resolve against your config):
+oxlint, with the rules this package ships in `oxlint.json`, refuses the clock (`Date`, `performance`), randomness (`Math.random`, `crypto`), the network (`fetch`, `WebSocket`), timers, `process`, `globalThis`, and imports of `@sanoma/testing`, `@sanoma/app`, `@sanoma/connector-*/fake` and `@sanoma/connector-*/driver`. From `@sanoma/workflows` it allows only `defineWorkflow`, `definePolicy`, `allow`, `deny`, `approve`, `approvedFor`, `allowAll`, `mayDecide`, `errorCode`, `DriverError` and types: the rest could start runs or approve the run's own approvals (`SanomaClient`, `startWorker`), forge the audit record (`jsonlLedger`, `memoryLedger`: a store keeps the first record per id) or read credentials. Each message names the `ctx` replacement. Extend it from your `.oxlintrc.json` by its path: oxlint resolves `extends` as a file, not a package name, so `@sanoma/workflows/oxlint` would not load. The `workflows/**` and `policies/**` globs resolve against your config:
 
 ```json
 {
@@ -169,6 +169,21 @@ it.each(files)("%s has no problems", (file) => {
 ```
 
 `@sanoma/workflows/lint` is a separate entry so the runtime never loads its parser.
+
+## Fakes for tests
+
+`@sanoma/workflows/fake` exports `defineFake(connector, { initial, ops }, { file?, calls? })`, which builds an in-memory vendor for a connector: `ops` implements every operation against the fake's state, typed by the connector as `defineDriver` is, and the fake adds what a real vendor does around them (a repeated idempotency key gets the first reply and changes nothing) and faults a test can inject (`failNext`, `loseReply`, `rateLimit`, `hold`). The connectors' own fakes (`@sanoma/connector-ghost/fake` and the others) are built with it, and `@sanoma/testing` re-exports them. It is a separate entry so the runtime carries no test tooling, and the lint refuses it in workflow files.
+
+## Building your own UI
+
+`@sanoma/app` is one UI over a config; another (a Slack bot, an internal tool) can be built on the same pieces, which the package exports for that:
+
+- `describeConfig(config)` and its types (`ConfigDescription`, `WorkflowEntry`, `OpEntry`): what to render, as plain JSON. `resolveConfig(config)` returns the checked config as a `ResolvedConfig`, with the operations and drivers by id; `isOp(x)` tells an operation from a built-in in a workflow's `uses`.
+- `SanomaClient`: start runs, list them, read a run's ledger and approvals, and decide approvals, with the checks described above.
+- `APPROVALS_EVENT` and `decisionEventOf(approvalId)`: the DBOS events a run publishes its approvals and each decision on, for a UI that reads DBOS directly. `ApprovalMessage` is the zod schema of a decision as a run reads it. `RunArgs` is what a run receives: its input and `startedBy`.
+- `mayDecide(approval, principal)` and `approverLabel(approver)`: who may decide, and how to name them, the same way the run does.
+- Errors: `errorCode(err)` for the code to branch on, `errorMessage(err)` for the text of anything thrown, `invalidInput(what, issues)` to build an `invalid_input` error from zod issues (`InputIssue` is one issue, without symbols in its path), and the classes `SanomaError`, `PolicyDeniedError`, `RejectedError` and `DriverError`. Read codes with `errorCode`, never `instanceof`.
+- `LedgerRecord` and `LedgerStore` for the audit record, `jsonlLedger(dir)` and `memoryLedger()` to keep it, and `RUNTIME_VERSION`, this package's version as the runtime reports it.
 
 Status: early (0.x). The API may change between minor versions.
 

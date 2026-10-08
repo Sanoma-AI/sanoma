@@ -40,8 +40,7 @@
     "./lint": {
       "types": "./dist/lint.d.ts",
       "default": "./dist/lint.js"
-    },
-    "./oxlint": "./oxlint.json"
+    }
   },
   "publishConfig": {
     "access": "public"

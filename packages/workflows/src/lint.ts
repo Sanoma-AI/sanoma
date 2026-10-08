@@ -10,7 +10,7 @@ export interface LintProblem {
 /**
  * A workflow must call vendors through `ctx`, so the policy sees every call. These are the
  * import rules oxlint's built-in rules cannot express; the clock, randomness, the network
- * and the environment are oxlint's (`@sanoma/workflows/oxlint`).
+ * and the environment are oxlint's (the package's `oxlint.json`).
  */
 const THROUGH_CTX = "a workflow must call vendors through ctx, so the policy sees every call";
 
