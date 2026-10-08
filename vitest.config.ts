@@ -18,5 +18,7 @@ export default defineConfig({
     testTimeout: 60_000,
     hookTimeout: 60_000,
     fileParallelism: false,
+    // Every spy is undone before the next test, so a test needs no try/finally to put one back.
+    restoreMocks: true,
   },
 });

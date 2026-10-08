@@ -327,7 +327,6 @@ describe("a worker stopping while a call fails for good", () => {
     } finally {
       shut.resolve();
       await stopping;
-      vi.restoreAllMocks();
     }
     const records = await c().ledger(runId);
     const refused = { code: "driver_failed", message: "bluesky: the post is too long", status: 400 };

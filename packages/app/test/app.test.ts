@@ -547,17 +547,10 @@ describe("an app with its own resolveActor", () => {
 
   it("answers a resolver that throws with a 500, and logs why", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    let calls: unknown[][];
-    let failed: Awaited<ReturnType<typeof post>>;
-    try {
-      failed = await post("boom");
-    } finally {
-      calls = [...logged.mock.calls];
-      logged.mockRestore();
-    }
+    const failed = await post("boom");
     expect(failed.status).toBe(500);
     expect(failed.body.error).toBe("Something went wrong");
-    expect(calls).toEqual([
+    expect(logged.mock.calls).toEqual([
       [
         expect.stringContaining("POST /api/runs failed"),
         expect.objectContaining({ message: "Could not tell who you are: the session store is down" }),
@@ -673,20 +666,13 @@ describe("an app reading a jsonl ledger", () => {
     mkdirSync(join(dir, "ledger"), { recursive: true });
     writeFileSync(join(dir, "ledger", `${encodeURIComponent(runId)}.jsonl`), "not json\n");
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    let calls: unknown[][];
-    let result: Awaited<ReturnType<typeof read>>;
-    try {
-      result = await read();
-      // Read again, as the page's poll does: logged once for the run and the failure.
-      await read();
-    } finally {
-      calls = [...logged.mock.calls];
-      logged.mockRestore();
-    }
+    const result = await read();
+    // Read again, as the page's poll does: logged once for the run and the failure.
+    await read();
     expect(result.status).toBe(200);
     expect(result.body.ledger).toEqual([]);
     expect(result.body.ledgerError).toMatch(/corrupt ledger line/);
-    expect(calls).toHaveLength(1);
-    expect(String(calls[0]?.[0])).toContain(`could not read the ledger of run ${runId}`);
+    expect(logged).toHaveBeenCalledOnce();
+    expect(String(logged.mock.calls[0]?.[0])).toContain(`could not read the ledger of run ${runId}`);
   });
 });

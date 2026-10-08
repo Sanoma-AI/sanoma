@@ -76,7 +76,6 @@ describe.each<[string, () => LedgerStore]>([
     await store.append(rec(run, 3, "run.started", "x".repeat(300)));
     await store.append(rec(run, 3, "run.started", "y"));
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/differed in input \(kept "x{199}…, later "y"\)$/));
-    warn.mockRestore();
     expect((await store.read(run)).flatMap((r) => (r.type === "run.finished" ? [r.output] : []))).toEqual([{ seq: 1 }]);
   });
 });
@@ -110,7 +109,6 @@ describe("jsonlLedger on a damaged file", () => {
     await store.append(rec("t1", 2));
     await store.append(rec("t1", 3, "run.finished"));
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/cut-off line/));
-    warn.mockRestore();
 
     expect((await store.read("t1")).map((r) => r.seq)).toEqual([0, 1, 2, 3]);
     const lines = readFileSync(path, "utf8").split("\n");
@@ -180,17 +178,11 @@ describe("writing a run's records", () => {
     const { store, calls } = flaky(2);
     const run = runOn(store);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    let warned: unknown[];
-    try {
-      await write(run, entry(run, { type: "run.started", input: null }));
-      warned = warn.mock.calls.map(([m]) => m);
-    } finally {
-      warn.mockRestore();
-    }
+    await write(run, entry(run, { type: "run.started", input: null }));
     expect(calls()).toBe(3);
     expect(await store.read(run.id)).toHaveLength(1);
     // Said once per retry, naming the record.
-    expect(warned).toEqual([
+    expect(warn.mock.calls.map(([m]) => m)).toEqual([
       expect.stringMatching(new RegExp(`appending ${run.id}:run.started:0 failed .*trying again in 50 ms`)),
       expect.stringMatching(/trying again in 200 ms/),
     ]);

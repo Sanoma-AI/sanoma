@@ -206,7 +206,6 @@ describe("workers on one database", () => {
         await worker.stop();
       }
     } finally {
-      warn.mockRestore();
       await client.close();
     }
   });
@@ -248,7 +247,6 @@ describe("workers on one database", () => {
       expect(lines[0]).toContain(queued.workflowID);
       expect(lines[0]).toContain(`forkWorkflow(id, step, { applicationVersion: "${appName}@two"`);
     } finally {
-      warn.mockRestore();
       await raw.destroy();
       await client.close();
       await worker.stop();

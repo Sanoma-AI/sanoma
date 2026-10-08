@@ -116,12 +116,8 @@ describe("startWorker, resolveConfig and describeConfig", () => {
 describe("startWorker failing after DBOS has launched", () => {
   it("stops DBOS and throws, so nothing runs in a worker nobody holds and the next start launches afresh", async () => {
     const ok = config({ appName: "worker-launch", databaseUrl: testDatabaseUrl("worker") });
-    const queue = vi.spyOn(DBOS, "registerQueue").mockRejectedValueOnce(new Error("no queue for you"));
-    try {
-      await expect(startWorker(ok)).rejects.toThrow("no queue for you");
-    } finally {
-      queue.mockRestore();
-    }
+    vi.spyOn(DBOS, "registerQueue").mockRejectedValueOnce(new Error("no queue for you"));
+    await expect(startWorker(ok)).rejects.toThrow("no queue for you");
     expect(DBOS.isInitialized()).toBe(false);
     const worker = await startWorker(ok);
     expect(DBOS.isInitialized()).toBe(true);
