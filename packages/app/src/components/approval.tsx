@@ -220,12 +220,11 @@ function DecideDialog({
       // open, so the approver sees that nothing has happened yet.
       if (state.status === "pending") {
         toast.warning("Sent, but the run has not read it yet. Is a worker running?");
-        await refresh;
-        return;
+      } else {
+        toast.success(`${chosen === "approve" ? "Approved" : "Rejected"} “${approval.title}”`);
+        setNote("");
+        onClose();
       }
-      toast.success(`${chosen === "approve" ? "Approved" : "Rejected"} “${approval.title}”`);
-      setNote("");
-      onClose();
       await refresh;
     },
   });
