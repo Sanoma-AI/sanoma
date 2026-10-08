@@ -3,6 +3,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { memo, type ReactNode, useMemo } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
+import { Card, CardContent } from "#/components/ui/card.tsx";
 import { Item, ItemContent, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { approverLabel } from "@sanoma/workflows/shared";
 import { starterName } from "../../api.ts";
@@ -78,25 +79,29 @@ function RunPage() {
   const reducedMotion = useReducedMotion();
   const select = (recordId: string) => show(recordId, reducedMotion);
   return (
-    <section className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <PageHeader title={run.workflow}>
         <Badge className={toneBadge({ tone: RUN_TONE[run.status] })}>{run.status}</Badge>
       </PageHeader>
       {error && <Notice variant="destructive">Could not refresh: {error.message}</Notice>}
-      <Facts>
-        <Fact label="Started by">{starterName(run)}</Fact>
-        <Fact label="Started">
-          <When at={run.createdAt} />
-        </Fact>
-        <Fact label="Run id">
-          <code className="break-all">{run.runId}</code>
-        </Fact>
-        {run.error && (
-          <Fact label="Error">
-            <span className="text-destructive">{run.error}</span>
-          </Fact>
-        )}
-      </Facts>
+      <Card size="sm">
+        <CardContent>
+          <Facts>
+            <Fact label="Started by">{starterName(run)}</Fact>
+            <Fact label="Started">
+              <When at={run.createdAt} />
+            </Fact>
+            <Fact label="Run id">
+              <code className="break-all">{run.runId}</code>
+            </Fact>
+            {run.error && (
+              <Fact label="Error">
+                <span className="text-destructive">{run.error}</span>
+              </Fact>
+            )}
+          </Facts>
+        </CardContent>
+      </Card>
 
       <section className="flex flex-col gap-3">
         <SectionTitle>Graph</SectionTitle>
@@ -124,7 +129,7 @@ function RunPage() {
           ))}
         </aside>
       </div>
-    </section>
+    </div>
   );
 }
 
