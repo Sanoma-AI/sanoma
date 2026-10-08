@@ -4,6 +4,7 @@
   "ignorePatterns": [
     "pnpm-lock.yaml",
     "**/dist",
+    "**/.test-dist-*",
     "**/routeTree.gen.ts",
     "**/cn-tables.ts",
     ".agents/skills",

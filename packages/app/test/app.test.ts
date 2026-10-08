@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -345,6 +345,34 @@ describe("startApp", () => {
     const empty = mkdtempSync(join(tmpdir(), "sanoma-app-dist-"));
     try {
       await expect(startApp(config, { distDir: empty })).rejects.toThrow(/pnpm --filter @sanoma\/app build/);
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a build without its client files, rather than serving pages with no script or style", async () => {
+    // Inside the package, so the server build still resolves its dependencies.
+    const half = mkdtempSync(join(appDir, ".test-dist-"));
+    try {
+      cpSync(join(distDir, "server"), join(half, "server"), { recursive: true });
+      await expect(startApp(config, { distDir: half })).rejects.toThrow(
+        `The app is not built: ${join(half, "client")} is missing`,
+      );
+    } finally {
+      rmSync(half, { recursive: true, force: true });
+    }
+  });
+
+  it("reports both failures when neither the build nor the database is there", async () => {
+    const empty = mkdtempSync(join(tmpdir(), "sanoma-app-dist-"));
+    try {
+      const err = await startApp({ ...config, databaseUrl: "not a url" }, { distDir: empty }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(AggregateError);
+      expect((err as AggregateError).errors).toHaveLength(2);
+      expect((err as Error).message).toMatch(/^The app could not start: The app is not built: .*; and Invalid URL/);
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }

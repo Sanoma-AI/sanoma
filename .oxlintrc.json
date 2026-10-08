@@ -19,5 +19,5 @@
       }
     ]
   },
-  "ignorePatterns": ["**/node_modules", "**/.sanoma", "**/dist"]
+  "ignorePatterns": ["**/node_modules", "**/.sanoma", "**/dist", "**/.test-dist-*"]
 }

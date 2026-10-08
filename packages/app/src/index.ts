@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { describeConfig, resolveConfig, SanomaClient, type SanomaConfig } from "@sanoma/workflows";
+import { describeConfig, errorMessage, resolveConfig, SanomaClient, type SanomaConfig } from "@sanoma/workflows";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import type { AppContext, ResolveActor } from "./context.ts";
 import { actorFromHeader } from "./default-actor.ts";
@@ -55,6 +55,12 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   const loopbackOnly = isLoopback(host);
 
   const [loaded, connected] = await Promise.allSettled([loadServerEntry(distDir), SanomaClient.connect(config)]);
+  if (loaded.status === "rejected" && connected.status === "rejected") {
+    throw new AggregateError(
+      [loaded.reason, connected.reason],
+      `The app could not start: ${errorMessage(loaded.reason)}; and ${errorMessage(connected.reason)}`,
+    );
+  }
   if (loaded.status === "rejected") {
     if (connected.status === "fulfilled") await connected.value.close();
     throw loaded.reason;
@@ -62,7 +68,13 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   if (connected.status === "rejected") throw connected.reason;
   const entry = loaded.value;
   const client = connected.value;
-  const files = await staticFiles(join(distDir, "client"));
+  let files: Map<string, StaticFile>;
+  try {
+    files = await staticFiles(join(distDir, "client"));
+  } catch (err) {
+    await client.close();
+    throw err;
+  }
   const app: AppContext = { resolved, description, client, resolveActor: options.resolveActor ?? actorFromHeader };
 
   const server = createServer((req, res) => {
@@ -109,11 +121,14 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     url: `http://${urlHost(address)}:${address.port}`,
     close() {
       closing ??= (async () => {
-        await new Promise<void>((done, fail) => {
-          server.close((err) => (err ? fail(err) : done()));
-          server.closeAllConnections();
-        });
-        await client.close();
+        try {
+          await new Promise<void>((done, fail) => {
+            server.close((err) => (err ? fail(err) : done()));
+            server.closeAllConnections();
+          });
+        } finally {
+          await client.close();
+        }
       })();
       return closing;
     },
@@ -125,17 +140,26 @@ function defaultDistDir(): string {
   return fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "../dist/" : "./", import.meta.url));
 }
 
+/** What startApp says when the build it serves is missing, in part or whole. */
+const notBuilt = (path: string) =>
+  new Error(`The app is not built: ${path} is missing. Run \`pnpm --filter @sanoma/app build\` first.`);
+
+/** True for the errors that mean a path is not there: missing, or under something that is not a directory. */
+const isMissing = (err: unknown) => {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+};
+
 async function loadServerEntry(distDir: string): Promise<ServerEntry> {
   const path = join(distDir, "server", "server.js");
   const found = await stat(path).then(
     (s) => s.isFile(),
-    () => false,
+    (err: unknown) => {
+      if (isMissing(err)) return false;
+      throw err;
+    },
   );
-  if (!found) {
-    throw new Error(
-      `The app is not built: ${path} is missing. Run \`pnpm --filter @sanoma/app build\` (in the sanoma repo) first.`,
-    );
-  }
+  if (!found) throw notBuilt(path);
   const mod = (await import(pathToFileURL(path).href)) as { default?: ServerEntry };
   if (typeof mod.default?.fetch !== "function") throw new Error(`${path} does not export a { fetch } server entry`);
   return mod.default;
@@ -168,7 +192,10 @@ interface StaticFile {
  */
 async function staticFiles(clientDir: string): Promise<Map<string, StaticFile>> {
   const files = new Map<string, StaticFile>();
-  const entries = await readdir(clientDir, { recursive: true, withFileTypes: true }).catch(() => []);
+  const entries = await readdir(clientDir, { recursive: true, withFileTypes: true }).catch((err: unknown) => {
+    // Served without its client files, every page would load with no script or style.
+    throw isMissing(err) ? notBuilt(clientDir) : err;
+  });
   for (const entry of entries) {
     if (!entry.isFile()) continue;
     const path = join(entry.parentPath, entry.name);

@@ -146,3 +146,6 @@ vite.config.ts.timestamp-*
 
 # Agent worktrees
 .claude/worktrees/
+
+# A half-built app copied by packages/app/test, removed after the test
+.test-dist-*/
