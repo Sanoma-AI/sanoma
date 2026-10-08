@@ -1,10 +1,11 @@
 import type { ApprovalState, RunStatus, RunSummary } from "@sanoma/workflows";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { CheckIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import {
   Card,
@@ -29,10 +30,12 @@ import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import { approverName, type DecideRequest, errorBodyOf, starterName } from "../api.ts";
 import { decideFn } from "../functions.ts";
+import { configQuery } from "../queries.ts";
 import {
   ApprovalStatusBadge,
   DecisionNote,
   Disclosure,
+  effectBadge,
   Expandable,
   Fact,
   Facts,
@@ -88,6 +91,9 @@ export function ApprovalCard({
       <CardContent className="flex flex-col gap-3">
         <Facts>
           <Fact label="Approver">{approverName(approval.approver)}</Fact>
+          <Fact label="Lets through">
+            <Covers covers={approval.covers} />
+          </Fact>
           <Fact label="Asked by">
             <RequestedBy requestedBy={approval.requestedBy} op={approval.op} />
           </Fact>
@@ -167,6 +173,30 @@ export function ApprovalCard({
         />
       )}
     </Card>
+  );
+}
+
+/**
+ * The operations an approval stands for, each with its effect: what the approver's sign-off
+ * lets a policy allow later in the run. A workflow's approval often covers none.
+ */
+function Covers({ covers }: { covers: string[] }) {
+  // The config never changes while the app runs; until it loads, the ids show alone.
+  const { data: config } = useQuery(configQuery());
+  if (covers.length === 0) return <span className="text-muted-foreground">no operation by itself</span>;
+  const effects = new Map(config?.ops.map((op) => [op.id, op.effect]));
+  return (
+    <ul className="flex flex-wrap gap-1.5">
+      {covers.map((id) => {
+        const effect = effects.get(id);
+        return (
+          <li key={id} className="flex items-center gap-1">
+            <code>{id}</code>
+            {effect && <Badge className={effectBadge({ effect })}>{effect}</Badge>}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

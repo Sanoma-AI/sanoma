@@ -306,7 +306,10 @@ describe("the page", () => {
   it("renders a run, and answers a run that does not exist with not-found", async () => {
     const found = await fetch(new URL(`/runs/${runId}`, app.url));
     expect(found.status).toBe(200);
-    expect(await found.text()).toMatch(/<h2[^>]*>Ledger<\/h2>/);
+    const html = await found.text();
+    expect(html).toMatch(/<h2[^>]*>Ledger<\/h2>/);
+    // The workflow's own approval covers no operation, and says so.
+    expect(html).toMatch(/Lets through<\/dt><dd[^>]*><span[^>]*>no operation by itself/);
     const missing = await fetch(new URL("/runs/does-not-exist", app.url));
     expect(missing.status).toBe(404);
     expect(await missing.text()).toContain("No run <!-- -->does-not-exist");

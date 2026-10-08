@@ -23,8 +23,8 @@ console.log(app.url); // http://127.0.0.1:4321
 ## Screens
 
 - **Runs**: recent runs with their workflow, status, who started them, when, pending approvals and any error. Refreshes every 2 seconds while the page is visible.
-- **Run**: one run's ledger as a timeline (the start, each operation call with its effect, the policy's decision, duration, input and output, each approval asked, decided or ignored, and how it ended) beside its approvals, with Approve and Reject and an optional note.
-- **Inbox**: every pending approval, newest first, with the same controls. Refreshes every 5 seconds.
+- **Run**: one run's ledger as a timeline (the start, each operation call with its effect, the policy's decision, duration, input and output, each approval asked, decided or ignored, and how it ended) beside its approvals, each with the operations it lets through (badged by effect), and Approve and Reject with an optional note while the run can still read a decision.
+- **Inbox**: every pending approval, newest first, with what it lets through and the same controls. Refreshes every 5 seconds.
 - **Start**: a form built from the workflow's input schema: text, date and time, numbers, yes/no, choices, lists with Add and Remove, and objects one level deep; anything else is entered as JSON. Optional fields left empty are left out, so the schema's defaults apply. The server checks the input with the workflow's schema and its complaints appear on the fields they name.
 - **Workflows**: each workflow's operations with their effects, its built-ins and its input; whether a policy is configured, and its version; the config's version.
 

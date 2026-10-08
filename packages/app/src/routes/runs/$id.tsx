@@ -24,10 +24,15 @@ import {
   toneBadge,
   When,
 } from "../../components/common.tsx";
-import { runQuery } from "../../queries.ts";
+import { configQuery, runQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/runs/$id")({
-  loader: ({ context, params }) => context.queryClient.ensureQueryData(runQuery(params.id)),
+  // The config too: each approval badges the operations it covers by their effect.
+  loader: ({ context, params }) =>
+    Promise.all([
+      context.queryClient.ensureQueryData(runQuery(params.id)),
+      context.queryClient.ensureQueryData(configQuery()),
+    ]),
   head: ({ params }) => ({ meta: [{ title: `Run ${params.id} · Sanoma` }] }),
   component: RunPage,
   // getRun throws the router's not-found for a run that does not exist.

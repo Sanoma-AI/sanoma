@@ -4,10 +4,15 @@ import { useActor } from "../actor.ts";
 import { pendingApprovals } from "../api.ts";
 import { ApprovalCard } from "../components/approval.tsx";
 import { Nothing, Notice, PageHeader } from "../components/common.tsx";
-import { waitingRunsQuery } from "../queries.ts";
+import { configQuery, waitingRunsQuery } from "../queries.ts";
 
 export const Route = createFileRoute("/inbox")({
-  loader: ({ context }) => context.queryClient.ensureQueryData(waitingRunsQuery()),
+  // The config too: each approval badges the operations it covers by their effect.
+  loader: ({ context }) =>
+    Promise.all([
+      context.queryClient.ensureQueryData(waitingRunsQuery()),
+      context.queryClient.ensureQueryData(configQuery()),
+    ]),
   head: () => ({ meta: [{ title: "Inbox · Sanoma" }] }),
   component: InboxPage,
 });
