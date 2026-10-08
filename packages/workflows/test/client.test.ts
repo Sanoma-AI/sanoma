@@ -222,6 +222,23 @@ describe("a workflow whose input schema transforms", () => {
     });
     const actor = await caught(c().start(double, { n: "2" }, { startedBy: { id: "bob" }, runId }));
     expect(actor).toMatchObject({ data: { differs: ["startedBy"] } });
+    const workflow = await caught(c().start(clock, {}, { startedBy: alice, runId }));
+    expect(errorCode(workflow)).toBe("invalid_input");
+    expect(workflow).toMatchObject({
+      message: `Run ${runId} already exists as another workflow than clock; use another run id`,
+      data: { runId, differs: ["workflow"] },
+    });
     expect((await c().ledger(runId)).filter((r) => r.type === "run.started")).toHaveLength(1);
+  });
+
+  it("lets the first of two starts racing with one new run id stand, and refuses the other", async () => {
+    const runId = `double-${randomUUID()}`;
+    const starts = await Promise.allSettled(
+      ["5", "6"].map((n) => c().start(double, { n }, { startedBy: alice, runId })),
+    );
+    expect(starts.map((s) => s.status).toSorted()).toEqual(["fulfilled", "rejected"]);
+    const refused = starts.find((s) => s.status === "rejected")?.reason;
+    expect(refused).toMatchObject({ code: "invalid_input", data: { differs: ["input"] } });
+    expect([10, 12]).toContain(await c().result(runId));
   });
 });

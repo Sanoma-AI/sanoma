@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { DBOSClient, type WorkflowStatusString } from "@dbos-inc/dbos-sdk";
+import { isDeepStrictEqual } from "node:util";
+import { DBOSClient, Error as DBOSErrors, type WorkflowStatusString } from "@dbos-inc/dbos-sdk";
 import type { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, topicOf } from "./approvals.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
@@ -87,7 +88,7 @@ export interface StartOptions {
    * Use this run id instead of a new one, so a retried start makes one run. Starting an id
    * that exists returns it, without starting another, when the workflow, the input (compared
    * as JSON) and `startedBy` are the same, and throws `invalid_input` naming what differs
-   * when they are not.
+   * when they are not. Of two starts racing with one new id, the first's run stands.
    */
   runId?: string;
 }
@@ -132,18 +133,33 @@ export class SanomaClient {
       '`startedBy` must be a principal, such as { id: "alice" }',
     );
     const args: RunArgs = { input, startedBy };
-    if (options.runId !== undefined) await this.mustMatch(options.runId, workflow.name, args);
-    const handle = await this.dbos.enqueue(
-      {
-        queueName: this.config.queueName,
-        workflowName: workflow.name,
-        workflowID: options.runId,
-        applicationName: this.config.appName,
-        authenticatedUser: startedBy.id,
-        authenticatedRoles: startedBy.groups ?? [],
-      },
-      args,
-    );
+    const { runId } = options;
+    // An id DBOS has already returns that run, unless it is another workflow's, which DBOS refuses.
+    const handle = await this.dbos
+      .enqueue(
+        {
+          queueName: this.config.queueName,
+          workflowName: workflow.name,
+          workflowID: runId,
+          applicationName: this.config.appName,
+          authenticatedUser: startedBy.id,
+          authenticatedRoles: startedBy.groups ?? [],
+        },
+        args,
+      )
+      .catch((err: unknown) => {
+        if (runId !== undefined && err instanceof DBOSErrors.DBOSConflictingWorkflowError) {
+          throw new SanomaError(
+            "invalid_input",
+            `Run ${runId} already exists as another workflow than ${workflow.name}; use another run id`,
+            { runId, differs: ["workflow"] },
+            { cause: err },
+          );
+        }
+        throw err;
+      });
+    // After the enqueue, not before: of two starts racing with one new id, the first's run stands.
+    if (runId !== undefined) await this.mustMatch(runId, args);
     return handle.workflowID;
   }
 
@@ -285,20 +301,15 @@ export class SanomaClient {
     return this.dbos.destroy();
   }
 
-  /** Refuses a run id that names a different run than the one being started. */
-  private async mustMatch(runId: string, workflow: string, args: RunArgs) {
-    const existing = await this.dbos.getWorkflow(runId);
-    if (!existing) return;
-    const [was] = (existing.input ?? []) as [RunArgs?];
-    const differs: Record<string, string> = {};
-    if (existing.workflowName !== workflow) differs.workflow = `workflow (${existing.workflowName}, not ${workflow})`;
-    if (!was || !sameJson(was.input, args.input)) differs.input = "input";
-    if (!was || !sameJson(was.startedBy, args.startedBy)) differs.startedBy = "startedBy";
-    if (Object.keys(differs).length) {
+  /** Refuses a run id whose run, as stored, was started with another input or by someone else. */
+  private async mustMatch(runId: string, args: RunArgs) {
+    const [stored] = ((await this.dbos.getWorkflow(runId))?.input ?? []) as [RunArgs?];
+    const differs = (["input", "startedBy"] as const).filter((key) => !stored || !sameJson(stored[key], args[key]));
+    if (differs.length) {
       throw new SanomaError(
         "invalid_input",
-        `Run ${runId} already exists with a different ${Object.values(differs).join(", ")}; use another run id`,
-        { runId, differs: Object.keys(differs) },
+        `Run ${runId} already exists with a different ${differs.join(", ")}; use another run id`,
+        { runId, differs },
       );
     }
   }
@@ -332,20 +343,11 @@ export class SanomaClient {
   }
 }
 
-/** The value with every object's keys in order, so two equal values are the same JSON. */
-const sorted = (v: unknown): unknown =>
-  Array.isArray(v)
-    ? v.map(sorted)
-    : typeof v === "object" && v !== null
-      ? Object.fromEntries(
-          Object.entries(v)
-            .toSorted(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0))
-            .map(([k, x]) => [k, sorted(x)]),
-        )
-      : v;
+/** The value as JSON reads it back: a Date as its string, undefined members gone. */
+const asJson = (v: unknown): unknown => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 
 /** True when the two are the same JSON, whatever the order of their keys. */
-const sameJson = (a: unknown, b: unknown): boolean => JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
+const sameJson = (a: unknown, b: unknown): boolean => isDeepStrictEqual(asJson(a), asJson(b));
 
 const alreadyDecided = (runId: string, a: ApprovalState) =>
   new SanomaError("already_decided", `${a.id} on run ${runId} was already ${a.status} by ${a.decidedBy}`, {
