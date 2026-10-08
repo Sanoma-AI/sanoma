@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiRouteImport } from './routes/api'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as StartRouteImport } from './routes/start'
 import { Route as WorkflowsRouteImport } from './routes/workflows'
@@ -24,6 +25,11 @@ import { Route as ApiRunsIdApprovalsApprovalIdRouteImport } from './routes/api/r
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiRoute = ApiRouteImport.update({
+  id: '/api',
+  path: '/api',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InboxRoute = InboxRouteImport.update({
@@ -42,14 +48,14 @@ const WorkflowsRoute = WorkflowsRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSplatRoute = ApiSplatRouteImport.update({
-  id: '/api/$',
-  path: '/api/$',
-  getParentRoute: () => rootRouteImport,
+  id: '/$',
+  path: '/$',
+  getParentRoute: () => ApiRoute,
 } as any)
 const ApiConfigRoute = ApiConfigRouteImport.update({
-  id: '/api/config',
-  path: '/api/config',
-  getParentRoute: () => rootRouteImport,
+  id: '/config',
+  path: '/config',
+  getParentRoute: () => ApiRoute,
 } as any)
 const RunsIndexRoute = RunsIndexRouteImport.update({
   id: '/runs/',
@@ -62,24 +68,25 @@ const RunsIdRoute = RunsIdRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiRunsIndexRoute = ApiRunsIndexRouteImport.update({
-  id: '/api/runs/',
-  path: '/api/runs/',
-  getParentRoute: () => rootRouteImport,
+  id: '/runs/',
+  path: '/runs/',
+  getParentRoute: () => ApiRoute,
 } as any)
 const ApiRunsIdIndexRoute = ApiRunsIdIndexRouteImport.update({
-  id: '/api/runs/$id/',
-  path: '/api/runs/$id/',
-  getParentRoute: () => rootRouteImport,
+  id: '/runs/$id/',
+  path: '/runs/$id/',
+  getParentRoute: () => ApiRoute,
 } as any)
 const ApiRunsIdApprovalsApprovalIdRoute =
   ApiRunsIdApprovalsApprovalIdRouteImport.update({
-    id: '/api/runs/$id/approvals/$approvalId',
-    path: '/api/runs/$id/approvals/$approvalId',
-    getParentRoute: () => rootRouteImport,
+    id: '/runs/$id/approvals/$approvalId',
+    path: '/runs/$id/approvals/$approvalId',
+    getParentRoute: () => ApiRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/api': typeof ApiRouteWithChildren
   '/inbox': typeof InboxRoute
   '/start': typeof StartRoute
   '/workflows': typeof WorkflowsRoute
@@ -93,6 +100,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api': typeof ApiRouteWithChildren
   '/inbox': typeof InboxRoute
   '/start': typeof StartRoute
   '/workflows': typeof WorkflowsRoute
@@ -107,6 +115,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/api': typeof ApiRouteWithChildren
   '/inbox': typeof InboxRoute
   '/start': typeof StartRoute
   '/workflows': typeof WorkflowsRoute
@@ -122,6 +131,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/api'
     | '/inbox'
     | '/start'
     | '/workflows'
@@ -135,6 +145,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/api'
     | '/inbox'
     | '/start'
     | '/workflows'
@@ -148,6 +159,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/api'
     | '/inbox'
     | '/start'
     | '/workflows'
@@ -162,16 +174,12 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApiRoute: typeof ApiRouteWithChildren
   InboxRoute: typeof InboxRoute
   StartRoute: typeof StartRoute
   WorkflowsRoute: typeof WorkflowsRoute
-  ApiSplatRoute: typeof ApiSplatRoute
-  ApiConfigRoute: typeof ApiConfigRoute
   RunsIdRoute: typeof RunsIdRoute
   RunsIndexRoute: typeof RunsIndexRoute
-  ApiRunsIndexRoute: typeof ApiRunsIndexRoute
-  ApiRunsIdIndexRoute: typeof ApiRunsIdIndexRoute
-  ApiRunsIdApprovalsApprovalIdRoute: typeof ApiRunsIdApprovalsApprovalIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -181,6 +189,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api': {
+      id: '/api'
+      path: '/api'
+      fullPath: '/api'
+      preLoaderRoute: typeof ApiRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/inbox': {
@@ -206,17 +221,17 @@ declare module '@tanstack/react-router' {
     }
     '/api/$': {
       id: '/api/$'
-      path: '/api/$'
+      path: '/$'
       fullPath: '/api/$'
       preLoaderRoute: typeof ApiSplatRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof ApiRoute
     }
     '/api/config': {
       id: '/api/config'
-      path: '/api/config'
+      path: '/config'
       fullPath: '/api/config'
       preLoaderRoute: typeof ApiConfigRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof ApiRoute
     }
     '/runs/': {
       id: '/runs/'
@@ -234,40 +249,54 @@ declare module '@tanstack/react-router' {
     }
     '/api/runs/': {
       id: '/api/runs/'
-      path: '/api/runs'
+      path: '/runs'
       fullPath: '/api/runs/'
       preLoaderRoute: typeof ApiRunsIndexRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof ApiRoute
     }
     '/api/runs/$id/': {
       id: '/api/runs/$id/'
-      path: '/api/runs/$id'
+      path: '/runs/$id'
       fullPath: '/api/runs/$id/'
       preLoaderRoute: typeof ApiRunsIdIndexRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof ApiRoute
     }
     '/api/runs/$id/approvals/$approvalId': {
       id: '/api/runs/$id/approvals/$approvalId'
-      path: '/api/runs/$id/approvals/$approvalId'
+      path: '/runs/$id/approvals/$approvalId'
       fullPath: '/api/runs/$id/approvals/$approvalId'
       preLoaderRoute: typeof ApiRunsIdApprovalsApprovalIdRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof ApiRoute
     }
   }
 }
 
-const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  InboxRoute: InboxRoute,
-  StartRoute: StartRoute,
-  WorkflowsRoute: WorkflowsRoute,
+interface ApiRouteChildren {
+  ApiSplatRoute: typeof ApiSplatRoute
+  ApiConfigRoute: typeof ApiConfigRoute
+  ApiRunsIndexRoute: typeof ApiRunsIndexRoute
+  ApiRunsIdIndexRoute: typeof ApiRunsIdIndexRoute
+  ApiRunsIdApprovalsApprovalIdRoute: typeof ApiRunsIdApprovalsApprovalIdRoute
+}
+
+const ApiRouteChildren: ApiRouteChildren = {
   ApiSplatRoute: ApiSplatRoute,
   ApiConfigRoute: ApiConfigRoute,
-  RunsIdRoute: RunsIdRoute,
-  RunsIndexRoute: RunsIndexRoute,
   ApiRunsIndexRoute: ApiRunsIndexRoute,
   ApiRunsIdIndexRoute: ApiRunsIdIndexRoute,
   ApiRunsIdApprovalsApprovalIdRoute: ApiRunsIdApprovalsApprovalIdRoute,
+}
+
+const ApiRouteWithChildren = ApiRoute._addFileChildren(ApiRouteChildren)
+
+const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
+  ApiRoute: ApiRouteWithChildren,
+  InboxRoute: InboxRoute,
+  StartRoute: StartRoute,
+  WorkflowsRoute: WorkflowsRoute,
+  RunsIdRoute: RunsIdRoute,
+  RunsIndexRoute: RunsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

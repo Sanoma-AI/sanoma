@@ -1,5 +1,7 @@
-import type { ApprovalState, ErrorCode, LedgerRecord, RunSummary } from "@sanoma/workflows";
+import type { ApprovalState, ErrorCode, InputIssue, LedgerRecord, RunStatus, RunSummary } from "@sanoma/workflows";
 import { z } from "zod";
+
+export type { InputIssue } from "@sanoma/workflows";
 
 /**
  * The shapes the app's HTTP API and server functions send and receive. The page imports this
@@ -32,8 +34,24 @@ export type DecideRequest = z.infer<typeof DecideRequest>;
 export const DecideCall = DecideRequest.extend({ runId: z.string().min(1), approvalId: z.string().min(1) });
 export type DecideCall = z.infer<typeof DecideCall>;
 
-/** `GET /api/runs?limit=`: 1 to 500, default 50. */
-export const RunsQuery = z.object({ limit: z.coerce.number().int().min(1).max(500).default(50) });
+/** How many runs one read lists. */
+export const RUNS_LIMIT = { default: 50, max: 500 } as const;
+
+const RUN_STATUSES = [
+  "queued",
+  "running",
+  "waiting",
+  "finished",
+  "failed",
+  "cancelled",
+] as const satisfies readonly RunStatus[];
+
+/** `GET /api/runs?limit=&status=`: the latest runs, or the latest with that status. */
+export const RunsQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(RUNS_LIMIT.max).default(RUNS_LIMIT.default),
+  status: z.enum(RUN_STATUSES).optional(),
+});
+export type RunsQuery = z.input<typeof RunsQuery>;
 
 /** `GET /api/runs/:id` */
 export interface RunDetail {
@@ -45,14 +63,7 @@ export interface RunDetail {
   approvals: ApprovalState[];
 }
 
-/** A schema problem with a request or a run's input, as zod reports it. `path` leads to the field. */
-export interface InputIssue {
-  path: (string | number)[];
-  message: string;
-  code?: string;
-}
-
-/** Every error response, and the `body` of an error a server function throws. */
+/** Every error response, and the `body` of the error a server function throws. */
 export interface ErrorResponse {
   error: string;
   /** The runtime's code, when the error has one. Branch on this, never on `error`. */
@@ -63,7 +74,10 @@ export interface ErrorResponse {
   approver?: ApprovalState["approver"];
 }
 
-/** An error with the HTTP status and body the API answers with. */
+/**
+ * An error with the HTTP status and body the API answers with. Every server function fails
+ * with one, and the page receives it as one (start.ts registers how it travels).
+ */
 export class ApiError extends Error {
   readonly status: number;
   readonly body: ErrorResponse;
@@ -76,26 +90,9 @@ export class ApiError extends Error {
   }
 }
 
-/** The API error body carried by an error (an `ApiError`, here or rebuilt by `unwrap`), when it has one. */
-export function errorBodyOf(err: unknown): ErrorResponse | undefined {
-  const body = typeof err === "object" && err !== null ? (err as { body?: unknown }).body : undefined;
-  return typeof body === "object" && body !== null && typeof (body as { error?: unknown }).error === "string"
-    ? (body as ErrorResponse)
-    : undefined;
-}
-
-/**
- * What a server function that changes something answers: its value, or the error the API
- * would answer with. Start sends a thrown error to the browser with its message only, so the
- * status and body travel as a value instead.
- */
-export type Outcome<T> = { ok: true; value: T } | { ok: false; status: number; error: ErrorResponse };
-
-/** The outcome's value, or an `ApiError` thrown in the browser with the status and body. */
-export function unwrap<T>(outcome: Outcome<T>): T {
-  if (outcome.ok) return outcome.value;
-  throw new ApiError(outcome.status, outcome.error);
-}
+/** The API error body an error carries, when it is an `ApiError`. */
+export const errorBodyOf = (err: unknown): ErrorResponse | undefined =>
+  err instanceof ApiError ? err.body : undefined;
 
 /** Someone who may decide an approval, as text: a name, or "group <name>". */
 export function approverName(approver: string | { group: string }): string {

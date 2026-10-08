@@ -1,4 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
+import { RUNS_LIMIT } from "./api.ts";
 import { getConfig, getRun, getRuns } from "./functions.ts";
 
 /** How often the runs and a run's detail refresh while a page shows them. */
@@ -8,22 +9,28 @@ export const POLL_MS = 2_000;
 export const configQuery = () =>
   queryOptions({ queryKey: ["config"], queryFn: () => getConfig(), staleTime: Number.POSITIVE_INFINITY });
 
-export const runsQuery = (limit = 50) =>
+export const runsQuery = (limit: number = RUNS_LIMIT.default) =>
   queryOptions({
     queryKey: ["runs", limit],
     queryFn: () => getRuns({ data: { limit } }),
     refetchInterval: POLL_MS,
   });
 
+/** The runs waiting on an approval: every one, up to the API's largest page. Under "runs", so a decision refreshes it. */
+export const waitingRunsQuery = () =>
+  queryOptions({
+    queryKey: ["runs", "waiting"],
+    queryFn: () => getRuns({ data: { status: "waiting", limit: RUNS_LIMIT.max } }),
+    refetchInterval: 5_000,
+  });
+
 export const runQuery = (id: string) =>
   queryOptions({
     queryKey: ["run", id],
     queryFn: () => getRun({ data: { id } }),
-    // A missing run is not polled, and a finished one has nothing left to change.
+    // A finished run has nothing left to change.
     refetchInterval: (query) => {
-      const run = query.state.data?.run;
-      return !run || run.status === "finished" || run.status === "failed" || run.status === "cancelled"
-        ? false
-        : POLL_MS;
+      const status = query.state.data?.run.status;
+      return !status || status === "finished" || status === "failed" || status === "cancelled" ? false : POLL_MS;
     },
   });

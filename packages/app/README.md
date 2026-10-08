@@ -24,13 +24,13 @@ console.log(app.url); // http://127.0.0.1:4321
 
 - **Runs**: recent runs with their workflow, status, who started them, when, pending approvals and any error. Refreshes every 2 seconds while the page is visible.
 - **Run**: one run's ledger as a timeline (the start, each operation call with its effect, the policy's decision, duration, input and output, each approval asked, decided or ignored, and how it ended) beside its approvals, with Approve and Reject and an optional note.
-- **Inbox**: every pending approval across recent runs, newest first, with the same controls.
+- **Inbox**: every pending approval, newest first, with the same controls. Refreshes every 5 seconds.
 - **Start**: a form built from the workflow's input schema: text, date and time, numbers, yes/no, choices, lists with Add and Remove, and objects one level deep; anything else is entered as JSON. Optional fields left empty are left out, so the schema's defaults apply. The server checks the input with the workflow's schema and its complaints appear on the fields they name.
 - **Workflows**: each workflow's operations with their effects, its built-ins and its input; whether a policy is configured, and its version; the config's version.
 
 ## No authentication
 
-This is a local tool. There is no login. The page asks "Who are you?" once, keeps the answer in the browser, and sends it with every change. Anyone who can reach the app can start runs and decide approvals as any name they type; the approver check only compares names. The app listens on 127.0.0.1 unless you pass another `host`, and then refuses requests addressed to any host name but this machine's. Do not expose it to a network you do not trust.
+This is a local tool. There is no login. The page asks "Who are you?" once, keeps the answer in the browser, and sends it with every change. Anyone who can reach the app can start runs and decide approvals as any name they type; the approver check only compares names. The app listens on 127.0.0.1 unless you pass another `host`. While it listens on this machine only, it refuses every request (page, API, server function or static file) whose `Host` names anything but this machine, so another site cannot reach it through DNS rebinding. Do not expose it to a network you do not trust.
 
 A hosted deployment replaces the header with its own login through `resolveActor`, which turns each request into the person acting (`{ id, groups? }`), or `undefined` to refuse a change:
 
@@ -43,7 +43,7 @@ await startApp(config, { resolveActor: async (request) => sessionUser(request) }
 The page uses server functions; scripts (and later Slack or access-request callbacks) use this JSON API. Requests that change something name the actor in the `x-sanoma-actor` header (URI-encoded), or are refused with 400.
 
 - `GET /api/config`: `describeConfig(config)`, including `version` and `policy`.
-- `GET /api/runs?limit=50`: recent runs, newest first (`limit` 1 to 500).
+- `GET /api/runs?limit=50&status=waiting`: recent runs, newest first (`limit` 1 to 500), only those with `status` when given (`queued`, `running`, `waiting`, `finished`, `failed` or `cancelled`).
 - `GET /api/runs/:id`: `{ run, ledger, ledgerError?, approvals }`.
 - `POST /api/runs` with `{ "workflow": name, "input": {...} }`: 201 `{ runId }`.
 - `POST /api/runs/:id/approvals/:approvalId` with `{ "decision": "approve" | "reject", "note"?: string }`: the approval's state.

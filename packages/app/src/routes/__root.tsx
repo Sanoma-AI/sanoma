@@ -19,6 +19,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   headers: () => ({ "cache-control": "no-store" }),
   component: Root,
   notFoundComponent: () => <Notice tone="bad">There is no page here.</Notice>,
+  // The router types a boundary's error as unknown: anything can be thrown.
   errorComponent: ({ error }) => (
     <Notice tone="bad">Something went wrong: {error instanceof Error ? error.message : String(error)}</Notice>
   ),

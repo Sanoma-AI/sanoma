@@ -1,5 +1,5 @@
-// One place for the loopback rule, shared by startApp (what it listens on) and the request
-// middleware (what Host names it answers to), so the two can never disagree.
+// The loopback rule: which addresses count as this machine, for what startApp listens on and
+// for the Host names it then answers to, so the two can never disagree.
 
 const LOOPBACK_NAMES = new Set(["localhost", "127.0.0.1", "::1"]);
 

@@ -1,5 +1,5 @@
 import type { LedgerRecord } from "@sanoma/workflows";
-import { useQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { approverName } from "../../api.ts";
@@ -11,16 +11,13 @@ export const Route = createFileRoute("/runs/$id")({
   loader: ({ context, params }) => context.queryClient.ensureQueryData(runQuery(params.id)),
   head: ({ params }) => ({ meta: [{ title: `Run ${params.id} · Sanoma` }] }),
   component: RunPage,
+  // getRun throws the router's not-found for a run that does not exist.
+  notFoundComponent: () => <Notice tone="bad">No run {Route.useParams().id}.</Notice>,
 });
 
 function RunPage() {
   const { id } = Route.useParams();
-  const { data, error } = useQuery(runQuery(id));
-
-  if (data === null) return <Notice tone="bad">No run {id}.</Notice>;
-  if (!data)
-    return error ? <Notice tone="bad">Could not load the run: {error.message}</Notice> : <Notice>Loading…</Notice>;
-
+  const { data, error } = useSuspenseQuery(runQuery(id));
   const { run, ledger, ledgerError, approvals } = data;
   const titles = new Map(approvals.map((a) => [a.id, a.title]));
   return (

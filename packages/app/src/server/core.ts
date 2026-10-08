@@ -1,4 +1,11 @@
-import { type ApprovalState, errorCode, type Principal, type RunSummary } from "@sanoma/workflows";
+import {
+  type ApprovalState,
+  errorCode,
+  errorMessage,
+  invalidInput,
+  Principal,
+  type SanomaError,
+} from "@sanoma/workflows";
 import type { z } from "zod";
 import {
   ACTOR_HEADER,
@@ -7,78 +14,48 @@ import {
   type ErrorResponse,
   type InputIssue,
   type RunDetail,
-  RunsQuery,
   type StartRunRequest,
   type StartRunResponse,
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
-import { getApp } from "./app.ts";
 
-// What the API routes and the server functions both do. Server-only: it reads the app context
-// that startApp passes with each request. Every expected failure is an ApiError.
+// What the API routes and the server functions both do. Server-only: each takes the app
+// context that startApp passes with every request. Every expected failure is an ApiError.
 
-/** Who is making a change, or a 400 when nobody is named. */
-export async function requireActor(app: AppContext, request: Request): Promise<Principal> {
-  const actor = await app.resolveActor(request);
-  if (!actor || typeof actor.id !== "string" || !actor.id.trim()) {
-    throw new ApiError(400, {
-      error: `Say who you are in the ${ACTOR_HEADER} header`,
-      code: "invalid_input",
-    });
-  }
-  return actor;
+/** Who is making a change (resolved once per request, in start.ts), or a 400 when nobody is named. */
+export function requireActor({ actor }: { actor?: Principal | undefined }): Principal {
+  const parsed = Principal.safeParse(actor);
+  if (parsed.success) return parsed.data;
+  throw new ApiError(400, { error: `Say who you are in the ${ACTOR_HEADER} header`, code: "invalid_input" });
 }
 
+/** The value, parsed by the schema, or a 400 `invalid_input` with zod's issues. */
 export function parse<T extends z.ZodType>(schema: T, value: unknown, what: string): z.output<T> {
   const parsed = schema.safeParse(value);
   if (parsed.success) return parsed.data;
-  throw new ApiError(400, {
-    error: `${what}: ${parsed.error.issues[0]?.message ?? "invalid"}`,
-    code: "invalid_input",
-    issues: issuesOf(parsed.error.issues),
-  });
-}
-
-const issuesOf = (issues: readonly z.core.$ZodIssue[]): InputIssue[] =>
-  issues.map(({ path, message, code }) => ({
-    path: path.filter((p): p is string | number => typeof p !== "symbol"),
-    message,
-    code,
-  }));
-
-export async function listRuns(limit: number): Promise<RunSummary[]> {
-  return getApp().client.runs(limit);
-}
-
-export function runsLimit(url: URL): number {
-  return parse(RunsQuery, { limit: url.searchParams.get("limit") ?? undefined }, "limit must be 1 to 500").limit;
+  throw asApiError(invalidInput(what, parsed.error.issues));
 }
 
 /** The run with its ledger and approvals, or a 404. */
-export async function runDetail(runId: string): Promise<RunDetail> {
-  const { client, resolved } = getApp();
+export async function runDetail({ client, resolved }: AppContext, runId: string): Promise<RunDetail> {
   const run = await client.run(runId);
   if (!run) throw new ApiError(404, { error: `No run ${runId}`, code: "run_not_found" });
-  const [ledger, approvals] = await Promise.all([
-    readLedger(runId, resolved.ledger !== undefined),
-    client.approvals(runId),
-  ]);
-  return { run, ...ledger, approvals };
-}
-
-async function readLedger(runId: string, hasStore: boolean): Promise<Pick<RunDetail, "ledger" | "ledgerError">> {
-  if (!hasStore) return { ledger: null };
+  const { approvals } = run;
+  if (!resolved.ledger) return { run, ledger: null, approvals };
   try {
-    return { ledger: await getApp().client.ledger(runId) };
+    return { run, ledger: await resolved.ledger.read(runId), approvals };
   } catch (err) {
     // A JSONL ledger whose directory no run has written to yet throws; the run still shows, and
     // the page gets the reason. Not logged: the page polls, and this is expected.
-    return { ledger: [], ledgerError: messageOf(err) };
+    return { run, ledger: [], ledgerError: errorMessage(err), approvals };
   }
 }
 
-export async function startRun(actor: Principal, body: StartRunRequest): Promise<StartRunResponse> {
-  const { client, resolved } = getApp();
+export async function startRun(
+  { client, resolved }: AppContext,
+  actor: Principal,
+  body: StartRunRequest,
+): Promise<StartRunResponse> {
   const workflow = resolved.workflows.find((wf) => wf.name === body.workflow);
   if (!workflow) {
     throw new ApiError(404, {
@@ -87,27 +64,15 @@ export async function startRun(actor: Principal, body: StartRunRequest): Promise
       issues: [{ path: ["workflow"], message: `No workflow named "${body.workflow}"`, code: "invalid_value" }],
     });
   }
-  try {
-    return { runId: await client.start(workflow, body.input, { startedBy: actor }) };
-  } catch (err) {
-    throw asApiError(err);
-  }
+  return { runId: await client.start(workflow, body.input, { startedBy: actor }) };
 }
 
 /** Sends the decision, then answers with the approval once the run has read it (or as it stands after 5 s). */
-export async function decide(actor: Principal, call: DecideCall): Promise<ApprovalState> {
-  const { client } = getApp();
+export function decide({ client }: AppContext, actor: Principal, call: DecideCall): Promise<ApprovalState> {
   const note = call.note?.trim() || undefined;
-  try {
-    return await client.decide(
-      call.runId,
-      note === undefined ? { decision: call.decision, by: actor } : { decision: call.decision, by: actor, note },
-      call.approvalId,
-      { timeoutSeconds: 5 },
-    );
-  } catch (err) {
-    throw asApiError(err);
-  }
+  return client.decide(call.runId, { decision: call.decision, by: actor, note }, call.approvalId, {
+    timeoutSeconds: 5,
+  });
 }
 
 const STATUS: Partial<Record<NonNullable<ErrorResponse["code"]>, number>> = {
@@ -122,34 +87,30 @@ const STATUS: Partial<Record<NonNullable<ErrorResponse["code"]>, number>> = {
 export function asApiError(err: unknown): ApiError {
   if (err instanceof ApiError) return err;
   const code = errorCode(err);
-  const status = code && STATUS[code];
-  if (!code || !status) return new ApiError(500, { error: messageOf(err), ...(code ? { code } : {}) });
-  const data = (err as { data?: Record<string, unknown> }).data ?? {};
-  const body: ErrorResponse = { error: messageOf(err), code };
-  if (Array.isArray(data.issues)) body.issues = data.issues as InputIssue[];
-  if (code === "not_approver" && data.approver !== undefined)
-    body.approver = data.approver as ErrorResponse["approver"];
+  const status = (code && STATUS[code]) || 500;
+  const body: ErrorResponse = { error: errorMessage(err), code };
+  // Read by property, not instanceof: DBOS hands a run's errors back as copies.
+  const data: Record<string, unknown> = (err as Partial<SanomaError>).data ?? {};
+  if (status !== 500 && Array.isArray(data.issues)) body.issues = data.issues as InputIssue[];
+  if (code === "not_approver") body.approver = data.approver as ErrorResponse["approver"];
   return new ApiError(status, body);
 }
 
-/** A JSON response for any error. 500s are logged, since only they are unexpected. */
-export function errorResponse(err: unknown, where: string): Response {
+/** `asApiError`, logging what it turns into a 500: only those are unexpected. */
+export function toApiError(err: unknown, where: string): ApiError {
   const api = asApiError(err);
   if (api.status >= 500) console.error(`sanoma app: ${where} failed:`, err);
+  return api;
+}
+
+/** A JSON response for any error. */
+export function errorResponse(err: unknown, where: string): Response {
+  const api = toApiError(err, where);
   return json(api.body, api.status);
 }
 
 export const json = (body: unknown, status = 200) =>
   Response.json(body, { status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } });
-
-/** Runs an API handler, turning any error into its JSON response. */
-export async function respond(where: string, handler: () => Promise<Response>): Promise<Response> {
-  try {
-    return await handler();
-  } catch (err) {
-    return errorResponse(err, where);
-  }
-}
 
 /**
  * The request's JSON body, or a 400. The content type must say JSON: a browser cannot send that
@@ -169,5 +130,3 @@ export async function readJson(request: Request): Promise<unknown> {
     throw new ApiError(400, { error: "The body is not JSON", code: "invalid_input" });
   }
 }
-
-const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));

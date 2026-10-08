@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { extname, join, relative, resolve, sep } from "node:path";
@@ -11,17 +11,7 @@ import type { AppContext, ResolveActor } from "./context.ts";
 import { actorFromHeader } from "./default-actor.ts";
 import { hostName, isLoopback, refuseHost } from "./loopback.ts";
 
-export {
-  ACTOR_HEADER,
-  approverName,
-  DecideRequest,
-  errorBodyOf,
-  type ErrorResponse,
-  type InputIssue,
-  type RunDetail,
-  StartRunRequest,
-  type StartRunResponse,
-} from "./api.ts";
+export { ACTOR_HEADER, type ErrorResponse, type InputIssue, type RunDetail, type StartRunResponse } from "./api.ts";
 export type { ResolveActor } from "./context.ts";
 
 export interface AppOptions {
@@ -61,18 +51,19 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   const resolved = resolveConfig(config);
   const description = describeConfig(config);
   const distDir = resolve(options.distDir ?? defaultDistDir());
-  const entry = await loadServerEntry(distDir);
-  const clientDir = join(distDir, "client");
   const host = options.host ?? "127.0.0.1";
+  const loopbackOnly = isLoopback(host);
 
-  const client = await SanomaClient.connect(config);
-  const app: AppContext = {
-    resolved,
-    description,
-    client,
-    resolveActor: options.resolveActor ?? actorFromHeader,
-    loopbackOnly: isLoopback(host),
-  };
+  const [loaded, connected] = await Promise.allSettled([loadServerEntry(distDir), SanomaClient.connect(config)]);
+  if (loaded.status === "rejected") {
+    if (connected.status === "fulfilled") await connected.value.close();
+    throw loaded.reason;
+  }
+  if (connected.status === "rejected") throw connected.reason;
+  const entry = loaded.value;
+  const client = connected.value;
+  const files = await staticFiles(join(distDir, "client"));
+  const app: AppContext = { resolved, description, client, resolveActor: options.resolveActor ?? actorFromHeader };
 
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => {
@@ -86,11 +77,15 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   });
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
-    // Static files are answered here, before Start sees the request, so the Host rule runs here too.
-    if (app.loopbackOnly && !isLoopback(hostName(req.headers.host ?? ""))) {
+    // When the app listens on this machine only, a page elsewhere could still reach it by
+    // pointing its own host name at 127.0.0.1 (DNS rebinding). Its requests then carry that
+    // name in Host, so anything not addressed to a loopback name is refused: here, where every
+    // request passes (pages, API, server functions and static files alike).
+    if (loopbackOnly && !isLoopback(hostName(req.headers.host ?? ""))) {
       return sendNodeResponse(res, refuseHost(req.headers.host ?? ""));
     }
-    if (await serveStatic(clientDir, req, res)) return;
+    const file = staticFile(files, req);
+    if (file) return sendFile(file, req, res);
     const request = new NodeRequest({ req, res });
     await sendNodeResponse(res, await entry.fetch(request, { context: { app } }));
   }
@@ -132,7 +127,11 @@ function defaultDistDir(): string {
 
 async function loadServerEntry(distDir: string): Promise<ServerEntry> {
   const path = join(distDir, "server", "server.js");
-  if (!(await isFile(path))) {
+  const found = await stat(path).then(
+    (s) => s.isFile(),
+    () => false,
+  );
+  if (!found) {
     throw new Error(
       `The app is not built: ${path} is missing. Run \`pnpm --filter @sanoma/app build\` (in the sanoma repo) first.`,
     );
@@ -157,42 +156,54 @@ const TYPES: Record<string, string> = {
   ".txt": "text/plain; charset=utf-8",
 };
 
-/**
- * Serves a file from the built client when the path names one, and says whether it did.
- * Vite names everything under assets/ by content hash, so those never change; anything else
- * is revalidated on every use.
- */
-async function serveStatic(clientDir: string, req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-  if (req.method !== "GET" && req.method !== "HEAD") return false;
-  let pathname: string;
-  try {
-    pathname = decodeURIComponent(new URL(req.url ?? "/", "http://app.invalid").pathname);
-  } catch {
-    return false;
-  }
-  if (pathname === "/" || pathname.includes("\0")) return false;
-  const file = resolve(clientDir, `.${pathname}`);
-  const rel = relative(clientDir, file);
-  // Outside the client directory (`..`, an absolute path) is never served.
-  if (!rel || rel.startsWith("..") || resolve(clientDir, rel) !== file || !(await isFile(file))) return false;
-  const immutable = rel.startsWith(`assets${sep}`);
-  res.writeHead(200, {
-    "content-type": TYPES[extname(file)] ?? "application/octet-stream",
-    "content-length": (await stat(file)).size,
-    "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
-    "x-content-type-options": "nosniff",
-  });
-  if (req.method === "HEAD") res.end();
-  else await pipeline(createReadStream(file), res);
-  return true;
+interface StaticFile {
+  path: string;
+  headers: Record<string, string | number>;
 }
 
-async function isFile(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isFile();
-  } catch {
-    return false;
+/**
+ * The built client's files by URL path, read once at boot: the build does not change while the
+ * app runs, and only a file found here is ever served. Vite names everything under assets/ by
+ * content hash, so those never change; anything else is revalidated on every use.
+ */
+async function staticFiles(clientDir: string): Promise<Map<string, StaticFile>> {
+  const files = new Map<string, StaticFile>();
+  const entries = await readdir(clientDir, { recursive: true, withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const path = join(entry.parentPath, entry.name);
+    const rel = relative(clientDir, path).split(sep).join("/");
+    files.set(`/${rel}`, {
+      path,
+      headers: {
+        "content-type": TYPES[extname(path)] ?? "application/octet-stream",
+        "content-length": (await stat(path)).size,
+        "cache-control": rel.startsWith("assets/") ? "public, max-age=31536000, immutable" : "no-cache",
+        "x-content-type-options": "nosniff",
+      },
+    });
   }
+  return files;
+}
+
+/** The built file a request names, if any. The API and server functions are never files. */
+function staticFile(files: Map<string, StaticFile>, req: IncomingMessage): StaticFile | undefined {
+  const url = req.url ?? "/";
+  if ((req.method !== "GET" && req.method !== "HEAD") || url.startsWith("/api/") || url.startsWith("/_serverFn/")) {
+    return undefined;
+  }
+  const query = url.indexOf("?");
+  try {
+    return files.get(decodeURIComponent(query === -1 ? url : url.slice(0, query)));
+  } catch {
+    return undefined;
+  }
+}
+
+async function sendFile(file: StaticFile, req: IncomingMessage, res: ServerResponse) {
+  res.writeHead(200, file.headers);
+  if (req.method === "HEAD") res.end();
+  else await pipeline(createReadStream(file.path), res);
 }
 
 function urlHost({ address, family }: AddressInfo): string {

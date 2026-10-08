@@ -2,8 +2,8 @@ import type { WorkflowEntry } from "@sanoma/workflows";
 import { useForm } from "@tanstack/react-form";
 import { useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useMemo, useRef } from "react";
-import { errorBodyOf, unwrap } from "../api.ts";
+import { useMemo } from "react";
+import { errorBodyOf } from "../api.ts";
 import { startRunFn } from "../functions.ts";
 import {
   buildInput,
@@ -21,13 +21,11 @@ const WHOLE = "input";
 
 /** A form for a workflow's input, from its JSON Schema. Starts the run and opens it. */
 export function StartForm({ workflow }: { workflow: WorkflowEntry }) {
-  const schema = JSON.stringify(workflow.input);
-  // Re-read only when the schema itself changes, not on every render.
   const { fields, whole } = useMemo(() => {
-    const read = fieldsOf(JSON.parse(schema) as Record<string, unknown>);
+    const read = fieldsOf(workflow.input);
     const all: Field[] = read ?? [{ key: WHOLE, label: "Input (JSON)", kind: "json", required: true, default: {} }];
     return { fields: all, whole: !read };
-  }, [schema]);
+  }, [workflow.input]);
   const form = useStartForm(workflow.name, fields, whole);
 
   return (
@@ -40,7 +38,7 @@ export function StartForm({ workflow }: { workflow: WorkflowEntry }) {
       }}
     >
       {fields.map((field) => (
-        <FieldView key={field.key} form={form} field={field} name={field.key} />
+        <FieldView key={field.key} form={form} field={field} path={[field.key]} />
       ))}
       <form.Subscribe selector={(s) => [s.errorMap.onSubmit, s.isSubmitting] as const}>
         {([error, submitting]) => (
@@ -65,22 +63,23 @@ type FormValues = Record<string, any>;
 function useStartForm(workflow: string, fields: Field[], whole: boolean) {
   const start = useServerFn(startRunFn);
   const navigate = useNavigate();
-  const started = useRef<string | undefined>(undefined);
+  const defaultValues = useMemo(() => initialValues(fields) as FormValues, [fields]);
   return useForm({
-    defaultValues: initialValues(fields) as FormValues,
+    defaultValues,
     validators: {
       // Starting the run is the validation: the server checks the input against the workflow's
-      // zod schema and answers with its issues, which land on the fields they name.
+      // zod schema and answers with its issues, which land on the fields they name. Once it
+      // has started, the page moves on to the run.
       onSubmitAsync: async ({ value }) => {
         const built = buildInput(fields, value);
         if (Object.keys(built.errors).length) return { fields: built.errors };
+        let runId: string;
         try {
-          const input = whole ? built.input[WHOLE] : built.input;
-          started.current = unwrap(await start({ data: { workflow, input } })).runId;
-          return undefined;
+          ({ runId } = await start({ data: { workflow, input: whole ? built.input[WHOLE] : built.input } }));
         } catch (err) {
           const body = errorBodyOf(err);
-          if (!body?.issues?.length) return { form: body?.error ?? (err as Error).message };
+          // `fields` must be there, even empty, for the form to read `form` as its own error.
+          if (!body?.issues?.length) return { form: body?.error ?? (err as Error).message, fields: {} };
           const byField: Record<string, string> = {};
           const rest: string[] = [];
           for (const issue of body.issues) {
@@ -90,10 +89,9 @@ function useStartForm(workflow: string, fields: Field[], whole: boolean) {
           }
           return { form: rest.join("; ") || "The input does not match the workflow's schema", fields: byField };
         }
+        await navigate({ to: "/runs/$id", params: { id: runId } });
+        return undefined;
       },
-    },
-    onSubmit: async () => {
-      if (started.current) await navigate({ to: "/runs/$id", params: { id: started.current } });
     },
   });
 }
@@ -101,7 +99,8 @@ function useStartForm(workflow: string, fields: Field[], whole: boolean) {
 type StartFormApi = ReturnType<typeof useStartForm>;
 
 /** One field, by its kind: a control, a group of controls, or a list with Add and Remove. */
-function FieldView({ form, field, name }: { form: StartFormApi; field: Field; name: string }) {
+function FieldView({ form, field, path }: { form: StartFormApi; field: Field; path: (string | number)[] }) {
+  const name = pathName(path);
   if (field.kind === "object") {
     return (
       <fieldset className="group">
@@ -110,7 +109,7 @@ function FieldView({ form, field, name }: { form: StartFormApi; field: Field; na
         </legend>
         {field.description && <p className="hint">{field.description}</p>}
         {field.fields.map((sub) => (
-          <FieldView key={sub.key} form={form} field={sub} name={`${name}.${sub.key}`} />
+          <FieldView key={sub.key} form={form} field={sub} path={[...path, sub.key]} />
         ))}
       </fieldset>
     );
@@ -127,7 +126,7 @@ function FieldView({ form, field, name }: { form: StartFormApi; field: Field; na
             {field.description && <p className="hint">{field.description}</p>}
             {(f.state.value as unknown[]).map((_, i) => (
               <div className="array-item" key={i}>
-                <FieldView form={form} field={{ ...item, label: `${field.label} ${i + 1}` }} name={`${name}[${i}]`} />
+                <FieldView form={form} field={{ ...item, label: `${field.label} ${i + 1}` }} path={[...path, i]} />
                 <button type="button" onClick={() => f.removeValue(i)} aria-label={`Remove ${field.label} ${i + 1}`}>
                   Remove
                 </button>

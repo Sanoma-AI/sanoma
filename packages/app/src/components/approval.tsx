@@ -3,9 +3,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
-import { approverName, type DecideRequest, errorBodyOf, unwrap } from "../api.ts";
+import { approverName, type DecideRequest, errorBodyOf } from "../api.ts";
 import { decideFn } from "../functions.ts";
-import { ApprovalStatusBadge, Expandable, When } from "./common.tsx";
+import { ApprovalStatusBadge, Expandable, plural, When } from "./common.tsx";
 
 /** An approval: what it is for, who may decide, and the controls to decide while it is pending. */
 export function ApprovalCard({
@@ -82,9 +82,7 @@ export function ApprovalCard({
       )}
       {approval.refused.length > 0 && (
         <details className="expand">
-          <summary>
-            {approval.refused.length} message{approval.refused.length === 1 ? "" : "s"} ignored
-          </summary>
+          <summary>{plural(approval.refused.length, "message")} ignored</summary>
           <ul className="refused">
             {approval.refused.map((r, i) => (
               <li key={`${r.at}-${i}`}>
@@ -105,12 +103,9 @@ function DecisionControls({ runId, approval }: { runId: string; approval: Approv
   const queryClient = useQueryClient();
   const send = useServerFn(decideFn);
   const mutation = useMutation({
-    mutationFn: async (decision: DecideRequest["decision"]) =>
-      unwrap(
-        await send({
-          data: { runId, approvalId: approval.id, decision, ...(note.trim() ? { note: note.trim() } : {}) },
-        }),
-      ),
+    // The server trims the note and drops an empty one.
+    mutationFn: (decision: DecideRequest["decision"]) =>
+      send({ data: { runId, approvalId: approval.id, decision, note } }),
     onSuccess: async () => {
       setNote("");
       await Promise.all([
@@ -119,7 +114,7 @@ function DecisionControls({ runId, approval }: { runId: string; approval: Approv
       ]);
     },
   });
-  const body = mutation.error ? errorBodyOf(mutation.error) : undefined;
+  const body = errorBodyOf(mutation.error);
   const error =
     body?.code === "not_approver"
       ? `Only ${approverName(body.approver ?? approval.approver)} can decide this`

@@ -139,6 +139,9 @@ describe("the API", () => {
     });
     expect(notJson.status).toBe(400);
     expect(await call("/api/runs?limit=0").then((r) => r.status)).toBe(400);
+    const badStatus = await call("/api/runs?status=asleep");
+    expect(badStatus.status).toBe(400);
+    expect(badStatus.body.issues).toEqual([expect.objectContaining({ path: ["status"] })]);
   });
 
   it("starts a run as the actor, holds it for the approver, refuses anyone else, then finishes", async () => {
@@ -164,6 +167,10 @@ describe("the API", () => {
     const approval = held.approvals[0]!;
     expect(approval).toMatchObject({ id: "approval-1", approver: "marketing-lead", status: "pending" });
     expect(held.run.status).toBe("waiting");
+    const waiting = await call<RunSummary[]>("/api/runs?status=waiting");
+    expect(waiting.status).toBe(200);
+    expect(waiting.body.map((r) => r.runId)).toContain(runId);
+    expect(waiting.body.every((r) => r.status === "waiting")).toBe(true);
     const decide = `/api/runs/${runId}/approvals/${approval.id}`;
 
     const anonymous = await call(decide, { method: "POST", body: { decision: "approve" } });
@@ -190,6 +197,8 @@ describe("the API", () => {
       () => detail(runId),
       (d) => d.run.status === "finished",
     );
+    const stillWaiting = await call<RunSummary[]>("/api/runs?status=waiting");
+    expect(stillWaiting.body.map((r) => r.runId)).not.toContain(runId);
     const ledger = finished.ledger ?? [];
     expect(ledger.map((r) => r.type)).toEqual([
       "run.started",
@@ -247,6 +256,15 @@ describe("the page", () => {
     const res = await fetch(new URL("/nonexistent", app.url));
     expect(res.status).toBe(404);
     expect(await res.text()).toContain('<div id="app">');
+  });
+
+  it("renders a run, and answers a run that does not exist with not-found", async () => {
+    const found = await fetch(new URL(`/runs/${runId}`, app.url));
+    expect(found.status).toBe(200);
+    expect(await found.text()).toContain("<h2>Ledger</h2>");
+    const missing = await fetch(new URL("/runs/does-not-exist", app.url));
+    expect(missing.status).toBe(404);
+    expect(await missing.text()).toContain("No run <!-- -->does-not-exist");
   });
 
   it("serves the built assets, hashed ones as immutable, and nothing outside them", async () => {

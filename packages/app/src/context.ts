@@ -13,6 +13,4 @@ export interface AppContext {
   description: ConfigDescription;
   client: SanomaClient;
   resolveActor: ResolveActor;
-  /** True when the app listens on a loopback address, so requests must be addressed to one. */
-  loopbackOnly: boolean;
 }
