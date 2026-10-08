@@ -176,7 +176,8 @@ describe("writing a run's records", () => {
     await expect(write(run, entry(run, { type: "run.started", input: 1n }))).rejects.toThrow(
       "can't be written as JSON",
     );
-    expect(calls()).toBe(0);
+    // The store refuses it as final on the first try.
+    expect(calls()).toBe(1);
 
     let tries = 0;
     const corrupt: LedgerStore = {

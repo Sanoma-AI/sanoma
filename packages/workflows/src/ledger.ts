@@ -65,8 +65,9 @@ export type LedgerRecord = {
 export interface LedgerStore {
   /**
    * Adds a record, unless one with the same id is already stored. A failed append is tried
-   * again, up to three times; throw an error with `retryable: false` for a failure that would
-   * only happen again, such as a corrupt file.
+   * again, up to three times. A store throws an error with `retryable: false` for a failure
+   * that must not be retried because it would only happen again, such as a corrupt file or a
+   * record that can't be written as JSON.
    */
   append(record: LedgerRecord): Promise<void>;
   /** A run's records in `seq` order. */
@@ -84,8 +85,7 @@ function serialize(record: LedgerRecord): string {
     return JSON.stringify(record);
   } catch (cause) {
     const op = record.type === "op.called" ? ` (${record.op})` : "";
-    const why = cause instanceof Error ? cause.message : String(cause);
-    throw final(`Ledger record ${record.id}${op} can't be written as JSON: ${why}`, cause);
+    throw final(`Ledger record ${record.id}${op} can't be written as JSON: ${errorMessage(cause)}`, cause);
   }
 }
 
@@ -222,8 +222,6 @@ export function entry(run: Run, body: Body, opts: { seq?: number; key?: string; 
 const RETRY_DELAYS_MS = [50, 200, 800];
 
 async function append(run: Run, record: LedgerRecord) {
-  // A record that can't be written as JSON never will be: fail before the first try.
-  serialize(record);
   for (let i = 0; ; i++) {
     try {
       return await run.state.ledger.append(record);
