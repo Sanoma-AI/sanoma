@@ -4,7 +4,7 @@ import type { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, topicOf } from "./approvals.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { type ApprovalState, mayDecide, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
-import { invalidInput, parseOrThrow, SanomaError } from "./errors.ts";
+import { parseOrThrow, SanomaError } from "./errors.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { RunArgs } from "./run.ts";
 
@@ -125,10 +125,7 @@ export class SanomaClient {
     input: z.input<S>,
     options: StartOptions,
   ): Promise<string> {
-    const checked = workflow.input.safeParse(input);
-    if (!checked.success) {
-      throw invalidInput(`The input does not match ${workflow.name}'s schema`, checked.error.issues);
-    }
+    parseOrThrow(workflow.input, input, `The input does not match ${workflow.name}'s schema`);
     const startedBy = parseOrThrow(
       Principal,
       options?.startedBy,
