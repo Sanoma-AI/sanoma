@@ -51,17 +51,22 @@ export function shouldRetry(err: unknown): boolean {
  */
 function serial<T>(run: Run, call: () => Promise<T>): Promise<T> {
   // A failure rejects its caller; the calls queued after it still run, since the workflow may
-  // have caught it. Once the workflow body itself has ended, nothing queued may touch a vendor.
-  const next = run.tail.then(() => {
-    ended(run);
-    return call();
-  });
+  // have caught it. Once the workflow body itself has ended, nothing queued may run. The body
+  // awaits only ctx calls, so one macrotask after the call before settles, the body has either
+  // caught the failure and gone on or ended; the rejection alone reaches it in the same
+  // microtask flush that would start this call.
+  const next = run.tail
+    .then(() => new Promise((r) => setImmediate(r)))
+    .then(() => {
+      refuseIfEnded(run);
+      return call();
+    });
   run.tail = next.catch(() => {});
   return next;
 }
 
 /** Throws once the workflow body has returned or thrown: a call left queued must not run then. */
-export function ended(run: Run) {
+function refuseIfEnded(run: Run) {
   if (run.ended) {
     throw new SanomaError("run_ended", `run ${run.id} has ended; a call queued behind its failure was not made`, {
       runId: run.id,
@@ -173,9 +178,6 @@ async function callOp(run: Run, id: string, input: unknown) {
     await writeFailure(run, entry(run, { ...call, error: errorInfo(err), durationMs: 0 }, { seq }), err);
     throw err;
   }
-  // The policy step is where a call queued behind a failure first yields; if the workflow body
-  // ended meanwhile, stop here: a decision was recorded, but nothing reached the vendor.
-  ended(run);
   if (decision.kind === "approve") {
     const title = decision.title ?? `${op.id} needs ${approverLabel(decision.approver)}`;
     try {

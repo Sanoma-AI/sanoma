@@ -360,9 +360,33 @@ describe("a call queued behind a refused one", () => {
     uses: [ghost.post.publish, bluesky.post.create],
     run: async (ctx, { id }) => Promise.all([ctx.ghost.post.publish({ id }), ctx.bluesky.post.create({ text: "too" })]),
   });
+  // The same, with an approval or a sleep queued behind the refused publish. How the queued
+  // call fails is kept: refused by the runtime, not by DBOS finding the run already over.
+  const queuedFailed: unknown[] = [];
+  const kept = (p: Promise<unknown>) =>
+    p.catch((e: unknown) => {
+      queuedFailed.push(e);
+      throw e;
+    });
+  const asking = defineWorkflow({
+    name: "asking",
+    trigger: "manual",
+    input: z.object({ id: z.string() }),
+    uses: [ghost.post.publish, "approval"],
+    run: async (ctx, { id }) =>
+      Promise.all([ctx.ghost.post.publish({ id }), kept(ctx.approval("Then this", { approver: "marketing-lead" }))]),
+  });
+  const napping = defineWorkflow({
+    name: "napping",
+    trigger: "manual",
+    input: z.object({ id: z.string() }),
+    uses: [ghost.post.publish, "sleep"],
+    run: async (ctx, { id }) => Promise.all([ctx.ghost.post.publish({ id }), kept(ctx.sleep({ ms: 50 }))]),
+  });
   const policy = definePolicy(({ op }) => (op.id === "ghost.post.publish" ? deny("not today") : allow()));
-  const app = useApp(databaseUrl, "call-ended", () => ({ workflows: [both], policy }));
+  const app = useApp(databaseUrl, "call-ended", () => ({ workflows: [both, asking, napping], policy }));
   const c = () => app.client;
+  const steps = async (runId: string) => ((await app.raw.listWorkflowSteps(runId)) ?? []).map((s) => s.name);
 
   it("never reaches its vendor once the run has failed", async () => {
     const runId = await c().start(both, { id: "p1" }, { startedBy: alice });
@@ -371,14 +395,36 @@ describe("a call queued behind a refused one", () => {
     await new Promise((r) => setTimeout(r, 300));
 
     // Its policy step may have run (a decision, no side effect), but never the vendor's step.
-    const steps = ((await app.raw.listWorkflowSteps(runId)) ?? []).map((s) => s.name);
-    expect(steps).not.toContain("bluesky.post.create");
+    expect(await steps(runId)).not.toContain("bluesky.post.create");
     expect(app.ops()).toEqual([]);
     expect(app.vendors.bluesky.state.posts).toEqual([]);
     const records = await c().ledger(runId);
     expect(records.some((r) => r.type === "op.called" && r.op === "bluesky.post.create" && "output" in r)).toBe(false);
     expect(types(records)).toEqual(["run.started", "op.called ghost.post.publish", "run.failed"]);
     expect(records.at(-1)).toMatchObject({ type: "run.failed", error: { code: "policy_denied" } });
+  });
+
+  it("never publishes an approval queued behind it", async () => {
+    queuedFailed.length = 0;
+    const runId = await c().start(asking, { id: "p2" }, { startedBy: alice });
+    expect(errorCode(await failure(c().result(runId)))).toBe("policy_denied");
+    await new Promise((r) => setTimeout(r, 300));
+
+    expect(queuedFailed.map(errorCode)).toEqual(["run_ended"]);
+    expect(await c().approvals(runId)).toEqual([]);
+    expect(await steps(runId)).toEqual(["policy:ghost.post.publish"]);
+    expect(types(await c().ledger(runId))).toEqual(["run.started", "op.called ghost.post.publish", "run.failed"]);
+  });
+
+  it("never sleeps for a sleep queued behind it", async () => {
+    queuedFailed.length = 0;
+    const runId = await c().start(napping, { id: "p3" }, { startedBy: alice });
+    expect(errorCode(await failure(c().result(runId)))).toBe("policy_denied");
+    await new Promise((r) => setTimeout(r, 300));
+
+    expect(queuedFailed.map(errorCode)).toEqual(["run_ended"]);
+    expect(await steps(runId)).toEqual(["policy:ghost.post.publish"]);
+    expect(types(await c().ledger(runId))).toEqual(["run.started", "op.called ghost.post.publish", "run.failed"]);
   });
 });
 

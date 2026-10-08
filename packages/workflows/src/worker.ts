@@ -141,16 +141,19 @@ function register(wf: WorkflowDefinition<any, any>) {
       await write(run, entry(run, { type: "run.started", input }));
       let output: unknown;
       try {
-        output = await wf.run(buildCtx(wf, run), wf.input.parse(input));
+        try {
+          output = await wf.run(buildCtx(wf, run), wf.input.parse(input));
+        } finally {
+          // Before the outcome is written: a call still queued must find the run ended.
+          run.ended = true;
+        }
       } catch (err) {
-        run.ended = true;
         const record = entry(run, { type: "run.failed", error: errorInfo(err) });
         if (isInfrastructureError(err)) skipped(record, `the run was interrupted by DBOS (${errorMessage(err)})`);
         else if (state.stopped) skipped(record, "its worker has stopped; the recovered run records the outcome");
         else await writeFailure(run, record, err);
         throw err;
       }
-      run.ended = true;
       await write(run, entry(run, { type: "run.finished", output }));
       return output;
     },
