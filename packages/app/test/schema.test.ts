@@ -76,6 +76,15 @@ describe("buildInput", () => {
     expect(built).toHaveProperty("people", []);
   });
 
+  it("leaves out an optional object left as it started, a required yes/no in it included", () => {
+    const probe = fieldsOf(
+      jsonSchema(z.object({ details: z.object({ owner: z.string(), notify: z.boolean() }).optional() })),
+    )!;
+    expect(buildInput(probe, initialValues(probe)).input).toEqual({});
+    const owned = buildInput(probe, { details: { owner: "Bo", notify: false } }).input;
+    expect(owned).toEqual({ details: { owner: "Bo", notify: false } });
+  });
+
   it("reads numbers, choices, lists and JSON as their values", () => {
     const { input: built } = filled({
       title: "Launch",
