@@ -15,7 +15,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { ActorContext, useActor, useActorState } from "../actor.ts";
 import { Notice } from "../components/common.tsx";
 import { ModeToggle } from "../components/mode-toggle.tsx";
-import { ThemeProvider, ThemeScript } from "../components/theme-provider.tsx";
+import { ThemeProvider } from "next-themes";
 import css from "../style.css?url";
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
@@ -42,7 +42,15 @@ function Root() {
   const actor = useActorState();
   return (
     <Document>
-      <ThemeProvider>
+      {/* Light, dark or the system's, kept in localStorage. style.css sets color-scheme with the class. */}
+      <ThemeProvider
+        attribute="class"
+        defaultTheme="system"
+        enableSystem
+        enableColorScheme={false}
+        storageKey="sanoma.theme"
+        disableTransitionOnChange
+      >
         <ActorContext value={actor}>
           <div id="app">
             <Nav />
@@ -60,10 +68,9 @@ function Root() {
 
 function Document({ children }: { children: ReactNode }) {
   return (
-    // The theme script sets the class on <html> before React hydrates it.
+    // next-themes' script sets the class on <html> before the body paints, so React finds it changed.
     <html lang="en" suppressHydrationWarning>
       <head>
-        <ThemeScript />
         <HeadContent />
       </head>
       <body>

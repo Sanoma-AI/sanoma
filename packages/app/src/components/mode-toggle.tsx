@@ -7,7 +7,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { type Theme, useTheme } from "./theme-provider.tsx";
+import { useTheme } from "next-themes";
 
 /** Light, dark, or the system's: shadcn's mode toggle, showing which is chosen. */
 export function ModeToggle() {
@@ -21,7 +21,7 @@ export function ModeToggle() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuRadioGroup value={theme} onValueChange={(value) => setTheme(value as Theme)}>
+        <DropdownMenuRadioGroup value={theme} onValueChange={setTheme}>
           <DropdownMenuRadioItem value="light">
             <SunIcon />
             Light
