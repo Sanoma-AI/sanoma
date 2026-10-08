@@ -25,7 +25,7 @@ export {
   type Use,
   type WorkflowDefinition,
 } from "./define.ts";
-export { defineConfig, resolveConfig, resolveDatabaseUrl, type ResolvedConfig, type SanomaConfig } from "./config.ts";
+export { defineConfig, resolveConfig, type ResolvedConfig, type SanomaConfig } from "./config.ts";
 export { describeConfig, type ConfigDescription, type OpEntry, type WorkflowEntry } from "./describe.ts";
 export {
   allow,

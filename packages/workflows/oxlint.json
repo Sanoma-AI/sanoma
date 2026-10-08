@@ -66,8 +66,20 @@
               },
               {
                 "name": "@sanoma/workflows",
-                "importNames": ["SanomaClient", "startWorker", "startApp"],
-                "message": "A workflow must not start runs, start a worker or decide approvals (it could approve itself): ask with `ctx.approval`."
+                "allowImportNames": [
+                  "defineWorkflow",
+                  "definePolicy",
+                  "allow",
+                  "deny",
+                  "approve",
+                  "approvedFor",
+                  "allowAll",
+                  "mayDecide",
+                  "errorCode",
+                  "DriverError"
+                ],
+                "allowTypeImports": true,
+                "message": "A workflow or policy imports only these and types from @sanoma/workflows: the rest (SanomaClient, startWorker, the ledger stores, config helpers) could start runs, approve its own approvals, forge the ledger or read credentials. Ask for approval with `ctx.approval`."
               }
             ],
             "patterns": [

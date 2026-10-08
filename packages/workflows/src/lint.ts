@@ -24,18 +24,48 @@ const REFUSED_PACKAGES: [RegExp, string][] = [
   [/^@sanoma\/connector-[^/]+\/(fake|driver)(\/|$)/, `${THROUGH_CTX}; import the connector itself`],
 ];
 
-/** Runtime entry points a workflow or policy could use to start runs or approve its own approvals. */
-const FORBIDDEN_IMPORTS: Record<string, string> = {
-  SanomaClient: "a workflow must not start runs or decide approvals (it could approve itself); ask with `ctx.approval`",
-  startWorker: "a workflow must not start a worker; it already runs inside one",
-  startApp: "a workflow must not start the app, which decides approvals; ask with `ctx.approval`",
-};
+/**
+ * What a workflow or policy may import from `@sanoma/workflows`, besides types. Everything else
+ * is refused: the client, the worker and the app could start runs or approve the run's own
+ * approvals, a ledger store could forge the audit record (a store keeps the first record per
+ * id), and config helpers can read credentials. Kept equal to `allowImportNames` in oxlint.json.
+ */
+export const WORKFLOW_IMPORTS = [
+  "defineWorkflow",
+  "definePolicy",
+  "allow",
+  "deny",
+  "approve",
+  "approvedFor",
+  "allowAll",
+  "mayDecide",
+  "errorCode",
+  "DriverError",
+] as const;
+
+const ALLOWED_NAMES = new Set<string>(WORKFLOW_IMPORTS);
+
+const NOT_ALLOWED =
+  "a workflow or policy imports only " +
+  WORKFLOW_IMPORTS.join(", ") +
+  " and types from @sanoma/workflows: the rest could start runs, approve its own approvals, forge the ledger or read credentials";
 
 /**
- * Checks a workflow or policy file's imports. Allowed: `@sanoma/workflows` (without
- * `SanomaClient`, `startWorker` or `startApp`), `@sanoma/connector-<vendor>`, `zod`, and
- * relative files. With `filename`, a relative import must stay inside the file's nearest
- * `workflows/` or `policies/` directory, or its own directory when it has neither.
+ * Error classes a run must not test with `instanceof`: on a replay DBOS rethrows a serialized
+ * copy, which is no instance of them, so a branch on it goes another way than the first time
+ * and the run's steps fall out of step. Read the code with `errorCode(err)` instead.
+ */
+const ERROR_CLASSES = new Set(["DriverError", "SanomaError", "PolicyDeniedError", "RejectedError"]);
+
+/**
+ * Checks a workflow or policy file. Imports allowed: the names in `WORKFLOW_IMPORTS` and any
+ * type from `@sanoma/workflows`, `@sanoma/connector-<vendor>`, `zod`, and relative files. With
+ * `filename`, a relative import must stay inside the file's nearest `workflows/` or `policies/`
+ * directory, or its own directory when it has neither. No `instanceof` against the runtime's
+ * error classes: read `errorCode(err)`.
+ *
+ * It guards against accidental non-determinism and accidental ways around the policy; it is
+ * not a sandbox, and code written to get around it can.
  */
 export function lintWorkflow(source: string, filename?: string): LintProblem[] {
   const { program, errors } = parseSync(filename ?? "workflow.ts", source, { sourceType: "module", lang: "ts" });
@@ -51,6 +81,9 @@ export function lintWorkflow(source: string, filename?: string): LintProblem[] {
     message: `syntax: ${e.message}`,
   }));
   const root = filename === undefined ? undefined : treeOf(filename);
+  // Local names of the runtime's error classes, as imported, and every `instanceof` seen.
+  const errorClasses = new Set<string>();
+  const instanceofs: any[] = [];
 
   const checkSource = (node: any) => {
     const spec: string = node.source.value;
@@ -74,10 +107,21 @@ export function lintWorkflow(source: string, filename?: string): LintProblem[] {
         });
         continue;
       }
-      const name = s.imported?.name ?? s.imported?.value ?? s.local?.name ?? s.local?.value;
-      if (s.type !== "ImportDefaultSpecifier" && Object.hasOwn(FORBIDDEN_IMPORTS, name)) {
-        problems.push({ ...at(s.start), message: `${name} is not allowed in a workflow: ${FORBIDDEN_IMPORTS[name]}` });
+      // `import type { X }`, `import { type X }` and `export type { X }` bring in no values.
+      if (
+        node.importKind === "type" ||
+        node.exportKind === "type" ||
+        s.importKind === "type" ||
+        s.exportKind === "type"
+      ) {
+        continue;
       }
+      // What the module exports under: `imported` for an import, `local` for a re-export.
+      const named = s.imported ?? s.local;
+      const imported: string = s.type === "ImportDefaultSpecifier" ? "default" : (named?.name ?? named?.value);
+      if (!ALLOWED_NAMES.has(imported)) {
+        problems.push({ ...at(s.start), message: `${imported} is not allowed in a workflow: ${NOT_ALLOWED}` });
+      } else if (ERROR_CLASSES.has(imported) && s.local?.name) errorClasses.add(s.local.name);
     }
   };
 
@@ -96,6 +140,8 @@ export function lintWorkflow(source: string, filename?: string): LintProblem[] {
       checkSource(node);
     } else if (node.type === "ImportExpression") {
       problems.push({ ...at(node.start), message: "dynamic import is not allowed in a workflow" });
+    } else if (node.type === "BinaryExpression" && node.operator === "instanceof") {
+      instanceofs.push(node);
     }
     for (const [key, child] of Object.entries(node)) {
       if (key !== "type" && key !== "start" && key !== "end" && child && typeof child === "object") visit(child);
@@ -103,6 +149,24 @@ export function lintWorkflow(source: string, filename?: string): LintProblem[] {
   };
 
   visit(program);
+  // After the walk, so an import below its use still counts.
+  for (const node of instanceofs) {
+    const right = node.right;
+    const name: string | undefined =
+      right?.type === "Identifier"
+        ? right.name
+        : right?.type === "MemberExpression" && !right.computed
+          ? right.property?.name
+          : undefined;
+    if (name !== undefined && (errorClasses.has(name) || ERROR_CLASSES.has(name))) {
+      problems.push({
+        ...at(node.start),
+        message:
+          `instanceof ${name} is not allowed in a workflow: on a replay DBOS rethrows a copy of the error, ` +
+          "which is no instance of it, so the run would take another branch; read `errorCode(err)`",
+      });
+    }
+  }
   return problems.toSorted((a, b) => a.line - b.line || a.column - b.column);
 }
 
