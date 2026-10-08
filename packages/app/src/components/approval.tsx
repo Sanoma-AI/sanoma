@@ -175,7 +175,8 @@ export function ApprovalCard({
                 Reject
               </Button>
               {waiting && (
-                <p className="text-sm text-muted-foreground">
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Spinner className="shrink-0" />
                   Your {waiting === "approve" ? "approval" : "rejection"} is queued: the run has not read it yet. Is a
                   worker running?
                 </p>
