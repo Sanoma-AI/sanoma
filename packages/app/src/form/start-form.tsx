@@ -1,5 +1,6 @@
 import type { WorkflowEntry } from "@sanoma/workflows/describe";
 import { useForm } from "@tanstack/react-form";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
@@ -26,6 +27,7 @@ import { errorMessage } from "@sanoma/workflows/shared";
 import { errorBodyOf } from "../api.ts";
 import { Notice } from "../components/common.tsx";
 import { startRunFn } from "../functions.ts";
+import { RUNS_KEY } from "../queries.ts";
 import {
   buildInput,
   type Field as SchemaField,
@@ -86,6 +88,7 @@ type FormValues = Record<string, any>;
 function useStartForm(workflow: string, fields: SchemaField[], whole: boolean) {
   const start = useServerFn(startRunFn);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const defaultValues = useMemo(() => initialValues(fields) as FormValues, [fields]);
   return useForm({
     defaultValues,
@@ -125,6 +128,8 @@ function useStartForm(workflow: string, fields: SchemaField[], whole: boolean) {
           return { form: message, fields: byField };
         }
         toast.success(`Started ${workflow}`);
+        // The lists show the new run at once, not at their next poll.
+        void queryClient.invalidateQueries({ queryKey: RUNS_KEY });
         await navigate({ to: "/runs/$id", params: { id: runId } });
         return undefined;
       },

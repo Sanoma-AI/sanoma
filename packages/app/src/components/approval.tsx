@@ -31,7 +31,7 @@ import { Textarea } from "#/components/ui/textarea.tsx";
 import { approverLabel, isEnded } from "@sanoma/workflows/shared";
 import { type DecideRequest, errorBodyOf, starterName } from "../api.ts";
 import { decideFn } from "../functions.ts";
-import { configQuery, opsById } from "../queries.ts";
+import { configQuery, opsById, RUNS_KEY, runQuery } from "../queries.ts";
 import {
   ApprovalStatusBadge,
   DecisionNote,
@@ -239,8 +239,8 @@ function DecideDialog({
     mutationFn: (chosen: Decision) => send({ data: { runId, approvalId: approval.id, decision: chosen, note } }),
     onSuccess: async (state, chosen) => {
       const refresh = Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["run", runId] }),
-        queryClient.invalidateQueries({ queryKey: ["runs"] }),
+        queryClient.invalidateQueries({ queryKey: runQuery(runId).queryKey }),
+        queryClient.invalidateQueries({ queryKey: RUNS_KEY }),
       ]);
       // Still pending: the decision is queued, but the run has not read it.
       if (state.status === "pending") {

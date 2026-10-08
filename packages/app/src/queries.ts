@@ -26,17 +26,20 @@ export const actorQuery = () =>
     refetchInterval: (query) => (query.state.data?.error ? 10_000 : false),
   });
 
+/** Every list of runs is under this key: invalidating it refreshes them all. */
+export const RUNS_KEY = ["runs"] as const;
+
 export const runsQuery = (limit: number = RUNS_LIMIT.default) =>
   queryOptions({
-    queryKey: ["runs", limit],
+    queryKey: [...RUNS_KEY, limit],
     queryFn: () => getRuns({ data: { limit } }),
     refetchInterval: POLL_MS,
   });
 
-/** The runs waiting on an approval: every one, up to the API's largest page. Under "runs", so a decision refreshes it. */
+/** The runs waiting on an approval: every one, up to the API's largest page. Under RUNS_KEY, so a decision refreshes it. */
 export const waitingRunsQuery = () =>
   queryOptions({
-    queryKey: ["runs", "waiting"],
+    queryKey: [...RUNS_KEY, "waiting"],
     queryFn: () => getRuns({ data: { status: "waiting", limit: RUNS_LIMIT.max } }),
     refetchInterval: 5_000,
   });
