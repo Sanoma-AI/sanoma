@@ -47,8 +47,6 @@ export interface ResolvedConfig {
   /** Each checked against `ops` and `drivers`; names are unique. */
   workflows: WorkflowDefinition<any, any>[];
   policy: Policy;
-  /** The policy's `version`, from `definePolicy(fn, { version })`. */
-  policyVersion?: string;
   /** Undefined when the config has none. */
   ledger?: LedgerStore;
 }
@@ -109,7 +107,6 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     drivers,
     workflows: [...names.values()],
     policy: config.policy,
-    ...(config.policy.version === undefined ? {} : { policyVersion: config.policy.version }),
     ...(config.ledger === undefined ? {} : { ledger: config.ledger }),
   };
 }

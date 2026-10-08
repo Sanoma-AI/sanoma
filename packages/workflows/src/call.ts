@@ -162,7 +162,7 @@ async function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecisio
     run: { id: run.id, workflow: run.workflow, approvals: structuredClone(run.approvals) },
   };
   const decision = checkDecision(await run.state.policy(call), op.id);
-  const { policyVersion } = run.state;
+  const policyVersion = run.state.policy.version;
   return policyVersion === undefined ? decision : { ...decision, policyVersion };
 }
 

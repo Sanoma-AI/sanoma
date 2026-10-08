@@ -21,9 +21,8 @@ export interface WorkerState {
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id. */
   drivers: Map<string, DriverFn>;
+  /** Its `version`, when it has one, is recorded with each of its decisions. */
   policy: Policy;
-  /** The policy's `version`, recorded with each of its decisions. */
-  policyVersion?: string;
   ledger: LedgerStore;
   /**
    * Set when the worker stops. DBOS abandons a stopped worker's run functions, which then fail

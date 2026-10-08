@@ -78,7 +78,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     ops,
     policy: {
       defined: resolved.policy !== allowAll,
-      ...(resolved.policyVersion === undefined ? {} : { version: resolved.policyVersion }),
+      ...(resolved.policy.version === undefined ? {} : { version: resolved.policy.version }),
     },
   };
 }

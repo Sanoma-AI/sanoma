@@ -51,7 +51,6 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     ops: resolved.ops,
     drivers: resolved.drivers,
     policy: resolved.policy,
-    ...(resolved.policyVersion === undefined ? {} : { policyVersion: resolved.policyVersion }),
     ledger: resolved.ledger ?? memoryLedger(),
     stopped: false,
   };

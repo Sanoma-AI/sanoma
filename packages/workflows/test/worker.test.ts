@@ -99,7 +99,6 @@ describe("startWorker, resolveConfig and describeConfig", () => {
     ]);
     expect([...resolved.drivers.keys()].toSorted()).toEqual([...resolved.ops.keys()].toSorted());
     expect(resolved).not.toHaveProperty("ledger");
-    expect(resolved).not.toHaveProperty("policyVersion");
     expect(resolveConfig(config({})).appName).toBe("sanoma");
     expect(resolveConfig(config({})).queueName).toBe("sanoma:sanoma");
   });
