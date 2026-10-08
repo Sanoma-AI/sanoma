@@ -48,7 +48,9 @@ export interface App {
   readonly raw: DBOSClient;
   /** Operation ids the fake vendors were called with, in order. */
   ops(): string[];
-  /** Stops the worker and starts another on the same config, as a restarted process would. */
+  /** Stops the worker, as a process that stopped would; `restart` starts another. */
+  stop(): Promise<void>;
+  /** Stops the worker (unless `stop` did) and starts another on the same config, as a restarted process would. */
   restart(): Promise<void>;
   /** Runs a test leaves unfinished on purpose; cancelled after the describe. */
   readonly leftPending: string[];
@@ -68,6 +70,7 @@ export function useApp(
   const ledgerDir = mkdtempSync(join(tmpdir(), `sanoma-ledger-${appName}-`));
   let config: SanomaConfig;
   let worker: Worker | undefined;
+  let stopped = false;
   let client: SanomaClient | undefined;
   let raw: DBOSClient | undefined;
   const leftPending: string[] = [];
@@ -92,7 +95,7 @@ export function useApp(
     if (leftPending.length) await raw?.cancelWorkflows(leftPending);
     await client?.close();
     await raw?.destroy();
-    await worker?.stop();
+    if (!stopped) await worker?.stop();
     rmSync(ledgerDir, { recursive: true, force: true });
   });
 
@@ -117,9 +120,14 @@ export function useApp(
       return defined(raw, "raw client");
     },
     ops: () => vendors.calls.map((c) => c.op),
-    async restart() {
+    async stop() {
       await defined(worker, "worker").stop();
+      stopped = true;
+    },
+    async restart() {
+      if (!stopped) await defined(worker, "worker").stop();
       worker = await startWorker(config);
+      stopped = false;
     },
     leftPending,
   };

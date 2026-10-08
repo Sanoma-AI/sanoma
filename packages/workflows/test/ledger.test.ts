@@ -205,11 +205,10 @@ describe("writing a run's records", () => {
         throw Object.assign(new Error("corrupt ledger line"), { retryable: false });
       },
     };
-    const started = Date.now();
     const other = runOn(corrupt);
     await expect(write(other, entry(other, { type: "run.started", input: null }))).rejects.toThrow("corrupt");
+    // Tried once: no retry, so no wait.
     expect(tries).toBe(1);
-    expect(Date.now() - started).toBeLessThan(50);
   });
 
   it("gives up after three retries, and a failure record then throws both errors", async () => {

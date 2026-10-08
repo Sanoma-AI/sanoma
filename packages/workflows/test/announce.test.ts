@@ -7,6 +7,7 @@ import { z } from "zod";
 import {
   allow,
   approve,
+  approvedFor,
   type Decision,
   definePolicy,
   defineWorkflow,
@@ -105,21 +106,27 @@ describe("announce", () => {
   });
 
   it("finishes after the worker is stopped and restarted mid-sleep, without repeating a step", async () => {
-    const launchAt = inSeconds(4);
+    // Held at the vendor, so the publish cannot take effect before the stop, however long the
+    // approval and the stop take: the stop lands in the sleep or in the held call, never after it.
+    const release = app.vendors.ghost.hold("ghost.post.publish");
+    const launchAt = inSeconds(1);
     const runId = await c().start(announce, { title: "Restart", body: "<p>x</p>", launchAt }, { startedBy: alice });
     await waitFor(pending(c, runId));
     await c().decide(runId, { decision: "approve", by: { id: "marketing-lead" } });
     await waitFor(async () => (await c().approvals(runId))[0]?.status === "approved");
 
-    await app.worker.stop();
-    expect(app.ops()).not.toContain("ghost.post.publish");
     await app.restart();
+    expect(Object.values(app.vendors.ghost.state.posts).map((p) => p.status)).toEqual(["draft"]);
+    release();
 
     await c().result(runId);
     expect(Date.now()).toBeGreaterThanOrEqual(Date.parse(launchAt));
-    const counts = Object.groupBy(app.ops(), (op) => op);
-    for (const op of Object.keys(counts)) expect(counts[op], op).toHaveLength(1);
-    expect(Object.keys(counts)).toHaveLength(5);
+    // Each call has one identity, even one the stopped worker had in flight, and one effect.
+    const keys = Object.groupBy(app.vendors.calls, (call) => call.op);
+    for (const [op, calls] of Object.entries(keys))
+      expect(new Set(calls?.map((call) => call.idempotencyKey)), op).toHaveProperty("size", 1);
+    expect(Object.keys(keys)).toHaveLength(5);
+    expect(Object.values(app.vendors.ghost.state.posts).map((p) => p.status)).toEqual(["published"]);
 
     // The replay wrote run.started and the approval records again; the ledger kept one of each.
     const records = await c().ledger(runId);
@@ -203,7 +210,7 @@ describe("announce under a policy", () => {
     "no-email": ({ effect }) => (effect === "send" ? deny("no email this week") : allow()),
     // Holds the first publish; its approval covers both publishing operations.
     "lead-publishes": ({ op, effect, run }) =>
-      effect === "publish" && !run.approvals.some((a) => a.status === "approved" && a.covers.includes(op.id))
+      effect === "publish" && !approvedFor(run.approvals, op.id, "marketing-lead")
         ? approve("marketing-lead", { covers: [ghost.post.publish, bluesky.post.create] })
         : allow(),
     "approve-nobody": ({ effect }) => (effect === "publish" ? ({ kind: "approve" } as unknown as Decision) : allow()),

@@ -3,9 +3,11 @@ import { bluesky } from "@sanoma/connector-bluesky";
 import { testDatabaseUrl } from "@sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { sameApprover } from "../src/define.ts";
 import {
   allow,
   approve,
+  approvedFor,
   type ApprovalState,
   decisionEventOf,
   definePolicy,
@@ -14,7 +16,6 @@ import {
   type LedgerRecord,
   mayDecide,
   type Policy,
-  type PolicyCall,
 } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
 import { inSeconds, pending, useApp, waitFor } from "./harness.ts";
@@ -36,6 +37,27 @@ const caught = (p: Promise<unknown>) =>
 const ofType = <T extends LedgerRecord["type"]>(records: LedgerRecord[], type: T) =>
   records.filter((r): r is Extract<LedgerRecord, { type: T }> => r.type === type);
 
+/** Asks for an approval as given, so a test can send one the runtime must refuse. */
+const odd = defineWorkflow({
+  name: "odd",
+  trigger: "manual",
+  input: z.object({ request: z.any() }),
+  uses: ["approval"],
+  run: async (ctx, { request }) => ctx.approval("Odd", request),
+});
+
+/** A workflow that asks someone of its choosing to sign off a post, then posts. */
+const launder = defineWorkflow({
+  name: "launder",
+  trigger: "manual",
+  input: z.object({ text: z.string() }),
+  uses: [bluesky.post.create, "approval"],
+  run: async (ctx, { text }) => {
+    await ctx.approval("Looks fine", { approver: "intern", covers: [bluesky.post.create] });
+    return ctx.bluesky.post.create({ text });
+  },
+});
+
 /** One post, which the "group" policy holds for the marketing group. */
 const shout = defineWorkflow({
   name: "shout",
@@ -43,6 +65,52 @@ const shout = defineWorkflow({
   input: z.object({ text: z.string() }),
   uses: [bluesky.post.create],
   run: async (ctx, { text }) => ctx.bluesky.post.create({ text }),
+});
+
+/** An approval in a run, with the parts approvedFor reads set as the test needs. */
+const state = (over: Partial<ApprovalState>): ApprovalState => ({
+  id: "approval-1",
+  title: "Refund",
+  requestedBy: "workflow",
+  approver: "lead",
+  covers: ["shop.order.refund"],
+  status: "approved",
+  requestedAt: 0,
+  refused: [],
+  ...over,
+});
+
+describe("approvedFor", () => {
+  const refund = "shop.order.refund";
+
+  it("is true for an approval that is approved, covers the operation, and was addressed to that approver", () => {
+    expect(approvedFor([state({})], refund, "lead")).toBe(true);
+    expect(approvedFor([state({ status: "pending" }), state({ id: "approval-2" })], refund, "lead")).toBe(true);
+    const group = { group: "finance" };
+    expect(approvedFor([state({ approver: group })], refund, { group: "finance" })).toBe(true);
+  });
+
+  it("is false when any of the three is missing", () => {
+    expect(approvedFor([], refund, "lead")).toBe(false);
+    expect(approvedFor([state({ status: "pending" })], refund, "lead")).toBe(false);
+    expect(approvedFor([state({ status: "rejected" })], refund, "lead")).toBe(false);
+    expect(approvedFor([state({ covers: [] })], refund, "lead")).toBe(false);
+    expect(approvedFor([state({ covers: ["shop.order.get"] })], refund, "lead")).toBe(false);
+    expect(approvedFor([state({ approver: "intern" })], refund, "lead")).toBe(false);
+    // A person and a group of the same name are different approvers.
+    expect(approvedFor([state({ approver: { group: "lead" } })], refund, "lead")).toBe(false);
+    expect(approvedFor([state({ approver: "lead" })], refund, { group: "lead" })).toBe(false);
+    expect(approvedFor([state({ approver: { group: "sales" } })], refund, { group: "finance" })).toBe(false);
+  });
+
+  it("compares approvers by kind and name", () => {
+    expect(sameApprover("lead", "lead")).toBe(true);
+    expect(sameApprover("lead", "intern")).toBe(false);
+    expect(sameApprover("lead", { group: "lead" })).toBe(false);
+    expect(sameApprover({ group: "lead" }, "lead")).toBe(false);
+    expect(sameApprover({ group: "finance" }, { group: "finance" })).toBe(true);
+    expect(sameApprover({ group: "finance" }, { group: "sales" })).toBe(false);
+  });
 });
 
 describe("mayDecide", () => {
@@ -56,8 +124,46 @@ describe("mayDecide", () => {
 });
 
 describe("approvals a workflow asks for", () => {
-  const app = useApp(databaseUrl, "approvals");
+  const app = useApp(databaseUrl, "approvals", () => ({ workflows: [announce, odd] }));
   const c = () => app.client;
+
+  it("fails the run with invalid_input, asking nobody, when the request names no approver or covers no operations", async () => {
+    const bad: [unknown, RegExp][] = [
+      [{}, /^ctx\.approval\("Odd"\): needs an approver/],
+      [{ approver: "lead", covers: ["ghost.post.publish"] }, /covers must be a list of operations/],
+      [{ approver: "lead", links: "https://example.com" }, /links must be a list of strings/],
+    ];
+    const runs = await Promise.all(bad.map(([request]) => c().start(odd, { request }, { startedBy: alice })));
+    for (const [i, runId] of runs.entries()) {
+      const [request, message] = bad[i]!;
+      const err = await caught(c().result(runId));
+      expect(errorCode(err), JSON.stringify(request)).toBe("invalid_input");
+      expect(err).toMatchObject({ message: expect.stringMatching(message), data: { title: "Odd" } });
+      expect(await c().approvals(runId)).toEqual([]);
+      expect((await c().ledger(runId)).map((r) => r.type)).toEqual(["run.started", "run.failed"]);
+    }
+  });
+
+  it("returns the approval still pending while no worker reads it, and the run reads it once one does", async () => {
+    const runId = await c().start(announce, input("Nobody home"), { startedBy: alice });
+    await waitFor(pending(c, runId));
+    await app.stop();
+    try {
+      const sent = await c().decide(runId, { id: "m-1", decision: "approve", by: lead }, undefined, {
+        timeoutSeconds: 1,
+      });
+      expect(sent).toMatchObject({ id: "approval-1", status: "pending" });
+      // The same message again, as a retried send: the key keeps it to one message.
+      await app.raw.send(runId, { id: "m-1", decision: "approve", by: lead }, "approval-1", "approval-1:m-1");
+    } finally {
+      await app.restart();
+    }
+    await c().result(runId);
+    expect((await c().approvals(runId))[0]).toMatchObject({ status: "approved", decidedWith: "m-1" });
+    const records = await c().ledger(runId);
+    expect(ofType(records, "approval.decided")).toHaveLength(1);
+    expect(ofType(records, "approval.refused")).toEqual([]);
+  });
 
   it("refuses anyone but the approver, before sending and again in the run, and records the refusal", async () => {
     const runId = await c().start(announce, input("Wrong approver"), { startedBy: alice });
@@ -167,23 +273,23 @@ describe("approvals a workflow asks for", () => {
   });
 });
 
-/** True when an approval that covers the call's operation is approved: the README's check. */
-const approved = ({ op, run }: PolicyCall) =>
-  run.approvals.some((a) => a.status === "approved" && a.covers.includes(op.id));
-
 describe("approvals a policy asks for", () => {
   // The test picks a policy per run by actor.
   const byActor: Record<string, Policy> = {
     // The README's policy: each publishing operation needs an approval that covers it.
-    each: (call) => (call.effect === "publish" && !approved(call) ? approve("marketing-lead") : allow()),
-    broad: (call) =>
-      call.effect === "publish" && !approved(call)
+    each: ({ effect, op, run }) =>
+      effect === "publish" && !approvedFor(run.approvals, op.id, "marketing-lead")
+        ? approve("marketing-lead")
+        : allow(),
+    broad: ({ effect, op, run }) =>
+      effect === "publish" && !approvedFor(run.approvals, op.id, "marketing-lead")
         ? approve("marketing-lead", { title: "Publish everywhere", covers: [bluesky.post.create] })
         : allow(),
-    group: (call) => (approved(call) ? allow() : approve({ group: "marketing" })),
+    group: ({ op, run }) =>
+      approvedFor(run.approvals, op.id, { group: "marketing" }) ? allow() : approve({ group: "marketing" }),
   };
   const policy = definePolicy((call) => byActor[call.actor.id]?.(call) ?? allow());
-  const app = useApp(databaseUrl, "approvals-policy", () => ({ workflows: [announce, shout], policy }));
+  const app = useApp(databaseUrl, "approvals-policy", () => ({ workflows: [announce, shout, launder], policy }));
   const c = () => app.client;
 
   it("covers only the held operation by default, so a later publish of another one is held again", async () => {
@@ -259,6 +365,32 @@ describe("approvals a policy asks for", () => {
       covers: ["bluesky.post.create"],
     });
     expect(calls.find((r) => r.op === "bluesky.post.create")?.decision).toEqual({ kind: "allow" });
+  });
+
+  it("does not let a workflow launder a sign-off through an approver of its own choosing", async () => {
+    // Under the "each" policy: a publish needs marketing-lead's approval covering it.
+    const runId = await c().start(launder, { text: "trust me" }, { startedBy: { id: "each" } });
+    await waitFor(pending(c, runId));
+    await c().decide(runId, { decision: "approve", by: { id: "intern" } });
+
+    // The intern's approval covers the post, but was not addressed to marketing-lead.
+    await waitFor(pending(c, runId, 2));
+    expect((await c().approvals(runId))[1]).toMatchObject({
+      approver: "marketing-lead",
+      requestedBy: "policy",
+      op: "bluesky.post.create",
+      status: "pending",
+    });
+    expect(app.ops()).toEqual([]);
+    expect(ofType(await c().ledger(runId), "approval.requested")[0]).toMatchObject({
+      approver: "intern",
+      requestedBy: "workflow",
+      covers: ["bluesky.post.create"],
+    });
+
+    await c().decide(runId, { decision: "approve", by: lead });
+    await c().result(runId);
+    expect(app.ops()).toEqual(["bluesky.post.create"]);
   });
 
   it("lets anyone in an approver group decide, and refuses anyone outside it", async () => {

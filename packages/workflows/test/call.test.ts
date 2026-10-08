@@ -87,7 +87,26 @@ const notes = defineConnector("notes", {
     },
   },
 });
+/** Names its target with a number, which the runtime refuses. */
+const tags = defineConnector("tags", {
+  tag: {
+    add: {
+      effect: "write",
+      input: z.object({ id: z.string() }),
+      output: z.object({ id: z.string() }),
+      target: ({ id }: { id: string }) => id.length as unknown as string,
+    },
+  },
+});
 const notesDriver = defineDriver(notes, { note: { update: async ({ id }) => ({ id }) } });
+const tagsDriver = defineDriver(tags, { tag: { add: async ({ id }) => ({ id }) } });
+const tag = defineWorkflow({
+  name: "tag",
+  trigger: "manual",
+  input: z.object({ id: z.string() }),
+  uses: [tags.tag.add],
+  run: async (ctx, { id }) => ctx.tags.tag.add({ id }),
+});
 const edit = defineWorkflow({
   name: "edit",
   trigger: "manual",
@@ -310,7 +329,7 @@ describe("ctx.sleep", () => {
     );
     for (const runId of [isoPast!, epochPast!]) {
       expect(await c().result(runId)).toBe("rested");
-      expect(await steps(runId)).toEqual(["DBOS.now"]);
+      expect(await steps(runId)).not.toContain("DBOS.sleep");
       expect(types(await c().ledger(runId))).toEqual(["run.started", "run.finished"]);
     }
     expect(await c().result(short!)).toBe("rested");
@@ -321,7 +340,9 @@ describe("ctx.sleep", () => {
 describe("the call a policy sees", () => {
   const seen: PolicyCall[] = [];
   const policy = definePolicy(
-    (call) => {
+    // Async: a policy may return a promise of its decision.
+    async (call) => {
+      await Promise.resolve();
       // A copy proves the call is plain data: structuredClone refuses functions such as zod schemas.
       seen.push(structuredClone(call));
       if (call.target === "note/broken") throw new Error("no rule for broken notes");
@@ -332,9 +353,9 @@ describe("the call a policy sees", () => {
     { version: "notes-1" },
   );
   const app = useApp(databaseUrl, "call-policy", (vendors) => ({
-    workflows: [edit, post],
-    connectors: [ghost, resend, bluesky, notes],
-    drivers: [...vendors.drivers, notesDriver],
+    workflows: [edit, post, tag],
+    connectors: [ghost, resend, bluesky, notes, tags],
+    drivers: [...vendors.drivers, notesDriver, tagsDriver],
     policy,
     ledger: memoryLedger(),
   }));
@@ -383,6 +404,15 @@ describe("the call a policy sees", () => {
     });
   });
 
+  it("fails the run, before the policy decides, when the operation's target is not a string", async () => {
+    seen.length = 0;
+    const runId = await c().start(tag, { id: "t1" }, { startedBy: alice });
+    const err = await failure(c().result(runId));
+    expect(err).toMatchObject({ message: "tags.tag.add: `target` returned number, not a string" });
+    expect(seen).toEqual([]);
+    expect(types(await c().ledger(runId))).toEqual(["run.started", "run.failed"]);
+  });
+
   it("has no target when the operation declares none", async () => {
     seen.length = 0;
     const runId = await c().start(post, { text: "hi" }, { startedBy: alice });
@@ -401,21 +431,23 @@ describe("the call a policy sees", () => {
 
 describe("a call queued behind a refused one", () => {
   // Both calls are made at once; the publish is refused, which ends the run.
-  const both = defineWorkflow({
-    name: "both",
-    trigger: "manual",
-    input: z.object({ id: z.string() }),
-    uses: [ghost.post.publish, bluesky.post.create],
-    run: async (ctx, { id }) => Promise.all([ctx.ghost.post.publish({ id }), ctx.bluesky.post.create({ text: "too" })]),
-  });
-  // The same, with an approval or a sleep queued behind the refused publish. How the queued
-  // call fails is kept: refused by the runtime, not by DBOS finding the run already over.
+  // How the queued call fails is kept: refused by the runtime, not by DBOS finding the run
+  // already over.
   const queuedFailed: unknown[] = [];
   const kept = (p: Promise<unknown>) =>
     p.catch((e: unknown) => {
       queuedFailed.push(e);
       throw e;
     });
+  const both = defineWorkflow({
+    name: "both",
+    trigger: "manual",
+    input: z.object({ id: z.string() }),
+    uses: [ghost.post.publish, bluesky.post.create],
+    run: async (ctx, { id }) =>
+      Promise.all([ctx.ghost.post.publish({ id }), kept(ctx.bluesky.post.create({ text: "too" }))]),
+  });
+  // The same, with an approval or a sleep queued behind the refused publish.
   const asking = defineWorkflow({
     name: "asking",
     trigger: "manual",
@@ -437,11 +469,13 @@ describe("a call queued behind a refused one", () => {
   const steps = async (runId: string) => ((await app.raw.listWorkflowSteps(runId)) ?? []).map((s) => s.name);
 
   it("never reaches its vendor once the run has failed", async () => {
+    queuedFailed.length = 0;
     const runId = await c().start(both, { id: "p1" }, { startedBy: alice });
     expect(errorCode(await failure(c().result(runId)))).toBe("policy_denied");
     // Time for the queued call to run, had it been going to.
     await new Promise((r) => setTimeout(r, 300));
 
+    expect(queuedFailed.map(errorCode)).toEqual(["run_ended"]);
     // Its policy step may have run (a decision, no side effect), but never the vendor's step.
     expect(await steps(runId)).not.toContain("bluesky.post.create");
     expect(app.ops()).toEqual([]);

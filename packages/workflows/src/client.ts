@@ -42,6 +42,24 @@ export const dbosStatusesOf = (...statuses: RunStatus[]): WorkflowStatusString[]
     statuses.some((status) => FROM_DBOS[s] === (status === "waiting" ? "running" : status)),
   );
 
+/**
+ * The first `limit` items `keep` accepts, read a page of `pageSize` at a time from `list`, in
+ * its order, until there are enough or a page comes back short (the last one).
+ */
+export async function firstMatching<T>(
+  list: (page: { limit: number; offset: number }) => Promise<T[]>,
+  keep: (item: T) => boolean,
+  limit: number,
+  pageSize: number,
+): Promise<T[]> {
+  const found: T[] = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const rows = await list({ limit: pageSize, offset });
+    found.push(...rows.filter(keep));
+    if (found.length >= limit || rows.length < pageSize) return found.slice(0, limit);
+  }
+}
+
 /** Which runs `SanomaClient.runs` lists. */
 export interface RunsFilter {
   /** At most this many, newest first. Defaults to 20. */
@@ -157,15 +175,12 @@ export class SanomaClient {
     if (status !== "running" && status !== "waiting") {
       return Promise.all((await list({ limit })).map((r) => this.summarize(r)));
     }
-    const pageSize = Math.max(limit * 2, 50);
-    const found: RunSummary[] = [];
-    for (let offset = 0; ; offset += pageSize) {
-      const rows = await list({ limit: pageSize, offset });
-      for (const run of await Promise.all(rows.map((r) => this.summarize(r)))) {
-        if (run.status === status) found.push(run);
-      }
-      if (found.length >= limit || rows.length < pageSize) return found.slice(0, limit);
-    }
+    return firstMatching(
+      async (page) => Promise.all((await list(page)).map((r) => this.summarize(r))),
+      (run) => run.status === status,
+      limit,
+      Math.max(limit * 2, 50),
+    );
   }
 
   async run(runId: string): Promise<RunSummary | undefined> {
