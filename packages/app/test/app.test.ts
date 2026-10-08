@@ -466,6 +466,10 @@ describe("the page", () => {
     const found = await page(`/runs/${runId}`);
     expect(found.status).toBe(200);
     expect(found.html).toMatch(/<h2[^>]*>Ledger<\/h2>/);
+    // React Flow draws the graph in the browser only: the server renders its heading and a skeleton.
+    expect(found.html).toMatch(
+      /<h2[^>]*>Graph<\/h2><div[^>]*><div data-slot="skeleton"[^>]*aria-label="Loading the graph"/,
+    );
     // The workflow's own approval covers no operation, and says so.
     expect(found.html).toMatch(/Lets through<\/dt><dd[^>]*><span[^>]*>no operation by itself/);
     const missing = await page("/runs/does-not-exist");
