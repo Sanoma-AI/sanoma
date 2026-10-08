@@ -111,7 +111,13 @@ function useStartForm(workflow: string, fields: SchemaField[], whole: boolean) {
             if (target) byField[target.name] ??= target.message;
             else rest.push(issue.path.length ? `${pathName(issue.path)}: ${issue.message}` : issue.message);
           }
-          const message = rest.join("; ") || "The input does not match the workflow's schema";
+          // A form-level message only for what no field shows.
+          const placed = Object.keys(byField).length > 0;
+          const message = rest.length
+            ? rest.join("; ")
+            : placed
+              ? undefined
+              : "The input does not match the workflow's schema";
           return { form: message, fields: byField };
         }
         toast.success(`Started ${workflow}`);
