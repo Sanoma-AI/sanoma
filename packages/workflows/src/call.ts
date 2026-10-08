@@ -71,9 +71,12 @@ function serial<T>(run: Run, call: () => Promise<T>): Promise<T> {
       refuseIfEnded(run);
       return call();
     });
-  run.tail = next.catch(() => {});
+  // Settled either way, and holding nothing: the queue keeps neither the output nor the error.
+  run.tail = next.then(noop, noop);
   return next;
 }
+
+const noop = () => {};
 
 /** Throws once the workflow body has returned or thrown: a call left queued must not run then. */
 function refuseIfEnded(run: Run) {

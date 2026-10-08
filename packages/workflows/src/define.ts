@@ -49,13 +49,13 @@ export const notApprover = ({ approver }: Pick<ApprovalState, "approver">, by: P
 export const sameApprover = (a: Approver, b: Approver): boolean =>
   typeof a === "string" || typeof b === "string" ? a === b : a.group === b.group;
 
+const notOps = "covers must be a list of operations";
+
 /** `covers` as given (operations), parsed to their ids. */
 export const Covers = z
   .array(
-    z.object({ id: z.string() }, { error: "covers must be a list of operations" }).transform((op) => op.id),
-    {
-      error: "covers must be a list of operations",
-    },
+    z.object({ id: z.string() }, { error: notOps }).transform((op) => op.id),
+    { error: notOps },
   )
   .optional();
 

@@ -59,7 +59,7 @@ export function defineConnector<const V extends string, const S extends Specs>(v
         effect: spec.effect,
         idempotent: spec.idempotent ?? false,
         description: spec.description,
-        ...(spec.target === undefined ? {} : { target: spec.target }),
+        target: spec.target,
         input: spec.input,
         output: spec.output,
       } satisfies Op);
