@@ -1,7 +1,6 @@
 import type { ApprovalState, Effect, LedgerRecord, RecordedDecision } from "@sanoma/workflows";
 import { cva } from "class-variance-authority";
 import { ChevronRightIcon, CircleAlertIcon, InfoIcon } from "lucide-react";
-import { ClientOnly } from "@tanstack/react-router";
 import {
   lazy,
   type ReactNode,
@@ -277,7 +276,8 @@ function useSeen(ref: RefObject<HTMLElement | null>): boolean {
 /**
  * A graph (a run's, or a workflow's outline) in a box 220 px high, 280 px from `sm`. It is
  * built and drawn in the browser, once the box comes near the screen; until then, and on the
- * server, a skeleton of the same size holds its place.
+ * server, a skeleton of the same size holds its place. (The server never sees the box: `useSeen`
+ * flips in an effect, and effects run only in the browser.)
  */
 export function GraphPanel(props: GraphProps) {
   const box = useRef<HTMLDivElement>(null);
@@ -285,15 +285,13 @@ export function GraphPanel(props: GraphProps) {
   const skeleton = <Skeleton role="status" aria-label="Loading the graph" className="size-full rounded-none" />;
   return (
     <Card ref={box} className="h-[220px] gap-0 py-0 sm:h-[280px]">
-      <ClientOnly fallback={skeleton}>
-        {seen ? (
-          <Suspense fallback={skeleton}>
-            <Graph {...props} />
-          </Suspense>
-        ) : (
-          skeleton
-        )}
-      </ClientOnly>
+      {seen ? (
+        <Suspense fallback={skeleton}>
+          <Graph {...props} />
+        </Suspense>
+      ) : (
+        skeleton
+      )}
     </Card>
   );
 }

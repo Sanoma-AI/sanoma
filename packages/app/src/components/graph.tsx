@@ -34,7 +34,7 @@ import { effectBadge, StatusDot, toneBadge } from "./common.tsx";
 import { ZoomSlider } from "./zoom-slider.tsx";
 
 // A run's graph, or a workflow's outline, drawn with React Flow. It needs the DOM, so the pages
-// load this module only in the browser (GraphPanel in common.tsx: React.lazy behind ClientOnly);
+// load this module only in the browser (GraphPanel in common.tsx: React.lazy, once seen);
 // the server renders a skeleton instead.
 
 type FlowNode = Node<{ node: GraphNode }, GraphNodeKind>;
