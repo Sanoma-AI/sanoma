@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Approver, Principal } from "./define.ts";
 import { type ErrorInfo, errorMessage, isFinal, keepCode } from "./errors.ts";
-import { warn } from "./log.ts";
+import { shown, warn } from "./log.ts";
 import type { Effect } from "./op.ts";
 import type { RecordedDecision } from "./policy.ts";
 import type { Run } from "./run.ts";
@@ -96,10 +96,6 @@ function serialize(record: LedgerRecord): string {
 
 const COMPARED = ["type", "input", "decision", "error", "output"] as const;
 
-/** A value as JSON, cut to `max` characters, for a message. */
-const brief = (json: string | undefined, max = 200) =>
-  json === undefined ? "nothing" : json.length > max ? `${json.slice(0, max)}…` : json;
-
 /**
  * The first record with an id stands. Says so when a later one with that id differs where it
  * matters, showing both, so a replay that went another way can be told from a retry.
@@ -107,9 +103,11 @@ const brief = (json: string | undefined, max = 200) =>
 function warnIfDifferent(stored: LedgerRecord, line: string) {
   const later = JSON.parse(line) as Record<string, unknown>;
   const differs = COMPARED.flatMap((k) => {
-    const kept = JSON.stringify((stored as Record<string, unknown>)[k]);
-    const sent = JSON.stringify(later[k]);
-    return kept === sent ? [] : [`${k} (kept ${brief(kept)}, later ${brief(sent)})`];
+    const kept = (stored as Record<string, unknown>)[k];
+    const sent = later[k];
+    return JSON.stringify(kept) === JSON.stringify(sent)
+      ? []
+      : [`${k} (kept ${shown(kept, 200)}, later ${shown(sent, 200)})`];
   });
   if (differs.length) {
     warn(`ledger: kept the first record ${stored.id}; a later write differed in ${differs.join("; ")}`);

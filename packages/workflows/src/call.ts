@@ -21,6 +21,7 @@ import {
   SanomaError,
 } from "./errors.ts";
 import { entry, skipped, write, writeFailure } from "./ledger.ts";
+import { shown } from "./log.ts";
 import { type CallContext, isOp, type Op } from "./op.ts";
 import { DecisionSchema, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
 import type { Run, WorkerState } from "./run.ts";
@@ -143,15 +144,6 @@ function checkDecision(decision: unknown, opId: string): RecordedDecision {
   throw new Error(
     `The policy returned ${shown(decision)} for ${opId}: ${why}; use allow(), deny(reason) or approve(approver)`,
   );
-}
-
-/** A value as JSON, for a message, or as a string when it isn't JSON. */
-function shown(value: unknown): string {
-  try {
-    return JSON.stringify(value) ?? String(value);
-  } catch {
-    return String(value);
-  }
 }
 
 /** The resource instance the call acts on, from the operation's `target`, when it declares one. */
