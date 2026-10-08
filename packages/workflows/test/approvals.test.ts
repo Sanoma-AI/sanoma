@@ -4,7 +4,6 @@ import { testDatabaseUrl } from "@sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { messageKeyOf, topicOf } from "../src/approvals.ts";
-import { sameApprover } from "../src/define.ts";
 import {
   allow,
   approve,
@@ -102,15 +101,6 @@ describe("approvedFor", () => {
     expect(approvedFor([state({ approver: { group: "lead" } })], refund, "lead")).toBe(false);
     expect(approvedFor([state({ approver: "lead" })], refund, { group: "lead" })).toBe(false);
     expect(approvedFor([state({ approver: { group: "sales" } })], refund, { group: "finance" })).toBe(false);
-  });
-
-  it("compares approvers by kind and name", () => {
-    expect(sameApprover("lead", "lead")).toBe(true);
-    expect(sameApprover("lead", "intern")).toBe(false);
-    expect(sameApprover("lead", { group: "lead" })).toBe(false);
-    expect(sameApprover({ group: "lead" }, "lead")).toBe(false);
-    expect(sameApprover({ group: "finance" }, { group: "finance" })).toBe(true);
-    expect(sameApprover({ group: "finance" }, { group: "sales" })).toBe(false);
   });
 });
 

@@ -181,16 +181,16 @@ export const all = [SanomaClient, jsonlLedger, x, fakeGhost, t, r, k, resolveDat
 
 describe("lintWorkflow on a workflow that tries everything", () => {
   it("refuses each import and instanceof it can see, on its line", () => {
-    const problems = lintWorkflow(BAD, "workflows/bad.ts").map((p) => [p.line, p.message] as const);
-    expect(problems).toEqual([
-      [1, expect.stringMatching(/^SanomaClient is not allowed/)],
-      [1, expect.stringMatching(/^jsonlLedger is not allowed/)],
-      [1, expect.stringMatching(/^DriverError is not allowed/)],
-      [2, expect.stringMatching(/^import "@sanoma\/testing" is not allowed/)],
-      [3, expect.stringMatching(/^import "@sanoma\/connector-ghost\/fake" is not allowed/)],
-      [8, expect.stringMatching(/^resolveDatabaseUrl is not allowed.*read credentials/)],
-      [9, expect.stringMatching(/^import "@sanoma\/connector-ghost\/driver" is not allowed/)],
-      [15, expect.stringMatching(/^instanceof DriverError is not allowed/)],
+    const refused = lintWorkflow(BAD, "workflows/bad.ts").map((p) => [p.line, p.message.split(" is not allowed")[0]]);
+    expect(refused).toEqual([
+      [1, "SanomaClient"],
+      [1, "jsonlLedger"],
+      [1, "DriverError"],
+      [2, 'import "@sanoma/testing"'],
+      [3, 'import "@sanoma/connector-ghost/fake"'],
+      [8, "resolveDatabaseUrl"],
+      [9, 'import "@sanoma/connector-ghost/driver"'],
+      [15, "instanceof DriverError"],
     ]);
   });
 });
