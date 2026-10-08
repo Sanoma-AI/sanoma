@@ -201,11 +201,17 @@ export function Expandable({ label, value }: { label: string; value: unknown }) 
   );
 }
 
-/** A callout: a fact about the page, or (`bad`) something that went wrong. */
-export function Notice({ tone = "muted", children }: { tone?: "muted" | "bad"; children: ReactNode }) {
+/** A callout: a fact about the page, or (`destructive`) something that went wrong. */
+export function Notice({
+  variant = "default",
+  children,
+}: {
+  variant?: "default" | "destructive";
+  children: ReactNode;
+}) {
   return (
-    <Alert variant={tone === "bad" ? "destructive" : "default"}>
-      {tone === "bad" ? <CircleAlertIcon /> : <InfoIcon />}
+    <Alert variant={variant}>
+      {variant === "destructive" ? <CircleAlertIcon /> : <InfoIcon />}
       <AlertDescription>{children}</AlertDescription>
     </Alert>
   );

@@ -25,10 +25,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   // Pages show what is happening now: never cache them.
   headers: () => ({ "cache-control": "no-store" }),
   component: Root,
-  notFoundComponent: () => <Notice tone="bad">There is no page here.</Notice>,
+  notFoundComponent: () => <Notice variant="destructive">There is no page here.</Notice>,
   // The router types a boundary's error as unknown: anything can be thrown.
   errorComponent: ({ error }) => (
-    <Notice tone="bad">Something went wrong: {error instanceof Error ? error.message : String(error)}</Notice>
+    <Notice variant="destructive">
+      Something went wrong: {error instanceof Error ? error.message : String(error)}
+    </Notice>
   ),
 });
 

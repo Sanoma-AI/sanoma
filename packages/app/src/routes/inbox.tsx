@@ -29,7 +29,7 @@ function InboxPage() {
           {pending.length} waiting{actor ? `, ${mine} for you` : ""}
         </p>
       </PageHeader>
-      {error && <Notice tone="bad">Could not refresh approvals: {error.message}</Notice>}
+      {error && <Notice variant="destructive">Could not refresh approvals: {error.message}</Notice>}
       {pending.length === 0 && <Nothing title="Nothing is waiting for a decision" />}
       <div className="grid gap-4 lg:grid-cols-2">
         {pending.map(({ run, approval }) => (

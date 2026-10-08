@@ -31,7 +31,7 @@ export const Route = createFileRoute("/runs/$id")({
   head: ({ params }) => ({ meta: [{ title: `Run ${params.id} · Sanoma` }] }),
   component: RunPage,
   // getRun throws the router's not-found for a run that does not exist.
-  notFoundComponent: () => <Notice tone="bad">No run {Route.useParams().id}.</Notice>,
+  notFoundComponent: () => <Notice variant="destructive">No run {Route.useParams().id}.</Notice>,
 });
 
 function RunPage() {
@@ -44,7 +44,7 @@ function RunPage() {
       <PageHeader title={run.workflow}>
         <Badge className={toneBadge({ tone: RUN_TONE[run.status] })}>{run.status}</Badge>
       </PageHeader>
-      {error && <Notice tone="bad">Could not refresh: {error.message}</Notice>}
+      {error && <Notice variant="destructive">Could not refresh: {error.message}</Notice>}
       <Facts>
         <Fact label="Started by">{starterName(run)}</Fact>
         <Fact label="Started">
@@ -64,7 +64,7 @@ function RunPage() {
         <div className="flex flex-col gap-3">
           <SectionTitle>Ledger</SectionTitle>
           {ledger === null && <Notice>This config has no ledger store, so there is no record to show.</Notice>}
-          {ledgerError && <Notice tone="bad">Could not read the ledger: {ledgerError}</Notice>}
+          {ledgerError && <Notice variant="destructive">Could not read the ledger: {ledgerError}</Notice>}
           {ledger && ledger.length === 0 && !ledgerError && <Nothing title="Nothing recorded yet" />}
           {ledger && ledger.length > 0 && (
             <ItemGroup aria-label="Ledger">

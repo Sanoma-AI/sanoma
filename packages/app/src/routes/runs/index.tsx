@@ -29,7 +29,7 @@ function RunsPage() {
   return (
     <section className="flex flex-col gap-4">
       <PageHeader title="Runs">{runs.length > 0 && <div className="ml-auto">{start}</div>}</PageHeader>
-      {error && <Notice tone="bad">Could not refresh runs: {error.message}</Notice>}
+      {error && <Notice variant="destructive">Could not refresh runs: {error.message}</Notice>}
       {runs.length === 0 && (
         <Nothing title="No runs yet" action={start}>
           Start one, or have a worker start one.

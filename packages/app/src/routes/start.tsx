@@ -48,7 +48,7 @@ function StartPage() {
           ))}
         </NativeSelect>
       </Field>
-      {!workflow && name && <Notice tone="bad">No workflow named “{name}”.</Notice>}
+      {!workflow && name && <Notice variant="destructive">No workflow named “{name}”.</Notice>}
       {workflow && (
         <Card>
           <CardHeader>

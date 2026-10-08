@@ -64,7 +64,7 @@ export function StartForm({ workflow }: { workflow: WorkflowEntry }) {
         <form.Subscribe selector={(s) => [s.errorMap.onSubmit, s.isSubmitting] as const}>
           {([error, submitting]) => (
             <>
-              {typeof error === "string" && error && <Notice tone="bad">{error}</Notice>}
+              {typeof error === "string" && error && <Notice variant="destructive">{error}</Notice>}
               <Field orientation="horizontal">
                 <Button type="submit" disabled={submitting}>
                   {submitting ? <Spinner data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}
