@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, isNotFound, isRedirect } from "@tanstack/react-router";
 import { createMiddleware } from "@tanstack/react-start";
 import { errorResponse } from "../server/core.ts";
 
@@ -7,6 +7,8 @@ const jsonErrors = createMiddleware().server(async ({ request, pathname, next })
   try {
     return await next();
   } catch (err) {
+    // The router's not-found and redirects are answers, not failures: they go through as thrown.
+    if (isNotFound(err) || isRedirect(err)) throw err;
     return errorResponse(err, `${request.method} ${pathname}`);
   }
 });
