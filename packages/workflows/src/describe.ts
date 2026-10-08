@@ -1,6 +1,6 @@
-import { z } from "zod";
+import type { z } from "zod";
 import { resolveConfig, type SanomaConfig } from "./config.ts";
-import type { Builtin, Use } from "./define.ts";
+import { type Builtin, jsonSchemaOf, type Use } from "./define.ts";
 import { isOp, type Effect } from "./op.ts";
 import { allowAll } from "./policy.ts";
 
@@ -85,8 +85,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
 
 function toJsonSchema(schema: z.ZodType, what: string): Record<string, unknown> {
   try {
-    // Input schemas describe what a caller sends, so defaults stay optional (`io: "input"`).
-    return z.toJSONSchema(schema, { io: "input", target: "draft-2020-12", unrepresentable: "any" });
+    return jsonSchemaOf(schema);
   } catch (e) {
     throw new Error(`Cannot describe ${what} as JSON Schema: ${(e as Error).message}`, { cause: e });
   }

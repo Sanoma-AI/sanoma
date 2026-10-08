@@ -2,9 +2,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import type { Use, WorkflowDefinition } from "./define.ts";
+import { jsonSchemaOf, type Use, type WorkflowDefinition } from "./define.ts";
 import { isOp } from "./op.ts";
-import { z } from "zod";
 
 /** This package's version. A unit test keeps it equal to package.json. */
 export const RUNTIME_VERSION = "0.1.0";
@@ -77,7 +76,7 @@ export function computeVersion(config: {
  */
 function inputSchemaOf(wf: WorkflowDefinition<any, any>): unknown {
   try {
-    return z.toJSONSchema(wf.input, { io: "input", unrepresentable: "any" });
+    return jsonSchemaOf(wf.input);
   } catch {
     return String(wf.input);
   }
