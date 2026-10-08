@@ -1,6 +1,10 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Notice, plural, RunStatusBadge, When } from "../../components/common.tsx";
+import { PlayIcon } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Nothing, Notice, PageHeader, plural, RunStatusBadge, When } from "../../components/common.tsx";
 import { runsQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/runs/")({
@@ -12,65 +16,79 @@ export const Route = createFileRoute("/runs/")({
 function RunsPage() {
   const { data: runs, error } = useSuspenseQuery(runsQuery());
   const navigate = useNavigate();
+  const start = (
+    <Button asChild>
+      <Link to="/start">
+        <PlayIcon data-icon="inline-start" />
+        Start a run
+      </Link>
+    </Button>
+  );
 
   return (
-    <section>
-      <header className="page-head">
-        <h1>Runs</h1>
-        <Link className="button" to="/start">
-          Start a run
-        </Link>
-      </header>
+    <section className="flex flex-col gap-4">
+      <PageHeader title="Runs">{runs.length > 0 && <div className="ml-auto">{start}</div>}</PageHeader>
       {error && <Notice tone="bad">Could not refresh runs: {error.message}</Notice>}
-      {runs.length === 0 && <Notice>No runs yet. Start one, or have a worker start one.</Notice>}
+      {runs.length === 0 && (
+        <Nothing title="No runs yet" action={start}>
+          Start one, or have a worker start one.
+        </Nothing>
+      )}
       {runs.length > 0 && (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Workflow</th>
-                <th>Status</th>
-                <th>Started by</th>
-                <th>When</th>
-                <th>Waiting on</th>
-                <th>Error</th>
-              </tr>
-            </thead>
-            <tbody>
+        <div className="rounded-lg border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Workflow</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Started by</TableHead>
+                <TableHead>When</TableHead>
+                <TableHead>Waiting on</TableHead>
+                <TableHead>Error</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {runs.map((run) => {
                 const pending = run.approvals.filter((a) => a.status === "pending").length;
                 return (
-                  <tr
+                  <TableRow
                     key={run.runId}
-                    className="clickable"
+                    className="cursor-pointer"
                     onClick={() => void navigate({ to: "/runs/$id", params: { id: run.runId } })}
                     title={run.runId}
                   >
-                    <td>
-                      <Link to="/runs/$id" params={{ id: run.runId }} onClick={(e) => e.stopPropagation()}>
+                    <TableCell className="font-medium">
+                      <Link
+                        to="/runs/$id"
+                        params={{ id: run.runId }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="underline-offset-4 hover:underline"
+                      >
                         {run.workflow}
                       </Link>
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                       <RunStatusBadge status={run.status} />
-                    </td>
-                    <td>{run.startedBy?.id ?? <span className="muted">unknown</span>}</td>
-                    <td>
+                    </TableCell>
+                    <TableCell>{run.startedBy?.id ?? <span className="text-muted-foreground">unknown</span>}</TableCell>
+                    <TableCell className="text-muted-foreground">
                       <When at={run.createdAt} />
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                       {pending > 0 ? (
-                        <span className="badge tone-waiting">{plural(pending, "approval")}</span>
+                        <Badge variant="waiting">{plural(pending, "approval")}</Badge>
                       ) : (
-                        <span className="muted">-</span>
+                        <span className="text-muted-foreground">-</span>
                       )}
-                    </td>
-                    <td className="error-cell">{run.status === "failed" && run.error ? run.error : ""}</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell className="max-w-md min-w-64 whitespace-normal text-destructive">
+                      {run.status === "failed" && run.error ? run.error : ""}
+                    </TableCell>
+                  </TableRow>
                 );
               })}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
     </section>

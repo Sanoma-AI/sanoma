@@ -2,7 +2,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useActor } from "../actor.ts";
 import { ApprovalCard } from "../components/approval.tsx";
-import { Notice } from "../components/common.tsx";
+import { Nothing, Notice, PageHeader } from "../components/common.tsx";
 import { waitingRunsQuery } from "../queries.ts";
 
 export const Route = createFileRoute("/inbox")({
@@ -22,23 +22,23 @@ function InboxPage() {
   const mine = pending.filter(({ approval }) => approval.approver === actor).length;
 
   return (
-    <section>
-      <header className="page-head">
-        <h1>Inbox</h1>
-        <p className="muted">
+    <section className="flex flex-col gap-4">
+      <PageHeader title="Inbox">
+        <p className="text-sm text-muted-foreground">
           {pending.length} waiting{actor ? `, ${mine} for you` : ""}
         </p>
-      </header>
+      </PageHeader>
       {error && <Notice tone="bad">Could not refresh approvals: {error.message}</Notice>}
-      {pending.length === 0 && <Notice>Nothing is waiting for a decision.</Notice>}
-      <div className="cards">
+      {pending.length === 0 && <Nothing title="Nothing is waiting for a decision" />}
+      <div className="grid gap-4 lg:grid-cols-2">
         {pending.map(({ run, approval }) => (
-          <div key={`${run.runId}/${approval.id}`}>
-            <p className="card-label">
-              {run.workflow}, started by {run.startedBy?.id ?? "unknown"}
-            </p>
-            <ApprovalCard runId={run.runId} approval={approval} showRun />
-          </div>
+          <ApprovalCard
+            key={`${run.runId}/${approval.id}`}
+            runId={run.runId}
+            approval={approval}
+            showRun
+            description={`${run.workflow}, started by ${run.startedBy?.id ?? "unknown"}`}
+          />
         ))}
       </div>
     </section>

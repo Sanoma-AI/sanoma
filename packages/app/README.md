@@ -28,6 +28,8 @@ console.log(app.url); // http://127.0.0.1:4321
 - **Start**: a form built from the workflow's input schema: text, date and time, numbers, yes/no, choices, lists with Add and Remove, and objects one level deep; anything else is entered as JSON. Optional fields left empty are left out, so the schema's defaults apply. The server checks the input with the workflow's schema and its complaints appear on the fields they name.
 - **Workflows**: each workflow's operations with their effects, its built-ins and its input; whether a policy is configured, and its version; the config's version.
 
+The header switches between light, dark and the system's theme; the browser remembers the choice. The screens are built with [shadcn/ui](https://ui.shadcn.com) components (`src/components/ui`, from `components.json`) on Tailwind CSS.
+
 ## No authentication
 
 This is a local tool. There is no login. The page asks "Who are you?" once, keeps the answer in the browser, and sends it with every change. Anyone who can reach the app can start runs and decide approvals as any name they type; the approver check only compares names. The app listens on 127.0.0.1 unless you pass another `host`. While it listens on this machine only, it refuses every request (page, API, server function or static file) whose `Host` names anything but this machine, so another site cannot reach it through DNS rebinding. Do not expose it to a network you do not trust.

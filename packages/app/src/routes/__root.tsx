@@ -1,8 +1,21 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { createRootRouteWithContext, HeadContent, Link, Outlet, Scripts } from "@tanstack/react-router";
+import { createRootRouteWithContext, HeadContent, Link, Outlet, Scripts, useMatchRoute } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import {
+  NavigationMenu,
+  NavigationMenuItem,
+  NavigationMenuLink,
+  NavigationMenuList,
+} from "@/components/ui/navigation-menu";
+import { Toaster } from "@/components/ui/sonner";
 import { ActorContext, useActor, useActorState } from "../actor.ts";
 import { Notice } from "../components/common.tsx";
+import { ModeToggle } from "../components/mode-toggle.tsx";
+import { ThemeProvider, ThemeScript } from "../components/theme-provider.tsx";
 import css from "../style.css?url";
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
@@ -29,23 +42,28 @@ function Root() {
   const actor = useActorState();
   return (
     <Document>
-      <ActorContext value={actor}>
-        <div id="app">
-          <Nav />
-          <main>
-            <Outlet />
-          </main>
-          {actor.actor === null && <WhoAreYou />}
-        </div>
-      </ActorContext>
+      <ThemeProvider>
+        <ActorContext value={actor}>
+          <div id="app">
+            <Nav />
+            <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
+              <Outlet />
+            </main>
+            <WhoAreYou open={actor.actor === null} />
+            <Toaster />
+          </div>
+        </ActorContext>
+      </ThemeProvider>
     </Document>
   );
 }
 
 function Document({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    // The theme script sets the class on <html> before React hydrates it.
+    <html lang="en" suppressHydrationWarning>
       <head>
+        <ThemeScript />
         <HeadContent />
       </head>
       <body>
@@ -56,59 +74,95 @@ function Document({ children }: { children: ReactNode }) {
   );
 }
 
+const PAGES = [
+  { to: "/runs", label: "Runs" },
+  { to: "/inbox", label: "Inbox" },
+  { to: "/start", label: "Start" },
+  { to: "/workflows", label: "Workflows" },
+] as const;
+
 function Nav() {
   const { actor, setActor } = useActor();
+  const matchRoute = useMatchRoute();
   return (
-    <nav className="top">
-      <Link className="brand" to="/runs">
-        Sanoma
-      </Link>
-      <Link to="/runs">Runs</Link>
-      <Link to="/inbox">Inbox</Link>
-      <Link to="/start">Start</Link>
-      <Link to="/workflows">Workflows</Link>
-      {actor && (
-        <span className="who">
-          You are <strong>{actor}</strong>{" "}
-          <button type="button" className="link" onClick={() => setActor(null)}>
-            change
-          </button>
-        </span>
-      )}
-    </nav>
+    <header className="border-b">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 sm:px-6">
+        <Link to="/runs" className="font-heading text-base font-semibold">
+          Sanoma
+        </Link>
+        <NavigationMenu viewport={false} className="order-last basis-full justify-start sm:order-none sm:basis-auto">
+          <NavigationMenuList>
+            {PAGES.map(({ to, label }) => (
+              <NavigationMenuItem key={to}>
+                <NavigationMenuLink asChild active={Boolean(matchRoute({ to, fuzzy: true }))}>
+                  <Link to={to}>{label}</Link>
+                </NavigationMenuLink>
+              </NavigationMenuItem>
+            ))}
+          </NavigationMenuList>
+        </NavigationMenu>
+        <div className="ml-auto flex items-center gap-1 text-sm text-muted-foreground">
+          {actor && (
+            <>
+              <span>
+                You are <strong className="text-foreground">{actor}</strong>
+              </span>
+              <Button variant="link" size="sm" onClick={() => setActor(null)}>
+                change
+              </Button>
+            </>
+          )}
+          <ModeToggle />
+        </div>
+      </div>
+    </header>
   );
 }
 
 /** There is no login. The name is kept in this browser and sent with every change. */
-function WhoAreYou() {
+function WhoAreYou({ open }: { open: boolean }) {
   const { setActor } = useActor();
   const [name, setName] = useState("");
   return (
-    <div className="who-are-you" role="dialog" aria-modal="true" aria-labelledby="who-title">
-      <form
-        className="card"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (name.trim()) setActor(name.trim());
-        }}
+    // No way out but a name: every change needs one.
+    <Dialog open={open}>
+      <DialogContent
+        showCloseButton={false}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
       >
-        <h1 id="who-title">Who are you?</h1>
-        <p className="muted">
-          Runs you start and approvals you decide are recorded under this name. Use the name approvals ask for, such as{" "}
-          <code>marketing-lead</code>. There is no login: this is a local tool.
-        </p>
-        <input
-          type="text"
-          aria-label="Your name"
-          autoFocus
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Your name"
-        />
-        <button type="submit" className="primary" disabled={!name.trim()}>
-          Continue
-        </button>
-      </form>
-    </div>
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (name.trim()) setActor(name.trim());
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Who are you?</DialogTitle>
+            <DialogDescription>
+              Runs you start and approvals you decide are recorded under this name. Use the name approvals ask for, such
+              as <code>marketing-lead</code>. There is no login: this is a local tool.
+            </DialogDescription>
+          </DialogHeader>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="who-name">Your name</FieldLabel>
+              <Input
+                id="who-name"
+                autoFocus
+                autoComplete="username"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="marketing-lead"
+              />
+            </Field>
+            <Button type="submit" disabled={!name.trim()}>
+              Continue
+            </Button>
+          </FieldGroup>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

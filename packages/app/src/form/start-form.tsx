@@ -2,12 +2,31 @@ import type { WorkflowEntry } from "@sanoma/workflows";
 import { useForm } from "@tanstack/react-form";
 import { useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
+import { PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useMemo } from "react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
+import { Textarea } from "@/components/ui/textarea";
 import { errorBodyOf } from "../api.ts";
+import { Notice } from "../components/common.tsx";
 import { startRunFn } from "../functions.ts";
 import {
   buildInput,
-  type Field,
+  type Field as SchemaField,
   fieldsOf,
   initialValue,
   initialValues,
@@ -23,44 +42,46 @@ const WHOLE = "input";
 export function StartForm({ workflow }: { workflow: WorkflowEntry }) {
   const { fields, whole } = useMemo(() => {
     const read = fieldsOf(workflow.input);
-    const all: Field[] = read ?? [{ key: WHOLE, label: "Input (JSON)", kind: "json", required: true, default: {} }];
+    const all: SchemaField[] = read ?? [
+      { key: WHOLE, label: "Input (JSON)", kind: "json", required: true, default: {} },
+    ];
     return { fields: all, whole: !read };
   }, [workflow.input]);
   const form = useStartForm(workflow.name, fields, whole);
 
   return (
     <form
-      className="start-form"
       noValidate
       onSubmit={(e) => {
         e.preventDefault();
         void form.handleSubmit();
       }}
     >
-      {fields.map((field) => (
-        <FieldView key={field.key} form={form} field={field} path={[field.key]} />
-      ))}
-      <form.Subscribe selector={(s) => [s.errorMap.onSubmit, s.isSubmitting] as const}>
-        {([error, submitting]) => (
-          <>
-            {typeof error === "string" && error && (
-              <p className="form-error" role="alert">
-                {error}
-              </p>
-            )}
-            <button type="submit" className="primary" disabled={submitting}>
-              {submitting ? "Starting…" : `Start ${workflow.name}`}
-            </button>
-          </>
-        )}
-      </form.Subscribe>
+      <FieldGroup>
+        {fields.map((field) => (
+          <FieldView key={field.key} form={form} field={field} path={[field.key]} />
+        ))}
+        <form.Subscribe selector={(s) => [s.errorMap.onSubmit, s.isSubmitting] as const}>
+          {([error, submitting]) => (
+            <>
+              {typeof error === "string" && error && <Notice tone="bad">{error}</Notice>}
+              <Field orientation="horizontal">
+                <Button type="submit" disabled={submitting}>
+                  {submitting ? <Spinner data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}
+                  {submitting ? "Starting…" : `Start ${workflow.name}`}
+                </Button>
+              </Field>
+            </>
+          )}
+        </form.Subscribe>
+      </FieldGroup>
     </form>
   );
 }
 
 type FormValues = Record<string, any>;
 
-function useStartForm(workflow: string, fields: Field[], whole: boolean) {
+function useStartForm(workflow: string, fields: SchemaField[], whole: boolean) {
   const start = useServerFn(startRunFn);
   const navigate = useNavigate();
   const defaultValues = useMemo(() => initialValues(fields) as FormValues, [fields]);
@@ -78,8 +99,12 @@ function useStartForm(workflow: string, fields: Field[], whole: boolean) {
           ({ runId } = await start({ data: { workflow, input: whole ? built.input[WHOLE] : built.input } }));
         } catch (err) {
           const body = errorBodyOf(err);
-          // `fields` must be there, even empty, for the form to read `form` as its own error.
-          if (!body?.issues?.length) return { form: body?.error ?? (err as Error).message, fields: {} };
+          if (!body?.issues?.length) {
+            const message = body?.error ?? (err as Error).message;
+            toast.error(`Could not start ${workflow}`, { description: message });
+            // `fields` must be there, even empty, for the form to read `form` as its own error.
+            return { form: message, fields: {} };
+          }
           const byField: Record<string, string> = {};
           const rest: string[] = [];
           for (const issue of body.issues) {
@@ -87,8 +112,11 @@ function useStartForm(workflow: string, fields: Field[], whole: boolean) {
             if (target) byField[target.name] ??= target.message;
             else rest.push(issue.path.length ? `${pathName(issue.path)}: ${issue.message}` : issue.message);
           }
-          return { form: rest.join("; ") || "The input does not match the workflow's schema", fields: byField };
+          const message = rest.join("; ") || "The input does not match the workflow's schema";
+          toast.error(`Could not start ${workflow}`, { description: message });
+          return { form: message, fields: byField };
         }
+        toast.success(`Started ${workflow}`);
         await navigate({ to: "/runs/$id", params: { id: runId } });
         return undefined;
       },
@@ -98,20 +126,22 @@ function useStartForm(workflow: string, fields: Field[], whole: boolean) {
 
 type StartFormApi = ReturnType<typeof useStartForm>;
 
-/** One field, by its kind: a control, a group of controls, or a list with Add and Remove. */
-function FieldView({ form, field, path }: { form: StartFormApi; field: Field; path: (string | number)[] }) {
+/** One field, by its kind: a control, a set of controls, or a list with Add and Remove. */
+function FieldView({ form, field, path }: { form: StartFormApi; field: SchemaField; path: (string | number)[] }) {
   const name = pathName(path);
   if (field.kind === "object") {
     return (
-      <fieldset className="group">
-        <legend>
+      <FieldSet>
+        <FieldLegend>
           <Label field={field} />
-        </legend>
-        {field.description && <p className="hint">{field.description}</p>}
-        {field.fields.map((sub) => (
-          <FieldView key={sub.key} form={form} field={sub} path={[...path, sub.key]} />
-        ))}
-      </fieldset>
+        </FieldLegend>
+        {field.description && <FieldDescription>{field.description}</FieldDescription>}
+        <FieldGroup>
+          {field.fields.map((sub) => (
+            <FieldView key={sub.key} form={form} field={sub} path={[...path, sub.key]} />
+          ))}
+        </FieldGroup>
+      </FieldSet>
     );
   }
   if (field.kind === "array") {
@@ -119,30 +149,46 @@ function FieldView({ form, field, path }: { form: StartFormApi; field: Field; pa
     return (
       <form.Field name={name} mode="array">
         {(f) => (
-          <fieldset className="group">
-            <legend>
+          <FieldSet data-invalid={f.state.meta.errors.length ? true : undefined}>
+            <FieldLegend>
               <Label field={field} />
-            </legend>
-            {field.description && <p className="hint">{field.description}</p>}
-            {(f.state.value as unknown[]).map((_, i) => (
-              <div className="array-item" key={i}>
-                <FieldView form={form} field={{ ...item, label: `${field.label} ${i + 1}` }} path={[...path, i]} />
-                <button type="button" onClick={() => f.removeValue(i)} aria-label={`Remove ${field.label} ${i + 1}`}>
-                  Remove
-                </button>
-              </div>
-            ))}
-            <button type="button" onClick={() => f.pushValue(initialValue(item, item.default))}>
-              Add {item.kind === "object" ? "an item" : "a value"}
-            </button>
+            </FieldLegend>
+            {field.description && <FieldDescription>{field.description}</FieldDescription>}
+            <FieldGroup>
+              {(f.state.value as unknown[]).map((_, i) => (
+                <Field key={i} orientation="horizontal" className="items-start">
+                  <FieldContent>
+                    <FieldView form={form} field={{ ...item, label: `${field.label} ${i + 1}` }} path={[...path, i]} />
+                  </FieldContent>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => f.removeValue(i)}
+                    aria-label={`Remove ${field.label} ${i + 1}`}
+                  >
+                    <Trash2Icon />
+                  </Button>
+                </Field>
+              ))}
+              <Field orientation="horizontal">
+                <Button type="button" variant="outline" onClick={() => f.pushValue(initialValue(item, item.default))}>
+                  <PlusIcon data-icon="inline-start" />
+                  Add {item.kind === "object" ? "an item" : "a value"}
+                </Button>
+              </Field>
+            </FieldGroup>
             <Errors errors={f.state.meta.errors} />
-          </fieldset>
+          </FieldSet>
         )}
       </form.Field>
     );
   }
   return <ScalarView form={form} field={field} name={name} />;
 }
+
+/** Radix's Select has no empty value: an optional choice left out is this one. */
+const LEAVE_OUT = "-";
 
 function ScalarView({ form, field, name }: { form: StartFormApi; field: ScalarField; name: string }) {
   const id = `field-${name}`;
@@ -151,101 +197,116 @@ function ScalarView({ form, field, name }: { form: StartFormApi; field: ScalarFi
       {(f) => {
         const value = f.state.value as string | boolean | undefined;
         const text = typeof value === "string" ? value : "";
+        const invalid = f.state.meta.errors.length ? true : undefined;
         const onText = (e: { target: { value: string } }) => f.handleChange(e.target.value);
+        const common = { id, "aria-invalid": invalid, onBlur: f.handleBlur };
+        const description = (
+          <>
+            {field.description && <FieldDescription>{field.description}</FieldDescription>}
+            {field.kind === "json" && <FieldDescription>Entered as JSON.</FieldDescription>}
+          </>
+        );
+
+        if (field.kind === "boolean") {
+          return (
+            <Field orientation="horizontal" data-invalid={invalid}>
+              <Checkbox
+                id={id}
+                aria-invalid={invalid}
+                checked={value === true}
+                onCheckedChange={(checked) => f.handleChange(checked === true)}
+              />
+              <FieldContent>
+                <FieldLabel htmlFor={id}>
+                  <Label field={field} />
+                </FieldLabel>
+                {description}
+                <Errors errors={f.state.meta.errors} />
+              </FieldContent>
+            </Field>
+          );
+        }
+
         let control;
         switch (field.kind) {
           case "string":
-            control = <input id={id} type="text" value={text} onChange={onText} onBlur={f.handleBlur} />;
+            control = <Input {...common} type="text" value={text} onChange={onText} />;
             break;
           case "datetime":
-            control = <input id={id} type="datetime-local" value={text} onChange={onText} onBlur={f.handleBlur} />;
+            control = <Input {...common} type="datetime-local" value={text} onChange={onText} />;
             break;
           case "number":
           case "integer":
             control = (
-              <input
-                id={id}
+              <Input
+                {...common}
                 type="number"
                 step={field.kind === "integer" ? 1 : "any"}
                 value={text}
                 onChange={onText}
-                onBlur={f.handleBlur}
-              />
-            );
-            break;
-          case "boolean":
-            control = (
-              <input
-                id={id}
-                type="checkbox"
-                checked={value === true}
-                onChange={(e) => f.handleChange(e.target.checked)}
               />
             );
             break;
           case "enum":
             control = (
-              <select id={id} value={text} onChange={onText} onBlur={f.handleBlur}>
-                <option value="">{field.required ? "Choose…" : "(leave out)"}</option>
-                {(field.options ?? []).map((option, i) => (
-                  <option key={String(option)} value={String(i)}>
-                    {String(option)}
-                  </option>
-                ))}
-              </select>
+              <Select
+                name={name}
+                value={text || (field.required ? "" : LEAVE_OUT)}
+                onValueChange={(v) => f.handleChange(v === LEAVE_OUT ? "" : v)}
+              >
+                <SelectTrigger id={id} aria-invalid={invalid} onBlur={f.handleBlur} className="w-full">
+                  <SelectValue placeholder="Choose…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {!field.required && <SelectItem value={LEAVE_OUT}>(leave out)</SelectItem>}
+                    {(field.options ?? []).map((option, i) => (
+                      <SelectItem key={String(option)} value={String(i)}>
+                        {String(option)}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             );
             break;
           case "json":
             control = (
-              <textarea
-                id={id}
-                className="mono"
-                rows={4}
-                placeholder="JSON"
-                value={text}
-                onChange={onText}
-                onBlur={f.handleBlur}
-              />
+              <Textarea {...common} className="font-mono" rows={4} placeholder="JSON" value={text} onChange={onText} />
             );
             break;
         }
         return (
-          <div className={`field${field.kind === "boolean" ? " inline" : ""}`}>
-            <label className="label" htmlFor={id}>
+          <Field data-invalid={invalid}>
+            <FieldLabel htmlFor={id}>
               <Label field={field} />
-            </label>
+            </FieldLabel>
             {control}
-            {field.description && <p className="hint">{field.description}</p>}
-            {field.kind === "json" && <p className="hint">Entered as JSON.</p>}
+            {description}
             <Errors errors={f.state.meta.errors} />
-          </div>
+          </Field>
         );
       }}
     </form.Field>
   );
 }
 
-function Label({ field }: { field: Field }) {
+function Label({ field }: { field: SchemaField }) {
   return (
     <>
       {field.label}
       {field.required ? (
-        <span className="required" title="Required">
-          {" "}
+        <span className="text-destructive" title="Required">
           *
         </span>
       ) : (
-        <span className="muted"> (optional)</span>
+        <span className="font-normal text-muted-foreground">(optional)</span>
       )}
     </>
   );
 }
 
+/** The field's errors, under it: the form's own checks and the server's issues, as strings. */
 function Errors({ errors }: { errors: unknown[] }) {
-  const messages = [...new Set(errors.filter(Boolean).map(String))];
-  return messages.map((message) => (
-    <p key={message} className="field-error" role="alert">
-      {message}
-    </p>
-  ));
+  return <FieldError errors={errors.filter(Boolean).map((e) => ({ message: String(e) }))} />;
 }

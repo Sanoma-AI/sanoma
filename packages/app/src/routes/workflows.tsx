@@ -1,7 +1,14 @@
 import type { OpEntry, WorkflowEntry } from "@sanoma/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { EffectBadge, Json, Notice } from "../components/common.tsx";
+import { PlayIcon } from "lucide-react";
+import type { ReactNode } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
+import { Separator } from "@/components/ui/separator";
+import { EffectBadge, Fact, Facts, Json, Nothing, PageHeader } from "../components/common.tsx";
 import { type Field, fieldsOf } from "../form/schema.ts";
 import { configQuery } from "../queries.ts";
 
@@ -15,19 +22,14 @@ function WorkflowsPage() {
   const { data: config } = useSuspenseQuery(configQuery());
   const ops = new Map(config.ops.map((op) => [op.id, op]));
   return (
-    <section>
-      <header className="page-head">
-        <h1>Workflows</h1>
-      </header>
-      <dl className="facts">
-        <dt>App</dt>
-        <dd>{config.appName}</dd>
-        <dt>Version</dt>
-        <dd>
+    <section className="flex flex-col gap-6">
+      <PageHeader title="Workflows" />
+      <Facts>
+        <Fact label="App">{config.appName}</Fact>
+        <Fact label="Version">
           <code>{config.version}</code>
-        </dd>
-        <dt>Policy</dt>
-        <dd>
+        </Fact>
+        <Fact label="Policy">
           {config.policy.defined ? (
             <>
               a policy checks every operation call
@@ -43,10 +45,10 @@ function WorkflowsPage() {
           ) : (
             "allowAll: every operation call is allowed"
           )}
-        </dd>
-      </dl>
-      {config.workflows.length === 0 && <Notice>This config has no workflows.</Notice>}
-      <div className="cards">
+        </Fact>
+      </Facts>
+      {config.workflows.length === 0 && <Nothing title="This config has no workflows" />}
+      <div className="grid gap-4 lg:grid-cols-2">
         {config.workflows.map((wf) => (
           <WorkflowCard key={wf.name} workflow={wf} ops={ops} />
         ))}
@@ -55,76 +57,123 @@ function WorkflowsPage() {
   );
 }
 
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="text-sm font-medium">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+const None = () => <p className="text-muted-foreground">None.</p>;
+
 function WorkflowCard({ workflow, ops }: { workflow: WorkflowEntry; ops: Map<string, OpEntry> }) {
   const fields = fieldsOf(workflow.input);
   return (
-    <article className="card">
-      <header className="row">
-        <h2>{workflow.title ?? workflow.name}</h2>
-        <code className="muted">{workflow.name}</code>
-        <Link className="button push" to="/start" search={{ workflow: workflow.name }}>
-          Start
-        </Link>
-      </header>
-      <h3>Operations it may call</h3>
-      {workflow.ops.length === 0 ? (
-        <p className="muted">None.</p>
-      ) : (
-        <ul className="ops">
-          {workflow.ops.map((id) => {
-            const op = ops.get(id);
-            return (
-              <li key={id}>
-                <code>{id}</code> {op && <EffectBadge effect={op.effect} />}
-                {op?.idempotent && (
-                  <span className="muted" title="Safe to retry: the vendor dedupes repeated calls">
-                    {" "}
-                    idempotent
-                  </span>
-                )}
-                {op?.description && <p className="hint">{op.description}</p>}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      <h3>Built-ins</h3>
-      <p>{workflow.builtins.length ? workflow.builtins.join(", ") : <span className="muted">None.</span>}</p>
-      <h3>Input</h3>
-      {fields ? (
-        fields.length === 0 ? (
-          <p className="muted">No fields.</p>
-        ) : (
-          <ul className="inputs">
-            {fields.map((f) => (
-              <InputField key={f.key} field={f} />
-            ))}
-          </ul>
-        )
-      ) : (
-        <Json value={workflow.input} />
-      )}
-    </article>
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          <h2>{workflow.title ?? workflow.name}</h2>
+        </CardTitle>
+        <CardDescription>
+          <code>{workflow.name}</code>
+        </CardDescription>
+        <CardAction>
+          <Button asChild variant="outline" size="sm">
+            <Link to="/start" search={{ workflow: workflow.name }}>
+              <PlayIcon data-icon="inline-start" />
+              Start
+            </Link>
+          </Button>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <Section title="Operations it may call">
+          {workflow.ops.length === 0 ? (
+            <None />
+          ) : (
+            <ItemGroup className="gap-2">
+              {workflow.ops.map((id) => (
+                <OpItem key={id} id={id} op={ops.get(id)} />
+              ))}
+            </ItemGroup>
+          )}
+        </Section>
+        <Separator />
+        <Section title="Built-ins">
+          {workflow.builtins.length ? (
+            <div className="flex flex-wrap gap-1.5">
+              {workflow.builtins.map((b) => (
+                <Badge key={b} variant="outline">
+                  {b}
+                </Badge>
+              ))}
+            </div>
+          ) : (
+            <None />
+          )}
+        </Section>
+        <Separator />
+        <Section title="Input">
+          {fields ? (
+            fields.length === 0 ? (
+              <p className="text-muted-foreground">No fields.</p>
+            ) : (
+              <InputFields fields={fields} />
+            )
+          ) : (
+            <Json value={workflow.input} />
+          )}
+        </Section>
+      </CardContent>
+    </Card>
+  );
+}
+
+function OpItem({ id, op }: { id: string; op: OpEntry | undefined }) {
+  return (
+    <Item role="listitem" variant="outline" size="xs">
+      <ItemContent>
+        <ItemTitle>
+          <code>{id}</code>
+          {op && <EffectBadge effect={op.effect} />}
+          {op?.idempotent && (
+            <Badge variant="outline" title="Safe to retry: the vendor dedupes repeated calls">
+              idempotent
+            </Badge>
+          )}
+        </ItemTitle>
+        {op?.description && <ItemDescription>{op.description}</ItemDescription>}
+      </ItemContent>
+    </Item>
   );
 }
 
 const kindName = (f: Field): string =>
   f.kind === "array" ? `list of ${kindName(f.item)}` : f.kind === "json" ? "JSON" : f.kind;
 
-function InputField({ field }: { field: Field }) {
+function InputFields({ fields }: { fields: Field[] }) {
   return (
-    <li>
-      <code>{field.key}</code> <span className="muted">{kindName(field)}</span>
-      {field.required ? <span className="required"> required</span> : null}
-      {field.default !== undefined && <span className="muted"> · default {JSON.stringify(field.default)}</span>}
-      {field.description && <p className="hint">{field.description}</p>}
-      {field.kind === "object" && (
-        <ul className="inputs">
-          {field.fields.map((f) => (
-            <InputField key={f.key} field={f} />
-          ))}
-        </ul>
-      )}
-    </li>
+    <ul className="flex flex-col gap-2">
+      {fields.map((field) => (
+        <li key={field.key} className="flex flex-col gap-0.5">
+          <span className="flex flex-wrap items-center gap-1.5">
+            <code>{field.key}</code>
+            <span className="text-muted-foreground">{kindName(field)}</span>
+            {field.required && <Badge variant="outline">required</Badge>}
+            {field.default !== undefined && (
+              <span className="text-muted-foreground">default {JSON.stringify(field.default)}</span>
+            )}
+          </span>
+          {field.description && <span className="text-muted-foreground">{field.description}</span>}
+          {field.kind === "object" && (
+            <div className="border-l pl-3">
+              <InputFields fields={field.fields} />
+            </div>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }

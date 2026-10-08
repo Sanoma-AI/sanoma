@@ -1,10 +1,24 @@
 import type { LedgerRecord } from "@sanoma/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { cn } from "cn";
+import { Fragment, type ReactNode } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Item, ItemContent, ItemGroup, ItemMedia, ItemSeparator, ItemTitle } from "@/components/ui/item";
 import { approverName } from "../../api.ts";
 import { ApprovalCard } from "../../components/approval.tsx";
-import { DecisionBadge, EffectBadge, Expandable, Notice, RunStatusBadge, When } from "../../components/common.tsx";
+import {
+  DecisionBadge,
+  EffectBadge,
+  Expandable,
+  Fact,
+  Facts,
+  Nothing,
+  Notice,
+  PageHeader,
+  RunStatusBadge,
+  When,
+} from "../../components/common.tsx";
 import { runQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/runs/$id")({
@@ -21,49 +35,50 @@ function RunPage() {
   const { run, ledger, ledgerError, approvals } = data;
   const titles = new Map(approvals.map((a) => [a.id, a.title]));
   return (
-    <section>
-      <header className="page-head">
-        <h1>
-          {run.workflow} <RunStatusBadge status={run.status} />
-        </h1>
-      </header>
+    <section className="flex flex-col gap-6">
+      <PageHeader title={run.workflow}>
+        <RunStatusBadge status={run.status} />
+      </PageHeader>
       {error && <Notice tone="bad">Could not refresh: {error.message}</Notice>}
-      <dl className="facts">
-        <dt>Started by</dt>
-        <dd>{run.startedBy?.id ?? "unknown"}</dd>
-        <dt>Started</dt>
-        <dd>
+      <Facts>
+        <Fact label="Started by">{run.startedBy?.id ?? "unknown"}</Fact>
+        <Fact label="Started">
           <When at={run.createdAt} />
-        </dd>
-        <dt>Run id</dt>
-        <dd>
-          <code>{run.runId}</code>
-        </dd>
+        </Fact>
+        <Fact label="Run id">
+          <code className="break-all">{run.runId}</code>
+        </Fact>
         {run.error && (
-          <>
-            <dt>Error</dt>
-            <dd className="error-text">{run.error}</dd>
-          </>
+          <Fact label="Error">
+            <span className="text-destructive">{run.error}</span>
+          </Fact>
         )}
-      </dl>
+      </Facts>
 
-      <div className="split">
-        <div>
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        <div className="flex flex-col gap-3">
           <h2>Ledger</h2>
           {ledger === null && <Notice>This config has no ledger store, so there is no record to show.</Notice>}
           {ledgerError && <Notice tone="bad">Could not read the ledger: {ledgerError}</Notice>}
-          {ledger && ledger.length === 0 && !ledgerError && <Notice>Nothing recorded yet.</Notice>}
+          {ledger && ledger.length === 0 && !ledgerError && <Nothing title="Nothing recorded yet" />}
           {ledger && ledger.length > 0 && (
-            <ol className="timeline">
-              {ledger.map((record) => (
-                <LedgerRow key={record.id} record={record} titles={titles} />
-              ))}
-            </ol>
+            <Card size="sm">
+              <CardContent>
+                <ItemGroup className="gap-0" aria-label="Ledger">
+                  {ledger.map((record, i) => (
+                    <Fragment key={record.id}>
+                      {i > 0 && <ItemSeparator className="my-0" />}
+                      <LedgerRow record={record} titles={titles} />
+                    </Fragment>
+                  ))}
+                </ItemGroup>
+              </CardContent>
+            </Card>
           )}
         </div>
-        <aside>
+        <aside className="flex flex-col gap-3">
           <h2>Approvals</h2>
-          {approvals.length === 0 && <Notice>None asked for.</Notice>}
+          {approvals.length === 0 && <Nothing title="None asked for" />}
           {approvals.map((approval) => (
             <ApprovalCard key={approval.id} runId={run.runId} approval={approval} />
           ))}
@@ -73,12 +88,22 @@ function RunPage() {
   );
 }
 
+type Tone = "finished" | "failed" | "waiting" | "none";
+
+/** The dot beside a record, coloured like the run status it is closest to. */
+const DOT: Record<Tone, string> = {
+  finished: "bg-status-finished-foreground",
+  failed: "bg-status-failed-foreground",
+  waiting: "bg-status-waiting-foreground",
+  none: "bg-muted-foreground/50",
+};
+
 /** One ledger record: what happened, when, and its details. */
 function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<string, string> }) {
   const title = (approval: string) => titles.get(approval) ?? approval;
   let kind = "";
   let body: ReactNode;
-  let tone = "";
+  let tone: Tone = "none";
   switch (record.type) {
     case "run.started":
       kind = "started";
@@ -91,16 +116,16 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
       break;
     case "op.called":
       kind = "called";
-      tone = record.error ? "bad" : "";
+      tone = record.error ? "failed" : "none";
       body = (
         <>
-          <p className="row">
+          <p className="flex flex-wrap items-center gap-2">
             <code>{record.op}</code> <EffectBadge effect={record.effect} /> <DecisionBadge decision={record.decision} />
-            <span className="muted">
+            <span className="text-muted-foreground">
               {record.durationMs} ms{record.attempt && record.attempt > 1 ? `, attempt ${record.attempt}` : ""}
             </span>
           </p>
-          {record.error && <p className="error-text">{record.error.message}</p>}
+          {record.error && <p className="text-destructive">{record.error.message}</p>}
           <Expandable label="Input" value={record.input} />
           {"output" in record && <Expandable label="Output" value={record.output} />}
         </>
@@ -125,11 +150,11 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
       break;
     case "approval.decided":
       kind = record.decision === "approve" ? "approved" : "rejected";
-      tone = record.decision === "approve" ? "good" : "bad";
+      tone = record.decision === "approve" ? "finished" : "failed";
       body = (
         <p>
           {record.by} {record.decision === "approve" ? "approved" : "rejected"} “{title(record.approval)}”
-          {record.note ? <q className="note">{record.note}</q> : null}
+          {record.note ? <q className="block text-muted-foreground italic">{record.note}</q> : null}
         </p>
       );
       break;
@@ -143,22 +168,29 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
       break;
     case "run.finished":
       kind = "finished";
-      tone = "good";
+      tone = "finished";
       body = <Expandable label="Output" value={record.output} />;
       break;
     case "run.failed":
       kind = "failed";
-      tone = "bad";
-      body = <p className="error-text">{record.error.message}</p>;
+      tone = "failed";
+      body = <p className="text-destructive">{record.error.message}</p>;
       break;
   }
   return (
-    <li className={tone ? `tone-${tone}` : undefined}>
-      <div className="when">
-        <span className="kind">{kind}</span>
-        <When at={record.at} />
-      </div>
-      <div className="what">{body}</div>
-    </li>
+    <Item role="listitem" size="sm" className="items-start px-0">
+      <ItemMedia className="pt-1.5">
+        <span aria-hidden className={cn("size-2.5 rounded-full", DOT[tone])} />
+      </ItemMedia>
+      <ItemContent className="min-w-0">
+        <ItemTitle>
+          {kind}
+          <span className="font-normal text-muted-foreground">
+            <When at={record.at} />
+          </span>
+        </ItemTitle>
+        <div className="flex flex-col gap-1">{body}</div>
+      </ItemContent>
+    </Item>
   );
 }
