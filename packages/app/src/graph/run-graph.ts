@@ -1,6 +1,14 @@
-import type { ApprovalState, Effect, ErrorCode, RecordedDecision, RunStatus, RunSummary } from "@sanoma/workflows";
+import type {
+  ApprovalState,
+  Effect,
+  ErrorCode,
+  LedgerGroup,
+  LedgerRecord,
+  RecordedDecision,
+  RunStatus,
+  RunSummary,
+} from "@sanoma/workflows";
 import { approverLabel, isEnded } from "@sanoma/workflows/shared";
-import type { GraphRecord, LedgerGroup } from "../api.ts";
 import { APPROVAL_TONE, RUN_TONE, type Tone } from "../lib/tone.ts";
 
 /**
@@ -76,7 +84,7 @@ const sleepLabel = (until: number) => `sleep until ${new Date(until).toISOString
  * one `ctx.all` (the same `group.id`) form parallel branches, one per member (`group.index`):
  * each branch starts from what came before the group and leads to what came after it.
  */
-export function runGraph(records: readonly GraphRecord[], run: RunSummary): RunGraph {
+export function runGraph(records: readonly LedgerRecord[], run: RunSummary): RunGraph {
   const ended = isEnded(run.status);
   const sorted = records.toSorted((a, b) => a.seq - b.seq);
   const lastSeq = sorted.at(-1)?.seq ?? -1;

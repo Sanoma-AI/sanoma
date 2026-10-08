@@ -2,7 +2,7 @@
 // --xy-* colours to the theme.
 // oxlint-disable-next-line import/no-unassigned-import
 import "@xyflow/react/dist/style.css";
-import type { RunSummary } from "@sanoma/workflows";
+import type { LedgerRecord, RunSummary } from "@sanoma/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   Background,
@@ -22,7 +22,6 @@ import {
 import { cva } from "class-variance-authority";
 import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
-import type { GraphRecord } from "../api.ts";
 import { layout, NODE_SIZE } from "../graph/layout.ts";
 import { type GraphNode, type GraphNodeKind, runGraph } from "../graph/run-graph.ts";
 import { configQuery, opsById } from "../queries.ts";
@@ -216,7 +215,7 @@ function FitOnChange({ nodes, onFitted }: { nodes: FlowNode[]; onFitted: () => v
 }
 
 export interface RunGraphProps {
-  records: readonly GraphRecord[];
+  records: readonly LedgerRecord[];
   run: RunSummary;
   /** Called with a clicked node's ledger record id. */
   onSelect: (recordId: string) => void;

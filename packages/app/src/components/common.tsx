@@ -1,4 +1,4 @@
-import type { ApprovalState, Effect, RecordedDecision } from "@sanoma/workflows";
+import type { ApprovalState, Effect, LedgerRecord, RecordedDecision } from "@sanoma/workflows";
 import { cva } from "class-variance-authority";
 import { ChevronRightIcon, CircleAlertIcon, InfoIcon } from "lucide-react";
 import { type ReactNode, useMemo, useSyncExternalStore } from "react";
@@ -8,7 +8,6 @@ import { Button } from "#/components/ui/button.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
-import type { GraphRecord } from "../api.ts";
 import { approverLabel } from "@sanoma/workflows/shared";
 
 // Small pieces shared by the screens, composed from the shadcn components in ./ui.
@@ -16,7 +15,7 @@ import { approverLabel } from "@sanoma/workflows/shared";
 export { APPROVAL_TONE, DECISION_TONE, RUN_TONE, type Tone } from "#/lib/tone.ts";
 
 /** A ledger record's tone: what it did to the run. */
-export function ledgerTone(record: GraphRecord): Tone {
+export function ledgerTone(record: LedgerRecord): Tone {
   switch (record.type) {
     case "op.called":
       return record.error ? "bad" : "off";

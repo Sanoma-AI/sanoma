@@ -1,4 +1,4 @@
-import type { ErrorInfo } from "@sanoma/workflows";
+import type { ErrorInfo, LedgerRecord } from "@sanoma/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { ClientOnly, createFileRoute } from "@tanstack/react-router";
 import { lazy, type ReactNode, Suspense, useCallback, useEffect, useState } from "react";
@@ -6,7 +6,7 @@ import { Badge } from "#/components/ui/badge.tsx";
 import { Item, ItemContent, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { approverLabel } from "@sanoma/workflows/shared";
-import { type GraphRecord, starterName } from "../../api.ts";
+import { starterName } from "../../api.ts";
 import { ApprovalCard } from "../../components/approval.tsx";
 import {
   DecisionBadge,
@@ -46,8 +46,6 @@ function RunPage() {
   const { id } = Route.useParams();
   const { data, error } = useSuspenseQuery(runQuery(id));
   const { run, ledger, ledgerError, approvals } = data;
-  // The runtime's records, with the fields it adds that LedgerRecord does not declare yet.
-  const records: GraphRecord[] = ledger;
   const titles = new Map(approvals.map((a) => [a.id, a.title]));
   const [highlighted, setHighlighted] = useState<string>();
   useEffect(() => {
@@ -89,7 +87,7 @@ function RunPage() {
         <div className="h-[220px] overflow-hidden rounded-lg border sm:h-[280px]">
           <ClientOnly fallback={skeleton}>
             <Suspense fallback={skeleton}>
-              <RunGraph records={records} run={run} onSelect={show} />
+              <RunGraph records={ledger} run={run} onSelect={show} />
             </Suspense>
           </ClientOnly>
         </div>
@@ -99,10 +97,10 @@ function RunPage() {
         <div className="flex flex-col gap-3">
           <SectionTitle>Ledger</SectionTitle>
           {ledgerError && <Notice variant="destructive">Could not read the ledger: {ledgerError}</Notice>}
-          {records.length === 0 && !ledgerError && <Nothing title="Nothing recorded yet" />}
-          {records.length > 0 && (
+          {ledger.length === 0 && !ledgerError && <Nothing title="Nothing recorded yet" />}
+          {ledger.length > 0 && (
             <ItemGroup aria-label="Ledger">
-              {records.map((record) => (
+              {ledger.map((record) => (
                 <LedgerRow key={record.id} record={record} titles={titles} highlighted={record.id === highlighted} />
               ))}
             </ItemGroup>
@@ -142,7 +140,7 @@ function LedgerRow({
   titles,
   highlighted,
 }: {
-  record: GraphRecord;
+  record: LedgerRecord;
   titles: Map<string, string>;
   highlighted: boolean;
 }) {

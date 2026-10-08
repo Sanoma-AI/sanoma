@@ -1,15 +1,14 @@
-import type { RunStatus, RunSummary } from "@sanoma/workflows";
+import type { LedgerGroup, LedgerRecord, RunStatus, RunSummary } from "@sanoma/workflows";
 import { describe, expect, it } from "vitest";
-import type { GraphRecord, LedgerGroup } from "../src/api.ts";
 import { type GraphNode, runGraph } from "../src/graph/run-graph.ts";
 
 // Hand-built ledgers, in the shapes the runtime writes (see packages/workflows/src/ledger.ts).
 
-type Body = GraphRecord extends infer R ? (R extends GraphRecord ? Omit<R, keyof Common> : never) : never;
-type Common = Pick<GraphRecord, "v" | "app" | "id" | "runId" | "seq" | "at" | "actor" | "workflow">;
+type Body = LedgerRecord extends infer R ? (R extends LedgerRecord ? Omit<R, keyof Common> : never) : never;
+type Common = Pick<LedgerRecord, "v" | "app" | "id" | "runId" | "seq" | "at" | "actor" | "workflow">;
 
 /** A record with this seq, its id made the way the runtime makes it. */
-function record(seq: number, body: Body): GraphRecord {
+function record(seq: number, body: Body): LedgerRecord {
   const key = body.type === "approval.requested" || body.type === "approval.decided" ? body.approval : seq;
   return {
     v: 1,
@@ -21,11 +20,11 @@ function record(seq: number, body: Body): GraphRecord {
     actor: { id: "ada" },
     workflow: "announce",
     ...body,
-  } as GraphRecord;
+  } as LedgerRecord;
 }
 
 /** A run's records from their bodies, numbered in order. */
-const ledger = (...bodies: Body[]): GraphRecord[] => bodies.map((body, seq) => record(seq, body));
+const ledger = (...bodies: Body[]): LedgerRecord[] => bodies.map((body, seq) => record(seq, body));
 
 const run = (status: RunStatus): RunSummary => ({
   runId: "run-1",
