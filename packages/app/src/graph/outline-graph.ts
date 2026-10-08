@@ -59,9 +59,11 @@ export function outlineGraph(outline: readonly OutlineNode[]): RunGraph {
           from = [add({ ...base("sleep", "sleep", parent), kind: "sleep" }, from)];
           break;
         case "all":
-          if (step.dynamic) from = [cluster("for each", step.branches[0] ?? [], from, parent)];
           // An empty lane leads straight from the node before to the node after.
-          else if (step.branches.length) from = unique(step.branches.flatMap((b) => chain(b, from, parent)));
+          if (step.branches.length) from = unique(step.branches.flatMap((b) => chain(b, from, parent)));
+          break;
+        case "each":
+          from = [cluster("for each", step.body, from, parent)];
           break;
         case "repeat":
           from = [cluster("repeats", step.body, from, parent)];

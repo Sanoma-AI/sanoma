@@ -85,7 +85,7 @@ describe("outlineWorkflow", () => {
     });
   });
 
-  it("nests fan-outs, branches and loops, marks computed calls dynamic, and cannot see into helpers", () => {
+  it("nests fan-outs, branches and loops, stars computed segments, and cannot see into helpers", () => {
     expect(outlineWorkflow(busy)).toEqual({
       nodes: [
         {
@@ -95,15 +95,69 @@ describe("outlineWorkflow", () => {
             [{ kind: "sleep" }, { kind: "op", id: "forum.comments.list" }],
           ],
         },
-        { kind: "all", branches: [[{ kind: "op", id: "forum.comments.list" }]], dynamic: true },
+        { kind: "each", body: [{ kind: "op", id: "forum.comments.list" }] },
         {
           kind: "branch",
-          cases: [[{ kind: "approval", title: "Shout?" }], [{ kind: "op", id: "bluesky.post.create" }]],
+          // The final else logs and makes no call: the empty case.
+          cases: [[{ kind: "approval", title: "Shout?" }], [{ kind: "op", id: "bluesky.post.create" }], []],
         },
         { kind: "repeat", body: [{ kind: "op", id: "bluesky.post.create" }] },
-        { kind: "op", id: "*.comments.list", dynamic: true },
+        { kind: "op", id: "*.comments.list" },
       ],
     });
+  });
+
+  it("keeps the way past a branch's calls: a missing else or default, an arm without calls, && and ??", () => {
+    const post = { kind: "op", id: "bluesky.post.create" } as const;
+    const bypassed = { kind: "branch", cases: [[post], []] } as const;
+    const branches = defineWorkflow({
+      name: "branches",
+      trigger: "manual",
+      input: z.object({ loud: z.boolean(), mood: z.string(), text: z.string().optional() }),
+      uses: [bluesky.post.create, "sleep"],
+      run: async (ctx, { loud, mood, text }) => {
+        if (loud) await ctx.bluesky.post.create({ text: "if" });
+        switch (mood) {
+          case "glad":
+          case "happy":
+            await ctx.bluesky.post.create({ text: "case" });
+            break;
+        }
+        await (loud ? ctx.bluesky.post.create({ text: "?:" }) : undefined);
+        await (loud && ctx.bluesky.post.create({ text: "&&" }));
+        await (text ?? ctx.bluesky.post.create({ text: "??" }));
+        // Both arms call: no way past.
+        await (loud ? ctx.bluesky.post.create({ text: "a" }) : ctx.sleep({ ms: 1 }));
+      },
+    });
+    expect(outlineWorkflow(branches)).toEqual({
+      nodes: [
+        bypassed,
+        bypassed,
+        bypassed,
+        bypassed,
+        bypassed,
+        { kind: "branch", cases: [[post], [{ kind: "sleep" }]] },
+      ],
+    });
+  });
+
+  it("does not read a function defined inside run: its calls run where it is called", () => {
+    const helpers = defineWorkflow({
+      name: "helpers",
+      trigger: "manual",
+      input: z.object({ threads: z.array(z.string()) }),
+      uses: [forum.comments.list, bluesky.post.create],
+      run: async (ctx, { threads }) => {
+        const list = async (thread: string) => ctx.forum.comments.list({ thread });
+        async function post(text: string) {
+          await ctx.bluesky.post.create({ text });
+        }
+        for (const thread of threads) await post(String(await list(thread)));
+        return threads;
+      },
+    });
+    expect(outlineWorkflow(helpers)).toEqual({ nodes: [] });
   });
 
   it("reads a run written as a method, and whatever its ctx parameter is named", () => {
@@ -184,8 +238,8 @@ console.log(JSON.stringify(outlineWorkflow(built)));
       expect(out.status, out.stderr).toBe(0);
       expect(JSON.parse(out.stdout)).toEqual({
         nodes: [
-          { kind: "all", branches: [[{ kind: "op", id: "forum.comments.list" }]], dynamic: true },
-          { kind: "branch", cases: [[{ kind: "sleep" }]] },
+          { kind: "each", body: [{ kind: "op", id: "forum.comments.list" }] },
+          { kind: "branch", cases: [[{ kind: "sleep" }], []] },
         ],
       });
     } finally {

@@ -6,7 +6,7 @@ import type { GraphNode } from "../src/graph/run-graph.ts";
 
 // Hand-built outlines, in the shapes outlineWorkflow returns (packages/workflows/src/outline.ts).
 
-const op = (id: string, dynamic?: true): OutlineNode => ({ kind: "op", id, ...(dynamic ? { dynamic } : {}) });
+const op = (id: string): OutlineNode => ({ kind: "op", id });
 
 const labels = (nodes: GraphNode[]) => nodes.map((n) => `${n.id} ${n.label}${n.parent ? ` in ${n.parent}` : ""}`);
 const pairs = (edges: { source: string; target: string }[]) => edges.map((e) => `${e.source}->${e.target}`);
@@ -18,7 +18,7 @@ describe("outlineGraph", () => {
       { kind: "approval", title: "Review launch copy" },
       { kind: "approval" },
       { kind: "sleep" },
-      op("*.post.create", true),
+      op("*.post.create"),
     ]);
     expect(labels(nodes)).toEqual([
       "start start",
@@ -70,10 +70,10 @@ describe("outlineGraph", () => {
     ]);
   });
 
-  it("draws a dynamic ctx.all as its one member in a cluster labelled for each", () => {
+  it("draws a ctx.all over computed members as its one member in a cluster labelled for each", () => {
     const { nodes, edges } = outlineGraph([
-      { kind: "all", dynamic: true, branches: [[op("forum.comments.list"), op("forum.comments.hide")]] },
-      { kind: "all", dynamic: true, branches: [] },
+      { kind: "each", body: [op("forum.comments.list"), op("forum.comments.hide")] },
+      { kind: "each", body: [] },
     ]);
     expect(labels(nodes)).toEqual([
       "start start",
