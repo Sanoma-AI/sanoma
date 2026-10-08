@@ -14,7 +14,8 @@ import { APPROVAL_TONE, RUN_TONE, type Tone } from "../lib/tone.ts";
 /**
  * A run as a graph, built from its ledger: where it started, each operation call, sleep and
  * approval the workflow asked for, and how it ended. No React here: the page lays it out and
- * draws it (components/run-graph.tsx).
+ * draws it (components/graph.tsx). A workflow's outline is drawn with the same nodes and edges
+ * (outline-graph.ts).
  */
 
 /** An approval's state as the ledger tells it. */
@@ -33,12 +34,15 @@ export interface Hold {
 interface Base {
   id: string;
   label: string;
-  tone: Tone;
+  /** How it went. None in an outline, which shows what a run may do, not what one did. */
+  tone?: Tone;
   /** Orders the nodes: the seq of the record the node stands for. */
   seq: number;
   /** The ledger record to show when the node is clicked. */
   recordId?: string;
   group?: LedgerGroup;
+  /** The `cluster` node it is drawn inside, by id. */
+  parent?: string;
 }
 
 export type GraphNode =
@@ -53,9 +57,16 @@ export type GraphNode =
       durationMs?: number;
       hold?: Hold;
     })
-  | (Base & { kind: "sleep"; until: number })
-  | (Base & { kind: "approval"; approval: string; title: string; approver: string; state: HoldState; refused: number })
-  | (Base & { kind: "end"; state: RunStatus | "pending"; errorCode?: ErrorCode | undefined });
+  /** `until` is unknown in an outline. */
+  | (Base & { kind: "sleep"; until?: number })
+  /** `hold` is how the approval stands in a run; an outline has none, and a title only when the source gives one. */
+  | (Base & { kind: "approval"; title?: string; hold?: Hold })
+  /** `state` is how the run ended, or `pending`; none in an outline. */
+  | (Base & { kind: "end"; state?: RunStatus | "pending"; errorCode?: ErrorCode | undefined })
+  /** In an outline: a box around a loop's body or a dynamic `ctx.all`'s member, which `label` names. */
+  | (Base & { kind: "cluster" })
+  /** In an outline: where a branch splits into its cases. */
+  | (Base & { kind: "split" });
 
 export type GraphNodeKind = GraphNode["kind"];
 
@@ -127,11 +138,11 @@ export function runGraph(records: readonly LedgerRecord[], run: RunSummary): Run
         break;
       }
       case "approval.requested": {
-        const hold = {
+        const hold: Hold = {
           approval: record.approval,
           title: record.title,
           approver: approverLabel(record.approver),
-          state: "pending" as const,
+          state: "pending",
           refused: 0,
         };
         if (record.requestedBy === "policy" && record.op !== undefined) {
@@ -146,10 +157,11 @@ export function runGraph(records: readonly LedgerRecord[], run: RunSummary): Run
             id: `approval:${record.approval}`,
             kind: "approval",
             label: record.title,
+            title: record.title,
             tone: "waiting",
             seq: record.seq,
             recordId: record.id,
-            ...hold,
+            hold,
             ...group,
           };
           asked.set(record.approval, node);
@@ -159,8 +171,7 @@ export function runGraph(records: readonly LedgerRecord[], run: RunSummary): Run
       }
       case "approval.decided":
       case "approval.refused": {
-        const node = asked.get(record.approval);
-        const target = node?.kind === "op" ? node.hold : node;
+        const target = asked.get(record.approval)?.hold;
         if (!target) break;
         if (record.type === "approval.refused") target.refused++;
         else target.state = record.decision === "approve" ? "approved" : "rejected";
@@ -195,11 +206,12 @@ export function runGraph(records: readonly LedgerRecord[], run: RunSummary): Run
     }
   }
 
-  for (const node of steps) {
-    if (node.kind === "approval") node.tone = ended && node.state === "pending" ? "off" : APPROVAL_TONE[node.state];
-    if (node.kind === "op" && node.hold && !called.has(node)) {
+  for (const node of asked.values()) {
+    if (!node.hold) continue;
+    const { state } = node.hold;
+    if (node.kind === "approval") node.tone = ended && state === "pending" ? "off" : APPROVAL_TONE[state];
+    if (node.kind === "op" && !called.has(node)) {
       // Not recorded yet: waiting on its approval, or running once approved.
-      const { state } = node.hold;
       node.tone = state === "rejected" ? "bad" : ended ? "off" : state === "approved" ? "active" : "waiting";
     }
   }

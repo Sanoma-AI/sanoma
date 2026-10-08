@@ -53,7 +53,7 @@ const useReducedMotion = () =>
   );
 
 const frame = cva(
-  "flex size-full cursor-pointer flex-col justify-center gap-1 rounded-lg border bg-card px-2.5 text-xs text-card-foreground shadow-xs transition-colors hover:bg-muted",
+  "flex size-full flex-col justify-center gap-1 rounded-lg border bg-card px-2.5 text-xs text-card-foreground shadow-xs transition-colors",
   {
     variants: {
       tone: {
@@ -65,6 +65,8 @@ const frame = cva(
         off: "border-border",
       } satisfies Record<Tone, string>,
       pending: { true: "border-dashed bg-transparent" },
+      // It has a ledger record to show.
+      clickable: { true: "cursor-pointer hover:bg-muted" },
     },
   },
 );
@@ -83,7 +85,11 @@ function Frame({
 }) {
   return (
     <div
-      className={frame({ tone: node.tone, pending: node.kind === "end" && node.state === "pending" })}
+      className={frame({
+        tone: node.tone ?? "off",
+        pending: node.kind === "end" && node.state === "pending",
+        clickable: node.recordId !== undefined,
+      })}
       title={node.label}
     >
       {inbound && <Handle type="target" position={Position.Left} isConnectable={false} className="invisible" />}
@@ -97,11 +103,14 @@ function Line({ children }: { children: ReactNode }) {
   return <div className="flex min-w-0 items-center gap-1.5">{children}</div>;
 }
 
+/** The node's tone, when it has one: an outline's nodes have none. */
+const Dot = ({ node }: { node: GraphNode }) => node.tone && <StatusDot tone={node.tone} />;
+
 function StartNode({ data: { node } }: NodeProps<FlowNode>) {
   return (
     <Frame node={node} inbound={false}>
       <Line>
-        <StatusDot tone={node.tone} />
+        <Dot node={node} />
         start
       </Line>
     </Frame>
@@ -113,7 +122,7 @@ function EndNode({ data: { node } }: NodeProps<FlowNode>) {
   return (
     <Frame node={node} outbound={false}>
       <Line>
-        <StatusDot tone={node.tone} />
+        <Dot node={node} />
         <span className={node.state === "pending" ? "text-muted-foreground" : ""}>{node.label}</span>
       </Line>
     </Frame>
@@ -128,7 +137,7 @@ function OpNode({ data: { node } }: NodeProps<FlowNode>) {
   return (
     <Frame node={node}>
       <Line>
-        <StatusDot tone={node.tone} />
+        <Dot node={node} />
         <code className="truncate">{node.op}</code>
       </Line>
       <Line>
@@ -155,13 +164,15 @@ function ApprovalNode({ data: { node } }: NodeProps<FlowNode>) {
   return (
     <Frame node={node}>
       <Line>
-        <StatusDot tone={node.tone} />
-        <span className="truncate">“{node.title}”</span>
+        <Dot node={node} />
+        <span className="truncate">{node.title ? `“${node.title}”` : node.label}</span>
       </Line>
-      <Line>
-        <Badge className={toneBadge({ tone: APPROVAL_TONE[node.state] })}>{node.state}</Badge>
-        <span className="truncate text-muted-foreground">{node.approver}</span>
-      </Line>
+      {node.hold && (
+        <Line>
+          <Badge className={toneBadge({ tone: APPROVAL_TONE[node.hold.state] })}>{node.hold.state}</Badge>
+          <span className="truncate text-muted-foreground">{node.hold.approver}</span>
+        </Line>
+      )}
     </Frame>
   );
 }
@@ -171,10 +182,36 @@ function SleepNode({ data: { node } }: NodeProps<FlowNode>) {
   return (
     <Frame node={node}>
       <Line>
-        <StatusDot tone={node.tone} />
-        <span className="truncate">sleep until {new Date(node.until).toLocaleString()}</span>
+        <Dot node={node} />
+        <span className="truncate">
+          {node.until === undefined ? "sleep" : `sleep until ${new Date(node.until).toLocaleString()}`}
+        </span>
       </Line>
     </Frame>
+  );
+}
+
+/** A box around the nodes it holds (a loop's body, a dynamic `ctx.all`'s member), named by a badge. */
+function ClusterNode({ data: { node } }: NodeProps<FlowNode>) {
+  return (
+    <div className="size-full rounded-lg border border-dashed border-muted-foreground/40" title={node.label}>
+      <Handle type="target" position={Position.Left} isConnectable={false} className="invisible" />
+      <Badge variant="outline" className="m-1.5 bg-card">
+        {node.label}
+      </Badge>
+      <Handle type="source" position={Position.Right} isConnectable={false} className="invisible" />
+    </div>
+  );
+}
+
+/** Where a branch splits: a small diamond. */
+function SplitNode() {
+  return (
+    <div className="flex size-full items-center justify-center" title="branch">
+      <Handle type="target" position={Position.Left} isConnectable={false} className="invisible" />
+      <div className="size-4 rotate-45 rounded-xs border border-muted-foreground/60 bg-card" />
+      <Handle type="source" position={Position.Right} isConnectable={false} className="invisible" />
+    </div>
   );
 }
 
@@ -184,6 +221,8 @@ const nodeTypes: NodeTypes = {
   op: OpNode,
   approval: ApprovalNode,
   sleep: SleepNode,
+  cluster: ClusterNode,
+  split: SplitNode,
 } satisfies Record<GraphNodeKind, unknown>;
 
 /** Fits the view again when nodes come or go, as the run's page polls. */
@@ -194,10 +233,12 @@ function FitOnChange({ nodes, onFitted }: { nodes: FlowNode[]; onFitted: () => v
   const count = nodes.length;
   useEffect(() => {
     if (!width || !height || !count) return;
-    const left = Math.min(...nodes.map((n) => n.position.x));
-    const right = Math.max(...nodes.map((n) => n.position.x + (n.width ?? 0)));
-    const top = Math.min(...nodes.map((n) => n.position.y));
-    const bottom = Math.max(...nodes.map((n) => n.position.y + (n.height ?? 0)));
+    // A cluster's nodes are placed relative to it, and inside it.
+    const outer = nodes.filter((n) => n.parentId === undefined);
+    const left = Math.min(...outer.map((n) => n.position.x));
+    const right = Math.max(...outer.map((n) => n.position.x + (n.width ?? 0)));
+    const top = Math.min(...outer.map((n) => n.position.y));
+    const bottom = Math.max(...outer.map((n) => n.position.y + (n.height ?? 0)));
     // All of the graph when it fits at a readable zoom. Else its right-hand end, the run's
     // latest steps, at that zoom; panning shows the rest.
     const fits = (right - left) * READABLE_ZOOM <= width * (1 - 2 * FIT.padding);
@@ -229,16 +270,21 @@ export default function RunGraph({ records, run, onSelect }: RunGraphProps) {
   const graph = useMemo(() => runGraph(records, run), [records, run]);
   const nodes = useMemo<FlowNode[]>(() => {
     const at = layout(graph.nodes, graph.edges);
-    return graph.nodes.map((node) => ({
-      id: node.id,
-      type: node.kind,
-      position: at.get(node.id) ?? { x: 0, y: 0 },
-      ...NODE_SIZE[node.kind],
-      data: { node },
-      ariaLabel: node.label,
-      draggable: false,
-      connectable: false,
-    }));
+    // A cluster comes before the nodes inside it, as React Flow needs.
+    return graph.nodes.map((node) => {
+      const { x, y, ...size } = at.get(node.id) ?? { x: 0, y: 0, ...NODE_SIZE[node.kind] };
+      return {
+        id: node.id,
+        type: node.kind,
+        position: { x, y },
+        ...size,
+        ...(node.parent === undefined ? {} : { parentId: node.parent }),
+        data: { node },
+        ariaLabel: node.label,
+        draggable: false,
+        connectable: false,
+      };
+    });
   }, [graph]);
   const edges = useMemo<Edge[]>(
     () =>

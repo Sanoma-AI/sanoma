@@ -159,9 +159,8 @@ describe("runGraph", () => {
     expect(waiting.nodes[1]).toMatchObject({
       kind: "approval",
       label: "Send it?",
-      approver: "marketing-lead",
-      state: "pending",
-      refused: 1,
+      title: "Send it?",
+      hold: { approver: "marketing-lead", state: "pending", refused: 1 },
       recordId: "run-1:approval.requested:approval-1",
     });
     expect(waiting.edges.at(-1)).toMatchObject({ target: "end", pending: true });
