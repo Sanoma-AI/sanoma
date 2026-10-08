@@ -17,7 +17,6 @@ import {
   Nothing,
   OpName,
   PageHeader,
-  SectionTitle,
   SubsectionTitle,
 } from "../components/common.tsx";
 import { type Field, fieldsOf } from "../form/schema.ts";
@@ -36,38 +35,42 @@ function WorkflowsPage() {
   const { data: config } = useSuspenseQuery(configQuery());
   const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
   return (
-    <section className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <PageHeader title="Workflows" />
-      <Facts>
-        <Fact label="App">{config.appName}</Fact>
-        <Fact label="Version">
-          <code>{config.version}</code>
-        </Fact>
-        <Fact label="Policy">
-          {config.policy.defined ? (
-            <>
-              a policy checks every operation call
-              {config.policy.version ? (
+      <Card size="sm">
+        <CardContent>
+          <Facts>
+            <Fact label="App">{config.appName}</Fact>
+            <Fact label="Version">
+              <code>{config.version}</code>
+            </Fact>
+            <Fact label="Policy">
+              {config.policy.defined ? (
                 <>
-                  {" "}
-                  (version <code>{config.policy.version}</code>)
+                  a policy checks every operation call
+                  {config.policy.version ? (
+                    <>
+                      {" "}
+                      (version <code>{config.policy.version}</code>)
+                    </>
+                  ) : (
+                    " (no version named)"
+                  )}
                 </>
               ) : (
-                " (no version named)"
+                "allowAll: every operation call is allowed"
               )}
-            </>
-          ) : (
-            "allowAll: every operation call is allowed"
-          )}
-        </Fact>
-      </Facts>
+            </Fact>
+          </Facts>
+        </CardContent>
+      </Card>
       {config.workflows.length === 0 && <Nothing title="This config has no workflows" />}
       <div className="grid gap-4 lg:grid-cols-2">
         {config.workflows.map((wf) => (
           <WorkflowCard key={wf.name} workflow={wf} ops={ops} />
         ))}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -89,8 +92,8 @@ function WorkflowCard({ workflow, ops }: { workflow: WorkflowEntry; ops: Map<str
   return (
     <Card>
       <CardHeader>
-        <CardTitle>
-          <SectionTitle>{workflow.title ?? workflow.name}</SectionTitle>
+        <CardTitle role="heading" aria-level={2}>
+          {workflow.title ?? workflow.name}
         </CardTitle>
         <CardDescription>
           <code>{workflow.name}</code>
