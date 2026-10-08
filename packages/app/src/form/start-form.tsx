@@ -21,6 +21,7 @@ import { Input } from "#/components/ui/input.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
+import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
 import { errorMessage } from "@sanoma/workflows/shared";
 import { errorBodyOf } from "../api.ts";
 import { Notice } from "../components/common.tsx";
@@ -167,15 +168,22 @@ function FieldView({ form, field, path }: { form: StartFormApi; field: SchemaFie
                   <FieldContent>
                     <FieldView form={form} field={{ ...item, label: `${field.label} ${i + 1}` }} path={[...path, i]} />
                   </FieldContent>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => f.removeValue(i)}
-                    aria-label={`Remove ${field.label} ${i + 1}`}
-                  >
-                    <Trash2Icon />
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => f.removeValue(i)}
+                        aria-label={`Remove ${field.label} ${i + 1}`}
+                      >
+                        <Trash2Icon />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      Remove {field.label} {i + 1}
+                    </TooltipContent>
+                  </Tooltip>
                 </Field>
               ))}
               <Field orientation="horizontal">
