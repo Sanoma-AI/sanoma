@@ -23,18 +23,18 @@ import type { AppContext } from "../context.ts";
 // What the API routes and the server functions both do. Server-only: each takes the app
 // context that startApp passes with every request. Every expected failure is an ApiError.
 
+/** A request's context once start.ts's `actor` middleware has run: the app, and who is asking. */
+export interface ActorContext {
+  app: AppContext;
+  actor: () => Promise<Principal | undefined>;
+}
+
 /**
  * Who is making a change (resolved at most once per request, see start.ts), or a 400 when
  * nobody is named. Only the default resolver reads the header, so only then does the answer
  * name it.
  */
-export async function requireActor({
-  app,
-  actor,
-}: {
-  app: AppContext;
-  actor: () => Promise<Principal | undefined>;
-}): Promise<Principal> {
+export async function requireActor({ app, actor }: ActorContext): Promise<Principal> {
   const parsed = Principal.safeParse(await actor());
   if (parsed.success) return parsed.data;
   const error = app.resolveActor

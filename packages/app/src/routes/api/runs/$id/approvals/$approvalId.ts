@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { DecideRequest } from "../../../../../api.ts";
-import { decide, json, parse, readJson, requireActor } from "../../../../../server/core.ts";
+import { decide, json, parse, readJson } from "../../../../../server/core.ts";
+import { withPrincipalRoute } from "../../../../../middleware.ts";
 
 /**
  * Decides an approval as the actor; answers with the approval's state: 200 once the run read
@@ -8,17 +9,21 @@ import { decide, json, parse, readJson, requireActor } from "../../../../../serv
  */
 export const Route = createFileRoute("/api/runs/$id/approvals/$approvalId")({
   server: {
-    handlers: {
-      POST: async ({ request, params, context }) => {
-        const actor = await requireActor(context);
-        const body = parse(
-          DecideRequest,
-          await readJson(request),
-          'Send {"decision": "approve" | "reject", "note"?: string}',
-        );
-        const state = await decide(context.app, actor, { ...body, runId: params.id, approvalId: params.approvalId });
-        return json(state, state.status === "pending" ? 202 : 200);
-      },
-    },
+    handlers: ({ createHandlers }) =>
+      createHandlers({
+        POST: {
+          middleware: [withPrincipalRoute],
+          handler: async ({ request, params, context }) => {
+            const body = parse(
+              DecideRequest,
+              await readJson(request),
+              'Send {"decision": "approve" | "reject", "note"?: string}',
+            );
+            const call = { ...body, runId: params.id, approvalId: params.approvalId };
+            const state = await decide(context.app, context.principal, call);
+            return json(state, state.status === "pending" ? 202 : 200);
+          },
+        },
+      }),
   },
 });

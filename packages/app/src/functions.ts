@@ -1,7 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { type ActorInfo, DecideCall, RunsQuery, StartRunRequest } from "./api.ts";
-import { decide, parse, requireActor, runDetail, startRun } from "./server/core.ts";
+import { decide, parse, runDetail, startRun } from "./server/core.ts";
+import { withPrincipal } from "./middleware.ts";
 
 // The page's reads and changes, as server functions. They do what the /api routes do, with the
 // same schemas; the routes stay the stable surface for scripts. Failures, the actor header and
@@ -45,9 +46,11 @@ export const getRun = createServerFn(READ)
   .handler(({ data, context }) => runDetail(context.app, data.id));
 
 export const startRunFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
   .validator(validate(StartRunRequest))
-  .handler(async ({ data, context }) => startRun(context.app, await requireActor(context), data));
+  .handler(({ data, context }) => startRun(context.app, context.principal, data));
 
 export const decideFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
   .validator(validate(DecideCall))
-  .handler(async ({ data, context }) => decide(context.app, await requireActor(context), data));
+  .handler(({ data, context }) => decide(context.app, context.principal, data));
