@@ -73,20 +73,37 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     current = previous;
     throw err;
   }
-  // DBOS gives runs queued without a version only to the app's latest version, which is the
-  // newest one registered. A worker started on code seen before (a rollback) is not it.
-  const latest = (await DBOS.getLatestApplicationVersion()).versionName;
-  if (latest !== resolved.version) {
-    if (options.promote) await DBOS.setLatestApplicationVersion(resolved.version);
-    else {
-      warn(
-        `this worker runs version ${resolved.version} but the app's latest is ${latest}; ` +
-          "runs queued without a version go to the latest. Start with { promote: true } to take them here",
+  try {
+    // DBOS gives runs queued without a version only to the app's latest version, which is the
+    // newest one registered. A worker started on code seen before (a rollback) is not it.
+    const latest = (await DBOS.getLatestApplicationVersion()).versionName;
+    if (latest !== resolved.version) {
+      if (options.promote) await DBOS.setLatestApplicationVersion(resolved.version);
+      else {
+        warn(
+          `this worker runs version ${resolved.version} but the app's latest is ${latest}; ` +
+            "runs queued without a version go to the latest. Start with { promote: true } to take them here",
+        );
+      }
+    }
+    await DBOS.registerQueue(resolved.queueName);
+    await warnAboutStrandedRuns(resolved);
+  } catch (err) {
+    // DBOS is launched, but the caller gets no worker to stop: stop it here, so no run goes on
+    // in a worker nobody holds, and the next startWorker launches afresh.
+    state.stopped = true;
+    current = previous;
+    try {
+      await DBOS.shutdown();
+    } catch (shutdownError) {
+      throw new AggregateError(
+        [err, shutdownError],
+        `${errorMessage(err)} (and stopping DBOS failed too: ${errorMessage(shutdownError)})`,
+        { cause: shutdownError },
       );
     }
+    throw err;
   }
-  await DBOS.registerQueue(resolved.queueName);
-  await warnAboutStrandedRuns(resolved);
   return {
     async stop() {
       state.stopped = true;

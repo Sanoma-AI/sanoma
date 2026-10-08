@@ -1,7 +1,9 @@
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
-import { describe, expect, it } from "vitest";
+import { DBOS } from "@dbos-inc/dbos-sdk";
+import { testDatabaseUrl } from "@sanoma/testing";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   allowAll,
@@ -100,5 +102,21 @@ describe("startWorker, resolveConfig and describeConfig", () => {
     expect(resolved).not.toHaveProperty("ledger");
     expect(resolveConfig(config({})).appName).toBe("sanoma");
     expect(resolveConfig(config({})).queueName).toBe("sanoma:sanoma");
+  });
+});
+
+describe("startWorker failing after DBOS has launched", () => {
+  it("stops DBOS and throws, so nothing runs in a worker nobody holds and the next start launches afresh", async () => {
+    const ok = config({ appName: "worker-launch", databaseUrl: testDatabaseUrl("worker") });
+    const queue = vi.spyOn(DBOS, "registerQueue").mockRejectedValueOnce(new Error("no queue for you"));
+    try {
+      await expect(startWorker(ok)).rejects.toThrow("no queue for you");
+    } finally {
+      queue.mockRestore();
+    }
+    expect(DBOS.isInitialized()).toBe(false);
+    const worker = await startWorker(ok);
+    expect(DBOS.isInitialized()).toBe(true);
+    await worker.stop();
   });
 });
