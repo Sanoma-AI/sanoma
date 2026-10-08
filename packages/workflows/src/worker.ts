@@ -1,5 +1,6 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { buildCtx, isInfrastructureError } from "./call.ts";
+import { dbosStatusesOf } from "./client.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import type { WorkflowDefinition } from "./define.ts";
 import { errorInfo, errorMessage } from "./errors.ts";
@@ -102,7 +103,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
  */
 async function warnAboutStrandedRuns({ appName, version, queueName }: ResolvedConfig) {
   const runs = await DBOS.listWorkflows({
-    status: ["PENDING", "ENQUEUED"],
+    status: dbosStatusesOf("queued", "running"),
     applicationName: appName,
     loadInput: false,
     loadOutput: false,

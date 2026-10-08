@@ -14,36 +14,33 @@ import type { RunArgs } from "./run.ts";
  */
 export type RunStatus = "queued" | "running" | "waiting" | "finished" | "failed" | "cancelled";
 
+/**
+ * The run status each DBOS status maps to. `waiting` is PENDING with an approval pending, so
+ * only the approvals tell it from `running`. Keyed by every DBOS status, so one a later DBOS
+ * adds fails to compile here until it is mapped.
+ */
+const FROM_DBOS: Record<WorkflowStatusString, Exclude<RunStatus, "waiting">> = {
+  ENQUEUED: "queued",
+  DELAYED: "queued",
+  PENDING: "running",
+  SUCCESS: "finished",
+  ERROR: "failed",
+  MAX_RECOVERY_ATTEMPTS_EXCEEDED: "failed",
+  CANCELLED: "cancelled",
+};
+
 /** A run's status from DBOS's, and whether it has an approval pending. */
 export function runStatus(dbosStatus: string, approvals: readonly ApprovalState[]): RunStatus {
-  switch (dbosStatus) {
-    case "ENQUEUED":
-    case "DELAYED":
-      return "queued";
-    case "PENDING":
-      return approvals.some((a) => a.status === "pending") ? "waiting" : "running";
-    case "SUCCESS":
-      return "finished";
-    case "ERROR":
-    case "MAX_RECOVERY_ATTEMPTS_EXCEEDED":
-      return "failed";
-    case "CANCELLED":
-      return "cancelled";
-    default:
-      // A status a later DBOS adds: not ended as far as we know.
-      return "running";
-  }
+  // A status this DBOS did not have when the table was written: not ended as far as we know.
+  const status = Object.hasOwn(FROM_DBOS, dbosStatus) ? FROM_DBOS[dbosStatus as WorkflowStatusString] : "running";
+  return status === "running" && approvals.some((a) => a.status === "pending") ? "waiting" : status;
 }
 
-/** The DBOS statuses each run status comes from. `running` and `waiting` are both PENDING, told apart by the approvals. */
-const DBOS_STATUSES: Record<RunStatus, WorkflowStatusString[]> = {
-  queued: ["ENQUEUED", "DELAYED"],
-  running: ["PENDING"],
-  waiting: ["PENDING"],
-  finished: ["SUCCESS"],
-  failed: ["ERROR", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"],
-  cancelled: ["CANCELLED"],
-};
+/** The DBOS statuses the run statuses come from; `running` and `waiting` both come from PENDING. */
+export const dbosStatusesOf = (...statuses: RunStatus[]): WorkflowStatusString[] =>
+  (Object.keys(FROM_DBOS) as WorkflowStatusString[]).filter((s) =>
+    statuses.some((status) => FROM_DBOS[s] === (status === "waiting" ? "running" : status)),
+  );
 
 /** Which runs `SanomaClient.runs` lists. */
 export interface RunsFilter {
@@ -131,7 +128,7 @@ export class SanomaClient {
     const split = status === "running" || status === "waiting";
     const rows = await this.dbos.listWorkflows({
       limit: split ? undefined : limit,
-      status: status && DBOS_STATUSES[status],
+      status: status && dbosStatusesOf(status),
       sortDesc: true,
       applicationName: this.config.appName,
       loadInput: false,
