@@ -186,25 +186,26 @@ const kindName = (f: Field): string =>
 
 function InputFields({ fields }: { fields: Field[] }) {
   return (
-    <ul className="flex flex-col gap-2">
+    <ItemGroup>
       {fields.map((field) => (
-        <li key={field.key} className="flex flex-col gap-0.5">
-          <span className="flex flex-wrap items-center gap-1.5">
-            <code>{field.key}</code>
-            <span className="text-muted-foreground">{kindName(field)}</span>
-            {field.required && <Badge variant="outline">required</Badge>}
-            {field.default !== undefined && (
-              <span className="text-muted-foreground">default {JSON.stringify(field.default)}</span>
+        <Item key={field.key} role="listitem" variant="outline" size="xs">
+          <ItemContent>
+            <ItemTitle>
+              <code>{field.key}</code>
+              <span className="font-normal text-muted-foreground">{kindName(field)}</span>
+              {field.required && <Badge variant="outline">required</Badge>}
+            </ItemTitle>
+            {(field.description || field.default !== undefined) && (
+              <ItemDescription>
+                {[field.description, field.default !== undefined && `default ${JSON.stringify(field.default)}`]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </ItemDescription>
             )}
-          </span>
-          {field.description && <span className="text-muted-foreground">{field.description}</span>}
-          {field.kind === "object" && (
-            <div className="border-l pl-3">
-              <InputFields fields={field.fields} />
-            </div>
-          )}
-        </li>
+            {field.kind === "object" && <InputFields fields={field.fields} />}
+          </ItemContent>
+        </Item>
       ))}
-    </ul>
+    </ItemGroup>
   );
 }
