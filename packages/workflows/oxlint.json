@@ -74,8 +74,7 @@
                   "approvedFor",
                   "allowAll",
                   "mayDecide",
-                  "errorCode",
-                  "DriverError"
+                  "errorCode"
                 ],
                 "allowTypeImports": true,
                 "message": "A workflow or policy imports only these and types from @sanoma/workflows: the rest (SanomaClient, startWorker, the ledger stores, config helpers) could start runs, approve its own approvals, forge the ledger or read credentials. Ask for approval with `ctx.approval`."

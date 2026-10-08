@@ -107,7 +107,7 @@ describe("lintWorkflow", () => {
     expect(
       messages(`
         import { defineWorkflow, definePolicy, allow, deny, approve, approvedFor, allowAll } from "@sanoma/workflows";
-        import { mayDecide, errorCode, DriverError } from "@sanoma/workflows";
+        import { mayDecide, errorCode } from "@sanoma/workflows";
         import type { Ctx, PolicyCall, SanomaClient } from "@sanoma/workflows";
         import { type ApprovalState } from "@sanoma/workflows";
         export type { Principal } from "@sanoma/workflows";
@@ -132,19 +132,20 @@ describe("lintWorkflow", () => {
     ]);
   });
 
-  it("refuses instanceof against the runtime's error classes, whose replayed copies are no instances", () => {
+  it("refuses the runtime's error classes, and instanceof against them, whose replayed copies are no instances", () => {
     expect(
       messages(`
-        import { DriverError as Vendor, errorCode } from "@sanoma/workflows";
+        import { DriverError, errorCode } from "@sanoma/workflows";
         import * as errors from "./errors.ts";
-        export const a = (e: unknown) => e instanceof Vendor;
+        export const a = (e: unknown) => e instanceof DriverError;
         export const b = (e: unknown) => e instanceof SanomaError;
         export const c = (e: unknown) => e instanceof errors.RejectedError;
         export const d = (e: unknown) => e instanceof PolicyDeniedError;
         export const ok = (e: unknown) => e instanceof Error || errorCode(e) === "driver_failed";
       `),
     ).toEqual([
-      expect.stringMatching(/^instanceof Vendor is not allowed in a workflow: .*errorCode\(err\)/),
+      expect.stringMatching(/^DriverError is not allowed in a workflow/),
+      expect.stringMatching(/^instanceof DriverError is not allowed in a workflow: .*errorCode\(err\)/),
       expect.stringMatching(/^instanceof SanomaError is not allowed/),
       expect.stringMatching(/^instanceof RejectedError is not allowed/),
       expect.stringMatching(/^instanceof PolicyDeniedError is not allowed/),
@@ -184,6 +185,7 @@ describe("lintWorkflow on a workflow that tries everything", () => {
     expect(problems).toEqual([
       [1, expect.stringMatching(/^SanomaClient is not allowed/)],
       [1, expect.stringMatching(/^jsonlLedger is not allowed/)],
+      [1, expect.stringMatching(/^DriverError is not allowed/)],
       [2, expect.stringMatching(/^import "@sanoma\/testing" is not allowed/)],
       [3, expect.stringMatching(/^import "@sanoma\/connector-ghost\/fake" is not allowed/)],
       [8, expect.stringMatching(/^resolveDatabaseUrl is not allowed.*read credentials/)],
@@ -267,6 +269,7 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
       { file: "policies/bad.ts", line: 1, rule: globals, text: expect.stringMatching(/'Date'.*ctx\.now/) },
       bad(1, imports, /'SanomaClient'.*approve its own approvals/),
       bad(1, imports, /'jsonlLedger'.*forge the ledger/),
+      bad(1, imports, /'DriverError'/),
       bad(2, imports, /@sanoma\/testing.*through ctx/),
       bad(3, imports, /@sanoma\/connector-ghost\/fake.*through ctx/),
       bad(4, globals, /'Date'.*ctx\.now/),

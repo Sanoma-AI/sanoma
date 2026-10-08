@@ -1,5 +1,7 @@
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { parseSync } from "oxc-parser";
+// From src/ and from dist/ alike, the package's own oxlint.json: the one list of allowed names.
+import oxlint from "../oxlint.json" with { type: "json" };
 
 export interface LintProblem {
   line: number;
@@ -25,25 +27,15 @@ const REFUSED_PACKAGES: [RegExp, string][] = [
 ];
 
 /**
- * What a workflow or policy may import from `@sanoma/workflows`, besides types. Everything else
- * is refused: the client, the worker and the app could start runs or approve the run's own
- * approvals, a ledger store could forge the audit record (a store keeps the first record per
- * id), and config helpers can read credentials. Kept equal to `allowImportNames` in oxlint.json.
+ * What a workflow or policy may import from `@sanoma/workflows`, besides types: oxlint.json's
+ * `allowImportNames`. Everything else is refused: the client, the worker and the app could start
+ * runs or approve the run's own approvals, a ledger store could forge the audit record (a store
+ * keeps the first record per id), and config helpers can read credentials.
  */
-export const WORKFLOW_IMPORTS = [
-  "defineWorkflow",
-  "definePolicy",
-  "allow",
-  "deny",
-  "approve",
-  "approvedFor",
-  "allowAll",
-  "mayDecide",
-  "errorCode",
-  "DriverError",
-] as const;
+const WORKFLOW_IMPORTS: readonly string[] =
+  restrictedImports(oxlint).find((p) => p.name === "@sanoma/workflows")?.allowImportNames ?? [];
 
-const ALLOWED_NAMES = new Set<string>(WORKFLOW_IMPORTS);
+const ALLOWED_NAMES = new Set(WORKFLOW_IMPORTS);
 
 const NOT_ALLOWED =
   "a workflow or policy imports only " +
@@ -81,9 +73,6 @@ export function lintWorkflow(source: string, filename?: string): LintProblem[] {
     message: `syntax: ${e.message}`,
   }));
   const root = filename === undefined ? undefined : treeOf(filename);
-  // Local names of the runtime's error classes, as imported, and every `instanceof` seen.
-  const errorClasses = new Set<string>();
-  const instanceofs: any[] = [];
 
   const checkSource = (node: any) => {
     const spec: string = node.source.value;
@@ -121,7 +110,7 @@ export function lintWorkflow(source: string, filename?: string): LintProblem[] {
       const imported: string = s.type === "ImportDefaultSpecifier" ? "default" : (named?.name ?? named?.value);
       if (!ALLOWED_NAMES.has(imported)) {
         problems.push({ ...at(s.start), message: `${imported} is not allowed in a workflow: ${NOT_ALLOWED}` });
-      } else if (ERROR_CLASSES.has(imported) && s.local?.name) errorClasses.add(s.local.name);
+      }
     }
   };
 
@@ -141,16 +130,15 @@ export function lintWorkflow(source: string, filename?: string): LintProblem[] {
     } else if (node.type === "ImportExpression") {
       problems.push({ ...at(node.start), message: "dynamic import is not allowed in a workflow" });
     } else if (node.type === "BinaryExpression" && node.operator === "instanceof") {
-      instanceofs.push(node);
+      checkInstanceof(node);
     }
     for (const [key, child] of Object.entries(node)) {
       if (key !== "type" && key !== "start" && key !== "end" && child && typeof child === "object") visit(child);
     }
   };
 
-  visit(program);
-  // After the walk, so an import below its use still counts.
-  for (const node of instanceofs) {
+  // A workflow imports none of these classes, so they are refused by the name they have.
+  const checkInstanceof = (node: any) => {
     const right = node.right;
     const name: string | undefined =
       right?.type === "Identifier"
@@ -158,7 +146,7 @@ export function lintWorkflow(source: string, filename?: string): LintProblem[] {
         : right?.type === "MemberExpression" && !right.computed
           ? right.property?.name
           : undefined;
-    if (name !== undefined && (errorClasses.has(name) || ERROR_CLASSES.has(name))) {
+    if (name !== undefined && ERROR_CLASSES.has(name)) {
       problems.push({
         ...at(node.start),
         message:
@@ -166,8 +154,18 @@ export function lintWorkflow(source: string, filename?: string): LintProblem[] {
           "which is no instance of it, so the run would take another branch; read `errorCode(err)`",
       });
     }
-  }
+  };
+
+  visit(program);
   return problems.toSorted((a, b) => a.line - b.line || a.column - b.column);
+}
+
+/** The `paths` of oxlint.json's `no-restricted-imports` rule. */
+function restrictedImports(config: typeof oxlint): { name: string; allowImportNames?: string[] }[] {
+  return config.overrides.flatMap((o) => {
+    const [, options] = o.rules["no-restricted-imports"] as [string, { paths: { name: string }[] }];
+    return options.paths;
+  });
 }
 
 function whyRefused(spec: string, filename: string | undefined, root: string | undefined): string | undefined {
