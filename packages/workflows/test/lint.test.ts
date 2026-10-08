@@ -176,7 +176,11 @@ const g = globalThis;
 const ws = new WebSocket("wss://example.com");
 const p = performance.now();
 const vendor = (e: unknown) => e instanceof DriverError;
-export const all = [SanomaClient, jsonlLedger, x, fakeGhost, t, r, k, resolveDatabaseUrl, ghostDriver, id, g, ws, p, vendor];
+const fanned = await Promise.all([t, r]);
+const settled = await Promise.allSettled([t, r]);
+const raced = await Promise.race([t, r]);
+const first = await Promise.any([t, r]);
+export const all = [SanomaClient, jsonlLedger, x, fakeGhost, t, r, k, resolveDatabaseUrl, ghostDriver, id, g, ws, p, vendor, fanned, settled, raced, first];
 `;
 
 describe("lintWorkflow on a workflow that tries everything", () => {
@@ -283,6 +287,10 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
       bad(12, globals, /'globalThis'.*bypass/),
       bad(13, globals, /'WebSocket'.*connector operation/),
       bad(14, globals, /'performance'.*ctx\.now/),
+      bad(16, "eslint(no-restricted-properties)", /Promise\.all\b.*one at a time.*ctx\.all\(\[\.\.\.\]\)/),
+      bad(17, "eslint(no-restricted-properties)", /Promise\.allSettled.*ctx\.all/),
+      bad(18, "eslint(no-restricted-properties)", /Promise\.race.*ctx\.all/),
+      bad(19, "eslint(no-restricted-properties)", /Promise\.any.*ctx\.all/),
     ]);
   });
 });

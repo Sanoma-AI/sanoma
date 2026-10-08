@@ -49,6 +49,26 @@
             "object": "Math",
             "property": "random",
             "message": "Workflows are replayed: derive values from `ctx.runId` or the input."
+          },
+          {
+            "object": "Promise",
+            "property": "all",
+            "message": "Calls through ctx run one at a time; declare a fan-out with `ctx.all([...])` so the ledger and the graph show it."
+          },
+          {
+            "object": "Promise",
+            "property": "allSettled",
+            "message": "Calls through ctx run one at a time; declare a fan-out with `ctx.all([...])` so the ledger and the graph show it."
+          },
+          {
+            "object": "Promise",
+            "property": "race",
+            "message": "Calls through ctx run one at a time; declare a fan-out with `ctx.all([...])` so the ledger and the graph show it."
+          },
+          {
+            "object": "Promise",
+            "property": "any",
+            "message": "Calls through ctx run one at a time; declare a fan-out with `ctx.all([...])` so the ledger and the graph show it."
           }
         ],
         "no-restricted-imports": [
