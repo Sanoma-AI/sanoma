@@ -81,7 +81,7 @@ function RunsPage() {
                         <span className="text-muted-foreground">-</span>
                       )}
                     </TableCell>
-                    <TableCell className="max-w-md min-w-64 whitespace-normal text-destructive">
+                    <TableCell className="max-w-xs truncate text-destructive" title={run.error}>
                       {run.status === "failed" && run.error ? run.error : ""}
                     </TableCell>
                   </TableRow>
