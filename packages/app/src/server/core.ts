@@ -107,17 +107,20 @@ const isZodError = (err: unknown): err is { issues: z.core.$ZodIssue[] } =>
 
 /**
  * An ApiError for any error: the runtime's codes get their status, a server function's
- * validator refusing its argument is a 400 with zod's issues, and anything else is a 500.
+ * validator refusing its argument is a 400 with zod's issues, and anything else is a 500. A
+ * 500 answers only that something went wrong: its message may name internal details (a
+ * database host, say), so the detail goes to the log (`toApiError`), not the caller.
  */
 export function asApiError(err: unknown): ApiError {
   if (err instanceof ApiError) return err;
   if (isZodError(err)) err = invalidInput("The request", err.issues);
   const code = errorCode(err);
   const status = (code && STATUS[code]) || 500;
+  if (status === 500) return new ApiError(500, { error: "Something went wrong", ...(code ? { code } : {}) });
   const body: ErrorResponse = { error: errorMessage(err), code };
   // Read by property, not instanceof: DBOS hands a run's errors back as copies.
   const data: Record<string, unknown> = (err as Partial<SanomaError>).data ?? {};
-  if (status !== 500 && Array.isArray(data.issues)) body.issues = data.issues as InputIssue[];
+  if (Array.isArray(data.issues)) body.issues = data.issues as InputIssue[];
   if (code === "not_approver") body.approver = data.approver as ErrorResponse["approver"];
   return new ApiError(status, body);
 }

@@ -331,6 +331,12 @@ describe("the API", () => {
 });
 
 describe("asApiError", () => {
+  it("answers anything unexpected with a 500 that names no detail", () => {
+    const api = asApiError(new Error("connect ECONNREFUSED db.internal:5432"));
+    expect(api.status).toBe(500);
+    expect(api.body).toEqual({ error: "Something went wrong" });
+  });
+
   it("answers a server function's argument that its validator refuses with 400 and the issues", () => {
     const refused = z.object({ runId: z.string().min(1) }).safeParse({ runId: "" });
     const api = asApiError(refused.error);
@@ -534,10 +540,24 @@ describe("an app with its own resolveActor", () => {
     expect(html).not.toMatch(/>change</);
   });
 
-  it("answers a resolver that throws with a 500 that says so", async () => {
-    const failed = await post("boom");
+  it("answers a resolver that throws with a 500, and logs why", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    let calls: unknown[][];
+    let failed: Awaited<ReturnType<typeof post>>;
+    try {
+      failed = await post("boom");
+    } finally {
+      calls = [...logged.mock.calls];
+      logged.mockRestore();
+    }
     expect(failed.status).toBe(500);
-    expect(failed.body.error).toBe("Could not tell who you are: the session store is down");
+    expect(failed.body.error).toBe("Something went wrong");
+    expect(calls).toEqual([
+      [
+        expect.stringContaining("POST /api/runs failed"),
+        expect.objectContaining({ message: "Could not tell who you are: the session store is down" }),
+      ],
+    ]);
   });
 });
 
