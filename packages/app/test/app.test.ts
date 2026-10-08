@@ -39,7 +39,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
 import { z } from "zod";
 import { type App, type ErrorResponse, type RunDetail, startApp } from "../src/index.ts";
-import { asApiError } from "../src/server/core.ts";
+import { ApiError } from "../src/api.ts";
+import { asApiError, parse } from "../src/server/core.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it when
 // dist/server/server.js is missing or older than a file under src/.
@@ -330,16 +331,21 @@ describe("the API", () => {
   });
 });
 
-describe("asApiError", () => {
+describe("errors the app answers with", () => {
   it("answers anything unexpected with a 500 that names no detail", () => {
     const api = asApiError(new Error("connect ECONNREFUSED db.internal:5432"));
     expect(api.status).toBe(500);
     expect(api.body).toEqual({ error: "Something went wrong" });
   });
 
-  it("answers a server function's argument that its validator refuses with 400 and the issues", () => {
-    const refused = z.object({ runId: z.string().min(1) }).safeParse({ runId: "" });
-    const api = asApiError(refused.error);
+  it("answers an argument a schema refuses, a server function's included, with 400 and the issues", () => {
+    let api: unknown;
+    try {
+      parse(z.object({ runId: z.string().min(1) }), { runId: "" }, "The request");
+    } catch (err) {
+      api = err;
+    }
+    if (!(api instanceof ApiError)) throw new Error("expected an ApiError");
     expect(api.status).toBe(400);
     expect(api.body).toMatchObject({
       code: "invalid_input",

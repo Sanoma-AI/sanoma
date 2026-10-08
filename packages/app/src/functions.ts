@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { type ActorInfo, DecideCall, RunsQuery, StartRunRequest } from "./api.ts";
-import { decide, requireActor, runDetail, startRun } from "./server/core.ts";
+import { decide, parse, requireActor, runDetail, startRun } from "./server/core.ts";
 
 // The page's reads and changes, as server functions. They do what the /api routes do, with the
 // same schemas; the routes stay the stable surface for scripts. Failures, the actor header and
@@ -12,6 +12,12 @@ import { decide, requireActor, runDetail, startRun } from "./server/core.ts";
 // the outputs: `strict: { output: false }`.
 const READ = { method: "GET", strict: { output: false } } as const;
 const CHANGE = { method: "POST", strict: { output: false } } as const;
+
+/** A validator that refuses an argument the way the API routes do: a 400 with zod's issues. */
+const validate =
+  <T extends z.ZodType>(schema: T) =>
+  (data: z.input<T>): z.output<T> =>
+    parse(schema, data, "The request");
 
 export const getConfig = createServerFn(READ).handler(({ context }) => context.app.description);
 
@@ -30,18 +36,18 @@ export const getActor = createServerFn(READ).handler(async ({ context }): Promis
 });
 
 export const getRuns = createServerFn(READ)
-  .validator(RunsQuery)
+  .validator(validate(RunsQuery))
   .handler(({ data, context }) => context.app.client.runs(data));
 
 /** The run, or the router's not-found when there is none. */
 export const getRun = createServerFn(READ)
-  .validator(z.object({ id: z.string().min(1) }))
+  .validator(validate(z.object({ id: z.string().min(1) })))
   .handler(({ data, context }) => runDetail(context.app, data.id));
 
 export const startRunFn = createServerFn(CHANGE)
-  .validator(StartRunRequest)
+  .validator(validate(StartRunRequest))
   .handler(async ({ data, context }) => startRun(context.app, await requireActor(context), data));
 
 export const decideFn = createServerFn(CHANGE)
-  .validator(DecideCall)
+  .validator(validate(DecideCall))
   .handler(async ({ data, context }) => decide(context.app, await requireActor(context), data));
