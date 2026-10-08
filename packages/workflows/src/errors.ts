@@ -1,21 +1,7 @@
+import type { z } from "zod";
 import type { Principal } from "./define.ts";
 
-/**
- * Why something failed, as a stable string a caller can branch on. Messages are for people
- * and may change; codes are the contract.
- */
-export type ErrorCode =
-  | "policy_denied"
-  | "approval_rejected"
-  | "not_approver"
-  | "no_pending_approval"
-  | "already_decided"
-  | "run_not_found"
-  | "driver_failed"
-  | "invalid_input"
-  | "run_ended";
-
-const CODES: ReadonlySet<string> = new Set<ErrorCode>([
+const CODES = [
   "policy_denied",
   "approval_rejected",
   "not_approver",
@@ -25,7 +11,15 @@ const CODES: ReadonlySet<string> = new Set<ErrorCode>([
   "driver_failed",
   "invalid_input",
   "run_ended",
-]);
+] as const;
+
+/**
+ * Why something failed, as a stable string a caller can branch on. Messages are for people
+ * and may change; codes are the contract.
+ */
+export type ErrorCode = (typeof CODES)[number];
+
+const KNOWN = new Set<string>(CODES);
 
 /**
  * An error with a `code` and plain-JSON `data`, both own enumerable properties, so they survive
@@ -48,8 +42,15 @@ export class SanomaError extends Error {
 export function errorCode(e: unknown): ErrorCode | undefined {
   if (typeof e !== "object" || e === null || !Object.hasOwn(e, "code")) return undefined;
   const code = (e as { code: unknown }).code;
-  return typeof code === "string" && CODES.has(code) ? (code as ErrorCode) : undefined;
+  return typeof code === "string" && KNOWN.has(code) ? (code as ErrorCode) : undefined;
 }
+
+/**
+ * True when the error says trying again would only repeat it (`retryable: false`), as a
+ * `DriverError` for a vendor's final answer or a ledger store for a corrupt file does. Read as
+ * a property, never `instanceof`: the error may come from another copy of this package.
+ */
+export const isFinal = (err: unknown): boolean => (err as { retryable?: unknown } | null)?.retryable === false;
 
 /** Thrown into the run when the policy denies an operation call. The run fails with it. */
 export class PolicyDeniedError extends SanomaError {
@@ -84,6 +85,18 @@ export interface InputIssue {
   path: (string | number)[];
   message: string;
   code: string;
+}
+
+/** The value, parsed by the schema, or an `invalid_input` error carrying zod's issues and `data`. */
+export function parseOrThrow<T extends z.ZodType>(
+  schema: T,
+  value: unknown,
+  what: string,
+  data?: Record<string, unknown>,
+): z.output<T> {
+  const parsed = schema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  throw invalidInput(what, parsed.error.issues, data);
 }
 
 /** An `invalid_input` error from zod issues, with the issues in `data` and a one-line message. */

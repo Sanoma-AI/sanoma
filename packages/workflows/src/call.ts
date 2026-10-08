@@ -1,7 +1,7 @@
 import { DBOS, DBOSWorkflowConflictError, Error as DBOSErrors } from "@dbos-inc/dbos-sdk";
 import { approverLabel, awaitApproval, type CheckedApproval } from "./approvals.ts";
 import { type ApprovalRequest, Approver, Covers, SleepRequest, type Use, type WorkflowDefinition } from "./define.ts";
-import { errorCode, errorInfo, errorMessage, invalidInput, PolicyDeniedError, SanomaError } from "./errors.ts";
+import { errorCode, errorInfo, errorMessage, isFinal, parseOrThrow, PolicyDeniedError, SanomaError } from "./errors.ts";
 import { entry, skipped, write, writeFailure } from "./ledger.ts";
 import { type CallContext, isOp, type Op } from "./op.ts";
 import { DecisionSchema, type PolicyCall, type RecordedDecision } from "./policy.ts";
@@ -37,7 +37,7 @@ const isSchemaError = (err: unknown) => err instanceof Error && err.name === "Zo
  */
 export function shouldRetry(err: unknown): boolean {
   if (isSchemaError(err)) return false;
-  return !(errorCode(err) === "driver_failed" && (err as { retryable?: unknown }).retryable === false);
+  return !(errorCode(err) === "driver_failed" && isFinal(err));
 }
 
 /*
@@ -163,11 +163,7 @@ async function callOp(run: Run, id: string, input: unknown) {
   const op = run.state.ops.get(id);
   const fn = run.state.drivers.get(id);
   if (!op || !fn) throw new Error(`No connector or driver for ${id} in this worker`);
-  const checked = op.input.safeParse(input);
-  if (!checked.success) {
-    throw invalidInput(`The input to ${op.id} does not match its schema`, checked.error.issues, { op: op.id });
-  }
-  const parsed = checked.data;
+  const parsed = parseOrThrow(op.input, input, `The input to ${op.id} does not match its schema`, { op: op.id });
   // The call's identity (its ledger seq and id, and the driver's idempotency key) is taken
   // before the first await, so it depends only on the order the workflow made its calls. A
   // replay skips the step bodies but counts the same way. A call held for an approval is
@@ -243,19 +239,15 @@ async function callOp(run: Run, id: string, input: unknown) {
  * `invalid_input`: who may decide it, and the operations it covers, as ids (none unless named).
  */
 function checkApproval(title: string, req: ApprovalRequest): CheckedApproval {
-  const approver = Approver.safeParse(req?.approver);
-  if (!approver.success) throw invalidInput(`ctx.approval("${title}")`, approver.error.issues, { title });
-  const covers = Covers.safeParse(req.covers);
-  if (!covers.success) throw invalidInput(`ctx.approval("${title}") covers`, covers.error.issues, { title });
-  return { approver: approver.data, covers: covers.data ?? [], links: req.links, details: req.details };
+  const approver = parseOrThrow(Approver, req?.approver, `ctx.approval("${title}")`, { title });
+  const covers = parseOrThrow(Covers, req.covers, `ctx.approval("${title}") covers`, { title });
+  return { approver, covers: covers ?? [], links: req.links, details: req.details };
 }
 
 /** Checks a sleep request before any DBOS call, so a bad one fails the run with `invalid_input`. */
 function checkSleep(req: unknown): SleepRequest {
   const timed = typeof req === "object" && req !== null && "until" in req;
-  const parsed = SleepRequest.options[timed ? 0 : 1].safeParse(req);
-  if (parsed.success) return parsed.data;
-  throw invalidInput(`ctx.sleep(${shown(req)})`, parsed.error.issues);
+  return parseOrThrow(SleepRequest.options[timed ? 0 : 1], req, `ctx.sleep(${shown(req)})`);
 }
 
 /**

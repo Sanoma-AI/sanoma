@@ -2,7 +2,7 @@ import { appendFile, mkdir, readFile, stat, truncate } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Approver, Principal } from "./define.ts";
-import { type ErrorInfo, errorMessage } from "./errors.ts";
+import { type ErrorInfo, errorMessage, isFinal } from "./errors.ts";
 import { warn } from "./log.ts";
 import type { Effect } from "./op.ts";
 import type { RecordedDecision } from "./policy.ts";
@@ -229,7 +229,7 @@ async function append(run: Run, record: LedgerRecord) {
       return await run.state.ledger.append(record);
     } catch (err) {
       const wait = RETRY_DELAYS_MS[i];
-      if (wait === undefined || (err as { retryable?: unknown } | null)?.retryable === false) throw err;
+      if (wait === undefined || isFinal(err)) throw err;
       await delay(wait);
     }
   }

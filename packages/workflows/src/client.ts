@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { DBOSClient, type WorkflowStatusString } from "@dbos-inc/dbos-sdk";
-import { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, mayDecide, topicOf, notApprover } from "./approvals.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { type ApprovalState, Principal, type WorkflowDefinition } from "./define.ts";
-import { SanomaError, invalidInput } from "./errors.ts";
+import { parseOrThrow, SanomaError } from "./errors.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { RunArgs } from "./run.ts";
 
@@ -94,8 +93,12 @@ export class SanomaClient {
 
   /** Validates the input against the workflow's schema, then queues a run for the worker. */
   async start(workflow: WorkflowDefinition<any, any>, input: unknown, options: StartOptions): Promise<string> {
-    const parsed = valid(workflow.input, input, `The input does not match ${workflow.name}'s schema`);
-    const startedBy = valid(Principal, options?.startedBy, '`startedBy` must be a principal, such as { id: "alice" }');
+    const parsed = parseOrThrow(workflow.input, input, `The input does not match ${workflow.name}'s schema`);
+    const startedBy = parseOrThrow(
+      Principal,
+      options?.startedBy,
+      '`startedBy` must be a principal, such as { id: "alice" }',
+    );
     const args: RunArgs = { input: parsed, startedBy };
     const handle = await this.dbos.enqueue(
       {
@@ -174,7 +177,7 @@ export class SanomaClient {
     approvalId?: string,
     options: { timeoutSeconds?: number } = {},
   ): Promise<ApprovalState> {
-    const msg = valid(ApprovalMessage, message, "Not a decision");
+    const msg = parseOrThrow(ApprovalMessage, message, "Not a decision");
     const all = await this.approvals(runId);
     const target = approvalId ? all.find((a) => a.id === approvalId) : all.find((a) => a.status === "pending");
     if (target && target.status !== "pending") throw alreadyDecided(runId, target);
@@ -264,10 +267,3 @@ const alreadyDecided = (runId: string, a: ApprovalState) =>
     status: a.status,
     decidedBy: a.decidedBy,
   });
-
-/** The value, parsed by the schema, or an `invalid_input` error carrying zod's issues. */
-function valid<T>(schema: z.ZodType<T>, value: unknown, what: string): T {
-  const parsed = schema.safeParse(value);
-  if (parsed.success) return parsed.data;
-  throw invalidInput(what, parsed.error.issues);
-}
