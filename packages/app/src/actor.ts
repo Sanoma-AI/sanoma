@@ -5,15 +5,15 @@ import { createContext, useContext, useEffect, useState } from "react";
 
 const ACTOR_KEY = "sanoma.actor";
 
-export function loadActor(): string | undefined {
+export function loadActor(): string | null {
   try {
-    return globalThis.localStorage?.getItem(ACTOR_KEY)?.trim() || undefined;
+    return globalThis.localStorage?.getItem(ACTOR_KEY)?.trim() || null;
   } catch {
-    return undefined;
+    return null;
   }
 }
 
-export function saveActor(name: string | undefined) {
+function saveActor(name: string | null) {
   try {
     if (name) localStorage.setItem(ACTOR_KEY, name);
     else localStorage.removeItem(ACTOR_KEY);
@@ -23,7 +23,7 @@ export function saveActor(name: string | undefined) {
 }
 
 export interface ActorState {
-  /** Undefined until the page has read the browser's storage, then the name or null. */
+  /** The name, or null for none; undefined only until the page has read the browser's storage. */
   actor: string | null | undefined;
   setActor(name: string | null): void;
 }
@@ -34,12 +34,12 @@ export const useActor = () => useContext(ActorContext);
 
 /** The actor state for the root: read from storage after the first render, so hydration matches the server. */
 export function useActorState(): ActorState {
-  const [actor, setState] = useState<string | null | undefined>(undefined);
-  useEffect(() => setState(loadActor() ?? null), []);
+  const [actor, setState] = useState<string | null>();
+  useEffect(() => setState(loadActor()), []);
   return {
     actor,
     setActor(name) {
-      saveActor(name ?? undefined);
+      saveActor(name);
       setState(name);
     },
   };

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { z } from "zod";
 import { Notice } from "../components/common.tsx";
@@ -15,9 +15,8 @@ export const Route = createFileRoute("/start")({
 function StartPage() {
   const { workflow: wanted } = Route.useSearch();
   const navigate = useNavigate();
-  const { data: config, error } = useQuery(configQuery());
+  const { data: config } = useSuspenseQuery(configQuery());
 
-  if (!config) return error ? <Notice tone="bad">Could not load the config: {error.message}</Notice> : null;
   if (config.workflows.length === 0) return <Notice>This config has no workflows.</Notice>;
   const name = wanted ?? config.workflows[0]?.name;
   const workflow = config.workflows.find((w) => w.name === name);

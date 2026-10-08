@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Notice, plural, RunStatusBadge, When } from "../../components/common.tsx";
 import { runsQuery } from "../../queries.ts";
@@ -10,7 +10,7 @@ export const Route = createFileRoute("/runs/")({
 });
 
 function RunsPage() {
-  const { data: runs, error } = useQuery(runsQuery());
+  const { data: runs, error } = useSuspenseQuery(runsQuery());
   const navigate = useNavigate();
 
   return (
@@ -21,9 +21,9 @@ function RunsPage() {
           Start a run
         </Link>
       </header>
-      {error && <Notice tone="bad">Could not load runs: {error.message}</Notice>}
-      {runs && runs.length === 0 && <Notice>No runs yet. Start one, or have a worker start one.</Notice>}
-      {runs && runs.length > 0 && (
+      {error && <Notice tone="bad">Could not refresh runs: {error.message}</Notice>}
+      {runs.length === 0 && <Notice>No runs yet. Start one, or have a worker start one.</Notice>}
+      {runs.length > 0 && (
         <div className="table-wrap">
           <table>
             <thead>

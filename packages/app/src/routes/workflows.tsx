@@ -1,7 +1,7 @@
 import type { OpEntry, WorkflowEntry } from "@sanoma/workflows";
-import { useQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { EffectBadge, Notice } from "../components/common.tsx";
+import { EffectBadge, Json, Notice } from "../components/common.tsx";
 import { type Field, fieldsOf } from "../form/schema.ts";
 import { configQuery } from "../queries.ts";
 
@@ -12,9 +12,7 @@ export const Route = createFileRoute("/workflows")({
 });
 
 function WorkflowsPage() {
-  const { data: config, error } = useQuery(configQuery());
-
-  if (!config) return error ? <Notice tone="bad">Could not load the config: {error.message}</Notice> : null;
+  const { data: config } = useSuspenseQuery(configQuery());
   const ops = new Map(config.ops.map((op) => [op.id, op]));
   return (
     <section>
@@ -104,7 +102,7 @@ function WorkflowCard({ workflow, ops }: { workflow: WorkflowEntry; ops: Map<str
           </ul>
         )
       ) : (
-        <pre className="json">{JSON.stringify(workflow.input, null, 2)}</pre>
+        <Json value={workflow.input} />
       )}
     </article>
   );

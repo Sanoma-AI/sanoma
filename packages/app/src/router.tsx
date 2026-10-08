@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { createRouter } from "@tanstack/react-router";
 import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query";
+import { POLL_MS } from "./queries.ts";
 import { routeTree } from "./routeTree.gen.ts";
 
 /** A router per request on the server, one for the page's life in the browser. */
@@ -11,7 +12,8 @@ export function getRouter() {
     routeTree,
     context: { queryClient },
     defaultPreload: "intent",
-    defaultPreloadStaleTime: 0,
+    // The pages poll their data anyway: hovering a link need not load it again.
+    defaultPreloadStaleTime: POLL_MS,
     scrollRestoration: true,
   });
   setupRouterSsrQueryIntegration({ router, queryClient });

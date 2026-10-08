@@ -1,5 +1,5 @@
 import type { ApprovalState, Effect, RecordedDecision, RunStatus } from "@sanoma/workflows";
-import { useEffect, useState, type ReactNode } from "react";
+import { type ReactNode, useMemo, useState, useSyncExternalStore } from "react";
 import { approverName } from "../api.ts";
 
 // Small presentational pieces shared by the screens. Plain markup and the classes in
@@ -54,35 +54,60 @@ function ago(ms: number, now: number): string {
   return new Date(ms).toLocaleDateString();
 }
 
+// One clock for every `When` on the page, ticking every 15 s while any is shown.
+let now: number | undefined;
+const watchers = new Set<() => void>();
+let ticker: ReturnType<typeof setInterval> | undefined;
+
+function watchClock(onTick: () => void) {
+  watchers.add(onTick);
+  if (!ticker) {
+    // A clock read while nothing watched it may be old: catch up now.
+    now = Date.now();
+    ticker = setInterval(() => {
+      now = Date.now();
+      for (const watcher of watchers) watcher();
+    }, 15_000);
+  }
+  return () => {
+    watchers.delete(onTick);
+    if (!watchers.size) {
+      clearInterval(ticker);
+      ticker = undefined;
+    }
+  };
+}
+
+const readClock = () => (now ??= Date.now());
+/** The server, and the browser while it hydrates, know no time: they render the ISO time. */
+const noClock = () => undefined;
+
 /**
  * A time, relative to now in the browser. The server renders the ISO time, so the page
  * hydrates the same markup whatever the browser's clock and time zone.
  */
 export function When({ at }: { at: number }) {
-  const [now, setNow] = useState<number>();
-  useEffect(() => {
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 15_000);
-    return () => clearInterval(timer);
-  }, []);
+  const clock = useSyncExternalStore(watchClock, readClock, noClock);
   const iso = new Date(at).toISOString();
   return (
-    <time dateTime={iso} title={now === undefined ? iso : new Date(at).toLocaleString()}>
-      {now === undefined ? iso.replace("T", " ").slice(0, 19) : ago(at, now)}
+    <time dateTime={iso} title={clock === undefined ? iso : new Date(at).toLocaleString()}>
+      {clock === undefined ? iso.replace("T", " ").slice(0, 19) : ago(at, clock)}
     </time>
   );
 }
 
 export function Json({ value }: { value: unknown }) {
-  return <pre className="json">{JSON.stringify(value, null, 2) ?? "undefined"}</pre>;
+  const text = useMemo(() => JSON.stringify(value, null, 2) ?? "undefined", [value]);
+  return <pre className="json">{text}</pre>;
 }
 
-/** JSON behind a disclosure, for inputs and outputs that are usually too long to show inline. */
+/** JSON behind a disclosure, for inputs and outputs that are usually too long to show inline. Written out only once opened. */
 export function Expandable({ label, value }: { label: string; value: unknown }) {
+  const [open, setOpen] = useState(false);
   return (
-    <details className="expand">
+    <details className="expand" onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary>{label}</summary>
-      <Json value={value} />
+      {open && <Json value={value} />}
     </details>
   );
 }
