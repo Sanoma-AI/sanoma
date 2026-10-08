@@ -183,7 +183,13 @@ function read(field: Field, raw: unknown, path: (string | number)[], errors: Rec
       });
     }
     case "object": {
-      const obj = readObject(field.fields, isRecord(raw) ? raw : {}, path, errors);
+      const values = isRecord(raw) ? raw : {};
+      // An optional object left wholly empty is left out, even when a field in it is required:
+      // the person did not fill it in, which is not the same as filling in an empty name.
+      if (!field.required && field.fields.every((f) => values[f.key] === undefined || values[f.key] === "")) {
+        return OMIT;
+      }
+      const obj = readObject(field.fields, values, path, errors);
       return Object.keys(obj).length || field.required ? obj : OMIT;
     }
     default:
