@@ -1,15 +1,12 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { createRootRouteWithContext, HeadContent, Link, Outlet, Scripts } from "@tanstack/react-router";
-import { type ReactNode, useState } from "react";
+import { ThemeProvider } from "next-themes";
+import { lazy, type ReactNode, Suspense } from "react";
 import { Button } from "#/components/ui/button.tsx";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "#/components/ui/dialog.tsx";
-import { Field, FieldGroup, FieldLabel } from "#/components/ui/field.tsx";
-import { Input } from "#/components/ui/input.tsx";
 import { Toaster } from "#/components/ui/sonner.tsx";
 import { ActorContext, useActor, useActorState } from "../actor.ts";
 import { Notice } from "../components/common.tsx";
 import { ModeToggle } from "../components/mode-toggle.tsx";
-import { ThemeProvider } from "next-themes";
 import css from "../style.css?url";
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
@@ -34,6 +31,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   ),
 });
 
+/** Asked once per browser, so loaded only when no name is stored. */
+const WhoAreYou = lazy(() => import("../components/who-are-you.tsx"));
+
 function Root() {
   const actor = useActorState();
   return (
@@ -53,7 +53,11 @@ function Root() {
             <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
               <Outlet />
             </main>
-            <WhoAreYou open={actor.actor === null} />
+            {actor.actor === null && (
+              <Suspense fallback={null}>
+                <WhoAreYou />
+              </Suspense>
+            )}
             <Toaster />
           </div>
         </ActorContext>
@@ -121,53 +125,5 @@ function Nav() {
         </div>
       </div>
     </header>
-  );
-}
-
-/** There is no login. The name is kept in this browser and sent with every change. */
-function WhoAreYou({ open }: { open: boolean }) {
-  const { setActor } = useActor();
-  const [name, setName] = useState("");
-  return (
-    // No way out but a name: every change needs one.
-    <Dialog open={open}>
-      <DialogContent
-        showCloseButton={false}
-        onEscapeKeyDown={(e) => e.preventDefault()}
-        onInteractOutside={(e) => e.preventDefault()}
-      >
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (name.trim()) setActor(name.trim());
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>Who are you?</DialogTitle>
-            <DialogDescription>
-              Runs you start and approvals you decide are recorded under this name. Use the name approvals ask for, such
-              as <code>marketing-lead</code>. There is no login: this is a local tool.
-            </DialogDescription>
-          </DialogHeader>
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="who-name">Your name</FieldLabel>
-              <Input
-                id="who-name"
-                autoFocus
-                autoComplete="username"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="marketing-lead"
-              />
-            </Field>
-            <Button type="submit" disabled={!name.trim()}>
-              Continue
-            </Button>
-          </FieldGroup>
-        </form>
-      </DialogContent>
-    </Dialog>
   );
 }
