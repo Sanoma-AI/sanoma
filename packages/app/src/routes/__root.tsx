@@ -28,6 +28,8 @@ import { TooltipProvider } from "#/components/ui/tooltip.tsx";
 import { ActorContext, useActorState } from "../actor.ts";
 import { Notice } from "../components/common.tsx";
 import { actorQuery, configQuery } from "../queries.ts";
+// lucide's shield-check, the sidebar's brand icon.
+import favicon from "../favicon.svg?url";
 import css from "../style.css?url";
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
@@ -38,7 +40,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "color-scheme", content: "light dark" },
       { title: "Sanoma" },
     ],
-    links: [{ rel: "stylesheet", href: css }],
+    links: [
+      { rel: "stylesheet", href: css },
+      // Without an icon the browser asks for /favicon.ico, and gets a 404.
+      { rel: "icon", type: "image/svg+xml", href: favicon },
+    ],
   }),
   // Pages show what is happening now: never cache them.
   headers: () => ({ "cache-control": "no-store" }),
