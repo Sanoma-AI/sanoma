@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { testDatabaseUrl } from "@sanoma/testing";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { runStatus } from "../src/client.ts";
-import { type ApprovalState, errorCode, SanomaClient } from "../src/index.ts";
+import { type ApprovalState, defineWorkflow, errorCode, SanomaClient } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
 import { inSeconds, pending, useApp, waitFor } from "./harness.ts";
 
@@ -106,5 +107,25 @@ describe("SanomaClient", () => {
     await expect(SanomaClient.connect({ ...app.config, policy: undefined as never })).rejects.toThrow(
       "The config needs a `policy`; use `allowAll` to allow every operation call",
     );
+  });
+});
+
+/** Its schema changes the value it parses, so parsing it twice would fail every run. */
+const double = defineWorkflow({
+  name: "double",
+  trigger: "manual",
+  input: z.object({ n: z.string().transform(Number) }),
+  uses: [],
+  run: async (_ctx, { n }) => n * 2,
+});
+
+describe("a workflow whose input schema transforms", () => {
+  const app = useApp(databaseUrl, "client-transform", () => ({ workflows: [double] }));
+  const c = () => app.client;
+
+  it("parses the input once, in the worker, and records it as the caller sent it", async () => {
+    const runId = await c().start(double, { n: "21" }, { startedBy: alice });
+    expect(await c().result(runId)).toBe(42);
+    expect((await c().ledger(runId))[0]).toMatchObject({ type: "run.started", input: { n: "21" } });
   });
 });

@@ -3,7 +3,7 @@ import { buildCtx, isInfrastructureError } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import type { WorkflowDefinition } from "./define.ts";
-import { errorInfo, errorMessage } from "./errors.ts";
+import { errorInfo, errorMessage, parseOrThrow } from "./errors.ts";
 import { entry, memoryLedger, skipped, write, writeFailure } from "./ledger.ts";
 import { warn } from "./log.ts";
 import type { Run, RunArgs, WorkerState } from "./run.ts";
@@ -142,7 +142,9 @@ function register(wf: WorkflowDefinition<any, any>) {
       let output: unknown;
       try {
         try {
-          output = await wf.run(buildCtx(wf, run), wf.input.parse(input));
+          // The one parse of the input: the client checked it, but sent it as given.
+          const parsed = parseOrThrow(wf.input, input, `The input does not match ${wf.name}'s schema`);
+          output = await wf.run(buildCtx(wf, run), parsed);
         } finally {
           // Before the outcome is written: a call still queued must find the run ended.
           run.ended = true;

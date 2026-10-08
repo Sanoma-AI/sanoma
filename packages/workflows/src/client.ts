@@ -3,7 +3,7 @@ import { DBOSClient, type WorkflowStatusString } from "@dbos-inc/dbos-sdk";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, topicOf } from "./approvals.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { type ApprovalState, mayDecide, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
-import { parseOrThrow, SanomaError } from "./errors.ts";
+import { invalidInput, parseOrThrow, SanomaError } from "./errors.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { RunArgs } from "./run.ts";
 
@@ -91,15 +91,22 @@ export class SanomaClient {
     return new SanomaClient(dbos, resolved);
   }
 
-  /** Validates the input against the workflow's schema, then queues a run for the worker. */
+  /**
+   * Checks the input against the workflow's schema, then queues a run for the worker. The run
+   * gets the input as sent, not as the schema parsed it: the worker parses it once, so a schema
+   * with a `.transform` or a default sees the caller's value, and `run.started` records it.
+   */
   async start(workflow: WorkflowDefinition<any, any>, input: unknown, options: StartOptions): Promise<string> {
-    const parsed = parseOrThrow(workflow.input, input, `The input does not match ${workflow.name}'s schema`);
+    const checked = workflow.input.safeParse(input);
+    if (!checked.success) {
+      throw invalidInput(`The input does not match ${workflow.name}'s schema`, checked.error.issues);
+    }
     const startedBy = parseOrThrow(
       Principal,
       options?.startedBy,
       '`startedBy` must be a principal, such as { id: "alice" }',
     );
-    const args: RunArgs = { input: parsed, startedBy };
+    const args: RunArgs = { input, startedBy };
     const handle = await this.dbos.enqueue(
       {
         queueName: this.config.queueName,
