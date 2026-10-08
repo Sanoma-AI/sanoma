@@ -2,7 +2,7 @@ import { appendFile, mkdir, readFile, truncate } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Approver, Principal } from "./define.ts";
-import { type ErrorInfo, errorMessage, isFinal } from "./errors.ts";
+import { type ErrorInfo, errorMessage, isFinal, keepCode } from "./errors.ts";
 import { warn } from "./log.ts";
 import type { Effect } from "./op.ts";
 import type { RecordedDecision } from "./policy.ts";
@@ -249,15 +249,21 @@ export async function write(run: Run, record: LedgerRecord) {
   await append(run, record);
 }
 
-/** Records a failure. If the ledger fails too, throws both, so neither is lost. */
+/**
+ * Records a failure. If the ledger fails too, throws both, so neither is lost, with the
+ * original's code: the run still fails the way it did.
+ */
 export async function writeFailure(run: Run, record: LedgerRecord, original: unknown) {
   try {
     await append(run, record);
   } catch (ledgerError) {
-    throw new AggregateError(
-      [original, ledgerError],
-      `${errorMessage(original)} (and the ledger could not record ${record.id}: ${errorMessage(ledgerError)})`,
-      { cause: ledgerError },
+    throw keepCode(
+      new AggregateError(
+        [original, ledgerError],
+        `${errorMessage(original)} (and the ledger could not record ${record.id}: ${errorMessage(ledgerError)})`,
+        { cause: ledgerError },
+      ),
+      original,
     );
   }
 }

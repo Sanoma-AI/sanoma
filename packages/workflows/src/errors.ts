@@ -80,6 +80,18 @@ export class RejectedError extends SanomaError {
 
 export const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
+/**
+ * The wrapper, given the original's own `code` and `data` when it has one of our codes, so
+ * `errorCode` reads the same through it: a denied call whose ledger write failed too is still
+ * `policy_denied`.
+ */
+export function keepCode<E extends Error>(wrapper: E, original: unknown): E {
+  const code = errorCode(original);
+  if (code === undefined) return wrapper;
+  const data = own<Record<string, unknown>>(original, "data", "object");
+  return Object.assign(wrapper, { code }, data === undefined ? {} : { data });
+}
+
 /** A zod issue as the ledger and an API can carry it: no symbols in the path. */
 export interface InputIssue {
   path: (string | number)[];

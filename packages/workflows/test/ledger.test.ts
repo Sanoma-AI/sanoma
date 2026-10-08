@@ -3,7 +3,15 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFile
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { allowAll, jsonlLedger, type LedgerRecord, type LedgerStore, memoryLedger } from "../src/index.ts";
+import {
+  allowAll,
+  errorCode,
+  jsonlLedger,
+  type LedgerRecord,
+  type LedgerStore,
+  memoryLedger,
+  PolicyDeniedError,
+} from "../src/index.ts";
 import { entry, write, writeFailure } from "../src/ledger.ts";
 import type { Run } from "../src/run.ts";
 
@@ -216,10 +224,15 @@ describe("writing a run's records", () => {
     const run = runOn(store);
     await expect(write(run, entry(run, { type: "run.started", input: null }))).rejects.toThrow("disk full (4)");
     expect(calls()).toBe(4);
-    const original = new Error("the vendor said no");
+    const original = new PolicyDeniedError("shop.order.refund", "not today");
     const record = entry(run, { type: "run.failed", error: { name: "Error", message: original.message } });
-    await expect(writeFailure(run, record, original)).rejects.toThrow(
-      `the vendor said no (and the ledger could not record ${record.id}: disk full (8))`,
+    const err = await writeFailure(run, record, original).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AggregateError);
+    expect((err as Error).message).toBe(
+      `shop.order.refund was denied by policy: not today (and the ledger could not record ${record.id}: disk full (8))`,
     );
+    // Still the denial, by code: the run fails the way it did.
+    expect(errorCode(err)).toBe("policy_denied");
+    expect(err).toMatchObject({ data: { op: "shop.order.refund", reason: "not today" } });
   });
 });
