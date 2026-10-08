@@ -114,18 +114,45 @@ export function invalidInput(
   return new SanomaError("invalid_input", `${what}: ${said}`, { ...data, issues });
 }
 
-/** What the ledger keeps of an error. */
+/**
+ * What the ledger keeps of an error. `status`, `vendorCode` and `retryable` are a
+ * `DriverError`'s account of the vendor's answer; `data` is a `SanomaError`'s. Each is there
+ * only when the error has it.
+ */
 export interface ErrorInfo {
   code?: ErrorCode;
   name: string;
   message: string;
+  /** The vendor's HTTP status, from a `DriverError`. */
+  status?: number;
+  /** The vendor's own error code, from a `DriverError`. */
+  vendorCode?: string;
+  /** Whether trying again could succeed, from a `DriverError` or a ledger store. */
+  retryable?: boolean;
+  /** A `SanomaError`'s `data`: the operation, the approval, the issues. */
+  data?: Record<string, unknown>;
+}
+
+/** The error's own property `key`, when it is of the type given. Own: a copy from DBOS has no prototype to read. */
+function own<T>(err: unknown, key: string, type: "number" | "string" | "boolean" | "object"): T | undefined {
+  if (typeof err !== "object" || err === null || !Object.hasOwn(err, key)) return undefined;
+  const value = (err as Record<string, unknown>)[key];
+  return typeof value === type && value !== null ? (value as T) : undefined;
 }
 
 export function errorInfo(err: unknown): ErrorInfo {
   const code = errorCode(err);
+  const status = own<number>(err, "status", "number");
+  const vendorCode = own<string>(err, "vendorCode", "string");
+  const retryable = own<boolean>(err, "retryable", "boolean");
+  const data = own<Record<string, unknown>>(err, "data", "object");
   return {
     ...(code === undefined ? {} : { code }),
     name: err instanceof Error ? err.name : "Error",
     message: errorMessage(err),
+    ...(status === undefined ? {} : { status }),
+    ...(vendorCode === undefined ? {} : { vendorCode }),
+    ...(retryable === undefined ? {} : { retryable }),
+    ...(data === undefined || Object.keys(data).length === 0 ? {} : { data }),
   };
 }

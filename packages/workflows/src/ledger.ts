@@ -37,6 +37,10 @@ export type LedgerRecord = {
       /** The policy's decision, with its `reasons` and the policy's `policyVersion` when there are any. */
       decision: RecordedDecision;
       output?: unknown;
+      /**
+       * Why the call failed: `{ code?, name, message }`, and the vendor's `status`, `vendorCode`
+       * and `retryable` from a `DriverError`, or the `data` of one of the runtime's errors.
+       */
       error?: ErrorInfo;
       durationMs: number;
       /** Which try produced the output or the final error, from 1. Idempotent operations are retried. */
@@ -59,6 +63,7 @@ export type LedgerRecord = {
   | { type: "approval.refused"; approval: string; by?: string; reason: string }
   | { type: "approval.decided"; approval: string; decision: "approve" | "reject"; by: string; note?: string }
   | { type: "run.finished"; output: unknown }
+  /** `error` as for `op.called`. */
   | { type: "run.failed"; error: ErrorInfo }
 );
 

@@ -1,4 +1,4 @@
-import type { LedgerRecord } from "@sanoma/workflows";
+import type { ErrorInfo, LedgerRecord } from "@sanoma/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import type { ReactNode } from "react";
@@ -86,6 +86,19 @@ function RunPage() {
   );
 }
 
+/** An error from the ledger, with what the vendor said when the driver kept it. */
+function ErrorText({ error }: { error: ErrorInfo }) {
+  const vendor = [error.status === undefined ? "" : `status ${error.status}`, error.vendorCode ?? ""]
+    .filter(Boolean)
+    .join(", ");
+  return (
+    <p className="text-destructive">
+      {error.message}
+      {vendor && <span className="text-muted-foreground"> ({vendor})</span>}
+    </p>
+  );
+}
+
 /** One ledger record: what happened, when, and its details. */
 function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<string, string> }) {
   const title = (approval: string) => titles.get(approval) ?? approval;
@@ -112,7 +125,7 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
               {record.durationMs} ms{record.attempt && record.attempt > 1 ? `, attempt ${record.attempt}` : ""}
             </span>
           </p>
-          {record.error && <p className="text-destructive">{record.error.message}</p>}
+          {record.error && <ErrorText error={record.error} />}
           <Expandable label="Input" value={record.input} />
           {"output" in record && <Expandable label="Output" value={record.output} />}
         </>
@@ -150,7 +163,7 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
       break;
     case "run.failed":
       kind = "failed";
-      body = <p className="text-destructive">{record.error.message}</p>;
+      body = <ErrorText error={record.error} />;
       break;
   }
   return (

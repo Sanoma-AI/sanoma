@@ -110,7 +110,13 @@ describe("a call that fails", () => {
     expect(app.ops()).toEqual([]);
     const records = await c().ledger(runId);
     expect(types(records)).toEqual(["run.started", "run.failed"]);
-    expect(records.at(-1)).toMatchObject({ error: { code: "invalid_input", name: "SanomaError" } });
+    expect(records.at(-1)).toMatchObject({
+      error: {
+        code: "invalid_input",
+        name: "SanomaError",
+        data: { op: "bluesky.post.create", issues: [expect.objectContaining({ path: ["text"] })] },
+      },
+    });
   });
 
   it("fails the run with driver_failed when a non-idempotent call loses its reply, after one side effect", async () => {
@@ -149,7 +155,11 @@ describe("a call that fails", () => {
   });
 
   it("does not retry an idempotent call when the driver says the answer is final", async () => {
-    const locked = new DriverError("ghost: the post is locked", { retryable: false, status: 409 });
+    const locked = new DriverError("ghost: the post is locked", {
+      retryable: false,
+      status: 409,
+      vendorCode: "locked",
+    });
     app.vendors.ghost.failNext("ghost.post.publish", locked);
     const runId = await c().start(publish, { title: "Locked" }, { startedBy: alice });
 
@@ -158,7 +168,19 @@ describe("a call that fails", () => {
     expect((await c().ledger(runId)).at(-2)).toMatchObject({
       op: "ghost.post.publish",
       attempt: 1,
-      error: { code: "driver_failed", name: "DriverError", message: "ghost: the post is locked" },
+      error: {
+        code: "driver_failed",
+        name: "DriverError",
+        message: "ghost: the post is locked",
+        status: 409,
+        vendorCode: "locked",
+        retryable: false,
+      },
+    });
+    // The run's error is DBOS's copy of the driver's: it keeps them too.
+    expect((await c().ledger(runId)).at(-1)).toMatchObject({
+      type: "run.failed",
+      error: { status: 409, vendorCode: "locked", retryable: false },
     });
   });
 
