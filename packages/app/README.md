@@ -1,6 +1,6 @@
 # @sanoma/app
 
-A web UI and a JSON API for a [Sanoma](https://github.com/Sanoma-AI/sanoma) config: the runs, each run's ledger and approvals, a form to start a workflow, and what each workflow may call. It reads the same `sanoma.config.ts` your worker runs, so it shows exactly what the worker enforces: it renders from `describeConfig(config)`, the config's ledger store and Postgres, and never parses workflow code. It runs no workflows itself.
+A web UI and a JSON API for a [Sanoma](https://github.com/Sanoma-AI/sanoma) config: the runs, each run's ledger and approvals, a form to start a workflow, and what each workflow may call. It reads the same `sanoma.config.ts` your worker runs, so it shows exactly what the worker enforces: it renders from `describeConfig(config)`, the config's ledger store and Postgres. The only workflow code it reads is each workflow's `run`, once at start, to draw its outline. It runs no workflows itself.
 
 It is a [TanStack Start](https://tanstack.com/start) app (React, TanStack Router, Query and Form), built into the package and served by `startApp` from Node.
 
@@ -26,13 +26,19 @@ console.log(app.url); // http://127.0.0.1:4321
 - **Run**: one run as a graph (see [Run graph](#run-graph)), and its ledger as a timeline (the start, each operation call with its effect, the policy's decision, duration, input and output, each approval asked, decided or ignored, and how it ended) beside its approvals, each with the operations it lets through (badged by effect), and Approve and Reject with an optional note while the run can still read a decision.
 - **Inbox**: every pending approval, newest first, with what it lets through and the same controls. Refreshes every 5 seconds.
 - **Start**: a form built from the workflow's input schema: text, date and time, numbers, yes/no, choices, lists with Add and Remove, and objects one level deep; anything else is entered as JSON. Optional fields left empty are left out, so the schema's defaults apply. The server checks the input with the workflow's schema and its complaints appear on the fields they name.
-- **Workflows**: each workflow's operations with their effects, its built-ins and its input; whether a policy is configured, and its version; the config's version.
+- **Workflows**: each workflow's outline (see [Outline](#outline)), its operations with their effects, its built-ins and its input; whether a policy is configured, and its version; the config's version.
 
 The header switches between light, dark and the system's theme; the browser remembers the choice. The screens are built with [shadcn/ui](https://ui.shadcn.com) components (`src/components/ui`, from `components.json`) on Tailwind CSS.
 
 ### Run graph
 
-The run page draws the run as a graph above its ledger, left to right: the start, each operation call (its effect, the policy's decision, its duration or error), each sleep, each approval the workflow asked for, and how the run ended, or a dashed end while it has not. An approval the policy asked for sits on the call it holds. The calls of one `ctx.all` branch out side by side and join again after it. Each node's colour says how it went: done, failed or denied, waiting on a person or a sleep, or running. The graph is read from the ledger alone, so it shows what happened, not what the workflow may still do, and it redraws as the page polls. Clicking a node scrolls to its record in the ledger. It is drawn with [React Flow](https://reactflow.dev) in the browser only; the server renders a placeholder of the same size, and the graph's code loads on the run page alone.
+The run page draws the run as a graph above its ledger, left to right: the start, each operation call (its effect, the policy's decision, its duration or error), each sleep, each approval the workflow asked for, and how the run ended, or a dashed end while it has not. An approval the policy asked for sits on the call it holds. The calls of one `ctx.all` branch out side by side and join again after it. Each node's colour says how it went: done, failed or denied, waiting on a person or a sleep, or running. The graph is read from the ledger alone, so it shows what happened, not what the workflow may still do, and it redraws as the page polls. Clicking a node scrolls to its record in the ledger. It is drawn with [React Flow](https://reactflow.dev) in the browser only; the server renders a placeholder of the same size, and the graph's code loads, once, only on the pages that draw a graph (this one and Workflows).
+
+A `ctx.all` draws as one lane per member, side by side between the step before it and the step after: in a run that posts to three vendors at once, sleeps, then reads two results at once, the graph shows three lanes, the sleep, then two lanes, each lane coloured as its call went (a call the policy holds waits in its own lane). Members that never ran, after one failed, have no lane.
+
+### Outline
+
+Each workflow card on the Workflows page draws the workflow's shape before it runs, from `outlineWorkflow` in `@sanoma/workflows/lint`, which `startApp` calls once per workflow when it starts. It is the run graph's drawing without colours: the operations (with their effects), approvals and sleeps the body of `run` calls, a `ctx.all` as lanes, a loop or a `ctx.all` over a list as a box labelled "repeats" or "for each", and an `if` or `switch` as a diamond that splits into one lane per case. It is a reading of the source, labelled so: calls made by helpers `run` calls are not shown, and when the source cannot be read the card says why instead.
 
 ## No authentication
 
@@ -54,7 +60,7 @@ With its own `resolveActor`, the page never asks for a name: it shows who the de
 
 The page uses server functions; scripts (and later Slack or access-request callbacks) use this JSON API. Requests that change something name the actor in the `x-sanoma-actor` header (URI-encoded), or are refused with 400.
 
-- `GET /api/config`: `describeConfig(config)`, including `version` and `policy`.
+- `GET /api/config`: `describeConfig(config)`, including `version` and `policy`, with each workflow's `outline`.
 - `GET /api/runs?limit=50&status=waiting`: recent runs, newest first (`limit` 1 to 500), only those with `status` when given (`queued`, `running`, `waiting`, `finished`, `failed` or `cancelled`).
 - `GET /api/runs/:id`: `{ run, ledger, ledgerError?, approvals }`. `ledgerError` says why `ledger` is empty: the ledger could not be read, or it has no records for a run that has started.
 - `POST /api/runs` with `{ "workflow": name, "input": {...} }`: 201 `{ runId }`.
