@@ -4,6 +4,7 @@ import { PlayIcon } from "lucide-react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
+import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
 import { Nothing, Notice, PageHeader, plural, toneBadge, When } from "../../components/common.tsx";
 import { RUN_TONE } from "#/lib/tone.ts";
 import { pendingApprovals, starterName } from "../../api.ts";
@@ -28,7 +29,7 @@ function RunsPage() {
   );
 
   return (
-    <section className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <PageHeader title="Runs">{runs.length > 0 && <div className="ml-auto">{start}</div>}</PageHeader>
       {error && <Notice variant="destructive">Could not refresh runs: {error.message}</Notice>}
       {runs.length === 0 && (
@@ -57,12 +58,18 @@ function RunsPage() {
                     key={run.runId}
                     className="cursor-pointer"
                     onClick={() => void navigate({ to: "/runs/$id", params: { id: run.runId } })}
-                    title={run.runId}
                   >
                     <TableCell className="font-medium">
-                      <Link to="/runs/$id" params={{ id: run.runId }} onClick={(e) => e.stopPropagation()}>
-                        {run.workflow}
-                      </Link>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Link to="/runs/$id" params={{ id: run.runId }} onClick={(e) => e.stopPropagation()}>
+                            {run.workflow}
+                          </Link>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <code>{run.runId}</code>
+                        </TooltipContent>
+                      </Tooltip>
                     </TableCell>
                     <TableCell>
                       <Badge className={toneBadge({ tone: RUN_TONE[run.status] })}>{run.status}</Badge>
@@ -78,8 +85,15 @@ function RunsPage() {
                         <span className="text-muted-foreground">-</span>
                       )}
                     </TableCell>
-                    <TableCell className="max-w-xs truncate text-destructive" title={run.error}>
-                      {run.status === "failed" && run.error ? run.error : ""}
+                    <TableCell>
+                      {run.status === "failed" && run.error && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="block max-w-xs truncate text-destructive">{run.error}</span>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-sm">{run.error}</TooltipContent>
+                        </Tooltip>
+                      )}
                     </TableCell>
                   </TableRow>
                 );
@@ -88,6 +102,6 @@ function RunsPage() {
           </Table>
         </div>
       )}
-    </section>
+    </div>
   );
 }
