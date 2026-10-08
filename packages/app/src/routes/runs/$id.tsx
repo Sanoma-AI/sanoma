@@ -33,9 +33,11 @@ import { RUN_TONE } from "#/lib/tone.ts";
 import { runQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/runs/$id")({
-  loader: ({ context, params }) => {
+  // The page reads the run from the query client; the loader returns only its workflow, for the title.
+  loader: async ({ context, params }) => {
     if (!import.meta.env.SSR) void loadGraph();
-    return context.queryClient.ensureQueryData(runQuery(params.id));
+    const { run } = await context.queryClient.query({ ...runQuery(params.id), staleTime: "static" });
+    return { workflow: run.workflow };
   },
   head: ({ params }) => ({ meta: [{ title: `Run ${params.id} · Sanoma` }] }),
   component: RunPage,

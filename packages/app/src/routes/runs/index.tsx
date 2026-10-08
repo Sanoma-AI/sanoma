@@ -11,7 +11,9 @@ import { pendingApprovals, starterName } from "../../api.ts";
 import { runsQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/runs/")({
-  loader: ({ context }) => context.queryClient.ensureQueryData(runsQuery()),
+  loader: async ({ context }) => {
+    await context.queryClient.query({ ...runsQuery(), staleTime: "static" });
+  },
   head: () => ({ meta: [{ title: "Runs · Sanoma" }] }),
   component: RunsPage,
 });

@@ -49,11 +49,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   headers: () => ({ "cache-control": "no-store" }),
   // Who the server says is asking, in the first render: a deployment's login shows at once.
   // And the config, which every page reads and which cannot change while the app runs.
-  // And whether the sidebar was left open, so the first render draws it as it was.
-  loader: async ({ context }) => {
+  // Both stay in the query client, where the page reads them: a loader returns only what no
+  // query holds (here, whether the sidebar was left open), since the page carries loader data too.
+  loader: async ({ context: { queryClient } }) => {
     await Promise.all([
-      context.queryClient.ensureQueryData(actorQuery()),
-      context.queryClient.ensureQueryData(configQuery()),
+      queryClient.query({ ...actorQuery(), staleTime: "static" }),
+      queryClient.query({ ...configQuery(), staleTime: "static" }),
     ]);
     return { sidebarOpen: readSidebarOpen() };
   },
@@ -149,7 +150,7 @@ function Crumbs() {
             </BreadcrumbItem>
             <BreadcrumbSeparator className="hidden md:block" />
             <BreadcrumbItem>
-              <BreadcrumbPage>{run.loaderData?.run.workflow ?? run.params.id}</BreadcrumbPage>
+              <BreadcrumbPage>{run.loaderData?.workflow ?? run.params.id}</BreadcrumbPage>
             </BreadcrumbItem>
           </>
         ) : (

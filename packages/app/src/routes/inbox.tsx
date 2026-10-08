@@ -9,7 +9,9 @@ import { Nothing, Notice, PageHeader, toneBadge } from "../components/common.tsx
 import { waitingRunsQuery } from "../queries.ts";
 
 export const Route = createFileRoute("/inbox")({
-  loader: ({ context }) => context.queryClient.ensureQueryData(waitingRunsQuery()),
+  loader: async ({ context }) => {
+    await context.queryClient.query({ ...waitingRunsQuery(), staleTime: "static" });
+  },
   head: () => ({ meta: [{ title: "Inbox · Sanoma" }] }),
   component: InboxPage,
 });
