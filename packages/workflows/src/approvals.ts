@@ -16,8 +16,12 @@ export const topicOf = (approvalId: string) => approvalId;
 /** The DBOS event an approval's decision is published on, as its decided `ApprovalState`, once made. */
 export const decisionEventOf = (approvalId: string) => `approval:${approvalId}`;
 
-/** A decision, as sent to a run. */
+/**
+ * A decision, as sent to a run. `id` names the message, so whoever sent it can tell whether
+ * the run decided with it or with another; `SanomaClient.decide` sets one.
+ */
 export const ApprovalMessage = z.object({
+  id: z.string().optional(),
   decision: z.enum(["approve", "reject"]),
   by: Principal,
   note: z.string().optional(),
@@ -131,7 +135,13 @@ export async function awaitApproval(
       );
       continue;
     }
-    Object.assign(state, { status: statusOf(msg.decision), decidedBy: msg.by.id, decidedAt: at, note: msg.note });
+    Object.assign(state, {
+      status: statusOf(msg.decision),
+      decidedBy: msg.by.id,
+      decidedAt: at,
+      note: msg.note,
+      decidedWith: msg.id,
+    });
     // The list first, then the ledger, then the decision event: whoever sees the event sees both.
     await DBOS.setEvent(APPROVALS_EVENT, all);
     await write(

@@ -68,6 +68,8 @@ export interface ApprovalState extends Omit<ApprovalRequest, "covers"> {
   decidedBy?: string;
   decidedAt?: number;
   note?: string;
+  /** The `id` of the decision message the run decided with, when it had one. */
+  decidedWith?: string;
   /**
    * Messages that were ignored: decisions sent by someone who may not decide the approval,
    * and messages that were not a decision. `by` is the sender, when the message named one.

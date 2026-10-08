@@ -1,14 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { DBOSClient, type WorkflowStatusString } from "@dbos-inc/dbos-sdk";
 import { z } from "zod";
-import {
-  APPROVALS_EVENT,
-  ApprovalMessage,
-  decisionEventOf,
-  mayDecide,
-  statusOf,
-  topicOf,
-  notApprover,
-} from "./approvals.ts";
+import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, mayDecide, topicOf, notApprover } from "./approvals.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { type ApprovalState, Principal, type WorkflowDefinition } from "./define.ts";
 import { SanomaError, invalidInput } from "./errors.ts";
@@ -192,16 +185,17 @@ export class SanomaClient {
         approver: target.approver,
       });
     }
-    await this.dbos.send(runId, msg, topicOf(target.id));
+    // The id names this message, so the run's answer says whether it decided with it; as the
+    // idempotency key, it also keeps a retried send from queueing the message twice.
+    const id = msg.id ?? randomUUID();
+    await this.dbos.send(runId, { ...msg, id }, topicOf(target.id), id);
     // DBOSClient does not LISTEN for events: it polls, every 10 s unless told otherwise.
     const decided = await this.dbos.getEvent<ApprovalState>(runId, decisionEventOf(target.id), {
       timeoutSeconds: options.timeoutSeconds ?? 30,
       pollingIntervalMs: 100,
     });
     const now = decided ?? (await this.approvals(runId)).find((a) => a.id === target.id) ?? target;
-    if (now.status !== "pending" && (now.status !== statusOf(msg.decision) || now.decidedBy !== msg.by.id)) {
-      throw alreadyDecided(runId, now);
-    }
+    if (now.status !== "pending" && now.decidedWith !== id) throw alreadyDecided(runId, now);
     return now;
   }
 

@@ -276,4 +276,20 @@ describe("approvals a policy asks for", () => {
     expect((await c().approvals(runId))[0]?.decidedBy).toBe(won[0]?.decidedBy);
     await c().result(runId);
   });
+
+  it("tells the loser of two decisions from one person, the same verdict with different notes, that it lost", async () => {
+    const runId = await c().start(shout, { text: "twice" }, { startedBy: { id: "group" } });
+    await waitFor(pending(c, runId));
+
+    const carol = { id: "carol", groups: ["marketing"] };
+    const outcomes = await Promise.allSettled(
+      ["first", "second"].map((note) => c().decide(runId, { decision: "approve", by: carol, note }, "approval-1")),
+    );
+    const won = outcomes.flatMap((o) => (o.status === "fulfilled" ? [o.value] : []));
+    const lost = outcomes.flatMap((o) => (o.status === "rejected" ? [o.reason as unknown] : []));
+    expect(won).toHaveLength(1);
+    expect(errorCode(lost[0])).toBe("already_decided");
+    expect((await c().approvals(runId))[0]).toMatchObject({ decidedBy: "carol", note: won[0]?.note });
+    await c().result(runId);
+  });
 });
