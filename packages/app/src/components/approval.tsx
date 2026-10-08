@@ -101,11 +101,9 @@ export function ApprovalCard({
           </Fact>
           {showRun && (
             <Fact label="Run">
-              <Button asChild variant="link" size="xs" className="h-auto max-w-full p-0 whitespace-normal">
-                <Link to="/runs/$id" params={{ id: run.runId }}>
-                  <code>{run.runId}</code>
-                </Link>
-              </Button>
+              <Link to="/runs/$id" params={{ id: run.runId }}>
+                <code>{run.runId}</code>
+              </Link>
             </Fact>
           )}
           {approval.decidedBy && (
