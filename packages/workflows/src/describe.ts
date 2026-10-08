@@ -26,7 +26,9 @@ export interface OpEntry {
   effect: Effect;
   idempotent: boolean;
   description?: string;
+  /** What a call sends, as JSON Schema (`io: "input"`: fields with defaults are optional). */
   input: Record<string, unknown>;
+  /** What a call returns once its schema has parsed the vendor's reply (`io: "output"`). */
   output: Record<string, unknown>;
 }
 
@@ -56,8 +58,8 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     effect: op.effect,
     idempotent: op.idempotent,
     description: op.description,
-    input: toJsonSchema(op.input, `${op.id} input`),
-    output: toJsonSchema(op.output, `${op.id} output`),
+    input: toJsonSchema(op.input, `${op.id} input`, "input"),
+    output: toJsonSchema(op.output, `${op.id} output`, "output"),
   }));
   ops.sort((a, b) => a.id.localeCompare(b.id));
 
@@ -65,7 +67,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     name: wf.name,
     title: wf.title,
     trigger: wf.trigger,
-    input: toJsonSchema(wf.input, `${wf.name} input`),
+    input: toJsonSchema(wf.input, `${wf.name} input`, "input"),
     ops: (wf.uses as Use[]).filter(isOp).map((op) => op.id),
     builtins: (wf.uses as Use[]).filter((u): u is Builtin => typeof u === "string"),
   }));
@@ -83,9 +85,9 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
   };
 }
 
-function toJsonSchema(schema: z.ZodType, what: string): Record<string, unknown> {
+function toJsonSchema(schema: z.ZodType, what: string, io: "input" | "output"): Record<string, unknown> {
   try {
-    return jsonSchemaOf(schema);
+    return jsonSchemaOf(schema, io);
   } catch (e) {
     throw new Error(`Cannot describe ${what} as JSON Schema: ${(e as Error).message}`, { cause: e });
   }

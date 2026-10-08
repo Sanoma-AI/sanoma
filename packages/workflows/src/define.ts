@@ -175,12 +175,12 @@ export type Ctx<U extends readonly Use[]> = BaseCtx &
   ("sleep" extends U[number] ? SleepCtx : unknown);
 
 /**
- * A schema as JSON Schema (draft 2020-12), describing what a caller sends: defaults stay
- * optional (`io: "input"`), and what JSON Schema can't express is left open. Throws when zod
- * can't convert the schema at all.
+ * A schema as JSON Schema (draft 2020-12). By default it describes what a caller sends
+ * (`io: "input"`: defaults stay optional); `io: "output"` describes what parsing returns.
+ * What JSON Schema can't express is left open. Throws when zod can't convert the schema at all.
  */
-export function jsonSchemaOf(schema: z.ZodType): Record<string, unknown> {
-  return z.toJSONSchema(schema, { io: "input", target: "draft-2020-12", unrepresentable: "any" });
+export function jsonSchemaOf(schema: z.ZodType, io: "input" | "output" = "input"): Record<string, unknown> {
+  return z.toJSONSchema(schema, { io, target: "draft-2020-12", unrepresentable: "any" });
 }
 
 export interface WorkflowDefinition<U extends readonly Use[] = readonly Use[], S extends z.ZodType = z.ZodType> {

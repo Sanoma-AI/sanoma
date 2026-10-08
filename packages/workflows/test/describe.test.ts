@@ -68,6 +68,24 @@ describe("describeConfig", () => {
     });
   });
 
+  it("describes an operation's input as a caller sends it and its output as parsed", () => {
+    const counter = defineConnector("counter", {
+      tally: {
+        add: {
+          effect: "write",
+          input: z.object({ by: z.number().default(1) }),
+          output: z.object({ total: z.number(), unit: z.string().default("items") }),
+        },
+      },
+    });
+    const drivers = [{ vendor: "counter", ops: { "tally.add": async () => ({ total: 1 }) } }];
+    const { ops } = describeConfig({ ...base, workflows: [], connectors: [counter], drivers });
+    const [add] = ops;
+    // A default makes an input field optional to send, and an output field always there.
+    expect(add?.input).not.toHaveProperty("required");
+    expect(add?.output).toMatchObject({ required: ["total", "unit"] });
+  });
+
   it("says whether a policy other than allowAll is configured, and its version, and names the app and version", () => {
     expect(describeConfig(base).policy).toEqual({ defined: false });
     expect(describeConfig(base).appName).toBe("sanoma");
