@@ -5,7 +5,6 @@ import "@xyflow/react/dist/style.css";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   Background,
-  Controls,
   type Edge,
   getNodesBounds,
   Handle,
@@ -32,6 +31,7 @@ import { useReducedMotion } from "#/lib/motion.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import { configQuery, opsById } from "../queries.ts";
 import { effectBadge, StatusDot, toneBadge } from "./common.tsx";
+import { ZoomSlider } from "./zoom-slider.tsx";
 
 // A run's graph, or a workflow's outline, drawn with React Flow. It needs the DOM, so the pages
 // load this module only in the browser (GraphPanel in common.tsx: React.lazy behind ClientOnly);
@@ -42,11 +42,12 @@ type FlowNode = Node<{ node: GraphNode }, GraphNodeKind>;
 type Props<K extends GraphNodeKind> = { data: { node: Extract<GraphNode, { kind: K }> } };
 
 /**
- * The room the view leaves around the graph, in px. Below it, the controls': they sit 15 px
- * from the bottom edge and are 26 px high, and no node goes under them, at any width.
+ * The room the view leaves around the graph, in px. Below it, the zoom slider's: its panel sits
+ * 15 px from the bottom edge and is 40 px high (size-8 buttons and p-1), and no node goes under
+ * it, at any width.
  */
-const PAD = { x: 24, top: 16, bottom: 52 } as const;
-/** How the view fits the graph (the controls' fit button fits all of it). */
+const PAD = { x: 24, top: 16, bottom: 64 } as const;
+/** How the view fits the graph (the zoom slider's fit button fits all of it). */
 const FIT = {
   padding: { x: `${PAD.x}px`, top: `${PAD.top}px`, bottom: `${PAD.bottom}px` },
   minZoom: 0.25,
@@ -399,7 +400,7 @@ export default function Graph({ source, onSelect, show = "end" }: GraphProps) {
           nodesConnectable={false}
           elementsSelectable={false}
           // Wheel and trackpad pan sideways; the page keeps its vertical scroll. Zoom with the
-          // controls or a pinch.
+          // zoom slider or a pinch.
           zoomOnScroll={false}
           zoomOnDoubleClick={false}
           panOnScroll
@@ -408,7 +409,7 @@ export default function Graph({ source, onSelect, show = "end" }: GraphProps) {
           proOptions={PRO_OPTIONS}
         >
           <Background gap={16} size={1} />
-          <Controls showInteractive={false} orientation="horizontal" fitViewOptions={FIT} />
+          <ZoomSlider position="bottom-left" fitViewOptions={FIT} duration={reducedMotion ? 0 : 300} />
           <FitOnChange nodes={nodes} show={show} onFitted={() => setFitted(true)} />
         </ReactFlow>
       </Ops>

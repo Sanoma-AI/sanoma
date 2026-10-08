@@ -132,8 +132,8 @@
 }
 
 /*
- * React Flow (the run graph) reads its colours from --xy-* variables; these point them at the
- * theme's tokens, so the graph follows light and dark with the rest of the page.
+ * React Flow (the run graph and the outlines) reads its colours from --xy-* variables; these
+ * point them at the theme's tokens, so the graphs follow light and dark with the rest of the page.
  */
 .react-flow {
   --xy-background-color: var(--background);
@@ -145,12 +145,6 @@
   --xy-edge-stroke-selected: var(--foreground);
   --xy-handle-background-color: var(--muted-foreground);
   --xy-handle-border-color: var(--card);
-  --xy-controls-button-background-color: var(--card);
-  --xy-controls-button-background-color-hover: var(--accent);
-  --xy-controls-button-color: var(--foreground);
-  --xy-controls-button-color-hover: var(--accent-foreground);
-  --xy-controls-button-border-color: var(--border);
-  --xy-controls-box-shadow: 0 0 0 1px var(--border);
   --xy-attribution-background-color: color-mix(in oklch, var(--background) 70%, transparent);
 }
 
