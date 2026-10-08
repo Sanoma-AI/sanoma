@@ -5,45 +5,15 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * The theme: shadcn's neutral tokens, and beside them one pair per operation effect and per run
+ * status (`--x` is the badge's background, `--x-foreground` its text). Light is `:root`, dark is
+ * `.dark` on <html>, which the theme script in the document head sets before the page paints.
+ */
+
 :root {
-  color-scheme: light dark;
-  --bg: #fafaf9;
-  --surface: #ffffff;
-  --fg: #1c1917;
-  --muted: oklch(0.97 0 0);
-  --border: oklch(0.922 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-fg: #ffffff;
-  --code-bg: #f3f1ee;
-
-  --good: #17703a;
-  --good-bg: #e2f4e8;
-  --bad: #b42318;
-  --bad-bg: #fde7e4;
-  --waiting: #8a5300;
-  --waiting-bg: #fdf0d5;
-  --running: #1d4fbf;
-  --running-bg: #e3ebfc;
-  --neutral: #57534e;
-  --neutral-bg: #eeece9;
-
-  /* One color per effect, used for every effect badge. */
-  --effect-read: #475569;
-  --effect-read-bg: #e7ebf0;
-  --effect-write: #1d4fbf;
-  --effect-write-bg: #e3ebfc;
-  --effect-publish: #6d28d9;
-  --effect-publish-bg: #efe7fd;
-  --effect-send: #a14b00;
-  --effect-send-bg: #fdecd9;
-  --effect-money: #17703a;
-  --effect-money-bg: #e2f4e8;
-  --effect-access: #b42318;
-  --effect-access-bg: #fde7e4;
-
+  color-scheme: light;
   --radius: 0.625rem;
-  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -54,9 +24,12 @@
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
   --chart-1: oklch(0.87 0 0);
@@ -72,666 +45,96 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #161514;
-    --surface: #1f1e1c;
-    --fg: #ece9e5;
-    --muted: #a39e98;
-    --border: #36332f;
-    --accent: #7c9cf5;
-    --accent-fg: #10131c;
-    --code-bg: #2a2825;
-
-    --good: #6fd394;
-    --good-bg: #173523;
-    --bad: #ff8a7a;
-    --bad-bg: #441914;
-    --waiting: #f4c06a;
-    --waiting-bg: #3d2c0d;
-    --running: #8fb0ff;
-    --running-bg: #1b2747;
-    --neutral: #c9c4be;
-    --neutral-bg: #2e2c29;
-
-    --effect-read: #b8c3d1;
-    --effect-read-bg: #28303b;
-    --effect-write: #8fb0ff;
-    --effect-write-bg: #1b2747;
-    --effect-publish: #c4a5ff;
-    --effect-publish-bg: #2f2147;
-    --effect-send: #ffb36b;
-    --effect-send-bg: #40260c;
-    --effect-money: #6fd394;
-    --effect-money-bg: #173523;
-    --effect-access: #ff8a7a;
-    --effect-access-bg: #441914;
-  }
-}
-
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-  font: 15px/1.5 var(--font);
-}
-
-a {
-  color: var(--accent);
-}
-
-code,
-.mono,
-pre {
-  font-family: var(--mono);
-  font-size: 0.9em;
-}
-
-h1,
-h2,
-h3 {
-  line-height: 1.25;
-  margin: 0 0 0.5rem;
-}
-
-h1 {
-  font-size: 1.5rem;
-}
-
-h2 {
-  font-size: 1.15rem;
-  margin-top: 1.5rem;
-}
-
-h3 {
-  font-size: 0.95rem;
-  margin-top: 1rem;
-}
-
-.card h2,
-.card h3:first-child {
-  margin-top: 0;
-}
-
-/* Layout */
-
-nav.top {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.25rem 1rem;
-  padding: 0.75rem 1.5rem;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-}
-
-nav.top a {
-  color: var(--fg);
-  text-decoration: none;
-  padding: 0.25rem 0;
-  border-bottom: 2px solid transparent;
-}
-
-nav.top a[aria-current="page"]:not(.brand) {
-  border-bottom-color: var(--accent);
-}
-
-nav.top .brand {
-  font-weight: 700;
-  margin-right: 0.5rem;
-}
-
-nav.top .who {
-  margin-left: auto;
-  color: var(--muted);
-}
-
-main {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 1.5rem;
-}
-
-.page-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5rem 1rem;
-  margin-bottom: 1rem;
-}
-
-.page-head h1 {
-  margin: 0;
-}
-
-.row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0;
-}
-
-.push {
-  margin-left: auto;
-}
-
-.split {
-  display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-  gap: 2rem;
-}
-
-@media (max-width: 860px) {
-  .split {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.cards {
-  display: grid;
-  gap: 1rem;
-}
-
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1rem 1.25rem;
-  margin-bottom: 1rem;
-}
-
-.card-label {
-  margin: 0 0 0.25rem;
-  color: var(--muted);
-  font-size: 0.9em;
-}
-
-.muted {
-  color: var(--muted);
-}
-
-.notice {
-  padding: 0.75rem 1rem;
-  border-radius: var(--radius);
-  background: var(--neutral-bg);
-  color: var(--neutral);
-}
-
-.notice.tone-bad {
-  background: var(--bad-bg);
-  color: var(--bad);
-}
-
-/* Badges */
-
-.badge {
-  display: inline-block;
-  padding: 0.05rem 0.5rem;
-  border-radius: 999px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  line-height: 1.5;
-  white-space: nowrap;
-  vertical-align: middle;
-  background: var(--neutral-bg);
-  color: var(--neutral);
-}
-
-.badge.tone-good {
-  background: var(--good-bg);
-  color: var(--good);
-}
-
-.badge.tone-bad {
-  background: var(--bad-bg);
-  color: var(--bad);
-}
-
-.badge.tone-waiting {
-  background: var(--waiting-bg);
-  color: var(--waiting);
-}
-
-.badge.tone-running {
-  background: var(--running-bg);
-  color: var(--running);
-}
-
-.badge.effect-read {
-  background: var(--effect-read-bg);
-  color: var(--effect-read);
-}
-
-.badge.effect-write {
-  background: var(--effect-write-bg);
-  color: var(--effect-write);
-}
-
-.badge.effect-publish {
-  background: var(--effect-publish-bg);
-  color: var(--effect-publish);
-}
-
-.badge.effect-send {
-  background: var(--effect-send-bg);
-  color: var(--effect-send);
-}
-
-.badge.effect-money {
-  background: var(--effect-money-bg);
-  color: var(--effect-money);
-}
-
-.badge.effect-access {
-  background: var(--effect-access-bg);
-  color: var(--effect-access);
-}
-
-/* Tables */
-
-.table-wrap {
-  overflow-x: auto;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-th,
-td {
-  text-align: left;
-  padding: 0.6rem 0.9rem;
-  border-bottom: 1px solid var(--border);
-  vertical-align: top;
-}
-
-th {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-tbody tr:last-child td {
-  border-bottom: none;
-}
-
-tr.clickable {
-  cursor: pointer;
-}
-
-tr.clickable:hover {
-  background: var(--code-bg);
-}
-
-.error-cell,
-.error-text {
-  color: var(--bad);
-}
-
-.error-cell {
-  max-width: 28rem;
-}
-
-/* Facts */
-
-dl.facts {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 0.25rem 1rem;
-  margin: 0.5rem 0 1rem;
-}
-
-dl.facts dt {
-  color: var(--muted);
-}
-
-dl.facts dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-q.note {
-  display: block;
-  margin-top: 0.25rem;
-  color: var(--muted);
-  font-style: italic;
-}
-
-/* Ledger timeline */
-
-ol.timeline {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  border-left: 2px solid var(--border);
-}
-
-ol.timeline > li {
-  position: relative;
-  display: grid;
-  grid-template-columns: 7rem minmax(0, 1fr);
-  gap: 0.75rem;
-  padding: 0.5rem 0 0.75rem 1rem;
-}
-
-ol.timeline > li::before {
-  content: "";
-  position: absolute;
-  left: -6px;
-  top: 0.85rem;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--neutral);
-  border: 2px solid var(--bg);
-}
-
-ol.timeline > li.tone-good::before {
-  background: var(--good);
-}
-
-ol.timeline > li.tone-bad::before {
-  background: var(--bad);
-}
-
-ol.timeline > li.tone-waiting::before {
-  background: var(--waiting);
-}
-
-ol.timeline .when {
-  display: flex;
-  flex-direction: column;
-  font-size: 0.85rem;
-  color: var(--muted);
-}
-
-ol.timeline .kind {
-  font-weight: 600;
-  color: var(--fg);
-}
-
-ol.timeline .what p {
-  margin: 0 0 0.25rem;
-}
-
-details.expand {
-  margin: 0.25rem 0;
-}
-
-details.expand summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-
-pre.json {
-  margin: 0.25rem 0;
-  padding: 0.6rem 0.75rem;
-  background: var(--code-bg);
-  border-radius: var(--radius);
-  overflow-x: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-/* Approvals */
-
-.approval .details {
-  margin: 0 0 0.5rem;
-}
-
-ul.links,
-ul.refused,
-ul.ops,
-ul.inputs {
-  margin: 0 0 0.5rem;
-  padding-left: 1.1rem;
-}
-
-ul.links a {
-  overflow-wrap: anywhere;
-}
-
-ul.ops li,
-ul.inputs li {
-  margin-bottom: 0.35rem;
-}
-
-.hint {
-  margin: 0.15rem 0 0;
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-
-form.decide {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--border);
-}
-
-form.decide input {
-  flex: 1 1 12rem;
-}
-
-/* Forms */
-
-input,
-select,
-textarea,
-button,
-.button {
-  font: inherit;
-  color: inherit;
-}
-
-input[type="text"],
-input[type="number"],
-input[type="datetime-local"],
-select,
-textarea {
-  width: 100%;
-  padding: 0.45rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-
-form.decide input[type="text"] {
-  width: auto;
-}
-
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
-button:focus-visible,
-a:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-button,
-.button {
-  display: inline-block;
-  padding: 0.45rem 0.9rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  cursor: pointer;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-button:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-fg);
-}
-
-button.approve {
-  background: var(--good-bg);
-  border-color: var(--good);
-  color: var(--good);
-}
-
-button.reject {
-  background: var(--bad-bg);
-  border-color: var(--bad);
-  color: var(--bad);
-}
-
-button.link {
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--accent);
-  text-decoration: underline;
-}
-
-.start-form {
-  max-width: 40rem;
-}
-
-.field {
-  display: block;
-  margin-bottom: 1rem;
-  max-width: 40rem;
-}
-
-.field .label {
-  display: block;
-  font-weight: 600;
-  margin-bottom: 0.25rem;
-}
-
-.field.inline {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.25rem 0.5rem;
-}
-
-.field.inline .label {
-  order: 2;
-  margin: 0;
-}
-
-.field.inline .hint,
-.field.inline .field-error {
-  order: 3;
-  flex-basis: 100%;
-}
-
-.required {
-  color: var(--bad);
-}
-
-.field-error {
-  flex-basis: 100%;
-  margin: 0.25rem 0 0;
-  color: var(--bad);
-  font-size: 0.9rem;
-}
-
-/* Who are you: over the page until a name is given */
-
-.who-are-you {
-  position: fixed;
-  inset: 0;
-  display: grid;
-  place-items: start center;
-  padding: 10vh 1rem 0;
-  background: color-mix(in srgb, var(--bg) 85%, transparent);
-  z-index: 10;
-}
-
-.who-are-you form {
-  display: grid;
-  gap: 0.75rem;
-  width: min(28rem, 100%);
-}
-
-.who-are-you p {
-  margin: 0;
-}
-
-/* Start form */
-
-fieldset.group {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.75rem 1rem 0.25rem;
-  margin: 0 0 1rem;
-  max-width: 40rem;
-}
-
-fieldset.group legend {
-  font-weight: 600;
-  padding: 0 0.25rem;
-}
-
-.array-item {
-  display: flex;
-  gap: 0.5rem;
-  align-items: flex-start;
-  margin-bottom: 0.5rem;
-}
-
-.array-item > :first-child {
-  flex: 1;
-  margin-bottom: 0;
-}
-
-.form-error {
-  margin: 0 0 1rem;
-  color: var(--bad);
-}
-
-/* Phones */
-
-@media (max-width: 600px) {
-  main {
-    padding: 1rem;
-  }
-
-  nav.top {
-    padding: 0.5rem 1rem;
-  }
-
-  nav.top .who {
-    margin-left: 0;
-    flex-basis: 100%;
-  }
-
-  ol.timeline > li {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.25rem;
-  }
 
-  ol.timeline .when {
-    flex-direction: row;
-    gap: 0.5rem;
-  }
+  /* Effects: pale tints with deep, saturated text, readable on white. */
+  --effect-read: oklch(0.95 0.012 250);
+  --effect-read-foreground: oklch(0.42 0.04 255);
+  --effect-write: oklch(0.94 0.035 255);
+  --effect-write-foreground: oklch(0.46 0.16 260);
+  --effect-publish: oklch(0.94 0.04 300);
+  --effect-publish-foreground: oklch(0.47 0.2 295);
+  --effect-send: oklch(0.95 0.045 70);
+  --effect-send-foreground: oklch(0.5 0.13 55);
+  --effect-money: oklch(0.95 0.045 155);
+  --effect-money-foreground: oklch(0.47 0.12 155);
+  --effect-access: oklch(0.94 0.04 25);
+  --effect-access-foreground: oklch(0.5 0.18 27);
+
+  /* Run statuses. Approvals and policy decisions borrow these: pending waits, approved finishes. */
+  --status-queued: oklch(0.95 0.015 280);
+  --status-queued-foreground: oklch(0.45 0.06 280);
+  --status-running: oklch(0.94 0.035 240);
+  --status-running-foreground: oklch(0.47 0.15 245);
+  --status-waiting: oklch(0.95 0.06 85);
+  --status-waiting-foreground: oklch(0.5 0.12 65);
+  --status-finished: oklch(0.95 0.045 155);
+  --status-finished-foreground: oklch(0.46 0.12 155);
+  --status-failed: oklch(0.94 0.04 25);
+  --status-failed-foreground: oklch(0.5 0.19 27);
+  --status-cancelled: oklch(0.95 0 0);
+  --status-cancelled-foreground: oklch(0.48 0 0);
+}
+
+.dark {
+  color-scheme: dark;
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+
+  /* Effects: deep, low-lightness fills that sit on the dark cards, with light text. */
+  --effect-read: oklch(0.3 0.02 255);
+  --effect-read-foreground: oklch(0.85 0.03 255);
+  --effect-write: oklch(0.3 0.07 260);
+  --effect-write-foreground: oklch(0.84 0.09 260);
+  --effect-publish: oklch(0.3 0.08 300);
+  --effect-publish-foreground: oklch(0.84 0.1 300);
+  --effect-send: oklch(0.32 0.06 60);
+  --effect-send-foreground: oklch(0.86 0.1 70);
+  --effect-money: oklch(0.3 0.06 155);
+  --effect-money-foreground: oklch(0.85 0.12 155);
+  --effect-access: oklch(0.3 0.08 25);
+  --effect-access-foreground: oklch(0.83 0.1 25);
+
+  --status-queued: oklch(0.3 0.03 280);
+  --status-queued-foreground: oklch(0.84 0.05 280);
+  --status-running: oklch(0.31 0.07 245);
+  --status-running-foreground: oklch(0.84 0.09 245);
+  --status-waiting: oklch(0.33 0.06 75);
+  --status-waiting-foreground: oklch(0.88 0.11 85);
+  --status-finished: oklch(0.3 0.06 155);
+  --status-finished-foreground: oklch(0.85 0.12 155);
+  --status-failed: oklch(0.3 0.08 25);
+  --status-failed-foreground: oklch(0.83 0.1 25);
+  --status-cancelled: oklch(0.28 0 0);
+  --status-cancelled-foreground: oklch(0.78 0 0);
 }
 
 @theme inline {
@@ -775,40 +178,31 @@ fieldset.group legend {
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
-}
 
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --color-effect-read: var(--effect-read);
+  --color-effect-read-foreground: var(--effect-read-foreground);
+  --color-effect-write: var(--effect-write);
+  --color-effect-write-foreground: var(--effect-write-foreground);
+  --color-effect-publish: var(--effect-publish);
+  --color-effect-publish-foreground: var(--effect-publish-foreground);
+  --color-effect-send: var(--effect-send);
+  --color-effect-send-foreground: var(--effect-send-foreground);
+  --color-effect-money: var(--effect-money);
+  --color-effect-money-foreground: var(--effect-money-foreground);
+  --color-effect-access: var(--effect-access);
+  --color-effect-access-foreground: var(--effect-access-foreground);
+  --color-status-queued: var(--status-queued);
+  --color-status-queued-foreground: var(--status-queued-foreground);
+  --color-status-running: var(--status-running);
+  --color-status-running-foreground: var(--status-running-foreground);
+  --color-status-waiting: var(--status-waiting);
+  --color-status-waiting-foreground: var(--status-waiting-foreground);
+  --color-status-finished: var(--status-finished);
+  --color-status-finished-foreground: var(--status-finished-foreground);
+  --color-status-failed: var(--status-failed);
+  --color-status-failed-foreground: var(--status-failed-foreground);
+  --color-status-cancelled: var(--status-cancelled);
+  --color-status-cancelled-foreground: var(--status-cancelled-foreground);
 }
 
 @layer base {
@@ -820,5 +214,15 @@ fieldset.group legend {
   }
   html {
     @apply font-sans;
+  }
+  /* Page and section headings are plain elements: the pages render <h1>, <h2> with no classes. */
+  h1 {
+    @apply font-heading text-2xl font-semibold tracking-tight;
+  }
+  h2 {
+    @apply font-heading text-lg font-semibold tracking-tight;
+  }
+  code {
+    @apply font-mono text-[0.9em];
   }
 }
