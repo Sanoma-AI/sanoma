@@ -1,4 +1,4 @@
-import type { ApprovalState, Effect, LedgerRecord, RecordedDecision, RunStatus } from "@sanoma/workflows";
+import type { ApprovalState, Effect, LedgerRecord, RecordedDecision } from "@sanoma/workflows";
 import { cva } from "class-variance-authority";
 import { ChevronRightIcon, CircleAlertIcon, InfoIcon } from "lucide-react";
 import { type ReactNode, useMemo, useSyncExternalStore } from "react";
@@ -7,29 +7,12 @@ import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
+import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import { approverLabel } from "@sanoma/workflows/shared";
 
 // Small pieces shared by the screens, composed from the shadcn components in ./ui.
 
-/** What a status means, one colour each (the --tone-* tokens in style.css). */
-export type Tone = "ok" | "bad" | "waiting" | "active" | "idle" | "off";
-
-export const RUN_TONE: Record<RunStatus, Tone> = {
-  queued: "idle",
-  running: "active",
-  waiting: "waiting",
-  finished: "ok",
-  failed: "bad",
-  cancelled: "off",
-};
-
-export const APPROVAL_TONE: Record<ApprovalState["status"], Tone> = {
-  pending: "waiting",
-  approved: "ok",
-  rejected: "bad",
-};
-
-export const DECISION_TONE: Record<RecordedDecision["kind"], Tone> = { allow: "ok", deny: "bad", approve: "waiting" };
+export { APPROVAL_TONE, DECISION_TONE, RUN_TONE, type Tone } from "#/lib/tone.ts";
 
 /** A ledger record's tone: what it did to the run. */
 export function ledgerTone(record: LedgerRecord): Tone {

@@ -94,6 +94,24 @@ export interface RunDetail {
   approvals: ApprovalState[];
 }
 
+/** The `ctx.all` member a record was written in: the group's id, the member's position, the member count. */
+export interface LedgerGroup {
+  id: string;
+  index: number;
+  size: number;
+}
+
+type LedgerCommon = Omit<Extract<LedgerRecord, { type: "run.started" }>, "type" | "input">;
+
+/**
+ * A ledger record as the run graph reads it. The runtime adds `group` (on every record written
+ * while a `ctx.all` member runs) and the `sleep.started` record (`until` in ms since the epoch,
+ * written before the run sleeps); until `LedgerRecord` declares them, they are declared here.
+ */
+export type GraphRecord = (LedgerRecord | (LedgerCommon & { type: "sleep.started"; until: number })) & {
+  group?: LedgerGroup;
+};
+
 /** Every error response, and the `body` of the error a server function throws. */
 export interface ErrorResponse {
   error: string;
