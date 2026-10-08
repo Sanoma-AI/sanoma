@@ -102,7 +102,7 @@ function WorkflowCard({ workflow, ops }: { workflow: WorkflowEntry; ops: Map<str
           {workflow.ops.length === 0 ? (
             <None />
           ) : (
-            <ItemGroup className="gap-2">
+            <ItemGroup>
               {workflow.ops.map((id) => (
                 <OpItem key={id} id={id} op={ops.get(id)} />
               ))}

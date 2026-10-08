@@ -252,18 +252,14 @@ export function SubsectionTitle({ children }: { children: ReactNode }) {
 
 /** Label and value pairs. */
 export function Facts({ children }: { children: ReactNode }) {
-  return (
-    <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm [&_dd]:break-words [&_dt]:text-muted-foreground">
-      {children}
-    </dl>
-  );
+  return <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm">{children}</dl>;
 }
 
 export function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
     <>
-      <dt>{label}</dt>
-      <dd>{children}</dd>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="break-words">{children}</dd>
     </>
   );
 }
