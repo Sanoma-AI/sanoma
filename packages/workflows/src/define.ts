@@ -59,12 +59,6 @@ export const Covers = z
   )
   .optional();
 
-/** `links` and `details` as a workflow may give them: checked, so the UI and the ledger get what the types say. */
-export const ApprovalExtras = z.object({
-  links: z.array(z.string(), { error: "links must be a list of strings" }).optional(),
-  details: z.string({ error: "details must be a string" }).optional(),
-});
-
 export interface ApprovalRequest {
   /** Who must approve: a person's id, or `{ group }` for anyone in it. Phase 4 replaces this with a Cedar decision. */
   approver: Approver;
@@ -76,6 +70,20 @@ export interface ApprovalRequest {
   links?: string[];
   details?: string;
 }
+
+/**
+ * Checks a `ctx.approval` request as a workflow may give it, so the UI and the ledger get what
+ * the types say, and turns `covers` into op ids.
+ */
+export const ApprovalRequestSchema = z.object(
+  {
+    approver: Approver,
+    covers: Covers,
+    links: z.array(z.string(), { error: "links must be a list of strings" }).optional(),
+    details: z.string({ error: "details must be a string" }).optional(),
+  },
+  { error: "needs a request: { approver, covers?, links?, details? }" },
+);
 
 /** One approval in a run, as the run sees it. Published as the run's "approvals" event. */
 export interface ApprovalState extends Omit<ApprovalRequest, "covers"> {

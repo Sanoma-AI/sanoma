@@ -129,7 +129,7 @@ describe("approvals a workflow asks for", () => {
 
   it("fails the run with invalid_input, asking nobody, when the request names no approver or covers no operations", async () => {
     const bad: [unknown, RegExp][] = [
-      [{}, /^ctx\.approval\("Odd"\): needs an approver/],
+      [{}, /^ctx\.approval\("Odd"\): approver: needs an approver/],
       [{ approver: "lead", covers: ["ghost.post.publish"] }, /covers must be a list of operations/],
       [{ approver: "lead", links: "https://example.com" }, /links must be a list of strings/],
     ];
