@@ -34,11 +34,12 @@ import {
   startWorker,
   type Worker,
 } from "@sanoma/workflows";
+import { outlineWorkflow } from "@sanoma/workflows/lint";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
 import { z } from "zod";
 import { type App, type ErrorResponse, type RunDetail, startApp } from "../src/index.ts";
-import { ApiError } from "../src/api.ts";
+import { ApiError, type AppConfig } from "../src/api.ts";
 import { asApiError, parse } from "../src/server/core.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it when
@@ -167,7 +168,7 @@ const input = (title: string) => ({
 
 describe("the API", () => {
   it("describes the config: workflows, ops, built-ins, the policy and the version", async () => {
-    const { status, body } = await call<ConfigDescription>("/api/config");
+    const { status, body } = await call<AppConfig>("/api/config");
     expect(status).toBe(200);
     expect(body.appName).toBe("sanoma-app-test");
     expect(body.version).toMatch(/^sanoma-app-test@/);
@@ -176,6 +177,9 @@ describe("the API", () => {
     expect(wf?.ops).toHaveLength(5);
     expect(wf?.ops).toEqual(expect.arrayContaining(["ghost.post.publish", "resend.broadcast.send"]));
     expect(wf?.builtins).toEqual(["approval", "sleep"]);
+    // Each workflow's outline, read from its run's source when the app started.
+    expect(wf?.outline).toEqual(outlineWorkflow(announce));
+    expect(wf?.outline).toMatchObject({ nodes: expect.arrayContaining([{ kind: "sleep" }]) });
     expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.effect).toBe("send");
   });
 

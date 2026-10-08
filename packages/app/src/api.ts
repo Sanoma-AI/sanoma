@@ -1,12 +1,15 @@
 import type {
   ApprovalState,
+  ConfigDescription,
   ErrorCode,
   InputIssue,
   LedgerRecord,
   Principal,
   RunStatus,
   RunSummary,
+  WorkflowEntry,
 } from "@sanoma/workflows";
+import type { Outline } from "@sanoma/workflows/lint";
 import { z } from "zod";
 
 export type { InputIssue } from "@sanoma/workflows";
@@ -32,6 +35,18 @@ export interface ActorInfo {
   actor: Principal | null;
   /** Set when the deployment's `resolveActor` threw: it could not say. */
   error?: string;
+}
+
+/**
+ * `GET /api/config`, and the config the page reads: `describeConfig(config)`, each workflow with
+ * its outline (`outlineWorkflow`), both made once when the app starts.
+ */
+export interface AppConfig extends ConfigDescription {
+  workflows: AppWorkflow[];
+}
+
+export interface AppWorkflow extends WorkflowEntry {
+  outline: Outline;
 }
 
 /** `POST /api/runs` */
