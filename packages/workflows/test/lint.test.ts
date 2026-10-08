@@ -289,8 +289,9 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
       bad(14, globals, /'performance'.*ctx\.now/),
       bad(16, "eslint(no-restricted-properties)", /Promise\.all\b.*one at a time.*ctx\.all\(\[\.\.\.\]\)/),
       bad(17, "eslint(no-restricted-properties)", /Promise\.allSettled.*ctx\.all/),
-      bad(18, "eslint(no-restricted-properties)", /Promise\.race.*ctx\.all/),
-      bad(19, "eslint(no-restricted-properties)", /Promise\.any.*ctx\.all/),
+      // A race has no ctx.all to point at: nothing races.
+      bad(18, "eslint(no-restricted-properties)", /Promise\.race.*nothing races: pick one call, or sleep/),
+      bad(19, "eslint(no-restricted-properties)", /Promise\.any.*nothing races/),
     ]);
   });
 });

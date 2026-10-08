@@ -63,12 +63,12 @@
           {
             "object": "Promise",
             "property": "race",
-            "message": "Calls through ctx run one at a time; declare a fan-out with `ctx.all([...])` so the ledger and the graph show it."
+            "message": "Calls through ctx run one at a time, so nothing races: pick one call, or sleep and then check."
           },
           {
             "object": "Promise",
             "property": "any",
-            "message": "Calls through ctx run one at a time; declare a fan-out with `ctx.all([...])` so the ledger and the graph show it."
+            "message": "Calls through ctx run one at a time, so nothing races: pick one call, or sleep and then check."
           }
         ],
         "no-restricted-imports": [
