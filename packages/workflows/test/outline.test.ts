@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { defineConnector, defineWorkflow } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
+import fanout from "./fixtures/fanout.ts";
 
 const forum = defineConnector("forum", {
   comments: {
@@ -50,6 +51,26 @@ const busy = defineWorkflow({
 });
 
 describe("outlineWorkflow", () => {
+  it("outlines the fan-out fixture: two ctx.all around a sleep", () => {
+    expect(outlineWorkflow(fanout)).toEqual({
+      nodes: [
+        {
+          kind: "all",
+          branches: [
+            [{ kind: "op", id: "ghost.post.create" }],
+            [{ kind: "op", id: "resend.broadcast.create" }],
+            [{ kind: "op", id: "bluesky.post.create" }],
+          ],
+        },
+        { kind: "sleep" },
+        {
+          kind: "all",
+          branches: [[{ kind: "op", id: "stats.post.views" }], [{ kind: "op", id: "stats.email.opens" }]],
+        },
+      ],
+    });
+  });
+
   it("outlines the announce workflow: its calls in order", () => {
     expect(outlineWorkflow(announce)).toEqual({
       nodes: [
