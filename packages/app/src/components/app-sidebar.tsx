@@ -36,6 +36,8 @@ export function AppSidebar() {
   // The root route loads the config before any page renders.
   const { data: config } = useSuspenseQuery(configQuery());
   const { setOpenMobile } = useSidebar();
+  // On a phone the sidebar is a sheet over the page: every link in it closes it on the way.
+  const close = () => setOpenMobile(false);
   // The Inbox page's query (its costliest read), polled every 30 s for the badge. Each watcher
   // polls at its own interval, so while the Inbox page shows, its 5 s poll keeps the badge
   // fresh too; and a decision refreshes it at once.
@@ -46,7 +48,7 @@ export function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
-              <Link to="/runs">
+              <Link to="/runs" onClick={close}>
                 <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
                   <ShieldCheckIcon />
                 </div>
@@ -65,8 +67,7 @@ export function AppSidebar() {
             {PAGES.map(({ label, icon: Icon, ...link }) => (
               <SidebarMenuItem key={link.to}>
                 <SidebarMenuButton asChild tooltip={label}>
-                  {/* On a phone the sidebar is a sheet over the page: close it on the way. */}
-                  <Link {...link} activeProps={ACTIVE} onClick={() => setOpenMobile(false)}>
+                  <Link {...link} activeProps={ACTIVE} onClick={close}>
                     <Icon />
                     <span>{label}</span>
                   </Link>
