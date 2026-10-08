@@ -1,3 +1,5 @@
+// oxlint-disable-next-line import/no-unassigned-import
+import "@tanstack/react-start/server-only";
 import {
   type ApprovalState,
   errorCode,
