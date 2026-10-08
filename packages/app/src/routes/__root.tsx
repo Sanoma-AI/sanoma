@@ -8,6 +8,8 @@ import {
   useLocation,
   useMatch,
 } from "@tanstack/react-router";
+import { createIsomorphicFn } from "@tanstack/react-start";
+import { getCookie } from "@tanstack/react-start/server";
 import { ThemeProvider } from "next-themes";
 import { lazy, type ReactNode, Suspense } from "react";
 import { AppSidebar, PAGES } from "#/components/app-sidebar.tsx";
@@ -42,11 +44,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   headers: () => ({ "cache-control": "no-store" }),
   // Who the server says is asking, in the first render: a deployment's login shows at once.
   // And the config, which every page reads and which cannot change while the app runs.
-  loader: ({ context }) =>
-    Promise.all([
+  // And whether the sidebar was left open, so the first render draws it as it was.
+  loader: async ({ context }) => {
+    await Promise.all([
       context.queryClient.ensureQueryData(actorQuery()),
       context.queryClient.ensureQueryData(configQuery()),
-    ]),
+    ]);
+    return { sidebarOpen: readSidebarOpen() };
+  },
   component: Root,
   notFoundComponent: () => <Notice variant="destructive">There is no page here.</Notice>,
   // The router types a boundary's error as unknown: anything can be thrown.
@@ -57,12 +62,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   ),
 });
 
+/** The sidebar's own cookie, which it writes as it opens and closes: open unless it says closed. */
+const readSidebarOpen = createIsomorphicFn()
+  .server(() => getCookie("sidebar_state") !== "false")
+  .client(() => !document.cookie.split("; ").includes("sidebar_state=false"));
+
 /** Asked once per browser, so loaded only when no name is stored. */
 const WhoAreYou = lazy(() => import("../components/who-are-you.tsx"));
 
 function Root() {
   const { data: server } = useQuery(actorQuery());
   const actor = useActorState(server);
+  const { sidebarOpen } = Route.useLoaderData();
   return (
     <Document>
       {/* Light, dark or the system's, kept in localStorage. style.css sets color-scheme with the class. */}
@@ -78,8 +89,7 @@ function Root() {
           {/* Radix's tooltips need one provider: the sidebar's, and any a page shows. */}
           <TooltipProvider>
             <div id="app">
-              {/* Opens expanded: the sidebar's cookie is written for a later visit, never read. */}
-              <SidebarProvider>
+              <SidebarProvider defaultOpen={sidebarOpen}>
                 <AppSidebar />
                 <SidebarInset>
                   <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
