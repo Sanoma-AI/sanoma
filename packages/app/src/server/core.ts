@@ -104,9 +104,17 @@ const STATUS: Partial<Record<NonNullable<ErrorResponse["code"]>, number>> = {
   run_ended: 409,
 };
 
-/** An ApiError for any error: the runtime's codes get their status, anything else is a 500. */
+/** True for zod's error, by name: a server function's validator may use another copy of zod. */
+const isZodError = (err: unknown): err is { issues: z.core.$ZodIssue[] } =>
+  err instanceof Error && err.name === "ZodError" && Array.isArray((err as { issues?: unknown }).issues);
+
+/**
+ * An ApiError for any error: the runtime's codes get their status, a server function's
+ * validator refusing its argument is a 400 with zod's issues, and anything else is a 500.
+ */
 export function asApiError(err: unknown): ApiError {
   if (err instanceof ApiError) return err;
+  if (isZodError(err)) err = invalidInput("The request", err.issues);
   const code = errorCode(err);
   const status = (code && STATUS[code]) || 500;
   const body: ErrorResponse = { error: errorMessage(err), code };

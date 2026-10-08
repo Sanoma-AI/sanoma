@@ -25,7 +25,9 @@ import {
 } from "@sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
+import { z } from "zod";
 import { type App, type ErrorResponse, type RunDetail, startApp } from "../src/index.ts";
+import { asApiError } from "../src/server/core.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it once when
 // dist/server/server.js is missing. Rebuild with `pnpm --filter @sanoma/app build` after
@@ -265,6 +267,19 @@ describe("the API", () => {
     expect(approval.status).toBe(404);
     expect(approval.body.code).toBe("run_not_found");
     expect((await call("/api/nothing-here")).status).toBe(404);
+  });
+});
+
+describe("asApiError", () => {
+  it("answers a server function's argument that its validator refuses with 400 and the issues", () => {
+    const refused = z.object({ runId: z.string().min(1) }).safeParse({ runId: "" });
+    const api = asApiError(refused.error);
+    expect(api.status).toBe(400);
+    expect(api.body).toMatchObject({
+      code: "invalid_input",
+      error: expect.stringMatching(/^The request: runId: /),
+      issues: [expect.objectContaining({ path: ["runId"] })],
+    });
   });
 });
 
