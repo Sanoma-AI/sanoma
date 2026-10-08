@@ -1,9 +1,9 @@
-import type { ApprovalState } from "@sanoma/workflows";
+import type { ApprovalState, RunSummary } from "@sanoma/workflows";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { CheckIcon, XIcon } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
 import {
@@ -37,21 +37,23 @@ type Decision = DecideRequest["decision"];
 export function ApprovalCard({
   runId,
   approval,
-  showRun = false,
-  description,
+  run,
 }: {
   runId: string;
   approval: ApprovalState;
-  showRun?: boolean;
-  /** Above the facts, under the title: what the approval belongs to. */
-  description?: ReactNode;
+  /** The run it belongs to, for an approval shown away from its run: named under the title, and linked. */
+  run?: Pick<RunSummary, "workflow" | "startedBy">;
 }) {
   const [deciding, setDeciding] = useState<Decision | null>(null);
   return (
     <Card>
       <CardHeader>
         <CardTitle>{approval.title}</CardTitle>
-        {description && <CardDescription>{description}</CardDescription>}
+        {run && (
+          <CardDescription>
+            {run.workflow}, started by {run.startedBy?.id ?? "unknown"}
+          </CardDescription>
+        )}
         <CardAction>
           <ApprovalStatusBadge status={approval.status} />
         </CardAction>
@@ -71,7 +73,7 @@ export function ApprovalCard({
           <Fact label="Asked">
             <When at={approval.requestedAt} />
           </Fact>
-          {showRun && (
+          {run && (
             <Fact label="Run">
               <Link to="/runs/$id" params={{ id: runId }} className="underline underline-offset-4">
                 <code>{runId}</code>
@@ -129,7 +131,9 @@ export function ApprovalCard({
           </Button>
         </CardFooter>
       )}
-      <DecideDialog runId={runId} approval={approval} decision={deciding} onClose={() => setDeciding(null)} />
+      {approval.status === "pending" && (
+        <DecideDialog runId={runId} approval={approval} decision={deciding} onClose={() => setDeciding(null)} />
+      )}
     </Card>
   );
 }
