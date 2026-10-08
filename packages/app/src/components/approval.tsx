@@ -1,4 +1,4 @@
-import type { ApprovalState, RunSummary } from "@sanoma/workflows";
+import type { ApprovalState, RunStatus, RunSummary } from "@sanoma/workflows";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -69,6 +69,10 @@ export function ApprovalCard({
     setDecision(chosen);
     setDeciding(true);
   };
+  // A decision the run has not read yet (no worker running, say) stays queued: until the run's
+  // status changes, the card says so and takes no second, different decision.
+  const [queued, setQueued] = useState<{ decision: Decision; status: RunStatus }>();
+  const waiting = queued?.status === run.status ? queued.decision : undefined;
   return (
     <Card>
       <CardHeader>
@@ -148,14 +152,20 @@ export function ApprovalCard({
         ) : (
           <>
             <CardFooter className="flex-wrap gap-2">
-              <Button onClick={() => decide("approve")}>
+              <Button disabled={waiting !== undefined} onClick={() => decide("approve")}>
                 <CheckIcon data-icon="inline-start" />
                 Approve
               </Button>
-              <Button variant="destructive" onClick={() => decide("reject")}>
+              <Button variant="destructive" disabled={waiting !== undefined} onClick={() => decide("reject")}>
                 <XIcon data-icon="inline-start" />
                 Reject
               </Button>
+              {waiting && (
+                <p className="text-sm text-muted-foreground">
+                  Your {waiting === "approve" ? "approval" : "rejection"} is queued: the run has not read it yet. Is a
+                  worker running?
+                </p>
+              )}
             </CardFooter>
             <DecideDialog
               runId={run.runId}
@@ -163,6 +173,7 @@ export function ApprovalCard({
               open={deciding}
               decision={decision}
               onClose={() => setDeciding(false)}
+              onQueued={(chosen) => setQueued({ decision: chosen, status: run.status })}
             />
           </>
         ))}
@@ -195,12 +206,15 @@ function DecideDialog({
   open,
   decision,
   onClose,
+  onQueued,
 }: {
   runId: string;
   approval: ApprovalState;
   open: boolean;
   decision: Decision;
   onClose: () => void;
+  /** The run has not read the decision yet: it stays queued, and the card says so. */
+  onQueued: (decision: Decision) => void;
 }) {
   const [note, setNote] = useState("");
   const queryClient = useQueryClient();
@@ -213,15 +227,15 @@ function DecideDialog({
         queryClient.invalidateQueries({ queryKey: ["run", runId] }),
         queryClient.invalidateQueries({ queryKey: ["runs"] }),
       ]);
-      // Still pending: the decision is queued, but the run has not read it. The dialog stays
-      // open, so the approver sees that nothing has happened yet.
+      // Still pending: the decision is queued, but the run has not read it.
       if (state.status === "pending") {
         toast.warning("Sent, but the run has not read it yet. Is a worker running?");
+        onQueued(chosen);
       } else {
         toast.success(`${chosen === "approve" ? "Approved" : "Rejected"} “${approval.title}”`);
-        setNote("");
-        onClose();
       }
+      setNote("");
+      onClose();
       await refresh;
     },
   });
