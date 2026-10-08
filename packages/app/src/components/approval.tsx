@@ -15,7 +15,6 @@ import {
   CardHeader,
   CardTitle,
 } from "#/components/ui/card.tsx";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
 import {
   Dialog,
   DialogClose,
@@ -30,7 +29,7 @@ import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import { approverName, type DecideRequest, errorBodyOf } from "../api.ts";
 import { decideFn } from "../functions.ts";
-import { ApprovalStatusBadge, Expandable, Fact, Facts, plural, When } from "./common.tsx";
+import { ApprovalStatusBadge, Disclosure, Expandable, Fact, Facts, plural, When } from "./common.tsx";
 
 type Decision = DecideRequest["decision"];
 
@@ -107,22 +106,15 @@ export function ApprovalCard({
           <Expandable label="The held call's input" value={approval.input} />
         )}
         {approval.refused.length > 0 && (
-          <Collapsible>
-            <CollapsibleTrigger asChild>
-              <Button variant="ghost" size="xs" className="-ml-2 text-muted-foreground">
-                {plural(approval.refused.length, "message")} ignored
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <ul className="flex flex-col gap-1 text-muted-foreground">
-                {approval.refused.map((r, i) => (
-                  <li key={`${r.at}-${i}`}>
-                    {r.by ?? "someone"}: {r.reason} (<When at={r.at} />)
-                  </li>
-                ))}
-              </ul>
-            </CollapsibleContent>
-          </Collapsible>
+          <Disclosure label={`${plural(approval.refused.length, "message")} ignored`}>
+            <ul className="flex flex-col gap-1 text-muted-foreground">
+              {approval.refused.map((r, i) => (
+                <li key={`${r.at}-${i}`}>
+                  {r.by ?? "someone"}: {r.reason} (<When at={r.at} />)
+                </li>
+              ))}
+            </ul>
+          </Disclosure>
         )}
       </CardContent>
       {approval.status === "pending" && (

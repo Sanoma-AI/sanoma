@@ -174,23 +174,30 @@ export function Json({ value }: { value: unknown }) {
   );
 }
 
-/** JSON behind a disclosure, for inputs and outputs that are usually too long to show inline. Written out only once opened. */
-export function Expandable({ label, value }: { label: string; value: unknown }) {
+/** Something behind a small toggle, closed at first. The content renders only once opened. */
+export function Disclosure({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
-    <Collapsible className="group/expand">
+    <Collapsible className="group/disclosure">
       <CollapsibleTrigger asChild>
         <Button variant="ghost" size="xs" className="-ml-2 text-muted-foreground">
           <ChevronRightIcon
             data-icon="inline-start"
-            className="transition-transform group-data-open/expand:rotate-90"
+            className="transition-transform group-data-open/disclosure:rotate-90"
           />
           {label}
         </Button>
       </CollapsibleTrigger>
-      <CollapsibleContent>
-        <Json value={value} />
-      </CollapsibleContent>
+      <CollapsibleContent>{children}</CollapsibleContent>
     </Collapsible>
+  );
+}
+
+/** JSON behind a disclosure, for inputs and outputs that are usually too long to show inline. */
+export function Expandable({ label, value }: { label: string; value: unknown }) {
+  return (
+    <Disclosure label={label}>
+      <Json value={value} />
+    </Disclosure>
   );
 }
 
