@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { appendFile, mkdir, readFile, truncate } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -77,15 +78,22 @@ export type LedgerRecord = {
 );
 
 /**
- * The `ctx.all` member a record was written in. `id` is `all:<n>`, `n` counting the run's
- * `ctx.all` calls from 0 in program order, so a replay numbers them the same; `index` is the
- * member's position and `size` the member count.
+ * The `ctx.all` member a record was written in. `id` is `all:<seq>`, the run's next `seq` when
+ * the `ctx.all` began, so a replay names it the same; `index` is the member's position and
+ * `size` the member count.
  */
 export interface LedgerGroup {
   id: string;
   index: number;
   size: number;
 }
+
+/**
+ * The `ctx.all` member a call was made in. Each member runs inside `currentGroup.run`, and a
+ * queued call keeps the context it was queued in, so a call made outside the member meanwhile
+ * (one the workflow did not await) is not tagged as the member's.
+ */
+export const currentGroup = new AsyncLocalStorage<LedgerGroup>();
 
 export interface LedgerStore {
   /**
@@ -226,10 +234,10 @@ export function memoryLedger(): LedgerStore {
 type Common = "v" | "app" | "id" | "runId" | "seq" | "at" | "actor" | "workflow" | "group";
 type Body = LedgerRecord extends infer R ? (R extends LedgerRecord ? Omit<R, Common> : never) : never;
 
-/** A record of the run, with the next `seq` unless one is given, tagged with the `ctx.all` member running. */
+/** A record of the run, with the next `seq` unless one is given, tagged with the `ctx.all` member it is written in. */
 export function entry(run: Run, body: Body, opts: { seq?: number; key?: string; at?: number } = {}): LedgerRecord {
   const seq = opts.seq ?? run.seq++;
-  return {
+  const record = {
     v: 1,
     app: run.state.app,
     id: `${run.id}:${body.type}:${opts.key ?? seq}`,
@@ -238,9 +246,11 @@ export function entry(run: Run, body: Body, opts: { seq?: number; key?: string; 
     at: opts.at ?? Date.now(),
     actor: run.actor,
     workflow: run.workflow,
-    ...(run.group ? { group: { ...run.group } } : {}),
     ...body,
   } as LedgerRecord;
+  const group = currentGroup.getStore();
+  if (group) record.group = group;
+  return record;
 }
 
 // Waits between tries of a failed append. Safe to repeat: append is idempotent by id.

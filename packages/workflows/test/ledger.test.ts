@@ -12,7 +12,7 @@ import {
   memoryLedger,
   PolicyDeniedError,
 } from "../src/index.ts";
-import { entry, write, writeFailure } from "../src/ledger.ts";
+import { currentGroup, entry, write, writeFailure } from "../src/ledger.ts";
 import type { Run } from "../src/run.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "sanoma-ledger-unit-"));
@@ -152,7 +152,7 @@ const runOn = (ledger: LedgerStore): Run => ({
   approvals: [],
   seq: 0,
   tail: Promise.resolve(),
-  groups: 0,
+  inAll: false,
   ended: false,
   state: { app: "acme", ops: new Map(), drivers: new Map(), policy: allowAll, ledger, stopped: false },
 });
@@ -175,11 +175,10 @@ describe("writing a run's records", () => {
     expect(entry(run, { type: "run.finished", output: 2 }).seq).toBe(1);
   });
 
-  it("tags a record with the ctx.all member running, and only while one runs", () => {
+  it("tags a record with the ctx.all member it is written in, and only then", () => {
     const run = runOn(memoryLedger());
-    run.group = { id: "all:0", index: 1, size: 2 };
-    expect(entry(run, { type: "run.started", input: 1 })).toMatchObject({ group: { id: "all:0", index: 1, size: 2 } });
-    run.group = undefined;
+    const group = { id: "all:1", index: 1, size: 2 };
+    expect(currentGroup.run(group, () => entry(run, { type: "run.started", input: 1 }))).toMatchObject({ group });
     expect(entry(run, { type: "run.finished", output: 2 })).not.toHaveProperty("group");
   });
 

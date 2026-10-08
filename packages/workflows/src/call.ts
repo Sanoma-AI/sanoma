@@ -11,7 +11,7 @@ import {
   type WorkflowDefinition,
 } from "./define.ts";
 import { errorCode, errorInfo, isFinal, keepCode, parseOrThrow, PolicyDeniedError, SanomaError } from "./errors.ts";
-import { entry, skipped, write, writeFailure } from "./ledger.ts";
+import { currentGroup, entry, skipped, write, writeFailure } from "./ledger.ts";
 import { shown } from "./log.ts";
 import { type CallContext, isOp, type Op } from "./op.ts";
 import { DecisionSchema, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
@@ -276,28 +276,30 @@ function checkSleep(req: unknown): SleepRequest {
 }
 
 /**
- * Calls the members one after another, each awaited before the next starts, with the run's
- * group set so every record a member writes carries it. The first failure stops the group and is
- * rethrown as it is. `n` is taken in program order, so a replay numbers the groups the same.
+ * Calls the members one after another, each awaited before the next starts, each inside its
+ * group (`currentGroup`), so every record its calls write carries it. The first failure stops
+ * the group and is rethrown as it is. The id is the run's next `seq` when ctx.all begins, which
+ * depends only on the calls made before it, so a replay names the group the same.
  */
 async function all(run: Run, list: unknown): Promise<unknown[]> {
-  if (run.group) {
+  const outer = currentGroup.getStore();
+  if (outer) {
     throw new SanomaError("invalid_input", "ctx.all cannot be nested: a member of a ctx.all called ctx.all", {
-      group: run.group.id,
+      group: outer.id,
     });
   }
+  // Two groups' calls would interleave on the run's queue, and neither would read as one fan-out.
+  if (run.inAll) throw new SanomaError("invalid_input", "a ctx.all is already running: await it before the next");
   const members = parseOrThrow(AllMembers, list, "ctx.all");
-  const id = `all:${run.groups++}`;
-  // A call made before ctx.all and not awaited settles first, so it is not tagged as a member's.
-  await run.tail;
+  const id = `all:${run.seq}`;
   const outputs: unknown[] = [];
+  run.inAll = true;
   try {
     for (const [index, member] of members.entries()) {
-      run.group = { id, index, size: members.length };
-      outputs.push(await member());
+      outputs.push(await currentGroup.run({ id, index, size: members.length }, member));
     }
   } finally {
-    run.group = undefined;
+    run.inAll = false;
   }
   return outputs;
 }

@@ -80,8 +80,32 @@ const odd = defineWorkflow({
   },
 });
 
+/** Leaves a ctx.all un-awaited while it calls on, as the lint would refuse, to show what is recorded. */
+const loose = defineWorkflow({
+  name: "loose",
+  trigger: "manual",
+  input: z.object({ shape: z.enum(["outside", "twice"]) }),
+  uses: [bluesky.post.create, "all"],
+  run: async (ctx, { shape }) => {
+    const group = ctx.all([
+      () => ctx.bluesky.post.create({ text: "one" }),
+      () => ctx.bluesky.post.create({ text: "two" }),
+    ]);
+    if (shape === "outside") {
+      // Made while the first member runs, but not in it.
+      await ctx.bluesky.post.create({ text: "outside" });
+      return (await group).length;
+    }
+    const refused = await ctx
+      .all([() => ctx.bluesky.post.create({ text: "three" })])
+      .catch((err: Error) => `${errorCode(err)}: ${err.message}`);
+    await group;
+    return refused;
+  },
+});
+
 describe("ctx.all", () => {
-  const app = useApp(databaseUrl, "all", () => ({ workflows: [fan, signed, broken, odd] }));
+  const app = useApp(databaseUrl, "all", () => ({ workflows: [fan, signed, broken, odd, loose] }));
   const c = () => app.client;
 
   it("runs the members in order, returns their outputs in order, and tags their records with the group", async () => {
@@ -102,9 +126,10 @@ describe("ctx.all", () => {
     expect(groups(records)).toEqual([
       undefined,
       undefined,
-      { id: "all:0", index: 0, size: 3 },
-      { id: "all:0", index: 1, size: 3 },
-      { id: "all:0", index: 2, size: 3 },
+      // Named for the seq the run was at when ctx.all began: the first member's call took it.
+      { id: "all:2", index: 0, size: 3 },
+      { id: "all:2", index: 1, size: 3 },
+      { id: "all:2", index: 2, size: 3 },
       undefined,
       undefined,
     ]);
@@ -125,7 +150,7 @@ describe("ctx.all", () => {
       "op.called bluesky.post.create",
       "run.finished",
     ]);
-    const group = { id: "all:0", size: 2 };
+    const group = { id: "all:1", size: 2 };
     expect(groups(records)).toEqual([
       undefined,
       { ...group, index: 0 },
@@ -149,7 +174,7 @@ describe("ctx.all", () => {
       "op.called ghost.post.publish",
       "run.failed",
     ]);
-    expect(records[2]).toMatchObject({ group: { id: "all:0", index: 1, size: 3 }, error: { code: "driver_failed" } });
+    expect(records[2]).toMatchObject({ group: { id: "all:1", index: 1, size: 3 }, error: { code: "driver_failed" } });
     expect(records[3]).not.toHaveProperty("group");
   });
 
@@ -161,6 +186,33 @@ describe("ctx.all", () => {
     expect(errors[0]).toMatchObject({ message: expect.stringMatching(/^ctx\.all cannot be nested/) });
     expect(errors[1]).toMatchObject({ message: expect.stringMatching(/^ctx\.all: needs a list of functions/) });
     expect(errors[2]).toMatchObject({ message: expect.stringMatching(/^ctx\.all: 0: each member must be a function/) });
+  });
+
+  it("does not tag a call made outside the group while a member runs", async () => {
+    const runId = await c().start(loose, { shape: "outside" }, { startedBy: alice });
+    expect(await c().result(runId)).toBe(2);
+    expect(app.vendors.bluesky.state.posts.map((p) => p.text)).toEqual(["one", "outside", "two"]);
+    const group = { id: "all:1", size: 2 };
+    expect(groups(await c().ledger(runId))).toEqual([
+      undefined,
+      { ...group, index: 0 },
+      undefined,
+      { ...group, index: 1 },
+      undefined,
+    ]);
+  });
+
+  it("refuses a second ctx.all while one runs, and keeps the first one's tags", async () => {
+    const runId = await c().start(loose, { shape: "twice" }, { startedBy: alice });
+    expect(await c().result(runId)).toBe("invalid_input: a ctx.all is already running: await it before the next");
+    expect(app.vendors.bluesky.state.posts.map((p) => p.text)).toEqual(["one", "two"]);
+    const group = { id: "all:1", size: 2 };
+    expect(groups(await c().ledger(runId))).toEqual([
+      undefined,
+      { ...group, index: 0 },
+      { ...group, index: 1 },
+      undefined,
+    ]);
   });
 
   it("returns [] for no members, and writes nothing for them", async () => {
@@ -204,6 +256,6 @@ describe("ctx.all", () => {
       "op.called bluesky.post.create",
       "run.finished",
     ]);
-    expect(records[4]).toMatchObject({ group: { id: "all:0", index: 2, size: 3 } });
+    expect(records[4]).toMatchObject({ group: { id: "all:2", index: 2, size: 3 } });
   });
 });
