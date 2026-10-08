@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
@@ -23,7 +25,10 @@ const browserSafe: Plugin = {
 };
 
 export default defineConfig({
-  plugins: [browserSafe, tanstackStart(), react()],
+  plugins: [browserSafe, tailwindcss(), tanstackStart(), react()],
+  // shadcn's `@/` alias (components.json), as in tsconfig.json's `paths`. Only this one: the
+  // other paths there point @sanoma/workflows at source, which the bundles must not inline.
+  resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   environments: {
     ssr: { resolve: { external: RUNTIME } },
   },
