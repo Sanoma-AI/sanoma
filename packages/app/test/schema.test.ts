@@ -9,10 +9,9 @@ import {
   issueTarget,
   toLocalInput,
 } from "../src/form/schema.ts";
+import { jsonSchemaOf } from "../../workflows/src/define.ts";
 
 // The start form's logic, on the JSON Schema describeConfig sends. No database, no build.
-const jsonSchema = (schema: z.ZodType) =>
-  z.toJSONSchema(schema, { io: "input", target: "draft-2020-12", unrepresentable: "any" });
 
 const input = z.object({
   title: z.string().min(1).describe("What to call it"),
@@ -27,7 +26,7 @@ const input = z.object({
   details: z.object({ owner: z.string() }).optional(),
   extra: z.record(z.string(), z.unknown()).optional(),
 });
-const fields = fieldsOf(jsonSchema(input))!;
+const fields = fieldsOf(jsonSchemaOf(input))!;
 const field = (key: string) => fields.find((f) => f.key === key)!;
 
 describe("fieldsOf", () => {
@@ -52,9 +51,9 @@ describe("fieldsOf", () => {
   });
 
   it("gives nothing for an input that is not an object with properties, so the form takes the whole input as JSON", () => {
-    expect(fieldsOf(jsonSchema(z.array(z.string())))).toBeUndefined();
-    expect(fieldsOf(jsonSchema(z.union([z.object({ a: z.string() }), z.string()])))).toBeUndefined();
-    expect(fieldsOf(jsonSchema(z.string()))).toBeUndefined();
+    expect(fieldsOf(jsonSchemaOf(z.array(z.string())))).toBeUndefined();
+    expect(fieldsOf(jsonSchemaOf(z.union([z.object({ a: z.string() }), z.string()])))).toBeUndefined();
+    expect(fieldsOf(jsonSchemaOf(z.string()))).toBeUndefined();
   });
 });
 
@@ -78,7 +77,7 @@ describe("buildInput", () => {
 
   it("leaves out an optional object left as it started, a required yes/no in it included", () => {
     const probe = fieldsOf(
-      jsonSchema(z.object({ details: z.object({ owner: z.string(), notify: z.boolean() }).optional() })),
+      jsonSchemaOf(z.object({ details: z.object({ owner: z.string(), notify: z.boolean() }).optional() })),
     )!;
     expect(buildInput(probe, initialValues(probe)).input).toEqual({});
     const owned = buildInput(probe, { details: { owner: "Bo", notify: false } }).input;
