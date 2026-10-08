@@ -561,9 +561,12 @@ describe("an app configured otherwise", () => {
     it("renders who the deployment says is asking, and never asks for a name", async () => {
       const res = await fetch(new URL("/runs", other.url), { headers: { "x-test-user": "sso-user" } });
       const html = await res.text();
-      expect(html).toMatch(/>sso-user<\/span>/);
+      // The user menu's trigger: the deployment's name for you, and whose name it is. Nothing
+      // asks for a name or says one is kept here (the menu, with no "Change name" either,
+      // renders only once opened).
+      expect(html).toMatch(/>sso-user<\/span><span[^>]*>Signed in by the deployment<\/span>/);
       expect(html).not.toContain("Who are you?");
-      expect(html).not.toMatch(/>change</);
+      expect(html).not.toContain("Name kept in this browser");
     });
 
     it("answers a resolver that throws with a 500, and logs why", async () => {
