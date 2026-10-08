@@ -1,10 +1,9 @@
 import type { LedgerRecord } from "@sanoma/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Fragment, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
-import { Item, ItemContent, ItemGroup, ItemMedia, ItemSeparator, ItemTitle } from "@/components/ui/item";
+import { Item, ItemContent, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { approverName } from "../../api.ts";
 import { ApprovalCard } from "../../components/approval.tsx";
 import {
@@ -66,18 +65,11 @@ function RunPage() {
           {ledgerError && <Notice tone="bad">Could not read the ledger: {ledgerError}</Notice>}
           {ledger && ledger.length === 0 && !ledgerError && <Nothing title="Nothing recorded yet" />}
           {ledger && ledger.length > 0 && (
-            <Card size="sm">
-              <CardContent>
-                <ItemGroup className="gap-0" aria-label="Ledger">
-                  {ledger.map((record, i) => (
-                    <Fragment key={record.id}>
-                      {i > 0 && <ItemSeparator className="my-0" />}
-                      <LedgerRow record={record} titles={titles} />
-                    </Fragment>
-                  ))}
-                </ItemGroup>
-              </CardContent>
-            </Card>
+            <ItemGroup aria-label="Ledger">
+              {ledger.map((record) => (
+                <LedgerRow key={record.id} record={record} titles={titles} />
+              ))}
+            </ItemGroup>
           )}
         </div>
         <aside className="flex flex-col gap-3">
@@ -167,12 +159,10 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
       break;
   }
   return (
-    <Item role="listitem" size="sm" className="items-start px-0">
-      <ItemMedia className="pt-1.5">
-        <StatusDot tone={ledgerTone(record)} />
-      </ItemMedia>
+    <Item role="listitem" variant="outline" size="sm">
       <ItemContent className="min-w-0">
         <ItemTitle>
+          <StatusDot tone={ledgerTone(record)} />
           {kind}
           <span className="font-normal text-muted-foreground">
             <When at={record.at} />
