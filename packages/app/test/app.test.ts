@@ -675,6 +675,8 @@ describe("an app reading a jsonl ledger", () => {
     let result: Awaited<ReturnType<typeof read>>;
     try {
       result = await read();
+      // Read again, as the page's poll does: logged once for the run and the failure.
+      await read();
     } finally {
       calls = [...logged.mock.calls];
       logged.mockRestore();

@@ -49,6 +49,9 @@ export function parse<T extends z.ZodType>(schema: T, value: unknown, what: stri
   throw asApiError(invalidInput(what, parsed.error.issues));
 }
 
+/** Ledger read failures already logged, by run and message: a page polls its run every 2 s. */
+const loggedReads = new Set<string>();
+
 /** The run with its ledger and approvals, or a 404. */
 export async function runDetail({ client, resolved }: AppContext, runId: string): Promise<RunDetail> {
   const run = await client.run(runId);
@@ -58,10 +61,15 @@ export async function runDetail({ client, resolved }: AppContext, runId: string)
     return { run, ledger: await resolved.ledger.read(runId), approvals };
   } catch (err) {
     // A store reads a run nothing has recorded as no records, so this is a real failure (a
-    // corrupt file, a permission): logged for the operator, and the page shows the run and why
-    // its ledger is missing.
-    console.error(`sanoma app: could not read the ledger of run ${runId}:`, err);
-    return { run, ledger: [], ledgerError: errorMessage(err), approvals };
+    // corrupt file, a permission): logged for the operator once, and the page shows the run and
+    // why its ledger is missing.
+    const ledgerError = errorMessage(err);
+    const key = `${runId}\n${ledgerError}`;
+    if (!loggedReads.has(key)) {
+      loggedReads.add(key);
+      console.error(`sanoma app: could not read the ledger of run ${runId}:`, err);
+    }
+    return { run, ledger: [], ledgerError, approvals };
   }
 }
 
