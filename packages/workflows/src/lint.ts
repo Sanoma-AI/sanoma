@@ -3,6 +3,9 @@ import { parseSync } from "oxc-parser";
 // From src/ and from dist/ alike, the package's own oxlint.json: the one list of allowed names.
 import oxlint from "../oxlint.json" with { type: "json" };
 
+// The outline parses `run` with oxc-parser too, so it lives on this entry, not the runtime's.
+export { outlineWorkflow, type Outline, type OutlineNode } from "./outline.ts";
+
 export interface LintProblem {
   line: number;
   column: number;
