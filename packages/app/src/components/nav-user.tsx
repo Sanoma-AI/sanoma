@@ -24,6 +24,10 @@ export function NavUser() {
   const { isMobile } = useSidebar();
   const { actor, fromServer, error, setActor } = useActor();
   const { theme, setTheme } = useTheme();
+  // Under the name: why the deployment could not say, or where the name comes from; nothing
+  // when there is no name.
+  const status =
+    error ?? (actor ? (fromServer ? "Signed in by the deployment" : "Name kept in this browser") : undefined);
   return (
     <SidebarMenu>
       <SidebarMenuItem>
@@ -47,25 +51,21 @@ export function NavUser() {
                     {actor ?? (fromServer ? "Not signed in" : "Who are you?")}
                   </span>
                 )}
-                <span className={cn("truncate text-xs", error && "text-destructive")}>
-                  {error ?? (fromServer ? "Signed in by the deployment" : "Name kept in this browser")}
-                </span>
+                {status && <span className={cn("truncate text-xs", error && "text-destructive")}>{status}</span>}
               </div>
               <ChevronsUpDownIcon className="ml-auto size-4" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent side={isMobile ? "bottom" : "right"} align="end" sideOffset={4}>
-            <DropdownMenuLabel>{error ?? (actor ? `You are ${actor}` : "Not signed in")}</DropdownMenuLabel>
             {!fromServer && (
               <>
-                <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={() => setActor(null)}>
                   <UserPenIcon />
                   Change name
                 </DropdownMenuItem>
+                <DropdownMenuSeparator />
               </>
             )}
-            <DropdownMenuSeparator />
             <DropdownMenuLabel>Theme</DropdownMenuLabel>
             <DropdownMenuRadioGroup value={theme ?? "system"} onValueChange={setTheme}>
               <DropdownMenuRadioItem value="light">
