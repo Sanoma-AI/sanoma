@@ -26,7 +26,6 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "#/components/ui/s
 import { Toaster } from "#/components/ui/sonner.tsx";
 import { TooltipProvider } from "#/components/ui/tooltip.tsx";
 import { ActorContext, useActorState } from "../actor.ts";
-import { Notice } from "../components/common.tsx";
 import { actorQuery, configQuery } from "../queries.ts";
 // lucide's shield-check, the sidebar's brand icon.
 import favicon from "../favicon.svg?url";
@@ -58,14 +57,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     ]);
     return { sidebarOpen: readSidebarOpen() };
   },
+  // The document, around everything the root renders: its page, error or not-found included.
+  shellComponent: Document,
   component: Root,
-  notFoundComponent: () => <Notice variant="destructive">There is no page here.</Notice>,
-  // The router types a boundary's error as unknown: anything can be thrown.
-  errorComponent: ({ error }) => (
-    <Notice variant="destructive">
-      Something went wrong: {error instanceof Error ? error.message : String(error)}
-    </Notice>
-  ),
 });
 
 /** The sidebar's own cookie, which it writes as it opens and closes: open unless it says closed. */
@@ -81,46 +75,34 @@ function Root() {
   const actor = useActorState(server);
   const { sidebarOpen } = Route.useLoaderData();
   return (
-    <Document>
-      {/* Light, dark or the system's, kept in localStorage. style.css sets color-scheme with the class. */}
-      <ThemeProvider
-        attribute="class"
-        defaultTheme="system"
-        enableSystem
-        enableColorScheme={false}
-        storageKey="sanoma.theme"
-        disableTransitionOnChange
-      >
-        <ActorContext value={actor}>
-          {/* Radix's tooltips need one provider: the sidebar's, and any a page shows. */}
-          <TooltipProvider>
-            <div id="app">
-              <SidebarProvider defaultOpen={sidebarOpen}>
-                <AppSidebar />
-                <SidebarInset>
-                  <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
-                    <div className="flex items-center gap-2 px-4">
-                      <SidebarTrigger className="-ml-1" />
-                      <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
-                      <Crumbs />
-                    </div>
-                  </header>
-                  <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 p-4 pt-0 sm:px-6">
-                    <Outlet />
-                  </div>
-                </SidebarInset>
-              </SidebarProvider>
-              {!actor.fromServer && actor.actor === null && (
-                <Suspense fallback={null}>
-                  <WhoAreYou />
-                </Suspense>
-              )}
-              <Toaster />
-            </div>
-          </TooltipProvider>
-        </ActorContext>
-      </ThemeProvider>
-    </Document>
+    <ActorContext value={actor}>
+      {/* Radix's tooltips need one provider: the sidebar's, and any a page shows. */}
+      <TooltipProvider>
+        <div id="app">
+          <SidebarProvider defaultOpen={sidebarOpen}>
+            <AppSidebar />
+            <SidebarInset>
+              <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+                <div className="flex items-center gap-2 px-4">
+                  <SidebarTrigger className="-ml-1" />
+                  <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
+                  <Crumbs />
+                </div>
+              </header>
+              <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 p-4 pt-0 sm:px-6">
+                <Outlet />
+              </div>
+            </SidebarInset>
+          </SidebarProvider>
+          {!actor.fromServer && actor.actor === null && (
+            <Suspense fallback={null}>
+              <WhoAreYou />
+            </Suspense>
+          )}
+          <Toaster />
+        </div>
+      </TooltipProvider>
+    </ActorContext>
   );
 }
 
@@ -132,7 +114,17 @@ function Document({ children }: { children: ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        {children}
+        {/* Light, dark or the system's, kept in localStorage. style.css sets color-scheme with the class. */}
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          enableColorScheme={false}
+          storageKey="sanoma.theme"
+          disableTransitionOnChange
+        >
+          {children}
+        </ThemeProvider>
         <Scripts />
       </body>
     </html>
