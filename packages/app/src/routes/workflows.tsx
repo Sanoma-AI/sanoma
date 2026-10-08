@@ -9,27 +9,26 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
 import {
-  effectBadge,
   Fact,
   Facts,
   Json,
   Nothing,
+  OpName,
   PageHeader,
   SectionTitle,
   SubsectionTitle,
 } from "../components/common.tsx";
 import { type Field, fieldsOf } from "../form/schema.ts";
-import { configQuery } from "../queries.ts";
+import { configQuery, opsById } from "../queries.ts";
 
 export const Route = createFileRoute("/workflows")({
-  loader: ({ context }) => context.queryClient.ensureQueryData(configQuery()),
   head: () => ({ meta: [{ title: "Workflows · Sanoma" }] }),
   component: WorkflowsPage,
 });
 
 function WorkflowsPage() {
   const { data: config } = useSuspenseQuery(configQuery());
-  const ops = new Map(config.ops.map((op) => [op.id, op]));
+  const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
   return (
     <section className="flex flex-col gap-6">
       <PageHeader title="Workflows" />
@@ -145,8 +144,7 @@ function OpItem({ id, op }: { id: string; op: OpEntry | undefined }) {
     <Item role="listitem" variant="outline" size="xs">
       <ItemContent>
         <ItemTitle>
-          <code>{id}</code>
-          {op && <Badge className={effectBadge({ effect: op.effect })}>{op.effect}</Badge>}
+          <OpName id={id} effect={op?.effect} />
           {op?.idempotent && (
             <Badge variant="outline" title="Safe to retry: the vendor dedupes repeated calls">
               idempotent

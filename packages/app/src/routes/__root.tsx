@@ -7,7 +7,7 @@ import { Toaster } from "#/components/ui/sonner.tsx";
 import { ActorContext, useActor, useActorState } from "../actor.ts";
 import { Notice } from "../components/common.tsx";
 import { ModeToggle } from "../components/mode-toggle.tsx";
-import { actorQuery } from "../queries.ts";
+import { actorQuery, configQuery } from "../queries.ts";
 import css from "../style.css?url";
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
@@ -23,7 +23,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   // Pages show what is happening now: never cache them.
   headers: () => ({ "cache-control": "no-store" }),
   // Who the server says is asking, in the first render: a deployment's login shows at once.
-  loader: ({ context }) => context.queryClient.ensureQueryData(actorQuery()),
+  // And the config, which every page reads and which cannot change while the app runs.
+  loader: ({ context }) =>
+    Promise.all([
+      context.queryClient.ensureQueryData(actorQuery()),
+      context.queryClient.ensureQueryData(configQuery()),
+    ]),
   component: Root,
   notFoundComponent: () => <Notice variant="destructive">There is no page here.</Notice>,
   // The router types a boundary's error as unknown: anything can be thrown.

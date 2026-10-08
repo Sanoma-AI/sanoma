@@ -1,11 +1,10 @@
 import type { ApprovalState, RunStatus, RunSummary } from "@sanoma/workflows";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { CheckIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import {
   Card,
@@ -31,16 +30,16 @@ import { Textarea } from "#/components/ui/textarea.tsx";
 import { approverLabel, isEnded } from "@sanoma/workflows/shared";
 import { type DecideRequest, errorBodyOf, starterName } from "../api.ts";
 import { decideFn } from "../functions.ts";
-import { configQuery } from "../queries.ts";
+import { configQuery, opsById } from "../queries.ts";
 import {
   ApprovalStatusBadge,
   DecisionNote,
   Disclosure,
-  effectBadge,
   Expandable,
   Fact,
   Facts,
   Notice,
+  OpName,
   plural,
   RequestedBy,
   When,
@@ -179,21 +178,15 @@ export function ApprovalCard({
  * lets a policy allow later in the run. A workflow's approval often covers none.
  */
 function Covers({ covers }: { covers: string[] }) {
-  // The config never changes while the app runs; until it loads, the ids show alone.
-  const { data: config } = useQuery(configQuery());
+  const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
   if (covers.length === 0) return <span className="text-muted-foreground">no operation by itself</span>;
-  const effects = new Map(config?.ops.map((op) => [op.id, op.effect]));
   return (
     <ul className="flex flex-wrap gap-1.5">
-      {covers.map((id) => {
-        const effect = effects.get(id);
-        return (
-          <li key={id} className="flex items-center gap-1">
-            <code>{id}</code>
-            {effect && <Badge className={effectBadge({ effect })}>{effect}</Badge>}
-          </li>
-        );
-      })}
+      {covers.map((id) => (
+        <li key={id} className="flex items-center gap-1">
+          <OpName id={id} effect={ops.get(id)?.effect} />
+        </li>
+      ))}
     </ul>
   );
 }

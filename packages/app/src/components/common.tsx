@@ -90,6 +90,16 @@ const dot = cva("size-2.5 rounded-full", {
   },
 });
 
+/** An operation by id, with its effect's badge when the effect is known. */
+export function OpName({ id, effect }: { id: string; effect?: Effect | undefined }) {
+  return (
+    <>
+      <code>{id}</code>
+      {effect && <Badge className={effectBadge({ effect })}>{effect}</Badge>}
+    </>
+  );
+}
+
 /** A tone as a dot, where a badge would be too much. */
 export function StatusDot({ tone }: { tone: Tone }) {
   return <span aria-hidden className={dot({ tone })} />;

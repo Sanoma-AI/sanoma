@@ -10,7 +10,6 @@ import { configQuery } from "../queries.ts";
 
 export const Route = createFileRoute("/start")({
   validateSearch: z.object({ workflow: z.string().optional() }),
-  loader: ({ context }) => context.queryClient.ensureQueryData(configQuery()),
   head: () => ({ meta: [{ title: "Start a run · Sanoma" }] }),
   component: StartPage,
 });

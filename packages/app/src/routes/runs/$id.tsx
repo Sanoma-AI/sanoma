@@ -10,13 +10,13 @@ import { ApprovalCard } from "../../components/approval.tsx";
 import {
   DecisionBadge,
   DecisionNote,
-  effectBadge,
   Expandable,
   Fact,
   Facts,
   ledgerTone,
   Nothing,
   Notice,
+  OpName,
   PageHeader,
   RequestedBy,
   RUN_TONE,
@@ -25,15 +25,10 @@ import {
   toneBadge,
   When,
 } from "../../components/common.tsx";
-import { configQuery, runQuery } from "../../queries.ts";
+import { runQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/runs/$id")({
-  // The config too: each approval badges the operations it covers by their effect.
-  loader: ({ context, params }) =>
-    Promise.all([
-      context.queryClient.ensureQueryData(runQuery(params.id)),
-      context.queryClient.ensureQueryData(configQuery()),
-    ]),
+  loader: ({ context, params }) => context.queryClient.ensureQueryData(runQuery(params.id)),
   head: ({ params }) => ({ meta: [{ title: `Run ${params.id} · Sanoma` }] }),
   component: RunPage,
   // getRun throws the router's not-found for a run that does not exist.
@@ -124,7 +119,7 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
       body = (
         <>
           <p className="flex flex-wrap items-center gap-2">
-            <code>{record.op}</code> <Badge className={effectBadge({ effect: record.effect })}>{record.effect}</Badge>{" "}
+            <OpName id={record.op} effect={record.effect} />
             <DecisionBadge decision={record.decision} />
             <span className="text-muted-foreground">
               {record.durationMs} ms{record.attempt && record.attempt > 1 ? `, attempt ${record.attempt}` : ""}
