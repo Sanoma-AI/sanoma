@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { DBOSClient, Error as DBOSErrors, type WorkflowStatusString } from "@dbos-inc/dbos-sdk";
 import type { z } from "zod";
-import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, topicOf } from "./approvals.ts";
+import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, messageKeyOf, topicOf } from "./approvals.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { type ApprovalState, mayDecide, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
 import { parseOrThrow, SanomaError } from "./errors.ts";
@@ -251,12 +251,10 @@ export class SanomaClient {
         approver: target.approver,
       });
     }
-    // The id names this message, so the run's answer says whether it decided with it. In the
-    // idempotency key it keeps a retried send from queueing the message twice; DBOS scopes the
-    // key per run, not per topic, so it names the approval too: one message id reused for two
-    // approvals of a run would otherwise drop the second send.
+    // The id names this message, so the run's answer says whether it decided with it, and is
+    // in its idempotency key, so a retried send queues it once.
     const id = msg.id ?? randomUUID();
-    await this.dbos.send(runId, { ...msg, id }, topicOf(target.id), `${target.id}:${id}`);
+    await this.dbos.send(runId, { ...msg, id }, topicOf(target.id), messageKeyOf(target.id, id));
     // DBOSClient does not LISTEN for events: it polls, every 10 s unless told otherwise. A
     // running worker answers within moments, so poll often at first, then once a second.
     const event = decisionEventOf(target.id);

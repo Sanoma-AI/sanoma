@@ -23,6 +23,12 @@ export const APPROVALS_EVENT = "approvals";
 export const topicOf = (approvalId: string) => approvalId;
 /** The DBOS event an approval's decision is published on, as its decided `ApprovalState`, once made. */
 export const decisionEventOf = (approvalId: string) => `approval:${approvalId}`;
+/**
+ * The idempotency key a decision message is sent with, so a retried send queues it once. DBOS
+ * scopes the key per run, not per topic, so it names the approval too: one message id reused
+ * for two approvals of a run would otherwise drop the second send.
+ */
+export const messageKeyOf = (approvalId: string, messageId: string) => `${approvalId}:${messageId}`;
 
 /**
  * A decision, as sent to a run. `id` names the message, so whoever sent it can tell whether

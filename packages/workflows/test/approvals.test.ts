@@ -3,6 +3,7 @@ import { bluesky } from "@sanoma/connector-bluesky";
 import { testDatabaseUrl } from "@sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { messageKeyOf, topicOf } from "../src/approvals.ts";
 import { sameApprover } from "../src/define.ts";
 import {
   allow,
@@ -154,7 +155,12 @@ describe("approvals a workflow asks for", () => {
       });
       expect(sent).toMatchObject({ id: "approval-1", status: "pending" });
       // The same message again, as a retried send: the key keeps it to one message.
-      await app.raw.send(runId, { id: "m-1", decision: "approve", by: lead }, "approval-1", "approval-1:m-1");
+      await app.raw.send(
+        runId,
+        { id: "m-1", decision: "approve", by: lead },
+        topicOf("approval-1"),
+        messageKeyOf("approval-1", "m-1"),
+      );
     } finally {
       await app.restart();
     }
