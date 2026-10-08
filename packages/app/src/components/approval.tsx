@@ -2,7 +2,7 @@ import type { ApprovalState, RunStatus, RunSummary } from "@sanoma/workflows";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { CheckIcon, XIcon } from "lucide-react";
+import { CheckIcon, ExternalLinkIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
@@ -25,6 +25,7 @@ import {
   DialogTitle,
 } from "#/components/ui/dialog.tsx";
 import { Field, FieldDescription, FieldError, FieldLabel } from "#/components/ui/field.tsx";
+import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import { approverLabel, isEnded } from "@sanoma/workflows/shared";
@@ -119,28 +120,39 @@ export function ApprovalCard({
         </Facts>
         {approval.details && <p>{approval.details}</p>}
         {approval.links?.length ? (
-          <ul className="flex flex-col gap-1">
+          <ItemGroup>
             {approval.links.map((href) => (
-              <li key={href} className="break-all">
-                <a href={href} target="_blank" rel="noreferrer noopener">
-                  {href}
+              <Item key={href} asChild variant="outline" size="xs">
+                <a href={href} target="_blank" rel="noreferrer noopener" title={href}>
+                  <ItemContent className="min-w-0">
+                    <ItemTitle className="block max-w-full truncate">{href}</ItemTitle>
+                  </ItemContent>
+                  <ItemActions>
+                    <ExternalLinkIcon className="size-4" />
+                  </ItemActions>
                 </a>
-              </li>
+              </Item>
             ))}
-          </ul>
+          </ItemGroup>
         ) : null}
         {approval.requestedBy === "policy" && approval.input !== undefined && (
           <Expandable label="The held call's input" value={approval.input} />
         )}
         {approval.refused.length > 0 && (
           <Disclosure label={`${plural(approval.refused.length, "message")} ignored`}>
-            <ul className="flex flex-col gap-1 text-muted-foreground">
+            <ItemGroup>
               {approval.refused.map((r, i) => (
-                <li key={`${r.at}-${i}`}>
-                  {r.by ?? "someone"}: {r.reason} (<When at={r.at} />)
-                </li>
+                <Item key={`${r.at}-${i}`} role="listitem" variant="muted" size="xs">
+                  <ItemContent>
+                    <ItemTitle>{r.by ?? "someone"}</ItemTitle>
+                    <ItemDescription>{r.reason}</ItemDescription>
+                  </ItemContent>
+                  <ItemActions className="text-xs text-muted-foreground">
+                    <When at={r.at} />
+                  </ItemActions>
+                </Item>
               ))}
-            </ul>
+            </ItemGroup>
           </Disclosure>
         )}
       </CardContent>
