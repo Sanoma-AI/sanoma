@@ -36,6 +36,7 @@ import {
   Expandable,
   Fact,
   Facts,
+  Notice,
   plural,
   RequestedBy,
   When,
@@ -54,7 +55,13 @@ export function ApprovalCard({
   /** The run it belongs to, for an approval shown away from its run: named under the title, and linked. */
   run?: Pick<RunSummary, "workflow" | "startedBy">;
 }) {
-  const [deciding, setDeciding] = useState<Decision | null>(null);
+  // The decision stays put while the dialog animates closed, so its verb and colour do not flip.
+  const [decision, setDecision] = useState<Decision>("approve");
+  const [deciding, setDeciding] = useState(false);
+  const decide = (chosen: Decision) => {
+    setDecision(chosen);
+    setDeciding(true);
+  };
   return (
     <Card>
       <CardHeader>
@@ -125,18 +132,24 @@ export function ApprovalCard({
       </CardContent>
       {approval.status === "pending" && (
         <CardFooter className="flex-wrap gap-2">
-          <Button onClick={() => setDeciding("approve")}>
+          <Button onClick={() => decide("approve")}>
             <CheckIcon data-icon="inline-start" />
             Approve
           </Button>
-          <Button variant="destructive" onClick={() => setDeciding("reject")}>
+          <Button variant="destructive" onClick={() => decide("reject")}>
             <XIcon data-icon="inline-start" />
             Reject
           </Button>
         </CardFooter>
       )}
       {approval.status === "pending" && (
-        <DecideDialog runId={runId} approval={approval} decision={deciding} onClose={() => setDeciding(null)} />
+        <DecideDialog
+          runId={runId}
+          approval={approval}
+          open={deciding}
+          decision={decision}
+          onClose={() => setDeciding(false)}
+        />
       )}
     </Card>
   );
@@ -146,23 +159,19 @@ export function ApprovalCard({
 function DecideDialog({
   runId,
   approval,
+  open,
   decision,
   onClose,
 }: {
   runId: string;
   approval: ApprovalState;
-  decision: Decision | null;
+  open: boolean;
+  decision: Decision;
   onClose: () => void;
 }) {
   const [note, setNote] = useState("");
   const queryClient = useQueryClient();
   const send = useServerFn(decideFn);
-  const messageOf = (err: Error | null) => {
-    const body = errorBodyOf(err);
-    return body?.code === "not_approver"
-      ? `Only ${approverName(body.approver ?? approval.approver)} can decide this`
-      : err?.message;
-  };
   const mutation = useMutation({
     // The server trims the note and drops an empty one.
     mutationFn: (chosen: Decision) => send({ data: { runId, approvalId: approval.id, decision: chosen, note } }),
@@ -176,15 +185,25 @@ function DecideDialog({
       ]);
     },
   });
-  const error = messageOf(mutation.error);
+  // An issue with the note belongs under it; anything else (not the approver, already decided,
+  // the network) is about the whole decision.
+  const body = errorBodyOf(mutation.error);
+  const noteError = body?.issues?.find((issue) => issue.path[0] === "note")?.message;
+  const error =
+    !mutation.error || noteError
+      ? undefined
+      : body?.code === "not_approver"
+        ? `Only ${approverName(body.approver ?? approval.approver)} can decide this`
+        : mutation.error.message;
   const verb = decision === "reject" ? "Reject" : "Approve";
 
   return (
     <Dialog
-      open={decision !== null}
-      onOpenChange={(open) => {
-        if (!open && !mutation.isPending) {
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && !mutation.isPending) {
           mutation.reset();
+          setNote("");
           onClose();
         }
       }}
@@ -194,7 +213,7 @@ function DecideDialog({
           className="flex flex-col gap-4"
           onSubmit={(e) => {
             e.preventDefault();
-            if (decision) mutation.mutate(decision);
+            mutation.mutate(decision);
           }}
         >
           <DialogHeader>
@@ -205,18 +224,19 @@ function DecideDialog({
               Asked of {approverName(approval.approver)}. The run carries on once decided.
             </DialogDescription>
           </DialogHeader>
-          <Field data-invalid={error ? true : undefined}>
+          {error && <Notice variant="destructive">{error}</Notice>}
+          <Field data-invalid={noteError ? true : undefined}>
             <FieldLabel htmlFor={`note-${approval.id}`}>Note</FieldLabel>
             <Textarea
               id={`note-${approval.id}`}
               value={note}
               onChange={(e) => setNote(e.target.value)}
               disabled={mutation.isPending}
-              aria-invalid={error ? true : undefined}
+              aria-invalid={noteError ? true : undefined}
               placeholder="Optional: why, or what to change"
             />
             <FieldDescription>Recorded in the run's ledger with your decision.</FieldDescription>
-            {error && <FieldError>{error}</FieldError>}
+            {noteError && <FieldError>{noteError}</FieldError>}
           </Field>
           <DialogFooter>
             <DialogClose asChild>
