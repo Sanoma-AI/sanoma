@@ -59,10 +59,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   component: Root,
 });
 
-/** The sidebar's own cookie, which it writes as it opens and closes: open unless it says closed. */
-const readSidebarOpen = createIsomorphicFn()
-  .server(() => getCookie("sidebar_state") !== "false")
-  .client(() => !document.cookie.split("; ").includes("sidebar_state=false"));
+/**
+ * The cookie the sidebar writes as it opens and closes: SIDEBAR_COOKIE_NAME in ui/sidebar.tsx,
+ * which does not export it (and is generated, so not edited).
+ */
+const SIDEBAR_COOKIE = "sidebar_state";
+
+/**
+ * Whether the sidebar was left open: open unless its cookie says closed. Read on the server
+ * only; the browser's answer is undefined. SidebarProvider reads `defaultOpen` once, as it
+ * mounts, and in the browser that is hydration, which has the server's answer.
+ */
+const readSidebarOpen = createIsomorphicFn().server(() => getCookie(SIDEBAR_COOKIE) !== "false");
 
 /** Asked once per browser, so loaded only when no name is stored. */
 const WhoAreYou = lazy(() => import("../components/who-are-you.tsx"));
@@ -70,7 +78,8 @@ const WhoAreYou = lazy(() => import("../components/who-are-you.tsx"));
 function Root() {
   const { data: server } = useSuspenseQuery(actorQuery());
   const actor = useActorState(server);
-  const { sidebarOpen } = Route.useLoaderData();
+  // Only this field: the root's loader data is new on every navigation, the field is not.
+  const sidebarOpen = Route.useLoaderData({ select: (data) => data.sidebarOpen });
   return (
     <ActorContext value={actor}>
       {/* Radix's tooltips need one provider: the sidebar's, and any a page shows. */}
