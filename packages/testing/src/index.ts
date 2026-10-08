@@ -27,13 +27,11 @@ type Filled = "databaseUrl" | "ledger";
  * passed to `startWorker` as given. Stop the worker in `afterAll`.
  */
 export function startTestWorker(
-  config: Omit<WorkerConfig, Filled> & Partial<Pick<WorkerConfig, Filled>>,
+  config: Omit<WorkerConfig, Filled | "appName"> & Partial<Pick<WorkerConfig, Filled>> & { appName: string },
 ): ReturnType<typeof startWorker> {
-  const { appName } = config;
-  if (!appName) throw new Error("startTestWorker needs an `appName` unique to the test file, which names its database");
   return startWorker({
     ...config,
-    databaseUrl: config.databaseUrl ?? testDatabaseUrl(appName),
+    databaseUrl: config.databaseUrl ?? testDatabaseUrl(config.appName),
     ledger: config.ledger ?? memoryLedger(),
   });
 }
