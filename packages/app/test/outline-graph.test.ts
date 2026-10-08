@@ -119,6 +119,27 @@ describe("outlineGraph", () => {
     ]);
   });
 
+  it("draws a branch's way past its cases as a lane of its own, marked otherwise", () => {
+    const { nodes, edges } = outlineGraph([
+      { kind: "branch", cases: [[{ kind: "approval", title: "Shout?" }], []] },
+      op("b.x.after"),
+    ]);
+    expect(labels(nodes).slice(1, -1)).toEqual([
+      "split:0 branch",
+      "approval:1 “Shout?”",
+      "skip:2 otherwise",
+      "op:3 b.x.after",
+    ]);
+    expect(pairs(edges)).toEqual([
+      "start->split:0",
+      "split:0->approval:1",
+      "split:0->skip:2",
+      "approval:1->op:3",
+      "skip:2->op:3",
+      "op:3->end",
+    ]);
+  });
+
   it("draws a ctx.all inside a loop as lanes inside its cluster", () => {
     const { nodes, edges } = outlineGraph([
       {

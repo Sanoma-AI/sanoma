@@ -62,7 +62,9 @@ export type GraphNode =
   /** A box around a loop's body or a computed `ctx.all`'s member, which `label` names. */
   | (Base & { kind: "cluster" })
   /** Where a branch splits into its cases. */
-  | (Base & { kind: "split" });
+  | (Base & { kind: "split" })
+  /** A branch's way past its cases, when it has one: an `if` without `else`, say. */
+  | (Base & { kind: "skip" });
 
 export type GraphNodeKind = GraphNode["kind"];
 

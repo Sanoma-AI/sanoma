@@ -12,8 +12,8 @@ const OUTLINE_ENDS: Ends = { end: { label: "end" } };
  * Steps as a graph: a chain from start to end. A `ctx.all` is one lane per member between the
  * node before it and the node after; a branch splits at a diamond into one lane per case. A
  * computed `ctx.all`'s member is a chain in a cluster labelled "for each", a loop's body one in a
- * cluster labelled "repeats". An empty lane leads straight from the node before to the node
- * after. A workflow's outline is drawn this way, and a run's ledger once runGraph has made it
+ * cluster labelled "repeats". An empty member leads straight from the node before to the node
+ * after; a branch's empty case, the way past it, is a lane marked "otherwise". A workflow's outline is drawn this way, and a run's ledger once runGraph has made it
  * into steps.
  */
 export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS): Graph {
@@ -72,7 +72,13 @@ export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS
           break;
         case "branch": {
           const split = add({ id: idOf("split", undefined), kind: "split", label: "branch", ...inside }, from);
-          from = lanes(step.cases, [split]);
+          // The way past the cases gets a node of its own: an edge alone would run straight from
+          // the split to what follows, behind the case drawn level with them.
+          const past = (lane: readonly Step[]) =>
+            lane.length
+              ? chain(lane, [split], parent)
+              : [add({ id: idOf("skip", undefined), kind: "skip", label: "otherwise", ...inside }, [split])];
+          from = [...new Set(step.cases.flatMap(past))];
           break;
         }
       }

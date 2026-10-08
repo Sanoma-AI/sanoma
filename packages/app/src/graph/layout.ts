@@ -15,6 +15,7 @@ export const NODE_SIZE: Record<GraphNodeKind, { width: number; height: number }>
   pending: { width: 112, height: 40 },
   cluster: { width: 112, height: 40 },
   split: { width: 24, height: 24 },
+  skip: { width: 88, height: 28 },
 };
 
 /** The room a `cluster` leaves above what it holds, for its label. */

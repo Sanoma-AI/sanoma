@@ -52,6 +52,9 @@ const FIT = {
   minZoom: 0.25,
   maxZoom: 1,
 } as const;
+/** No "React Flow" link in the corner of each graph. */
+const PRO_OPTIONS = { hideAttribution: true };
+
 /** Below this zoom the badges cannot be read: fit one end of the graph instead of all of it. */
 const READABLE_ZOOM = 0.8;
 
@@ -233,6 +236,18 @@ function SplitNode() {
   );
 }
 
+/** A branch's way past its cases: a label on its own lane, so the lane shows. */
+function SkipNode({ data: { node } }: Props<"skip">) {
+  return (
+    <div className="flex size-full items-center justify-center" title={node.label}>
+      <Handles />
+      <Badge variant="outline" className="bg-card text-muted-foreground">
+        {node.label}
+      </Badge>
+    </div>
+  );
+}
+
 const nodeTypes = {
   start: StartNode,
   end: EndNode,
@@ -242,6 +257,7 @@ const nodeTypes = {
   pending: PendingNode,
   cluster: ClusterNode,
   split: SplitNode,
+  skip: SkipNode,
 } satisfies { [K in GraphNodeKind]: (props: Props<K>) => ReactNode } as NodeTypes;
 
 /** Fits the view again when nodes come or go, as the run's page polls. */
@@ -389,6 +405,7 @@ export default function Graph({ source, onSelect, show = "end" }: GraphProps) {
           panOnScroll
           panOnScrollMode={PanOnScrollMode.Horizontal}
           preventScrolling={false}
+          proOptions={PRO_OPTIONS}
         >
           <Background gap={16} size={1} />
           <Controls showInteractive={false} orientation="horizontal" fitViewOptions={FIT} />

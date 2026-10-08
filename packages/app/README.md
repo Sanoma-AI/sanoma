@@ -38,7 +38,7 @@ A `ctx.all` draws as one lane per member, top to bottom in member order, between
 
 ### Outline
 
-Each workflow card on the Workflows page draws the workflow's shape before it runs, from the `outline` that `describeConfig` (`@sanoma/workflows/describe`) reads once per workflow when `startApp` starts. It is the run graph's drawing without colours: the operations (with their effects), approvals and sleeps the body of `run` calls, a `ctx.all` as lanes, a loop or a `ctx.all` over a list as a box labelled "repeats" or "for each", and an `if` or `switch` as a diamond that splits into one lane per case, plus a lane straight past when the run can go by without any of them (an `if` without `else`, say). It is a reading of the source, labelled so: "Read from the body of run; the functions it calls are not shown, even those defined in it". When the source cannot be read the card says why instead.
+Each workflow card on the Workflows page draws the workflow's shape before it runs, from the `outline` that `describeConfig` (`@sanoma/workflows/describe`) reads once per workflow when `startApp` starts. It is the run graph's drawing without colours: the operations (with their effects), approvals and sleeps the body of `run` calls, a `ctx.all` as lanes, a loop or a `ctx.all` over a list as a box labelled "repeats" or "for each", and an `if` or `switch` as a diamond that splits into one lane per case, plus a lane marked "otherwise" when the run can go by without any of them (an `if` without `else`, say). It is a reading of the source, labelled so: "Read from the body of run; the functions it calls are not shown, even those defined in it". When the source cannot be read the card says why instead.
 
 ## No authentication
 
