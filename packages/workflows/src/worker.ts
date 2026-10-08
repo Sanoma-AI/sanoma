@@ -151,8 +151,8 @@ function register(wf: WorkflowDefinition<any, any>) {
         }
       } catch (err) {
         const record = entry(run, { type: "run.failed", error: errorInfo(err) });
-        if (isInfrastructureError(err)) skipped(record, `the run was interrupted by DBOS (${errorMessage(err)})`);
-        else if (state.stopped) skipped(record, "its worker has stopped; the recovered run records the outcome");
+        if (state.stopped) skipped(record, "its worker has stopped; the recovered run records the outcome");
+        else if (isInfrastructureError(err)) skipped(record, `the run was interrupted by DBOS (${errorMessage(err)})`);
         else await writeFailure(run, record, err);
         throw err;
       }

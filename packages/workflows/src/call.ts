@@ -18,17 +18,25 @@ import { DecisionSchema, type PolicyCall, type RecordedDecision } from "./policy
 import type { Run } from "./run.ts";
 
 // What DBOS throws into a run whose worker is shutting down. Verified for DBOS 5.2: a
-// pending recv rejects with DBOSError("The system database has been shut down"), and a
-// sleep or step that finishes after shutdown fails with pg's "Cannot use a pool after
-// calling end on the pool". They are plain errors, so they are matched by message.
-const SHUTDOWN =
-  /system database has been shut down|System database shutting down|Cannot use a pool after calling end on the pool/;
+// pending recv rejects with DBOSError("The system database has been shut down"). They are
+// DBOS's own errors but not of a class of their own, so they are matched by message, and only
+// on an error DBOS made: a vendor's message may say anything. A sleep or step that finishes
+// after shutdown fails with pg's "Cannot use a pool after calling end on the pool", a plain
+// error, which the worker's `stopped` flag covers instead.
+const SHUTDOWN = /system database has been shut down|System database shutting down/;
 
-/** True for errors that come from DBOS itself rather than the run: cancellation, lost ownership, shutdown. */
-export function isInfrastructureError(err: unknown): boolean {
+const fromDbos = (e: Error) => e.name.startsWith("DBOS") || (e.constructor?.name ?? "").startsWith("DBOS");
+
+/**
+ * True for errors that come from DBOS itself rather than the run: cancellation, lost ownership,
+ * or shutdown, which includes anything that fails once the run's worker has stopped. Such a
+ * failure is not the run's outcome, so the ledger does not record it.
+ */
+export function isInfrastructureError(err: unknown, run?: Pick<Run, "state">): boolean {
+  if (run?.state.stopped) return true;
   for (let e = err, depth = 0; e instanceof Error && depth < 5; e = e.cause, depth++) {
     if (e instanceof DBOSErrors.DBOSWorkflowCancelledError || e instanceof DBOSWorkflowConflictError) return true;
-    if (SHUTDOWN.test(e.message)) return true;
+    if (fromDbos(e) && SHUTDOWN.test(e.message)) return true;
   }
   return false;
 }
@@ -166,7 +174,15 @@ async function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecisio
     actor: run.actor,
     run: { id: run.id, workflow: run.workflow, approvals: structuredClone(run.approvals) },
   };
-  const decision = checkDecision(await run.state.policy(call), op.id);
+  let answer: unknown;
+  try {
+    answer = await run.state.policy(call);
+  } catch (err) {
+    // Named here, so the run's error and the ledger say which call the policy failed on.
+    if (isInfrastructureError(err, run)) throw err;
+    throw new Error(`The policy failed deciding ${op.id}: ${errorMessage(err)}`, { cause: err });
+  }
+  const decision = checkDecision(answer, op.id);
   const policyVersion = run.state.policy.version;
   return policyVersion === undefined ? decision : { ...decision, policyVersion };
 }
@@ -238,7 +254,7 @@ async function callOp(run: Run, id: string, input: unknown) {
       { ...call, error: errorInfo(err), durationMs: Date.now() - started, ...(attempt ? { attempt } : {}) },
       { seq, at: started },
     );
-    if (isInfrastructureError(err)) skipped(record, `the call was interrupted by DBOS (${errorMessage(err)})`);
+    if (isInfrastructureError(err, run)) skipped(record, `the call was interrupted by DBOS (${errorMessage(err)})`);
     else await writeFailure(run, record, err);
     throw err;
   }

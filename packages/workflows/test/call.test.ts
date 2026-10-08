@@ -136,6 +136,18 @@ describe("a call that fails", () => {
     expect(records.at(-1)).toMatchObject({ type: "run.failed", error: vendorError });
   });
 
+  it("records a vendor's failure even when its message reads like DBOS shutting down", async () => {
+    const pool = new DriverError("Cannot use a pool after calling end on the pool", { retryable: false });
+    app.vendors.bluesky.failNext("bluesky.post.create", pool);
+    const runId = await c().start(post, { text: "pool" }, { startedBy: alice });
+    expect(errorCode(await failure(c().result(runId)))).toBe("driver_failed");
+    const records = await c().ledger(runId);
+    expect(types(records)).toEqual(["run.started", "op.called bluesky.post.create", "run.failed"]);
+    const said = { code: "driver_failed", message: "Cannot use a pool after calling end on the pool" };
+    expect(records[1]).toMatchObject({ error: said });
+    expect(records[2]).toMatchObject({ error: said });
+  });
+
   it("does not retry an idempotent call when the driver says the answer is final", async () => {
     const locked = new DriverError("ghost: the post is locked", { retryable: false, status: 409 });
     app.vendors.ghost.failNext("ghost.post.publish", locked);
@@ -289,6 +301,7 @@ describe("the call a policy sees", () => {
     (call) => {
       // A copy proves the call is plain data: structuredClone refuses functions such as zod schemas.
       seen.push(structuredClone(call));
+      if (call.target === "note/broken") throw new Error("no rule for broken notes");
       return call.target === "note/locked"
         ? deny("the note is locked", ["note/locked is read-only"])
         : allow([`${call.op.id} may change ${call.target ?? "anything"}`]);
@@ -332,6 +345,16 @@ describe("the call a policy sees", () => {
         reasons: ["note/locked is read-only"],
         policyVersion: "notes-1",
       },
+    });
+  });
+
+  it("fails the run naming the call when the policy throws", async () => {
+    const runId = await c().start(edit, { id: "broken" }, { startedBy: alice });
+    const err = await failure(c().result(runId));
+    expect(err).toMatchObject({ message: "The policy failed deciding notes.note.update: no rule for broken notes" });
+    expect(types(await c().ledger(runId))).toEqual(["run.started", "run.failed"]);
+    expect((await c().ledger(runId)).at(-1)).toMatchObject({
+      error: { message: "The policy failed deciding notes.note.update: no rule for broken notes" },
     });
   });
 
