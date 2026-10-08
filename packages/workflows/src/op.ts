@@ -34,6 +34,8 @@ export interface Op<V extends string = string, R extends string = string, N exte
   readonly effect: Effect;
   readonly idempotent: boolean;
   readonly description?: string;
+  /** From `defineConnector`'s third argument: who the vendor is, for a UI. */
+  readonly vendorInfo?: VendorInfo;
   /** From the spec: the resource instance a call acts on. */
   readonly target?: (input: any) => string;
   readonly input: z.ZodType<any, I>;
@@ -48,8 +50,40 @@ export type Connector<V extends string, S extends Specs> = {
   };
 };
 
-/** Declares a vendor's operations, grouped by resource: `defineConnector("ghost", { post: { create: {...} } })`. */
-export function defineConnector<const V extends string, const S extends Specs>(vendor: V, specs: S): Connector<V, S> {
+/**
+ * Who a connector's vendor is, for a UI to show beside its operations. `logo` is the vendor's
+ * mark as inline SVG markup (one `<svg>…</svg>` element), and `dark` its variant for dark
+ * backgrounds. The app shows a logo only as an image (a `data:` URL in an `<img>`), where an
+ * SVG's scripts and external references never run or load.
+ */
+export interface VendorInfo {
+  /** The vendor's name as it writes it, such as "Resend". */
+  title?: string;
+  /** The vendor's home page. */
+  url?: string;
+  logo?: { svg: string; dark?: string };
+}
+
+/** One `<svg>` element, with nothing but whitespace around it. */
+const SVG_ELEMENT = /^\s*<svg[\s>][\s\S]*<\/svg>\s*$/;
+
+/**
+ * Declares a vendor's operations, grouped by resource: `defineConnector("ghost", { post: { create: {...} } })`.
+ * `info` says who the vendor is, for a UI: `{ title: "Resend", url: "https://resend.com", logo: { svg } }`.
+ */
+export function defineConnector<const V extends string, const S extends Specs>(
+  vendor: V,
+  specs: S,
+  info?: VendorInfo,
+): Connector<V, S> {
+  for (const [variant, svg] of Object.entries(info?.logo ?? {})) {
+    if (typeof svg !== "string" || !SVG_ELEMENT.test(svg)) {
+      throw new Error(
+        `defineConnector("${vendor}"): logo.${variant} must be inline SVG markup, one <svg>…</svg> element`,
+      );
+    }
+  }
+  const vendorInfo = info && Object.freeze({ ...info });
   const out: Record<string, Record<string, Op>> = {};
   for (const [resource, ops] of Object.entries(specs)) {
     out[resource] = {};
@@ -63,6 +97,7 @@ export function defineConnector<const V extends string, const S extends Specs>(v
         effect: spec.effect,
         idempotent: spec.idempotent ?? false,
         description: spec.description,
+        vendorInfo,
         target: spec.target,
         input: spec.input,
         output: spec.output,

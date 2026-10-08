@@ -39,6 +39,15 @@ export interface OpEntry {
   output: Record<string, unknown>;
 }
 
+/** Who a vendor is, from its connector's `VendorInfo`: enough to name it and show its logo. */
+export interface VendorEntry {
+  /** The connector's `title`, else the vendor's id. */
+  title: string;
+  url?: string;
+  /** The logo as `data:image/svg+xml` URLs, for an `<img>`: `dark` is for dark backgrounds. */
+  logo?: { src: string; dark?: string };
+}
+
 /**
  * A plain-JSON description of what a config can do: its workflows, the operations they call,
  * and whether a policy gates them. The app server builds it from the config and sends it to the
@@ -50,6 +59,8 @@ export interface ConfigDescription {
   version: string;
   workflows: WorkflowEntry[];
   ops: OpEntry[];
+  /** Every vendor the operations are from, by its id (an `OpEntry`'s `vendor`). */
+  vendors: Record<string, VendorEntry>;
   /** `defined` is false for `allowAll`. */
   policy: { defined: boolean; version?: string };
 }
@@ -65,6 +76,18 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     output: toJsonSchema(op.output, `${op.id} output`, "output"),
   }));
   ops.sort((a, b) => a.id.localeCompare(b.id));
+
+  const vendors: Record<string, VendorEntry> = {};
+  for (const { vendor, vendorInfo: info } of resolved.ops.values()) {
+    if (vendors[vendor] && !info) continue;
+    vendors[vendor] = {
+      title: info?.title ?? vendor,
+      ...(info?.url && { url: info.url }),
+      ...(info?.logo && {
+        logo: { src: svgDataUrl(info.logo.svg), ...(info.logo.dark && { dark: svgDataUrl(info.logo.dark) }) },
+      }),
+    };
+  }
 
   const workflows: WorkflowEntry[] = resolved.workflows.map((wf) => ({
     name: wf.name,
@@ -82,12 +105,15 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     version: resolved.version,
     workflows,
     ops,
+    vendors,
     policy: {
       defined: resolved.policy !== allowAll,
       ...(resolved.policy.version === undefined ? {} : { version: resolved.policy.version }),
     },
   };
 }
+
+const svgDataUrl = (svg: string) => `data:image/svg+xml,${encodeURIComponent(svg.trim())}`;
 
 function toJsonSchema(schema: z.ZodType, what: string, io: "input" | "output"): Record<string, unknown> {
   try {

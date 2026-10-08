@@ -23,6 +23,8 @@ defineWorkflow({
 
 This package declares the operations only. A driver that calls Bluesky is not included yet.
 
+The logo the app shows beside these operations is Bluesky's butterfly from its [brand assets](https://bsky.social/about/support/icons), blue or white. It is there only to identify the service an operation calls. Bluesky is a trademark of Bluesky Social PBC, which does not endorse this package.
+
 ## Testing
 
 `@sanoma/connector-bluesky/fake` is an in-memory Bluesky that posts nowhere: pass its driver to the worker, then check `state.posts` and `calls`.

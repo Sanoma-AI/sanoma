@@ -99,6 +99,39 @@ describe("describeConfig", () => {
     expect(add?.output).toMatchObject({ required: ["total", "unit"] });
   });
 
+  it("describes each vendor once, its logo as data: URLs; a connector that names no vendor gets its id as title", () => {
+    const counter = defineConnector("counter", {
+      tally: { add: { effect: "write", input: z.object({}), output: z.object({}) } },
+    });
+    const drivers = [...base.drivers, { vendor: "counter", ops: { "tally.add": async () => ({}) } }];
+    const { vendors } = describeConfig({ ...base, connectors: [ghost, resend, bluesky, counter], drivers });
+    expect(Object.keys(vendors).toSorted()).toEqual(["bluesky", "counter", "ghost", "resend"]);
+    expect(vendors.counter).toEqual({ title: "counter" });
+    expect(vendors.resend).toMatchObject({
+      title: "Resend",
+      url: "https://resend.com",
+      logo: {
+        src: expect.stringMatching(/^data:image\/svg\+xml,/),
+        dark: expect.stringMatching(/^data:image\/svg\+xml,/),
+      },
+    });
+    expect(decodeURIComponent(vendors.resend!.logo!.src.slice("data:image/svg+xml,".length))).toMatch(
+      /^<svg xmlns="http:\/\/www.w3.org\/2000\/svg"[^>]*>.*<\/svg>$/,
+    );
+    for (const vendor of ["ghost", "bluesky"]) expect(vendors[vendor]?.logo?.src).toBeDefined();
+  });
+
+  it("refuses a logo that is not one inline <svg> element", () => {
+    const specs = { tally: { add: { effect: "write", input: z.object({}), output: z.object({}) } } } as const;
+    for (const svg of ["logo.svg", "https://example.com/logo.svg", "<img src=x>", "<svg></svg><script></script>"]) {
+      expect(() => defineConnector("counter", specs, { logo: { svg } })).toThrow(
+        'defineConnector("counter"): logo.svg must be inline SVG markup, one <svg>…</svg> element',
+      );
+    }
+    expect(() => defineConnector("counter", specs, { logo: { svg: "<svg></svg>", dark: "x" } })).toThrow("logo.dark");
+    expect(() => defineConnector("counter", specs, { logo: { svg: '<svg viewBox="0 0 1 1"></svg>' } })).not.toThrow();
+  });
+
   it("says whether a policy other than allowAll is configured, and its version, and names the app and version", () => {
     expect(describeConfig(base).policy).toEqual({ defined: false });
     expect(describeConfig(base).appName).toBe("sanoma");

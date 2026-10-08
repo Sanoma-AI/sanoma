@@ -9,6 +9,7 @@ export {
   isOp,
   type Op,
   type OpSpec,
+  type VendorInfo,
 } from "./op.ts";
 export {
   defineWorkflow,

@@ -27,6 +27,8 @@ defineWorkflow({
 
 This package declares the operations only. A driver that calls Resend is not included yet.
 
+The logo the app shows beside these operations is Resend's lettermark from its [brand kit](https://resend.com/brand), black or white. It is there only to identify the service an operation calls.
+
 ## Testing
 
 `@sanoma/connector-resend/fake` is an in-memory Resend that emails nobody: pass its driver to the worker, then check `state.broadcasts` and `calls`.

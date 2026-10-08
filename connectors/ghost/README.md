@@ -27,6 +27,8 @@ defineWorkflow({
 
 This package declares the operations only. A driver that calls Ghost is not included yet.
 
+The logo the app shows beside these operations is Ghost's glyph from [simple-icons](https://simpleicons.org/?q=ghost) (CC0), in near-black or white. It is there only to identify the service an operation calls. Ghost is a trademark of Ghost Foundation.
+
 ## Testing
 
 `@sanoma/connector-ghost/fake` is an in-memory Ghost: pass its driver to the worker, then check `state.posts` and `calls`.
