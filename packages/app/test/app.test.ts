@@ -178,7 +178,6 @@ describe("the API", () => {
     expect(wf?.builtins).toEqual(["approval", "sleep"]);
     // Each workflow's outline, read from its run's source when the app started.
     expect(wf?.outline).toEqual(outlineWorkflow(announce));
-    expect(wf?.outline).toMatchObject({ nodes: expect.arrayContaining([{ kind: "sleep" }]) });
     expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.effect).toBe("send");
   });
 

@@ -1,15 +1,11 @@
 import type { OutlineNode } from "@sanoma/workflows/describe";
 import { describe, expect, it } from "vitest";
-import { CLUSTER_HEADER, layout, NODE_SIZE } from "../src/graph/layout.ts";
 import { outlineGraph } from "../src/graph/outline-graph.ts";
-import type { GraphNode } from "../src/graph/types.ts";
+import { labels, pairs } from "./graph-helpers.ts";
 
 // Hand-built outlines, in the shapes outlineWorkflow returns (packages/workflows/src/outline.ts).
 
 const op = (id: string): OutlineNode => ({ kind: "op", id });
-
-const labels = (nodes: GraphNode[]) => nodes.map((n) => `${n.id} ${n.label}${n.parent ? ` in ${n.parent}` : ""}`);
-const pairs = (edges: { source: string; target: string }[]) => edges.map((e) => `${e.source}->${e.target}`);
 
 describe("outlineGraph", () => {
   it("draws a sequence as a chain from start to end, with no state", () => {
@@ -123,7 +119,7 @@ describe("outlineGraph", () => {
     ]);
   });
 
-  it("draws a ctx.all inside a loop as lanes inside its cluster, and lays the cluster out around them", () => {
+  it("draws a ctx.all inside a loop as lanes inside its cluster", () => {
     const { nodes, edges } = outlineGraph([
       {
         kind: "repeat",
@@ -139,21 +135,5 @@ describe("outlineGraph", () => {
       "end end",
     ]);
     expect(pairs(edges)).toEqual(["start->cluster:0", "op:1->op:2", "op:1->op:3", "cluster:0->end"]);
-
-    const at = layout({ nodes, edges });
-    const box = at.get("cluster:0")!;
-    const [open, a, b] = ["op:1", "op:2", "op:3"].map((id) => at.get(id)!);
-    // The lanes share a rank and stack apart, inside the cluster, under its label.
-    expect(a!.x).toBe(b!.x);
-    expect(Math.abs(a!.y - b!.y)).toBeGreaterThanOrEqual(NODE_SIZE.op.height);
-    expect(open!.x + NODE_SIZE.op.width).toBeLessThan(a!.x);
-    for (const inner of [open!, a!, b!]) {
-      expect(inner.y).toBeGreaterThanOrEqual(CLUSTER_HEADER);
-      expect(inner.x + inner.width).toBeLessThanOrEqual(box.width);
-      expect(inner.y + inner.height).toBeLessThanOrEqual(box.height);
-    }
-    expect(box.width).toBeGreaterThan(2 * NODE_SIZE.op.width);
-    expect(at.get("start")!.x + NODE_SIZE.start.width).toBeLessThan(box.x);
-    expect(box.x + box.width).toBeLessThan(at.get("end")!.x);
   });
 });

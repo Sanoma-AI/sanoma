@@ -1,7 +1,7 @@
 import type { ApprovalState, LedgerBody, LedgerGroup, LedgerRecord, RunStatus, RunSummary } from "@sanoma/workflows";
 import { describe, expect, it } from "vitest";
 import { runGraph } from "../src/graph/run-graph.ts";
-import type { GraphNode } from "../src/graph/types.ts";
+import { pairs, summary } from "./graph-helpers.ts";
 
 // Hand-built ledgers, in the shapes the runtime writes (see packages/workflows/src/ledger.ts).
 
@@ -57,10 +57,7 @@ const called = (op: string, more: object = {}): Body => ({
   durationMs: 12,
   ...more,
 });
-const inGroup = (body: Body, index: number, size = 3): Body => ({ ...body, group: { id: "all:1", index, size } });
-
-const summary = (nodes: GraphNode[]) => nodes.map((n) => `${n.id} ${"state" in n ? n.state?.tone : "-"}`);
-const pairs = (edges: { source: string; target: string }[]) => edges.map((e) => `${e.source}->${e.target}`);
+const inGroup = (body: Body, index: number, size = 3, id = "all:1"): Body => ({ ...body, group: { id, index, size } });
 
 describe("runGraph", () => {
   it("draws a straight run as a chain in seq order", () => {
@@ -129,6 +126,32 @@ describe("runGraph", () => {
       "op:3->op:5",
       "op:4->op:5",
       "op:5->end",
+    ]);
+  });
+
+  it("keeps two fan-outs in a row apart by their ids, the second joined after the first", () => {
+    const { nodes, edges } = runGraph(
+      ledger(
+        started,
+        inGroup(called("a.x.one"), 0, 2),
+        inGroup(called("b.x.one"), 1, 2),
+        inGroup(called("a.x.two"), 0, 2, "all:3"),
+        inGroup(called("b.x.two"), 1, 2, "all:3"),
+        { type: "run.finished", output: {} },
+      ),
+      run("finished"),
+      NOW,
+    );
+    expect(summary(nodes)).toEqual(["start ok", "op:1 ok", "op:2 ok", "op:3 ok", "op:4 ok", "end ok"]);
+    expect(pairs(edges)).toEqual([
+      "start->op:1",
+      "start->op:2",
+      "op:1->op:3",
+      "op:2->op:3",
+      "op:1->op:4",
+      "op:2->op:4",
+      "op:3->end",
+      "op:4->end",
     ]);
   });
 
