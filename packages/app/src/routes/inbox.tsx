@@ -3,10 +3,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { mayDecide } from "@sanoma/workflows/shared";
 import { Badge } from "#/components/ui/badge.tsx";
 import { useActor } from "../actor.ts";
-import { pendingApprovals } from "../api.ts";
 import { ApprovalCard } from "../components/approval.tsx";
 import { Nothing, Notice, PageHeader, pageTitle, toneBadge } from "../components/common.tsx";
-import { waitingRunsQuery } from "../queries.ts";
+import { pendingOf, waitingRunsQuery } from "../queries.ts";
 
 export const Route = createFileRoute("/inbox")({
   loader: async ({ context }) => {
@@ -20,10 +19,7 @@ export const Route = createFileRoute("/inbox")({
 /** Every pending approval, newest first. */
 function InboxPage() {
   const { actor, groups } = useActor();
-  const { data: runs, error } = useSuspenseQuery(waitingRunsQuery());
-  const pending = runs
-    .flatMap((run) => pendingApprovals(run).map((approval) => ({ run, approval })))
-    .toSorted((a, b) => b.approval.requestedAt - a.approval.requestedAt);
+  const { data: pending, error } = useSuspenseQuery({ ...waitingRunsQuery(), select: pendingOf });
   // A group approver counts only when the deployment vouches for groups: a typed name has none.
   const mine = actor
     ? pending.filter(({ approval }) => mayDecide(approval, { id: actor, groups: [...groups] })).length
