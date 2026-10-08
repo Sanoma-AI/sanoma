@@ -1,18 +1,11 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { z } from "zod";
-import {
-  type ApprovalRequest,
-  type ApprovalResult,
-  type ApprovalState,
-  approverLabel,
-  mayDecide,
-  notApprover,
-  Principal,
-} from "./define.ts";
+import { type ApprovalRequest, type ApprovalResult, type ApprovalState, notApprover, Principal } from "./define.ts";
 import { RejectedError } from "./errors.ts";
 import { entry, write } from "./ledger.ts";
 import { warn } from "./log.ts";
 import type { Run } from "./run.ts";
+import { approverLabel, mayDecide } from "./shared.ts";
 
 // The wire contract between a run waiting on approvals and whoever decides them. The client
 // imports this file and never the worker's.

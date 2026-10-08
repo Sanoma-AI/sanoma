@@ -3,28 +3,19 @@ import { awaitApproval, type CheckedApproval } from "./approvals.ts";
 import {
   type ApprovalRequest,
   ApprovalRequestSchema,
-  approverLabel,
   SleepFor,
   type SleepRequest,
   SleepUntil,
   type Use,
   type WorkflowDefinition,
 } from "./define.ts";
-import {
-  errorCode,
-  errorInfo,
-  errorMessage,
-  isFinal,
-  keepCode,
-  parseOrThrow,
-  PolicyDeniedError,
-  SanomaError,
-} from "./errors.ts";
+import { errorCode, errorInfo, isFinal, keepCode, parseOrThrow, PolicyDeniedError, SanomaError } from "./errors.ts";
 import { entry, skipped, write, writeFailure } from "./ledger.ts";
 import { shown } from "./log.ts";
 import { type CallContext, isOp, type Op } from "./op.ts";
 import { DecisionSchema, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
 import type { Run, WorkerState } from "./run.ts";
+import { approverLabel, errorMessage } from "./shared.ts";
 
 /**
  * True for a failure that is not the run's outcome, so the ledger does not record it: DBOS

@@ -17,10 +17,8 @@ export {
   type ApprovalResult,
   type ApprovalState,
   type Approver,
-  approverLabel,
   type Builtin,
   type Ctx,
-  mayDecide,
   type SleepRequest,
   type Use,
   type WorkflowDefinition,
@@ -45,7 +43,6 @@ export {
   errorCode,
   type ErrorCode,
   type ErrorInfo,
-  errorMessage,
   type InputIssue,
   invalidInput,
   PolicyDeniedError,
@@ -57,7 +54,9 @@ export { ApprovalMessage, APPROVALS_EVENT, decisionEventOf } from "./approvals.t
 export { RUNTIME_VERSION } from "./version.ts";
 export type { RunArgs } from "./run.ts";
 export { startWorker, type Worker, type WorkerOptions } from "./worker.ts";
-export { SanomaClient, type RunsFilter, type RunStatus, type RunSummary, type StartOptions } from "./client.ts";
+export { SanomaClient, type RunsFilter, type RunSummary, type StartOptions } from "./client.ts";
+// Also at `@sanoma/workflows/shared`, which a browser bundle can import.
+export { approverLabel, ENDED_STATUSES, errorMessage, isEnded, mayDecide, type RunStatus } from "./shared.ts";
 // lintWorkflow lives at `@sanoma/workflows/lint`, so the runtime never loads oxc-parser.
 export { defineDriver, type DriverImpl, type OpIdOf } from "./op.ts";
 // defineFake lives at `@sanoma/workflows/fake`: test tooling, not runtime.

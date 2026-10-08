@@ -2,11 +2,12 @@ import { appendFile, mkdir, readFile, truncate } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Approver, Principal } from "./define.ts";
-import { type ErrorInfo, errorMessage, isFinal, keepCode } from "./errors.ts";
+import { type ErrorInfo, isFinal, keepCode } from "./errors.ts";
 import { shown, warn } from "./log.ts";
 import type { Effect } from "./op.ts";
 import type { RecordedDecision } from "./policy.ts";
 import type { Run } from "./run.ts";
+import { errorMessage } from "./shared.ts";
 
 /**
  * The audit record of a run: who started it, every operation call with the policy's

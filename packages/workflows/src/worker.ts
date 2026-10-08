@@ -3,10 +3,11 @@ import { buildCtx, isInfrastructureError } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import type { WorkflowDefinition } from "./define.ts";
-import { errorInfo, errorMessage, parseOrThrow } from "./errors.ts";
+import { errorInfo, parseOrThrow } from "./errors.ts";
 import { entry, skipped, write, writeFailure } from "./ledger.ts";
 import { warn } from "./log.ts";
 import type { Run, RunArgs, WorkerState } from "./run.ts";
+import { errorMessage } from "./shared.ts";
 
 export interface Worker {
   stop(): Promise<void>;

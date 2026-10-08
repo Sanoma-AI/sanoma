@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Op } from "./op.ts";
+import { approverLabel } from "./shared.ts";
 
 /**
  * Who is acting: the person or service that starts a run or decides an approval. `id` is
@@ -25,19 +26,6 @@ export const Approver: z.ZodType<Approver> = z.union(
   [z.string().regex(/\S/), z.object({ group: z.string().regex(/\S/) })],
   { error: 'needs an approver: a name, or { group: "name" }' },
 );
-
-/**
- * True when `by` may decide the approval: `by.id` is the approver, or `by.groups` holds the
- * approver group. Pure: everything it reads is already recorded.
- */
-export function mayDecide(approval: Pick<ApprovalState, "approver">, by: Principal): boolean {
-  const { approver } = approval;
-  return typeof approver === "string" ? approver === by.id : (by.groups?.includes(approver.group) ?? false);
-}
-
-/** Who may decide, as text: the person's id, or "group <name>". */
-export const approverLabel = (approver: Approver): string =>
-  typeof approver === "string" ? approver : `group ${approver.group}`;
 
 /** Why `by` may not decide the approval, naming who may. */
 export const notApprover = ({ approver }: Pick<ApprovalState, "approver">, by: Principal): string =>

@@ -40,6 +40,10 @@
     "./lint": {
       "types": "./dist/lint.d.ts",
       "default": "./dist/lint.js"
+    },
+    "./shared": {
+      "types": "./dist/shared.d.ts",
+      "default": "./dist/shared.js"
     }
   },
   "publishConfig": {

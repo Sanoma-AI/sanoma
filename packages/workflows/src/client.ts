@@ -4,16 +4,11 @@ import { DBOSClient, Error as DBOSErrors, type WorkflowStatusString } from "@dbo
 import type { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, messageKeyOf, topicOf } from "./approvals.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
-import { type ApprovalState, mayDecide, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
+import { type ApprovalState, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
 import { parseOrThrow, SanomaError } from "./errors.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { RunArgs } from "./run.ts";
-
-/**
- * Where a run is: waiting on the queue, running, waiting for an approval, or ended.
- * `waiting` is `running` with an approval pending.
- */
-export type RunStatus = "queued" | "running" | "waiting" | "finished" | "failed" | "cancelled";
+import { isEnded, mayDecide, type RunStatus } from "./shared.ts";
 
 /**
  * The run status each DBOS status maps to. `waiting` is PENDING with an approval pending, so
@@ -231,7 +226,7 @@ export class SanomaClient {
     if (target && target.status !== "pending") throw alreadyDecided(runId, target);
     // A run that has ended reads no more messages: a decision sent to it would wait forever.
     const status = runStatus(row.status, all);
-    if (status === "finished" || status === "failed" || status === "cancelled") {
+    if (isEnded(status)) {
       throw new SanomaError("run_ended", `Run ${runId} has ${status}; it takes no more decisions`, {
         runId,
         status,

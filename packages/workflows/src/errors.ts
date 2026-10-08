@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { Principal } from "./define.ts";
+import { errorMessage } from "./shared.ts";
 
 const CODES = [
   "policy_denied",
@@ -77,8 +78,6 @@ export class RejectedError extends SanomaError {
     this.name = "RejectedError";
   }
 }
-
-export const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /**
  * The wrapper, given the original's own `code` and `data` when it has one of our codes, so
