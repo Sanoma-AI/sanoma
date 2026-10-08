@@ -18,6 +18,7 @@ import {
   Notice,
   PageHeader,
   RUN_TONE,
+  SectionTitle,
   StatusDot,
   toneBadge,
   When,
@@ -60,7 +61,7 @@ function RunPage() {
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="flex flex-col gap-3">
-          <h2>Ledger</h2>
+          <SectionTitle>Ledger</SectionTitle>
           {ledger === null && <Notice>This config has no ledger store, so there is no record to show.</Notice>}
           {ledgerError && <Notice tone="bad">Could not read the ledger: {ledgerError}</Notice>}
           {ledger && ledger.length === 0 && !ledgerError && <Nothing title="Nothing recorded yet" />}
@@ -80,7 +81,7 @@ function RunPage() {
           )}
         </div>
         <aside className="flex flex-col gap-3">
-          <h2>Approvals</h2>
+          <SectionTitle>Approvals</SectionTitle>
           {approvals.length === 0 && <Nothing title="None asked for" />}
           {approvals.map((approval) => (
             <ApprovalCard key={approval.id} runId={run.runId} approval={approval} />

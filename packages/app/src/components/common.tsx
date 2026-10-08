@@ -221,10 +221,20 @@ export function Nothing({ title, children, action }: { title: string; children?:
 export function PageHeader({ title, children }: { title: ReactNode; children?: ReactNode }) {
   return (
     <header className="flex flex-wrap items-center gap-x-4 gap-y-2">
-      <h1>{title}</h1>
+      <h1 className="font-heading text-2xl font-semibold tracking-tight">{title}</h1>
       {children}
     </header>
   );
+}
+
+/** A section's heading, under the page's. */
+export function SectionTitle({ children }: { children: ReactNode }) {
+  return <h2 className="font-heading text-lg font-semibold tracking-tight">{children}</h2>;
+}
+
+/** A heading inside a card's section. */
+export function SubsectionTitle({ children }: { children: ReactNode }) {
+  return <h3 className="text-sm font-medium">{children}</h3>;
 }
 
 /** Label and value pairs. */

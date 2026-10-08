@@ -245,7 +245,7 @@ describe("the page", () => {
     expect(res.headers.get("content-type")).toMatch(/text\/html/);
     const html = await res.text();
     expect(html).toContain('<div id="app">');
-    expect(html).toContain("<h1>Runs</h1>");
+    expect(html).toMatch(/<h1[^>]*>Runs<\/h1>/);
     expect(html).toContain(`href="/runs/${runId}"`);
     const root = await fetch(app.url, { redirect: "manual" });
     expect(root.status).toBe(307);
@@ -261,7 +261,7 @@ describe("the page", () => {
   it("renders a run, and answers a run that does not exist with not-found", async () => {
     const found = await fetch(new URL(`/runs/${runId}`, app.url));
     expect(found.status).toBe(200);
-    expect(await found.text()).toContain("<h2>Ledger</h2>");
+    expect(await found.text()).toMatch(/<h2[^>]*>Ledger<\/h2>/);
     const missing = await fetch(new URL("/runs/does-not-exist", app.url));
     expect(missing.status).toBe(404);
     expect(await missing.text()).toContain("No run <!-- -->does-not-exist");

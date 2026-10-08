@@ -8,7 +8,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { effectBadge, Fact, Facts, Json, Nothing, PageHeader } from "../components/common.tsx";
+import {
+  effectBadge,
+  Fact,
+  Facts,
+  Json,
+  Nothing,
+  PageHeader,
+  SectionTitle,
+  SubsectionTitle,
+} from "../components/common.tsx";
 import { type Field, fieldsOf } from "../form/schema.ts";
 import { configQuery } from "../queries.ts";
 
@@ -60,7 +69,7 @@ function WorkflowsPage() {
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-2">
-      <h3 className="text-sm font-medium">{title}</h3>
+      <SubsectionTitle>{title}</SubsectionTitle>
       {children}
     </section>
   );
@@ -74,7 +83,7 @@ function WorkflowCard({ workflow, ops }: { workflow: WorkflowEntry; ops: Map<str
     <Card>
       <CardHeader>
         <CardTitle>
-          <h2>{workflow.title ?? workflow.name}</h2>
+          <SectionTitle>{workflow.title ?? workflow.name}</SectionTitle>
         </CardTitle>
         <CardDescription>
           <code>{workflow.name}</code>
