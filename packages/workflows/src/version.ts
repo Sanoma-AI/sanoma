@@ -41,20 +41,21 @@ function installedDbosVersion(): string {
  * own version, so the version must change whenever replaying an old run on the new code could
  * go wrong.
  *
- * Without `config.version`, it is a hash of the app name, `RUNTIME_VERSION`, `STEP_LAYOUT`,
- * the installed DBOS version, and for each workflow its name, the source text of its `run`
- * function, the ids of the operations it uses and its input schema as JSON Schema. The hash
- * cannot see functions `run` calls that live elsewhere (their source is not reachable from the
- * definition), op schemas, drivers or the policy: a project that edits those between deploys
- * should set `version` in the config (a git commit) instead.
+ * It is a hash of the app name, `RUNTIME_VERSION`, `STEP_LAYOUT`, the installed DBOS version,
+ * and for each workflow its name, the source text of its `run` function, the ids of the
+ * operations it uses and its input schema as JSON Schema: DBOS's own automatic versioning, over
+ * the workflow code instead of the runtime's one registration wrapper. The hash cannot see
+ * functions `run` calls that live elsewhere (their source is not reachable from the definition),
+ * op schemas, drivers or the policy. DBOS's `DBOS__APPVERSION` environment variable names a
+ * version instead (a git commit, say), still prefixed with the app name.
  */
 export function computeVersion(config: {
   appName?: string;
-  version?: string;
   workflows: readonly WorkflowDefinition<any, any>[];
 }): string {
   const appName = config.appName ?? "sanoma";
-  if (config.version !== undefined) return `${appName}@${config.version}`;
+  const named = process.env.DBOS__APPVERSION?.trim();
+  if (named) return `${appName}@${named}`;
   const workflows = config.workflows
     .map(
       (wf) =>

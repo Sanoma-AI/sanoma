@@ -4,7 +4,7 @@ import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
 import { testDatabaseUrl } from "@sanoma/testing";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   allowAll,
@@ -44,6 +44,13 @@ const base: SanomaConfig = {
   appName: "acme",
 };
 const versionOf = (config: Partial<SanomaConfig>) => resolveConfig({ ...base, ...config }).version;
+/** DBOS's own override, read when the config is resolved; prefixed with the app name like the hash. */
+const named = (version: string) => {
+  process.env.DBOS__APPVERSION = version;
+};
+afterEach(() => {
+  delete process.env.DBOS__APPVERSION;
+});
 
 describe("the application version", () => {
   it("is the package's version", () => {
@@ -75,9 +82,11 @@ describe("the application version", () => {
     expect(versionOf({ workflows: [] })).not.toBe(versionOf({}));
   });
 
-  it("is the config's version when it names one, still prefixed with the app name", () => {
-    expect(versionOf({ version: "abc123" })).toBe("acme@abc123");
-    expect(() => versionOf({ version: " " })).toThrow("The config's `version` must be a non-empty string");
+  it("is DBOS__APPVERSION when that is set, still prefixed with the app name", () => {
+    named("abc123");
+    expect(versionOf({})).toBe("acme@abc123");
+    named(" ");
+    expect(versionOf({})).toMatch(/^acme@[0-9a-f]{64}$/);
   });
 });
 
@@ -104,7 +113,8 @@ describe("workers on one database", () => {
   it("start two apps one after the other without a queue or version conflict, each running its own runs", async () => {
     for (const appName of ["version-a", "version-b"]) {
       // The same version name for both: it is prefixed with the app name.
-      const cfg = config(appName, { version: "1" });
+      named("1");
+      const cfg = config(appName);
       const worker = await startWorker(cfg);
       const client = await SanomaClient.connect(cfg);
       try {
@@ -124,7 +134,8 @@ describe("workers on one database", () => {
   });
 
   it("warns at startup about unfinished runs on another version or another queue, naming them", async () => {
-    const before = config("version-warn", { version: "one" });
+    named("one");
+    const before = config("version-warn");
     // On a reused database "one" is older than "two" from the last run, so this start is a
     // rollback: it must promote itself to take the runs queued below.
     let worker = await startWorker(before, { promote: true });
@@ -148,7 +159,8 @@ describe("workers on one database", () => {
       await worker.stop();
 
       warn.mockClear();
-      worker = await startWorker(config("version-warn", { version: "two" }));
+      named("two");
+      worker = await startWorker(config("version-warn"));
       const lines = warn.mock.calls.map((args) => String(args[0])).filter((l) => l.includes("unfinished run"));
       expect(lines).toHaveLength(1);
       expect(lines[0]).toMatch(/run\(s\) of "version-warn" belong to another version and \d+ wait on another queue/);

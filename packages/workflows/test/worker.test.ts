@@ -62,7 +62,6 @@ const refused: [string, Partial<SanomaConfig>, RegExp][] = [
   ],
   ["no policy", { policy: undefined as never }, /^The config needs a `policy`; use `allowAll`/],
   ["no connectors", { connectors: undefined as never }, /^The config needs `connectors`/],
-  ["a blank version", { version: "" }, /^The config's `version` must be a non-empty string$/],
 ];
 
 describe("startWorker, resolveConfig and describeConfig", () => {
@@ -81,11 +80,11 @@ describe("startWorker, resolveConfig and describeConfig", () => {
   });
 
   it("derive the queue, version, policy version and ledger from the config", () => {
-    const resolved = resolveConfig(config({ appName: "acme", version: "abc" }));
+    const resolved = resolveConfig(config({ appName: "acme" }));
     expect(resolved).toMatchObject({
       appName: "acme",
       databaseUrl: "postgresql://unused@localhost:1/unused",
-      version: "acme@abc",
+      version: expect.stringMatching(/^acme@[0-9a-f]{64}$/),
       queueName: "sanoma:acme",
       policy: allowAll,
       workflows: [announce],

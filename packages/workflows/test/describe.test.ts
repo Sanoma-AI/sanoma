@@ -70,8 +70,12 @@ describe("describeConfig", () => {
     expect(describeConfig(base).policy).toEqual({ defined: false });
     expect(describeConfig(base).appName).toBe("sanoma");
     expect(describeConfig(base).version).toMatch(/^sanoma@[0-9a-f]{64}$/);
-    const gated = defineConfig({ ...base, appName: "acme", version: "abc", policy: definePolicy(() => allow()) });
-    expect(describeConfig(gated)).toMatchObject({ appName: "acme", version: "acme@abc", policy: { defined: true } });
+    const gated = defineConfig({ ...base, appName: "acme", policy: definePolicy(() => allow()) });
+    expect(describeConfig(gated)).toMatchObject({
+      appName: "acme",
+      version: expect.stringMatching(/^acme@/),
+      policy: { defined: true },
+    });
     const versioned = definePolicy(() => allow(), { version: "2026-10-07" });
     expect(versioned.version).toBe("2026-10-07");
     expect(describeConfig({ ...base, policy: versioned }).policy).toEqual({ defined: true, version: "2026-10-07" });

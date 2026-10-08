@@ -25,18 +25,13 @@ export interface SanomaConfig {
   appName?: string;
   /** Postgres for the runtime. Defaults to `SANOMA_DATABASE_URL`, then the local docker compose database. */
   databaseUrl?: string;
-  /**
-   * Names this build of the workflows, such as a git commit. Defaults to a hash of the workflows'
-   * code. A worker runs only runs started on its own version; see the README.
-   */
-  version?: string;
 }
 
 /** A config, checked, with everything a worker, client or app derives from it. */
 export interface ResolvedConfig {
   appName: string;
   databaseUrl: string;
-  /** The DBOS application version: `<appName>@<config.version or a hash of the workflows>`. */
+  /** The DBOS application version: `<appName>@<DBOS__APPVERSION, or a hash of the workflows>`. */
   version: string;
   /** The DBOS queue runs are started on: `sanoma:<appName>`. */
   queueName: string;
@@ -80,9 +75,6 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   }
   if (typeof config.policy !== "function") {
     throw new Error("The config needs a `policy`; use `allowAll` to allow every operation call");
-  }
-  if (config.version !== undefined && (typeof config.version !== "string" || !config.version.trim())) {
-    throw new Error("The config's `version` must be a non-empty string");
   }
   const appName = config.appName ?? "sanoma";
   const ops = indexConnectors(config.connectors);
