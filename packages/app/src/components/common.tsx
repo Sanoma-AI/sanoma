@@ -19,6 +19,7 @@ import { Button } from "#/components/ui/button.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
+import { Table, TableBody, TableCell, TableHead, TableRow } from "#/components/ui/table.tsx";
 import { utcText } from "#/lib/time.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import { approverLabel } from "@sanoma/workflows/shared";
@@ -305,17 +306,23 @@ export function SubsectionTitle({ children }: { children: ReactNode }) {
   return <h3 className="text-sm font-medium">{children}</h3>;
 }
 
-/** Label and value pairs. */
+/** Label and value pairs: a table of `Fact` rows, each headed by its label. */
 export function Facts({ children }: { children: ReactNode }) {
-  return <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm">{children}</dl>;
+  return (
+    <Table>
+      <TableBody>{children}</TableBody>
+    </Table>
+  );
 }
 
 export function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <>
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="break-words">{children}</dd>
-    </>
+    <TableRow className="hover:bg-transparent">
+      <TableHead scope="row" className="h-auto w-0 py-1.5 pl-0 align-top font-normal text-muted-foreground">
+        {label}
+      </TableHead>
+      <TableCell className="py-1.5 pr-0 align-top whitespace-normal wrap-anywhere">{children}</TableCell>
+    </TableRow>
   );
 }
 
