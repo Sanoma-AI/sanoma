@@ -35,9 +35,10 @@ export default defineConfig({
   ],
   resolve: {
     alias: [
-      // Every `cn` is the one bound to those tables, and cva's clsx is cn's join.
+      // Every `cn` is the one bound to those tables, and cva's clsx is cn's (cn/engine's, which
+      // joins arrays and objects as clsx does; cn/lite's joins only strings).
       { find: /^cn$/, replacement: "#/lib/utils.ts" },
-      { find: /^clsx$/, replacement: "cn/lite" },
+      { find: /^clsx$/, replacement: "cn/engine" },
     ],
   },
   environments: {
