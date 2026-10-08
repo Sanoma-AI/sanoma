@@ -1,11 +1,12 @@
-import type { ErrorInfo, LedgerRecord } from "@sanoma/workflows";
+import type { ErrorInfo } from "@sanoma/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { ClientOnly, createFileRoute } from "@tanstack/react-router";
+import { lazy, type ReactNode, Suspense, useCallback, useEffect, useState } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Item, ItemContent, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
+import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { approverLabel } from "@sanoma/workflows/shared";
-import { starterName } from "../../api.ts";
+import { type GraphRecord, starterName } from "../../api.ts";
 import { ApprovalCard } from "../../components/approval.tsx";
 import {
   DecisionBadge,
@@ -35,11 +36,33 @@ export const Route = createFileRoute("/runs/$id")({
   notFoundComponent: () => <Notice variant="destructive">No run {Route.useParams().id}.</Notice>,
 });
 
+// React Flow needs the DOM: the graph loads in the browser only, as its own chunk.
+const RunGraph = lazy(() => import("../../components/run-graph.tsx"));
+
+/** How long a ledger item stays highlighted after a click on its node in the graph. */
+const HIGHLIGHT_MS = 2_000;
+
 function RunPage() {
   const { id } = Route.useParams();
   const { data, error } = useSuspenseQuery(runQuery(id));
   const { run, ledger, ledgerError, approvals } = data;
+  // The runtime's records, with the fields it adds that LedgerRecord does not declare yet.
+  const records: GraphRecord[] = ledger;
   const titles = new Map(approvals.map((a) => [a.id, a.title]));
+  const [highlighted, setHighlighted] = useState<string>();
+  useEffect(() => {
+    if (highlighted === undefined) return;
+    const timer = setTimeout(() => setHighlighted(undefined), HIGHLIGHT_MS);
+    return () => clearTimeout(timer);
+  }, [highlighted]);
+  const show = useCallback((recordId: string) => {
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    document
+      .getElementById(ledgerItemId(recordId))
+      ?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" });
+    setHighlighted(recordId);
+  }, []);
+  const skeleton = <Skeleton role="status" aria-label="Loading the graph" className="size-full rounded-none" />;
   return (
     <section className="flex flex-col gap-6">
       <PageHeader title={run.workflow}>
@@ -61,15 +84,26 @@ function RunPage() {
         )}
       </Facts>
 
+      <section className="flex flex-col gap-3">
+        <SectionTitle>Graph</SectionTitle>
+        <div className="h-[220px] overflow-hidden rounded-lg border sm:h-[280px]">
+          <ClientOnly fallback={skeleton}>
+            <Suspense fallback={skeleton}>
+              <RunGraph records={records} run={run} onSelect={show} />
+            </Suspense>
+          </ClientOnly>
+        </div>
+      </section>
+
       <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="flex flex-col gap-3">
           <SectionTitle>Ledger</SectionTitle>
           {ledgerError && <Notice variant="destructive">Could not read the ledger: {ledgerError}</Notice>}
-          {ledger.length === 0 && !ledgerError && <Nothing title="Nothing recorded yet" />}
-          {ledger.length > 0 && (
+          {records.length === 0 && !ledgerError && <Nothing title="Nothing recorded yet" />}
+          {records.length > 0 && (
             <ItemGroup aria-label="Ledger">
-              {ledger.map((record) => (
-                <LedgerRow key={record.id} record={record} titles={titles} />
+              {records.map((record) => (
+                <LedgerRow key={record.id} record={record} titles={titles} highlighted={record.id === highlighted} />
               ))}
             </ItemGroup>
           )}
@@ -99,8 +133,19 @@ function ErrorText({ error }: { error: ErrorInfo }) {
   );
 }
 
+/** A ledger record's item on the page, by the record's id: where a click on the graph leads. */
+const ledgerItemId = (recordId: string) => `ledger-${recordId}`;
+
 /** One ledger record: what happened, when, and its details. */
-function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<string, string> }) {
+function LedgerRow({
+  record,
+  titles,
+  highlighted,
+}: {
+  record: GraphRecord;
+  titles: Map<string, string>;
+  highlighted: boolean;
+}) {
   const title = (approval: string) => titles.get(approval) ?? approval;
   let kind = "";
   let body: ReactNode;
@@ -157,6 +202,17 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
         </p>
       );
       break;
+    case "sleep.started": {
+      // A time to come, which a relative time ("just now") would not say: the server's UTC.
+      const until = new Date(record.until).toISOString();
+      kind = "sleeping";
+      body = (
+        <p>
+          Until <time dateTime={until}>{until.replace("T", " ").slice(0, 16)} UTC</time>
+        </p>
+      );
+      break;
+    }
     case "run.finished":
       kind = "finished";
       body = <Expandable label="Output" value={record.output} />;
@@ -167,7 +223,14 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
       break;
   }
   return (
-    <Item role="listitem" variant="outline" size="sm">
+    <Item
+      role="listitem"
+      variant="outline"
+      size="sm"
+      id={ledgerItemId(record.id)}
+      data-highlighted={highlighted || undefined}
+      className="scroll-mt-24 data-highlighted:bg-muted data-highlighted:ring-2 data-highlighted:ring-ring"
+    >
       <ItemContent className="min-w-0">
         <ItemTitle>
           <StatusDot tone={ledgerTone(record)} />

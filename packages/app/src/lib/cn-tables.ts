@@ -25,11 +25,11 @@ const DZ = (s: string): Int32Array => {
     }
     return out
 }
-const GROUP_COUNT = 145
+const GROUP_COUNT = 148
 const customValidatorNames: string[] = []
-const edgeStart = PS(U("C030003200013000200020021200120001200220021007100200000030005000002200301200120020030020202001000"))
-const labelStart = PS(U(":111811151111111911468115;3111185332311114411111522264131111711646111111132451111234533225255117"))
-const labelText = "@containerabcdurationfghinsetlmoprstunderlinewzlignnimateuto-rowsagorderckdrop-blursis-bltol-startursorlexontaprid-xy-colsrows-xyeiadingftnest-clampax-wbin-ltxy-screenhwpacityrderutlineblrxyioghtngtateundedw-bt-spantarthrinkizeextoprackingnsitionlate-xy-offset"
+const edgeStart = PS(U("C030003200013000200020021200120001200220021007100200000030005000002200301200120030200030020202001000"))
+const labelStart = PS(U(":111811151111111911468115;3111185332311114411111522264131111711646111111132451111234813443225255117"))
+const labelText = "@containerabcdurationfghinsetlmoprstunderlinewzlignnimateuto-rowsagorderckdrop-blursis-bltol-startursorlexontaprid-xy-colsrows-xyeiadingftnest-clampax-wbin-ltxy-screenhwpacityrderutlineblrxyioghtngtateundedw-bt-spantartcroll-mthizeadowrinkextoprackingnsitionlate-xy-offset"
 // pre-order tree: targets derived from edge counts via subtree sizes
 const edgeTarget = (() => {
     const N = edgeStart.length - 1
@@ -48,21 +48,21 @@ const edgeTarget = (() => {
     }
     return out
 })()
-const nodeGroup = U("0200000060090;<=00000w000000w000000000000000000Q00000000000[000000000c00f0gh00000k0000000q000000", 1)
+const nodeGroup = U("0200000060090;<=00000y000000y000000000000000000Q00000000000[000000000c00f0gh0000000lm0000000s000000", 1)
 // vlists = op-pattern pool + per-list refs; the engine indexes these directly
-const vlistPat = PS(U("12335363333543516"))
-const vlistOps = U("932325832483250325B:0325B:632532542H<C=1432553;8432588B:032")
-const vlistRef = U("011123456777819:;22288<<<<2<=1>?2<>2222987222222<69333889<@<11<<9>8")
-const vlistGroup = DZ("0202020200200200002002002002002002002002020020020200200200200200200200020002000200020020002002020000020020002000020020020020020020020020020020020020020020002002002002002002002002002002000200200200020202000200020020000200")
+const vlistPat = PS(U("123353633335435136"))
+const vlistOps = U("932325832483250325B:0325B:632532542H<C=1432553;8432588GA8B:032")
+const vlistRef = U("011123456777819:;22288<<<<2<=1>?2<>2222987222222<69333882@9<A<11<<9>8")
+const vlistGroup = DZ("0202020200200200002002002002002002002002020020020200200200200200200200020002000200020020002002020000020020002000020020020020020020020020020020020020020020002002002002002002002002002002002002000200200200020202000200020020000200")
 // nodeVlist rebuilt sparse: (anchor deltas, vlist ids)
 const nodeVlist = (() => {
-    const out = new Int32Array(97).fill(-1)
-    const A = DZ("02422622242242242442622242626242242222242222222262424224242424442422")
-    const V = DZ("02222222222222222222222222222222222222222222222222222220222222222222")
+    const out = new Int32Array(100).fill(-1)
+    const A = DZ("0242262224224224244262224262624224222224222222226242422424422424442422")
+    const V = DZ("0222222222222222222222222222222222222222222222222222222022222222222222")
     for (let i = 0; i < A.length; i++) out[A[i]!] = V[i]!
     return out
 })()
-const SETS = " block contents flow-root hidden inline inline-block inline-flex inline-grid inline-table table table-caption table-cell table-column table-column-group table-footer-group table-header-group table-row table-row-group| not-sr-only sr-only|isolat e ion-auto|object- contain cover fill none scale-down|overflow- auto clip hidden scroll visible|overflow-x- auto clip hidden scroll visible| absolute fixed relative static sticky|justify- around baseline between center center-safe end end-safe evenly normal start stretch|justify-self- auto center center-safe end end-safe start stretch|items- baseline baseline-last center center-safe end end-safe start stretch|self- auto baseline baseline-last center center-safe end end-safe start stretch|place-content- around baseline between center center-safe end end-safe evenly start stretch| italic not-italic| no-underline overline|truncate |whitespace- break-spaces normal nowrap pre pre-line pre-wrap|break- all keep normal words|caption- bottom top|appearance- auto none|field-sizing- content fixed|pointer-events- auto none|select- all auto none text| normal size| baseline bottom middle sub super text-bottom text-top top| bounce none ping pulse spin| auto fr max min px|none | auto full px|clip- border content padding text| dashed dotted double hidden none solid|auto | alias all-scroll auto cell col-resize context-menu copy crosshair default e-resize ew-resize grab grabbing help move n-resize ne-resize nesw-resize no-drop none not-allowed ns-resize nw-resize nwse-resize pointer progress row-resize s-resize se-resize sw-resize text vertical-text w-resize wait zoom-in zoom-out|initial | col col-reverse row row-reverse| nowrap wrap wrap-reverse| auto initial none| black bold extrabold extralight light medium normal semibold thin|px | none subgrid| auto dvh dvw fit full lh lvh lvw max min px screen svh svw| loose none normal px relaxed snug tight|through |item | decimal disc none| auto dvh dvw fit full lvh lvw max min none prose px svh svw| auto px| auto dvh dvw fit full lh lvh lvw max min none px screen svh svw| auto dvh dvw fit full lvh lvw max min none px screen svh svw| first last none| 2xl 3xl 4xl full lg md none sm xl|full | auto dvh dvw fit full lvh lvw max min px svh svw|base | center end justify left right start| clip ellipsis| balance nowrap pretty wrap| normal tight tighter wide wider widest| all colors none opacity shadow transform| full px| auto dvh dvw fit full lvh lvw max min px screen svh svw".split('|').map((s) => {
+const SETS = " block contents flow-root hidden inline inline-block inline-flex inline-grid inline-table table table-caption table-cell table-column table-column-group table-footer-group table-header-group table-row table-row-group| not-sr-only sr-only|isolat e ion-auto|object- contain cover fill none scale-down|overflow- auto clip hidden scroll visible|overflow-x- auto clip hidden scroll visible| absolute fixed relative static sticky| collapse invisible visible|justify- around baseline between center center-safe end end-safe evenly normal start stretch|justify-self- auto center center-safe end end-safe start stretch|items- baseline baseline-last center center-safe end end-safe start stretch|self- auto baseline baseline-last center center-safe end end-safe start stretch|place-content- around baseline between center center-safe end end-safe evenly start stretch| italic not-italic| no-underline overline|truncate |whitespace- break-spaces normal nowrap pre pre-line pre-wrap|break- all keep normal words|caption- bottom top|appearance- auto none|field-sizing- content fixed|pointer-events- auto none|select- all auto none text| normal size| baseline bottom middle sub super text-bottom text-top top| bounce none ping pulse spin| auto fr max min px|none | auto full px|clip- border content padding text| dashed dotted double hidden none solid|auto | alias all-scroll auto cell col-resize context-menu copy crosshair default e-resize ew-resize grab grabbing help move n-resize ne-resize nesw-resize no-drop none not-allowed ns-resize nw-resize nwse-resize pointer progress row-resize s-resize se-resize sw-resize text vertical-text w-resize wait zoom-in zoom-out|initial | col col-reverse row row-reverse| nowrap wrap wrap-reverse| auto initial none| black bold extrabold extralight light medium normal semibold thin|px | none subgrid| auto dvh dvw fit full lh lvh lvw max min px screen svh svw| loose none normal px relaxed snug tight|through |item | decimal disc none| auto dvh dvw fit full lvh lvw max min none prose px svh svw| auto px| auto dvh dvw fit full lh lvh lvw max min none px screen svh svw| auto dvh dvw fit full lvh lvw max min none px screen svh svw| first last none| 2xl 3xl 4xl full lg md none sm xl|full | inner none| auto dvh dvw fit full lvh lvw max min px svh svw|base | center end justify left right start| clip ellipsis| balance nowrap pretty wrap| normal tight tighter wide wider widest| all colors none opacity shadow transform| full px| auto dvh dvw fit full lvh lvw max min px screen svh svw".split('|').map((s) => {
     const tails = s.split(' ')
     const prefix = tails.shift()!
     for (let i = 0; i < tails.length; i++) {
@@ -70,14 +70,14 @@ const SETS = " block contents flow-root hidden inline inline-block inline-flex i
     }
     return tails
 })
-const AA = DZ("000000000000000000000024226222<2240024426222426242204442222262222222662422426400024442422")
-const AG = DZ("¼222222222222222222222ã22222Ü2Ï22Î2Í242222222222}222222224222222622220242zILw2222222")
-const AS = DZ("0222222222222222222222222222222222222200202G00JILMP2222230006U@00000C1^00UXWZ2222gj220gji")
-const litAnchor = new Int32Array(412)
-const litGroup = new Int32Array(412)
-const litPool = new Int32Array(412)
+const AA = DZ("0000000000000000000000024226222<224002442622242624220444222226222222266242242444400024442422")
+const AG = DZ("À2222222222222222222222é22222â2Õ22Ô2Ó242222222222¢222222224¤22222262222022242|ILy2222222")
+const AS = DZ("02222222222222222222222222222222222222200202G00JILMP2222230006U@00000C1^00UXW>L22222il220ilk")
+const litAnchor = new Int32Array(418)
+const litGroup = new Int32Array(418)
+const litPool = new Int32Array(418)
 let poolText = ''
-const poolOffsets = new Int32Array(482)
+const poolOffsets = new Int32Array(490)
 {
     const tailRef = new Map()
     let nextRef = 0
@@ -100,10 +100,10 @@ const poolOffsets = new Int32Array(482)
     }
 }
 // conflict adjacency (engine builds claim bitmask CSR at init)
-const adjGid = DZ("0@2>6<226@2882:2282L")
+const adjGid = DZ("0@2>6<226@2882:22<2L")
 const adjStart = PS(U("1::32:44244:44>22212"))
-const adjTgt = DZ("2Į22222ġĤħ2Ĩ222222222Ńö{2:2Â222IÅÂ2W¾2}s8z22ÉÌ2Ë7L2¤2222¯32ª2©1®22³À2«®¯²222222221252¡8`")
-const patGid = U("l")
+const adjTgt = DZ("2Ĵ22222ħĪĭ2Į222222222ŉü2:2È222M¤ËÈ2¡WÄ2u8|22ÏÒ2Ñ7L2ª2222µ32°2¯1´22¹Æ2±´µ¸222222221252£8b")
+const patGid = U("n")
 const patTgt = U("L")
 const postfixLookupGroups = U("1")
 const orderSensitiveModifiers = "* ** after backdrop before details-content file first-letter first-line marker placeholder selection"
