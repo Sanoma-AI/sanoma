@@ -39,7 +39,8 @@ export const Route = createFileRoute("/runs/$id")({
     const { run } = await context.queryClient.query({ ...runQuery(params.id), staleTime: "static" });
     return { workflow: run.workflow };
   },
-  head: ({ params }) => ({ meta: [{ title: `Run ${params.id} · Sanoma` }] }),
+  // A run that does not exist has no loader data: its id stands in.
+  head: ({ loaderData, params }) => ({ meta: [{ title: `${loaderData?.workflow ?? params.id} · Sanoma` }] }),
   component: RunPage,
   // getRun throws the router's not-found for a run that does not exist.
   notFoundComponent: () => <Notice variant="destructive">No run {Route.useParams().id}.</Notice>,
