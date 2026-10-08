@@ -1,8 +1,7 @@
-// React Flow's stylesheet, once, in this chunk: only the run page loads it. style.css maps its
-// --xy-* colours to the theme.
+// React Flow's stylesheet, once, in this chunk: only the pages with a graph load it. style.css
+// maps its --xy-* colours to the theme.
 // oxlint-disable-next-line import/no-unassigned-import
 import "@xyflow/react/dist/style.css";
-import type { LedgerRecord, RunSummary } from "@sanoma/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   Background,
@@ -23,18 +22,19 @@ import { cva } from "class-variance-authority";
 import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { layout, NODE_SIZE } from "../graph/layout.ts";
-import { type GraphNode, type GraphNodeKind, runGraph } from "../graph/run-graph.ts";
+import type { GraphNode, GraphNodeKind, RunGraph } from "../graph/run-graph.ts";
 import { configQuery, opsById } from "../queries.ts";
 import { APPROVAL_TONE, DECISION_TONE, effectBadge, StatusDot, type Tone, toneBadge } from "./common.tsx";
 
-// The run graph, drawn with React Flow. It needs the DOM, so the run page loads this module
-// only in the browser (React.lazy behind ClientOnly); the server renders a skeleton instead.
+// A run's graph, or a workflow's outline, drawn with React Flow. It needs the DOM, so the pages
+// load this module only in the browser (GraphPanel in common.tsx: React.lazy behind ClientOnly);
+// the server renders a skeleton instead.
 
 type FlowNode = Node<{ node: GraphNode }, GraphNodeKind>;
 
 /** How the view fits the graph (the controls' fit button fits all of it). */
 const FIT = { padding: 0.1, minZoom: 0.25, maxZoom: 1 } as const;
-/** Below this zoom the badges cannot be read: fit the run's latest part instead of all of it. */
+/** Below this zoom the badges cannot be read: fit one end of the graph instead of all of it. */
 const READABLE_ZOOM = 0.8;
 
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
@@ -226,7 +226,7 @@ const nodeTypes: NodeTypes = {
 } satisfies Record<GraphNodeKind, unknown>;
 
 /** Fits the view again when nodes come or go, as the run's page polls. */
-function FitOnChange({ nodes, onFitted }: { nodes: FlowNode[]; onFitted: () => void }) {
+function FitOnChange({ nodes, show, onFitted }: { nodes: FlowNode[]; show: GraphProps["show"]; onFitted: () => void }) {
   const { fitView, setViewport } = useReactFlow();
   const width = useStore((s) => s.width);
   const height = useStore((s) => s.height);
@@ -239,14 +239,17 @@ function FitOnChange({ nodes, onFitted }: { nodes: FlowNode[]; onFitted: () => v
     const right = Math.max(...outer.map((n) => n.position.x + (n.width ?? 0)));
     const top = Math.min(...outer.map((n) => n.position.y));
     const bottom = Math.max(...outer.map((n) => n.position.y + (n.height ?? 0)));
-    // All of the graph when it fits at a readable zoom. Else its right-hand end, the run's
-    // latest steps, at that zoom; panning shows the rest.
+    // All of the graph when it fits at a readable zoom. Else one end at that zoom (a run's
+    // latest steps, an outline's first); panning shows the rest.
     const fits = (right - left) * READABLE_ZOOM <= width * (1 - 2 * FIT.padding);
     const done = fits
       ? fitView(FIT)
       : setViewport({
           zoom: READABLE_ZOOM,
-          x: width * (1 - FIT.padding) - right * READABLE_ZOOM,
+          x:
+            show === "start"
+              ? width * FIT.padding - left * READABLE_ZOOM
+              : width * (1 - FIT.padding) - right * READABLE_ZOOM,
           y: height / 2 - ((top + bottom) / 2) * READABLE_ZOOM,
         });
     void done.then(onFitted);
@@ -255,19 +258,19 @@ function FitOnChange({ nodes, onFitted }: { nodes: FlowNode[]; onFitted: () => v
   return null;
 }
 
-export interface RunGraphProps {
-  records: readonly LedgerRecord[];
-  run: RunSummary;
-  /** Called with a clicked node's ledger record id. */
-  onSelect: (recordId: string) => void;
+export interface GraphProps {
+  graph: RunGraph;
+  /** Called with a clicked node's ledger record id. Nodes without a record do nothing. */
+  onSelect?: ((recordId: string) => void) | undefined;
+  /** The end shown when all of the graph cannot be read at once. Defaults to `end`. */
+  show?: "start" | "end" | undefined;
 }
 
-/** The run as a graph, left to right. Clicking a node shows its ledger record. */
-export default function RunGraph({ records, run, onSelect }: RunGraphProps) {
+/** A graph, left to right. Clicking a node with a ledger record calls `onSelect` with it. */
+export default function Graph({ graph, onSelect, show = "end" }: GraphProps) {
   const reducedMotion = useReducedMotion();
   // Hidden until the first fit, so the graph does not show unfitted for a frame.
   const [fitted, setFitted] = useState(false);
-  const graph = useMemo(() => runGraph(records, run), [records, run]);
   const nodes = useMemo<FlowNode[]>(() => {
     const at = layout(graph.nodes, graph.edges);
     // A cluster comes before the nodes inside it, as React Flow needs.
@@ -308,7 +311,7 @@ export default function RunGraph({ records, run, onSelect }: RunGraphProps) {
         className={fitted ? undefined : "invisible"}
         onNodeClick={(_, node) => {
           const { recordId } = node.data.node;
-          if (recordId) onSelect(recordId);
+          if (recordId) onSelect?.(recordId);
         }}
         minZoom={0.25}
         maxZoom={1.5}
@@ -325,7 +328,7 @@ export default function RunGraph({ records, run, onSelect }: RunGraphProps) {
       >
         <Background gap={16} size={1} />
         <Controls showInteractive={false} orientation="horizontal" fitViewOptions={FIT} />
-        <FitOnChange nodes={nodes} onFitted={() => setFitted(true)} />
+        <FitOnChange nodes={nodes} show={show} onFitted={() => setFitted(true)} />
       </ReactFlow>
     </ReactFlowProvider>
   );

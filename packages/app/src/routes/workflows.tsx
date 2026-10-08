@@ -1,16 +1,18 @@
-import type { OpEntry, WorkflowEntry } from "@sanoma/workflows";
+import type { OpEntry } from "@sanoma/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { PlayIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useMemo } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
+import type { AppWorkflow } from "../api.ts";
 import {
   Fact,
   Facts,
+  GraphPanel,
   Json,
   Nothing,
   OpName,
@@ -19,6 +21,7 @@ import {
   SubsectionTitle,
 } from "../components/common.tsx";
 import { type Field, fieldsOf } from "../form/schema.ts";
+import { outlineGraph } from "../graph/outline-graph.ts";
 import { configQuery, opsById } from "../queries.ts";
 
 export const Route = createFileRoute("/workflows")({
@@ -65,10 +68,13 @@ function WorkflowsPage() {
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ title, note, children }: { title: string; note?: ReactNode; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-2">
-      <SubsectionTitle>{title}</SubsectionTitle>
+      <div className="flex flex-col gap-0.5">
+        <SubsectionTitle>{title}</SubsectionTitle>
+        {note && <p className="text-muted-foreground">{note}</p>}
+      </div>
       {children}
     </section>
   );
@@ -76,8 +82,10 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 
 const None = ({ children = "None." }: { children?: ReactNode }) => <p className="text-muted-foreground">{children}</p>;
 
-function WorkflowCard({ workflow, ops }: { workflow: WorkflowEntry; ops: Map<string, OpEntry> }) {
+function WorkflowCard({ workflow, ops }: { workflow: AppWorkflow; ops: Map<string, OpEntry> }) {
   const fields = fieldsOf(workflow.input);
+  const { outline } = workflow;
+  const graph = useMemo(() => ("nodes" in outline ? outlineGraph(outline.nodes) : undefined), [outline]);
   return (
     <Card>
       <CardHeader>
@@ -97,6 +105,13 @@ function WorkflowCard({ workflow, ops }: { workflow: WorkflowEntry; ops: Map<str
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
+        <Section
+          title="Outline"
+          note={"error" in outline ? outline.error : "Read from the body of run; helpers it calls are not shown"}
+        >
+          {graph && <GraphPanel graph={graph} show="start" />}
+        </Section>
+        <Separator />
         <Section title="Operations it may call">
           {workflow.ops.length === 0 ? (
             <None />

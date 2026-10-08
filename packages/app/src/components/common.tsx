@@ -1,14 +1,17 @@
 import type { ApprovalState, Effect, LedgerRecord, RecordedDecision } from "@sanoma/workflows";
 import { cva } from "class-variance-authority";
 import { ChevronRightIcon, CircleAlertIcon, InfoIcon } from "lucide-react";
-import { type ReactNode, useMemo, useSyncExternalStore } from "react";
+import { ClientOnly } from "@tanstack/react-router";
+import { lazy, type ReactNode, Suspense, useMemo, useSyncExternalStore } from "react";
 import { Alert, AlertDescription } from "#/components/ui/alert.tsx";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
+import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import { approverLabel } from "@sanoma/workflows/shared";
+import type { GraphProps } from "./graph.tsx";
 
 // Small pieces shared by the screens, composed from the shadcn components in ./ui.
 
@@ -220,6 +223,27 @@ export function Nothing({ title, children, action }: { title: string; children?:
       </EmptyHeader>
       {action && <EmptyContent>{action}</EmptyContent>}
     </Empty>
+  );
+}
+
+// React Flow needs the DOM: the graph loads in the browser only, as one chunk for every page
+// that draws one.
+const Graph = lazy(() => import("./graph.tsx"));
+
+/**
+ * A graph (a run's, or a workflow's outline) in a box 220 px high, 280 px from `sm`. It is drawn
+ * in the browser; the server renders a skeleton of the same size.
+ */
+export function GraphPanel(props: GraphProps) {
+  const skeleton = <Skeleton role="status" aria-label="Loading the graph" className="size-full rounded-none" />;
+  return (
+    <div className="h-[220px] overflow-hidden rounded-lg border sm:h-[280px]">
+      <ClientOnly fallback={skeleton}>
+        <Suspense fallback={skeleton}>
+          <Graph {...props} />
+        </Suspense>
+      </ClientOnly>
+    </div>
   );
 }
 

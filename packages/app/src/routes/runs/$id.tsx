@@ -1,10 +1,9 @@
 import type { ErrorInfo, LedgerRecord } from "@sanoma/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { ClientOnly, createFileRoute } from "@tanstack/react-router";
-import { lazy, type ReactNode, Suspense, useCallback, useEffect, useState } from "react";
+import { createFileRoute } from "@tanstack/react-router";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Item, ItemContent, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
-import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { approverLabel } from "@sanoma/workflows/shared";
 import { starterName } from "../../api.ts";
 import { ApprovalCard } from "../../components/approval.tsx";
@@ -14,6 +13,7 @@ import {
   Expandable,
   Fact,
   Facts,
+  GraphPanel,
   ledgerTone,
   Nothing,
   Notice,
@@ -26,6 +26,7 @@ import {
   toneBadge,
   When,
 } from "../../components/common.tsx";
+import { runGraph } from "../../graph/run-graph.ts";
 import { runQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/runs/$id")({
@@ -36,9 +37,6 @@ export const Route = createFileRoute("/runs/$id")({
   notFoundComponent: () => <Notice variant="destructive">No run {Route.useParams().id}.</Notice>,
 });
 
-// React Flow needs the DOM: the graph loads in the browser only, as its own chunk.
-const RunGraph = lazy(() => import("../../components/run-graph.tsx"));
-
 /** How long a ledger item stays highlighted after a click on its node in the graph. */
 const HIGHLIGHT_MS = 2_000;
 
@@ -46,6 +44,7 @@ function RunPage() {
   const { id } = Route.useParams();
   const { data, error } = useSuspenseQuery(runQuery(id));
   const { run, ledger, ledgerError, approvals } = data;
+  const graph = useMemo(() => runGraph(ledger, run), [ledger, run]);
   const titles = new Map(approvals.map((a) => [a.id, a.title]));
   const [highlighted, setHighlighted] = useState<string>();
   useEffect(() => {
@@ -60,7 +59,6 @@ function RunPage() {
       ?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" });
     setHighlighted(recordId);
   }, []);
-  const skeleton = <Skeleton role="status" aria-label="Loading the graph" className="size-full rounded-none" />;
   return (
     <section className="flex flex-col gap-6">
       <PageHeader title={run.workflow}>
@@ -84,13 +82,7 @@ function RunPage() {
 
       <section className="flex flex-col gap-3">
         <SectionTitle>Graph</SectionTitle>
-        <div className="h-[220px] overflow-hidden rounded-lg border sm:h-[280px]">
-          <ClientOnly fallback={skeleton}>
-            <Suspense fallback={skeleton}>
-              <RunGraph records={ledger} run={run} onSelect={show} />
-            </Suspense>
-          </ClientOnly>
-        </div>
+        <GraphPanel graph={graph} onSelect={show} />
       </section>
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
