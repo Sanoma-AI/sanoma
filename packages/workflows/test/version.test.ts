@@ -1,9 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { DBOSClient } from "@dbos-inc/dbos-sdk";
+import { DBOS, DBOSClient } from "@dbos-inc/dbos-sdk";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
-import { testDatabaseUrl } from "@sanoma/testing";
+import { startTestWorker, testDatabaseUrl } from "@sanoma/testing";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -131,6 +132,30 @@ describe("workers on one database", () => {
         await client.close();
         await worker.stop();
       }
+    }
+  });
+
+  it("takes a rollback's runs only when promoted: a version seen before is not the latest again by starting", async () => {
+    // A fresh app, so its versions are new whatever earlier runs left in the database.
+    const appName = `version-promote-${randomUUID().slice(0, 8)}`;
+    // startTestWorker runs on the database named here, not the config's own.
+    const cfg = { ...config(appName), appName, databaseUrl: "postgresql://nobody@127.0.0.1:1/not-this-one" };
+    const start = async (version: string, promote?: boolean) => {
+      named(version);
+      const worker = await startTestWorker(cfg, { databaseUrl, promote });
+      const latest = (await DBOS.getLatestApplicationVersion()).versionName;
+      await worker.stop();
+      return latest;
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(await start("a")).toBe(`${appName}@a`);
+      expect(await start("b")).toBe(`${appName}@b`);
+      expect(await start("a")).toBe(`${appName}@b`);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(`but the app's latest is ${appName}@b`));
+      expect(await start("a", true)).toBe(`${appName}@a`);
+    } finally {
+      warn.mockRestore();
     }
   });
 

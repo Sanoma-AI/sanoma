@@ -8,14 +8,15 @@ npm install --save-dev @sanoma/testing
 
 ## A worker for a test
 
-`startTestWorker(config)` calls `startWorker` with test defaults: `databaseUrl` from `testDatabaseUrl(appName)` and a fresh in-memory ledger. `appName` is required and should be unique to the test file, since it names the file's database; two files sharing one would recover each other's runs.
+`startTestWorker(config, options?)` calls `startWorker` with test defaults: the database `testDatabaseUrl(appName)` and, unless the config has one, a fresh in-memory ledger. `appName` is required and should be unique to the test file, since it names the file's database; two files sharing one would recover each other's runs. A `databaseUrl` in the config is ignored, so a test can spread the project's own config without reaching its real database; pass `options.databaseUrl` to use another one. The other options (`promote`, `logLevel`) go to `startWorker`.
 
 `testDatabaseUrl(suffix)` is `SANOMA_TEST_DATABASE_URL` (default `postgresql://postgres:dbos@localhost:5433/sanoma_test`) with `_<suffix>` appended to the database name. Give each test file its own suffix, so files don't recover each other's runs. DBOS creates the database if it is missing.
 
 ```ts
 import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
-import { type FakeCall, fakeGhost, fakeResend, startTestWorker, testDatabaseUrl } from "@sanoma/testing";
+import { type FakeCall, fakeGhost, fakeResend, startTestWorker } from "@sanoma/testing";
+import { allowAll } from "@sanoma/workflows";
 import announce from "./workflows/announce.ts";
 
 const calls: FakeCall[] = [];
@@ -25,7 +26,8 @@ const worker = await startTestWorker({
   workflows: [announce],
   connectors: [ghost, resend],
   drivers: [blog.driver, email.driver],
-  databaseUrl: testDatabaseUrl("announce"),
+  policy: allowAll,
+  appName: "announce-test", // and the database announce-test's tests run on
 });
 
 // ...start a run and wait for it to finish, then:

@@ -55,7 +55,7 @@ export { jsonlLedger, memoryLedger, type LedgerRecord, type LedgerStore } from "
 export { ApprovalMessage, APPROVALS_EVENT, decisionEventOf } from "./approvals.ts";
 export { RUNTIME_VERSION } from "./version.ts";
 export type { RunArgs } from "./run.ts";
-export { startWorker, type Worker } from "./worker.ts";
+export { startWorker, type Worker, type WorkerOptions } from "./worker.ts";
 export { SanomaClient, type RunsFilter, type RunStatus, type RunSummary, type StartOptions } from "./client.ts";
 // lintWorkflow lives at `@sanoma/workflows/lint`, so the runtime never loads oxc-parser.
 export { defineDriver, type DriverImpl, type OpIdOf } from "./op.ts";
