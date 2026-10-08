@@ -70,7 +70,6 @@ export function useApp(
   const ledgerDir = mkdtempSync(join(tmpdir(), `sanoma-ledger-${appName}-`));
   let config: SanomaConfig;
   let worker: Worker | undefined;
-  let stopped = false;
   let client: SanomaClient | undefined;
   let raw: DBOSClient | undefined;
   const leftPending: string[] = [];
@@ -95,7 +94,7 @@ export function useApp(
     if (leftPending.length) await raw?.cancelWorkflows(leftPending);
     await client?.close();
     await raw?.destroy();
-    if (!stopped) await worker?.stop();
+    await worker?.stop();
     rmSync(ledgerDir, { recursive: true, force: true });
   });
 
@@ -122,12 +121,11 @@ export function useApp(
     ops: () => vendors.calls.map((c) => c.op),
     async stop() {
       await defined(worker, "worker").stop();
-      stopped = true;
+      worker = undefined;
     },
     async restart() {
-      if (!stopped) await defined(worker, "worker").stop();
+      await worker?.stop();
       worker = await startWorker(config);
-      stopped = false;
     },
     leftPending,
   };
