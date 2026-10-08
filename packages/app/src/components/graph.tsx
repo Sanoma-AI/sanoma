@@ -41,8 +41,17 @@ type FlowNode = Node<{ node: GraphNode }, GraphNodeKind>;
 /** What a node component reads of its `NodeProps`: its node, of its kind. */
 type Props<K extends GraphNodeKind> = { data: { node: Extract<GraphNode, { kind: K }> } };
 
+/**
+ * The room the view leaves around the graph, in px. Below it, the controls': they sit 15 px
+ * from the bottom edge and are 26 px high, and no node goes under them, at any width.
+ */
+const PAD = { x: 24, top: 16, bottom: 52 } as const;
 /** How the view fits the graph (the controls' fit button fits all of it). */
-const FIT = { padding: 0.1, minZoom: 0.25, maxZoom: 1 } as const;
+const FIT = {
+  padding: { x: `${PAD.x}px`, top: `${PAD.top}px`, bottom: `${PAD.bottom}px` },
+  minZoom: 0.25,
+  maxZoom: 1,
+} as const;
 /** Below this zoom the badges cannot be read: fit one end of the graph instead of all of it. */
 const READABLE_ZOOM = 0.8;
 
@@ -245,19 +254,19 @@ function FitOnChange({ nodes, show, onFitted }: { nodes: FlowNode[]; show: "star
     if (!width || !height || !count) return;
     // A cluster's nodes are placed relative to it, and inside it.
     const bounds = getNodesBounds(nodes.filter((n) => n.parentId === undefined));
-    // All of the graph when it fits at a readable zoom. Else one end at that zoom (a run's
-    // latest steps, an outline's first); panning shows the rest.
-    const fits = bounds.width * READABLE_ZOOM <= width * (1 - 2 * FIT.padding);
-    const done = fits
-      ? fitView(FIT)
-      : setViewport({
-          zoom: READABLE_ZOOM,
-          x:
-            show === "start"
-              ? width * FIT.padding - bounds.x * READABLE_ZOOM
-              : width * (1 - FIT.padding) - (bounds.x + bounds.width) * READABLE_ZOOM,
-          y: height / 2 - (bounds.y + bounds.height / 2) * READABLE_ZOOM,
-        });
+    const room = { width: width - 2 * PAD.x, height: height - PAD.top - PAD.bottom };
+    // All of the graph when it fits at a readable zoom. Else one end (a run's latest steps, an
+    // outline's first) at that zoom, or less if its lanes are taller than the room; panning
+    // shows the rest.
+    const zoom = Math.max(FIT.minZoom, Math.min(READABLE_ZOOM, room.height / bounds.height));
+    const done =
+      bounds.width * READABLE_ZOOM <= room.width
+        ? fitView(FIT)
+        : setViewport({
+            zoom,
+            x: show === "start" ? PAD.x - bounds.x * zoom : width - PAD.x - (bounds.x + bounds.width) * zoom,
+            y: PAD.top + room.height / 2 - (bounds.y + bounds.height / 2) * zoom,
+          });
     void done.then(onFitted);
     // Only when nodes come or go, or the view resizes: not on every poll.
   }, [count, width, height, fitView, setViewport]);
