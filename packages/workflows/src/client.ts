@@ -175,11 +175,12 @@ export class SanomaClient {
     options: { timeoutSeconds?: number } = {},
   ): Promise<ApprovalState> {
     const msg = valid(ApprovalMessage, message, "Not a decision");
-    await this.mustExist(runId);
     const all = await this.approvals(runId);
     const target = approvalId ? all.find((a) => a.id === approvalId) : all.find((a) => a.status === "pending");
     if (target && target.status !== "pending") throw alreadyDecided(runId, target);
     if (!target) {
+      // A run with no approvals may not exist at all.
+      await this.mustExist(runId);
       throw new SanomaError(
         "no_pending_approval",
         `Run ${runId} has no pending approval${approvalId ? ` "${approvalId}"` : ""}`,
@@ -197,11 +198,19 @@ export class SanomaClient {
     // idempotency key, it also keeps a retried send from queueing the message twice.
     const id = msg.id ?? randomUUID();
     await this.dbos.send(runId, { ...msg, id }, topicOf(target.id), id);
-    // DBOSClient does not LISTEN for events: it polls, every 10 s unless told otherwise.
-    const decided = await this.dbos.getEvent<ApprovalState>(runId, decisionEventOf(target.id), {
-      timeoutSeconds: options.timeoutSeconds ?? 30,
-      pollingIntervalMs: 100,
-    });
+    // DBOSClient does not LISTEN for events: it polls, every 10 s unless told otherwise. A
+    // running worker answers within moments, so poll often at first, then once a second.
+    const event = decisionEventOf(target.id);
+    const timeoutSeconds = options.timeoutSeconds ?? 30;
+    const soon = Math.min(2, timeoutSeconds);
+    const decided =
+      (await this.dbos.getEvent<ApprovalState>(runId, event, { timeoutSeconds: soon, pollingIntervalMs: 100 })) ??
+      (timeoutSeconds > soon
+        ? await this.dbos.getEvent<ApprovalState>(runId, event, {
+            timeoutSeconds: timeoutSeconds - soon,
+            pollingIntervalMs: 1000,
+          })
+        : null);
     const now = decided ?? (await this.approvals(runId)).find((a) => a.id === target.id) ?? target;
     if (now.status !== "pending" && now.decidedWith !== id) throw alreadyDecided(runId, now);
     return now;
