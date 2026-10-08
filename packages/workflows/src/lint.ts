@@ -1,5 +1,5 @@
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
-import { parseSync } from "oxc-parser";
+import { childrenOf, type Node, parse } from "./ast.ts";
 // From src/ and from dist/ alike, the package's own oxlint.json: the one list of allowed names.
 import oxlint from "../oxlint.json" with { type: "json" };
 
@@ -63,7 +63,7 @@ const ERROR_CLASSES = new Set(["DriverError", "SanomaError", "PolicyDeniedError"
  * not a sandbox, and code written to get around it can.
  */
 export function lintWorkflow(source: string, filename?: string): LintProblem[] {
-  const { program, errors } = parseSync(filename ?? "workflow.ts", source, { sourceType: "module", lang: "ts" });
+  const { program, errors } = parse(filename ?? "workflow.ts", source);
   const lineStarts = [0];
   for (let i = 0; i < source.length; i++) if (source[i] === "\n") lineStarts.push(i + 1);
   const at = (offset: number) => {
@@ -77,7 +77,7 @@ export function lintWorkflow(source: string, filename?: string): LintProblem[] {
   }));
   const root = filename === undefined ? undefined : treeOf(filename);
 
-  const checkSource = (node: any) => {
+  const checkSource = (node: Node) => {
     const spec: string = node.source.value;
     const refusal = whyRefused(spec, filename, root);
     if (refusal) {
@@ -117,12 +117,8 @@ export function lintWorkflow(source: string, filename?: string): LintProblem[] {
     }
   };
 
-  const visit = (node: any) => {
-    if (!node || typeof node !== "object") return;
-    if (Array.isArray(node)) {
-      for (const n of node) visit(n);
-      return;
-    }
+  const visit = (node: Node) => {
+    if (!node) return;
     if (
       (node.type === "ImportDeclaration" ||
         node.type === "ExportNamedDeclaration" ||
@@ -135,13 +131,11 @@ export function lintWorkflow(source: string, filename?: string): LintProblem[] {
     } else if (node.type === "BinaryExpression" && node.operator === "instanceof") {
       checkInstanceof(node);
     }
-    for (const [key, child] of Object.entries(node)) {
-      if (key !== "type" && key !== "start" && key !== "end" && child && typeof child === "object") visit(child);
-    }
+    for (const child of childrenOf(node)) visit(child);
   };
 
   // A workflow imports none of these classes, so they are refused by the name they have.
-  const checkInstanceof = (node: any) => {
+  const checkInstanceof = (node: Node) => {
     const right = node.right;
     const name: string | undefined =
       right?.type === "Identifier"

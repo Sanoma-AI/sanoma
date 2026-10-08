@@ -1,4 +1,4 @@
-import { parseSync } from "oxc-parser";
+import { childrenOf, type Node, parse } from "./ast.ts";
 import type { WorkflowDefinition } from "./define.ts";
 import { errorMessage } from "./shared.ts";
 
@@ -29,9 +29,6 @@ export type OutlineNode =
    */
   | { kind: "branch"; cases: OutlineNode[][] };
 
-// oxc-parser's ESTree nodes, read by shape as lint.ts does.
-type Node = any;
-
 const FUNCTIONS = new Set(["ArrowFunctionExpression", "FunctionExpression", "FunctionDeclaration"]);
 const ITERATING = new Set(["map", "forEach", "reduce"]);
 // Wrappers that leave the expression's value as it is: `ctx!.x`, `(ctx as Ctx).x`, `ctx?.x`.
@@ -42,8 +39,6 @@ const TRANSPARENT = new Set([
   "TSTypeAssertion",
   "ChainExpression",
 ]);
-// Keys that hold types, not code.
-const SKIPPED = new Set(["typeAnnotation", "returnType", "typeParameters", "typeArguments"]);
 
 /**
  * Outlines a workflow from the source of its `run` function (`wf.run.toString()`): TypeScript or,
@@ -66,17 +61,18 @@ export function outlineWorkflow(wf: WorkflowDefinition<any, any>): Outline {
   return { nodes: outlineBody(fn.body, param.name) };
 }
 
+/** The one expression the text holds, or the first parse error. */
+function expression(text: string): Node | string {
+  const { program, errors } = parse("run.ts", text);
+  return errors.length ? errors[0]!.message : (program.body[0] as Node)?.expression;
+}
+
 /** The function the source holds, or why it could not be parsed. */
 function parseFunction(source: string): Node | string {
-  // The one expression the text holds, or the first parse error.
-  const parse = (text: string): Node | string => {
-    const { program, errors } = parseSync("run.ts", text, { lang: "ts", sourceType: "module", preserveParens: false });
-    return errors.length ? errors[0]!.message : (program.body[0] as Node)?.expression;
-  };
-  let parsed = parse(`(${source})`);
+  let parsed = expression(`(${source})`);
   // A method (`async run(ctx) { … }`) is no expression on its own; it is one inside an object.
   if (typeof parsed === "string") {
-    const method = parse(`({${source}})`);
+    const method = expression(`({${source}})`);
     if (typeof method !== "string") parsed = method?.properties?.[0]?.value;
   }
   if (typeof parsed === "string") return parsed;
@@ -113,7 +109,7 @@ function outlineBody(body: Node, ctx: string): OutlineNode[] {
     // which a reading of the source cannot follow. Only the callbacks of ctx.all and of `.map`,
     // `.forEach` and `.reduce` are read, where they are passed.
     if (FUNCTIONS.has(node.type)) return [];
-    return Object.entries(node).flatMap(([key, child]) => (SKIPPED.has(key) ? [] : walk(child)));
+    return childrenOf(node).flatMap(walk);
   };
 
   // The arms that make calls, and one empty arm when some arm makes none: the way past them.
