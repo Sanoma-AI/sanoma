@@ -1,4 +1,12 @@
-import type { ApprovalState, ErrorCode, InputIssue, LedgerRecord, RunStatus, RunSummary } from "@sanoma/workflows";
+import type {
+  ApprovalState,
+  Approver,
+  ErrorCode,
+  InputIssue,
+  LedgerRecord,
+  RunStatus,
+  RunSummary,
+} from "@sanoma/workflows";
 import { z } from "zod";
 
 export type { InputIssue } from "@sanoma/workflows";
@@ -94,7 +102,10 @@ export class ApiError extends Error {
 export const errorBodyOf = (err: unknown): ErrorResponse | undefined =>
   err instanceof ApiError ? err.body : undefined;
 
-/** Someone who may decide an approval, as text: a name, or "group <name>". */
-export function approverName(approver: string | { group: string }): string {
+/**
+ * Someone who may decide an approval, as text: a name, or "group <name>". The same as the
+ * runtime's `approverLabel`, which the browser bundle can't import: only types cross over.
+ */
+export function approverName(approver: Approver): string {
   return typeof approver === "string" ? approver : `group ${approver.group}`;
 }

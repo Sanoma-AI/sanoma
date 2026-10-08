@@ -26,6 +26,29 @@ export const Approver: z.ZodType<Approver> = z.union(
   { error: 'needs an approver: a name, or { group: "name" }' },
 );
 
+/**
+ * True when `by` may decide the approval: `by.id` is the approver, or `by.groups` holds the
+ * approver group. Pure: everything it reads is already recorded.
+ */
+export function mayDecide(approval: Pick<ApprovalState, "approver">, by: Principal): boolean {
+  const { approver } = approval;
+  return typeof approver === "string" ? approver === by.id : (by.groups?.includes(approver.group) ?? false);
+}
+
+/** Who may decide, as text: the person's id, or "group <name>". */
+export const approverLabel = (approver: Approver): string =>
+  typeof approver === "string" ? approver : `group ${approver.group}`;
+
+/** Why `by` may not decide the approval, naming who may. */
+export const notApprover = ({ approver }: Pick<ApprovalState, "approver">, by: Principal): string =>
+  typeof approver === "string"
+    ? `${by.id} is not the approver; ${approverLabel(approver)} is`
+    : `${by.id} is not in ${approverLabel(approver)}`;
+
+/** True when the two name the same approver: the same id, or the same group. */
+export const sameApprover = (a: Approver, b: Approver): boolean =>
+  typeof a === "string" || typeof b === "string" ? a === b : a.group === b.group;
+
 /** `covers` as given (operations), parsed to their ids. */
 export const Covers = z
   .array(

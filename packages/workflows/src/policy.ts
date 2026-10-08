@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { type ApprovalState, Approver, Covers, type Principal } from "./define.ts";
+import { type ApprovalState, Approver, Covers, type Principal, sameApprover } from "./define.ts";
 import type { Effect, Op } from "./op.ts";
 
 /** An operation as a policy sees it: plain data, without its schemas. */
@@ -122,10 +122,6 @@ export function definePolicy(
 
 /** Allows every operation call. A config says so explicitly: `policy: allowAll`. */
 export const allowAll: Policy = definePolicy(() => allow());
-
-/** True when the two name the same approver: the same id, or the same group. */
-export const sameApprover = (a: Approver, b: Approver): boolean =>
-  typeof a === "string" || typeof b === "string" ? a === b : a.group === b.group;
 
 /**
  * True when an approval in the run was approved, covers the operation, and was addressed to

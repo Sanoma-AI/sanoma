@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { DBOSClient, type WorkflowStatusString } from "@dbos-inc/dbos-sdk";
-import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, mayDecide, topicOf, notApprover } from "./approvals.ts";
+import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, topicOf } from "./approvals.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
-import { type ApprovalState, Principal, type WorkflowDefinition } from "./define.ts";
+import { type ApprovalState, mayDecide, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
 import { parseOrThrow, SanomaError } from "./errors.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { RunArgs } from "./run.ts";

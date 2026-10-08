@@ -1,6 +1,14 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { z } from "zod";
-import { type ApprovalRequest, type ApprovalResult, type ApprovalState, Approver, Principal } from "./define.ts";
+import {
+  type ApprovalRequest,
+  type ApprovalResult,
+  type ApprovalState,
+  approverLabel,
+  mayDecide,
+  notApprover,
+  Principal,
+} from "./define.ts";
 import { RejectedError } from "./errors.ts";
 import { entry, write } from "./ledger.ts";
 import { warn } from "./log.ts";
@@ -29,25 +37,6 @@ export const ApprovalMessage = z.object({
 export type ApprovalMessage = z.infer<typeof ApprovalMessage>;
 
 export const statusOf = (decision: ApprovalMessage["decision"]) => (decision === "approve" ? "approved" : "rejected");
-
-/**
- * True when `by` may decide the approval: `by.id` is the approver, or `by.groups` holds the
- * approver group. Pure: everything it reads is already recorded.
- */
-export function mayDecide(approval: Pick<ApprovalState, "approver">, by: Principal): boolean {
-  const { approver } = approval;
-  return typeof approver === "string" ? approver === by.id : (by.groups?.includes(approver.group) ?? false);
-}
-
-/** Who may decide, as text: the person's id, or "group <name>". */
-export const approverLabel = (approver: Approver) =>
-  typeof approver === "string" ? approver : `group ${approver.group}`;
-
-/** Why `by` may not decide the approval, naming who may. */
-export const notApprover = (approval: Pick<ApprovalState, "approver">, by: Principal) =>
-  typeof approval.approver === "string"
-    ? `${by.id} is not the approver; ${approval.approver} is`
-    : `${by.id} is not in group ${approval.approver.group}`;
 
 /** The sender's id, from a message that may not be a valid decision. */
 function senderOf(raw: unknown): string | undefined {
