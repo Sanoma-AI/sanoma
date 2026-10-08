@@ -211,7 +211,8 @@ export class SanomaClient {
    * it is decided already (`already_decided`), when the run has finished, failed or been
    * cancelled (`run_ended`), when there is nothing to decide (`no_pending_approval`,
    * `run_not_found`), or when `by` may not decide it (`not_approver`); and throws
-   * `already_decided` too when another decision reached the run first.
+   * `already_decided` too when another decision reached the run first, and `not_approver` when
+   * the run read this one and refused it.
    *
    * If the run does not read the decision within `timeoutSeconds` (30 by default; the worker
    * may be down), returns the approval as it stands, still `pending`: the decision stays
@@ -269,6 +270,15 @@ export class SanomaClient {
           })
         : null);
     const now = decided ?? (await this.approvals(runId)).find((a) => a.id === target.id) ?? target;
+    // Read, but refused: the run checks the sender again, and said no.
+    const refused = now.refused.find((r) => r.id === id);
+    if (refused) {
+      throw new SanomaError("not_approver", `${refused.reason} (${target.id})`, {
+        runId,
+        approvalId: target.id,
+        approver: target.approver,
+      });
+    }
     if (now.status !== "pending" && now.decidedWith !== id) throw alreadyDecided(runId, now);
     return now;
   }

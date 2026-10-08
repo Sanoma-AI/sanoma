@@ -208,6 +208,25 @@ describe("approvals a workflow asks for", () => {
     ]);
   });
 
+  it("says not_approver, rather than still pending, when the run read the decision and refused it", async () => {
+    const runId = await c().start(announce, input("Refused in the run"), { startedBy: alice });
+    await waitFor(pending(c, runId));
+    // A message the run refuses, sent around the client under the id and key decide then uses:
+    // decide's own send is that message, which the run has read and refused.
+    const message = { id: "m-9", decision: "approve" as const, by: { id: "intern" } };
+    await app.raw.send(runId, message, topicOf("approval-1"), messageKeyOf("approval-1", "m-9"));
+    await waitFor(async () => (await c().approvals(runId))[0]?.refused[0]?.id === "m-9");
+
+    const err = await caught(c().decide(runId, { ...message, by: lead }, undefined, { timeoutSeconds: 1 }));
+    expect(errorCode(err)).toBe("not_approver");
+    expect(err).toMatchObject({
+      message: "intern is not the approver; marketing-lead is (approval-1)",
+      data: { runId, approvalId: "approval-1", approver: "marketing-lead" },
+    });
+    await c().decide(runId, { decision: "approve", by: lead });
+    await c().result(runId);
+  });
+
   it("returns the approval as decided, from the run's decision event, not as it was sent", async () => {
     const runId = await c().start(announce, input("Decided"), { startedBy: alice });
     await waitFor(pending(c, runId));

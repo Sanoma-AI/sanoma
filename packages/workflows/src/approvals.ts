@@ -118,7 +118,12 @@ export async function awaitApproval(
     if (!msg || !mayDecide(state, msg.by)) {
       const by = msg?.by.id ?? senderOf(raw);
       const reason = msg ? notApprover(state, msg.by) : "not a valid decision message";
-      state.refused.push(by === undefined ? { at, reason } : { by, at, reason });
+      state.refused.push({
+        ...(by === undefined ? {} : { by }),
+        ...(msg?.id === undefined ? {} : { id: msg.id }),
+        at,
+        reason,
+      });
       await DBOS.setEvent(APPROVALS_EVENT, all);
       await write(
         run,
