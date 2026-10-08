@@ -4,7 +4,7 @@ import { PlayIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Nothing, Notice, PageHeader, plural, RunStatusBadge, When } from "../../components/common.tsx";
+import { Nothing, Notice, PageHeader, plural, RUN_TONE, toneBadge, When } from "../../components/common.tsx";
 import { runsQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/runs/")({
@@ -68,7 +68,7 @@ function RunsPage() {
                       </Link>
                     </TableCell>
                     <TableCell>
-                      <RunStatusBadge status={run.status} />
+                      <Badge className={toneBadge({ tone: RUN_TONE[run.status] })}>{run.status}</Badge>
                     </TableCell>
                     <TableCell>{run.startedBy?.id ?? <span className="text-muted-foreground">unknown</span>}</TableCell>
                     <TableCell className="text-muted-foreground">
@@ -76,7 +76,7 @@ function RunsPage() {
                     </TableCell>
                     <TableCell>
                       {pending > 0 ? (
-                        <Badge variant="waiting">{plural(pending, "approval")}</Badge>
+                        <Badge className={toneBadge({ tone: "waiting" })}>{plural(pending, "approval")}</Badge>
                       ) : (
                         <span className="text-muted-foreground">-</span>
                       )}

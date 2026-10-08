@@ -1,22 +1,25 @@
 import type { LedgerRecord } from "@sanoma/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { cn } from "cn";
 import { Fragment, type ReactNode } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Item, ItemContent, ItemGroup, ItemMedia, ItemSeparator, ItemTitle } from "@/components/ui/item";
 import { approverName } from "../../api.ts";
 import { ApprovalCard } from "../../components/approval.tsx";
 import {
   DecisionBadge,
-  EffectBadge,
+  effectBadge,
   Expandable,
   Fact,
   Facts,
+  ledgerTone,
   Nothing,
   Notice,
   PageHeader,
-  RunStatusBadge,
+  RUN_TONE,
+  StatusDot,
+  toneBadge,
   When,
 } from "../../components/common.tsx";
 import { runQuery } from "../../queries.ts";
@@ -37,7 +40,7 @@ function RunPage() {
   return (
     <section className="flex flex-col gap-6">
       <PageHeader title={run.workflow}>
-        <RunStatusBadge status={run.status} />
+        <Badge className={toneBadge({ tone: RUN_TONE[run.status] })}>{run.status}</Badge>
       </PageHeader>
       {error && <Notice tone="bad">Could not refresh: {error.message}</Notice>}
       <Facts>
@@ -88,22 +91,11 @@ function RunPage() {
   );
 }
 
-type Tone = "finished" | "failed" | "waiting" | "none";
-
-/** The dot beside a record, coloured like the run status it is closest to. */
-const DOT: Record<Tone, string> = {
-  finished: "bg-status-finished-foreground",
-  failed: "bg-status-failed-foreground",
-  waiting: "bg-status-waiting-foreground",
-  none: "bg-muted-foreground/50",
-};
-
 /** One ledger record: what happened, when, and its details. */
 function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<string, string> }) {
   const title = (approval: string) => titles.get(approval) ?? approval;
   let kind = "";
   let body: ReactNode;
-  let tone: Tone = "none";
   switch (record.type) {
     case "run.started":
       kind = "started";
@@ -116,11 +108,11 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
       break;
     case "op.called":
       kind = "called";
-      tone = record.error ? "failed" : "none";
       body = (
         <>
           <p className="flex flex-wrap items-center gap-2">
-            <code>{record.op}</code> <EffectBadge effect={record.effect} /> <DecisionBadge decision={record.decision} />
+            <code>{record.op}</code> <Badge className={effectBadge({ effect: record.effect })}>{record.effect}</Badge>{" "}
+            <DecisionBadge decision={record.decision} />
             <span className="text-muted-foreground">
               {record.durationMs} ms{record.attempt && record.attempt > 1 ? `, attempt ${record.attempt}` : ""}
             </span>
@@ -133,7 +125,6 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
       break;
     case "approval.requested":
       kind = "asked";
-      tone = "waiting";
       body = (
         <p>
           “{record.title}” asked of {approverName(record.approver)}
@@ -150,7 +141,6 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
       break;
     case "approval.decided":
       kind = record.decision === "approve" ? "approved" : "rejected";
-      tone = record.decision === "approve" ? "finished" : "failed";
       body = (
         <p>
           {record.by} {record.decision === "approve" ? "approved" : "rejected"} “{title(record.approval)}”
@@ -168,19 +158,17 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
       break;
     case "run.finished":
       kind = "finished";
-      tone = "finished";
       body = <Expandable label="Output" value={record.output} />;
       break;
     case "run.failed":
       kind = "failed";
-      tone = "failed";
       body = <p className="text-destructive">{record.error.message}</p>;
       break;
   }
   return (
     <Item role="listitem" size="sm" className="items-start px-0">
       <ItemMedia className="pt-1.5">
-        <span aria-hidden className={cn("size-2.5 rounded-full", DOT[tone])} />
+        <StatusDot tone={ledgerTone(record)} />
       </ItemMedia>
       <ItemContent className="min-w-0">
         <ItemTitle>

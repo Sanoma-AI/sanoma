@@ -6,8 +6,8 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * The theme: shadcn's neutral tokens, and beside them one pair per operation effect and per run
- * status (`--x` is the badge's background, `--x-foreground` its text). Light is `:root`, dark is
+ * The theme: shadcn's neutral tokens, and beside them one pair per operation effect and per tone
+ * (`--x` is the badge's background, `--x-foreground` its text). Light is `:root`, dark is
  * `.dark` on <html>, which the theme script in the document head sets before the page paints.
  */
 
@@ -60,19 +60,23 @@
   --effect-access: oklch(0.94 0.04 25);
   --effect-access-foreground: oklch(0.5 0.18 27);
 
-  /* Run statuses. Approvals and policy decisions borrow these: pending waits, approved finishes. */
-  --status-queued: oklch(0.95 0.015 280);
-  --status-queued-foreground: oklch(0.45 0.06 280);
-  --status-running: oklch(0.94 0.035 240);
-  --status-running-foreground: oklch(0.47 0.15 245);
-  --status-waiting: oklch(0.95 0.06 85);
-  --status-waiting-foreground: oklch(0.5 0.12 65);
-  --status-finished: oklch(0.95 0.045 155);
-  --status-finished-foreground: oklch(0.46 0.12 155);
-  --status-failed: oklch(0.94 0.04 25);
-  --status-failed-foreground: oklch(0.5 0.19 27);
-  --status-cancelled: oklch(0.95 0 0);
-  --status-cancelled-foreground: oklch(0.48 0 0);
+  /*
+   * Tones: what a status means, shared by runs, approvals, policy decisions and ledger records
+   * (common.tsx maps each to one). ok finished or allowed, bad failed or refused, waiting on a
+   * person, active running, idle queued, off cancelled or nothing to say.
+   */
+  --tone-ok: oklch(0.95 0.045 155);
+  --tone-ok-foreground: oklch(0.46 0.12 155);
+  --tone-bad: oklch(0.94 0.04 25);
+  --tone-bad-foreground: oklch(0.5 0.19 27);
+  --tone-waiting: oklch(0.95 0.06 85);
+  --tone-waiting-foreground: oklch(0.5 0.12 65);
+  --tone-active: oklch(0.94 0.035 240);
+  --tone-active-foreground: oklch(0.47 0.15 245);
+  --tone-idle: oklch(0.95 0.015 280);
+  --tone-idle-foreground: oklch(0.45 0.06 280);
+  --tone-off: oklch(0.95 0 0);
+  --tone-off-foreground: oklch(0.48 0 0);
 }
 
 .dark {
@@ -123,18 +127,18 @@
   --effect-access: oklch(0.3 0.08 25);
   --effect-access-foreground: oklch(0.83 0.1 25);
 
-  --status-queued: oklch(0.3 0.03 280);
-  --status-queued-foreground: oklch(0.84 0.05 280);
-  --status-running: oklch(0.31 0.07 245);
-  --status-running-foreground: oklch(0.84 0.09 245);
-  --status-waiting: oklch(0.33 0.06 75);
-  --status-waiting-foreground: oklch(0.88 0.11 85);
-  --status-finished: oklch(0.3 0.06 155);
-  --status-finished-foreground: oklch(0.85 0.12 155);
-  --status-failed: oklch(0.3 0.08 25);
-  --status-failed-foreground: oklch(0.83 0.1 25);
-  --status-cancelled: oklch(0.28 0 0);
-  --status-cancelled-foreground: oklch(0.78 0 0);
+  --tone-ok: oklch(0.3 0.06 155);
+  --tone-ok-foreground: oklch(0.85 0.12 155);
+  --tone-bad: oklch(0.3 0.08 25);
+  --tone-bad-foreground: oklch(0.83 0.1 25);
+  --tone-waiting: oklch(0.33 0.06 75);
+  --tone-waiting-foreground: oklch(0.88 0.11 85);
+  --tone-active: oklch(0.31 0.07 245);
+  --tone-active-foreground: oklch(0.84 0.09 245);
+  --tone-idle: oklch(0.3 0.03 280);
+  --tone-idle-foreground: oklch(0.84 0.05 280);
+  --tone-off: oklch(0.28 0 0);
+  --tone-off-foreground: oklch(0.78 0 0);
 }
 
 @theme inline {
@@ -191,18 +195,18 @@
   --color-effect-money-foreground: var(--effect-money-foreground);
   --color-effect-access: var(--effect-access);
   --color-effect-access-foreground: var(--effect-access-foreground);
-  --color-status-queued: var(--status-queued);
-  --color-status-queued-foreground: var(--status-queued-foreground);
-  --color-status-running: var(--status-running);
-  --color-status-running-foreground: var(--status-running-foreground);
-  --color-status-waiting: var(--status-waiting);
-  --color-status-waiting-foreground: var(--status-waiting-foreground);
-  --color-status-finished: var(--status-finished);
-  --color-status-finished-foreground: var(--status-finished-foreground);
-  --color-status-failed: var(--status-failed);
-  --color-status-failed-foreground: var(--status-failed-foreground);
-  --color-status-cancelled: var(--status-cancelled);
-  --color-status-cancelled-foreground: var(--status-cancelled-foreground);
+  --color-tone-ok: var(--tone-ok);
+  --color-tone-ok-foreground: var(--tone-ok-foreground);
+  --color-tone-bad: var(--tone-bad);
+  --color-tone-bad-foreground: var(--tone-bad-foreground);
+  --color-tone-waiting: var(--tone-waiting);
+  --color-tone-waiting-foreground: var(--tone-waiting-foreground);
+  --color-tone-active: var(--tone-active);
+  --color-tone-active-foreground: var(--tone-active-foreground);
+  --color-tone-idle: var(--tone-idle);
+  --color-tone-idle-foreground: var(--tone-idle-foreground);
+  --color-tone-off: var(--tone-off);
+  --color-tone-off-foreground: var(--tone-off-foreground);
 }
 
 @layer base {

@@ -1,4 +1,5 @@
-import type { ApprovalState, Effect, RecordedDecision, RunStatus } from "@sanoma/workflows";
+import type { ApprovalState, Effect, LedgerRecord, RecordedDecision, RunStatus } from "@sanoma/workflows";
+import { cva } from "class-variance-authority";
 import { ChevronRightIcon, CircleAlertIcon, InfoIcon } from "lucide-react";
 import { type ReactNode, useMemo, useSyncExternalStore } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -10,23 +11,93 @@ import { approverName } from "../api.ts";
 
 // Small pieces shared by the screens, composed from the shadcn components in ./ui.
 
-/** One colour per effect, the same everywhere: Badge has a variant for each. */
-export function EffectBadge({ effect }: { effect: Effect }) {
-  return <Badge variant={effect}>{effect}</Badge>;
+/** What a status means, one colour each (the --tone-* tokens in style.css). */
+export type Tone = "ok" | "bad" | "waiting" | "active" | "idle" | "off";
+
+export const RUN_TONE: Record<RunStatus, Tone> = {
+  queued: "idle",
+  running: "active",
+  waiting: "waiting",
+  finished: "ok",
+  failed: "bad",
+  cancelled: "off",
+};
+
+export const APPROVAL_TONE: Record<ApprovalState["status"], Tone> = {
+  pending: "waiting",
+  approved: "ok",
+  rejected: "bad",
+};
+
+export const DECISION_TONE: Record<RecordedDecision["kind"], Tone> = { allow: "ok", deny: "bad", approve: "waiting" };
+
+/** A ledger record's tone: what it did to the run. */
+export function ledgerTone(record: LedgerRecord): Tone {
+  switch (record.type) {
+    case "op.called":
+      return record.error ? "bad" : "off";
+    case "approval.requested":
+      return "waiting";
+    case "approval.decided":
+      return record.decision === "approve" ? "ok" : "bad";
+    case "run.finished":
+      return "ok";
+    case "run.failed":
+      return "bad";
+    default:
+      return "off";
+  }
 }
 
-/** Badge has a variant for each run status. */
-export function RunStatusBadge({ status }: { status: RunStatus }) {
-  return <Badge variant={status}>{status}</Badge>;
-}
+/** Badge colours by tone, over Badge's default variant: `<Badge className={toneBadge({ tone })}>`. */
+export const toneBadge = cva("", {
+  variants: {
+    tone: {
+      ok: "bg-tone-ok text-tone-ok-foreground",
+      bad: "bg-tone-bad text-tone-bad-foreground",
+      waiting: "bg-tone-waiting text-tone-waiting-foreground",
+      active: "bg-tone-active text-tone-active-foreground",
+      idle: "bg-tone-idle text-tone-idle-foreground",
+      off: "bg-tone-off text-tone-off-foreground",
+    } satisfies Record<Tone, string>,
+  },
+});
 
-const APPROVAL_VARIANT = { pending: "waiting", approved: "finished", rejected: "failed" } as const;
+/** Badge colours by operation effect, one each, the same everywhere (the --effect-* tokens). */
+export const effectBadge = cva("", {
+  variants: {
+    effect: {
+      read: "bg-effect-read text-effect-read-foreground",
+      write: "bg-effect-write text-effect-write-foreground",
+      publish: "bg-effect-publish text-effect-publish-foreground",
+      send: "bg-effect-send text-effect-send-foreground",
+      money: "bg-effect-money text-effect-money-foreground",
+      access: "bg-effect-access text-effect-access-foreground",
+    } satisfies Record<Effect, string>,
+  },
+});
+
+const dot = cva("size-2.5 rounded-full", {
+  variants: {
+    tone: {
+      ok: "bg-tone-ok-foreground",
+      bad: "bg-tone-bad-foreground",
+      waiting: "bg-tone-waiting-foreground",
+      active: "bg-tone-active-foreground",
+      idle: "bg-tone-idle-foreground",
+      off: "bg-muted-foreground/50",
+    } satisfies Record<Tone, string>,
+  },
+});
+
+/** A tone as a dot, where a badge would be too much. */
+export function StatusDot({ tone }: { tone: Tone }) {
+  return <span aria-hidden className={dot({ tone })} />;
+}
 
 export function ApprovalStatusBadge({ status }: { status: ApprovalState["status"] }) {
-  return <Badge variant={APPROVAL_VARIANT[status]}>{status}</Badge>;
+  return <Badge className={toneBadge({ tone: APPROVAL_TONE[status] })}>{status}</Badge>;
 }
-
-const DECISION_VARIANT = { allow: "finished", deny: "failed", approve: "waiting" } as const;
 
 /** The policy's decision on an operation call. */
 export function DecisionBadge({ decision }: { decision: RecordedDecision }) {
@@ -34,7 +105,7 @@ export function DecisionBadge({ decision }: { decision: RecordedDecision }) {
   const title =
     decision.kind === "deny" ? decision.reason : approver ? `held for ${approver}` : "allowed by the policy";
   return (
-    <Badge variant={DECISION_VARIANT[decision.kind]} title={title}>
+    <Badge className={toneBadge({ tone: DECISION_TONE[decision.kind] })} title={title}>
       {decision.kind}
       {approver ? ` · ${approver}` : ""}
     </Badge>

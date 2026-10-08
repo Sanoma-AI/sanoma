@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { EffectBadge, Fact, Facts, Json, Nothing, PageHeader } from "../components/common.tsx";
+import { effectBadge, Fact, Facts, Json, Nothing, PageHeader } from "../components/common.tsx";
 import { type Field, fieldsOf } from "../form/schema.ts";
 import { configQuery } from "../queries.ts";
 
@@ -137,7 +137,7 @@ function OpItem({ id, op }: { id: string; op: OpEntry | undefined }) {
       <ItemContent>
         <ItemTitle>
           <code>{id}</code>
-          {op && <EffectBadge effect={op.effect} />}
+          {op && <Badge className={effectBadge({ effect: op.effect })}>{op.effect}</Badge>}
           {op?.idempotent && (
             <Badge variant="outline" title="Safe to retry: the vendor dedupes repeated calls">
               idempotent

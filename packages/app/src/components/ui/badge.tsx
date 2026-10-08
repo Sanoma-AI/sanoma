@@ -15,20 +15,6 @@ const badgeVariants = cva(
         outline: "border-border text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
         ghost: "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
         link: "text-primary underline-offset-4 hover:underline",
-        // An operation's effect, one colour each (the --effect-* tokens in style.css).
-        read: "bg-effect-read text-effect-read-foreground",
-        write: "bg-effect-write text-effect-write-foreground",
-        publish: "bg-effect-publish text-effect-publish-foreground",
-        send: "bg-effect-send text-effect-send-foreground",
-        money: "bg-effect-money text-effect-money-foreground",
-        access: "bg-effect-access text-effect-access-foreground",
-        // A run's status (the --status-* tokens).
-        queued: "bg-status-queued text-status-queued-foreground",
-        running: "bg-status-running text-status-running-foreground",
-        waiting: "bg-status-waiting text-status-waiting-foreground",
-        finished: "bg-status-finished text-status-finished-foreground",
-        failed: "bg-status-failed text-status-failed-foreground",
-        cancelled: "bg-status-cancelled text-status-cancelled-foreground",
       },
     },
     defaultVariants: {
