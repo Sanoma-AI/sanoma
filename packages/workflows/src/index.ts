@@ -21,7 +21,7 @@ export {
   type Builtin,
   type Ctx,
   mayDecide,
-  SleepRequest,
+  type SleepRequest,
   type Use,
   type WorkflowDefinition,
 } from "./define.ts";

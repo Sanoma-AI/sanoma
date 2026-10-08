@@ -118,13 +118,19 @@ export type SleepRequest =
 const time = "must be an ISO 8601 date-time with an offset, such as 2026-10-07T09:00:00Z, or epoch milliseconds";
 const duration = z.number({ error: "must be a number" }).nonnegative("must not be negative").optional();
 
-/** Checks a `ctx.sleep` request: `options[0]` is the time form, `options[1]` the duration form. */
-export const SleepRequest = z.union([
-  z.strictObject({
-    until: z.union([z.iso.datetime({ offset: true, error: time }), z.number({ error: time })], { error: time }),
-  }),
-  z.strictObject({ ms: duration, seconds: duration, minutes: duration, hours: duration, days: duration }),
-]) satisfies z.ZodType<SleepRequest>;
+/** Checks a `ctx.sleep` request that names a time. */
+export const SleepUntil = z.strictObject({
+  until: z.union([z.iso.datetime({ offset: true, error: time }), z.number({ error: time })], { error: time }),
+}) satisfies z.ZodType<SleepRequest>;
+
+/** Checks a `ctx.sleep` request that names a duration. */
+export const SleepFor = z.strictObject({
+  ms: duration,
+  seconds: duration,
+  minutes: duration,
+  hours: duration,
+  days: duration,
+}) satisfies z.ZodType<SleepRequest>;
 
 type OpsOf<U extends readonly Use[]> = Extract<U[number], Op>;
 

@@ -5,7 +5,9 @@ import {
   Approver,
   approverLabel,
   Covers,
-  SleepRequest,
+  SleepFor,
+  type SleepRequest,
+  SleepUntil,
   type Use,
   type WorkflowDefinition,
 } from "./define.ts";
@@ -255,7 +257,7 @@ function checkApproval(title: string, req: ApprovalRequest): CheckedApproval {
 /** Checks a sleep request before any DBOS call, so a bad one fails the run with `invalid_input`. */
 function checkSleep(req: unknown): SleepRequest {
   const timed = typeof req === "object" && req !== null && "until" in req;
-  return parseOrThrow(SleepRequest.options[timed ? 0 : 1], req, `ctx.sleep(${shown(req)})`);
+  return parseOrThrow(timed ? SleepUntil : SleepFor, req, `ctx.sleep(${shown(req)})`);
 }
 
 /**
