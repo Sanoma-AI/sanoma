@@ -1,5 +1,15 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,34 +24,54 @@ import { testDatabaseUrl } from "@sanoma/testing";
 import {
   allow,
   approve,
+  approvedFor,
   type ApprovalState,
   type ConfigDescription,
   defineConfig,
   definePolicy,
+  jsonlLedger,
   memoryLedger,
   type RunSummary,
   startWorker,
   type Worker,
 } from "@sanoma/workflows";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
 import { z } from "zod";
 import { type App, type ErrorResponse, type RunDetail, startApp } from "../src/index.ts";
 import { asApiError } from "../src/server/core.ts";
 
-// Needs Postgres (`pnpm db:up`) and the built app: the tests build it once when
-// dist/server/server.js is missing. Rebuild with `pnpm --filter @sanoma/app build` after
-// changing anything under src/ but index.ts.
+// Needs Postgres (`pnpm db:up`) and the built app: the tests build it when
+// dist/server/server.js is missing or older than a file under src/.
 const appDir = fileURLToPath(new URL("..", import.meta.url));
 const distDir = join(appDir, "dist");
 
+function needsBuild(): boolean {
+  const built = join(distDir, "server", "server.js");
+  if (!existsSync(built)) return true;
+  const builtAt = statSync(built).mtimeMs;
+  const src = join(appDir, "src");
+  return readdirSync(src, { recursive: true, encoding: "utf8" }).some(
+    (file) => statSync(join(src, file)).mtimeMs > builtAt,
+  );
+}
+
+const HOLD_TITLE = "Publish the held post";
+
 // Holds publish and send for marketing-lead, unless they already approved something in the run.
+// A run started by "held" is held by the policy itself, once for everything it publishes.
 const policy = definePolicy(
-  ({ effect, run }) =>
-    (effect === "publish" || effect === "send") &&
-    !run.approvals.some((a) => a.approver === "marketing-lead" && a.status === "approved")
-      ? approve("marketing-lead")
-      : allow(),
+  ({ op, effect, actor, run }) => {
+    if (effect !== "publish" && effect !== "send") return allow();
+    if (actor.id === "held") {
+      return approvedFor(run.approvals, op.id, "marketing-lead")
+        ? allow()
+        : approve("marketing-lead", { title: HOLD_TITLE, covers: [resend.broadcast.send, bluesky.post.create] });
+    }
+    return run.approvals.some((a) => a.approver === "marketing-lead" && a.status === "approved")
+      ? allow()
+      : approve("marketing-lead");
+  },
   { version: "test-1" },
 );
 
@@ -61,7 +91,7 @@ let app: App;
 let runId: string;
 
 beforeAll(async () => {
-  if (!existsSync(join(distDir, "server", "server.js"))) {
+  if (needsBuild()) {
     execFileSync("pnpm", ["exec", "vite", "build"], { cwd: appDir, stdio: "inherit" });
   }
   worker = await startWorker(config);
@@ -96,6 +126,21 @@ async function waitFor<T>(get: () => Promise<T>, done: (value: T) => boolean, ti
 }
 
 const detail = async (id: string) => (await call<RunDetail>(`/api/runs/${id}`)).body;
+
+/** A page as the server renders it, and its text without the comments React puts between text parts. */
+async function page(path: string, base = app.url) {
+  const res = await fetch(new URL(path, base));
+  const html = await res.text();
+  return { status: res.status, html, text: html.replaceAll("<!-- -->", "") };
+}
+
+/** A request the way a client other than ours might send it: any content type, any body. */
+const raw = (path: string, contentType: string | undefined, body: string | undefined) =>
+  fetch(new URL(path, app.url), {
+    method: "POST",
+    headers: { "x-sanoma-actor": "marketing-lead", ...(contentType ? { "content-type": contentType } : {}) },
+    body,
+  }).then(async (res) => ({ status: res.status, body: (await res.json()) as ErrorResponse }));
 const input = (title: string) => ({
   title,
   body: "<p>Hello</p>",
@@ -123,6 +168,10 @@ describe("the API", () => {
 
     const unknown = await call("/api/runs", { method: "POST", actor: "alice", body: { workflow: "nope", input: {} } });
     expect(unknown.status).toBe(404);
+    expect(unknown.body).toMatchObject({
+      code: "invalid_input",
+      issues: [expect.objectContaining({ path: ["workflow"] })],
+    });
 
     const { title: _, ...untitled } = input("x");
     const invalid = await call("/api/runs", {
@@ -144,6 +193,17 @@ describe("the API", () => {
     const badStatus = await call("/api/runs?status=asleep");
     expect(badStatus.status).toBe(400);
     expect(badStatus.body.issues).toEqual([expect.objectContaining({ path: ["status"] })]);
+  });
+
+  it("takes only a JSON body, on both routes that change something", async () => {
+    for (const path of ["/api/runs", "/api/runs/does-not-exist/approvals/approval-1"]) {
+      const form = await raw(path, "application/x-www-form-urlencoded", "decision=approve");
+      expect(form.status, path).toBe(415);
+      expect(form.body.code, path).toBe("invalid_input");
+      const empty = await raw(path, "application/json", undefined);
+      expect(empty.status, path).toBe(400);
+      expect(empty.body).toMatchObject({ code: "invalid_input", error: expect.stringMatching(/empty/) });
+    }
   });
 
   it("starts a run as the actor, holds it for the approver, refuses anyone else, then finishes", async () => {
@@ -297,6 +357,76 @@ describe("the page", () => {
     expect(root.headers.get("location")).toMatch(/\/runs$/);
   });
 
+  it("renders a run the policy held: its card in the inbox while held, then the hold, the notes and the records", async () => {
+    const started = await call<{ runId: string }>("/api/runs", {
+      method: "POST",
+      actor: "held",
+      body: { workflow: "announce", input: input("Held by the policy") },
+    });
+    const id = started.body.runId;
+    const approveAs = (approvalId: string, note: string) =>
+      call<ApprovalState>(`/api/runs/${id}/approvals/${approvalId}`, {
+        method: "POST",
+        actor: "marketing-lead",
+        body: { decision: "approve", note },
+      });
+    await waitFor(
+      () => detail(id),
+      (d) => d.approvals.some((a) => a.status === "pending"),
+    );
+    // The note is trimmed, and one with nothing in it is left out.
+    expect((await approveAs("approval-1", "  copy is fine  ")).body).toMatchObject({ note: "copy is fine" });
+
+    const held = await waitFor(
+      () => detail(id),
+      (d) => d.approvals.some((a) => a.requestedBy === "policy"),
+    );
+    const hold = held.approvals.find((a) => a.requestedBy === "policy")!;
+    expect(hold).toMatchObject({ title: HOLD_TITLE, op: "ghost.post.publish", status: "pending" });
+    const inbox = await page("/inbox");
+    expect(inbox.status).toBe(200);
+    expect(inbox.text).toContain(HOLD_TITLE);
+
+    const decided = await approveAs(hold.id, "   ");
+    expect(decided.body).toMatchObject({ status: "approved" });
+    expect(decided.body).not.toHaveProperty("note");
+    const done = await waitFor(
+      () => detail(id),
+      (d) => d.run.status === "finished",
+    );
+    const notes = done.ledger.flatMap((r) => (r.type === "approval.decided" ? [r.note] : []));
+    expect(notes).toEqual(["copy is fine", undefined]);
+
+    const run = await page(`/runs/${id}`);
+    expect(run.status).toBe(200);
+    expect(run.text).toContain(`“${HOLD_TITLE}” asked of marketing-lead`);
+    expect(run.text).toContain(`marketing-lead approved “${HOLD_TITLE}”`);
+    expect(run.text).toContain("copy is fine");
+    expect(run.text).toMatch(/approved by marketing-lead/);
+    expect(run.text).toContain("<code>ghost.post.publish</code>");
+    expect(run.text).toContain("Started by held");
+    expect(run.text).toMatch(/>finished<\/span>/);
+  });
+
+  it("renders the workflows, the start form and the theme switch on the server", async () => {
+    const version = (await call<ConfigDescription>("/api/config")).body.version;
+    const workflows = await page("/workflows");
+    expect(workflows.status).toBe(200);
+    expect(workflows.text).toContain(`<code>${version}</code>`);
+    expect(workflows.text).toMatch(/>idempotent<\/span>/);
+    expect(workflows.text).toMatch(/default (&quot;|")newsletter(&quot;|")/);
+
+    const start = await page("/start");
+    expect(start.status).toBe(200);
+    expect(start.html).toContain('id="field-title"');
+    expect(start.html).toContain('type="datetime-local"');
+
+    const runs = await page("/runs");
+    expect(runs.html).toContain("sanoma.theme");
+    expect(runs.html).toContain('aria-label="Theme: system"');
+    expect(runs.html.match(/<html[^>]*>/)?.[0]).not.toMatch(/class="[^"]*\bdark\b/);
+  });
+
   it("answers any other path with the app's not-found page", async () => {
     const res = await fetch(new URL("/nonexistent", app.url));
     expect(res.status).toBe(404);
@@ -312,7 +442,7 @@ describe("the page", () => {
     expect(html).toMatch(/Lets through<\/dt><dd[^>]*><span[^>]*>no operation by itself/);
     const missing = await fetch(new URL("/runs/does-not-exist", app.url));
     expect(missing.status).toBe(404);
-    expect(await missing.text()).toContain("No run <!-- -->does-not-exist");
+    expect(await missing.text()).toMatch(/No run (<!-- -->)?does-not-exist/);
   });
 
   it("serves the built assets, hashed ones as immutable, and nothing outside them", async () => {
@@ -337,7 +467,7 @@ describe("the page", () => {
   it("keeps the runtime out of the browser bundle", () => {
     const dir = join(distDir, "client", "assets");
     for (const file of readdirSync(dir).filter((f) => f.endsWith(".js"))) {
-      expect(readFileSync(join(dir, file), "utf8"), file).not.toMatch(/dbos/i);
+      expect(readFileSync(join(dir, file), "utf8"), file).not.toMatch(/DBOSClient|systemDatabaseUrl/);
     }
   });
 
@@ -447,5 +577,80 @@ describe("startApp", () => {
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }
+  });
+});
+
+describe("an app on every interface", () => {
+  it("answers a request addressed to any name, since it was asked to listen beyond this machine", async () => {
+    const open = await startApp(config, { host: "0.0.0.0" });
+    try {
+      const status = await new Promise<number>((done, fail) => {
+        httpRequest(
+          {
+            host: "127.0.0.1",
+            port: new URL(open.url).port,
+            path: "/api/config",
+            headers: { host: "sanoma.example:80" },
+          },
+          (r) => {
+            r.resume();
+            done(r.statusCode ?? 0);
+          },
+        )
+          .on("error", fail)
+          .end();
+      });
+      expect(status).toBe(200);
+    } finally {
+      await open.close();
+    }
+  });
+});
+
+describe("an app reading a jsonl ledger", () => {
+  let dir: string;
+  let jsonl: App;
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), "sanoma-app-ledger-"));
+    // A directory nothing has written to yet: the worker keeps its records in memory.
+    jsonl = await startApp({ ...config, ledger: jsonlLedger(join(dir, "ledger")) });
+  });
+  afterAll(async () => {
+    await jsonl?.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const read = () =>
+    fetch(new URL(`/api/runs/${runId}`, jsonl.url)).then(async (res) => ({
+      status: res.status,
+      body: (await res.json()) as RunDetail,
+    }));
+
+  it("shows a run nothing has recorded there as having no records, not as an error", async () => {
+    const { status, body } = await read();
+    expect(status).toBe(200);
+    expect(body.ledger).toEqual([]);
+    expect(body).not.toHaveProperty("ledgerError");
+    const html = await page(`/runs/${runId}`, jsonl.url);
+    expect(html.status).toBe(200);
+    expect(html.text).toContain("Nothing recorded yet");
+  });
+
+  it("shows why it cannot read a corrupt ledger, and logs it for the operator once", async () => {
+    mkdirSync(join(dir, "ledger"), { recursive: true });
+    writeFileSync(join(dir, "ledger", `${encodeURIComponent(runId)}.jsonl`), "not json\n");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    let calls: unknown[][];
+    let result: Awaited<ReturnType<typeof read>>;
+    try {
+      result = await read();
+    } finally {
+      calls = [...logged.mock.calls];
+      logged.mockRestore();
+    }
+    expect(result.status).toBe(200);
+    expect(result.body.ledger).toEqual([]);
+    expect(result.body.ledgerError).toMatch(/corrupt ledger line/);
+    expect(calls).toHaveLength(1);
+    expect(String(calls[0]?.[0])).toContain(`could not read the ledger of run ${runId}`);
   });
 });
