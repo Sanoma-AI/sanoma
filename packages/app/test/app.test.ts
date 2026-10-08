@@ -478,7 +478,7 @@ describe("the page", () => {
       /<h2[^>]*>Graph<\/h2><div[^>]*><div data-slot="skeleton"[^>]*aria-label="Loading the graph"/,
     );
     // The workflow's own approval covers no operation, and says so.
-    expect(found.html).toMatch(/Lets through<\/th><td[^>]*><span[^>]*>no operation by itself/);
+    expect(found.html).toMatch(/Lets through<\/dt><dd[^>]*><span[^>]*>no operation by itself/);
     const missing = await page("/runs/does-not-exist");
     expect(missing.status).toBe(404);
     expect(missing.text).toContain("No run does-not-exist");
