@@ -1,6 +1,7 @@
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import react from "@vitejs/plugin-react";
+import { cn as cnTables } from "cn/vite";
 import { defineConfig, type Plugin } from "vite";
 
 // The runtime and what it loads stay outside the server bundle: dist/server/server.js imports
@@ -24,7 +25,21 @@ const browserSafe: Plugin = {
 };
 
 export default defineConfig({
-  plugins: [browserSafe, tailwindcss(), tanstackStart(), react()],
+  plugins: [
+    browserSafe,
+    // Merge tables fitted to the classes in src (see src/lib/utils.ts), rewritten when they change.
+    cnTables({ content: ["src/**/*.tsx"], css: "src/style.css", out: "src/lib/cn-tables.ts" }),
+    tailwindcss(),
+    tanstackStart(),
+    react(),
+  ],
+  resolve: {
+    alias: [
+      // Every `cn` is the one bound to those tables, and cva's clsx is cn's join.
+      { find: /^cn$/, replacement: "#/lib/utils.ts" },
+      { find: /^clsx$/, replacement: "cn/lite" },
+    ],
+  },
   environments: {
     ssr: { resolve: { external: RUNTIME } },
   },

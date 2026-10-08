@@ -1,5 +1,12 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "printWidth": 120,
-  "ignorePatterns": ["pnpm-lock.yaml", "**/dist", "**/routeTree.gen.ts", ".agents/skills", "skills-lock.json"]
+  "ignorePatterns": [
+    "pnpm-lock.yaml",
+    "**/dist",
+    "**/routeTree.gen.ts",
+    "**/cn-tables.ts",
+    ".agents/skills",
+    "skills-lock.json"
+  ]
 }
