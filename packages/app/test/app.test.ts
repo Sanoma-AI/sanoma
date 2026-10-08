@@ -657,14 +657,16 @@ describe("an app reading a jsonl ledger", () => {
       body: (await res.json()) as RunDetail,
     }));
 
-  it("shows a run nothing has recorded there as having no records, not as an error", async () => {
+  it("says a run that has started has no records there: the app reads another ledger than the worker", async () => {
     const { status, body } = await read();
     expect(status).toBe(200);
     expect(body.ledger).toEqual([]);
-    expect(body).not.toHaveProperty("ledgerError");
+    expect(body.ledgerError).toBe(
+      "No records for a run that has started; is the app reading the same ledger as the worker?",
+    );
     const html = await page(`/runs/${runId}`, jsonl.url);
     expect(html.status).toBe(200);
-    expect(html.text).toContain("Nothing recorded yet");
+    expect(html.text).toContain("is the app reading the same ledger as the worker?");
   });
 
   it("shows why it cannot read a corrupt ledger, and logs it for the operator once", async () => {

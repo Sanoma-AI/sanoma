@@ -86,7 +86,10 @@ export interface RunDetail {
   run: RunSummary;
   /** The run's ledger records in `seq` order. */
   ledger: LedgerRecord[];
-  /** Why the ledger could not be read, when it could not. `ledger` is then empty. */
+  /**
+   * Why the ledger could not be read, when it could not, or why a run that has started has no
+   * records there. `ledger` is then empty.
+   */
   ledgerError?: string;
   approvals: ApprovalState[];
 }

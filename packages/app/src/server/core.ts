@@ -49,6 +49,8 @@ export function parse<T extends z.ZodType>(schema: T, value: unknown, what: stri
   throw asApiError(invalidInput(what, parsed.error.issues));
 }
 
+const NO_RECORDS = "No records for a run that has started; is the app reading the same ledger as the worker?";
+
 /** Ledger read failures already logged, by run and message: a page polls its run every 2 s. */
 const loggedReads = new Set<string>();
 
@@ -58,7 +60,13 @@ export async function runDetail({ client, resolved }: AppContext, runId: string)
   if (!run) throw new ApiError(404, { error: `No run ${runId}`, code: "run_not_found" });
   const { approvals } = run;
   try {
-    return { run, ledger: await resolved.ledger.read(runId), approvals };
+    const ledger = await resolved.ledger.read(runId);
+    // A run that has started records run.started first. Seeing none, the likeliest cause is an
+    // app reading another ledger than the worker's (a jsonl directory relative to another cwd).
+    if (ledger.length === 0 && run.status !== "queued") {
+      return { run, ledger, ledgerError: NO_RECORDS, approvals };
+    }
+    return { run, ledger, approvals };
   } catch (err) {
     // A store reads a run nothing has recorded as no records, so this is a real failure (a
     // corrupt file, a permission): logged for the operator once, and the page shows the run and
