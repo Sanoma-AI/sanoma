@@ -234,10 +234,16 @@ export function memoryLedger(): LedgerStore {
 }
 
 type Common = "v" | "app" | "id" | "runId" | "seq" | "at" | "actor" | "workflow" | "group";
-type Body = LedgerRecord extends infer R ? (R extends LedgerRecord ? Omit<R, Common> : never) : never;
+
+/** What one kind of record says, without what every record carries: `type` and its own fields. */
+export type LedgerBody = LedgerRecord extends infer R ? (R extends LedgerRecord ? Omit<R, Common> : never) : never;
 
 /** A record of the run, with the next `seq` unless one is given, tagged with the `ctx.all` member it is written in. */
-export function entry(run: Run, body: Body, opts: { seq?: number; key?: string; at?: number } = {}): LedgerRecord {
+export function entry(
+  run: Run,
+  body: LedgerBody,
+  opts: { seq?: number; key?: string; at?: number } = {},
+): LedgerRecord {
   const seq = opts.seq ?? run.seq++;
   const record = {
     v: 1,

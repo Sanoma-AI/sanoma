@@ -1,11 +1,10 @@
-import type { LedgerGroup, LedgerRecord, RunStatus, RunSummary } from "@sanoma/workflows";
+import type { LedgerBody, LedgerGroup, LedgerRecord, RunStatus, RunSummary } from "@sanoma/workflows";
 import { describe, expect, it } from "vitest";
 import { type GraphNode, runGraph } from "../src/graph/run-graph.ts";
 
 // Hand-built ledgers, in the shapes the runtime writes (see packages/workflows/src/ledger.ts).
 
-type Body = LedgerRecord extends infer R ? (R extends LedgerRecord ? Omit<R, keyof Common> : never) : never;
-type Common = Pick<LedgerRecord, "v" | "app" | "id" | "runId" | "seq" | "at" | "actor" | "workflow">;
+type Body = LedgerBody & { group?: LedgerGroup };
 
 /** A record with this seq, its id made the way the runtime makes it. */
 function record(seq: number, body: Body): LedgerRecord {
