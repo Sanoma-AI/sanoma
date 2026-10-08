@@ -22,10 +22,9 @@ import { Input } from "#/components/ui/input.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
-import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
 import { errorMessage } from "@sanoma/workflows/shared";
 import { errorBodyOf } from "../api.ts";
-import { Notice } from "../components/common.tsx";
+import { Notice, Tip } from "../components/common.tsx";
 import { startRunFn } from "../functions.ts";
 import { RUNS_KEY } from "../queries.ts";
 import {
@@ -168,29 +167,29 @@ function FieldView({ form, field, path }: { form: StartFormApi; field: SchemaFie
             </FieldLegend>
             {field.description && <FieldDescription>{field.description}</FieldDescription>}
             <FieldGroup>
-              {(f.state.value as unknown[]).map((_, i) => (
-                <Field key={i} orientation="horizontal" className="items-start">
-                  <FieldContent>
-                    <FieldView form={form} field={{ ...item, label: `${field.label} ${i + 1}` }} path={[...path, i]} />
-                  </FieldContent>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
+              {(f.state.value as unknown[]).map((_, i) => {
+                const label = `${field.label} ${i + 1}`;
+                const remove = `Remove ${label}`;
+                return (
+                  <Field key={i} orientation="horizontal" className="items-start">
+                    <FieldContent>
+                      <FieldView form={form} field={{ ...item, label }} path={[...path, i]} />
+                    </FieldContent>
+                    {/* The button's name says it already: hidden from the tooltip's description, so it is not read twice. */}
+                    <Tip tip={<span aria-hidden>{remove}</span>}>
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon"
                         onClick={() => f.removeValue(i)}
-                        aria-label={`Remove ${field.label} ${i + 1}`}
+                        aria-label={remove}
                       >
                         <Trash2Icon />
                       </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      Remove {field.label} {i + 1}
-                    </TooltipContent>
-                  </Tooltip>
-                </Field>
-              ))}
+                    </Tip>
+                  </Field>
+                );
+              })}
               <Field orientation="horizontal">
                 <Button type="button" variant="outline" onClick={() => f.pushValue(initialValue(item, item.default))}>
                   <PlusIcon data-icon="inline-start" />

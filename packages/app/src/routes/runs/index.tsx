@@ -4,8 +4,7 @@ import { PlayIcon } from "lucide-react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
-import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
-import { Nothing, Notice, PageHeader, plural, toneBadge, When } from "../../components/common.tsx";
+import { Nothing, Notice, PageHeader, plural, Tip, toneBadge, When } from "../../components/common.tsx";
 import { RUN_TONE } from "#/lib/tone.ts";
 import { pendingApprovals, starterName } from "../../api.ts";
 import { runsQuery } from "../../queries.ts";
@@ -61,16 +60,11 @@ function RunsPage() {
                     onClick={() => void navigate({ to: "/runs/$id", params: { id: run.runId } })}
                   >
                     <TableCell className="font-medium">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Link to="/runs/$id" params={{ id: run.runId }} onClick={(e) => e.stopPropagation()}>
-                            {run.workflow}
-                          </Link>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <code>{run.runId}</code>
-                        </TooltipContent>
-                      </Tooltip>
+                      <Tip tip={<code>{run.runId}</code>}>
+                        <Link to="/runs/$id" params={{ id: run.runId }} onClick={(e) => e.stopPropagation()}>
+                          {run.workflow}
+                        </Link>
+                      </Tip>
                     </TableCell>
                     <TableCell>
                       <Badge className={toneBadge({ tone: RUN_TONE[run.status] })}>{run.status}</Badge>
@@ -88,12 +82,9 @@ function RunsPage() {
                     </TableCell>
                     <TableCell>
                       {run.status === "failed" && run.error && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="block max-w-xs truncate text-destructive">{run.error}</span>
-                          </TooltipTrigger>
-                          <TooltipContent className="max-w-sm">{run.error}</TooltipContent>
-                        </Tooltip>
+                        <span className="block max-w-xs truncate text-destructive" title={run.error}>
+                          {run.error}
+                        </span>
                       )}
                     </TableCell>
                   </TableRow>

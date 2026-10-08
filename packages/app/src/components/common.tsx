@@ -4,6 +4,7 @@ import { cva } from "class-variance-authority";
 import { ChevronRightIcon, CircleAlertIcon, InfoIcon } from "lucide-react";
 import {
   lazy,
+  type ReactElement,
   type ReactNode,
   type RefObject,
   Suspense,
@@ -133,21 +134,37 @@ export function ApprovalStatusBadge({ status }: { status: ApprovalState["status"
   return <Badge className={toneBadge({ tone: APPROVAL_TONE[status] })}>{status}</Badge>;
 }
 
-/** The policy's decision on an operation call. */
-export function DecisionBadge({ decision }: { decision: RecordedDecision }) {
-  const approver = decision.kind === "approve" ? approverLabel(decision.approver) : undefined;
-  const title =
-    decision.kind === "deny" ? decision.reason : approver ? `held for ${approver}` : "allowed by the policy";
+/**
+ * A tooltip on a control. Only on what takes focus (a button, a link, or a badge given
+ * `tabIndex={0}` because its tooltip says something it does not), so a keyboard reaches it too.
+ * Passive detail on many items, such as a time's exact value, is a native `title` instead.
+ */
+export function Tip({ tip, children }: { tip: ReactNode; children: ReactElement }) {
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <Badge className={toneBadge({ tone: DECISION_TONE[decision.kind] })}>
-          {decision.kind}
-          {approver ? ` · ${approver}` : ""}
-        </Badge>
-      </TooltipTrigger>
-      <TooltipContent>{title}</TooltipContent>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent>{tip}</TooltipContent>
     </Tooltip>
+  );
+}
+
+/** The policy's decision on an operation call; a denial's reason is its tooltip. */
+export function DecisionBadge({ decision }: { decision: RecordedDecision }) {
+  const tone = toneBadge({ tone: DECISION_TONE[decision.kind] });
+  if (decision.kind === "deny") {
+    return (
+      <Tip tip={decision.reason}>
+        <Badge className={tone} tabIndex={0}>
+          deny
+        </Badge>
+      </Tip>
+    );
+  }
+  return (
+    <Badge className={tone}>
+      {decision.kind}
+      {decision.kind === "approve" ? ` · ${approverLabel(decision.approver)}` : ""}
+    </Badge>
   );
 }
 
@@ -191,21 +208,16 @@ const readClock = () => (now ??= Date.now());
 const noClock = () => undefined;
 
 /**
- * A time, relative to now in the browser. The server renders the UTC time, so the page
- * hydrates the same markup whatever the browser's clock and time zone. Its tooltip, the local
- * time, renders only once opened, in the browser.
+ * A time, relative to now in the browser, with the UTC time as its title. The server renders
+ * the UTC time, so the page hydrates the same markup whatever the browser's clock and time zone.
  */
 export function When({ at }: { at: number }) {
   const clock = useSyncExternalStore(watchClock, readClock, noClock);
+  const utc = utcText(at, { seconds: true });
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <time dateTime={new Date(at).toISOString()}>
-          {clock === undefined ? utcText(at, { seconds: true }) : ago(at, clock)}
-        </time>
-      </TooltipTrigger>
-      <TooltipContent>{new Date(at).toLocaleString()}</TooltipContent>
-    </Tooltip>
+    <time dateTime={new Date(at).toISOString()} title={utc}>
+      {clock === undefined ? utc : ago(at, clock)}
+    </time>
   );
 }
 

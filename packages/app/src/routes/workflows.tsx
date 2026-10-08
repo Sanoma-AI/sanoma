@@ -8,7 +8,6 @@ import { Button } from "#/components/ui/button.tsx";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
-import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
 import {
   Fact,
   Facts,
@@ -20,6 +19,7 @@ import {
   PageHeader,
   pageTitle,
   SubsectionTitle,
+  Tip,
 } from "../components/common.tsx";
 import { type Field, fieldsOf } from "../form/schema.ts";
 import { configQuery, opsById } from "../queries.ts";
@@ -169,12 +169,11 @@ function OpItem({ id, op }: { id: string; op: OpEntry | undefined }) {
         <ItemTitle>
           <OpName id={id} effect={op?.effect} />
           {op?.idempotent && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Badge variant="outline">idempotent</Badge>
-              </TooltipTrigger>
-              <TooltipContent>Safe to retry: the vendor dedupes repeated calls</TooltipContent>
-            </Tooltip>
+            <Tip tip="Safe to retry: the vendor dedupes repeated calls">
+              <Badge variant="outline" tabIndex={0}>
+                idempotent
+              </Badge>
+            </Tip>
           )}
         </ItemTitle>
         {op?.description && <ItemDescription>{op.description}</ItemDescription>}
