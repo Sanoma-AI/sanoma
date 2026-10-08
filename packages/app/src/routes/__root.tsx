@@ -93,7 +93,7 @@ function Root() {
                 <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
                 <Crumbs />
               </header>
-              <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 p-4 pt-0 sm:px-6">
+              <div className="mx-auto w-full max-w-6xl p-4 pt-0 sm:px-6">
                 <Outlet />
               </div>
             </SidebarInset>
