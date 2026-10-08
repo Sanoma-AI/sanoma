@@ -40,7 +40,7 @@ export default function WhoAreYou() {
               <Input
                 id="who-name"
                 autoFocus
-                autoComplete="username"
+                autoComplete="off"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="marketing-lead"
