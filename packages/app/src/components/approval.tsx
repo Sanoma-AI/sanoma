@@ -119,21 +119,26 @@ export function ApprovalCard({
           )}
         </Facts>
         {approval.details && <p>{approval.details}</p>}
+        {/* A list of links: each Item is the <a> itself, which cannot also be a listitem, so the
+            list is a <ul> rather than an ItemGroup. */}
         {approval.links?.length ? (
-          <ItemGroup>
+          <ul className="flex flex-col gap-2">
             {approval.links.map((href) => (
-              <Item key={href} asChild variant="outline" size="xs">
-                <a href={href} target="_blank" rel="noreferrer noopener" title={href}>
-                  <ItemContent className="min-w-0">
-                    <ItemTitle className="block max-w-full truncate">{href}</ItemTitle>
-                  </ItemContent>
-                  <ItemActions>
-                    <ExternalLinkIcon className="size-4" />
-                  </ItemActions>
-                </a>
-              </Item>
+              <li key={href}>
+                <Item asChild variant="outline" size="xs">
+                  <a href={href} target="_blank" rel="noreferrer noopener" title={href}>
+                    <ItemContent className="min-w-0">
+                      {/* ItemTitle fits its content (w-fit): a long address is cut to the item instead. */}
+                      <ItemTitle className="block max-w-full truncate">{href}</ItemTitle>
+                    </ItemContent>
+                    <ItemActions>
+                      <ExternalLinkIcon className="size-4" />
+                    </ItemActions>
+                  </a>
+                </Item>
+              </li>
             ))}
-          </ItemGroup>
+          </ul>
         ) : null}
         {approval.requestedBy === "policy" && approval.input !== undefined && (
           <Expandable label="The held call's input" value={approval.input} />
