@@ -1,6 +1,7 @@
 import { DBOS, DBOSWorkflowConflictError, Error as DBOSErrors } from "@dbos-inc/dbos-sdk";
 import { awaitApproval, type CheckedApproval } from "./approvals.ts";
 import {
+  ApprovalExtras,
   type ApprovalRequest,
   Approver,
   approverLabel,
@@ -270,7 +271,13 @@ async function callOp(run: Run, id: string, input: unknown) {
 function checkApproval(title: string, req: ApprovalRequest): CheckedApproval {
   const approver = parseOrThrow(Approver, req?.approver, `ctx.approval("${title}")`, { title });
   const covers = parseOrThrow(Covers, req.covers, `ctx.approval("${title}") covers`, { title });
-  return { approver, covers: covers ?? [], links: req.links, details: req.details };
+  const { links, details } = parseOrThrow(
+    ApprovalExtras,
+    { links: req.links, details: req.details },
+    `ctx.approval("${title}")`,
+    { title },
+  );
+  return { approver, covers: covers ?? [], links, details };
 }
 
 /** Checks a sleep request before any DBOS call, so a bad one fails the run with `invalid_input`. */

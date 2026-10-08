@@ -11,7 +11,7 @@ export interface Principal {
 }
 
 export const Principal: z.ZodType<Principal> = z.object({
-  id: z.string().regex(/\S/, "id must not be blank"),
+  id: z.string().min(1, "id must not be blank").regex(/\S/, "id must not be blank"),
   groups: z.array(z.string()).optional(),
 });
 
@@ -22,7 +22,7 @@ export type Use = Op | Builtin;
 export type Approver = string | { group: string };
 
 export const Approver: z.ZodType<Approver> = z.union(
-  [z.string().regex(/\S/), z.object({ group: z.string().regex(/\S/) })],
+  [z.string().min(1).regex(/\S/), z.object({ group: z.string().min(1).regex(/\S/) })],
   { error: 'needs an approver: a name, or { group: "name" }' },
 );
 
@@ -58,6 +58,12 @@ export const Covers = z
     { error: notOps },
   )
   .optional();
+
+/** `links` and `details` as a workflow may give them: checked, so the UI and the ledger get what the types say. */
+export const ApprovalExtras = z.object({
+  links: z.array(z.string(), { error: "links must be a list of strings" }).optional(),
+  details: z.string({ error: "details must be a string" }).optional(),
+});
 
 export interface ApprovalRequest {
   /** Who must approve: a person's id, or `{ group }` for anyone in it. Phase 4 replaces this with a Cedar decision. */

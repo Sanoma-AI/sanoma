@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { DBOSClient, type WorkflowStatusString } from "@dbos-inc/dbos-sdk";
+import type { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, topicOf } from "./approvals.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { type ApprovalState, mayDecide, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
@@ -101,7 +102,11 @@ export class SanomaClient {
    * gets the input as sent, not as the schema parsed it: the worker parses it once, so a schema
    * with a `.transform` or a default sees the caller's value, and `run.started` records it.
    */
-  async start(workflow: WorkflowDefinition<any, any>, input: unknown, options: StartOptions): Promise<string> {
+  async start<S extends z.ZodType>(
+    workflow: WorkflowDefinition<any, S>,
+    input: z.input<S>,
+    options: StartOptions,
+  ): Promise<string> {
     const checked = workflow.input.safeParse(input);
     if (!checked.success) {
       throw invalidInput(`The input does not match ${workflow.name}'s schema`, checked.error.issues);

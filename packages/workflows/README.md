@@ -73,12 +73,17 @@ interface PolicyCall {
 }
 ```
 
-An operation names the instance it acts on with `target`, a function of its parsed input, so a policy can decide per post or per order rather than per operation:
+An operation names the instance it acts on with `target`, a function of its parsed input, so a policy can decide per post or per order rather than per operation. TypeScript types its input `any` there, so annotate it to have it checked:
 
 ```ts
 const shop = defineConnector("shop", {
   order: {
-    refund: { effect: "money", input: z.object({ id: z.string() }), output, target: ({ id }) => `order/${id}` },
+    refund: {
+      effect: "money",
+      input: z.object({ id: z.string() }),
+      output,
+      target: ({ id }: { id: string }) => `order/${id}`,
+    },
   },
 });
 ```

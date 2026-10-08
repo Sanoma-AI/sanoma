@@ -16,6 +16,10 @@ export interface OpSpec<I extends z.ZodType = z.ZodType, O extends z.ZodType = z
   /**
    * The resource instance a call acts on, from its parsed input, such as a post's id. The
    * policy sees it as `target`, so it can decide per instance. Must be deterministic.
+   *
+   * Its input is typed `any` inside `defineConnector`: TypeScript gives an inline function the
+   * type `Specs` declares, not the one its own spec's schema implies. Annotate it to have it
+   * checked: `target: ({ id }: { id: string }) => \`post/${id}\``.
    */
   target?: (input: any) => string;
 }

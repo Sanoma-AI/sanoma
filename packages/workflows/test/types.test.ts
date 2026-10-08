@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { defineConnector, defineDriver, defineWorkflow } from "../src/index.ts";
+import { defineConnector, defineDriver, defineWorkflow, type SanomaClient } from "../src/index.ts";
 
 // These assertions are checked by `pnpm typecheck`; the runtime test only keeps vitest happy.
 const shop = defineConnector("shop", {
@@ -69,6 +69,15 @@ const undeclared = () =>
       cancel: async () => ({ ok: true }),
     },
   });
+
+/** Never called: only typed. */
+export const startsTyped = (client: SanomaClient) => [
+  client.start(wf, { id: "o1" }, { startedBy: { id: "alice" } }),
+  // @ts-expect-error the input is checked against the workflow's schema: `id` is a string
+  client.start(wf, { id: 1 }, { startedBy: { id: "alice" } }),
+  // @ts-expect-error the input is the schema's input: `id` is required
+  client.start(wf, {}, { startedBy: { id: "alice" } }),
+];
 
 describe("types", () => {
   it("keys a driver's operations by resource and name", () => {
