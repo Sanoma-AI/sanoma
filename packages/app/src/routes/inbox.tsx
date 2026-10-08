@@ -14,13 +14,15 @@ export const Route = createFileRoute("/inbox")({
 
 /** Every pending approval, newest first. */
 function InboxPage() {
-  const { actor } = useActor();
+  const { actor, groups } = useActor();
   const { data: runs, error } = useSuspenseQuery(waitingRunsQuery());
   const pending = runs
     .flatMap((run) => pendingApprovals(run).map((approval) => ({ run, approval })))
     .toSorted((a, b) => b.approval.requestedAt - a.approval.requestedAt);
-  // Names only: a group approver needs the deployment to vouch for groups, which a typed name cannot.
-  const mine = pending.filter(({ approval }) => approval.approver === actor).length;
+  // A group approver counts only when the deployment vouches for groups: a typed name has none.
+  const mine = pending.filter(({ approval: { approver } }) =>
+    typeof approver === "string" ? approver === actor : groups.includes(approver.group),
+  ).length;
 
   return (
     <section className="flex flex-col gap-4">

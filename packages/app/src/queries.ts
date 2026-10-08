@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import { RUNS_LIMIT } from "./api.ts";
-import { getConfig, getRun, getRuns } from "./functions.ts";
+import { getActor, getConfig, getRun, getRuns } from "./functions.ts";
 
 /** How often the runs and a run's detail refresh while a page shows them. */
 export const POLL_MS = 2_000;
@@ -8,6 +8,10 @@ export const POLL_MS = 2_000;
 /** The config cannot change while the app runs. */
 export const configQuery = () =>
   queryOptions({ queryKey: ["config"], queryFn: () => getConfig(), staleTime: Number.POSITIVE_INFINITY });
+
+/** Who the server says is asking. A login lasts the page's life; the header name is kept in the browser. */
+export const actorQuery = () =>
+  queryOptions({ queryKey: ["actor"], queryFn: () => getActor(), staleTime: Number.POSITIVE_INFINITY });
 
 export const runsQuery = (limit: number = RUNS_LIMIT.default) =>
   queryOptions({

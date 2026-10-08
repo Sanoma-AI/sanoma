@@ -6,8 +6,8 @@ import { Input } from "#/components/ui/input.tsx";
 import { useActor } from "../actor.ts";
 
 /**
- * There is no login. The name is kept in this browser and sent with every change. Rendered (and
- * loaded) only while no name is stored.
+ * There is no login with the default resolver. The name is kept in this browser and sent with
+ * every change. Rendered (and loaded) only under that resolver, while no name is stored.
  */
 export default function WhoAreYou() {
   const { setActor } = useActor();

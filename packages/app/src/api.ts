@@ -4,6 +4,7 @@ import type {
   ErrorCode,
   InputIssue,
   LedgerRecord,
+  Principal,
   RunStatus,
   RunSummary,
 } from "@sanoma/workflows";
@@ -19,6 +20,19 @@ export type { InputIssue } from "@sanoma/workflows";
 
 /** Who is asking. There is no login: the page asks once and sends the name with every change. */
 export const ACTOR_HEADER = "x-sanoma-actor";
+
+/**
+ * Who the server says is asking. With the default resolver (`fromHeader`), that is whatever
+ * name the page sends, so the page asks for one and keeps it; with a deployment's own
+ * `resolveActor`, it is the deployment's login, which the page shows and cannot change.
+ */
+export interface ActorInfo {
+  fromHeader: boolean;
+  /** Null when the request names nobody. */
+  actor: Principal | null;
+  /** Why the deployment's `resolveActor` could not say, when it threw. */
+  error?: string;
+}
 
 /** `POST /api/runs` */
 export const StartRunRequest = z.object({

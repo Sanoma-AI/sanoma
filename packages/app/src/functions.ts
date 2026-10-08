@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { DecideCall, RunsQuery, StartRunRequest } from "./api.ts";
+import { type ActorInfo, DecideCall, RunsQuery, StartRunRequest } from "./api.ts";
 import { decide, requireActor, runDetail, startRun } from "./server/core.ts";
 
 // The page's reads and changes, as server functions. They do what the /api routes do, with the
@@ -14,6 +14,13 @@ const READ = { method: "GET", strict: { output: false } } as const;
 const CHANGE = { method: "POST", strict: { output: false } } as const;
 
 export const getConfig = createServerFn(READ).handler(({ context }) => context.app.description);
+
+/** Who the server resolves this request to, and whether it reads that from the page's header. */
+export const getActor = createServerFn(READ).handler(({ context }): ActorInfo => ({
+  fromHeader: context.app.actorFromHeader,
+  actor: context.actor ?? null,
+  ...(context.actorError ? { error: context.actorError.body.error } : {}),
+}));
 
 export const getRuns = createServerFn(READ)
   .validator(RunsQuery)

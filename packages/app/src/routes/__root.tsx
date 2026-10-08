@@ -1,4 +1,4 @@
-import type { QueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQuery } from "@tanstack/react-query";
 import { createRootRouteWithContext, HeadContent, Link, Outlet, Scripts } from "@tanstack/react-router";
 import { ThemeProvider } from "next-themes";
 import { lazy, type ReactNode, Suspense } from "react";
@@ -7,6 +7,7 @@ import { Toaster } from "#/components/ui/sonner.tsx";
 import { ActorContext, useActor, useActorState } from "../actor.ts";
 import { Notice } from "../components/common.tsx";
 import { ModeToggle } from "../components/mode-toggle.tsx";
+import { actorQuery } from "../queries.ts";
 import css from "../style.css?url";
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
@@ -21,6 +22,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   }),
   // Pages show what is happening now: never cache them.
   headers: () => ({ "cache-control": "no-store" }),
+  // Who the server says is asking, in the first render: a deployment's login shows at once.
+  loader: ({ context }) => context.queryClient.ensureQueryData(actorQuery()),
   component: Root,
   notFoundComponent: () => <Notice variant="destructive">There is no page here.</Notice>,
   // The router types a boundary's error as unknown: anything can be thrown.
@@ -35,7 +38,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 const WhoAreYou = lazy(() => import("../components/who-are-you.tsx"));
 
 function Root() {
-  const actor = useActorState();
+  const { data: server } = useQuery(actorQuery());
+  const actor = useActorState(server);
   return (
     <Document>
       {/* Light, dark or the system's, kept in localStorage. style.css sets color-scheme with the class. */}
@@ -53,7 +57,7 @@ function Root() {
             <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
               <Outlet />
             </main>
-            {actor.actor === null && (
+            {server?.fromHeader !== false && actor.actor === null && (
               <Suspense fallback={null}>
                 <WhoAreYou />
               </Suspense>
@@ -89,7 +93,8 @@ const PAGES = [
 ] as const;
 
 function Nav() {
-  const { actor, setActor } = useActor();
+  const { actor, fromServer, setActor } = useActor();
+  const { data: server } = useQuery(actorQuery());
   return (
     <header className="border-b">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 sm:px-6">
@@ -111,14 +116,18 @@ function Nav() {
           ))}
         </nav>
         <div className="ml-auto flex items-center gap-1 text-sm text-muted-foreground">
+          {server?.error && <span className="text-destructive">{server.error}</span>}
+          {fromServer && !actor && !server?.error && <span>Not signed in</span>}
           {actor && (
             <>
               <span>
                 You are <strong className="text-foreground">{actor}</strong>
               </span>
-              <Button variant="link" size="sm" onClick={() => setActor(null)}>
-                change
-              </Button>
+              {!fromServer && (
+                <Button variant="link" size="sm" onClick={() => setActor(null)}>
+                  change
+                </Button>
+              )}
             </>
           )}
           <ModeToggle />

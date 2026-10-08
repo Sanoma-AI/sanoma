@@ -34,11 +34,19 @@ The header switches between light, dark and the system's theme; the browser reme
 
 This is a local tool. There is no login. The page asks "Who are you?" once, keeps the answer in the browser, and sends it with every change. Anyone who can reach the app can start runs and decide approvals as any name they type; the approver check only compares names. The app listens on 127.0.0.1 unless you pass another `host`. While it listens on this machine only, it refuses every request (page, API, server function or static file) whose `Host` names anything but this machine, so another site cannot reach it through DNS rebinding. Do not expose it to a network you do not trust.
 
-A hosted deployment replaces the header with its own login through `resolveActor`, which turns each request into the person acting (`{ id, groups? }`), or `undefined` to refuse a change:
+Reads are open. Anyone who can reach the app sees every run, its ledger (each operation's input and output included) and its approvals, through the page and `GET /api/*`; nothing asks who they are. On this machine, the Host check above is the only protection.
+
+### Hosted
+
+A hosted deployment puts its own authentication in front of the whole app (a reverse proxy or an identity-aware proxy), since the app checks no one on a read. It also replaces the header with its own login through `resolveActor`, which turns each request into the person acting (`{ id, groups? }`), or `undefined` to refuse a change:
 
 ```ts
 await startApp(config, { resolveActor: async (request) => sessionUser(request) });
 ```
+
+With its own `resolveActor`, the page never asks for a name: it shows who the deployment says you are. An approval addressed to a group (`{ group: "finance" }`) can be decided only by a principal whose `groups` lists it, and the default header carries a name only, so group approvals need a `resolveActor` that supplies `groups`. A `resolveActor` that throws fails the change with a 500 saying "Could not tell who you are", logged with the request.
+
+A 500's `error` is the raw message of what failed, which can name internal details such as a database host. The app does not hide them yet; a deployment that must not show them filters 500 bodies in its proxy.
 
 ## HTTP API
 

@@ -393,6 +393,14 @@ describe("an app with its own resolveActor", () => {
     expect(anonymous.body.error).not.toMatch(/x-sanoma-actor/);
   });
 
+  it("renders who the deployment says is asking, and never asks for a name", async () => {
+    const res = await fetch(new URL("/runs", hosted.url), { headers: { "x-test-user": "sso-user" } });
+    const html = await res.text();
+    expect(html).toMatch(/You are <strong[^>]*>sso-user<\/strong>/);
+    expect(html).not.toContain("Who are you?");
+    expect(html).not.toMatch(/>change</);
+  });
+
   it("answers a resolver that throws with a 500 that says so", async () => {
     const failed = await post("boom");
     expect(failed.status).toBe(500);
