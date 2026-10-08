@@ -291,6 +291,7 @@ describe("the API", () => {
       "op.called",
       "approval.requested",
       "approval.decided",
+      "sleep.started",
       "op.called",
       "op.called",
       "op.called",
