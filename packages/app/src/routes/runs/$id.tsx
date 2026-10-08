@@ -1,7 +1,7 @@
 import type { ErrorInfo, LedgerRecord } from "@sanoma/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, type ReactNode, useMemo } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Item, ItemContent, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { approverLabel } from "@sanoma/workflows/shared";
@@ -15,6 +15,7 @@ import {
   Facts,
   GraphPanel,
   ledgerTone,
+  loadGraph,
   Nothing,
   Notice,
   OpName,
@@ -26,11 +27,13 @@ import {
   toneBadge,
   When,
 } from "../../components/common.tsx";
-import { runGraph } from "../../graph/run-graph.ts";
 import { runQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/runs/$id")({
-  loader: ({ context, params }) => context.queryClient.ensureQueryData(runQuery(params.id)),
+  loader: ({ context, params }) => {
+    if (!import.meta.env.SSR) void loadGraph();
+    return context.queryClient.ensureQueryData(runQuery(params.id));
+  },
   head: ({ params }) => ({ meta: [{ title: `Run ${params.id} · Sanoma` }] }),
   component: RunPage,
   // getRun throws the router's not-found for a run that does not exist.
@@ -40,26 +43,37 @@ export const Route = createFileRoute("/runs/$id")({
 /** How long a ledger item stays highlighted after a click on its node in the graph. */
 const HIGHLIGHT_MS = 2_000;
 
+/** The ledger item a click on the graph lit last, until its timer puts it out. */
+let lit: { item: HTMLElement; timer: ReturnType<typeof setTimeout> } | undefined;
+
+/**
+ * Scrolls to a record's ledger item and highlights it for a while: an attribute on the element,
+ * so the page does not render for it.
+ */
+function show(recordId: string) {
+  const item = document.getElementById(ledgerItemId(recordId));
+  if (!item) return;
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  item.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" });
+  if (lit) {
+    clearTimeout(lit.timer);
+    delete lit.item.dataset.highlighted;
+  }
+  item.dataset.highlighted = "";
+  const timer = setTimeout(() => {
+    delete item.dataset.highlighted;
+    lit = undefined;
+  }, HIGHLIGHT_MS);
+  lit = { item, timer };
+}
+
 function RunPage() {
   const { id } = Route.useParams();
   const { data, error, dataUpdatedAt } = useSuspenseQuery(runQuery(id));
   const { run, ledger, ledgerError, approvals } = data;
-  // Rebuilt on every poll, even one that changed nothing: a sleep's end may have come.
-  const graph = useMemo(() => runGraph(ledger, run, dataUpdatedAt), [ledger, run, dataUpdatedAt]);
-  const titles = new Map(approvals.map((a) => [a.id, a.title]));
-  const [highlighted, setHighlighted] = useState<string>();
-  useEffect(() => {
-    if (highlighted === undefined) return;
-    const timer = setTimeout(() => setHighlighted(undefined), HIGHLIGHT_MS);
-    return () => clearTimeout(timer);
-  }, [highlighted]);
-  const show = useCallback((recordId: string) => {
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    document
-      .getElementById(ledgerItemId(recordId))
-      ?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" });
-    setHighlighted(recordId);
-  }, []);
+  // A new source on every poll, even one that changed nothing: a sleep's end may have come.
+  const source = useMemo(() => ({ ledger, run, at: dataUpdatedAt }), [ledger, run, dataUpdatedAt]);
+  const titles = useMemo(() => new Map(approvals.map((a) => [a.id, a.title])), [approvals]);
   return (
     <section className="flex flex-col gap-6">
       <PageHeader title={run.workflow}>
@@ -83,7 +97,7 @@ function RunPage() {
 
       <section className="flex flex-col gap-3">
         <SectionTitle>Graph</SectionTitle>
-        <GraphPanel graph={graph} onSelect={show} />
+        <GraphPanel source={source} onSelect={show} />
       </section>
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
@@ -94,7 +108,7 @@ function RunPage() {
           {ledger.length > 0 && (
             <ItemGroup aria-label="Ledger">
               {ledger.map((record) => (
-                <LedgerRow key={record.id} record={record} titles={titles} highlighted={record.id === highlighted} />
+                <LedgerRow key={record.id} record={record} titles={titles} />
               ))}
             </ItemGroup>
           )}
@@ -127,16 +141,8 @@ function ErrorText({ error }: { error: ErrorInfo }) {
 /** A ledger record's item on the page, by the record's id: where a click on the graph leads. */
 const ledgerItemId = (recordId: string) => `ledger-${recordId}`;
 
-/** One ledger record: what happened, when, and its details. */
-function LedgerRow({
-  record,
-  titles,
-  highlighted,
-}: {
-  record: LedgerRecord;
-  titles: Map<string, string>;
-  highlighted: boolean;
-}) {
+/** One ledger record: what happened, when, and its details. Drawn again only when they change. */
+const LedgerRow = memo(function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<string, string> }) {
   const title = (approval: string) => titles.get(approval) ?? approval;
   let kind = "";
   let body: ReactNode;
@@ -219,7 +225,7 @@ function LedgerRow({
       variant="outline"
       size="sm"
       id={ledgerItemId(record.id)}
-      data-highlighted={highlighted || undefined}
+      // `show` sets data-highlighted.
       className="scroll-mt-24 data-highlighted:bg-muted data-highlighted:ring-2 data-highlighted:ring-ring"
     >
       <ItemContent className="min-w-0">
@@ -234,4 +240,4 @@ function LedgerRow({
       </ItemContent>
     </Item>
   );
-}
+});

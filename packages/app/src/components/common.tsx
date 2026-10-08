@@ -2,7 +2,17 @@ import type { ApprovalState, Effect, LedgerRecord, RecordedDecision } from "@san
 import { cva } from "class-variance-authority";
 import { ChevronRightIcon, CircleAlertIcon, InfoIcon } from "lucide-react";
 import { ClientOnly } from "@tanstack/react-router";
-import { lazy, type ReactNode, Suspense, useMemo, useSyncExternalStore } from "react";
+import {
+  lazy,
+  type ReactNode,
+  type RefObject,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Alert, AlertDescription } from "#/components/ui/alert.tsx";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
@@ -226,22 +236,51 @@ export function Nothing({ title, children, action }: { title: string; children?:
   );
 }
 
-// React Flow needs the DOM: the graph loads in the browser only, as one chunk for every page
-// that draws one.
-const Graph = lazy(() => import("./graph.tsx"));
+/**
+ * The graph's chunk: React Flow, dagre and the builders. It needs the DOM, so it loads in the
+ * browser only, as one chunk for every page that draws a graph. A page's loader calls this in
+ * the browser, so the chunk loads while the page hydrates rather than after.
+ */
+export const loadGraph = () => import("./graph.tsx");
+const Graph = lazy(loadGraph);
+
+/** True once the element has come within a screen of the viewport, and from then on. */
+function useSeen(ref: RefObject<HTMLElement | null>): boolean {
+  const [seen, setSeen] = useState(false);
+  useEffect(() => {
+    const element = ref.current;
+    if (seen || !element) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) setSeen(true);
+      },
+      { rootMargin: "100% 0px" },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref, seen]);
+  return seen;
+}
 
 /**
- * A graph (a run's, or a workflow's outline) in a box 220 px high, 280 px from `sm`. It is drawn
- * in the browser; the server renders a skeleton of the same size.
+ * A graph (a run's, or a workflow's outline) in a box 220 px high, 280 px from `sm`. It is
+ * built and drawn in the browser, once the box comes near the screen; until then, and on the
+ * server, a skeleton of the same size holds its place.
  */
 export function GraphPanel(props: GraphProps) {
+  const box = useRef<HTMLDivElement>(null);
+  const seen = useSeen(box);
   const skeleton = <Skeleton role="status" aria-label="Loading the graph" className="size-full rounded-none" />;
   return (
-    <div className="h-[220px] overflow-hidden rounded-lg border sm:h-[280px]">
+    <div ref={box} className="h-[220px] overflow-hidden rounded-lg border sm:h-[280px]">
       <ClientOnly fallback={skeleton}>
-        <Suspense fallback={skeleton}>
-          <Graph {...props} />
-        </Suspense>
+        {seen ? (
+          <Suspense fallback={skeleton}>
+            <Graph {...props} />
+          </Suspense>
+        ) : (
+          skeleton
+        )}
       </ClientOnly>
     </div>
   );

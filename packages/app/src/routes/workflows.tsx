@@ -13,6 +13,7 @@ import {
   Facts,
   GraphPanel,
   Json,
+  loadGraph,
   Nothing,
   OpName,
   PageHeader,
@@ -20,10 +21,13 @@ import {
   SubsectionTitle,
 } from "../components/common.tsx";
 import { type Field, fieldsOf } from "../form/schema.ts";
-import { outlineGraph } from "../graph/outline-graph.ts";
 import { configQuery, opsById } from "../queries.ts";
 
 export const Route = createFileRoute("/workflows")({
+  // The root route loads the config.
+  loader: () => {
+    if (!import.meta.env.SSR) void loadGraph();
+  },
   head: () => ({ meta: [{ title: "Workflows · Sanoma" }] }),
   component: WorkflowsPage,
 });
@@ -84,7 +88,7 @@ const None = ({ children = "None." }: { children?: ReactNode }) => <p className=
 function WorkflowCard({ workflow, ops }: { workflow: WorkflowEntry; ops: Map<string, OpEntry> }) {
   const fields = fieldsOf(workflow.input);
   const { outline } = workflow;
-  const graph = useMemo(() => ("nodes" in outline ? outlineGraph(outline.nodes) : undefined), [outline]);
+  const source = useMemo(() => ("nodes" in outline ? { outline: outline.nodes } : undefined), [outline]);
   return (
     <Card>
       <CardHeader>
@@ -108,7 +112,7 @@ function WorkflowCard({ workflow, ops }: { workflow: WorkflowEntry; ops: Map<str
           title="Outline"
           note={"error" in outline ? outline.error : "Read from the body of run; helpers it calls are not shown"}
         >
-          {graph && <GraphPanel graph={graph} show="start" />}
+          {source && <GraphPanel source={source} show="start" />}
         </Section>
         <Separator />
         <Section title="Operations it may call">

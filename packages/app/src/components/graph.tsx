@@ -19,11 +19,25 @@ import {
   useStore,
 } from "@xyflow/react";
 import { cva } from "class-variance-authority";
-import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import type { LedgerRecord, RunSummary } from "@sanoma/workflows";
+import type { OpEntry, OutlineNode } from "@sanoma/workflows/describe";
+import {
+  createContext,
+  type ReactNode,
+  use,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { approverLabel } from "@sanoma/workflows/shared";
 import { layout } from "../graph/layout.ts";
-import { type Graph as GraphData, type GraphNode, type GraphNodeKind, isPending } from "../graph/types.ts";
+import { outlineGraph } from "../graph/outline-graph.ts";
+import { runGraph } from "../graph/run-graph.ts";
+import { type GraphNode, type GraphNodeKind, isPending } from "../graph/types.ts";
 import { configQuery, opsById } from "../queries.ts";
 import { APPROVAL_TONE, DECISION_TONE, effectBadge, StatusDot, type Tone, toneBadge } from "./common.tsx";
 
@@ -137,10 +151,12 @@ function EndNode({ data: { node } }: Props<"end">) {
   );
 }
 
+/** The config's operations by id, read once for the whole graph. */
+const Ops = createContext<Map<string, OpEntry>>(new Map());
+
 function OpNode({ data: { node } }: Props<"op">) {
   // The effect is the config's: a call still held for its approval has no record yet.
-  const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
-  const effect = ops.get(node.label)?.effect;
+  const effect = use(Ops).get(node.label)?.effect;
   const { state } = node;
   const held = state?.approval && state.decision === undefined ? state.approval : undefined;
   return (
@@ -271,20 +287,56 @@ function FitOnChange({ nodes, show, onFitted }: { nodes: FlowNode[]; show: "star
   return null;
 }
 
+/** Equal, objects compared key by key down to `depth` levels. */
+function same(a: unknown, b: unknown, depth: number): boolean {
+  if (Object.is(a, b)) return true;
+  if (depth === 0 || typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  const [x, y] = [a as Record<string, unknown>, b as Record<string, unknown>];
+  const keys = Object.keys(x);
+  return keys.length === Object.keys(y).length && keys.every((key) => same(x[key], y[key], depth - 1));
+}
+
+/**
+ * The items, each replaced by the last render's of its id when that is the same down to `depth`
+ * levels, so React Flow redraws only what a poll changed.
+ */
+function useStable<T extends { id: string }>(items: T[], depth: number): T[] {
+  const last = useRef(new Map<string, T>());
+  return useMemo(() => {
+    const stable = items.map((item) => {
+      const before = last.current.get(item.id);
+      return before && same(before, item, depth) ? before : item;
+    });
+    last.current = new Map(stable.map((item) => [item.id, item]));
+    return stable;
+  }, [items, depth]);
+}
+
+/** What a graph is drawn from: a run's ledger as read at `at`, or a workflow's outline. */
+export type GraphSource = { ledger: LedgerRecord[]; run: RunSummary; at: number } | { outline: OutlineNode[] };
+
 export interface GraphProps {
-  graph: GraphData;
+  source: GraphSource;
   /** Called with a clicked node's ledger record id. Nodes without a record do nothing. */
   onSelect?: (recordId: string) => void;
   /** The end shown when all of the graph cannot be read at once. Defaults to `end`. */
   show?: "start" | "end";
 }
 
-/** A graph, left to right. Clicking a node with a ledger record calls `onSelect` with it. */
-export default function Graph({ graph, onSelect, show = "end" }: GraphProps) {
+/**
+ * A graph, built, laid out and drawn left to right, here in the browser. Clicking a node with a
+ * ledger record calls `onSelect` with it.
+ */
+export default function Graph({ source, onSelect, show = "end" }: GraphProps) {
   const reducedMotion = useReducedMotion();
+  const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
   // Hidden until the first fit, so the graph does not show unfitted for a frame.
   const [fitted, setFitted] = useState(false);
-  const nodes = useMemo(() => {
+  const graph = useMemo(
+    () => ("outline" in source ? outlineGraph(source.outline) : runGraph(source.ledger, source.run, source.at)),
+    [source],
+  );
+  const laidOut = useMemo(() => {
     const at = layout(graph);
     // A cluster comes before the nodes inside it, as React Flow needs.
     return graph.nodes.map((node) => {
@@ -302,52 +354,61 @@ export default function Graph({ graph, onSelect, show = "end" }: GraphProps) {
       } as FlowNode;
     });
   }, [graph]);
-  const edges = useMemo<Edge[]>(() => {
+  // A node down to its state's fields; the approval on it is the query's, kept when unchanged.
+  const nodes = useStable(laidOut, 4);
+  const drawn = useMemo<Edge[]>(() => {
     const byId = new Map(graph.nodes.map((node) => [node.id, node]));
-    return graph.edges.map(({ id, source, target }) => {
-      const from = byId.get(source)!;
-      const to = byId.get(target)!;
+    return graph.edges.map((edge) => {
+      const from = byId.get(edge.source)!;
+      const to = byId.get(edge.target)!;
       // Moving into what is in flight; dashed into and out of what the run has not reached.
       const active = "state" in to && to.state?.tone === "active";
       return {
-        id,
-        source,
-        target,
+        ...edge,
         type: "smoothstep",
         animated: active && !reducedMotion,
         ...(isPending(from) || isPending(to) ? { style: { strokeDasharray: "4 4" } } : {}),
       };
     });
   }, [graph, reducedMotion]);
+  const edges = useStable(drawn, 2);
+  // The page's handler changes as it renders; the one React Flow holds does not.
+  const select = useRef(onSelect);
+  useEffect(() => {
+    select.current = onSelect;
+  });
+  const onNodeClick = useCallback((_: unknown, { data: { node } }: FlowNode) => {
+    const recordId = "state" in node ? node.state?.recordId : undefined;
+    if (recordId) select.current?.(recordId);
+  }, []);
 
   return (
     <ReactFlowProvider>
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        className={fitted ? undefined : "invisible"}
-        onNodeClick={(_, node: FlowNode) => {
-          const recordId = "state" in node.data.node ? node.data.node.state?.recordId : undefined;
-          if (recordId) onSelect?.(recordId);
-        }}
-        minZoom={0.25}
-        maxZoom={1.5}
-        nodesDraggable={false}
-        nodesConnectable={false}
-        elementsSelectable={false}
-        // Wheel and trackpad pan sideways; the page keeps its vertical scroll. Zoom with the
-        // controls or a pinch.
-        zoomOnScroll={false}
-        zoomOnDoubleClick={false}
-        panOnScroll
-        panOnScrollMode={PanOnScrollMode.Horizontal}
-        preventScrolling={false}
-      >
-        <Background gap={16} size={1} />
-        <Controls showInteractive={false} orientation="horizontal" fitViewOptions={FIT} />
-        <FitOnChange nodes={nodes} show={show} onFitted={() => setFitted(true)} />
-      </ReactFlow>
+      <Ops value={ops}>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          className={fitted ? undefined : "invisible"}
+          onNodeClick={onNodeClick}
+          minZoom={0.25}
+          maxZoom={1.5}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable={false}
+          // Wheel and trackpad pan sideways; the page keeps its vertical scroll. Zoom with the
+          // controls or a pinch.
+          zoomOnScroll={false}
+          zoomOnDoubleClick={false}
+          panOnScroll
+          panOnScrollMode={PanOnScrollMode.Horizontal}
+          preventScrolling={false}
+        >
+          <Background gap={16} size={1} />
+          <Controls showInteractive={false} orientation="horizontal" fitViewOptions={FIT} />
+          <FitOnChange nodes={nodes} show={show} onFitted={() => setFitted(true)} />
+        </ReactFlow>
+      </Ops>
     </ReactFlowProvider>
   );
 }
