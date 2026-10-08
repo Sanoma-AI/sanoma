@@ -262,7 +262,14 @@ async function callOp(run: Run, id: string, input: unknown) {
     throw err;
   }
   const { output, at, durationMs } = result;
-  await write(run, entry(run, { ...call, output, durationMs, attempt: result.attempt }, { seq, at }));
+  try {
+    await write(run, entry(run, { ...call, output, durationMs, attempt: result.attempt }, { seq, at }));
+  } catch (err) {
+    // The vendor acted, and nothing records it. A workflow that caught this and called again
+    // would repeat the side effect under a new key, so the run makes no further calls.
+    run.ended = true;
+    throw new Error(`${op.id} succeeded, but the ledger could not record it: ${errorMessage(err)}`, { cause: err });
+  }
   return output;
 }
 

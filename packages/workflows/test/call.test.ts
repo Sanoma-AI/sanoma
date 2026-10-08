@@ -245,6 +245,48 @@ describe("a call that fails", () => {
   });
 });
 
+/** Tries the post again when the first call fails. */
+const repost = defineWorkflow({
+  name: "repost",
+  trigger: "manual",
+  input: z.object({}),
+  uses: [bluesky.post.create],
+  run: async (ctx) => {
+    try {
+      return await ctx.bluesky.post.create({ text: "once" });
+    } catch {
+      return ctx.bluesky.post.create({ text: "again" });
+    }
+  },
+});
+
+describe("a call the ledger cannot record", () => {
+  // Records each run's start, then refuses everything after it, for good.
+  const kept = memoryLedger();
+  const full: LedgerStore = {
+    read: kept.read,
+    async append(record) {
+      if (record.type !== "run.started") throw Object.assign(new Error("disk full"), { retryable: false });
+      await kept.append(record);
+    },
+  };
+  const app = useApp(databaseUrl, "call-unrecorded", () => ({ workflows: [post, repost], ledger: full }));
+  const c = () => app.client;
+
+  it("fails the run saying the call succeeded unrecorded, and makes no further call", async () => {
+    const posted = await failure(c().result(await c().start(post, { text: "hi" }, { startedBy: alice })));
+    expect((posted as Error).message).toMatch(
+      /^bluesky\.post\.create succeeded, but the ledger could not record it: disk full/,
+    );
+
+    // A workflow that catches it and calls again is refused: the first call has no record.
+    const reposted = await failure(c().result(await c().start(repost, {}, { startedBy: alice })));
+    expect(errorCode(reposted)).toBe("run_ended");
+    expect(app.ops()).toEqual(["bluesky.post.create", "bluesky.post.create"]);
+    expect(app.vendors.bluesky.state.posts.map((p) => p.text)).toEqual(["hi", "once"]);
+  });
+});
+
 describe("a worker stopping while a call fails for good", () => {
   // bluesky.post.create waits until released, then the vendor refuses it for good.
   const entered = Promise.withResolvers<void>();
