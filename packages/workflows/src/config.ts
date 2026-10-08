@@ -19,8 +19,11 @@ export interface SanomaConfig {
   drivers: Driver[];
   /** Checked before every operation call. Required: `allowAll` says that every call is allowed. */
   policy: Policy;
-  /** Where the audit record goes. Defaults to an in-memory store, which a separate client cannot read. */
-  ledger?: LedgerStore;
+  /**
+   * Where the audit record goes. Required: `jsonlLedger(dir)` keeps it in files that the app
+   * and other processes read; `memoryLedger()` keeps it in this process only, for tests.
+   */
+  ledger: LedgerStore;
   /** Scopes workflows, queues and versions in the system database. Defaults to "sanoma". */
   appName?: string;
   /** Postgres for the runtime. Defaults to `SANOMA_DATABASE_URL`, then the local docker compose database. */
@@ -42,8 +45,7 @@ export interface ResolvedConfig {
   /** Each checked against `ops` and `drivers`; names are unique. */
   workflows: WorkflowDefinition<any, any>[];
   policy: Policy;
-  /** Undefined when the config has none. */
-  ledger?: LedgerStore;
+  ledger: LedgerStore;
 }
 
 export const DEFAULT_DATABASE_URL = "postgresql://postgres:dbos@localhost:5433/sanoma";
@@ -76,6 +78,12 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   if (typeof config.policy !== "function") {
     throw new Error("The config needs a `policy`; use `allowAll` to allow every operation call");
   }
+  const { ledger } = config;
+  if (typeof ledger?.append !== "function" || typeof ledger.read !== "function") {
+    throw new Error(
+      "The config needs a `ledger`; use `jsonlLedger(dir)` to keep records in files, or `memoryLedger()` to keep them in memory, for tests",
+    );
+  }
   const appName = config.appName ?? "sanoma";
   const ops = indexConnectors(config.connectors);
   const drivers = indexDrivers(config.drivers, ops);
@@ -99,7 +107,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     drivers,
     workflows: [...names.values()],
     policy: config.policy,
-    ...(config.ledger === undefined ? {} : { ledger: config.ledger }),
+    ledger,
   };
 }
 

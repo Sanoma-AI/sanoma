@@ -11,6 +11,7 @@ import {
   defineConnector,
   definePolicy,
   defineWorkflow,
+  memoryLedger,
 } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
 import { marketingFakes } from "./harness.ts";
@@ -20,6 +21,7 @@ const base = defineConfig({
   connectors: [ghost, resend, bluesky],
   drivers: marketingFakes().drivers,
   policy: allowAll,
+  ledger: memoryLedger(),
 });
 
 describe("describeConfig", () => {
@@ -101,7 +103,9 @@ describe("describeConfig", () => {
     const drivers = [{ vendor: "odd", ops: { "thing.get": async () => new Map() } }];
     // `unrepresentable: "any"` keeps custom types as {}; only a schema that throws is reported.
     expect(() =>
-      describeConfig(defineConfig({ workflows: [wf], connectors: [odd], drivers, policy: allowAll })),
+      describeConfig(
+        defineConfig({ workflows: [wf], connectors: [odd], drivers, policy: allowAll, ledger: memoryLedger() }),
+      ),
     ).not.toThrow();
   });
 });

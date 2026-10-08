@@ -10,6 +10,7 @@ import {
   defineConnector,
   defineWorkflow,
   describeConfig,
+  memoryLedger,
   resolveConfig,
   type SanomaConfig,
   startWorker,
@@ -19,11 +20,13 @@ import { marketingFakes } from "./harness.ts";
 
 // These configs are refused before the worker connects, so no database is needed.
 const vendors = marketingFakes();
+const ledger = memoryLedger();
 const config = (options: Partial<SanomaConfig>): SanomaConfig => ({
   workflows: [announce],
   connectors: [ghost, resend, bluesky],
   drivers: vendors.drivers,
   policy: allowAll,
+  ledger,
   databaseUrl: "postgresql://unused@localhost:1/unused",
   ...options,
 });
@@ -63,6 +66,11 @@ const refused: [string, Partial<SanomaConfig>, RegExp][] = [
     /^Two different workflow definitions are named "announce"/,
   ],
   ["no policy", { policy: undefined as never }, /^The config needs a `policy`; use `allowAll`/],
+  [
+    "no ledger",
+    { ledger: undefined as never },
+    /^The config needs a `ledger`; use `jsonlLedger\(dir\)`.*`memoryLedger\(\)`/,
+  ],
   ["no connectors", { connectors: undefined as never }, /^The config needs `connectors`/],
 ];
 
@@ -99,7 +107,7 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       "resend.broadcast.send",
     ]);
     expect([...resolved.drivers.keys()].toSorted()).toEqual([...resolved.ops.keys()].toSorted());
-    expect(resolved).not.toHaveProperty("ledger");
+    expect(resolved.ledger).toBe(ledger);
     expect(resolveConfig(config({})).appName).toBe("sanoma");
     expect(resolveConfig(config({})).queueName).toBe("sanoma:sanoma");
   });

@@ -18,7 +18,7 @@ const app = await startApp(config, { port: 4321 });
 console.log(app.url); // http://127.0.0.1:4321
 ```
 
-`startApp` checks the config first and throws what the worker would refuse. The worker and the app share the config's Postgres (`databaseUrl`, else `SANOMA_DATABASE_URL`) and its ledger store. Give the config a `jsonlLedger` so the app, in its own process, can read what the worker records; an in-memory ledger is visible only in the process that wrote it. Without `port`, the app takes any free port and reports it in `app.url`. `app.close()` stops it.
+`startApp` checks the config first and throws what the worker would refuse. The worker and the app share the config's Postgres (`databaseUrl`, else `SANOMA_DATABASE_URL`) and its ledger store. Give the config a `jsonlLedger` so the app, in its own process, can read what the worker records; a `memoryLedger` is visible only in the process that wrote it. Without `port`, the app takes any free port and reports it in `app.url`. `app.close()` stops it.
 
 ## Screens
 

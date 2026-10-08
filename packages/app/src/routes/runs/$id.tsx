@@ -63,10 +63,9 @@ function RunPage() {
       <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="flex flex-col gap-3">
           <SectionTitle>Ledger</SectionTitle>
-          {ledger === null && <Notice>This config has no ledger store, so there is no record to show.</Notice>}
           {ledgerError && <Notice variant="destructive">Could not read the ledger: {ledgerError}</Notice>}
-          {ledger && ledger.length === 0 && !ledgerError && <Nothing title="Nothing recorded yet" />}
-          {ledger && ledger.length > 0 && (
+          {ledger.length === 0 && !ledgerError && <Nothing title="Nothing recorded yet" />}
+          {ledger.length > 0 && (
             <ItemGroup aria-label="Ledger">
               {ledger.map((record) => (
                 <LedgerRow key={record.id} record={record} titles={titles} />

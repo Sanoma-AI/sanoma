@@ -70,8 +70,8 @@ export type RunsQuery = z.input<typeof RunsQuery>;
 /** `GET /api/runs/:id` */
 export interface RunDetail {
   run: RunSummary;
-  /** The run's ledger records in `seq` order, or null when the config has no ledger store. */
-  ledger: LedgerRecord[] | null;
+  /** The run's ledger records in `seq` order. */
+  ledger: LedgerRecord[];
   /** Why the ledger could not be read, when it could not. `ledger` is then empty. */
   ledgerError?: string;
   approvals: ApprovalState[];

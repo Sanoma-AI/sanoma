@@ -4,7 +4,7 @@ import { dbosStatusesOf } from "./client.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import type { WorkflowDefinition } from "./define.ts";
 import { errorInfo, errorMessage, parseOrThrow } from "./errors.ts";
-import { entry, memoryLedger, skipped, write, writeFailure } from "./ledger.ts";
+import { entry, skipped, write, writeFailure } from "./ledger.ts";
 import { warn } from "./log.ts";
 import type { Run, RunArgs, WorkerState } from "./run.ts";
 
@@ -43,15 +43,12 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       );
     }
   }
-  if (!resolved.ledger) {
-    warn("the config has no ledger, so records are kept in memory only and a separate client cannot read them");
-  }
   const state: WorkerState = {
     app: resolved.appName,
     ops: resolved.ops,
     drivers: resolved.drivers,
     policy: resolved.policy,
-    ledger: resolved.ledger ?? memoryLedger(),
+    ledger: resolved.ledger,
     stopped: false,
   };
   for (const wf of resolved.workflows) {

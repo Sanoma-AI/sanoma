@@ -121,9 +121,8 @@ export class SanomaClient {
     return handle.workflowID;
   }
 
-  /** The run's audit record, in order. Needs the config's ledger store. */
+  /** The run's audit record, in order, from the config's ledger store. */
   async ledger(runId: string): Promise<LedgerRecord[]> {
-    if (!this.config.ledger) throw new Error("This client has no ledger store: the config has no `ledger`");
     await this.mustExist(runId);
     return this.config.ledger.read(runId);
   }

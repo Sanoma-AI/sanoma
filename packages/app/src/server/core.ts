@@ -57,7 +57,6 @@ export async function runDetail({ client, resolved }: AppContext, runId: string)
   const run = await client.run(runId);
   if (!run) throw new ApiError(404, { error: `No run ${runId}`, code: "run_not_found" });
   const { approvals } = run;
-  if (!resolved.ledger) return { run, ledger: null, approvals };
   try {
     return { run, ledger: await resolved.ledger.read(runId), approvals };
   } catch (err) {

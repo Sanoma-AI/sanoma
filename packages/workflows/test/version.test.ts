@@ -41,6 +41,7 @@ const base: SanomaConfig = {
   connectors: [ghost, resend, bluesky],
   drivers: vendors.drivers,
   policy: allowAll,
+  ledger: memoryLedger(),
   appName: "acme",
 };
 const versionOf = (config: Partial<SanomaConfig>) => resolveConfig({ ...base, ...config }).version;

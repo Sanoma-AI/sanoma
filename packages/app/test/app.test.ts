@@ -199,7 +199,7 @@ describe("the API", () => {
     );
     const stillWaiting = await call<RunSummary[]>("/api/runs?status=waiting");
     expect(stillWaiting.body.map((r) => r.runId)).not.toContain(runId);
-    const ledger = finished.ledger ?? [];
+    const ledger = finished.ledger;
     expect(ledger.map((r) => r.type)).toEqual([
       "run.started",
       "op.called",
