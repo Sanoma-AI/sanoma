@@ -128,4 +128,21 @@ describe("a workflow whose input schema transforms", () => {
     expect(await c().result(runId)).toBe(42);
     expect((await c().ledger(runId))[0]).toMatchObject({ type: "run.started", input: { n: "21" } });
   });
+
+  it("returns the run a run id names when started again the same way, and refuses another input or actor", async () => {
+    const runId = `double-${randomUUID()}`;
+    expect(await c().start(double, { n: "2" }, { startedBy: alice, runId })).toBe(runId);
+    expect(await c().result(runId)).toBe(4);
+    expect(await c().start(double, { n: "2" }, { startedBy: { id: "alice" }, runId })).toBe(runId);
+
+    const otherInput = await caught(c().start(double, { n: "3" }, { startedBy: alice, runId }));
+    expect(errorCode(otherInput)).toBe("invalid_input");
+    expect(otherInput).toMatchObject({
+      message: `Run ${runId} already exists with a different input; use another run id`,
+      data: { runId, differs: ["input"] },
+    });
+    const actor = await caught(c().start(double, { n: "2" }, { startedBy: { id: "bob" }, runId }));
+    expect(actor).toMatchObject({ data: { differs: ["startedBy"] } });
+    expect((await c().ledger(runId)).filter((r) => r.type === "run.started")).toHaveLength(1);
+  });
 });
