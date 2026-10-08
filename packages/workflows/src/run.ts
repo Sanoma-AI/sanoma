@@ -1,5 +1,5 @@
 import type { ApprovalState, Principal } from "./define.ts";
-import type { LedgerStore } from "./ledger.ts";
+import type { LedgerGroup, LedgerStore } from "./ledger.ts";
 import type { DriverFn, Op } from "./op.ts";
 import type { Policy } from "./policy.ts";
 
@@ -46,6 +46,10 @@ export interface Run {
    * at a time, in program order, even under `Promise.all`. Never rejects.
    */
   tail: Promise<unknown>;
+  /** The `ctx.all` member running, if any: every record written meanwhile carries it. */
+  group?: LedgerGroup;
+  /** How many `ctx.all` calls the run has made: the `n` of the next group's `all:<n>`. */
+  groups: number;
   /** Set when the workflow body has returned or thrown. A call still queued then is refused. */
   ended: boolean;
   state: WorkerState;

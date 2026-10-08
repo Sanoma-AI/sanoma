@@ -149,6 +149,7 @@ function register(wf: WorkflowDefinition<any, any>) {
         approvals: [],
         seq: 0,
         tail: Promise.resolve(),
+        groups: 0,
         ended: false,
         state,
       };

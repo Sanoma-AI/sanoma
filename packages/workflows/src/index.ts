@@ -49,7 +49,7 @@ export {
   RejectedError,
   SanomaError,
 } from "./errors.ts";
-export { jsonlLedger, memoryLedger, type LedgerRecord, type LedgerStore } from "./ledger.ts";
+export { jsonlLedger, memoryLedger, type LedgerGroup, type LedgerRecord, type LedgerStore } from "./ledger.ts";
 export { ApprovalMessage, APPROVALS_EVENT, decisionEventOf } from "./approvals.ts";
 export { RUNTIME_VERSION } from "./version.ts";
 export type { RunArgs } from "./run.ts";

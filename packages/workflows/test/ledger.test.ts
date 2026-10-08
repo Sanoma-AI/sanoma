@@ -152,6 +152,7 @@ const runOn = (ledger: LedgerStore): Run => ({
   approvals: [],
   seq: 0,
   tail: Promise.resolve(),
+  groups: 0,
   ended: false,
   state: { app: "acme", ops: new Map(), drivers: new Map(), policy: allowAll, ledger, stopped: false },
 });
@@ -172,6 +173,14 @@ describe("writing a run's records", () => {
       input: 1,
     });
     expect(entry(run, { type: "run.finished", output: 2 }).seq).toBe(1);
+  });
+
+  it("tags a record with the ctx.all member running, and only while one runs", () => {
+    const run = runOn(memoryLedger());
+    run.group = { id: "all:0", index: 1, size: 2 };
+    expect(entry(run, { type: "run.started", input: 1 })).toMatchObject({ group: { id: "all:0", index: 1, size: 2 } });
+    run.group = undefined;
+    expect(entry(run, { type: "run.finished", output: 2 })).not.toHaveProperty("group");
   });
 
   it("retries a failed append, so a store failing twice then succeeding loses nothing", async () => {

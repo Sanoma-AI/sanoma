@@ -28,6 +28,8 @@ export type LedgerRecord = {
   at: number;
   actor: Principal;
   workflow: string;
+  /** Set on every record written while a `ctx.all` member runs; absent outside one. */
+  group?: LedgerGroup;
 } & (
   | { type: "run.started"; input: unknown }
   | {
@@ -73,6 +75,17 @@ export type LedgerRecord = {
   /** `error` as for `op.called`. */
   | { type: "run.failed"; error: ErrorInfo }
 );
+
+/**
+ * The `ctx.all` member a record was written in. `id` is `all:<n>`, `n` counting the run's
+ * `ctx.all` calls from 0 in program order, so a replay numbers them the same; `index` is the
+ * member's position and `size` the member count.
+ */
+export interface LedgerGroup {
+  id: string;
+  index: number;
+  size: number;
+}
 
 export interface LedgerStore {
   /**
@@ -210,10 +223,10 @@ export function memoryLedger(): LedgerStore {
   };
 }
 
-type Common = "v" | "app" | "id" | "runId" | "seq" | "at" | "actor" | "workflow";
+type Common = "v" | "app" | "id" | "runId" | "seq" | "at" | "actor" | "workflow" | "group";
 type Body = LedgerRecord extends infer R ? (R extends LedgerRecord ? Omit<R, Common> : never) : never;
 
-/** A record of the run, with the next `seq` unless one is given. */
+/** A record of the run, with the next `seq` unless one is given, tagged with the `ctx.all` member running. */
 export function entry(run: Run, body: Body, opts: { seq?: number; key?: string; at?: number } = {}): LedgerRecord {
   const seq = opts.seq ?? run.seq++;
   return {
@@ -225,6 +238,7 @@ export function entry(run: Run, body: Body, opts: { seq?: number; key?: string; 
     at: opts.at ?? Date.now(),
     actor: run.actor,
     workflow: run.workflow,
+    ...(run.group ? { group: { ...run.group } } : {}),
     ...body,
   } as LedgerRecord;
 }
