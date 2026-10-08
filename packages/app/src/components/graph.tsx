@@ -43,8 +43,8 @@ type Props<K extends GraphNodeKind> = { data: { node: Extract<GraphNode, { kind:
 
 /**
  * The room the view leaves around the graph, in px. Below it, the zoom slider's: its panel sits
- * 15 px from the bottom edge and is 40 px high (size-8 buttons and p-1), and no node goes under
- * it, at any width.
+ * 15 px from the bottom edge and is 42 px high (size-8 buttons, p-1 and a border), and no node
+ * goes under it, at any width.
  */
 const PAD = { x: 24, top: 16, bottom: 64 } as const;
 /** How the view fits the graph (the zoom slider's fit button fits all of it). */
