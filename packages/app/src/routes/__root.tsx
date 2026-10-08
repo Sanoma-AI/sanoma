@@ -1,16 +1,10 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { createRootRouteWithContext, HeadContent, Link, Outlet, Scripts, useMatchRoute } from "@tanstack/react-router";
+import { createRootRouteWithContext, HeadContent, Link, Outlet, Scripts } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  NavigationMenu,
-  NavigationMenuItem,
-  NavigationMenuLink,
-  NavigationMenuList,
-} from "@/components/ui/navigation-menu";
 import { Toaster } from "@/components/ui/sonner";
 import { ActorContext, useActor, useActorState } from "../actor.ts";
 import { Notice } from "../components/common.tsx";
@@ -90,24 +84,26 @@ const PAGES = [
 
 function Nav() {
   const { actor, setActor } = useActor();
-  const matchRoute = useMatchRoute();
   return (
     <header className="border-b">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 sm:px-6">
         <Link to="/runs" className="font-heading text-base font-semibold">
           Sanoma
         </Link>
-        <NavigationMenu viewport={false} className="order-last basis-full justify-start sm:order-none sm:basis-auto">
-          <NavigationMenuList>
-            {PAGES.map(({ to, label }) => (
-              <NavigationMenuItem key={to}>
-                <NavigationMenuLink asChild active={Boolean(matchRoute({ to, fuzzy: true }))}>
-                  <Link to={to}>{label}</Link>
-                </NavigationMenuLink>
-              </NavigationMenuItem>
-            ))}
-          </NavigationMenuList>
-        </NavigationMenu>
+        <nav className="order-last flex basis-full gap-1 sm:order-none sm:basis-auto">
+          {PAGES.map(({ to, label }) => (
+            <Button key={to} asChild variant="ghost" size="sm">
+              <Link
+                to={to}
+                activeOptions={{ exact: false }}
+                activeProps={{ "data-active": "", "aria-current": "page" }}
+                className="data-[active]:bg-muted"
+              >
+                {label}
+              </Link>
+            </Button>
+          ))}
+        </nav>
         <div className="ml-auto flex items-center gap-1 text-sm text-muted-foreground">
           {actor && (
             <>
