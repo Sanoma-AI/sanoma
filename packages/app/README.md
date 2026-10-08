@@ -18,7 +18,7 @@ const app = await startApp(config, { port: 4321 });
 console.log(app.url); // http://127.0.0.1:4321
 ```
 
-`startApp` checks the config first and throws what the worker would refuse. The worker and the app share the config's Postgres (`databaseUrl`, else `SANOMA_DATABASE_URL`) and its ledger store. Give the config a `jsonlLedger` so the app, in its own process, can read what the worker records; a `memoryLedger` is visible only in the process that wrote it. Without `port`, the app takes any free port and reports it in `app.url`. `app.close()` stops it.
+`startApp` checks the config first and throws what the worker would refuse. The worker and the app share the config's Postgres (`databaseUrl`, else `SANOMA_DATABASE_URL`) and its ledger store. Give the config a `jsonlLedger` so the app, in its own process, can read what the worker records; a `memoryLedger` is visible only in the process that wrote it. A run that has started but has no records in the app's ledger says so on its page, since the likeliest cause is an app reading another ledger than the worker's (a `jsonlLedger` directory relative to another working directory). Without `port`, the app takes any free port and reports it in `app.url`. `app.close()` stops it.
 
 ## Screens
 
@@ -44,9 +44,7 @@ A hosted deployment puts its own authentication in front of the whole app (a rev
 await startApp(config, { resolveActor: async (request) => sessionUser(request) });
 ```
 
-With its own `resolveActor`, the page never asks for a name: it shows who the deployment says you are. An approval addressed to a group (`{ group: "finance" }`) can be decided only by a principal whose `groups` lists it, and the default header carries a name only, so group approvals need a `resolveActor` that supplies `groups`. A `resolveActor` that throws fails the change with a 500 saying "Could not tell who you are", logged with the request.
-
-A 500's `error` is the raw message of what failed, which can name internal details such as a database host. The app does not hide them yet; a deployment that must not show them filters 500 bodies in its proxy.
+With its own `resolveActor`, the page never asks for a name: it shows who the deployment says you are. An approval addressed to a group (`{ group: "finance" }`) can be decided only by a principal whose `groups` lists it, and the default header carries a name only, so group approvals need a `resolveActor` that supplies `groups`. The app calls `resolveActor` only for a request that needs to know who is asking, once per request. One that throws fails the change with a 500, logged with the request as "Could not tell who you are: " and the resolver's message; the page's header says "Could not tell who you are" and asks again every 10 seconds.
 
 ## HTTP API
 
@@ -54,11 +52,11 @@ The page uses server functions; scripts (and later Slack or access-request callb
 
 - `GET /api/config`: `describeConfig(config)`, including `version` and `policy`.
 - `GET /api/runs?limit=50&status=waiting`: recent runs, newest first (`limit` 1 to 500), only those with `status` when given (`queued`, `running`, `waiting`, `finished`, `failed` or `cancelled`).
-- `GET /api/runs/:id`: `{ run, ledger, ledgerError?, approvals }`.
+- `GET /api/runs/:id`: `{ run, ledger, ledgerError?, approvals }`. `ledgerError` says why `ledger` is empty: the ledger could not be read, or it has no records for a run that has started.
 - `POST /api/runs` with `{ "workflow": name, "input": {...} }`: 201 `{ runId }`.
-- `POST /api/runs/:id/approvals/:approvalId` with `{ "decision": "approve" | "reject", "note"?: string }`: the approval's state, 200 once the run has read the decision. When the run has not read it within 5 seconds (no worker is running, say), 202 with the approval still `pending`: the decision stays queued and the run reads it when it next runs. The page says so and keeps the dialog open.
+- `POST /api/runs/:id/approvals/:approvalId` with `{ "decision": "approve" | "reject", "note"?: string }`: the approval's state, 200 once the run has read the decision. When the run has not read it within 5 seconds (no worker is running, say), 202 with the approval still `pending`: the decision stays queued and the run reads it when it next runs. The page closes the dialog and shows the decision as queued, with Approve and Reject disabled for that approval, until the run's status changes.
 
-Errors are `{ error, code?, issues?, approver? }`. Branch on `code`, never on `error`: `invalid_input` is 400 (with `issues` when the input or the body does not match its schema), `not_approver` 403 (with `approver`), `run_not_found` and `no_pending_approval` 404, `already_decided` and `run_ended` (the run has finished, failed or been cancelled, so it reads no decision) 409. An unknown workflow is 404 with `invalid_input` and an issue at `workflow`; a body without `content-type: application/json` is 415; anything unexpected is 500.
+Errors are `{ error, code?, issues?, approver? }`. Branch on `code`, never on `error`: `invalid_input` is 400 (with `issues` when the input or the body does not match its schema), `not_approver` 403 (with `approver`), `run_not_found` and `no_pending_approval` 404, `already_decided` and `run_ended` (the run has finished, failed or been cancelled, so it reads no decision) 409. An unknown workflow is 404 with `invalid_input` and an issue at `workflow`; a body without `content-type: application/json` is 415; anything unexpected is 500 with `error` "Something went wrong" (and its `code`, when it has one). A 500 never carries the message of what failed, which can name internal details such as a database host: the app logs it with the request instead.
 
 ## Developing
 
