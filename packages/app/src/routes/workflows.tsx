@@ -77,10 +77,10 @@ function WorkflowsPage() {
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2">
       <SubsectionTitle>{title}</SubsectionTitle>
       {children}
-    </section>
+    </div>
   );
 }
 

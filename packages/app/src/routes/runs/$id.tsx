@@ -103,10 +103,10 @@ function RunPage() {
         </CardContent>
       </Card>
 
-      <section className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3">
         <SectionTitle>Graph</SectionTitle>
         <GraphPanel source={source} onSelect={select} />
-      </section>
+      </div>
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="flex flex-col gap-3">
@@ -121,13 +121,13 @@ function RunPage() {
             </ItemGroup>
           )}
         </div>
-        <aside className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3">
           <SectionTitle>Approvals</SectionTitle>
           {approvals.length === 0 && <Nothing title="None asked for" />}
           {approvals.map((approval) => (
             <ApprovalCard key={approval.id} run={run} approval={approval} />
           ))}
-        </aside>
+        </div>
       </div>
     </div>
   );
