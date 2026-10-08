@@ -31,8 +31,10 @@ function StartPage() {
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle>{workflow?.title ?? workflow?.name ?? "Choose a workflow"}</CardTitle>
-            <CardDescription>Its input, checked against the workflow's schema before the run starts.</CardDescription>
+            <CardTitle>Input</CardTitle>
+            <CardDescription>
+              The workflow and its input, checked against its schema before the run starts.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <FieldGroup>
