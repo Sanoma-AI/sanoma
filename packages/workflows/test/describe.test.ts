@@ -107,7 +107,7 @@ describe("describeConfig", () => {
     expect(JSON.parse(JSON.stringify(c))).toEqual(c);
   });
 
-  it("names the schema it cannot describe", () => {
+  it("describes what JSON Schema cannot express as open, rather than failing", () => {
     const odd = defineConnector("odd", {
       thing: { get: { effect: "read", input: z.object({ id: z.string() }), output: z.custom<Map<string, string>>() } },
     });
@@ -125,5 +125,15 @@ describe("describeConfig", () => {
         defineConfig({ workflows: [wf], connectors: [odd], drivers, policy: allowAll, ledger: memoryLedger() }),
       ),
     ).not.toThrow();
+  });
+
+  it("names the schema it cannot describe at all", () => {
+    // zod refuses two schemas with one id in a single conversion, whatever `unrepresentable` says.
+    const twice = z.object({ a: z.string().meta({ id: "twice" }), b: z.number().meta({ id: "twice" }) });
+    const clash = defineConnector("clash", { thing: { get: { effect: "read", input: z.object({}), output: twice } } });
+    const drivers = [{ vendor: "clash", ops: { "thing.get": async () => ({ a: "", b: 0 }) } }];
+    expect(() => describeConfig({ ...base, workflows: [], connectors: [clash], drivers })).toThrow(
+      /^Cannot describe clash\.thing\.get output as JSON Schema: Duplicate schema id "twice"/,
+    );
   });
 });

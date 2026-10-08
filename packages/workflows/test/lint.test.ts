@@ -156,6 +156,53 @@ describe("lintWorkflow", () => {
   });
 });
 
+/**
+ * A workflow that does everything the checks refuse, one thing per line, so each diagnostic
+ * names its line. Some lines are refused by oxlint, some by lintWorkflow, some by both.
+ */
+const BAD = `import { SanomaClient, jsonlLedger, DriverError } from "@sanoma/workflows";
+import x from "@sanoma/testing";
+import { fakeGhost } from "@sanoma/connector-ghost/fake";
+const t = Date.now();
+await fetch("https://example.com");
+const r = Math.random();
+const k = process.env.KEY;
+import { resolveDatabaseUrl } from "@sanoma/workflows";
+import { ghostDriver } from "@sanoma/connector-ghost/driver";
+setTimeout(() => {}, 1);
+const id = crypto.randomUUID();
+const g = globalThis;
+const ws = new WebSocket("wss://example.com");
+const p = performance.now();
+const vendor = (e: unknown) => e instanceof DriverError;
+export const all = [SanomaClient, jsonlLedger, x, fakeGhost, t, r, k, resolveDatabaseUrl, ghostDriver, id, g, ws, p, vendor];
+`;
+
+describe("lintWorkflow on a workflow that tries everything", () => {
+  it("refuses each import and instanceof it can see, on its line", () => {
+    const problems = lintWorkflow(BAD, "workflows/bad.ts").map((p) => [p.line, p.message] as const);
+    expect(problems).toEqual([
+      [1, expect.stringMatching(/^SanomaClient is not allowed/)],
+      [1, expect.stringMatching(/^jsonlLedger is not allowed/)],
+      [2, expect.stringMatching(/^import "@sanoma\/testing" is not allowed/)],
+      [3, expect.stringMatching(/^import "@sanoma\/connector-ghost\/fake" is not allowed/)],
+      [8, expect.stringMatching(/^resolveDatabaseUrl is not allowed.*read credentials/)],
+      [9, expect.stringMatching(/^import "@sanoma\/connector-ghost\/driver" is not allowed/)],
+      [15, expect.stringMatching(/^instanceof DriverError is not allowed/)],
+    ]);
+  });
+});
+
+const globals = "eslint(no-restricted-globals)";
+const imports = "eslint(no-restricted-imports)";
+/** A diagnostic oxlint reports on a line of BAD. */
+const bad = (line: number, rule: string, text: RegExp) => ({
+  file: "workflows/bad.ts",
+  line,
+  rule,
+  text: expect.stringMatching(text),
+});
+
 // The fragment consumers extend from their `.oxlintrc.json`. Its override globs resolve against
 // the extending config, so the test writes one into a temp project the way a consumer would.
 describe("oxlint.json", () => {
@@ -170,18 +217,7 @@ describe("oxlint.json", () => {
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), "sanoma-oxlint-"));
     write(".oxlintrc.json", JSON.stringify({ extends: [fragment] }));
-    write(
-      "workflows/bad.ts",
-      `import { SanomaClient, jsonlLedger } from "@sanoma/workflows";
-import x from "@sanoma/testing";
-import { fakeGhost } from "@sanoma/connector-ghost/fake";
-const t = Date.now();
-await fetch("https://example.com");
-const r = Math.random();
-const k = process.env.KEY;
-export const all = [SanomaClient, jsonlLedger, x, fakeGhost, t, r, k];
-`,
-    );
+    write("workflows/bad.ts", BAD);
     write("policies/bad.ts", `export const hour = new Date().getUTCHours();\n`);
     write(
       "workflows/good.ts",
@@ -225,63 +261,25 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
     }));
   };
 
-  it("reports the clock, randomness, the network, the environment and the bypass imports in workflows and policies", () => {
+  it("reports the clock, randomness, the network, timers, the environment, globals and the bypass imports", () => {
     const problems = lint().toSorted((a, b) => a.file.localeCompare(b.file) || a.line! - b.line!);
     expect(problems).toEqual([
-      {
-        file: "policies/bad.ts",
-        line: 1,
-        rule: "eslint(no-restricted-globals)",
-        text: expect.stringMatching(/'Date'.*ctx\.now/),
-      },
-      {
-        file: "workflows/bad.ts",
-        line: 1,
-        rule: "eslint(no-restricted-imports)",
-        text: expect.stringMatching(/'SanomaClient'.*approve its own approvals/),
-      },
-      {
-        file: "workflows/bad.ts",
-        line: 1,
-        rule: "eslint(no-restricted-imports)",
-        text: expect.stringMatching(/'jsonlLedger'.*forge the ledger/),
-      },
-      {
-        file: "workflows/bad.ts",
-        line: 2,
-        rule: "eslint(no-restricted-imports)",
-        text: expect.stringMatching(/@sanoma\/testing.*through ctx/),
-      },
-      {
-        file: "workflows/bad.ts",
-        line: 3,
-        rule: "eslint(no-restricted-imports)",
-        text: expect.stringMatching(/@sanoma\/connector-ghost\/fake.*through ctx/),
-      },
-      {
-        file: "workflows/bad.ts",
-        line: 4,
-        rule: "eslint(no-restricted-globals)",
-        text: expect.stringMatching(/'Date'.*ctx\.now/),
-      },
-      {
-        file: "workflows/bad.ts",
-        line: 5,
-        rule: "eslint(no-restricted-globals)",
-        text: expect.stringMatching(/'fetch'.*connector operation/),
-      },
-      {
-        file: "workflows/bad.ts",
-        line: 6,
-        rule: "eslint(no-restricted-properties)",
-        text: expect.stringMatching(/Math\.random.*ctx\.runId/),
-      },
-      {
-        file: "workflows/bad.ts",
-        line: 7,
-        rule: "eslint(no-restricted-globals)",
-        text: expect.stringMatching(/'process'.*workflow input/),
-      },
+      { file: "policies/bad.ts", line: 1, rule: globals, text: expect.stringMatching(/'Date'.*ctx\.now/) },
+      bad(1, imports, /'SanomaClient'.*approve its own approvals/),
+      bad(1, imports, /'jsonlLedger'.*forge the ledger/),
+      bad(2, imports, /@sanoma\/testing.*through ctx/),
+      bad(3, imports, /@sanoma\/connector-ghost\/fake.*through ctx/),
+      bad(4, globals, /'Date'.*ctx\.now/),
+      bad(5, globals, /'fetch'.*connector operation/),
+      bad(6, "eslint(no-restricted-properties)", /Math\.random.*ctx\.runId/),
+      bad(7, globals, /'process'.*workflow input/),
+      bad(8, imports, /'resolveDatabaseUrl'.*read credentials/),
+      bad(9, imports, /@sanoma\/connector-ghost\/driver.*through ctx/),
+      bad(10, globals, /'setTimeout'.*ctx\.sleep/),
+      bad(11, globals, /'crypto'.*ctx\.runId/),
+      bad(12, globals, /'globalThis'.*bypass/),
+      bad(13, globals, /'WebSocket'.*connector operation/),
+      bad(14, globals, /'performance'.*ctx\.now/),
     ]);
   });
 });
