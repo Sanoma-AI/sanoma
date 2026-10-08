@@ -1,7 +1,7 @@
 import { MonitorIcon, MoonIcon, SunIcon } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useSyncExternalStore } from "react";
-import { Button } from "@/components/ui/button";
+import { Button } from "#/components/ui/button.tsx";
 
 const NEXT = { light: "dark", dark: "system", system: "light" } as const;
 const ICON = { light: SunIcon, dark: MoonIcon, system: MonitorIcon };

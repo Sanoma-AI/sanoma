@@ -5,8 +5,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useMemo } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "#/components/ui/button.tsx";
+import { Checkbox } from "#/components/ui/checkbox.tsx";
 import {
   Field,
   FieldContent,
@@ -16,11 +16,11 @@ import {
   FieldLabel,
   FieldLegend,
   FieldSet,
-} from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import { Spinner } from "@/components/ui/spinner";
-import { Textarea } from "@/components/ui/textarea";
+} from "#/components/ui/field.tsx";
+import { Input } from "#/components/ui/input.tsx";
+import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
+import { Spinner } from "#/components/ui/spinner.tsx";
+import { Textarea } from "#/components/ui/textarea.tsx";
 import { errorBodyOf } from "../api.ts";
 import { Notice } from "../components/common.tsx";
 import { startRunFn } from "../functions.ts";

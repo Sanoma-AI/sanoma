@@ -15,10 +15,10 @@
     "verbatimModuleSyntax": true,
     "erasableSyntaxOnly": true,
     "skipLibCheck": true,
-    // Source, as in the root tsconfig. Keep in sync with its `paths`.
+    // Source, as in the root tsconfig. Keep in sync with its `paths`. (`#/*` is package.json's
+    // `imports`, which TypeScript, Vite and the shadcn CLI all read.)
     "paths": {
-      "@sanoma/workflows": ["../workflows/src/index.ts"],
-      "@/*": ["./src/*"]
+      "@sanoma/workflows": ["../workflows/src/index.ts"]
     }
   },
   "include": ["src", "vite.config.ts"]

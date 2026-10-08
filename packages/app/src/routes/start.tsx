@@ -1,9 +1,9 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { z } from "zod";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Field, FieldLabel } from "@/components/ui/field";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
+import { Field, FieldLabel } from "#/components/ui/field.tsx";
+import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Nothing, Notice, PageHeader } from "../components/common.tsx";
 import { StartForm } from "../form/start-form.tsx";
 import { configQuery } from "../queries.ts";

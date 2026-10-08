@@ -2,8 +2,8 @@ import type { LedgerRecord } from "@sanoma/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Item, ItemContent, ItemGroup, ItemTitle } from "@/components/ui/item";
+import { Badge } from "#/components/ui/badge.tsx";
+import { Item, ItemContent, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { approverName } from "../../api.ts";
 import { ApprovalCard } from "../../components/approval.tsx";
 import {

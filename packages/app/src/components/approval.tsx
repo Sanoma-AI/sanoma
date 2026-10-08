@@ -5,7 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { CheckIcon, XIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { Button } from "#/components/ui/button.tsx";
 import {
   Card,
   CardAction,
@@ -14,8 +14,8 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+} from "#/components/ui/card.tsx";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
 import {
   Dialog,
   DialogClose,
@@ -24,10 +24,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
-import { Spinner } from "@/components/ui/spinner";
-import { Textarea } from "@/components/ui/textarea";
+} from "#/components/ui/dialog.tsx";
+import { Field, FieldDescription, FieldError, FieldLabel } from "#/components/ui/field.tsx";
+import { Spinner } from "#/components/ui/spinner.tsx";
+import { Textarea } from "#/components/ui/textarea.tsx";
 import { approverName, type DecideRequest, errorBodyOf } from "../api.ts";
 import { decideFn } from "../functions.ts";
 import { ApprovalStatusBadge, Expandable, Fact, Facts, plural, When } from "./common.tsx";
