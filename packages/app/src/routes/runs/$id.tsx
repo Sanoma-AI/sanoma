@@ -4,7 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { memo, type ReactNode, useMemo } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Card, CardContent } from "#/components/ui/card.tsx";
-import { Item, ItemContent, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
+import { Item, ItemActions, ItemContent, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { approverLabel } from "@sanoma/workflows/shared";
 import { starterName } from "../../api.ts";
 import { ApprovalCard } from "../../components/approval.tsx";
@@ -238,12 +238,12 @@ const LedgerRow = memo(function LedgerRow({ record, titles }: { record: LedgerRe
         <ItemTitle>
           <StatusDot tone={ledgerTone(record)} />
           {kind}
-          <span className="font-normal text-muted-foreground">
-            <When at={record.at} />
-          </span>
         </ItemTitle>
         <div className="flex flex-col gap-1">{body}</div>
       </ItemContent>
+      <ItemActions className="self-start text-xs text-muted-foreground">
+        <When at={record.at} />
+      </ItemActions>
     </Item>
   );
 });
