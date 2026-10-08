@@ -21,6 +21,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/component
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Table, TableBody, TableCell, TableHead, TableRow } from "#/components/ui/table.tsx";
+import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
 import { utcText } from "#/lib/time.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import { approverLabel } from "@sanoma/workflows/shared";
@@ -112,10 +113,15 @@ export function DecisionBadge({ decision }: { decision: RecordedDecision }) {
   const title =
     decision.kind === "deny" ? decision.reason : approver ? `held for ${approver}` : "allowed by the policy";
   return (
-    <Badge className={toneBadge({ tone: DECISION_TONE[decision.kind] })} title={title}>
-      {decision.kind}
-      {approver ? ` · ${approver}` : ""}
-    </Badge>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge className={toneBadge({ tone: DECISION_TONE[decision.kind] })}>
+          {decision.kind}
+          {approver ? ` · ${approver}` : ""}
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent>{title}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -160,15 +166,20 @@ const noClock = () => undefined;
 
 /**
  * A time, relative to now in the browser. The server renders the UTC time, so the page
- * hydrates the same markup whatever the browser's clock and time zone.
+ * hydrates the same markup whatever the browser's clock and time zone. Its tooltip, the local
+ * time, renders only once opened, in the browser.
  */
 export function When({ at }: { at: number }) {
   const clock = useSyncExternalStore(watchClock, readClock, noClock);
-  const iso = new Date(at).toISOString();
   return (
-    <time dateTime={iso} title={clock === undefined ? iso : new Date(at).toLocaleString()}>
-      {clock === undefined ? utcText(at, { seconds: true }) : ago(at, clock)}
-    </time>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <time dateTime={new Date(at).toISOString()}>
+          {clock === undefined ? utcText(at, { seconds: true }) : ago(at, clock)}
+        </time>
+      </TooltipTrigger>
+      <TooltipContent>{new Date(at).toLocaleString()}</TooltipContent>
+    </Tooltip>
   );
 }
 
