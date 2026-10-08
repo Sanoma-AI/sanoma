@@ -18,7 +18,8 @@
     // Source, as in the root tsconfig. Keep in sync with its `paths`. (`#/*` is package.json's
     // `imports`, which TypeScript, Vite and the shadcn CLI all read.)
     "paths": {
-      "@sanoma/workflows": ["../workflows/src/index.ts"]
+      "@sanoma/workflows": ["../workflows/src/index.ts"],
+      "@sanoma/workflows/shared": ["../workflows/src/shared.ts"]
     }
   },
   "include": ["src", "vite.config.ts"]

@@ -21,7 +21,8 @@ import { Input } from "#/components/ui/input.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
-import { errorBodyOf, errorMessageOf } from "../api.ts";
+import { errorMessage } from "@sanoma/workflows/shared";
+import { errorBodyOf } from "../api.ts";
 import { Notice } from "../components/common.tsx";
 import { startRunFn } from "../functions.ts";
 import {
@@ -102,7 +103,7 @@ function useStartForm(workflow: string, fields: SchemaField[], whole: boolean) {
           if (!body?.issues?.length) {
             // Not the server's answer (the network, a bug): keep the raw value for whoever debugs it.
             if (!body) console.error("sanoma app: starting the run failed:", err);
-            const message = errorMessageOf(err).trim() || "Could not start the run, and no reason was given";
+            const message = errorMessage(err).trim() || "Could not start the run, and no reason was given";
             // `fields` must be there, even empty, for the form to read `form` as its own error.
             return { form: message, fields: {} };
           }

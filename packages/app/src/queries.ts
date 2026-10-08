@@ -1,3 +1,4 @@
+import { isEnded } from "@sanoma/workflows/shared";
 import { queryOptions } from "@tanstack/react-query";
 import { RUNS_LIMIT } from "./api.ts";
 import { getActor, getConfig, getRun, getRuns } from "./functions.ts";
@@ -35,6 +36,6 @@ export const runQuery = (id: string) =>
     // A finished run has nothing left to change.
     refetchInterval: (query) => {
       const status = query.state.data?.run.status;
-      return !status || status === "finished" || status === "failed" || status === "cancelled" ? false : POLL_MS;
+      return !status || isEnded(status) ? false : POLL_MS;
     },
   });

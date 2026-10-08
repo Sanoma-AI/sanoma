@@ -4,7 +4,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Item, ItemContent, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
-import { approverName, starterName } from "../../api.ts";
+import { approverLabel } from "@sanoma/workflows/shared";
+import { starterName } from "../../api.ts";
 import { ApprovalCard } from "../../components/approval.tsx";
 import {
   DecisionBadge,
@@ -139,7 +140,7 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
       kind = "asked";
       body = (
         <p>
-          “{record.title}” asked of {approverName(record.approver)} by{" "}
+          “{record.title}” asked of {approverLabel(record.approver)} by{" "}
           <RequestedBy requestedBy={record.requestedBy} op={record.op} />
         </p>
       );

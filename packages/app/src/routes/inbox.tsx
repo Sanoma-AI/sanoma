@@ -1,5 +1,6 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { mayDecide } from "@sanoma/workflows/shared";
 import { useActor } from "../actor.ts";
 import { pendingApprovals } from "../api.ts";
 import { ApprovalCard } from "../components/approval.tsx";
@@ -25,9 +26,9 @@ function InboxPage() {
     .flatMap((run) => pendingApprovals(run).map((approval) => ({ run, approval })))
     .toSorted((a, b) => b.approval.requestedAt - a.approval.requestedAt);
   // A group approver counts only when the deployment vouches for groups: a typed name has none.
-  const mine = pending.filter(({ approval: { approver } }) =>
-    typeof approver === "string" ? approver === actor : groups.includes(approver.group),
-  ).length;
+  const mine = actor
+    ? pending.filter(({ approval }) => mayDecide(approval, { id: actor, groups: [...groups] })).length
+    : 0;
 
   return (
     <section className="flex flex-col gap-4">

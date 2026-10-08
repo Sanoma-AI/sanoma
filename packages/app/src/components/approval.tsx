@@ -28,7 +28,8 @@ import {
 import { Field, FieldDescription, FieldError, FieldLabel } from "#/components/ui/field.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
-import { approverName, type DecideRequest, errorBodyOf, starterName } from "../api.ts";
+import { approverLabel, isEnded } from "@sanoma/workflows/shared";
+import { type DecideRequest, errorBodyOf, starterName } from "../api.ts";
 import { decideFn } from "../functions.ts";
 import { configQuery } from "../queries.ts";
 import {
@@ -47,9 +48,6 @@ import {
 
 type Decision = DecideRequest["decision"];
 
-/** A run that has ended reads no more decisions. */
-const ENDED: ReadonlySet<RunStatus> = new Set(["finished", "failed", "cancelled"]);
-
 /**
  * An approval: what it is for, who may decide, and the controls to decide while it is pending
  * and its run can still read a decision.
@@ -67,7 +65,7 @@ export function ApprovalCard({
   /** The run it belongs to, for an approval shown away from its run: named under the title, and linked. */
   run?: Pick<RunSummary, "workflow" | "startedBy">;
 }) {
-  const decidable = approval.status === "pending" && !ENDED.has(runStatus);
+  const decidable = approval.status === "pending" && !isEnded(runStatus);
   // The decision stays put while the dialog animates closed, so its verb and colour do not flip.
   const [decision, setDecision] = useState<Decision>("approve");
   const [deciding, setDeciding] = useState(false);
@@ -90,7 +88,7 @@ export function ApprovalCard({
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <Facts>
-          <Fact label="Approver">{approverName(approval.approver)}</Fact>
+          <Fact label="Approver">{approverLabel(approval.approver)}</Fact>
           <Fact label="Lets through">
             <Covers covers={approval.covers} />
           </Fact>
@@ -246,7 +244,7 @@ function DecideDialog({
     !mutation.error || noteError
       ? undefined
       : body?.code === "not_approver"
-        ? `Only ${approverName(body.approver ?? approval.approver)} can decide this`
+        ? `Only ${approverLabel(body.approver ?? approval.approver)} can decide this`
         : mutation.error.message;
   const verb = decision === "reject" ? "Reject" : "Approve";
 
@@ -274,7 +272,7 @@ function DecideDialog({
               {verb} “{approval.title}”?
             </DialogTitle>
             <DialogDescription>
-              Asked of {approverName(approval.approver)}. The run carries on once decided.
+              Asked of {approverLabel(approval.approver)}. The run carries on once decided.
             </DialogDescription>
           </DialogHeader>
           {error && <Notice variant="destructive">{error}</Notice>}

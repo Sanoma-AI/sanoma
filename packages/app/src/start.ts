@@ -2,8 +2,9 @@ import { createSerializationAdapter, isNotFound, isRedirect, notFound } from "@t
 import { createCsrfMiddleware, createMiddleware, createStart } from "@tanstack/react-start";
 import { setResponseStatus } from "@tanstack/react-start/server";
 import type { Principal } from "@sanoma/workflows";
+import { errorMessage } from "@sanoma/workflows/shared";
 import { loadActor } from "./actor.ts";
-import { ACTOR_HEADER, ApiError, errorMessageOf } from "./api.ts";
+import { ACTOR_HEADER, ApiError } from "./api.ts";
 import type { AppContext } from "./context.ts";
 import { toApiError } from "./server/core.ts";
 
@@ -29,7 +30,7 @@ const actor = createMiddleware().server(async ({ request, context, next }) => {
     who = await context.app.resolveActor(request);
   } catch (err) {
     console.error(`sanoma app: resolveActor failed for ${request.method} ${new URL(request.url).pathname}:`, err);
-    actorError = new ApiError(500, { error: `Could not tell who you are: ${errorMessageOf(err)}` });
+    actorError = new ApiError(500, { error: `Could not tell who you are: ${errorMessage(err)}` });
   }
   return next({ context: { actor: who, actorError } });
 });

@@ -1,6 +1,5 @@
 import type {
   ApprovalState,
-  Approver,
   ErrorCode,
   InputIssue,
   LedgerRecord,
@@ -15,7 +14,8 @@ export type { InputIssue } from "@sanoma/workflows";
 /**
  * The shapes the app's HTTP API and server functions send and receive. The page imports this
  * file too, so the server and the browser agree on them. Only types come from
- * `@sanoma/workflows`, so the browser bundle never loads the runtime.
+ * `@sanoma/workflows`, so the browser bundle never loads the runtime; values the page shares
+ * with the runtime come from `@sanoma/workflows/shared`.
  */
 
 /** Who is asking. There is no login: the page asks once and sends the name with every change. */
@@ -118,20 +118,9 @@ export class ApiError extends Error {
   }
 }
 
-/** An error's message, or the value as text when it is not an Error. */
-export const errorMessageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
-
 /** The API error body an error carries, when it is an `ApiError`. */
 export const errorBodyOf = (err: unknown): ErrorResponse | undefined =>
   err instanceof ApiError ? err.body : undefined;
-
-/**
- * Someone who may decide an approval, as text: a name, or "group <name>". The same as the
- * runtime's `approverLabel`, which the browser bundle can't import: only types cross over.
- */
-export function approverName(approver: Approver): string {
-  return typeof approver === "string" ? approver : `group ${approver.group}`;
-}
 
 /** Who started a run, as text. */
 export const starterName = (run: Pick<RunSummary, "startedBy">): string => run.startedBy?.id ?? "unknown";

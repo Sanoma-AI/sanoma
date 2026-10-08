@@ -7,7 +7,7 @@ import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
-import { approverName } from "../api.ts";
+import { approverLabel } from "@sanoma/workflows/shared";
 
 // Small pieces shared by the screens, composed from the shadcn components in ./ui.
 
@@ -101,7 +101,7 @@ export function ApprovalStatusBadge({ status }: { status: ApprovalState["status"
 
 /** The policy's decision on an operation call. */
 export function DecisionBadge({ decision }: { decision: RecordedDecision }) {
-  const approver = decision.kind === "approve" ? approverName(decision.approver) : undefined;
+  const approver = decision.kind === "approve" ? approverLabel(decision.approver) : undefined;
   const title =
     decision.kind === "deny" ? decision.reason : approver ? `held for ${approver}` : "allowed by the policy";
   return (
