@@ -39,8 +39,14 @@ function installedDbosVersion(): string {
  * The application version DBOS stamps on every run, always `<appName>@…`: DBOS version names
  * are unique per system database across apps. A worker recovers and dequeues only runs of its
  * own version, so the version must change whenever replaying an old run on the new code could
- * go wrong. Without `config.version`, it is a hash of the app name, this runtime's and DBOS's
- * versions, and each workflow's name, body and operations; drivers and policy are not in it.
+ * go wrong.
+ *
+ * Without `config.version`, it is a hash of the app name, `RUNTIME_VERSION`, `STEP_LAYOUT`,
+ * the installed DBOS version, and for each workflow its name, the source text of its `run`
+ * function, the ids of the operations it uses and its input schema as JSON Schema. The hash
+ * cannot see functions `run` calls that live elsewhere (their source is not reachable from the
+ * definition), op schemas, drivers or the policy: a project that edits those between deploys
+ * should set `version` in the config (a git commit) instead.
  */
 export function computeVersion(config: {
   appName?: string;
@@ -67,13 +73,7 @@ export function computeVersion(config: {
   return `${appName}@${hash}`;
 }
 
-/*
- * What the hash covers: each workflow's name, the source text of its `run` function, the ids
- * of the operations it uses, and its input schema. What it cannot cover: functions `run` calls
- * that live elsewhere (their source is not reachable from the definition), op schemas, drivers
- * and the policy. A project that edits such helpers between deploys should set `version` in
- * the config (a git commit) instead of relying on the hash.
- */
+/** The workflow's input schema as the hash sees it: its JSON Schema, or its text when zod can't convert it. */
 function inputSchemaOf(wf: WorkflowDefinition<any, any>): unknown {
   try {
     return jsonSchemaOf(wf.input);

@@ -20,7 +20,6 @@ const registered = new Map<
   { definition: WorkflowDefinition<any, any>; fn: (args: RunArgs) => Promise<unknown> }
 >();
 
-/** Registers the workflows, connects to Postgres and recovers any runs that were interrupted. */
 export interface WorkerOptions {
   logLevel?: string;
   /**
@@ -32,6 +31,7 @@ export interface WorkerOptions {
   promote?: boolean;
 }
 
+/** Registers the workflows, connects to Postgres and recovers any runs that were interrupted. */
 export async function startWorker(config: SanomaConfig, options: WorkerOptions = {}): Promise<Worker> {
   // Check everything before touching the state a running worker reads.
   const resolved = resolveConfig(config);

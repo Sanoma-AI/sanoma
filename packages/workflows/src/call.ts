@@ -260,10 +260,7 @@ function checkSleep(req: unknown): SleepRequest {
   return parseOrThrow(timed ? SleepUntil : SleepFor, req, `ctx.sleep(${shown(req)})`);
 }
 
-/**
- * An `invalid_input` error naming each problem, with zod's issues as plain JSON in `data`
- * (the shape `SanomaClient` uses), so they survive the trip through DBOS.
- */
+/** Waits, durably, until the time or for the duration the request names. */
 async function sleep(raw: unknown) {
   const req = checkSleep(raw);
   let ms: number;
