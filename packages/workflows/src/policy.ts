@@ -76,13 +76,8 @@ export const allow = (reasons?: string[]): Decision =>
 export const deny = (reason: string, reasons?: string[]): Decision =>
   reasons === undefined ? { kind: "deny", reason } : { kind: "deny", reason, reasons };
 
-/**
- * Holds the call for `approver`. The second argument is the title, or `{ title?, covers? }`:
- * `covers` lists other operations the approval also stands for.
- */
-export function approve(approver: Approver, options?: string | { title?: string; covers?: Op[] }): Decision {
-  const { title, covers }: { title?: string; covers?: Op[] } =
-    typeof options === "string" ? { title: options } : (options ?? {});
+/** Holds the call for `approver`. `covers` lists other operations the approval also stands for. */
+export function approve(approver: Approver, { title, covers }: { title?: string; covers?: Op[] } = {}): Decision {
   return {
     kind: "approve",
     approver,
