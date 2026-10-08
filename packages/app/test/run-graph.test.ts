@@ -163,7 +163,7 @@ describe("runGraph", () => {
     );
     const { nodes, edges } = runGraph(records, run("running"), NOW);
     expect(summary(nodes)).toEqual(["start ok", "op:1 ok", "op:2 ok", "pending:all:1:2 -", "end off"]);
-    expect(nodes[3]).toEqual({ id: "pending:all:1:2", kind: "pending", label: "pending" });
+    expect(nodes[3]).toEqual({ id: "pending:all:1:2", kind: "pending", label: "not started" });
     expect(pairs(edges)).toEqual([
       "start->op:1",
       "start->op:2",

@@ -59,7 +59,7 @@ export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS
           ];
           break;
         case "pending":
-          from = [add({ id: step.key, kind: "pending", label: "pending", ...inside }, from)];
+          from = [add({ id: step.key, kind: "pending", label: "not started", ...inside }, from)];
           break;
         case "all":
           if (step.branches.length) from = lanes(step.branches, from);

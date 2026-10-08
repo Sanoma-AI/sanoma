@@ -205,7 +205,7 @@ function SleepNode({ data: { node } }: Props<"sleep">) {
   );
 }
 
-/** A `ctx.all` member the run has recorded nothing for yet, drawn like the end it has not reached. */
+/** A `ctx.all` member the run has recorded nothing for yet: "not started", dashed like the open end. */
 function PendingNode({ data: { node } }: Props<"pending">) {
   return (
     <Frame node={node}>
