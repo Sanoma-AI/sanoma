@@ -1,6 +1,7 @@
 import { DBOS, DBOSWorkflowConflictError, Error as DBOSErrors } from "@dbos-inc/dbos-sdk";
 import { awaitApproval, type CheckedApproval } from "./approvals.ts";
 import {
+  AllMembers,
   type ApprovalRequest,
   ApprovalRequestSchema,
   SleepFor,
@@ -114,7 +115,12 @@ export function buildCtx(wf: WorkflowDefinition<any, any>, run: Run): any {
     }
     return strict(out, path, wf.name);
   };
-  return queued(members, "ctx");
+  const ctx = queued(members, "ctx");
+  // ctx.all alone skips the queue: it makes no DBOS call or record itself, it only calls its
+  // members, whose ctx calls are queued. Queued, it would hold the queue until its members
+  // settled, and their calls, queued behind it, would never start.
+  if (uses.includes("all")) ctx.all = (list: unknown) => all(run, list);
+  return ctx;
 }
 
 /** Refuses anything not declared in `uses`, with a message that says so. */
@@ -267,6 +273,33 @@ function checkApproval(title: string, req: ApprovalRequest): CheckedApproval {
 function checkSleep(req: unknown): SleepRequest {
   const timed = typeof req === "object" && req !== null && "until" in req;
   return parseOrThrow(timed ? SleepUntil : SleepFor, req, `ctx.sleep(${shown(req)})`);
+}
+
+/**
+ * Calls the members one after another, each awaited before the next starts, with the run's
+ * group set so every record a member writes carries it. The first failure stops the group and is
+ * rethrown as it is. `n` is taken in program order, so a replay numbers the groups the same.
+ */
+async function all(run: Run, list: unknown): Promise<unknown[]> {
+  if (run.group) {
+    throw new SanomaError("invalid_input", "ctx.all cannot be nested: a member of a ctx.all called ctx.all", {
+      group: run.group.id,
+    });
+  }
+  const members = parseOrThrow(AllMembers, list, "ctx.all");
+  const id = `all:${run.groups++}`;
+  // A call made before ctx.all and not awaited settles first, so it is not tagged as a member's.
+  await run.tail;
+  const outputs: unknown[] = [];
+  try {
+    for (const [index, member] of members.entries()) {
+      run.group = { id, index, size: members.length };
+      outputs.push(await member());
+    }
+  } finally {
+    run.group = undefined;
+  }
+  return outputs;
 }
 
 /**

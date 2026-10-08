@@ -44,6 +44,18 @@ describe("describeConfig", () => {
     expect(wf.builtins).toEqual(["approval", "sleep"]);
   });
 
+  it("lists ctx.all among a workflow's built-ins", () => {
+    const fan = defineWorkflow({
+      name: "fan",
+      trigger: "manual",
+      input: z.object({}),
+      uses: [bluesky.post.create, "all"],
+      run: async (ctx) => ctx.all([() => ctx.bluesky.post.create({ text: "x" })]),
+    });
+    const wf = describeConfig({ ...base, workflows: [fan] }).workflows[0]!;
+    expect(wf.builtins).toEqual(["all"]);
+  });
+
   it("describes every operation the connectors declare, with its effect and contract, sorted by id", () => {
     const { ops } = describeConfig(base);
     expect(ops.map((o) => o.id)).toEqual([

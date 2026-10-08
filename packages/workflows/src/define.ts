@@ -16,7 +16,7 @@ export const Principal: z.ZodType<Principal> = z.object({
   groups: z.array(z.string()).optional(),
 });
 
-export type Builtin = "approval" | "sleep";
+export type Builtin = "approval" | "sleep" | "all";
 export type Use = Op | Builtin;
 
 /** Who may decide an approval: one person, by `Principal.id`, or anyone in a group, by `Principal.groups`. */
@@ -135,6 +135,12 @@ export const SleepFor = z.strictObject({
   days: duration,
 }) satisfies z.ZodType<SleepRequest>;
 
+/** Checks a `ctx.all` argument: a list of functions, each one member. */
+export const AllMembers = z.array(
+  z.custom<() => unknown>((m) => typeof m === "function", "each member must be a function, such as () => ctx.…"),
+  { error: "needs a list of functions: ctx.all([() => …, () => …])" },
+);
+
 type OpsOf<U extends readonly Use[]> = Extract<U[number], Op>;
 
 type CtxOps<O extends Op> = {
@@ -160,6 +166,17 @@ interface SleepCtx {
   sleep(request: SleepRequest): Promise<void>;
 }
 
+interface AllCtx {
+  /**
+   * Runs the members one after another, in order, and returns their outputs in that order. It
+   * declares a fan-out for the ledger and the graph; it adds no concurrency. The first member
+   * that throws stops the group with its error, and later members never run. Not nestable.
+   */
+  all<const T extends readonly (() => Promise<unknown>)[]>(
+    members: T,
+  ): Promise<{ -readonly [K in keyof T]: Awaited<ReturnType<T[K]>> }>;
+}
+
 interface BaseCtx {
   /** The current time, recorded so replays see the same value. Use instead of `Date.now()`. */
   now(): Promise<number>;
@@ -169,7 +186,8 @@ interface BaseCtx {
 export type Ctx<U extends readonly Use[]> = BaseCtx &
   CtxOps<OpsOf<U>> &
   ("approval" extends U[number] ? ApprovalCtx : unknown) &
-  ("sleep" extends U[number] ? SleepCtx : unknown);
+  ("sleep" extends U[number] ? SleepCtx : unknown) &
+  ("all" extends U[number] ? AllCtx : unknown);
 
 /**
  * A schema as JSON Schema (draft 2020-12). By default it describes what a caller sends

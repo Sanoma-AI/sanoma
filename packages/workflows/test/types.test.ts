@@ -29,6 +29,34 @@ export const wf = defineWorkflow({
   },
 });
 
+export const fan = defineWorkflow({
+  name: "fan",
+  trigger: "manual",
+  input: z.object({ id: z.string() }),
+  uses: [shop.order.get, "all"],
+  run: async (ctx, { id }) => {
+    // Each output keeps its member's type, in order.
+    const [order, label] = await ctx.all([() => ctx.shop.order.get({ id }), async () => "x" as const]);
+    const total: number = order.total;
+    const x: "x" = label;
+    // @ts-expect-error a member is a function, not a promise
+    await ctx.all([ctx.shop.order.get({ id })]);
+    const none: [] = await ctx.all([]);
+    return [total, x, none];
+  },
+});
+
+export const noAll = defineWorkflow({
+  name: "no-all",
+  trigger: "manual",
+  input: z.object({}),
+  uses: [],
+  run: async (ctx) => {
+    // @ts-expect-error all is not in `uses`
+    await ctx.all([]);
+  },
+});
+
 export const shopDriver = defineDriver(shop, {
   order: {
     get: async ({ id }, call) => ({ total: id.length + call.attempt }),
