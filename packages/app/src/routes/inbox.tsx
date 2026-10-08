@@ -1,10 +1,11 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { mayDecide } from "@sanoma/workflows/shared";
+import { Badge } from "#/components/ui/badge.tsx";
 import { useActor } from "../actor.ts";
 import { pendingApprovals } from "../api.ts";
 import { ApprovalCard } from "../components/approval.tsx";
-import { Nothing, Notice, PageHeader } from "../components/common.tsx";
+import { Nothing, Notice, PageHeader, toneBadge } from "../components/common.tsx";
 import { waitingRunsQuery } from "../queries.ts";
 
 export const Route = createFileRoute("/inbox")({
@@ -26,11 +27,10 @@ function InboxPage() {
     : 0;
 
   return (
-    <section className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <PageHeader title="Inbox">
-        <p className="text-sm text-muted-foreground">
-          {pending.length} waiting{actor ? `, ${mine} for you` : ""}
-        </p>
+        <Badge variant="secondary">{pending.length} waiting</Badge>
+        {actor && <Badge className={toneBadge({ tone: mine ? "waiting" : "off" })}>{mine} for you</Badge>}
       </PageHeader>
       {error && <Notice variant="destructive">Could not refresh approvals: {error.message}</Notice>}
       {pending.length === 0 && <Nothing title="Nothing is waiting for a decision" />}
@@ -39,6 +39,6 @@ function InboxPage() {
           <ApprovalCard key={`${run.runId}/${approval.id}`} run={run} approval={approval} showRun />
         ))}
       </div>
-    </section>
+    </div>
   );
 }
