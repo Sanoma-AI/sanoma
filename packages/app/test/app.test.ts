@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
 import {
-  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -577,31 +576,38 @@ describe("startApp", () => {
     }
   });
 
-  it("refuses a build without its client files, rather than serving pages with no script or style", async () => {
-    // Inside the package, so the server build still resolves its dependencies.
-    const half = mkdtempSync(join(appDir, ".test-dist-"));
+  it("refuses a build without its client files, or with none in it, rather than serving pages with no script or style", async () => {
+    const half = mkdtempSync(join(tmpdir(), "sanoma-app-dist-"));
     try {
-      cpSync(join(distDir, "server"), join(half, "server"), { recursive: true });
-      await expect(startApp(config, { distDir: half })).rejects.toThrow(
-        `The app is not built: ${join(half, "client")} is missing`,
-      );
+      mkdirSync(join(half, "server"));
+      writeFileSync(join(half, "server", "server.js"), "");
+      const refusal = `The app is not built: ${join(half, "client")} is missing`;
+      await expect(startApp(config, { distDir: half })).rejects.toThrow(refusal);
+      mkdirSync(join(half, "client"));
+      await expect(startApp(config, { distDir: half })).rejects.toThrow(refusal);
     } finally {
       rmSync(half, { recursive: true, force: true });
     }
   });
 
-  it("reports both failures when neither the build nor the database is there", async () => {
-    const empty = mkdtempSync(join(tmpdir(), "sanoma-app-dist-"));
+  it("reports both failures when neither the server entry nor the database works", async () => {
+    const broken = mkdtempSync(join(tmpdir(), "sanoma-app-dist-"));
     try {
-      const err = await startApp({ ...config, databaseUrl: "not a url" }, { distDir: empty }).then(
+      mkdirSync(join(broken, "server"));
+      mkdirSync(join(broken, "client"));
+      writeFileSync(join(broken, "server", "server.js"), "");
+      writeFileSync(join(broken, "client", "index.txt"), "");
+      const err = await startApp({ ...config, databaseUrl: "not a url" }, { distDir: broken }).then(
         () => undefined,
         (e: unknown) => e,
       );
       expect(err).toBeInstanceOf(AggregateError);
       expect((err as AggregateError).errors).toHaveLength(2);
-      expect((err as Error).message).toMatch(/^The app could not start: The app is not built: .*; and Invalid URL/);
+      expect((err as Error).message).toMatch(
+        /^The app could not start: .*server\.js does not export a \{ fetch \} server entry; and Invalid URL/,
+      );
     } finally {
-      rmSync(empty, { recursive: true, force: true });
+      rmSync(broken, { recursive: true, force: true });
     }
   });
 });

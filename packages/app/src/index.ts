@@ -53,7 +53,12 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   const host = options.host ?? "127.0.0.1";
   const loopbackOnly = isLoopback(host);
 
-  const [loaded, connected] = await Promise.allSettled([loadServerEntry(distDir), SanomaClient.connect(config)]);
+  // The build first, importing nothing and connecting to nothing: a missing or half build is
+  // refused before anything is opened.
+  const files = await staticFiles(join(distDir, "client"));
+  const serverEntry = join(distDir, "server", "server.js");
+  await mustBeFile(serverEntry);
+  const [loaded, connected] = await Promise.allSettled([loadServerEntry(serverEntry), SanomaClient.connect(config)]);
   if (loaded.status === "rejected" && connected.status === "rejected") {
     throw new AggregateError(
       [loaded.reason, connected.reason],
@@ -67,13 +72,6 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   if (connected.status === "rejected") throw connected.reason;
   const entry = loaded.value;
   const client = connected.value;
-  let files: Map<string, StaticFile>;
-  try {
-    files = await staticFiles(join(distDir, "client"));
-  } catch (err) {
-    await client.close();
-    throw err;
-  }
   const app: AppContext = { resolved, description, client, resolveActor: options.resolveActor };
 
   const server = createServer((req, res) => {
@@ -149,8 +147,8 @@ const isMissing = (err: unknown) => {
   return code === "ENOENT" || code === "ENOTDIR";
 };
 
-async function loadServerEntry(distDir: string): Promise<ServerEntry> {
-  const path = join(distDir, "server", "server.js");
+/** Refuses a build whose file at `path` is not there. */
+async function mustBeFile(path: string) {
   const found = await stat(path).then(
     (s) => s.isFile(),
     (err: unknown) => {
@@ -159,6 +157,9 @@ async function loadServerEntry(distDir: string): Promise<ServerEntry> {
     },
   );
   if (!found) throw notBuilt(path);
+}
+
+async function loadServerEntry(path: string): Promise<ServerEntry> {
   const mod = (await import(pathToFileURL(path).href)) as { default?: ServerEntry };
   if (typeof mod.default?.fetch !== "function") throw new Error(`${path} does not export a { fetch } server entry`);
   return mod.default;
@@ -209,6 +210,8 @@ async function staticFiles(clientDir: string): Promise<Map<string, StaticFile>> 
       },
     });
   }
+  // An empty directory is as unbuilt as a missing one.
+  if (files.size === 0) throw notBuilt(clientDir);
   return files;
 }
 
