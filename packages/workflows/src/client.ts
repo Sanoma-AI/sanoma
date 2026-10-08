@@ -224,12 +224,11 @@ export class SanomaClient {
     options: { timeoutSeconds?: number } = {},
   ): Promise<ApprovalState> {
     const msg = parseOrThrow(ApprovalMessage, message, "Not a decision");
-    const all = await this.approvals(runId);
+    // A run that does not exist has no approvals, so run_not_found never hides already_decided.
+    const [all, row] = await Promise.all([this.approvals(runId), this.mustExist(runId)]);
     const target = approvalId ? all.find((a) => a.id === approvalId) : all.find((a) => a.status === "pending");
     if (target && target.status !== "pending") throw alreadyDecided(runId, target);
     // A run that has ended reads no more messages: a decision sent to it would wait forever.
-    const row = await this.dbos.getWorkflow(runId);
-    if (!row) throw new SanomaError("run_not_found", `No run ${runId}`, { runId });
     const status = runStatus(row.status, all);
     if (status === "finished" || status === "failed" || status === "cancelled") {
       throw new SanomaError("run_ended", `Run ${runId} has ${status}; it takes no more decisions`, {
@@ -314,8 +313,11 @@ export class SanomaClient {
     }
   }
 
+  /** The run's status row, read without its input or output, or `run_not_found`. */
   private async mustExist(runId: string) {
-    if (!(await this.dbos.getWorkflow(runId))) throw new SanomaError("run_not_found", `No run ${runId}`, { runId });
+    const [row] = await this.dbos.listWorkflows({ workflowIDs: [runId], loadInput: false, loadOutput: false });
+    if (!row) throw new SanomaError("run_not_found", `No run ${runId}`, { runId });
+    return row;
   }
 
   private async summarize(r: {
