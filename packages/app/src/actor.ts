@@ -50,10 +50,10 @@ export const useActor = () => useContext(ActorContext);
  * The actor state for the root. With a deployment's own resolver, who the server says; else the
  * name in this browser's storage, read after the first render so hydration matches the server.
  */
-export function useActorState(server: ActorInfo | undefined): ActorState {
+export function useActorState(server: ActorInfo): ActorState {
   const [stored, setState] = useState<string | null>();
   useEffect(() => setState(loadActor()), []);
-  if (server?.fromServer) {
+  if (server.fromServer) {
     const { actor, error } = server;
     return {
       actor: actor?.id ?? null,

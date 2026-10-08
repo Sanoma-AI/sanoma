@@ -1,4 +1,4 @@
-import { type QueryClient, useQuery } from "@tanstack/react-query";
+import { type QueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
   createRootRouteWithContext,
   HeadContent,
@@ -26,7 +26,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "#/components/ui/s
 import { Toaster } from "#/components/ui/sonner.tsx";
 import { TooltipProvider } from "#/components/ui/tooltip.tsx";
 import { ActorContext, useActorState } from "../actor.ts";
-import { actorQuery, configQuery } from "../queries.ts";
+import { actorQuery, configQuery, waitingRunsQuery } from "../queries.ts";
 // lucide's shield-check, the sidebar's brand icon.
 import favicon from "../favicon.svg?url";
 import css from "../style.css?url";
@@ -52,6 +52,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   // Both stay in the query client, where the page reads them: a loader returns only what no
   // query holds (here, whether the sidebar was left open), since the page carries loader data too.
   loader: async ({ context: { queryClient } }) => {
+    // The inbox badge's count, started here and not awaited: it streams in with the page, and a
+    // slow or failed read never holds the page up (the badge shows nothing until it comes).
+    void queryClient.query(waitingRunsQuery()).catch(() => {});
     await Promise.all([
       queryClient.query({ ...actorQuery(), staleTime: "static" }),
       queryClient.query({ ...configQuery(), staleTime: "static" }),
@@ -72,7 +75,7 @@ const readSidebarOpen = createIsomorphicFn()
 const WhoAreYou = lazy(() => import("../components/who-are-you.tsx"));
 
 function Root() {
-  const { data: server } = useQuery(actorQuery());
+  const { data: server } = useSuspenseQuery(actorQuery());
   const actor = useActorState(server);
   const { sidebarOpen } = Route.useLoaderData();
   return (

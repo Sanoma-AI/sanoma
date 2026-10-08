@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, type LinkProps } from "@tanstack/react-router";
+import { ClientOnly, Link, type LinkProps } from "@tanstack/react-router";
 import type { LucideIcon } from "lucide-react";
 import {
   SidebarGroup,
@@ -39,7 +39,11 @@ export function NavMain({
                 <span>{item.label}</span>
               </Link>
             </SidebarMenuButton>
-            {item.to === "/inbox" && pending > 0 && <SidebarMenuBadge>{pending}</SidebarMenuBadge>}
+            {/* After hydration only: the root loader starts this query without waiting for it, so
+                the server may render before it answers and the browser after. */}
+            {item.to === "/inbox" && (
+              <ClientOnly>{pending > 0 && <SidebarMenuBadge>{pending}</SidebarMenuBadge>}</ClientOnly>
+            )}
           </SidebarMenuItem>
         ))}
       </SidebarMenu>
