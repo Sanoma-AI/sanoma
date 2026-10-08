@@ -1,27 +1,29 @@
-import { Avatar, AvatarFallback, AvatarImage } from "#/components/ui/avatar.tsx";
+import { ChevronsUpDownIcon, MonitorIcon, MoonIcon, SunIcon, UserIcon, UserPenIcon } from "lucide-react";
+import { useTheme } from "next-themes";
+import { cn } from "#/lib/utils.ts";
+import { Avatar, AvatarFallback } from "#/components/ui/avatar.tsx";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu.tsx";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "#/components/ui/sidebar.tsx";
-import { ChevronsUpDownIcon, SparklesIcon, BadgeCheckIcon, CreditCardIcon, BellIcon, LogOutIcon } from "lucide-react";
+import { Skeleton } from "#/components/ui/skeleton.tsx";
+import { useActor } from "../actor.ts";
 
-export function NavUser({
-  user,
-}: {
-  user: {
-    name: string;
-    email: string;
-    avatar: string;
-  };
-}) {
+/**
+ * Who you are and the theme, in the sidebar's footer. The menu renders only once opened, in the
+ * browser, so the stored theme never reaches the server's markup.
+ */
+export function NavUser() {
   const { isMobile } = useSidebar();
-
+  const { actor, fromServer, error, setActor } = useActor();
+  const { theme, setTheme } = useTheme();
   return (
     <SidebarMenu>
       <SidebarMenuItem>
@@ -31,57 +33,54 @@ export function NavUser({
               size="lg"
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
-              <Avatar className="h-8 w-8 rounded-lg">
-                <AvatarImage src={user.avatar} alt={user.name} />
-                <AvatarFallback className="rounded-lg">CN</AvatarFallback>
+              <Avatar className="size-8 rounded-lg">
+                <AvatarFallback className="rounded-lg">
+                  {actor ? actor.slice(0, 2).toUpperCase() : <UserIcon />}
+                </AvatarFallback>
               </Avatar>
               <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-medium">{user.name}</span>
-                <span className="truncate text-xs">{user.email}</span>
+                {/* The name in this browser is read after hydration: until then, a placeholder. */}
+                {actor === undefined && !fromServer ? (
+                  <Skeleton className="h-4 w-24" />
+                ) : (
+                  <span className="truncate font-medium">
+                    {actor ?? (fromServer ? "Not signed in" : "Who are you?")}
+                  </span>
+                )}
+                <span className={cn("truncate text-xs", error && "text-destructive")}>
+                  {error ?? (fromServer ? "Signed in by the deployment" : "Name kept in this browser")}
+                </span>
               </div>
               <ChevronsUpDownIcon className="ml-auto size-4" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
-          <DropdownMenuContent className="w-fit" side={isMobile ? "bottom" : "right"} align="end" sideOffset={4}>
-            <DropdownMenuLabel className="p-0 font-normal">
-              <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-                <Avatar className="h-8 w-8 rounded-lg">
-                  <AvatarImage src={user.avatar} alt={user.name} />
-                  <AvatarFallback className="rounded-lg">CN</AvatarFallback>
-                </Avatar>
-                <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">{user.name}</span>
-                  <span className="truncate text-xs">{user.email}</span>
-                </div>
-              </div>
-            </DropdownMenuLabel>
+          <DropdownMenuContent side={isMobile ? "bottom" : "right"} align="end" sideOffset={4}>
+            <DropdownMenuLabel>{error ?? (actor ? `You are ${actor}` : "Not signed in")}</DropdownMenuLabel>
+            {!fromServer && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => setActor(null)}>
+                  <UserPenIcon />
+                  Change name
+                </DropdownMenuItem>
+              </>
+            )}
             <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuItem>
-                <SparklesIcon />
-                Upgrade to Pro
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuItem>
-                <BadgeCheckIcon />
-                Account
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <CreditCardIcon />
-                Billing
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <BellIcon />
-                Notifications
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem>
-              <LogOutIcon />
-              Log out
-            </DropdownMenuItem>
+            <DropdownMenuLabel>Theme</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={theme ?? "system"} onValueChange={setTheme}>
+              <DropdownMenuRadioItem value="light">
+                <SunIcon />
+                Light
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="dark">
+                <MoonIcon />
+                Dark
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="system">
+                <MonitorIcon />
+                System
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

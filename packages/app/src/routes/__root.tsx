@@ -1,12 +1,30 @@
 import { type QueryClient, useQuery } from "@tanstack/react-query";
-import { createRootRouteWithContext, HeadContent, Link, Outlet, Scripts } from "@tanstack/react-router";
+import {
+  createRootRouteWithContext,
+  HeadContent,
+  Link,
+  Outlet,
+  Scripts,
+  useLocation,
+  useMatch,
+} from "@tanstack/react-router";
 import { ThemeProvider } from "next-themes";
 import { lazy, type ReactNode, Suspense } from "react";
-import { Button } from "#/components/ui/button.tsx";
+import { AppSidebar, PAGES } from "#/components/app-sidebar.tsx";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "#/components/ui/breadcrumb.tsx";
+import { Separator } from "#/components/ui/separator.tsx";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "#/components/ui/sidebar.tsx";
 import { Toaster } from "#/components/ui/sonner.tsx";
-import { ActorContext, useActor, useActorState } from "../actor.ts";
+import { TooltipProvider } from "#/components/ui/tooltip.tsx";
+import { ActorContext, useActorState } from "../actor.ts";
 import { Notice } from "../components/common.tsx";
-import { ModeToggle } from "../components/mode-toggle.tsx";
 import { actorQuery, configQuery } from "../queries.ts";
 import css from "../style.css?url";
 
@@ -57,18 +75,33 @@ function Root() {
         disableTransitionOnChange
       >
         <ActorContext value={actor}>
-          <div id="app">
-            <Nav />
-            <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
-              <Outlet />
-            </main>
-            {!actor.fromServer && actor.actor === null && (
-              <Suspense fallback={null}>
-                <WhoAreYou />
-              </Suspense>
-            )}
-            <Toaster />
-          </div>
+          {/* Radix's tooltips need one provider: the sidebar's, and any a page shows. */}
+          <TooltipProvider>
+            <div id="app">
+              {/* Opens expanded: the sidebar's cookie is written for a later visit, never read. */}
+              <SidebarProvider>
+                <AppSidebar />
+                <SidebarInset>
+                  <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+                    <div className="flex items-center gap-2 px-4">
+                      <SidebarTrigger className="-ml-1" />
+                      <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
+                      <Crumbs />
+                    </div>
+                  </header>
+                  <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 p-4 pt-0 sm:px-6">
+                    <Outlet />
+                  </div>
+                </SidebarInset>
+              </SidebarProvider>
+              {!actor.fromServer && actor.actor === null && (
+                <Suspense fallback={null}>
+                  <WhoAreYou />
+                </Suspense>
+              )}
+              <Toaster />
+            </div>
+          </TooltipProvider>
         </ActorContext>
       </ThemeProvider>
     </Document>
@@ -90,53 +123,33 @@ function Document({ children }: { children: ReactNode }) {
   );
 }
 
-const PAGES = [
-  { to: "/runs", label: "Runs" },
-  { to: "/inbox", label: "Inbox" },
-  { to: "/start", label: "Start" },
-  { to: "/workflows", label: "Workflows" },
-] as const;
-
-function Nav() {
-  const { actor, fromServer, error, setActor } = useActor();
+/** Where you are: the page, or Runs and the run's workflow. */
+function Crumbs() {
+  const pathname = useLocation({ select: (location) => location.pathname });
+  // A run that does not exist has no loader data: its id stands in.
+  const run = useMatch({ from: "/runs/$id", shouldThrow: false });
+  const page = PAGES.find(({ to }) => pathname === to || pathname.startsWith(`${to}/`));
   return (
-    <header className="border-b">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 sm:px-6">
-        <Link to="/runs" className="font-heading text-base font-semibold">
-          Sanoma
-        </Link>
-        <nav className="order-last flex basis-full gap-1 sm:order-none sm:basis-auto">
-          {PAGES.map(({ to, label }) => (
-            <Button key={to} asChild variant="ghost" size="sm">
-              <Link
-                to={to}
-                activeOptions={{ exact: false }}
-                activeProps={{ "data-active": "", "aria-current": "page" }}
-                className="data-[active]:bg-muted"
-              >
-                {label}
-              </Link>
-            </Button>
-          ))}
-        </nav>
-        <div className="ml-auto flex items-center gap-1 text-sm text-muted-foreground">
-          {error && <span className="text-destructive">{error}</span>}
-          {fromServer && !actor && !error && <span>Not signed in</span>}
-          {actor && (
-            <>
-              <span>
-                You are <strong className="text-foreground">{actor}</strong>
-              </span>
-              {!fromServer && (
-                <Button variant="link" size="sm" onClick={() => setActor(null)}>
-                  change
-                </Button>
-              )}
-            </>
-          )}
-          <ModeToggle />
-        </div>
-      </div>
-    </header>
+    <Breadcrumb>
+      <BreadcrumbList>
+        {run ? (
+          <>
+            <BreadcrumbItem className="hidden md:block">
+              <BreadcrumbLink asChild>
+                <Link to="/runs">Runs</Link>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator className="hidden md:block" />
+            <BreadcrumbItem>
+              <BreadcrumbPage>{run.loaderData?.run.workflow ?? run.params.id}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </>
+        ) : (
+          <BreadcrumbItem>
+            <BreadcrumbPage>{page?.title ?? "Not found"}</BreadcrumbPage>
+          </BreadcrumbItem>
+        )}
+      </BreadcrumbList>
+    </Breadcrumb>
   );
 }

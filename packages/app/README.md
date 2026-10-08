@@ -28,7 +28,7 @@ console.log(app.url); // http://127.0.0.1:4321
 - **Start**: a form built from the workflow's input schema: text, date and time, numbers, yes/no, choices, lists with Add and Remove, and objects one level deep; anything else is entered as JSON. Optional fields left empty are left out, so the schema's defaults apply. The server checks the input with the workflow's schema and its complaints appear on the fields they name.
 - **Workflows**: each workflow's outline (see [Outline](#outline)), its operations with their effects, its built-ins and its input; whether a policy is configured, and its version; the config's version.
 
-The header switches between light, dark and the system's theme; the browser remembers the choice. The screens are built with [shadcn/ui](https://ui.shadcn.com) components (`src/components/ui`, from `components.json`) on Tailwind CSS.
+The sidebar's footer menu shows who you are and switches between light, dark and the system's theme; the browser remembers the choice. The screens are built with [shadcn/ui](https://ui.shadcn.com) components (`src/components/ui`, from `components.json`) on Tailwind CSS.
 
 ### Run graph
 
@@ -54,7 +54,7 @@ A hosted deployment puts its own authentication in front of the whole app (a rev
 await startApp(config, { resolveActor: async (request) => sessionUser(request) });
 ```
 
-With its own `resolveActor`, the page never asks for a name: it shows who the deployment says you are. An approval addressed to a group (`{ group: "finance" }`) can be decided only by a principal whose `groups` lists it, and the default header carries a name only, so group approvals need a `resolveActor` that supplies `groups`. The app calls `resolveActor` only for a request that needs to know who is asking, once per request. One that throws fails the change with a 500, logged with the request as "Could not tell who you are: " and the resolver's message; the page's header says "Could not tell who you are" and asks again every 10 seconds.
+With its own `resolveActor`, the page never asks for a name: it shows who the deployment says you are. An approval addressed to a group (`{ group: "finance" }`) can be decided only by a principal whose `groups` lists it, and the default header carries a name only, so group approvals need a `resolveActor` that supplies `groups`. The app calls `resolveActor` only for a request that needs to know who is asking, once per request. One that throws fails the change with a 500, logged with the request as "Could not tell who you are: " and the resolver's message; the sidebar's footer says "Could not tell who you are" and asks again every 10 seconds.
 
 ## HTTP API
 

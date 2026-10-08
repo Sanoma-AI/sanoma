@@ -459,7 +459,7 @@ describe("the page", () => {
 
     const runs = await page("/runs");
     expect(runs.html).toContain("sanoma.theme");
-    expect(runs.html).toContain('aria-label="Theme: system"');
+    expect(runs.html).toContain('data-slot="sidebar-wrapper"');
     expect(runs.html.match(/<html[^>]*>/)?.[0]).not.toMatch(/class="[^"]*\bdark\b/);
   });
 
@@ -561,7 +561,7 @@ describe("an app configured otherwise", () => {
     it("renders who the deployment says is asking, and never asks for a name", async () => {
       const res = await fetch(new URL("/runs", other.url), { headers: { "x-test-user": "sso-user" } });
       const html = await res.text();
-      expect(html).toMatch(/You are <strong[^>]*>sso-user<\/strong>/);
+      expect(html).toMatch(/>sso-user<\/span>/);
       expect(html).not.toContain("Who are you?");
       expect(html).not.toMatch(/>change</);
     });

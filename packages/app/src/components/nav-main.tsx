@@ -1,59 +1,46 @@
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
+import { useQuery } from "@tanstack/react-query";
+import { Link, type LinkProps } from "@tanstack/react-router";
+import type { LucideIcon } from "lucide-react";
 import {
   SidebarGroup,
-  SidebarGroupLabel,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubButton,
-  SidebarMenuSubItem,
+  useSidebar,
 } from "#/components/ui/sidebar.tsx";
-import { ChevronRightIcon } from "lucide-react";
+import { pendingApprovals } from "../api.ts";
+import { waitingRunsQuery } from "../queries.ts";
+
+/** A page's link, lit while its page or one under it shows. */
+const ACTIVE = { "data-active": true } as const;
 
 export function NavMain({
   items,
 }: {
-  items: {
-    title: string;
-    url: string;
-    icon?: React.ReactNode;
-    isActive?: boolean;
-    items?: {
-      title: string;
-      url: string;
-    }[];
-  }[];
+  items: readonly { to: NonNullable<LinkProps["to"]>; label: string; icon: LucideIcon }[];
 }) {
+  const { setOpenMobile } = useSidebar();
+  // The Inbox page's own query, so it costs that page nothing.
+  const pending =
+    useQuery({
+      ...waitingRunsQuery(),
+      select: (runs) => runs.reduce((n, run) => n + pendingApprovals(run).length, 0),
+    }).data ?? 0;
   return (
     <SidebarGroup>
-      <SidebarGroupLabel>Platform</SidebarGroupLabel>
       <SidebarMenu>
         {items.map((item) => (
-          <Collapsible key={item.title} asChild defaultOpen={item.isActive} className="group/collapsible">
-            <SidebarMenuItem>
-              <CollapsibleTrigger asChild>
-                <SidebarMenuButton tooltip={item.title}>
-                  {item.icon}
-                  <span>{item.title}</span>
-                  <ChevronRightIcon className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
-                </SidebarMenuButton>
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <SidebarMenuSub>
-                  {item.items?.map((subItem) => (
-                    <SidebarMenuSubItem key={subItem.title}>
-                      <SidebarMenuSubButton asChild>
-                        <a href={subItem.url}>
-                          <span>{subItem.title}</span>
-                        </a>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                  ))}
-                </SidebarMenuSub>
-              </CollapsibleContent>
-            </SidebarMenuItem>
-          </Collapsible>
+          <SidebarMenuItem key={item.to}>
+            <SidebarMenuButton asChild tooltip={item.label}>
+              {/* On a phone the sidebar is a sheet over the page: close it on the way. */}
+              <Link to={item.to} activeProps={ACTIVE} onClick={() => setOpenMobile(false)}>
+                <item.icon />
+                <span>{item.label}</span>
+              </Link>
+            </SidebarMenuButton>
+            {item.to === "/inbox" && pending > 0 && <SidebarMenuBadge>{pending}</SidebarMenuBadge>}
+          </SidebarMenuItem>
         ))}
       </SidebarMenu>
     </SidebarGroup>
