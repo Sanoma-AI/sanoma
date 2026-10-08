@@ -16,6 +16,7 @@ import {
 import { Alert, AlertDescription } from "#/components/ui/alert.tsx";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
+import { Card } from "#/components/ui/card.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
@@ -272,7 +273,7 @@ export function GraphPanel(props: GraphProps) {
   const seen = useSeen(box);
   const skeleton = <Skeleton role="status" aria-label="Loading the graph" className="size-full rounded-none" />;
   return (
-    <div ref={box} className="h-[220px] overflow-hidden rounded-lg border sm:h-[280px]">
+    <Card ref={box} className="h-[220px] gap-0 py-0 sm:h-[280px]">
       <ClientOnly fallback={skeleton}>
         {seen ? (
           <Suspense fallback={skeleton}>
@@ -282,7 +283,7 @@ export function GraphPanel(props: GraphProps) {
           skeleton
         )}
       </ClientOnly>
-    </div>
+    </Card>
   );
 }
 
