@@ -54,10 +54,18 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   for (const wf of resolved.workflows) {
     if (!registered.has(wf.name)) registered.set(wf.name, { definition: wf, fn: register(wf) });
   }
+  const worker: Worker = {
+    async stop() {
+      state.stopped = true;
+      await DBOS.shutdown();
+    },
+  };
   // Runs recovered during launch start before it returns, so they must already find this
-  // state. If the launch fails, a worker still running in the process gets its own back.
+  // state. If starting fails, a worker still running in the process gets its own back, once
+  // DBOS has stopped: until then a run DBOS dispatches finds this state stopped, and is refused.
   const previous = current;
   current = state;
+  let launched = false;
   try {
     DBOS.setConfig({
       name: resolved.appName,
@@ -66,11 +74,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       applicationVersion: resolved.version,
     });
     await DBOS.launch();
-  } catch (err) {
-    current = previous;
-    throw err;
-  }
-  try {
+    launched = true;
     // DBOS gives runs queued without a version only to the app's latest version, which is the
     // newest one registered. A worker started on code seen before (a rollback) is not it.
     const latest = (await DBOS.getLatestApplicationVersion()).versionName;
@@ -86,27 +90,21 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     await DBOS.registerQueue(resolved.queueName);
     await warnAboutStrandedRuns(resolved);
   } catch (err) {
-    // DBOS is launched, but the caller gets no worker to stop: stop it here, so no run goes on
+    // Once DBOS is launched, the caller gets no worker to stop: stop it here, so no run goes on
     // in a worker nobody holds, and the next startWorker launches afresh.
-    state.stopped = true;
+    let stopFailed: { error: unknown } | undefined;
+    if (launched) await worker.stop().catch((error: unknown) => (stopFailed = { error }));
     current = previous;
-    try {
-      await DBOS.shutdown();
-    } catch (shutdownError) {
+    if (stopFailed) {
       throw new AggregateError(
-        [err, shutdownError],
-        `${errorMessage(err)} (and stopping DBOS failed too: ${errorMessage(shutdownError)})`,
-        { cause: shutdownError },
+        [err, stopFailed.error],
+        `${errorMessage(err)} (and stopping DBOS failed too: ${errorMessage(stopFailed.error)})`,
+        { cause: err },
       );
     }
     throw err;
   }
-  return {
-    async stop() {
-      state.stopped = true;
-      await DBOS.shutdown();
-    },
-  };
+  return worker;
 }
 
 /**
@@ -141,7 +139,8 @@ function register(wf: WorkflowDefinition<any, any>) {
   return DBOS.registerWorkflow(
     async ({ input, startedBy }: RunArgs) => {
       const state = current;
-      if (!state) throw new Error(`Run of "${wf.name}" started with no worker running`);
+      // A stopped worker's state stays current while DBOS shuts down.
+      if (!state || state.stopped) throw new Error(`Run of "${wf.name}" started with no worker running`);
       const run: Run = {
         id: DBOS.workflowID!,
         workflow: wf.name,
