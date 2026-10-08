@@ -219,6 +219,10 @@
   html {
     @apply font-sans;
   }
+  /* A link with no classes of its own is a link in running text. Buttons and the like style theirs. */
+  a:not([class]) {
+    @apply underline underline-offset-4 hover:text-primary;
+  }
   code {
     @apply font-mono text-[0.9em];
   }

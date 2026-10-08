@@ -75,7 +75,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-const None = () => <p className="text-muted-foreground">None.</p>;
+const None = ({ children = "None." }: { children?: ReactNode }) => <p className="text-muted-foreground">{children}</p>;
 
 function WorkflowCard({ workflow, ops }: { workflow: WorkflowEntry; ops: Map<string, OpEntry> }) {
   const fields = fieldsOf(workflow.input);
@@ -127,7 +127,7 @@ function WorkflowCard({ workflow, ops }: { workflow: WorkflowEntry; ops: Map<str
         <Section title="Input">
           {fields ? (
             fields.length === 0 ? (
-              <p className="text-muted-foreground">No fields.</p>
+              <None>No fields.</None>
             ) : (
               <InputFields fields={fields} />
             )

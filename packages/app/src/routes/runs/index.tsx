@@ -5,6 +5,7 @@ import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { Nothing, Notice, PageHeader, plural, RUN_TONE, toneBadge, When } from "../../components/common.tsx";
+import { pendingApprovals, starterName } from "../../api.ts";
 import { runsQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/runs/")({
@@ -49,7 +50,7 @@ function RunsPage() {
             </TableHeader>
             <TableBody>
               {runs.map((run) => {
-                const pending = run.approvals.filter((a) => a.status === "pending").length;
+                const pending = pendingApprovals(run).length;
                 return (
                   <TableRow
                     key={run.runId}
@@ -58,19 +59,14 @@ function RunsPage() {
                     title={run.runId}
                   >
                     <TableCell className="font-medium">
-                      <Link
-                        to="/runs/$id"
-                        params={{ id: run.runId }}
-                        onClick={(e) => e.stopPropagation()}
-                        className="underline-offset-4 hover:underline"
-                      >
+                      <Link to="/runs/$id" params={{ id: run.runId }} onClick={(e) => e.stopPropagation()}>
                         {run.workflow}
                       </Link>
                     </TableCell>
                     <TableCell>
                       <Badge className={toneBadge({ tone: RUN_TONE[run.status] })}>{run.status}</Badge>
                     </TableCell>
-                    <TableCell>{run.startedBy?.id ?? <span className="text-muted-foreground">unknown</span>}</TableCell>
+                    <TableCell>{starterName(run)}</TableCell>
                     <TableCell className="text-muted-foreground">
                       <When at={run.createdAt} />
                     </TableCell>

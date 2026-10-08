@@ -109,3 +109,10 @@ export const errorBodyOf = (err: unknown): ErrorResponse | undefined =>
 export function approverName(approver: Approver): string {
   return typeof approver === "string" ? approver : `group ${approver.group}`;
 }
+
+/** Who started a run, as text. */
+export const starterName = (run: Pick<RunSummary, "startedBy">): string => run.startedBy?.id ?? "unknown";
+
+/** A run's approvals still waiting for a decision. */
+export const pendingApprovals = (run: Pick<RunSummary, "approvals">): ApprovalState[] =>
+  run.approvals.filter((a) => a.status === "pending");

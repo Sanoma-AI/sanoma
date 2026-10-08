@@ -27,9 +27,19 @@ import {
 import { Field, FieldDescription, FieldError, FieldLabel } from "#/components/ui/field.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
-import { approverName, type DecideRequest, errorBodyOf } from "../api.ts";
+import { approverName, type DecideRequest, errorBodyOf, starterName } from "../api.ts";
 import { decideFn } from "../functions.ts";
-import { ApprovalStatusBadge, Disclosure, Expandable, Fact, Facts, plural, When } from "./common.tsx";
+import {
+  ApprovalStatusBadge,
+  DecisionNote,
+  Disclosure,
+  Expandable,
+  Fact,
+  Facts,
+  plural,
+  RequestedBy,
+  When,
+} from "./common.tsx";
 
 type Decision = DecideRequest["decision"];
 
@@ -51,7 +61,7 @@ export function ApprovalCard({
         <CardTitle>{approval.title}</CardTitle>
         {run && (
           <CardDescription>
-            {run.workflow}, started by {run.startedBy?.id ?? "unknown"}
+            {run.workflow}, started by {starterName(run)}
           </CardDescription>
         )}
         <CardAction>
@@ -62,20 +72,14 @@ export function ApprovalCard({
         <Facts>
           <Fact label="Approver">{approverName(approval.approver)}</Fact>
           <Fact label="Asked by">
-            {approval.requestedBy === "policy" ? (
-              <>
-                the policy, holding <code>{approval.op}</code>
-              </>
-            ) : (
-              "the workflow"
-            )}
+            <RequestedBy requestedBy={approval.requestedBy} op={approval.op} />
           </Fact>
           <Fact label="Asked">
             <When at={approval.requestedAt} />
           </Fact>
           {run && (
             <Fact label="Run">
-              <Link to="/runs/$id" params={{ id: runId }} className="underline underline-offset-4">
+              <Link to="/runs/$id" params={{ id: runId }}>
                 <code>{runId}</code>
               </Link>
             </Fact>
@@ -88,7 +92,7 @@ export function ApprovalCard({
                   , <When at={approval.decidedAt} />
                 </>
               ) : null}
-              {approval.note ? <q className="block text-muted-foreground italic">{approval.note}</q> : null}
+              {approval.note ? <DecisionNote note={approval.note} /> : null}
             </Fact>
           )}
         </Facts>
@@ -97,7 +101,7 @@ export function ApprovalCard({
           <ul className="flex flex-col gap-1">
             {approval.links.map((href) => (
               <li key={href} className="break-all">
-                <a href={href} target="_blank" rel="noreferrer noopener" className="underline underline-offset-4">
+                <a href={href} target="_blank" rel="noreferrer noopener">
                   {href}
                 </a>
               </li>

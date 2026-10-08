@@ -4,10 +4,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Item, ItemContent, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
-import { approverName } from "../../api.ts";
+import { approverName, starterName } from "../../api.ts";
 import { ApprovalCard } from "../../components/approval.tsx";
 import {
   DecisionBadge,
+  DecisionNote,
   effectBadge,
   Expandable,
   Fact,
@@ -16,6 +17,7 @@ import {
   Nothing,
   Notice,
   PageHeader,
+  RequestedBy,
   RUN_TONE,
   SectionTitle,
   StatusDot,
@@ -44,7 +46,7 @@ function RunPage() {
       </PageHeader>
       {error && <Notice tone="bad">Could not refresh: {error.message}</Notice>}
       <Facts>
-        <Fact label="Started by">{run.startedBy?.id ?? "unknown"}</Fact>
+        <Fact label="Started by">{starterName(run)}</Fact>
         <Fact label="Started">
           <When at={run.createdAt} />
         </Fact>
@@ -120,15 +122,8 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
       kind = "asked";
       body = (
         <p>
-          “{record.title}” asked of {approverName(record.approver)}
-          {record.requestedBy === "policy" ? (
-            <>
-              {" "}
-              by the policy, holding <code>{record.op}</code>
-            </>
-          ) : (
-            " by the workflow"
-          )}
+          “{record.title}” asked of {approverName(record.approver)} by{" "}
+          <RequestedBy requestedBy={record.requestedBy} op={record.op} />
         </p>
       );
       break;
@@ -137,7 +132,7 @@ function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<strin
       body = (
         <p>
           {record.by} {record.decision === "approve" ? "approved" : "rejected"} “{title(record.approval)}”
-          {record.note ? <q className="block text-muted-foreground italic">{record.note}</q> : null}
+          {record.note ? <DecisionNote note={record.note} /> : null}
         </p>
       );
       break;

@@ -262,4 +262,20 @@ export function Fact({ label, children }: { label: string; children: ReactNode }
   );
 }
 
+/** Who asked for an approval: "the policy, holding <op>" or "the workflow". */
+export function RequestedBy({ requestedBy, op }: Pick<ApprovalState, "requestedBy" | "op">) {
+  return requestedBy === "policy" ? (
+    <>
+      the policy, holding <code>{op}</code>
+    </>
+  ) : (
+    "the workflow"
+  );
+}
+
+/** The note a decider left, quoted on its own line. */
+export function DecisionNote({ note }: { note: string }) {
+  return <q className="block text-muted-foreground italic">{note}</q>;
+}
+
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
