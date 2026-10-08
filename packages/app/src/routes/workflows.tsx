@@ -18,6 +18,7 @@ import {
   Nothing,
   OpName,
   PageHeader,
+  pageTitle,
   SubsectionTitle,
 } from "../components/common.tsx";
 import { type Field, fieldsOf } from "../form/schema.ts";
@@ -28,7 +29,8 @@ export const Route = createFileRoute("/workflows")({
   loader: () => {
     if (!import.meta.env.SSR) void loadGraph();
   },
-  head: () => ({ meta: [{ title: "Workflows · Sanoma" }] }),
+  staticData: { crumb: "Workflows" },
+  head: ({ match }) => pageTitle(match.staticData.crumb),
   component: WorkflowsPage,
 });
 
@@ -37,7 +39,7 @@ function WorkflowsPage() {
   const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="Workflows" />
+      <PageHeader />
       <Card size="sm">
         <CardContent>
           <Facts>

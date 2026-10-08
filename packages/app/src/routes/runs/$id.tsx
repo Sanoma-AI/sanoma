@@ -21,6 +21,7 @@ import {
   Notice,
   OpName,
   PageHeader,
+  pageTitle,
   RequestedBy,
   SectionTitle,
   StatusDot,
@@ -33,14 +34,14 @@ import { RUN_TONE } from "#/lib/tone.ts";
 import { runQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/runs/$id")({
-  // The page reads the run from the query client; the loader returns only its workflow, for the title.
+  // The page reads the run from the query client; the loader returns only its name: its workflow.
   loader: async ({ context, params }) => {
     if (!import.meta.env.SSR) void loadGraph();
     const { run } = await context.queryClient.query({ ...runQuery(params.id), staleTime: "static" });
-    return { workflow: run.workflow };
+    return { crumb: run.workflow };
   },
   // A run that does not exist has no loader data: its id stands in.
-  head: ({ loaderData, params }) => ({ meta: [{ title: `${loaderData?.workflow ?? params.id} · Sanoma` }] }),
+  head: ({ loaderData, params }) => pageTitle(loaderData?.crumb ?? params.id),
   component: RunPage,
   // getRun throws the router's not-found for a run that does not exist.
   notFoundComponent: () => <Notice variant="destructive">No run {Route.useParams().id}.</Notice>,
@@ -83,7 +84,7 @@ function RunPage() {
   const select = (recordId: string) => show(recordId, reducedMotion);
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title={run.workflow}>
+      <PageHeader>
         <Badge className={toneBadge({ tone: RUN_TONE[run.status] })}>{run.status}</Badge>
       </PageHeader>
       {error && <Notice variant="destructive">Could not refresh: {error.message}</Notice>}

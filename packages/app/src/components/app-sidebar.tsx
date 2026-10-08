@@ -1,5 +1,5 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, linkOptions } from "@tanstack/react-router";
 import { ActivityIcon, InboxIcon, PlayIcon, ShieldCheckIcon, WorkflowIcon } from "lucide-react";
 import { NavMain } from "#/components/nav-main.tsx";
 import { NavUser } from "#/components/nav-user.tsx";
@@ -15,13 +15,13 @@ import {
 } from "#/components/ui/sidebar.tsx";
 import { configQuery } from "../queries.ts";
 
-/** The app's pages: the sidebar's nav, and the header's breadcrumb, which uses `title`. */
-export const PAGES = [
-  { to: "/runs", label: "Runs", title: "Runs", icon: ActivityIcon },
-  { to: "/inbox", label: "Inbox", title: "Inbox", icon: InboxIcon },
-  { to: "/start", label: "Start", title: "Start a run", icon: PlayIcon },
-  { to: "/workflows", label: "Workflows", title: "Workflows", icon: WorkflowIcon },
-] as const;
+/** The sidebar's nav. (Each page's own name is its route's crumb.) */
+const PAGES = linkOptions([
+  { to: "/runs", label: "Runs", icon: ActivityIcon },
+  { to: "/inbox", label: "Inbox", icon: InboxIcon },
+  { to: "/start", label: "Start", icon: PlayIcon },
+  { to: "/workflows", label: "Workflows", icon: WorkflowIcon },
+]);
 
 export function AppSidebar() {
   // The root route loads the config before any page renders.

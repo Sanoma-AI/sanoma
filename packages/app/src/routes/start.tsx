@@ -4,13 +4,14 @@ import { z } from "zod";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
 import { Field, FieldGroup, FieldLabel, FieldSeparator } from "#/components/ui/field.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
-import { Nothing, Notice, PageHeader } from "../components/common.tsx";
+import { Nothing, Notice, PageHeader, pageTitle } from "../components/common.tsx";
 import { StartForm } from "../form/start-form.tsx";
 import { configQuery } from "../queries.ts";
 
 export const Route = createFileRoute("/start")({
   validateSearch: z.object({ workflow: z.string().optional() }),
-  head: () => ({ meta: [{ title: "Start a run · Sanoma" }] }),
+  staticData: { crumb: "Start a run" },
+  head: ({ match }) => pageTitle(match.staticData.crumb),
   component: StartPage,
 });
 
@@ -24,7 +25,7 @@ function StartPage() {
 
   return (
     <div className="flex max-w-2xl flex-col gap-6">
-      <PageHeader title="Start a run" />
+      <PageHeader />
       {config.workflows.length === 0 ? (
         <Nothing title="This config has no workflows" />
       ) : (

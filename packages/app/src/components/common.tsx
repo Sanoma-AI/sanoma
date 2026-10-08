@@ -1,4 +1,5 @@
 import type { ApprovalState, Effect, LedgerRecord, RecordedDecision } from "@sanoma/workflows";
+import { useMatches } from "@tanstack/react-router";
 import { cva } from "class-variance-authority";
 import { ChevronRightIcon, CircleAlertIcon, InfoIcon } from "lucide-react";
 import {
@@ -27,6 +28,33 @@ import { approverLabel } from "@sanoma/workflows/shared";
 import type { GraphProps } from "./graph.tsx";
 
 // Small pieces shared by the screens, composed from the shadcn components in ./ui.
+
+declare module "@tanstack/react-router" {
+  interface StaticDataRouteOption {
+    /** The page's name: its breadcrumb, its <h1> (PageHeader) and its <title> (pageTitle). */
+    crumb?: string;
+  }
+}
+
+/**
+ * The names of the pages the location matches, outermost first, each with where it is. A route
+ * names its page in `staticData.crumb`, or, when the name is something it loaded, in its loader
+ * data's `crumb`; a route that names nothing (the root, an index) is left out.
+ */
+export const useCrumbs = () =>
+  useMatches({
+    select: (matches) =>
+      matches.flatMap(({ id, pathname, staticData, loaderData }) => {
+        const label = (loaderData && "crumb" in loaderData ? loaderData.crumb : undefined) ?? staticData.crumb;
+        return label ? [{ id, pathname, label }] : [];
+      }),
+    structuralSharing: true,
+  });
+
+/** A page's <title>, from its crumb: `head: ({ match }) => pageTitle(match.staticData.crumb)`. */
+export const pageTitle = (crumb: string | undefined) => ({
+  meta: [{ title: crumb ? `${crumb} · Sanoma` : "Sanoma" }],
+});
 
 /** A ledger record's tone: what it did to the run. */
 export function ledgerTone(record: LedgerRecord): Tone {
@@ -296,8 +324,9 @@ export function GraphPanel(props: GraphProps) {
   );
 }
 
-/** A page's heading row: its <h1> and whatever sits beside it. */
-export function PageHeader({ title, children }: { title: ReactNode; children?: ReactNode }) {
+/** A page's heading row: its <h1>, which is its crumb, and whatever sits beside it. */
+export function PageHeader({ children }: { children?: ReactNode }) {
+  const title = useCrumbs().at(-1)?.label;
   return (
     <header className="flex flex-wrap items-center gap-x-4 gap-y-2">
       <h1 className="font-heading text-2xl font-semibold tracking-tight">{title}</h1>

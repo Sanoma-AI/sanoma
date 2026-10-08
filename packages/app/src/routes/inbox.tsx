@@ -5,14 +5,15 @@ import { Badge } from "#/components/ui/badge.tsx";
 import { useActor } from "../actor.ts";
 import { pendingApprovals } from "../api.ts";
 import { ApprovalCard } from "../components/approval.tsx";
-import { Nothing, Notice, PageHeader, toneBadge } from "../components/common.tsx";
+import { Nothing, Notice, PageHeader, pageTitle, toneBadge } from "../components/common.tsx";
 import { waitingRunsQuery } from "../queries.ts";
 
 export const Route = createFileRoute("/inbox")({
   loader: async ({ context }) => {
     await context.queryClient.query({ ...waitingRunsQuery(), staleTime: "static" });
   },
-  head: () => ({ meta: [{ title: "Inbox · Sanoma" }] }),
+  staticData: { crumb: "Inbox" },
+  head: ({ match }) => pageTitle(match.staticData.crumb),
   component: InboxPage,
 });
 
@@ -30,7 +31,7 @@ function InboxPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader title="Inbox">
+      <PageHeader>
         <Badge variant="secondary">{pending.length} waiting</Badge>
         {actor && <Badge className={toneBadge({ tone: mine ? "waiting" : "off" })}>{mine} for you</Badge>}
       </PageHeader>

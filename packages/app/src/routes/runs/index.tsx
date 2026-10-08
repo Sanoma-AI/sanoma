@@ -14,7 +14,6 @@ export const Route = createFileRoute("/runs/")({
   loader: async ({ context }) => {
     await context.queryClient.query({ ...runsQuery(), staleTime: "static" });
   },
-  head: () => ({ meta: [{ title: "Runs · Sanoma" }] }),
   component: RunsPage,
 });
 
@@ -32,7 +31,7 @@ function RunsPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader title="Runs">{runs.length > 0 && <div className="ml-auto">{start}</div>}</PageHeader>
+      <PageHeader>{runs.length > 0 && <div className="ml-auto">{start}</div>}</PageHeader>
       {error && <Notice variant="destructive">Could not refresh runs: {error.message}</Notice>}
       {runs.length === 0 && (
         <Nothing title="No runs yet" action={start}>

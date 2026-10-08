@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiRouteImport } from './routes/api'
 import { Route as InboxRouteImport } from './routes/inbox'
+import { Route as RunsRouteRouteImport } from './routes/runs/route'
 import { Route as StartRouteImport } from './routes/start'
 import { Route as WorkflowsRouteImport } from './routes/workflows'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
@@ -37,6 +38,11 @@ const InboxRoute = InboxRouteImport.update({
   path: '/inbox',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RunsRouteRoute = RunsRouteRouteImport.update({
+  id: '/runs',
+  path: '/runs',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const StartRoute = StartRouteImport.update({
   id: '/start',
   path: '/start',
@@ -58,14 +64,14 @@ const ApiConfigRoute = ApiConfigRouteImport.update({
   getParentRoute: () => ApiRoute,
 } as any)
 const RunsIndexRoute = RunsIndexRouteImport.update({
-  id: '/runs/',
-  path: '/runs/',
-  getParentRoute: () => rootRouteImport,
+  id: '/',
+  path: '/',
+  getParentRoute: () => RunsRouteRoute,
 } as any)
 const RunsIdRoute = RunsIdRouteImport.update({
-  id: '/runs/$id',
-  path: '/runs/$id',
-  getParentRoute: () => rootRouteImport,
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => RunsRouteRoute,
 } as any)
 const ApiRunsIndexRoute = ApiRunsIndexRouteImport.update({
   id: '/runs/',
@@ -86,6 +92,7 @@ const ApiRunsIdApprovalsApprovalIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/runs': typeof RunsRouteRouteWithChildren
   '/api': typeof ApiRouteWithChildren
   '/inbox': typeof InboxRoute
   '/start': typeof StartRoute
@@ -115,6 +122,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/runs': typeof RunsRouteRouteWithChildren
   '/api': typeof ApiRouteWithChildren
   '/inbox': typeof InboxRoute
   '/start': typeof StartRoute
@@ -131,6 +139,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/runs'
     | '/api'
     | '/inbox'
     | '/start'
@@ -159,6 +168,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/runs'
     | '/api'
     | '/inbox'
     | '/start'
@@ -174,12 +184,11 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  RunsRouteRoute: typeof RunsRouteRouteWithChildren
   ApiRoute: typeof ApiRouteWithChildren
   InboxRoute: typeof InboxRoute
   StartRoute: typeof StartRoute
   WorkflowsRoute: typeof WorkflowsRoute
-  RunsIdRoute: typeof RunsIdRoute
-  RunsIndexRoute: typeof RunsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -203,6 +212,13 @@ declare module '@tanstack/react-router' {
       path: '/inbox'
       fullPath: '/inbox'
       preLoaderRoute: typeof InboxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/runs': {
+      id: '/runs'
+      path: '/runs'
+      fullPath: '/runs'
+      preLoaderRoute: typeof RunsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/start': {
@@ -235,17 +251,17 @@ declare module '@tanstack/react-router' {
     }
     '/runs/': {
       id: '/runs/'
-      path: '/runs'
+      path: '/'
       fullPath: '/runs/'
       preLoaderRoute: typeof RunsIndexRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof RunsRouteRoute
     }
     '/runs/$id': {
       id: '/runs/$id'
-      path: '/runs/$id'
+      path: '/$id'
       fullPath: '/runs/$id'
       preLoaderRoute: typeof RunsIdRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof RunsRouteRoute
     }
     '/api/runs/': {
       id: '/api/runs/'
@@ -271,6 +287,20 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface RunsRouteRouteChildren {
+  RunsIdRoute: typeof RunsIdRoute
+  RunsIndexRoute: typeof RunsIndexRoute
+}
+
+const RunsRouteRouteChildren: RunsRouteRouteChildren = {
+  RunsIdRoute: RunsIdRoute,
+  RunsIndexRoute: RunsIndexRoute,
+}
+
+const RunsRouteRouteWithChildren = RunsRouteRoute._addFileChildren(
+  RunsRouteRouteChildren,
+)
+
 interface ApiRouteChildren {
   ApiSplatRoute: typeof ApiSplatRoute
   ApiConfigRoute: typeof ApiConfigRoute
@@ -291,12 +321,11 @@ const ApiRouteWithChildren = ApiRoute._addFileChildren(ApiRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  RunsRouteRoute: RunsRouteRouteWithChildren,
   ApiRoute: ApiRouteWithChildren,
   InboxRoute: InboxRoute,
   StartRoute: StartRoute,
   WorkflowsRoute: WorkflowsRoute,
-  RunsIdRoute: RunsIdRoute,
-  RunsIndexRoute: RunsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

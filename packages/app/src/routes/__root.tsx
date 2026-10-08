@@ -1,18 +1,10 @@
 import { type QueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import {
-  createRootRouteWithContext,
-  HeadContent,
-  Link,
-  Outlet,
-  Scripts,
-  useLocation,
-  useMatch,
-} from "@tanstack/react-router";
+import { createRootRouteWithContext, HeadContent, Link, Outlet, Scripts } from "@tanstack/react-router";
 import { createIsomorphicFn } from "@tanstack/react-start";
 import { getCookie } from "@tanstack/react-start/server";
 import { ThemeProvider } from "next-themes";
-import { lazy, type ReactNode, Suspense } from "react";
-import { AppSidebar, PAGES } from "#/components/app-sidebar.tsx";
+import { Fragment, lazy, type ReactNode, Suspense } from "react";
+import { AppSidebar } from "#/components/app-sidebar.tsx";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -26,6 +18,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "#/components/ui/s
 import { Toaster } from "#/components/ui/sonner.tsx";
 import { TooltipProvider } from "#/components/ui/tooltip.tsx";
 import { ActorContext, useActorState } from "../actor.ts";
+import { useCrumbs } from "../components/common.tsx";
 import { actorQuery, configQuery, waitingRunsQuery } from "../queries.ts";
 // lucide's shield-check, the sidebar's brand icon.
 import favicon from "../favicon.svg?url";
@@ -135,31 +128,27 @@ function Document({ children }: { children: ReactNode }) {
   );
 }
 
-/** Where you are: the page, or Runs and the run's workflow. */
+/** Where you are: the crumbs of the pages matched, each but the last a link to its page. */
 function Crumbs() {
-  const pathname = useLocation({ select: (location) => location.pathname });
-  // A run that does not exist has no loader data: its id stands in.
-  const run = useMatch({ from: "/runs/$id", shouldThrow: false });
-  const page = PAGES.find(({ to }) => pathname === to || pathname.startsWith(`${to}/`));
+  const crumbs = useCrumbs();
   return (
     <Breadcrumb>
       <BreadcrumbList>
-        {run ? (
-          <>
-            <BreadcrumbItem className="hidden md:block">
-              <BreadcrumbLink asChild>
-                <Link to="/runs">Runs</Link>
-              </BreadcrumbLink>
+        {crumbs.map(({ id, pathname, label }, i) =>
+          i < crumbs.length - 1 ? (
+            <Fragment key={id}>
+              <BreadcrumbItem>
+                <BreadcrumbLink asChild>
+                  <Link to={pathname}>{label}</Link>
+                </BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+            </Fragment>
+          ) : (
+            <BreadcrumbItem key={id}>
+              <BreadcrumbPage>{label}</BreadcrumbPage>
             </BreadcrumbItem>
-            <BreadcrumbSeparator className="hidden md:block" />
-            <BreadcrumbItem>
-              <BreadcrumbPage>{run.loaderData?.workflow ?? run.params.id}</BreadcrumbPage>
-            </BreadcrumbItem>
-          </>
-        ) : (
-          <BreadcrumbItem>
-            <BreadcrumbPage>{page?.title ?? "Not found"}</BreadcrumbPage>
-          </BreadcrumbItem>
+          ),
         )}
       </BreadcrumbList>
     </Breadcrumb>
