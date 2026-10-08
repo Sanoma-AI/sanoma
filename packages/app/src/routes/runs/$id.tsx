@@ -78,7 +78,7 @@ function RunPage() {
           <SectionTitle>Approvals</SectionTitle>
           {approvals.length === 0 && <Nothing title="None asked for" />}
           {approvals.map((approval) => (
-            <ApprovalCard key={approval.id} runId={run.runId} runStatus={run.status} approval={approval} />
+            <ApprovalCard key={approval.id} run={run} approval={approval} />
           ))}
         </aside>
       </div>

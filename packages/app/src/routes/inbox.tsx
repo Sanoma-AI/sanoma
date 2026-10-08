@@ -36,13 +36,7 @@ function InboxPage() {
       {pending.length === 0 && <Nothing title="Nothing is waiting for a decision" />}
       <div className="grid gap-4 lg:grid-cols-2">
         {pending.map(({ run, approval }) => (
-          <ApprovalCard
-            key={`${run.runId}/${approval.id}`}
-            runId={run.runId}
-            runStatus={run.status}
-            approval={approval}
-            run={run}
-          />
+          <ApprovalCard key={`${run.runId}/${approval.id}`} run={run} approval={approval} showRun />
         ))}
       </div>
     </section>

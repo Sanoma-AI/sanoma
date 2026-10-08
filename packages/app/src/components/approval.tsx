@@ -1,4 +1,4 @@
-import type { ApprovalState, RunStatus, RunSummary } from "@sanoma/workflows";
+import type { ApprovalState, RunSummary } from "@sanoma/workflows";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -52,19 +52,16 @@ type Decision = DecideRequest["decision"];
  * and its run can still read a decision.
  */
 export function ApprovalCard({
-  runId,
-  runStatus,
-  approval,
   run,
+  approval,
+  showRun = false,
 }: {
-  runId: string;
-  /** The run's status: an approval left pending by a run that ended gets no controls. */
-  runStatus: RunStatus;
+  /** The run it belongs to: an approval left pending by a run that ended gets no controls. */
+  run: Pick<RunSummary, "runId" | "status" | "workflow" | "startedBy">;
   approval: ApprovalState;
-  /** The run it belongs to, for an approval shown away from its run: named under the title, and linked. */
-  run?: Pick<RunSummary, "workflow" | "startedBy">;
+  /** For an approval shown away from its run: the run is named under the title, and linked. */
+  showRun?: boolean;
 }) {
-  const decidable = approval.status === "pending" && !isEnded(runStatus);
   // The decision stays put while the dialog animates closed, so its verb and colour do not flip.
   const [decision, setDecision] = useState<Decision>("approve");
   const [deciding, setDeciding] = useState(false);
@@ -76,7 +73,7 @@ export function ApprovalCard({
     <Card>
       <CardHeader>
         <CardTitle>{approval.title}</CardTitle>
-        {run && (
+        {showRun && (
           <CardDescription>
             {run.workflow}, started by {starterName(run)}
           </CardDescription>
@@ -97,10 +94,10 @@ export function ApprovalCard({
           <Fact label="Asked">
             <When at={approval.requestedAt} />
           </Fact>
-          {run && (
+          {showRun && (
             <Fact label="Run">
-              <Link to="/runs/$id" params={{ id: runId }}>
-                <code>{runId}</code>
+              <Link to="/runs/$id" params={{ id: run.runId }}>
+                <code>{run.runId}</code>
               </Link>
             </Fact>
           )}
@@ -143,32 +140,32 @@ export function ApprovalCard({
           </Disclosure>
         )}
       </CardContent>
-      {approval.status === "pending" && !decidable && (
-        <CardFooter>
-          <p className="text-sm text-muted-foreground">The run has {runStatus}, so this can no longer be decided.</p>
-        </CardFooter>
-      )}
-      {decidable && (
-        <CardFooter className="flex-wrap gap-2">
-          <Button onClick={() => decide("approve")}>
-            <CheckIcon data-icon="inline-start" />
-            Approve
-          </Button>
-          <Button variant="destructive" onClick={() => decide("reject")}>
-            <XIcon data-icon="inline-start" />
-            Reject
-          </Button>
-        </CardFooter>
-      )}
-      {decidable && (
-        <DecideDialog
-          runId={runId}
-          approval={approval}
-          open={deciding}
-          decision={decision}
-          onClose={() => setDeciding(false)}
-        />
-      )}
+      {approval.status === "pending" &&
+        (isEnded(run.status) ? (
+          <CardFooter>
+            <p className="text-sm text-muted-foreground">The run has {run.status}, so this can no longer be decided.</p>
+          </CardFooter>
+        ) : (
+          <>
+            <CardFooter className="flex-wrap gap-2">
+              <Button onClick={() => decide("approve")}>
+                <CheckIcon data-icon="inline-start" />
+                Approve
+              </Button>
+              <Button variant="destructive" onClick={() => decide("reject")}>
+                <XIcon data-icon="inline-start" />
+                Reject
+              </Button>
+            </CardFooter>
+            <DecideDialog
+              runId={run.runId}
+              approval={approval}
+              open={deciding}
+              decision={decision}
+              onClose={() => setDeciding(false)}
+            />
+          </>
+        ))}
     </Card>
   );
 }
