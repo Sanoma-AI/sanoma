@@ -8,6 +8,7 @@ import { Button } from "#/components/ui/button.tsx";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
+import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
 import {
   Fact,
   Facts,
@@ -166,9 +167,12 @@ function OpItem({ id, op }: { id: string; op: OpEntry | undefined }) {
         <ItemTitle>
           <OpName id={id} effect={op?.effect} />
           {op?.idempotent && (
-            <Badge variant="outline" title="Safe to retry: the vendor dedupes repeated calls">
-              idempotent
-            </Badge>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline">idempotent</Badge>
+              </TooltipTrigger>
+              <TooltipContent>Safe to retry: the vendor dedupes repeated calls</TooltipContent>
+            </Tooltip>
           )}
         </ItemTitle>
         {op?.description && <ItemDescription>{op.description}</ItemDescription>}
