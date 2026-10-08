@@ -15,7 +15,7 @@ import {
 import { errorCode, errorInfo, errorMessage, isFinal, parseOrThrow, PolicyDeniedError, SanomaError } from "./errors.ts";
 import { entry, skipped, write, writeFailure } from "./ledger.ts";
 import { type CallContext, isOp, type Op } from "./op.ts";
-import { DecisionSchema, type PolicyCall, type RecordedDecision } from "./policy.ts";
+import { DecisionSchema, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
 import type { Run } from "./run.ts";
 
 // What DBOS throws into a run whose worker is shutting down. Verified for DBOS 5.2: a
@@ -168,7 +168,7 @@ function targetOf(op: Op, input: unknown): { target?: string } {
 /** Asks the policy. Runs inside a step, so it must have no side effects of its own. */
 async function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecision> {
   const call: PolicyCall = {
-    op: { id: op.id, vendor: op.vendor, resource: op.resource, name: op.name, effect: op.effect },
+    op: policyOpOf(op),
     effect: op.effect,
     ...targetOf(op, input),
     input,

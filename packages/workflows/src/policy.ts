@@ -5,6 +5,18 @@ import type { Effect, Op } from "./op.ts";
 /** An operation as a policy sees it: plain data, without its schemas. */
 export type PolicyOp = Pick<Op, "id" | "vendor" | "resource" | "name" | "effect">;
 
+/**
+ * An operation as a policy sees it, for a `PolicyCall`: what the runtime passes, so a policy
+ * test can build a call from the connector, `{ op: policyOpOf(shop.order.refund), ... }`.
+ */
+export const policyOpOf = ({ id, vendor, resource, name, effect }: Op): PolicyOp => ({
+  id,
+  vendor,
+  resource,
+  name,
+  effect,
+});
+
 /** What a policy sees for each operation a run calls. Plain data, so a test can build one by hand. */
 export interface PolicyCall {
   op: PolicyOp;

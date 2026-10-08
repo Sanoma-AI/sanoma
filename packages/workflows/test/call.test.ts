@@ -17,6 +17,7 @@ import {
   type LedgerStore,
   memoryLedger,
   type PolicyCall,
+  policyOpOf,
 } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
 import { inSeconds, pending, useApp, waitFor } from "./harness.ts";
@@ -353,6 +354,8 @@ describe("the call a policy sees", () => {
         run: { id: runId, workflow: "edit", approvals: [] },
       },
     ]);
+    // What a policy test builds the op with.
+    expect(seen[0]?.op).toEqual(policyOpOf(notes.note.update));
     expect((await c().ledger(runId)).at(-2)).toMatchObject({
       op: "notes.note.update",
       decision: { kind: "allow", reasons: ["notes.note.update may change note/n1"], policyVersion: "notes-1" },

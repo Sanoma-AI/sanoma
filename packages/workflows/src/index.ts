@@ -38,6 +38,7 @@ export {
   type Policy,
   type PolicyCall,
   type PolicyOp,
+  policyOpOf,
   type RecordedDecision,
 } from "./policy.ts";
 export {
