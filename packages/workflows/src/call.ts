@@ -12,7 +12,16 @@ import {
   type Use,
   type WorkflowDefinition,
 } from "./define.ts";
-import { errorCode, errorInfo, errorMessage, isFinal, parseOrThrow, PolicyDeniedError, SanomaError } from "./errors.ts";
+import {
+  errorCode,
+  errorInfo,
+  errorMessage,
+  isFinal,
+  keepCode,
+  parseOrThrow,
+  PolicyDeniedError,
+  SanomaError,
+} from "./errors.ts";
 import { entry, skipped, write, writeFailure } from "./ledger.ts";
 import { type CallContext, isOp, type Op } from "./op.ts";
 import { DecisionSchema, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
@@ -179,9 +188,10 @@ async function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecisio
   try {
     answer = await run.state.policy(call);
   } catch (err) {
-    // Named here, so the run's error and the ledger say which call the policy failed on.
+    // Named here, so the run's error and the ledger say which call the policy failed on, with
+    // the code the policy's error had.
     if (isInfrastructureError(err, run)) throw err;
-    throw new Error(`The policy failed deciding ${op.id}: ${errorMessage(err)}`, { cause: err });
+    throw keepCode(new Error(`The policy failed deciding ${op.id}: ${errorMessage(err)}`, { cause: err }), err);
   }
   const decision = checkDecision(answer, op.id);
   const policyVersion = run.state.policy.version;

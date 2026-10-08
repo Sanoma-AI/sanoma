@@ -18,6 +18,7 @@ import {
   memoryLedger,
   type PolicyCall,
   policyOpOf,
+  SanomaError,
 } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
 import { inSeconds, pending, useApp, waitFor } from "./harness.ts";
@@ -346,6 +347,7 @@ describe("the call a policy sees", () => {
       // A copy proves the call is plain data: structuredClone refuses functions such as zod schemas.
       seen.push(structuredClone(call));
       if (call.target === "note/broken") throw new Error("no rule for broken notes");
+      if (call.target === "note/odd") throw new SanomaError("invalid_input", "odd is no note id", { id: "odd" });
       return call.target === "note/locked"
         ? deny("the note is locked", ["note/locked is read-only"])
         : allow([`${call.op.id} may change ${call.target ?? "anything"}`]);
@@ -401,6 +403,14 @@ describe("the call a policy sees", () => {
     expect(types(await c().ledger(runId))).toEqual(["run.started", "run.failed"]);
     expect((await c().ledger(runId)).at(-1)).toMatchObject({
       error: { message: "The policy failed deciding notes.note.update: no rule for broken notes" },
+    });
+
+    // A coded error keeps its code and data through the naming.
+    const odd = await failure(c().result(await c().start(edit, { id: "odd" }, { startedBy: alice })));
+    expect(errorCode(odd)).toBe("invalid_input");
+    expect(odd).toMatchObject({
+      message: "The policy failed deciding notes.note.update: odd is no note id",
+      data: { id: "odd" },
     });
   });
 
