@@ -17,9 +17,10 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
+  useStore,
 } from "@xyflow/react";
 import { cva } from "class-variance-authority";
-import { type ReactNode, useEffect, useMemo, useSyncExternalStore } from "react";
+import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import type { GraphRecord } from "../api.ts";
 import { layout, NODE_SIZE } from "../graph/layout.ts";
@@ -32,8 +33,10 @@ import { APPROVAL_TONE, DECISION_TONE, effectBadge, StatusDot, type Tone, toneBa
 
 type FlowNode = Node<{ node: GraphNode }, GraphNodeKind>;
 
-/** How the view fits the graph: on mount, and whenever the node count changes. */
-const FIT = { padding: 0.12, minZoom: 0.5, maxZoom: 1 } as const;
+/** How the view fits the graph (the controls' fit button fits all of it). */
+const FIT = { padding: 0.1, minZoom: 0.25, maxZoom: 1 } as const;
+/** Below this zoom the badges cannot be read: fit the run's latest part instead of all of it. */
+const READABLE_ZOOM = 0.8;
 
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 
@@ -185,11 +188,30 @@ const nodeTypes: NodeTypes = {
 } satisfies Record<GraphNodeKind, unknown>;
 
 /** Fits the view again when nodes come or go, as the run's page polls. */
-function FitOnChange({ count }: { count: number }) {
-  const { fitView } = useReactFlow();
+function FitOnChange({ nodes, onFitted }: { nodes: FlowNode[]; onFitted: () => void }) {
+  const { fitView, setViewport } = useReactFlow();
+  const width = useStore((s) => s.width);
+  const height = useStore((s) => s.height);
+  const count = nodes.length;
   useEffect(() => {
-    void fitView(FIT);
-  }, [count, fitView]);
+    if (!width || !height || !count) return;
+    const left = Math.min(...nodes.map((n) => n.position.x));
+    const right = Math.max(...nodes.map((n) => n.position.x + (n.width ?? 0)));
+    const top = Math.min(...nodes.map((n) => n.position.y));
+    const bottom = Math.max(...nodes.map((n) => n.position.y + (n.height ?? 0)));
+    // All of the graph when it fits at a readable zoom. Else its right-hand end, the run's
+    // latest steps, at that zoom; panning shows the rest.
+    const fits = (right - left) * READABLE_ZOOM <= width * (1 - 2 * FIT.padding);
+    const done = fits
+      ? fitView(FIT)
+      : setViewport({
+          zoom: READABLE_ZOOM,
+          x: width * (1 - FIT.padding) - right * READABLE_ZOOM,
+          y: height / 2 - ((top + bottom) / 2) * READABLE_ZOOM,
+        });
+    void done.then(onFitted);
+    // Only when nodes come or go, or the view resizes: not on every poll.
+  }, [count, width, height, fitView, setViewport]);
   return null;
 }
 
@@ -203,6 +225,8 @@ export interface RunGraphProps {
 /** The run as a graph, left to right. Clicking a node shows its ledger record. */
 export default function RunGraph({ records, run, onSelect }: RunGraphProps) {
   const reducedMotion = useReducedMotion();
+  // Hidden until the first fit, so the graph does not show unfitted for a frame.
+  const [fitted, setFitted] = useState(false);
   const graph = useMemo(() => runGraph(records, run), [records, run]);
   const nodes = useMemo<FlowNode[]>(() => {
     const at = layout(graph.nodes, graph.edges);
@@ -236,12 +260,11 @@ export default function RunGraph({ records, run, onSelect }: RunGraphProps) {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        className={fitted ? undefined : "invisible"}
         onNodeClick={(_, node) => {
           const { recordId } = node.data.node;
           if (recordId) onSelect(recordId);
         }}
-        fitView
-        fitViewOptions={FIT}
         minZoom={0.25}
         maxZoom={1.5}
         nodesDraggable={false}
@@ -257,7 +280,7 @@ export default function RunGraph({ records, run, onSelect }: RunGraphProps) {
       >
         <Background gap={16} size={1} />
         <Controls showInteractive={false} orientation="horizontal" fitViewOptions={FIT} />
-        <FitOnChange count={nodes.length} />
+        <FitOnChange nodes={nodes} onFitted={() => setFitted(true)} />
       </ReactFlow>
     </ReactFlowProvider>
   );

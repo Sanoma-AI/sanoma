@@ -25,7 +25,7 @@ export interface Position {
 export function layout(nodes: readonly GraphNode[], edges: readonly GraphEdge[]): Map<string, Position> {
   const g = new Graph();
   // ranksep leaves the edges room between ranks; nodesep keeps stacked branches apart.
-  g.setGraph({ rankdir: "LR", ranksep: 40, nodesep: 20, marginx: 8, marginy: 8 });
+  g.setGraph({ rankdir: "LR", ranksep: 32, nodesep: 20, marginx: 8, marginy: 8 });
   g.setDefaultEdgeLabel(() => ({}));
   for (const node of nodes) g.setNode(node.id, { ...NODE_SIZE[node.kind] });
   for (const edge of edges) g.setEdge(edge.source, edge.target);
