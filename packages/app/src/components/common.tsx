@@ -1,4 +1,5 @@
 import type { ApprovalState, Effect, LedgerRecord, RecordedDecision } from "@sanoma/workflows";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { useMatches } from "@tanstack/react-router";
 import { cva } from "class-variance-authority";
 import { ChevronRightIcon, CircleAlertIcon, InfoIcon } from "lucide-react";
@@ -24,8 +25,10 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
 import { utcText } from "#/lib/time.ts";
+import { cn } from "#/lib/utils.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import { approverLabel } from "@sanoma/workflows/shared";
+import { configQuery } from "../queries.ts";
 import type { GraphProps } from "./graph.tsx";
 
 // Small pieces shared by the screens, composed from the shadcn components in ./ui.
@@ -124,10 +127,28 @@ const dot = cva("size-2.5 rounded-full", {
   },
 });
 
-/** An operation by id, with its effect's badge when the effect is known. */
+/**
+ * A vendor's logo, 16 px, named by the vendor's title for assistive tech: its connector's light
+ * variant, and its dark one under the dark theme. Nothing when the connector gives no logo.
+ */
+export function VendorLogo({ vendor }: { vendor: string }) {
+  const { data: entry } = useSuspenseQuery({ ...configQuery(), select: (config) => config.vendors[vendor] });
+  if (!entry?.logo) return null;
+  const { src, dark } = entry.logo;
+  // A hidden <img> is out of the accessibility tree: one name is read either way.
+  return (
+    <>
+      <img src={src} alt={entry.title} className={cn("size-4 shrink-0", dark && "dark:hidden")} />
+      {dark && <img src={dark} alt={entry.title} className="hidden size-4 shrink-0 dark:block" />}
+    </>
+  );
+}
+
+/** An operation by id, after its vendor's logo, with its effect's badge when the effect is known. */
 export function OpName({ id, effect }: { id: string; effect?: Effect | undefined }) {
   return (
     <>
+      <VendorLogo vendor={id.slice(0, id.indexOf("."))} />
       <code>{id}</code>
       {effect && <Badge className={effectBadge({ effect })}>{effect}</Badge>}
     </>

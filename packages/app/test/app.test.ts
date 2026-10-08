@@ -179,6 +179,7 @@ describe("the API", () => {
     // Each workflow's outline, read from its run's source when the app started.
     expect(wf?.outline).toEqual(outlineWorkflow(announce));
     expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.effect).toBe("send");
+    expect(body.vendors.resend).toMatchObject({ title: "Resend", logo: { src: expect.stringMatching(/^data:/) } });
   });
 
   it("refuses a run without an actor, for an unknown workflow, or with input the schema refuses", async () => {
@@ -436,6 +437,11 @@ describe("the page", () => {
     expect(run.text).toContain("copy is fine");
     expect(run.text).toMatch(/approved by marketing-lead/);
     expect(run.text).toContain("<code>ghost.post.publish</code>");
+    // Each call after its vendor's logo, the dark theme's variant hidden until it applies.
+    expect(run.html).toMatch(/<img src="data:image\/svg\+xml,[^"]+" alt="Ghost" class="[^"]*dark:hidden[^"]*"\/>/);
+    expect(run.html).toMatch(
+      /<img src="data:image\/svg\+xml,[^"]+" alt="Ghost" class="hidden [^"]*dark:block[^"]*"\/>/,
+    );
     expect(run.text).toContain("Started by held");
     expect(run.text).toMatch(/>finished<\/span>/);
   });
@@ -446,6 +452,9 @@ describe("the page", () => {
     expect(workflows.status).toBe(200);
     expect(workflows.text).toContain(`<code>${version}</code>`);
     expect(workflows.text).toMatch(/>idempotent<\/span>/);
+    for (const title of ["Ghost", "Resend", "Bluesky"]) {
+      expect(workflows.html).toMatch(new RegExp(`<img src="data:image/svg\\+xml,[^"]+" alt="${title}"`));
+    }
     expect(workflows.text).toMatch(/default (&quot;|")newsletter(&quot;|")/);
     // Each workflow's outline, drawn in the browser like the run graph: a heading, what it is, a skeleton.
     expect(workflows.text).toMatch(

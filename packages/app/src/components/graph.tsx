@@ -30,7 +30,7 @@ import { type GraphNode, type GraphNodeKind, isPending } from "../graph/types.ts
 import { useReducedMotion } from "#/lib/motion.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import { configQuery, opsById } from "../queries.ts";
-import { ApprovalStatusBadge, effectBadge, StatusDot, ToneBadge } from "./common.tsx";
+import { ApprovalStatusBadge, effectBadge, StatusDot, ToneBadge, VendorLogo } from "./common.tsx";
 import { ZoomSlider } from "./zoom-slider.tsx";
 
 // A run's graph, or a workflow's outline, drawn with React Flow. It needs the DOM, so the pages
@@ -146,13 +146,15 @@ const Ops = createContext<Map<string, OpEntry>>(new Map());
 
 function OpNode({ data: { node } }: Props<"op">) {
   // The effect is the config's: a call still held for its approval has no record yet.
-  const effect = use(Ops).get(node.label)?.effect;
+  const op = use(Ops).get(node.label);
+  const effect = op?.effect;
   const { state } = node;
   const held = state?.approval && state.decision === undefined ? state.approval : undefined;
   return (
     <Frame node={node}>
       <Line>
         <Dot tone={state?.tone} />
+        {op && <VendorLogo vendor={op.vendor} />}
         <code className="truncate">{node.label}</code>
       </Line>
       <Line>
