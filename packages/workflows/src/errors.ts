@@ -41,9 +41,8 @@ export class SanomaError extends Error {
 
 /** The error's code, read from its own `code` property, or undefined when it has none of ours. */
 export function errorCode(e: unknown): ErrorCode | undefined {
-  if (typeof e !== "object" || e === null || !Object.hasOwn(e, "code")) return undefined;
-  const code = (e as { code: unknown }).code;
-  return typeof code === "string" && KNOWN.has(code) ? (code as ErrorCode) : undefined;
+  const code = own<string>(e, "code", "string");
+  return code !== undefined && KNOWN.has(code) ? (code as ErrorCode) : undefined;
 }
 
 /**
@@ -141,19 +140,25 @@ function own<T>(err: unknown, key: string, type: "number" | "string" | "boolean"
   return typeof value === type && value !== null ? (value as T) : undefined;
 }
 
+/** The fields `errorInfo` copies when the error has them, with their types. */
+const KEPT = [
+  ["status", "number"],
+  ["vendorCode", "string"],
+  ["retryable", "boolean"],
+  ["data", "object"],
+] as const;
+
 export function errorInfo(err: unknown): ErrorInfo {
   const code = errorCode(err);
-  const status = own<number>(err, "status", "number");
-  const vendorCode = own<string>(err, "vendorCode", "string");
-  const retryable = own<boolean>(err, "retryable", "boolean");
-  const data = own<Record<string, unknown>>(err, "data", "object");
-  return {
+  const info: ErrorInfo = {
     ...(code === undefined ? {} : { code }),
     name: err instanceof Error ? err.name : "Error",
     message: errorMessage(err),
-    ...(status === undefined ? {} : { status }),
-    ...(vendorCode === undefined ? {} : { vendorCode }),
-    ...(retryable === undefined ? {} : { retryable }),
-    ...(data === undefined || Object.keys(data).length === 0 ? {} : { data }),
   };
+  for (const [key, type] of KEPT) {
+    const value = own(err, key, type);
+    if (value !== undefined) Object.assign(info, { [key]: value });
+  }
+  if (info.data && Object.keys(info.data).length === 0) delete info.data;
+  return info;
 }
