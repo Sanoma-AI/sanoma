@@ -1,5 +1,5 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
 import { Field, FieldGroup, FieldLabel, FieldSeparator } from "#/components/ui/field.tsx";
@@ -16,7 +16,7 @@ export const Route = createFileRoute("/start")({
 
 function StartPage() {
   const { workflow: wanted } = Route.useSearch();
-  const navigate = useNavigate();
+  const navigate = Route.useNavigate();
   const { data: config } = useSuspenseQuery(configQuery());
 
   const name = wanted ?? config.workflows[0]?.name;
@@ -42,7 +42,8 @@ function StartPage() {
                   name="workflow"
                   className="w-full"
                   value={workflow ? workflow.name : ""}
-                  onChange={(e) => void navigate({ to: "/start", search: { workflow: e.target.value } })}
+                  // Choosing another workflow replaces the page in the history rather than adding one.
+                  onChange={(e) => void navigate({ search: { workflow: e.target.value }, replace: true })}
                 >
                   {!workflow && (
                     <NativeSelectOption value="" disabled>
