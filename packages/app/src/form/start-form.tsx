@@ -100,8 +100,7 @@ function useStartForm(workflow: string, fields: SchemaField[], whole: boolean) {
         } catch (err) {
           const body = errorBodyOf(err);
           if (!body?.issues?.length) {
-            const message = body?.error ?? (err as Error).message;
-            toast.error(`Could not start ${workflow}`, { description: message });
+            const message = (err as Error).message;
             // `fields` must be there, even empty, for the form to read `form` as its own error.
             return { form: message, fields: {} };
           }
@@ -113,7 +112,6 @@ function useStartForm(workflow: string, fields: SchemaField[], whole: boolean) {
             else rest.push(issue.path.length ? `${pathName(issue.path)}: ${issue.message}` : issue.message);
           }
           const message = rest.join("; ") || "The input does not match the workflow's schema";
-          toast.error(`Could not start ${workflow}`, { description: message });
           return { form: message, fields: byField };
         }
         toast.success(`Started ${workflow}`);

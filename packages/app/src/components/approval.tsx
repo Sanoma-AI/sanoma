@@ -153,7 +153,7 @@ function DecideDialog({
     const body = errorBodyOf(err);
     return body?.code === "not_approver"
       ? `Only ${approverName(body.approver ?? approval.approver)} can decide this`
-      : (body?.error ?? err?.message);
+      : err?.message;
   };
   const mutation = useMutation({
     // The server trims the note and drops an empty one.
@@ -167,7 +167,6 @@ function DecideDialog({
         queryClient.invalidateQueries({ queryKey: ["runs"] }),
       ]);
     },
-    onError: (err) => toast.error(`Could not decide “${approval.title}”`, { description: messageOf(err) }),
   });
   const error = messageOf(mutation.error);
   const verb = decision === "reject" ? "Reject" : "Approve";
