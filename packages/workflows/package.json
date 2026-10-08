@@ -53,8 +53,13 @@
   },
   "dependencies": {
     "@dbos-inc/dbos-sdk": "^5.2.11",
-    "oxc-parser": "^0.153.0",
+    "oxc-parser": "^0.153.0"
+  },
+  "devDependencies": {
     "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "zod": "^4"
   },
   "engines": {
     "node": ">=24"
