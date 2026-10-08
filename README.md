@@ -2,17 +2,18 @@
 
 Open core of Sanoma. Business as Code keeps a company's operational configuration (card limits, time-off policies, access, onboarding steps) in typed code and applies it to vendors like Mercury, Gusto and Okta. An agent drafts each change, policies decide who must approve, and a ledger records what happened. This TypeScript monorepo holds the open parts.
 
-Status: early. Business processes are written as TypeScript workflows that run on [DBOS](https://dbos.dev): each vendor call is a durable step, approvals and sleeps survive restarts, and a lint keeps workflow code safe to replay.
+Status: early. Business processes are written as TypeScript workflows that run on [DBOS](https://dbos.dev): each vendor call is a durable step, approvals and sleeps survive restarts, and a lint keeps workflow code safe to replay. Versioning is automatic: each run is stamped with a hash of the workflow code it started on, and only a worker on that version resumes it (`DBOS__APPVERSION` names a version instead; see [Versions](packages/workflows/README.md#versions)).
 
 ## Packages
 
-| Package                                           | What it is                                                   |
-| ------------------------------------------------- | ------------------------------------------------------------ |
-| [`@sanoma/workflows`](packages/workflows)         | Define connectors and workflows, run them durably, lint them |
-| [`@sanoma/testing`](packages/testing)             | Fake vendors for testing workflows without vendor accounts   |
-| [`@sanoma/connector-ghost`](connectors/ghost)     | Ghost operations (posts)                                     |
-| [`@sanoma/connector-resend`](connectors/resend)   | Resend operations (broadcasts)                               |
-| [`@sanoma/connector-bluesky`](connectors/bluesky) | Bluesky operations (posts)                                   |
+| Package                                           | What it is                                                                                                                       |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| [`@sanoma/workflows`](packages/workflows)         | Define connectors and workflows, run them durably, lint them (`./lint`, `oxlint.json`); `./fake` builds a fake for any connector |
+| [`@sanoma/app`](packages/app)                     | The web UI and JSON API over a config: runs, ledgers, approvals, start forms. `startApp(config)`                                 |
+| [`@sanoma/testing`](packages/testing)             | `startTestWorker` and `testDatabaseUrl` for workflow tests, and the connectors' fakes re-exported                                |
+| [`@sanoma/connector-ghost`](connectors/ghost)     | Ghost operations (posts); `./fake` is an in-memory Ghost                                                                         |
+| [`@sanoma/connector-resend`](connectors/resend)   | Resend operations (broadcasts); `./fake` is an in-memory Resend                                                                  |
+| [`@sanoma/connector-bluesky`](connectors/bluesky) | Bluesky operations (posts); `./fake` is an in-memory Bluesky                                                                     |
 
 The other directories under `packages/` and `modules/` are placeholders for parts that are not written yet.
 

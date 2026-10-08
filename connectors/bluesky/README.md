@@ -47,4 +47,6 @@ A repeated idempotency key gets the first reply and posts nothing new. To test w
 
 `fake.reset()` empties it between tests. Pass `{ calls }` with one array to several fakes to see their calls in one order.
 
+`@sanoma/testing` re-exports `fakeBluesky` beside the other fakes, with `startTestWorker` and `testDatabaseUrl` to run a test's worker on a database of its own.
+
 License: Apache-2.0.

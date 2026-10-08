@@ -52,4 +52,6 @@ Like Resend, the fake refuses to send a broadcast twice, unless the second call 
 
 `fake.reset()` empties it between tests. Pass `{ calls }` with one array to several fakes to see their calls in one order.
 
+`@sanoma/testing` re-exports `fakeResend` beside the other fakes, with `startTestWorker` and `testDatabaseUrl` to run a test's worker on a database of its own.
+
 License: Apache-2.0.

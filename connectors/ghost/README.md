@@ -52,4 +52,6 @@ A repeated idempotency key gets the first reply and changes nothing, as a real v
 
 `fake.reset()` empties it between tests. Pass `{ calls }` with one array to several fakes to see their calls in one order.
 
+`@sanoma/testing` re-exports `fakeGhost` beside the other fakes, with `startTestWorker` and `testDatabaseUrl` to run a test's worker on a database of its own.
+
 License: Apache-2.0.
