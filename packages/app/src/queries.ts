@@ -10,9 +10,17 @@ export const POLL_MS = 2_000;
 export const configQuery = () =>
   queryOptions({ queryKey: ["config"], queryFn: () => getConfig(), staleTime: Number.POSITIVE_INFINITY });
 
-/** Who the server says is asking. A login lasts the page's life; the header name is kept in the browser. */
+/**
+ * Who the server says is asking. A login lasts the page's life; the header name is kept in the
+ * browser. A resolver that failed is asked again every 10 s, so the nav recovers with it.
+ */
 export const actorQuery = () =>
-  queryOptions({ queryKey: ["actor"], queryFn: () => getActor(), staleTime: Number.POSITIVE_INFINITY });
+  queryOptions({
+    queryKey: ["actor"],
+    queryFn: () => getActor(),
+    staleTime: Number.POSITIVE_INFINITY,
+    refetchInterval: (query) => (query.state.data?.error ? 10_000 : false),
+  });
 
 export const runsQuery = (limit: number = RUNS_LIMIT.default) =>
   queryOptions({
