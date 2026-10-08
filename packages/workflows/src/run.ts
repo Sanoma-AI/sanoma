@@ -25,9 +25,10 @@ export interface WorkerState {
   policy: Policy;
   ledger: LedgerStore;
   /**
-   * Set when the worker stops. DBOS abandons a stopped worker's run functions, which then fail
-   * as their next DBOS call finds the database closed. Such a run must not record `run.failed`:
-   * the run recovered on the next worker records how it really ends.
+   * Set when the worker stops, before DBOS shuts down. DBOS abandons a stopped worker's run
+   * functions, which then fail as their next DBOS call finds the database closed. Such a failure,
+   * one with none of our codes, is not recorded: the run recovered on the next worker records
+   * how it really ends (see `isInfrastructureError`).
    */
   stopped: boolean;
 }

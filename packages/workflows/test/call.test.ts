@@ -1,8 +1,9 @@
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
+import { DBOS } from "@dbos-inc/dbos-sdk";
 import { testDatabaseUrl } from "@sanoma/testing";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   allow,
@@ -241,6 +242,56 @@ describe("a call that fails", () => {
     const last = { code: "driver_failed", name: "DriverError", message: "ghost: 503 (3)" };
     expect(records.at(-2)).toMatchObject({ op: "ghost.post.publish", attempt: 3, error: last });
     expect(records.at(-1)).toMatchObject({ type: "run.failed", error: last });
+  });
+});
+
+describe("a worker stopping while a call fails for good", () => {
+  // bluesky.post.create waits until released, then the vendor refuses it for good.
+  const entered = Promise.withResolvers<void>();
+  const released = Promise.withResolvers<void>();
+  const app = useApp(databaseUrl, "call-stopping", (vendors) => ({
+    workflows: [post],
+    drivers: [
+      vendors.ghost.driver,
+      vendors.resend.driver,
+      {
+        vendor: "bluesky",
+        ops: {
+          "post.create": async () => {
+            entered.resolve();
+            await released.promise;
+            throw new DriverError("bluesky: the post is too long", { retryable: false, status: 400 });
+          },
+        },
+      },
+    ],
+  }));
+  const c = () => app.client;
+
+  it("records the call's failure and the run's: they are its outcome, not the shutdown", async () => {
+    const runId = await c().start(post, { text: "too long" }, { startedBy: alice });
+    await entered.promise;
+    // The worker is stopping (marked stopped) but DBOS has not shut down yet when the call fails.
+    const shutdown = DBOS.shutdown.bind(DBOS);
+    const shut = Promise.withResolvers<void>();
+    vi.spyOn(DBOS, "shutdown").mockImplementationOnce(async (options) => {
+      await shut.promise;
+      return shutdown(options);
+    });
+    const stopping = app.stop();
+    released.resolve();
+    try {
+      await waitFor(async () => (await c().ledger(runId)).some((r) => r.type === "run.failed"));
+    } finally {
+      shut.resolve();
+      await stopping;
+      vi.restoreAllMocks();
+    }
+    const records = await c().ledger(runId);
+    const refused = { code: "driver_failed", message: "bluesky: the post is too long", status: 400 };
+    expect(types(records)).toEqual(["run.started", "op.called bluesky.post.create", "run.failed"]);
+    expect(records[1]).toMatchObject({ error: refused });
+    expect(records[2]).toMatchObject({ error: refused });
   });
 });
 
