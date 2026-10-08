@@ -11,7 +11,7 @@ export interface Principal {
 }
 
 export const Principal: z.ZodType<Principal> = z.object({
-  id: z.string().min(1, "id must not be blank").regex(/\S/, "id must not be blank"),
+  id: z.string().regex(/\S/, "id must not be blank"),
   groups: z.array(z.string()).optional(),
 });
 
@@ -22,7 +22,7 @@ export type Use = Op | Builtin;
 export type Approver = string | { group: string };
 
 export const Approver: z.ZodType<Approver> = z.union(
-  [z.string().min(1).regex(/\S/), z.object({ group: z.string().min(1).regex(/\S/) })],
+  [z.string().regex(/\S/), z.object({ group: z.string().regex(/\S/) })],
   { error: 'needs an approver: a name, or { group: "name" }' },
 );
 
