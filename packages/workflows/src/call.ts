@@ -1,6 +1,6 @@
 import { DBOS, DBOSWorkflowConflictError, Error as DBOSErrors } from "@dbos-inc/dbos-sdk";
-import { approverLabel, awaitApproval } from "./approvals.ts";
-import { type ApprovalRequest, SleepRequest, type Use, type WorkflowDefinition } from "./define.ts";
+import { approverLabel, awaitApproval, type CheckedApproval } from "./approvals.ts";
+import { type ApprovalRequest, Approver, Covers, SleepRequest, type Use, type WorkflowDefinition } from "./define.ts";
 import { errorCode, errorInfo, errorMessage, invalidInput, PolicyDeniedError, SanomaError } from "./errors.ts";
 import { entry, skipped, write, writeFailure } from "./ledger.ts";
 import { type CallContext, isOp, type Op } from "./op.ts";
@@ -86,7 +86,7 @@ export function buildCtx(wf: WorkflowDefinition<any, any>, run: Run): any {
   members.runId = run.id;
   members.now = () => DBOS.now();
   if (uses.includes("approval")) {
-    members.approval = (title: string, req: ApprovalRequest) => awaitApproval(run, title, req);
+    members.approval = (title: string, req: ApprovalRequest) => awaitApproval(run, title, checkApproval(title, req));
   }
   if (uses.includes("sleep")) members.sleep = (req: unknown) => sleep(req);
 
@@ -186,9 +186,10 @@ async function callOp(run: Run, id: string, input: unknown) {
   }
   if (decision.kind === "approve") {
     const title = decision.title ?? `${op.id} needs ${approverLabel(decision.approver)}`;
+    // A hold covers the call it held, and any other operations the policy named.
+    const covers = [...new Set([op.id, ...(decision.covers ?? [])])];
     try {
-      const held = { op: op.id, input: parsed, ...(decision.covers ? { covers: decision.covers } : {}) };
-      await awaitApproval(run, title, { approver: decision.approver }, held);
+      await awaitApproval(run, title, { approver: decision.approver, covers }, { op: op.id, input: parsed });
     } catch (err) {
       if (errorCode(err) === "approval_rejected") {
         const approval = (err as SanomaError).data.approvalId as string;
@@ -235,6 +236,18 @@ async function callOp(run: Run, id: string, input: unknown) {
   const { output, at, durationMs } = result;
   await write(run, entry(run, { ...call, output, durationMs, attempt: result.attempt }, { seq, at }));
   return output;
+}
+
+/**
+ * Checks a `ctx.approval` request before any DBOS call, so a bad one fails the run with
+ * `invalid_input`: who may decide it, and the operations it covers, as ids (none unless named).
+ */
+function checkApproval(title: string, req: ApprovalRequest): CheckedApproval {
+  const approver = Approver.safeParse(req?.approver);
+  if (!approver.success) throw invalidInput(`ctx.approval("${title}")`, approver.error.issues, { title });
+  const covers = Covers.safeParse(req.covers);
+  if (!covers.success) throw invalidInput(`ctx.approval("${title}") covers`, covers.error.issues, { title });
+  return { approver: approver.data, covers: covers.data ?? [], links: req.links, details: req.details };
 }
 
 /** Checks a sleep request before any DBOS call, so a bad one fails the run with `invalid_input`. */

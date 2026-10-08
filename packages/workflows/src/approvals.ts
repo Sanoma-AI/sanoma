@@ -1,14 +1,7 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { z } from "zod";
-import {
-  type ApprovalRequest,
-  type ApprovalResult,
-  type ApprovalState,
-  Approver,
-  Covers,
-  Principal,
-} from "./define.ts";
-import { invalidInput, RejectedError } from "./errors.ts";
+import { type ApprovalRequest, type ApprovalResult, type ApprovalState, Approver, Principal } from "./define.ts";
+import { RejectedError } from "./errors.ts";
 import { entry, write } from "./ledger.ts";
 import { warn } from "./log.ts";
 import type { Run } from "./run.ts";
@@ -59,11 +52,15 @@ function senderOf(raw: unknown): string | undefined {
   return typeof id === "string" && id ? id : undefined;
 }
 
-/** A policy's hold: the call held, and the other operations (by id) the policy said the approval covers. */
+/** An approval request as checked: who may decide it, and the operations it covers, by id. */
+export interface CheckedApproval extends Omit<ApprovalRequest, "covers"> {
+  covers: string[];
+}
+
+/** A policy's hold: the call held. */
 export interface HeldCall {
   op: string;
   input: unknown;
-  covers?: string[];
 }
 
 /**
@@ -73,20 +70,15 @@ export interface HeldCall {
 export async function awaitApproval(
   run: Run,
   title: string,
-  req: ApprovalRequest,
+  req: CheckedApproval,
   held?: HeldCall,
 ): Promise<ApprovalResult> {
-  const approver = Approver.safeParse(req?.approver);
-  if (!approver.success) throw invalidInput(`ctx.approval("${title}")`, approver.error.issues, { title });
-  const named = Covers.safeParse(req.covers);
-  if (!named.success) throw invalidInput(`ctx.approval("${title}") covers`, named.error.issues, { title });
-  const covers = held ? [...new Set([held.op, ...(held.covers ?? [])])] : (named.data ?? []);
-
+  const { covers } = req;
   const all = run.approvals;
   const state: ApprovalState = {
     id: `approval-${all.length + 1}`,
     title,
-    approver: approver.data,
+    approver: req.approver,
     ...(req.links === undefined ? {} : { links: req.links }),
     ...(req.details === undefined ? {} : { details: req.details }),
     requestedBy: held ? "policy" : "workflow",
