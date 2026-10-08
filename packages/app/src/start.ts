@@ -1,4 +1,4 @@
-import { createSerializationAdapter, isNotFound, isRedirect, notFound } from "@tanstack/react-router";
+import { createSerializationAdapter, notFound } from "@tanstack/react-router";
 import { createCsrfMiddleware, createMiddleware, createStart } from "@tanstack/react-start";
 import { setResponseStatus } from "@tanstack/react-start/server";
 import type { Principal } from "@sanoma/workflows";
@@ -7,7 +7,7 @@ import { loadActor } from "./actor.ts";
 import { ACTOR_HEADER, ApiError } from "./api.ts";
 import type { AppContext } from "./context.ts";
 import { actorFromHeader } from "./default-actor.ts";
-import { toApiError } from "./server/core.ts";
+import { isRouterAnswer, toApiError } from "./server/core.ts";
 
 declare module "@tanstack/react-router" {
   interface Register {
@@ -60,8 +60,7 @@ const apiErrors = createMiddleware({ type: "function" }).server(async ({ next, m
   try {
     return await next();
   } catch (err) {
-    // The router's not-found and redirects are answers, not failures: they go through as thrown.
-    if (isNotFound(err) || isRedirect(err)) throw err;
+    if (isRouterAnswer(err)) throw err;
     const api = toApiError(err, "a server function");
     if (api.status === 404 && method === "GET") throw notFound();
     setResponseStatus(api.status);

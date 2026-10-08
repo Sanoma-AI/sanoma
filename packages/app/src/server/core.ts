@@ -6,6 +6,7 @@ import {
   Principal,
   type SanomaError,
 } from "@sanoma/workflows";
+import { isNotFound, isRedirect } from "@tanstack/react-router";
 import type { z } from "zod";
 import {
   ACTOR_HEADER,
@@ -141,6 +142,9 @@ export function toApiError(err: unknown, where: string): ApiError {
   if (api.status >= 500) console.error(`sanoma app: ${where} failed:`, err);
   return api;
 }
+
+/** True for the router's not-found and redirects: answers, not failures, which go through as thrown. */
+export const isRouterAnswer = (err: unknown): boolean => isNotFound(err) || isRedirect(err);
 
 /** A JSON response for any error. */
 export function errorResponse(err: unknown, where: string): Response {
