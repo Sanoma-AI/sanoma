@@ -1,76 +1,78 @@
-import type { OutlineNode } from "@sanoma/workflows/describe";
-import type { GraphEdge, GraphNode, RunGraph } from "./run-graph.ts";
+import type { Graph, GraphEdge, GraphNode, Step, StepState } from "./types.ts";
+
+/** A graph's two ends: an outline's are plain; a run's say how it started and how it ended. */
+export interface Ends {
+  start?: StepState;
+  end: { label: string; state?: StepState; pending?: true };
+}
+
+const OUTLINE_ENDS: Ends = { end: { label: "end" } };
 
 /**
- * A workflow's outline (`outlineWorkflow`, read from its `run`'s source) as a graph of the same
- * nodes and edges as a run's, so the same layout and component draw it: a chain from start to
- * end, with no tone, record or run state. A literal `ctx.all` is one lane per member between the
- * node before it and the node after; a dynamic one (`ids.map(…)`) is its one member in a cluster
- * labelled "for each". A loop's body is a chain in a cluster labelled "repeats". A branch splits
- * at a diamond into one lane per case that makes calls.
+ * Steps as a graph: a chain from start to end. A `ctx.all` is one lane per member between the
+ * node before it and the node after; a branch splits at a diamond into one lane per case. A
+ * computed `ctx.all`'s member is a chain in a cluster labelled "for each", a loop's body one in a
+ * cluster labelled "repeats". An empty lane leads straight from the node before to the node
+ * after. A workflow's outline is drawn this way, and a run's ledger once runGraph has made it
+ * into steps.
  */
-export function outlineGraph(outline: readonly OutlineNode[]): RunGraph {
+export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS): Graph {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
-  let seq = 0;
+  let count = 0;
 
   /** Adds the node, drawn from each of `from`, and returns its id. */
   const add = (node: GraphNode, from: readonly string[]): string => {
     nodes.push(node);
-    for (const source of from) {
-      const id = `${source}->${node.id}`;
-      if (!edges.some((e) => e.id === id)) edges.push({ id, source, target: node.id, active: false, pending: false });
-    }
+    for (const source of from) edges.push({ id: `${source}->${node.id}`, source, target: node.id });
     return node.id;
   };
-  const base = (kind: GraphNode["kind"], label: string, parent: string | undefined) => ({
-    id: `${kind}:${seq}`,
-    label,
-    seq: seq++,
-    ...(parent === undefined ? {} : { parent }),
-  });
-  /** A cluster holding `body`, drawn from `from`. */
-  const cluster = (label: string, body: readonly OutlineNode[], from: readonly string[], parent?: string) => {
-    const id = add({ ...base("cluster", label, parent), kind: "cluster" }, from);
-    chain(body, [], id);
-    return id;
-  };
+  const idOf = (kind: string, key: string | undefined) => key ?? `${kind}:${count++}`;
 
   /** Adds `steps` one after another from `from`, and returns the ids what follows is drawn from. */
-  function chain(steps: readonly OutlineNode[], from: readonly string[], parent?: string): readonly string[] {
+  function chain(steps: readonly Step[], from: readonly string[], parent?: string): readonly string[] {
+    const inside = parent === undefined ? {} : { parent };
+    const lanes = (lists: readonly (readonly Step[])[], start: readonly string[]) => [
+      ...new Set(lists.flatMap((lane) => chain(lane, start, parent))),
+    ];
+    const cluster = (label: string, body: readonly Step[]) => {
+      const id = add({ id: idOf("cluster", undefined), kind: "cluster", label, ...inside }, from);
+      chain(body, [], id);
+      return [id];
+    };
     for (const step of steps) {
       switch (step.kind) {
         case "op":
-          from = [add({ ...base("op", step.id, parent), kind: "op", op: step.id }, from)];
+          from = [add({ id: idOf("op", step.key), kind: "op", label: step.id, ...inside, ...stateOf(step) }, from)];
           break;
-        case "approval":
+        case "approval": {
+          const label = step.title === undefined ? "approval" : `“${step.title}”`;
+          from = [add({ id: idOf("approval", step.key), kind: "approval", label, ...inside, ...stateOf(step) }, from)];
+          break;
+        }
+        case "sleep":
           from = [
             add(
-              {
-                ...base("approval", step.title ?? "approval", parent),
-                kind: "approval",
-                ...(step.title === undefined ? {} : { title: step.title }),
-              },
+              { id: idOf("sleep", step.key), kind: "sleep", label: step.label ?? "sleep", ...inside, ...stateOf(step) },
               from,
             ),
           ];
           break;
-        case "sleep":
-          from = [add({ ...base("sleep", "sleep", parent), kind: "sleep" }, from)];
+        case "pending":
+          from = [add({ id: step.key, kind: "pending", label: "pending", ...inside }, from)];
           break;
         case "all":
-          // An empty lane leads straight from the node before to the node after.
-          if (step.branches.length) from = unique(step.branches.flatMap((b) => chain(b, from, parent)));
+          if (step.branches.length) from = lanes(step.branches, from);
           break;
         case "each":
-          from = [cluster("for each", step.body, from, parent)];
+          from = cluster("for each", step.body);
           break;
         case "repeat":
-          from = [cluster("repeats", step.body, from, parent)];
+          from = cluster("repeats", step.body);
           break;
         case "branch": {
-          const split = [add({ ...base("split", "branch", parent), kind: "split" }, from)];
-          from = unique(step.cases.flatMap((c) => chain(c, split, parent)));
+          const split = add({ id: idOf("split", undefined), kind: "split", label: "branch", ...inside }, from);
+          from = lanes(step.cases, [split]);
           break;
         }
       }
@@ -78,10 +80,10 @@ export function outlineGraph(outline: readonly OutlineNode[]): RunGraph {
     return from;
   }
 
-  add({ id: "start", kind: "start", label: "start", seq: -1 }, []);
+  add({ id: "start", kind: "start", label: "start", ...(ends.start && { state: ends.start }) }, []);
   const tails = chain(outline, ["start"]);
-  add({ id: "end", kind: "end", label: "end", seq }, tails);
+  add({ id: "end", kind: "end", ...ends.end }, tails);
   return { nodes, edges };
 }
 
-const unique = (ids: readonly string[]) => [...new Set(ids)];
+const stateOf = <S>(step: { state?: S }) => (step.state === undefined ? {} : { state: step.state });

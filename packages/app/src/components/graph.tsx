@@ -7,9 +7,9 @@ import {
   Background,
   Controls,
   type Edge,
+  getNodesBounds,
   Handle,
   type Node,
-  type NodeProps,
   type NodeTypes,
   PanOnScrollMode,
   Position,
@@ -21,8 +21,9 @@ import {
 import { cva } from "class-variance-authority";
 import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
-import { layout, NODE_SIZE } from "../graph/layout.ts";
-import type { GraphNode, GraphNodeKind, RunGraph } from "../graph/run-graph.ts";
+import { approverLabel } from "@sanoma/workflows/shared";
+import { layout } from "../graph/layout.ts";
+import { type Graph as GraphData, type GraphNode, type GraphNodeKind, isPending } from "../graph/types.ts";
 import { configQuery, opsById } from "../queries.ts";
 import { APPROVAL_TONE, DECISION_TONE, effectBadge, StatusDot, type Tone, toneBadge } from "./common.tsx";
 
@@ -31,6 +32,8 @@ import { APPROVAL_TONE, DECISION_TONE, effectBadge, StatusDot, type Tone, toneBa
 // the server renders a skeleton instead.
 
 type FlowNode = Node<{ node: GraphNode }, GraphNodeKind>;
+/** What a node component reads of its `NodeProps`: its node, of its kind. */
+type Props<K extends GraphNodeKind> = { data: { node: Extract<GraphNode, { kind: K }> } };
 
 /** How the view fits the graph (the controls' fit button fits all of it). */
 const FIT = { padding: 0.1, minZoom: 0.25, maxZoom: 1 } as const;
@@ -64,18 +67,28 @@ const frame = cva(
         idle: "border-tone-idle-foreground/50",
         off: "border-border",
       } satisfies Record<Tone, string>,
-      pending: { true: "border-dashed bg-transparent" },
+      pending: { true: "border-dashed bg-transparent text-muted-foreground" },
       // It has a ledger record to show.
       clickable: { true: "cursor-pointer hover:bg-muted" },
     },
   },
 );
 
-/** One node's box, with handles where edges meet it (hidden: nothing connects by hand here). */
+/** Where edges meet a node: hidden, since nothing connects by hand here. */
+function Handles({ inbound = true, outbound = true }: { inbound?: boolean; outbound?: boolean }) {
+  return (
+    <>
+      {inbound && <Handle type="target" position={Position.Left} isConnectable={false} className="invisible" />}
+      {outbound && <Handle type="source" position={Position.Right} isConnectable={false} className="invisible" />}
+    </>
+  );
+}
+
+/** One node's box, in its tone when a run gives it one, with its handles. */
 function Frame({
   node,
-  inbound = true,
-  outbound = true,
+  inbound,
+  outbound,
   children,
 }: {
   node: GraphNode;
@@ -83,18 +96,14 @@ function Frame({
   outbound?: boolean;
   children: ReactNode;
 }) {
+  const state = "state" in node ? node.state : undefined;
   return (
     <div
-      className={frame({
-        tone: node.tone ?? "off",
-        pending: node.kind === "end" && node.state === "pending",
-        clickable: node.recordId !== undefined,
-      })}
+      className={frame({ tone: state?.tone ?? "off", pending: isPending(node), clickable: !!state?.recordId })}
       title={node.label}
     >
-      {inbound && <Handle type="target" position={Position.Left} isConnectable={false} className="invisible" />}
+      <Handles inbound={inbound} outbound={outbound} />
       {children}
-      {outbound && <Handle type="source" position={Position.Right} isConnectable={false} className="invisible" />}
     </div>
   );
 }
@@ -103,103 +112,111 @@ function Line({ children }: { children: ReactNode }) {
   return <div className="flex min-w-0 items-center gap-1.5">{children}</div>;
 }
 
-/** The node's tone, when it has one: an outline's nodes have none. */
-const Dot = ({ node }: { node: GraphNode }) => node.tone && <StatusDot tone={node.tone} />;
+/** The node's tone, when a run gives it one. */
+const Dot = ({ tone }: { tone: Tone | undefined }) => tone && <StatusDot tone={tone} />;
 
-function StartNode({ data: { node } }: NodeProps<FlowNode>) {
+function StartNode({ data: { node } }: Props<"start">) {
   return (
     <Frame node={node} inbound={false}>
       <Line>
-        <Dot node={node} />
-        start
+        <Dot tone={node.state?.tone} />
+        {node.label}
       </Line>
     </Frame>
   );
 }
 
-function EndNode({ data: { node } }: NodeProps<FlowNode>) {
-  if (node.kind !== "end") return null;
+function EndNode({ data: { node } }: Props<"end">) {
   return (
     <Frame node={node} outbound={false}>
       <Line>
-        <Dot node={node} />
-        <span className={node.state === "pending" ? "text-muted-foreground" : ""}>{node.label}</span>
+        <Dot tone={node.state?.tone} />
+        {node.label}
       </Line>
     </Frame>
   );
 }
 
-function OpNode({ data: { node } }: NodeProps<FlowNode>) {
-  // A call still held for its approval has no record yet, so no effect: the config knows it.
+function OpNode({ data: { node } }: Props<"op">) {
+  // The effect is the config's: a call still held for its approval has no record yet.
   const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
-  if (node.kind !== "op") return null;
-  const effect = node.effect ?? ops.get(node.op)?.effect;
+  const effect = ops.get(node.label)?.effect;
+  const { state } = node;
+  const held = state?.approval && state.decision === undefined ? state.approval : undefined;
   return (
     <Frame node={node}>
       <Line>
-        <Dot node={node} />
-        <code className="truncate">{node.op}</code>
+        <Dot tone={state?.tone} />
+        <code className="truncate">{node.label}</code>
       </Line>
       <Line>
         {effect && <Badge className={effectBadge({ effect })}>{effect}</Badge>}
-        {node.hold && node.decision === undefined ? (
-          <Badge className={toneBadge({ tone: APPROVAL_TONE[node.hold.state] })} title={node.hold.title}>
-            {node.hold.state === "pending" ? `held · ${node.hold.approver}` : node.hold.state}
+        {held ? (
+          <Badge className={toneBadge({ tone: APPROVAL_TONE[held.status] })} title={held.title}>
+            {held.status === "pending" ? `held · ${approverLabel(held.approver)}` : held.status}
           </Badge>
         ) : (
-          node.decision && <Badge className={toneBadge({ tone: DECISION_TONE[node.decision] })}>{node.decision}</Badge>
+          state?.decision && (
+            <Badge className={toneBadge({ tone: DECISION_TONE[state.decision] })}>{state.decision}</Badge>
+          )
         )}
-        {node.errorCode ? (
-          <span className="truncate text-destructive">{node.errorCode}</span>
+        {state?.errorCode ? (
+          <span className="truncate text-destructive">{state.errorCode}</span>
         ) : (
-          node.durationMs !== undefined && <span className="text-muted-foreground">{node.durationMs} ms</span>
+          state?.durationMs !== undefined && <span className="text-muted-foreground">{state.durationMs} ms</span>
         )}
       </Line>
     </Frame>
   );
 }
 
-function ApprovalNode({ data: { node } }: NodeProps<FlowNode>) {
-  if (node.kind !== "approval") return null;
+function ApprovalNode({ data: { node } }: Props<"approval">) {
+  const approval = node.state?.approval;
   return (
     <Frame node={node}>
       <Line>
-        <Dot node={node} />
-        <span className="truncate">{node.title ? `“${node.title}”` : node.label}</span>
+        <Dot tone={node.state?.tone} />
+        <span className="truncate">{node.label}</span>
       </Line>
-      {node.hold && (
+      {approval && (
         <Line>
-          <Badge className={toneBadge({ tone: APPROVAL_TONE[node.hold.state] })}>{node.hold.state}</Badge>
-          <span className="truncate text-muted-foreground">{node.hold.approver}</span>
+          <Badge className={toneBadge({ tone: APPROVAL_TONE[approval.status] })}>{approval.status}</Badge>
+          <span className="truncate text-muted-foreground">{approverLabel(approval.approver)}</span>
         </Line>
       )}
     </Frame>
   );
 }
 
-function SleepNode({ data: { node } }: NodeProps<FlowNode>) {
-  if (node.kind !== "sleep") return null;
+/** A sleep, and in a run when it ends (UTC, as the ledger shows it). */
+function SleepNode({ data: { node } }: Props<"sleep">) {
   return (
     <Frame node={node}>
       <Line>
-        <Dot node={node} />
-        <span className="truncate">
-          {node.until === undefined ? "sleep" : `sleep until ${new Date(node.until).toLocaleString()}`}
-        </span>
+        <Dot tone={node.state?.tone} />
+        <span className="truncate">{node.label}</span>
       </Line>
     </Frame>
   );
 }
 
-/** A box around the nodes it holds (a loop's body, a dynamic `ctx.all`'s member), named by a badge. */
-function ClusterNode({ data: { node } }: NodeProps<FlowNode>) {
+/** A `ctx.all` member the run has recorded nothing for yet, drawn like the end it has not reached. */
+function PendingNode({ data: { node } }: Props<"pending">) {
+  return (
+    <Frame node={node}>
+      <Line>{node.label}</Line>
+    </Frame>
+  );
+}
+
+/** A box around the nodes it holds (a loop's body, a computed `ctx.all`'s member), named by a badge. */
+function ClusterNode({ data: { node } }: Props<"cluster">) {
   return (
     <div className="size-full rounded-lg border border-dashed border-muted-foreground/40" title={node.label}>
-      <Handle type="target" position={Position.Left} isConnectable={false} className="invisible" />
+      <Handles />
       <Badge variant="outline" className="m-1.5 bg-card">
         {node.label}
       </Badge>
-      <Handle type="source" position={Position.Right} isConnectable={false} className="invisible" />
     </div>
   );
 }
@@ -208,25 +225,25 @@ function ClusterNode({ data: { node } }: NodeProps<FlowNode>) {
 function SplitNode() {
   return (
     <div className="flex size-full items-center justify-center" title="branch">
-      <Handle type="target" position={Position.Left} isConnectable={false} className="invisible" />
+      <Handles />
       <div className="size-4 rotate-45 rounded-xs border border-muted-foreground/60 bg-card" />
-      <Handle type="source" position={Position.Right} isConnectable={false} className="invisible" />
     </div>
   );
 }
 
-const nodeTypes: NodeTypes = {
+const nodeTypes = {
   start: StartNode,
   end: EndNode,
   op: OpNode,
   approval: ApprovalNode,
   sleep: SleepNode,
+  pending: PendingNode,
   cluster: ClusterNode,
   split: SplitNode,
-} satisfies Record<GraphNodeKind, unknown>;
+} satisfies { [K in GraphNodeKind]: (props: Props<K>) => ReactNode } as NodeTypes;
 
 /** Fits the view again when nodes come or go, as the run's page polls. */
-function FitOnChange({ nodes, show, onFitted }: { nodes: FlowNode[]; show: GraphProps["show"]; onFitted: () => void }) {
+function FitOnChange({ nodes, show, onFitted }: { nodes: FlowNode[]; show: "start" | "end"; onFitted: () => void }) {
   const { fitView, setViewport } = useReactFlow();
   const width = useStore((s) => s.width);
   const height = useStore((s) => s.height);
@@ -234,23 +251,19 @@ function FitOnChange({ nodes, show, onFitted }: { nodes: FlowNode[]; show: Graph
   useEffect(() => {
     if (!width || !height || !count) return;
     // A cluster's nodes are placed relative to it, and inside it.
-    const outer = nodes.filter((n) => n.parentId === undefined);
-    const left = Math.min(...outer.map((n) => n.position.x));
-    const right = Math.max(...outer.map((n) => n.position.x + (n.width ?? 0)));
-    const top = Math.min(...outer.map((n) => n.position.y));
-    const bottom = Math.max(...outer.map((n) => n.position.y + (n.height ?? 0)));
+    const bounds = getNodesBounds(nodes.filter((n) => n.parentId === undefined));
     // All of the graph when it fits at a readable zoom. Else one end at that zoom (a run's
     // latest steps, an outline's first); panning shows the rest.
-    const fits = (right - left) * READABLE_ZOOM <= width * (1 - 2 * FIT.padding);
+    const fits = bounds.width * READABLE_ZOOM <= width * (1 - 2 * FIT.padding);
     const done = fits
       ? fitView(FIT)
       : setViewport({
           zoom: READABLE_ZOOM,
           x:
             show === "start"
-              ? width * FIT.padding - left * READABLE_ZOOM
-              : width * (1 - FIT.padding) - right * READABLE_ZOOM,
-          y: height / 2 - ((top + bottom) / 2) * READABLE_ZOOM,
+              ? width * FIT.padding - bounds.x * READABLE_ZOOM
+              : width * (1 - FIT.padding) - (bounds.x + bounds.width) * READABLE_ZOOM,
+          y: height / 2 - (bounds.y + bounds.height / 2) * READABLE_ZOOM,
         });
     void done.then(onFitted);
     // Only when nodes come or go, or the view resizes: not on every poll.
@@ -259,11 +272,11 @@ function FitOnChange({ nodes, show, onFitted }: { nodes: FlowNode[]; show: Graph
 }
 
 export interface GraphProps {
-  graph: RunGraph;
+  graph: GraphData;
   /** Called with a clicked node's ledger record id. Nodes without a record do nothing. */
-  onSelect?: ((recordId: string) => void) | undefined;
+  onSelect?: (recordId: string) => void;
   /** The end shown when all of the graph cannot be read at once. Defaults to `end`. */
-  show?: "start" | "end" | undefined;
+  show?: "start" | "end";
 }
 
 /** A graph, left to right. Clicking a node with a ledger record calls `onSelect` with it. */
@@ -271,11 +284,11 @@ export default function Graph({ graph, onSelect, show = "end" }: GraphProps) {
   const reducedMotion = useReducedMotion();
   // Hidden until the first fit, so the graph does not show unfitted for a frame.
   const [fitted, setFitted] = useState(false);
-  const nodes = useMemo<FlowNode[]>(() => {
-    const at = layout(graph.nodes, graph.edges);
+  const nodes = useMemo(() => {
+    const at = layout(graph);
     // A cluster comes before the nodes inside it, as React Flow needs.
     return graph.nodes.map((node) => {
-      const { x, y, ...size } = at.get(node.id) ?? { x: 0, y: 0, ...NODE_SIZE[node.kind] };
+      const { x, y, ...size } = at.get(node.id)!;
       return {
         id: node.id,
         type: node.kind,
@@ -286,21 +299,26 @@ export default function Graph({ graph, onSelect, show = "end" }: GraphProps) {
         ariaLabel: node.label,
         draggable: false,
         connectable: false,
-      };
+      } as FlowNode;
     });
   }, [graph]);
-  const edges = useMemo<Edge[]>(
-    () =>
-      graph.edges.map((edge) => ({
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
+  const edges = useMemo<Edge[]>(() => {
+    const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+    return graph.edges.map(({ id, source, target }) => {
+      const from = byId.get(source)!;
+      const to = byId.get(target)!;
+      // Moving into what is in flight; dashed into and out of what the run has not reached.
+      const active = "state" in to && to.state?.tone === "active";
+      return {
+        id,
+        source,
+        target,
         type: "smoothstep",
-        animated: edge.active && !reducedMotion,
-        ...(edge.pending ? { style: { strokeDasharray: "4 4" } } : {}),
-      })),
-    [graph, reducedMotion],
-  );
+        animated: active && !reducedMotion,
+        ...(isPending(from) || isPending(to) ? { style: { strokeDasharray: "4 4" } } : {}),
+      };
+    });
+  }, [graph, reducedMotion]);
 
   return (
     <ReactFlowProvider>
@@ -309,8 +327,8 @@ export default function Graph({ graph, onSelect, show = "end" }: GraphProps) {
         edges={edges}
         nodeTypes={nodeTypes}
         className={fitted ? undefined : "invisible"}
-        onNodeClick={(_, node) => {
-          const { recordId } = node.data.node;
+        onNodeClick={(_, node: FlowNode) => {
+          const recordId = "state" in node.data.node ? node.data.node.state?.recordId : undefined;
           if (recordId) onSelect?.(recordId);
         }}
         minZoom={0.25}

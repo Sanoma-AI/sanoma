@@ -1,275 +1,154 @@
-import type {
-  ApprovalState,
-  Effect,
-  ErrorCode,
-  LedgerGroup,
-  LedgerRecord,
-  RecordedDecision,
-  RunStatus,
-  RunSummary,
-} from "@sanoma/workflows";
-import { approverLabel, isEnded } from "@sanoma/workflows/shared";
+import type { ApprovalState, LedgerGroup, LedgerRecord, RunSummary } from "@sanoma/workflows";
+import { isEnded } from "@sanoma/workflows/shared";
 import { APPROVAL_TONE, RUN_TONE, type Tone } from "../lib/tone.ts";
+import { type Ends, outlineGraph } from "./outline-graph.ts";
+import type { Graph, Step } from "./types.ts";
 
-/**
- * A run as a graph, built from its ledger: where it started, each operation call, sleep and
- * approval the workflow asked for, and how it ended. No React here: the page lays it out and
- * draws it (components/graph.tsx). A workflow's outline is drawn with the same nodes and edges
- * (outline-graph.ts).
- */
-
-/** An approval's state as the ledger tells it. */
-export type HoldState = ApprovalState["status"];
-
-/** An approval the policy asked for to let an operation call through. It belongs to the call's node. */
-export interface Hold {
-  approval: string;
-  title: string;
-  approver: string;
-  state: HoldState;
-  /** How many messages it ignored (not from the approver, or not a decision). */
-  refused: number;
-}
-
-interface Base {
-  id: string;
-  label: string;
-  /** How it went. None in an outline, which shows what a run may do, not what one did. */
-  tone?: Tone;
-  /** Orders the nodes: the seq of the record the node stands for. */
-  seq: number;
-  /** The ledger record to show when the node is clicked. */
-  recordId?: string;
-  group?: LedgerGroup;
-  /** The `cluster` node it is drawn inside, by id. */
-  parent?: string;
-}
-
-export type GraphNode =
-  | (Base & { kind: "start" })
-  | (Base & {
-      kind: "op";
-      op: string;
-      /** Unknown until the call is recorded, while the policy's approval is pending. */
-      effect?: Effect;
-      decision?: RecordedDecision["kind"];
-      errorCode?: ErrorCode | undefined;
-      durationMs?: number;
-      hold?: Hold;
-    })
-  /** `until` is unknown in an outline. */
-  | (Base & { kind: "sleep"; until?: number })
-  /** `hold` is how the approval stands in a run; an outline has none, and a title only when the source gives one. */
-  | (Base & { kind: "approval"; title?: string; hold?: Hold })
-  /** `state` is how the run ended, or `pending`; none in an outline. */
-  | (Base & { kind: "end"; state?: RunStatus | "pending"; errorCode?: ErrorCode | undefined })
-  /** In an outline: a box around a loop's body or a dynamic `ctx.all`'s member, which `label` names. */
-  | (Base & { kind: "cluster" })
-  /** In an outline: where a branch splits into its cases. */
-  | (Base & { kind: "split" });
-
-export type GraphNodeKind = GraphNode["kind"];
-
-export interface GraphEdge {
-  id: string;
-  source: string;
-  target: string;
-  /** The target is an operation in flight: draw the edge moving. */
-  active: boolean;
-  /** The target is the end the run has not reached yet. */
-  pending: boolean;
-}
-
-export interface RunGraph {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-}
-
-type OpNode = Extract<GraphNode, { kind: "op" }>;
-type ApprovalNode = Extract<GraphNode, { kind: "approval" }>;
+type OpStep = Extract<Step, { kind: "op" }>;
+type AllStep = Extract<Step, { kind: "all" }>;
 
 const sleepLabel = (until: number) => `sleep until ${new Date(until).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 
 /**
- * The run's graph. Nodes come in `seq` order and edges follow it, except that the records of
- * one `ctx.all` (the same `group.id`) form parallel branches, one per member (`group.index`):
- * each branch starts from what came before the group and leads to what came after it.
+ * A run's graph, built from its ledger (`records`, in `seq` order) and its approvals as the run
+ * tells them (`run.approvals`): where it started, each operation call, sleep and approval the
+ * workflow asked for, and how it ended. The records of one `ctx.all` (one `group.id`) are its
+ * lanes, one per member (`group.index`); while the run is in the group, the members it has
+ * recorded nothing for yet are pending lanes. `now` is when the ledger was read, which a sleep's
+ * end is compared with.
  */
-export function runGraph(records: readonly LedgerRecord[], run: RunSummary): RunGraph {
+export function runGraph(records: readonly LedgerRecord[], run: RunSummary, now: number): Graph {
   const ended = isEnded(run.status);
-  const sorted = records.toSorted((a, b) => a.seq - b.seq);
-  const lastSeq = sorted.at(-1)?.seq ?? -1;
-  const start: GraphNode = { id: "start", kind: "start", label: "start", tone: "ok", seq: -1 };
-  const steps: GraphNode[] = [];
-  const ops = new Map<number, OpNode>();
-  /** The calls with an op.called record: they have run, or failed. */
-  const called = new Set<OpNode>();
-  const asked = new Map<string, OpNode | ApprovalNode>();
-  let end: GraphNode | undefined;
+  const approvals = new Map(run.approvals.map((a) => [a.id, a]));
+  const steps: Step[] = [];
+  /** Op steps by seq: a policy's approval finds the call it holds by `opSeq`. */
+  const ops = new Map<number, OpStep>();
+  const groups = new Map<string, { step: AllStep; size: number }>();
+  let start: Ends["start"] = { tone: "ok" };
+  let end: Ends["end"] | undefined;
 
-  const opAt = (seq: number, op: string, group: LedgerGroup | undefined): OpNode => {
-    let node = ops.get(seq);
-    if (!node) {
-      node = { id: `op:${seq}`, kind: "op", label: op, op, tone: "active", seq, ...(group ? { group } : {}) };
-      ops.set(seq, node);
-      steps.push(node);
+  /** Adds the step after the others, or to its member's lane in its `ctx.all`. */
+  const place = (step: Step, group: LedgerGroup | undefined) => {
+    if (!group) {
+      steps.push(step);
+      return;
     }
-    return node;
+    let fan = groups.get(group.id);
+    if (!fan) {
+      fan = { step: { kind: "all", branches: [] }, size: group.size };
+      groups.set(group.id, fan);
+      steps.push(fan.step);
+    }
+    (fan.step.branches[group.index] ??= []).push(step);
   };
 
-  for (const record of sorted) {
-    const group = record.group ? { group: record.group } : {};
+  for (const record of records) {
     switch (record.type) {
       case "run.started":
-        Object.assign(start, { seq: record.seq, recordId: record.id });
+        start = { tone: "ok", recordId: record.id };
         break;
       case "op.called": {
-        const node = opAt(record.seq, record.op, record.group);
-        called.add(node);
-        Object.assign(node, {
-          recordId: record.id,
-          effect: record.effect,
-          decision: record.decision.kind,
-          durationMs: record.durationMs,
-          ...(record.error ? { errorCode: record.error.code } : {}),
-          // The runtime records a call once it has returned or failed.
-          tone: record.error || record.decision.kind === "deny" ? "bad" : "ok",
-        });
+        const failed = record.error !== undefined || record.decision.kind === "deny";
+        const step: OpStep = {
+          kind: "op",
+          id: record.op,
+          key: `op:${record.seq}`,
+          state: {
+            tone: failed ? "bad" : "ok",
+            recordId: record.id,
+            decision: record.decision.kind,
+            durationMs: record.durationMs,
+            ...(record.error?.code && { errorCode: record.error.code }),
+          },
+        };
+        ops.set(record.seq, step);
+        place(step, record.group);
         break;
       }
       case "approval.requested": {
-        const hold: Hold = {
-          approval: record.approval,
-          title: record.title,
-          approver: approverLabel(record.approver),
-          state: "pending",
-          refused: 0,
-        };
-        if (record.requestedBy === "policy" && record.op !== undefined) {
-          // The held call takes its seq just before the approval's records (runtime: callOp),
-          // and its op.called is written only once it has run: until then, the node is the hold.
-          const node = opAt(record.seq - 1, record.op, record.group);
-          node.recordId ??= record.id;
-          node.hold = hold;
-          asked.set(record.approval, node);
+        const approval = approvals.get(record.approval);
+        const status = approval?.status ?? "pending";
+        if (record.op !== undefined && record.opSeq !== undefined) {
+          // The policy's: it belongs to the call it holds, whose op.called, numbered before the
+          // approval, is written only once the call has run.
+          const held = ops.get(record.opSeq);
+          if (held) {
+            if (approval) held.state = { ...held.state!, approval };
+          } else {
+            const step: OpStep = {
+              kind: "op",
+              id: record.op,
+              key: `op:${record.opSeq}`,
+              state: { tone: heldTone(status, ended), recordId: record.id, ...(approval && { approval }) },
+            };
+            ops.set(record.opSeq, step);
+            place(step, record.group);
+          }
         } else {
-          const node: ApprovalNode = {
-            id: `approval:${record.approval}`,
-            kind: "approval",
-            label: record.title,
-            title: record.title,
-            tone: "waiting",
-            seq: record.seq,
-            recordId: record.id,
-            hold,
-            ...group,
-          };
-          asked.set(record.approval, node);
-          steps.push(node);
+          const tone = ended && status === "pending" ? "off" : APPROVAL_TONE[status];
+          place(
+            {
+              kind: "approval",
+              title: record.title,
+              key: `approval:${record.approval}`,
+              state: { tone, recordId: record.id, ...(approval && { approval }) },
+            },
+            record.group,
+          );
         }
         break;
       }
-      case "approval.decided":
-      case "approval.refused": {
-        const target = asked.get(record.approval)?.hold;
-        if (!target) break;
-        if (record.type === "approval.refused") target.refused++;
-        else target.state = record.decision === "approve" ? "approved" : "rejected";
+      case "sleep.started": {
+        // Asleep while it is the run's last record and its time has not come.
+        const asleep = !ended && record === records.at(-1) && record.until > now;
+        place(
+          {
+            kind: "sleep",
+            key: `sleep:${record.seq}`,
+            label: sleepLabel(record.until),
+            state: { tone: asleep ? "waiting" : "ok", recordId: record.id },
+          },
+          record.group,
+        );
         break;
       }
-      case "sleep.started":
-        steps.push({
-          id: `sleep:${record.seq}`,
-          kind: "sleep",
-          label: sleepLabel(record.until),
-          until: record.until,
-          // Still asleep while it is the run's last record.
-          tone: !ended && record.seq === lastSeq ? "waiting" : "ok",
-          seq: record.seq,
-          recordId: record.id,
-          ...group,
-        });
-        break;
       case "run.finished":
-      case "run.failed":
+      case "run.failed": {
+        const finished = record.type === "run.finished";
         end = {
-          id: "end",
-          kind: "end",
-          label: record.type === "run.finished" ? "finished" : "failed",
-          state: record.type === "run.finished" ? "finished" : "failed",
-          tone: record.type === "run.finished" ? "ok" : "bad",
-          seq: record.seq,
-          recordId: record.id,
-          ...(record.type === "run.failed" ? { errorCode: record.error.code } : {}),
+          label: finished ? "finished" : "failed",
+          state: { tone: finished ? "ok" : "bad", recordId: record.id },
         };
         break;
-    }
-  }
-
-  for (const node of asked.values()) {
-    if (!node.hold) continue;
-    const { state } = node.hold;
-    if (node.kind === "approval") node.tone = ended && state === "pending" ? "off" : APPROVAL_TONE[state];
-    if (node.kind === "op" && !called.has(node)) {
-      // Not recorded yet: waiting on its approval, or running once approved.
-      node.tone = state === "rejected" ? "bad" : ended ? "off" : state === "approved" ? "active" : "waiting";
-    }
-  }
-  // Ended without a record (cancelled, say): the run's status. Not ended: a placeholder.
-  end ??= ended
-    ? { id: "end", kind: "end", label: run.status, state: run.status, tone: RUN_TONE[run.status], seq: lastSeq + 1 }
-    : { id: "end", kind: "end", label: "pending", state: "pending", tone: "off", seq: lastSeq + 1 };
-
-  steps.sort((a, b) => a.seq - b.seq);
-  const nodes = [start, ...steps, end];
-  return { nodes, edges: edgesOf(nodes) };
-}
-
-/** A stretch of the graph: one node, or one `ctx.all` with a chain of nodes per member. */
-interface Stretch {
-  heads: GraphNode[];
-  tails: GraphNode[];
-  chains: GraphNode[][];
-}
-
-function edgesOf(nodes: GraphNode[]): GraphEdge[] {
-  const stretches: Stretch[] = [];
-  let open: { id: string; branches: Map<number, GraphNode[]> } | undefined;
-  const close = () => {
-    if (!open) return;
-    const chains = [...open.branches].toSorted(([a], [b]) => a - b).map(([, chain]) => chain);
-    stretches.push({ heads: chains.map((c) => c[0]!), tails: chains.map((c) => c.at(-1)!), chains });
-    open = undefined;
-  };
-  for (const node of nodes) {
-    if (node.group) {
-      if (open?.id !== node.group.id) {
-        close();
-        open = { id: node.group.id, branches: new Map() };
       }
-      const chain = open.branches.get(node.group.index);
-      if (chain) chain.push(node);
-      else open.branches.set(node.group.index, [node]);
-      continue;
     }
-    close();
-    stretches.push({ heads: [node], tails: [node], chains: [[node]] });
   }
-  close();
 
-  const edges: GraphEdge[] = [];
-  const link = (source: GraphNode, target: GraphNode) =>
-    edges.push({
-      id: `${source.id}->${target.id}`,
-      source: source.id,
-      target: target.id,
-      active: target.tone === "active",
-      pending: target.kind === "end" && target.state === "pending",
-    });
-  stretches.forEach((stretch, i) => {
-    const before = stretches[i - 1];
-    if (before) for (const source of before.tails) for (const target of stretch.heads) link(source, target);
-    for (const chain of stretch.chains) chain.slice(1).forEach((node, j) => link(chain[j]!, node));
-  });
-  return edges;
+  // Members run in order, so those after the last one recorded have not run. While the run is
+  // in the group (it is the last thing recorded), they are pending; once it has gone on, or
+  // ended, they never ran and have no lane. A member that wrote nothing has none either.
+  for (const [id, { step, size }] of groups) {
+    if (!ended && step === steps.at(-1)) {
+      for (let index = step.branches.length; index < size; index++) {
+        step.branches[index] = [{ kind: "pending", key: `pending:${id}:${index}` }];
+      }
+    }
+    step.branches = step.branches.filter(Boolean);
+  }
+
+  // Not ended: a placeholder, moving once a sleep that was the last record is over, since the run
+  // is then on to its next call. Ended without a record (cancelled, say): the run's status.
+  const last = records.at(-1);
+  const woke = last?.type === "sleep.started" && last.until <= now;
+  end ??= ended
+    ? { label: run.status, state: { tone: RUN_TONE[run.status] } }
+    : { label: "pending", pending: true, state: { tone: woke ? "active" : "off" } };
+  return outlineGraph(steps, { start, end });
+}
+
+/** A held call not recorded yet: waiting on its approval, or running once approved. */
+function heldTone(status: ApprovalState["status"], ended: boolean): Tone {
+  if (status === "rejected") return "bad";
+  if (ended) return "off";
+  return status === "approved" ? "active" : "waiting";
 }

@@ -2,7 +2,7 @@ import type { OutlineNode } from "@sanoma/workflows/describe";
 import { describe, expect, it } from "vitest";
 import { CLUSTER_HEADER, layout, NODE_SIZE } from "../src/graph/layout.ts";
 import { outlineGraph } from "../src/graph/outline-graph.ts";
-import type { GraphNode } from "../src/graph/run-graph.ts";
+import type { GraphNode } from "../src/graph/types.ts";
 
 // Hand-built outlines, in the shapes outlineWorkflow returns (packages/workflows/src/outline.ts).
 
@@ -12,7 +12,7 @@ const labels = (nodes: GraphNode[]) => nodes.map((n) => `${n.id} ${n.label}${n.p
 const pairs = (edges: { source: string; target: string }[]) => edges.map((e) => `${e.source}->${e.target}`);
 
 describe("outlineGraph", () => {
-  it("draws a sequence as a chain from start to end, with no tone or record", () => {
+  it("draws a sequence as a chain from start to end, with no state", () => {
     const { nodes, edges } = outlineGraph([
       op("ghost.post.create"),
       { kind: "approval", title: "Review launch copy" },
@@ -23,7 +23,7 @@ describe("outlineGraph", () => {
     expect(labels(nodes)).toEqual([
       "start start",
       "op:0 ghost.post.create",
-      "approval:1 Review launch copy",
+      "approval:1 “Review launch copy”",
       "approval:2 approval",
       "sleep:3 sleep",
       "op:4 *.post.create",
@@ -37,11 +37,9 @@ describe("outlineGraph", () => {
       "sleep:3->op:4",
       "op:4->end",
     ]);
-    expect(nodes[1]).toEqual({ id: "op:0", kind: "op", label: "ghost.post.create", op: "ghost.post.create", seq: 0 });
-    expect(nodes[2]).toMatchObject({ kind: "approval", title: "Review launch copy" });
-    expect(nodes[3]).not.toHaveProperty("title");
-    expect(nodes.some((n) => n.tone !== undefined || n.recordId !== undefined)).toBe(false);
-    expect(edges.some((e) => e.active || e.pending)).toBe(false);
+    expect(nodes[1]).toEqual({ id: "op:0", kind: "op", label: "ghost.post.create" });
+    expect(nodes.at(-1)).toEqual({ id: "end", kind: "end", label: "end" });
+    expect(nodes.some((n) => "state" in n)).toBe(false);
   });
 
   it("draws a literal ctx.all as one lane per member, from the node before to the node after", () => {
@@ -111,7 +109,7 @@ describe("outlineGraph", () => {
       "split:0 branch",
       "op:1 a.x.one",
       "op:2 a.x.two",
-      "approval:3 Go?",
+      "approval:3 “Go?”",
       "op:4 b.x.after",
     ]);
     expect(pairs(edges)).toEqual([
@@ -142,7 +140,7 @@ describe("outlineGraph", () => {
     ]);
     expect(pairs(edges)).toEqual(["start->cluster:0", "op:1->op:2", "op:1->op:3", "cluster:0->end"]);
 
-    const at = layout(nodes, edges);
+    const at = layout({ nodes, edges });
     const box = at.get("cluster:0")!;
     const [open, a, b] = ["op:1", "op:2", "op:3"].map((id) => at.get(id)!);
     // The lanes share a rank and stack apart, inside the cluster, under its label.

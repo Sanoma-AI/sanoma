@@ -42,9 +42,10 @@ const HIGHLIGHT_MS = 2_000;
 
 function RunPage() {
   const { id } = Route.useParams();
-  const { data, error } = useSuspenseQuery(runQuery(id));
+  const { data, error, dataUpdatedAt } = useSuspenseQuery(runQuery(id));
   const { run, ledger, ledgerError, approvals } = data;
-  const graph = useMemo(() => runGraph(ledger, run), [ledger, run]);
+  // Rebuilt on every poll, even one that changed nothing: a sleep's end may have come.
+  const graph = useMemo(() => runGraph(ledger, run, dataUpdatedAt), [ledger, run, dataUpdatedAt]);
   const titles = new Map(approvals.map((a) => [a.id, a.title]));
   const [highlighted, setHighlighted] = useState<string>();
   useEffect(() => {
