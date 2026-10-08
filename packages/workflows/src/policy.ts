@@ -44,22 +44,13 @@ interface ApproveDecision {
   covers?: Op[];
 }
 
-/**
- * A decision as checked and as the ledger records it: `covers` by op id, and the `version` of
- * the policy that made it, when it has one.
- */
-export type RecordedDecision = (
-  | Exclude<Decision, ApproveDecision>
-  | (Omit<ApproveDecision, "covers"> & { covers?: string[] })
-) & { policyVersion?: string };
-
 const ReasonList = z.array(z.string(), { error: "reasons must be a list of strings" }).optional();
 
 /**
  * Checks a policy's answer. Parsing also copies it, so nothing else the policy returned is kept,
  * and turns `covers` into op ids.
  */
-export const DecisionSchema: z.ZodType<RecordedDecision> = z.discriminatedUnion(
+export const DecisionSchema = z.discriminatedUnion(
   "kind",
   [
     z.object({ kind: z.literal("allow"), reasons: ReasonList }),
@@ -73,6 +64,12 @@ export const DecisionSchema: z.ZodType<RecordedDecision> = z.discriminatedUnion(
   ],
   { error: "not a decision" },
 );
+
+/**
+ * A decision as checked and as the ledger records it: `covers` by op id, and the `version` of
+ * the policy that made it, when it has one.
+ */
+export type RecordedDecision = z.output<typeof DecisionSchema> & { policyVersion?: string };
 
 export const allow = (reasons?: string[]): Decision =>
   reasons === undefined ? { kind: "allow" } : { kind: "allow", reasons };
