@@ -495,64 +495,113 @@ describe("the page", () => {
   });
 });
 
-describe("an app with its own resolveActor", () => {
-  // Says who is asking from a test header, the way a hosted deployment reads its login.
-  let hosted: App;
+// One more app on the file's database, to test three things a deployment may change: its own
+// resolveActor, listening on every interface, and a ledger the worker does not write to.
+describe("an app configured otherwise", () => {
+  let dir: string;
+  let other: App;
   beforeAll(async () => {
-    hosted = await startApp(config, {
-      resolveActor: (request) => {
-        const who = request.headers.get("x-test-user");
-        if (who === "boom") throw new Error("the session store is down");
-        return who ? { id: who, groups: ["marketing"] } : undefined;
+    dir = mkdtempSync(join(tmpdir(), "sanoma-app-ledger-"));
+    other = await startApp(
+      // A directory nothing has written to yet: the worker keeps its records in memory.
+      { ...config, ledger: jsonlLedger(join(dir, "ledger")) },
+      {
+        host: "0.0.0.0",
+        // Says who is asking from a test header, the way a hosted deployment reads its login.
+        resolveActor: (request) => {
+          const who = request.headers.get("x-test-user");
+          if (who === "boom") throw new Error("the session store is down");
+          return who ? { id: who, groups: ["marketing"] } : undefined;
+        },
       },
-    });
+    );
   });
-  afterAll(() => hosted?.close());
-
+  afterAll(async () => {
+    await other?.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
   const post = (user?: string) =>
     call<ErrorResponse & { runId?: string }>("/api/runs", {
       method: "POST",
-      base: hosted.url,
+      base: other.url,
       headers: user ? { "x-test-user": user } : {},
       body: { workflow: "announce", input: input("Hosted") },
     });
+  const read = () => call<RunDetail>(`/api/runs/${runId}`, { base: other.url });
 
-  it("starts runs as the principal it resolves, groups included", async () => {
-    const started = await post("sso-user");
-    expect(started.status).toBe(201);
-    const run = await waitFor(
-      () => detail(started.body.runId!),
-      (d) => d.run.startedBy !== undefined,
-    );
-    expect(run.run.startedBy).toEqual({ id: "sso-user", groups: ["marketing"] });
+  describe("with its own resolveActor", () => {
+    it("starts runs as the principal it resolves, groups included", async () => {
+      const started = await post("sso-user");
+      expect(started.status).toBe(201);
+      const run = await waitFor(
+        () => detail(started.body.runId!),
+        (d) => d.run.startedBy !== undefined,
+      );
+      expect(run.run.startedBy).toEqual({ id: "sso-user", groups: ["marketing"] });
+    });
+
+    it("refuses a change it names nobody for without mentioning the header it does not read", async () => {
+      const anonymous = await post();
+      expect(anonymous.status).toBe(400);
+      expect(anonymous.body.code).toBe("invalid_input");
+      expect(anonymous.body.error).not.toMatch(/x-sanoma-actor/);
+    });
+
+    it("renders who the deployment says is asking, and never asks for a name", async () => {
+      const res = await fetch(new URL("/runs", other.url), { headers: { "x-test-user": "sso-user" } });
+      const html = await res.text();
+      expect(html).toMatch(/You are <strong[^>]*>sso-user<\/strong>/);
+      expect(html).not.toContain("Who are you?");
+      expect(html).not.toMatch(/>change</);
+    });
+
+    it("answers a resolver that throws with a 500, and logs why", async () => {
+      const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+      const failed = await post("boom");
+      expect(failed.status).toBe(500);
+      expect(failed.body.error).toBe("Something went wrong");
+      expect(logged.mock.calls).toEqual([
+        [
+          expect.stringContaining("POST /api/runs failed"),
+          expect.objectContaining({ message: "Could not tell who you are: the session store is down" }),
+        ],
+      ]);
+    });
   });
 
-  it("refuses a change it names nobody for without mentioning the header it does not read", async () => {
-    const anonymous = await post();
-    expect(anonymous.status).toBe(400);
-    expect(anonymous.body.code).toBe("invalid_input");
-    expect(anonymous.body.error).not.toMatch(/x-sanoma-actor/);
+  describe("on every interface", () => {
+    it("answers a request addressed to any name, since it was asked to listen beyond this machine", async () => {
+      const base = `http://127.0.0.1:${new URL(other.url).port}`;
+      expect(await rawStatus(base, "/api/config", { host: "sanoma.example:80" })).toBe(200);
+    });
   });
 
-  it("renders who the deployment says is asking, and never asks for a name", async () => {
-    const res = await fetch(new URL("/runs", hosted.url), { headers: { "x-test-user": "sso-user" } });
-    const html = await res.text();
-    expect(html).toMatch(/You are <strong[^>]*>sso-user<\/strong>/);
-    expect(html).not.toContain("Who are you?");
-    expect(html).not.toMatch(/>change</);
-  });
+  describe("reading a jsonl ledger", () => {
+    it("says a run that has started has no records there: the app reads another ledger than the worker", async () => {
+      const { status, body } = await read();
+      expect(status).toBe(200);
+      expect(body.ledger).toEqual([]);
+      expect(body.ledgerError).toBe(
+        "No records for a run that has started; is the app reading the same ledger as the worker?",
+      );
+      const html = await page(`/runs/${runId}`, other.url);
+      expect(html.status).toBe(200);
+      expect(html.text).toContain("is the app reading the same ledger as the worker?");
+    });
 
-  it("answers a resolver that throws with a 500, and logs why", async () => {
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    const failed = await post("boom");
-    expect(failed.status).toBe(500);
-    expect(failed.body.error).toBe("Something went wrong");
-    expect(logged.mock.calls).toEqual([
-      [
-        expect.stringContaining("POST /api/runs failed"),
-        expect.objectContaining({ message: "Could not tell who you are: the session store is down" }),
-      ],
-    ]);
+    it("shows why it cannot read a corrupt ledger, and logs it for the operator once", async () => {
+      mkdirSync(join(dir, "ledger"), { recursive: true });
+      writeFileSync(join(dir, "ledger", `${encodeURIComponent(runId)}.jsonl`), "not json\n");
+      const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+      const result = await read();
+      // Read again, as the page's poll does: logged once for the run and the failure.
+      await read();
+      expect(result.status).toBe(200);
+      expect(result.body.ledger).toEqual([]);
+      expect(result.body.ledgerError).toMatch(/corrupt ledger line/);
+      expect(logged).toHaveBeenCalledOnce();
+      expect(String(logged.mock.calls[0]?.[0])).toContain(`could not read the ledger of run ${runId}`);
+    });
   });
 });
 
@@ -599,58 +648,5 @@ describe("startApp", () => {
     } finally {
       rmSync(broken, { recursive: true, force: true });
     }
-  });
-});
-
-describe("an app on every interface", () => {
-  it("answers a request addressed to any name, since it was asked to listen beyond this machine", async () => {
-    const open = await startApp(config, { host: "0.0.0.0" });
-    try {
-      const base = `http://127.0.0.1:${new URL(open.url).port}`;
-      expect(await rawStatus(base, "/api/config", { host: "sanoma.example:80" })).toBe(200);
-    } finally {
-      await open.close();
-    }
-  });
-});
-
-describe("an app reading a jsonl ledger", () => {
-  let dir: string;
-  let jsonl: App;
-  beforeAll(async () => {
-    dir = mkdtempSync(join(tmpdir(), "sanoma-app-ledger-"));
-    // A directory nothing has written to yet: the worker keeps its records in memory.
-    jsonl = await startApp({ ...config, ledger: jsonlLedger(join(dir, "ledger")) });
-  });
-  afterAll(async () => {
-    await jsonl?.close();
-    rmSync(dir, { recursive: true, force: true });
-  });
-  const read = () => call<RunDetail>(`/api/runs/${runId}`, { base: jsonl.url });
-
-  it("says a run that has started has no records there: the app reads another ledger than the worker", async () => {
-    const { status, body } = await read();
-    expect(status).toBe(200);
-    expect(body.ledger).toEqual([]);
-    expect(body.ledgerError).toBe(
-      "No records for a run that has started; is the app reading the same ledger as the worker?",
-    );
-    const html = await page(`/runs/${runId}`, jsonl.url);
-    expect(html.status).toBe(200);
-    expect(html.text).toContain("is the app reading the same ledger as the worker?");
-  });
-
-  it("shows why it cannot read a corrupt ledger, and logs it for the operator once", async () => {
-    mkdirSync(join(dir, "ledger"), { recursive: true });
-    writeFileSync(join(dir, "ledger", `${encodeURIComponent(runId)}.jsonl`), "not json\n");
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    const result = await read();
-    // Read again, as the page's poll does: logged once for the run and the failure.
-    await read();
-    expect(result.status).toBe(200);
-    expect(result.body.ledger).toEqual([]);
-    expect(result.body.ledgerError).toMatch(/corrupt ledger line/);
-    expect(logged).toHaveBeenCalledOnce();
-    expect(String(logged.mock.calls[0]?.[0])).toContain(`could not read the ledger of run ${runId}`);
   });
 });
