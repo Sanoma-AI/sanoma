@@ -204,7 +204,7 @@ async function callOp(run: Run, id: string, input: unknown) {
     // A hold covers the call it held, and any other operations the policy named.
     const covers = [...new Set([op.id, ...(decision.covers ?? [])])];
     try {
-      await awaitApproval(run, title, { approver: decision.approver, covers }, { op: op.id, input: parsed });
+      await awaitApproval(run, title, { approver: decision.approver, covers }, { op: op.id, seq, input: parsed });
     } catch (err) {
       if (errorCode(err) === "approval_rejected") {
         const approval = (err as SanomaError).data.approvalId as string;

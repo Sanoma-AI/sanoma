@@ -86,6 +86,8 @@ export interface ApprovalState extends Omit<ApprovalRequest, "covers"> {
   covers: string[];
   /** For a policy request: the operation call held, by op id. */
   op?: string;
+  /** For a policy request: the ledger `seq` of the call held, which its `op.called` record has. */
+  opSeq?: number;
   /** For a policy request: the held call's input. */
   input?: unknown;
   status: "pending" | "approved" | "rejected";

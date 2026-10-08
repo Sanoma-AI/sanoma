@@ -284,7 +284,12 @@ describe("announce under a policy", () => {
     await waitFor(pending(c, runId, 2));
     expect(app.ops()).toEqual(["ghost.post.create", "resend.broadcast.create"]);
     const held = (await c().approvals(runId))[1];
-    expect(held).toMatchObject({ title: "ghost.post.publish needs marketing-lead", approver: "marketing-lead" });
+    expect(held).toMatchObject({
+      title: "ghost.post.publish needs marketing-lead",
+      approver: "marketing-lead",
+      op: "ghost.post.publish",
+      opSeq: 6,
+    });
 
     await c().decide(runId, { decision: "approve", by: { id: "marketing-lead" } });
     await c().result(runId);
@@ -308,7 +313,13 @@ describe("announce under a policy", () => {
     ]);
     expect(records.map((r) => r.seq)).toEqual(records.map((_, i) => i));
     expect(records[6]).toMatchObject({ decision: { kind: "approve", approver: "marketing-lead" }, attempt: 1 });
-    expect(records[7]).toMatchObject({ approval: "approval-2", requestedBy: "policy", op: "ghost.post.publish" });
+    // The approval names the call it held by that number.
+    expect(records[7]).toMatchObject({
+      approval: "approval-2",
+      requestedBy: "policy",
+      op: "ghost.post.publish",
+      opSeq: 6,
+    });
     expect(records[8]).toMatchObject({ approval: "approval-2", by: "marketing-lead" });
     expect(records[10]).toMatchObject({ op: "bluesky.post.create", decision: { kind: "allow" } });
   });

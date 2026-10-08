@@ -49,9 +49,10 @@ export interface CheckedApproval extends Omit<ApprovalRequest, "covers"> {
   covers: string[];
 }
 
-/** A policy's hold: the call held. */
+/** A policy's hold: the call held, and the ledger `seq` its `op.called` record takes. */
 export interface HeldCall {
   op: string;
+  seq: number;
   input: unknown;
 }
 
@@ -75,7 +76,7 @@ export async function awaitApproval(
     ...(req.details === undefined ? {} : { details: req.details }),
     requestedBy: held ? "policy" : "workflow",
     covers,
-    ...(held ? { op: held.op, input: held.input } : {}),
+    ...(held ? { op: held.op, opSeq: held.seq, input: held.input } : {}),
     status: "pending",
     requestedAt: 0,
     refused: [],
@@ -94,7 +95,7 @@ export async function awaitApproval(
         approver: state.approver,
         requestedBy: state.requestedBy,
         covers,
-        ...(held ? { op: held.op } : {}),
+        ...(held ? { op: held.op, opSeq: held.seq } : {}),
       },
       { key: state.id, at: state.requestedAt },
     ),
