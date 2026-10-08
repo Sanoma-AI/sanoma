@@ -33,7 +33,6 @@ export {
   approve,
   approvedFor,
   type Decision,
-  DecisionSchema,
   definePolicy,
   deny,
   type Policy,
@@ -54,7 +53,7 @@ export {
 } from "./errors.ts";
 export { jsonlLedger, memoryLedger, type LedgerRecord, type LedgerStore } from "./ledger.ts";
 export { ApprovalMessage, APPROVALS_EVENT, decisionEventOf } from "./approvals.ts";
-export { RUNTIME_VERSION, STEP_LAYOUT } from "./version.ts";
+export { RUNTIME_VERSION } from "./version.ts";
 export type { RunArgs } from "./run.ts";
 export { startWorker, type Worker } from "./worker.ts";
 export { SanomaClient, type RunsFilter, type RunStatus, type RunSummary, type StartOptions } from "./client.ts";

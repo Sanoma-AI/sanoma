@@ -36,7 +36,7 @@ export const ApprovalMessage = z.object({
 });
 export type ApprovalMessage = z.infer<typeof ApprovalMessage>;
 
-export const statusOf = (decision: ApprovalMessage["decision"]) => (decision === "approve" ? "approved" : "rejected");
+const statusOf = (decision: ApprovalMessage["decision"]) => (decision === "approve" ? "approved" : "rejected");
 
 /** The sender's id, from a message that may not be a valid decision. */
 function senderOf(raw: unknown): string | undefined {

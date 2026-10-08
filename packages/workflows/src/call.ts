@@ -45,7 +45,7 @@ const isSchemaError = (err: unknown) => err instanceof Error && err.name === "Zo
  * (a `DriverError` with `retryable: false`, such as a 4xx). Read by code and property, never
  * `instanceof`: the error may come from another copy of this package.
  */
-export function shouldRetry(err: unknown): boolean {
+function shouldRetry(err: unknown): boolean {
   if (isSchemaError(err)) return false;
   return !(errorCode(err) === "driver_failed" && isFinal(err));
 }
@@ -125,7 +125,7 @@ function strict<T extends object>(obj: T, path: string, workflow: string): T {
 }
 
 /** Checks a policy's answer, and copies it so nothing else the policy returned is recorded. */
-export function checkDecision(decision: unknown, opId: string): RecordedDecision {
+function checkDecision(decision: unknown, opId: string): RecordedDecision {
   const parsed = DecisionSchema.safeParse(decision);
   if (parsed.success) return parsed.data;
   const why = parsed.error.issues[0]?.message ?? "not a decision";
