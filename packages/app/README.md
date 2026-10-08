@@ -23,12 +23,16 @@ console.log(app.url); // http://127.0.0.1:4321
 ## Screens
 
 - **Runs**: recent runs with their workflow, status, who started them, when, pending approvals and any error. Refreshes every 2 seconds while the page is visible.
-- **Run**: one run's ledger as a timeline (the start, each operation call with its effect, the policy's decision, duration, input and output, each approval asked, decided or ignored, and how it ended) beside its approvals, each with the operations it lets through (badged by effect), and Approve and Reject with an optional note while the run can still read a decision.
+- **Run**: one run as a graph (see [Run graph](#run-graph)), and its ledger as a timeline (the start, each operation call with its effect, the policy's decision, duration, input and output, each approval asked, decided or ignored, and how it ended) beside its approvals, each with the operations it lets through (badged by effect), and Approve and Reject with an optional note while the run can still read a decision.
 - **Inbox**: every pending approval, newest first, with what it lets through and the same controls. Refreshes every 5 seconds.
 - **Start**: a form built from the workflow's input schema: text, date and time, numbers, yes/no, choices, lists with Add and Remove, and objects one level deep; anything else is entered as JSON. Optional fields left empty are left out, so the schema's defaults apply. The server checks the input with the workflow's schema and its complaints appear on the fields they name.
 - **Workflows**: each workflow's operations with their effects, its built-ins and its input; whether a policy is configured, and its version; the config's version.
 
 The header switches between light, dark and the system's theme; the browser remembers the choice. The screens are built with [shadcn/ui](https://ui.shadcn.com) components (`src/components/ui`, from `components.json`) on Tailwind CSS.
+
+### Run graph
+
+The run page draws the run as a graph above its ledger, left to right: the start, each operation call (its effect, the policy's decision, its duration or error), each sleep, each approval the workflow asked for, and how the run ended, or a dashed end while it has not. An approval the policy asked for sits on the call it holds. The calls of one `ctx.all` branch out side by side and join again after it. Each node's colour says how it went: done, failed or denied, waiting on a person or a sleep, or running. The graph is read from the ledger alone, so it shows what happened, not what the workflow may still do, and it redraws as the page polls. Clicking a node scrolls to its record in the ledger. It is drawn with [React Flow](https://reactflow.dev) in the browser only; the server renders a placeholder of the same size, and the graph's code loads on the run page alone.
 
 ## No authentication
 
