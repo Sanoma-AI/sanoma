@@ -66,10 +66,29 @@ describe("firstMatching", () => {
   });
 });
 
-describe("SanomaClient", () => {
-  const app = useApp(databaseUrl, "client");
-  const c = () => app.client;
+/** Returns the run's clock. */
+const clock = defineWorkflow({
+  name: "clock",
+  trigger: "manual",
+  input: z.object({}),
+  uses: [],
+  run: async (ctx) => ctx.now(),
+});
 
+/** Its schema changes the value it parses, so parsing it twice would fail every run. */
+const double = defineWorkflow({
+  name: "double",
+  trigger: "manual",
+  input: z.object({ n: z.string().transform(Number) }),
+  uses: [],
+  run: async (_ctx, { n }) => n * 2,
+});
+
+// One app for the whole file, its workflows registered alongside announce.
+const app = useApp(databaseUrl, "client", () => ({ workflows: [announce, clock, double] }));
+const c = () => app.client;
+
+describe("SanomaClient", () => {
   it("refuses input the workflow's schema refuses, with invalid_input and zod's issues, before queueing", async () => {
     const before = (await c().runs({ limit: 1 }))[0]?.runId;
     const err = await caught(c().start(announce, { ...input, launchAt: "tomorrow" }, { startedBy: alice }));
@@ -168,28 +187,7 @@ describe("SanomaClient", () => {
   });
 });
 
-/** Returns the run's clock. */
-const clock = defineWorkflow({
-  name: "clock",
-  trigger: "manual",
-  input: z.object({}),
-  uses: [],
-  run: async (ctx) => ctx.now(),
-});
-
-/** Its schema changes the value it parses, so parsing it twice would fail every run. */
-const double = defineWorkflow({
-  name: "double",
-  trigger: "manual",
-  input: z.object({ n: z.string().transform(Number) }),
-  uses: [],
-  run: async (_ctx, { n }) => n * 2,
-});
-
 describe("a workflow whose input schema transforms", () => {
-  const app = useApp(databaseUrl, "client-transform", () => ({ workflows: [double, clock] }));
-  const c = () => app.client;
-
   it("gives the run the time from ctx.now(), as a number no later than what the ledger records after it", async () => {
     const before = Date.now();
     const runId = await c().start(clock, {}, { startedBy: alice });
