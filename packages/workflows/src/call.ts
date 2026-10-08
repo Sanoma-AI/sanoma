@@ -23,6 +23,9 @@ export function isInfrastructureError(err: unknown): boolean {
   return false;
 }
 
+/** How many times an idempotent operation is tried. */
+const MAX_ATTEMPTS = 3;
+
 // Matched by name too, since a workflow's schemas may come from another copy of zod.
 const isSchemaError = (err: unknown) => err instanceof Error && err.name === "ZodError";
 
@@ -35,27 +38,6 @@ const isSchemaError = (err: unknown) => err instanceof Error && err.name === "Zo
 export function shouldRetry(err: unknown): boolean {
   if (isSchemaError(err)) return false;
   return !(errorCode(err) === "driver_failed" && (err as { retryable?: unknown }).retryable === false);
-}
-
-// DBOS's code for a step that ran out of tries, read from an instance so it is not copied here.
-const MAX_RETRIES = new DBOSErrors.DBOSMaxStepRetriesError("", 0, []).dbosErrorCode;
-
-/**
- * The error a step failed with, as the vendor gave it. When an idempotent step runs out of
- * tries, DBOS throws a `DBOSMaxStepRetriesError` holding each try's error; this returns the
- * last one, so the ledger and the run record the vendor's error and its `code`. On a replay
- * DBOS revives the wrapper from the database, with the tries as plain objects.
- */
-export function lastTry(err: unknown): unknown {
-  const wrapped =
-    err instanceof DBOSErrors.DBOSMaxStepRetriesError ||
-    (err instanceof Error && DBOSErrors.getDBOSErrorCode(err) === MAX_RETRIES);
-  const tries = wrapped ? (err as { errors?: unknown }).errors : undefined;
-  const last = Array.isArray(tries) ? tries.at(-1) : undefined;
-  if (last === undefined) return err;
-  if (last instanceof Error || typeof last !== "object" || last === null) return last;
-  // Own enumerable properties, `code` among them, survive the trip through the database.
-  return Object.assign(new Error(String((last as { message?: unknown }).message ?? "")), last);
 }
 
 /*
@@ -210,6 +192,8 @@ async function callOp(run: Run, id: string, input: unknown) {
   }
 
   const started = Date.now();
+  // The try DBOS is on, as it passes it to the step. The last try's error is not retried, so
+  // DBOS records and throws it as the vendor gave it, never wrapped with the others.
   let attempt: number | undefined;
   let result: { output: unknown; at: number; durationMs: number; attempt: number };
   try {
@@ -221,23 +205,24 @@ async function callOp(run: Run, id: string, input: unknown) {
         const output = op.output.parse(await fn(parsed, context));
         return { output, at, durationMs: Date.now() - at, attempt };
       },
-      { name: op.id, retriesAllowed: op.idempotent, maxAttempts: 3, shouldRetry },
+      {
+        name: op.id,
+        retriesAllowed: op.idempotent,
+        maxAttempts: MAX_ATTEMPTS,
+        shouldRetry: (e) => shouldRetry(e) && (attempt ?? 1) < MAX_ATTEMPTS,
+      },
     );
   } catch (err) {
     // The step failed for good; on replay DBOS rethrows the recorded error, and this record
     // gets the same id. A success record would too, so a call has one op.called at most.
-    const failure = lastTry(err);
     const record = entry(
       run,
-      { ...call, error: errorInfo(failure), durationMs: Date.now() - started, ...(attempt ? { attempt } : {}) },
+      { ...call, error: errorInfo(err), durationMs: Date.now() - started, ...(attempt ? { attempt } : {}) },
       { seq, at: started },
     );
-    if (isInfrastructureError(err) || isInfrastructureError(failure)) {
-      skipped(record, `the call was interrupted by DBOS (${errorMessage(err)})`);
-      throw err;
-    }
-    await writeFailure(run, record, failure);
-    throw failure;
+    if (isInfrastructureError(err)) skipped(record, `the call was interrupted by DBOS (${errorMessage(err)})`);
+    else await writeFailure(run, record, err);
+    throw err;
   }
   const { output, at, durationMs } = result;
   await write(run, entry(run, { ...call, output, durationMs, attempt: result.attempt }, { seq, at }));
