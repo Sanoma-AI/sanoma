@@ -287,9 +287,12 @@ function LabelText({ field }: { field: SchemaField }) {
     <>
       {field.label}
       {field.required ? (
-        <span className="text-destructive" title="Required">
-          *
-        </span>
+        <>
+          <span aria-hidden className="text-destructive">
+            *
+          </span>
+          <span className="sr-only">(required)</span>
+        </>
       ) : (
         <span className="font-normal text-muted-foreground">(optional)</span>
       )}
