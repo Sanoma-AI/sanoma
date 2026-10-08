@@ -97,7 +97,7 @@ const shop = defineConnector("shop", {
 });
 ```
 
-A policy's answer is checked; anything else (`{ kind: "approve" }` with no approver, say) fails the run with a message naming the operation. The ledger gets one record for the start of the run, each operation call with its decision and the vendor's reply, each approval requested and decided, each message an approval ignored (`approval.refused`: sent by someone who may not decide it, or not a decision), each sleep (`sleep.started` with `until`, when it ends in ms since the epoch: the time asked for, or for a duration, the time the sleep started plus the duration, as the runtime saw it; written for a time already past too), and how the run ended, in a JSONL file per run. A decision is recorded with its `reasons` and, for a policy from `definePolicy(fn, { version })`, its `policyVersion`. Every record carries `v: 1`, the `app` and the `actor`; an error is recorded as `{ code?, name, message }`, with `retryable` when the error says, the vendor's `status` and `vendorCode` only from a `DriverError`, and `data` only from the runtime's own errors (the operation, the approval, the input's issues), so an HTTP client's error that escapes a driver does not put the vendor's reply in the ledger. A ledger store's failed append is tried again up to three times; a store throws an error with `retryable: false` for a failure that would only repeat. When a call's record still cannot be written after the vendor replied, the call fails with "<op id> succeeded, but the ledger could not record it" and the run makes no further calls (`run_ended`), so a workflow that catches the failure cannot repeat the side effect unrecorded.
+A policy's answer is checked; anything else (`{ kind: "approve" }` with no approver, say) fails the run with a message naming the operation. The ledger gets one record for the start of the run, each operation call with its decision and the vendor's reply, each approval requested and decided, each message an approval ignored (`approval.refused`: sent by someone who may not decide it, or not a decision), each sleep (`sleep.started` with `until`, when it ends in ms since the epoch: the time asked for, or for a duration, the time the sleep started plus the duration, as the runtime saw it; written for a time already past too), and how the run ended, in a JSONL file per run. A decision is recorded with its `reasons` and, for a policy from `definePolicy(fn, { version })`, its `policyVersion`. Every record carries `v: 1`, the `app` and the `actor`, and one written inside a `ctx.all` member its `group` (see [Built-ins](#built-ins)); an error is recorded as `{ code?, name, message }`, with `retryable` when the error says, the vendor's `status` and `vendorCode` only from a `DriverError`, and `data` only from the runtime's own errors (the operation, the approval, the input's issues), so an HTTP client's error that escapes a driver does not put the vendor's reply in the ledger. A ledger store's failed append is tried again up to three times; a store throws an error with `retryable: false` for a failure that would only repeat. When a call's record still cannot be written after the vendor replied, the call fails with "<op id> succeeded, but the ledger could not record it" and the run makes no further calls (`run_ended`), so a workflow that catches the failure cannot repeat the side effect unrecorded.
 
 People are `Principal`s: `{ id, groups? }`. A run is started as one and a decision is sent as one:
 
@@ -126,9 +126,25 @@ The approver is a person's id (`"finance-lead"`), or `{ group: "finance" }` for 
 
 ### Calls run one at a time
 
-A run's ctx calls run one at a time, in program order. Inside `Promise.all`, each call waits for the one before it to settle, so two calls a policy holds for approval are asked for one after the other. DBOS matches a replayed call to its recorded result by the order calls reach it, so calls left to race would replay out of step. A call that fails rejects its caller. The calls queued after it still run only if the workflow catches the failure and goes on; otherwise the body has ended, and each queued call is refused with `run_ended` (the run has ended, so the call is never made) instead of reaching its vendor, an approver or a sleep. Write calls one after another, as the workflow means them.
+A run's ctx calls run one at a time, in program order. Even inside `Promise.all`, each call waits for the one before it to settle, so two calls a policy holds for approval are asked for one after the other. DBOS matches a replayed call to its recorded result by the order calls reach it, so calls left to race would replay out of step. A call that fails rejects its caller. The calls queued after it still run only if the workflow catches the failure and goes on; otherwise the body has ended, and each queued call is refused with `run_ended` (the run has ended, so the call is never made) instead of reaching its vendor, an approver or a sleep. Write calls one after another, as the workflow means them, and a fan-out with `ctx.all`.
 
-`ctx.sleep({ until })` takes an ISO 8601 date-time with an offset (`2026-10-07T09:00:00Z`) or epoch milliseconds, and a time already past does not wait; `ctx.sleep({ minutes: 5 })` takes a duration from `ms`, `seconds`, `minutes`, `hours` and `days`, none negative. A request it can't read fails the run with `invalid_input`, as does an operation input its schema refuses.
+### Built-ins
+
+A workflow gets these on `ctx` by listing them in `uses`, next to its operations: `"approval"` (see [Approvals](#approvals)), `"sleep"` and `"all"`. `describeConfig` lists them as each workflow's `builtins`.
+
+`ctx.sleep({ until })` takes an ISO 8601 date-time with an offset (`2026-10-07T09:00:00Z`) or epoch milliseconds, and a time already past does not wait; `ctx.sleep({ minutes: 5 })` takes a duration from `ms`, `seconds`, `minutes`, `hours` and `days`, none negative. A request it can't read fails the run with `invalid_input`, as does an operation input its schema refuses. Each sleep writes a `sleep.started` record before it waits, with `until`: the time asked for, or for a duration, the time the sleep started plus the duration, as the runtime saw it.
+
+`ctx.all([() => …, () => …])` declares a fan-out: work that could go in any order, such as one post per network. It calls the members one after another, in array order, each awaited before the next starts, and returns their outputs in that order, each typed as its member's. It adds no concurrency: calls through `ctx` run one at a time anyway, and `ctx.all` says what belongs together, so the ledger and a graph of the run can show it. Every record written while a member runs (its operation calls, its approvals, its sleeps) carries `group: { id, index, size }`: `id` is `all:<n>`, the run's nth `ctx.all` from 0, `index` the member's position and `size` the member count. Records outside a group have no `group`. The first member that throws stops the group: its error is rethrown as it is, and the members after it never run. A `ctx.all` inside a member fails with `invalid_input` (`ctx.all cannot be nested`), as does an argument that is not a list of functions; an empty list returns `[]` and writes nothing.
+
+```ts
+const [post, broadcast] = await ctx.all([
+  () => ctx.bluesky.post.create({ text }),
+  () => ctx.resend.broadcast.send({ id: email.id }),
+]);
+const comments = await ctx.all(threads.map((id) => () => ctx.forum.comments.list({ id })));
+```
+
+The lint refuses `Promise.all`, `Promise.allSettled`, `Promise.race` and `Promise.any` in workflows, pointing at `ctx.all`.
 
 ### Drivers
 
@@ -152,7 +168,7 @@ Queues used to be one `sanoma` queue for every app and are now `sanoma:<appName>
 
 A run is replayed after a restart by calling the function again and reading each step's result back, so workflows and policies must do the same thing every time, and must reach vendors only through `ctx` so the policy sees every call. Two checks guard against getting that wrong by accident, on files under `workflows/` and `policies/`. They are not a sandbox: they read the source, and code written to get around them can.
 
-oxlint, with the rules this package ships in `oxlint.json`, refuses the clock (`Date`, `performance`), randomness (`Math.random`, `crypto`), the network (`fetch`, `WebSocket`), timers, `process`, `globalThis`, and imports of `@sanoma/testing`, `@sanoma/app`, `@sanoma/connector-*/fake` and `@sanoma/connector-*/driver`. From `@sanoma/workflows` it allows only `defineWorkflow`, `definePolicy`, `allow`, `deny`, `approve`, `approvedFor`, `allowAll`, `mayDecide`, `errorCode` and types (the list is `allowImportNames` in `oxlint.json`): the rest could start runs or approve the run's own approvals (`SanomaClient`, `startWorker`), forge the audit record (`jsonlLedger`, `memoryLedger`: a store keeps the first record per id) or read credentials. Each message names the `ctx` replacement. Extend it from your `.oxlintrc.json` by its path: oxlint resolves `extends` as a file, not a package name, so `@sanoma/workflows/oxlint` would not load. The `workflows/**` and `policies/**` globs resolve against your config:
+oxlint, with the rules this package ships in `oxlint.json`, refuses the clock (`Date`, `performance`), randomness (`Math.random`, `crypto`), the network (`fetch`, `WebSocket`), timers, `process`, `globalThis`, `Promise.all` and its kin (use `ctx.all`), and imports of `@sanoma/testing`, `@sanoma/app`, `@sanoma/connector-*/fake` and `@sanoma/connector-*/driver`. From `@sanoma/workflows` it allows only `defineWorkflow`, `definePolicy`, `allow`, `deny`, `approve`, `approvedFor`, `allowAll`, `mayDecide`, `errorCode` and types (the list is `allowImportNames` in `oxlint.json`): the rest could start runs or approve the run's own approvals (`SanomaClient`, `startWorker`), forge the audit record (`jsonlLedger`, `memoryLedger`: a store keeps the first record per id) or read credentials. Each message names the `ctx` replacement. Extend it from your `.oxlintrc.json` by its path: oxlint resolves `extends` as a file, not a package name, so `@sanoma/workflows/oxlint` would not load. The `workflows/**` and `policies/**` globs resolve against your config:
 
 ```json
 {
@@ -195,7 +211,20 @@ it.each(files)("%s has no problems", (file) => {
 - `mayDecide(approval, principal)` and `approverLabel(approver)`: who may decide, and how to name them, the same way the run does. `isEnded(status)` and `ENDED_STATUSES`: the run statuses that read no more decisions.
 - Errors: `errorCode(err)` for the code to branch on, `errorMessage(err)` for the text of anything thrown, `invalidInput(what, issues)` to build an `invalid_input` error from zod issues (`InputIssue` is one issue, without symbols in its path), and the classes `SanomaError`, `PolicyDeniedError`, `RejectedError` and `DriverError`. Read codes with `errorCode`, never `instanceof`.
 - `@sanoma/workflows/shared` exports `mayDecide`, `approverLabel`, `errorMessage`, `isEnded`, `ENDED_STATUSES` and the `RunStatus` type with nothing else: no DBOS or Node imports, so a browser bundle can use them. The main entry exports them too.
-- `LedgerRecord` and `LedgerStore` for the audit record, `jsonlLedger(dir)` and `memoryLedger()` to keep it, and `RUNTIME_VERSION`, this package's version as the runtime reports it.
+- `LedgerRecord` and `LedgerStore` for the audit record (`LedgerGroup` is a record's `ctx.all` tag), `jsonlLedger(dir)` and `memoryLedger()` to keep it, and `RUNTIME_VERSION`, this package's version as the runtime reports it.
+
+### Outline
+
+`outlineWorkflow(wf)`, from `@sanoma/workflows/lint`, reads a workflow's shape from the source of its `run` function, for drawing it before it runs:
+
+```ts
+import { outlineWorkflow } from "@sanoma/workflows/lint";
+
+outlineWorkflow(announce);
+// { nodes: [{ kind: "op", id: "ghost.post.create" }, …, { kind: "approval", title: "Review launch copy" }, { kind: "sleep" }, …] }
+```
+
+It parses `run` with oxc-parser (TypeScript in a repo, JavaScript once built) and lists, in the order they run, the calls made on `run`'s first parameter, whatever it is named: operations (`op`, with `dynamic` and a `*` for a computed segment such as `ctx[vendor].comments.list`), approvals (with the title, when it is a string literal), sleeps, and `ctx.all` (`all`, one branch per member of an array literal; for anything else, such as `ids.map(…)`, `dynamic` with the callback as its one branch). Around them it shows loops and `.map`, `.forEach` and `.reduce` callbacks as `repeat`, and `if`, `switch`, `?:`, `&&`, `||` and `??` as `branch`, keeping only the arms that make calls. It is a reading of the body, not a guarantee: it cannot see calls made by functions defined outside `run` (a helper that takes `ctx`), how many times a loop runs, which arm is taken, or a `ctx` passed around under another name. It returns `{ error }` when the source cannot be read or parsed, or when `run` destructures its `ctx` parameter.
 
 Status: early (0.x). The API may change between minor versions.
 
