@@ -4,7 +4,7 @@ import { mayDecide } from "@sanoma/workflows/shared";
 import { Badge } from "#/components/ui/badge.tsx";
 import { useActor } from "../actor.ts";
 import { ApprovalCard } from "../components/approval.tsx";
-import { Nothing, Notice, PageHeader, pageTitle, toneBadge } from "../components/common.tsx";
+import { Nothing, Notice, PageHeader, pageTitle, ToneBadge } from "../components/common.tsx";
 import { pendingOf, waitingRunsQuery } from "../queries.ts";
 
 export const Route = createFileRoute("/inbox")({
@@ -29,7 +29,7 @@ function InboxPage() {
     <div className="flex flex-col gap-4">
       <PageHeader>
         <Badge variant="secondary">{pending.length} waiting</Badge>
-        {actor && <Badge className={toneBadge({ tone: mine ? "waiting" : "off" })}>{mine} for you</Badge>}
+        {actor && <ToneBadge tone={mine ? "waiting" : "off"}>{mine} for you</ToneBadge>}
       </PageHeader>
       {error && <Notice variant="destructive">Could not refresh approvals: {error.message}</Notice>}
       {pending.length === 0 && <Nothing title="Nothing is waiting for a decision" />}

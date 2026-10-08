@@ -30,7 +30,7 @@ import { type GraphNode, type GraphNodeKind, isPending } from "../graph/types.ts
 import { useReducedMotion } from "#/lib/motion.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import { configQuery, opsById } from "../queries.ts";
-import { effectBadge, StatusDot, toneBadge } from "./common.tsx";
+import { ApprovalStatusBadge, effectBadge, StatusDot, ToneBadge } from "./common.tsx";
 import { ZoomSlider } from "./zoom-slider.tsx";
 
 // A run's graph, or a workflow's outline, drawn with React Flow. It needs the DOM, so the pages
@@ -158,13 +158,11 @@ function OpNode({ data: { node } }: Props<"op">) {
       <Line>
         {effect && <Badge className={effectBadge({ effect })}>{effect}</Badge>}
         {held ? (
-          <Badge className={toneBadge({ tone: APPROVAL_TONE[held.status] })} title={held.title}>
+          <ToneBadge tone={APPROVAL_TONE[held.status]} title={held.title}>
             {held.status === "pending" ? `held · ${approverLabel(held.approver)}` : held.status}
-          </Badge>
+          </ToneBadge>
         ) : (
-          state?.decision && (
-            <Badge className={toneBadge({ tone: DECISION_TONE[state.decision] })}>{state.decision}</Badge>
-          )
+          state?.decision && <ToneBadge tone={DECISION_TONE[state.decision]}>{state.decision}</ToneBadge>
         )}
         {state?.errorCode ? (
           <span className="truncate text-destructive">{state.errorCode}</span>
@@ -186,7 +184,7 @@ function ApprovalNode({ data: { node } }: Props<"approval">) {
       </Line>
       {approval && (
         <Line>
-          <Badge className={toneBadge({ tone: APPROVAL_TONE[approval.status] })}>{approval.status}</Badge>
+          <ApprovalStatusBadge status={approval.status} />
           <span className="truncate text-muted-foreground">{approverLabel(approval.approver)}</span>
         </Line>
       )}

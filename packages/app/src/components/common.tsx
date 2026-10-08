@@ -3,6 +3,7 @@ import { useMatches } from "@tanstack/react-router";
 import { cva } from "class-variance-authority";
 import { ChevronRightIcon, CircleAlertIcon, InfoIcon } from "lucide-react";
 import {
+  type ComponentProps,
   lazy,
   type ReactElement,
   type ReactNode,
@@ -74,8 +75,8 @@ export function ledgerTone(record: LedgerRecord): Tone {
   }
 }
 
-/** Badge colours by tone, over Badge's default variant: `<Badge className={toneBadge({ tone })}>`. */
-export const toneBadge = cva("", {
+/** Badge colours by tone, over Badge's default variant. */
+const toneBadge = cva("", {
   variants: {
     tone: {
       ok: "bg-tone-ok text-tone-ok-foreground",
@@ -87,6 +88,14 @@ export const toneBadge = cva("", {
     } satisfies Record<Tone, string>,
   },
 });
+
+/** A badge in a tone's colours: what a status means, the same everywhere (the --tone-* tokens). */
+export function ToneBadge({
+  tone,
+  ...props
+}: Omit<ComponentProps<typeof Badge>, "className" | "variant"> & { tone: Tone }) {
+  return <Badge {...props} className={toneBadge({ tone })} />;
+}
 
 /** Badge colours by operation effect, one each, the same everywhere (the --effect-* tokens). */
 export const effectBadge = cva("", {
@@ -131,7 +140,7 @@ export function StatusDot({ tone }: { tone: Tone }) {
 }
 
 export function ApprovalStatusBadge({ status }: { status: ApprovalState["status"] }) {
-  return <Badge className={toneBadge({ tone: APPROVAL_TONE[status] })}>{status}</Badge>;
+  return <ToneBadge tone={APPROVAL_TONE[status]}>{status}</ToneBadge>;
 }
 
 /**
@@ -150,21 +159,21 @@ export function Tip({ tip, children }: { tip: ReactNode; children: ReactElement 
 
 /** The policy's decision on an operation call; a denial's reason is its tooltip. */
 export function DecisionBadge({ decision }: { decision: RecordedDecision }) {
-  const tone = toneBadge({ tone: DECISION_TONE[decision.kind] });
+  const tone = DECISION_TONE[decision.kind];
   if (decision.kind === "deny") {
     return (
       <Tip tip={decision.reason}>
-        <Badge className={tone} tabIndex={0}>
+        <ToneBadge tone={tone} tabIndex={0}>
           deny
-        </Badge>
+        </ToneBadge>
       </Tip>
     );
   }
   return (
-    <Badge className={tone}>
+    <ToneBadge tone={tone}>
       {decision.kind}
       {decision.kind === "approve" ? ` · ${approverLabel(decision.approver)}` : ""}
-    </Badge>
+    </ToneBadge>
   );
 }
 

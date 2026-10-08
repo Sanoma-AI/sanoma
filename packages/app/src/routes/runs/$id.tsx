@@ -2,7 +2,6 @@ import type { ErrorInfo, LedgerRecord } from "@sanoma/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { memo, type ReactNode, useMemo } from "react";
-import { Badge } from "#/components/ui/badge.tsx";
 import { Card, CardContent } from "#/components/ui/card.tsx";
 import { Item, ItemActions, ItemContent, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { approverLabel } from "@sanoma/workflows/shared";
@@ -25,7 +24,7 @@ import {
   RequestedBy,
   SectionTitle,
   StatusDot,
-  toneBadge,
+  ToneBadge,
   When,
 } from "../../components/common.tsx";
 import { useReducedMotion } from "#/lib/motion.ts";
@@ -85,7 +84,7 @@ function RunPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader>
-        <Badge className={toneBadge({ tone: RUN_TONE[run.status] })}>{run.status}</Badge>
+        <ToneBadge tone={RUN_TONE[run.status]}>{run.status}</ToneBadge>
       </PageHeader>
       {error && <Notice variant="destructive">Could not refresh: {error.message}</Notice>}
       <Card size="sm">

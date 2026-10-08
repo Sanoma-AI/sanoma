@@ -1,10 +1,9 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { PlayIcon } from "lucide-react";
-import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
-import { Nothing, Notice, PageHeader, plural, Tip, toneBadge, When } from "../../components/common.tsx";
+import { Nothing, Notice, PageHeader, plural, Tip, ToneBadge, When } from "../../components/common.tsx";
 import { RUN_TONE } from "#/lib/tone.ts";
 import { pendingApprovals, starterName } from "../../api.ts";
 import { runsQuery } from "../../queries.ts";
@@ -67,7 +66,7 @@ function RunsPage() {
                       </Tip>
                     </TableCell>
                     <TableCell>
-                      <Badge className={toneBadge({ tone: RUN_TONE[run.status] })}>{run.status}</Badge>
+                      <ToneBadge tone={RUN_TONE[run.status]}>{run.status}</ToneBadge>
                     </TableCell>
                     <TableCell>{starterName(run)}</TableCell>
                     <TableCell className="text-muted-foreground">
@@ -75,7 +74,7 @@ function RunsPage() {
                     </TableCell>
                     <TableCell>
                       {pending > 0 ? (
-                        <Badge className={toneBadge({ tone: "waiting" })}>{plural(pending, "approval")}</Badge>
+                        <ToneBadge tone="waiting">{plural(pending, "approval")}</ToneBadge>
                       ) : (
                         <span className="text-muted-foreground">-</span>
                       )}
