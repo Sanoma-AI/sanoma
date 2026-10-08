@@ -19,5 +19,14 @@
       }
     ]
   },
-  "ignorePatterns": ["**/node_modules", "**/.sanoma", "**/dist"]
+  "ignorePatterns": ["**/node_modules", "**/.sanoma", "**/dist"],
+  "overrides": [
+    {
+      "files": ["packages/app/src/components/ui/**"],
+      "rules": {
+        "eslint/no-shadow": "off",
+        "eslint/no-underscore-dangle": "off"
+      }
+    }
+  ]
 }
