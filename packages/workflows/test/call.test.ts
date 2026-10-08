@@ -383,6 +383,7 @@ describe("a worker restarted mid-run", () => {
       "op.called resend.broadcast.create",
       "approval.requested",
       "approval.decided",
+      "sleep.started",
       "op.called ghost.post.publish",
       "op.called resend.broadcast.send",
       "op.called bluesky.post.create",
@@ -420,13 +421,48 @@ describe("ctx.sleep", () => {
     const [isoPast, epochPast, short] = await Promise.all(
       requests.map((request) => c().start(nap, { request }, { startedBy: alice })),
     );
-    for (const runId of [isoPast!, epochPast!]) {
+    for (const [runId, until] of [
+      [isoPast!, Date.parse("2020-01-01T00:00:00Z")],
+      [epochPast!, 0],
+    ] as const) {
       expect(await c().result(runId)).toBe("rested");
       expect(await steps(runId)).not.toContain("DBOS.sleep");
-      expect(types(await c().ledger(runId))).toEqual(["run.started", "run.finished"]);
+      const records = await c().ledger(runId);
+      expect(types(records)).toEqual(["run.started", "sleep.started", "run.finished"]);
+      expect(records[1]).toMatchObject({ until, seq: 1, id: `${runId}:sleep.started:1` });
     }
     expect(await c().result(short!)).toBe("rested");
     expect(await steps(short!)).toEqual(["DBOS.sleep"]);
+  });
+
+  it("records when the sleep ends, before it waits: the time asked for, or the start plus the duration", async () => {
+    const target = Date.now() + 400;
+    const before = Date.now();
+    const [timed, timer] = await Promise.all(
+      [{ until: target }, { ms: 300 }].map((request) => c().start(nap, { request }, { startedBy: alice })),
+    );
+    await Promise.all([c().result(timed!), c().result(timer!)]);
+    const [, slept] = await c().ledger(timed!);
+    expect(slept).toMatchObject({ type: "sleep.started", until: target });
+    const [, napped, finished] = await c().ledger(timer!);
+    expect(napped).toMatchObject({ type: "sleep.started" });
+    const until = (napped as { until: number }).until;
+    expect(until - napped!.at).toBeGreaterThanOrEqual(300);
+    expect(until).toBeGreaterThanOrEqual(before + 300);
+    expect(finished!.at).toBeGreaterThanOrEqual(until);
+  });
+
+  it("records a sleep once when a restart interrupts it", async () => {
+    const runId = await c().start(nap, { request: { seconds: 3 } }, { startedBy: alice });
+    await waitFor(async () => (await c().ledger(runId)).some((r) => r.type === "sleep.started"));
+    const [first] = (await c().ledger(runId)).filter((r) => r.type === "sleep.started");
+    await app.restart();
+
+    expect(await c().result(runId)).toBe("rested");
+    const records = await c().ledger(runId);
+    expect(types(records)).toEqual(["run.started", "sleep.started", "run.finished"]);
+    expect(records[1]).toEqual(first);
+    expect(await steps(runId)).toEqual(["DBOS.sleep"]);
   });
 });
 

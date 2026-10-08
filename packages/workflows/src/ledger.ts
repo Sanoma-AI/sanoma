@@ -63,6 +63,12 @@ export type LedgerRecord = {
   /** A message the approval ignored: from someone other than the approver, or not a decision. */
   | { type: "approval.refused"; approval: string; by?: string; reason: string }
   | { type: "approval.decided"; approval: string; decision: "approve" | "reject"; by: string; note?: string }
+  /**
+   * A `ctx.sleep` began; `until` is when it ends, in ms since the epoch: the time asked for, or
+   * for a duration the time the sleep started plus the duration, as the runtime saw it. Written
+   * for a time already past too, which waits not at all.
+   */
+  | { type: "sleep.started"; until: number }
   | { type: "run.finished"; output: unknown }
   /** `error` as for `op.called`. */
   | { type: "run.failed"; error: ErrorInfo }

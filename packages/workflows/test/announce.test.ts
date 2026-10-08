@@ -88,6 +88,7 @@ describe("announce", () => {
       "op.called resend.broadcast.create",
       "approval.requested",
       "approval.decided",
+      "sleep.started",
       "op.called ghost.post.publish",
       "op.called resend.broadcast.send",
       "op.called bluesky.post.create",
@@ -137,6 +138,7 @@ describe("announce", () => {
       "op.called resend.broadcast.create": 1,
       "approval.requested": 1,
       "approval.decided": 1,
+      "sleep.started": 1,
       "op.called ghost.post.publish": 1,
       "op.called resend.broadcast.send": 1,
       "op.called bluesky.post.create": 1,
@@ -296,6 +298,7 @@ describe("announce under a policy", () => {
       "op.called resend.broadcast.create",
       "approval.requested",
       "approval.decided",
+      "sleep.started",
       "op.called ghost.post.publish",
       "approval.requested",
       "approval.decided",
@@ -304,10 +307,10 @@ describe("announce under a policy", () => {
       "run.finished",
     ]);
     expect(records.map((r) => r.seq)).toEqual(records.map((_, i) => i));
-    expect(records[5]).toMatchObject({ decision: { kind: "approve", approver: "marketing-lead" }, attempt: 1 });
-    expect(records[6]).toMatchObject({ approval: "approval-2", requestedBy: "policy", op: "ghost.post.publish" });
-    expect(records[7]).toMatchObject({ approval: "approval-2", by: "marketing-lead" });
-    expect(records[9]).toMatchObject({ op: "bluesky.post.create", decision: { kind: "allow" } });
+    expect(records[6]).toMatchObject({ decision: { kind: "approve", approver: "marketing-lead" }, attempt: 1 });
+    expect(records[7]).toMatchObject({ approval: "approval-2", requestedBy: "policy", op: "ghost.post.publish" });
+    expect(records[8]).toMatchObject({ approval: "approval-2", by: "marketing-lead" });
+    expect(records[10]).toMatchObject({ op: "bluesky.post.create", decision: { kind: "allow" } });
   });
 
   it("records the held call as stopped when the policy's approver rejects it", async () => {

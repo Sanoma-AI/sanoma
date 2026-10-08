@@ -101,7 +101,7 @@ export function buildCtx(wf: WorkflowDefinition<any, any>, run: Run): any {
   if (uses.includes("approval")) {
     members.approval = (title: string, req: ApprovalRequest) => awaitApproval(run, title, checkApproval(title, req));
   }
-  if (uses.includes("sleep")) members.sleep = (req: unknown) => sleep(req);
+  if (uses.includes("sleep")) members.sleep = (req: unknown) => sleep(run, req);
 
   // Every function goes through the run's queue, so no member can be added that skips it.
   const queued = (node: Record<string, unknown>, path: string): Record<string, unknown> => {
@@ -269,13 +269,20 @@ function checkSleep(req: unknown): SleepRequest {
   return parseOrThrow(timed ? SleepUntil : SleepFor, req, `ctx.sleep(${shown(req)})`);
 }
 
-/** Waits, durably, until the time or for the duration the request names. */
-async function sleep(raw: unknown) {
+/**
+ * Waits, durably, until the time or for the duration the request names, and records when it
+ * ends. For a duration that is the time the sleep started plus the duration, as the runtime saw
+ * it (`Date.now()`, which adds no DBOS call): a replay may compute another, but the store keeps
+ * the first record with the id, so the record says what the first execution waited for.
+ */
+async function sleep(run: Run, raw: unknown) {
   const req = checkSleep(raw);
+  const seq = run.seq++;
+  let until: number;
   let ms: number;
   if ("until" in req) {
-    const target = typeof req.until === "number" ? req.until : Date.parse(req.until);
-    ms = target - (await DBOS.now());
+    until = typeof req.until === "number" ? req.until : Date.parse(req.until);
+    ms = until - (await DBOS.now());
   } else {
     ms =
       (req.ms ?? 0) +
@@ -283,7 +290,9 @@ async function sleep(raw: unknown) {
       (req.minutes ?? 0) * 60_000 +
       (req.hours ?? 0) * 3_600_000 +
       (req.days ?? 0) * 86_400_000;
+    until = Date.now() + ms;
   }
+  await write(run, entry(run, { type: "sleep.started", until }, { seq }));
   // A time already past waits not at all, and adds no step.
   if (ms > 0) await DBOS.sleep(ms);
 }
