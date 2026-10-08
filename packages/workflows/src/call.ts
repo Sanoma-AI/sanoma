@@ -77,25 +77,31 @@ function refuseIfEnded(run: Run) {
 /** The run's `ctx`: the operations and built-ins its workflow `uses`, and nothing else. */
 export function buildCtx(wf: WorkflowDefinition<any, any>, run: Run): any {
   const uses = wf.uses as readonly Use[];
-  const tree: Record<string, any> = {};
+  const members: Record<string, any> = {};
   for (const op of uses.filter(isOp)) {
-    const vendor = (tree[op.vendor] ??= {});
+    const vendor = (members[op.vendor] ??= {});
     const resource = (vendor[op.resource] ??= {});
-    resource[op.name] = (input: unknown) => serial(run, () => callOp(run, op.id, input));
+    resource[op.name] = (input: unknown) => callOp(run, op.id, input);
   }
-  for (const [v, resources] of Object.entries(tree)) {
-    for (const [r, ops] of Object.entries(resources as Record<string, object>))
-      resources[r] = strict(ops, `ctx.${v}.${r}`, wf.name);
-    tree[v] = strict(resources, `ctx.${v}`, wf.name);
+  members.runId = run.id;
+  members.now = () => DBOS.now();
+  if (uses.includes("approval")) {
+    members.approval = (title: string, req: ApprovalRequest) => awaitApproval(run, title, req);
   }
-  const builtins: Record<string, unknown> = {
-    runId: run.id,
-    now: () => serial(run, () => DBOS.now()),
+  if (uses.includes("sleep")) members.sleep = (req: unknown) => sleep(req);
+
+  // Every function goes through the run's queue, so no member can be added that skips it.
+  const queued = (node: Record<string, unknown>, path: string): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(node)) {
+      if (typeof value === "function") out[key] = (...args: unknown[]) => serial(run, () => value(...args));
+      else if (typeof value === "object" && value !== null) {
+        out[key] = queued(value as Record<string, unknown>, `${path}.${key}`);
+      } else out[key] = value;
+    }
+    return strict(out, path, wf.name);
   };
-  if (uses.includes("approval"))
-    builtins.approval = (title: string, req: ApprovalRequest) => serial(run, () => awaitApproval(run, title, req));
-  if (uses.includes("sleep")) builtins.sleep = (req: unknown) => serial(run, () => sleep(req));
-  return strict({ ...tree, ...builtins }, "ctx", wf.name);
+  return queued(members, "ctx");
 }
 
 /** Refuses anything not declared in `uses`, with a message that says so. */
