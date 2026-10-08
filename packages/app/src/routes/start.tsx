@@ -3,7 +3,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { z } from "zod";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldLabel } from "@/components/ui/field";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Nothing, Notice, PageHeader } from "../components/common.tsx";
 import { StartForm } from "../form/start-form.tsx";
 import { configQuery } from "../queries.ts";
@@ -29,24 +29,24 @@ function StartPage() {
       <PageHeader title="Start a run" />
       <Field>
         <FieldLabel htmlFor="workflow">Workflow</FieldLabel>
-        <Select
+        <NativeSelect
+          id="workflow"
           name="workflow"
+          className="w-full"
           value={workflow ? workflow.name : ""}
-          onValueChange={(value) => void navigate({ to: "/start", search: { workflow: value } })}
+          onChange={(e) => void navigate({ to: "/start", search: { workflow: e.target.value } })}
         >
-          <SelectTrigger id="workflow" className="w-full">
-            <SelectValue placeholder="Choose a workflow" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              {config.workflows.map((w) => (
-                <SelectItem key={w.name} value={w.name}>
-                  {w.title ? `${w.title} (${w.name})` : w.name}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
+          {!workflow && (
+            <NativeSelectOption value="" disabled>
+              Choose a workflow
+            </NativeSelectOption>
+          )}
+          {config.workflows.map((w) => (
+            <NativeSelectOption key={w.name} value={w.name}>
+              {w.title ? `${w.title} (${w.name})` : w.name}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
       </Field>
       {!workflow && name && <Notice tone="bad">No workflow named “{name}”.</Notice>}
       {workflow && (

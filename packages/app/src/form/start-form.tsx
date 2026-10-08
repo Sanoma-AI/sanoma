@@ -18,7 +18,7 @@ import {
   FieldSet,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { errorBodyOf } from "../api.ts";
@@ -187,9 +187,6 @@ function FieldView({ form, field, path }: { form: StartFormApi; field: SchemaFie
   return <ScalarView form={form} field={field} name={name} />;
 }
 
-/** Radix's Select has no empty value: an optional choice left out is this one. */
-const LEAVE_OUT = "-";
-
 function ScalarView({ form, field, name }: { form: StartFormApi; field: ScalarField; name: string }) {
   const id = `field-${name}`;
   return (
@@ -249,25 +246,16 @@ function ScalarView({ form, field, name }: { form: StartFormApi; field: ScalarFi
             break;
           case "enum":
             control = (
-              <Select
-                name={name}
-                value={text || (field.required ? "" : LEAVE_OUT)}
-                onValueChange={(v) => f.handleChange(v === LEAVE_OUT ? "" : v)}
-              >
-                <SelectTrigger id={id} aria-invalid={invalid} onBlur={f.handleBlur} className="w-full">
-                  <SelectValue placeholder="Choose…" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {!field.required && <SelectItem value={LEAVE_OUT}>(leave out)</SelectItem>}
-                    {(field.options ?? []).map((option, i) => (
-                      <SelectItem key={String(option)} value={String(i)}>
-                        {String(option)}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+              <NativeSelect {...common} name={name} className="w-full" value={text} onChange={onText}>
+                <NativeSelectOption value="" disabled={field.required}>
+                  {field.required ? "Choose…" : "(leave out)"}
+                </NativeSelectOption>
+                {(field.options ?? []).map((option, i) => (
+                  <NativeSelectOption key={String(option)} value={String(i)}>
+                    {String(option)}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
             );
             break;
           case "json":
