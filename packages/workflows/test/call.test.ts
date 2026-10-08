@@ -22,19 +22,13 @@ import {
   SanomaError,
 } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
-import { inSeconds, pending, useApp, waitFor } from "./harness.ts";
+import fanout, { fakeStats, stats } from "./fixtures/fanout.ts";
+import { failure, inSeconds, pending, types, useApp, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`.
 const databaseUrl = testDatabaseUrl("call");
 const alice = { id: "alice" };
-const types = (records: LedgerRecord[]) => records.map((r) => (r.type === "op.called" ? `${r.type} ${r.op}` : r.type));
-const failure = (p: Promise<unknown>) =>
-  p.then(
-    () => {
-      throw new Error("expected the run to fail");
-    },
-    (e: unknown) => e,
-  );
+const groups = (records: LedgerRecord[]) => records.map((r) => r.group);
 
 /** One post: bluesky.post.create is not idempotent, so it is never retried. */
 const post = defineWorkflow({
@@ -564,6 +558,247 @@ describe("the call a policy sees", () => {
       name: "create",
       effect: "publish",
     });
+  });
+});
+
+describe("ctx.all", () => {
+  /** An approval as one member, a post as the other. */
+  const signed = defineWorkflow({
+    name: "signed",
+    trigger: "manual",
+    input: z.object({}),
+    uses: [bluesky.post.create, "approval", "all"],
+    run: async (ctx) => {
+      const [, posted] = await ctx.all([
+        () => ctx.approval("Post it?", { approver: "marketing-lead" }),
+        () => ctx.bluesky.post.create({ text: "signed" }),
+      ]);
+      return posted.url;
+    },
+  });
+
+  /** The second member fails for good: ghost has no such post. */
+  const broken = defineWorkflow({
+    name: "broken",
+    trigger: "manual",
+    input: z.object({}),
+    uses: [bluesky.post.create, ghost.post.publish, "all"],
+    run: async (ctx) =>
+      ctx.all([
+        () => ctx.bluesky.post.create({ text: "first" }),
+        () => ctx.ghost.post.publish({ id: "post_missing" }),
+        () => ctx.bluesky.post.create({ text: "never" }),
+      ]),
+  });
+
+  /** Calls ctx.all with what the request says, so a test can send one it must refuse. */
+  const odd = defineWorkflow({
+    name: "odd",
+    trigger: "manual",
+    input: z.object({ shape: z.enum(["nested", "empty", "not-a-list", "not-functions"]) }),
+    uses: ["all"],
+    run: async (ctx, { shape }) => {
+      if (shape === "nested") return ctx.all([async () => "outer", () => ctx.all([async () => "inner"])]);
+      if (shape === "empty") return ctx.all([]);
+      if (shape === "not-a-list") return ctx.all("members" as never);
+      return ctx.all([1, 2] as never);
+    },
+  });
+
+  /** Leaves a ctx.all un-awaited while it calls on, as the lint would refuse, to show what is recorded. */
+  const loose = defineWorkflow({
+    name: "loose",
+    trigger: "manual",
+    input: z.object({ shape: z.enum(["outside", "twice"]) }),
+    uses: [bluesky.post.create, "all"],
+    run: async (ctx, { shape }) => {
+      const group = ctx.all([
+        () => ctx.bluesky.post.create({ text: "one" }),
+        () => ctx.bluesky.post.create({ text: "two" }),
+      ]);
+      if (shape === "outside") {
+        // Made while the first member runs, but not in it.
+        await ctx.bluesky.post.create({ text: "outside" });
+        return (await group).length;
+      }
+      const refused = await ctx
+        .all([() => ctx.bluesky.post.create({ text: "three" })])
+        .catch((err: Error) => `${errorCode(err)}: ${err.message}`);
+      await group;
+      return refused;
+    },
+  });
+
+  const app = useApp(
+    databaseUrl,
+    "call-all",
+    (vendors) => ({
+      workflows: [fanout, signed, broken, odd, loose],
+      connectors: [ghost, resend, bluesky, stats],
+      drivers: vendors.drivers,
+    }),
+    { extra: [fakeStats] },
+  );
+  const c = () => app.client;
+  const posted = () => app.vendors.bluesky.state.posts.map((p) => p.text);
+
+  it("runs the members in order, returns their outputs in order, and tags their records with the group", async () => {
+    const runId = await c().start(fanout, { title: "Launch" }, { startedBy: alice });
+    expect(await c().result(runId)).toEqual({ post: expect.any(String), views: 42, opens: 7 });
+    expect(app.ops()).toEqual([
+      "ghost.post.create",
+      "resend.broadcast.create",
+      "bluesky.post.create",
+      "stats.post.views",
+      "stats.email.opens",
+    ]);
+
+    const records = await c().ledger(runId);
+    expect(types(records)).toEqual([
+      "run.started",
+      "op.called ghost.post.create",
+      "op.called resend.broadcast.create",
+      "op.called bluesky.post.create",
+      "sleep.started",
+      "op.called stats.post.views",
+      "op.called stats.email.opens",
+      "run.finished",
+    ]);
+    // Each group is named for the seq the run was at when it began, which its first call took.
+    expect(groups(records)).toEqual([
+      undefined,
+      { id: "all:1", index: 0, size: 3 },
+      { id: "all:1", index: 1, size: 3 },
+      { id: "all:1", index: 2, size: 3 },
+      undefined,
+      { id: "all:5", index: 0, size: 2 },
+      { id: "all:5", index: 1, size: 2 },
+      undefined,
+    ]);
+    expect(records.map((r) => r.seq)).toEqual(records.map((_, i) => i));
+  });
+
+  it("tags the records of an approval a member asks for", async () => {
+    const runId = await c().start(signed, {}, { startedBy: alice });
+    await waitFor(pending(c, runId));
+    await c().decide(runId, { decision: "approve", by: { id: "marketing-lead" } });
+    await c().result(runId);
+
+    const records = await c().ledger(runId);
+    expect(types(records)).toEqual([
+      "run.started",
+      "approval.requested",
+      "approval.decided",
+      "op.called bluesky.post.create",
+      "run.finished",
+    ]);
+    const group = { id: "all:1", size: 2 };
+    expect(groups(records)).toEqual([
+      undefined,
+      { ...group, index: 0 },
+      { ...group, index: 0 },
+      { ...group, index: 1 },
+      undefined,
+    ]);
+  });
+
+  it("stops at the first member that fails, with its error, and never runs the members after it", async () => {
+    const runId = await c().start(broken, {}, { startedBy: alice });
+    const err = await failure(c().result(runId));
+    expect(errorCode(err)).toBe("driver_failed");
+    expect(app.ops()).toEqual(["bluesky.post.create", "ghost.post.publish"]);
+    expect(posted()).toEqual(["first"]);
+
+    const records = await c().ledger(runId);
+    expect(types(records)).toEqual([
+      "run.started",
+      "op.called bluesky.post.create",
+      "op.called ghost.post.publish",
+      "run.failed",
+    ]);
+    expect(records[2]).toMatchObject({ group: { id: "all:1", index: 1, size: 3 }, error: { code: "driver_failed" } });
+    expect(records[3]).not.toHaveProperty("group");
+  });
+
+  it("refuses a nested ctx.all, and an argument that is not a list of functions, with invalid_input", async () => {
+    const shapes = ["nested", "not-a-list", "not-functions"] as const;
+    const runs = await Promise.all(shapes.map((shape) => c().start(odd, { shape }, { startedBy: alice })));
+    const errors = await Promise.all(runs.map((runId) => failure(c().result(runId))));
+    expect(errors.map(errorCode)).toEqual(["invalid_input", "invalid_input", "invalid_input"]);
+    expect(errors[0]).toMatchObject({ message: expect.stringMatching(/^ctx\.all cannot be nested/) });
+    expect(errors[1]).toMatchObject({ message: expect.stringMatching(/^ctx\.all: needs a list of functions/) });
+    expect(errors[2]).toMatchObject({ message: expect.stringMatching(/^ctx\.all: 0: each member must be a function/) });
+  });
+
+  it("does not tag a call made outside the group while a member runs", async () => {
+    const runId = await c().start(loose, { shape: "outside" }, { startedBy: alice });
+    expect(await c().result(runId)).toBe(2);
+    expect(posted()).toEqual(["one", "outside", "two"]);
+    const group = { id: "all:1", size: 2 };
+    expect(groups(await c().ledger(runId))).toEqual([
+      undefined,
+      { ...group, index: 0 },
+      undefined,
+      { ...group, index: 1 },
+      undefined,
+    ]);
+  });
+
+  it("refuses a second ctx.all while one runs, and keeps the first one's tags", async () => {
+    const runId = await c().start(loose, { shape: "twice" }, { startedBy: alice });
+    expect(await c().result(runId)).toBe("invalid_input: a ctx.all is already running: await it before the next");
+    expect(posted()).toEqual(["one", "two"]);
+    const group = { id: "all:1", size: 2 };
+    expect(groups(await c().ledger(runId))).toEqual([
+      undefined,
+      { ...group, index: 0 },
+      { ...group, index: 1 },
+      undefined,
+    ]);
+  });
+
+  it("returns [] for no members, and writes nothing for them", async () => {
+    const runId = await c().start(odd, { shape: "empty" }, { startedBy: alice });
+    expect(await c().result(runId)).toEqual([]);
+    expect(types(await c().ledger(runId))).toEqual(["run.started", "run.finished"]);
+  });
+
+  it("replays the members a stopped worker finished, and runs the one it was in once", async () => {
+    const release = app.vendors.bluesky.hold("bluesky.post.create");
+    const runId = await c().start(fanout, { title: "Restarted" }, { startedBy: alice });
+    await waitFor(() => app.ops().includes("bluesky.post.create"));
+
+    await app.restart();
+    await waitFor(() => app.ops().filter((op) => op === "bluesky.post.create").length === 2);
+    release();
+
+    expect(await c().result(runId)).toMatchObject({ views: 42, opens: 7 });
+    // Members 1 and 2 came back from their recorded steps; member 3 was called again with its key.
+    expect(app.ops()).toEqual([
+      "ghost.post.create",
+      "resend.broadcast.create",
+      "bluesky.post.create",
+      "bluesky.post.create",
+      "stats.post.views",
+      "stats.email.opens",
+    ]);
+    const posts = app.vendors.calls.filter((call) => call.op === "bluesky.post.create");
+    expect(posts[1]?.idempotencyKey).toBe(posts[0]?.idempotencyKey);
+    expect(posted()).toEqual(["Restarted"]);
+
+    const records = await c().ledger(runId);
+    expect(new Set(records.map((r) => r.id)).size).toBe(records.length);
+    expect(types(records)).toEqual([
+      "run.started",
+      "op.called ghost.post.create",
+      "op.called resend.broadcast.create",
+      "op.called bluesky.post.create",
+      "sleep.started",
+      "op.called stats.post.views",
+      "op.called stats.email.opens",
+      "run.finished",
+    ]);
+    expect(records[3]).toMatchObject({ group: { id: "all:1", index: 2, size: 3 } });
   });
 });
 

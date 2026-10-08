@@ -1,9 +1,9 @@
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
-import { defineFake } from "@sanoma/workflows/fake";
+import { defineFake, type FakeOptions } from "@sanoma/workflows/fake";
 import { z } from "zod";
-import { allow, approve, approvedFor, defineConnector, definePolicy, defineWorkflow } from "../../src/index.ts";
+import { defineConnector, defineWorkflow } from "../../src/index.ts";
 
 /** A vendor to read from after the fan-out: how a post and an email did. */
 export const stats = defineConnector("stats", {
@@ -16,14 +16,18 @@ export const stats = defineConnector("stats", {
 });
 
 /** An in-memory stats vendor: every post has 42 views, every email 7 opens. */
-export const fakeStats = () =>
-  defineFake(stats, {
-    initial: () => ({}),
-    ops: () => ({
-      post: { views: async () => ({ views: 42 }) },
-      email: { opens: async () => ({ opens: 7 }) },
-    }),
-  });
+export const fakeStats = (options?: FakeOptions) =>
+  defineFake(
+    stats,
+    {
+      initial: () => ({}),
+      ops: () => ({
+        post: { views: async () => ({ views: 42 }) },
+        email: { opens: async () => ({ opens: 7 }) },
+      }),
+    },
+    options,
+  );
 
 /**
  * Fan a launch out to three vendors at once, wait a second, then read back how two of them did,
@@ -58,12 +62,3 @@ const fanout = defineWorkflow({
   },
 });
 export default fanout;
-
-/** Holds the one public post (Bluesky's) for marketing-lead; lets everything else through. */
-export const fanoutPolicy = definePolicy(
-  ({ op, effect, run }) =>
-    effect !== "publish" || approvedFor(run.approvals, op.id, "marketing-lead")
-      ? allow()
-      : approve("marketing-lead", { title: "Post the launch", covers: [bluesky.post.create] }),
-  { version: "fanout-1" },
-);

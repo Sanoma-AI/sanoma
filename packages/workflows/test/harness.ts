@@ -8,9 +8,17 @@ import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
 import { fakeGhost } from "@sanoma/connector-ghost/fake";
 import { resend } from "@sanoma/connector-resend";
 import { fakeResend } from "@sanoma/connector-resend/fake";
-import type { FakeCall } from "@sanoma/workflows/fake";
+import type { Fake, FakeCall, FakeOptions } from "@sanoma/workflows/fake";
 import { afterAll, beforeAll, beforeEach } from "vitest";
-import { allowAll, jsonlLedger, SanomaClient, type SanomaConfig, startWorker, type Worker } from "../src/index.ts";
+import {
+  allowAll,
+  jsonlLedger,
+  type LedgerRecord,
+  SanomaClient,
+  type SanomaConfig,
+  startWorker,
+  type Worker,
+} from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
 
 export async function waitFor(check: () => Promise<boolean> | boolean, timeoutMs = 15_000) {
@@ -23,13 +31,40 @@ export async function waitFor(check: () => Promise<boolean> | boolean, timeoutMs
 
 export const inSeconds = (s: number) => new Date(Date.now() + s * 1000).toISOString();
 
-/** The fakes the announce workflow calls, logging into one list so the order across vendors shows. */
-export function marketingFakes() {
+/** A run's records by type, an operation call's with its operation: what the tests compare the order of. */
+export const types = (records: LedgerRecord[]) =>
+  records.map((r) => (r.type === "op.called" ? `${r.type} ${r.op}` : r.type));
+
+/** What the promise rejects with; it fails the test by resolving. */
+export const failure = (p: Promise<unknown>) =>
+  p.then(
+    () => {
+      throw new Error("expected the run to fail");
+    },
+    (e: unknown) => e,
+  );
+
+/** A fake vendor's maker, such as `fakeGhost`. */
+type MakeFake = (options: FakeOptions) => Fake<any, any>;
+
+/**
+ * The fakes the announce workflow calls, and the `extra` ones a test adds, all logging into one
+ * list so the order across vendors shows.
+ */
+export function marketingFakes({ extra = [] }: { extra?: MakeFake[] } = {}) {
   const calls: FakeCall[] = [];
   const blog = fakeGhost({ calls });
   const email = fakeResend({ calls });
   const social = fakeBluesky({ calls });
-  return { calls, ghost: blog, resend: email, bluesky: social, drivers: [blog.driver, email.driver, social.driver] };
+  const fakes = [blog, email, social, ...extra.map((make) => make({ calls }))];
+  return {
+    calls,
+    ghost: blog,
+    resend: email,
+    bluesky: social,
+    drivers: fakes.map((fake) => fake.driver),
+    reset: () => fakes.forEach((fake) => fake.reset()),
+  };
 }
 
 export type Vendors = ReturnType<typeof marketingFakes>;
@@ -58,15 +93,16 @@ export interface App {
 
 /**
  * Starts a worker and a client for one `describe`, on its own app name in the file's database,
- * and stops them after it. Fake vendors reset before each test; the ledger is on disk so it
- * outlives a restart the way it would across processes.
+ * and stops them after it. Fake vendors, and the `extra` ones, reset before each test; the
+ * ledger is on disk so it outlives a restart the way it would across processes.
  */
 export function useApp(
   databaseUrl: string,
   appName: string,
   overrides: (vendors: Vendors) => Partial<SanomaConfig> = () => ({}),
+  { extra }: { extra?: MakeFake[] } = {},
 ): App {
-  const vendors = marketingFakes();
+  const vendors = marketingFakes({ extra });
   const ledgerDir = mkdtempSync(join(tmpdir(), `sanoma-ledger-${appName}-`));
   let config: SanomaConfig;
   let worker: Worker | undefined;
@@ -98,11 +134,7 @@ export function useApp(
     rmSync(ledgerDir, { recursive: true, force: true });
   });
 
-  beforeEach(() => {
-    vendors.ghost.reset();
-    vendors.resend.reset();
-    vendors.bluesky.reset();
-  });
+  beforeEach(() => vendors.reset());
 
   return {
     vendors,

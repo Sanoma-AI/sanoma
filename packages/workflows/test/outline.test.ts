@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { describe, expect, it } from "vitest";
@@ -210,7 +211,9 @@ describe("outlineWorkflow, built", () => {
 
   it("outlines a workflow from its JavaScript source, in plain Node", () => {
     if (needsBuild()) {
-      const build = spawnSync("pnpm", ["run", "build"], { cwd: pkg, encoding: "utf8" });
+      // The package's build is this one tsc run.
+      const tsc = join(dirname(createRequire(import.meta.url).resolve("typescript/package.json")), "bin", "tsc");
+      const build = spawnSync(process.execPath, [tsc, "-p", "tsconfig.build.json"], { cwd: pkg, encoding: "utf8" });
       if (build.status !== 0) throw new Error(`build failed: ${build.stderr}${build.stdout}`);
     }
     const dir = mkdtempSync(join(tmpdir(), "sanoma-outline-"));

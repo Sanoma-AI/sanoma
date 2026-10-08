@@ -13,17 +13,15 @@ import {
   defineWorkflow,
   deny,
   errorCode,
-  type LedgerRecord,
   memoryLedger,
   type Policy,
 } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
-import { inSeconds, pending, useApp, waitFor } from "./harness.ts";
+import { inSeconds, pending, types, useApp, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`.
 const databaseUrl = testDatabaseUrl("announce");
 const alice = { id: "alice", groups: ["marketing"] };
-const types = (records: LedgerRecord[]) => records.map((r) => (r.type === "op.called" ? `${r.type} ${r.op}` : r.type));
 
 /** Posts twice at once, under a policy that holds each call for an approval. */
 const twin = defineWorkflow({
