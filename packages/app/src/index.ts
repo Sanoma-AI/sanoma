@@ -8,7 +8,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { describeConfig, errorMessage, resolveConfig, SanomaClient, type SanomaConfig } from "@sanoma/workflows";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import type { AppContext, ResolveActor } from "./context.ts";
-import { actorFromHeader } from "./default-actor.ts";
 import { hostName, isLoopback, refuseHost } from "./loopback.ts";
 
 export { ACTOR_HEADER, type ErrorResponse, type InputIssue, type RunDetail, type StartRunResponse } from "./api.ts";
@@ -75,13 +74,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     await client.close();
     throw err;
   }
-  const app: AppContext = {
-    resolved,
-    description,
-    client,
-    resolveActor: options.resolveActor ?? actorFromHeader,
-    actorFromHeader: options.resolveActor === undefined,
-  };
+  const app: AppContext = { resolved, description, client, resolveActor: options.resolveActor };
 
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => {

@@ -32,6 +32,8 @@ export interface ActorState {
   groups: readonly string[];
   /** True when the deployment says who you are: the page shows it and cannot change it. */
   fromServer: boolean;
+  /** Set when the deployment could not say who you are. */
+  error?: string;
   setActor(name: string | null): void;
 }
 
@@ -51,8 +53,15 @@ export const useActor = () => useContext(ActorContext);
 export function useActorState(server: ActorInfo | undefined): ActorState {
   const [stored, setState] = useState<string | null>();
   useEffect(() => setState(loadActor()), []);
-  if (server && !server.fromHeader) {
-    return { actor: server.actor?.id ?? null, groups: server.actor?.groups ?? [], fromServer: true, setActor() {} };
+  if (server?.fromServer) {
+    const { actor, error } = server;
+    return {
+      actor: actor?.id ?? null,
+      groups: actor?.groups ?? [],
+      fromServer: true,
+      ...(error === undefined ? {} : { error }),
+      setActor() {},
+    };
   }
   return {
     actor: stored,

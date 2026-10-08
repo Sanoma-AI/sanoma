@@ -23,25 +23,22 @@ import type { AppContext } from "../context.ts";
 // context that startApp passes with every request. Every expected failure is an ApiError.
 
 /**
- * Who is making a change (resolved once per request, in start.ts), or a 400 when nobody is
- * named. Only the default resolver reads the header, so only then does the answer name it.
+ * Who is making a change (resolved at most once per request, see start.ts), or a 400 when
+ * nobody is named. Only the default resolver reads the header, so only then does the answer
+ * name it.
  */
-export function requireActor({
+export async function requireActor({
   app,
   actor,
-  actorError,
 }: {
   app: AppContext;
-  actor?: Principal | undefined;
-  /** Set when `resolveActor` threw: a 500, already logged. */
-  actorError?: ApiError | undefined;
-}): Principal {
-  if (actorError) throw actorError;
-  const parsed = Principal.safeParse(actor);
+  actor: () => Promise<Principal | undefined>;
+}): Promise<Principal> {
+  const parsed = Principal.safeParse(await actor());
   if (parsed.success) return parsed.data;
-  const error = app.actorFromHeader
-    ? `Say who you are in the ${ACTOR_HEADER} header`
-    : "This request does not say who is making it: sign in";
+  const error = app.resolveActor
+    ? "This request does not say who is making it: sign in"
+    : `Say who you are in the ${ACTOR_HEADER} header`;
   throw new ApiError(400, { error, code: "invalid_input" });
 }
 
@@ -125,13 +122,10 @@ export function asApiError(err: unknown): ApiError {
   return new ApiError(status, body);
 }
 
-/**
- * `asApiError`, logging what it turns into a 500: only those are unexpected. An ApiError was
- * made on purpose, and a 500 one is logged where it was made.
- */
+/** `asApiError`, logging what it turns into a 500: only those are unexpected. */
 export function toApiError(err: unknown, where: string): ApiError {
   const api = asApiError(err);
-  if (api.status >= 500 && !(err instanceof ApiError)) console.error(`sanoma app: ${where} failed:`, err);
+  if (api.status >= 500) console.error(`sanoma app: ${where} failed:`, err);
   return api;
 }
 

@@ -12,7 +12,7 @@ export const Route = createFileRoute("/api/runs/")({
       },
       /** Starts a run as the actor: 201 `{ runId }`. */
       POST: async ({ request, context }) => {
-        const actor = requireActor(context);
+        const actor = await requireActor(context);
         const body = parse(StartRunRequest, await readJson(request), 'Send {"workflow": name, "input": {...}}');
         return json(await startRun(context.app, actor, body), 201);
       },

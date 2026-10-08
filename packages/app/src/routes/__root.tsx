@@ -57,7 +57,7 @@ function Root() {
             <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
               <Outlet />
             </main>
-            {server?.fromHeader !== false && actor.actor === null && (
+            {!actor.fromServer && actor.actor === null && (
               <Suspense fallback={null}>
                 <WhoAreYou />
               </Suspense>
@@ -93,8 +93,7 @@ const PAGES = [
 ] as const;
 
 function Nav() {
-  const { actor, fromServer, setActor } = useActor();
-  const { data: server } = useQuery(actorQuery());
+  const { actor, fromServer, error, setActor } = useActor();
   return (
     <header className="border-b">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 sm:px-6">
@@ -116,8 +115,8 @@ function Nav() {
           ))}
         </nav>
         <div className="ml-auto flex items-center gap-1 text-sm text-muted-foreground">
-          {server?.error && <span className="text-destructive">{server.error}</span>}
-          {fromServer && !actor && !server?.error && <span>Not signed in</span>}
+          {error && <span className="text-destructive">{error}</span>}
+          {fromServer && !actor && !error && <span>Not signed in</span>}
           {actor && (
             <>
               <span>

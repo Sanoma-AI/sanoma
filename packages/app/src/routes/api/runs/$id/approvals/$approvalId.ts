@@ -10,7 +10,7 @@ export const Route = createFileRoute("/api/runs/$id/approvals/$approvalId")({
   server: {
     handlers: {
       POST: async ({ request, params, context }) => {
-        const actor = requireActor(context);
+        const actor = await requireActor(context);
         const body = parse(
           DecideRequest,
           await readJson(request),

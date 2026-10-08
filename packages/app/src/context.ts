@@ -12,10 +12,6 @@ export interface AppContext {
   resolved: ResolvedConfig;
   description: ConfigDescription;
   client: SanomaClient;
-  resolveActor: ResolveActor;
-  /**
-   * True when `resolveActor` is the default, which reads the `x-sanoma-actor` header the page
-   * sends. A flag, not a comparison of functions: the server bundle has its own copy of it.
-   */
-  actorFromHeader: boolean;
+  /** The deployment's own; undefined for the default, the `x-sanoma-actor` header the page sends. */
+  resolveActor?: ResolveActor;
 }

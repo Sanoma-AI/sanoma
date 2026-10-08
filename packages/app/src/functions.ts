@@ -15,12 +15,19 @@ const CHANGE = { method: "POST", strict: { output: false } } as const;
 
 export const getConfig = createServerFn(READ).handler(({ context }) => context.app.description);
 
-/** Who the server resolves this request to, and whether it reads that from the page's header. */
-export const getActor = createServerFn(READ).handler(({ context }): ActorInfo => ({
-  fromHeader: context.app.actorFromHeader,
-  actor: context.actor ?? null,
-  ...(context.actorError ? { error: context.actorError.body.error } : {}),
-}));
+/**
+ * Who the server resolves this request to, and whether the deployment says so itself. A
+ * resolver that fails is logged, and the nav says so without its detail.
+ */
+export const getActor = createServerFn(READ).handler(async ({ context }): Promise<ActorInfo> => {
+  const fromServer = context.app.resolveActor !== undefined;
+  try {
+    return { fromServer, actor: (await context.actor()) ?? null };
+  } catch (err) {
+    console.error("sanoma app: resolveActor failed:", err);
+    return { fromServer, actor: null, error: "Could not tell who you are" };
+  }
+});
 
 export const getRuns = createServerFn(READ)
   .validator(RunsQuery)
@@ -33,8 +40,8 @@ export const getRun = createServerFn(READ)
 
 export const startRunFn = createServerFn(CHANGE)
   .validator(StartRunRequest)
-  .handler(({ data, context }) => startRun(context.app, requireActor(context), data));
+  .handler(async ({ data, context }) => startRun(context.app, await requireActor(context), data));
 
 export const decideFn = createServerFn(CHANGE)
   .validator(DecideCall)
-  .handler(({ data, context }) => decide(context.app, requireActor(context), data));
+  .handler(async ({ data, context }) => decide(context.app, await requireActor(context), data));

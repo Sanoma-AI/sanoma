@@ -22,15 +22,15 @@ export type { InputIssue } from "@sanoma/workflows";
 export const ACTOR_HEADER = "x-sanoma-actor";
 
 /**
- * Who the server says is asking. With the default resolver (`fromHeader`), that is whatever
- * name the page sends, so the page asks for one and keeps it; with a deployment's own
- * `resolveActor`, it is the deployment's login, which the page shows and cannot change.
+ * Who the server says is asking. With a deployment's own `resolveActor` (`fromServer`), it is
+ * the deployment's login, which the page shows and cannot change; with the default resolver, it
+ * is whatever name the page sends, so the page asks for one and keeps it.
  */
 export interface ActorInfo {
-  fromHeader: boolean;
+  fromServer: boolean;
   /** Null when the request names nobody. */
   actor: Principal | null;
-  /** Why the deployment's `resolveActor` could not say, when it threw. */
+  /** Set when the deployment's `resolveActor` threw: it could not say. */
   error?: string;
 }
 
