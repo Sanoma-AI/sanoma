@@ -119,22 +119,33 @@ export class SanomaClient {
   }
 
   /**
-   * The app's runs, newest first: the latest `limit` (a number, or `{ limit }`), or those with
-   * a `status`. `running` and `waiting` read every unfinished run, since only the approvals tell
-   * them apart, and keep the first `limit` with that status.
+   * The app's runs, newest first: the latest `limit`, or the latest `limit` with a `status`.
+   * Only the approvals tell `running` from `waiting`, so those read PENDING runs a page at a
+   * time until `limit` have that status.
    */
-  async runs(filter: number | RunsFilter = 20): Promise<RunSummary[]> {
-    const { limit = 20, status } = typeof filter === "number" ? { limit: filter } : filter;
-    const split = status === "running" || status === "waiting";
-    const rows = await this.dbos.listWorkflows({
-      limit: split ? undefined : limit,
-      status: status && dbosStatusesOf(status),
-      sortDesc: true,
-      applicationName: this.config.appName,
-      loadInput: false,
-    });
-    const runs = await Promise.all(rows.map((r) => this.summarize(r)));
-    return split ? runs.filter((r) => r.status === status).slice(0, limit) : runs;
+  async runs({ limit = 20, status }: RunsFilter = {}): Promise<RunSummary[]> {
+    const list = (more: { limit: number; offset?: number }) =>
+      this.dbos.listWorkflows({
+        ...more,
+        status: status && dbosStatusesOf(status),
+        sortDesc: true,
+        applicationName: this.config.appName,
+        loadInput: false,
+        // The output holds the error a summary shows; only an ended run can have one.
+        loadOutput: status === undefined || status === "failed" || status === "cancelled",
+      });
+    if (status !== "running" && status !== "waiting") {
+      return Promise.all((await list({ limit })).map((r) => this.summarize(r)));
+    }
+    const pageSize = Math.max(limit * 2, 50);
+    const found: RunSummary[] = [];
+    for (let offset = 0; ; offset += pageSize) {
+      const rows = await list({ limit: pageSize, offset });
+      for (const run of await Promise.all(rows.map((r) => this.summarize(r)))) {
+        if (run.status === status) found.push(run);
+      }
+      if (found.length >= limit || rows.length < pageSize) return found.slice(0, limit);
+    }
   }
 
   async run(runId: string): Promise<RunSummary | undefined> {

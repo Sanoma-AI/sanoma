@@ -42,14 +42,14 @@ describe("SanomaClient", () => {
   const c = () => app.client;
 
   it("refuses input the workflow's schema refuses, with invalid_input and zod's issues, before queueing", async () => {
-    const before = (await c().runs(1))[0]?.runId;
+    const before = (await c().runs({ limit: 1 }))[0]?.runId;
     const err = await caught(c().start(announce, { ...input, launchAt: "tomorrow" }, { startedBy: alice }));
     expect(errorCode(err)).toBe("invalid_input");
     expect(err).toMatchObject({
       message: expect.stringMatching(/launchAt/),
       data: { issues: [expect.objectContaining({ path: ["launchAt"], message: expect.any(String) })] },
     });
-    expect((await c().runs(1))[0]?.runId).toBe(before);
+    expect((await c().runs({ limit: 1 }))[0]?.runId).toBe(before);
   });
 
   it("requires a principal to start a run as", async () => {
@@ -74,7 +74,7 @@ describe("SanomaClient", () => {
   it("lists the app's runs with their status and who started them", async () => {
     const runId = await c().start(announce, input, { startedBy: { id: "bob", groups: ["ops", "marketing"] } });
     await waitFor(pending(c, runId));
-    const [listed] = (await c().runs(50)).filter((r) => r.runId === runId);
+    const [listed] = (await c().runs({ limit: 50 })).filter((r) => r.runId === runId);
     expect(listed).toMatchObject({
       workflow: "announce",
       status: "waiting",
