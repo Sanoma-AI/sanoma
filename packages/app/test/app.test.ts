@@ -340,6 +340,51 @@ describe("the page", () => {
   });
 });
 
+describe("an app with its own resolveActor", () => {
+  // Says who is asking from a test header, the way a hosted deployment reads its login.
+  let hosted: App;
+  beforeAll(async () => {
+    hosted = await startApp(config, {
+      resolveActor: (request) => {
+        const who = request.headers.get("x-test-user");
+        if (who === "boom") throw new Error("the session store is down");
+        return who ? { id: who, groups: ["marketing"] } : undefined;
+      },
+    });
+  });
+  afterAll(() => hosted?.close());
+
+  const post = (user?: string) =>
+    fetch(new URL("/api/runs", hosted.url), {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(user ? { "x-test-user": user } : {}) },
+      body: JSON.stringify({ workflow: "announce", input: input("Hosted") }),
+    }).then(async (res) => ({ status: res.status, body: (await res.json()) as ErrorResponse & { runId?: string } }));
+
+  it("starts runs as the principal it resolves, groups included", async () => {
+    const started = await post("sso-user");
+    expect(started.status).toBe(201);
+    const run = await waitFor(
+      () => detail(started.body.runId!),
+      (d) => d.run.startedBy !== undefined,
+    );
+    expect(run.run.startedBy).toEqual({ id: "sso-user", groups: ["marketing"] });
+  });
+
+  it("refuses a change it names nobody for without mentioning the header it does not read", async () => {
+    const anonymous = await post();
+    expect(anonymous.status).toBe(400);
+    expect(anonymous.body.code).toBe("invalid_input");
+    expect(anonymous.body.error).not.toMatch(/x-sanoma-actor/);
+  });
+
+  it("answers a resolver that throws with a 500 that says so", async () => {
+    const failed = await post("boom");
+    expect(failed.status).toBe(500);
+    expect(failed.body.error).toBe("Could not tell who you are: the session store is down");
+  });
+});
+
 describe("startApp", () => {
   it("says to build the app when it is not built", async () => {
     const empty = mkdtempSync(join(tmpdir(), "sanoma-app-dist-"));

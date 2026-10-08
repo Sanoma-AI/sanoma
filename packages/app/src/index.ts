@@ -75,7 +75,13 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     await client.close();
     throw err;
   }
-  const app: AppContext = { resolved, description, client, resolveActor: options.resolveActor ?? actorFromHeader };
+  const app: AppContext = {
+    resolved,
+    description,
+    client,
+    resolveActor: options.resolveActor ?? actorFromHeader,
+    actorFromHeader: options.resolveActor === undefined,
+  };
 
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => {

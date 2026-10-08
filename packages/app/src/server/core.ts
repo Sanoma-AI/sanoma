@@ -22,11 +22,27 @@ import type { AppContext } from "../context.ts";
 // What the API routes and the server functions both do. Server-only: each takes the app
 // context that startApp passes with every request. Every expected failure is an ApiError.
 
-/** Who is making a change (resolved once per request, in start.ts), or a 400 when nobody is named. */
-export function requireActor({ actor }: { actor?: Principal | undefined }): Principal {
+/**
+ * Who is making a change (resolved once per request, in start.ts), or a 400 when nobody is
+ * named. Only the default resolver reads the header, so only then does the answer name it.
+ */
+export function requireActor({
+  app,
+  actor,
+  actorError,
+}: {
+  app: AppContext;
+  actor?: Principal | undefined;
+  /** Set when `resolveActor` threw: a 500, already logged. */
+  actorError?: ApiError | undefined;
+}): Principal {
+  if (actorError) throw actorError;
   const parsed = Principal.safeParse(actor);
   if (parsed.success) return parsed.data;
-  throw new ApiError(400, { error: `Say who you are in the ${ACTOR_HEADER} header`, code: "invalid_input" });
+  const error = app.actorFromHeader
+    ? `Say who you are in the ${ACTOR_HEADER} header`
+    : "This request does not say who is making it: sign in";
+  throw new ApiError(400, { error, code: "invalid_input" });
 }
 
 /** The value, parsed by the schema, or a 400 `invalid_input` with zod's issues. */
@@ -102,10 +118,13 @@ export function asApiError(err: unknown): ApiError {
   return new ApiError(status, body);
 }
 
-/** `asApiError`, logging what it turns into a 500: only those are unexpected. */
+/**
+ * `asApiError`, logging what it turns into a 500: only those are unexpected. An ApiError was
+ * made on purpose, and a 500 one is logged where it was made.
+ */
 export function toApiError(err: unknown, where: string): ApiError {
   const api = asApiError(err);
-  if (api.status >= 500) console.error(`sanoma app: ${where} failed:`, err);
+  if (api.status >= 500 && !(err instanceof ApiError)) console.error(`sanoma app: ${where} failed:`, err);
   return api;
 }
 

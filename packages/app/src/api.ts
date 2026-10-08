@@ -104,6 +104,9 @@ export class ApiError extends Error {
   }
 }
 
+/** An error's message, or the value as text when it is not an Error. */
+export const errorMessageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
 /** The API error body an error carries, when it is an `ApiError`. */
 export const errorBodyOf = (err: unknown): ErrorResponse | undefined =>
   err instanceof ApiError ? err.body : undefined;
