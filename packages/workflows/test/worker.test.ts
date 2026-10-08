@@ -9,12 +9,12 @@ import {
   allowAll,
   defineConnector,
   defineWorkflow,
-  describeConfig,
   memoryLedger,
   resolveConfig,
   type SanomaConfig,
   startWorker,
 } from "../src/index.ts";
+import { describeConfig } from "../src/describe.ts";
 import announce from "./fixtures/announce.ts";
 import { marketingFakes } from "./harness.ts";
 

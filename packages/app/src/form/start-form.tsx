@@ -1,4 +1,4 @@
-import type { WorkflowEntry } from "@sanoma/workflows";
+import type { WorkflowEntry } from "@sanoma/workflows/describe";
 import { useForm } from "@tanstack/react-form";
 import { useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";

@@ -2,7 +2,12 @@ import type { z } from "zod";
 import { resolveConfig, type SanomaConfig } from "./config.ts";
 import { type Builtin, jsonSchemaOf, type Use } from "./define.ts";
 import { isOp, type Effect } from "./op.ts";
+import { type Outline, outlineWorkflow } from "./outline.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
+
+// `@sanoma/workflows/describe`: what a UI renders from. Apart from the main entry, so the
+// worker never loads oxc-parser, which the outline reads `run` with.
+export { outlineWorkflow, type Outline, type OutlineNode } from "./outline.ts";
 
 /** What a workflow is, read from its definition: enough to draw a start form and show what it may call. */
 export interface WorkflowEntry {
@@ -15,6 +20,8 @@ export interface WorkflowEntry {
   ops: string[];
   /** Built-ins the workflow may call. */
   builtins: Builtin[];
+  /** What its `run` calls, in order, read from its source (`outlineWorkflow`). */
+  outline: Outline;
 }
 
 /** What an operation is, read from its connector: enough to badge it and show its contract. */
@@ -66,6 +73,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     input: toJsonSchema(wf.input, `${wf.name} input`, "input"),
     ops: (wf.uses as Use[]).filter(isOp).map((op) => op.id),
     builtins: (wf.uses as Use[]).filter((u): u is Builtin => typeof u === "string"),
+    outline: outlineWorkflow(wf),
   }));
   workflows.sort((a, b) => a.name.localeCompare(b.name));
 

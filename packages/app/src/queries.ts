@@ -1,4 +1,4 @@
-import type { ConfigDescription } from "@sanoma/workflows";
+import type { ConfigDescription } from "@sanoma/workflows/describe";
 import { isEnded } from "@sanoma/workflows/shared";
 import { queryOptions } from "@tanstack/react-query";
 import { RUNS_LIMIT } from "./api.ts";

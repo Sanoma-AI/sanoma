@@ -1,4 +1,4 @@
-import type { OutlineNode } from "@sanoma/workflows/lint";
+import type { OutlineNode } from "@sanoma/workflows/describe";
 import type { GraphEdge, GraphNode, RunGraph } from "./run-graph.ts";
 
 /**

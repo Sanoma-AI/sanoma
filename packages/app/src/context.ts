@@ -1,5 +1,5 @@
 import type { Principal, ResolvedConfig, SanomaClient } from "@sanoma/workflows";
-import type { AppConfig } from "./api.ts";
+import type { ConfigDescription } from "@sanoma/workflows/describe";
 
 /**
  * Says who is making a request, or undefined when nobody is named. The app refuses a change
@@ -11,7 +11,8 @@ export type ResolveActor = (request: Request) => Principal | undefined | Promise
 /** What `startApp` hands every request: built once at boot, shared by all requests. */
 export interface AppContext {
   resolved: ResolvedConfig;
-  description: AppConfig;
+  /** `GET /api/config`, and the config the page reads: `describeConfig(config)`, made once. */
+  description: ConfigDescription;
   client: SanomaClient;
   /** The deployment's own; undefined for the default, the `x-sanoma-actor` header the page sends. */
   resolveActor?: ResolveActor;

@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { bluesky } from "@sanoma/connector-bluesky";
-import { outlineWorkflow } from "@sanoma/workflows/lint";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { outlineWorkflow } from "../src/describe.ts";
 import { defineConnector, defineWorkflow } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
 import fanout from "./fixtures/fanout.ts";
@@ -202,7 +202,7 @@ describe("outlineWorkflow, built", () => {
   const dist = (file: string) => pathToFileURL(join(pkg, "dist", file)).href;
 
   function needsBuild(): boolean {
-    const built = join(pkg, "dist", "lint.js");
+    const built = join(pkg, "dist", "describe.js");
     if (!existsSync(built)) return true;
     const builtAt = statSync(built).mtimeMs;
     return readdirSync(join(pkg, "src")).some((file) => statSync(join(pkg, "src", file)).mtimeMs > builtAt);
@@ -219,7 +219,7 @@ describe("outlineWorkflow, built", () => {
       writeFileSync(
         script,
         `import { defineWorkflow } from ${JSON.stringify(dist("index.js"))};
-import { outlineWorkflow } from ${JSON.stringify(dist("lint.js"))};
+import { outlineWorkflow } from ${JSON.stringify(dist("describe.js"))};
 const built = defineWorkflow({
   name: "built",
   trigger: "manual",

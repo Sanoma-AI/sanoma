@@ -18,6 +18,7 @@
     // Keep in sync with resolve.alias in vitest.config.ts.
     "paths": {
       "@sanoma/workflows": ["./packages/workflows/src/index.ts"],
+      "@sanoma/workflows/describe": ["./packages/workflows/src/describe.ts"],
       "@sanoma/workflows/fake": ["./packages/workflows/src/fake.ts"],
       "@sanoma/workflows/lint": ["./packages/workflows/src/lint.ts"],
       "@sanoma/workflows/shared": ["./packages/workflows/src/shared.ts"],

@@ -7,12 +7,12 @@ import {
   allow,
   allowAll,
   defineConfig,
-  describeConfig,
   defineConnector,
   definePolicy,
   defineWorkflow,
   memoryLedger,
 } from "../src/index.ts";
+import { describeConfig, outlineWorkflow } from "../src/describe.ts";
 import announce from "./fixtures/announce.ts";
 import { marketingFakes } from "./harness.ts";
 
@@ -25,7 +25,7 @@ const base = defineConfig({
 });
 
 describe("describeConfig", () => {
-  it("describes each workflow: its input as JSON Schema, the operations it may call, and its built-ins", () => {
+  it("describes each workflow: its input as JSON Schema, the operations it may call, its built-ins and outline", () => {
     const wf = describeConfig(base).workflows[0]!;
     expect(wf.name).toBe("announce");
     expect(wf.title).toBe("Announce a launch");
@@ -42,6 +42,7 @@ describe("describeConfig", () => {
       "bluesky.post.create",
     ]);
     expect(wf.builtins).toEqual(["approval", "sleep"]);
+    expect(wf.outline).toEqual(outlineWorkflow(announce));
   });
 
   it("lists ctx.all among a workflow's built-ins", () => {

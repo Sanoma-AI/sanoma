@@ -1,4 +1,4 @@
-import type { OpEntry } from "@sanoma/workflows";
+import type { OpEntry, WorkflowEntry } from "@sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { PlayIcon } from "lucide-react";
@@ -8,7 +8,6 @@ import { Button } from "#/components/ui/button.tsx";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
-import type { AppWorkflow } from "../api.ts";
 import {
   Fact,
   Facts,
@@ -82,7 +81,7 @@ function Section({ title, note, children }: { title: string; note?: ReactNode; c
 
 const None = ({ children = "None." }: { children?: ReactNode }) => <p className="text-muted-foreground">{children}</p>;
 
-function WorkflowCard({ workflow, ops }: { workflow: AppWorkflow; ops: Map<string, OpEntry> }) {
+function WorkflowCard({ workflow, ops }: { workflow: WorkflowEntry; ops: Map<string, OpEntry> }) {
   const fields = fieldsOf(workflow.input);
   const { outline } = workflow;
   const graph = useMemo(() => ("nodes" in outline ? outlineGraph(outline.nodes) : undefined), [outline]);

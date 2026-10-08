@@ -19,6 +19,7 @@
     // `imports`, which TypeScript, Vite and the shadcn CLI all read.)
     "paths": {
       "@sanoma/workflows": ["../workflows/src/index.ts"],
+      "@sanoma/workflows/describe": ["../workflows/src/describe.ts"],
       "@sanoma/workflows/shared": ["../workflows/src/shared.ts"]
     }
   },

@@ -1,4 +1,4 @@
-import type { OutlineNode } from "@sanoma/workflows/lint";
+import type { OutlineNode } from "@sanoma/workflows/describe";
 import { describe, expect, it } from "vitest";
 import { CLUSTER_HEADER, layout, NODE_SIZE } from "../src/graph/layout.ts";
 import { outlineGraph } from "../src/graph/outline-graph.ts";

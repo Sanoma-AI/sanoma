@@ -5,17 +5,9 @@ import type { AddressInfo } from "node:net";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import {
-  describeConfig,
-  errorMessage,
-  type ResolvedConfig,
-  resolveConfig,
-  SanomaClient,
-  type SanomaConfig,
-} from "@sanoma/workflows";
-import { outlineWorkflow } from "@sanoma/workflows/lint";
+import { errorMessage, resolveConfig, SanomaClient, type SanomaConfig } from "@sanoma/workflows";
+import { describeConfig } from "@sanoma/workflows/describe";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
-import type { AppConfig } from "./api.ts";
 import type { AppContext, ResolveActor } from "./context.ts";
 import { hostName, isLoopback, refuseHost } from "./loopback.ts";
 
@@ -57,7 +49,7 @@ interface ServerEntry {
  */
 export async function startApp(config: SanomaConfig, options: AppOptions = {}): Promise<App> {
   const resolved = resolveConfig(config);
-  const description = describe(config, resolved);
+  const description = describeConfig(config);
   const distDir = resolve(options.distDir ?? defaultDistDir());
   const host = options.host ?? "127.0.0.1";
   const loopbackOnly = isLoopback(host);
@@ -138,17 +130,6 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       })();
       return closing;
     },
-  };
-}
-
-/** The config as the page reads it: each workflow outlined from its `run`'s source, once. */
-function describe(config: SanomaConfig, resolved: ResolvedConfig): AppConfig {
-  const described = describeConfig(config);
-  const outlines = new Map(resolved.workflows.map((wf) => [wf.name, outlineWorkflow(wf)]));
-  return {
-    ...described,
-    // describeConfig lists the same workflows, by name.
-    workflows: described.workflows.map((wf) => ({ ...wf, outline: outlines.get(wf.name)! })),
   };
 }
 

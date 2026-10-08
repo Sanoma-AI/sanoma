@@ -24,7 +24,6 @@ export {
   type WorkflowDefinition,
 } from "./define.ts";
 export { defineConfig, resolveConfig, type ResolvedConfig, type SanomaConfig } from "./config.ts";
-export { describeConfig, type ConfigDescription, type OpEntry, type WorkflowEntry } from "./describe.ts";
 export {
   allow,
   allowAll,
@@ -64,6 +63,7 @@ export { startWorker, type Worker, type WorkerOptions } from "./worker.ts";
 export { SanomaClient, type RunsFilter, type RunSummary, type StartOptions } from "./client.ts";
 // Also at `@sanoma/workflows/shared`, which a browser bundle can import.
 export { approverLabel, ENDED_STATUSES, errorMessage, isEnded, mayDecide, type RunStatus } from "./shared.ts";
-// lintWorkflow lives at `@sanoma/workflows/lint`, so the runtime never loads oxc-parser.
+// lintWorkflow lives at `@sanoma/workflows/lint`, and describeConfig with the outline at
+// `@sanoma/workflows/describe`, so the runtime never loads oxc-parser.
 export { defineDriver, type DriverImpl, type OpIdOf } from "./op.ts";
 // defineFake lives at `@sanoma/workflows/fake`: test tooling, not runtime.
