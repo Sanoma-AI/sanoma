@@ -35,7 +35,12 @@ export function ZoomSlider({
       )}
       {...props}
     >
-      <div className={cn("flex gap-1", orientation === "horizontal" ? "flex-row" : "flex-col-reverse")}>
+      {/* shadcn's Slider passes no name to its thumb, so the group names the slider's controls. */}
+      <div
+        role="group"
+        aria-label="Zoom"
+        className={cn("flex gap-1", orientation === "horizontal" ? "flex-row" : "flex-col-reverse")}
+      >
         <Button variant="ghost" size="icon" aria-label="Zoom out" onClick={() => zoomOut({ duration })}>
           <Minus className="h-4 w-4" />
         </Button>
