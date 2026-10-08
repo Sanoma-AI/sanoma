@@ -21,12 +21,14 @@ import {
   OpName,
   PageHeader,
   RequestedBy,
-  RUN_TONE,
   SectionTitle,
   StatusDot,
   toneBadge,
   When,
 } from "../../components/common.tsx";
+import { useReducedMotion } from "#/lib/motion.ts";
+import { utcText } from "#/lib/time.ts";
+import { RUN_TONE } from "#/lib/tone.ts";
 import { runQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/runs/$id")({
@@ -50,11 +52,10 @@ let lit: { item: HTMLElement; timer: ReturnType<typeof setTimeout> } | undefined
  * Scrolls to a record's ledger item and highlights it for a while: an attribute on the element,
  * so the page does not render for it.
  */
-function show(recordId: string) {
+function show(recordId: string, reducedMotion: boolean) {
   const item = document.getElementById(ledgerItemId(recordId));
   if (!item) return;
-  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  item.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" });
+  item.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
   if (lit) {
     clearTimeout(lit.timer);
     delete lit.item.dataset.highlighted;
@@ -74,6 +75,8 @@ function RunPage() {
   // A new source on every poll, even one that changed nothing: a sleep's end may have come.
   const source = useMemo(() => ({ ledger, run, at: dataUpdatedAt }), [ledger, run, dataUpdatedAt]);
   const titles = useMemo(() => new Map(approvals.map((a) => [a.id, a.title])), [approvals]);
+  const reducedMotion = useReducedMotion();
+  const select = (recordId: string) => show(recordId, reducedMotion);
   return (
     <section className="flex flex-col gap-6">
       <PageHeader title={run.workflow}>
@@ -97,7 +100,7 @@ function RunPage() {
 
       <section className="flex flex-col gap-3">
         <SectionTitle>Graph</SectionTitle>
-        <GraphPanel source={source} onSelect={show} />
+        <GraphPanel source={source} onSelect={select} />
       </section>
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
@@ -199,17 +202,15 @@ const LedgerRow = memo(function LedgerRow({ record, titles }: { record: LedgerRe
         </p>
       );
       break;
-    case "sleep.started": {
-      // A time to come, which a relative time ("just now") would not say: the server's UTC.
-      const until = new Date(record.until).toISOString();
+    case "sleep.started":
+      // A time to come, which a relative time ("just now") would not say: in UTC.
       kind = "sleeping";
       body = (
         <p>
-          Until <time dateTime={until}>{until.replace("T", " ").slice(0, 16)} UTC</time>
+          Until <time dateTime={new Date(record.until).toISOString()}>{utcText(record.until)}</time>
         </p>
       );
       break;
-    }
     case "run.finished":
       kind = "finished";
       body = <Expandable label="Output" value={record.output} />;

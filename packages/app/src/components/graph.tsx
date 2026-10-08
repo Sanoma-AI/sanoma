@@ -21,25 +21,17 @@ import {
 import { cva } from "class-variance-authority";
 import type { LedgerRecord, RunSummary } from "@sanoma/workflows";
 import type { OpEntry, OutlineNode } from "@sanoma/workflows/describe";
-import {
-  createContext,
-  type ReactNode,
-  use,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { approverLabel } from "@sanoma/workflows/shared";
 import { layout } from "../graph/layout.ts";
 import { outlineGraph } from "../graph/outline-graph.ts";
 import { runGraph } from "../graph/run-graph.ts";
 import { type GraphNode, type GraphNodeKind, isPending } from "../graph/types.ts";
+import { useReducedMotion } from "#/lib/motion.ts";
+import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import { configQuery, opsById } from "../queries.ts";
-import { APPROVAL_TONE, DECISION_TONE, effectBadge, StatusDot, type Tone, toneBadge } from "./common.tsx";
+import { effectBadge, StatusDot, toneBadge } from "./common.tsx";
 
 // A run's graph, or a workflow's outline, drawn with React Flow. It needs the DOM, so the pages
 // load this module only in the browser (GraphPanel in common.tsx: React.lazy behind ClientOnly);
@@ -53,21 +45,6 @@ type Props<K extends GraphNodeKind> = { data: { node: Extract<GraphNode, { kind:
 const FIT = { padding: 0.1, minZoom: 0.25, maxZoom: 1 } as const;
 /** Below this zoom the badges cannot be read: fit one end of the graph instead of all of it. */
 const READABLE_ZOOM = 0.8;
-
-const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
-
-function watchReducedMotion(onChange: () => void) {
-  const query = window.matchMedia(REDUCED_MOTION);
-  query.addEventListener("change", onChange);
-  return () => query.removeEventListener("change", onChange);
-}
-
-const useReducedMotion = () =>
-  useSyncExternalStore(
-    watchReducedMotion,
-    () => window.matchMedia(REDUCED_MOTION).matches,
-    () => true,
-  );
 
 const frame = cva(
   "flex size-full flex-col justify-center gap-1 rounded-lg border bg-card px-2.5 text-xs text-card-foreground shadow-xs transition-colors",

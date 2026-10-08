@@ -450,7 +450,7 @@ describe("the page", () => {
     expect(workflows.text).toMatch(/default (&quot;|")newsletter(&quot;|")/);
     // Each workflow's outline, drawn in the browser like the run graph: a heading, what it is, a skeleton.
     expect(workflows.text).toMatch(
-      /<h3[^>]*>Outline<\/h3><p[^>]*>Read from the body of run; helpers it calls are not shown<\/p><\/div><div[^>]*><div data-slot="skeleton"[^>]*aria-label="Loading the graph"/,
+      /<h3[^>]*>Outline<\/h3><p[^>]*>Read from the body of run; the functions it calls are not shown, even those defined in it<\/p><div[^>]*><div data-slot="skeleton"[^>]*aria-label="Loading the graph"/,
     );
 
     const start = await page("/start");

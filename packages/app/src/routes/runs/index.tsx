@@ -4,7 +4,8 @@ import { PlayIcon } from "lucide-react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
-import { Nothing, Notice, PageHeader, plural, RUN_TONE, toneBadge, When } from "../../components/common.tsx";
+import { Nothing, Notice, PageHeader, plural, toneBadge, When } from "../../components/common.tsx";
+import { RUN_TONE } from "#/lib/tone.ts";
 import { pendingApprovals, starterName } from "../../api.ts";
 import { runsQuery } from "../../queries.ts";
 

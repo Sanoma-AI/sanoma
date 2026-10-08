@@ -19,13 +19,12 @@ import { Button } from "#/components/ui/button.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
+import { utcText } from "#/lib/time.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import { approverLabel } from "@sanoma/workflows/shared";
 import type { GraphProps } from "./graph.tsx";
 
 // Small pieces shared by the screens, composed from the shadcn components in ./ui.
-
-export { APPROVAL_TONE, DECISION_TONE, RUN_TONE, type Tone } from "#/lib/tone.ts";
 
 /** A ledger record's tone: what it did to the run. */
 export function ledgerTone(record: LedgerRecord): Tone {
@@ -154,11 +153,11 @@ function watchClock(onTick: () => void) {
 }
 
 const readClock = () => (now ??= Date.now());
-/** The server, and the browser while it hydrates, know no time: they render the ISO time. */
+/** The server, and the browser while it hydrates, know no time: they render the UTC time. */
 const noClock = () => undefined;
 
 /**
- * A time, relative to now in the browser. The server renders the ISO time, so the page
+ * A time, relative to now in the browser. The server renders the UTC time, so the page
  * hydrates the same markup whatever the browser's clock and time zone.
  */
 export function When({ at }: { at: number }) {
@@ -166,7 +165,7 @@ export function When({ at }: { at: number }) {
   const iso = new Date(at).toISOString();
   return (
     <time dateTime={iso} title={clock === undefined ? iso : new Date(at).toLocaleString()}>
-      {clock === undefined ? iso.replace("T", " ").slice(0, 19) : ago(at, clock)}
+      {clock === undefined ? utcText(at, { seconds: true }) : ago(at, clock)}
     </time>
   );
 }

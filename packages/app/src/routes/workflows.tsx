@@ -71,13 +71,10 @@ function WorkflowsPage() {
   );
 }
 
-function Section({ title, note, children }: { title: string; note?: ReactNode; children: ReactNode }) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-2">
-      <div className="flex flex-col gap-0.5">
-        <SubsectionTitle>{title}</SubsectionTitle>
-        {note && <p className="text-muted-foreground">{note}</p>}
-      </div>
+      <SubsectionTitle>{title}</SubsectionTitle>
       {children}
     </section>
   );
@@ -108,10 +105,12 @@ function WorkflowCard({ workflow, ops }: { workflow: WorkflowEntry; ops: Map<str
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <Section
-          title="Outline"
-          note={"error" in outline ? outline.error : "Read from the body of run; helpers it calls are not shown"}
-        >
+        <Section title="Outline">
+          <p className="text-muted-foreground">
+            {"error" in outline
+              ? outline.error
+              : "Read from the body of run; the functions it calls are not shown, even those defined in it"}
+          </p>
           {source && <GraphPanel source={source} show="start" />}
         </Section>
         <Separator />

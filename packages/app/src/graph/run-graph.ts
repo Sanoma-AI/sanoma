@@ -1,13 +1,12 @@
 import type { ApprovalState, LedgerGroup, LedgerRecord, RunSummary } from "@sanoma/workflows";
 import { isEnded } from "@sanoma/workflows/shared";
+import { utcText } from "../lib/time.ts";
 import { APPROVAL_TONE, RUN_TONE, type Tone } from "../lib/tone.ts";
 import { type Ends, outlineGraph } from "./outline-graph.ts";
 import type { Graph, Step } from "./types.ts";
 
 type OpStep = Extract<Step, { kind: "op" }>;
 type AllStep = Extract<Step, { kind: "all" }>;
-
-const sleepLabel = (until: number) => `sleep until ${new Date(until).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 
 /**
  * A run's graph, built from its ledger (`records`, in `seq` order) and its approvals as the run
@@ -105,7 +104,7 @@ export function runGraph(records: readonly LedgerRecord[], run: RunSummary, now:
           {
             kind: "sleep",
             key: `sleep:${record.seq}`,
-            label: sleepLabel(record.until),
+            label: `sleep until ${utcText(record.until)}`,
             state: { tone: asleep ? "waiting" : "ok", recordId: record.id },
           },
           record.group,
