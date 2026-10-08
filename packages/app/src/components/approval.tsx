@@ -1,4 +1,4 @@
-import type { ApprovalState, RunSummary } from "@sanoma/workflows";
+import type { ApprovalState, RunStatus, RunSummary } from "@sanoma/workflows";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -44,17 +44,27 @@ import {
 
 type Decision = DecideRequest["decision"];
 
-/** An approval: what it is for, who may decide, and the controls to decide while it is pending. */
+/** A run that has ended reads no more decisions. */
+const ENDED: ReadonlySet<RunStatus> = new Set(["finished", "failed", "cancelled"]);
+
+/**
+ * An approval: what it is for, who may decide, and the controls to decide while it is pending
+ * and its run can still read a decision.
+ */
 export function ApprovalCard({
   runId,
+  runStatus,
   approval,
   run,
 }: {
   runId: string;
+  /** The run's status: an approval left pending by a run that ended gets no controls. */
+  runStatus: RunStatus;
   approval: ApprovalState;
   /** The run it belongs to, for an approval shown away from its run: named under the title, and linked. */
   run?: Pick<RunSummary, "workflow" | "startedBy">;
 }) {
+  const decidable = approval.status === "pending" && !ENDED.has(runStatus);
   // The decision stays put while the dialog animates closed, so its verb and colour do not flip.
   const [decision, setDecision] = useState<Decision>("approve");
   const [deciding, setDeciding] = useState(false);
@@ -130,7 +140,12 @@ export function ApprovalCard({
           </Disclosure>
         )}
       </CardContent>
-      {approval.status === "pending" && (
+      {approval.status === "pending" && !decidable && (
+        <CardFooter>
+          <p className="text-sm text-muted-foreground">The run has {runStatus}, so this can no longer be decided.</p>
+        </CardFooter>
+      )}
+      {decidable && (
         <CardFooter className="flex-wrap gap-2">
           <Button onClick={() => decide("approve")}>
             <CheckIcon data-icon="inline-start" />
@@ -142,7 +157,7 @@ export function ApprovalCard({
           </Button>
         </CardFooter>
       )}
-      {approval.status === "pending" && (
+      {decidable && (
         <DecideDialog
           runId={runId}
           approval={approval}
@@ -175,14 +190,22 @@ function DecideDialog({
   const mutation = useMutation({
     // The server trims the note and drops an empty one.
     mutationFn: (chosen: Decision) => send({ data: { runId, approvalId: approval.id, decision: chosen, note } }),
-    onSuccess: async (_, chosen) => {
-      toast.success(`${chosen === "approve" ? "Approved" : "Rejected"} “${approval.title}”`);
-      setNote("");
-      onClose();
-      await Promise.all([
+    onSuccess: async (state, chosen) => {
+      const refresh = Promise.all([
         queryClient.invalidateQueries({ queryKey: ["run", runId] }),
         queryClient.invalidateQueries({ queryKey: ["runs"] }),
       ]);
+      // Still pending: the decision is queued, but the run has not read it. The dialog stays
+      // open, so the approver sees that nothing has happened yet.
+      if (state.status === "pending") {
+        toast.warning("Sent, but the run has not read it yet. Is a worker running?");
+        await refresh;
+        return;
+      }
+      toast.success(`${chosen === "approve" ? "Approved" : "Rejected"} “${approval.title}”`);
+      setNote("");
+      onClose();
+      await refresh;
     },
   });
   // An issue with the note belongs under it; anything else (not the approver, already decided,

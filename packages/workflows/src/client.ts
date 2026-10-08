@@ -170,9 +170,10 @@ export class SanomaClient {
   /**
    * Sends a decision on the run's pending approval (or the one named), as `message.by`, and
    * waits for the run to read it. Returns the approval as decided. Throws without sending when
-   * `by` may not decide it (`not_approver`), when there is nothing to decide
-   * (`no_pending_approval`, `run_not_found`), or when it is decided already (`already_decided`),
-   * and throws `already_decided` too when another decision reached the run first.
+   * it is decided already (`already_decided`), when the run has finished, failed or been
+   * cancelled (`run_ended`), when there is nothing to decide (`no_pending_approval`,
+   * `run_not_found`), or when `by` may not decide it (`not_approver`); and throws
+   * `already_decided` too when another decision reached the run first.
    *
    * If the run does not read the decision within `timeoutSeconds` (30 by default; the worker
    * may be down), returns the approval as it stands, still `pending`: the decision stays
@@ -188,9 +189,18 @@ export class SanomaClient {
     const all = await this.approvals(runId);
     const target = approvalId ? all.find((a) => a.id === approvalId) : all.find((a) => a.status === "pending");
     if (target && target.status !== "pending") throw alreadyDecided(runId, target);
+    // A run that has ended reads no more messages: a decision sent to it would wait forever.
+    const row = await this.dbos.getWorkflow(runId);
+    if (!row) throw new SanomaError("run_not_found", `No run ${runId}`, { runId });
+    const status = runStatus(row.status, all);
+    if (status === "finished" || status === "failed" || status === "cancelled") {
+      throw new SanomaError("run_ended", `Run ${runId} has ${status}; it takes no more decisions`, {
+        runId,
+        status,
+        ...(target ? { approvalId: target.id } : {}),
+      });
+    }
     if (!target) {
-      // A run with no approvals may not exist at all.
-      await this.mustExist(runId);
       throw new SanomaError(
         "no_pending_approval",
         `Run ${runId} has no pending approval${approvalId ? ` "${approvalId}"` : ""}`,
@@ -204,10 +214,12 @@ export class SanomaClient {
         approver: target.approver,
       });
     }
-    // The id names this message, so the run's answer says whether it decided with it; as the
-    // idempotency key, it also keeps a retried send from queueing the message twice.
+    // The id names this message, so the run's answer says whether it decided with it. In the
+    // idempotency key it keeps a retried send from queueing the message twice; DBOS scopes the
+    // key per run, not per topic, so it names the approval too: one message id reused for two
+    // approvals of a run would otherwise drop the second send.
     const id = msg.id ?? randomUUID();
-    await this.dbos.send(runId, { ...msg, id }, topicOf(target.id), id);
+    await this.dbos.send(runId, { ...msg, id }, topicOf(target.id), `${target.id}:${id}`);
     // DBOSClient does not LISTEN for events: it polls, every 10 s unless told otherwise. A
     // running worker answers within moments, so poll often at first, then once a second.
     const event = decisionEventOf(target.id);

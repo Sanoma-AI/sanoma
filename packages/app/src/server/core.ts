@@ -67,7 +67,10 @@ export async function startRun(
   return { runId: await client.start(workflow, body.input, { startedBy: actor }) };
 }
 
-/** Sends the decision, then answers with the approval once the run has read it (or as it stands after 5 s). */
+/**
+ * Sends the decision, then answers with the approval once the run has read it, or as it stands
+ * after 5 s: still `pending` when the run has not read it (no worker running, say).
+ */
 export function decide({ client }: AppContext, actor: Principal, call: DecideCall): Promise<ApprovalState> {
   const note = call.note?.trim() || undefined;
   return client.decide(call.runId, { decision: call.decision, by: actor, note }, call.approvalId, {
@@ -81,6 +84,7 @@ const STATUS: Partial<Record<NonNullable<ErrorResponse["code"]>, number>> = {
   run_not_found: 404,
   no_pending_approval: 404,
   already_decided: 409,
+  run_ended: 409,
 };
 
 /** An ApiError for any error: the runtime's codes get their status, anything else is a 500. */

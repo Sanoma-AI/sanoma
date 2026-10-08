@@ -48,9 +48,9 @@ The page uses server functions; scripts (and later Slack or access-request callb
 - `GET /api/runs?limit=50&status=waiting`: recent runs, newest first (`limit` 1 to 500), only those with `status` when given (`queued`, `running`, `waiting`, `finished`, `failed` or `cancelled`).
 - `GET /api/runs/:id`: `{ run, ledger, ledgerError?, approvals }`.
 - `POST /api/runs` with `{ "workflow": name, "input": {...} }`: 201 `{ runId }`.
-- `POST /api/runs/:id/approvals/:approvalId` with `{ "decision": "approve" | "reject", "note"?: string }`: the approval's state.
+- `POST /api/runs/:id/approvals/:approvalId` with `{ "decision": "approve" | "reject", "note"?: string }`: the approval's state, 200 once the run has read the decision. When the run has not read it within 5 seconds (no worker is running, say), 202 with the approval still `pending`: the decision stays queued and the run reads it when it next runs. The page says so and keeps the dialog open.
 
-Errors are `{ error, code?, issues?, approver? }`. Branch on `code`, never on `error`: `invalid_input` is 400 (with `issues` when the input or the body does not match its schema), `not_approver` 403 (with `approver`), `run_not_found` and `no_pending_approval` 404, `already_decided` 409. An unknown workflow is 404 with `invalid_input` and an issue at `workflow`; a body without `content-type: application/json` is 415; anything unexpected is 500.
+Errors are `{ error, code?, issues?, approver? }`. Branch on `code`, never on `error`: `invalid_input` is 400 (with `issues` when the input or the body does not match its schema), `not_approver` 403 (with `approver`), `run_not_found` and `no_pending_approval` 404, `already_decided` and `run_ended` (the run has finished, failed or been cancelled, so it reads no decision) 409. An unknown workflow is 404 with `invalid_input` and an issue at `workflow`; a body without `content-type: application/json` is 415; anything unexpected is 500.
 
 ## Developing
 

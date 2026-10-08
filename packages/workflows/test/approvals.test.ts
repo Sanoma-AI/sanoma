@@ -134,8 +134,29 @@ describe("approvals a workflow asks for", () => {
 
     await c().result(runId);
     const none = await caught(c().decide(runId, { decision: "approve", by: lead }));
-    expect(errorCode(none)).toBe("no_pending_approval");
+    expect(errorCode(none)).toBe("run_ended");
+    expect(none).toMatchObject({ data: { runId, status: "finished" } });
     expect(app.ops()).toHaveLength(5);
+  });
+
+  it("says run_ended, without sending, for a decision on a run that has failed or been cancelled", async () => {
+    const rejected = await c().start(announce, input("Rejected"), { startedBy: alice });
+    await waitFor(pending(c, rejected));
+    await c().decide(rejected, { decision: "reject", by: lead });
+    expect(errorCode(await caught(c().result(rejected)))).toBe("approval_rejected");
+    const failed = await caught(c().decide(rejected, { decision: "approve", by: lead }));
+    expect(errorCode(failed)).toBe("run_ended");
+    expect(failed).toMatchObject({ message: `Run ${rejected} has failed; it takes no more decisions` });
+
+    // Cancelled while its approval was pending: the approval still says so, but no run will read a decision.
+    const cancelled = await c().start(announce, input("Cancelled"), { startedBy: alice });
+    await waitFor(pending(c, cancelled));
+    await app.raw.cancelWorkflow(cancelled);
+    await waitFor(async () => (await c().run(cancelled))?.status === "cancelled");
+    const ended = await caught(c().decide(cancelled, { decision: "approve", by: lead }));
+    expect(errorCode(ended)).toBe("run_ended");
+    expect(ended).toMatchObject({ data: { runId: cancelled, status: "cancelled", approvalId: "approval-1" } });
+    expect((await c().approvals(cancelled))[0]?.status).toBe("pending");
   });
 
   it("says run_not_found for a decision on a run that does not exist", async () => {
@@ -196,6 +217,21 @@ describe("approvals a policy asks for", () => {
 
     const requested = ofType(await c().ledger(runId), "approval.requested");
     expect(requested.map((r) => r.covers)).toEqual([[], ["ghost.post.publish"], ["bluesky.post.create"]]);
+  });
+
+  it("delivers two decisions that reuse one message id, on two approvals of a run", async () => {
+    const runId = await c().start(announce, input("Same id"), { startedBy: { id: "each" } });
+    await waitFor(pending(c, runId));
+    const first = await c().decide(runId, { id: "same", decision: "approve", by: lead });
+    expect(first).toMatchObject({ id: "approval-1", status: "approved", decidedWith: "same" });
+    await waitFor(pending(c, runId, 2));
+    const second = await c().decide(runId, { id: "same", decision: "approve", by: lead }, undefined, {
+      timeoutSeconds: 10,
+    });
+    expect(second).toMatchObject({ id: "approval-2", status: "approved", decidedWith: "same" });
+    await waitFor(pending(c, runId, 3));
+    await c().decide(runId, { decision: "approve", by: lead });
+    await c().result(runId);
   });
 
   it("lets a later call through when the policy's approval covers its operation too", async () => {

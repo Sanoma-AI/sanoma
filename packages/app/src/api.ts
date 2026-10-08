@@ -31,7 +31,13 @@ export interface StartRunResponse {
   runId: string;
 }
 
-/** `POST /api/runs/:id/approvals/:approvalId`. The response is the approval's `ApprovalState`. */
+/**
+ * `POST /api/runs/:id/approvals/:approvalId`. The response is the approval's `ApprovalState`:
+ * 200 once the run has read the decision (`status` is `approved` or `rejected`), or 202 with
+ * `status` still `pending` when the run did not read it within a few seconds, typically because
+ * no worker is running. A 202 decision stays queued, and the run reads it when it next runs.
+ * A run that has finished, failed or been cancelled takes no decision: 409 `run_ended`.
+ */
 export const DecideRequest = z.object({
   decision: z.enum(["approve", "reject"]),
   note: z.string().optional(),

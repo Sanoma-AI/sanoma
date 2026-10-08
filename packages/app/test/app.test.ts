@@ -223,6 +223,36 @@ describe("the API", () => {
     ]);
   });
 
+  it("answers 202 with the approval still pending when no worker reads the decision, which the run reads later", async () => {
+    const started = await call<{ runId: string }>("/api/runs", {
+      method: "POST",
+      actor: "alice",
+      body: { workflow: "announce", input: input("Nobody home") },
+    });
+    const id = started.body.runId;
+    await waitFor(
+      () => detail(id),
+      (d) => d.approvals.some((a) => a.status === "pending"),
+    );
+    await worker.stop();
+    try {
+      const sent = await call<ApprovalState>(`/api/runs/${id}/approvals/approval-1`, {
+        method: "POST",
+        actor: "marketing-lead",
+        body: { decision: "approve" },
+      });
+      expect(sent.status).toBe(202);
+      expect(sent.body).toMatchObject({ id: "approval-1", status: "pending" });
+    } finally {
+      worker = await startWorker(config);
+    }
+    const done = await waitFor(
+      () => detail(id),
+      (d) => d.run.status === "finished",
+    );
+    expect(done.approvals[0]).toMatchObject({ status: "approved", decidedBy: "marketing-lead" });
+  });
+
   it("says when a run or an approval does not exist, by code", async () => {
     const run = await call("/api/runs/does-not-exist");
     expect(run.status).toBe(404);
