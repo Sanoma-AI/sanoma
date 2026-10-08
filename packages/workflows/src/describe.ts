@@ -2,7 +2,7 @@ import type { z } from "zod";
 import { resolveConfig, type SanomaConfig } from "./config.ts";
 import { type Builtin, jsonSchemaOf, type Use } from "./define.ts";
 import { isOp, type Effect } from "./op.ts";
-import { allowAll } from "./policy.ts";
+import { allowAll, policyOpOf } from "./policy.ts";
 
 /** What a workflow is, read from its definition: enough to draw a start form and show what it may call. */
 export interface WorkflowEntry {
@@ -51,11 +51,7 @@ export interface ConfigDescription {
 export function describeConfig(config: SanomaConfig): ConfigDescription {
   const resolved = resolveConfig(config);
   const ops: OpEntry[] = [...resolved.ops.values()].map((op) => ({
-    id: op.id,
-    vendor: op.vendor,
-    resource: op.resource,
-    name: op.name,
-    effect: op.effect,
+    ...policyOpOf(op),
     idempotent: op.idempotent,
     description: op.description,
     input: toJsonSchema(op.input, `${op.id} input`, "input"),
