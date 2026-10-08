@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, stat, truncate } from "node:fs/promises";
+import { appendFile, mkdir, readFile, truncate } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Approver, Principal } from "./define.ts";
@@ -125,7 +125,8 @@ async function load(path: string): Promise<{ records: LedgerRecord[]; tornAt?: n
 }
 
 /**
- * Keeps each run's records in `<dir>/<runId>.jsonl`, one JSON object per line.
+ * Keeps each run's records in `<dir>/<runId>.jsonl`, one JSON object per line. A run with no
+ * file, or a directory not yet created, reads as no records.
  *
  * A line with no newline at the end of a file is a write that was cut off (the process
  * died mid-append): reads ignore it, and the next append removes it before writing.
@@ -164,17 +165,8 @@ export function jsonlLedger(dir: string): LedgerStore {
     async read(runId) {
       const path = file(runId);
       await queues.get(path)?.catch(() => {});
-      try {
-        await stat(root);
-      } catch (cause) {
-        if ((cause as NodeJS.ErrnoException).code === "ENOENT") {
-          throw new Error(
-            `Ledger directory ${root} does not exist (no run has written to it, or it is the wrong path)`,
-            { cause },
-          );
-        }
-        throw cause;
-      }
+      // A missing directory, like a missing file, means nothing has been recorded there yet:
+      // `load` reads either as no records. Any other failure is thrown.
       // A case-insensitive file system can map two run ids to one file.
       return (await load(path)).records.filter((r) => r.runId === runId).toSorted(bySeq);
     },

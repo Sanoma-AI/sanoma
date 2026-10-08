@@ -112,9 +112,8 @@ describe("jsonlLedger on a damaged file", () => {
     await expect(store.append(rec("c1", 3))).rejects.toThrow(/corrupt ledger line/);
   });
 
-  it("says when the directory does not exist, rather than reading no records", async () => {
-    const missing = join(dir, "no-such-dir");
-    await expect(jsonlLedger(missing).read("r1")).rejects.toThrow(`Ledger directory ${missing} does not exist`);
+  it("reads no records from a directory nothing has written to yet, as from a missing file", async () => {
+    expect(await jsonlLedger(join(dir, "missing")).read("r1")).toEqual([]);
   });
 });
 

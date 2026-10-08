@@ -45,8 +45,10 @@ export async function runDetail({ client, resolved }: AppContext, runId: string)
   try {
     return { run, ledger: await resolved.ledger.read(runId), approvals };
   } catch (err) {
-    // A JSONL ledger whose directory no run has written to yet throws; the run still shows, and
-    // the page gets the reason. Not logged: the page polls, and this is expected.
+    // A store reads a run nothing has recorded as no records, so this is a real failure (a
+    // corrupt file, a permission): logged for the operator, and the page shows the run and why
+    // its ledger is missing.
+    console.error(`sanoma app: could not read the ledger of run ${runId}:`, err);
     return { run, ledger: [], ledgerError: errorMessage(err), approvals };
   }
 }
