@@ -116,8 +116,8 @@ export function invalidInput(
 
 /**
  * What the ledger keeps of an error. `status`, `vendorCode` and `retryable` are a
- * `DriverError`'s account of the vendor's answer; `data` is a `SanomaError`'s. Each is there
- * only when the error has it.
+ * `DriverError`'s account of the vendor's answer; `data` is one of the runtime's errors'. Each is
+ * there only when the error has it, and `data`, `status` and `vendorCode` only from those errors.
  */
 export interface ErrorInfo {
   code?: ErrorCode;
@@ -140,12 +140,21 @@ function own<T>(err: unknown, key: string, type: "number" | "string" | "boolean"
   return typeof value === type && value !== null ? (value as T) : undefined;
 }
 
-/** The fields `errorInfo` copies when the error has them, with their types. */
+const fromDriver = (code: ErrorCode | undefined) => code === "driver_failed";
+const fromRuntime = (code: ErrorCode | undefined) => code !== undefined;
+const fromAny = () => true;
+
+/**
+ * The fields `errorInfo` copies, with their types, and from which errors. Only the runtime's
+ * errors give `data`, and only a `DriverError` the vendor's `status` and `vendorCode`: an error
+ * a driver lets escape (an HTTP client's) may carry the vendor's whole response under those
+ * names. `retryable` is anyone's, a ledger store's included.
+ */
 const KEPT = [
-  ["status", "number"],
-  ["vendorCode", "string"],
-  ["retryable", "boolean"],
-  ["data", "object"],
+  ["status", "number", fromDriver],
+  ["vendorCode", "string", fromDriver],
+  ["retryable", "boolean", fromAny],
+  ["data", "object", fromRuntime],
 ] as const;
 
 export function errorInfo(err: unknown): ErrorInfo {
@@ -155,8 +164,8 @@ export function errorInfo(err: unknown): ErrorInfo {
     name: err instanceof Error ? err.name : "Error",
     message: errorMessage(err),
   };
-  for (const [key, type] of KEPT) {
-    const value = own(err, key, type);
+  for (const [key, type, keeps] of KEPT) {
+    const value = keeps(code) ? own(err, key, type) : undefined;
     if (value !== undefined) Object.assign(info, { [key]: value });
   }
   if (info.data && Object.keys(info.data).length === 0) delete info.data;

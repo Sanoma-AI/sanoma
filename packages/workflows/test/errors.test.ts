@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { errorInfo } from "../src/errors.ts";
 import { DriverError, errorCode, PolicyDeniedError, RejectedError, SanomaError } from "../src/index.ts";
 
 describe("errorCode", () => {
@@ -28,5 +29,34 @@ describe("errorCode", () => {
       code: "approval_rejected",
       data: { title: "Review copy", by: { id: "lead" }, note: "wrong date", approvalId: "approval-2" },
     });
+  });
+});
+
+describe("errorInfo", () => {
+  it("keeps the vendor's answer from a DriverError and the data of the runtime's errors", () => {
+    const vendor = new DriverError("Ghost said no", { retryable: false, status: 422, vendorCode: "ValidationError" });
+    expect(errorInfo(vendor)).toEqual({
+      code: "driver_failed",
+      name: "DriverError",
+      message: "Ghost said no",
+      status: 422,
+      vendorCode: "ValidationError",
+      retryable: false,
+    });
+    expect(errorInfo(new PolicyDeniedError("ghost.post.publish", "not today"))).toMatchObject({
+      code: "policy_denied",
+      data: { op: "ghost.post.publish", reason: "not today" },
+    });
+  });
+
+  it("keeps no data, status or vendor code from an error the runtime did not make", () => {
+    // Like an HTTP client's error a driver let escape: the vendor's response under `data`.
+    const escaped = Object.defineProperty(Object.assign(new Error("fetch failed"), { status: 500 }), "data", {
+      get: () => ({ body: "the vendor's whole reply" }),
+      enumerable: true,
+    });
+    const store = Object.assign(new Error("corrupt ledger line"), { retryable: false, data: { line: 3 } });
+    expect(errorInfo(escaped)).toEqual({ name: "Error", message: "fetch failed" });
+    expect(errorInfo(store)).toEqual({ name: "Error", message: "corrupt ledger line", retryable: false });
   });
 });
