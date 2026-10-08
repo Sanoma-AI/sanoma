@@ -94,16 +94,25 @@ function serialize(record: LedgerRecord): string {
   }
 }
 
-const COMPARED = ["type", "decision", "error", "output"] as const;
+const COMPARED = ["type", "input", "decision", "error", "output"] as const;
 
-/** The first record with an id stands. Says so when a later one with that id differs where it matters. */
+/** A value as JSON, cut to `max` characters, for a message. */
+const brief = (json: string | undefined, max = 200) =>
+  json === undefined ? "nothing" : json.length > max ? `${json.slice(0, max)}…` : json;
+
+/**
+ * The first record with an id stands. Says so when a later one with that id differs where it
+ * matters, showing both, so a replay that went another way can be told from a retry.
+ */
 function warnIfDifferent(stored: LedgerRecord, line: string) {
   const later = JSON.parse(line) as Record<string, unknown>;
-  const differs = COMPARED.filter(
-    (k) => JSON.stringify((stored as Record<string, unknown>)[k]) !== JSON.stringify(later[k]),
-  );
+  const differs = COMPARED.flatMap((k) => {
+    const kept = JSON.stringify((stored as Record<string, unknown>)[k]);
+    const sent = JSON.stringify(later[k]);
+    return kept === sent ? [] : [`${k} (kept ${brief(kept)}, later ${brief(sent)})`];
+  });
   if (differs.length) {
-    warn(`ledger: kept the first record ${stored.id}; a later write differed in ${differs.join(", ")}`);
+    warn(`ledger: kept the first record ${stored.id}; a later write differed in ${differs.join("; ")}`);
   }
 }
 
@@ -225,6 +234,7 @@ async function append(run: Run, record: LedgerRecord) {
     } catch (err) {
       const wait = RETRY_DELAYS_MS[i];
       if (wait === undefined || isFinal(err)) throw err;
+      warn(`ledger: appending ${record.id} failed (${errorMessage(err)}); trying again in ${wait} ms`);
       await delay(wait);
     }
   }

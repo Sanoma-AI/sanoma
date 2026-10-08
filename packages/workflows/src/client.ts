@@ -248,12 +248,25 @@ export class SanomaClient {
     return now;
   }
 
+  /**
+   * The run's output once it ends, or its error. Throws `run_running` when it has not ended
+   * within `timeoutMs`; the run goes on.
+   */
   async result(runId: string, timeoutMs = 30_000): Promise<unknown> {
     await this.mustExist(runId);
-    return Promise.race([
-      this.dbos.retrieveWorkflow(runId).getResult(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error(`Run ${runId} still running`)), timeoutMs).unref()),
-    ]);
+    const running = () =>
+      new SanomaError("run_running", `Run ${runId} is still running after ${timeoutMs} ms`, { runId, timeoutMs });
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        this.dbos.retrieveWorkflow(runId).getResult(),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(running()), timeoutMs).unref();
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   close() {

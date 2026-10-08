@@ -11,6 +11,7 @@ const CODES = [
   "driver_failed",
   "invalid_input",
   "run_ended",
+  "run_running",
 ] as const;
 
 /**

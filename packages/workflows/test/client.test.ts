@@ -103,6 +103,16 @@ describe("SanomaClient", () => {
     expect(finished.every((r) => r.status === "finished")).toBe(true);
   });
 
+  it("says run_running when a run has not ended within the time result waits", async () => {
+    const runId = await c().start(announce, input, { startedBy: alice });
+    await waitFor(pending(c, runId));
+    const err = await caught(c().result(runId, 100));
+    expect(errorCode(err)).toBe("run_running");
+    expect(err).toMatchObject({ message: `Run ${runId} is still running after 100 ms`, data: { runId } });
+    await c().decide(runId, { decision: "approve", by: lead });
+    await c().result(runId);
+  });
+
   it("checks the config on connect, the way the worker does", async () => {
     await expect(SanomaClient.connect({ ...app.config, policy: undefined as never })).rejects.toThrow(
       "The config needs a `policy`; use `allowAll` to allow every operation call",

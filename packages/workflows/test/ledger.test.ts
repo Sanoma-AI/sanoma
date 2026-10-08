@@ -60,9 +60,16 @@ describe.each<[string, () => LedgerStore]>([
     await store.append({ ...rec(run, 1, "run.finished"), at: 5 });
     expect(warn).not.toHaveBeenCalled();
     await store.append(rec(run, 1, "run.finished", { seq: 2 }));
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`${run}:run.finished:1.*differed in output`)));
+    expect(warn).toHaveBeenCalledWith(
+      `sanoma: ledger: kept the first record ${run}:run.finished:1; a later write differed in output (kept {"seq":1}, later {"seq":2})`,
+    );
+    warn.mockClear();
+    // The input counts too: a replay that started with other input went another way.
+    await store.append(rec(run, 3, "run.started", "x".repeat(300)));
+    await store.append(rec(run, 3, "run.started", "y"));
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/differed in input \(kept "x{199}…, later "y"\)$/));
     warn.mockRestore();
-    expect((await store.read(run)).map((r) => (r.type === "run.finished" ? r.output : null))).toEqual([{ seq: 1 }]);
+    expect((await store.read(run)).flatMap((r) => (r.type === "run.finished" ? [r.output] : []))).toEqual([{ seq: 1 }]);
   });
 });
 
@@ -164,9 +171,21 @@ describe("writing a run's records", () => {
   it("retries a failed append, so a store failing twice then succeeding loses nothing", async () => {
     const { store, calls } = flaky(2);
     const run = runOn(store);
-    await write(run, entry(run, { type: "run.started", input: null }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let warned: unknown[];
+    try {
+      await write(run, entry(run, { type: "run.started", input: null }));
+      warned = warn.mock.calls.map(([m]) => m);
+    } finally {
+      warn.mockRestore();
+    }
     expect(calls()).toBe(3);
     expect(await store.read(run.id)).toHaveLength(1);
+    // Said once per retry, naming the record.
+    expect(warned).toEqual([
+      expect.stringMatching(new RegExp(`appending ${run.id}:run.started:0 failed .*trying again in 50 ms`)),
+      expect.stringMatching(/trying again in 200 ms/),
+    ]);
   });
 
   it("does not retry what would fail again: a record that isn't JSON, or a store error marked retryable: false", async () => {
