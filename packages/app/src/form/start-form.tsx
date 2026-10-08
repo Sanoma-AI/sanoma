@@ -131,7 +131,7 @@ function FieldView({ form, field, path }: { form: StartFormApi; field: SchemaFie
     return (
       <FieldSet>
         <FieldLegend>
-          <Label field={field} />
+          <LabelText field={field} />
         </FieldLegend>
         {field.description && <FieldDescription>{field.description}</FieldDescription>}
         <FieldGroup>
@@ -149,7 +149,7 @@ function FieldView({ form, field, path }: { form: StartFormApi; field: SchemaFie
         {(f) => (
           <FieldSet data-invalid={f.state.meta.errors.length ? true : undefined}>
             <FieldLegend>
-              <Label field={field} />
+              <LabelText field={field} />
             </FieldLegend>
             {field.description && <FieldDescription>{field.description}</FieldDescription>}
             <FieldGroup>
@@ -185,6 +185,14 @@ function FieldView({ form, field, path }: { form: StartFormApi; field: SchemaFie
   return <ScalarView form={form} field={field} name={name} />;
 }
 
+/** The text-like kinds, each one <Input>. */
+const INPUT_TYPE = {
+  string: { type: "text" },
+  datetime: { type: "datetime-local" },
+  number: { type: "number", step: "any" },
+  integer: { type: "number", step: 1 },
+} as const;
+
 function ScalarView({ form, field, name }: { form: StartFormApi; field: ScalarField; name: string }) {
   const id = `field-${name}`;
   return (
@@ -213,7 +221,7 @@ function ScalarView({ form, field, name }: { form: StartFormApi; field: ScalarFi
               />
               <FieldContent>
                 <FieldLabel htmlFor={id}>
-                  <Label field={field} />
+                  <LabelText field={field} />
                 </FieldLabel>
                 {description}
                 <Errors errors={f.state.meta.errors} />
@@ -225,22 +233,10 @@ function ScalarView({ form, field, name }: { form: StartFormApi; field: ScalarFi
         let control;
         switch (field.kind) {
           case "string":
-            control = <Input {...common} type="text" value={text} onChange={onText} />;
-            break;
           case "datetime":
-            control = <Input {...common} type="datetime-local" value={text} onChange={onText} />;
-            break;
           case "number":
           case "integer":
-            control = (
-              <Input
-                {...common}
-                type="number"
-                step={field.kind === "integer" ? 1 : "any"}
-                value={text}
-                onChange={onText}
-              />
-            );
+            control = <Input {...common} {...INPUT_TYPE[field.kind]} value={text} onChange={onText} />;
             break;
           case "enum":
             control = (
@@ -265,7 +261,7 @@ function ScalarView({ form, field, name }: { form: StartFormApi; field: ScalarFi
         return (
           <Field data-invalid={invalid}>
             <FieldLabel htmlFor={id}>
-              <Label field={field} />
+              <LabelText field={field} />
             </FieldLabel>
             {control}
             {description}
@@ -277,7 +273,7 @@ function ScalarView({ form, field, name }: { form: StartFormApi; field: ScalarFi
   );
 }
 
-function Label({ field }: { field: SchemaField }) {
+function LabelText({ field }: { field: SchemaField }) {
   return (
     <>
       {field.label}
