@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -408,6 +408,24 @@ describe("loadScenarios", () => {
       { file: "b.feature", message: 'b.feature: scenario "Same" is also in a.feature; give each its own name' },
       { file: "c.feature", message: expect.stringMatching(/^c\.feature:3: no step matches "nothing"/) },
     ]);
+  });
+
+  it("parses the files again only once one has changed", () => {
+    const sub = join(dir, "cached");
+    mkdirSync(sub);
+    writeFileSync(join(sub, "a.feature"), feature("First"));
+    const cachedScope = { ...scope, scenarios: pathToFileURL(`${sub}/`) };
+    const first = loadScenarios(cachedScope);
+    expect(loadScenarios(cachedScope)).toBe(first);
+
+    // Written again, longer, so the stamp changes even where the clock is coarse.
+    writeFileSync(join(sub, "a.feature"), feature("First, renamed"));
+    const second = loadScenarios(cachedScope);
+    expect(second).not.toBe(first);
+    expect(second.scenarios.map((s) => s.name)).toEqual(["First, renamed"]);
+
+    writeFileSync(join(sub, "b.feature"), feature("Second"));
+    expect(loadScenarios(cachedScope).scenarios.map((s) => s.name)).toEqual(["First, renamed", "Second"]);
   });
 
   it("finds no scenarios, and no errors, without a directory", () => {
