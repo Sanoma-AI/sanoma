@@ -38,6 +38,8 @@ export interface OpEntry {
   effect: Effect;
   idempotent: boolean;
   description?: string;
+  /** How a scenario's steps name it: Cucumber expressions over its input's fields. */
+  phrases?: { given?: string; then?: string };
   /** What a call sends, as JSON Schema (`io: "input"`: fields with defaults are optional). */
   input: Record<string, unknown>;
   /** What a call returns once its schema has parsed the vendor's reply (`io: "output"`). */
@@ -80,6 +82,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     ...policyOpOf(op),
     idempotent: op.idempotent,
     description: op.description,
+    ...(op.phrases && { phrases: op.phrases }),
     input: toJsonSchema(op.input, `${op.id} input`, "input"),
     output: toJsonSchema(op.output, `${op.id} output`, "output"),
   }));
