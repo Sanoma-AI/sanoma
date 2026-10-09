@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { getCallSites } from "node:util";
 import { z } from "zod";
 import type { Op } from "./op.ts";
 import { approverLabel } from "./shared.ts";
@@ -220,28 +221,16 @@ export function defineWorkflow<const U extends readonly Use[], S extends z.ZodTy
   if (!/^[a-z][a-z0-9-]*$/.test(def.name)) {
     throw new Error(`Workflow name "${def.name}" must be lowercase letters, digits and dashes`);
   }
-  return Object.freeze({ kind: "workflow", ...def, file: callerFile() });
+  // Frame 0 is this function, frame 1 its caller: by index, since a bundle may hold both.
+  return Object.freeze({ kind: "workflow", ...def, file: pathOf(getCallSites(2)[1]?.scriptName) });
 }
 
-const THIS_FILE = fileURLToPath(import.meta.url);
-
-/** The file of the code that called into this one, from V8's call sites; undefined where there are none. */
-function callerFile(): string | undefined {
-  const { prepareStackTrace, stackTraceLimit } = Error;
+/** The file of the code that called into this one, from V8's call site: its script as a path; undefined where there is none. */
+function pathOf(script: string | undefined): string | undefined {
+  if (!script?.startsWith("file:")) return script || undefined;
   try {
-    Error.stackTraceLimit = 20;
-    Error.prepareStackTrace = (_, sites) => sites;
-    const sites: unknown = new Error().stack;
-    if (!Array.isArray(sites)) return undefined;
-    for (const site of sites as NodeJS.CallSite[]) {
-      const name = site.getFileName();
-      if (!name || name.startsWith("node:")) continue;
-      const file = name.startsWith("file:") ? fileURLToPath(name) : name;
-      if (file !== THIS_FILE) return file;
-    }
+    return fileURLToPath(script);
+  } catch {
     return undefined;
-  } finally {
-    Error.prepareStackTrace = prepareStackTrace;
-    Error.stackTraceLimit = stackTraceLimit;
   }
 }
