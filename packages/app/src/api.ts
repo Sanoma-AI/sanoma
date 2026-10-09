@@ -115,9 +115,14 @@ export interface RunDetail {
   approvals: ApprovalState[];
   /**
    * For a sandbox run, each of its scenario's expectations checked against the ledger. Absent
-   * when the run has not been seeded yet, or its scenario is no longer in the config.
+   * until the run has been seeded, and when `checksError` says why there are none.
    */
   checks?: Check[];
+  /**
+   * Why a seeded sandbox run has no checks: its scenario is no longer in the feature files (with
+   * those that did not load), or the scenarios could not be read at all.
+   */
+  checksError?: string;
 }
 
 /** A scenario as the page lists it: what it says, not how the worker seeds and checks it. */
