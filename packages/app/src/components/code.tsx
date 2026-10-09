@@ -10,6 +10,7 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
+import type { Span } from "@sanoma/workflows/describe";
 import { useEffect, useEffectEvent, useRef } from "react";
 import { highlightedLines } from "#/lib/lines.ts";
 import { cn } from "#/lib/utils.ts";
@@ -18,9 +19,6 @@ import { cn } from "#/lib/utils.ts";
 // this module only in the browser (CodePanel in common.tsx: React.lazy, once seen); the server
 // renders the source as plain text instead. Colours come from the --code-* tokens in style.css,
 // so `.dark` flips the view with the rest of the page.
-
-/** A range of `source`, in UTF-16 offsets (CodeMirror's units). */
-export type Span = readonly [start: number, end: number];
 
 export interface CodeProps {
   source: string;
