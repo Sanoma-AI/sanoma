@@ -23,3 +23,12 @@ Feature: Announce a launch
     And "Review launch copy" is approved by marketing-lead
     Then post "post_0001" is published
     And the run succeeds
+
+  Scenario: Copy rejected
+    When announce runs with
+      | title    | Rejected             |
+      | launchAt | 2030-01-01T09:00:00Z |
+    And "Review launch copy" is rejected by marketing-lead
+    Then ghost.post.publish was not called
+    And resend.broadcast.send was called
+    And the run fails with "approval_rejected"

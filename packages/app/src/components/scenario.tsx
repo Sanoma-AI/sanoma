@@ -1,13 +1,11 @@
-import type { Check } from "@sanoma/workflows/scenario";
 import { errorMessage } from "@sanoma/workflows/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { CheckIcon, CircleDashedIcon, FlaskConicalIcon, XIcon } from "lucide-react";
+import { FlaskConicalIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardContent } from "#/components/ui/card.tsx";
-import { Item, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from "#/components/ui/item.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { errorBodyOf, type ScenarioEntry } from "../api.ts";
@@ -15,7 +13,7 @@ import { startRunFn } from "../functions.ts";
 import { RUNS_KEY } from "../queries.ts";
 import { Section } from "./common.tsx";
 
-// A workflow's scenarios, as its page offers them, and a sandbox run's checks, as its page shows them.
+// A workflow's scenarios, as its page offers them: to pick, to Test, and to read.
 
 /** One of the workflow's scenarios to try, or none: the page keeps the choice in its URL. */
 export function ScenarioPicker({
@@ -98,33 +96,5 @@ export function ScenarioCard({ scenario }: { scenario: ScenarioEntry }) {
         </Section>
       </CardContent>
     </Card>
-  );
-}
-
-/**
- * A sandbox run's checks: each expectation of its scenario, met or not. Until the run ends, one
- * not met yet is shown as still to come rather than failed.
- */
-export function Checks({ checks, ended }: { checks: Check[]; ended: boolean }) {
-  return (
-    <ItemGroup aria-label="Checks">
-      {checks.map((c, i) => (
-        <Item key={i} role="listitem" variant="outline" size="xs">
-          <ItemMedia variant="icon">
-            {c.ok ? (
-              <CheckIcon aria-label="met" className="text-tone-ok-foreground" />
-            ) : ended ? (
-              <XIcon aria-label="not met" className="text-destructive" />
-            ) : (
-              <CircleDashedIcon aria-label="not yet" className="text-muted-foreground" />
-            )}
-          </ItemMedia>
-          <ItemContent>
-            <ItemTitle>{c.step}</ItemTitle>
-            {c.detail && <ItemDescription>{c.detail}</ItemDescription>}
-          </ItemContent>
-        </Item>
-      ))}
-    </ItemGroup>
   );
 }

@@ -4,9 +4,9 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { memo, type ReactNode, useCallback, useMemo } from "react";
 import { Card, CardContent } from "#/components/ui/card.tsx";
-import { Item, ItemActions, ItemContent, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
-import { approverLabel, isEnded } from "@sanoma/workflows/shared";
-import { starterName } from "../../api.ts";
+import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
+import { approverLabel } from "@sanoma/workflows/shared";
+import { type RunCheck, starterName } from "../../api.ts";
 import { ApprovalCard } from "../../components/approval.tsx";
 import {
   DecisionBadge,
@@ -30,7 +30,6 @@ import {
   ToneBadge,
   When,
 } from "../../components/common.tsx";
-import { Checks } from "../../components/scenario.tsx";
 import type { GraphNode } from "../../graph/types.ts";
 import { useReducedMotion } from "#/lib/motion.ts";
 import { utcText } from "#/lib/time.ts";
@@ -142,7 +141,13 @@ function RunPage() {
               <span className="whitespace-pre-wrap">Could not check the run against its scenario: {checksError}</span>
             </Notice>
           )}
-          {checks && <Checks checks={checks} ended={isEnded(run.status)} />}
+          {checks && (
+            <ItemGroup aria-label="Checks">
+              {checks.map((c, i) => (
+                <CheckRow key={i} check={c} />
+              ))}
+            </ItemGroup>
+          )}
         </div>
       )}
 
@@ -173,6 +178,26 @@ function RunPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * One of a sandbox run's checks, as a ledger row is drawn: met, failed with why, or "not yet"
+ * while its answer can still change.
+ */
+function CheckRow({ check }: { check: RunCheck }) {
+  const tone = !check.settled ? "waiting" : check.ok ? "ok" : "bad";
+  const detail = check.settled ? check.detail : "not yet";
+  return (
+    <Item role="listitem" variant="outline" size="sm">
+      <ItemContent className="min-w-0">
+        <ItemTitle>
+          <StatusDot tone={tone} />
+          {check.step}
+        </ItemTitle>
+        {detail && <ItemDescription>{detail}</ItemDescription>}
+      </ItemContent>
+    </Item>
   );
 }
 

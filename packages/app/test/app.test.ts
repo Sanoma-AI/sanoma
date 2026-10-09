@@ -386,7 +386,7 @@ describe("scenarios and sandbox runs", () => {
     const { status, body } = await call<ScenariosResponse>("/api/scenarios");
     expect(status).toBe(200);
     expect(body.errors).toEqual([]);
-    expect(body.scenarios.map((s) => s.name)).toEqual([SCENARIO, "Publish retried"]);
+    expect(body.scenarios.map((s) => s.name)).toEqual([SCENARIO, "Publish retried", "Copy rejected"]);
     const launch = body.scenarios[0]!;
     expect(launch).toMatchObject({
       workflow: "announce",
@@ -429,7 +429,9 @@ describe("scenarios and sandbox runs", () => {
     const { status, body } = await call("/api/runs", { method: "POST", actor: "tester", body: { scenario: "nope" } });
     expect(status).toBe(404);
     expect(body).toMatchObject({ code: "invalid_input", issues: [expect.objectContaining({ path: ["scenario"] })] });
-    expect(body.error).toBe('No scenario named "nope"; the scenarios are "Launch on time", "Publish retried"');
+    expect(body.error).toBe(
+      'No scenario named "nope"; the scenarios are "Launch on time", "Publish retried", "Copy rejected"',
+    );
   });
 
   it("starts a sandbox run whose approval waits for a person, then checks it against the scenario", async () => {
@@ -453,7 +455,14 @@ describe("scenarios and sandbox runs", () => {
         expect.objectContaining({ op: "ghost.post.create", input: expect.objectContaining({ title: "Old news" }) }),
       ],
     });
-    expect(held.checks).toContainEqual({ step: "the run succeeds", ok: false, detail: "run not ended" });
+    // A call it expects has been made, so that check is settled; the outcome is not yet.
+    expect(held.checks).toContainEqual({ step: 'a post titled "Acme Pro" is created', ok: true, settled: true });
+    expect(held.checks).toContainEqual({
+      step: "the run succeeds",
+      ok: false,
+      detail: "run not ended",
+      settled: false,
+    });
 
     const decided = await call<ApprovalState>(`/api/runs/${sandboxId}/approvals/${held.approvals[0]!.id}`, {
       method: "POST",
@@ -467,6 +476,43 @@ describe("scenarios and sandbox runs", () => {
     );
     expect(done.checks).toHaveLength(5);
     expect(done.checks?.filter((c) => !c.ok)).toEqual([]);
+  });
+
+  it("settles a check once its answer cannot change, and fails those not met when the run ends", async () => {
+    const started = await call<{ runId: string }>("/api/runs", {
+      method: "POST",
+      actor: "tester",
+      body: { scenario: "Copy rejected" },
+    });
+    expect(started.status).toBe(201);
+    const id = started.body.runId;
+    const held = await waitFor(
+      () => detail(id),
+      (d) => d.approvals.some((a) => a.status === "pending"),
+    );
+    // A call not made so far may still be made: not settled, though met.
+    expect(held.checks).toEqual([
+      { step: "ghost.post.publish was not called", ok: true, settled: false },
+      expect.objectContaining({ step: "resend.broadcast.send was called", ok: false, settled: false }),
+      { step: 'the run fails with "approval_rejected"', ok: false, detail: "run not ended", settled: false },
+    ]);
+    expect((await page(`/runs/${id}`)).text).toMatch(/>not yet</);
+
+    const decided = await call<ApprovalState>(`/api/runs/${id}/approvals/${held.approvals[0]!.id}`, {
+      method: "POST",
+      actor: "marketing-lead",
+      body: { decision: "reject" },
+    });
+    expect(decided.body.status).toBe("rejected");
+    const failed = await waitFor(
+      () => detail(id),
+      (d) => d.run.status === "failed",
+    );
+    expect(failed.checks).toEqual([
+      { step: "ghost.post.publish was not called", ok: true, settled: true },
+      expect.objectContaining({ step: "resend.broadcast.send was called", ok: false, settled: true }),
+      { step: 'the run fails with "approval_rejected"', ok: true, settled: true },
+    ]);
   });
 });
 

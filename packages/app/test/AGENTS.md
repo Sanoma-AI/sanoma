@@ -14,5 +14,5 @@ Vitest tests for `@sanoma/app`. They start the app against a real config and cal
 | [`schema.test.ts`](schema.test.ts)                 | The start form's schema code: fields, input, issue targets and datetime-local values |
 | [`lines.test.ts`](lines.test.ts)                   | `highlightedLines` for the source panel                                              |
 | [`loopback.test.ts`](loopback.test.ts)             | The loopback rule for Host names                                                     |
-| [`fixtures/scenarios/`](fixtures/scenarios/)       | The feature file the app tests' config reads its scenarios from                      |
+| [`fixtures/scenarios/`](fixtures/scenarios/)       | The feature file the app tests copy and read their scenarios from                    |
 | [`graph-helpers.ts`](graph-helpers.ts)             | Edge and node helpers for the graph tests                                            |

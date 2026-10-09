@@ -5,6 +5,7 @@ import {
   errorCode,
   errorMessage,
   invalidInput,
+  isEnded,
   type LedgerRecord,
   Principal,
   type SanomaError,
@@ -123,7 +124,14 @@ export async function runDetail({ client, resolved }: AppContext, runId: string)
   try {
     const loaded = loadScenarios(resolved);
     const scenario = loaded.scenarios.find((s) => s.name === seeded.scenario);
-    if (scenario) return { run, ledger, approvals, checks: check(scenario, ledger) };
+    if (scenario) {
+      const ended = isEnded(run.status);
+      const checks = check(scenario, ledger).map((c, i) => {
+        const e = scenario.expect[i]!;
+        return { ...c, settled: ended || (c.ok && "op" in e && e.called) };
+      });
+      return { run, ledger, approvals, checks };
+    }
     const checksError = `The feature files no longer have scenario "${seeded.scenario}"${notLoaded(loaded.errors)}`;
     return { run, ledger, approvals, checksError };
   } catch (err) {
