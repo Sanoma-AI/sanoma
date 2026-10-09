@@ -1,7 +1,4 @@
 import { execFile } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { resolveConfig, SanomaClient } from "@sanoma/workflows";
@@ -46,24 +43,17 @@ describe("describeScenarios", () => {
     );
   });
 
-  const dir = mkdtempSync(join(tmpdir(), "sanoma-scenarios-"));
-  afterAll(() => rmSync(dir, { recursive: true, force: true }));
-
-  it("registers a failing test for a file that does not load, naming its file and line", async () => {
+  it("registers a failing test for a file that does not load, naming its file and line", async ({ signal }) => {
     // fixtures/broken.scenarios.ts, in a vitest of its own: its one test fails.
     const vitest = fileURLToPath(new URL("../../../node_modules/vitest/vitest.mjs", import.meta.url));
     const vitestConfig = fileURLToPath(new URL("./fixtures/vitest.config.ts", import.meta.url));
-    const report = join(dir, "report.json");
-    const run = promisify(execFile)(process.execPath, [
-      vitest,
-      "run",
-      "--config",
-      vitestConfig,
-      "--reporter=json",
-      `--outputFile=${report}`,
-    ]);
-    await expect(run).rejects.toMatchObject({ code: 1 });
-    const { testResults } = JSON.parse(readFileSync(report, "utf8")) as {
+    const args = [vitest, "run", "--config", vitestConfig];
+    const child = await promisify(execFile)(process.execPath, args, { signal }).then(
+      (out) => ({ code: 0, ...out }),
+      (err: { code?: number | string; stdout: string; stderr: string }) => err,
+    );
+    expect(child.code, `vitest exited with ${child.code}:\n${child.stderr}`).toBe(1);
+    const { testResults } = JSON.parse(child.stdout) as {
       testResults: { assertionResults: { fullName: string; status: string; failureMessages: string[] }[] }[];
     };
     const tests = testResults.flatMap((r) => r.assertionResults);
