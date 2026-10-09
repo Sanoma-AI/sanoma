@@ -76,9 +76,7 @@
   /* Source code (code.tsx): muted hues, readable on the background. */
   --code-keyword: oklch(0.5 0.15 260);
   --code-string: oklch(0.5 0.12 150);
-  --code-comment: var(--muted-foreground);
   --code-number: oklch(0.55 0.13 60);
-  --code-property: var(--foreground);
   --code-punctuation: oklch(0.5 0 0);
   --code-highlight: color-mix(in oklch, var(--primary) 7%, transparent);
 }
@@ -141,9 +139,7 @@
 
   --code-keyword: oklch(0.78 0.1 255);
   --code-string: oklch(0.8 0.12 150);
-  --code-comment: var(--muted-foreground);
   --code-number: oklch(0.82 0.11 75);
-  --code-property: var(--foreground);
   --code-punctuation: oklch(0.7 0 0);
   --code-highlight: color-mix(in oklch, var(--primary) 12%, transparent);
 }

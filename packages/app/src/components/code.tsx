@@ -52,9 +52,8 @@ const theme = EditorView.theme({
 const highlightStyle = HighlightStyle.define([
   { tag: tags.keyword, color: "var(--code-keyword)" },
   { tag: [tags.string, tags.regexp], color: "var(--code-string)" },
-  { tag: tags.comment, color: "var(--code-comment)", fontStyle: "italic" },
+  { tag: tags.comment, color: "var(--muted-foreground)", fontStyle: "italic" },
   { tag: [tags.number, tags.bool, tags.null], color: "var(--code-number)" },
-  { tag: tags.propertyName, color: "var(--code-property)" },
   { tag: [tags.punctuation, tags.operator], color: "var(--code-punctuation)" },
 ]);
 
