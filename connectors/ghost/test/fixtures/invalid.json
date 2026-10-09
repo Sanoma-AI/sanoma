@@ -1,0 +1,18 @@
+[
+  {
+    "method": "POST",
+    "path": "/posts/?source=html",
+    "status": 422,
+    "body": {
+      "errors": [
+        {
+          "message": "Validation error, cannot save post.",
+          "context": "Value in [posts.title] exceeds maximum length of 255 characters. posts.title",
+          "type": "ValidationError",
+          "code": null,
+          "id": "00000000-0000-4000-8000-000000000001"
+        }
+      ]
+    }
+  }
+]

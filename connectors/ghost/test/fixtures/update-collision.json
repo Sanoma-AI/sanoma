@@ -1,0 +1,18 @@
+[
+  {
+    "method": "PUT",
+    "path": "/posts/000000000000000000000001/",
+    "status": 409,
+    "body": {
+      "errors": [
+        {
+          "message": "Saving failed! Someone else is editing this post.",
+          "context": "Saving failed! Someone else is editing this post.",
+          "type": "UpdateCollisionError",
+          "code": "UPDATE_COLLISION",
+          "id": "00000000-0000-4000-8000-000000000001"
+        }
+      ]
+    }
+  }
+]

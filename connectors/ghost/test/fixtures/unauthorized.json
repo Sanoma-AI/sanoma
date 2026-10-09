@@ -1,0 +1,18 @@
+[
+  {
+    "method": "POST",
+    "path": "/posts/?source=html",
+    "status": 401,
+    "body": {
+      "errors": [
+        {
+          "message": "Unknown Admin API Key",
+          "context": null,
+          "type": "UnauthorizedError",
+          "code": "UNKNOWN_ADMIN_API_KEY",
+          "id": "00000000-0000-4000-8000-000000000001"
+        }
+      ]
+    }
+  }
+]

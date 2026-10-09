@@ -33,6 +33,10 @@
     "./fake": {
       "types": "./dist/fake.d.ts",
       "default": "./dist/fake.js"
+    },
+    "./driver": {
+      "types": "./dist/driver.d.ts",
+      "default": "./dist/driver.js"
     }
   },
   "publishConfig": {
@@ -41,10 +45,15 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
-    "prepack": "pnpm run clean && pnpm run build"
+    "prepack": "pnpm run clean && pnpm run build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "jose": "^6.2.12"
   },
   "devDependencies": {
     "@sanoma/workflows": "workspace:*",
+    "msw": "^3.0.2",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
