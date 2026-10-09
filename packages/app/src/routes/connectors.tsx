@@ -1,6 +1,6 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { CodeIcon, type LucideIcon, PackageIcon } from "lucide-react";
+import { ExternalLinkIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
@@ -37,7 +37,8 @@ function ConnectorCard({ connector: { id, vendor, ops, workflows } }: { connecto
     <Card>
       <CardHeader>
         <CardTitle role="heading" aria-level={2} className="flex items-center gap-2">
-          <VendorLogo vendor={id} className="size-6" />
+          {/* Decorative: the title beside it names the heading, which would otherwise read "Resend Resend". */}
+          <VendorLogo vendor={id} alt="" className="size-6" />
           {vendor.title}
         </CardTitle>
         <CardDescription>
@@ -45,27 +46,25 @@ function ConnectorCard({ connector: { id, vendor, ops, workflows } }: { connecto
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {(vendor.package || vendor.source) && (
-          // The links' icons line up with the card's text: a link button pads its icon side by 1.5.
-          <div className="-ml-1.5 flex flex-wrap">
+        {(vendor.package || vendor.homepage) && (
+          // The links' text lines up with the card's: a link button pads its text side by 2.5.
+          <div className="-ml-2.5 flex flex-wrap">
             {vendor.package && (
-              <ExternalLink href={`https://www.npmjs.com/package/${vendor.package}`} icon={PackageIcon}>
-                {vendor.package}
-              </ExternalLink>
+              <ExternalLink href={`https://www.npmjs.com/package/${vendor.package}`}>{vendor.package}</ExternalLink>
             )}
-            {vendor.source && (
-              <ExternalLink href={vendor.source} icon={CodeIcon}>
-                Source
-              </ExternalLink>
-            )}
+            {vendor.homepage && <ExternalLink href={vendor.homepage}>Source</ExternalLink>}
           </div>
         )}
         <Section title="Operations">
-          <ItemGroup>
-            {ops.map((op) => (
-              <OpItem key={op.id} id={op.id} op={op} />
-            ))}
-          </ItemGroup>
+          {ops.length === 0 ? (
+            <None />
+          ) : (
+            <ItemGroup>
+              {ops.map((op) => (
+                <OpItem key={op.id} id={op.id} op={op} />
+              ))}
+            </ItemGroup>
+          )}
         </Section>
         <Separator />
         <Section title="Used by">
@@ -88,13 +87,13 @@ function ConnectorCard({ connector: { id, vendor, ops, workflows } }: { connecto
   );
 }
 
-/** A link off the app, in a new tab. */
-function ExternalLink({ href, icon: Icon, children }: { href: string; icon: LucideIcon; children: ReactNode }) {
+/** A link off the app, in a new tab, which its icon says. */
+function ExternalLink({ href, children }: { href: string; children: ReactNode }) {
   return (
     <Button asChild variant="link" size="sm">
       <a href={href} target="_blank" rel="noreferrer">
-        <Icon data-icon="inline-start" />
         {children}
+        <ExternalLinkIcon data-icon="inline-end" />
       </a>
     </Button>
   );

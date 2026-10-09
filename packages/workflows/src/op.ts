@@ -72,8 +72,8 @@ export interface VendorInfo {
   logo?: { svg: string; dark?: string };
   /** The connector's npm package name, such as "@sanoma/connector-resend". */
   package?: string;
-  /** Where the connector's code is, as an https URL, such as its package's directory on GitHub. */
-  source?: string;
+  /** The connector package's `homepage` from its package.json: where its code and README are, as an https URL. */
+  homepage?: string;
 }
 
 /** One `<svg>` element, with nothing but whitespace around it. */
@@ -82,7 +82,7 @@ const SVG_ELEMENT = /^\s*<svg[\s>][\s\S]*<\/svg>\s*$/;
 /**
  * Declares a vendor's operations, grouped by resource: `defineConnector("ghost", { post: { create: {...} } })`.
  * `info` says who the vendor is and where the connector lives, for a UI:
- * `{ title: "Resend", logo: { svg }, package: "@sanoma/connector-resend", source: "https://…" }`.
+ * `{ title: "Resend", logo: { svg }, package: "@sanoma/connector-resend", homepage: "https://…" }`.
  */
 export function defineConnector<const V extends string, const S extends Specs>(
   vendor: V,
@@ -99,10 +99,11 @@ export function defineConnector<const V extends string, const S extends Specs>(
       );
     }
   }
-  // It becomes a link's href: nothing but https, so never a `javascript:` URL.
-  if (info?.source?.startsWith("https://") === false)
-    throw new Error(`defineConnector("${vendor}"): source must be an https URL`);
   const vendorInfo = info && Object.freeze({ ...info, ...(logo && { logo: logo as VendorInfo["logo"] }) });
+  // It becomes a link's href: a whole https URL, so never a `javascript:` one. Checked on the copy kept.
+  const homepage: unknown = vendorInfo?.homepage;
+  if (homepage !== undefined && (typeof homepage !== "string" || URL.parse(homepage)?.protocol !== "https:"))
+    throw new Error(`defineConnector("${vendor}"): homepage must be an https URL`);
   const out: Record<string, Record<string, Op>> = {};
   for (const [resource, ops] of Object.entries(specs)) {
     out[resource] = {};

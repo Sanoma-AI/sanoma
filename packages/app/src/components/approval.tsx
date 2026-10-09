@@ -126,7 +126,7 @@ export function ApprovalCard({
             {approval.links.map((href) => (
               <li key={href}>
                 <Item asChild variant="outline" size="xs">
-                  <a href={href} target="_blank" rel="noreferrer noopener" title={href}>
+                  <a href={href} target="_blank" rel="noreferrer" title={href}>
                     <ItemContent className="min-w-0">
                       {/* ItemTitle fits its content (w-fit): a long address is cut to the item instead. */}
                       <ItemTitle className="block max-w-full truncate">{href}</ItemTitle>
