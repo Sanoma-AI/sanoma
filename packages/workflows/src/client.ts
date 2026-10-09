@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { DBOSClient, Error as DBOSErrors, type WorkflowStatusString } from "@dbos-inc/dbos-sdk";
-import type { z } from "zod";
+import { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, messageKeyOf, topicOf } from "./approvals.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { type ApprovalState, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
@@ -135,7 +135,12 @@ export class SanomaClient {
       options?.startedBy,
       '`startedBy` must be a principal, such as { id: "alice" }',
     );
-    const { runId, sandbox } = options;
+    const { runId } = options;
+    const sandbox = parseOrThrow(
+      z.string().min(1).optional(),
+      options.sandbox,
+      "`sandbox` must be the name of a scenario in the config's `scenarios`",
+    );
     const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }) };
     // An id DBOS has already returns that run, unless it is another workflow's, which DBOS refuses.
     const handle = await this.dbos

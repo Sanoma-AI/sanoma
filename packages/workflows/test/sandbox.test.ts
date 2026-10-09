@@ -247,6 +247,14 @@ describe("sandbox runs", () => {
     expect(records.map((r) => r.seq)).toEqual(records.map((_, i) => i));
   });
 
+  it("refuses a sandbox that is not a scenario's name", async () => {
+    for (const sandbox of [7, ""]) {
+      const err = await failure(c().start(review, {}, { startedBy: alice, sandbox: sandbox as never }));
+      expect(errorCode(err)).toBe("invalid_input");
+      expect((err as Error).message).toMatch(/^`sandbox` must be the name of a scenario in the config's `scenarios`/);
+    }
+  });
+
   it("refuses to reuse a run id for a start in another sandbox, or none", async () => {
     const launch = scenario("Launch on time");
     const runId = randomUUID();
