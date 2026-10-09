@@ -43,6 +43,8 @@ export interface ScenarioStep {
   kind: "given" | "when" | "then";
   /** The operation the step is about, when it names one. */
   op?: string;
+  /** For a `Then` step about an operation: true when it expects a call, false for `was not called`. */
+  called?: boolean;
 }
 
 /** A fake's state to seed through one of its operations, or a fault to inject into its next call. */
@@ -516,6 +518,7 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
       }
       const [{ rule, args }] = matches as [{ rule: Rule; args: readonly Argument[] }];
       let op: string | undefined;
+      let called: boolean | undefined;
       try {
         const values = args.map((a) => a.getValue<unknown>(null));
         const step = ps.text;
@@ -529,7 +532,7 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
           case "then": {
             const item = rule.read(values, ps);
             scenario.expect.push({ step, ...item });
-            op = "op" in item ? item.op : undefined;
+            if ("op" in item) ({ op, called } = item);
             break;
           }
           case "any":
@@ -544,7 +547,12 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
         if (isBug(err)) throw err;
         throw new Error(`${where(line)}: ${errorMessage(err)}`, { cause: err });
       }
-      scenario.steps.push({ text: ps.text, kind, ...(op === undefined ? {} : { op }) });
+      scenario.steps.push({
+        text: ps.text,
+        kind,
+        ...(op === undefined ? {} : { op }),
+        ...(called === undefined ? {} : { called }),
+      });
     }
     const { workflow } = scenario;
     if (workflow === undefined) {
