@@ -321,6 +321,7 @@ describe("runGraph", () => {
       { kind: "approval", title: "Send it?", span: [60, 70] },
       { kind: "approval", span: [80, 90] },
       { kind: "sleep", span: [100, 110] },
+      { kind: "op", id: "*.post.create", span: [120, 130] },
     ];
     const spans = (records: LedgerRecord[], status: RunStatus = "running") =>
       runGraph(records, run(status), NOW, outline).nodes.map(
@@ -329,28 +330,45 @@ describe("runGraph", () => {
 
     it("points an operation's call at the outline's calls of that operation, wherever they are", () => {
       expect(
-        spans(ledger(started, called("ghost.post.create"), called("resend.broadcast.send"), called("x.post.create"))),
+        spans(
+          ledger(
+            started,
+            called("ghost.post.create"),
+            called("resend.broadcast.send"),
+            called("x.post.create"),
+            called("x.mail.send"),
+          ),
+        ),
       ).toEqual([
         "start null",
+        // Its own calls, not the computed one it also fits.
         "op:1 [[0,10]]",
         "op:2 [[20,30],[40,50]]",
-        // Not in the outline: nowhere.
-        "op:3 null",
+        // None of its own: the calls with a computed segment that fits it.
+        "op:3 [[120,130]]",
+        // Nothing fits: nowhere.
+        "op:4 null",
         "end null",
       ]);
     });
 
-    it("points an approval at the outline's approvals with its title, or at all of them, and a sleep at the sleeps", () => {
+    it("points an approval at the outline's approvals with its title, or else at the untitled ones, and a sleep at the sleeps", () => {
       const until = NOW + 60_000;
       expect(
         spans(ledger(started, requested("Send it?"), requested("Other"), { type: "sleep.started", until })),
       ).toEqual([
         "start null",
         "approval:approval-Send it? [[60,70]]",
-        "approval:approval-Other [[60,70],[80,90]]",
+        "approval:approval-Other [[80,90]]",
         "sleep:3 [[100,110]]",
         "end null",
       ]);
+    });
+
+    it("points an approval nowhere when no approval has its title and none is untitled", () => {
+      const titled: OutlineNode[] = [{ kind: "approval", title: "Send it?", span: [60, 70] }];
+      const { nodes } = runGraph(ledger(started, requested("Other")), run("running"), NOW, titled);
+      expect(nodes.find((n) => n.kind === "approval")?.spans).toBeUndefined();
     });
 
     it("points a pending member nowhere", () => {

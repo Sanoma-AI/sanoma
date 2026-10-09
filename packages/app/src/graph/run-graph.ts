@@ -170,14 +170,23 @@ const calls = (nodes: readonly OutlineNode[]): Call[] =>
           : [node],
   );
 
+/** True when an outline's op id, a computed segment shown as `*`, could be this op: `a.*.c` fits `a.b.c`. */
+function fits(pattern: string, op: string): boolean {
+  const want = pattern.split(".");
+  const got = op.split(".");
+  return want.length === got.length && want.every((segment, i) => segment === "*" || segment === got[i]);
+}
+
 /** The calls' spans, or none when there are no calls. */
 const spansOf = (found: readonly Call[]) => (found.length ? found.map((call) => call.span) : undefined);
 
 /**
- * Where a run's call is in the source: the spans of the outline's calls it may be. A record says
- * what was called, not where from, so a step may be any of several calls: an operation's, the
- * calls of that operation; an approval's, those with its title, or else every approval; a
- * sleep's, every sleep.
+ * Where a run's call is in the source: the spans of the outline's calls it may be, matched by what
+ * the record names. A record says what was called, not where from, so a step may be any of
+ * several calls: an operation's, the outline's calls of that operation, or else those whose id has
+ * a computed segment (`*`) that fits it; an approval's, those with its title, or else the untitled
+ * ones (a computed title is one); a sleep's, every sleep. None when nothing matches: a step is
+ * never pointed at a call it is not.
  */
 function whereIn(outline: readonly OutlineNode[]): (step: CallStep) => Span[] | undefined {
   const all = calls(outline);
@@ -185,12 +194,15 @@ function whereIn(outline: readonly OutlineNode[]): (step: CallStep) => Span[] | 
     all.filter((call): call is Extract<Call, { kind: K }> => call.kind === kind);
   return (step) => {
     switch (step.kind) {
-      case "op":
-        return spansOf(ofKind("op").filter((call) => call.id === step.id));
+      case "op": {
+        const ops = ofKind("op");
+        const same = ops.filter((call) => call.id === step.id);
+        return spansOf(same.length ? same : ops.filter((call) => fits(call.id, step.id)));
+      }
       case "approval": {
         const approvals = ofKind("approval");
         const titled = approvals.filter((call) => call.title === step.title);
-        return spansOf(titled.length ? titled : approvals);
+        return spansOf(titled.length ? titled : approvals.filter((call) => call.title === undefined));
       }
       case "sleep":
         return spansOf(ofKind("sleep"));
