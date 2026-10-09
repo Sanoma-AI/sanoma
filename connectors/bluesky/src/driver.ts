@@ -69,9 +69,19 @@ export function blueskyDriver(options: BlueskyDriverOptions = {}) {
         try {
           ref = await agent.app.bsky.feed.post.create({ repo: did, rkey }, record);
         } catch (err) {
-          // A repo holds one record per key, so a repeated create fails. If this key's post
-          // exists, an earlier try of this call made it (its reply was lost): return it.
-          const existing = await agent.app.bsky.feed.post.get({ repo: did, rkey }).catch(() => undefined);
+          // Refused outright: no record was made, so there is nothing to look for.
+          if (err instanceof XRPCError && REFUSED.has(err.status)) throw driverError(err, "post", timeoutMs);
+          // A repo holds one record per key, so a repeated create fails (Bluesky's PDS answers
+          // 500). If this key's post exists, an earlier try of this call made it (its reply was
+          // lost): return it. Only RecordNotFound says it does not; any other failure to read
+          // it back leaves that unknown, so the call may be tried again.
+          const existing = await agent.app.bsky.feed.post.get({ repo: did, rkey }).catch((lookup: unknown) => {
+            if (lookup instanceof XRPCError && lookup.error === "RecordNotFound") return undefined;
+            throw new DriverError(`Bluesky post failed, and reading it back failed too: ${(lookup as Error).message}`, {
+              retryable: true,
+              cause: lookup,
+            });
+          });
           if (!existing) throw driverError(err, "post", timeoutMs);
           if (existing.value.text !== text) {
             throw new DriverError(`Bluesky already has a different post at ${existing.uri}`, { retryable: false });
@@ -85,6 +95,9 @@ export function blueskyDriver(options: BlueskyDriverOptions = {}) {
     },
   });
 }
+
+/** A create that failed with one of these made no record: the request was bad or not allowed. */
+const REFUSED = new Set([400, 401, 403]);
 
 function env(name: string): string {
   const value = process.env[name];

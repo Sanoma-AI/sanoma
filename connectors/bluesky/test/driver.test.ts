@@ -184,11 +184,10 @@ describe("blueskyDriver", () => {
     expect(sentTo("com.atproto.repo.createRecord")[0]?.body.record.facets).toEqual([]);
   });
 
-  it.skipIf(live)("fails without retrying when Bluesky refuses the post (400)", async () => {
+  it.skipIf(live)("fails without retrying when Bluesky refuses the post (400), and does not look for it", async () => {
     server.use(
       xrpc("com.atproto.server.createSession", "createSession"),
       xrpc("com.atproto.repo.createRecord", "createRecord-invalid"),
-      xrpc("com.atproto.repo.getRecord", "getRecord-not-found"),
     );
     await expect(postCreate()({ text }, call(6))).rejects.toMatchObject({
       name: "DriverError",
@@ -197,7 +196,28 @@ describe("blueskyDriver", () => {
       vendorCode: "InvalidRequest",
       message: expect.stringMatching(/must not be longer than 300 graphemes/),
     });
+    expect(sentTo("com.atproto.repo.getRecord")).toEqual([]);
   });
+
+  it.skipIf(live)(
+    "fails as retryable, with the read-back's error, when a failed post cannot be read back",
+    async () => {
+      server.use(
+        xrpc("com.atproto.server.createSession", "createSession"),
+        xrpc("com.atproto.repo.createRecord", "createRecord-repeated"),
+        http.get("*/xrpc/com.atproto.repo.getRecord", () =>
+          HttpResponse.json({ error: "UpstreamFailure", message: "Upstream Failure" }, { status: 502 }),
+        ),
+      );
+      const err = (await postCreate()({ text }, call(12)).catch((e) => e)) as DriverError;
+      expect(err).toMatchObject({
+        name: "DriverError",
+        retryable: true,
+        message: "Bluesky post failed, and reading it back failed too: Upstream Failure",
+        cause: { status: 502, error: "UpstreamFailure" },
+      });
+    },
+  );
 
   it.skipIf(live)("fails as retryable when rate limited (429), saying when the limit resets", async () => {
     server.use(
@@ -231,7 +251,8 @@ describe("blueskyDriver", () => {
   it.skipIf(live)("fails as retryable when Bluesky does not answer in time", async () => {
     server.use(
       xrpc("com.atproto.server.createSession", "createSession"),
-      http.all("*/xrpc/com.atproto.repo.*", () => delay("infinite")),
+      http.post("*/xrpc/com.atproto.repo.createRecord", () => delay("infinite")),
+      xrpc("com.atproto.repo.getRecord", "getRecord-not-found"),
     );
     const err = (await postCreate({ timeoutMs: 100 })({ text }, call(9)).catch((e) => e)) as DriverError;
     expect(err).toMatchObject({ name: "DriverError", retryable: true, message: "Bluesky post timed out after 100 ms" });
