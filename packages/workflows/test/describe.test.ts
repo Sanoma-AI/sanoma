@@ -1,6 +1,9 @@
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
+import blueskyPkg from "../../../connectors/bluesky/package.json" with { type: "json" };
+import ghostPkg from "../../../connectors/ghost/package.json" with { type: "json" };
+import resendPkg from "../../../connectors/resend/package.json" with { type: "json" };
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
@@ -102,7 +105,7 @@ describe("describeConfig", () => {
     expect(add?.output).toMatchObject({ required: ["total", "unit"] });
   });
 
-  it("describes each vendor once, its logo as data: URLs; a connector that names no vendor gets its id as title", () => {
+  it("describes each vendor once, its logo as data: URLs, its package and source; a connector that names no vendor gets its id as title", () => {
     const counter = defineConnector("counter", {
       tally: { add: { effect: "write", input: z.object({}), output: z.object({}) } },
     });
@@ -112,6 +115,8 @@ describe("describeConfig", () => {
     expect(vendors.counter).toEqual({ title: "counter" });
     expect(vendors.resend).toMatchObject({
       title: "Resend",
+      package: "@sanoma/connector-resend",
+      source: "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/resend",
       logo: {
         src: expect.stringMatching(/^data:image\/svg\+xml,/),
         dark: expect.stringMatching(/^data:image\/svg\+xml,/),
@@ -121,6 +126,27 @@ describe("describeConfig", () => {
       /^<svg xmlns="http:\/\/www.w3.org\/2000\/svg"[^>]*>.*<\/svg>$/,
     );
     for (const vendor of ["ghost", "bluesky"]) expect(vendors[vendor]?.logo?.src).toBeDefined();
+  });
+
+  it.each([
+    { vendor: "resend", connector: resend, pkg: resendPkg },
+    { vendor: "ghost", connector: ghost, pkg: ghostPkg },
+    { vendor: "bluesky", connector: bluesky, pkg: blueskyPkg },
+  ])("names the $vendor connector's package and source as its package.json does", ({ connector, pkg }) => {
+    expect(connector[VENDOR].info).toMatchObject({
+      package: pkg.name,
+      source: pkg.homepage.replace(/#readme$/, ""),
+    });
+  });
+
+  it("refuses a source that is not an https URL", () => {
+    const specs = { tally: { add: { effect: "write", input: z.object({}), output: z.object({}) } } } as const;
+    for (const source of ["http://example.com/code", "javascript:alert(1)", "github.com/x"]) {
+      expect(() => defineConnector("counter", specs, { source })).toThrow(
+        'defineConnector("counter"): source must be an https URL',
+      );
+    }
+    expect(() => defineConnector("counter", specs, { source: "https://example.com/code" })).not.toThrow();
   });
 
   it("refuses a logo that is not one inline <svg> element", () => {

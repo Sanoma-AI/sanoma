@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiRouteImport } from './routes/api'
+import { Route as ConnectorsRouteImport } from './routes/connectors'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as RunsRouteRouteImport } from './routes/runs/route'
 import { Route as StartRouteImport } from './routes/start'
@@ -33,6 +34,11 @@ const IndexRoute = IndexRouteImport.update({
 const ApiRoute = ApiRouteImport.update({
   id: '/api',
   path: '/api',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConnectorsRoute = ConnectorsRouteImport.update({
+  id: '/connectors',
+  path: '/connectors',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InboxRoute = InboxRouteImport.update({
@@ -107,6 +113,7 @@ export interface FileRoutesByFullPath {
   '/runs': typeof RunsRouteRouteWithChildren
   '/workflows': typeof WorkflowsRouteRouteWithChildren
   '/api': typeof ApiRouteWithChildren
+  '/connectors': typeof ConnectorsRoute
   '/inbox': typeof InboxRoute
   '/start': typeof StartRoute
   '/api/$': typeof ApiSplatRoute
@@ -122,6 +129,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api': typeof ApiRouteWithChildren
+  '/connectors': typeof ConnectorsRoute
   '/inbox': typeof InboxRoute
   '/start': typeof StartRoute
   '/api/$': typeof ApiSplatRoute
@@ -140,6 +148,7 @@ export interface FileRoutesById {
   '/runs': typeof RunsRouteRouteWithChildren
   '/workflows': typeof WorkflowsRouteRouteWithChildren
   '/api': typeof ApiRouteWithChildren
+  '/connectors': typeof ConnectorsRoute
   '/inbox': typeof InboxRoute
   '/start': typeof StartRoute
   '/api/$': typeof ApiSplatRoute
@@ -159,6 +168,7 @@ export interface FileRouteTypes {
     | '/runs'
     | '/workflows'
     | '/api'
+    | '/connectors'
     | '/inbox'
     | '/start'
     | '/api/$'
@@ -174,6 +184,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/api'
+    | '/connectors'
     | '/inbox'
     | '/start'
     | '/api/$'
@@ -191,6 +202,7 @@ export interface FileRouteTypes {
     | '/runs'
     | '/workflows'
     | '/api'
+    | '/connectors'
     | '/inbox'
     | '/start'
     | '/api/$'
@@ -209,6 +221,7 @@ export interface RootRouteChildren {
   RunsRouteRoute: typeof RunsRouteRouteWithChildren
   WorkflowsRouteRoute: typeof WorkflowsRouteRouteWithChildren
   ApiRoute: typeof ApiRouteWithChildren
+  ConnectorsRoute: typeof ConnectorsRoute
   InboxRoute: typeof InboxRoute
   StartRoute: typeof StartRoute
 }
@@ -227,6 +240,13 @@ declare module '@tanstack/react-router' {
       path: '/api'
       fullPath: '/api'
       preLoaderRoute: typeof ApiRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/connectors': {
+      id: '/connectors'
+      path: '/connectors'
+      fullPath: '/connectors'
+      preLoaderRoute: typeof ConnectorsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/inbox': {
@@ -374,6 +394,7 @@ const rootRouteChildren: RootRouteChildren = {
   RunsRouteRoute: RunsRouteRouteWithChildren,
   WorkflowsRouteRoute: WorkflowsRouteRouteWithChildren,
   ApiRoute: ApiRouteWithChildren,
+  ConnectorsRoute: ConnectorsRoute,
   InboxRoute: InboxRoute,
   StartRoute: StartRoute,
 }

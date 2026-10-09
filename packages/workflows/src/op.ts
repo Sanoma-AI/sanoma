@@ -61,15 +61,19 @@ export interface ConnectorVendor<V extends string = string> {
 }
 
 /**
- * Who a connector's vendor is, for a UI to show beside its operations. `logo` is the vendor's
- * mark as inline SVG markup (one `<svg>…</svg>` element), and `dark` its variant for dark
- * backgrounds. The app shows a logo only as an image (a `data:` URL in an `<img>`), where an
- * SVG's scripts and external references never run or load.
+ * Who a connector's vendor is, and where the connector lives, for a UI to show beside its
+ * operations. `logo` is the vendor's mark as inline SVG markup (one `<svg>…</svg>` element), and
+ * `dark` its variant for dark backgrounds. The app shows a logo only as an image (a `data:` URL
+ * in an `<img>`), where an SVG's scripts and external references never run or load.
  */
 export interface VendorInfo {
   /** The vendor's name as it writes it, such as "Resend". */
   title?: string;
   logo?: { svg: string; dark?: string };
+  /** The connector's npm package name, such as "@sanoma/connector-resend". */
+  package?: string;
+  /** Where the connector's code is, as an https URL, such as its package's directory on GitHub. */
+  source?: string;
 }
 
 /** One `<svg>` element, with nothing but whitespace around it. */
@@ -77,7 +81,8 @@ const SVG_ELEMENT = /^\s*<svg[\s>][\s\S]*<\/svg>\s*$/;
 
 /**
  * Declares a vendor's operations, grouped by resource: `defineConnector("ghost", { post: { create: {...} } })`.
- * `info` says who the vendor is, for a UI: `{ title: "Resend", logo: { svg } }`.
+ * `info` says who the vendor is and where the connector lives, for a UI:
+ * `{ title: "Resend", logo: { svg }, package: "@sanoma/connector-resend", source: "https://…" }`.
  */
 export function defineConnector<const V extends string, const S extends Specs>(
   vendor: V,
@@ -94,6 +99,9 @@ export function defineConnector<const V extends string, const S extends Specs>(
       );
     }
   }
+  // It becomes a link's href: nothing but https, so never a `javascript:` URL.
+  if (info?.source?.startsWith("https://") === false)
+    throw new Error(`defineConnector("${vendor}"): source must be an https URL`);
   const vendorInfo = info && Object.freeze({ ...info, ...(logo && { logo: logo as VendorInfo["logo"] }) });
   const out: Record<string, Record<string, Op>> = {};
   for (const [resource, ops] of Object.entries(specs)) {
