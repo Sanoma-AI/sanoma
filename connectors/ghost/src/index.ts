@@ -1,7 +1,8 @@
 import { defineConnector } from "@sanoma/workflows";
 import { z } from "zod";
 
-const Post = z.object({
+/** A post, as the operations return it. */
+export const Post = z.object({
   id: z.string(),
   url: z.string(),
   slug: z.string(),

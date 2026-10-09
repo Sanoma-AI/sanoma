@@ -1,12 +1,12 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { brotliDecompressSync, gunzipSync, inflateSync } from "node:zlib";
-import { decodeProtectedHeader, jwtVerify, SignJWT } from "jose";
+import { decodeProtectedHeader, jwtVerify } from "jose";
 import { delay, http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
 import { type CallContext, DriverError } from "@sanoma/workflows";
-import { ghostDriver } from "../src/driver.ts";
+import { adminToken, ghostDriver } from "../src/driver.ts";
 import type { ghost } from "../src/index.ts";
 
 /*
@@ -218,13 +218,7 @@ afterEach(async () => {
 afterAll(async () => {
   // Live, delete the posts the tests made, with a token signed as the driver signs one.
   if (LIVE && created.length) {
-    const [id, secret] = process.env.GHOST_ADMIN_API_KEY!.split(":") as [string, string];
-    const token = await new SignJWT({})
-      .setProtectedHeader({ alg: "HS256", kid: id, typ: "JWT" })
-      .setIssuedAt()
-      .setExpirationTime("5m")
-      .setAudience("/admin/")
-      .sign(Buffer.from(secret, "hex"));
+    const token = await adminToken(process.env.GHOST_ADMIN_API_KEY!);
     for (const post of new Set(created)) {
       await fetch(`${API}/posts/${post}/`, { method: "DELETE", headers: { Authorization: `Ghost ${token}` } });
     }
