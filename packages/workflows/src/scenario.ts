@@ -120,8 +120,6 @@ const FAULTS = {
   "loses its reply once": "loseReply",
 } as const;
 
-const unquote = (s: string) => (s.length >= 2 && s.startsWith('"') && s.endsWith('"') ? s.slice(1, -1) : s);
-
 /** A mistake in this code, not in a feature file: thrown as it is, never filed as the file's error. */
 const isBug = (err: unknown) => err instanceof TypeError || err instanceof RangeError || err instanceof ReferenceError;
 
@@ -130,42 +128,66 @@ function fill(schema: z.ZodType, given: Record<string, unknown>): unknown {
   return schema.parse({ ...(fake(schema) as object), ...given });
 }
 
-/** A JSON object from the step's doc string or its two-column table (values parsed as JSON when they parse). */
-function object(pickle: PickleStep): Record<string, unknown> {
+/** The schema of the field `name` of an object schema; throws naming the fields it has. */
+function fieldOf(schema: z.ZodType, name: string, owner: string): z.ZodType {
+  const shape: Record<string, z.ZodType> = schema instanceof z.ZodObject ? schema.shape : {};
+  if (!Object.hasOwn(shape, name)) {
+    throw new Error(`no field "${name}" in ${owner}'s input; it has ${Object.keys(shape).join(", ") || "none"}`);
+  }
+  return shape[name]!;
+}
+
+const issues = (error: z.ZodError) => error.issues.map((i) => i.message).join("; ");
+
+/**
+ * The value text from a table cell or a phrase gives a field: the text itself when the field
+ * takes it, else the text read as JSON (a number, `true`, a list) when the field takes that.
+ */
+function valueFor(field: z.ZodType, text: string, what: string): unknown {
+  const asText = field.safeParse(text);
+  if (asText.success) return text;
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error(`${what} cannot be ${JSON.stringify(text)}: ${issues(asText.error)}`);
+  }
+  const asJson = field.safeParse(json);
+  if (!asJson.success) throw new Error(`${what} cannot be ${text}: ${issues(asJson.error)}`);
+  return json;
+}
+
+/**
+ * The fields the step's doc string (a JSON object) or two-column table gives an input, each
+ * checked against its field in `schema`: a field the input lacks, or a value it refuses, is an error.
+ */
+function fieldsFrom(pickle: PickleStep, schema: z.ZodType, owner: string): Record<string, unknown> {
   const { docString, dataTable } = pickle.argument ?? {};
-  let value: unknown;
+  const what = (name: string) => `${name} in ${owner}'s input`;
   if (dataTable) {
-    value = Object.fromEntries(
+    return Object.fromEntries(
       dataTable.rows.map(({ cells }) => {
         if (cells.length !== 2) throw new Error(`the table after "${pickle.text}" needs two columns: name | value`);
-        const [name, raw] = cells.map((c) => c.value) as [string, string];
-        try {
-          return [name, JSON.parse(raw)];
-        } catch {
-          return [name, raw];
-        }
+        const [name, text] = cells.map((c) => c.value) as [string, string];
+        return [name, valueFor(fieldOf(schema, name, owner), text, what(name))];
       }),
     );
-  } else if (docString) {
-    try {
-      value = JSON.parse(docString.content);
-    } catch (err) {
-      throw new Error(`the doc string after "${pickle.text}" is not JSON: ${errorMessage(err)}`, { cause: err });
-    }
-  } else {
-    throw new Error(`"${pickle.text}" needs a JSON doc string or a two-column table after it`);
+  }
+  if (!docString) throw new Error(`"${pickle.text}" needs a JSON doc string or a two-column table after it`);
+  let value: unknown;
+  try {
+    value = JSON.parse(docString.content);
+  } catch (err) {
+    throw new Error(`the doc string after "${pickle.text}" is not JSON: ${errorMessage(err)}`, { cause: err });
   }
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error(`"${pickle.text}" needs a JSON object`);
   }
+  for (const [name, v] of Object.entries(value)) {
+    const parsed = fieldOf(schema, name, owner).safeParse(v);
+    if (!parsed.success) throw new Error(`${what(name)} cannot be ${JSON.stringify(v)}: ${issues(parsed.error)}`);
+  }
   return value as Record<string, unknown>;
-}
-
-/** The value a phrase captured, as the type the operation's JSON Schema gives the field. */
-function coerce(value: string, type: unknown): unknown {
-  if (type === "number" || type === "integer") return Number(value);
-  if (type === "boolean") return value === "true";
-  return value;
 }
 
 /** A parameter's transform: the name, when `ids` has it. */
@@ -200,7 +222,10 @@ function rulesOf(scope: Scope): Rule[] {
       source: "{op} was called with",
       takes: TAKES_OBJECT,
       expression: expression("{op} was called with"),
-      read: ([op], pickle) => ({ op: op as string, input: fill(opOf(op).input, object(pickle)) }),
+      read: ([op], pickle) => ({
+        op: op as string,
+        input: fill(opOf(op).input, fieldsFrom(pickle, opOf(op).input, op as string)),
+      }),
     },
     ...Object.entries(FAULTS).map(([words, fault]): Rule => ({
       kind: "given",
@@ -213,7 +238,10 @@ function rulesOf(scope: Scope): Rule[] {
       source: "{workflow} runs with",
       takes: TAKES_OBJECT,
       expression: expression("{workflow} runs with"),
-      read: ([name], pickle) => ({ workflow: name as string, input: fill(workflowOf(name).input, object(pickle)) }),
+      read: ([name], pickle) => {
+        const { input } = workflowOf(name);
+        return { workflow: name as string, input: fill(input, fieldsFrom(pickle, input, name as string)) };
+      },
     },
     {
       kind: "when",
@@ -242,7 +270,11 @@ function rulesOf(scope: Scope): Rule[] {
       source: "{op} was called with",
       takes: TAKES_OBJECT,
       expression: expression("{op} was called with"),
-      read: ([op], pickle) => ({ op: op as string, input: object(pickle), called: true }),
+      read: ([op], pickle) => ({
+        op: op as string,
+        input: fieldsFrom(pickle, opOf(op).input, op as string),
+        called: true,
+      }),
     },
     ...[true, false].map((called): Rule => ({
       kind: "then",
@@ -270,12 +302,13 @@ function rulesOf(scope: Scope): Rule[] {
     },
   ];
 
-  // Each operation's phrases, last: their fields become parameter types the generic steps never use.
+  // Each operation's phrases, last. A field `{title}` becomes the parameter type `{field_title}`,
+  // so a field named like another type (`op`, `string`, `int`) never takes that type's pattern.
+  // It matches what `{string}` does, or one word, and unquotes the same way.
+  const string = registry.lookupByTypeName("string")!;
+  const word = /([^\s"']\S*)/;
+  const field = (groups: string[]) => groups.at(-1) ?? string.transform(null, groups.slice(0, -1));
   for (const op of scope.ops.values()) {
-    const properties = (z.toJSONSchema(op.input, { unrepresentable: "any" }).properties ?? {}) as Record<
-      string,
-      { type?: unknown }
-    >;
     // A phrase's key, and the keyword of the steps it adds.
     for (const [key, kind] of [
       ["given", "given"],
@@ -284,19 +317,27 @@ function rulesOf(scope: Scope): Rule[] {
       const template = op.phrases?.[key];
       if (template === undefined) continue;
       const fields = [...template.matchAll(/\{([^}]*)\}/g)].map(([, name]) => name!);
-      for (const name of fields) {
-        if (!Object.hasOwn(properties, name)) {
+      const schemas = fields.map((name) => {
+        try {
+          return fieldOf(op.input, name, op.id);
+        } catch {
           throw new Error(
             `${op.id}: its ${key} phrase "${template}" names {${name}}, which is not a field of its input`,
           );
         }
-        if (!registry.lookupByTypeName(name)) {
-          registry.defineParameterType(new ParameterType(name, /"[^"]*"|\S+/, null, unquote, false));
-        }
+      });
+      for (const name of fields) {
+        if (registry.lookupByTypeName(`field_${name}`)) continue;
+        registry.defineParameterType(
+          new ParameterType(`field_${name}`, [...string.regexpStrings, word], null, (...g) => field(g), false),
+        );
       }
       const given = (values: unknown[]) =>
-        Object.fromEntries(fields.map((name, i) => [name, coerce(String(values[i]), properties[name]?.type)]));
-      const common = { source: template, phrase: op.id, expression: expression(template) };
+        Object.fromEntries(
+          fields.map((name, i) => [name, valueFor(schemas[i]!, values[i] as string, `${name} in ${op.id}'s input`)]),
+        );
+      const compiled = template.replaceAll(/\{([^}]*)\}/g, "{field_$1}");
+      const common = { source: template, phrase: op.id, expression: expression(compiled) };
       rules.push(
         kind === "given"
           ? { ...common, kind, read: (values) => ({ op: op.id, input: fill(op.input, given(values)) }) }

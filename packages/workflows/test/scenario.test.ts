@@ -7,7 +7,14 @@ import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { allowAll, defineConnector, type LedgerRecord, memoryLedger, resolveConfig } from "../src/index.ts";
+import {
+  allowAll,
+  defineConnector,
+  defineWorkflow,
+  type LedgerRecord,
+  memoryLedger,
+  resolveConfig,
+} from "../src/index.ts";
 import { check, loadScenarios, parseFeature, type Scenario, type Scope } from "../src/scenario.ts";
 import announce from "./fixtures/announce.ts";
 import { marketingFakes } from "./harness.ts";
@@ -33,6 +40,9 @@ const thrown = (text: string, s: Scope = scope) => {
   }
   throw new Error("expected parseFeature to throw");
 };
+
+/** A feature with one scenario that runs tally with these table rows. */
+const tallyWith = (rows: string) => `Feature: T\n  Scenario: S\n    When tally runs with\n${rows}`;
 
 /** A feature with one scenario that runs announce on made-up input. */
 const feature = (name: string) => `Feature: Announce\n  Scenario: ${name}\n    When announce runs\n`;
@@ -126,13 +136,13 @@ describe("parseFeature", () => {
     ]);
   });
 
-  it("reads a workflow's input from a two-column table, parsing values that are JSON", () => {
+  it("reads a workflow's input from a two-column table", () => {
     const [scenario] = parse(`Feature: Announce
   Scenario: Table
     When announce runs with
       | title    | Table launch         |
       | launchAt | 2030-01-01T09:00:00Z |
-      | audience | "vip"                |
+      | audience | vip                  |
     Then "Table launch" is rejected by marketing-lead
     And the run fails with "approval_rejected"
 `);
@@ -261,6 +271,91 @@ describe("parseFeature", () => {
     expect(message).toBe(
       'x.feature:3: "ghost.post.publish fails once" is ambiguous: it matches "{op} fails once" and "{id} fails once"',
     );
+  });
+
+  describe("values", () => {
+    /** A workflow with a field of each kind a table cell may give. */
+    const tally = defineWorkflow({
+      name: "tally",
+      trigger: "manual",
+      input: z.object({ title: z.string(), count: z.number(), loud: z.boolean(), tags: z.array(z.string()) }),
+      uses: [],
+      run: async () => null,
+    });
+    const tallyScope = { ...scope, workflows: new Map([["tally", tally]]) };
+
+    it("takes a cell as text when its field takes text, else as JSON", () => {
+      const [scenario] = parseFeature(
+        tallyWith(`      | title | 123 |\n      | count | 5 |\n      | loud | true |\n      | tags | ["a", "b"] |\n`),
+        "x.feature",
+        tallyScope,
+      );
+      expect(scenario?.input).toEqual({ title: "123", count: 5, loud: true, tags: ["a", "b"] });
+    });
+
+    it("refuses a value its field does not take, naming the field", () => {
+      expect(thrown(tallyWith(`      | loud | yes |\n`), tallyScope)).toMatch(
+        /^x\.feature:3: loud in tally's input cannot be "yes": /,
+      );
+      expect(thrown(tallyWith(`      | count | many |\n`), tallyScope)).toMatch(
+        /^x\.feature:3: count in tally's input cannot be "many": /,
+      );
+    });
+
+    it("refuses a field the input does not have, in a table and in a doc string, naming those it has", () => {
+      expect(thrown(tallyWith(`      | titel | Launch |\n`), tallyScope)).toBe(
+        'x.feature:3: no field "titel" in tally\'s input; it has title, count, loud, tags',
+      );
+      expect(
+        thrown(`Feature: A
+  Scenario: S
+    When announce runs
+    Then ghost.post.create was called with
+      """
+      { "titel": "Launch" }
+      """
+`),
+      ).toBe('x.feature:4: no field "titel" in ghost.post.create\'s input; it has title, html, status');
+    });
+
+    it("checks each field of a doc string against its schema", () => {
+      expect(
+        thrown(`Feature: A
+  Scenario: S
+    Given ghost.post.create was called with
+      """
+      { "title": 7 }
+      """
+    When announce runs
+`),
+      ).toMatch(/^x\.feature:3: title in ghost\.post\.create's input cannot be 7: /);
+    });
+
+    it("reads a phrase's field as its own type, even one named like a built-in type", () => {
+      const runs = defineConnector("runs", {
+        run: {
+          start: {
+            effect: "write",
+            input: z.object({ workflow: z.string(), int: z.number() }),
+            output: z.object({}),
+            phrases: { given: "a run of {workflow} with {int} tries exists" },
+          },
+        },
+      });
+      const drivers = [...marketingFakes().drivers, { vendor: "runs", ops: { "run.start": async () => ({}) } }];
+      const [scenario] = parseFeature(
+        `Feature: A\n  Scenario: S\n    Given a run of "refund all" with 3 tries exists\n    When announce runs\n`,
+        "x.feature",
+        scopeOf([ghost, resend, bluesky, runs], drivers),
+      );
+      expect(scenario?.given).toEqual([
+        {
+          step: 'a run of "refund all" with 3 tries exists',
+          op: "runs.run.start",
+          input: { workflow: "refund all", int: 3 },
+        },
+      ]);
+    });
   });
 
   it("refuses a phrase naming a field its operation's input does not have", () => {
