@@ -33,33 +33,43 @@ import { blueskyDriver } from "@sanoma/connector-bluesky/driver";
 const drivers = [blueskyDriver()]; // or blueskyDriver({ timeoutMs: 5_000 }); the default is 10 s per request
 ```
 
+URLs and @mentions in the text become links (`RichText.detectFacets`); a mention whose handle does not resolve is posted as plain text. The reply's `url` is `https://bsky.app/profile/<handle>/post/<rkey>`.
+
+### Environment
+
 It reads these when it is called, never at import:
 
-| Variable               | What                                                                                  |
+| Variable               | What it is                                                                            |
 | ---------------------- | ------------------------------------------------------------------------------------- |
 | `BLUESKY_IDENTIFIER`   | The account's handle or email.                                                        |
 | `BLUESKY_APP_PASSWORD` | An [app password](https://bsky.app/settings/app-passwords), not the account password. |
 | `BLUESKY_SERVICE`      | Optional. The PDS or entryway to log in to; default `https://bsky.social`.            |
 
-It signs in with the app password, keeps the session for the life of the driver, and lets `@atproto/api` refresh it when the access token expires: Bluesky allows 30 logins per 5 minutes and 300 a day per account, fewer than a long-lived worker may post. If the refresh token has expired or been revoked, the next call logs in again. Bluesky's [OAuth](https://docs.bsky.app/docs/advanced-guides/oauth-client) needs a hosted client metadata document, a browser redirect and a session store, which a worker posting to its own account does not have; `@atproto/api` marks app-password sessions deprecated in favour of OAuth, so this may change. Any account can post with an app password: there is no approval or paid tier.
+A missing variable fails the call without calling Bluesky, naming it, and is not retried.
 
-URLs and @mentions in the text become links (`RichText.detectFacets`); a mention whose handle does not resolve is posted as plain text. The reply's `url` is `https://bsky.app/profile/<handle>/post/<rkey>`.
+It signs in with the app password, keeps the session for the life of the driver, and lets `@atproto/api` refresh it when the access token expires: Bluesky allows 30 logins per 5 minutes and 300 a day per account, fewer than a long-lived worker may post. If the refresh token has expired or been revoked, the next call logs in again. Bluesky's [OAuth](https://docs.bsky.app/docs/advanced-guides/oauth-client) needs a hosted client metadata document, a browser redirect and a session store, which a worker posting to its own account does not have; `@atproto/api` marks app-password sessions deprecated in favour of OAuth, so this may change.
 
-Bluesky's errors become a `DriverError` with its HTTP `status` and its `error` name as `vendorCode` (`InvalidRequest`, `RateLimitExceeded`, ...). A timeout, a lost connection, a 429 and a 5xx are retryable; any other 4xx is not. A missing variable fails without calling Bluesky, naming it. Writes are limited to 5,000 points an hour and 35,000 a day per account, a post costing 3 ([rate limits](https://docs.bsky.app/docs/advanced-guides/rate-limits)); a 429's message says when the limit resets.
-
-### One post per call
+### Idempotency
 
 `bluesky.post.create` is not idempotent, so the runtime never retries it. A worker that crashes after Bluesky replied but before the reply was recorded runs the call again on recovery, though. The driver makes that safe: the post's record key is a TID derived from the call's idempotency key, so every try of one call names the same record, and a repository holds one record per key. When the create fails, the driver looks that key up; if the post is there, it returns it instead of posting again. TIDs are the key type posts declare, a client may choose them, and their timestamps are [not validated anywhere in the network](https://docs.bsky.app/docs/advanced-guides/timestamps), so this key's timestamp is a hash, not the time of posting (`createdAt` is).
 
+### Errors and retries
+
+Bluesky's errors become a `DriverError` with its HTTP `status` and its `error` name as `vendorCode` (`InvalidRequest`, `RateLimitExceeded`, ...). A timeout, a lost connection, a 429 and a 5xx are retryable; any other 4xx is not. Writes are limited to 5,000 points an hour and 35,000 a day per account, a post costing 3 ([rate limits](https://docs.bsky.app/docs/advanced-guides/rate-limits)); a 429's message says when the limit resets.
+
+### Plan
+
+Any account can post with an app password: there is no approval or paid tier.
+
 ### Testing the driver
 
-`test/driver.test.ts` replays recorded XRPC replies from `test/fixtures/` with [msw](https://mswjs.io), so it needs no account. To run it against Bluesky, posting a few test posts to the account:
+`test/driver.test.ts` replays recorded XRPC replies (`test/fixtures`) with [msw](https://mswjs.io): `pnpm vitest run connectors/bluesky` needs no account. With `SANOMA_LIVE=1` the same tests post a few test posts to the account instead; a missing variable fails the run, and `CI` being set turns it off:
 
 ```sh
 SANOMA_LIVE=1 BLUESKY_IDENTIFIER=you.bsky.social BLUESKY_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx pnpm vitest run connectors/bluesky
 ```
 
-Add `SANOMA_RECORD=1` to rewrite the fixtures of the tests Bluesky can reproduce from its replies. The account's DID, handle, email, tokens, keys and CIDs are replaced with placeholders before a fixture is written; check the diff, and run `pnpm format`, before committing. The error cases (400, 429, 502, a timeout, a wrong password) stay as written.
+Add `SANOMA_RECORD=1` to rewrite the fixtures of the tests Bluesky can reproduce from its replies. The account's DID, handle, email, tokens, keys and CIDs are replaced with placeholders as they are written; read the diff, and run `pnpm format`, before you commit it. The error cases (400, 429, 502, a timeout, a wrong password) are not rewritten: they only replay.
 
 ## Testing
 
