@@ -25,9 +25,12 @@ interface Fixture {
 const fixtureUrl = (name: string) => new URL(`fixtures/${name}.json`, import.meta.url);
 const fixture = (name: string): Fixture => JSON.parse(readFileSync(fixtureUrl(name), "utf8"));
 
-/** Ids, addresses and keys out of a recorded reply, so the repo never holds an account's. */
+/** The sender's domain, which a reply may name outside an address (an unverified domain's error). */
+const fromDomain = /@([\w.-]+)/.exec(from)?.[1];
+
+/** Ids, addresses, the sender's domain and keys out of a recorded reply, so the repo never holds an account's. */
 const scrub = (json: string) =>
-  json
+  (fromDomain ? json.replaceAll(fromDomain, "example.com") : json)
     .replaceAll(
       /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
       "00000000-0000-4000-8000-000000000001",

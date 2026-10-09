@@ -69,7 +69,7 @@ Any account can post with an app password: there is no approval or paid tier.
 SANOMA_LIVE=1 BLUESKY_IDENTIFIER=you.bsky.social BLUESKY_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx pnpm vitest run connectors/bluesky
 ```
 
-Add `SANOMA_RECORD=1` to rewrite the fixtures of the tests Bluesky can reproduce from its replies. The account's DID, handle, email, tokens, keys and CIDs are replaced with placeholders as they are written; read the diff, and run `pnpm format`, before you commit it. The error cases (400, 429, 502, a timeout, a wrong password) are not rewritten: they only replay.
+Add `SANOMA_RECORD=1` to rewrite the fixtures of the tests Bluesky can reproduce from its replies. A session keeps only the fields the driver reads, and the account's DID, handle, email, tokens, PDS and `BLUESKY_SERVICE` hosts and CIDs are replaced with placeholders as they are written; read the diff, and run `pnpm format`, before you commit it. The error cases (400, 429, 502, a timeout, a wrong password) are not rewritten: they only replay.
 
 ## Testing
 

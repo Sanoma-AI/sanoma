@@ -37,7 +37,7 @@ function xrpc(nsid: string, ...names: string[]) {
     const rkey: string = body?.rkey ?? new URL(request.url).searchParams.get("rkey") ?? "";
     if (live) {
       const res = await fetch(bypass(request));
-      if (recording) await save(name, res.clone(), rkey);
+      if (recording) await save(name, nsid, res.clone(), rkey);
       return res;
     }
     const fixture: Fixture = JSON.parse(readFileSync(new URL(`${name}.json`, fixtures), "utf8"));
@@ -48,23 +48,37 @@ function xrpc(nsid: string, ...names: string[]) {
 
 /** What a recorded reply must not keep, and what replaces it. Filled from the live account. */
 const scrubs = new Map<string, string>();
+/** Strings of a kind a reply must not keep, whatever the account, and their placeholders. */
+const patterns: [RegExp, string][] = [
+  [/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, "example.jwt"],
+  [/did:plc:[a-z2-7]{24}/g, "did:plc:example"],
+  [/\bbafy[a-z2-7]{50,}/g, "bafyreihclbg5r7bdqu5lq3ulxnjalvh3a6nztvr7gp7u56xr4yn6qahpme"],
+  [/https:\/\/[\w.-]+\.host\.bsky\.network/g, "https://pds.example.test"],
+];
+/** The fields of a successful reply the driver reads; the rest (the DID document, the email) is not kept. */
+const keep: Record<string, string[]> = {
+  "com.atproto.server.createSession": ["did", "handle", "accessJwt", "refreshJwt", "active"],
+};
 
-async function save(name: string, res: Response, rkey: string) {
-  const body = (await res.json()) as any;
+async function save(name: string, nsid: string, res: Response, rkey: string) {
+  let body = (await res.json()) as any;
   if (body.did) scrubs.set(body.did, "did:plc:example");
   if (body.handle) scrubs.set(body.handle, "alice.example.test");
   if (body.email) scrubs.set(body.email, "alice@example.test");
+  for (const service of body.didDoc?.service ?? []) {
+    if (URL.canParse(service.serviceEndpoint)) scrubs.set(new URL(service.serviceEndpoint).host, "pds.example.test");
+  }
   if (rkey) scrubs.set(rkey, "{rkey}");
+  if (res.ok && keep[nsid]) body = Object.fromEntries(keep[nsid].filter((k) => k in body).map((k) => [k, body[k]]));
   const headers = Object.fromEntries([...res.headers].filter(([k]) => k.startsWith("ratelimit-")));
   let text = JSON.stringify({ status: res.status, ...(Object.keys(headers).length ? { headers } : {}), body }, null, 2);
   for (const [secret, placeholder] of scrubs) text = text.replaceAll(secret, placeholder);
-  text = text
-    .replace(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, "example.jwt")
-    .replace(/did:plc:[a-z2-7]{24}/g, "did:plc:example")
-    .replace(/\bbafy[a-z2-7]{50,}/g, "bafyreihclbg5r7bdqu5lq3ulxnjalvh3a6nztvr7gp7u56xr4yn6qahpme")
-    .replace(/https:\/\/[\w.-]+\.host\.bsky\.network/g, "https://pds.example.test")
-    .replace(/"publicKeyMultibase": "[^"]+"/g, '"publicKeyMultibase": "zExamplePublicKey"');
-  for (const secret of scrubs.keys()) if (text.includes(secret)) throw new Error(`${name}: scrubbing left a secret`);
+  for (const [pattern, placeholder] of patterns) text = text.replace(pattern, placeholder);
+  const left = [
+    ...[...scrubs.keys()].filter((secret) => text.includes(secret)),
+    ...patterns.flatMap(([pattern, placeholder]) => (text.match(pattern) ?? []).filter((m) => m !== placeholder)),
+  ];
+  if (left.length) throw new Error(`${name}: scrubbing left ${left.length} secret(s)`);
   writeFileSync(new URL(`${name}.json`, fixtures), `${text}\n`);
 }
 
@@ -77,6 +91,8 @@ beforeAll(() => {
   if (recording) {
     scrubs.set(process.env.BLUESKY_IDENTIFIER!, "alice.example.test");
     scrubs.set(process.env.BLUESKY_APP_PASSWORD!, "example-app-password");
+    const service = process.env.BLUESKY_SERVICE;
+    if (service && URL.canParse(service)) scrubs.set(new URL(service).host, "bsky.example.test");
   }
   server.listen({ onUnhandledFrame: live ? "bypass" : "error" });
 });

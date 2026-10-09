@@ -71,7 +71,7 @@ Broadcasts are on the free Marketing plan (1,000 contacts, 3 segments, 3 domains
 SANOMA_LIVE=1 RESEND_API_KEY=re_... RESEND_TEST_AUDIENCE=<segment id> RESEND_TEST_FROM="Test <test@your-domain>" pnpm vitest run connectors/resend
 ```
 
-Add `SANOMA_RECORD=1` to rewrite the fixtures from Resend's replies. Ids, addresses and keys are scrubbed as they are written; read the diff, and run `pnpm format`, before you commit it. The error cases (429, 5xx, quota, a timeout) are not rewritten: they only replay.
+Add `SANOMA_RECORD=1` to rewrite the fixtures from Resend's replies. Ids, addresses, the sender's domain and keys are scrubbed as they are written; read the diff, and run `pnpm format`, before you commit it. The error cases (429, 5xx, quota, a timeout) are not rewritten: they only replay.
 
 ## Testing
 
