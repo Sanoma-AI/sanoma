@@ -164,7 +164,7 @@ function register(wf: WorkflowDefinition<any, any>) {
         try {
           if (sandbox !== undefined) {
             // Imported here, so a live worker never loads the Gherkin parser or faker.
-            const { seedSandbox } = await import("./scenario.ts");
+            const { seedSandbox } = await import("./sandbox.ts");
             await seedSandbox(run, sandbox);
           }
           // The one parse of the input: the client checked it, but sent it as given.
