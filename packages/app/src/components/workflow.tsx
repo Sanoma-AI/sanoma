@@ -3,7 +3,7 @@ import type { OpEntry, WorkflowEntry } from "@sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { PlayIcon } from "lucide-react";
-import { memo, type ReactNode, useCallback, useMemo, useState } from "react";
+import { type ComponentProps, memo, type ReactNode, useCallback, useMemo, useState } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
@@ -19,13 +19,18 @@ import { BUILTIN_ICON, CodePanel, GraphPanel, Json, Nothing, Notice, OpName, Sec
 // A workflow's pieces, as the workflows page's cards and a workflow's own page show them, and
 // its graph beside its source, as a workflow's page and a run's show them.
 
-/** The Start page, with the workflow chosen. */
-export function StartButton({ name }: { name: string }) {
+/** The Start page, with the workflow chosen when `name` names one. Small and outlined unless told otherwise. */
+export function StartButton({
+  name,
+  children = "Start",
+  variant = "outline",
+  size = "sm",
+}: { name?: string; children?: ReactNode } & Pick<ComponentProps<typeof Button>, "variant" | "size">) {
   return (
-    <Button asChild variant="outline" size="sm">
-      <Link to="/start" search={{ workflow: name }}>
+    <Button asChild variant={variant} size={size}>
+      <Link to="/start" search={name === undefined ? {} : { workflow: name }}>
         <PlayIcon data-icon="inline-start" />
-        Start
+        {children}
       </Link>
     </Button>
   );

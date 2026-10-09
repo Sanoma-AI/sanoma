@@ -428,13 +428,17 @@ export const CodePanel = ({ className, ...props }: CodeProps) => (
   </LazyPanel>
 );
 
-/** A page's heading row: its <h1>, which is its crumb, and whatever sits beside it. */
-export function PageHeader({ children }: { children?: ReactNode }) {
+/**
+ * A page's heading row: its <h1>, which is its crumb, whatever sits beside it, and the page's
+ * `action` at the far end.
+ */
+export function PageHeader({ children, action }: { children?: ReactNode; action?: ReactNode }) {
   const title = useCrumbs().at(-1)?.label;
   return (
     <header className="flex flex-wrap items-center gap-x-4 gap-y-2">
       <h1 className="font-heading text-2xl font-semibold tracking-tight">{title}</h1>
       {children}
+      {action && <div className="ml-auto">{action}</div>}
     </header>
   );
 }

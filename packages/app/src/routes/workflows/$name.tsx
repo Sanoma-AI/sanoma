@@ -33,11 +33,8 @@ function WorkflowPage() {
   });
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader>
+      <PageHeader action={<StartButton name={workflow.name} />}>
         <code className="text-muted-foreground">{workflow.name}</code>
-        <div className="ml-auto">
-          <StartButton name={workflow.name} />
-        </div>
       </PageHeader>
       <GraphAndSource key={name} workflow={workflow} />
       <Card>
