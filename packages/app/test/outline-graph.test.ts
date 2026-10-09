@@ -3,7 +3,7 @@ import { outlineWorkflow } from "@sanoma/workflows/describe";
 import { describe, expect, it } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
 import { outlineGraph } from "../src/graph/outline-graph.ts";
-import type { Step } from "../src/graph/types.ts";
+import { type GraphNode, nodeAt, type Step } from "../src/graph/types.ts";
 import { labels, pairs } from "./graph-helpers.ts";
 
 // Hand-built outlines, in the shapes outlineWorkflow returns (packages/workflows/src/outline.ts).
@@ -181,6 +181,35 @@ describe("outlineGraph", () => {
       "op:5 ctx.resend.broadcast.send",
       "op:6 ctx.bluesky.post.create",
       "end -",
+    ]);
+  });
+
+  it("finds the node a click in the source is in: the innermost, the first of equals, or none", () => {
+    const nodes: GraphNode[] = [
+      { id: "op:0", kind: "op", label: "a.b.outer", spans: [[0, 40]] },
+      { id: "op:1", kind: "op", label: "a.b.inner", spans: [[10, 20]] },
+      { id: "op:2", kind: "op", label: "a.b.inner", spans: [[10, 20]] },
+      {
+        id: "sleep:3",
+        kind: "sleep",
+        label: "sleep",
+        spans: [
+          [50, 60],
+          [70, 80],
+        ],
+      },
+      { id: "end", kind: "end", label: "end" },
+    ];
+    const at = (offset: number) => nodeAt(nodes, offset)?.id;
+    expect([at(5), at(10), at(15), at(20), at(21), at(75), at(45), at(90)]).toEqual([
+      "op:0",
+      "op:1",
+      "op:1",
+      "op:1",
+      "op:0",
+      "sleep:3",
+      undefined,
+      undefined,
     ]);
   });
 });
