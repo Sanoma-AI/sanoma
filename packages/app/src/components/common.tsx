@@ -1,8 +1,16 @@
-import type { ApprovalState, Effect, LedgerRecord, RecordedDecision } from "@sanoma/workflows";
+import type { ApprovalState, Builtin, Effect, LedgerRecord, RecordedDecision } from "@sanoma/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useMatches } from "@tanstack/react-router";
 import { cva } from "class-variance-authority";
-import { ChevronRightIcon, CircleAlertIcon, InfoIcon } from "lucide-react";
+import {
+  ChevronRightIcon,
+  CircleAlertIcon,
+  ClockIcon,
+  InfoIcon,
+  type LucideIcon,
+  SplitIcon,
+  UserCheckIcon,
+} from "lucide-react";
 import {
   type ComponentProps,
   lazy,
@@ -167,6 +175,16 @@ export function OpName({
     </>
   );
 }
+
+/**
+ * Each built-in as a thing, where an operation shows its vendor's logo: an approval, a person who
+ * decides; a sleep, a clock; `ctx.all`, calls that run in parallel.
+ */
+export const BUILTIN_ICON = {
+  approval: UserCheckIcon,
+  sleep: ClockIcon,
+  all: SplitIcon,
+} satisfies Record<Builtin, LucideIcon>;
 
 /** A tone as a dot, where a badge would be too much. */
 export function StatusDot({ tone }: { tone: Tone }) {

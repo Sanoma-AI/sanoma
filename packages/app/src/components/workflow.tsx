@@ -13,9 +13,8 @@ import { outlineGraph } from "../graph/outline-graph.ts";
 import { runGraph } from "../graph/run-graph.ts";
 import { type GraphNode, nodeAt } from "../graph/types.ts";
 import { configQuery, opsById, sourceQuery } from "../queries.ts";
-import { ApprovalIcon, SleepIcon } from "./approval.tsx";
 import type { CodeProps } from "./code.tsx";
-import { CodePanel, GraphPanel, Json, Nothing, Notice, OpName, Section, Tip } from "./common.tsx";
+import { BUILTIN_ICON, CodePanel, GraphPanel, Json, Nothing, Notice, OpName, Section, Tip } from "./common.tsx";
 
 // A workflow's pieces, as the workflows page's cards and a workflow's own page show them, and
 // its graph beside its source, as a workflow's page and a run's show them.
@@ -55,13 +54,15 @@ export function WorkflowSections({ workflow }: { workflow: WorkflowEntry }) {
       <Section title="Built-ins">
         {workflow.builtins.length ? (
           <div className="flex flex-wrap gap-1.5">
-            {workflow.builtins.map((b) => (
-              <Badge key={b} variant="outline">
-                {b === "approval" && <ApprovalIcon data-icon="inline-start" />}
-                {b === "sleep" && <SleepIcon data-icon="inline-start" />}
-                {b}
-              </Badge>
-            ))}
+            {workflow.builtins.map((b) => {
+              const Icon = BUILTIN_ICON[b];
+              return (
+                <Badge key={b} variant="outline">
+                  <Icon data-icon="inline-start" />
+                  {b}
+                </Badge>
+              );
+            })}
           </div>
         ) : (
           <None />
