@@ -185,6 +185,20 @@ describe("sandbox runs", () => {
     expect(await drive(c(), runId, launch)).toMatchObject({ status: "finished" });
   });
 
+  it("never takes a decision naming an approval still to come for the one pending", async () => {
+    const second = scenario("Decided for the second only");
+    expect(second.approvals).toEqual(["Legal review", "Final check"]);
+    const runId = await c().start(review, {}, { startedBy: alice, sandbox: second.name });
+    await expect(drive(c(), runId, second)).rejects.toThrow(
+      'Scenario "Decided for the second only" has no decision for "Legal review" (approval-1); the decisions left are for "Final check"',
+    );
+    // Finished by hand, so the next sandbox run can start.
+    await c().decide(runId, { decision: "approve", by: { id: "legal" } });
+    await waitFor(pending(c, runId, 2));
+    await c().decide(runId, { decision: "approve", by: { id: "boss" } });
+    expect(await c().result(runId)).toBe("reviewed");
+  });
+
   it("throws for an approval the scenario has no decision left for", async () => {
     const short = scenario("Missing a decision");
     const runId = await c().start(review, {}, { startedBy: alice, sandbox: short.name });
