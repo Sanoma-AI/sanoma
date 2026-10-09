@@ -5,7 +5,6 @@ import { useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { CheckIcon, CircleDashedIcon, FlaskConicalIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
-import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardContent } from "#/components/ui/card.tsx";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from "#/components/ui/item.tsx";
@@ -86,7 +85,7 @@ export function TestButton({ scenario }: { scenario: string | undefined }) {
   );
 }
 
-/** A scenario: its feature file as written, then its steps, each under its keyword. */
+/** A scenario as its feature file says it, and which file that is. */
 export function ScenarioCard({ scenario }: { scenario: ScenarioEntry }) {
   return (
     <Card>
@@ -96,16 +95,6 @@ export function ScenarioCard({ scenario }: { scenario: ScenarioEntry }) {
             From <code>{scenario.file}</code>
           </p>
           <pre className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs">{scenario.text}</pre>
-          <ol className="flex flex-col gap-1.5">
-            {scenario.steps.map((step, i) => (
-              <li key={i} className="flex items-baseline gap-2">
-                <Badge variant="outline" className="w-14 shrink-0 capitalize">
-                  {step.kind}
-                </Badge>
-                <span className="wrap-anywhere">{step.text}</span>
-              </li>
-            ))}
-          </ol>
         </Section>
       </CardContent>
     </Card>

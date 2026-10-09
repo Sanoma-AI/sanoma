@@ -11,7 +11,13 @@ import {
   ParameterTypeRegistry,
 } from "@cucumber/cucumber-expressions";
 import { AstBuilder, compile, GherkinClassicTokenMatcher, Parser } from "@cucumber/gherkin";
-import { type GherkinDocument, IdGenerator, type PickleStep, PickleStepType } from "@cucumber/messages";
+import {
+  type GherkinDocument,
+  IdGenerator,
+  type PickleStep,
+  PickleStepType,
+  type Step as GherkinStep,
+} from "@cucumber/messages";
 import { faker } from "@faker-js/faker";
 import { fake, seed, setFaker } from "zod-schema-faker/v4";
 import { z } from "zod";
@@ -63,7 +69,11 @@ export interface Scenario {
   /** The feature file, relative to the scenarios directory. */
   file: string;
   workflow: string;
-  /** The whole feature file, for display. */
+  /**
+   * The scenario's own lines of its feature file, for display: from its keyword line to the end
+   * of its last step (a step's doc string or table included, and an outline's examples), less
+   * the keyword line's indent. An outline's rows share their outline's.
+   */
   text: string;
   /** Every step in order, for a list and for marking graph nodes. */
   steps: ScenarioStep[];
@@ -386,6 +396,38 @@ function linesOf(doc: GherkinDocument): Map<string, number> {
   return lines;
 }
 
+/**
+ * Each scenario's own lines of the file, by AST node id: from its keyword line to the end of its
+ * last step (the closing delimiter of a doc string, the last row of a table) or of its examples'
+ * last row, each line less the keyword line's indent.
+ */
+function textsOf(doc: GherkinDocument, text: string): Map<string, string> {
+  const lines = text.split(/\r?\n/);
+  const endOf = (step: GherkinStep): number => {
+    if (step.dataTable) return step.dataTable.rows.at(-1)?.location.line ?? step.location.line;
+    if (!step.docString) return step.location.line;
+    // Line numbers count from 1, so index `line` is the line after the opening delimiter.
+    const { location, delimiter } = step.docString;
+    const close = lines.findIndex((l, i) => i >= location.line && l.trim() === delimiter);
+    return close === -1 ? location.line : close + 1;
+  };
+  const texts = new Map<string, string>();
+  for (const child of doc.feature?.children ?? []) {
+    for (const { scenario } of child.rule ? child.rule.children : [child]) {
+      if (!scenario) continue;
+      const { line, column = 1 } = scenario.location;
+      const end = Math.max(
+        line,
+        ...scenario.steps.map(endOf),
+        ...scenario.examples.map((ex) => (ex.tableBody.at(-1) ?? ex.tableHeader ?? ex).location.line),
+      );
+      const own = lines.slice(line - 1, end).map((l) => l.slice(Math.min(column - 1, l.length - l.trimStart().length)));
+      texts.set(scenario.id, own.join("\n"));
+    }
+  }
+  return texts;
+}
+
 const approvalsByWorkflow = new WeakMap<object, string[]>();
 
 /** The titles of the approvals in an outline, at any depth, where they are string literals. */
@@ -429,6 +471,7 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
     throw new Error(`${file}: ${errorMessage(err)}`, { cause: err });
   }
   const lines = linesOf(doc);
+  const texts = textsOf(doc, text);
   const pickles = compile(doc, file, newId);
   if (pickles.length === 0) throw new Error(`${file}: no scenarios; add one with "Scenario: <name>"`);
   // An outline's rows are named from its title; rows that share a name are told apart by their line.
@@ -447,7 +490,7 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
     const scenario: Omit<Scenario, "workflow" | "approvals"> & { workflow?: string } = {
       name,
       file,
-      text,
+      text: texts.get(pickle.astNodeIds[0]!) ?? "",
       steps: [],
       given: [],
       input: undefined,
