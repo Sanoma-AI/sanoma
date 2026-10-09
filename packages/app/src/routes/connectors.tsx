@@ -37,7 +37,8 @@ function ConnectorCard({ connector: { id, vendor, ops, workflows } }: { connecto
     <Card>
       <CardHeader>
         <CardTitle role="heading" aria-level={2} className="flex items-center gap-2">
-          <VendorLogo vendor={id} className="size-6" />
+          {/* Decorative: the title beside it names the heading, which would otherwise read "Resend Resend". */}
+          <VendorLogo vendor={id} alt="" className="size-6" />
           {vendor.title}
         </CardTitle>
         <CardDescription>

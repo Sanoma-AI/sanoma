@@ -140,18 +140,19 @@ const dot = cva("size-2.5 rounded-full", {
 
 /**
  * A vendor's logo, 16 px unless `className` sizes it, named by the vendor's title for assistive
- * tech: its connector's light variant, and its dark one under the dark theme. Nothing when the
- * connector gives no logo.
+ * tech unless `alt` says otherwise (`""` where the title is beside it): its connector's light
+ * variant, and its dark one under the dark theme. Nothing when the connector gives no logo.
  */
-export function VendorLogo({ vendor, className }: { vendor: string; className?: string }) {
+export function VendorLogo({ vendor, alt, className }: { vendor: string; alt?: string; className?: string }) {
   const { data: entry } = useSuspenseQuery({ ...configQuery(), select: (config) => config.vendors[vendor] });
   if (!entry?.logo) return null;
   const { src, dark } = entry.logo;
+  const name = alt ?? entry.title;
   // A hidden <img> is out of the accessibility tree: one name is read either way.
   return (
     <>
-      <img src={src} alt={entry.title} className={cn("size-4 shrink-0", dark && "dark:hidden", className)} />
-      {dark && <img src={dark} alt={entry.title} className={cn("hidden size-4 shrink-0 dark:block", className)} />}
+      <img src={src} alt={name} className={cn("size-4 shrink-0", dark && "dark:hidden", className)} />
+      {dark && <img src={dark} alt={name} className={cn("hidden size-4 shrink-0 dark:block", className)} />}
     </>
   );
 }
