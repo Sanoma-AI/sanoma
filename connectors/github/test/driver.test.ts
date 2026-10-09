@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { DriverError, errorCode } from "@sanoma/workflows";
+import { type Driver, DriverError, errorCode } from "@sanoma/workflows";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { type BridgeLike, type ReplayCall, replayBridge } from "../src/bridge.ts";
 import { githubDriver } from "../src/driver.ts";
@@ -10,7 +10,7 @@ const replies = fileURLToPath(new URL("../testdata/replies/", import.meta.url));
 
 let seq = 0;
 /** Calls one of a driver's operations the way the runtime does. */
-const call = (driver: { ops: Record<string, Function> }, op: string, input: unknown) =>
+const call = (driver: Driver, op: string, input: unknown): Promise<any> =>
   driver.ops[op]!(input, { idempotencyKey: `run:${++seq}`, runId: "run", opId: `github.${op}`, attempt: 1 });
 
 /** The bridge's error, as `@sanoma/bridge` throws it. */
