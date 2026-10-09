@@ -11,7 +11,8 @@ export const NODE_SIZE: Record<GraphNodeKind, { width: number; height: number }>
   end: { width: 112, height: 40 },
   op: { width: 232, height: 64 },
   approval: { width: 232, height: 64 },
-  sleep: { width: 232, height: 40 },
+  // Its icon, and in a run the UTC time it sleeps until.
+  sleep: { width: 256, height: 40 },
   pending: { width: 112, height: 40 },
   cluster: { width: 112, height: 40 },
   split: { width: 24, height: 24 },
