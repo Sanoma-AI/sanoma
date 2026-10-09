@@ -158,17 +158,18 @@ describe("parseFeature", () => {
     // A step with no input expects any call.
     expect(scenario!.expect[1]).not.toHaveProperty("input");
     // `And` after `When` is a When step: here, a decision.
-    expect(scenario!.steps.map((s) => [s.kind, s.op])).toEqual([
-      ["given", "ghost.post.create"],
-      ["given", "bluesky.post.create"],
-      ["when", undefined],
-      ["when", undefined],
-      ["then", "ghost.post.create"],
-      ["then", "ghost.post.publish"],
-      ["then", "resend.broadcast.send"],
-      ["then", "bluesky.post.create"],
-      ["then", "ghost.post.create"],
-      ["then", undefined],
+    // A `Then` about an operation says whether it expects a call or none.
+    expect(scenario!.steps.map((s) => [s.kind, s.op, s.called])).toEqual([
+      ["given", "ghost.post.create", undefined],
+      ["given", "bluesky.post.create", undefined],
+      ["when", undefined, undefined],
+      ["when", undefined, undefined],
+      ["then", "ghost.post.create", true],
+      ["then", "ghost.post.publish", true],
+      ["then", "resend.broadcast.send", true],
+      ["then", "bluesky.post.create", true],
+      ["then", "ghost.post.create", false],
+      ["then", undefined, undefined],
     ]);
   });
 
