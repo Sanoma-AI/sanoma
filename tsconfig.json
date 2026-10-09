@@ -22,6 +22,7 @@
       "@sanoma/workflows/fake": ["./packages/workflows/src/fake.ts"],
       "@sanoma/workflows/lint": ["./packages/workflows/src/lint.ts"],
       "@sanoma/workflows/shared": ["./packages/workflows/src/shared.ts"],
+      "@sanoma/workflows/tfschema": ["./packages/workflows/src/tfschema.ts"],
       "@sanoma/testing": ["./packages/testing/src/index.ts"],
       "@sanoma/testing/replay": ["./packages/testing/src/replay.ts"],
       "@sanoma/app": ["./packages/app/src/index.ts"],

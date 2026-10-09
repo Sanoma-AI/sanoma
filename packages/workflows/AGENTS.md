@@ -195,6 +195,8 @@ Only declared fields are compared for drift, as CloudFormation does: `compareDec
 
 `describeConfig` lists each vendor's resource types as `vendors[id].resources` (`{ vendor, type, title, identity }`). `@sanoma/workflows/shared` exports the `Resource`, `ResourceSpec`, `ResourceFields` and `Declared` types.
 
+Resource types from an OpenTofu provider are generated: `@sanoma/workflows/tfschema` turns the provider's schema document into zod schemas and flagged fields (`resources.gen.ts`), and converts states between the provider's layout and the resource's. See [`src/tfschema/`](src/tfschema/AGENTS.md).
+
 ### Secrets
 
 Never put a secret in a workflow's input or an operation's input or output. They are persisted verbatim: DBOS keeps every step's input and output in Postgres, the ledger records each call's input and output, an approval a policy asks for carries the held call's input, and the app shows all of it to anyone who can reach it. A driver reads its credentials when it is called (from the environment or a secret store), and an operation that creates a secret (an API key, a password reset link) returns a reference to where it is stored, not the secret.

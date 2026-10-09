@@ -48,6 +48,10 @@
     "./shared": {
       "types": "./dist/shared.d.ts",
       "default": "./dist/shared.js"
+    },
+    "./tfschema": {
+      "types": "./dist/tfschema.d.ts",
+      "default": "./dist/tfschema.js"
     }
   },
   "publishConfig": {
