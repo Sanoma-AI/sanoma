@@ -536,22 +536,35 @@ function contains(actual: unknown, expected: unknown): boolean {
   return Object.entries(expected).every(([k, v]) => contains((actual as Record<string, unknown>)[k], v));
 }
 
-/** Checks each of the scenario's expectations against a run's ledger records. Pure. */
+type Call = Extract<LedgerRecord, { type: "op.called" }>;
+const isCall = (r: LedgerRecord): r is Call => r.type === "op.called";
+
+/**
+ * Checks each of the scenario's expectations against a run's ledger records. Pure. A call is an
+ * `op.called` record without an `error`; one with an error (a policy denial, a rejected
+ * approval, a vendor's final failure) was attempted, not made.
+ */
 export function check(scenario: Scenario, records: readonly LedgerRecord[]): Check[] {
   const end = records.find((r) => r.type === "run.finished" || r.type === "run.failed");
   return scenario.expect.map((e): Check => {
     if ("op" in e) {
-      const calls = records.filter((r) => r.type === "op.called" && r.op === e.op);
-      const found = calls.some((r) => e.input === undefined || contains((r as { input: unknown }).input, e.input));
-      const ok = found === e.called;
+      const tries = records.filter(isCall).filter((r) => r.op === e.op);
+      const calls = tries.filter((r) => !r.error);
+      const matching = calls.filter((r) => e.input === undefined || contains(r.input, e.input));
+      const ok = matching.length > 0 === e.called;
       if (ok) return { step: e.step, ok };
       const what = e.input === undefined ? e.op : `${e.op} with ${JSON.stringify(e.input)}`;
+      const inputs = (list: Call[]) => list.map((r) => JSON.stringify(r.input)).join(", ");
+      if (!e.called) return { step: e.step, ok, detail: `${e.op} was called with ${inputs(matching)}` };
+      const tried = tries.flatMap(({ error }) => (error ? [`${error.code ?? error.name}: ${error.message}`] : []));
       return {
         step: e.step,
         ok,
-        detail: e.called
-          ? `no call to ${what}${calls.length ? `; its calls had ${calls.map((r) => JSON.stringify((r as { input: unknown }).input)).join(", ")}` : ""}`
-          : `${e.op} was called`,
+        detail: [
+          `no call to ${what}`,
+          ...(calls.length ? [`its calls had ${inputs(calls)}`] : []),
+          ...(tried.length ? [`attempted: ${tried.join(", ")}`] : []),
+        ].join("; "),
       };
     }
     if (!end) return { step: e.step, ok: false, detail: "run not ended" };

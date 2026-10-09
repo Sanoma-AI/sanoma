@@ -429,6 +429,9 @@ describe("check", () => {
     decision: { kind: "allow" },
     durationMs: 1,
   });
+  /** A call that failed with `error`. */
+  const attempted = (seq: number, op: string, error: Extract<LedgerRecord, { type: "op.called" }>["error"]) =>
+    ({ ...called(seq, op, { id: "p1" }), error }) as LedgerRecord;
   const calls = [
     called(1, "ghost.post.create", { title: "Acme Pro", html: "<p>x</p>", status: "draft", meta: { tags: ["a"] } }),
   ];
@@ -473,7 +476,44 @@ describe("check", () => {
     );
     expect(checks).toEqual([
       { step: "publish", ok: true },
-      { step: "create", ok: false, detail: "ghost.post.create was called" },
+      {
+        step: "create",
+        ok: false,
+        detail:
+          'ghost.post.create was called with {"title":"Acme Pro","html":"<p>x</p>","status":"draft","meta":{"tags":["a"]}}',
+      },
+    ]);
+  });
+
+  it("counts a call that failed (denied, rejected, or failed at the vendor) as attempted, not made", () => {
+    const records = [
+      attempted(1, "ghost.post.publish", { code: "policy_denied", name: "PolicyDeniedError", message: "not today" }),
+      attempted(2, "resend.broadcast.send", {
+        code: "approval_rejected",
+        name: "RejectedError",
+        message: '"Send" was rejected by boss',
+      }),
+      attempted(3, "bluesky.post.create", { code: "driver_failed", name: "DriverError", message: "down" }),
+    ];
+    const checks = check(
+      expecting([
+        { step: "publish", op: "ghost.post.publish", called: true },
+        { step: "send", op: "resend.broadcast.send", input: { id: "p1" }, called: true },
+        { step: "post", op: "bluesky.post.create", called: true },
+        { step: "not published", op: "ghost.post.publish", called: false },
+      ]),
+      records,
+    );
+    expect(checks).toEqual([
+      { step: "publish", ok: false, detail: "no call to ghost.post.publish; attempted: policy_denied: not today" },
+      {
+        step: "send",
+        ok: false,
+        detail:
+          'no call to resend.broadcast.send with {"id":"p1"}; attempted: approval_rejected: "Send" was rejected by boss',
+      },
+      { step: "post", ok: false, detail: "no call to bluesky.post.create; attempted: driver_failed: down" },
+      { step: "not published", ok: true },
     ]);
   });
 
