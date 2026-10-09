@@ -86,7 +86,7 @@ function show(recordId: string, reducedMotion: boolean) {
 function RunPage() {
   const { id } = Route.useParams();
   const { data, error, dataUpdatedAt } = useSuspenseQuery(runQuery(id));
-  const { run, ledger, ledgerError, approvals, checks } = data;
+  const { run, ledger, ledgerError, approvals, checks, checksError } = data;
   // Only its name when the config has no workflow of that name: the graph says so.
   const { data: workflow } = useSuspenseQuery({
     ...configQuery(),
@@ -133,10 +133,16 @@ function RunPage() {
         </CardContent>
       </Card>
 
-      {checks && (
+      {(checks || checksError) && (
         <div className="flex flex-col gap-3">
           <SectionTitle>Checks</SectionTitle>
-          <Checks checks={checks} ended={isEnded(run.status)} />
+          {checksError && (
+            <Notice variant="destructive">
+              {/* A step no rule matches lists the known steps, one a line. */}
+              <span className="whitespace-pre-wrap">Could not check the run against its scenario: {checksError}</span>
+            </Notice>
+          )}
+          {checks && <Checks checks={checks} ended={isEnded(run.status)} />}
         </div>
       )}
 

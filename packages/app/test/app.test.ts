@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -12,7 +13,7 @@ import {
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
 import { ghost } from "@sanoma/connector-ghost";
@@ -42,7 +43,7 @@ import announce from "../../workflows/test/fixtures/announce.ts";
 import { z } from "zod";
 import { type App, type ErrorResponse, type RunDetail, startApp } from "../src/index.ts";
 import { ApiError, type ScenariosResponse } from "../src/api.ts";
-import { asApiError, parse, withoutSources, workflowSource } from "../src/server/core.ts";
+import { asApiError, parse, scenarios, withoutSources, workflowSource } from "../src/server/core.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it when
 // dist/server/server.js is missing or older than a file under src/.
@@ -78,6 +79,11 @@ const policy = definePolicy(
   { version: "test-1" },
 );
 
+/** A copy of the fixtures' feature files, which a test breaks to see the app say so. */
+const scenariosDir = mkdtempSync(join(tmpdir(), "sanoma-app-scenarios-"));
+cpSync(fileURLToPath(new URL("./fixtures/scenarios/", import.meta.url)), scenariosDir, { recursive: true });
+const featureFile = join(scenariosDir, "announce.feature");
+
 const blog = fakeGhost();
 const config = defineConfig({
   workflows: [announce],
@@ -85,7 +91,7 @@ const config = defineConfig({
   drivers: [blog.driver, fakeResend().driver, fakeBluesky().driver, fakeGithub().driver],
   // Sandbox runs call these, seeded from the scenarios, never the drivers above.
   fakes: [fakeGhost(), fakeResend(), fakeBluesky()],
-  scenarios: new URL("./fixtures/scenarios/", import.meta.url),
+  scenarios: pathToFileURL(`${scenariosDir}/`),
   policy,
   ledger: memoryLedger(),
   appName: "sanoma-app-test",
@@ -111,6 +117,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await app?.close();
   await worker?.stop();
+  rmSync(scenariosDir, { recursive: true, force: true });
 });
 
 interface CallInit {
@@ -460,6 +467,45 @@ describe("scenarios and sandbox runs", () => {
     );
     expect(done.checks).toHaveLength(5);
     expect(done.checks?.filter((c) => !c.ok)).toEqual([]);
+  });
+});
+
+describe("scenarios that no longer load", () => {
+  it("says why a seeded run has no checks, and why a scenario cannot start, when its file breaks", async () => {
+    const before = await detail(sandboxId);
+    expect(before.checks).toBeDefined();
+    const text = readFileSync(featureFile, "utf8");
+    try {
+      writeFileSync(featureFile, "Feature: Broken\n  Scenario: Broken\n    Then nothing\n");
+      const broken = await detail(sandboxId);
+      expect(broken.checks).toBeUndefined();
+      expect(broken.checksError).toMatch(
+        /^The feature files no longer have scenario "Launch on time"; these files did not load: announce\.feature:3: no step matches "nothing"\nKnown steps:/,
+      );
+      const run = await page(`/runs/${sandboxId}`);
+      expect(run.html).toMatch(/<h2[^>]*>Checks<\/h2>/);
+      expect(run.text).toContain("Could not check the run against its scenario: The feature files no longer have");
+
+      const start = await postRun({ scenario: SCENARIO });
+      expect(start.status).toBe(404);
+      expect(start.body.error).toMatch(/; these files did not load: announce\.feature:3: no step matches "nothing"/);
+    } finally {
+      writeFileSync(featureFile, text);
+    }
+    expect((await detail(sandboxId)).checks).toEqual(before.checks);
+  });
+
+  it("lists no scenarios, with why, when they cannot be read at all", () => {
+    const resolved = {
+      scenarios: pathToFileURL(`${scenariosDir}/`),
+      get ops(): never {
+        throw new Error("the ops are gone");
+      },
+    };
+    expect(scenarios({ resolved } as never)).toEqual({
+      scenarios: [],
+      errors: [{ file: "", message: "the ops are gone" }],
+    });
   });
 });
 

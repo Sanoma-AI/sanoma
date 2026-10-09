@@ -81,8 +81,20 @@ export function workflowSource(
 
 const NO_RECORDS = "No records for a run that has started; is the app reading the same ledger as the worker?";
 
-/** Ledger read failures already logged, by run and message: a page polls its run every 2 s. */
+/** Failures to read a run's ledger or scenario already logged, by run and message: a page polls its run every 2 s. */
 const loggedReads = new Set<string>();
+
+/** Logs a failure to read what a run's page shows, once per run and message. */
+function logReadOnce(runId: string, message: string, what: string, err: unknown) {
+  const key = `${runId}\n${message}`;
+  if (loggedReads.has(key)) return;
+  loggedReads.add(key);
+  console.error(`sanoma app: could not read ${what} of run ${runId}:`, err);
+}
+
+/** The feature files that did not load, as `seedSandbox` names them: appended to a scenario not found. */
+const notLoaded = (errors: readonly { message: string }[]) =>
+  errors.length ? `; these files did not load: ${errors.map((e) => e.message).join("; ")}` : "";
 
 /** The run with its ledger and approvals, and a sandbox run's checks, or a 404. */
 export async function runDetail({ client, resolved }: AppContext, runId: string): Promise<RunDetail> {
@@ -97,11 +109,7 @@ export async function runDetail({ client, resolved }: AppContext, runId: string)
     // corrupt file, a permission): logged for the operator once, and the page shows the run and
     // why its ledger is missing.
     const ledgerError = errorMessage(err);
-    const key = `${runId}\n${ledgerError}`;
-    if (!loggedReads.has(key)) {
-      loggedReads.add(key);
-      console.error(`sanoma app: could not read the ledger of run ${runId}:`, err);
-    }
+    logReadOnce(runId, ledgerError, "the ledger", err);
     return { run, ledger: [], ledgerError, approvals };
   }
   // A run that has started records run.started first. Seeing none, the likeliest cause is an
@@ -109,19 +117,43 @@ export async function runDetail({ client, resolved }: AppContext, runId: string)
   if (ledger.length === 0 && run.status !== "queued") {
     return { run, ledger, ledgerError: NO_RECORDS, approvals };
   }
-  // Checked against the feature file as it reads now, which the agent may have changed since.
   const seeded = ledger.find((r) => r.type === "scenario.seeded");
-  const scenario = seeded && loadScenarios(resolved).scenarios.find((s) => s.name === seeded.scenario);
-  return { run, ledger, approvals, ...(scenario && { checks: check(scenario, ledger) }) };
+  if (!seeded) return { run, ledger, approvals };
+  // Checked against the feature file as it reads now, which the agent may have changed since.
+  try {
+    const loaded = loadScenarios(resolved);
+    const scenario = loaded.scenarios.find((s) => s.name === seeded.scenario);
+    if (scenario) return { run, ledger, approvals, checks: check(scenario, ledger) };
+    const checksError = `The feature files no longer have scenario "${seeded.scenario}"${notLoaded(loaded.errors)}`;
+    return { run, ledger, approvals, checksError };
+  } catch (err) {
+    // The scenarios could not be read at all (an operation's phrase names a field it lacks).
+    const checksError = errorMessage(err);
+    logReadOnce(runId, checksError, "the scenario", err);
+    return { run, ledger, approvals, checksError };
+  }
 }
 
-/** Every scenario in the config's feature files, as the page lists them, as they read now. */
+/**
+ * Every scenario in the config's feature files, as the page lists them, as they read now. When
+ * they cannot be read at all, none, with why as the one error, so the page says so and stays up.
+ */
 export function scenarios({ resolved }: Pick<AppContext, "resolved">): ScenariosResponse {
-  const loaded = loadScenarios(resolved);
-  return {
-    scenarios: loaded.scenarios.map(({ name, workflow, file, text, steps }) => ({ name, workflow, file, text, steps })),
-    errors: loaded.errors,
-  };
+  try {
+    const loaded = loadScenarios(resolved);
+    return {
+      scenarios: loaded.scenarios.map(({ name, workflow, file, text, steps }) => ({
+        name,
+        workflow,
+        file,
+        text,
+        steps,
+      })),
+      errors: loaded.errors,
+    };
+  } catch (err) {
+    return { scenarios: [], errors: [{ file: "", message: errorMessage(err) }] };
+  }
 }
 
 /** A 404 `invalid_input` for a name the request gives that the config does not have, with an issue at its field. */
@@ -142,12 +174,12 @@ export async function startRun(
   body: StartRunRequest,
 ): Promise<StartRunResponse> {
   if ("scenario" in body) {
-    const all = loadScenarios(resolved).scenarios;
+    const { scenarios: all, errors } = loadScenarios(resolved);
     const scenario = all.find((s) => s.name === body.scenario);
     const workflow = scenario && resolved.workflows.get(scenario.workflow);
     if (!scenario || !workflow) {
       const known = all.length ? `; the scenarios are ${all.map((s) => `"${s.name}"`).join(", ")}` : "; there are none";
-      throw noSuch("scenario", `No scenario named "${body.scenario}"${known}`);
+      throw noSuch("scenario", `No scenario named "${body.scenario}"${known}${notLoaded(errors)}`);
     }
     return {
       runId: await client.start(workflow, scenario.input, { startedBy: actor, sandbox: scenario.name }),
