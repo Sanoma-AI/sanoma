@@ -1,0 +1,22 @@
+[
+  {
+    "method": "POST",
+    "path": "/posts/?source=html",
+    "status": 201,
+    "body": {
+      "posts": [
+        {
+          "id": "000000000000000000000001",
+          "uuid": "00000000-0000-4000-8000-000000000001",
+          "title": "sanoma test 1791504321754",
+          "slug": "sanoma-test-1791504321754",
+          "status": "draft",
+          "url": "https://blog.example.test/p/00000000-0000-4000-8000-000000000001/",
+          "created_at": "2026-10-09T00:03:31.000Z",
+          "updated_at": "2026-10-09T00:03:31.000Z",
+          "published_at": null
+        }
+      ]
+    }
+  }
+]
