@@ -1,0 +1,162 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import type { CallContext, DriverError } from "@sanoma/workflows";
+import { delay, http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { resendDriver } from "../src/driver.ts";
+
+// Replays the responses in fixtures/. With SANOMA_LIVE=1 and RESEND_API_KEY set (never in CI),
+// the same tests call Resend, creating and sending broadcasts to the segment RESEND_TEST_AUDIENCE;
+// SANOMA_RECORD=1 then rewrites the fixtures from Resend's replies, scrubbed.
+const live = process.env.SANOMA_LIVE === "1" && !!process.env.RESEND_API_KEY && !process.env.CI;
+const record = live && process.env.SANOMA_RECORD === "1";
+
+const API = "https://api.resend.com";
+const audience = live ? (process.env.RESEND_TEST_AUDIENCE ?? "") : "00000000-0000-4000-8000-0000000000aa";
+const from = process.env.RESEND_TEST_FROM ?? "Sanoma test <onboarding@resend.dev>";
+const call: CallContext = { idempotencyKey: "run-1:3", runId: "run-1", opId: "resend.broadcast.create", attempt: 1 };
+
+interface Fixture {
+  status: number;
+  body: unknown;
+}
+const fixtureUrl = (name: string) => new URL(`fixtures/${name}.json`, import.meta.url);
+const fixture = (name: string): Fixture => JSON.parse(readFileSync(fixtureUrl(name), "utf8"));
+
+/** Ids, addresses and keys out of a recorded reply, so the repo never holds an account's. */
+const scrub = (json: string) =>
+  json
+    .replaceAll(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
+      "00000000-0000-4000-8000-000000000001",
+    )
+    .replaceAll(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, "someone@example.com")
+    .replaceAll(/re_\w+/g, "re_redacted");
+
+const server = setupServer();
+const requests: Request[] = [];
+let recordAs: string | undefined;
+const recordings: Promise<void>[] = [];
+server.events.on("request:start", ({ request }) => void requests.push(request.clone()));
+server.events.on("response:bypass", ({ response }) => {
+  const name = recordAs;
+  if (!record || !name) return;
+  recordings.push(
+    response
+      .clone()
+      .text()
+      .then((text) => {
+        const body: Fixture = { status: response.status, body: text ? JSON.parse(text) : null };
+        writeFileSync(fixtureUrl(name), `${scrub(JSON.stringify(body, null, 2))}\n`);
+      }),
+  );
+});
+
+/** The next request to `path` gets the fixture `name`; live, its reply is recorded as `name`. */
+function reply(name: string, path: string) {
+  recordAs = name;
+  if (live) return;
+  const { status, body } = fixture(name);
+  server.use(http.post(`${API}${path}`, () => HttpResponse.json(body as any, { status }), { once: true }));
+}
+
+// Read before any test can re-record it: live, Resend's reply must still match it.
+const invalidFrom = fixture("create-invalid-from") as Fixture & { body: { name: string } };
+
+const driver = resendDriver({ timeoutMs: live ? 15_000 : 200 });
+const create = (input: Record<string, unknown>) => driver.ops["broadcast.create"]!(input, call);
+const send = (id: string) => driver.ops["broadcast.send"]!({ id }, { ...call, opId: "resend.broadcast.send" });
+const failure = (promise: Promise<unknown>) =>
+  promise.then(
+    () => expect.unreachable(),
+    (err: DriverError) => err,
+  );
+
+beforeAll(() => server.listen({ onUnhandledFrame: live ? "bypass" : "error" }));
+beforeEach(() => {
+  requests.length = 0;
+  if (!live) vi.stubEnv("RESEND_API_KEY", "re_test_key");
+});
+afterEach(() => {
+  server.resetHandlers();
+  vi.unstubAllEnvs();
+});
+afterAll(async () => {
+  await Promise.all(recordings);
+  server.close();
+});
+
+describe("resendDriver", () => {
+  it("creates a broadcast as a draft, then sends it", async () => {
+    reply("create", "/broadcasts");
+    const { id } = (await create({ audience, from, subject: "Sanoma driver test", html: "<p>Hello</p>" })) as {
+      id: string;
+    };
+    expect(id).toEqual(expect.any(String));
+    const sent = requests[0]!;
+    expect(sent.method).toBe("POST");
+    expect(sent.headers.get("idempotency-key")).toBe("run-1:3");
+    expect(await sent.json()).toEqual({
+      segment_id: audience,
+      from,
+      subject: "Sanoma driver test",
+      html: "<p>Hello</p>",
+      name: "run-1:3",
+    });
+    // Compared, not printed: a failure must not show a live key.
+    expect(sent.headers.get("authorization") === `Bearer ${process.env.RESEND_API_KEY}`).toBe(true);
+
+    reply("send", `/broadcasts/${id}/send`);
+    expect(await send(id)).toEqual({ id, status: "queued" });
+    expect(new URL(requests[1]!.url).pathname).toBe(`/broadcasts/${id}/send`);
+    expect(requests[1]!.headers.get("idempotency-key")).toBe("run-1:3");
+  });
+
+  it("takes the sender from the driver's options when the input has none", async () => {
+    reply("create", "/broadcasts");
+    await resendDriver({ from }).ops["broadcast.create"]!({ audience, subject: "s", html: "" }, call);
+    expect(await requests[0]!.json()).toMatchObject({ from });
+  });
+
+  it("refuses a broadcast with no sender without calling Resend", async () => {
+    const err = await failure(create({ audience, subject: "s", html: "" }));
+    expect(err).toMatchObject({ name: "DriverError", retryable: false, message: expect.stringContaining("`from`") });
+    expect(requests).toEqual([]);
+  });
+
+  it("fails a 422 for good, with Resend's status and error name", async () => {
+    reply("create-invalid-from", "/broadcasts");
+    const err = await failure(create({ audience, from: "not an address", subject: "s", html: "" }));
+    expect(err).toMatchObject({
+      name: "DriverError",
+      retryable: false,
+      status: 422,
+      vendorCode: invalidFrom.body.name,
+      message: expect.stringContaining("resend: broadcast.create failed (422)"),
+    });
+  });
+
+  it.skipIf(live).each([
+    ["rate-limit", true, "rate_limit_exceeded"],
+    ["server-error", true, "application_error"],
+    ["daily-quota", false, "daily_quota_exceeded"],
+  ])("a %s reply is retryable: %s", async (name, retryable, vendorCode) => {
+    reply(name, "/broadcasts/bc_1/send");
+    const err = await failure(send("bc_1"));
+    expect(err).toMatchObject({ retryable, status: fixture(name).status, vendorCode });
+  });
+
+  it.skipIf(live)("fails retryable when Resend does not answer in time", async () => {
+    server.use(http.post(`${API}/broadcasts/bc_1/send`, () => delay("infinite")));
+    const err = await failure(send("bc_1"));
+    expect(err).toMatchObject({ retryable: true, message: "resend: broadcast.send timed out after 200 ms" });
+    expect(err.status).toBeUndefined();
+  });
+
+  it("names the variable when the API key is missing", async () => {
+    vi.stubEnv("RESEND_API_KEY", undefined);
+    const err = await failure(send("bc_1"));
+    expect(err).toMatchObject({ retryable: false, message: "resend: RESEND_API_KEY is not set" });
+    expect(requests).toEqual([]);
+  });
+});

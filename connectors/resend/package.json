@@ -34,6 +34,10 @@
     "./fake": {
       "types": "./dist/fake.d.ts",
       "default": "./dist/fake.js"
+    },
+    "./driver": {
+      "types": "./dist/driver.d.ts",
+      "default": "./dist/driver.js"
     }
   },
   "publishConfig": {
@@ -42,10 +46,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
-    "prepack": "pnpm run clean && pnpm run build"
+    "generate": "pnpm --package=@redocly/cli@2.60.0 dlx redocly bundle resend --config openapi.redocly.yaml --remove-unused-components --ext yaml | pnpm dlx --package openapi-typescript@7.13.0 --package typescript@5.9.3 openapi-typescript -o src/resend-api.d.ts && oxfmt src/resend-api.d.ts",
+    "prepack": "pnpm run clean && pnpm run build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.17.0"
   },
   "devDependencies": {
     "@sanoma/workflows": "workspace:*",
+    "msw": "^3.0.2",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
