@@ -7,7 +7,7 @@ import { defineConfig } from "vite";
 // The runtime and what it loads stay outside the server bundle: dist/server/server.js imports
 // them from the consumer's node_modules, so the app and the worker share one copy. (The app
 // imports no connector; a config's connectors reach it only through startApp.)
-const RUNTIME = ["@sanoma/workflows", "@dbos-inc/dbos-sdk", "pg", "zod"];
+const RUNTIME = ["@sanoma/workflows", "@sanoma/bridge", "@dbos-inc/dbos-sdk", "pg", "zod"];
 
 export default defineConfig({
   plugins: [
@@ -21,7 +21,7 @@ export default defineConfig({
       // to its own denials, and to the modules marked server-only, such as server/core.ts.)
       importProtection: {
         behavior: "error",
-        client: { specifiers: [/^(@sanoma\/(workflows(?!\/shared$)|connector-|testing)|@dbos-inc\/|pg$)/] },
+        client: { specifiers: [/^(@sanoma\/(workflows(?!\/shared$)|bridge|connector-|testing)|@dbos-inc\/|pg$)/] },
       },
     }),
     react(),
