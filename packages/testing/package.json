@@ -44,17 +44,23 @@
     "prepack": "pnpm run clean && pnpm run build"
   },
   "devDependencies": {
+    "@sanoma/bridge": "workspace:*",
     "@sanoma/connector-bluesky": "workspace:*",
     "@sanoma/connector-ghost": "workspace:*",
+    "@sanoma/connector-github": "workspace:*",
     "@sanoma/connector-resend": "workspace:*",
+    "@sanoma/connector-stripe": "workspace:*",
     "@sanoma/workflows": "workspace:*",
     "msw": "^3.0.2",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
+    "@sanoma/bridge": "^0.1.0",
     "@sanoma/connector-bluesky": "^0.1.0",
     "@sanoma/connector-ghost": "^0.1.0",
+    "@sanoma/connector-github": "^0.1.0",
     "@sanoma/connector-resend": "^0.1.0",
+    "@sanoma/connector-stripe": "^0.1.0",
     "@sanoma/workflows": "^0.1.0",
     "msw": "^3",
     "vitest": "^5",

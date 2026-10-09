@@ -19,7 +19,7 @@
       }
     ]
   },
-  "ignorePatterns": ["**/node_modules", "**/.sanoma", "**/dist", "**/generated"],
+  "ignorePatterns": ["**/node_modules", "**/.sanoma", "**/dist", "**/generated", "packages/bridge/src/gen"],
   "overrides": [
     {
       "files": ["packages/app/src/components/ui/**"],

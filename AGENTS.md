@@ -12,16 +12,19 @@ Status: early. Business processes are written as TypeScript workflows that run o
 | [`@sanoma/workflows`](packages/workflows/AGENTS.md)         | Define connectors and workflows, run them durably on DBOS, and lint them          |
 | [`@sanoma/app`](packages/app/AGENTS.md)                     | Web UI and JSON API over a config, started with `startApp(config)`                |
 | [`@sanoma/testing`](packages/testing/AGENTS.md)             | `startTestWorker`, `testDatabaseUrl` and the connectors' fakes for workflow tests |
+| [`@sanoma/bridge`](packages/bridge/AGENTS.md)               | OpenTofu providers: the provider-bridge client, its fake, the resource generator  |
 | [`connectors/`](connectors/AGENTS.md)                       | Vendor connectors, one workspace package each                                     |
 | [`@sanoma/connector-ghost`](connectors/ghost/AGENTS.md)     | Ghost Admin API post operations and an in-memory fake                             |
 | [`@sanoma/connector-resend`](connectors/resend/AGENTS.md)   | Resend broadcast operations and an in-memory fake                                 |
 | [`@sanoma/connector-bluesky`](connectors/bluesky/AGENTS.md) | Bluesky post operations and an in-memory fake                                     |
+| [`@sanoma/connector-github`](connectors/github/AGENTS.md)   | GitHub resources read through its OpenTofu provider, and a replay fake            |
+| [`@sanoma/connector-stripe`](connectors/stripe/AGENTS.md)   | Stripe resources read through its OpenTofu provider, and a replay fake            |
 | [`modules/`](modules/AGENTS.md)                             | Placeholder for parts not written yet                                             |
 | [`types/`](types/AGENTS.md)                                 | Ambient type declarations shared by the packages                                  |
 | [`.github/`](.github/AGENTS.md)                             | GitHub Actions CI                                                                 |
 | [`.claude/`](.claude/)                                      | Agent skills for Claude Code                                                      |
 | [`.agents/`](.agents/)                                      | Vendored agent skills                                                             |
-| [`package.json`](package.json)                              | Root scripts: typecheck, build, lint, format, test, `db:up`                       |
+| [`package.json`](package.json)                              | Root scripts: typecheck, build, lint, format, test, `db:up`, `bridge:download`    |
 | [`tsconfig.json`](tsconfig.json)                            | Root TypeScript config with `@sanoma/*` paths to each package's `src/`            |
 | [`vitest.config.ts`](vitest.config.ts)                      | Test config with aliases to the package sources                                   |
 | [`docker-compose.yml`](docker-compose.yml)                  | Postgres for DBOS on port 5433                                                    |
@@ -32,7 +35,7 @@ Status: early. Business processes are written as TypeScript workflows that run o
 | [`.pnpmfile.cjs`](.pnpmfile.cjs)                            | pnpm hook: a packed package's readme is its AGENTS.md without the Contents table  |
 | [`skills-lock.json`](skills-lock.json)                      | Lock file for installed agent skills                                              |
 
-Community connectors live in their authors' own repos (`sanoma-connector-<vendor>`) and are listed in [`Sanoma-AI/registry`](https://github.com/Sanoma-AI/registry).
+Connectors live here under `connectors/`; one moves to its own repo only when someone outside the team maintains it.
 
 ## Develop
 

@@ -1,0 +1,249 @@
+import { describe, expect, it } from "vitest";
+import { z } from "zod";
+import type { Block, CtyType, SchemaDocument } from "@sanoma/bridge";
+import { ctyToZod, fromTfState, generateResources, toTfState } from "@sanoma/bridge/tfschema";
+
+/** The zod schema a generated source expression builds. */
+const build = (source: string) => new Function("z", `return ${source}`)(z) as z.ZodType;
+
+describe("ctyToZod", () => {
+  // What the schema accepts, and one value it refuses (`dynamic` refuses nothing).
+  const cases: [string, CtyType, string, unknown, unknown[]][] = [
+    ["string", "string", "z.string()", "main", [1]],
+    ["number", "number", "z.number()", 1396749274, ["1"]],
+    ["bool", "bool", "z.boolean()", false, ["false"]],
+    ["list", ["list", "string"], "z.array(z.string())", ["a", "b"], ["a"]],
+    ["set", ["set", "number"], "z.array(z.number())", [3, 1], [[true]]],
+    ["map", ["map", "string"], "z.record(z.string(), z.string())", { team: "core" }, [{ team: 1 }]],
+    [
+      "object",
+      ["object", { up_to: "number", flat: "bool" }],
+      "z.object({ up_to: z.number().nullish(), flat: z.boolean().nullish() })",
+      { up_to: 10, flat: null },
+      [{ up_to: "10" }],
+    ],
+    ["tuple", ["tuple", ["string", "number"]], "z.tuple([z.string(), z.number()])", ["a", 1], [[1, "a"]]],
+    ["dynamic", "dynamic", "z.unknown()", { value: { brand: "visa" }, type: ["object", {}] }, []],
+  ];
+
+  it.each(cases)("maps %s", (_, type, source, valid, invalid) => {
+    expect(ctyToZod(type)).toBe(source);
+    const schema = build(source);
+    expect(schema.safeParse(valid).success).toBe(true);
+    expect(invalid.map((v) => schema.safeParse(v).success)).toEqual(invalid.map(() => false));
+  });
+
+  it("nests collections", () => {
+    expect(ctyToZod(["list", ["map", ["set", "bool"]]])).toBe("z.array(z.record(z.string(), z.array(z.boolean())))");
+  });
+
+  it("quotes object keys that are not identifiers", () => {
+    expect(ctyToZod(["object", { "3d_secure": "string" }])).toBe('z.object({ "3d_secure": z.string().nullish() })');
+  });
+
+  it("refuses a type the schema format does not have", () => {
+    expect(() => ctyToZod("int" as CtyType)).toThrow('Unknown cty type "int"');
+    expect(() => ctyToZod(["bag", "string"] as unknown as CtyType)).toThrow("Unknown cty type");
+  });
+});
+
+/** A schema document with one resource type, `acme_thing`. */
+const doc = (block: Block, schemaVersion = 1): SchemaDocument => ({
+  source: "acme/acme",
+  version: "1.0.0",
+  protocol: 5,
+  formatVersion: 1,
+  providerConfig: { attributes: {}, blocks: {} },
+  resources: { acme_thing: { schemaVersion, block } },
+  dataSources: {},
+});
+
+const thing: Block = {
+  attributes: {
+    name: { type: "string", required: true, description: "The thing's name." },
+    note: { type: "string", optional: true },
+    etag: { type: "string", optional: true, computed: true },
+    url: { type: "string", computed: true },
+    token: { type: "string", optional: true, sensitive: true },
+    region: { type: "string", optional: true, description: "Where it lives." },
+    legacy: { type: "bool", optional: true, deprecated: true, description: "Old." },
+    tags: { type: ["set", "string"], optional: true },
+  },
+  blocks: {
+    pages: {
+      nesting: "list",
+      maxItems: 1,
+      block: {
+        attributes: { cname: { type: "string", optional: true }, status: { type: "string", computed: true } },
+        blocks: {
+          source: {
+            nesting: "list",
+            minItems: 1,
+            maxItems: 1,
+            block: { attributes: { branch: { type: "string", required: true } }, blocks: {} },
+          },
+        },
+      },
+    },
+    rule: { nesting: "list", block: { attributes: { pattern: { type: "string", required: true } }, blocks: {} } },
+    member: { nesting: "set", block: { attributes: { login: { type: "string", required: true } }, blocks: {} } },
+  },
+};
+
+const sources = { provider: { source: "acme/acme", version: "1.0.0", sha256: "abc" }, config: "resources.config.ts" };
+
+/** The generated module, evaluated: its `acme_thing` export. */
+function generated(block: Block, immutable: string[] = []) {
+  const source = generateResources(
+    doc(block),
+    { provider: "acme/acme", types: ["acme_thing"], immutable: { acme_thing: immutable } },
+    sources,
+  );
+  const body = source
+    .replace(/^import .*$/gm, "")
+    .replace("export const provider: TfProvider =", "const provider =")
+    .replace(/export const (\w+) =/g, "exports.$1 =")
+    .replaceAll("} satisfies TfResourceType;", "};");
+  const exports: Record<string, any> = {};
+  new Function("z", "exports", body)(z, exports);
+  return { source, thing: exports.acme_thing };
+}
+
+describe("generateResources", () => {
+  it("writes the provider and each type with its schema version", () => {
+    const { source, thing: t } = generated(thing);
+    expect(source).toMatch(/^\/\/ Generated by `pnpm generate`/);
+    expect(source).toContain('"source": "acme/acme"');
+    expect(source).toContain('"sha256": "abc"');
+    expect(t.typeName).toBe("acme_thing");
+    expect(t.schemaVersion).toBe(1);
+  });
+
+  it("makes required attributes required and the rest nullish", () => {
+    const { schema } = generated(thing).thing;
+    expect(schema.safeParse({ name: "x" }).success).toBe(true);
+    expect(schema.safeParse({ name: "x", note: null }).success).toBe(true);
+    expect(schema.safeParse({ note: "x" }).success).toBe(false);
+  });
+
+  it("turns a list block of at most one item into an object, and keeps other lists", () => {
+    const { schema } = generated(thing).thing;
+    expect(schema.safeParse({ name: "x", pages: { cname: "a.example", source: { branch: "main" } } }).success).toBe(
+      true,
+    );
+    expect(schema.safeParse({ name: "x", pages: [{ cname: "a.example" }] }).success).toBe(false);
+    // A block of one that must be there stays required inside its parent.
+    expect(schema.safeParse({ name: "x", pages: { cname: "a.example" } }).success).toBe(false);
+    expect(schema.safeParse({ name: "x", rule: [{ pattern: "main" }] }).success).toBe(true);
+  });
+
+  it("flags computed-only attributes vendor-owned, sensitive ones write-only, sets unordered, and the config's immutable ones", () => {
+    const { fields } = generated(thing, ["region", "name", "pages.source.branch"]).thing;
+    expect(fields).toEqual({
+      immutable: ["name", "pages.source.branch", "region"],
+      vendorOwned: ["url", "pages.status"],
+      writeOnly: ["token"],
+      unordered: ["tags", "member"],
+    });
+  });
+
+  it("keeps computed and optional attributes the user's to set", () => {
+    const { fields } = generated(thing).thing;
+    expect(fields.vendorOwned).not.toContain("etag");
+  });
+
+  it("describes attributes, and marks deprecated ones in the metadata", () => {
+    const { schema } = generated(thing).thing;
+    expect(schema.shape.name.description).toBe("The thing's name.");
+    const json = z.toJSONSchema(schema) as { properties: Record<string, Record<string, unknown>> };
+    expect(json.properties.legacy).toMatchObject({ description: "Old.", deprecated: true });
+  });
+
+  it("generates nested attributes with their children's own flags", () => {
+    const { schema } = generated({
+      attributes: {
+        name: { type: "string", required: true },
+        tiers: {
+          type: ["list", ["object", { up_to: "number", flat: "number" }]],
+          optional: true,
+          nestedType: {
+            nesting: "list",
+            attributes: { up_to: { type: "number", required: true }, flat: { type: "number", optional: true } },
+          },
+        },
+      },
+      blocks: {},
+    }).thing;
+    expect(schema.safeParse({ name: "x", tiers: [{ up_to: 10 }] }).success).toBe(true);
+    expect(schema.safeParse({ name: "x", tiers: [{ flat: 10 }] }).success).toBe(false);
+  });
+
+  it("is the same text every time", () => {
+    expect(generated(thing).source).toBe(generated(thing).source);
+  });
+
+  it("refuses another release, types the schema does not have, and immutable attributes a type does not have", () => {
+    const config = { provider: "acme/acme", types: ["acme_thing"] };
+    const other = { ...sources, provider: { source: "acme/acme", version: "2.0.0" } };
+    expect(() => generateResources(doc(thing), config, other)).toThrow(
+      "the schema document is of acme/acme 1.0.0, not the pinned acme/acme 2.0.0",
+    );
+    expect(() => generateResources(doc(thing), { ...config, types: ["acme_other"] }, sources)).toThrow(
+      "acme/acme 1.0.0 has no resource type acme_other",
+    );
+    const immutable = (paths: string[]) => ({ ...config, immutable: { acme_thing: paths } });
+    expect(() => generateResources(doc(thing), immutable(["nope", "pages.nope", "pages.source"]), sources)).toThrow(
+      "immutable: acme_thing has no attribute nope, pages.nope",
+    );
+  });
+});
+
+describe("fromTfState and toTfState", () => {
+  const { shape } = generated(thing).thing;
+  const tf = {
+    name: "x",
+    note: null,
+    etag: "W/1",
+    url: "https://x",
+    token: "secret",
+    region: "eu",
+    legacy: null,
+    tags: ["b", "a"],
+    pages: [{ cname: null, status: "built", source: [{ branch: "main" }] }],
+    rule: [],
+    member: [],
+  };
+
+  it("unwraps blocks of one item and drops secrets", () => {
+    expect(fromTfState(shape, tf)).toEqual({
+      ...tf,
+      token: null,
+      pages: { cname: null, status: "built", source: { branch: "main" } },
+    });
+    expect(fromTfState(shape, { ...tf, pages: [] }).pages).toBeNull();
+  });
+
+  it("gives back the provider's layout, every attribute present", () => {
+    expect(toTfState(shape, fromTfState(shape, tf))).toEqual({ ...tf, token: null });
+    expect(toTfState(shape, { name: "x" })).toEqual({
+      name: "x",
+      note: null,
+      etag: null,
+      url: null,
+      token: null,
+      region: null,
+      legacy: null,
+      tags: null,
+      pages: [],
+      rule: [],
+      member: [],
+    });
+  });
+});
+
+describe("the sanoma-tfschema CLI", () => {
+  it("runs nothing on import, and says how to call it", async () => {
+    const { main } = await import("../src/tfschema/cli.ts");
+    await expect(main([])).rejects.toThrow("usage: sanoma-tfschema <resources.config.ts> <resources.gen.ts>");
+  });
+});

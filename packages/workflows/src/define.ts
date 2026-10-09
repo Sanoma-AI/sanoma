@@ -198,8 +198,25 @@ export type Ctx<U extends readonly Use[]> = BaseCtx &
  * (`io: "input"`: defaults stay optional); `io: "output"` describes what parsing returns.
  * What JSON Schema can't express is left open. Throws when zod can't convert the schema at all.
  */
-export function jsonSchemaOf(schema: z.ZodType, io: "input" | "output" = "input"): Record<string, unknown> {
-  return z.toJSONSchema(schema, { io, target: "draft-2020-12", unrepresentable: "any" });
+export function jsonSchemaOf(
+  schema: z.ZodType,
+  io: "input" | "output" = "input",
+  refs?: ReadonlyMap<unknown, string>,
+): Record<string, unknown> {
+  return z.toJSONSchema(schema, {
+    io,
+    target: "draft-2020-12",
+    unrepresentable: "any",
+    // A schema `refs` names, inside another, becomes a `$ref` to it (a resource type's state).
+    ...(refs?.size && {
+      override: ({ zodSchema, jsonSchema, path }) => {
+        const ref = path.length > 0 ? refs.get(zodSchema) : undefined;
+        if (ref === undefined) return;
+        for (const key of Object.keys(jsonSchema)) delete (jsonSchema as Record<string, unknown>)[key];
+        Object.assign(jsonSchema, { $ref: ref });
+      },
+    }),
+  });
 }
 
 export interface WorkflowDefinition<U extends readonly Use[] = readonly Use[], S extends z.ZodType = z.ZodType> {

@@ -1,0 +1,13 @@
+# `pnpm run generate` writes src/gen/ from proto/ with protoc-gen-es (its version pinned in
+# package.json, matching @bufbuild/protobuf). The generated files are committed; never edit them.
+version: v2
+inputs:
+  - directory: proto
+plugins:
+  - local: protoc-gen-es
+    out: src/gen
+    opt:
+      - target=ts
+      - import_extension=ts
+      - erasable_syntax=true
+clean: true

@@ -67,6 +67,18 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  connectors/github:
+    devDependencies:
+      '@sanoma/bridge':
+        specifier: workspace:*
+        version: link:../../packages/bridge
+      '@sanoma/workflows':
+        specifier: workspace:*
+        version: link:../../packages/workflows
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
   connectors/resend:
     devDependencies:
       '@sanoma/workflows':
@@ -75,6 +87,18 @@ importers:
       msw:
         specifier: ^3.0.2
         version: 3.0.2(@types/node@26.6.4)(typescript@7.0.2)(vite@8.3.3(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
+  connectors/stripe:
+    devDependencies:
+      '@sanoma/bridge':
+        specifier: workspace:*
+        version: link:../../packages/bridge
+      '@sanoma/workflows':
+        specifier: workspace:*
+        version: link:../../packages/workflows
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -145,12 +169,18 @@ importers:
       '@lezer/highlight':
         specifier: ^1.2.5
         version: 1.2.5
+      '@sanoma/bridge':
+        specifier: workspace:*
+        version: link:../bridge
       '@sanoma/connector-bluesky':
         specifier: workspace:*
         version: link:../../connectors/bluesky
       '@sanoma/connector-ghost':
         specifier: workspace:*
         version: link:../../connectors/ghost
+      '@sanoma/connector-github':
+        specifier: workspace:*
+        version: link:../../connectors/github
       '@sanoma/connector-resend':
         specifier: workspace:*
         version: link:../../connectors/resend
@@ -191,21 +221,49 @@ importers:
         specifier: ^8.3.3
         version: 8.3.3(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)
 
+  packages/bridge:
+    dependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
+      '@connectrpc/connect':
+        specifier: ^2.2.0
+        version: 2.2.0(@bufbuild/protobuf@2.16.0)
+      '@connectrpc/connect-node':
+        specifier: ^2.2.0
+        version: 2.2.0(@bufbuild/protobuf@2.16.0)(@connectrpc/connect@2.2.0(@bufbuild/protobuf@2.16.0))
+    devDependencies:
+      '@sanoma/workflows':
+        specifier: workspace:*
+        version: link:../workflows
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
   packages/testing:
     dependencies:
       vitest:
         specifier: ^5
         version: 5.0.3(@types/node@26.6.4)(msw@3.0.2(@types/node@26.6.4)(typescript@7.0.2)(vite@8.3.3(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)))(vite@8.3.3(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
     devDependencies:
+      '@sanoma/bridge':
+        specifier: workspace:*
+        version: link:../bridge
       '@sanoma/connector-bluesky':
         specifier: workspace:*
         version: link:../../connectors/bluesky
       '@sanoma/connector-ghost':
         specifier: workspace:*
         version: link:../../connectors/ghost
+      '@sanoma/connector-github':
+        specifier: workspace:*
+        version: link:../../connectors/github
       '@sanoma/connector-resend':
         specifier: workspace:*
         version: link:../../connectors/resend
+      '@sanoma/connector-stripe':
+        specifier: workspace:*
+        version: link:../../connectors/stripe
       '@sanoma/workflows':
         specifier: workspace:*
         version: link:../workflows
@@ -388,6 +446,9 @@ packages:
     resolution: {integrity: sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg==}
     engines: {node: '>=6.9.0'}
 
+  '@bufbuild/protobuf@2.16.0':
+    resolution: {integrity: sha512-FWa0sPlqYGJgpTs6OxBRcL/AW4JT0OIO+W1ajerluoTVh8CV0B7XM1qsNCRgnkSCkRCgOICKHRQlY17jrsm0+Q==}
+
   '@codemirror/autocomplete@6.20.3':
     resolution: {integrity: sha512-tlosUqb+3BbxCxZdu4tKeRghPFC+QM7q4X5YhKV2eCmPG+1r2F3f4AaSz5sCrFqUtX4Jh20VFTKecl16MgiV9g==}
 
@@ -408,6 +469,18 @@ packages:
 
   '@codemirror/view@6.43.14':
     resolution: {integrity: sha512-hC45YnmJNR1rz42OF57BLoQNFMV12/13drnvibDsR2quNDmldcb4WvYVV81hFQg56i9lcqQMEDqilhX2QDcGQQ==}
+
+  '@connectrpc/connect-node@2.2.0':
+    resolution: {integrity: sha512-E6uUO6e11WdynAuBjuN+0WpHjqxEM9BNDdfDIJHcn49Esg/WxSIbn2y1KFt9XL96IJi01qdBbvubcdpBz1X3Zw==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      '@bufbuild/protobuf': ^2.7.0
+      '@connectrpc/connect': 2.2.0
+
+  '@connectrpc/connect@2.2.0':
+    resolution: {integrity: sha512-M63OQ1ZFcPUm85CuewJ9G9CMV8LjzGR9935xOnXNQGSazAbwMb3x2W7vXBYM1zqrP7XFD8uxp/dUAhirclgwnQ==}
+    peerDependencies:
+      '@bufbuild/protobuf': ^2.7.0
 
   '@dagrejs/dagre@3.1.1':
     resolution: {integrity: sha512-zroZB1dFOFiGgv4Xcrn1DckB1o4aOikPqD2NDQPV0WM//CXGcS6xiD0rNkqHmw6FEg4tabt4nxPLwgCWT+Vb2A==}
@@ -4436,6 +4509,8 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
+  '@bufbuild/protobuf@2.16.0': {}
+
   '@codemirror/autocomplete@6.20.3':
     dependencies:
       '@codemirror/language': 6.13.1
@@ -4481,6 +4556,15 @@ snapshots:
       crelt: 1.0.7
       style-mod: 4.1.4
       w3c-keyname: 2.2.8
+
+  '@connectrpc/connect-node@2.2.0(@bufbuild/protobuf@2.16.0)(@connectrpc/connect@2.2.0(@bufbuild/protobuf@2.16.0))':
+    dependencies:
+      '@bufbuild/protobuf': 2.16.0
+      '@connectrpc/connect': 2.2.0(@bufbuild/protobuf@2.16.0)
+
+  '@connectrpc/connect@2.2.0(@bufbuild/protobuf@2.16.0)':
+    dependencies:
+      '@bufbuild/protobuf': 2.16.0
 
   '@dagrejs/dagre@3.1.1':
     dependencies:

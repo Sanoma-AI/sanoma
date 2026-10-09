@@ -35,7 +35,8 @@ export const connectorsOf = (config: ConfigDescription) =>
       const workflows = config.workflows
         .filter((wf) => wf.ops.some((op) => ids.has(op)))
         .map(({ name, title }) => ({ name, title }));
-      return { id, vendor, ops, workflows };
+      const resourceTypes = config.resourceTypes.filter((type) => type.vendor === id);
+      return { id, vendor, ops, workflows, resourceTypes };
     })
     // One collation, so the server and the browser sort alike.
     .toSorted((a, b) => a.vendor.title.localeCompare(b.vendor.title, "en"));

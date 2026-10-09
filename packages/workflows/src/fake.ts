@@ -43,6 +43,11 @@ export interface Fake<T, Id extends string = string> {
   readonly state: T;
   /** Empties the state, the remembered replies and the pending faults, and drops this fake's calls from the log. */
   reset(): void;
+  /**
+   * Changes the vendor's state as someone at the vendor would: re-reads it from the file first,
+   * applies `change`, and saves it, so the next call (in any process) sees it.
+   */
+  update(change: (state: T) => void): void;
   /** Every call received, in order, including failed ones and repeats of an idempotency key. */
   calls: FakeCall[];
   /** The next call to `opId` throws `err` (default: a retryable `DriverError`) and changes nothing. */
@@ -142,6 +147,11 @@ export function defineFake<V extends string, S extends Specs, T extends Record<s
     get state() {
       refresh();
       return state;
+    },
+    update(change) {
+      refresh();
+      change(state);
+      save();
     },
     reset() {
       replace(definition.initial());
