@@ -162,13 +162,13 @@ function register(wf: WorkflowDefinition<any, any>) {
       let output: unknown;
       try {
         try {
+          // The one parse of the input: the client checked it, but sent it as given.
+          const parsed = parseOrThrow(wf.input, input, `The input does not match ${wf.name}'s schema`);
           if (sandbox !== undefined) {
             // Imported here, so a live worker never loads the Gherkin parser or faker.
             const { seedSandbox } = await import("./sandbox.ts");
             await seedSandbox(run, sandbox);
           }
-          // The one parse of the input: the client checked it, but sent it as given.
-          const parsed = parseOrThrow(wf.input, input, `The input does not match ${wf.name}'s schema`);
           output = await wf.run(buildCtx(wf, run), parsed);
         } finally {
           // Before the outcome is written: a call still queued must find the run ended.

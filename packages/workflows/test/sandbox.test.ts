@@ -2,7 +2,17 @@ import { randomUUID } from "node:crypto";
 import { testDatabaseUrl } from "@sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { defineWorkflow, type Driver, errorCode, type LedgerRecord, resolveConfig } from "../src/index.ts";
+import { ghost } from "@sanoma/connector-ghost";
+import { resend } from "@sanoma/connector-resend";
+import { bluesky } from "@sanoma/connector-bluesky";
+import {
+  defineConnector,
+  defineWorkflow,
+  type Driver,
+  errorCode,
+  type LedgerRecord,
+  resolveConfig,
+} from "../src/index.ts";
 import { check, drive, loadScenarios, type Scenario } from "../src/scenario.ts";
 import announce from "./fixtures/announce.ts";
 import { failure, inSeconds, pending, types, useApp, waitFor } from "./harness.ts";
@@ -24,12 +34,25 @@ const review = defineWorkflow({
   },
 });
 
+/** A vendor with a driver and no fake. */
+const lab = defineConnector("lab", {
+  sample: { take: { effect: "write", input: z.object({}), output: z.object({}) } },
+});
+const sample = defineWorkflow({
+  name: "sample",
+  trigger: "manual",
+  input: z.object({}),
+  uses: [lab.sample.take],
+  run: async (ctx) => ctx.lab.sample.take({}),
+});
+
 describe("sandbox runs", () => {
   /** Operations the drivers were called with: a sandbox run calls none. */
   const live: string[] = [];
   const app = useApp(databaseUrl, "sandbox", (vendors) => ({
-    workflows: [announce, review],
-    drivers: vendors.drivers.map((d): Driver => ({
+    workflows: [announce, review, sample],
+    connectors: [ghost, resend, bluesky, lab],
+    drivers: [...vendors.drivers, { vendor: "lab", ops: { "sample.take": async () => ({}) } }].map((d): Driver => ({
       vendor: d.vendor,
       ops: Object.fromEntries(
         Object.keys(d.ops).map((key) => [
@@ -173,6 +196,50 @@ describe("sandbox runs", () => {
     expect(errorCode(missing)).toBe("invalid_input");
     expect((missing as Error).message).toBe('No scenario named "Nope"');
     expect(types(await ledger(unknown))).toEqual(["run.started", "run.failed"]);
+  });
+
+  it("refuses a workflow that uses an operation with no fake, and parses the input before seeding", async () => {
+    const runId = await c().start(sample, {}, { startedBy: alice, sandbox: "Sampled" });
+    const err = await failure(c().result(runId));
+    expect(errorCode(err)).toBe("invalid_input");
+    expect((err as Error).message).toBe(
+      "A sandbox run of sample has no fake for lab.sample.take: add their vendors' fakes to the config's `fakes`",
+    );
+    expect(live).toEqual([]);
+
+    // Enqueued as the client would, without its check of the input.
+    const { queueName, appName } = resolveConfig(app.config);
+    const handle = await app.raw.enqueue(
+      { queueName, workflowName: "announce", applicationName: appName },
+      { input: {}, startedBy: alice, sandbox: "Launch on time" },
+    );
+    const bad = await failure(c().result(handle.workflowID));
+    expect((bad as Error).message).toMatch(/^The input does not match announce's schema/);
+    expect(types(await ledger(handle.workflowID))).toEqual(["run.started", "run.failed"]);
+  });
+
+  it("fails a sandbox run whose worker restarts, since the fakes' state is gone", async () => {
+    const launch = scenario("Launch on time");
+    const runId = await c().start(announce, launch.input as never, { startedBy: alice, sandbox: launch.name });
+    await waitFor(pending(c, runId));
+
+    await app.restart();
+
+    const err = await failure(c().result(runId));
+    expect(errorCode(err)).toBe("invalid_input");
+    expect((err as Error).message).toBe(
+      `Sandbox run ${runId} was interrupted by a worker restart and the fakes' state is gone; start the scenario again`,
+    );
+    expect(types(await ledger(runId))).toEqual([
+      "run.started",
+      "scenario.seeded",
+      "op.called ghost.post.create",
+      "op.called resend.broadcast.create",
+      "approval.requested",
+      "run.failed",
+    ]);
+    const records = await ledger(runId);
+    expect(records.map((r) => r.seq)).toEqual(records.map((_, i) => i));
   });
 
   it("refuses to reuse a run id for a start in another sandbox, or none", async () => {
