@@ -14,7 +14,7 @@ export default defineConfig({
       { find: /^@sanoma\/testing\/replay$/, replacement: src("./packages/testing/src/replay.ts") },
       { find: /^@sanoma\/(workflows|testing|app)$/, replacement: src("./packages/$1/src/index.ts") },
       {
-        find: /^@sanoma\/connector-([a-z0-9-]+)\/(driver|fake)$/,
+        find: /^@sanoma\/connector-([a-z0-9-]+)\/(driver|fake|resources)$/,
         replacement: src("./connectors/$1/src/$2.ts"),
       },
       { find: /^@sanoma\/connector-([a-z0-9-]+)$/, replacement: src("./connectors/$1/src/index.ts") },

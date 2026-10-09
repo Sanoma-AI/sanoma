@@ -29,6 +29,7 @@
       // Before the bare pattern: TypeScript takes the first of two patterns with equal prefixes.
       "@sanoma/connector-*/fake": ["./connectors/*/src/fake.ts"],
       "@sanoma/connector-*/driver": ["./connectors/*/src/driver.ts"],
+      "@sanoma/connector-*/resources": ["./connectors/*/src/resources.ts"],
       "@sanoma/connector-*": ["./connectors/*/src/index.ts"]
     }
   },

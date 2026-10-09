@@ -67,6 +67,15 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  connectors/github:
+    devDependencies:
+      '@sanoma/workflows':
+        specifier: workspace:*
+        version: link:../../packages/workflows
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
   connectors/resend:
     devDependencies:
       '@sanoma/workflows':
