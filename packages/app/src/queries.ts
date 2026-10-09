@@ -49,14 +49,14 @@ export const workflowNamed = (name: string) => (config: ConfigDescription) =>
 
 /**
  * The config's scenarios. Unlike the config they change while the app runs (the agent edits the
- * feature files), so they are read again after 5 s, and whenever the window regains focus.
+ * feature files), so they are read again every 5 seconds while the page is open and when its
+ * window regains focus.
  */
 export const scenariosQuery = () =>
   queryOptions({
     queryKey: ["scenarios"],
     queryFn: () => getScenarios(),
-    staleTime: 5_000,
-    refetchOnWindowFocus: true,
+    refetchInterval: 5_000,
   });
 
 /** The workflow's scenarios, and every feature file that could not be read: for `select`. */
