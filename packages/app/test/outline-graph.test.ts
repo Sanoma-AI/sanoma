@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
 import { outlineGraph } from "../src/graph/outline-graph.ts";
 import { type GraphNode, nodeAt, type Step } from "../src/graph/types.ts";
-import { labels, pairs } from "./graph-helpers.ts";
+import { calls, labels, pairs } from "./graph-helpers.ts";
 
 // Hand-built outlines, in the shapes outlineWorkflow returns (packages/workflows/src/outline.ts).
 
@@ -165,13 +165,7 @@ describe("outlineGraph", () => {
     const outline = outlineWorkflow(announce);
     if (!("file" in outline)) throw new Error(`announce was not outlined from its file: ${JSON.stringify(outline)}`);
     const text = readFileSync(outline.file, "utf8");
-    const { nodes } = outlineGraph(outline.nodes);
-    // Each node's text, up to its call's arguments.
-    const calls = nodes.map((n) => {
-      const spans = "spans" in n ? n.spans : undefined;
-      return `${n.id} ${spans?.map(([start, end]) => text.slice(start, end).split("(")[0]).join() ?? "-"}`;
-    });
-    expect(calls).toEqual([
+    expect(calls(outlineGraph(outline.nodes).nodes, text)).toEqual([
       "start -",
       "op:0 ctx.ghost.post.create",
       "op:1 ctx.resend.broadcast.create",
@@ -201,14 +195,14 @@ describe("outlineGraph", () => {
       { id: "end", kind: "end", label: "end" },
     ];
     const at = (offset: number) => nodeAt(nodes, offset)?.id;
-    expect([at(5), at(10), at(15), at(20), at(21), at(75), at(45), at(90)]).toEqual([
+    // A span's end is outside it.
+    expect([at(5), at(10), at(15), at(19), at(20), at(75), at(40)]).toEqual([
       "op:0",
       "op:1",
       "op:1",
       "op:1",
       "op:0",
       "sleep:3",
-      undefined,
       undefined,
     ]);
   });

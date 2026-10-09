@@ -4,9 +4,10 @@ import { type ActorInfo, DecideCall, RunsQuery, StartRunRequest } from "./api.ts
 import { decide, parse, runDetail, startRun, withoutSources, workflowSource } from "./server/core.ts";
 import { withPrincipal } from "./middleware.ts";
 
-// The page's reads and changes, as server functions. They do what the /api routes do, with the
-// same schemas; the routes stay the stable surface for scripts. Failures, the actor header and
-// the actor itself are handled once for all of them, in start.ts.
+// The page's reads and changes, as server functions. Most do what an /api route does, with the
+// same schemas; the routes stay the stable surface for scripts. getSource has no route: only the
+// page shows a workflow's source. Failures, the actor header and the actor itself are handled
+// once for all of them, in start.ts.
 //
 // Runs carry `unknown` inputs and outputs, which Start's type check can't prove serializable.
 // They are JSON (they come out of Postgres and the ledger as JSON), so that check is off for
@@ -22,7 +23,7 @@ const validate =
 
 export const getConfig = createServerFn(READ).handler(({ context }) => withoutSources(context.app.description));
 
-/** A workflow's source, apart from the config since it is a whole file: asked for by name. */
+/** A workflow's source, apart from the config since it is a whole file: asked for by name, `null` when it has none. */
 export const getSource = createServerFn(READ)
   .validator(validate(z.object({ name: z.string().min(1) })))
   .handler(({ data, context }) => workflowSource(context.app, data.name));

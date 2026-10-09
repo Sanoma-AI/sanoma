@@ -23,22 +23,30 @@ import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, us
 import { Badge } from "#/components/ui/badge.tsx";
 import { approverLabel } from "@sanoma/workflows/shared";
 import { layout } from "../graph/layout.ts";
-import { graphOf } from "../graph/run-graph.ts";
-import { type GraphNode, type GraphNodeKind, type GraphSource, isPending, isSelectable } from "../graph/types.ts";
+import {
+  type Graph as GraphData,
+  type GraphNode,
+  type GraphNodeKind,
+  isPending,
+  isSelectable,
+} from "../graph/types.ts";
 import { useReducedMotion } from "#/lib/motion.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import { configQuery, opsById } from "../queries.ts";
-import { ApprovalIcon, SleepIcon } from "./approval.tsx";
-import { ApprovalStatusBadge, effectBadge, StatusDot, ToneBadge, VendorLogo } from "./common.tsx";
+import { ApprovalStatusBadge, BUILTIN_ICON, effectBadge, StatusDot, ToneBadge, VendorLogo } from "./common.tsx";
 import { ZoomSlider } from "./zoom-slider.tsx";
 
 // A run's graph, or a workflow's outline, drawn with React Flow. It needs the DOM, so the pages
 // load this module only in the browser (GraphPanel in common.tsx: React.lazy, once seen);
 // the server renders a skeleton instead.
 
-type FlowNode = Node<{ node: GraphNode }, GraphNodeKind>;
-/** What a node component reads of its `NodeProps`: its node, of its kind. */
-type Props<K extends GraphNodeKind> = { data: { node: Extract<GraphNode, { kind: K }> } };
+/** A node as React Flow holds it: the graph's node, and whether a click on it selects it. */
+type FlowNode = Node<{ node: GraphNode; selectable: boolean }, GraphNodeKind>;
+/** What a node component reads of its `NodeProps`: its node, of its kind, and whether it is selected. */
+type Props<K extends GraphNodeKind> = {
+  data: { node: Extract<GraphNode, { kind: K }>; selectable: boolean };
+  selected: boolean;
+};
 
 /**
  * The room the view leaves around the graph, in px. Below it, the zoom slider's: its panel sits
@@ -88,29 +96,25 @@ function Handles({ inbound = true, outbound = true }: { inbound?: boolean; outbo
   );
 }
 
-/** One node's box, in its tone when a run gives it one, with its handles. */
+/**
+ * What a node is called, for its title and assistive tech: its label, but for a run's sleep,
+ * whose label says only until when and whose clock says "sleep".
+ */
+const nameOf = (node: GraphNode) => (node.kind === "sleep" && node.state ? `sleep ${node.label}` : node.label);
+
+/** One node's box, in its tone when a run gives it one, ringed when selected, with its handles. */
 function Frame({
-  node,
+  data: { node, selectable },
+  selected,
   inbound,
   outbound,
   children,
-}: {
-  node: GraphNode;
-  inbound?: boolean;
-  outbound?: boolean;
-  children: ReactNode;
-}) {
+}: Props<GraphNodeKind> & { inbound?: boolean; outbound?: boolean; children: ReactNode }) {
   const state = "state" in node ? node.state : undefined;
-  const { selected, selectable } = use(Selection);
   return (
     <div
-      className={frame({
-        tone: state?.tone ?? "off",
-        pending: isPending(node),
-        clickable: selectable && isSelectable(node),
-        selected: node.id === selected,
-      })}
-      title={node.label}
+      className={frame({ tone: state?.tone ?? "off", pending: isPending(node), clickable: selectable, selected })}
+      title={nameOf(node)}
     >
       <Handles inbound={inbound} outbound={outbound} />
       {children}
@@ -125,9 +129,10 @@ function Line({ children }: { children: ReactNode }) {
 /** The node's tone, when a run gives it one. */
 const Dot = ({ tone }: { tone: Tone | undefined }) => tone && <StatusDot tone={tone} />;
 
-function StartNode({ data: { node } }: Props<"start">) {
+function StartNode(props: Props<"start">) {
+  const { node } = props.data;
   return (
-    <Frame node={node} inbound={false}>
+    <Frame {...props} inbound={false}>
       <Line>
         <Dot tone={node.state?.tone} />
         {node.label}
@@ -136,9 +141,10 @@ function StartNode({ data: { node } }: Props<"start">) {
   );
 }
 
-function EndNode({ data: { node } }: Props<"end">) {
+function EndNode(props: Props<"end">) {
+  const { node } = props.data;
   return (
-    <Frame node={node} outbound={false}>
+    <Frame {...props} outbound={false}>
       <Line>
         <Dot tone={node.state?.tone} />
         {node.label}
@@ -150,20 +156,15 @@ function EndNode({ data: { node } }: Props<"end">) {
 /** The config's operations by id, read once for the whole graph. */
 const Ops = createContext<Map<string, OpEntry>>(new Map());
 
-/**
- * The page's selected node, by id, and whether a click selects one: held by the page, and read
- * by each node as it renders, so a node is not rebuilt when the selection moves.
- */
-const Selection = createContext<{ selected?: string | undefined; selectable: boolean }>({ selectable: false });
-
-function OpNode({ data: { node } }: Props<"op">) {
+function OpNode(props: Props<"op">) {
+  const { node } = props.data;
   // The effect is the config's: a call still held for its approval has no record yet.
   const op = use(Ops).get(node.label);
   const effect = op?.effect;
   const { state } = node;
   const held = state?.approval && state.decision === undefined ? state.approval : undefined;
   return (
-    <Frame node={node}>
+    <Frame {...props}>
       <Line>
         <Dot tone={state?.tone} />
         {op && <VendorLogo vendor={op.vendor} />}
@@ -188,13 +189,14 @@ function OpNode({ data: { node } }: Props<"op">) {
   );
 }
 
-function ApprovalNode({ data: { node } }: Props<"approval">) {
+function ApprovalNode(props: Props<"approval">) {
+  const { node } = props.data;
   const approval = node.state?.approval;
   return (
-    <Frame node={node}>
+    <Frame {...props}>
       <Line>
         <Dot tone={node.state?.tone} />
-        <ApprovalIcon className="size-4 shrink-0" />
+        <BUILTIN_ICON.approval className="size-4 shrink-0" />
         <span className="truncate">{node.label}</span>
       </Line>
       {approval && (
@@ -208,12 +210,13 @@ function ApprovalNode({ data: { node } }: Props<"approval">) {
 }
 
 /** A sleep, and in a run when it ends (UTC, as the ledger shows it). */
-function SleepNode({ data: { node } }: Props<"sleep">) {
+function SleepNode(props: Props<"sleep">) {
+  const { node } = props.data;
   return (
-    <Frame node={node}>
+    <Frame {...props}>
       <Line>
         <Dot tone={node.state?.tone} />
-        <SleepIcon className="size-4 shrink-0" />
+        <BUILTIN_ICON.sleep className="size-4 shrink-0" />
         <span className="truncate">{node.label}</span>
       </Line>
     </Frame>
@@ -221,9 +224,10 @@ function SleepNode({ data: { node } }: Props<"sleep">) {
 }
 
 /** A `ctx.all` member the run has recorded nothing for yet: "not started", dashed like the open end. */
-function PendingNode({ data: { node } }: Props<"pending">) {
+function PendingNode(props: Props<"pending">) {
+  const { node } = props.data;
   return (
-    <Frame node={node}>
+    <Frame {...props}>
       <Line>{node.label}</Line>
     </Frame>
   );
@@ -330,7 +334,8 @@ function useStable<T extends { id: string }>(items: T[], depth: number): T[] {
 }
 
 export interface GraphProps {
-  source: GraphSource;
+  /** Built by the page, which needs its nodes too: a click in the source finds its node there. */
+  graph: GraphData;
   /** The end shown when all of the graph cannot be read at once. Defaults to `end`. */
   show?: "start" | "end";
   /** The selected node's id, ringed. */
@@ -340,15 +345,15 @@ export interface GraphProps {
 }
 
 /**
- * A graph, built, laid out and drawn left to right, here in the browser. Clicking a node with a
- * place in the source or a ledger record calls `onSelect` with it.
+ * A graph, laid out and drawn left to right, here in the browser. Clicking a node with a place in
+ * the source or a ledger record calls `onSelect` with it.
  */
-export default function Graph({ source, show = "end", selected, onSelect }: GraphProps) {
+export default function Graph({ graph, show = "end", selected, onSelect }: GraphProps) {
   const reducedMotion = useReducedMotion();
   const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
   // Hidden until the first fit, so the graph does not show unfitted for a frame.
   const [fitted, setFitted] = useState(false);
-  const graph = useMemo(() => graphOf(source), [source]);
+  const clickable = onSelect !== undefined;
   const laidOut = useMemo(() => {
     const at = layout(graph);
     // A cluster comes before the nodes inside it, as React Flow needs.
@@ -360,15 +365,20 @@ export default function Graph({ source, show = "end", selected, onSelect }: Grap
         position: { x, y },
         ...size,
         ...(node.parent === undefined ? {} : { parentId: node.parent }),
-        data: { node },
-        ariaLabel: node.label,
+        data: { node, selectable: clickable && isSelectable(node) },
+        ariaLabel: nameOf(node),
         draggable: false,
         connectable: false,
       } as FlowNode;
     });
-  }, [graph]);
+  }, [graph, clickable]);
   // A node down to its state's fields; the approval on it is the query's, kept when unchanged.
-  const nodes = useStable(laidOut, 4);
+  const stable = useStable(laidOut, 4);
+  // React Flow's own flag rings the selected node: only the nodes it moves from and to change.
+  const nodes = useMemo(
+    () => stable.map((node) => (node.id === selected ? { ...node, selected: true } : node)),
+    [stable, selected],
+  );
   const drawn = useMemo<Edge[]>(() => {
     const byId = new Map(graph.nodes.map((node) => [node.id, node]));
     return graph.edges.map((edge) => {
@@ -385,45 +395,40 @@ export default function Graph({ source, show = "end", selected, onSelect }: Grap
     });
   }, [graph, reducedMotion]);
   const edges = useStable(drawn, 2);
-  // The page's handler changes as it renders; the one React Flow holds does not.
-  const select = useRef(onSelect);
-  useEffect(() => {
-    select.current = onSelect;
-  });
-  const onNodeClick = useCallback((_: unknown, { data: { node } }: FlowNode) => {
-    if (isSelectable(node)) select.current?.(node);
-  }, []);
-  const selection = useMemo(() => ({ selected, selectable: !!onSelect }), [selected, onSelect]);
+  const onNodeClick = useCallback(
+    (_: unknown, { data }: FlowNode) => {
+      if (data.selectable) onSelect?.(data.node);
+    },
+    [onSelect],
+  );
 
   return (
     <ReactFlowProvider>
       <Ops value={ops}>
-        <Selection value={selection}>
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            className={fitted ? undefined : "invisible"}
-            onNodeClick={onNodeClick}
-            minZoom={0.25}
-            maxZoom={1.5}
-            nodesDraggable={false}
-            nodesConnectable={false}
-            elementsSelectable={false}
-            // Wheel and trackpad pan sideways; the page keeps its vertical scroll. Zoom with the
-            // zoom slider or a pinch.
-            zoomOnScroll={false}
-            zoomOnDoubleClick={false}
-            panOnScroll
-            panOnScrollMode={PanOnScrollMode.Horizontal}
-            preventScrolling={false}
-            proOptions={PRO_OPTIONS}
-          >
-            <Background gap={16} size={1} />
-            <ZoomSlider position="bottom-left" fitViewOptions={FIT} duration={reducedMotion ? 0 : 300} />
-            <FitOnChange nodes={nodes} show={show} onFitted={() => setFitted(true)} />
-          </ReactFlow>
-        </Selection>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          className={fitted ? undefined : "invisible"}
+          onNodeClick={onNodeClick}
+          minZoom={0.25}
+          maxZoom={1.5}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable={false}
+          // Wheel and trackpad pan sideways; the page keeps its vertical scroll. Zoom with the
+          // zoom slider or a pinch.
+          zoomOnScroll={false}
+          zoomOnDoubleClick={false}
+          panOnScroll
+          panOnScrollMode={PanOnScrollMode.Horizontal}
+          preventScrolling={false}
+          proOptions={PRO_OPTIONS}
+        >
+          <Background gap={16} size={1} />
+          <ZoomSlider position="bottom-left" fitViewOptions={FIT} duration={reducedMotion ? 0 : 300} />
+          <FitOnChange nodes={nodes} show={show} onFitted={() => setFitted(true)} />
+        </ReactFlow>
       </Ops>
     </ReactFlowProvider>
   );

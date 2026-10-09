@@ -12,3 +12,10 @@ export const summary = (nodes: readonly GraphNode[]) =>
 /** Each node as its id and label, and the cluster it is drawn in. */
 export const labels = (nodes: readonly GraphNode[]) =>
   nodes.map((n) => `${n.id} ${n.label}${n.parent ? ` in ${n.parent}` : ""}`);
+
+/** Each node as its id and its spans in the source, as JSON: `null` when it has none. */
+export const spans = (nodes: readonly GraphNode[]) => nodes.map((n) => `${n.id} ${JSON.stringify(n.spans ?? null)}`);
+
+/** Each node as its id and the text of each of its spans up to the call's arguments: `-` when it has none. */
+export const calls = (nodes: readonly GraphNode[], text: string) =>
+  nodes.map((n) => `${n.id} ${n.spans?.map(([start, end]) => text.slice(start, end).split("(")[0]).join() ?? "-"}`);

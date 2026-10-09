@@ -23,6 +23,10 @@ export const sourceQuery = (name: string) =>
 /** The config's operations by id, for `select`: built once per config, not on every render. */
 export const opsById = (config: ConfigDescription) => new Map(config.ops.map((op) => [op.id, op]));
 
+/** The config's workflow of this name, if it has one: for `select`, or called with the config. */
+export const workflowNamed = (name: string) => (config: ConfigDescription) =>
+  config.workflows.find((wf) => wf.name === name);
+
 /**
  * Who the server says is asking. A login lasts the page's life; the header name is kept in the
  * browser. A resolver that failed is asked again every 10 s, so the nav recovers with it.

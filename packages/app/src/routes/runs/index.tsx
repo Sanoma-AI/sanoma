@@ -1,9 +1,8 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { PlayIcon } from "lucide-react";
-import { Button } from "#/components/ui/button.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { Nothing, Notice, PageHeader, plural, Tip, ToneBadge, When } from "../../components/common.tsx";
+import { StartButton } from "../../components/workflow.tsx";
 import { RUN_TONE } from "#/lib/tone.ts";
 import { pendingApprovals, starterName } from "../../api.ts";
 import { runsQuery } from "../../queries.ts";
@@ -19,17 +18,14 @@ function RunsPage() {
   const { data: runs, error } = useSuspenseQuery(runsQuery());
   const navigate = useNavigate();
   const start = (
-    <Button asChild>
-      <Link to="/start">
-        <PlayIcon data-icon="inline-start" />
-        Start a run
-      </Link>
-    </Button>
+    <StartButton variant="default" size="default">
+      Start a run
+    </StartButton>
   );
 
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader>{runs.length > 0 && <div className="ml-auto">{start}</div>}</PageHeader>
+      <PageHeader action={runs.length > 0 && start} />
       {error && <Notice variant="destructive">Could not refresh runs: {error.message}</Notice>}
       {runs.length === 0 && (
         <Nothing title="No runs yet" action={start}>

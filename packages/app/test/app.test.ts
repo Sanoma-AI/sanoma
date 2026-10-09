@@ -381,14 +381,14 @@ describe("errors the app answers with", () => {
 });
 
 describe("a workflow's source", () => {
-  it("is served by name, apart from the config, and is not found for a workflow without one", () => {
+  it("is served by name, apart from the config, and is null for a workflow without one", () => {
     const description = describeConfig(config);
     expect(workflowSource({ description }, "announce")).toEqual({ source: readFileSync(announce.file!, "utf8") });
     const sourceless = withoutSources(description);
     expect(sourceless.workflows[0]).not.toHaveProperty("source");
-    const notFound = expect.objectContaining({ status: 404, body: expect.objectContaining({ code: "invalid_input" }) });
-    expect(() => workflowSource({ description }, "nope")).toThrow(notFound);
-    expect(() => workflowSource({ description: sourceless }, "announce")).toThrow(notFound);
+    // Not a 404: the page asking would take it for its own not-found.
+    expect(workflowSource({ description }, "nope")).toEqual({ source: null });
+    expect(workflowSource({ description: sourceless }, "announce")).toEqual({ source: null });
   });
 });
 
@@ -488,6 +488,7 @@ describe("the page", () => {
       expect(workflows.html).toMatch(new RegExp(`<img src="data:image/svg\\+xml,[^"]+" alt="${title}"`));
     }
     expect(workflows.text).toMatch(/default (&quot;|")newsletter(&quot;|")/);
+    expect(workflows.html).toContain('href="/workflows/announce"');
     // Each workflow's outline, drawn in the browser like the run graph: a heading, what it is, a skeleton.
     expect(workflows.text).toMatch(
       /<h3[^>]*>Outline<\/h3><p[^>]*>Read from the body of run; the functions it calls are not shown, even those defined in it<\/p><div[^>]*><div data-slot="skeleton"[^>]*aria-label="Loading the graph"/,
@@ -505,9 +506,6 @@ describe("the page", () => {
   });
 
   it("renders a workflow's page: its graph beside its source, and not-found for one that does not exist", async () => {
-    const list = await page("/workflows");
-    expect(list.html).toContain('href="/workflows/announce"');
-
     const found = await page("/workflows/announce");
     expect(found.status).toBe(200);
     expect(found.html).toMatch(/<h1[^>]*>Announce a launch<\/h1>/);
@@ -534,9 +532,8 @@ describe("the page", () => {
     expect(found.html).toMatch(/<h2[^>]*>Ledger<\/h2>/);
     // React Flow draws the graph in the browser only: the server renders its heading and a
     // skeleton, and the workflow's source beside it as plain text until its view loads.
-    expect(found.html).toMatch(
-      /<h2[^>]*>Graph<\/h2>(<div[^>]*>){3}<div data-slot="skeleton"[^>]*aria-label="Loading the graph"/,
-    );
+    expect(found.html).toMatch(/<h2[^>]*>Graph<\/h2>/);
+    expect(found.html).toMatch(/<div data-slot="skeleton"[^>]*aria-label="Loading the graph"/);
     expect(found.html).toMatch(/<pre[^>]*>[^<]*ctx\.ghost\.post\.create\(/);
     // The workflow's own approval covers no operation, and says so.
     expect(found.html).toMatch(/Lets through<\/dt><dd[^>]*><span[^>]*>no operation by itself/);

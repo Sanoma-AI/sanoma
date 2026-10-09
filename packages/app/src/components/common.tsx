@@ -1,8 +1,16 @@
-import type { ApprovalState, Effect, LedgerRecord, RecordedDecision } from "@sanoma/workflows";
+import type { ApprovalState, Builtin, Effect, LedgerRecord, RecordedDecision } from "@sanoma/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useMatches } from "@tanstack/react-router";
 import { cva } from "class-variance-authority";
-import { ChevronRightIcon, CircleAlertIcon, InfoIcon } from "lucide-react";
+import {
+  ChevronRightIcon,
+  CircleAlertIcon,
+  ClockIcon,
+  InfoIcon,
+  type LucideIcon,
+  SplitIcon,
+  UserCheckIcon,
+} from "lucide-react";
 import {
   type ComponentProps,
   lazy,
@@ -168,6 +176,16 @@ export function OpName({
   );
 }
 
+/**
+ * Each built-in as a thing, where an operation shows its vendor's logo: an approval, a person who
+ * decides; a sleep, a clock; `ctx.all`, calls that run in parallel.
+ */
+export const BUILTIN_ICON = {
+  approval: UserCheckIcon,
+  sleep: ClockIcon,
+  all: SplitIcon,
+} satisfies Record<Builtin, LucideIcon>;
+
 /** A tone as a dot, where a badge would be too much. */
 export function StatusDot({ tone }: { tone: Tone }) {
   return <span aria-hidden className={dot({ tone })} />;
@@ -330,9 +348,10 @@ export function Nothing({ title, children, action }: { title: string; children?:
 }
 
 /**
- * The graph's chunk: React Flow, dagre and the builders. It needs the DOM, so it loads in the
- * browser only, as one chunk for every page that draws a graph. A page's loader calls this in
- * the browser, so the chunk loads while the page hydrates rather than after.
+ * The graph's chunk: React Flow and dagre, which lay out and draw the graph the page builds. It
+ * needs the DOM, so it loads in the browser only, as one chunk for every page that draws a graph.
+ * A page's loader calls this in the browser, so the chunk loads while the page hydrates rather
+ * than after.
  */
 export const loadGraph = () => import("./graph.tsx");
 const Graph = lazy(loadGraph);
@@ -409,13 +428,17 @@ export const CodePanel = ({ className, ...props }: CodeProps) => (
   </LazyPanel>
 );
 
-/** A page's heading row: its <h1>, which is its crumb, and whatever sits beside it. */
-export function PageHeader({ children }: { children?: ReactNode }) {
+/**
+ * A page's heading row: its <h1>, which is its crumb, whatever sits beside it, and the page's
+ * `action` at the far end.
+ */
+export function PageHeader({ children, action }: { children?: ReactNode; action?: ReactNode }) {
   const title = useCrumbs().at(-1)?.label;
   return (
     <header className="flex flex-wrap items-center gap-x-4 gap-y-2">
       <h1 className="font-heading text-2xl font-semibold tracking-tight">{title}</h1>
       {children}
+      {action && <div className="ml-auto">{action}</div>}
     </header>
   );
 }
@@ -428,6 +451,16 @@ export function SectionTitle({ children }: { children: ReactNode }) {
 /** A heading inside a card's section. */
 export function SubsectionTitle({ children }: { children: ReactNode }) {
   return <h3 className="text-sm font-medium">{children}</h3>;
+}
+
+/** A card's section: its heading, and what it holds. */
+export function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <SubsectionTitle>{title}</SubsectionTitle>
+      {children}
+    </div>
+  );
 }
 
 /** Label and value pairs, as a description list of `Fact`s: labels in one column, values in the other. */

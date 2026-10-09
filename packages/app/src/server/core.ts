@@ -65,13 +65,15 @@ export const withoutSources = (description: ConfigDescription): ConfigDescriptio
   }),
 });
 
-/** The text a workflow's outline was read from, or a 404 when there is no such workflow or it has none. */
-export function workflowSource({ description }: Pick<AppContext, "description">, name: string): { source: string } {
-  const source = description.workflows.find((wf) => wf.name === name)?.source;
-  if (source === undefined) {
-    throw new ApiError(404, { error: `No source for a workflow named "${name}"`, code: "invalid_input" });
-  }
-  return { source };
+/**
+ * The text a workflow's outline was read from, or `null` when there is no such workflow or it
+ * has none: not a 404, which a page's loader would take for its own page not being found.
+ */
+export function workflowSource(
+  { description }: Pick<AppContext, "description">,
+  name: string,
+): { source: string | null } {
+  return { source: description.workflows.find((wf) => wf.name === name)?.source ?? null };
 }
 
 const NO_RECORDS = "No records for a run that has started; is the app reading the same ledger as the worker?";
