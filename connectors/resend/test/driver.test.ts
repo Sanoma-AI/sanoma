@@ -15,6 +15,8 @@ const API = "https://api.resend.com";
 const audience = live ? (process.env.RESEND_TEST_AUDIENCE ?? "") : "00000000-0000-4000-8000-0000000000aa";
 const from = process.env.RESEND_TEST_FROM ?? "Sanoma test <onboarding@resend.dev>";
 const call: CallContext = { idempotencyKey: "run-1:3", runId: "run-1", opId: "resend.broadcast.create", attempt: 1 };
+/** The run's next call: its own idempotency key. */
+const sendCall: CallContext = { idempotencyKey: "run-1:4", runId: "run-1", opId: "resend.broadcast.send", attempt: 1 };
 
 interface Fixture {
   status: number;
@@ -76,7 +78,7 @@ const invalidFrom = fixture("create-invalid-from") as Fixture & { body: { name: 
 
 const driver = resendDriver({ timeoutMs: live ? 15_000 : 200 });
 const create = (input: Record<string, unknown>) => driver.ops["broadcast.create"]!(input, call);
-const send = (id: string) => driver.ops["broadcast.send"]!({ id }, { ...call, opId: "resend.broadcast.send" });
+const send = (id: string) => driver.ops["broadcast.send"]!({ id }, sendCall);
 const failure = (promise: Promise<unknown>) =>
   promise.then(
     () => expect.unreachable(),
@@ -129,7 +131,7 @@ describe("resendDriver", () => {
       `GET /broadcasts/${id}`,
       `POST /broadcasts/${id}/send`,
     ]);
-    expect(requests[2]!.headers.get("idempotency-key")).toBe("run-1:3");
+    expect(requests.slice(1).map((r) => r.headers.get("idempotency-key"))).toEqual(["run-1:4", "run-1:4"]);
   });
 
   it.skipIf(live)("does not send a broadcast that is already sent, so a replay sends nothing", async () => {
