@@ -8,7 +8,7 @@ import { resend } from "@sanoma/connector-resend";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { allowAll, defineConnector, type LedgerRecord, memoryLedger, resolveConfig } from "../src/index.ts";
-import { check, loadScenarios, parseFeature, Scenario, type Scope } from "../src/scenario.ts";
+import { check, loadScenarios, parseFeature, type Scenario, type Scope } from "../src/scenario.ts";
 import announce from "./fixtures/announce.ts";
 import { marketingFakes } from "./harness.ts";
 
@@ -107,8 +107,8 @@ describe("parseFeature", () => {
         { step: "the run succeeds", outcome: "finished" },
       ],
     });
-    // Plain JSON, as its schema describes it.
-    expect(Scenario.parse(JSON.parse(JSON.stringify(scenario)))).toEqual(scenario);
+    // Plain JSON.
+    expect(JSON.parse(JSON.stringify(scenario))).toEqual(scenario);
     // A step with no input expects any call.
     expect(scenario!.expect[1]).not.toHaveProperty("input");
     // `And` after `When` is a When step: here, a decision.
@@ -180,6 +180,44 @@ describe("parseFeature", () => {
     ]);
   });
 
+  it("tells apart the rows of a Scenario Outline whose names are the same by their line", () => {
+    const scenarios = parse(`Feature: Announce
+  Scenario Outline: Launch
+    When announce runs with
+      | title | <title> |
+
+    Examples:
+      | title |
+      | One   |
+      | Two   |
+`);
+    expect(scenarios.map((s) => s.name)).toEqual(["Launch (line 8)", "Launch (line 9)"]);
+  });
+
+  it("reads a seed and an expected call from a two-column table, as from a doc string", () => {
+    const [scenario] = parse(`Feature: Announce
+  Scenario: Tables
+    Given ghost.post.create was called with
+      | title | Old news |
+    When announce runs
+    Then resend.broadcast.send was called with
+      | id | bc_0001 |
+`);
+    expect(scenario?.given).toMatchObject([{ op: "ghost.post.create", input: { title: "Old news", status: "draft" } }]);
+    expect(scenario?.expect).toEqual([
+      {
+        step: "resend.broadcast.send was called with",
+        op: "resend.broadcast.send",
+        input: { id: "bc_0001" },
+        called: true,
+      },
+    ]);
+  });
+
+  it("refuses a feature file with no scenarios", () => {
+    expect(thrown("Feature: Empty\n")).toBe('x.feature: no scenarios; add one with "Scenario: <name>"');
+  });
+
   it("names the file and line of a step nothing matches, and lists the steps it knows, phrases under their operation", () => {
     const message = thrown(`Feature: Announce
   Scenario: Moon
@@ -187,7 +225,7 @@ describe("parseFeature", () => {
     Then the moon is out
 `);
     expect(message).toMatch(/^x\.feature:4: no step matches "the moon is out"\nKnown steps:\n/);
-    expect(message).toContain("  Given {op} was called with (and a JSON doc string)\n");
+    expect(message).toContain("  Given {op} was called with (and a JSON doc string or a two-column table)\n");
     expect(message).toContain("  When {workflow} runs\n");
     expect(message).toContain(
       "  ghost.post.create:\n    Given a post titled {title} exists\n    Then a post titled {title} is created\n",

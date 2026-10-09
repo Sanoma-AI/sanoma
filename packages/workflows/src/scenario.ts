@@ -72,37 +72,6 @@ export interface Scenario {
   expect: Expectation[];
 }
 
-const step = z.string();
-export const Scenario: z.ZodType<Scenario> = z.object({
-  name: z.string(),
-  file: z.string(),
-  workflow: z.string(),
-  text: z.string(),
-  steps: z.array(z.object({ text: z.string(), kind: z.enum(["given", "when", "then"]), op: z.string().optional() })),
-  given: z.array(
-    z.union([
-      z.strictObject({ step, op: z.string(), input: z.unknown() }),
-      z.strictObject({ step, op: z.string(), fault: z.enum(["failNext", "rateLimit", "loseReply"]) }),
-    ]),
-  ),
-  input: z.unknown(),
-  decisions: z.array(
-    z.object({
-      step,
-      approval: z.string(),
-      decision: z.enum(["approve", "reject"]),
-      by: z.string(),
-      note: z.string().optional(),
-    }),
-  ),
-  expect: z.array(
-    z.union([
-      z.strictObject({ step, op: z.string(), input: z.unknown().optional(), called: z.boolean() }),
-      z.strictObject({ step, outcome: z.enum(["finished", "failed"]), code: z.string().optional() }),
-    ]),
-  ),
-});
-
 /** The result of one expectation against a run's ledger. */
 export interface Check {
   step: string;
@@ -114,30 +83,30 @@ export interface Check {
 export type Scope = Pick<ResolvedConfig, "ops" | "workflows" | "scenarios">;
 
 type Kind = ScenarioStep["kind"];
+type Unstepped<T> = T extends unknown ? Omit<T, "step"> : never;
 
-/** A scenario being built from its steps. */
-interface Draft extends Omit<Scenario, "workflow"> {
-  workflow?: string;
+/** What a step of each kind reads into; `any` is a decision, which a step of any keyword may make. */
+interface Items {
+  given: Unstepped<Given>;
+  when: { workflow: string; input: unknown };
+  then: Unstepped<Expectation>;
+  any: Unstepped<Decision>;
 }
 
-interface Matched {
-  draft: Draft;
-  values: unknown[];
-  pickle: PickleStep;
-}
-
-interface Rule {
-  kind: Kind | "any";
-  /** The Cucumber expression, as listed in errors. */
-  source: string;
-  /** What else the step takes, as listed in errors. */
-  takes?: string;
-  /** For an operation's phrase: its id, which errors list it under. */
-  phrase?: string;
-  expression: CucumberExpression;
-  /** Applies the step to the draft; returns the operation it is about, if any. */
-  apply(m: Matched): string | undefined;
-}
+type Rule = {
+  [K in keyof Items]: {
+    kind: K;
+    /** The Cucumber expression, as listed in errors. */
+    source: string;
+    /** What else the step takes, as listed in errors. */
+    takes?: string;
+    /** For an operation's phrase: its id, which errors list it under. */
+    phrase?: string;
+    expression: CucumberExpression;
+    /** What the step says, from the expression's values and the step's doc string or table. */
+    read(values: unknown[], pickle: PickleStep): Items[K];
+  };
+}[keyof Items];
 
 const KINDS: Partial<Record<PickleStepType, Kind>> = {
   [PickleStepType.CONTEXT]: "given",
@@ -153,38 +122,39 @@ const FAULTS = {
 
 const unquote = (s: string) => (s.length >= 2 && s.startsWith('"') && s.endsWith('"') ? s.slice(1, -1) : s);
 
+/** A mistake in this code, not in a feature file: thrown as it is, never filed as the file's error. */
+const isBug = (err: unknown) => err instanceof TypeError || err instanceof RangeError || err instanceof ReferenceError;
+
 /** The schema's value with every field `given` does not set made up, parsed by the schema. */
 function fill(schema: z.ZodType, given: Record<string, unknown>): unknown {
   return schema.parse({ ...(fake(schema) as object), ...given });
 }
 
-/** The step's JSON doc string, parsed. */
-function json(pickle: PickleStep): unknown {
-  const content = pickle.argument?.docString?.content;
-  if (content === undefined) throw new Error(`"${pickle.text}" needs a JSON doc string after it`);
-  try {
-    return JSON.parse(content);
-  } catch (err) {
-    throw new Error(`the doc string after "${pickle.text}" is not JSON: ${errorMessage(err)}`, { cause: err });
-  }
-}
-
 /** A JSON object from the step's doc string or its two-column table (values parsed as JSON when they parse). */
 function object(pickle: PickleStep): Record<string, unknown> {
-  const table = pickle.argument?.dataTable;
-  const value = table
-    ? Object.fromEntries(
-        table.rows.map(({ cells }) => {
-          if (cells.length !== 2) throw new Error(`the table after "${pickle.text}" needs two columns: name | value`);
-          const [name, raw] = cells.map((c) => c.value) as [string, string];
-          try {
-            return [name, JSON.parse(raw)];
-          } catch {
-            return [name, raw];
-          }
-        }),
-      )
-    : json(pickle);
+  const { docString, dataTable } = pickle.argument ?? {};
+  let value: unknown;
+  if (dataTable) {
+    value = Object.fromEntries(
+      dataTable.rows.map(({ cells }) => {
+        if (cells.length !== 2) throw new Error(`the table after "${pickle.text}" needs two columns: name | value`);
+        const [name, raw] = cells.map((c) => c.value) as [string, string];
+        try {
+          return [name, JSON.parse(raw)];
+        } catch {
+          return [name, raw];
+        }
+      }),
+    );
+  } else if (docString) {
+    try {
+      value = JSON.parse(docString.content);
+    } catch (err) {
+      throw new Error(`the doc string after "${pickle.text}" is not JSON: ${errorMessage(err)}`, { cause: err });
+    }
+  } else {
+    throw new Error(`"${pickle.text}" needs a JSON doc string or a two-column table after it`);
+  }
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error(`"${pickle.text}" needs a JSON object`);
   }
@@ -204,6 +174,8 @@ const known = (what: string, ids: Map<string, unknown>) => (name: string) => {
   return name;
 };
 
+const TAKES_OBJECT = "a JSON doc string or a two-column table";
+
 const rulesByScope = new WeakMap<Scope, Rule[]>();
 
 /**
@@ -218,76 +190,85 @@ function rulesOf(scope: Scope): Rule[] {
   registry.defineParameterType(new ParameterType("op", /\S+/, null, known("operation", scope.ops), false));
   registry.defineParameterType(new ParameterType("workflow", /\S+/, null, known("workflow", scope.workflows), false));
   registry.defineParameterType(new ParameterType("who", /\S+/, null, (s: string) => s, false));
-
-  const rules: Rule[] = [];
-  const add = (kind: Rule["kind"], source: string, apply: Rule["apply"], more: Partial<Rule> = {}) =>
-    rules.push({ kind, source, expression: new CucumberExpression(source, registry), apply, ...more });
+  const expression = (source: string) => new CucumberExpression(source, registry);
   const opOf = (id: unknown) => scope.ops.get(id as string)!;
+  const workflowOf = (name: unknown) => scope.workflows.get(name as string)!;
 
-  add(
-    "given",
-    "{op} was called with",
-    ({ draft, values: [op], pickle }) => {
-      draft.given.push({ step: pickle.text, op: op as string, input: fill(opOf(op).input, object(pickle)) });
-      return op as string;
+  const rules: Rule[] = [
+    {
+      kind: "given",
+      source: "{op} was called with",
+      takes: TAKES_OBJECT,
+      expression: expression("{op} was called with"),
+      read: ([op], pickle) => ({ op: op as string, input: fill(opOf(op).input, object(pickle)) }),
     },
-    { takes: "a JSON doc string" },
-  );
-  for (const [words, fault] of Object.entries(FAULTS)) {
-    add("given", `{op} ${words}`, ({ draft, values: [op], pickle }) => {
-      draft.given.push({ step: pickle.text, op: op as string, fault });
-      return op as string;
-    });
-  }
-  add(
-    "when",
-    "{workflow} runs with",
-    ({ draft, values: [name], pickle }) => runs(draft, name as string, object(pickle)),
-    { takes: "a JSON doc string or a two-column table" },
-  );
-  add("when", "{workflow} runs", ({ draft, values: [name] }) => runs(draft, name as string, {}));
-  for (const decision of ["approve", "reject"] as const) {
-    const verb = decision === "approve" ? "approved" : "rejected";
-    const decide = ({ draft, values: [approval, by, note], pickle }: Matched) => {
-      draft.decisions.push({
-        step: pickle.text,
-        approval: approval as string,
-        decision,
-        by: by as string,
-        ...(note === undefined ? {} : { note: note as string }),
-      });
-      return undefined;
-    };
-    add("any", `{string} is ${verb} by {who}`, decide);
-    add("any", `{string} is ${verb} by {who} with note {string}`, decide);
-  }
-  add(
-    "then",
-    "{op} was called with",
-    ({ draft, values: [op], pickle }) => {
-      draft.expect.push({ step: pickle.text, op: op as string, input: json(pickle), called: true });
-      return op as string;
+    ...Object.entries(FAULTS).map(([words, fault]): Rule => ({
+      kind: "given",
+      source: `{op} ${words}`,
+      expression: expression(`{op} ${words}`),
+      read: ([op]) => ({ op: op as string, fault }),
+    })),
+    {
+      kind: "when",
+      source: "{workflow} runs with",
+      takes: TAKES_OBJECT,
+      expression: expression("{workflow} runs with"),
+      read: ([name], pickle) => ({ workflow: name as string, input: fill(workflowOf(name).input, object(pickle)) }),
     },
-    { takes: "a JSON doc string" },
-  );
-  for (const called of [true, false]) {
-    add("then", `{op} was ${called ? "" : "not "}called`, ({ draft, values: [op], pickle }) => {
-      draft.expect.push({ step: pickle.text, op: op as string, called });
-      return op as string;
-    });
-  }
-  add("then", "the run succeeds", ({ draft, pickle }) => {
-    draft.expect.push({ step: pickle.text, outcome: "finished" });
-    return undefined;
-  });
-  add("then", "the run fails", ({ draft, pickle }) => {
-    draft.expect.push({ step: pickle.text, outcome: "failed" });
-    return undefined;
-  });
-  add("then", "the run fails with {string}", ({ draft, values: [code], pickle }) => {
-    draft.expect.push({ step: pickle.text, outcome: "failed", code: code as string });
-    return undefined;
-  });
+    {
+      kind: "when",
+      source: "{workflow} runs",
+      expression: expression("{workflow} runs"),
+      read: ([name]) => ({ workflow: name as string, input: fill(workflowOf(name).input, {}) }),
+    },
+    ...(["approve", "reject"] as const).flatMap((decision) => {
+      const verb = decision === "approve" ? "approved" : "rejected";
+      return [`{string} is ${verb} by {who}`, `{string} is ${verb} by {who} with note {string}`].map(
+        (source): Rule => ({
+          kind: "any",
+          source,
+          expression: expression(source),
+          read: ([approval, by, note]) => ({
+            approval: approval as string,
+            decision,
+            by: by as string,
+            ...(note === undefined ? {} : { note: note as string }),
+          }),
+        }),
+      );
+    }),
+    {
+      kind: "then",
+      source: "{op} was called with",
+      takes: TAKES_OBJECT,
+      expression: expression("{op} was called with"),
+      read: ([op], pickle) => ({ op: op as string, input: object(pickle), called: true }),
+    },
+    ...[true, false].map((called): Rule => ({
+      kind: "then",
+      source: `{op} was ${called ? "" : "not "}called`,
+      expression: expression(`{op} was ${called ? "" : "not "}called`),
+      read: ([op]) => ({ op: op as string, called }),
+    })),
+    {
+      kind: "then",
+      source: "the run succeeds",
+      expression: expression("the run succeeds"),
+      read: () => ({ outcome: "finished" }),
+    },
+    {
+      kind: "then",
+      source: "the run fails",
+      expression: expression("the run fails"),
+      read: () => ({ outcome: "failed" }),
+    },
+    {
+      kind: "then",
+      source: "the run fails with {string}",
+      expression: expression("the run fails with {string}"),
+      read: ([code]) => ({ outcome: "failed", code: code as string }),
+    },
+  ];
 
   // Each operation's phrases, last: their fields become parameter types the generic steps never use.
   for (const op of scope.ops.values()) {
@@ -313,42 +294,29 @@ function rulesOf(scope: Scope): Rule[] {
           registry.defineParameterType(new ParameterType(name, /"[^"]*"|\S+/, null, unquote, false));
         }
       }
-      add(
-        kind,
-        template,
-        ({ draft, values, pickle }) => {
-          const given = Object.fromEntries(
-            fields.map((name, i) => [name, coerce(String(values[i]), properties[name]?.type)]),
-          );
-          if (kind === "given") draft.given.push({ step: pickle.text, op: op.id, input: fill(op.input, given) });
-          else draft.expect.push({ step: pickle.text, op: op.id, input: given, called: true });
-          return op.id;
-        },
-        { phrase: op.id },
+      const given = (values: unknown[]) =>
+        Object.fromEntries(fields.map((name, i) => [name, coerce(String(values[i]), properties[name]?.type)]));
+      const common = { source: template, phrase: op.id, expression: expression(template) };
+      rules.push(
+        kind === "given"
+          ? { ...common, kind, read: (values) => ({ op: op.id, input: fill(op.input, given(values)) }) }
+          : { ...common, kind, read: (values) => ({ op: op.id, input: given(values), called: true }) },
       );
     }
   }
   rulesByScope.set(scope, rules);
   return rules;
-
-  function runs(draft: Draft, name: string, given: Record<string, unknown>) {
-    if (draft.workflow !== undefined) throw new Error("a second When: a scenario runs its workflow once");
-    draft.workflow = name;
-    draft.input = fill(scope.workflows.get(name)!.input, given);
-    return undefined;
-  }
 }
 
 /** Every step the scope knows, for an error: the generic ones by keyword, then each operation's phrases under its id. */
 function knownSteps(rules: Rule[]): string {
   const keyword = (kind: Rule["kind"]) => (kind === "any" ? "Given/When/Then" : kind[0]!.toUpperCase() + kind.slice(1));
   const line = (r: Rule) => `${keyword(r.kind)} ${r.source}${r.takes ? ` (and ${r.takes})` : ""}`;
-  const phrases = new Map<string, string[]>();
-  for (const r of rules) if (r.phrase) phrases.set(r.phrase, [...(phrases.get(r.phrase) ?? []), line(r)]);
+  const { generic = [], ...phrases } = Object.groupBy(rules, (r) => r.phrase ?? "generic");
   return [
     "Known steps:",
-    ...rules.filter((r) => !r.phrase).map((r) => `  ${line(r)}`),
-    ...[...phrases].flatMap(([op, lines]) => [`  ${op}:`, ...lines.map((l) => `    ${l}`)]),
+    ...generic.map((r) => `  ${line(r)}`),
+    ...Object.entries(phrases).flatMap(([op, list]) => [`  ${op}:`, ...(list ?? []).map((r) => `    ${line(r)}`)]),
   ].join("\n");
 }
 
@@ -375,8 +343,10 @@ const seedOf = (name: string) => createHash("sha256").update(name).digest().read
 
 /**
  * The scenarios in a feature file: one per Gherkin pickle (each row of a `Scenario Outline`'s
- * examples is one). Throws, naming `file:line`, for a step no rule or more than one matches, an
- * unknown operation or workflow, a missing or second `When`, bad JSON, or two scenarios with one name.
+ * examples is one; rows whose names would be the same get their line appended, such as
+ * `Launch (line 12)`). Throws, naming `file:line`, for a file with no scenarios, a step no rule
+ * or more than one matches, an unknown operation or workflow, a missing or second `When`, bad
+ * JSON, or two scenarios with one name.
  */
 export function parseFeature(text: string, file: string, scope: Scope): Scenario[] {
   const rules = rulesOf(scope);
@@ -385,17 +355,27 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
   try {
     doc = new Parser(new AstBuilder(newId), new GherkinClassicTokenMatcher()).parse(text);
   } catch (err) {
+    if (isBug(err)) throw err;
     throw new Error(`${file}: ${errorMessage(err)}`, { cause: err });
   }
   const lines = linesOf(doc);
+  const pickles = compile(doc, file, newId);
+  if (pickles.length === 0) throw new Error(`${file}: no scenarios; add one with "Scenario: <name>"`);
+  // An outline's rows are named from its title; rows that share a name are told apart by their line.
+  const counts = Map.groupBy(pickles, (p) => p.name);
   const scenarios: Scenario[] = [];
-  for (const pickle of compile(doc, file, newId)) {
-    const where = (line: number | undefined) => `${file}:${line ?? pickle.location?.line ?? 1}`;
-    if (scenarios.some((s) => s.name === pickle.name)) {
-      throw new Error(`${where(undefined)}: a second scenario named "${pickle.name}"; give each its own name`);
+  for (const pickle of pickles) {
+    const where = (line?: number) => `${file}:${line ?? pickle.location?.line ?? 1}`;
+    const row = pickle.astNodeIds[1];
+    const name =
+      row !== undefined && counts.get(pickle.name)!.length > 1
+        ? `${pickle.name} (line ${lines.get(row)})`
+        : pickle.name;
+    if (scenarios.some((s) => s.name === name)) {
+      throw new Error(`${where()}: a second scenario named "${name}"; give each its own name`);
     }
-    const draft: Draft = {
-      name: pickle.name,
+    const scenario: Omit<Scenario, "workflow"> & { workflow?: string } = {
+      name,
       file,
       text,
       steps: [],
@@ -404,7 +384,7 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
       decisions: [],
       expect: [],
     };
-    seed(seedOf(pickle.name));
+    seed(seedOf(name));
     for (const ps of pickle.steps) {
       const line = lines.get(ps.astNodeIds[0]!);
       const kind = ps.type && KINDS[ps.type];
@@ -422,21 +402,44 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
         throw new Error(`${where(line)}: "${ps.text}" is ambiguous: it matches ${which}`);
       }
       const [{ rule, args }] = matches as [{ rule: Rule; args: readonly Argument[] }];
+      let op: string | undefined;
       try {
         const values = args.map((a) => a.getValue<unknown>(null));
-        const op = rule.apply({ draft, values, pickle: ps });
-        draft.steps.push({ text: ps.text, kind, ...(op === undefined ? {} : { op }) });
+        const step = ps.text;
+        switch (rule.kind) {
+          case "given": {
+            const item = rule.read(values, ps);
+            scenario.given.push({ step, ...item });
+            op = item.op;
+            break;
+          }
+          case "then": {
+            const item = rule.read(values, ps);
+            scenario.expect.push({ step, ...item });
+            op = "op" in item ? item.op : undefined;
+            break;
+          }
+          case "any":
+            scenario.decisions.push({ step, ...rule.read(values, ps) });
+            break;
+          case "when": {
+            if (scenario.workflow !== undefined) throw new Error("a second When: a scenario runs its workflow once");
+            Object.assign(scenario, rule.read(values, ps));
+          }
+        }
       } catch (err) {
+        if (isBug(err)) throw err;
         throw new Error(`${where(line)}: ${errorMessage(err)}`, { cause: err });
       }
+      scenario.steps.push({ text: ps.text, kind, ...(op === undefined ? {} : { op }) });
     }
-    const { workflow } = draft;
+    const { workflow } = scenario;
     if (workflow === undefined) {
       throw new Error(
-        `${where(undefined)}: scenario "${pickle.name}" has no When: say which workflow runs, such as "When <workflow> runs with"`,
+        `${where()}: scenario "${name}" has no When: say which workflow runs, such as "When <workflow> runs with"`,
       );
     }
-    scenarios.push({ ...draft, workflow });
+    scenarios.push({ ...scenario, workflow });
   }
   return scenarios;
 }
@@ -466,6 +469,7 @@ export function loadScenarios(scope: Scope): {
     try {
       parsed = parseFeature(readFileSync(join(dir, file), "utf8"), file, scope);
     } catch (err) {
+      if (isBug(err)) throw err;
       errors.push({ file, message: errorMessage(err) });
       continue;
     }
