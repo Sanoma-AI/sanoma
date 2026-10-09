@@ -28,3 +28,5 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build
       - run: pnpm test
+      - name: Generated bridge client is up to date
+        run: pnpm --filter @sanoma/bridge run generate && git diff --exit-code packages/bridge/src/gen && test -z "$(git status --porcelain packages/bridge/src/gen)"
