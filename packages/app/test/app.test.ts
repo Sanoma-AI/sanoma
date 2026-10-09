@@ -181,10 +181,13 @@ describe("the API", () => {
     expect(wf?.ops).toEqual(expect.arrayContaining(["ghost.post.publish", "resend.broadcast.send"]));
     expect(wf?.builtins).toEqual(["approval", "sleep"]);
     // Each workflow's outline, read from its file when the app started; the file itself is not sent.
-    // (Only the workflows are checked: GitHub's repository schema has a field named `source`.)
     expect(wf?.outline).toEqual(outlineWorkflow(announce));
     expect(wf?.outline).toMatchObject({ file: expect.stringMatching(/announce\.ts$/) });
-    expect(JSON.stringify(body.workflows)).not.toContain('"source"');
+    expect(body.workflows.every((w) => !("source" in w))).toBe(true);
+    // Nor is its code anywhere else in the description.
+    const line = "ctx.ghost.post.create({ title, html: body";
+    expect(readFileSync(announce.file!, "utf8")).toContain(line);
+    expect(JSON.stringify(body)).not.toContain(line);
     expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.effect).toBe("send");
     expect(body.vendors.resend).toMatchObject({ title: "Resend", logo: { src: expect.stringMatching(/^data:/) } });
   });

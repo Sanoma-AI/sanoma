@@ -123,6 +123,16 @@ describe("fakes", () => {
     expect(one.state.posts).toEqual({});
   });
 
+  it("update the state as someone at the vendor would, in the file another instance reads", async () => {
+    const file = join(dir, "ghost-update.json");
+    const one = fakeGhost({ file });
+    const post = (await one.driver.ops["post.create"]!(draft, call("r:0"))) as { id: string };
+    fakeGhost({ file }).update((state) => {
+      state.posts[post.id]!.title = "Edited at Ghost";
+    });
+    expect(one.state.posts[post.id]?.title).toBe("Edited at Ghost");
+  });
+
   it("log into one shared list, and reset drops only their own calls", async () => {
     const calls: FakeCall[] = [];
     const ghost = fakeGhost({ calls });

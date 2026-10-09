@@ -126,21 +126,26 @@ function annotate(zod: string, description: string | undefined, deprecated: bool
 const isSecret = (a: Attribute): boolean =>
   Boolean(a.sensitive || a.writeOnly || Object.values(a.nestedType?.attributes ?? {}).some(isSecret));
 
-/** The flagged fields of a block, by dotted path: `vendorOwned`, `writeOnly` and `immutable`. */
+/** The flagged fields of a block, by dotted path: `vendorOwned`, `writeOnly`, `immutable` and `unordered` (sets). */
 function fieldsOf(block: Block, immutable: string[]): ResourceFields {
   const vendorOwned: string[] = [];
   const writeOnly: string[] = [];
+  const unordered: string[] = [];
   const walk = ({ attributes, blocks }: Block, prefix: string) => {
     for (const [name, a] of Object.entries(attributes)) {
       const path = prefix + name;
       if (a.computed && !a.optional && !a.required) vendorOwned.push(path);
+      if ((Array.isArray(a.type) && a.type[0] === "set") || a.nestedType?.nesting === "set") unordered.push(path);
       if (isSecret(a)) writeOnly.push(path);
       else if (a.nestedType) walk(blockOf(a.nestedType), `${path}.`);
     }
-    for (const [name, b] of Object.entries(blocks)) walk(b.block, `${prefix + name}.`);
+    for (const [name, b] of Object.entries(blocks)) {
+      if (b.nesting === "set" && !isOne(b)) unordered.push(prefix + name);
+      walk(b.block, `${prefix + name}.`);
+    }
   };
   walk(block, "");
-  return { immutable: immutable.toSorted(), vendorOwned, writeOnly };
+  return { immutable: immutable.toSorted(), vendorOwned, writeOnly, unordered };
 }
 
 /** The state layout of a block, for `fromTfState` and `toTfState`. */

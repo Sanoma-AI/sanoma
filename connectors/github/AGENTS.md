@@ -24,7 +24,7 @@ Each resource type has two operations, both effect `read` and idempotent, with t
 | `branch_protection` | `github.branch_protection.read`, `github.branch_protection.import` | `repository_id:pattern` |
 | `team_membership`   | `github.team_membership.read`, `github.team_membership.import`     | `team_id:username`      |
 
-`import` takes `{ id }` and returns the object's `state`; `read` takes a state an earlier call returned (`{ id, state, private, schemaVersion }`), or just `{ id }`, and returns its fresh `state`, or `gone: true` when it no longer exists. See [Resources](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/AGENTS.md#resources).
+`import` takes `{ id }` and returns the object's `state`; `read` takes a state an earlier call returned (`{ id, state, handle }`), or just `{ id }`, and returns its fresh `state`, or `gone: true` when it no longer exists. See [Resources](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/AGENTS.md#resources).
 
 A data file declares resources with the constructors in `@sanoma/connector-github/resources`:
 
@@ -34,7 +34,7 @@ import { github } from "@sanoma/connector-github/resources";
 export const site = github.repository({ name: "website", delete_branch_on_merge: true, has_wiki: false });
 ```
 
-The fields are the provider's attributes, by their names. A list block of at most one item (`pages`, `security_and_analysis`, `template`) is one object. Only declared fields are compared for drift; `topics` is compared in any order.
+The fields are the provider's attributes, by their names. A list block of at most one item (`pages`, `security_and_analysis`, `template`) is one object. Only declared fields are compared for drift; sets (`topics`, and five lists in a branch protection rule) are compared in any order.
 
 The logo is GitHub's mark from [Octicons](https://primer.style/octicons/) (`mark-github`, MIT), there only to identify the service an operation calls.
 

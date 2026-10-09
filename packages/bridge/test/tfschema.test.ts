@@ -86,6 +86,7 @@ const thing: Block = {
       },
     },
     rule: { nesting: "list", block: { attributes: { pattern: { type: "string", required: true } }, blocks: {} } },
+    member: { nesting: "set", block: { attributes: { login: { type: "string", required: true } }, blocks: {} } },
   },
 };
 
@@ -136,12 +137,13 @@ describe("generateResources", () => {
     expect(schema.safeParse({ name: "x", rule: [{ pattern: "main" }] }).success).toBe(true);
   });
 
-  it("flags computed-only attributes vendor-owned, sensitive ones write-only, and the config's immutable ones", () => {
+  it("flags computed-only attributes vendor-owned, sensitive ones write-only, sets unordered, and the config's immutable ones", () => {
     const { fields } = generated(thing, ["region", "name", "pages.source.branch"]).thing;
     expect(fields).toEqual({
       immutable: ["name", "pages.source.branch", "region"],
       vendorOwned: ["url", "pages.status"],
       writeOnly: ["token"],
+      unordered: ["tags", "member"],
     });
   });
 
@@ -209,6 +211,7 @@ describe("fromTfState and toTfState", () => {
     tags: ["b", "a"],
     pages: [{ cname: null, status: "built", source: [{ branch: "main" }] }],
     rule: [],
+    member: [],
   };
 
   it("unwraps blocks of one item and drops secrets", () => {
@@ -233,6 +236,7 @@ describe("fromTfState and toTfState", () => {
       tags: null,
       pages: [],
       rule: [],
+      member: [],
     });
   });
 });

@@ -16,7 +16,6 @@ export const product = defineResource({
   schema: stripe_product.schema,
   fields: stripe_product.fields,
   find: idOf,
-  crud: { read: {}, import: {} },
 });
 
 export const webhookEndpoint = defineResource({
@@ -27,7 +26,6 @@ export const webhookEndpoint = defineResource({
   schema: stripe_webhook_endpoint.schema,
   fields: stripe_webhook_endpoint.fields,
   find: idOf,
-  crud: { read: {}, import: {} },
 });
 
 /**

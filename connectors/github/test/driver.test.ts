@@ -34,7 +34,7 @@ describe("githubDriver", () => {
       { method: "import", typeName: "github_repository", id: "sanoma" },
       { method: "read", typeName: "github_repository", id: "sanoma" },
     ]);
-    expect(read).toMatchObject({ id: "sanoma", gone: false, schemaVersion: 1, private: expect.any(String) });
+    expect(read).toMatchObject({ id: "sanoma", gone: false, handle: expect.stringMatching(/^1:./) });
     expect(github.repository.read.output.parse(read).state).toMatchObject({ name: "sanoma", has_issues: true });
   });
 

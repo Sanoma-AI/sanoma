@@ -10,6 +10,7 @@ export {
   isOp,
   type Op,
   type OpSpec,
+  type ResourceGroup,
   retryableStatus,
   type VendorInfo,
 } from "./op.ts";
@@ -28,7 +29,6 @@ export {
 } from "./define.ts";
 export {
   compareDeclared,
-  type CrudOptions,
   type Declared,
   defineResource,
   type Resource,

@@ -123,6 +123,13 @@ export const github_branch_protection = {
     immutable: ["repository_id"],
     vendorOwned: [],
     writeOnly: [],
+    unordered: [
+      "force_push_bypassers",
+      "required_pull_request_reviews.dismissal_restrictions",
+      "required_pull_request_reviews.pull_request_bypassers",
+      "required_status_checks.contexts",
+      "restrict_pushes.push_allowances",
+    ],
   },
   shape: {
     attributes: [
@@ -433,6 +440,7 @@ export const github_repository = {
       "pages.url",
     ],
     writeOnly: [],
+    unordered: ["topics"],
   },
   shape: {
     attributes: [
@@ -579,6 +587,7 @@ export const github_team_membership = {
     immutable: ["team_id", "username"],
     vendorOwned: ["etag"],
     writeOnly: [],
+    unordered: [],
   },
   shape: {
     attributes: ["etag", "id", "role", "team_id", "username"],

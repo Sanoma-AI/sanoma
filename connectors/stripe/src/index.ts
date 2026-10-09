@@ -15,8 +15,8 @@ const glyph = (fill: string) =>
 export const stripe = defineConnector(
   "stripe",
   {
-    product: product.ops,
-    webhook_endpoint: webhookEndpoint.ops,
+    product,
+    webhook_endpoint: webhookEndpoint,
   },
   {
     title: "Stripe",

@@ -5,30 +5,30 @@ import { type OpSpec, RESOURCE } from "./op.ts";
 export interface ResourceFields {
   /** Changing it replaces the object. */
   readonly immutable: readonly string[];
-  /** Set by the vendor only: never drift. */
+  /** Set by the vendor only: never drift, and a data file may not declare it. */
   readonly vendorOwned: readonly string[];
   /** Sensitive or write-only: never read back, never compared, never in an operation's output. */
   readonly writeOnly: readonly string[];
-}
-
-/** What an operation of a resource says beyond what `defineResource` derives. */
-export interface CrudOptions {
-  description?: string;
+  /** Lists whose order is the vendor's (a set): compared as multisets, in no order. */
+  readonly unordered?: readonly string[];
 }
 
 type State = Record<string, unknown>;
 
 /** A resource type, as its connector declares it with `defineResource`. */
 export interface ResourceSpec<S extends z.ZodObject = z.ZodObject> {
-  /** The connector's vendor id, such as `github`. */
+  /** The connector's vendor id, such as `github`; `defineConnector` refuses a type of another vendor. */
   vendor: string;
   /** The type's name within the vendor, such as `repository`: its operations are `<vendor>.<type>.read` and `.import`. */
   type: string;
   /** What people call it, such as "Repository". */
   title: string;
-  /** How `find` makes the import id, for people: `name`, `repository_id:pattern`. */
+  /**
+   * How `find` makes the import id, for people: `name`, `repository_id:pattern`. The fields it
+   * names stay declarable even when the vendor sets them (Stripe's `id`).
+   */
   identity: string;
-  /** The resource's fields as a data file declares them and a read returns them. */
+  /** The resource's fields as a read returns them; a data file declares them, less the vendor-owned ones. */
   schema: S;
   fields: ResourceFields;
   /** The vendor's id for a declared resource (the import id), from its declared fields. */
@@ -39,8 +39,6 @@ export interface ResourceSpec<S extends z.ZodObject = z.ZodObject> {
    * `compareDeclared`, which keeps the declared fields only.
    */
   normalize?: (state: State, desired: z.input<S>) => State;
-  /** The operations the type has. Phase 5 reads only; create, update and delete join them when it writes. */
-  crud: { read: CrudOptions; import: CrudOptions };
 }
 
 /** A resource a data file declares: `github.repository({ name: "sanoma" })`. Plain data, so a reader can parse it. */
@@ -54,17 +52,14 @@ export interface Declared<T = State> {
 }
 
 const importId = z.string().min(1);
-/** What a bridged resource's provider keeps beside its state; passed back on the next read. */
-const handle = {
-  private: z.string().optional().describe("The provider's private data for the object, base64; pass it back unchanged"),
-  schemaVersion: z.number().int().nonnegative().optional().describe("The version of the state's layout"),
-};
+/** What a driver keeps beside a state (an OpenTofu provider's private data and state version), passed back unchanged. */
+const handle = z.string().optional().describe("The driver's data for the object, opaque: pass it back unchanged");
 
 const opsOf = <S extends z.ZodObject>(schema: S) => ({
-  import: { input: z.object({ id: importId }), output: z.object({ id: importId, state: schema, ...handle }) },
+  import: { input: z.object({ id: importId }), output: z.object({ id: importId, state: schema, handle }) },
   read: {
-    input: z.object({ id: importId, state: z.record(z.string(), z.unknown()).optional(), ...handle }),
-    output: z.object({ id: importId, gone: z.boolean(), state: schema.optional(), ...handle }),
+    input: z.object({ id: importId, state: z.record(z.string(), z.unknown()).optional(), handle }),
+    output: z.object({ id: importId, gone: z.boolean(), state: schema.optional(), handle }),
   },
 });
 
@@ -73,35 +68,39 @@ const target = ({ id }: { id: string }) => id;
 
 type OpsOf<S extends z.ZodObject> = ReturnType<typeof opsOf<S>>;
 
-/** A resource type's operation specs, for `defineConnector`: `{ repository: repository.ops }`. */
+/** A resource type's operation specs: `read` and `import`. */
 export type ResourceOps<S extends z.ZodObject> = {
   [N in keyof OpsOf<S>]: OpSpec<OpsOf<S>[N]["input"], OpsOf<S>[N]["output"]>;
 };
 
 /**
- * A resource type: call it to declare a resource in a data file, and give its `ops` to
- * `defineConnector`.
+ * A resource type: call it to declare a resource in a data file, and give it to
+ * `defineConnector` as a group, under its `type`: `defineConnector("github", { repository })`.
  */
-export interface Resource<S extends z.ZodObject = z.ZodObject> {
+export interface Resource<S extends z.ZodObject = z.ZodObject> extends Readonly<Required<ResourceSpec<S>>> {
   (desired: z.input<S>): Declared<z.input<S>>;
-  readonly vendor: string;
-  readonly type: string;
-  readonly title: string;
-  readonly identity: string;
-  readonly schema: S;
-  readonly fields: ResourceFields;
-  readonly find: (desired: z.input<S>) => string;
-  readonly normalize: (state: State, desired: z.input<S>) => State;
   /** `read` and `import`, each effect `read`, idempotent, with the import id as `target`. */
   readonly ops: ResourceOps<S>;
+  readonly [RESOURCE]: true;
 }
 
 const isObject = (v: unknown): v is State => typeof v === "object" && v !== null && !Array.isArray(v);
 
+/** One order for a list compared as a multiset: by each item's JSON. */
+const canonical = (items: unknown[]) =>
+  items
+    .map((item) => [JSON.stringify(item) ?? "", item] as const)
+    .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([, item]) => item);
+
+const comparers = new WeakMap<ResourceFields, (state: State, desired: State) => State>();
+
 /**
  * The fields of `state` that `desired` declares, minus vendor-owned and write-only ones: only
  * declared fields are compared, as CloudFormation does. An object is picked field by field, a
- * list item by item against the declared item at its index; anything else is kept whole.
+ * list item by item against the declared item at its index, and an `unordered` list (a set)
+ * item by item against what its declared items declare, then sorted, so its order never
+ * drifts. Anything else is kept whole.
  *
  * So a field the data file leaves out is never drift, whatever the vendor holds. That covers
  * attributes the provider marks `computed` and `optional`: they are the user's to set, not
@@ -109,20 +108,48 @@ const isObject = (v: unknown): v is State => typeof v === "object" && v !== null
  * `visibility`), so they are compared only when declared.
  */
 export function compareDeclared(fields: ResourceFields, state: State, desired: State): State {
+  let compare = comparers.get(fields);
+  if (!compare) {
+    compare = comparer(fields);
+    comparers.set(fields, compare);
+  }
+  return compare(state, desired);
+}
+
+function comparer(fields: ResourceFields) {
   const skip = new Set([...fields.vendorOwned, ...fields.writeOnly]);
-  const pick = (actual: unknown, declared: unknown, prefix: string): unknown => {
+  const unordered = new Set(fields.unordered);
+  const pick = (actual: unknown, declared: unknown, path: string): unknown => {
     if (Array.isArray(declared) && Array.isArray(actual)) {
-      return actual.map((item, i) => (i < declared.length ? pick(item, declared[i], prefix) : item));
+      if (unordered.has(path)) {
+        // What any declared item declares: a set's items have no declared counterpart by index.
+        const objects = declared.filter(isObject);
+        const like = objects.length ? Object.assign({}, ...objects) : undefined;
+        return canonical(like ? actual.map((item) => pick(item, like, path)) : actual);
+      }
+      return actual.map((item, i) => (i < declared.length ? pick(item, declared[i], path) : item));
     }
     if (!isObject(declared) || !isObject(actual)) return actual ?? null;
     const out: State = {};
     for (const [name, value] of Object.entries(declared)) {
-      if (value === undefined || skip.has(prefix + name)) continue;
-      out[name] = pick(actual[name], value, `${prefix + name}.`);
+      const at = path ? `${path}.${name}` : name;
+      if (value === undefined || skip.has(at)) continue;
+      out[name] = pick(actual[name], value, at);
     }
     return out;
   };
-  return pick(state, desired, "") as State;
+  return (state: State, desired: State) => pick(state, desired, "") as State;
+}
+
+/** The dotted paths in `value` that `paths` holds, looking into objects and lists' items. */
+function pathsIn(value: unknown, paths: ReadonlySet<string>, prefix = ""): string[] {
+  if (Array.isArray(value)) return [...new Set(value.flatMap((item) => pathsIn(item, paths, prefix)))];
+  if (!isObject(value)) return [];
+  return Object.entries(value).flatMap(([name, v]) => {
+    const path = prefix ? `${prefix}.${name}` : name;
+    if (v === undefined) return [];
+    return paths.has(path) ? [path] : pathsIn(v, paths, path);
+  });
 }
 
 /**
@@ -131,42 +158,48 @@ export function compareDeclared(fields: ResourceFields, state: State, desired: S
  * `read` and idempotent, with the import id as the policy's `target`:
  *
  * - `import` takes `{ id }`, the import id, and returns the object's `state` (with the
- *   provider's `private` data and `schemaVersion` when it is bridged), or fails when there is
- *   no such object.
- * - `read` takes `{ id, state?, private?, schemaVersion? }`, a state from an earlier `import`
- *   or `read`, and returns `{ gone: true }` when the object no longer exists, else its fresh
- *   `state`. A driver may import first when it is given no state.
+ *   driver's opaque `handle` when it keeps one), or fails when there is no such object.
+ * - `read` takes `{ id, state?, handle? }`, a state from an earlier `import` or `read`, and
+ *   returns `{ gone: true }` when the object no longer exists, else its fresh `state`. A
+ *   driver may import first when it is given no state.
  *
  * Calling the result declares one resource, for a data file:
  * `repository({ name: "sanoma" })` is `{ kind: "resource", vendor, type, name: "sanoma", desired }`.
- * It refuses fields the schema does not have, values it rejects, and an empty identity.
+ * It refuses fields the schema does not have, fields the vendor owns (unless the identity names
+ * them), values the schema rejects, and an empty identity.
  */
 export function defineResource<S extends z.ZodObject>(spec: ResourceSpec<S>): Resource<S> {
-  const { vendor, type, schema, find } = spec;
+  const { vendor, type, schema, fields, find } = spec;
   const what = `${vendor}.${type}`;
   const io = opsOf(schema);
   const ops = {
     import: {
       effect: "read",
       idempotent: true,
-      description:
-        spec.crud.import.description ?? `Find a ${spec.title.toLowerCase()} by its ${spec.identity} and read it`,
+      description: `Find a ${spec.title.toLowerCase()} by its ${spec.identity} and read it`,
       ...io.import,
       target,
     },
     read: {
       effect: "read",
       idempotent: true,
-      description:
-        spec.crud.read.description ?? `Read a ${spec.title.toLowerCase()} as it is now; gone when it no longer exists`,
+      description: `Read a ${spec.title.toLowerCase()} as it is now; gone when it no longer exists`,
       ...io.read,
       target,
     },
   } satisfies ResourceOps<S>;
 
+  const named = new Set(spec.identity.match(/[A-Za-z_][\w.]*/g));
+  const owned = new Set(fields.vendorOwned.filter((path) => !named.has(path)));
   const declare = (desired: z.input<S>): Declared<z.input<S>> => {
     const unknown = Object.keys(desired ?? {}).filter((name) => !Object.hasOwn(schema.shape, name));
     if (unknown.length) throw new Error(`${what}: no field ${unknown.join(", ")}`);
+    const vendors = pathsIn(desired, owned);
+    if (vendors.length) {
+      throw new Error(
+        `${what}: leave out ${vendors.join(", ")}: the vendor sets ${vendors.length > 1 ? "them" : "it"}`,
+      );
+    }
     const parsed = schema.safeParse(desired);
     if (!parsed.success) throw new Error(`${what}: ${z.prettifyError(parsed.error)}`);
     const name = find(desired);
@@ -179,16 +212,12 @@ export function defineResource<S extends z.ZodObject>(spec: ResourceSpec<S>): Re
     title: spec.title,
     identity: spec.identity,
     schema,
-    fields: spec.fields,
+    fields,
     find,
-    normalize: spec.normalize ?? ((state: State, desired: z.input<S>) => compareDeclared(spec.fields, state, desired)),
+    normalize: spec.normalize ?? ((state: State, desired: z.input<S>) => compareDeclared(fields, state, desired)),
     ops,
   });
-  // The connector keeps the type beside its operations (see `RESOURCE`), for `describeConfig`.
-  Object.defineProperty(ops, RESOURCE, { value: resource });
-  return Object.freeze(resource);
+  // A symbol, so `defineConnector` tells a resource type from a group of operations.
+  Object.defineProperty(resource, RESOURCE, { value: true });
+  return Object.freeze(resource) as Resource<S>;
 }
-
-/** The resource type a connector's resource group is for, when `defineResource` made its operations. */
-export const resourceOf = (group: unknown): Resource | undefined =>
-  (group as { [RESOURCE]?: Resource } | undefined)?.[RESOURCE];

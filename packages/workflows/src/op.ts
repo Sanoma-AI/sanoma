@@ -40,7 +40,27 @@ export interface Op<V extends string = string, R extends string = string, N exte
   readonly output: z.ZodType<O>;
 }
 
-export type Specs = Record<string, Record<string, OpSpec>>;
+/**
+ * Where a resource type keeps its brand. A symbol, so `defineConnector` tells a resource type
+ * (`defineResource`) from a group of operations.
+ */
+export const RESOURCE: unique symbol = Symbol("sanoma.resource");
+
+/** What `defineConnector` reads of a resource type; `defineResource` makes them. */
+export interface ResourceGroup {
+  readonly [RESOURCE]: true;
+  readonly vendor: string;
+  readonly type: string;
+  readonly ops: Readonly<Record<string, OpSpec>>;
+}
+
+/** A connector's groups: operations by name, or a resource type, whose operations are `read` and `import`. */
+export type Specs = Record<string, Record<string, OpSpec> | ResourceGroup>;
+
+/** The operations of one group of `Specs`. */
+export type GroupOps<G> = G extends ResourceGroup ? G["ops"] : G;
+type InputOf<T> = T extends OpSpec<infer I, any> ? I : never;
+type OutputOf<T> = T extends OpSpec<any, infer O> ? O : never;
 
 /**
  * Where a connector keeps its vendor. A symbol, so it names no resource: `Object.values` and
@@ -50,20 +70,22 @@ export const VENDOR: unique symbol = Symbol("sanoma.vendor");
 
 export type Connector<V extends string, S extends Specs> = {
   readonly [R in keyof S & string]: {
-    readonly [N in keyof S[R] & string]: Op<V, R, N, z.input<S[R][N]["input"]>, z.output<S[R][N]["output"]>>;
+    readonly [N in keyof GroupOps<S[R]> & string]: Op<
+      V,
+      R,
+      N,
+      z.input<InputOf<GroupOps<S[R]>[N]>>,
+      z.output<OutputOf<GroupOps<S[R]>[N]>>
+    >;
   };
 } & { readonly [VENDOR]: ConnectorVendor<V> };
 
-/**
- * Where a connector's resource group keeps the resource type its operations are for, when
- * `defineResource` made them (`github.repository`), so a UI can list a vendor's resource types.
- */
-export const RESOURCE: unique symbol = Symbol("sanoma.resource");
-
-/** A connector's vendor: its id and, from `defineConnector`'s third argument, who it is, for a UI. */
+/** A connector's vendor: its id, who it is (`defineConnector`'s third argument, for a UI) and its resource types. */
 export interface ConnectorVendor<V extends string = string> {
   readonly id: V;
   readonly info?: VendorInfo;
+  /** The resource types among its groups, in the order given. */
+  readonly resources: readonly ResourceGroup[];
 }
 
 /**
@@ -85,8 +107,15 @@ export interface VendorInfo {
 /** One `<svg>` element, with nothing but whitespace around it. */
 const SVG_ELEMENT = /^\s*<svg[\s>][\s\S]*<\/svg>\s*$/;
 
+const isResourceGroup = (group: unknown): group is ResourceGroup =>
+  (typeof group === "function" || typeof group === "object") &&
+  group !== null &&
+  (group as Partial<ResourceGroup>)[RESOURCE] === true;
+
 /**
  * Declares a vendor's operations, grouped by resource: `defineConnector("ghost", { post: { create: {...} } })`.
+ * A group may be a resource type from `defineResource`, under its own `type`, for its `read` and
+ * `import`: `defineConnector("github", { repository })`; it must be of the same vendor.
  * `info` says who the vendor is and where the connector lives, for a UI:
  * `{ title: "Resend", logo: { svg }, package: "@sanoma/connector-resend", homepage: "https://…" }`.
  */
@@ -111,11 +140,20 @@ export function defineConnector<const V extends string, const S extends Specs>(
   if (homepage !== undefined && (typeof homepage !== "string" || URL.parse(homepage)?.protocol !== "https:"))
     throw new Error(`defineConnector("${vendor}"): homepage must be an https URL`);
   const out: Record<string, Record<string, Op>> = {};
-  for (const [resource, ops] of Object.entries(specs)) {
+  const resources: ResourceGroup[] = [];
+  for (const [resource, group] of Object.entries(specs)) {
+    let ops: Readonly<Record<string, OpSpec>> = group as Record<string, OpSpec>;
+    if (isResourceGroup(group)) {
+      if (group.vendor !== vendor) {
+        throw new Error(`defineConnector("${vendor}"): ${resource} is a resource type of ${group.vendor}`);
+      }
+      if (group.type !== resource) {
+        throw new Error(`defineConnector("${vendor}"): the resource type ${group.type} is given as ${resource}`);
+      }
+      resources.push(group);
+      ops = group.ops;
+    }
     out[resource] = {};
-    // Kept as a symbol, so it is no operation: `Object.values` over the group sees operations only.
-    const type: unknown = (ops as { [RESOURCE]?: unknown })[RESOURCE];
-    if (type !== undefined) Object.defineProperty(out[resource], RESOURCE, { value: type });
     for (const [name, spec] of Object.entries(ops)) {
       out[resource][name] = Object.freeze({
         kind: "op",
@@ -132,7 +170,11 @@ export function defineConnector<const V extends string, const S extends Specs>(
       } satisfies Op);
     }
   }
-  const owner: ConnectorVendor<V> = Object.freeze({ id: vendor, info: vendorInfo });
+  const owner: ConnectorVendor<V> = Object.freeze({
+    id: vendor,
+    info: vendorInfo,
+    resources: Object.freeze(resources),
+  });
   return { ...out, [VENDOR]: owner } as unknown as Connector<V, S>;
 }
 
@@ -201,13 +243,16 @@ export function isOp(x: unknown): x is Op {
  */
 export type DriverImpl<S extends Specs> = {
   [R in keyof S & string]: {
-    [N in keyof S[R] & string]: DriverFn<z.output<S[R][N]["input"]>, z.input<S[R][N]["output"]>>;
+    [N in keyof GroupOps<S[R]> & string]: DriverFn<
+      z.output<InputOf<GroupOps<S[R]>[N]>>,
+      z.input<OutputOf<GroupOps<S[R]>[N]>>
+    >;
   };
 };
 
 /** The ids of a connector's operations, such as `"ghost.post.create" | "ghost.post.publish"`. */
 export type OpIdOf<V extends string, S extends Specs> = {
-  [R in keyof S & string]: { [N in keyof S[R] & string]: `${V}.${R}.${N}` }[keyof S[R] & string];
+  [R in keyof S & string]: { [N in keyof GroupOps<S[R]> & string]: `${V}.${R}.${N}` }[keyof GroupOps<S[R]> & string];
 }[keyof S & string];
 
 /**

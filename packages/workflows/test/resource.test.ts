@@ -10,8 +10,14 @@ import {
   defineResource,
   memoryLedger,
 } from "../src/index.ts";
+import { VENDOR } from "../src/op.ts";
 
-const fields = { immutable: ["name"], vendorOwned: ["url", "pages.status"], writeOnly: ["token"] };
+const fields = {
+  immutable: ["name"],
+  vendorOwned: ["url", "pages.status"],
+  writeOnly: ["token"],
+  unordered: ["topics", "rules"],
+};
 
 const repo = defineResource({
   vendor: "acme",
@@ -30,10 +36,9 @@ const repo = defineResource({
   }),
   fields,
   find: ({ name }) => name,
-  crud: { read: {}, import: { description: "Find a repo by name" } },
 });
 
-const acme = defineConnector("acme", { repo: repo.ops }, { title: "Acme" });
+const acme = defineConnector("acme", { repo }, { title: "Acme" });
 
 describe("defineResource", () => {
   it("derives read and import operations, effect read and idempotent, targeting the import id", () => {
@@ -42,7 +47,7 @@ describe("defineResource", () => {
       id: "acme.repo.import",
       effect: "read",
       idempotent: true,
-      description: "Find a repo by name",
+      description: "Find a repo by its name and read it",
     });
     expect(acme.repo.read.description).toBe("Read a repo as it is now; gone when it no longer exists");
     expect(acme.repo.read.target?.({ id: "sanoma" })).toBe("sanoma");
@@ -51,12 +56,25 @@ describe("defineResource", () => {
   it("types the operations' state with the resource's schema", () => {
     expect(acme.repo.import.input.safeParse({ id: "sanoma" }).success).toBe(true);
     expect(
-      acme.repo.import.output.safeParse({ id: "sanoma", state: { name: "sanoma" }, schemaVersion: 1 }).success,
+      acme.repo.import.output.safeParse({ id: "sanoma", state: { name: "sanoma" }, handle: "1:e30=" }).success,
     ).toBe(true);
     expect(acme.repo.import.output.safeParse({ id: "sanoma", state: { wiki: true } }).success).toBe(false);
     expect(acme.repo.read.output.safeParse({ id: "sanoma", gone: true }).success).toBe(true);
-    expect(acme.repo.read.input.safeParse({ id: "sanoma", state: { name: "sanoma" }, private: "e30=" }).success).toBe(
+    expect(acme.repo.read.input.safeParse({ id: "sanoma", state: { name: "sanoma" }, handle: "1:e30=" }).success).toBe(
       true,
+    );
+    // The handle is opaque: the driver's, not the runtime's.
+    expect(acme.repo.read.input.safeParse({ id: "sanoma", handle: 1 }).success).toBe(false);
+  });
+
+  it("is a connector's group under its type, of its vendor only", () => {
+    expect(acme[VENDOR].resources).toEqual([repo]);
+    expect(defineConnector("plain", {})[VENDOR].resources).toEqual([]);
+    expect(() => defineConnector("other", { repo })).toThrow(
+      'defineConnector("other"): repo is a resource type of acme',
+    );
+    expect(() => defineConnector("acme", { repository: repo })).toThrow(
+      'defineConnector("acme"): the resource type repo is given as repository',
     );
   });
 
@@ -72,8 +90,25 @@ describe("defineResource", () => {
 
   it("refuses fields the schema does not have, values it rejects, and an empty identity", () => {
     expect(() => repo({ name: "x", wikki: true } as never)).toThrow("acme.repo: no field wikki");
+    expect(() => repo({ name: "x", url: "https://x", pages: { status: "built" } })).toThrow(
+      "acme.repo: leave out url, pages.status: the vendor sets them",
+    );
     expect(() => repo({ name: "x", wiki: "yes" } as never)).toThrow(/acme\.repo: .*wiki/s);
     expect(() => repo({ name: "" })).toThrow("acme.repo: its name is missing");
+  });
+
+  it("lets a data file name a vendor-owned field its identity is made of", () => {
+    const thing = defineResource({
+      vendor: "acme",
+      type: "thing",
+      title: "Thing",
+      identity: "id",
+      schema: z.object({ id: z.string().nullish(), created: z.number().nullish() }),
+      fields: { immutable: [], vendorOwned: ["id", "created"], writeOnly: [] },
+      find: ({ id }) => id ?? "",
+    });
+    expect(thing({ id: "t_1" }).name).toBe("t_1");
+    expect(() => thing({ id: "t_1", created: 1 })).toThrow("acme.thing: leave out created: the vendor sets it");
   });
 
   it("is implemented by an ordinary driver", () => {
@@ -117,11 +152,33 @@ describe("compareDeclared", () => {
   });
 
   it("picks list items against the declared item at the same index, and keeps other values whole", () => {
-    expect(compareDeclared(fields, actual, { name: "sanoma", rules: [{ pattern: "main" }], topics: ["a"] })).toEqual({
+    const ordered = { ...fields, unordered: [] };
+    expect(compareDeclared(ordered, actual, { name: "sanoma", rules: [{ pattern: "main" }], topics: ["a"] })).toEqual({
       name: "sanoma",
       rules: [{ pattern: "main" }],
       topics: ["b", "a"],
     });
+  });
+
+  it("compares a set in any order, as a multiset", () => {
+    const state = {
+      ...actual,
+      rules: [
+        { pattern: "v*", strict: false },
+        { pattern: "main", strict: true },
+      ],
+    };
+    const desired = { name: "sanoma", topics: ["a", "b"], rules: [{ pattern: "main" }, { pattern: "v*" }] };
+    expect(repo.normalize(state, desired)).toEqual(repo.normalize(desired, desired));
+    expect(repo.normalize(state, desired)).toEqual({
+      name: "sanoma",
+      topics: ["a", "b"],
+      rules: [{ pattern: "main" }, { pattern: "v*" }],
+    });
+    // A repeated item counts: ["a", "a"] is not ["a"].
+    expect(repo.normalize({ name: "sanoma", topics: ["a", "a"] }, { name: "sanoma", topics: ["a"] })).not.toEqual(
+      repo.normalize({ name: "sanoma", topics: ["a"] }, { name: "sanoma", topics: ["a"] }),
+    );
   });
 
   it("gives what was declared when given it twice, for the other side of the comparison", () => {
@@ -131,7 +188,7 @@ describe("compareDeclared", () => {
 });
 
 describe("describeConfig with resources", () => {
-  it("lists each vendor's resource types with their identity", () => {
+  it("lists the resource types once, top level, and refers to their state from their operations", () => {
     const config = defineConfig({
       workflows: [],
       connectors: [acme, defineConnector("plain", {})],
@@ -146,9 +203,24 @@ describe("describeConfig with resources", () => {
       policy: allowAll,
       ledger: memoryLedger(),
     });
-    const { vendors, ops } = describeConfig(config);
-    expect(vendors.acme?.resources).toEqual([{ vendor: "acme", type: "repo", title: "Repo", identity: "name" }]);
-    expect(vendors.plain?.resources).toBeUndefined();
+    const { resourceTypes, ops } = describeConfig(config);
+    expect(resourceTypes).toEqual([
+      {
+        id: "acme.repo",
+        vendor: "acme",
+        type: "repo",
+        title: "Repo",
+        identity: "name",
+        fields,
+        schema: expect.objectContaining({ $id: "sanoma:resource-type/acme.repo", type: "object" }),
+        ops: ["acme.repo.import", "acme.repo.read"],
+      },
+    ]);
+    expect(resourceTypes[0]?.schema).toMatchObject({ properties: { name: { type: "string" } } });
     expect(ops.map((op) => op.id)).toEqual(["acme.repo.import", "acme.repo.read"]);
+    // The operations refer to the state's schema rather than repeating it.
+    const read = ops.find((op) => op.id === "acme.repo.read");
+    expect(read?.output).toMatchObject({ properties: { state: { $ref: "sanoma:resource-type/acme.repo" } } });
+    expect(JSON.stringify(read?.output)).not.toContain('"wiki"');
   });
 });

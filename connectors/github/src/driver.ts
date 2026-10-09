@@ -105,25 +105,20 @@ function bridgedOps(vendor: string, bridge: BridgeLike, config: () => Record<str
     };
     const out = (r: BridgeResource) => ({
       state: fromTfState(type.shape, JSON.parse(r.stateJson) as Record<string, unknown>),
-      ...(r.private.length > 0 && { private: Buffer.from(r.private).toString("base64") }),
-      schemaVersion: r.schemaVersion,
+      handle: `${r.schemaVersion}:${Buffer.from(r.private).toString("base64")}`,
     });
 
     const importOp: DriverFn<any, any> = ({ id }: { id: string }) =>
       call(op("import"), async () => ({ id, ...out(await importOne(id)) }));
 
-    const readOp: DriverFn<any, any> = (input: {
-      id: string;
-      state?: Record<string, unknown>;
-      private?: string;
-      schemaVersion?: number;
-    }) =>
+    const readOp: DriverFn<any, any> = (input: { id: string; state?: Record<string, unknown>; handle?: string }) =>
       call(op("read"), async () => {
+        const [version, priv = ""] = input.handle?.split(":") ?? [];
         const from: Omit<BridgeResource, "typeName"> = input.state
           ? {
               stateJson: JSON.stringify(toTfState(type.shape, input.state)),
-              private: Buffer.from(input.private ?? "", "base64"),
-              schemaVersion: input.schemaVersion ?? type.schemaVersion,
+              private: Buffer.from(priv, "base64"),
+              schemaVersion: version ? Number(version) : type.schemaVersion,
             }
           : await importOne(input.id);
         const reply = await bridge.read(provider, type.typeName, from.stateJson, from.private, from.schemaVersion);

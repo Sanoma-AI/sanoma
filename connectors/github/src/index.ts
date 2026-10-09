@@ -15,9 +15,9 @@ const mark = (fill: string) =>
 export const github = defineConnector(
   "github",
   {
-    repository: repository.ops,
-    branch_protection: branchProtection.ops,
-    team_membership: teamMembership.ops,
+    repository,
+    branch_protection: branchProtection,
+    team_membership: teamMembership,
   },
   {
     title: "GitHub",

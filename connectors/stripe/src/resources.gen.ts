@@ -277,6 +277,7 @@ export const stripe_product = {
     immutable: [],
     vendorOwned: ["created", "default_price", "id", "livemode", "object", "updated"],
     writeOnly: [],
+    unordered: [],
   },
   shape: {
     attributes: [
@@ -406,6 +407,7 @@ export const stripe_webhook_endpoint = {
     immutable: ["api_version", "connect"],
     vendorOwned: ["application", "created", "id", "livemode", "object", "secret", "status"],
     writeOnly: ["secret"],
+    unordered: [],
   },
   shape: {
     attributes: [

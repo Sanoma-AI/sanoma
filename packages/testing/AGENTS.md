@@ -55,6 +55,7 @@ await worker.stop();
 | `state`                | The vendor's state, such as `posts` or `broadcasts`.                                           |
 | `calls`                | Every call received, in order, with its input and idempotency key.                             |
 | `reset()`              | Empties the state, the remembered replies and the pending faults.                              |
+| `update(change)`       | Changes the state as someone at the vendor would, in the file too, for the next call to see.   |
 | `failNext(opId, err?)` | The next call to `opId` throws `err` (default: a retryable `DriverError`) and changes nothing. |
 | `loseReply(opId)`      | The next call to `opId` takes effect, then throws once, as if the reply was lost.              |
 | `rateLimit(opId)`      | The next call to `opId` throws a retryable `DriverError` with status 429 and changes nothing.  |

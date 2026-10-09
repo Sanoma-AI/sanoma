@@ -1,4 +1,4 @@
-import { compareDeclared, defineResource } from "@sanoma/workflows";
+import { defineResource } from "@sanoma/workflows";
 import { github_branch_protection, github_repository, github_team_membership } from "./resources.gen.ts";
 
 // The GitHub resource types Sanoma reads, from the OpenTofu provider's schema (`resources.gen.ts`),
@@ -12,13 +12,6 @@ export const repository = defineResource({
   schema: github_repository.schema,
   fields: github_repository.fields,
   find: ({ name }) => name,
-  // `topics` is a set: GitHub returns it in an order of its own.
-  normalize: (state, desired) => {
-    const compared = compareDeclared(github_repository.fields, state, desired);
-    if (Array.isArray(compared.topics)) compared.topics = compared.topics.toSorted();
-    return compared;
-  },
-  crud: { read: {}, import: {} },
 });
 
 export const branchProtection = defineResource({
@@ -29,7 +22,6 @@ export const branchProtection = defineResource({
   schema: github_branch_protection.schema,
   fields: github_branch_protection.fields,
   find: ({ repository_id, pattern }) => `${repository_id}:${pattern}`,
-  crud: { read: {}, import: {} },
 });
 
 export const teamMembership = defineResource({
@@ -40,7 +32,6 @@ export const teamMembership = defineResource({
   schema: github_team_membership.schema,
   fields: github_team_membership.fields,
   find: ({ team_id, username }) => `${team_id}:${username}`,
-  crud: { read: {}, import: {} },
 });
 
 /**

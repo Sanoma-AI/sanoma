@@ -35,7 +35,7 @@ describe("stripeDriver", () => {
     );
     expect(stripe.product.read.output.parse(read)).toMatchObject({
       gone: false,
-      schemaVersion: 2,
+      handle: "2:",
       state: { name: "Sanoma test product" },
     });
   });
