@@ -1,11 +1,11 @@
-import type { OutlineNode } from "@sanoma/workflows/describe";
 import { describe, expect, it } from "vitest";
 import { outlineGraph } from "../src/graph/outline-graph.ts";
+import type { Step } from "../src/graph/types.ts";
 import { labels, pairs } from "./graph-helpers.ts";
 
 // Hand-built outlines, in the shapes outlineWorkflow returns (packages/workflows/src/outline.ts).
 
-const op = (id: string): OutlineNode => ({ kind: "op", id, span: [0, 0] });
+const op = (id: string): Step => ({ kind: "op", id });
 
 describe("outlineGraph", () => {
   it("draws a sequence as a chain from start to end, with no state", () => {
