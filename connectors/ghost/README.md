@@ -62,7 +62,7 @@ Ghost documents no rate limit for the Admin API; Ghost(Pro) may answer 429 to pr
 `test/driver.test.ts` replays Ghost's recorded replies (`test/fixtures`) with [msw](https://mswjs.io/); no network, no database. To run the same tests against a real site (they create posts titled `sanoma test <timestamp>`, publish some, and delete them at the end):
 
 ```sh
-SANOMA_LIVE=1 GHOST_ADMIN_URL=https://example.ghost.io GHOST_ADMIN_API_KEY=<id>:<secret> pnpm --filter @sanoma/connector-ghost test
+SANOMA_LIVE=1 GHOST_ADMIN_URL=https://example.ghost.io GHOST_ADMIN_API_KEY=<id>:<secret> pnpm vitest run connectors/ghost
 ```
 
 Add `SANOMA_RECORD=1` to rewrite the fixtures from that site's replies. They are scrubbed as they are written: only the fields the driver reads are kept (no authors or emails), every URL is put on `https://blog.example.test`, and ids are renumbered. Run `pnpm format` afterwards, and read the diff before you commit it. `update-collision.json` is not rewritten: a test cannot make Ghost collide on cue, so it was taken by hand from a local Ghost.

@@ -45,8 +45,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
-    "prepack": "pnpm run clean && pnpm run build",
-    "test": "vitest run"
+    "prepack": "pnpm run clean && pnpm run build"
   },
   "dependencies": {
     "jose": "^6.2.12"

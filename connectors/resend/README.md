@@ -45,11 +45,11 @@ const drivers = [resendDriver({ from: "Acme <news@acme.example>" })]; // `from`:
 
 The client's types are generated from Resend's [OpenAPI spec](https://github.com/resend/resend-openapi), pinned to a commit and cut to the two operations in `openapi.redocly.yaml`: `pnpm run generate` rewrites `src/resend-api.d.ts`.
 
-`pnpm test` replays the replies in `test/fixtures`. To call Resend instead (never in CI), creating broadcasts and sending one to a test segment, and then to re-record the fixtures with ids, addresses and keys scrubbed:
+`pnpm vitest run connectors/resend` replays the replies in `test/fixtures`. To call Resend instead (never in CI), creating broadcasts and sending one to a test segment, and then to re-record the fixtures with ids, addresses and keys scrubbed:
 
 ```sh
-SANOMA_LIVE=1 RESEND_API_KEY=re_... RESEND_TEST_AUDIENCE=<segment id> RESEND_TEST_FROM="Test <test@your-domain>" pnpm test
-SANOMA_LIVE=1 SANOMA_RECORD=1 RESEND_API_KEY=re_... RESEND_TEST_AUDIENCE=<segment id> RESEND_TEST_FROM=... pnpm test
+SANOMA_LIVE=1 RESEND_API_KEY=re_... RESEND_TEST_AUDIENCE=<segment id> RESEND_TEST_FROM="Test <test@your-domain>" pnpm vitest run connectors/resend
+SANOMA_LIVE=1 SANOMA_RECORD=1 RESEND_API_KEY=re_... RESEND_TEST_AUDIENCE=<segment id> RESEND_TEST_FROM=... pnpm vitest run connectors/resend
 ```
 
 ## Testing

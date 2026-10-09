@@ -47,8 +47,7 @@
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
     "generate": "pnpm --package=@redocly/cli@2.60.0 dlx redocly bundle resend --config openapi.redocly.yaml --remove-unused-components --ext yaml | pnpm dlx --package openapi-typescript@7.13.0 --package typescript@5.9.3 openapi-typescript -o src/resend-api.d.ts && oxfmt src/resend-api.d.ts",
-    "prepack": "pnpm run clean && pnpm run build",
-    "test": "vitest run"
+    "prepack": "pnpm run clean && pnpm run build"
   },
   "dependencies": {
     "openapi-fetch": "^0.17.0"
