@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { type CallContext, DriverError } from "@sanoma/workflows";
-import { type FakeCall, fakeBluesky, fakeGhost, fakeResend } from "../src/index.ts";
+import { type FakeCall, fakeBluesky, fakeGhost, fakeGithub, fakeResend, fakeStripe } from "../src/index.ts";
 
 // No database: the fakes are called the way the runtime calls a driver.
 const call = (idempotencyKey: string, attempt = 1): CallContext => ({
@@ -150,5 +150,21 @@ describe("fakes", () => {
     for (const fake of [ghost, resend, bluesky]) fake.reset();
     expect(calls).toEqual([]);
     expect(fakeBluesky({ file: vendorFile("bluesky") }).state.posts).toEqual([]);
+  });
+
+  it("resource fakes: an override reaches a fake on the same file, and drift shows on the next read", async () => {
+    const github = fakeGithub({ file: vendorFile("github") });
+    const imported = await github.driver.ops["repository.import"]!({ id: "sanoma" }, call("r:0"));
+    // Another process's fake, on the same file: a test that drifts the vendor while a worker reads it.
+    fakeGithub({ file: vendorFile("github") }).override("repository", "sanoma", { has_wiki: false });
+    const read = (await github.driver.ops["repository.read"]!(imported, call("r:1"))) as {
+      state: { has_wiki: boolean };
+    };
+    expect(read.state.has_wiki).toBe(false);
+    const stripe = fakeStripe();
+    const product = (await stripe.driver.ops["product.read"]!({ id: "prod_SanomaTest0001" }, call("r:2"))) as {
+      state: { name: string };
+    };
+    expect(product.state.name).toBe("Sanoma test product");
   });
 });

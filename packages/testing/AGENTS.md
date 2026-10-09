@@ -47,7 +47,7 @@ await worker.stop();
 
 ## Fake vendors
 
-`fakeGhost`, `fakeResend` and `fakeBluesky` are re-exported from `@sanoma/connector-ghost/fake`, `@sanoma/connector-resend/fake` and `@sanoma/connector-bluesky/fake`. Each returns:
+`fakeGhost`, `fakeResend`, `fakeBluesky`, `fakeGithub` and `fakeStripe` are re-exported from `@sanoma/connector-ghost/fake`, `@sanoma/connector-resend/fake`, `@sanoma/connector-bluesky/fake`, `@sanoma/connector-github/fake` and `@sanoma/connector-stripe/fake`. Each returns:
 
 | Member                 | What it does                                                                                   |
 | ---------------------- | ---------------------------------------------------------------------------------------------- |
@@ -59,6 +59,8 @@ await worker.stop();
 | `loseReply(opId)`      | The next call to `opId` takes effect, then throws once, as if the reply was lost.              |
 | `rateLimit(opId)`      | The next call to `opId` throws a retryable `DriverError` with status 429 and changes nothing.  |
 | `hold(opId)`           | The next call to `opId` waits, before it takes effect, until the returned function is called.  |
+
+`fakeGithub` and `fakeStripe` serve resources from replies recorded from (or, for Stripe, written to) the vendor's OpenTofu provider, through the connector's real driver, and add `override(type, id, fields)`, which changes what the next read returns, as if someone edited the object at the vendor (drift), and `remove(type, id)`, after which a read says the object is gone.
 
 A call that repeats an earlier call's idempotency key gets the earlier reply and changes nothing, so a test can check that a retried or replayed call has one effect.
 

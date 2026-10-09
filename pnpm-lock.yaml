@@ -221,9 +221,15 @@ importers:
       '@sanoma/connector-ghost':
         specifier: workspace:*
         version: link:../../connectors/ghost
+      '@sanoma/connector-github':
+        specifier: workspace:*
+        version: link:../../connectors/github
       '@sanoma/connector-resend':
         specifier: workspace:*
         version: link:../../connectors/resend
+      '@sanoma/connector-stripe':
+        specifier: workspace:*
+        version: link:../../connectors/stripe
       '@sanoma/workflows':
         specifier: workspace:*
         version: link:../workflows
