@@ -1,14 +1,11 @@
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
-import { childrenOf, locator, type Node, parse } from "./ast.ts";
+import { basename, dirname, join } from "node:path";
+import { byPosition, childrenOf, type LintProblem, type Node, parsed } from "./ast.ts";
 import { readDataFile } from "./datafile.ts";
+import { inside, nearestDir, RELATIVE } from "./paths.ts";
 // From src/ and from dist/ alike, the package's own oxlint.json: the one list of allowed names.
 import oxlint from "../oxlint.json" with { type: "json" };
 
-export interface LintProblem {
-  line: number;
-  column: number;
-  message: string;
-}
+export type { LintProblem } from "./ast.ts";
 
 /**
  * A workflow must call vendors through `ctx`, so the policy sees every call. These are the
@@ -18,7 +15,6 @@ export interface LintProblem {
 const THROUGH_CTX = "a workflow must call vendors through ctx, so the policy sees every call";
 
 const ALLOWED_PACKAGE = /^(@sanoma\/workflows|@sanoma\/connector-[a-z0-9-]+|zod)$/;
-const RELATIVE = /^\.\.?\//;
 
 /** Packages refused by name, with the reason. */
 const REFUSED_PACKAGES: [RegExp, string][] = [
@@ -62,7 +58,7 @@ const ERROR_CLASSES = new Set(["DriverError", "SanomaError", "PolicyDeniedError"
  */
 export function lintWorkflow(source: string, filename?: string): LintProblem[] {
   const { program, problems, at } = parsed(source, filename ?? "workflow.ts");
-  const root = filename === undefined ? undefined : treeOf(filename);
+  const root = filename === undefined ? undefined : nearestDir(filename, ["workflows", "policies"]);
 
   const checkSource = (node: Node) => {
     const spec: string = node.source.value;
@@ -141,7 +137,7 @@ export function lintWorkflow(source: string, filename?: string): LintProblem[] {
   };
 
   visit(program);
-  return problems.toSorted((a, b) => a.line - b.line || a.column - b.column);
+  return byPosition(problems);
 }
 
 /**
@@ -155,33 +151,24 @@ export function lintWorkflow(source: string, filename?: string): LintProblem[] {
 export function lintResources(source: string, filename: string): LintProblem[] {
   const { program, problems, at } = parsed(source, filename);
   for (const p of readDataFile(program, filename).problems) problems.push({ ...at(p.start), message: p.message });
-  return problems.toSorted((a, b) => a.line - b.line || a.column - b.column);
-}
-
-/** A file parsed, its syntax errors as problems, and offsets as lines and columns from 1. */
-function parsed(source: string, filename: string) {
-  const { program, errors } = parse(filename, source);
-  const at = locator(source);
-  const problems: LintProblem[] = errors.map((e) => ({
-    ...at(e.labels?.[0]?.start ?? 0),
-    message: `syntax: ${e.message}`,
-  }));
-  return { program, problems, at };
+  return byPosition(problems);
 }
 
 /** The `paths` of oxlint.json's `no-restricted-imports` rule. */
-function restrictedImports(config: typeof oxlint): { name: string; allowImportNames?: string[] }[] {
-  return config.overrides.flatMap((o) => {
-    const rule = (o.rules as Record<string, unknown>)["no-restricted-imports"];
-    return rule ? (rule as [string, { paths: { name: string }[] }])[1].paths : [];
-  });
+function restrictedImports(config: typeof oxlint): RestrictedPath[] {
+  // JSON types the rule's [severity, options] as an array of either.
+  return config.overrides.flatMap((o) =>
+    "no-restricted-imports" in o.rules
+      ? (o.rules["no-restricted-imports"] as [string, { paths: RestrictedPath[] }])[1].paths
+      : [],
+  );
 }
+
+type RestrictedPath = { name: string; allowImportNames?: string[] };
 
 function whyRefused(spec: string, filename: string | undefined, root: string | undefined): string | undefined {
   if (RELATIVE.test(spec)) {
-    if (filename === undefined || root === undefined) return undefined;
-    const rel = relative(root, join(dirname(filename), spec));
-    if (rel !== "" && rel.split(sep)[0] !== ".." && !isAbsolute(rel)) return undefined;
+    if (filename === undefined || root === undefined || inside(root, join(dirname(filename), spec))) return undefined;
     const where =
       basename(root) === "workflows" || basename(root) === "policies" ? `${basename(root)}/` : "this directory";
     return `it reaches outside ${where}, toward the config and its drivers; ${THROUGH_CTX}`;
@@ -189,13 +176,4 @@ function whyRefused(spec: string, filename: string | undefined, root: string | u
   for (const [pattern, reason] of REFUSED_PACKAGES) if (pattern.test(spec)) return reason;
   if (ALLOWED_PACKAGE.test(spec)) return undefined;
   return "import only from `@sanoma/workflows`, a `@sanoma/connector-*` package, zod, or a file beside this one";
-}
-
-/** The file's nearest `workflows/` or `policies/` ancestor directory, else its own directory. */
-function treeOf(filename: string): string {
-  for (let dir = dirname(filename); ; dir = dirname(dir)) {
-    const name = basename(dir);
-    if (name === "workflows" || name === "policies") return dir;
-    if (dirname(dir) === dir) return dirname(filename);
-  }
 }

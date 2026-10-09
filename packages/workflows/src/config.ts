@@ -1,7 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { getCallSites } from "node:util";
-import { pathOf, type Use, type WorkflowDefinition } from "./define.ts";
+import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import type { LedgerStore } from "./ledger.ts";
 import { type Connector, type Driver, type DriverFn, isOp, type Op } from "./op.ts";
 import type { Policy } from "./policy.ts";
@@ -67,8 +66,7 @@ export const DEFAULT_DATABASE_URL = "postgresql://postgres:dbos@localhost:5433/s
 
 /** Returns the config, with the file it is called from as its `file`, which `resources` are relative to. */
 export function defineConfig(config: SanomaConfig): SanomaConfig {
-  // Frame 0 is this function, frame 1 its caller: by index, since a bundle may hold both.
-  return { ...config, file: config.file ?? pathOf(getCallSites(2)[1]?.scriptName) };
+  return { ...config, file: config.file ?? callerFile() };
 }
 
 export function resolveDatabaseUrl(config: { databaseUrl?: string }): string {

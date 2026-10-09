@@ -7,7 +7,7 @@ The source of `@sanoma/workflows`: how connectors, workflows and policies are de
 | Path                           | What it is                                                                                            |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------- |
 | [`approvals.ts`](approvals.ts) | Approval events, decision messages and the durable wait for a decision                                |
-| [`ast.ts`](ast.ts)             | Shared oxc parsing, tree walking and line numbers for the lints, the outline and the reader           |
+| [`ast.ts`](ast.ts)             | Shared oxc parsing, tree walking, line numbers and syntax problems for the lints, outline and reader  |
 | [`call.ts`](call.ts)           | Builds a workflow's `ctx`: policy, approval, driver call and ledger write around each operation       |
 | [`client.ts`](client.ts)       | `SanomaClient`: starts runs, lists them and decides approvals from outside the worker                 |
 | [`config.ts`](config.ts)       | `SanomaConfig`, `defineConfig` and `resolveConfig`: what a worker runs, with which drivers and policy |
@@ -23,6 +23,7 @@ The source of `@sanoma/workflows`: how connectors, workflows and policies are de
 | [`op.ts`](op.ts)               | `defineConnector`, operations, effects and drivers                                                    |
 | [`outline.ts`](outline.ts)     | `outlineWorkflow`: the calls, loops, branches and `ctx.all` groups a workflow's `run` makes           |
 | [`plugin.ts`](plugin.ts)       | The oxlint JS plugin `sanoma`, its rule `data-file`; `oxlint.json` loads it from `dist/`              |
+| [`paths.ts`](paths.ts)         | Where a relative import may reach: `nearestDir` and `inside`, for both lints and the reader           |
 | [`policy.ts`](policy.ts)       | Policy types, decisions (`allow`, `deny`, `approve`), `definePolicy` and `approvedFor`                |
 | [`resource.ts`](resource.ts)   | `defineResource`: a resource type's schema, fields, identity, constructor, and `read` and `import`    |
 | [`resources.ts`](resources.ts) | `readResources`: the resources the data files declare, read without running them                      |

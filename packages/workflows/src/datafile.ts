@@ -1,5 +1,6 @@
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { Node } from "./ast.ts";
+import { inside, nearestDir, RELATIVE } from "./paths.ts";
 
 // The one definition of what a data file may hold, over an ESTree program from oxc: the reader
 // (`resources.ts`), `lintResources` (`lint.ts`) and the oxlint plugin (`plugin.ts`) all
@@ -62,7 +63,6 @@ export interface DataFile {
   problems: DataFileProblem[];
 }
 
-const RELATIVE = /^\.\.?\//;
 /** A connector's constructors entry: a package specifier that ends in `/resources`. */
 const CONSTRUCTORS = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*\/resources$/;
 
@@ -90,7 +90,7 @@ const VALUES = "write a string, number, boolean, null, object or array, or name 
 export function readDataFile(
   program: Node,
   filename?: string,
-  root: string | undefined = filename === undefined ? undefined : resourcesRoot(filename),
+  root: string | undefined = filename === undefined ? undefined : nearestDir(filename, ["resources"]),
 ): DataFile {
   const problems: DataFileProblem[] = [];
   const fail = (node: { start: number; end: number }, message: string) =>
@@ -400,18 +400,4 @@ function describe(node: Node): string {
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .toLowerCase();
   return `${/^[aeiou]/.test(words) ? "an" : "a"} ${words}`;
-}
-
-/** The file's nearest `resources/` ancestor directory, else its own directory. */
-export function resourcesRoot(filename: string): string {
-  for (let dir = dirname(filename); ; dir = dirname(dir)) {
-    if (basename(dir) === "resources") return dir;
-    if (dirname(dir) === dir) return dirname(filename);
-  }
-}
-
-/** True when `path` is `dir` or inside it. */
-export function inside(dir: string, path: string): boolean {
-  const rel = relative(dir, path);
-  return rel === "" || (rel.split(sep)[0] !== ".." && !isAbsolute(rel));
 }

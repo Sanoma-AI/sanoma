@@ -1,6 +1,7 @@
 import { parseSync, visitorKeys } from "oxc-parser";
 
-// What the lint and the outline share: one way to parse a file and one way to walk it.
+// What the lints, the outline and the data-file reader share: one way to parse a file, walk it
+// and say where in it a problem is.
 
 /** oxc-parser's ESTree nodes, read by shape. */
 export type Node = any;
@@ -36,3 +37,25 @@ export function locator(source: string): (offset: number) => { line: number; col
     return { line: line + 1, column: offset - lineStarts[line]! + 1 };
   };
 }
+
+/** Something wrong in a file, at a line and column from 1. */
+export interface LintProblem {
+  line: number;
+  column: number;
+  message: string;
+}
+
+/** A file parsed, its syntax errors as problems, and offsets as lines and columns from 1. */
+export function parsed(source: string, filename: string) {
+  const { program, errors } = parse(filename, source);
+  const at = locator(source);
+  const problems: LintProblem[] = errors.map((e) => ({
+    ...at(e.labels?.[0]?.start ?? 0),
+    message: `syntax: ${e.message}`,
+  }));
+  return { program: program as Node, problems, at };
+}
+
+/** Problems in the order of their place in the file. */
+export const byPosition = <P extends Omit<LintProblem, "message">>(problems: P[]): P[] =>
+  problems.toSorted((a, b) => a.line - b.line || a.column - b.column);
