@@ -36,7 +36,7 @@ export interface WorkerOptions {
 export async function startWorker(config: SanomaConfig, options: WorkerOptions = {}): Promise<Worker> {
   // Check everything before touching the state a running worker reads.
   const resolved = resolveConfig(config);
-  for (const wf of resolved.workflows) {
+  for (const wf of resolved.workflows.values()) {
     const other = registered.get(wf.name)?.definition;
     if (other && other !== wf) {
       throw new Error(
@@ -51,12 +51,12 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     fakes: resolved.fakes,
     fakeDrivers: resolved.fakeDrivers,
     ...(resolved.scenarios && { scenarios: resolved.scenarios }),
-    workflows: new Map(resolved.workflows.map((wf) => [wf.name, wf])),
+    workflows: resolved.workflows,
     policy: resolved.policy,
     ledger: resolved.ledger,
     stopped: false,
   };
-  for (const wf of resolved.workflows) {
+  for (const wf of resolved.workflows.values()) {
     if (!registered.has(wf.name)) registered.set(wf.name, { definition: wf, fn: register(wf) });
   }
   const worker: Worker = {

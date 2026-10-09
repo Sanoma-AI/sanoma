@@ -153,7 +153,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
   }));
   ops.sort((a, b) => a.id.localeCompare(b.id));
 
-  const workflows: WorkflowEntry[] = resolved.workflows.map((wf) => {
+  const workflows: WorkflowEntry[] = [...resolved.workflows.values()].map((wf) => {
     const { outline, source } = outlineWithSource(wf);
     return {
       name: wf.name,

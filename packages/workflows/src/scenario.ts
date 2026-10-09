@@ -17,10 +17,9 @@ import { faker } from "@faker-js/faker";
 import { fake, seed, setFaker } from "zod-schema-faker/v4";
 import { z } from "zod";
 import type { RunSummary, SanomaClient } from "./client.ts";
-import type { WorkflowDefinition } from "./define.ts";
+import type { ResolvedConfig } from "./config.ts";
 import { SanomaError } from "./errors.ts";
 import { entry, type LedgerRecord, write } from "./ledger.ts";
-import type { Op } from "./op.ts";
 import type { Run } from "./run.ts";
 import { errorMessage, isEnded } from "./shared.ts";
 
@@ -113,11 +112,8 @@ export interface Check {
   detail?: string;
 }
 
-/** What steps can name: the config's operations and workflows, by id and name. */
-export interface Scope {
-  ops: Map<string, Op>;
-  workflows: Map<string, WorkflowDefinition<any, any>>;
-}
+/** What steps can name, the config's operations and workflows by id and name, and where the feature files are. */
+export type Scope = Pick<ResolvedConfig, "ops" | "workflows" | "scenarios">;
 
 type Kind = ScenarioStep["kind"];
 
@@ -452,7 +448,7 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
  * with an error for each file that does not parse and each name used twice. No directory,
  * or none given, is no scenarios. Throws when an operation's phrase names a field it lacks.
  */
-export function loadScenarios(scope: Scope & { scenarios?: URL }): {
+export function loadScenarios(scope: Scope): {
   scenarios: Scenario[];
   errors: { file: string; message: string }[];
 } {
@@ -575,11 +571,7 @@ export async function drive(
  */
 export async function seedSandbox(run: Run, name: string): Promise<void> {
   const { state } = run;
-  const { scenarios, errors } = loadScenarios({
-    ops: state.ops,
-    workflows: state.workflows,
-    scenarios: state.scenarios,
-  });
+  const { scenarios, errors } = loadScenarios(state);
   const scenario = scenarios.find((s) => s.name === name);
   if (!scenario) {
     const why = errors.length ? `; these files did not load: ${errors.map((e) => e.message).join("; ")}` : "";

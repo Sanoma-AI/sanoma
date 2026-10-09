@@ -102,7 +102,7 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       version: expect.stringMatching(/^acme@[0-9a-f]{64}$/),
       queueName: "sanoma:acme",
       policy: allowAll,
-      workflows: [announce],
+      workflows: new Map([["announce", announce]]),
     });
     expect([...resolved.ops.keys()].toSorted()).toEqual([
       "bluesky.post.create",
