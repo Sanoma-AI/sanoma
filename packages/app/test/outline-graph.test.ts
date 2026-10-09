@@ -201,14 +201,14 @@ describe("outlineGraph", () => {
       { id: "end", kind: "end", label: "end" },
     ];
     const at = (offset: number) => nodeAt(nodes, offset)?.id;
-    expect([at(5), at(10), at(15), at(20), at(21), at(75), at(45), at(90)]).toEqual([
+    // A span's end is outside it.
+    expect([at(5), at(10), at(15), at(19), at(20), at(75), at(40)]).toEqual([
       "op:0",
       "op:1",
       "op:1",
       "op:1",
       "op:0",
       "sleep:3",
-      undefined,
       undefined,
     ]);
   });

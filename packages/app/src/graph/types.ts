@@ -90,16 +90,17 @@ export interface Graph {
 }
 
 /**
- * The node a click at `offset` in the source is in: of the nodes with a span that holds it, the
- * one whose span is smallest, so a call made in another's arguments wins over the outer call.
- * The first of equals: a run's steps of one call site share its spans.
+ * The node a click at `offset` in the source is in: of the nodes with a span that holds it (its
+ * end exclusive, as `highlightedLines` reads it), the one whose span is smallest, so a call made
+ * in another's arguments wins over the outer call. The first of equals: a run's steps of one call
+ * site share its spans.
  */
 export function nodeAt(nodes: readonly GraphNode[], offset: number): GraphNode | undefined {
   let found: GraphNode | undefined;
   let size = Number.POSITIVE_INFINITY;
   for (const node of nodes) {
     for (const [start, end] of node.spans ?? []) {
-      if (start <= offset && offset <= end && end - start < size) {
+      if (start <= offset && offset < end && end - start < size) {
         found = node;
         size = end - start;
       }
