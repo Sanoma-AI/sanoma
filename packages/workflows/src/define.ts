@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { Op } from "./op.ts";
 import { approverLabel } from "./shared.ts";
@@ -209,13 +210,38 @@ export interface WorkflowDefinition<U extends readonly Use[] = readonly Use[], S
   /** Every operation and built-in the workflow may call. `ctx` is built from this list and nothing else. */
   readonly uses: U;
   readonly run: (ctx: Ctx<U>, input: z.output<S>) => Promise<unknown>;
+  /** The file that defined it, absolute, when known. Set by defineWorkflow from its call site; the app reads it for the code view. */
+  readonly file?: string;
 }
 
 export function defineWorkflow<const U extends readonly Use[], S extends z.ZodType>(
-  def: Omit<WorkflowDefinition<U, S>, "kind">,
+  def: Omit<WorkflowDefinition<U, S>, "kind" | "file">,
 ): WorkflowDefinition<U, S> {
   if (!/^[a-z][a-z0-9-]*$/.test(def.name)) {
     throw new Error(`Workflow name "${def.name}" must be lowercase letters, digits and dashes`);
   }
-  return Object.freeze({ kind: "workflow", ...def });
+  return Object.freeze({ kind: "workflow", ...def, file: callerFile() });
+}
+
+const THIS_FILE = fileURLToPath(import.meta.url);
+
+/** The file of the code that called into this one, from V8's call sites; undefined where there are none. */
+function callerFile(): string | undefined {
+  const { prepareStackTrace, stackTraceLimit } = Error;
+  try {
+    Error.stackTraceLimit = 20;
+    Error.prepareStackTrace = (_, sites) => sites;
+    const sites: unknown = new Error().stack;
+    if (!Array.isArray(sites)) return undefined;
+    for (const site of sites as NodeJS.CallSite[]) {
+      const name = site.getFileName();
+      if (!name || name.startsWith("node:")) continue;
+      const file = name.startsWith("file:") ? fileURLToPath(name) : name;
+      if (file !== THIS_FILE) return file;
+    }
+    return undefined;
+  } finally {
+    Error.prepareStackTrace = prepareStackTrace;
+    Error.stackTraceLimit = stackTraceLimit;
+  }
 }
