@@ -19,6 +19,7 @@ import type { RunSummary, SanomaClient } from "./client.ts";
 import type { ResolvedConfig } from "./config.ts";
 import { SanomaError } from "./errors.ts";
 import type { LedgerRecord } from "./ledger.ts";
+import { type OutlineNode, outlineWorkflow } from "./outline.ts";
 import { errorMessage, isEnded } from "./shared.ts";
 
 /*
@@ -69,6 +70,12 @@ export interface Scenario {
   given: Given[];
   input: unknown;
   decisions: Decision[];
+  /**
+   * The titles of the approvals the workflow's code asks for, where a title is a string literal
+   * (read from its outline), so `drive` can tell a decision for an approval still to come from
+   * one meant for whichever comes next.
+   */
+  approvals: string[];
   expect: Expectation[];
 }
 
@@ -379,6 +386,28 @@ function linesOf(doc: GherkinDocument): Map<string, number> {
   return lines;
 }
 
+const approvalsByWorkflow = new WeakMap<object, string[]>();
+
+/** The titles of the approvals in an outline, at any depth, where they are string literals. */
+const titles = (nodes: OutlineNode[]): string[] =>
+  nodes.flatMap((n) => {
+    if (n.kind === "approval") return n.title === undefined ? [] : [n.title];
+    if (n.kind === "all") return n.branches.flatMap(titles);
+    if (n.kind === "branch") return n.cases.flatMap(titles);
+    return n.kind === "each" || n.kind === "repeat" ? titles(n.body) : [];
+  });
+
+/** The literal titles of the approvals a workflow's code asks for, from its outline. */
+function approvalsOf(wf: Parameters<typeof outlineWorkflow>[0]): string[] {
+  let found = approvalsByWorkflow.get(wf);
+  if (!found) {
+    const outline = outlineWorkflow(wf);
+    found = "nodes" in outline ? [...new Set(titles(outline.nodes))] : [];
+    approvalsByWorkflow.set(wf, found);
+  }
+  return found;
+}
+
 /** A number from the scenario's name, so one name always makes up the same values. */
 const seedOf = (name: string) => createHash("sha256").update(name).digest().readUInt32BE(0);
 
@@ -415,7 +444,7 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
     if (scenarios.some((s) => s.name === name)) {
       throw new Error(`${where()}: a second scenario named "${name}"; give each its own name`);
     }
-    const scenario: Omit<Scenario, "workflow"> & { workflow?: string } = {
+    const scenario: Omit<Scenario, "workflow" | "approvals"> & { workflow?: string } = {
       name,
       file,
       text,
@@ -480,7 +509,7 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
         `${where()}: scenario "${name}" has no When: say which workflow runs, such as "When <workflow> runs with"`,
       );
     }
-    scenarios.push({ ...scenario, workflow });
+    scenarios.push({ ...scenario, workflow, approvals: approvalsOf(scope.workflows.get(workflow)!) });
   }
   return scenarios;
 }
@@ -586,7 +615,9 @@ export function check(scenario: Scenario, records: readonly LedgerRecord[]): Che
 /**
  * Decides the run's approvals as the scenario says until the run ends, and returns how it
  * ended. Each pending approval takes the decision naming its title (or id), else the next one
- * left in order; one with no decision left throws.
+ * left that names no approval of the run (one it has asked for, or one its code names). Throws
+ * for an approval with no such decision, and `run_running` when the run has not ended within
+ * `timeoutMs` or the worker has not read a decision by then.
  */
 export async function drive(
   client: SanomaClient,
@@ -600,14 +631,29 @@ export async function drive(
     const run = await client.run(runId);
     if (!run) throw new SanomaError("run_not_found", `No run ${runId}`, { runId });
     if (isEnded(run.status)) return run;
+    const names = new Set([...scenario.approvals, ...run.approvals.flatMap((a) => [a.title, a.id])]);
     for (const approval of run.approvals.filter((a) => a.status === "pending")) {
       const named = left.findIndex((d) => d.approval === approval.title || d.approval === approval.id);
-      const [d] = left.splice(named === -1 ? 0 : named, 1);
-      if (!d) {
-        throw new Error(`Scenario "${scenario.name}" has no decision for "${approval.title}" (${approval.id})`);
+      const next = named === -1 ? left.findIndex((d) => !names.has(d.approval)) : named;
+      if (next === -1) {
+        const which = left.length
+          ? `; the decisions left are for ${left.map((d) => `"${d.approval}"`).join(", ")}`
+          : "";
+        throw new Error(`Scenario "${scenario.name}" has no decision for "${approval.title}" (${approval.id})${which}`);
       }
+      const [d] = left.splice(next, 1) as [Decision];
       const note = d.note === undefined ? {} : { note: d.note };
-      await client.decide(runId, { decision: d.decision, by: { id: d.by }, ...note }, approval.id);
+      const timeoutSeconds = Math.max(1, Math.ceil((deadline - Date.now()) / 1000));
+      const decided = await client.decide(runId, { decision: d.decision, by: { id: d.by }, ...note }, approval.id, {
+        timeoutSeconds,
+      });
+      if (decided.status === "pending") {
+        throw new SanomaError(
+          "run_running",
+          `The worker did not read the decision for "${approval.title}" (${approval.id}) of run ${runId} within ${timeoutMs} ms`,
+          { runId, approvalId: approval.id, timeoutMs },
+        );
+      }
     }
     if (Date.now() > deadline) {
       throw new SanomaError("run_running", `Run ${runId} is still running after ${timeoutMs} ms`, {

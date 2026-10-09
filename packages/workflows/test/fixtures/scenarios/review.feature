@@ -17,3 +17,8 @@ Feature: Two reviews
     When review-twice runs
     And "Legal review" is approved by legal
     Then the run succeeds
+
+  Scenario: Decided for the second only
+    When review-twice runs
+    And "Final check" is approved by boss
+    Then the run succeeds

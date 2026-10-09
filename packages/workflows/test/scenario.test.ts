@@ -57,6 +57,7 @@ const expecting = (expectations: Scenario["expect"]): Scenario => ({
   given: [],
   input: {},
   decisions: [],
+  approvals: [],
   expect: expectations,
 });
 
@@ -117,6 +118,8 @@ describe("parseFeature", () => {
         { step: "the run succeeds", outcome: "finished" },
       ],
     });
+    // The approvals announce's code asks for, which drive never decides by position.
+    expect(scenario?.approvals).toEqual(["Review launch copy"]);
     // Plain JSON.
     expect(JSON.parse(JSON.stringify(scenario))).toEqual(scenario);
     // A step with no input expects any call.
