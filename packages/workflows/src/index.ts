@@ -29,9 +29,10 @@ export {
 } from "./define.ts";
 export {
   compareDeclared,
-  type Declarable,
   type Declared,
+  type Declaring,
   defineResource,
+  type References,
   type Resource,
   type ResourceFields,
   type ResourceOps,

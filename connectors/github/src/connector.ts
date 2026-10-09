@@ -31,6 +31,7 @@ export const githubTf = tfConnector({
       find: ({ team_id, username }) => `${team_id}:${username}`,
     },
   },
+  references: { branch_protection: { repository_id: "github.repository" } },
   info: {
     title: "GitHub",
     logo: { svg: mark("#1F2328"), dark: mark("#FFFFFF") },

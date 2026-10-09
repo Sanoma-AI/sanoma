@@ -63,12 +63,20 @@ describe("the github connector", () => {
       "github.repository: leave out html_url: the vendor sets it",
     );
     expect(declare.repository({ name: "sanoma", delete_branch_on_merge: true })).toMatchObject({
-      kind: "resource",
       vendor: "github",
       type: "repository",
       name: "sanoma",
     });
     expect(declare.branch_protection({ repository_id: "sanoma", pattern: "main" }).name).toBe("sanoma:main");
+    // A rule names its repository: the declared repository stands for its name.
+    const site = declare.repository({ name: "website" });
+    expect(declare.branch_protection({ repository_id: site, pattern: "main" })).toMatchObject({
+      name: "website:main",
+      desired: { repository_id: "website", pattern: "main" },
+      refs: { repository_id: "github.repository:website" },
+    });
+    // @ts-expect-error only a repository
+    expect(() => declare.team_membership({ team_id: site, username: "octocat" })).toThrow(/team_id takes a value/);
     expect(declare.team_membership({ team_id: "core", username: "octocat" }).name).toBe("core:octocat");
   });
 

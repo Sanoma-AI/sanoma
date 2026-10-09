@@ -11,6 +11,7 @@ import {
   memoryLedger,
 } from "../src/index.ts";
 import { VENDOR } from "../src/op.ts";
+import { DECLARED } from "../src/resource.ts";
 
 const fields = {
   immutable: ["name"],
@@ -38,7 +39,7 @@ const repo = defineResource({
   find: ({ name }) => name,
 });
 
-const acme = defineConnector("acme", { repo }, { title: "Acme" });
+const acme = defineConnector("acme", { repo }, { title: "Acme", package: "@acme/sanoma-connector" });
 
 describe("defineResource", () => {
   it("derives read and import operations, effect read and idempotent, targeting the import id", () => {
@@ -70,22 +71,33 @@ describe("defineResource", () => {
   it("is a connector's group under its type, of its vendor only", () => {
     expect(acme[VENDOR].resources).toEqual([repo]);
     expect(defineConnector("plain", {})[VENDOR].resources).toEqual([]);
-    expect(() => defineConnector("other", { repo })).toThrow(
+    const info = { package: "@other/connector" };
+    expect(() => defineConnector("other", { repo }, info)).toThrow(
       'defineConnector("other"): repo is a resource type of acme',
     );
-    expect(() => defineConnector("acme", { repository: repo })).toThrow(
+    expect(() => defineConnector("acme", { repository: repo }, info)).toThrow(
       'defineConnector("acme"): the resource type repo is given as repository',
     );
   });
 
-  it("declares a resource for a data file as a tagged literal named by its identity", () => {
-    expect(repo({ name: "sanoma", wiki: false })).toEqual({
-      kind: "resource",
+  it("needs the connector's package, whose `/resources` entry data files import the types from", () => {
+    expect(() => defineConnector("acme", { repo }, { title: "Acme" })).toThrow(
+      'defineConnector("acme"): a connector with resource types needs info.package',
+    );
+  });
+
+  it("declares a resource for a data file, branded and named by its identity", () => {
+    const site = repo({ name: "sanoma", wiki: false });
+    expect(site).toEqual({
+      [DECLARED]: "acme.repo",
       vendor: "acme",
       type: "repo",
       name: "sanoma",
       desired: { name: "sanoma", wiki: false },
+      refs: {},
     });
+    expect(site[DECLARED]).toBe("acme.repo");
+    expect(Object.isFrozen(site)).toBe(true);
   });
 
   it("refuses fields the schema does not have, values it rejects, and an empty identity", () => {
@@ -111,24 +123,70 @@ describe("defineResource", () => {
     expect(() => thing({ id: "t_1", created: 1 })).toThrow("acme.thing: leave out created: the vendor sets it");
   });
 
-  it("takes another declared resource for a string field, checked and found as its name", () => {
+  describe("references", () => {
     const rule = defineResource({
       vendor: "acme",
       type: "rule",
       title: "Rule",
       identity: "repository:pattern",
-      schema: z.object({ repository: z.string(), pattern: z.string(), strict: z.boolean().nullish() }),
-      fields: { immutable: ["repository"], vendorOwned: [], writeOnly: [] },
+      schema: z.object({
+        repository: z.string(),
+        pattern: z.string(),
+        strict: z.boolean().nullish(),
+        note: z.string().nullish(),
+        reviewers: z.array(z.object({ repository: z.string(), count: z.number() })).nullish(),
+      }),
+      fields: {
+        immutable: ["repository"],
+        vendorOwned: [],
+        writeOnly: [],
+        references: { repository: "acme.repo", "reviewers.repository": "acme.repo" },
+      },
       find: ({ repository, pattern }) => `${repository}:${pattern}`,
     });
     const site = repo({ name: "sanoma" });
-    const main = rule({ repository: site, pattern: "main" });
-    expect(main.name).toBe("sanoma:main");
-    // The data file's reference is kept: the resource, not a copy of its name.
-    expect(main.desired.repository).toBe(site);
-    // Only where a string goes: a boolean field takes no resource.
-    // @ts-expect-error strict is a boolean
-    expect(() => rule({ repository: site, pattern: "main", strict: site })).toThrow(/acme\.rule: .*strict/s);
+
+    it("take a declared resource where `fields.references` names its type, as its name", () => {
+      const main = rule({
+        repository: site,
+        pattern: "main",
+        reviewers: [
+          { repository: "docs", count: 1 },
+          { repository: site, count: 2 },
+        ],
+      });
+      expect(main.name).toBe("sanoma:main");
+      // `desired` holds the name, which the schema and `find` read; `refs` says where it was named.
+      expect(main.desired).toEqual({
+        repository: "sanoma",
+        pattern: "main",
+        reviewers: [
+          { repository: "docs", count: 1 },
+          { repository: "sanoma", count: 2 },
+        ],
+      });
+      expect(main.refs).toEqual({ repository: "acme.repo:sanoma", "reviewers.1.repository": "acme.repo:sanoma" });
+    });
+
+    it("are compared as the names they stand for, so a referencing resource does not drift", () => {
+      const { desired } = rule({ repository: site, pattern: "main" });
+      const state = { ...desired, strict: true, note: "set at the vendor" };
+      expect(rule.normalize(state, desired)).toEqual(rule.normalize(desired, desired));
+    });
+
+    it("are refused anywhere else, and of another type, by the type as by the constructor", () => {
+      const other = rule({ repository: "docs", pattern: "main" });
+      // @ts-expect-error note takes no reference
+      expect(() => rule({ repository: site, pattern: "main", note: site })).toThrow(
+        "acme.rule: note takes a value, not a resource (acme.repo sanoma)",
+      );
+      // @ts-expect-error repository names an acme.repo
+      expect(() => rule({ repository: other, pattern: "main" })).toThrow(
+        "acme.rule: repository names a resource of type acme.repo, not acme.rule (docs:main)",
+      );
+      // @ts-expect-error a repo names no resource
+      expect(() => repo({ name: site })).toThrow("acme.repo: name takes a value, not a resource (acme.repo sanoma)");
+    });
   });
 
   it("is implemented by an ordinary driver", () => {
