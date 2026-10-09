@@ -1,6 +1,6 @@
 import { javascript } from "@codemirror/lang-javascript";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { Compartment, EditorState, RangeSetBuilder, StateEffect, StateField, type Text } from "@codemirror/state";
+import { Compartment, EditorState, RangeSetBuilder, StateEffect, StateField } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -11,6 +11,7 @@ import {
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { useEffect, useEffectEvent, useRef } from "react";
+import { highlightedLines } from "#/lib/lines.ts";
 import { cn } from "#/lib/utils.ts";
 
 // A workflow's source, read-only, drawn with CodeMirror. It needs the DOM, so the pages load
@@ -28,18 +29,6 @@ export interface CodeProps {
   /** Called with the offset of a click in the text, or of the start of a clicked line number. */
   onSelect?: (offset: number) => void;
   className?: string;
-}
-
-/** The numbers of the lines the spans touch, in order, once each. Offsets past the end clamp. */
-export function highlightedLines(doc: Text, spans: readonly Span[]): number[] {
-  const lines = new Set<number>();
-  for (const [start, end] of spans) {
-    const first = doc.lineAt(Math.min(start, doc.length)).number;
-    // `end` is exclusive: a span that ends just after a newline does not touch the next line.
-    const last = doc.lineAt(Math.min(Math.max(start, end - 1), doc.length)).number;
-    for (let line = first; line <= last; line++) lines.add(line);
-  }
-  return [...lines].toSorted((a, b) => a - b);
 }
 
 /** Replaces the highlighted spans; null clears them. */
