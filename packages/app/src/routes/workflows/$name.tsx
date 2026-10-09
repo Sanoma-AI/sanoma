@@ -9,7 +9,7 @@ import { configQuery, scenariosFor, scenariosQuery, sourceQuery, workflowNamed }
 
 export const Route = createFileRoute("/workflows/$name")({
   // `?scenario=` names the scenario shown, marked on the graph, and tried by Test.
-  validateSearch: z.object({ scenario: z.string().optional() }),
+  validateSearch: z.object({ scenario: z.string().optional().catch(undefined) }),
   // The page reads the config, the source and the scenarios from the query client; the loader
   // returns only its name: the workflow's title.
   loader: async ({ context: { queryClient }, params }) => {

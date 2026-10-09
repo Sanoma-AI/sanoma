@@ -619,6 +619,10 @@ describe("the page", () => {
     expect(unknown.status).toBe(200);
     expect(unknown.text).toContain("No scenario named “nope”");
     expect(unknown.html).toMatch(/<select[^>]*aria-label="Scenario"/);
+
+    // A search value the router reads as a number is no scenario (or workflow), not a crash.
+    expect((await page("/workflows/announce?scenario=123")).status).toBe(200);
+    expect((await page("/start?workflow=123")).status).toBe(200);
   });
 
   it("renders a sandbox run: its badge, its checks and its seeding, and its badge in the runs", async () => {
