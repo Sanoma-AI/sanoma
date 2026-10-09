@@ -1,0 +1,28 @@
+{
+  "provider": {
+    "source": "stripe/stripe",
+    "version": "0.3.0",
+    "sha256": "2e3ae569e1bee7c64ae7f10e6ceaaf5bfab4db7af38979bab28f9b7a35a260c5",
+    "protocol": 6
+  },
+  "request": {
+    "provider": {
+      "source": "stripe/stripe",
+      "version": "0.3.0",
+      "sha256": "2e3ae569e1bee7c64ae7f10e6ceaaf5bfab4db7af38979bab28f9b7a35a260c5"
+    },
+    "typeName": "stripe_webhook_endpoint",
+    "id": "we_SanomaTest0001"
+  },
+  "response": {
+    "resources": [
+      {
+        "typeName": "stripe_webhook_endpoint",
+        "stateJson": "{\"api_version\":null,\"application\":null,\"connect\":null,\"created\":1760000000,\"description\":\"Sanoma test endpoint\",\"enabled_events\":[\"product.updated\"],\"id\":\"we_SanomaTest0001\",\"livemode\":false,\"metadata\":{},\"object\":\"webhook_endpoint\",\"secret\":null,\"status\":\"enabled\",\"url\":\"https://example.com/sanoma/stripe-webhook\"}",
+        "schemaVersion": "1"
+      }
+    ]
+  },
+  "scrubbed": [],
+  "synthetic": "Written by hand to the schema's implied type, not recorded: no Stripe key was on the recording machine (provider-bridge testdata/README.md). Values are made up; re-record with bridge-record."
+}

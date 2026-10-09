@@ -7,6 +7,7 @@ One workspace package per vendor, each built on `@sanoma/workflows`. A connector
 | Path                            | What it is                                                                               |
 | ------------------------------- | ---------------------------------------------------------------------------------------- |
 | [`bluesky/`](bluesky/AGENTS.md) | `@sanoma/connector-bluesky`: Bluesky (AT Protocol) post operations and an in-memory fake |
-| [`github/`](github/AGENTS.md)   | `@sanoma/connector-github`: GitHub resources read through its OpenTofu provider          |
 | [`ghost/`](ghost/AGENTS.md)     | `@sanoma/connector-ghost`: Ghost Admin API post operations and an in-memory fake         |
+| [`github/`](github/AGENTS.md)   | `@sanoma/connector-github`: GitHub resources read through its OpenTofu provider          |
 | [`resend/`](resend/AGENTS.md)   | `@sanoma/connector-resend`: Resend broadcast operations and an in-memory fake            |
+| [`stripe/`](stripe/AGENTS.md)   | `@sanoma/connector-stripe`: Stripe resources read through its OpenTofu provider          |
