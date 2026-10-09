@@ -90,8 +90,12 @@ function RunPage() {
     ...configQuery(),
     select: (config) => config.workflows.find((wf) => wf.name === run.workflow) ?? { name: run.workflow },
   });
-  // A new reading on every poll, even one that changed nothing: a sleep's end may have come.
-  const reading = useMemo(() => ({ ledger, run, at: dataUpdatedAt }), [ledger, run, dataUpdatedAt]);
+  // The graph reads the clock only for whether the run's last record, a sleep, is over: the
+  // sleep's end once it has come, else any time before it. So a poll that changed nothing keeps
+  // the same reading, and the graph is not built again.
+  const last = ledger.at(-1);
+  const at = last?.type === "sleep.started" && last.until <= dataUpdatedAt ? last.until : 0;
+  const reading = useMemo(() => ({ ledger, run, at }), [ledger, run, at]);
   const titles = useMemo(() => new Map(approvals.map((a) => [a.id, a.title])), [approvals]);
   const reducedMotion = useReducedMotion();
   const select = useCallback(
