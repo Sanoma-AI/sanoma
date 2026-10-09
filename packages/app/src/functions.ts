@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { type ActorInfo, DecideCall, RunsQuery, StartRunRequest } from "./api.ts";
+import { type ActorInfo, DecideCall, RunsQuery, type StartRunRequest, startRunSchema } from "./api.ts";
 import { decide, parse, runDetail, scenarios, startRun, withoutSources, workflowSource } from "./server/core.ts";
 import { withPrincipal } from "./middleware.ts";
 
@@ -56,7 +56,7 @@ export const getRun = createServerFn(READ)
 
 export const startRunFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
-  .validator(validate(StartRunRequest))
+  .validator((data: StartRunRequest) => parse(startRunSchema(data), data, "The request"))
   .handler(({ data, context }) => startRun(context.app, context.principal, data));
 
 export const decideFn = createServerFn(CHANGE)

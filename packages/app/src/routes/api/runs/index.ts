@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { RunsQuery, StartRunRequest } from "../../../api.ts";
+import { RunsQuery, startRunSchema } from "../../../api.ts";
 import { json, parse, readJson, startRun } from "../../../server/core.ts";
 import { withPrincipalRoute } from "../../../middleware.ts";
 
@@ -16,9 +16,10 @@ export const Route = createFileRoute("/api/runs/")({
         POST: {
           middleware: [withPrincipalRoute],
           handler: async ({ request, context }) => {
+            const sent = await readJson(request);
             const body = parse(
-              StartRunRequest,
-              await readJson(request),
+              startRunSchema(sent),
+              sent,
               'Send {"workflow": name, "input": {...}} or {"scenario": name}',
             );
             return json(await startRun(context.app, context.principal, body), 201);

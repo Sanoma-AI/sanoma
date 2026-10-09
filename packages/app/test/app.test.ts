@@ -148,6 +148,9 @@ async function waitFor<T>(get: () => Promise<T>, done: (value: T) => boolean, ti
 
 const detail = async (id: string) => (await call<RunDetail>(`/api/runs/${id}`)).body;
 
+/** `POST /api/runs` with this body, as tester. */
+const postRun = (body: unknown) => call("/api/runs", { method: "POST", actor: "tester", body });
+
 /** A page as the server renders it, and its text without the comments React puts between text parts. */
 async function page(path: string, base = app.url) {
   const res = await fetch(new URL(path, base));
@@ -382,6 +385,28 @@ describe("scenarios and sandbox runs", () => {
     expect(launch.steps).toContainEqual({ text: "the run succeeds", kind: "then" });
     // What the page lists, not how the worker seeds and checks it.
     expect(launch).not.toHaveProperty("expect");
+  });
+
+  it("refuses a request that names both a workflow and a scenario, or neither, at its own field", async () => {
+    const both = await postRun({ workflow: "announce", input: {}, scenario: SCENARIO });
+    expect(both.status).toBe(400);
+    expect(both.body).toMatchObject({ code: "invalid_input", issues: [{ path: [] }] });
+    expect(both.body.error).toContain("Send a workflow or a scenario, not both");
+
+    const neither = await postRun({});
+    expect(neither.status).toBe(400);
+    expect(neither.body.issues).toContainEqual(expect.objectContaining({ path: ["workflow"] }));
+
+    const noWorkflow = await postRun({ workflow: "" });
+    expect(noWorkflow.body.issues).toContainEqual(
+      expect.objectContaining({ path: ["workflow"], message: "Name a workflow" }),
+    );
+
+    const noScenario = await postRun({ scenario: "" });
+    expect(noScenario.status).toBe(400);
+    expect(noScenario.body.issues).toEqual([
+      expect.objectContaining({ path: ["scenario"], message: "Name a scenario" }),
+    ]);
   });
 
   it("refuses a scenario the config does not have, naming those it has", async () => {
