@@ -30,6 +30,7 @@ import { type GraphNode, type GraphNodeKind, isPending } from "../graph/types.ts
 import { useReducedMotion } from "#/lib/motion.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import { configQuery, opsById } from "../queries.ts";
+import { ApprovalIcon } from "./approval.tsx";
 import { ApprovalStatusBadge, effectBadge, StatusDot, ToneBadge, VendorLogo } from "./common.tsx";
 import { ZoomSlider } from "./zoom-slider.tsx";
 
@@ -182,6 +183,7 @@ function ApprovalNode({ data: { node } }: Props<"approval">) {
     <Frame node={node}>
       <Line>
         <Dot tone={node.state?.tone} />
+        <ApprovalIcon className="size-4 shrink-0" />
         <span className="truncate">{node.label}</span>
       </Line>
       {approval && (
