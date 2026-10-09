@@ -1,4 +1,5 @@
 import type { ApprovalState, ErrorCode, RecordedDecision } from "@sanoma/workflows";
+import type { Span } from "@sanoma/workflows/describe";
 import type { Tone } from "../lib/tone.ts";
 
 /*
@@ -28,14 +29,23 @@ export interface ApprovalStepState extends StepState {
 }
 
 /**
+ * Where a step is in the workflow's source: an outline's step has its `span`; a run's step has
+ * the `spans` of the outline's steps it may be (the calls of its operation, say).
+ */
+interface Where {
+  span?: Span;
+  spans?: Span[];
+}
+
+/**
  * What a graph is built from: a workflow's outline as `outlineWorkflow` reads it (an
  * `OutlineNode[]` is a `Step[]`), or a run's ledger made into the same shape, with each step's
  * state. `key` names a run's node, so it keeps its id from one poll to the next.
  */
 export type Step =
-  | { kind: "op"; id: string; key?: string; state?: OpState }
-  | { kind: "approval"; title?: string; key?: string; state?: ApprovalStepState }
-  | { kind: "sleep"; key?: string; label?: string; state?: StepState }
+  | ({ kind: "op"; id: string; key?: string; state?: OpState } & Where)
+  | ({ kind: "approval"; title?: string; key?: string; state?: ApprovalStepState } & Where)
+  | ({ kind: "sleep"; key?: string; label?: string; state?: StepState } & Where)
   /** A `ctx.all` member a running run has recorded nothing for yet. */
   | { kind: "pending"; key: string }
   | { kind: "all"; branches: Step[][] }
@@ -51,13 +61,18 @@ interface Base {
   parent?: string;
 }
 
+/** Where a step's node is in the workflow's source, when the outline says. */
+interface InSource {
+  spans?: Span[];
+}
+
 export type GraphNode =
   | (Base & { kind: "start"; state?: StepState })
   /** `pending` until the run has ended; an outline's end is plain. */
   | (Base & { kind: "end"; state?: StepState; pending?: true })
-  | (Base & { kind: "op"; state?: OpState })
-  | (Base & { kind: "approval"; state?: ApprovalStepState })
-  | (Base & { kind: "sleep"; state?: StepState })
+  | (Base & InSource & { kind: "op"; state?: OpState })
+  | (Base & InSource & { kind: "approval"; state?: ApprovalStepState })
+  | (Base & InSource & { kind: "sleep"; state?: StepState })
   | (Base & { kind: "pending" })
   /** A box around a loop's body or a computed `ctx.all`'s member, which `label` names. */
   | (Base & { kind: "cluster" })

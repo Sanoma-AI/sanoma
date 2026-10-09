@@ -1,4 +1,7 @@
+import { readFileSync } from "node:fs";
+import { outlineWorkflow } from "@sanoma/workflows/describe";
 import { describe, expect, it } from "vitest";
+import announce from "../../workflows/test/fixtures/announce.ts";
 import { outlineGraph } from "../src/graph/outline-graph.ts";
 import type { Step } from "../src/graph/types.ts";
 import { labels, pairs } from "./graph-helpers.ts";
@@ -156,5 +159,28 @@ describe("outlineGraph", () => {
       "end end",
     ]);
     expect(pairs(edges)).toEqual(["start->cluster:0", "op:1->op:2", "op:1->op:3", "cluster:0->end"]);
+  });
+
+  it("gives each call's node its place in the workflow's file, as outlineWorkflow reads it", () => {
+    const outline = outlineWorkflow(announce);
+    if (!("file" in outline)) throw new Error(`announce was not outlined from its file: ${JSON.stringify(outline)}`);
+    const text = readFileSync(outline.file, "utf8");
+    const { nodes } = outlineGraph(outline.nodes);
+    // Each node's text, up to its call's arguments.
+    const calls = nodes.map((n) => {
+      const spans = "spans" in n ? n.spans : undefined;
+      return `${n.id} ${spans?.map(([start, end]) => text.slice(start, end).split("(")[0]).join() ?? "-"}`;
+    });
+    expect(calls).toEqual([
+      "start -",
+      "op:0 ctx.ghost.post.create",
+      "op:1 ctx.resend.broadcast.create",
+      "approval:2 ctx.approval",
+      "sleep:3 ctx.sleep",
+      "op:4 ctx.ghost.post.publish",
+      "op:5 ctx.resend.broadcast.send",
+      "op:6 ctx.bluesky.post.create",
+      "end -",
+    ]);
   });
 });
