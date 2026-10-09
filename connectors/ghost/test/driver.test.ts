@@ -11,11 +11,11 @@ import type { ghost } from "../src/index.ts";
 
 /*
  * Replays Ghost's recorded replies (test/fixtures/<name>.json) with msw. To run the same
- * tests against a real site, set GHOST_ADMIN_URL, GHOST_ADMIN_API_KEY and SANOMA_LIVE=1 (ignored in CI);
+ * tests against a real site, set GHOST_ADMIN_URL, GHOST_ADMIN_API_KEY and SANOMA_LIVE=1;
  * add SANOMA_RECORD=1 to rewrite the fixtures from its replies, scrubbed. The tests that
  * need Ghost to misbehave (429, 503, a timeout, a collision) only replay.
  */
-const LIVE = process.env.SANOMA_LIVE === "1" && !process.env.CI;
+const LIVE = process.env.SANOMA_LIVE === "1";
 const RECORD = LIVE && process.env.SANOMA_RECORD === "1";
 const FIXTURES = new URL("./fixtures/", import.meta.url);
 const SITE = "https://blog.example.test";

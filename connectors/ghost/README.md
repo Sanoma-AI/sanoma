@@ -65,7 +65,7 @@ You need a Ghost site of your own. Self-hosted Ghost is free and open source (`d
 
 ### Testing the driver
 
-`test/driver.test.ts` replays Ghost's recorded replies (`test/fixtures`) with [msw](https://mswjs.io): `pnpm vitest run connectors/ghost` needs no site. With `SANOMA_LIVE=1` the same tests call a real site instead, creating posts titled `sanoma test <timestamp>`, publishing some, and deleting them at the end; a missing variable fails the run, and `CI` being set turns it off:
+`test/driver.test.ts` replays Ghost's recorded replies (`test/fixtures`) with [msw](https://mswjs.io): `pnpm vitest run connectors/ghost` needs no site. With `SANOMA_LIVE=1` the same tests call a real site instead, creating posts titled `sanoma test <timestamp>`, publishing some, and deleting them at the end; a missing variable fails the run. `SANOMA_LIVE=1` is the only switch, in CI as anywhere:
 
 ```sh
 SANOMA_LIVE=1 GHOST_ADMIN_URL=https://example.ghost.io GHOST_ADMIN_API_KEY=<id>:<secret> pnpm vitest run connectors/ghost

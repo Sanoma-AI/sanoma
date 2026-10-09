@@ -5,10 +5,10 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { resendDriver } from "../src/driver.ts";
 
-// Replays the responses in fixtures/. With SANOMA_LIVE=1 (ignored in CI), RESEND_API_KEY and
+// Replays the responses in fixtures/. With SANOMA_LIVE=1, RESEND_API_KEY and
 // RESEND_TEST_AUDIENCE, the same tests call Resend, creating and sending broadcasts to that segment;
 // SANOMA_RECORD=1 then rewrites the fixtures from Resend's replies, scrubbed.
-const live = process.env.SANOMA_LIVE === "1" && !process.env.CI;
+const live = process.env.SANOMA_LIVE === "1";
 const record = live && process.env.SANOMA_RECORD === "1";
 
 const API = "https://api.resend.com";

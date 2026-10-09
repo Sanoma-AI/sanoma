@@ -65,7 +65,7 @@ Broadcasts are on the free Marketing plan (1,000 contacts, 3 segments, 3 domains
 
 ### Testing the driver
 
-`test/driver.test.ts` replays Resend's recorded replies (`test/fixtures`) with [msw](https://mswjs.io): `pnpm vitest run connectors/resend` needs no account. With `SANOMA_LIVE=1` the same tests call Resend instead, creating broadcasts and sending one to a test segment; a missing variable fails the run, and `CI` being set turns it off:
+`test/driver.test.ts` replays Resend's recorded replies (`test/fixtures`) with [msw](https://mswjs.io): `pnpm vitest run connectors/resend` needs no account. With `SANOMA_LIVE=1` the same tests call Resend instead, creating broadcasts and sending one to a test segment; a missing variable fails the run. `SANOMA_LIVE=1` is the only switch, in CI as anywhere:
 
 ```sh
 SANOMA_LIVE=1 RESEND_API_KEY=re_... RESEND_TEST_AUDIENCE=<segment id> RESEND_TEST_FROM="Test <test@your-domain>" pnpm vitest run connectors/resend

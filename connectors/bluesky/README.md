@@ -63,7 +63,7 @@ Any account can post with an app password: there is no approval or paid tier.
 
 ### Testing the driver
 
-`test/driver.test.ts` replays recorded XRPC replies (`test/fixtures`) with [msw](https://mswjs.io): `pnpm vitest run connectors/bluesky` needs no account. With `SANOMA_LIVE=1` the same tests post a few test posts to the account instead; a missing variable fails the run, and `CI` being set turns it off:
+`test/driver.test.ts` replays recorded XRPC replies (`test/fixtures`) with [msw](https://mswjs.io): `pnpm vitest run connectors/bluesky` needs no account. With `SANOMA_LIVE=1` the same tests post a few test posts to the account instead; a missing variable fails the run. `SANOMA_LIVE=1` is the only switch, in CI as anywhere:
 
 ```sh
 SANOMA_LIVE=1 BLUESKY_IDENTIFIER=you.bsky.social BLUESKY_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx pnpm vitest run connectors/bluesky

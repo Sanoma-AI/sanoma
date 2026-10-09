@@ -6,11 +6,11 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { blueskyDriver, type BlueskyDriverOptions } from "../src/driver.ts";
 
 /*
- * Replays the XRPC replies in fixtures/ by default. With SANOMA_LIVE=1 (ignored in CI), BLUESKY_IDENTIFIER
+ * Replays the XRPC replies in fixtures/ by default. With SANOMA_LIVE=1, BLUESKY_IDENTIFIER
  * and BLUESKY_APP_PASSWORD set, the tests that Bluesky can reproduce post to that account instead,
  * and SANOMA_RECORD=1 rewrites their fixtures from the replies, scrubbed of the account.
  */
-const live = process.env.SANOMA_LIVE === "1" && !process.env.CI;
+const live = process.env.SANOMA_LIVE === "1";
 const recording = live && process.env.SANOMA_RECORD === "1";
 const fixtures = new URL("./fixtures/", import.meta.url);
 
