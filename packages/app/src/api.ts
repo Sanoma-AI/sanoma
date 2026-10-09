@@ -35,16 +35,32 @@ export interface ActorInfo {
   error?: string;
 }
 
+const StartWorkflowRequest = z.object({ workflow: z.string().min(1, "Name a workflow"), input: z.unknown() });
+
+const StartScenarioRequest = z.strictObject(
+  { scenario: z.string().min(1, "Name a scenario") },
+  {
+    error: (issue) =>
+      issue.code === "unrecognized_keys" && issue.keys.some((key) => key === "workflow" || key === "input")
+        ? "Send a workflow or a scenario, not both"
+        : undefined,
+  },
+);
+
 /**
  * `POST /api/runs`: a workflow and its input, or a scenario's name, which starts a sandbox run
  * of the scenario's workflow with its input. The app never decides a sandbox run's approvals:
  * people do, as in a live run.
  */
-export const StartRunRequest = z.union([
-  z.object({ workflow: z.string().min(1, "Name a workflow"), input: z.unknown() }),
-  z.object({ scenario: z.string().min(1, "Name a scenario") }),
-]);
-export type StartRunRequest = z.infer<typeof StartRunRequest>;
+export type StartRunRequest = z.infer<typeof StartWorkflowRequest> | z.infer<typeof StartScenarioRequest>;
+
+/**
+ * The schema a start request is read with, picked before parsing so each refusal names its own
+ * field: the scenario's for a body with a `scenario` key (which refuses a `workflow` or `input`
+ * beside it), else the workflow's.
+ */
+export const startRunSchema = (body: unknown) =>
+  typeof body === "object" && body !== null && "scenario" in body ? StartScenarioRequest : StartWorkflowRequest;
 
 export interface StartRunResponse {
   runId: string;
