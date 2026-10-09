@@ -13,7 +13,7 @@ The app's React components: page chrome, shared display pieces, and the graph an
 | [`code.tsx`](code.tsx)               | Read-only CodeMirror view of a workflow's source with line highlights; browser only                                       |
 | [`common.tsx`](common.tsx)           | Shared pieces: badges (the sandbox badge too), tones, page headers, facts, op items, JSON views, lazy graph & code panels |
 | [`graph.tsx`](graph.tsx)             | React Flow drawing of a laid-out graph; loaded lazily                                                                     |
-| [`scenario.tsx`](scenario.tsx)       | The scenario picker, the Test button, a scenario's card, and a sandbox run's checks                                       |
+| [`scenario.tsx`](scenario.tsx)       | The scenario picker, the Test button and a scenario's card                                                                |
 | [`nav-user.tsx`](nav-user.tsx)       | Sidebar footer menu for who you are and the theme                                                                         |
 | [`who-are-you.tsx`](who-are-you.tsx) | Dialog asking for a name under the default actor resolver                                                                 |
 | [`workflow.tsx`](workflow.tsx)       | A workflow's sections and its graph beside its source                                                                     |

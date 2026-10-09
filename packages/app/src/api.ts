@@ -117,12 +117,22 @@ export interface RunDetail {
    * For a sandbox run, each of its scenario's expectations checked against the ledger. Absent
    * until the run has been seeded, and when `checksError` says why there are none.
    */
-  checks?: Check[];
+  checks?: RunCheck[];
   /**
    * Why a seeded sandbox run has no checks: its scenario is no longer in the feature files (with
    * those that did not load), or the scenarios could not be read at all.
    */
   checksError?: string;
+}
+
+/** One of a sandbox run's checks, and whether its answer is final. */
+export interface RunCheck extends Check {
+  /**
+   * True once the answer cannot change: the run has ended, or the check expects a call that
+   * has been made. Until then a check not met is not failed yet, and one met (a call not made
+   * so far) may still fail.
+   */
+  settled: boolean;
 }
 
 /** A scenario as the page lists it: what it says, not how the worker seeds and checks it. */
