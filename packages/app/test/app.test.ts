@@ -181,13 +181,13 @@ describe("the API", () => {
     // Each workflow's outline, read from its file when the app started; the file itself is not sent.
     expect(wf?.outline).toEqual(outlineWorkflow(announce));
     expect(wf?.outline).toMatchObject({ file: expect.stringMatching(/announce\.ts$/) });
-    expect(JSON.stringify(body.workflows)).not.toContain('"source"');
+    expect(JSON.stringify(body)).not.toContain('"source"');
     expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.effect).toBe("send");
     expect(body.vendors.resend).toMatchObject({
       title: "Resend",
       logo: { src: expect.stringMatching(/^data:/) },
       package: "@sanoma/connector-resend",
-      source: expect.stringMatching(/^https:\/\/github\.com\/Sanoma-AI\/sanoma\//),
+      homepage: expect.stringMatching(/^https:\/\/github\.com\/Sanoma-AI\/sanoma\//),
     });
   });
 
@@ -518,7 +518,7 @@ describe("the page", () => {
     expect(connectors.text).toContain("<title>Connectors · Sanoma</title>");
     expect(connectors.html).toContain("Resend");
     expect(connectors.html).toContain('href="https://www.npmjs.com/package/@sanoma/connector-resend"');
-    expect(connectors.html).toContain(`href="${vendors.resend!.source}"`);
+    expect(connectors.html).toContain(`href="${vendors.resend!.homepage}"`);
     expect(connectors.html).toContain("<code>resend.broadcast.send</code>");
     expect(connectors.html).toContain('href="/workflows/announce"');
     // Every page's sidebar links to it.

@@ -45,7 +45,7 @@ function ConnectorCard({ connector: { id, vendor, ops, workflows } }: { connecto
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {(vendor.package || vendor.source) && (
+        {(vendor.package || vendor.homepage) && (
           // The links' icons line up with the card's text: a link button pads its icon side by 1.5.
           <div className="-ml-1.5 flex flex-wrap">
             {vendor.package && (
@@ -53,8 +53,8 @@ function ConnectorCard({ connector: { id, vendor, ops, workflows } }: { connecto
                 {vendor.package}
               </ExternalLink>
             )}
-            {vendor.source && (
-              <ExternalLink href={vendor.source} icon={CodeIcon}>
+            {vendor.homepage && (
+              <ExternalLink href={vendor.homepage} icon={CodeIcon}>
                 Source
               </ExternalLink>
             )}

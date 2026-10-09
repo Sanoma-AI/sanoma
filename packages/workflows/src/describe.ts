@@ -52,8 +52,8 @@ export interface VendorEntry {
   logo?: { src: string; dark?: string };
   /** The connector's npm package name. */
   package?: string;
-  /** Where the connector's code is: an https URL. */
-  source?: string;
+  /** The connector package's `homepage` from its package.json: where its code and README are, as an https URL. */
+  homepage?: string;
 }
 
 /**
@@ -125,7 +125,7 @@ const vendorEntry = (id: string, info: VendorInfo | undefined): VendorEntry => (
     logo: { src: svgDataUrl(info.logo.svg), ...(info.logo.dark && { dark: svgDataUrl(info.logo.dark) }) },
   }),
   ...(info?.package !== undefined && { package: info.package }),
-  ...(info?.source !== undefined && { source: info.source }),
+  ...(info?.homepage !== undefined && { homepage: info.homepage }),
 });
 
 function toJsonSchema(schema: z.ZodType, what: string, io: "input" | "output"): Record<string, unknown> {

@@ -105,7 +105,7 @@ describe("describeConfig", () => {
     expect(add?.output).toMatchObject({ required: ["total", "unit"] });
   });
 
-  it("describes each vendor once, its logo as data: URLs, its package and source; a connector that names no vendor gets its id as title", () => {
+  it("describes each vendor once, its logo as data: URLs, its package and homepage; a connector that names no vendor gets its id as title", () => {
     const counter = defineConnector("counter", {
       tally: { add: { effect: "write", input: z.object({}), output: z.object({}) } },
     });
@@ -116,7 +116,7 @@ describe("describeConfig", () => {
     expect(vendors.resend).toMatchObject({
       title: "Resend",
       package: "@sanoma/connector-resend",
-      source: "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/resend",
+      homepage: "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/resend#readme",
       logo: {
         src: expect.stringMatching(/^data:image\/svg\+xml,/),
         dark: expect.stringMatching(/^data:image\/svg\+xml,/),
@@ -132,21 +132,18 @@ describe("describeConfig", () => {
     { vendor: "resend", connector: resend, pkg: resendPkg },
     { vendor: "ghost", connector: ghost, pkg: ghostPkg },
     { vendor: "bluesky", connector: bluesky, pkg: blueskyPkg },
-  ])("names the $vendor connector's package and source as its package.json does", ({ connector, pkg }) => {
-    expect(connector[VENDOR].info).toMatchObject({
-      package: pkg.name,
-      source: pkg.homepage.replace(/#readme$/, ""),
-    });
+  ])("names the $vendor connector's package and homepage as its package.json does", ({ connector, pkg }) => {
+    expect(connector[VENDOR].info).toMatchObject({ package: pkg.name, homepage: pkg.homepage });
   });
 
-  it("refuses a source that is not an https URL", () => {
+  it("refuses a homepage that is not an https URL", () => {
     const specs = { tally: { add: { effect: "write", input: z.object({}), output: z.object({}) } } } as const;
-    for (const source of ["http://example.com/code", "javascript:alert(1)", "github.com/x"]) {
-      expect(() => defineConnector("counter", specs, { source })).toThrow(
-        'defineConnector("counter"): source must be an https URL',
+    for (const homepage of ["http://example.com/code", "javascript:alert(1)", "github.com/x", "https://", 42, null]) {
+      expect(() => defineConnector("counter", specs, { homepage: homepage as string })).toThrow(
+        'defineConnector("counter"): homepage must be an https URL',
       );
     }
-    expect(() => defineConnector("counter", specs, { source: "https://example.com/code" })).not.toThrow();
+    expect(() => defineConnector("counter", specs, { homepage: "https://example.com/code" })).not.toThrow();
   });
 
   it("refuses a logo that is not one inline <svg> element", () => {
