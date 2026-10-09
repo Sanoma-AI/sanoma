@@ -43,7 +43,6 @@ export interface OpEntry {
 export interface VendorEntry {
   /** The connector's `title`, else the vendor's id. */
   title: string;
-  url?: string;
   /** The logo as `data:image/svg+xml` URLs, for an `<img>`: `dark` is for dark backgrounds. */
   logo?: { src: string; dark?: string };
 }
@@ -82,7 +81,6 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     if (vendors[vendor] && !info) continue;
     vendors[vendor] = {
       title: info?.title ?? vendor,
-      ...(info?.url && { url: info.url }),
       ...(info?.logo && {
         logo: { src: svgDataUrl(info.logo.svg), ...(info.logo.dark && { dark: svgDataUrl(info.logo.dark) }) },
       }),

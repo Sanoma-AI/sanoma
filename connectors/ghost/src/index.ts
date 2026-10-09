@@ -38,5 +38,5 @@ export const ghost = defineConnector(
       },
     },
   },
-  { title: "Ghost", url: "https://ghost.org", logo: { svg: glyph("#15171A"), dark: glyph("white") } },
+  { title: "Ghost", logo: { svg: glyph("#15171A"), dark: glyph("white") } },
 );

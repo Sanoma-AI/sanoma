@@ -22,5 +22,5 @@ export const bluesky = defineConnector(
       },
     },
   },
-  { title: "Bluesky", url: "https://bsky.app", logo: { svg: butterfly("#006AFF"), dark: butterfly("white") } },
+  { title: "Bluesky", logo: { svg: butterfly("#006AFF"), dark: butterfly("white") } },
 );

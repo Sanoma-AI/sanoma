@@ -34,7 +34,6 @@ export const resend = defineConnector(
   },
   {
     title: "Resend",
-    url: "https://resend.com",
     logo: { svg: lettermark("black"), dark: lettermark("#FDFDFD") },
   },
 );

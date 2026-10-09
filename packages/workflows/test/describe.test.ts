@@ -109,7 +109,6 @@ describe("describeConfig", () => {
     expect(vendors.counter).toEqual({ title: "counter" });
     expect(vendors.resend).toMatchObject({
       title: "Resend",
-      url: "https://resend.com",
       logo: {
         src: expect.stringMatching(/^data:image\/svg\+xml,/),
         dark: expect.stringMatching(/^data:image\/svg\+xml,/),

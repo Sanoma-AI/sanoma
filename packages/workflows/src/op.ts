@@ -59,8 +59,6 @@ export type Connector<V extends string, S extends Specs> = {
 export interface VendorInfo {
   /** The vendor's name as it writes it, such as "Resend". */
   title?: string;
-  /** The vendor's home page. */
-  url?: string;
   logo?: { svg: string; dark?: string };
 }
 
@@ -69,7 +67,7 @@ const SVG_ELEMENT = /^\s*<svg[\s>][\s\S]*<\/svg>\s*$/;
 
 /**
  * Declares a vendor's operations, grouped by resource: `defineConnector("ghost", { post: { create: {...} } })`.
- * `info` says who the vendor is, for a UI: `{ title: "Resend", url: "https://resend.com", logo: { svg } }`.
+ * `info` says who the vendor is, for a UI: `{ title: "Resend", logo: { svg } }`.
  */
 export function defineConnector<const V extends string, const S extends Specs>(
   vendor: V,
