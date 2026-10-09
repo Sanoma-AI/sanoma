@@ -1,0 +1,7 @@
+{
+  "status": 400,
+  "body": {
+    "error": "InvalidRequest",
+    "message": "Invalid app.bsky.feed.post record: Record/text must not be longer than 300 graphemes"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "status": 200,
+  "body": {
+    "did": "did:plc:example",
+    "didDoc": {
+      "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/multikey/v1"],
+      "id": "did:plc:example",
+      "alsoKnownAs": ["at://alice.example.test"],
+      "verificationMethod": [
+        {
+          "id": "did:plc:example#atproto",
+          "type": "Multikey",
+          "controller": "did:plc:example",
+          "publicKeyMultibase": "zExamplePublicKey"
+        }
+      ],
+      "service": [
+        {
+          "id": "#atproto_pds",
+          "type": "AtprotoPersonalDataServer",
+          "serviceEndpoint": "https://pds.example.test"
+        }
+      ]
+    },
+    "handle": "alice.example.test",
+    "email": "alice@example.test",
+    "emailConfirmed": true,
+    "emailAuthFactor": false,
+    "accessJwt": "example.access.jwt",
+    "refreshJwt": "example.refresh.jwt",
+    "active": true
+  }
+}
