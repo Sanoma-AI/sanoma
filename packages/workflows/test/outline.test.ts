@@ -1,18 +1,8 @@
 import { spawnSync } from "node:child_process";
-import {
-  existsSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
-import { createRequire } from "node:module";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -20,6 +10,7 @@ import { type OutlineNode, outlineWorkflow } from "../src/describe.ts";
 import { defineConnector, defineWorkflow, type WorkflowDefinition } from "../src/index.ts";
 import { outlineWithSource } from "../src/outline.ts";
 import announce from "./fixtures/announce.ts";
+import { ensureBuilt, pkg } from "./build.ts";
 import fanout from "./fixtures/fanout.ts";
 
 const forum = defineConnector("forum", {
@@ -314,25 +305,12 @@ describe("outlineWorkflow, spans", () => {
   });
 });
 
-// The built package reads `run` as JavaScript. Builds dist/ when it is missing or older than src/.
+// The built package reads `run` as JavaScript. Builds dist/ when it is missing or older than src/ (`ensureBuilt`).
+const dist = (file: string) => pathToFileURL(join(pkg, "dist", file)).href;
+
 describe("outlineWorkflow, built", () => {
-  const pkg = fileURLToPath(new URL("..", import.meta.url));
-  const dist = (file: string) => pathToFileURL(join(pkg, "dist", file)).href;
-
-  function needsBuild(): boolean {
-    const built = join(pkg, "dist", "describe.js");
-    if (!existsSync(built)) return true;
-    const builtAt = statSync(built).mtimeMs;
-    return readdirSync(join(pkg, "src")).some((file) => statSync(join(pkg, "src", file)).mtimeMs > builtAt);
-  }
-
   it("outlines a workflow from its JavaScript source, in plain Node", () => {
-    if (needsBuild()) {
-      // The package's build is this one tsc run.
-      const tsc = join(dirname(createRequire(import.meta.url).resolve("typescript/package.json")), "bin", "tsc");
-      const build = spawnSync(process.execPath, [tsc, "-p", "tsconfig.build.json"], { cwd: pkg, encoding: "utf8" });
-      if (build.status !== 0) throw new Error(`build failed: ${build.stderr}${build.stdout}`);
-    }
+    ensureBuilt();
     const dir = mkdtempSync(join(tmpdir(), "sanoma-outline-"));
     try {
       const script = join(dir, "outline.mjs");

@@ -29,7 +29,7 @@ Status: early. Business processes are written as TypeScript workflows that run o
 | [`vitest.config.ts`](vitest.config.ts)                      | Test config with aliases to the package sources                                   |
 | [`docker-compose.yml`](docker-compose.yml)                  | Postgres for DBOS on port 5433                                                    |
 | [`lefthook.yml`](lefthook.yml)                              | Pre-commit format and lint on staged files                                        |
-| [`.oxlintrc.json`](.oxlintrc.json)                          | Lint config                                                                       |
+| [`.oxlintrc.json`](.oxlintrc.json)                          | Lint config, with the data-file rule on `**/resources/**`                         |
 | [`.oxfmtrc.json`](.oxfmtrc.json)                            | Format config                                                                     |
 | [`pnpm-workspace.yaml`](pnpm-workspace.yaml)                | Workspace globs: `packages/*` and `connectors/*`                                  |
 | [`.pnpmfile.cjs`](.pnpmfile.cjs)                            | pnpm hook: a packed package's readme is its AGENTS.md without the Contents table  |

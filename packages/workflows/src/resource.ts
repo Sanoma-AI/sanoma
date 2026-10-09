@@ -51,6 +51,12 @@ export interface Declared<T = State> {
   readonly desired: T;
 }
 
+/**
+ * What a data file may give a resource type: its fields, where a string field may name another
+ * declared resource instead (`repository_id: site`), which stands for that resource's `name`.
+ */
+export type Declarable<T> = { [K in keyof T]: string extends T[K] ? T[K] | Declared : T[K] };
+
 const importId = z.string().min(1);
 /** What a driver keeps beside a state (an OpenTofu provider's private data and state version), passed back unchanged. */
 const handle = z.string().optional().describe("The driver's data for the object, opaque: pass it back unchanged");
@@ -78,13 +84,24 @@ export type ResourceOps<S extends z.ZodObject> = {
  * `defineConnector` as a group, under its `type`: `defineConnector("github", { repository })`.
  */
 export interface Resource<S extends z.ZodObject = z.ZodObject> extends Readonly<Required<ResourceSpec<S>>> {
-  (desired: z.input<S>): Declared<z.input<S>>;
+  (desired: Declarable<z.input<S>>): Declared<Declarable<z.input<S>>>;
   /** `read` and `import`, each effect `read`, idempotent, with the import id as `target`. */
   readonly ops: ResourceOps<S>;
   readonly [RESOURCE]: true;
 }
 
 const isObject = (v: unknown): v is State => typeof v === "object" && v !== null && !Array.isArray(v);
+
+const isDeclared = (v: unknown): v is Declared =>
+  isObject(v) && v.kind === "resource" && typeof v.name === "string" && typeof v.type === "string";
+
+/** `value` with each declared resource in it replaced by its `name`, the import id it stands for. */
+function withNames(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withNames);
+  if (isDeclared(value)) return value.name;
+  if (!isObject(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([field, v]) => [field, withNames(v)]));
+}
 
 /** One order for a list compared as a multiset: by each item's JSON. */
 const canonical = (items: unknown[]) =>
@@ -166,7 +183,9 @@ function pathsIn(value: unknown, paths: ReadonlySet<string>, prefix = ""): strin
  * Calling the result declares one resource, for a data file:
  * `repository({ name: "sanoma" })` is `{ kind: "resource", vendor, type, name: "sanoma", desired }`.
  * It refuses fields the schema does not have, fields the vendor owns (unless the identity names
- * them), values the schema rejects, and an empty identity.
+ * them), values the schema rejects, and an empty identity. A field may name another declared
+ * resource (`repository_id: site`): it is checked, and `find` reads it, as that resource's
+ * `name`, and `desired` keeps the resource itself.
  */
 export function defineResource<S extends z.ZodObject>(spec: ResourceSpec<S>): Resource<S> {
   const { vendor, type, schema, fields, find } = spec;
@@ -191,7 +210,8 @@ export function defineResource<S extends z.ZodObject>(spec: ResourceSpec<S>): Re
 
   const named = new Set(spec.identity.match(/[A-Za-z_][\w.]*/g));
   const owned = new Set(fields.vendorOwned.filter((path) => !named.has(path)));
-  const declare = (desired: z.input<S>): Declared<z.input<S>> => {
+  const declare = (given: Declarable<z.input<S>>): Declared<Declarable<z.input<S>>> => {
+    const desired = withNames(given) as z.input<S>;
     const unknown = Object.keys(desired ?? {}).filter((name) => !Object.hasOwn(schema.shape, name));
     if (unknown.length) throw new Error(`${what}: no field ${unknown.join(", ")}`);
     const vendors = pathsIn(desired, owned);
@@ -204,7 +224,7 @@ export function defineResource<S extends z.ZodObject>(spec: ResourceSpec<S>): Re
     if (!parsed.success) throw new Error(`${what}: ${z.prettifyError(parsed.error)}`);
     const name = find(desired);
     if (typeof name !== "string" || name === "") throw new Error(`${what}: its ${spec.identity} is missing`);
-    return Object.freeze({ kind: "resource", vendor, type, name, desired });
+    return Object.freeze({ kind: "resource", vendor, type, name, desired: given });
   };
   const resource = Object.assign(declare, {
     vendor,

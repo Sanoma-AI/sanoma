@@ -5,10 +5,13 @@ import { type Effect, isOp, VENDOR, type VendorInfo } from "./op.ts";
 import { type Outline, outlineWithSource } from "./outline.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
 import type { Resource, ResourceFields } from "./resource.ts";
+import { type DeclaredResource, readResourceDirs } from "./resources.ts";
 
 // `@sanoma/workflows/describe`: what a UI renders from. Apart from the main entry, so the
 // worker never loads oxc-parser, which the outline reads `run` with.
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
+// The reader parses data files with oxc-parser too.
+export { readResources, type DeclaredResource, type ResourceRef } from "./resources.ts";
 
 /** What a workflow is, read from its definition: enough to draw a start form and show what it may call. */
 export interface WorkflowEntry {
@@ -77,6 +80,9 @@ export interface ResourceTypeEntry {
   ops: string[];
 }
 
+/** A resource a data file declares, read without running the file (`readResources`). */
+export type ResourceEntry = DeclaredResource;
+
 /**
  * A plain-JSON description of what a config can do: its workflows, the operations they call,
  * and whether a policy gates them. The app server builds it from the config and sends it to the
@@ -92,11 +98,16 @@ export interface ConfigDescription {
   vendors: Record<string, VendorEntry>;
   /** The resource types the connectors declare, by `id`. */
   resourceTypes: ResourceTypeEntry[];
+  /** The resources the data files under `resources` declare, by file and then in file order. */
+  resources: ResourceEntry[];
   /** `defined` is false for `allowAll`. */
   policy: { defined: boolean; version?: string };
 }
 
-/** Describes a config. Throws what `startWorker` would refuse (see `resolveConfig`); there is no partial description. */
+/**
+ * Describes a config. Throws what `startWorker` would refuse (see `resolveConfig`), and the
+ * problems `readResources` finds in the data files; there is no partial description.
+ */
 export function describeConfig(config: SanomaConfig): ConfigDescription {
   const resolved = resolveConfig(config);
   const vendors: Record<string, VendorEntry> = {};
@@ -154,6 +165,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     ops,
     vendors,
     resourceTypes,
+    resources: readResourceDirs(resolved.resources, config.connectors),
     policy: {
       defined: resolved.policy !== allowAll,
       ...(resolved.policy.version === undefined ? {} : { version: resolved.policy.version }),

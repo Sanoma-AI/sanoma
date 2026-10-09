@@ -25,3 +25,14 @@ const CODE_KEYS = new Map(
 
 /** A node's children in source order, by oxc-parser's `visitorKeys`, without its types. A hole in a list is `null`. */
 export const childrenOf = (node: Node): Node[] => (CODE_KEYS.get(node.type) ?? []).flatMap((key) => node[key] ?? []);
+
+/** Where an offset into `source` is, as a line and a column, both from 1. */
+export function locator(source: string): (offset: number) => { line: number; column: number } {
+  const lineStarts = [0];
+  for (let i = 0; i < source.length; i++) if (source[i] === "\n") lineStarts.push(i + 1);
+  return (offset) => {
+    let line = 0;
+    while (line + 1 < lineStarts.length && lineStarts[line + 1]! <= offset) line++;
+    return { line: line + 1, column: offset - lineStarts[line]! + 1 };
+  };
+}

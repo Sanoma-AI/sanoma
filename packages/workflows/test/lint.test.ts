@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { lintWorkflow } from "../src/lint.ts";
+import { lintResources, lintWorkflow } from "../src/lint.ts";
+import { ensureBuilt } from "./build.ts";
 
 const messages = (src: string, filename?: string) => lintWorkflow(src, filename).map((p) => p.message);
 
@@ -157,6 +158,126 @@ describe("lintWorkflow", () => {
   });
 });
 
+const fixture = (path: string) => fileURLToPath(new URL(`./fixtures/${path}`, import.meta.url));
+const GOOD = ["resources/identity/github.ts", "resources/identity/rules.ts", "resources/billing/stripe.ts"];
+
+/** The lines, columns and messages lintResources gives a data file. */
+const dataFile = (src: string, filename = "/repo/resources/area/file.ts") =>
+  lintResources(src, filename).map((p) => `${p.line}:${p.column} ${p.message}`);
+
+describe("lintResources", () => {
+  it.each(GOOD)("passes %s", (path) => {
+    expect(lintResources(readFileSync(fixture(path), "utf8"), fixture(path))).toEqual([]);
+  });
+
+  it.each([
+    ["assertion.ts", "3:65", /^a type assertion is not allowed in a data file: leave it out/],
+    ["call.ts", "3:46", /^a call is not allowed in a data file: write the value out/],
+    ["computed.ts", "3:41", /^a computed key is not allowed in a data file: write the field's name/],
+    ["default.ts", "5:16", /^export default must list this file's resources: `export default \[a, b\]`/],
+    ["function.ts", "3:1", /^a function declaration is not allowed in a data file: a data file holds only imports/],
+    ["let.ts", "3:1", /^`export let` is not allowed in a data file: use `export const`/],
+    ["member.ts", "4:66", /^member access is not allowed in a data file: .*name the resource itself/],
+    ["new.ts", "3:61", /^`new` is not allowed in a data file: write the value out/],
+    [
+      "not-constructor.ts",
+      "3:20",
+      /^export const web must be a resource constructor call, `<vendor>\.<type>\(\{ … \}\)`/,
+    ],
+    [
+      "outside.ts",
+      "2:25",
+      /^import "\.\.\/resources\/identity\/github\.ts" is not allowed .*reaches outside bad-resources\//,
+    ],
+    ["process.ts", "3:66", /^process is not allowed in a data file: .*cannot read the environment/],
+    ["spread.ts", "4:53", /^a spread is not allowed in a data file: write the fields out/],
+    ["template.ts", "3:46", /^a template with `\$\{…\}` is not allowed in a data file: write the string out/],
+    ["undefined.ts", "3:66", /^undefined is not allowed in a data file: leave the field out, or write null/],
+    ["unexported.ts", "3:1", /^`const name` is not allowed in a data file: export it as a resource/],
+  ])("refuses bad-resources/%s at %s, saying what to write instead", (file, at, message) => {
+    const path = fixture(`bad-resources/${file}`);
+    const problems = lintResources(readFileSync(path, "utf8"), path);
+    expect(problems.map((p) => `${p.line}:${p.column}`)).toEqual([at]);
+    expect(problems[0]?.message).toMatch(message);
+  });
+
+  it("refuses an import of anything but constructors and data files", () => {
+    expect(readFileSync(fixture("bad-resources/import.ts"), "utf8")).toContain('from "zod"');
+    expect(dataFile(readFileSync(fixture("bad-resources/import.ts"), "utf8"))).toEqual([
+      expect.stringMatching(
+        /^1:19 import "zod" is not allowed in a data file: import resource constructors from a connector's resources entry/,
+      ),
+      "4:66 a call is not allowed in a data file: write the value out; the reader never runs code",
+    ]);
+    expect(
+      dataFile(`import * as gh from "@sanoma/connector-github/resources";
+import site from "./site.ts";
+import "./setup.ts";
+import type { Declared } from "@sanoma/workflows";
+import { docs } from "./docs";
+import { team } from "../../people/team.ts";
+`),
+    ).toEqual([
+      '1:8 import * as gh is not allowed in a data file: import the names you use, `import { name } from "@sanoma/connector-github/resources"`',
+      '2:8 import site is not allowed in a data file: import the names you use, `import { name } from "./site.ts"`',
+      '3:1 import "./setup.ts" is not allowed in a data file: it imports nothing, and a data file runs no code',
+      "4:1 `import type` is not allowed in a data file: it holds values only, and the constructors type them",
+      '5:22 import "./docs" is not allowed in a data file: name the data file with its `.ts` extension',
+      '6:22 import "../../people/team.ts" is not allowed in a data file: it reaches outside resources/; import only other data files',
+    ]);
+    // Inside resources/, a sibling area is a data file like any other.
+    expect(
+      dataFile(`import { team } from "../people/team.ts";
+export default [];
+`),
+    ).toEqual([]);
+  });
+
+  it("refuses exports that are not one resource each", () => {
+    expect(
+      dataFile(`import { github } from "@sanoma/connector-github/resources";
+import { docs } from "./docs.ts";
+export { docs };
+export * from "./docs.ts";
+export const a = github.repository({ name: "a" }), b = github.repository({ name: "b" });
+export const { c } = github.repository({ name: "c" });
+export const d = github?.repository({ name: "d" });
+export const e = github.repository({ name: "e" }, {});
+export const f = github.repository("f");
+export const g = docs.repository({ name: "g" });
+export const h = github.branch_protection({ repository_id: github.repository({ name: "h" }), pattern: "main" });
+export const i = github.repository({ name: "i", get wiki() { return true; }, topics: [1, , 2], name: "j" });
+export const k = github.repository({ name: "k", pattern: /x/, size: 1n, has_wiki: !0, team: github });
+export default [a, ...docs];
+`),
+    ).toEqual([
+      "3:1 export { … } is not allowed in a data file: export each resource where it is declared, `export const name = <vendor>.<type>({ … })`",
+      "4:1 export * is not allowed in a data file: a data file holds only imports, `export const <name> = <vendor>.<type>({ … })` and `export default [ … ]`",
+      "5:1 declare one resource per `export const`",
+      "6:14 an `export const` names one resource: `export const name = <vendor>.<type>({ … })`",
+      "7:18 export const d must be a resource constructor call, `<vendor>.<type>({ … })`, with <vendor> imported from a connector's resources entry",
+      "8:18 github.repository takes one object literal: `github.repository({ … })`",
+      "9:18 github.repository takes one object literal: `github.repository({ … })`",
+      "10:18 docs is not a connector's resource constructors: import it from the connector's resources entry, `import { docs } from \"@sanoma/connector-docs/resources\"`",
+      "11:60 a resource is declared at the top of a data file: give it its own `export const` and name it here",
+      "12:49 a method or accessor is not allowed in a data file: a field holds a value",
+      "12:86 an empty array slot is not allowed in a data file: write null",
+      "12:96 name is given twice: give each field once",
+      "13:58 a regular expression is not allowed in a data file: write it as a string",
+      "13:69 a bigint is not allowed in a data file: write a number, or a string",
+      "13:83 `!` is not allowed in a data file: write the value out",
+      "13:93 github is a connector's resource constructors, not a resource: name a declared resource",
+      "14:20 export default must list this file's resources by name: `export default [a, b]`",
+    ]);
+  });
+
+  it("reports a syntax error", () => {
+    expect(dataFile(`export const a = github.repository({ name: "a" ;`)).toEqual([
+      expect.stringMatching(/^1:\d+ syntax: /),
+    ]);
+  });
+});
+
 /**
  * A workflow that does everything the checks refuse, one thing per line, so each diagnostic
  * names its line. Some lines are refused by oxlint, some by lintWorkflow, some by both.
@@ -221,6 +342,8 @@ describe("oxlint.json", () => {
   };
 
   beforeAll(() => {
+    // The fragment loads the data-file rule from dist/, as an installed package does.
+    ensureBuilt();
     dir = mkdtempSync(join(tmpdir(), "sanoma-oxlint-"));
     write(".oxlintrc.json", JSON.stringify({ extends: [fragment] }));
     write("workflows/bad.ts", BAD);
@@ -245,6 +368,10 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
     );
     // Outside workflows/ and policies/, nothing is restricted.
     write("lib/clock.ts", `export const now = () => Date.now() + Math.random();\n`);
+    for (const path of GOOD) write(path, readFileSync(fixture(path), "utf8"));
+    for (const file of ["call.ts", "process.ts", "spread.ts"]) {
+      write(`resources/bad/${file}`, readFileSync(fixture(`bad-resources/${file}`), "utf8"));
+    }
   });
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -268,7 +395,9 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
   };
 
   it("reports the clock, randomness, the network, timers, the environment, globals and the bypass imports", () => {
-    const problems = lint().toSorted((a, b) => a.file.localeCompare(b.file) || a.line! - b.line!);
+    const problems = lint()
+      .filter((d) => !d.file.startsWith("resources/"))
+      .toSorted((a, b) => a.file.localeCompare(b.file) || a.line! - b.line!);
     expect(problems).toEqual([
       { file: "policies/bad.ts", line: 1, rule: globals, text: expect.stringMatching(/'Date'.*ctx\.now/) },
       bad(1, imports, /'SanomaClient'.*approve its own approvals/),
@@ -292,6 +421,19 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
       // A race has no ctx.all to point at: nothing races.
       bad(18, "eslint(no-restricted-properties)", /Promise\.race.*nothing races: pick one call, or sleep/),
       bad(19, "eslint(no-restricted-properties)", /Promise\.any.*nothing races/),
+    ]);
+  });
+
+  it("holds files under resources/ to the data-file subset, with the plugin from dist/", () => {
+    const rule = "sanoma(data-file)";
+    expect(
+      lint()
+        .filter((d) => d.file.startsWith("resources/"))
+        .toSorted((a, b) => a.file.localeCompare(b.file)),
+    ).toEqual([
+      { file: "resources/bad/call.ts", line: 3, rule, text: expect.stringMatching(/^a call is not allowed/) },
+      { file: "resources/bad/process.ts", line: 3, rule, text: expect.stringMatching(/^process is not allowed/) },
+      { file: "resources/bad/spread.ts", line: 4, rule, text: expect.stringMatching(/^a spread is not allowed/) },
     ]);
   });
 });

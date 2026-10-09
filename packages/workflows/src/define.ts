@@ -243,7 +243,7 @@ export function defineWorkflow<const U extends readonly Use[], S extends z.ZodTy
 }
 
 /** The file of the code that called into this one, from V8's call site: its script as a path; undefined where there is none. */
-function pathOf(script: string | undefined): string | undefined {
+export function pathOf(script: string | undefined): string | undefined {
   if (!script?.startsWith("file:")) return script || undefined;
   try {
     return fileURLToPath(script);
