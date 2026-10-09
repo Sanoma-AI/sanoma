@@ -61,7 +61,7 @@ await worker.stop();
 | `rateLimit(opId)`      | The next call to `opId` throws a retryable `DriverError` with status 429 and changes nothing.  |
 | `hold(opId)`           | The next call to `opId` waits, before it takes effect, until the returned function is called.  |
 
-`fakeGithub` and `fakeStripe` serve resources from replies recorded from (or, for Stripe, written to) the vendor's OpenTofu provider, through the connector's real driver, and add `override(type, id, fields)`, which changes what the next read returns, as if someone edited the object at the vendor (drift), and `remove(type, id)`, after which a read says the object is gone.
+`fakeGithub` and `fakeStripe` serve resources from replies recorded from (or, for Stripe, written to) the vendor's OpenTofu provider, through the connector's real driver, and add `override(type, id, fields)`, which changes what the next read returns, as if someone edited the object at the vendor (drift; `fields` in the resource's shape, as a read returns them), and `remove(type, id)`, after which a read says the object is gone. They are `tfFake` from `@sanoma/bridge/fake` over each connector's `tfConnector` record.
 
 A call that repeats an earlier call's idempotency key gets the earlier reply and changes nothing, so a test can check that a retried or replayed call has one effect.
 
