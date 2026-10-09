@@ -114,11 +114,11 @@ function nestedBlockSchema(b: TfNestedBlock, indent: string): string {
 
 const isOne = (b: TfNestedBlock) => (b.nesting === "list" || b.nesting === "set") && b.maxItems === 1;
 
-/** The description, as `.describe()`, and `deprecated` in the schema's metadata. */
+/** The description, as `.describe()`, and `deprecated` in the schema's metadata, which keeps the description. */
 function annotate(zod: string, description: string | undefined, deprecated: boolean | undefined): string {
   const text = description?.trim();
-  if (deprecated) return `${zod}.meta({ ${text ? `description: ${JSON.stringify(text)}, ` : ""}deprecated: true })`;
-  return text ? `${zod}.describe(${JSON.stringify(text)})` : zod;
+  const described = text ? `${zod}.describe(${JSON.stringify(text)})` : zod;
+  return deprecated ? `${described}.meta({ deprecated: true })` : described;
 }
 
 /** True when the attribute, or anything nested in it, is sensitive or write-only. */

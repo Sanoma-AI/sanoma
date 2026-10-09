@@ -201,10 +201,11 @@ export const github_repository = {
         "Specifies if the repository should be archived. Defaults to 'false'. NOTE Currently, the API does not support unarchiving.",
       ),
     auto_init: z.boolean().nullish().describe("Set to 'true' to produce an initial commit in the repository."),
-    default_branch: z.string().nullish().meta({
-      description: "Can only be set after initial repository creation, and only if the target branch exists",
-      deprecated: true,
-    }),
+    default_branch: z
+      .string()
+      .nullish()
+      .describe("Can only be set after initial repository creation, and only if the target branch exists")
+      .meta({ deprecated: true }),
     delete_branch_on_merge: z
       .boolean()
       .nullish()
@@ -225,10 +226,11 @@ export const github_repository = {
       .boolean()
       .nullish()
       .describe("Set to 'true' to enable GitHub Discussions on the repository. Defaults to 'false'."),
-    has_downloads: z.boolean().nullish().meta({
-      description: "Set to 'true' to enable the (deprecated) downloads features on the repository.",
-      deprecated: true,
-    }),
+    has_downloads: z
+      .boolean()
+      .nullish()
+      .describe("Set to 'true' to enable the (deprecated) downloads features on the repository.")
+      .meta({ deprecated: true }),
     has_issues: z.boolean().nullish().describe("Set to 'true' to enable the GitHub Issues features on the repository"),
     has_projects: z
       .boolean()
@@ -290,11 +292,13 @@ export const github_repository = {
       .describe(
         "Can be 'public' or 'private'. If your organization is associated with an enterprise account using GitHub Enterprise Cloud or GitHub Enterprise Server 2.20+, visibility can also be 'internal'.",
       ),
-    vulnerability_alerts: z.boolean().nullish().meta({
-      description:
+    vulnerability_alerts: z
+      .boolean()
+      .nullish()
+      .describe(
         "Set to 'true' to enable security alerts for vulnerable dependencies. Enabling requires alerts to be enabled on the owner level. (Note for importing: GitHub enables the alerts on all repos by default). Note that vulnerability alerts have not been successfully tested on any GitHub Enterprise instance and may be unavailable in those settings.",
-      deprecated: true,
-    }),
+      )
+      .meta({ deprecated: true }),
     web_commit_signoff_required: z
       .boolean()
       .nullish()
@@ -326,7 +330,8 @@ export const github_repository = {
           .describe("The source branch and directory for the rendered Pages site."),
       })
       .nullish()
-      .meta({ description: "The repository's GitHub Pages configuration", deprecated: true }),
+      .describe("The repository's GitHub Pages configuration")
+      .meta({ deprecated: true }),
     security_and_analysis: z
       .object({
         advanced_security: z
