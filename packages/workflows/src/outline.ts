@@ -61,13 +61,12 @@ const TRANSPARENT = new Set([
 export function outlineWorkflow(wf: WorkflowDefinition<any, any>): Outline {
   let found = wf.file === undefined ? undefined : inFile(wf.file, wf.name);
   if (!found) {
-    let text: string;
+    let source: string;
     try {
-      text = Function.prototype.toString.call(wf.run);
+      source = lf(Function.prototype.toString.call(wf.run));
     } catch (err) {
       return { error: `Cannot read the source of ${wf.name}'s run: ${errorMessage(err)}` };
     }
-    const source = lf(text);
     const parsed = parseFunction(source);
     if (typeof parsed === "string") return { error: `Cannot parse ${wf.name}'s run: ${parsed}` };
     found = { source, ...parsed };
@@ -101,10 +100,11 @@ function inFile(file: string, name: string): Found | undefined {
   const { program, errors } = parse(file, source);
   if (errors.length) return undefined;
   const find = (node: Node): Node | undefined => {
-    if (!node || typeof node !== "object") return undefined;
+    if (!node) return undefined;
     if (node.type === "ObjectExpression") {
       const value = (key: string) =>
-        node.properties.find((p: Node) => p.type === "Property" && !p.computed && propertyName(p.key) === key)?.value;
+        node.properties.find((p: Node) => p.type === "Property" && !p.computed && (p.key.name ?? p.key.value) === key)
+          ?.value;
       const run = value("run");
       if (stringValue(value("name")) === name && FUNCTIONS.has(run?.type)) return run;
     }
@@ -118,26 +118,34 @@ function inFile(file: string, name: string): Found | undefined {
   return fn && { source, fn, offset: 0 };
 }
 
-/** A property key as written: `name`, `"name"` or `'name'`. */
-const propertyName = (key: Node): string | undefined => (key.type === "Identifier" ? key.name : stringValue(key));
-
 /** The one expression the text holds, or the first parse error. */
 function expression(text: string): Node | string {
   const { program, errors } = parse("run.ts", text);
   return errors.length ? errors[0]!.message : (program.body[0] as Node)?.expression;
 }
 
+/**
+ * What `run`'s text is parsed inside, in turn: as an expression, then, for a method
+ * (`async run(ctx) { … }`), which is no expression on its own, as one inside an object.
+ */
+const PREFIXES = [
+  ["(", ")"],
+  ["({", "})"],
+] as const;
+
 /** The function the source holds and the length of the wrapper parsed around it, or why it could not be parsed. */
 function parseFunction(source: string): Omit<Found, "source"> | string {
-  let offset = 1;
-  let parsed = expression(`(${source})`);
-  // A method (`async run(ctx) { … }`) is no expression on its own; it is one inside an object.
-  if (typeof parsed === "string") {
-    const method = expression(`({${source}})`);
-    if (typeof method !== "string") [parsed, offset] = [method?.properties?.[0]?.value, 2];
+  let error = "";
+  for (const [prefix, suffix] of PREFIXES) {
+    const parsed = expression(prefix + source + suffix);
+    if (typeof parsed === "string") {
+      error ||= parsed;
+      continue;
+    }
+    const fn = prefix === "({" ? parsed?.properties?.[0]?.value : parsed;
+    return FUNCTIONS.has(fn?.type) ? { fn, offset: prefix.length } : "it is not a function";
   }
-  if (typeof parsed === "string") return parsed;
-  return FUNCTIONS.has(parsed?.type) ? { fn: parsed, offset } : "it is not a function";
+  return error;
 }
 
 function outlineBody(body: Node, ctx: string, offset: number): OutlineNode[] {
@@ -195,21 +203,17 @@ function outlineBody(body: Node, ctx: string, offset: number): OutlineNode[] {
     const path = ctxPath(node.callee, ctx);
     if (path) {
       const id = path.join(".");
-      const at = span(node);
       switch (id) {
         case "all":
-          return all(args[0], at);
+          return all(node);
         case "approval": {
           const title = stringValue(args[0]);
-          return [
-            ...walk(args),
-            title === undefined ? { kind: "approval", span: at } : { kind: "approval", title, span: at },
-          ];
+          return [...walk(args), { kind: "approval", span: span(node), ...(title === undefined ? {} : { title }) }];
         }
         case "sleep":
-          return [...walk(args), { kind: "sleep", span: at }];
+          return [...walk(args), { kind: "sleep", span: span(node) }];
         default:
-          return path.length === 3 ? [...walk(args), { kind: "op", id, span: at }] : walk(args);
+          return path.length === 3 ? [...walk(args), { kind: "op", id, span: span(node) }] : walk(args);
       }
     }
     const callee = unwrap(node.callee);
@@ -222,7 +226,10 @@ function outlineBody(body: Node, ctx: string, offset: number): OutlineNode[] {
     return [...walk(node.callee), ...walk(args)];
   };
 
-  const all = (arg: Node, at: Span): OutlineNode[] => {
+  // `node` is the `ctx.all(...)` call.
+  const all = (node: Node): OutlineNode[] => {
+    const at = span(node);
+    const arg = node.arguments[0];
     if (arg?.type === "ArrayExpression") return [{ kind: "all", branches: arg.elements.map(member), span: at }];
     // Otherwise the members are computed, typically `items.map((item) => () => ctx.…)`.
     const made = unwrap(arg);
