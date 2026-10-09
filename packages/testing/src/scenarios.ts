@@ -48,11 +48,12 @@ export async function runScenario(
  * Registers a vitest test for each scenario in the config's `scenarios` directory, in a
  * `describe` per feature file, that runs it and expects every check to pass; and a failing test
  * for each file that does not load. Starts one test worker for the scenarios, before them, and
- * stops it after. `config` and `options` are `startTestWorker`'s; `startedBy` starts the runs.
+ * stops it after. `config` and `options` are `startTestWorker`'s; `startedBy` starts the runs, and
+ * `timeoutMs` is how long each may take (`drive`'s).
  */
 export function describeScenarios(
   config: Parameters<typeof startTestWorker>[0],
-  { startedBy, ...options }: TestWorkerOptions & { startedBy?: Principal } = {},
+  { startedBy, timeoutMs, ...options }: TestWorkerOptions & { startedBy?: Principal; timeoutMs?: number } = {},
 ): void {
   // The worker and the client share the ledger and the database, so the client reads the runs.
   const shared = {
@@ -76,10 +77,13 @@ export function describeScenarios(
 
   let worker: Worker | undefined;
   let client: SanomaClient | undefined;
+  // Each test gets twice drive's deadline (15 s by default), so drive's error, naming what the run
+  // waits on, is the one reported rather than vitest's timeout.
+  const testTimeout = (timeoutMs ?? 15_000) * 2;
   beforeAll(async () => {
     worker = await startTestWorker(shared, options);
     client = await SanomaClient.connect(shared);
-  });
+  }, 60_000);
   afterAll(async () => {
     await client?.close();
     await worker?.stop();
@@ -88,13 +92,22 @@ export function describeScenarios(
   for (const [file, inFile] of Map.groupBy(scenarios, (s) => s.file)) {
     describe(file, () => {
       for (const scenario of inFile) {
-        it(scenario.name, async () => {
-          if (!client) throw new Error("The scenarios' worker did not start");
-          const { checks } = await runScenario(scenario, { client, workflows: config.workflows, startedBy });
-          const failed = checks.filter((c) => !c.ok);
-          const lines = failed.map((c) => `  ${c.step}: ${c.detail}`);
-          expect(failed, [`${file}: "${scenario.name}" failed:`, ...lines].join("\n")).toEqual([]);
-        });
+        it(
+          scenario.name,
+          async () => {
+            if (!client) throw new Error("The scenarios' worker did not start");
+            const { checks } = await runScenario(scenario, {
+              client,
+              workflows: config.workflows,
+              startedBy,
+              timeoutMs,
+            });
+            const failed = checks.filter((c) => !c.ok);
+            const lines = failed.map((c) => `  ${c.step}: ${c.detail}`);
+            expect(failed, [`${file}: "${scenario.name}" failed:`, ...lines].join("\n")).toEqual([]);
+          },
+          testTimeout,
+        );
       }
     });
   }

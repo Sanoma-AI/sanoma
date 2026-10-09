@@ -96,7 +96,7 @@ Two variables change what the same tests do:
 
 `@sanoma/testing/scenarios` runs a config's [scenarios](https://www.npmjs.com/package/@sanoma/workflows#scenarios-and-sandbox-runs) as vitest tests (install `vitest` beside it). Each scenario is a sandbox run: the worker calls the config's `fakes`, never a driver.
 
-`describeScenarios(config, options?)` reads the `.feature` files in the config's `scenarios` directory and registers a test for each scenario, in a `describe` per file; it throws, naming the directory, when it finds none. A test starts the scenario's sandbox run, decides its approvals as the scenario says, and fails listing each `Then` step that did not hold, with why. A file that does not load (a step no rule matches, bad JSON, a name used twice) is a failing test named after the file, whose message names the file and line. It starts one worker for the file's scenarios, before them, with `startTestWorker(config, options)`, and stops it after; `appName` is required, as there. `options.startedBy` starts the runs (default `{ id: "scenarios" }`).
+`describeScenarios(config, options?)` reads the `.feature` files in the config's `scenarios` directory and registers a test for each scenario, in a `describe` per file; it throws, naming the directory, when it finds none. A test starts the scenario's sandbox run, decides its approvals as the scenario says, and fails listing each `Then` step that did not hold, with why. A file that does not load (a step no rule matches, bad JSON, a name used twice) is a failing test named after the file, whose message names the file and line. It starts one worker for the file's scenarios, before them, with `startTestWorker(config, options)`, and stops it after; `appName` is required, as there. `options.startedBy` starts the runs (default `{ id: "scenarios" }`), and `options.timeoutMs` is how long each may take (`drive`'s, 15 seconds by default); the tests it registers get twice that, so `drive`'s error is the one you see.
 
 ```ts
 // test/scenarios.test.ts
@@ -108,7 +108,7 @@ import config from "../sanoma.config.ts";
 describeScenarios({ ...config, ledger: memoryLedger(), appName: "scenarios-test" });
 ```
 
-A scenario takes a second or two, mostly the queue picking the run up, so give vitest more than its default 5 seconds: `testTimeout: 60_000` and `hookTimeout: 60_000` in `vitest.config.ts`. Sandbox runs go one at a time, so a scenario that leaves its run waiting on an approval it has no decision for holds up the ones after it until they time out; fix the first failure first.
+Sandbox runs go one at a time, so a scenario that leaves its run waiting on an approval it has no decision for holds up the ones after it until they time out; fix the first failure first.
 
 `runScenario(scenario, { client, workflows, startedBy?, timeoutMs? })` runs one scenario against a worker you started, with a `SanomaClient` of it, and returns `{ runId, run, ledger, checks }`: the run's id, its summary, its ledger records and `check(scenario, ledger)`. `workflows` is the config's: the scenario names its workflow, and the client starts a definition. `timeoutMs` goes to `drive`. Load the scenarios with `loadScenarios(resolveConfig(config))` from `@sanoma/workflows/scenario`.
 
