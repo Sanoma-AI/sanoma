@@ -99,6 +99,25 @@ export interface Graph {
 }
 
 /**
+ * The node a click at `offset` in the source is in: of the nodes with a span that holds it, the
+ * one whose span is smallest, so a call made in another's arguments wins over the outer call.
+ * The first of equals: a run's steps of one call site share its spans.
+ */
+export function nodeAt(nodes: readonly GraphNode[], offset: number): GraphNode | undefined {
+  let found: GraphNode | undefined;
+  let size = Number.POSITIVE_INFINITY;
+  for (const node of nodes) {
+    for (const [start, end] of ("spans" in node && node.spans) || []) {
+      if (start <= offset && offset <= end && end - start < size) {
+        found = node;
+        size = end - start;
+      }
+    }
+  }
+  return found;
+}
+
+/**
  * What a page's graph is drawn from: a run's ledger as read at `at`, with its workflow's outline
  * when there is one (runGraph), or a workflow's outline (outlineGraph).
  */
