@@ -29,6 +29,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./replay": {
+      "types": "./dist/replay.d.ts",
+      "default": "./dist/replay.js"
     }
   },
   "publishConfig": {
@@ -44,6 +48,7 @@
     "@sanoma/connector-ghost": "workspace:*",
     "@sanoma/connector-resend": "workspace:*",
     "@sanoma/workflows": "workspace:*",
+    "msw": "^3.0.2",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
@@ -51,7 +56,17 @@
     "@sanoma/connector-ghost": "^0.1.0",
     "@sanoma/connector-resend": "^0.1.0",
     "@sanoma/workflows": "^0.1.0",
+    "msw": "^3",
+    "vitest": "^5",
     "zod": "^4"
+  },
+  "peerDependenciesMeta": {
+    "msw": {
+      "optional": true
+    },
+    "vitest": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=24"

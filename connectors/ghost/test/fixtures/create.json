@@ -1,7 +1,7 @@
 [
   {
     "method": "POST",
-    "path": "/posts/?source=html",
+    "path": "/ghost/api/admin/posts/?source=html",
     "status": 201,
     "body": {
       "posts": [

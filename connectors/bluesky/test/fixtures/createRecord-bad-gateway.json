@@ -1,4 +1,11 @@
-{
-  "status": 502,
-  "body": { "error": "UpstreamFailure", "message": "Upstream Failure" }
-}
+[
+  {
+    "method": "POST",
+    "path": "/xrpc/com.atproto.repo.createRecord",
+    "status": 502,
+    "body": {
+      "error": "UpstreamFailure",
+      "message": "Upstream Failure"
+    }
+  }
+]

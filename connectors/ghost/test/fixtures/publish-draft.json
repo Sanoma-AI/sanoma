@@ -1,7 +1,7 @@
 [
   {
     "method": "POST",
-    "path": "/posts/?source=html",
+    "path": "/ghost/api/admin/posts/?source=html",
     "status": 201,
     "body": {
       "posts": [
@@ -21,7 +21,7 @@
   },
   {
     "method": "GET",
-    "path": "/posts/000000000000000000000001/",
+    "path": "/ghost/api/admin/posts/000000000000000000000001/",
     "status": 200,
     "body": {
       "posts": [
@@ -41,7 +41,7 @@
   },
   {
     "method": "PUT",
-    "path": "/posts/000000000000000000000001/",
+    "path": "/ghost/api/admin/posts/000000000000000000000001/",
     "status": 200,
     "body": {
       "posts": [

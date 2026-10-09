@@ -1,0 +1,34 @@
+[
+  {
+    "method": "POST",
+    "path": "/xrpc/com.atproto.server.createSession",
+    "status": 200,
+    "body": {
+      "did": "did:plc:example",
+      "handle": "alice.example.test",
+      "accessJwt": "example.access.jwt",
+      "refreshJwt": "example.refresh.jwt",
+      "active": true
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/xrpc/com.atproto.repo.createRecord",
+    "status": 200,
+    "headers": {
+      "ratelimit-limit": "5000",
+      "ratelimit-policy": "5000;w=3600",
+      "ratelimit-remaining": "4997",
+      "ratelimit-reset": "1791504000"
+    },
+    "body": {
+      "uri": "at://did:plc:example/app.bsky.feed.post/{rkey}",
+      "cid": "bafyreihclbg5r7bdqu5lq3ulxnjalvh3a6nztvr7gp7u56xr4yn6qahpme",
+      "commit": {
+        "cid": "bafyreihclbg5r7bdqu5lq3ulxnjalvh3a6nztvr7gp7u56xr4yn6qahpme",
+        "rev": "3m2examplerev"
+      },
+      "validationStatus": "valid"
+    }
+  }
+]

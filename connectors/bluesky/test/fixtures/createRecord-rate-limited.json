@@ -1,10 +1,17 @@
-{
-  "status": 429,
-  "headers": {
-    "ratelimit-limit": "5000",
-    "ratelimit-policy": "5000;w=3600",
-    "ratelimit-remaining": "0",
-    "ratelimit-reset": "1791504000"
-  },
-  "body": { "error": "RateLimitExceeded", "message": "Rate Limit Exceeded" }
-}
+[
+  {
+    "method": "POST",
+    "path": "/xrpc/com.atproto.repo.createRecord",
+    "status": 429,
+    "headers": {
+      "ratelimit-limit": "5000",
+      "ratelimit-policy": "5000;w=3600",
+      "ratelimit-remaining": "0",
+      "ratelimit-reset": "1791504000"
+    },
+    "body": {
+      "error": "RateLimitExceeded",
+      "message": "Rate Limit Exceeded"
+    }
+  }
+]

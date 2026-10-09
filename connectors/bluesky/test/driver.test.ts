@@ -1,113 +1,76 @@
-import { readFileSync, writeFileSync } from "node:fs";
-import type { CallContext, DriverError } from "@sanoma/workflows";
-import { bypass, delay, http, HttpResponse } from "msw";
-import { setupServer } from "msw/node";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { type Exchange, live, replay, type Sent } from "@sanoma/testing/replay";
+import type { CallContext } from "@sanoma/workflows";
+import { delay, http } from "msw";
+import { describe, expect, it, vi } from "vitest";
 import { blueskyDriver, type BlueskyDriverOptions } from "../src/driver.ts";
 
-/*
- * Replays the XRPC replies in fixtures/ by default. With SANOMA_LIVE=1, BLUESKY_IDENTIFIER
- * and BLUESKY_APP_PASSWORD set, the tests that Bluesky can reproduce post to that account instead,
- * and SANOMA_RECORD=1 rewrites their fixtures from the replies, scrubbed of the account.
- */
-const live = process.env.SANOMA_LIVE === "1";
-const recording = live && process.env.SANOMA_RECORD === "1";
-const fixtures = new URL("./fixtures/", import.meta.url);
+// Replays test/fixtures; the README says how to run these tests against an account.
 
-interface Fixture {
-  status: number;
-  headers?: Record<string, string>;
-  body: unknown;
-}
-
-/** The XRPC calls the driver made in this test, with the JSON body of each procedure. */
-const sent: { nsid: string; body?: any }[] = [];
-
-/**
- * Answers `nsid` with the named fixtures, one per request (the last repeats). `{rkey}` in a
- * fixture is the record key the request named. Live, forwards to Bluesky instead, and when
- * recording, saves each reply under the name it would be replayed from.
- */
-function xrpc(nsid: string, ...names: string[]) {
-  let count = 0;
-  return http.all(`*/xrpc/${nsid}`, async ({ request }) => {
-    const name = names[Math.min(count++, names.length - 1)]!;
-    const body = request.method === "POST" ? ((await request.clone().json()) as any) : undefined;
-    sent.push({ nsid, body });
-    const rkey: string = body?.rkey ?? new URL(request.url).searchParams.get("rkey") ?? "";
-    if (live) {
-      const res = await fetch(bypass(request));
-      if (recording) await save(name, nsid, res.clone(), rkey);
-      return res;
-    }
-    const fixture: Fixture = JSON.parse(readFileSync(new URL(`${name}.json`, fixtures), "utf8"));
-    const reply = JSON.parse(JSON.stringify(fixture.body).replaceAll("{rkey}", rkey));
-    return HttpResponse.json(reply, { status: fixture.status, headers: fixture.headers });
-  });
-}
-
-/** What a recorded reply must not keep, and what replaces it. Filled from the live account. */
-const scrubs = new Map<string, string>();
-/** Strings of a kind a reply must not keep, whatever the account, and their placeholders. */
+/** Strings of a kind a recording must not keep, whatever the account, and their placeholders. */
 const patterns: [RegExp, string][] = [
   [/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, "example.jwt"],
   [/did:plc:[a-z2-7]{24}/g, "did:plc:example"],
   [/\bbafy[a-z2-7]{50,}/g, "bafyreihclbg5r7bdqu5lq3ulxnjalvh3a6nztvr7gp7u56xr4yn6qahpme"],
   [/https:\/\/[\w.-]+\.host\.bsky\.network/g, "https://pds.example.test"],
+  // A post's record key, which differs on every live run: replaying, it is the request's.
+  [/(?<=app\.bsky\.feed\.post\/|rkey=)[a-z2-7]{13}\b/g, "{rkey}"],
 ];
 /** The fields of a successful reply the driver reads; the rest (the DID document, the email) is not kept. */
 const keep: Record<string, string[]> = {
   "com.atproto.server.createSession": ["did", "handle", "accessJwt", "refreshJwt", "active"],
 };
+const nsidOf = (path: string) => path.slice("/xrpc/".length).split("?")[0]!;
 
-async function save(name: string, nsid: string, res: Response, rkey: string) {
-  let body = (await res.json()) as any;
-  if (body.did) scrubs.set(body.did, "did:plc:example");
-  if (body.handle) scrubs.set(body.handle, "alice.example.test");
-  if (body.email) scrubs.set(body.email, "alice@example.test");
-  for (const service of body.didDoc?.service ?? []) {
-    if (URL.canParse(service.serviceEndpoint)) scrubs.set(new URL(service.serviceEndpoint).host, "pds.example.test");
+/** The account's identifiers and hosts, the fields the driver does not read, and every string of a kind above. */
+function scrub(exchanges: Exchange[]): Exchange[] {
+  const { BLUESKY_IDENTIFIER, BLUESKY_APP_PASSWORD, BLUESKY_SERVICE } = process.env;
+  const secrets = new Map([
+    [BLUESKY_IDENTIFIER!, "alice.example.test"],
+    [BLUESKY_APP_PASSWORD!, "example-app-password"],
+    ...(BLUESKY_SERVICE && URL.canParse(BLUESKY_SERVICE) ? [[new URL(BLUESKY_SERVICE).host, "bsky.example.test"]] : []),
+  ] as [string, string][]);
+  const kept = exchanges.map((e) => {
+    const body = e.body as any;
+    if (body?.did) secrets.set(body.did, "did:plc:example");
+    if (body?.handle) secrets.set(body.handle, "alice.example.test");
+    if (body?.email) secrets.set(body.email, "alice@example.test");
+    for (const { serviceEndpoint } of body?.didDoc?.service ?? []) {
+      if (URL.canParse(serviceEndpoint)) secrets.set(new URL(serviceEndpoint).host, "pds.example.test");
+    }
+    const fields = e.status < 300 ? keep[nsidOf(e.path)] : undefined;
+    return fields ? { ...e, body: Object.fromEntries(fields.filter((k) => k in body).map((k) => [k, body[k]])) } : e;
+  });
+  let text = JSON.stringify(kept);
+  // Longest first: a host inside a handle must not break the handle up before it is replaced.
+  for (const [secret, placeholder] of [...secrets].toSorted(([a], [b]) => b.length - a.length)) {
+    text = text.replaceAll(secret, placeholder);
   }
-  if (rkey) scrubs.set(rkey, "{rkey}");
-  if (res.ok && keep[nsid]) body = Object.fromEntries(keep[nsid].filter((k) => k in body).map((k) => [k, body[k]]));
-  const headers = Object.fromEntries([...res.headers].filter(([k]) => k.startsWith("ratelimit-")));
-  let text = JSON.stringify({ status: res.status, ...(Object.keys(headers).length ? { headers } : {}), body }, null, 2);
-  for (const [secret, placeholder] of scrubs) text = text.replaceAll(secret, placeholder);
   for (const [pattern, placeholder] of patterns) text = text.replace(pattern, placeholder);
   const left = [
-    ...[...scrubs.keys()].filter((secret) => text.includes(secret)),
+    ...[...secrets.keys()].filter((secret) => text.includes(secret)),
     ...patterns.flatMap(([pattern, placeholder]) => (text.match(pattern) ?? []).filter((m) => m !== placeholder)),
   ];
-  if (left.length) throw new Error(`${name}: scrubbing left ${left.length} secret(s)`);
-  writeFileSync(new URL(`${name}.json`, fixtures), `${text}\n`);
+  if (left.length) throw new Error(`scrubbing left ${left.length} secret(s) in the recording`);
+  return JSON.parse(text);
 }
 
-const server = setupServer();
-beforeAll(() => {
-  if (live && (!process.env.BLUESKY_IDENTIFIER || !process.env.BLUESKY_APP_PASSWORD)) {
-    throw new Error("SANOMA_LIVE=1 needs BLUESKY_IDENTIFIER and BLUESKY_APP_PASSWORD");
-  }
-  // Live, the credentials are scrubbed from recordings too.
-  if (recording) {
-    scrubs.set(process.env.BLUESKY_IDENTIFIER!, "alice.example.test");
-    scrubs.set(process.env.BLUESKY_APP_PASSWORD!, "example-app-password");
-    const service = process.env.BLUESKY_SERVICE;
-    if (service && URL.canParse(service)) scrubs.set(new URL(service).host, "bsky.example.test");
-  }
-  server.listen({ onUnhandledFrame: live ? "bypass" : "error" });
+/** `{rkey}` in a fixture is the record key the request names. */
+function fill(exchange: Exchange, sent: Sent): Exchange {
+  const rkey: string | null = sent.body?.rkey ?? new URLSearchParams(sent.path.split("?")[1]).get("rkey");
+  return rkey ? JSON.parse(JSON.stringify(exchange).replaceAll("{rkey}", rkey)) : exchange;
+}
+
+const { server, play, fixture, sent } = replay({
+  fixtures: new URL("./fixtures/", import.meta.url),
+  needs: ["BLUESKY_IDENTIFIER", "BLUESKY_APP_PASSWORD"],
+  env: {
+    BLUESKY_IDENTIFIER: "alice.example.test",
+    BLUESKY_APP_PASSWORD: "example-app-password",
+    BLUESKY_SERVICE: "https://bsky.example.test",
+  },
+  scrub,
+  fill,
 });
-beforeEach(() => {
-  if (live) return;
-  vi.stubEnv("BLUESKY_IDENTIFIER", "alice.example.test");
-  vi.stubEnv("BLUESKY_APP_PASSWORD", "example-app-password");
-  vi.stubEnv("BLUESKY_SERVICE", "https://bsky.example.test");
-});
-afterEach(() => {
-  server.resetHandlers();
-  sent.length = 0;
-  vi.unstubAllEnvs();
-});
-afterAll(() => server.close());
 
 const runId = live ? `live-${Date.now()}` : "run-1";
 const call = (seq: number): CallContext => ({
@@ -119,17 +82,15 @@ const call = (seq: number): CallContext => ({
 const at = live ? new Date().toISOString() : "2026-10-08T00:00:00.000Z";
 const text = `Sanoma driver test ${at} https://example.com`;
 
-function postCreate(options?: BlueskyDriverOptions) {
-  return blueskyDriver(options).ops["post.create"]!;
-}
-const sentTo = (nsid: string) => sent.filter((s) => s.nsid === nsid);
+const postCreate = (options?: BlueskyDriverOptions) => blueskyDriver(options).ops["post.create"]!;
+const sentTo = (nsid: string) => sent.filter((r) => nsidOf(r.path) === nsid);
+/** Exchanges recorded by the tests that run live, to compose the ones that only replay. */
+const session = () => fixture("post")[0]!;
+const repeated = () => fixture("repeat").slice(2) as [Exchange, Exchange];
 
 describe("blueskyDriver", () => {
   it("logs in, posts the text with a facet for its link, and returns the post", async () => {
-    server.use(
-      xrpc("com.atproto.server.createSession", "createSession"),
-      xrpc("com.atproto.repo.createRecord", "createRecord"),
-    );
+    play("post");
     const out = await postCreate()({ text }, call(0));
 
     const req = sentTo("com.atproto.repo.createRecord")[0]?.body;
@@ -151,10 +112,7 @@ describe("blueskyDriver", () => {
   });
 
   it("keeps one session across calls", async () => {
-    server.use(
-      xrpc("com.atproto.server.createSession", "createSession"),
-      xrpc("com.atproto.repo.createRecord", "createRecord"),
-    );
+    play("two-posts");
     const create = postCreate();
     await create({ text: `${text} (1)` }, call(1));
     await create({ text: `${text} (2)` }, call(2));
@@ -163,11 +121,7 @@ describe("blueskyDriver", () => {
   });
 
   it("posts once for one idempotency key: a repeat returns the post the first made", async () => {
-    server.use(
-      xrpc("com.atproto.server.createSession", "createSession"),
-      xrpc("com.atproto.repo.createRecord", "createRecord", "createRecord-repeated"),
-      xrpc("com.atproto.repo.getRecord", "getRecord"),
-    );
+    play("repeat");
     const create = postCreate();
     const first = await create({ text }, call(3));
     // A worker that crashed before checkpointing the reply runs the call again.
@@ -177,111 +131,70 @@ describe("blueskyDriver", () => {
     expect(two?.body.rkey).toBe(one?.body.rkey);
   });
 
-  it.skipIf(live)("refuses a reused key that holds a different post, without retrying", async () => {
-    server.use(
-      xrpc("com.atproto.server.createSession", "createSession"),
-      xrpc("com.atproto.repo.createRecord", "createRecord-repeated"),
-      xrpc("com.atproto.repo.getRecord", "getRecord"),
-    );
-    await expect(postCreate()({ text: "Something else" }, call(4))).rejects.toMatchObject({
-      name: "DriverError",
-      retryable: false,
-      message: expect.stringMatching(/already has a different post/),
+  describe.skipIf(live)("when Bluesky refuses or fails", () => {
+    it("refuses a reused key that holds a different post, without retrying", async () => {
+      play("different", [session(), ...repeated()]);
+      await expect(postCreate()({ text: "Something else" }, call(4))).rejects.toMatchObject({
+        name: "DriverError",
+        retryable: false,
+        message: expect.stringMatching(/already has a different post/),
+      });
     });
-  });
 
-  it.skipIf(live)("drops a mention whose handle does not resolve", async () => {
-    server.use(
-      xrpc("com.atproto.server.createSession", "createSession"),
-      xrpc("com.atproto.identity.resolveHandle", "resolveHandle-not-found"),
-      xrpc("com.atproto.repo.createRecord", "createRecord"),
-    );
-    await postCreate()({ text: "Hello @nobody.example.test" }, call(5));
-    expect(sentTo("com.atproto.repo.createRecord")[0]?.body.record.facets).toEqual([]);
-  });
-
-  it.skipIf(live)("fails without retrying when Bluesky refuses the post (400), and does not look for it", async () => {
-    server.use(
-      xrpc("com.atproto.server.createSession", "createSession"),
-      xrpc("com.atproto.repo.createRecord", "createRecord-invalid"),
-    );
-    await expect(postCreate()({ text }, call(6))).rejects.toMatchObject({
-      name: "DriverError",
-      retryable: false,
-      status: 400,
-      vendorCode: "InvalidRequest",
-      message: expect.stringMatching(/must not be longer than 300 graphemes/),
+    it("drops a mention whose handle does not resolve", async () => {
+      play("mention", [session(), ...fixture("resolveHandle-not-found"), fixture("post")[1]!]);
+      await postCreate()({ text: "Hello @nobody.example.test" }, call(5));
+      expect(sentTo("com.atproto.repo.createRecord")[0]?.body.record.facets).toEqual([]);
     });
-    expect(sentTo("com.atproto.repo.getRecord")).toEqual([]);
-  });
 
-  it.skipIf(live)(
-    "fails as retryable, with the read-back's error, when a failed post cannot be read back",
-    async () => {
-      server.use(
-        xrpc("com.atproto.server.createSession", "createSession"),
-        xrpc("com.atproto.repo.createRecord", "createRecord-repeated"),
-        http.get("*/xrpc/com.atproto.repo.getRecord", () =>
-          HttpResponse.json({ error: "UpstreamFailure", message: "Upstream Failure" }, { status: 502 }),
-        ),
-      );
-      const err = (await postCreate()({ text }, call(12)).catch((e) => e)) as DriverError;
-      expect(err).toMatchObject({
+    it.each([
+      ["createRecord-invalid", false, 400, "InvalidRequest", /must not be longer than 300 graphemes/],
+      ["createRecord-rate-limited", true, 429, "RateLimitExceeded", /the limit resets at 2026-10-09T00:00:00.000Z/],
+      ["createRecord-bad-gateway", true, 502, "UpstreamFailure", /Upstream Failure/],
+    ])("fails %s, retryable: %s", async (name, retryable, status, vendorCode, message) => {
+      // A refused create (4xx but 429) made no record, so the driver does not look for one.
+      const lookup = retryable ? fixture("getRecord-not-found") : [];
+      play(name, [session(), ...fixture(name), ...lookup]);
+      await expect(postCreate()({ text }, call(6))).rejects.toMatchObject({
+        name: "DriverError",
+        retryable,
+        status,
+        vendorCode,
+        message: expect.stringMatching(message),
+      });
+    });
+
+    it("fails without retrying when the app password is wrong (401)", async () => {
+      play("createSession-invalid-password");
+      await expect(postCreate()({ text }, call(10))).rejects.toMatchObject({
+        name: "DriverError",
+        retryable: false,
+        status: 401,
+        vendorCode: "AuthenticationRequired",
+      });
+    });
+
+    it("fails retryable, with the read-back's error, when a failed post cannot be read back", async () => {
+      const [failed, read] = repeated();
+      const body = { error: "UpstreamFailure", message: "Upstream Failure" };
+      play("unreadable", [session(), failed, { ...read, status: 502, body }]);
+      await expect(postCreate()({ text }, call(12))).rejects.toMatchObject({
         name: "DriverError",
         retryable: true,
         message: "Bluesky post failed, and reading it back failed too: Upstream Failure",
         cause: { status: 502, error: "UpstreamFailure" },
       });
-    },
-  );
-
-  it.skipIf(live)("fails as retryable when rate limited (429), saying when the limit resets", async () => {
-    server.use(
-      xrpc("com.atproto.server.createSession", "createSession"),
-      xrpc("com.atproto.repo.createRecord", "createRecord-rate-limited"),
-      xrpc("com.atproto.repo.getRecord", "getRecord-not-found"),
-    );
-    await expect(postCreate()({ text }, call(7))).rejects.toMatchObject({
-      name: "DriverError",
-      retryable: true,
-      status: 429,
-      vendorCode: "RateLimitExceeded",
-      message: expect.stringMatching(/the limit resets at 2026-10-09T00:00:00.000Z/),
     });
-  });
 
-  it.skipIf(live)("fails as retryable on a 5xx (502)", async () => {
-    server.use(
-      xrpc("com.atproto.server.createSession", "createSession"),
-      xrpc("com.atproto.repo.createRecord", "createRecord-bad-gateway"),
-      xrpc("com.atproto.repo.getRecord", "getRecord-not-found"),
-    );
-    await expect(postCreate()({ text }, call(8))).rejects.toMatchObject({
-      name: "DriverError",
-      retryable: true,
-      status: 502,
-      vendorCode: "UpstreamFailure",
-    });
-  });
-
-  it.skipIf(live)("fails as retryable when Bluesky does not answer in time", async () => {
-    server.use(
-      xrpc("com.atproto.server.createSession", "createSession"),
-      http.post("*/xrpc/com.atproto.repo.createRecord", () => delay("infinite")),
-      xrpc("com.atproto.repo.getRecord", "getRecord-not-found"),
-    );
-    const err = (await postCreate({ timeoutMs: 100 })({ text }, call(9)).catch((e) => e)) as DriverError;
-    expect(err).toMatchObject({ name: "DriverError", retryable: true, message: "Bluesky post timed out after 100 ms" });
-    expect(err.status).toBeUndefined();
-  });
-
-  it.skipIf(live)("fails without retrying when the app password is wrong (401)", async () => {
-    server.use(xrpc("com.atproto.server.createSession", "createSession-invalid-password"));
-    await expect(postCreate()({ text }, call(10))).rejects.toMatchObject({
-      name: "DriverError",
-      retryable: false,
-      status: 401,
-      vendorCode: "AuthenticationRequired",
+    it("fails retryable when Bluesky does not answer in time", async () => {
+      play("timeout", [session(), ...fixture("getRecord-not-found")]);
+      server.use(http.post("*/xrpc/com.atproto.repo.createRecord", () => delay("infinite")));
+      await expect(postCreate({ timeoutMs: 100 })({ text }, call(9))).rejects.toMatchObject({
+        name: "DriverError",
+        retryable: true,
+        status: undefined,
+        message: "Bluesky post timed out after 100 ms",
+      });
     });
   });
 

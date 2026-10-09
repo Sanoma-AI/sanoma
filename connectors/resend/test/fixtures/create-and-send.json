@@ -1,11 +1,20 @@
 [
   {
+    "method": "POST",
+    "path": "/broadcasts",
+    "status": 201,
+    "body": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "object": "broadcast"
+    }
+  },
+  {
     "method": "GET",
-    "path": "/broadcasts/bc_1",
+    "path": "/broadcasts/00000000-0000-4000-8000-000000000001",
     "status": 200,
     "body": {
       "object": "broadcast",
-      "id": "bc_1",
+      "id": "00000000-0000-4000-8000-000000000001",
       "name": "run-1:3",
       "audience_id": "00000000-0000-4000-8000-000000000001",
       "segment_id": "00000000-0000-4000-8000-000000000001",
@@ -15,11 +24,19 @@
       "preview_text": null,
       "html": "<p>Hello</p>",
       "text": null,
-      "status": "sent",
+      "status": "draft",
       "created_at": "2026-10-08 00:00:00.000+00",
       "scheduled_at": null,
-      "sent_at": "2026-10-08 00:00:05.000+00",
+      "sent_at": null,
       "topic_id": null
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/broadcasts/00000000-0000-4000-8000-000000000001/send",
+    "status": 200,
+    "body": {
+      "id": "00000000-0000-4000-8000-000000000001"
     }
   }
 ]

@@ -1,1 +1,11 @@
-{ "status": 201, "body": { "id": "00000000-0000-4000-8000-000000000001", "object": "broadcast" } }
+[
+  {
+    "method": "POST",
+    "path": "/broadcasts",
+    "status": 201,
+    "body": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "object": "broadcast"
+    }
+  }
+]

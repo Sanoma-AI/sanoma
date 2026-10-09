@@ -1,7 +1,11 @@
-{
-  "status": 400,
-  "body": {
-    "error": "RecordNotFound",
-    "message": "Could not locate record: at://did:plc:example/app.bsky.feed.post/{rkey}"
+[
+  {
+    "method": "GET",
+    "path": "/xrpc/com.atproto.repo.getRecord?collection=app.bsky.feed.post&repo=did:plc:example&rkey={rkey}",
+    "status": 400,
+    "body": {
+      "error": "RecordNotFound",
+      "message": "Could not locate record: at://did:plc:example/app.bsky.feed.post/{rkey}"
+    }
   }
-}
+]

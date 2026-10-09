@@ -1,8 +1,12 @@
-{
-  "status": 429,
-  "body": {
-    "statusCode": 429,
-    "name": "daily_quota_exceeded",
-    "message": "You have reached your daily email sending quota."
+[
+  {
+    "method": "POST",
+    "path": "/broadcasts/bc_1/send",
+    "status": 429,
+    "body": {
+      "statusCode": 429,
+      "name": "daily_quota_exceeded",
+      "message": "You have reached your daily email sending quota."
+    }
   }
-}
+]
