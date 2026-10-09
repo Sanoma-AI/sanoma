@@ -25,7 +25,30 @@ defineWorkflow({
 });
 ```
 
-This package declares the operations only. A driver that calls Resend is not included yet.
+## Driver
+
+`@sanoma/connector-resend/driver` calls Resend. Workflows never import it; the config that starts the worker does:
+
+```ts
+import { resendDriver } from "@sanoma/connector-resend/driver";
+
+const drivers = [resendDriver({ from: "Acme <news@acme.example>" })]; // `from`: the default sender
+```
+
+- **Env:** `RESEND_API_KEY`, read on every call. When it is unset, a call fails, not retryable, naming it.
+- **Mapping:** `audience` is Resend's `segment_id` (Resend renamed audiences to segments). `from` comes from the input, else the driver's `from` option; Resend requires one. `send` returns `status: "queued"`: Resend replies with the id only and sends in the background.
+- **Idempotency:** Resend documents `Idempotency-Key` for emails only, not broadcasts. The driver sends the call's key on both requests anyway, and names the broadcast after it so it traces to its run. A replayed `create` can leave a second draft, which sends nothing. A replayed `send` asks Resend to send the broadcast again; Resend does not document what it answers.
+- **Errors:** a 429 (except `daily_quota_exceeded` and `monthly_quota_exceeded`), a 5xx, a timeout (15 s; `timeoutMs` changes it) or no reply is retryable; any other 4xx is not. `status` and `vendorCode` (Resend's error `name`) are kept. Resend allows 10 requests per second per team.
+- **Free plan:** broadcasts are on the free Marketing plan (1,000 contacts, 3 segments, 3 domains), with no approval step documented. Sending to anyone but yourself needs a `from` on a domain you verified.
+
+The client's types are generated from Resend's [OpenAPI spec](https://github.com/resend/resend-openapi), pinned to a commit and cut to the two operations in `openapi.redocly.yaml`: `pnpm run generate` rewrites `src/resend-api.d.ts`.
+
+`pnpm test` replays the replies in `test/fixtures`. To call Resend instead (never in CI), creating broadcasts and sending one to a test segment, and then to re-record the fixtures with ids, addresses and keys scrubbed:
+
+```sh
+SANOMA_LIVE=1 RESEND_API_KEY=re_... RESEND_TEST_AUDIENCE=<segment id> RESEND_TEST_FROM="Test <test@your-domain>" pnpm test
+SANOMA_LIVE=1 SANOMA_RECORD=1 RESEND_API_KEY=re_... RESEND_TEST_AUDIENCE=<segment id> RESEND_TEST_FROM=... pnpm test
+```
 
 ## Testing
 
