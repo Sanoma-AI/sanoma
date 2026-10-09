@@ -27,6 +27,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip
 import { utcText } from "#/lib/time.ts";
 import { cn } from "#/lib/utils.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
+import type { OpEntry } from "@sanoma/workflows/describe";
 import { approverLabel } from "@sanoma/workflows/shared";
 import { configQuery } from "../queries.ts";
 import type { GraphProps } from "./graph.tsx";
@@ -144,11 +145,22 @@ export function VendorLogo({ vendor }: { vendor: string }) {
   );
 }
 
-/** An operation by id, after its vendor's logo, with its effect's badge when the effect is known. */
-export function OpName({ id, effect }: { id: string; effect?: Effect | undefined }) {
+/**
+ * An operation by id, after its vendor's logo, with its effect's badge when the effect is known.
+ * `op` is the config's entry for it (`opsById`): no logo when the config does not know it.
+ */
+export function OpName({
+  id,
+  op,
+  effect = op?.effect,
+}: {
+  id: string;
+  op: OpEntry | undefined;
+  effect?: Effect | undefined;
+}) {
   return (
     <>
-      <VendorLogo vendor={id.slice(0, id.indexOf("."))} />
+      {op && <VendorLogo vendor={op.vendor} />}
       <code>{id}</code>
       {effect && <Badge className={effectBadge({ effect })}>{effect}</Badge>}
     </>

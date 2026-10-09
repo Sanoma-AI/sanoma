@@ -30,7 +30,7 @@ import {
 import { useReducedMotion } from "#/lib/motion.ts";
 import { utcText } from "#/lib/time.ts";
 import { RUN_TONE } from "#/lib/tone.ts";
-import { runQuery } from "../../queries.ts";
+import { configQuery, opsById, runQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/runs/$id")({
   // The page reads the run from the query client; the loader returns only its name: its workflow.
@@ -155,6 +155,7 @@ const ledgerItemId = (recordId: string) => `ledger-${recordId}`;
 /** One ledger record: what happened, when, and its details. Drawn again only when they change. */
 const LedgerRow = memo(function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<string, string> }) {
   const title = (approval: string) => titles.get(approval) ?? approval;
+  const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
   let kind = "";
   let body: ReactNode;
   switch (record.type) {
@@ -172,7 +173,7 @@ const LedgerRow = memo(function LedgerRow({ record, titles }: { record: LedgerRe
       body = (
         <>
           <p className="flex flex-wrap items-center gap-2">
-            <OpName id={record.op} effect={record.effect} />
+            <OpName id={record.op} op={ops.get(record.op)} effect={record.effect} />
             <DecisionBadge decision={record.decision} />
             <span className="text-muted-foreground">
               {record.durationMs} ms{record.attempt && record.attempt > 1 ? `, attempt ${record.attempt}` : ""}

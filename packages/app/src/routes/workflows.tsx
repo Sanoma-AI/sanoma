@@ -167,7 +167,7 @@ function OpItem({ id, op }: { id: string; op: OpEntry | undefined }) {
     <Item role="listitem" variant="outline" size="xs">
       <ItemContent>
         <ItemTitle>
-          <OpName id={id} effect={op?.effect} />
+          <OpName id={id} op={op} />
           {op?.idempotent && (
             <Tip tip="Safe to retry: the vendor dedupes repeated calls">
               <Badge variant="outline" tabIndex={0}>

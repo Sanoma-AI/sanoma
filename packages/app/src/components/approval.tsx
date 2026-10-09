@@ -210,7 +210,7 @@ function Covers({ covers }: { covers: string[] }) {
     <ul className="flex flex-wrap gap-1.5">
       {covers.map((id) => (
         <li key={id} className="flex items-center gap-1">
-          <OpName id={id} effect={ops.get(id)?.effect} />
+          <OpName id={id} op={ops.get(id)} />
         </li>
       ))}
     </ul>
