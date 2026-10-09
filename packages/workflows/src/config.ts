@@ -58,8 +58,8 @@ export interface ResolvedConfig {
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id. */
   drivers: Map<string, DriverFn>;
-  /** The fake vendors sandbox runs call. */
-  fakes: Fake<any, any>[];
+  /** The fake vendors sandbox runs call, by vendor id. */
+  fakes: Map<string, Fake<any, any>>;
   /** The fakes' functions, by operation id: what a sandbox run calls. */
   fakeDrivers: Map<string, DriverFn>;
   /** The scenarios directory, a `file:` URL. */
@@ -127,9 +127,14 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     config.root !== undefined ? resolve(config.root) : config.file !== undefined ? dirname(config.file) : undefined;
   const ops = indexConnectors(config.connectors);
   const drivers = indexDrivers(config.drivers, ops);
-  const fakes = config.fakes ?? [];
+  const fakes = new Map<string, Fake<any, any>>();
+  for (const fake of config.fakes ?? []) {
+    const { vendor } = fake.driver;
+    if (fakes.has(vendor)) throw new Error(`Two fakes in \`fakes\` are for "${vendor}"; keep one per vendor`);
+    fakes.set(vendor, fake);
+  }
   const fakeDrivers = indexDrivers(
-    fakes.map((f) => f.driver),
+    [...fakes.values()].map((f) => f.driver),
     ops,
   );
   const names = new Map<string, WorkflowDefinition<any, any>>();
