@@ -37,9 +37,9 @@ import { resendDriver } from "@sanoma/connector-resend/driver";
 const drivers = [resendDriver({ from: "Acme <news@acme.example>" })]; // `from`: the default sender
 ```
 
-`audience` is Resend's `segment_id` (Resend renamed audiences to segments). `from` comes from the input, else the driver's `from` option; Resend requires one. `send` returns `status: "queued"`: Resend replies with the id only and sends in the background.
+`audience` is Resend's `segment_id` (Resend renamed audiences to segments). `from` comes from the input, else the driver's `from` option; Resend requires one. `send` returns `status: "queued"` when it sends: Resend replies with the id only and sends in the background.
 
-The client's types are generated from Resend's [OpenAPI spec](https://github.com/resend/resend-openapi), pinned to a commit and cut to the two operations in `openapi.redocly.yaml`: `pnpm run generate` rewrites `src/resend-api.d.ts`.
+The client's types are generated from Resend's [OpenAPI spec](https://github.com/resend/resend-openapi), pinned to a commit and cut to the operations it calls in `openapi.redocly.yaml`: `pnpm run generate` rewrites `src/resend-api.d.ts`.
 
 ### Environment
 
@@ -53,7 +53,7 @@ When it is unset, a call fails, not retryable, naming it.
 
 ### Idempotency
 
-Resend documents `Idempotency-Key` for emails only, not broadcasts. The driver sends the call's key on both requests anyway, and names the broadcast after it so it traces to its run. A replayed `create` can leave a second draft, which sends nothing. A replayed `send` asks Resend to send the broadcast again; Resend does not document what it answers.
+Resend documents `Idempotency-Key` for emails only, not broadcasts. The driver sends the call's key on both requests anyway, and names the broadcast after it so it traces to its run. A replayed `create` can leave a second draft, which sends nothing. `send` reads the broadcast first and sends only a `draft` or `scheduled` one, so a replayed `send` whose reply was lost sends nothing: it returns `queued` or `sent`, as Resend says the broadcast is, and fails for good on a `canceled` one. The read and the send are two requests, not one: two tries of one call running at once (a recovering worker re-running a call another worker still runs) could both read a draft and both send it, and Resend documents nothing that would stop the second.
 
 ### Errors and retries
 

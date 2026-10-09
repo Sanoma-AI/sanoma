@@ -6,7 +6,7 @@ apis:
     decorators:
       filter-in:
         property: operationId
-        value: [broadcasts/create, broadcasts/send]
+        value: [broadcasts/create, broadcasts/get, broadcasts/send]
       # Webhooks have no operationId, so filter-in keeps them.
       filter-out:
         property: tags

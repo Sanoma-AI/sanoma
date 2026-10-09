@@ -21,6 +21,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/broadcasts/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Retrieve a single broadcast */
+    get: operations["broadcasts/get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/broadcasts/{id}/send": {
     parameters: {
       query?: never;
@@ -86,6 +103,77 @@ export interface components {
        */
       object?: string;
     };
+    GetBroadcastResponseSuccess: {
+      /**
+       * @description Unique identifier for the broadcast.
+       * @example e169aa45-1ecf-4183-9955-b1499d5701d3
+       */
+      id?: string;
+      /**
+       * @description Name of the broadcast.
+       * @example November announcements
+       */
+      name?: string;
+      /**
+       * @deprecated
+       * @description Deprecated: use `segment_id` instead. Unique identifier of the segment this broadcast will be sent to.
+       */
+      audience_id?: string | null;
+      /** @description Unique identifier of the segment this broadcast will be sent to. */
+      segment_id?: string | null;
+      /**
+       * @description The email address of the sender.
+       * @example Acme <onboarding@resend.dev>
+       */
+      from?: string;
+      /**
+       * @description The subject line of the email.
+       * @example Hello World
+       */
+      subject?: string;
+      /** @description The email addresses to which replies should be sent. */
+      reply_to?: string[];
+      /**
+       * @description The preview text of the email.
+       * @example Here are our announcements
+       */
+      preview_text?: string;
+      /**
+       * @description The status of the broadcast.
+       * @example draft
+       */
+      status?: string;
+      /**
+       * @description Timestamp indicating when the broadcast was created.
+       * @example 2023-10-06 22:59:55.977+00
+       */
+      created_at?: string;
+      /**
+       * @description Timestamp indicating when the broadcast is scheduled to be sent.
+       * @example 2023-10-06 22:59:55.977+00
+       */
+      scheduled_at?: string;
+      /**
+       * @description Timestamp indicating when the broadcast was sent.
+       * @example 2023-10-06 22:59:55.977+00
+       */
+      sent_at?: string;
+      /**
+       * @description The plain text version of the broadcast content.
+       * @example Hello {{{FIRST_NAME|there}}}!
+       */
+      text?: string | null;
+      /**
+       * @description The HTML version of the broadcast content.
+       * @example <p>Hello {{{FIRST_NAME|there}}}!</p>
+       */
+      html?: string | null;
+      /**
+       * @description The topic ID that the broadcast is scoped to.
+       * @example b6d24b8e-af0b-4c3c-be0c-359bbd97381e
+       */
+      topic_id?: string | null;
+    };
     SendBroadcastOptions: {
       /** @description Schedule email to be sent later. The date should be in ISO 8601 format. */
       scheduled_at?: string;
@@ -126,6 +214,29 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CreateBroadcastResponseSuccess"];
+        };
+      };
+    };
+  };
+  "broadcasts/get": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The Broadcast ID. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GetBroadcastResponseSuccess"];
         };
       };
     };

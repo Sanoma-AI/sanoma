@@ -35,11 +35,13 @@ const scrub = (json: string) =>
 
 const server = setupServer();
 const requests: Request[] = [];
-let recordAs: string | undefined;
+/** The fixture each request (`<method> <path>`) is recorded as, live. */
+const recordAs = new Map<string, string>();
 const recordings: Promise<void>[] = [];
+const requestKey = (method: string, url: string) => `${method.toUpperCase()} ${new URL(url).pathname}`;
 server.events.on("request:start", ({ request }) => void requests.push(request.clone()));
-server.events.on("response:bypass", ({ response }) => {
-  const name = recordAs;
+server.events.on("response:bypass", ({ request, response }) => {
+  const name = recordAs.get(requestKey(request.method, request.url));
   if (!record || !name) return;
   recordings.push(
     response
@@ -52,13 +54,22 @@ server.events.on("response:bypass", ({ response }) => {
   );
 });
 
-/** The next request to `path` gets the fixture `name` (or `given`); live, its reply is recorded as `name`. */
-function reply(name: string, path: string, given?: Fixture) {
-  recordAs = name;
+/**
+ * The next `method` request to `path` gets the fixture `name` (or `given`); live, its reply is
+ * recorded as `name`.
+ */
+function reply(
+  name: string,
+  path: string,
+  { method = "post", given }: { method?: "get" | "post"; given?: Fixture } = {},
+) {
+  recordAs.set(requestKey(method, `${API}${path}`), name);
   if (live) return;
   const { status, body } = given ?? fixture(name);
-  server.use(http.post(`${API}${path}`, () => HttpResponse.json(body as any, { status }), { once: true }));
+  server.use(http[method](`${API}${path}`, () => HttpResponse.json(body as any, { status }), { once: true }));
 }
+/** The broadcast `id` is read before it is sent: as a draft unless `given` says otherwise. */
+const read = (id: string, given?: Fixture) => reply("get-draft", `/broadcasts/${id}`, { method: "get", given });
 
 // Read before any test can re-record it: live, Resend's reply must still match it.
 const invalidFrom = fixture("create-invalid-from") as Fixture & { body: { name: string } };
@@ -111,10 +122,36 @@ describe("resendDriver", () => {
     // Compared, not printed: a failure must not show a live key.
     expect(sent.headers.get("authorization") === `Bearer ${process.env.RESEND_API_KEY}`).toBe(true);
 
+    read(id);
     reply("send", `/broadcasts/${id}/send`);
     expect(await send(id)).toEqual({ id, status: "queued" });
-    expect(new URL(requests[1]!.url).pathname).toBe(`/broadcasts/${id}/send`);
-    expect(requests[1]!.headers.get("idempotency-key")).toBe("run-1:3");
+    expect(requests.slice(1).map((r) => requestKey(r.method, r.url))).toEqual([
+      `GET /broadcasts/${id}`,
+      `POST /broadcasts/${id}/send`,
+    ]);
+    expect(requests[2]!.headers.get("idempotency-key")).toBe("run-1:3");
+  });
+
+  it.skipIf(live)("does not send a broadcast that is already sent, so a replay sends nothing", async () => {
+    read("bc_1", fixture("get-sent"));
+    expect(await send("bc_1")).toEqual({ id: "bc_1", status: "sent" });
+    expect(requests.map((r) => r.method)).toEqual(["GET"]);
+  });
+
+  it.skipIf(live)("does not send a broadcast that is queued, and says it is", async () => {
+    read("bc_1", { status: 200, body: { object: "broadcast", id: "bc_1", status: "queued" } });
+    expect(await send("bc_1")).toEqual({ id: "bc_1", status: "queued" });
+    expect(requests.map((r) => r.method)).toEqual(["GET"]);
+  });
+
+  it.skipIf(live)("fails for good to send a canceled broadcast", async () => {
+    read("bc_1", { status: 200, body: { object: "broadcast", id: "bc_1", status: "canceled" } });
+    const err = await failure(send("bc_1"));
+    expect(err).toMatchObject({
+      retryable: false,
+      message: "resend: broadcast.send: broadcast bc_1 is canceled, not sendable",
+    });
+    expect(requests.map((r) => r.method)).toEqual(["GET"]);
   });
 
   it("takes the sender from the driver's options when the input has none", async () => {
@@ -146,6 +183,7 @@ describe("resendDriver", () => {
     ["server-error", true, "application_error"],
     ["daily-quota", false, "daily_quota_exceeded"],
   ])("a %s reply is retryable: %s", async (name, retryable, vendorCode) => {
+    read("bc_1");
     reply(name, "/broadcasts/bc_1/send");
     const err = await failure(send("bc_1"));
     expect(err).toMatchObject({ retryable, status: fixture(name).status, vendorCode });
@@ -156,13 +194,14 @@ describe("resendDriver", () => {
     [409, "concurrent_idempotent_requests", true],
     [409, "invalid_idempotent_request", false],
   ])("a %i %s is retryable: %s", async (status, name, retryable) => {
-    reply(name, "/broadcasts/bc_1/send", { status, body: { statusCode: status, name, message: name } });
+    read("bc_1");
+    reply(name, "/broadcasts/bc_1/send", { given: { status, body: { statusCode: status, name, message: name } } });
     const err = await failure(send("bc_1"));
     expect(err).toMatchObject({ retryable, status, vendorCode: name });
   });
 
   it.skipIf(live)("fails retryable when Resend does not answer in time", async () => {
-    server.use(http.post(`${API}/broadcasts/bc_1/send`, () => delay("infinite")));
+    server.use(http.all(`${API}/*`, () => delay("infinite")));
     const err = await failure(send("bc_1"));
     expect(err).toMatchObject({ retryable: true, message: "resend: broadcast.send timed out after 200 ms" });
     expect(err.status).toBeUndefined();
