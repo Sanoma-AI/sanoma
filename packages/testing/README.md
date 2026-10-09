@@ -92,4 +92,24 @@ Two variables change what the same tests do:
 - `SANOMA_LIVE=1` calls the vendor instead: every request goes through to it. A run without the `needs` variables fails at once rather than replaying. Tests that only replay skip themselves with `it.skipIf(live)`.
 - `SANOMA_RECORD=1`, with `SANOMA_LIVE=1`, rewrites each played fixture from the vendor's replies, passed through `scrub` first. Read the diff, and run `pnpm format`, before committing it.
 
+## Scenarios
+
+`@sanoma/testing/scenarios` runs a config's [scenarios](https://www.npmjs.com/package/@sanoma/workflows#scenarios-and-sandbox-runs) as vitest tests (install `vitest` beside it). Each scenario is a sandbox run: the worker calls the config's `fakes`, never a driver.
+
+`describeScenarios(config, options?)` reads the `.feature` files in the config's `scenarios` directory and registers a test for each scenario, in a `describe` per file. A test starts the scenario's sandbox run, decides its approvals as the scenario says, and fails listing each `Then` step that did not hold, with why. A file that does not load (a step no rule matches, bad JSON, a name used twice) is a failing test named after the file, whose message names the file and line. It starts one worker for the file's scenarios, before them, with `startTestWorker(config, options)`, and stops it after; `appName` is required, as there. `options.startedBy` starts the runs (default `{ id: "scenarios" }`).
+
+```ts
+// test/scenarios.test.ts
+import { describeScenarios } from "@sanoma/testing/scenarios";
+import { memoryLedger } from "@sanoma/workflows";
+import config from "../sanoma.config.ts";
+
+// An in-memory ledger, so test runs stay out of the project's own; appName names the test database.
+describeScenarios({ ...config, ledger: memoryLedger(), appName: "scenarios-test" });
+```
+
+A scenario takes a second or two, mostly the queue picking the run up, so give vitest more than its default 5 seconds: `testTimeout: 60_000` and `hookTimeout: 60_000` in `vitest.config.ts`. Sandbox runs go one at a time, so a scenario that leaves its run waiting on an approval it has no decision for holds up the ones after it until they time out; fix the first failure first.
+
+`runScenario(scenario, { client, workflows, startedBy?, timeoutMs? })` runs one scenario against a worker you started, with a `SanomaClient` of it, and returns `{ runId, run, ledger, checks }`: the run's id, its summary, its ledger records and `check(scenario, ledger)`. `workflows` is the config's: the scenario names its workflow, and the client starts a definition. `timeoutMs` goes to `drive`. Load the scenarios with `loadScenarios(resolveConfig(config))` from `@sanoma/workflows/scenario`.
+
 Status: early (0.x). License: Apache-2.0.
