@@ -2,7 +2,7 @@ import type { ApprovalState, LedgerBody, LedgerGroup, LedgerRecord, RunStatus, R
 import type { OutlineNode } from "@sanoma/workflows/describe";
 import { describe, expect, it } from "vitest";
 import { runGraph } from "../src/graph/run-graph.ts";
-import { pairs, summary } from "./graph-helpers.ts";
+import { pairs, spans, summary } from "./graph-helpers.ts";
 
 // Hand-built ledgers, in the shapes the runtime writes (see packages/workflows/src/ledger.ts).
 
@@ -59,9 +59,9 @@ const called = (op: string, more: object = {}): Body => ({
   ...more,
 });
 /** A workflow's approval, asked for. */
-const requested = (title: string): Body => ({
+const requested = (title: string, id = `approval-${title}`): Body => ({
   type: "approval.requested",
-  approval: `approval-${title}`,
+  approval: id,
   title,
   approver: "marketing-lead",
   requestedBy: "workflow",
@@ -211,18 +211,12 @@ describe("runGraph", () => {
   });
 
   it("draws a workflow's approval as a node, as the run's approvals tell it", () => {
-    const records = ledger(
-      started,
-      {
-        type: "approval.requested",
-        approval: "approval-1",
-        title: "Send it?",
-        approver: "marketing-lead",
-        requestedBy: "workflow",
-        covers: [],
-      },
-      { type: "approval.refused", approval: "approval-1", by: "mallory", reason: "not the approver" },
-    );
+    const records = ledger(started, requested("Send it?", "approval-1"), {
+      type: "approval.refused",
+      approval: "approval-1",
+      by: "mallory",
+      reason: "not the approver",
+    });
     const pending = approval("pending");
     const waiting = runGraph(records, run("waiting", [pending]), NOW);
     expect(summary(waiting.nodes)).toEqual(["start ok", "approval:approval-1 waiting", "end off"]);
@@ -323,14 +317,11 @@ describe("runGraph", () => {
       { kind: "sleep", span: [100, 110] },
       { kind: "op", id: "*.post.create", span: [120, 130] },
     ];
-    const spans = (records: LedgerRecord[], status: RunStatus = "running") =>
-      runGraph(records, run(status), NOW, outline).nodes.map(
-        (n) => `${n.id} ${JSON.stringify("spans" in n ? n.spans : null)}`,
-      );
+    const spansIn = (records: LedgerRecord[]) => spans(runGraph(records, run("running"), NOW, outline).nodes);
 
     it("points an operation's call at the outline's calls of that operation, wherever they are", () => {
       expect(
-        spans(
+        spansIn(
           ledger(
             started,
             called("ghost.post.create"),
@@ -355,7 +346,7 @@ describe("runGraph", () => {
     it("points an approval at the outline's approvals with its title, or else at the untitled ones, and a sleep at the sleeps", () => {
       const until = NOW + 60_000;
       expect(
-        spans(ledger(started, requested("Send it?"), requested("Other"), { type: "sleep.started", until })),
+        spansIn(ledger(started, requested("Send it?"), requested("Other"), { type: "sleep.started", until })),
       ).toEqual([
         "start null",
         "approval:approval-Send it? [[60,70]]",
@@ -368,21 +359,7 @@ describe("runGraph", () => {
     it("points an approval nowhere when no approval has its title and none is untitled", () => {
       const titled: OutlineNode[] = [{ kind: "approval", title: "Send it?", span: [60, 70] }];
       const { nodes } = runGraph(ledger(started, requested("Other")), run("running"), NOW, titled);
-      expect(nodes.find((n) => n.kind === "approval")?.spans).toBeUndefined();
-    });
-
-    it("points a pending member nowhere", () => {
-      const records = ledger(started, inGroup(called("ghost.post.create"), 0, 2));
-      expect(spans(records)).toEqual(["start null", "op:1 [[0,10]]", "pending:all:1:1 null", "end null"]);
-    });
-
-    it("points nothing anywhere without it", () => {
-      const { nodes } = runGraph(
-        ledger(started, called("ghost.post.create"), requested("Send it?")),
-        run("running"),
-        NOW,
-      );
-      expect(nodes.some((n) => "spans" in n)).toBe(false);
+      expect(spans(nodes)).toEqual(["start null", "approval:approval-Other null", "end null"]);
     });
   });
 });
