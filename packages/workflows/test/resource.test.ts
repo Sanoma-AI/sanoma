@@ -111,6 +111,26 @@ describe("defineResource", () => {
     expect(() => thing({ id: "t_1", created: 1 })).toThrow("acme.thing: leave out created: the vendor sets it");
   });
 
+  it("takes another declared resource for a string field, checked and found as its name", () => {
+    const rule = defineResource({
+      vendor: "acme",
+      type: "rule",
+      title: "Rule",
+      identity: "repository:pattern",
+      schema: z.object({ repository: z.string(), pattern: z.string(), strict: z.boolean().nullish() }),
+      fields: { immutable: ["repository"], vendorOwned: [], writeOnly: [] },
+      find: ({ repository, pattern }) => `${repository}:${pattern}`,
+    });
+    const site = repo({ name: "sanoma" });
+    const main = rule({ repository: site, pattern: "main" });
+    expect(main.name).toBe("sanoma:main");
+    // The data file's reference is kept: the resource, not a copy of its name.
+    expect(main.desired.repository).toBe(site);
+    // Only where a string goes: a boolean field takes no resource.
+    // @ts-expect-error strict is a boolean
+    expect(() => rule({ repository: site, pattern: "main", strict: site })).toThrow(/acme\.rule: .*strict/s);
+  });
+
   it("is implemented by an ordinary driver", () => {
     const driver = defineDriver(acme, {
       repo: {

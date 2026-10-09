@@ -1,4 +1,7 @@
-import type { Use, WorkflowDefinition } from "./define.ts";
+import { existsSync, statSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { getCallSites } from "node:util";
+import { pathOf, type Use, type WorkflowDefinition } from "./define.ts";
 import type { LedgerStore } from "./ledger.ts";
 import { type Connector, type Driver, type DriverFn, isOp, type Op } from "./op.ts";
 import type { Policy } from "./policy.ts";
@@ -28,6 +31,16 @@ export interface SanomaConfig {
   appName?: string;
   /** Postgres for the runtime. Defaults to `SANOMA_DATABASE_URL`, then the local docker compose database. */
   databaseUrl?: string;
+  /**
+   * The directories of the data files that declare resources, relative to the config's file.
+   * Defaults to `resources`, which may be missing; a directory named here must exist.
+   */
+  resources?: string | string[];
+  /**
+   * The file that defined the config, absolute, when known: `resources` are relative to its
+   * directory (else to the working directory). Set by `defineConfig` from its call site.
+   */
+  file?: string;
 }
 
 /** A config, checked, with everything a worker, client or app derives from it. */
@@ -46,12 +59,16 @@ export interface ResolvedConfig {
   workflows: WorkflowDefinition<any, any>[];
   policy: Policy;
   ledger: LedgerStore;
+  /** The data files' directories, absolute, each one that exists (see `SanomaConfig.resources`). */
+  resources: string[];
 }
 
 export const DEFAULT_DATABASE_URL = "postgresql://postgres:dbos@localhost:5433/sanoma";
 
+/** Returns the config, with the file it is called from as its `file`, which `resources` are relative to. */
 export function defineConfig(config: SanomaConfig): SanomaConfig {
-  return config;
+  // Frame 0 is this function, frame 1 its caller: by index, since a bundle may hold both.
+  return { ...config, file: config.file ?? pathOf(getCallSites(2)[1]?.scriptName) };
 }
 
 export function resolveDatabaseUrl(config: { databaseUrl?: string }): string {
@@ -108,7 +125,32 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     workflows: [...names.values()],
     policy: config.policy,
     ledger,
+    resources: resourceDirs(config),
   };
+}
+
+/** The config's data-file directories, absolute: the default, `resources`, only when it exists. */
+function resourceDirs(config: SanomaConfig): string[] {
+  const base = config.file === undefined ? process.cwd() : dirname(config.file);
+  if (config.resources === undefined) {
+    const dir = resolve(base, "resources");
+    return existsSync(dir) && statSync(dir).isDirectory() ? [dir] : [];
+  }
+  const dirs = typeof config.resources === "string" ? [config.resources] : config.resources;
+  if (!Array.isArray(dirs) || dirs.some((d) => typeof d !== "string")) {
+    throw new Error("The config's `resources` must be a directory, or a list of them, relative to the config's file");
+  }
+  return [
+    ...new Set(
+      dirs.map((d) => {
+        const dir = resolve(base, d);
+        if (!existsSync(dir) || !statSync(dir).isDirectory()) {
+          throw new Error(`The config's \`resources\` names ${d}, which is not a directory (${dir})`);
+        }
+        return dir;
+      }),
+    ),
+  ];
 }
 
 function indexConnectors(list: Connector<any, any>[]) {

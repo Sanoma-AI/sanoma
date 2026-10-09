@@ -190,6 +190,8 @@ describe("the API", () => {
     expect(JSON.stringify(body)).not.toContain(line);
     expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.effect).toBe("send");
     expect(body.vendors.resend).toMatchObject({ title: "Resend", logo: { src: expect.stringMatching(/^data:/) } });
+    // No data files beside the config: no declared resources, passed through as they are.
+    expect(body.resources).toEqual([]);
   });
 
   it("refuses a run without an actor, for an unknown workflow, or with input the schema refuses", async () => {
