@@ -111,7 +111,7 @@ export function runGraph(
           {
             kind: "sleep",
             key: `sleep:${record.seq}`,
-            label: `sleep until ${utcText(record.until)}`,
+            label: `until ${utcText(record.until)}`,
             state: { tone: asleep ? "waiting" : "ok", recordId: record.id },
           },
           record.group,

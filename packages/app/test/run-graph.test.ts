@@ -196,7 +196,7 @@ describe("runGraph", () => {
     expect(nodes[1]).toEqual({
       id: "sleep:1",
       kind: "sleep",
-      label: "sleep until 2026-10-09 08:01 UTC",
+      label: "until 2026-10-09 08:01 UTC",
       state: { tone: "waiting", recordId: "r1" },
     });
     expect(nodes[2]).toEqual({ id: "end", kind: "end", label: "pending", pending: true, state: { tone: "off" } });

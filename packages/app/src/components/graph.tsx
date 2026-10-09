@@ -96,6 +96,12 @@ function Handles({ inbound = true, outbound = true }: { inbound?: boolean; outbo
   );
 }
 
+/**
+ * What a node is called, for its title and assistive tech: its label, but for a run's sleep,
+ * whose label says only until when and whose clock says "sleep".
+ */
+const nameOf = (node: GraphNode) => (node.kind === "sleep" && node.state ? `sleep ${node.label}` : node.label);
+
 /** One node's box, in its tone when a run gives it one, ringed when selected, with its handles. */
 function Frame({
   data: { node, selectable },
@@ -108,7 +114,7 @@ function Frame({
   return (
     <div
       className={frame({ tone: state?.tone ?? "off", pending: isPending(node), clickable: selectable, selected })}
-      title={node.label}
+      title={nameOf(node)}
     >
       <Handles inbound={inbound} outbound={outbound} />
       {children}
@@ -360,7 +366,7 @@ export default function Graph({ graph, show = "end", selected, onSelect }: Graph
         ...size,
         ...(node.parent === undefined ? {} : { parentId: node.parent }),
         data: { node, selectable: clickable && isSelectable(node) },
-        ariaLabel: node.label,
+        ariaLabel: nameOf(node),
         draggable: false,
         connectable: false,
       } as FlowNode;
