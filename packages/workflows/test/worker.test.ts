@@ -72,6 +72,11 @@ const refused: [string, Partial<SanomaConfig>, RegExp][] = [
     /^The config needs a `ledger`; use `jsonlLedger\(dir\)`.*`memoryLedger\(\)`/,
   ],
   ["no connectors", { connectors: undefined as never }, /^The config needs `connectors`/],
+  [
+    "scenarios that are not a file: URL",
+    { scenarios: new URL("https://example.com/scenarios/") },
+    /^The config's `scenarios` must be a file: URL to a directory/,
+  ],
 ];
 
 describe("startWorker, resolveConfig and describeConfig", () => {
@@ -107,9 +112,25 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       "resend.broadcast.send",
     ]);
     expect([...resolved.drivers.keys()].toSorted()).toEqual([...resolved.ops.keys()].toSorted());
+    expect(resolved.fakes).toEqual([]);
+    expect(resolved.fakeDrivers.size).toBe(0);
     expect(resolved.ledger).toBe(ledger);
     expect(resolveConfig(config({})).appName).toBe("sanoma");
     expect(resolveConfig(config({})).queueName).toBe("sanoma:sanoma");
+  });
+
+  it("index the fakes' functions by operation id, apart from the drivers', for sandbox runs", () => {
+    const scenarios = new URL("file:///srv/acme/scenarios/");
+    const fakes = [vendors.ghost, vendors.bluesky];
+    const resolved = resolveConfig(config({ fakes, scenarios }));
+    expect(resolved.fakes).toBe(fakes);
+    expect([...resolved.fakeDrivers.keys()].toSorted()).toEqual([
+      "bluesky.post.create",
+      "ghost.post.create",
+      "ghost.post.publish",
+    ]);
+    expect(resolved.fakeDrivers.get("ghost.post.create")).toBe(vendors.ghost.driver.ops["post.create"]);
+    expect(resolved.scenarios).toBe(scenarios);
   });
 });
 

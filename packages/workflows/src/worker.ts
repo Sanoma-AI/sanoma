@@ -48,6 +48,10 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     app: resolved.appName,
     ops: resolved.ops,
     drivers: resolved.drivers,
+    fakes: resolved.fakes,
+    fakeDrivers: resolved.fakeDrivers,
+    ...(resolved.scenarios && { scenarios: resolved.scenarios }),
+    workflows: new Map(resolved.workflows.map((wf) => [wf.name, wf])),
     policy: resolved.policy,
     ledger: resolved.ledger,
     stopped: false,
@@ -138,7 +142,7 @@ async function warnAboutStrandedRuns({ appName, version, queueName }: ResolvedCo
 
 function register(wf: WorkflowDefinition<any, any>) {
   return DBOS.registerWorkflow(
-    async ({ input, startedBy }: RunArgs) => {
+    async ({ input, startedBy, sandbox }: RunArgs) => {
       const state = current;
       // A stopped worker's state stays current while DBOS shuts down.
       if (!state || state.stopped) throw new Error(`Run of "${wf.name}" started with no worker running`);
@@ -146,6 +150,7 @@ function register(wf: WorkflowDefinition<any, any>) {
         id: DBOS.workflowID!,
         workflow: wf.name,
         actor: startedBy,
+        ...(sandbox === undefined ? {} : { sandbox }),
         approvals: [],
         seq: 0,
         tail: Promise.resolve(),
@@ -157,12 +162,18 @@ function register(wf: WorkflowDefinition<any, any>) {
       let output: unknown;
       try {
         try {
+          if (sandbox !== undefined) {
+            // Imported here, so a live worker never loads the Gherkin parser or faker.
+            const { seedSandbox } = await import("./scenario.ts");
+            await seedSandbox(run, sandbox);
+          }
           // The one parse of the input: the client checked it, but sent it as given.
           const parsed = parseOrThrow(wf.input, input, `The input does not match ${wf.name}'s schema`);
           output = await wf.run(buildCtx(wf, run), parsed);
         } finally {
           // Before the outcome is written: a call still queued must find the run ended.
           run.ended = true;
+          if (state.sandboxRun === run.id) state.sandboxRun = undefined;
         }
       } catch (err) {
         const record = entry(run, { type: "run.failed", error: errorInfo(err) });

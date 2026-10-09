@@ -180,8 +180,15 @@ async function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecisio
 async function callOp(run: Run, id: string, input: unknown) {
   // The worker's declaration, never the workflow's: its effect, schemas and retry setting.
   const op = run.state.ops.get(id);
-  const fn = run.state.drivers.get(id);
-  if (!op || !fn) throw new Error(`No connector or driver for ${id} in this worker`);
+  // A sandbox run calls the fakes, never a vendor.
+  const fn = (run.sandbox === undefined ? run.state.drivers : run.state.fakeDrivers).get(id);
+  if (!op || !fn) {
+    throw new Error(
+      run.sandbox === undefined
+        ? `No connector or driver for ${id} in this worker`
+        : `No connector or fake for ${id} in this worker: add its vendor's fake to the config's \`fakes\``,
+    );
+  }
   const parsed = parseOrThrow(op.input, input, `The input to ${op.id} does not match its schema`, { op: op.id });
   // The call's identity (its ledger seq and id, and the driver's idempotency key) is taken
   // before the first await, so it depends only on the order the workflow made its calls. A
@@ -328,6 +335,6 @@ async function sleep(run: Run, raw: unknown) {
     until = Date.now() + ms;
   }
   await write(run, entry(run, { type: "sleep.started", until }, { seq }));
-  // A time already past waits not at all, and adds no step.
-  if (ms > 0) await DBOS.sleep(ms);
+  // A time already past waits not at all, and adds no step. A sandbox run never waits.
+  if (ms > 0 && run.sandbox === undefined) await DBOS.sleep(ms);
 }
