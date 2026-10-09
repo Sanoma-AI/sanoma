@@ -74,7 +74,7 @@ You need a Ghost site of your own. Self-hosted Ghost is free and open source (`d
 
 ### Testing the driver
 
-`test/driver.test.ts` replays Ghost's recorded replies (`test/fixtures`) with [`@sanoma/testing/replay`](https://github.com/Sanoma-AI/sanoma/tree/main/packages/testing#replaying-a-vendors-api), which says what `SANOMA_LIVE` and `SANOMA_RECORD` do: `pnpm vitest run connectors/ghost` needs no site. Live, they create posts titled `sanoma test <timestamp>` on the site, publish some, and delete them at the end:
+`test/driver.test.ts` replays Ghost's recorded replies (`test/fixtures`) with [`@sanoma/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/AGENTS.md#replaying-a-vendors-api), which says what `SANOMA_LIVE` and `SANOMA_RECORD` do: `pnpm vitest run connectors/ghost` needs no site. Live, they create posts titled `sanoma test <timestamp>` on the site, publish some, and delete them at the end:
 
 ```sh
 SANOMA_LIVE=1 GHOST_ADMIN_URL=https://example.ghost.io GHOST_ADMIN_API_KEY=<id>:<secret> pnpm vitest run connectors/ghost

@@ -74,7 +74,7 @@ Any account can post with an app password: there is no approval or paid tier.
 
 ### Testing the driver
 
-`test/driver.test.ts` replays recorded XRPC replies (`test/fixtures`) with [`@sanoma/testing/replay`](https://github.com/Sanoma-AI/sanoma/tree/main/packages/testing#replaying-a-vendors-api), which says what `SANOMA_LIVE` and `SANOMA_RECORD` do: `pnpm vitest run connectors/bluesky` needs no account. Live, they post a few test posts to the account:
+`test/driver.test.ts` replays recorded XRPC replies (`test/fixtures`) with [`@sanoma/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/AGENTS.md#replaying-a-vendors-api), which says what `SANOMA_LIVE` and `SANOMA_RECORD` do: `pnpm vitest run connectors/bluesky` needs no account. Live, they post a few test posts to the account:
 
 ```sh
 SANOMA_LIVE=1 BLUESKY_IDENTIFIER=you.bsky.social BLUESKY_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx pnpm vitest run connectors/bluesky
