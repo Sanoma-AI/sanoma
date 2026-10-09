@@ -7,6 +7,8 @@
     "**/routeTree.gen.ts",
     "**/cn-tables.ts",
     ".agents/skills",
-    "skills-lock.json"
+    "skills-lock.json",
+    "packages/bridge/src/gen",
+    "packages/bridge/testdata"
   ]
 }
