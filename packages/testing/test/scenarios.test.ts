@@ -45,6 +45,13 @@ describe("runScenario", () => {
 });
 
 describe("describeScenarios", () => {
+  it("throws, naming the directory, when it finds no scenarios", () => {
+    const none = new URL("./fixtures/none/", import.meta.url);
+    expect(() => describeScenarios({ ...config, scenarios: none, appName })).toThrow(
+      `describeScenarios found no scenarios in ${fileURLToPath(none)}`,
+    );
+  });
+
   const dir = mkdtempSync(join(tmpdir(), "sanoma-scenarios-"));
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
