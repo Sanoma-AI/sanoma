@@ -8,6 +8,8 @@ Source of `@sanoma/bridge`: the client exported from the package root, the fake 
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`index.ts`](index.ts)            | The package root: `startBridge`, `readPins`, `BridgeError`, `parseSchema` and the types                                                                              |
 | [`bridge.ts`](bridge.ts)          | The `Bridge` interface, `ProviderRef`, `ResourceState`, `Diagnostic`, `BridgeError`, and `bridgeClient`, which maps a Connect client's messages and errors onto them |
+| [`configure.ts`](configure.ts)    | `ensureConfigured`: configures a provider once per bridge and config, serialized, and again after it has gone                                                        |
+| [`replies.ts`](replies.ts)        | `loadReplies` and `stateBridge`: recorded replies as mutable state, and a bridge over it, for connectors' fakes                                                      |
 | [`client.ts`](client.ts)          | `startBridge`: spawns `provider-bridge serve`, waits for the ready line, connects over the unix socket                                                               |
 | [`fake.ts`](fake.ts)              | `fakeBridge`: `BridgeService` over fixture files on an in-memory transport; live and recording modes                                                                 |
 | [`record.ts`](record.ts)          | `recorder(dir)`: a Connect interceptor writing scrubbed fixtures                                                                                                     |

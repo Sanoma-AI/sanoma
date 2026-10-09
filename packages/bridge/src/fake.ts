@@ -24,6 +24,8 @@ import {
   ReadResponseSchema,
 } from "./gen/bridge/v1/bridge_pb.ts";
 import { readPins, testdata } from "./pins.ts";
+export { fixturesDir } from "./pins.ts";
+import type { BridgeCall } from "./replies.ts";
 import { recorder } from "./record.ts";
 import { parseSchema, type SchemaDocument } from "./schema.ts";
 
@@ -34,14 +36,14 @@ export interface FakeBridgeOptions {
   bridge?: StartBridgeOptions;
 }
 
-/** A call the fake received, in order. */
-export interface BridgeCall {
-  method: "schema" | "configure" | "import" | "read" | "close";
-  ref?: ProviderRef;
-  typeName?: string;
-  /** The import ID, or the `id` in a read's state. */
-  id?: string;
-}
+export {
+  type BridgeCall,
+  type BridgeState,
+  loadReplies,
+  type StateFailure,
+  type StateObject,
+  stateBridge,
+} from "./replies.ts";
 
 export interface FakeBridge extends Bridge {
   /** Every call, in order. */
