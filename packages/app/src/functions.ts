@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { type ActorInfo, DecideCall, RunsQuery, StartRunRequest } from "./api.ts";
-import { decide, parse, runDetail, startRun, withoutSources, workflowSource } from "./server/core.ts";
+import { decide, parse, runDetail, scenarios, startRun, withoutSources, workflowSource } from "./server/core.ts";
 import { withPrincipal } from "./middleware.ts";
 
 // The page's reads and changes, as server functions. Most do what an /api route does, with the
@@ -41,6 +41,9 @@ export const getActor = createServerFn(READ).handler(async ({ context }): Promis
     return { fromServer, actor: null, error: "Could not tell who you are" };
   }
 });
+
+/** The config's scenarios, read from their feature files on every call: the agent may be editing them. */
+export const getScenarios = createServerFn(READ).handler(({ context }) => scenarios(context.app));
 
 export const getRuns = createServerFn(READ)
   .validator(validate(RunsQuery))

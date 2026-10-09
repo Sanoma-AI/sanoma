@@ -21,6 +21,8 @@ export interface OpState extends StepState {
   durationMs?: number;
   /** The policy's approval holding the call, as the run tells it. */
   approval?: ApprovalState;
+  /** What a scenario says of the operation, on a workflow's outline: "seeded", "expected" or both. */
+  note?: string;
 }
 
 /** A workflow's approval, as the run tells it. */

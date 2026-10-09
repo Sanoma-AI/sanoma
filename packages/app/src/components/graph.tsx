@@ -185,6 +185,11 @@ function OpNode(props: Props<"op">) {
           state?.durationMs !== undefined && <span className="text-muted-foreground">{state.durationMs} ms</span>
         )}
       </Line>
+      {state?.note && (
+        <Line>
+          <span className="truncate text-muted-foreground">{state.note}</span>
+        </Line>
+      )}
     </Frame>
   );
 }

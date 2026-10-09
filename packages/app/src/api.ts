@@ -7,6 +7,7 @@ import type {
   RunStatus,
   RunSummary,
 } from "@sanoma/workflows";
+import type { Check, Scenario } from "@sanoma/workflows/scenario";
 import { z } from "zod";
 
 export type { InputIssue } from "@sanoma/workflows";
@@ -34,11 +35,15 @@ export interface ActorInfo {
   error?: string;
 }
 
-/** `POST /api/runs` */
-export const StartRunRequest = z.object({
-  workflow: z.string().min(1, "Name a workflow"),
-  input: z.unknown(),
-});
+/**
+ * `POST /api/runs`: a workflow and its input, or a scenario's name, which starts a sandbox run
+ * of the scenario's workflow with its input. The app never decides a sandbox run's approvals:
+ * people do, as in a live run.
+ */
+export const StartRunRequest = z.union([
+  z.object({ workflow: z.string().min(1, "Name a workflow"), input: z.unknown() }),
+  z.object({ scenario: z.string().min(1, "Name a scenario") }),
+]);
 export type StartRunRequest = z.infer<typeof StartRunRequest>;
 
 export interface StartRunResponse {
@@ -92,6 +97,20 @@ export interface RunDetail {
    */
   ledgerError?: string;
   approvals: ApprovalState[];
+  /**
+   * For a sandbox run, each of its scenario's expectations checked against the ledger. Absent
+   * when the run has not been seeded yet, or its scenario is no longer in the config.
+   */
+  checks?: Check[];
+}
+
+/** A scenario as the page lists it: what it says, not how the worker seeds and checks it. */
+export type ScenarioEntry = Pick<Scenario, "name" | "workflow" | "file" | "text" | "steps">;
+
+/** `GET /api/scenarios`: every scenario, and why each feature file that could not be read could not. */
+export interface ScenariosResponse {
+  scenarios: ScenarioEntry[];
+  errors: { file: string; message: string }[];
 }
 
 /** Every error response, and the `body` of the error a server function throws. */

@@ -5,7 +5,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { memo, type ReactNode, useCallback, useMemo } from "react";
 import { Card, CardContent } from "#/components/ui/card.tsx";
 import { Item, ItemActions, ItemContent, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
-import { approverLabel } from "@sanoma/workflows/shared";
+import { approverLabel, isEnded } from "@sanoma/workflows/shared";
 import { starterName } from "../../api.ts";
 import { ApprovalCard } from "../../components/approval.tsx";
 import {
@@ -24,11 +24,13 @@ import {
   pageTitle,
   plural,
   RequestedBy,
+  SandboxBadge,
   SectionTitle,
   StatusDot,
   ToneBadge,
   When,
 } from "../../components/common.tsx";
+import { Checks } from "../../components/scenario.tsx";
 import type { GraphNode } from "../../graph/types.ts";
 import { useReducedMotion } from "#/lib/motion.ts";
 import { utcText } from "#/lib/time.ts";
@@ -84,7 +86,7 @@ function show(recordId: string, reducedMotion: boolean) {
 function RunPage() {
   const { id } = Route.useParams();
   const { data, error, dataUpdatedAt } = useSuspenseQuery(runQuery(id));
-  const { run, ledger, ledgerError, approvals } = data;
+  const { run, ledger, ledgerError, approvals, checks } = data;
   // Only its name when the config has no workflow of that name: the graph says so.
   const { data: workflow } = useSuspenseQuery({
     ...configQuery(),
@@ -109,6 +111,7 @@ function RunPage() {
     <div className="flex flex-col gap-6">
       <PageHeader>
         <ToneBadge tone={RUN_TONE[run.status]}>{run.status}</ToneBadge>
+        {run.sandbox !== undefined && <SandboxBadge name={run.sandbox} />}
       </PageHeader>
       {error && <Notice variant="destructive">Could not refresh: {error.message}</Notice>}
       <Card size="sm">
@@ -129,6 +132,13 @@ function RunPage() {
           </Facts>
         </CardContent>
       </Card>
+
+      {checks && (
+        <div className="flex flex-col gap-3">
+          <SectionTitle>Checks</SectionTitle>
+          <Checks checks={checks} ended={isEnded(run.status)} />
+        </div>
+      )}
 
       <div className="flex flex-col gap-3">
         <SectionTitle>Graph</SectionTitle>
@@ -247,6 +257,17 @@ const LedgerRow = memo(function LedgerRow({ record, titles }: { record: LedgerRe
         <p>
           Ignored a message from {record.by ?? "someone"} on “{title(record.approval)}”: {record.reason}
         </p>
+      );
+      break;
+    case "scenario.seeded":
+      kind = "seeded";
+      body = (
+        <>
+          <p>
+            Seeded {plural(record.seeds.length, "call")} from scenario “{record.scenario}”
+          </p>
+          {record.seeds.length > 0 && <Expandable label="Seeds" value={record.seeds} />}
+        </>
       );
       break;
     case "sleep.started":

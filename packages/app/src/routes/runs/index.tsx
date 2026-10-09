@@ -1,7 +1,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
-import { Nothing, Notice, PageHeader, plural, Tip, ToneBadge, When } from "../../components/common.tsx";
+import { Nothing, Notice, PageHeader, plural, SandboxBadge, Tip, ToneBadge, When } from "../../components/common.tsx";
 import { StartButton } from "../../components/workflow.tsx";
 import { RUN_TONE } from "#/lib/tone.ts";
 import { pendingApprovals, starterName } from "../../api.ts";
@@ -55,11 +55,14 @@ function RunsPage() {
                     onClick={() => void navigate({ to: "/runs/$id", params: { id: run.runId } })}
                   >
                     <TableCell className="font-medium">
-                      <Tip tip={<code>{run.runId}</code>}>
-                        <Link to="/runs/$id" params={{ id: run.runId }} onClick={(e) => e.stopPropagation()}>
-                          {run.workflow}
-                        </Link>
-                      </Tip>
+                      <div className="flex items-center gap-2">
+                        <Tip tip={<code>{run.runId}</code>}>
+                          <Link to="/runs/$id" params={{ id: run.runId }} onClick={(e) => e.stopPropagation()}>
+                            {run.workflow}
+                          </Link>
+                        </Tip>
+                        {run.sandbox !== undefined && <SandboxBadge name={run.sandbox} />}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <ToneBadge tone={RUN_TONE[run.status]}>{run.status}</ToneBadge>
