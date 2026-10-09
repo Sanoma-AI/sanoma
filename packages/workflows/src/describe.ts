@@ -2,7 +2,7 @@ import type { z } from "zod";
 import { resolveConfig, type SanomaConfig } from "./config.ts";
 import { type Builtin, jsonSchemaOf, type Use } from "./define.ts";
 import { type Effect, isOp, VENDOR, type VendorInfo } from "./op.ts";
-import { type Outline, outlineWorkflow } from "./outline.ts";
+import { type Outline, outlineWithSource } from "./outline.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
 
 // `@sanoma/workflows/describe`: what a UI renders from. Apart from the main entry, so the
@@ -20,8 +20,13 @@ export interface WorkflowEntry {
   ops: string[];
   /** Built-ins the workflow may call. */
   builtins: Builtin[];
-  /** What its `run` calls, in order, read from its source (`outlineWorkflow`), with that source: its file, or else `run`'s text. */
+  /** What its `run` calls, in order, read from its source (`outlineWorkflow`): its file, or else `run`'s text. */
   outline: Outline;
+  /**
+   * The text the outline's spans index into: the file's, or `run`'s, with `\n` line endings.
+   * Absent only when the outline is `{ error }`. Whole files: a server may keep it from clients.
+   */
+  source?: string;
 }
 
 /** What an operation is, read from its connector: enough to badge it and show its contract. */
@@ -80,15 +85,19 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
   // A vendor whose operations are split over several connectors is named by the first.
   for (const { [VENDOR]: vendor } of config.connectors) vendors[vendor.id] ??= vendorEntry(vendor.id, vendor.info);
 
-  const workflows: WorkflowEntry[] = resolved.workflows.map((wf) => ({
-    name: wf.name,
-    title: wf.title,
-    trigger: wf.trigger,
-    input: toJsonSchema(wf.input, `${wf.name} input`, "input"),
-    ops: (wf.uses as Use[]).filter(isOp).map((op) => op.id),
-    builtins: (wf.uses as Use[]).filter((u): u is Builtin => typeof u === "string"),
-    outline: outlineWorkflow(wf),
-  }));
+  const workflows: WorkflowEntry[] = resolved.workflows.map((wf) => {
+    const { outline, source } = outlineWithSource(wf);
+    return {
+      name: wf.name,
+      title: wf.title,
+      trigger: wf.trigger,
+      input: toJsonSchema(wf.input, `${wf.name} input`, "input"),
+      ops: (wf.uses as Use[]).filter(isOp).map((op) => op.id),
+      builtins: (wf.uses as Use[]).filter((u): u is Builtin => typeof u === "string"),
+      outline,
+      ...(source === undefined ? {} : { source }),
+    };
+  });
   workflows.sort((a, b) => a.name.localeCompare(b.name));
 
   return {

@@ -9,9 +9,14 @@ import { errorMessage } from "./shared.ts";
  * the functions `run` calls are opaque, whether defined outside it or inside it, so their calls
  * do not show.
  */
-export type Outline = { source: string; nodes: OutlineNode[] } | { error: string };
+export type Outline =
+  /** Read from the file that defined the workflow (`wf.file`): the spans index into its text. */
+  | { nodes: OutlineNode[]; file: string }
+  /** Read from `run`'s own text (`run.toString()`), which the spans index into; `fallback` says why the file was not. */
+  | { nodes: OutlineNode[]; fallback: string }
+  | { error: string };
 
-/** Where a node is in the outline's `source`: UTF-16 offsets, as a string index or CodeMirror counts them. */
+/** Where a node is in the text the outline was read from: UTF-16 offsets, as a string index or CodeMirror counts them. */
 export type Span = readonly [start: number, end: number];
 
 /**
@@ -53,30 +58,28 @@ const TRANSPARENT = new Set([
 
 /**
  * Outlines a workflow from the source of its `run` function: TypeScript or, once built,
- * JavaScript. The `source` is the file that defined it (`wf.file`) when that can be read and
- * holds it, else `run`'s own text (`wf.run.toString()`); either way with `\n` line endings, and
- * every span indexes into it. Counts only calls on `run`'s first parameter, whatever it is named.
- * Returns `{ error }` when the source cannot be read or parsed, or `run` takes no `ctx` by name.
+ * JavaScript. It reads the file that defined it (`wf.file`) when that can be read and holds it,
+ * else `run`'s own text (`wf.run.toString()`), and says which. Counts only calls on `run`'s
+ * first parameter, whatever it is named. Returns `{ error }` when `run`'s text cannot be read or
+ * parsed, or `run` takes no `ctx` by name.
  */
-export function outlineWorkflow(wf: WorkflowDefinition<any, any>): Outline {
-  let found = wf.file === undefined ? undefined : inFile(wf.file, wf.name);
-  if (!found) {
-    let source: string;
-    try {
-      source = lf(Function.prototype.toString.call(wf.run));
-    } catch (err) {
-      return { error: `Cannot read the source of ${wf.name}'s run: ${errorMessage(err)}` };
-    }
-    const parsed = parseFunction(source);
-    if (typeof parsed === "string") return { error: `Cannot parse ${wf.name}'s run: ${parsed}` };
-    found = { source, ...parsed };
-  }
+export const outlineWorkflow = (wf: WorkflowDefinition<any, any>): Outline => outlineWithSource(wf).outline;
+
+/**
+ * `outlineWorkflow`, with the text its spans index into: the file's, or `run`'s, with `\n`
+ * line endings either way. No text with an `{ error }`.
+ */
+export function outlineWithSource(wf: WorkflowDefinition<any, any>): { outline: Outline; source?: string } {
+  const read = wf.file === undefined ? `${wf.name} has no file` : inFile(wf.file, wf.name);
+  const found = typeof read === "string" ? inRun(wf) : read;
+  if (typeof found === "string") return { outline: { error: found } };
   const { source, fn, offset } = found;
   const param = unwrap(fn.params[0]);
   if (param?.type !== "Identifier") {
-    return { error: `${wf.name}'s run takes no ctx parameter by name, so its calls cannot be read` };
+    return { outline: { error: `${wf.name}'s run takes no ctx parameter by name, so its calls cannot be read` } };
   }
-  return { source, nodes: outlineBody(fn.body, param.name, offset) };
+  const nodes = outlineBody(fn.body, param.name, offset);
+  return { source, outline: typeof read === "string" ? { nodes, fallback: read } : { nodes, file: wf.file! } };
 }
 
 /** CodeMirror counts a line break as one unit, oxc counts `\r\n` as two: spans need `\n` alone. */
@@ -89,16 +92,19 @@ interface Found {
   offset: number;
 }
 
-/** The workflow's `run` in its file: the first object literal with its `name` and a `run` function. */
-function inFile(file: string, name: string): Found | undefined {
+/**
+ * The workflow's `run` in its file: the first object literal with its `name` and a `run`
+ * function. Or why not: the file cannot be read or parsed, or holds no such literal.
+ */
+function inFile(file: string, name: string): Found | string {
   let source: string;
   try {
     source = lf(readFileSync(file, "utf8"));
-  } catch {
-    return undefined;
+  } catch (err) {
+    return `${file} could not be read: ${errorMessage(err)}`;
   }
   const { program, errors } = parse(file, source);
-  if (errors.length) return undefined;
+  if (errors.length) return `${file} could not be parsed: ${errors[0]!.message}`;
   const find = (node: Node): Node | undefined => {
     if (!node) return undefined;
     if (node.type === "ObjectExpression") {
@@ -115,7 +121,19 @@ function inFile(file: string, name: string): Found | undefined {
     return undefined;
   };
   const fn = find(program);
-  return fn && { source, fn, offset: 0 };
+  return fn ? { source, fn, offset: 0 } : `${file} holds no workflow named "${name}"`;
+}
+
+/** `run`'s own text, parsed, or why it could not be read or parsed. */
+function inRun(wf: WorkflowDefinition<any, any>): Found | string {
+  let source: string;
+  try {
+    source = lf(Function.prototype.toString.call(wf.run));
+  } catch (err) {
+    return `Cannot read the source of ${wf.name}'s run: ${errorMessage(err)}`;
+  }
+  const parsed = parseFunction(source);
+  return typeof parsed === "string" ? `Cannot parse ${wf.name}'s run: ${parsed}` : { source, ...parsed };
 }
 
 /** The one expression the text holds, or the first parse error. */
