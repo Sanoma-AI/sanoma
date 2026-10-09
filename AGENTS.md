@@ -11,7 +11,7 @@ Status: early. Business processes are written as TypeScript workflows that run o
 | [`packages/`](packages/AGENTS.md)                           | Core workspace packages                                                           |
 | [`@sanoma/workflows`](packages/workflows/AGENTS.md)         | Define connectors and workflows, run them durably on DBOS, and lint them          |
 | [`@sanoma/app`](packages/app/AGENTS.md)                     | Web UI and JSON API over a config, started with `startApp(config)`                |
-| [`@sanoma/testing`](packages/testing/AGENTS.md)             | `startTestWorker`, `testDatabaseUrl` and the connectors' fakes for workflow tests |
+| [`@sanoma/testing`](packages/testing/AGENTS.md)             | `startTestWorker`, `testDatabaseUrl`, the connectors' fakes, and scenario testing |
 | [`connectors/`](connectors/AGENTS.md)                       | Vendor connectors, one workspace package each                                     |
 | [`@sanoma/connector-ghost`](connectors/ghost/AGENTS.md)     | Ghost Admin API post operations and an in-memory fake                             |
 | [`@sanoma/connector-resend`](connectors/resend/AGENTS.md)   | Resend broadcast operations and an in-memory fake                                 |

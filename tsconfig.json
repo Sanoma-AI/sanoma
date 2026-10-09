@@ -25,6 +25,7 @@
       "@sanoma/workflows/shared": ["./packages/workflows/src/shared.ts"],
       "@sanoma/testing": ["./packages/testing/src/index.ts"],
       "@sanoma/testing/replay": ["./packages/testing/src/replay.ts"],
+      "@sanoma/testing/scenarios": ["./packages/testing/src/scenarios.ts"],
       "@sanoma/app": ["./packages/app/src/index.ts"],
       // Before the bare pattern: TypeScript takes the first of two patterns with equal prefixes.
       "@sanoma/connector-*/fake": ["./connectors/*/src/fake.ts"],

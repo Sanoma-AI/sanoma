@@ -4,10 +4,10 @@ Helpers for testing [`@sanoma/workflows`](https://www.npmjs.com/package/@sanoma/
 
 ## Contents
 
-| Path                      | What it is                                                                  |
-| ------------------------- | --------------------------------------------------------------------------- |
-| [`src/`](src/AGENTS.md)   | The package source: test worker helpers, fake vendors and the replay helper |
-| [`test/`](test/AGENTS.md) | Tests for the fakes                                                         |
+| Path                      | What it is                                                                                        |
+| ------------------------- | ------------------------------------------------------------------------------------------------- |
+| [`src/`](src/AGENTS.md)   | The package source: test worker helpers, fake vendors, the replay helper and the scenario helpers |
+| [`test/`](test/AGENTS.md) | Tests for the fakes and the scenario helpers                                                      |
 
 ## Install
 
@@ -95,5 +95,27 @@ Two variables change what the same tests do:
 
 - `SANOMA_LIVE=1` calls the vendor instead: every request goes through to it. A run without the `needs` variables fails at once rather than replaying. Tests that only replay skip themselves with `it.skipIf(live)`.
 - `SANOMA_RECORD=1`, with `SANOMA_LIVE=1`, rewrites each played fixture from the vendor's replies, passed through `scrub` first. Read the diff, and run `pnpm format`, before committing it.
+
+## Scenarios
+
+`@sanoma/testing/scenarios` runs a config's [scenarios](https://www.npmjs.com/package/@sanoma/workflows#scenarios-and-sandbox-runs) as vitest tests (install `vitest` beside it). Each scenario is a sandbox run: the worker calls the config's `fakes`, never a driver.
+
+`describeScenarios(config, options?)` reads the `.feature` files in the config's `scenarios` directory and registers a test for each scenario, in a `describe` per file; it throws, naming the directory, when it finds none. A test starts the scenario's sandbox run, decides its approvals as the scenario says, and fails listing each `Then` step that did not hold, with why. A file that does not load (a step no rule matches, bad JSON, a name used twice) is a failing test named after the file, whose message names the file (and the line, for a step or JSON error). It starts one worker for all its scenarios, before them, with `startTestWorker(config, options)`, and stops it after; `appName` is required, as there. `options.startedBy` starts the runs (default `{ id: "scenarios" }`), and `options.timeoutMs` is how long each may take (`drive`'s, 15 seconds by default); the tests it registers get twice that, so `drive`'s error is the one you see.
+
+```ts
+// test/scenarios.test.ts
+import { describeScenarios } from "@sanoma/testing/scenarios";
+import { memoryLedger } from "@sanoma/workflows";
+import config from "../sanoma.config.ts";
+
+// appName names the test database.
+describeScenarios({ ...config, ledger: memoryLedger(), appName: "scenarios-test" });
+```
+
+A company config spread into `describeScenarios` keeps its `ledger`, so pass `ledger: memoryLedger()`, as above, to keep test runs out of the project's ledger.
+
+Sandbox runs go one at a time, so a scenario that leaves its run waiting on an approval it has no decision for holds up the ones after it until they time out; fix the first failure first.
+
+`runScenario(scenario, { client, startedBy?, timeoutMs? })` runs one scenario against a worker you started, with a `SanomaClient` of it, and returns `{ runId, run, ledger, checks }`: the run's id, its summary, its ledger records and `check(scenario, ledger)`. `timeoutMs` goes to `drive`. Load the scenarios with `loadScenarios(resolveConfig(config))` from `@sanoma/workflows/scenario`.
 
 Status: early (0.x). License: Apache-2.0.
