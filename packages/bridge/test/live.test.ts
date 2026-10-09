@@ -30,8 +30,8 @@ describe.skipIf(!live)("startBridge (SANOMA_LIVE=1)", () => {
   afterAll(() => bridge?.stop());
 
   it("serves hashicorp/null's schema, configures it and reads a null_resource", async () => {
-    const { schema, protocol, sha256 } = await bridge.schema(nullProvider);
-    expect(protocol).toBe(5);
+    const { schema, sha256 } = await bridge.schema(nullProvider);
+    expect(schema.protocol).toBe(5);
     expect(sha256).toBe(nullProvider.sha256);
     expect(schema.resources.null_resource?.block.attributes.triggers).toMatchObject({ type: ["map", "string"] });
 

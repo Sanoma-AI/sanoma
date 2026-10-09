@@ -20,7 +20,7 @@ import { readPins, startBridge } from "@sanoma/bridge";
 
 const { "integrations/github": github } = readPins();
 const bridge = await startBridge(); // SANOMA_BRIDGE_BIN, or { bin }
-const { schema } = await bridge.schema(github!);
+const { schema } = await bridge.schema(github!); // schema.protocol: 5
 await bridge.configure(github!, JSON.stringify({ owner: "Sanoma-AI", token: process.env.GITHUB_TOKEN }));
 const { resources } = await bridge.import(github!, "github_repository", "provider-bridge");
 const [repo] = resources;
@@ -38,7 +38,7 @@ await bridge.stop();
 
 | `Bridge` method                                         | Returns                                        | Notes                                                                                                                                      |
 | ------------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `schema(ref)`                                           | `{ schema: SchemaDocument, protocol, sha256 }` | No credentials. `protocol` is 5 or 6; `sha256` is the release's SHA256SUMS hash.                                                           |
+| `schema(ref)`                                           | `{ schema: SchemaDocument, sha256 }`           | No credentials. `schema.protocol` is 5 or 6; `sha256` is the release's SHA256SUMS hash. Parsed once per release and hash.                  |
 | `configure(ref, configJson)`                            | `{ warnings }`                                 | The same config again is a no-op; another config fails (`failed_precondition`) until `close(ref)`.                                         |
 | `import(ref, typeName, id)`                             | `{ resources: ResourceState[], warnings }`     | Import, then read each result. Nothing found: `not_found`, though GitHub's provider fails with `failed_precondition` and a diagnostic.     |
 | `read(ref, typeName, stateJson, priv?, schemaVersion?)` | `{ resource?: ResourceState, gone, warnings }` | `gone: true` (no `resource`) when the object no longer exists. Pass back the `private` and `schemaVersion` you got: the state is upgraded. |
@@ -53,7 +53,7 @@ A failed call throws a `BridgeError` with `code` (Connect's, spelled `invalid_ar
 
 ## The fake
 
-`fakeBridge({ fixtures?, bridge? })` from `@sanoma/bridge/fake` is a `Bridge` that answers from fixtures (default: this package's `testdata/`), through the same Connect client as the real one (an in-memory router transport), so errors map the same way. It refuses what the bridge refuses: a call before `configure`, another config, an unknown resource type, a pin that does not match `pins.json`. `calls` lists every call. A call no fixture covers fails, `failed_precondition` for a schema and `not_found` for an import or read, naming the file to record.
+`fakeBridge({ fixtures?, bridge? })` from `@sanoma/bridge/fake` is a `Bridge` that answers from fixtures (default: this package's `testdata/`), through the same Connect client as the real one (an in-memory router transport), so errors map the same way. It refuses what the bridge refuses: a call before `configure`, another config, an unknown resource type, a pin that does not match the release's sha256 (from `pins.json`, or for a release not pinned there, the sha256 its recorded replies carry; a pin it has nothing to check against is refused too). `calls` lists every call sent, logged by a Connect interceptor on the in-memory transport and the real one alike. Schema documents are parsed once per file for every fake in the process. A call no fixture covers fails, `failed_precondition` for a schema and `not_found` for an import or read, naming the file to record.
 
 Fixtures, in provider-bridge's format (its `cmd/bridge-record` writes the same):
 

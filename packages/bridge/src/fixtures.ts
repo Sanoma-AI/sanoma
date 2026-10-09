@@ -45,9 +45,9 @@ export const typeDir = (dir: string, ref: ProviderRef, typeName: string) =>
 export const replyDir = (dir: string, ref: ProviderRef, typeName: string, id: string) =>
   join(typeDir(dir, ref, typeName), slug(id));
 
-/** The `id` attribute of a resource's state, which every provider sets; `undefined` if there is none. */
-export function stateId(stateJson: string): string | undefined {
-  const id = (JSON.parse(stateJson) as { id?: unknown }).id;
+/** The `id` attribute of a resource's state (JSON, or parsed), which every provider sets; `undefined` if there is none. */
+export function stateId(state: string | Record<string, unknown>): string | undefined {
+  const { id } = (typeof state === "string" ? JSON.parse(state) : state) as { id?: unknown };
   return typeof id === "string" ? id : undefined;
 }
 

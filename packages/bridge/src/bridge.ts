@@ -43,8 +43,8 @@ export interface ResourceState {
 
 /** The provider-bridge API: one bridge process (or its fake) serving any number of providers. */
 export interface Bridge {
-  /** The provider's schema document. Needs no credentials. */
-  schema(ref: ProviderRef): Promise<{ schema: SchemaDocument; protocol: number; sha256: string }>;
+  /** The provider's schema document (`schema.protocol` is its plugin protocol) and its release's SHA256SUMS hash. Needs no credentials. */
+  schema(ref: ProviderRef): Promise<{ schema: SchemaDocument; sha256: string }>;
   /**
    * Starts and configures the provider. The same config again is a no-op; another config for the
    * same release fails (`failed_precondition`) until `close(ref)`.
@@ -179,11 +179,16 @@ export function bridgeClient(
   stop: () => Promise<void>,
   options: CallOptions = {},
 ): Bridge {
+  // A release's schema is pinned by its sha256, so it is parsed once (Stripe's is 2.3 MB).
+  const schemas = new Map<string, SchemaDocument>();
   return {
     schema: (ref) =>
       call(async () => {
         const res = await rpc.getSchema({ provider: providerOf(ref) }, options);
-        return { schema: parseSchema(res.schemaJson), protocol: res.protocol, sha256: res.sha256 };
+        const key = `${ref.source} ${ref.version} ${res.sha256} ${res.schemaJson.length}`;
+        let schema = schemas.get(key);
+        if (!schema) schemas.set(key, (schema = parseSchema(res.schemaJson)));
+        return { schema, sha256: res.sha256 };
       }),
     configure: (ref, configJson) =>
       call(async () => {
