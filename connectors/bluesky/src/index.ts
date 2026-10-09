@@ -17,8 +17,7 @@ export const bluesky = defineConnector(
       create: {
         effect: "publish",
         description: "Post publicly to the account's feed.",
-        // oxlint-disable-next-line unicorn/no-thenable -- `then` is a scenario step keyword here, not a thenable
-        phrases: { then: "{text} is posted to Bluesky" },
+        phrases: { expect: "{text} is posted to Bluesky" },
         // The driver names the post's record after the idempotency key, and the fake dedupes on it.
         idempotent: true,
         input: z.object({ text: z.string().min(1).max(300) }),

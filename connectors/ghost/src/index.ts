@@ -27,16 +27,14 @@ export const ghost = defineConnector(
       create: {
         effect: "write",
         description: "Create a post. Drafts are not visible on the site.",
-        // oxlint-disable-next-line unicorn/no-thenable -- `then` is a scenario step keyword here, not a thenable
-        phrases: { given: "a post titled {title} exists", then: "a post titled {title} is created" },
+        phrases: { given: "a post titled {title} exists", expect: "a post titled {title} is created" },
         input: z.object({ title: z.string().min(1), html: z.string(), status: z.literal("draft").default("draft") }),
         output: Post,
       },
       publish: {
         effect: "publish",
         description: "Publish a draft post on the site. Visible to everyone.",
-        // oxlint-disable-next-line unicorn/no-thenable -- `then` is a scenario step keyword here, not a thenable
-        phrases: { then: "post {id} is published" },
+        phrases: { expect: "post {id} is published" },
         idempotent: true,
         input: z.object({ id: z.string() }),
         output: Post,

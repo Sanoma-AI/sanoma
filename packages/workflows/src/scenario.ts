@@ -301,14 +301,18 @@ function rulesOf(scope: Scope): Rule[] {
       string,
       { type?: unknown }
     >;
-    for (const kind of ["given", "then"] as const) {
-      const template = op.phrases?.[kind];
+    // A phrase's key, and the keyword of the steps it adds.
+    for (const [key, kind] of [
+      ["given", "given"],
+      ["expect", "then"],
+    ] as const) {
+      const template = op.phrases?.[key];
       if (template === undefined) continue;
       const fields = [...template.matchAll(/\{([^}]*)\}/g)].map(([, name]) => name!);
       for (const name of fields) {
         if (!Object.hasOwn(properties, name)) {
           throw new Error(
-            `${op.id}: its ${kind} phrase "${template}" names {${name}}, which is not a field of its input`,
+            `${op.id}: its ${key} phrase "${template}" names {${name}}, which is not a field of its input`,
           );
         }
         if (!registry.lookupByTypeName(name)) {
