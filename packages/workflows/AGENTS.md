@@ -285,10 +285,12 @@ Input the scenario leaves out is made up from the schema with [zod-schema-faker]
 
 Start a sandbox run with `client.start(workflow, input, { startedBy, sandbox: "<scenario name>" })`. The input is the caller's (a scenario's own is `scenario.input`). The worker then:
 
-- seeds the fakes from the scenario, once, in a step named `sandbox:seed`, so a replay never seeds twice: it resets every fake, calls each `Given` operation through its fake, injects the faults, and empties the call log, so the log holds the run's calls only. It records `scenario.seeded` (the scenario, and each seed's operation, input and output) right after `run.started`. A scenario that does not exist, or runs another workflow, fails the run with `invalid_input`.
+- parses the input, then seeds the fakes from the scenario, once, in a step named `sandbox:seed`: it reads the scenario, checks it, resets every fake, calls each `Given` operation through its fake, injects the faults, and empties the call log, so the log holds the run's calls only. It records `scenario.seeded` (the scenario, and each seed's operation, input and output) right after `run.started`. A scenario that does not exist or runs another workflow, and a workflow using (or a scenario seeding) an operation with no fake, fail the run with `invalid_input`.
 - calls the fakes, never a driver, under the same policy and approvals as a live run.
 - does not wait on `ctx.sleep`: it still records `sleep.started` with the real `until`, and goes straight on.
 - runs one sandbox run at a time, since they share the fakes: another started while one has not ended fails with `sandbox_busy`.
+
+A sandbox run does not survive a worker restart: the fakes keep their state in the worker's memory, so a run whose seeding DBOS replays from its checkpoint (after a restart, or in a fork) fails with `invalid_input`, "Sandbox run … was interrupted by a worker restart and the fakes' state is gone; start the scenario again", rather than going on against fakes in some other state.
 
 `RunSummary.sandbox` names the scenario a sandbox run was seeded from (kept in DBOS's `attributes` for the run). Reusing a run id with another `sandbox`, or none, is `invalid_input`, as with another input.
 
