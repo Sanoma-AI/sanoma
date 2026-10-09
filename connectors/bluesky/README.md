@@ -65,13 +65,13 @@ Any account can post with an app password: there is no approval or paid tier.
 
 ### Testing the driver
 
-`test/driver.test.ts` replays recorded XRPC replies (`test/fixtures`) with [msw](https://mswjs.io): `pnpm vitest run connectors/bluesky` needs no account. With `SANOMA_LIVE=1` the same tests post a few test posts to the account instead; a missing variable fails the run. `SANOMA_LIVE=1` is the only switch, in CI as anywhere:
+`test/driver.test.ts` replays recorded XRPC replies (`test/fixtures`) with [`@sanoma/testing/replay`](https://github.com/Sanoma-AI/sanoma/tree/main/packages/testing#replaying-a-vendors-api), which says what `SANOMA_LIVE` and `SANOMA_RECORD` do: `pnpm vitest run connectors/bluesky` needs no account. Live, they post a few test posts to the account:
 
 ```sh
 SANOMA_LIVE=1 BLUESKY_IDENTIFIER=you.bsky.social BLUESKY_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx pnpm vitest run connectors/bluesky
 ```
 
-Add `SANOMA_RECORD=1` to rewrite the fixtures of the tests Bluesky can reproduce from its replies. A session keeps only the fields the driver reads, and the account's DID, handle, email, tokens, PDS and `BLUESKY_SERVICE` hosts and CIDs are replaced with placeholders as they are written; read the diff, and run `pnpm format`, before you commit it. The error cases (400, 429, 502, a timeout, a wrong password) are not rewritten: they only replay.
+A recording keeps only the session fields the driver reads, and the account's DID, handle, email, tokens, PDS and `BLUESKY_SERVICE` hosts, CIDs and record keys are replaced with placeholders. The error cases only replay.
 
 ## Testing
 

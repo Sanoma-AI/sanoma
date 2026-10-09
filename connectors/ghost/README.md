@@ -65,13 +65,13 @@ You need a Ghost site of your own. Self-hosted Ghost is free and open source (`d
 
 ### Testing the driver
 
-`test/driver.test.ts` replays Ghost's recorded replies (`test/fixtures`) with [msw](https://mswjs.io): `pnpm vitest run connectors/ghost` needs no site. With `SANOMA_LIVE=1` the same tests call a real site instead, creating posts titled `sanoma test <timestamp>`, publishing some, and deleting them at the end; a missing variable fails the run. `SANOMA_LIVE=1` is the only switch, in CI as anywhere:
+`test/driver.test.ts` replays Ghost's recorded replies (`test/fixtures`) with [`@sanoma/testing/replay`](https://github.com/Sanoma-AI/sanoma/tree/main/packages/testing#replaying-a-vendors-api), which says what `SANOMA_LIVE` and `SANOMA_RECORD` do: `pnpm vitest run connectors/ghost` needs no site. Live, they create posts titled `sanoma test <timestamp>` on the site, publish some, and delete them at the end:
 
 ```sh
 SANOMA_LIVE=1 GHOST_ADMIN_URL=https://example.ghost.io GHOST_ADMIN_API_KEY=<id>:<secret> pnpm vitest run connectors/ghost
 ```
 
-Add `SANOMA_RECORD=1` to rewrite the fixtures from that site's replies. They are scrubbed as they are written: only the fields the driver reads are kept (no authors or emails), every URL is put on `https://blog.example.test`, and ids are renumbered. Read the diff, and run `pnpm format`, before you commit it. The error cases (429, 503, a timeout, a collision) are not rewritten: they only replay. `update-collision.json` was taken by hand from a local Ghost, since a test cannot make Ghost collide on cue.
+A recording keeps only the fields the driver reads (no authors or emails), puts every URL on `https://blog.example.test`, and renumbers ids. The error cases only replay; `update-collision.json` was taken by hand from a local Ghost, since a test cannot make Ghost collide on cue.
 
 ## Testing
 

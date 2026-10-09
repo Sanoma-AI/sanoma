@@ -59,4 +59,32 @@ To write a fake for another connector, use `defineFake(connector, { initial, ops
 
 `fakeMarketingVendors` is gone: compose the fakes you need, passing them one `calls` array, as in the example above.
 
+## Replaying a vendor's API
+
+`@sanoma/testing/replay` tests a driver against a vendor's recorded replies, with [msw](https://mswjs.io) (install `msw` and `vitest` beside it). Call `replay(options)` once at the top of a test file: it starts msw for the file and returns `play`, `fixture`, `sent`, `exchanges` and the msw `server`.
+
+```ts
+import { replay } from "@sanoma/testing/replay";
+
+const { play, sent } = replay({
+  fixtures: new URL("./fixtures/", import.meta.url),
+  needs: ["ACME_API_KEY"], // live, the run fails at once without these
+  env: { ACME_API_KEY: "test-key" }, // replaying, each test starts with these
+  scrub: (exchanges) => exchanges, // what of a recording the repo may hold
+});
+
+it("creates a widget", async () => {
+  play("create"); // fixtures/create.json
+  await acmeDriver().ops["widget.create"]!({ name: "x" }, call);
+  expect(sent[0]?.body).toEqual({ name: "x" });
+});
+```
+
+A fixture, `<name>.json`, is a list of exchanges: `{ method, path, status, headers?, body }`, where `path` is the URL's decoded path and query (the host is not compared) and `headers` keeps only rate-limit headers. `play(name)` answers the test's requests with them, in order; a request that is not next in the fixture, or an exchange no request asked for, fails the test. `play(name, exchanges)` serves a list the test builds instead, for the cases a vendor will not reproduce on cue. `fill(exchange, sent)`, an option, fills a fixture's placeholders from the request it answers, such as an id the request chose. `sent` holds the requests the test made, bodies parsed; `exchanges` the replies they got.
+
+Two variables change what the same tests do:
+
+- `SANOMA_LIVE=1` calls the vendor instead: every request goes through to it. A run without the `needs` variables fails at once rather than replaying. Tests that only replay skip themselves with `it.skipIf(live)`.
+- `SANOMA_RECORD=1`, with `SANOMA_LIVE=1`, rewrites each played fixture from the vendor's replies, passed through `scrub` first. Read the diff, and run `pnpm format`, before committing it.
+
 Status: early (0.x). License: Apache-2.0.

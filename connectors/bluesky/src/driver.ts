@@ -11,13 +11,8 @@ export interface BlueskyDriverOptions {
 }
 
 /**
- * Posts to Bluesky with `@atproto/api`, signed in with an app password from the environment:
- * `BLUESKY_IDENTIFIER` (handle or email), `BLUESKY_APP_PASSWORD`, and optionally
- * `BLUESKY_SERVICE` (default `https://bsky.social`), read on each call.
- *
- * The session is kept in the driver and refreshed by `@atproto/api` when its access token
- * expires: Bluesky allows 30 logins per 5 minutes and 300 a day per account, fewer than a
- * long-lived worker may post.
+ * Posts to Bluesky with `@atproto/api`, signed in with the app password in `BLUESKY_IDENTIFIER`
+ * and `BLUESKY_APP_PASSWORD`, once for the driver's life: Bluesky limits logins. See the README.
  */
 export function blueskyDriver(options: BlueskyDriverOptions = {}) {
   const timeoutMs = options.timeoutMs ?? 10_000;

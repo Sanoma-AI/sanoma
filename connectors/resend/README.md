@@ -65,13 +65,13 @@ Broadcasts are on the free Marketing plan (1,000 contacts, 3 segments, 3 domains
 
 ### Testing the driver
 
-`test/driver.test.ts` replays Resend's recorded replies (`test/fixtures`) with [msw](https://mswjs.io): `pnpm vitest run connectors/resend` needs no account. With `SANOMA_LIVE=1` the same tests call Resend instead, creating broadcasts and sending one to a test segment; a missing variable fails the run. `SANOMA_LIVE=1` is the only switch, in CI as anywhere:
+`test/driver.test.ts` replays Resend's recorded replies (`test/fixtures`) with [`@sanoma/testing/replay`](https://github.com/Sanoma-AI/sanoma/tree/main/packages/testing#replaying-a-vendors-api), which says what `SANOMA_LIVE` and `SANOMA_RECORD` do: `pnpm vitest run connectors/resend` needs no account. Live, they create broadcasts and send one to a test segment:
 
 ```sh
 SANOMA_LIVE=1 RESEND_API_KEY=re_... RESEND_TEST_AUDIENCE=<segment id> RESEND_TEST_FROM="Test <test@your-domain>" pnpm vitest run connectors/resend
 ```
 
-Add `SANOMA_RECORD=1` to rewrite the fixtures from Resend's replies. Ids, addresses, the sender's domain and keys are scrubbed as they are written; read the diff, and run `pnpm format`, before you commit it. The error cases (429, 5xx, quota, a timeout) are not rewritten: they only replay.
+A recording loses ids, addresses, the sender's domain and keys. The error cases, and the broadcasts that are no longer drafts, only replay.
 
 ## Testing
 

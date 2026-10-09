@@ -130,15 +130,7 @@ function connect(timeoutMs: number) {
   };
 }
 
-/**
- * The real Ghost, through the Admin API. It reads `GHOST_ADMIN_URL` and `GHOST_ADMIN_API_KEY`
- * from the environment on every call.
- *
- * `post.create` sends HTML, which Ghost converts to its editor format. Ghost takes no
- * idempotency key, so a create whose reply is lost leaves a draft that no run will reuse.
- * `post.publish` reads the post first and does nothing to one already published, so a retry
- * after a lost reply returns the post as it is.
- */
+/** The real Ghost, through the Admin API, with `GHOST_ADMIN_URL` and `GHOST_ADMIN_API_KEY`. See the README. */
 export function ghostDriver(options: GhostDriverOptions = {}) {
   const timeoutMs = options.timeoutMs ?? 10_000;
   return defineDriver(ghost, {
