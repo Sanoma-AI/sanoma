@@ -30,17 +30,11 @@ describe("runScenario", () => {
 
   it("runs the scenario in a sandbox and returns its run id, run, ledger and checks", async () => {
     const launch = scenario("Launch on time");
-    const { runId, run, ledger, checks } = await runScenario(launch, { client, workflows: config.workflows });
+    const { runId, run, ledger, checks } = await runScenario(launch, { client });
     expect(run).toMatchObject({ runId, status: "finished", sandbox: "Launch on time", startedBy: { id: "scenarios" } });
     expect(ledger.map((r) => r.type)).toContain("scenario.seeded");
     expect(ledger.every((r) => r.runId === runId)).toBe(true);
     expect(checks).toEqual(launch.expect.map((e) => ({ step: e.step, ok: true })));
-  });
-
-  it("refuses a scenario whose workflow is not in `workflows`", async () => {
-    await expect(runScenario(scenario("Launch on time"), { client, workflows: [] })).rejects.toThrow(
-      'Scenario "Launch on time" runs announce, which is not in `workflows`',
-    );
   });
 });
 

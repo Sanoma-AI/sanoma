@@ -8,7 +8,6 @@ import {
   resolveConfig,
   type RunSummary,
   SanomaClient,
-  type SanomaConfig,
   type Worker,
 } from "@sanoma/workflows";
 import { type Check, check, drive, loadScenarios, type Scenario } from "@sanoma/workflows/scenario";
@@ -18,8 +17,6 @@ import { startTestWorker, testDatabaseUrl, type TestWorkerOptions } from "./inde
 export interface RunScenarioOptions {
   /** A client of the worker that runs the scenario, which has the config's `fakes` and `scenarios`. */
   client: SanomaClient;
-  /** The config's workflows, one of which the scenario runs. */
-  workflows: SanomaConfig["workflows"];
   /** Who starts the run. Defaults to `{ id: "scenarios" }`. */
   startedBy?: Principal;
   /** How long the run may take, passed to `drive`. */
@@ -32,13 +29,9 @@ export interface RunScenarioOptions {
  */
 export async function runScenario(
   scenario: Scenario,
-  { client, workflows, startedBy = { id: "scenarios" }, timeoutMs }: RunScenarioOptions,
+  { client, startedBy = { id: "scenarios" }, timeoutMs }: RunScenarioOptions,
 ): Promise<{ runId: string; run: RunSummary; ledger: LedgerRecord[]; checks: Check[] }> {
-  const workflow = workflows.find((w) => w.name === scenario.workflow);
-  if (!workflow) {
-    throw new Error(`Scenario "${scenario.name}" runs ${scenario.workflow}, which is not in \`workflows\``);
-  }
-  const runId = await client.start(workflow, scenario.input, { startedBy, sandbox: scenario.name });
+  const runId = await client.start(scenario.workflow, scenario.input, { startedBy, sandbox: scenario.name });
   const run = await drive(client, runId, scenario, { timeoutMs });
   const ledger = await client.ledger(runId);
   return { runId, run, ledger, checks: check(scenario, ledger) };
@@ -96,12 +89,7 @@ export function describeScenarios(
           scenario.name,
           async () => {
             if (!client) throw new Error("The scenarios' worker did not start");
-            const { checks } = await runScenario(scenario, {
-              client,
-              workflows: config.workflows,
-              startedBy,
-              timeoutMs,
-            });
+            const { checks } = await runScenario(scenario, { client, startedBy, timeoutMs });
             const failed = checks.filter((c) => !c.ok);
             const lines = failed.map((c) => `  ${c.step}: ${c.detail}`);
             expect(failed, [`${file}: "${scenario.name}" failed:`, ...lines].join("\n")).toEqual([]);
