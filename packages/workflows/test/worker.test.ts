@@ -73,6 +73,11 @@ const refused: [string, Partial<SanomaConfig>, RegExp][] = [
   ],
   ["no connectors", { connectors: undefined as never }, /^The config needs `connectors`/],
   [
+    "two fakes for one vendor",
+    { fakes: [vendors.ghost, vendors.ghost] },
+    /^Two fakes in `fakes` are for "ghost"; keep one per vendor$/,
+  ],
+  [
     "scenarios that are not a file: URL",
     { scenarios: new URL("https://example.com/scenarios/") },
     /^The config's `scenarios` must be a file: URL to a directory/,
@@ -112,7 +117,7 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       "resend.broadcast.send",
     ]);
     expect([...resolved.drivers.keys()].toSorted()).toEqual([...resolved.ops.keys()].toSorted());
-    expect(resolved.fakes).toEqual([]);
+    expect(resolved.fakes.size).toBe(0);
     expect(resolved.fakeDrivers.size).toBe(0);
     expect(resolved.ledger).toBe(ledger);
     expect(resolveConfig(config({})).appName).toBe("sanoma");
@@ -123,7 +128,10 @@ describe("startWorker, resolveConfig and describeConfig", () => {
     const scenarios = new URL("file:///srv/acme/scenarios/");
     const fakes = [vendors.ghost, vendors.bluesky];
     const resolved = resolveConfig(config({ fakes, scenarios }));
-    expect(resolved.fakes).toBe(fakes);
+    expect([...resolved.fakes]).toEqual([
+      ["ghost", vendors.ghost],
+      ["bluesky", vendors.bluesky],
+    ]);
     expect([...resolved.fakeDrivers.keys()].toSorted()).toEqual([
       "bluesky.post.create",
       "ghost.post.create",

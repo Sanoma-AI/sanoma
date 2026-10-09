@@ -25,7 +25,7 @@ export interface WorkerState {
   /** The drivers' functions, by operation id. */
   drivers: Map<string, DriverFn>;
   /** The fake vendors sandbox runs call, and their functions by operation id. */
-  fakes: Fake<any, any>[];
+  fakes: Map<string, Fake<any, any>>;
   fakeDrivers: Map<string, DriverFn>;
   /** Where sandbox runs' scenarios are. */
   scenarios?: URL;
