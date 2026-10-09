@@ -3,7 +3,7 @@ import type { ConfigDescription } from "@sanoma/workflows/describe";
 import { isEnded } from "@sanoma/workflows/shared";
 import { queryOptions } from "@tanstack/react-query";
 import { pendingApprovals, RUNS_LIMIT } from "./api.ts";
-import { getActor, getConfig, getRun, getRuns } from "./functions.ts";
+import { getActor, getConfig, getRun, getRuns, getSource } from "./functions.ts";
 
 /** How often the runs and a run's detail refresh while a page shows them. */
 export const POLL_MS = 2_000;
@@ -11,6 +11,14 @@ export const POLL_MS = 2_000;
 /** The config cannot change while the app runs. The root route loads it for every page. */
 export const configQuery = () =>
   queryOptions({ queryKey: ["config"], queryFn: () => getConfig(), staleTime: Number.POSITIVE_INFINITY });
+
+/** A workflow's source, which cannot change while the app runs either. Not in the config: a page that shows it asks. */
+export const sourceQuery = (name: string) =>
+  queryOptions({
+    queryKey: ["source", name],
+    queryFn: () => getSource({ data: { name } }),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
 
 /** The config's operations by id, for `select`: built once per config, not on every render. */
 export const opsById = (config: ConfigDescription) => new Map(config.ops.map((op) => [op.id, op]));
