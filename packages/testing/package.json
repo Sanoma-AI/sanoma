@@ -1,7 +1,7 @@
 {
   "name": "@sanoma/testing",
   "version": "0.1.0",
-  "description": "Fake vendors for testing Sanoma workflows without vendor accounts",
+  "description": "Fake vendors and scenario tests for testing Sanoma workflows without vendor accounts",
   "keywords": [
     "fakes",
     "sanoma",

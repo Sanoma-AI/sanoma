@@ -382,6 +382,8 @@ A sandbox run does not survive a worker restart: the fakes keep their state in t
 
 `RunSummary.sandbox` names the scenario a sandbox run was seeded from (kept in DBOS's `attributes` for the run). Reusing a run id with another `sandbox`, or none, is `invalid_input`, as with another input.
 
+To run a config's scenarios as tests, a vitest test each, use `describeScenarios` from [`@sanoma/testing/scenarios`](https://www.npmjs.com/package/@sanoma/testing#scenarios).
+
 ## Building your own UI
 
 `@sanoma/app` is one UI over a config; another (a Slack bot, an internal tool) can be built on the same pieces, which the package exports for that:
