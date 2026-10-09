@@ -4,6 +4,7 @@ import { type Builtin, jsonSchemaOf, type Use } from "./define.ts";
 import { type Effect, isOp, VENDOR, type VendorInfo } from "./op.ts";
 import { type Outline, outlineWithSource } from "./outline.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
+import { resourceOf } from "./resource.ts";
 
 // `@sanoma/workflows/describe`: what a UI renders from. Apart from the main entry, so the
 // worker never loads oxc-parser, which the outline reads `run` with.
@@ -54,6 +55,17 @@ export interface VendorEntry {
   package?: string;
   /** The connector package's `homepage` from its package.json: where its code and README are, as an https URL. */
   homepage?: string;
+  /** The resource types its connectors declare with `defineResource`, by type; none when it has none. */
+  resources?: ResourceTypeEntry[];
+}
+
+/** A resource type a connector declares: its operations are `<vendor>.<type>.read` and `.import`. */
+export interface ResourceTypeEntry {
+  vendor: string;
+  type: string;
+  title: string;
+  /** How a declared resource's import id is made, such as `name` or `repository_id:pattern`. */
+  identity: string;
 }
 
 /**
@@ -86,8 +98,19 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
   ops.sort((a, b) => a.id.localeCompare(b.id));
 
   const vendors: Record<string, VendorEntry> = {};
-  // A vendor whose operations are split over several connectors is named by the first.
-  for (const { [VENDOR]: vendor } of config.connectors) vendors[vendor.id] ??= vendorEntry(vendor.id, vendor.info);
+  // A vendor whose operations are split over several connectors is named by the first; its
+  // resource types are every connector's.
+  for (const connector of config.connectors) {
+    const { id, info } = connector[VENDOR];
+    const entry = (vendors[id] ??= vendorEntry(id, info));
+    for (const group of Object.values(connector as Record<string, unknown>)) {
+      const resource = resourceOf(group);
+      if (!resource) continue;
+      const { vendor, type, title, identity } = resource;
+      (entry.resources ??= []).push({ vendor, type, title, identity });
+    }
+  }
+  for (const entry of Object.values(vendors)) entry.resources?.sort((a, b) => a.type.localeCompare(b.type));
 
   const workflows: WorkflowEntry[] = resolved.workflows.map((wf) => {
     const { outline, source } = outlineWithSource(wf);

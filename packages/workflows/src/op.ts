@@ -54,6 +54,12 @@ export type Connector<V extends string, S extends Specs> = {
   };
 } & { readonly [VENDOR]: ConnectorVendor<V> };
 
+/**
+ * Where a connector's resource group keeps the resource type its operations are for, when
+ * `defineResource` made them (`github.repository`), so a UI can list a vendor's resource types.
+ */
+export const RESOURCE: unique symbol = Symbol("sanoma.resource");
+
 /** A connector's vendor: its id and, from `defineConnector`'s third argument, who it is, for a UI. */
 export interface ConnectorVendor<V extends string = string> {
   readonly id: V;
@@ -107,6 +113,9 @@ export function defineConnector<const V extends string, const S extends Specs>(
   const out: Record<string, Record<string, Op>> = {};
   for (const [resource, ops] of Object.entries(specs)) {
     out[resource] = {};
+    // Kept as a symbol, so it is no operation: `Object.values` over the group sees operations only.
+    const type: unknown = (ops as { [RESOURCE]?: unknown })[RESOURCE];
+    if (type !== undefined) Object.defineProperty(out[resource], RESOURCE, { value: type });
     for (const [name, spec] of Object.entries(ops)) {
       out[resource][name] = Object.freeze({
         kind: "op",

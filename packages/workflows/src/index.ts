@@ -26,6 +26,16 @@ export {
   type Use,
   type WorkflowDefinition,
 } from "./define.ts";
+export {
+  compareDeclared,
+  type CrudOptions,
+  type Declared,
+  defineResource,
+  type Resource,
+  type ResourceFields,
+  type ResourceOps,
+  type ResourceSpec,
+} from "./resource.ts";
 export { defineConfig, resolveConfig, type ResolvedConfig, type SanomaConfig } from "./config.ts";
 export {
   allow,
