@@ -37,5 +37,5 @@ export default defineConfig({
   environments: {
     ssr: { resolve: { external: RUNTIME } },
   },
-  server: { port: 4321 },
+  server: { port: 3000 },
 });
