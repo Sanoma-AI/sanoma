@@ -181,9 +181,10 @@ describe("the API", () => {
     expect(wf?.ops).toEqual(expect.arrayContaining(["ghost.post.publish", "resend.broadcast.send"]));
     expect(wf?.builtins).toEqual(["approval", "sleep"]);
     // Each workflow's outline, read from its file when the app started; the file itself is not sent.
+    // (Only the workflows are checked: GitHub's repository schema has a field named `source`.)
     expect(wf?.outline).toEqual(outlineWorkflow(announce));
     expect(wf?.outline).toMatchObject({ file: expect.stringMatching(/announce\.ts$/) });
-    expect(JSON.stringify(body)).not.toContain('"source"');
+    expect(JSON.stringify(body.workflows)).not.toContain('"source"');
     expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.effect).toBe("send");
     expect(body.vendors.resend).toMatchObject({ title: "Resend", logo: { src: expect.stringMatching(/^data:/) } });
   });
