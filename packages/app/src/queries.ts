@@ -24,17 +24,21 @@ export const sourceQuery = (name: string) =>
 export const opsById = (config: ConfigDescription) => new Map(config.ops.map((op) => [op.id, op]));
 
 /**
- * Each vendor with its operations (in `ops`' order) and the workflows that may call one of them,
- * by title: for `select`.
+ * Each vendor, sorted by title, with its operations (in `ops`' order) and the workflows that may
+ * call one of them: for `select`.
  */
 export const connectorsOf = (config: ConfigDescription) =>
   Object.entries(config.vendors)
     .map(([id, vendor]) => {
       const ops = config.ops.filter((op) => op.vendor === id);
       const ids = new Set(ops.map((op) => op.id));
-      return { id, vendor, ops, workflows: config.workflows.filter((wf) => wf.ops.some((op) => ids.has(op))) };
+      const workflows = config.workflows
+        .filter((wf) => wf.ops.some((op) => ids.has(op)))
+        .map(({ name, title }) => ({ name, title }));
+      return { id, vendor, ops, workflows };
     })
-    .toSorted((a, b) => a.vendor.title.localeCompare(b.vendor.title));
+    // One collation, so the server and the browser sort alike.
+    .toSorted((a, b) => a.vendor.title.localeCompare(b.vendor.title, "en"));
 
 export type ConnectorEntry = ReturnType<typeof connectorsOf>[number];
 
