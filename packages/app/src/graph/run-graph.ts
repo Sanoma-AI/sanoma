@@ -1,4 +1,5 @@
 import type { ApprovalState, LedgerGroup, LedgerRecord, RunSummary } from "@sanoma/workflows";
+import type { OutlineNode, Span } from "@sanoma/workflows/describe";
 import { isEnded } from "@sanoma/workflows/shared";
 import { utcText } from "../lib/time.ts";
 import { APPROVAL_TONE, RUN_TONE, type Tone } from "../lib/tone.ts";
@@ -14,10 +15,21 @@ type AllStep = Extract<Step, { kind: "all" }>;
  * workflow asked for, and how it ended. The records of one `ctx.all` (one `group.id`) are its
  * lanes, one per member (`group.index`); while the run is in the group, the members it has
  * recorded nothing for yet are pending lanes. `now` is when the ledger was read, which a sleep's
- * end is compared with.
+ * end is compared with. Given the workflow's `outline`, each step's node has the `spans` of the
+ * outline's steps it may be (see `spansOf`).
  */
-export function runGraph(records: readonly LedgerRecord[], run: RunSummary, now: number): Graph {
+export function runGraph(
+  records: readonly LedgerRecord[],
+  run: RunSummary,
+  now: number,
+  outline: readonly OutlineNode[] = [],
+): Graph {
   const ended = isEnded(run.status);
+  const where = spansOf(outline);
+  const inSource = (...keys: string[]) => {
+    const spans = keys.map((key) => where.get(key)).find(Boolean);
+    return spans ? { spans } : {};
+  };
   const approvals = new Map(run.approvals.map((a) => [a.id, a]));
   const steps: Step[] = [];
   /** Op steps by seq: a policy's approval finds the call it holds by `opSeq`. */
@@ -52,6 +64,7 @@ export function runGraph(records: readonly LedgerRecord[], run: RunSummary, now:
           kind: "op",
           id: record.op,
           key: `op:${record.seq}`,
+          ...inSource(`op:${record.op}`),
           state: {
             tone: failed ? "bad" : "ok",
             recordId: record.id,
@@ -78,6 +91,7 @@ export function runGraph(records: readonly LedgerRecord[], run: RunSummary, now:
               kind: "op",
               id: record.op,
               key: `op:${record.opSeq}`,
+              ...inSource(`op:${record.op}`),
               state: { tone: heldTone(status, ended), recordId: record.id, ...(approval && { approval }) },
             };
             ops.set(record.opSeq, step);
@@ -90,6 +104,7 @@ export function runGraph(records: readonly LedgerRecord[], run: RunSummary, now:
               kind: "approval",
               title: record.title,
               key: `approval:${record.approval}`,
+              ...inSource(`approval:${record.title}`, "approval"),
               state: { tone, recordId: record.id, ...(approval && { approval }) },
             },
             record.group,
@@ -104,6 +119,7 @@ export function runGraph(records: readonly LedgerRecord[], run: RunSummary, now:
           {
             kind: "sleep",
             key: `sleep:${record.seq}`,
+            ...inSource("sleep"),
             label: `sleep until ${utcText(record.until)}`,
             state: { tone: asleep ? "waiting" : "ok", recordId: record.id },
           },
@@ -143,6 +159,45 @@ export function runGraph(records: readonly LedgerRecord[], run: RunSummary, now:
     ? { label: run.status, state: { tone: RUN_TONE[run.status] } }
     : { label: "pending", pending: true, state: { tone: woke ? "active" : "off" } };
   return outlineGraph(steps, { start, end });
+}
+
+/**
+ * Where the outline makes each kind of call, by what a ledger record names: `op:<id>` for an
+ * operation's calls, `approval:<title>` for the approvals with that title and `approval` for
+ * all of them, `sleep` for the sleeps. A record is matched by what it is, not where it was
+ * called from (the ledger does not say), so a step may be any of several places.
+ */
+function spansOf(outline: readonly OutlineNode[]): Map<string, Span[]> {
+  const spans = new Map<string, Span[]>();
+  const add = (key: string, span: Span) => spans.set(key, [...(spans.get(key) ?? []), span]);
+  const walk = (nodes: readonly OutlineNode[]): void => {
+    for (const node of nodes) {
+      switch (node.kind) {
+        case "op":
+          add(`op:${node.id}`, node.span);
+          break;
+        case "approval":
+          add("approval", node.span);
+          if (node.title !== undefined) add(`approval:${node.title}`, node.span);
+          break;
+        case "sleep":
+          add("sleep", node.span);
+          break;
+        case "all":
+          node.branches.forEach(walk);
+          break;
+        case "branch":
+          node.cases.forEach(walk);
+          break;
+        case "each":
+        case "repeat":
+          walk(node.body);
+          break;
+      }
+    }
+  };
+  walk(outline);
+  return spans;
 }
 
 /** A held call not recorded yet: waiting on its approval, or running once approved. */
