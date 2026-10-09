@@ -488,9 +488,9 @@ export function Section({ title, children }: { title: string; children: ReactNod
 }
 
 /** What a section says when it has nothing to list. */
-export const None = ({ children = "None." }: { children?: ReactNode }) => (
-  <p className="text-muted-foreground">{children}</p>
-);
+export function None({ children = "None." }: { children?: ReactNode }) {
+  return <p className="text-muted-foreground">{children}</p>;
+}
 
 /** Label and value pairs, as a description list of `Fact`s: labels in one column, values in the other. */
 export function Facts({ children }: { children: ReactNode }) {
