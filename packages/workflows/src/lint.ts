@@ -1,5 +1,6 @@
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
-import { childrenOf, type Node, parse } from "./ast.ts";
+import { childrenOf, locator, type Node, parse } from "./ast.ts";
+import { readDataFile } from "./datafile.ts";
 // From src/ and from dist/ alike, the package's own oxlint.json: the one list of allowed names.
 import oxlint from "../oxlint.json" with { type: "json" };
 
@@ -60,18 +61,7 @@ const ERROR_CLASSES = new Set(["DriverError", "SanomaError", "PolicyDeniedError"
  * not a sandbox, and code written to get around it can.
  */
 export function lintWorkflow(source: string, filename?: string): LintProblem[] {
-  const { program, errors } = parse(filename ?? "workflow.ts", source);
-  const lineStarts = [0];
-  for (let i = 0; i < source.length; i++) if (source[i] === "\n") lineStarts.push(i + 1);
-  const at = (offset: number) => {
-    let line = 0;
-    while (line + 1 < lineStarts.length && lineStarts[line + 1]! <= offset) line++;
-    return { line: line + 1, column: offset - lineStarts[line]! + 1 };
-  };
-  const problems: LintProblem[] = errors.map((e) => ({
-    ...at(e.labels?.[0]?.start ?? 0),
-    message: `syntax: ${e.message}`,
-  }));
+  const { program, problems, at } = parsed(source, filename ?? "workflow.ts");
   const root = filename === undefined ? undefined : treeOf(filename);
 
   const checkSource = (node: Node) => {
@@ -154,11 +144,36 @@ export function lintWorkflow(source: string, filename?: string): LintProblem[] {
   return problems.toSorted((a, b) => a.line - b.line || a.column - b.column);
 }
 
+/**
+ * Checks a data file under `resources/`: only named imports (a connector's constructors from its
+ * `…/resources` entry, and resources from other data files inside the same `resources/`
+ * directory), `export const <name> = <vendor>.<type>({ … })` with literal fields and names of
+ * declared resources, and `export default [ … ]`. Each message says what to write instead.
+ * It is the subset `readResources` reads (`readDataFile`), without the config: whether the
+ * connector, the type and the values are known is the reader's to say.
+ */
+export function lintResources(source: string, filename: string): LintProblem[] {
+  const { program, problems, at } = parsed(source, filename);
+  for (const p of readDataFile(program, filename).problems) problems.push({ ...at(p.start), message: p.message });
+  return problems.toSorted((a, b) => a.line - b.line || a.column - b.column);
+}
+
+/** A file parsed, its syntax errors as problems, and offsets as lines and columns from 1. */
+function parsed(source: string, filename: string) {
+  const { program, errors } = parse(filename, source);
+  const at = locator(source);
+  const problems: LintProblem[] = errors.map((e) => ({
+    ...at(e.labels?.[0]?.start ?? 0),
+    message: `syntax: ${e.message}`,
+  }));
+  return { program, problems, at };
+}
+
 /** The `paths` of oxlint.json's `no-restricted-imports` rule. */
 function restrictedImports(config: typeof oxlint): { name: string; allowImportNames?: string[] }[] {
   return config.overrides.flatMap((o) => {
-    const [, options] = o.rules["no-restricted-imports"] as [string, { paths: { name: string }[] }];
-    return options.paths;
+    const rule = (o.rules as Record<string, unknown>)["no-restricted-imports"];
+    return rule ? (rule as [string, { paths: { name: string }[] }])[1].paths : [];
   });
 }
 
