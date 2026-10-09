@@ -78,8 +78,11 @@ export function describeScenarios(
     client = await SanomaClient.connect(shared);
   }, 60_000);
   afterAll(async () => {
-    await client?.close();
-    await worker?.stop();
+    try {
+      await client?.close();
+    } finally {
+      await worker?.stop();
+    }
   });
 
   for (const [file, inFile] of Map.groupBy(scenarios, (s) => s.file)) {
