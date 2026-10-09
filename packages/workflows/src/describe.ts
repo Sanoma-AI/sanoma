@@ -124,8 +124,8 @@ const vendorEntry = (id: string, info: VendorInfo | undefined): VendorEntry => (
   ...(info?.logo && {
     logo: { src: svgDataUrl(info.logo.svg), ...(info.logo.dark && { dark: svgDataUrl(info.logo.dark) }) },
   }),
-  ...(info?.package !== undefined && { package: info.package }),
-  ...(info?.homepage !== undefined && { homepage: info.homepage }),
+  ...(info?.package && { package: info.package }),
+  ...(info?.homepage && { homepage: info.homepage }),
 });
 
 function toJsonSchema(schema: z.ZodType, what: string, io: "input" | "output"): Record<string, unknown> {
