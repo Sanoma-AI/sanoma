@@ -1,6 +1,6 @@
 # packages/workflows/src
 
-The source of `@sanoma/workflows`: how connectors, workflows and policies are declared, how a worker runs them durably on DBOS, and the tools that read them (lint, outline, describe). Its entry points, from `exports` in `package.json`: `.` (`index.ts`), `./describe`, `./fake`, `./lint` and `./shared`.
+The source of `@sanoma/workflows`: how connectors, workflows and policies are declared, how a worker runs them durably on DBOS, and the tools that read them (lint, outline, describe). Its entry points, from `exports` in `package.json`: `.` (`index.ts`), `./describe`, `./fake`, `./lint`, `./scenario` and `./shared`.
 
 ## Contents
 
@@ -28,6 +28,7 @@ The source of `@sanoma/workflows`: how connectors, workflows and policies are de
 | [`resource.ts`](resource.ts)   | `defineResource`: a resource type's schema, fields, identity, constructor, and `read` and `import`    |
 | [`resources.ts`](resources.ts) | `readDataFiles` and `readResources`: the resources the data files declare, and their problems         |
 | [`run.ts`](run.ts)             | The per-run and per-worker state the DBOS workflow receives                                           |
+| [`scenario.ts`](scenario.ts)   | Gherkin scenarios: `loadScenarios`, `check` and `drive`, and the seeding of a sandbox run's fakes     |
 | [`shared.ts`](shared.ts)       | Browser-safe helpers for run status and approvals, and resource types; no DBOS, Node or zod           |
 | [`version.ts`](version.ts)     | The package version, the step layout and `computeVersion`, the application version hash               |
 | [`worker.ts`](worker.ts)       | `startWorker`: launches DBOS, registers the workflows and returns a stoppable `Worker`                |
