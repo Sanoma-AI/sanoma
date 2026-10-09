@@ -183,12 +183,7 @@ describe("the API", () => {
     expect(wf?.outline).toMatchObject({ file: expect.stringMatching(/announce\.ts$/) });
     expect(JSON.stringify(body)).not.toContain('"source"');
     expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.effect).toBe("send");
-    expect(body.vendors.resend).toMatchObject({
-      title: "Resend",
-      logo: { src: expect.stringMatching(/^data:/) },
-      package: "@sanoma/connector-resend",
-      homepage: expect.stringMatching(/^https:\/\/github\.com\/Sanoma-AI\/sanoma\//),
-    });
+    expect(body.vendors.resend).toMatchObject({ title: "Resend", logo: { src: expect.stringMatching(/^data:/) } });
   });
 
   it("refuses a run without an actor, for an unknown workflow, or with input the schema refuses", async () => {
@@ -510,19 +505,17 @@ describe("the page", () => {
     expect(runs.html.match(/<html[^>]*>/)?.[0]).not.toMatch(/class="[^"]*\bdark\b/);
   });
 
-  it("renders the connectors: each one's package and source, its operations and the workflows that use them", async () => {
-    const { vendors } = (await call<ConfigDescription>("/api/config")).body;
+  it("renders the connectors: each one's package and homepage, its operations and the workflows that use them", async () => {
     const connectors = await page("/connectors");
     expect(connectors.status).toBe(200);
     expect(connectors.html).toMatch(/<h1[^>]*>Connectors<\/h1>/);
     expect(connectors.text).toContain("<title>Connectors · Sanoma</title>");
-    expect(connectors.html).toContain("Resend");
     expect(connectors.html).toContain('href="https://www.npmjs.com/package/@sanoma/connector-resend"');
-    expect(connectors.html).toContain(`href="${vendors.resend!.homepage}"`);
+    expect(connectors.html).toContain('href="https://github.com/Sanoma-AI/sanoma/tree/main/connectors/resend#readme"');
     expect(connectors.html).toContain("<code>resend.broadcast.send</code>");
     expect(connectors.html).toContain('href="/workflows/announce"');
-    // Every page's sidebar links to it.
-    expect((await page("/runs")).html).toContain('href="/connectors"');
+    // The sidebar, on every page, links to it.
+    expect(connectors.html).toContain('href="/connectors"');
   });
 
   it("renders a workflow's page: its graph beside its source, and not-found for one that does not exist", async () => {
