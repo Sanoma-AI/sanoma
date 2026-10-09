@@ -130,6 +130,16 @@ describe("describeConfig", () => {
     }
     expect(() => defineConnector("counter", specs, { logo: { svg: "<svg></svg>", dark: "x" } })).toThrow("logo.dark");
     expect(() => defineConnector("counter", specs, { logo: { svg: '<svg viewBox="0 0 1 1"></svg>' } })).not.toThrow();
+    expect(() => defineConnector("counter", specs, { logo: { svg: "<svg></svg>", dark: undefined } })).not.toThrow();
+  });
+
+  it("keeps the logo it checked, whatever the caller changes later", () => {
+    const specs = { tally: { add: { effect: "write", input: z.object({}), output: z.object({}) } } } as const;
+    const info = { logo: { svg: "<svg></svg>" } };
+    const counter = defineConnector("counter", specs, info);
+    info.logo.svg = "<img src=x>";
+    expect(counter.tally.add.vendorInfo?.logo).toEqual({ svg: "<svg></svg>" });
+    expect(Object.isFrozen(counter.tally.add.vendorInfo?.logo)).toBe(true);
   });
 
   it("says whether a policy other than allowAll is configured, and its version, and names the app and version", () => {

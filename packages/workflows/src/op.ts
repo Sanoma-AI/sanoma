@@ -76,14 +76,17 @@ export function defineConnector<const V extends string, const S extends Specs>(
   specs: S,
   info?: VendorInfo,
 ): Connector<V, S> {
-  for (const [variant, svg] of Object.entries(info?.logo ?? {})) {
+  // A copy, frozen once checked: changing the caller's object later cannot slip a logo past the check.
+  const logo =
+    info?.logo && Object.freeze(Object.fromEntries(Object.entries(info.logo).filter(([, v]) => v !== undefined)));
+  for (const [variant, svg] of Object.entries(logo ?? {})) {
     if (typeof svg !== "string" || !SVG_ELEMENT.test(svg)) {
       throw new Error(
         `defineConnector("${vendor}"): logo.${variant} must be inline SVG markup, one <svg>…</svg> element`,
       );
     }
   }
-  const vendorInfo = info && Object.freeze({ ...info });
+  const vendorInfo = info && Object.freeze({ ...info, ...(logo && { logo: logo as VendorInfo["logo"] }) });
   const out: Record<string, Record<string, Op>> = {};
   for (const [resource, ops] of Object.entries(specs)) {
     out[resource] = {};
