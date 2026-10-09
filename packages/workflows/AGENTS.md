@@ -235,7 +235,7 @@ export default defineConfig({
 });
 ```
 
-`fakes` are `defineFake` fakes; each implements its vendor's operations for sandbox runs. `scenarios` must be a `file:` URL (`resolveConfig` refuses anything else); a directory that does not exist has no scenarios. Every `.feature` file under it is read, and each scenario's name must be unique across them.
+`fakes` are `defineFake` fakes; each implements its vendor's operations for sandbox runs. `scenarios` must be a `file:` URL (`resolveConfig` refuses anything else); a directory that does not exist has no scenarios. Every `.feature` file under it is read; each must hold at least one scenario, and each scenario's name must be unique across them. Each row of a `Scenario Outline`'s examples is a scenario of its own, named from the outline's title; rows whose names come out the same get their line appended, such as `Launch (line 12)`.
 
 ```gherkin
 Feature: Announce a launch
@@ -262,12 +262,12 @@ The steps, as [Cucumber expressions](https://github.com/cucumber/cucumber-expres
 
 | Keyword | Step                                                                                 | What it does                                                                                 |
 | ------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
-| Given   | `{op} was called with` and a JSON doc string                                         | Seeds the fake: calls the operation through it before the run                                |
+| Given   | `{op} was called with` and a JSON doc string or a two-column table (`name \| value`) | Seeds the fake: calls the operation through it before the run                                |
 | Given   | `{op} fails once`, `{op} is rate limited once`, `{op} loses its reply once`          | Injects the fault into the operation's next call (`failNext`, `rateLimit`, `loseReply`)      |
 | When    | `{workflow} runs with` and a JSON doc string or a two-column table (`name \| value`) | The workflow the scenario runs, and its input; table values are read as JSON when they parse |
 | When    | `{workflow} runs`                                                                    | The same, with the input made up                                                             |
 | Any     | `{string} is approved by {who}`, `… with note {string}`, and the `rejected` forms    | How the approval with that title (or id, such as `approval-2`) is decided                    |
-| Then    | `{op} was called with` and a JSON doc string                                         | Expects a call whose input has at least these fields                                         |
+| Then    | `{op} was called with` and a JSON doc string or a two-column table                   | Expects a call whose input has at least these fields                                         |
 | Then    | `{op} was called`, `{op} was not called`                                             | Expects a call to the operation, or none                                                     |
 | Then    | `the run succeeds`, `the run fails`, `the run fails with {string}`                   | Expects the run to finish, or to fail (with that error code, such as `"approval_rejected"`)  |
 
