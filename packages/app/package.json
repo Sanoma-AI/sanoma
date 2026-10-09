@@ -61,8 +61,13 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.14",
     "@dagrejs/dagre": "^3.1.1",
     "@fontsource-variable/geist": "^5.3.0",
+    "@lezer/highlight": "^1.2.5",
     "@sanoma/connector-bluesky": "workspace:*",
     "@sanoma/connector-ghost": "workspace:*",
     "@sanoma/connector-resend": "workspace:*",

@@ -5,6 +5,7 @@ import { cva } from "class-variance-authority";
 import { ChevronRightIcon, CircleAlertIcon, InfoIcon } from "lucide-react";
 import {
   type ComponentProps,
+  type CSSProperties,
   lazy,
   type ReactElement,
   type ReactNode,
@@ -30,6 +31,7 @@ import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import type { OpEntry } from "@sanoma/workflows/describe";
 import { approverLabel } from "@sanoma/workflows/shared";
 import { configQuery } from "../queries.ts";
+import type { CodeProps } from "./code.tsx";
 import type { GraphProps } from "./graph.tsx";
 
 // Small pieces shared by the screens, composed from the shadcn components in ./ui.
@@ -372,6 +374,35 @@ export function GraphPanel(props: GraphProps) {
         </Suspense>
       ) : (
         skeleton
+      )}
+    </Card>
+  );
+}
+
+/**
+ * The source view's chunk: CodeMirror and its TypeScript grammar. Like the graph's, it needs the
+ * DOM and loads in the browser only; a page's loader calls this in the browser to warm it.
+ */
+export const loadCode = () => import("./code.tsx");
+const Code = lazy(loadCode);
+
+/**
+ * A workflow's source in a box 220 px high, 280 px from `sm` (or `height`), scrolling inside.
+ * On the server, without JavaScript, and until the view loads, the box holds the source as
+ * plain text; once the box comes near the screen, the view replaces it.
+ */
+export function CodePanel({ height, ...props }: CodeProps & { height?: CSSProperties["height"] }) {
+  const box = useRef<HTMLDivElement>(null);
+  const seen = useSeen(box);
+  const text = <pre className="size-full overflow-auto p-3 font-mono text-xs">{props.source}</pre>;
+  return (
+    <Card ref={box} className="h-[220px] gap-0 py-0 sm:h-[280px]" style={{ height }}>
+      {seen ? (
+        <Suspense fallback={text}>
+          <Code {...props} />
+        </Suspense>
+      ) : (
+        text
       )}
     </Card>
   );
