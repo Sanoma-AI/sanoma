@@ -54,6 +54,8 @@ export interface ResolvedConfig {
   version: string;
   /** The DBOS queue runs are started on: `sanoma:<appName>`. */
   queueName: string;
+  /** The DBOS queue sandbox runs are started on, which runs one at a time per worker: `sanoma:<appName>:sandbox`. */
+  sandboxQueueName: string;
   /** The operations the connectors declare, by id. */
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id. */
@@ -153,6 +155,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     databaseUrl: resolveDatabaseUrl(config),
     version: computeVersion(config),
     queueName: `sanoma:${appName}`,
+    sandboxQueueName: `sanoma:${appName}:sandbox`,
     ops,
     drivers,
     fakes,

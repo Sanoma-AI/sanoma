@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { testDatabaseUrl } from "@sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -179,17 +180,21 @@ describe("sandbox runs", () => {
     }
   });
 
-  it("refuses a second sandbox run while one waits, and a scenario that does not exist", async () => {
+  it("starts a second sandbox run once the one waiting on an approval ends, and refuses a scenario that does not exist", async () => {
     const launch = scenario("Launch on time");
     const first = await c().start(announce, launch.input as never, { startedBy: alice, sandbox: launch.name });
     await waitFor(pending(c, first));
 
     const second = await c().start(announce, launch.input as never, { startedBy: alice, sandbox: launch.name });
-    const busy = await failure(c().result(second));
-    expect(errorCode(busy)).toBe("sandbox_busy");
-    expect((busy as Error).message).toContain(first);
+    // Longer than the queue's dispatch interval (a second): it would have started by now.
+    await delay(2_000);
+    expect((await c().run(second))?.status).toBe("queued");
+    expect(await ledger(second)).toEqual([]);
 
     expect(await drive(c(), first, launch)).toMatchObject({ status: "finished" });
+    expect(await drive(c(), second, launch)).toMatchObject({ status: "finished" });
+    const [one, two] = await Promise.all([ledger(first), ledger(second)]);
+    expect(two[0]!.at).toBeGreaterThanOrEqual(one.at(-1)!.at);
 
     const unknown = await c().start(announce, launch.input as never, { startedBy: alice, sandbox: "Nope" });
     const missing = await failure(c().result(unknown));

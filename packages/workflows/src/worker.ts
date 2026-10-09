@@ -93,6 +93,8 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       }
     }
     await DBOS.registerQueue(resolved.queueName);
+    // Sandbox runs share the worker's fakes, so it runs one at a time; another waits, queued.
+    await DBOS.registerQueue(resolved.sandboxQueueName, { workerConcurrency: 1 });
     await warnAboutStrandedRuns(resolved);
   } catch (err) {
     // Once DBOS is launched, the caller gets no worker to stop: stop it here, so no run goes on
@@ -117,7 +119,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
  * the app, or queued on another queue (such as the single "sanoma" queue before queues were
  * named per app).
  */
-async function warnAboutStrandedRuns({ appName, version, queueName }: ResolvedConfig) {
+async function warnAboutStrandedRuns({ appName, version, queueName, sandboxQueueName }: ResolvedConfig) {
   const runs = await DBOS.listWorkflows({
     status: dbosStatusesOf("queued", "running"),
     applicationName: appName,
@@ -127,7 +129,12 @@ async function warnAboutStrandedRuns({ appName, version, queueName }: ResolvedCo
   const otherVersion = runs.filter((r) => r.applicationVersion && r.applicationVersion !== version);
   // Recovery moves a worker's own runs to DBOS's internal queues, which are fine.
   const otherQueue = runs.filter(
-    (r) => !otherVersion.includes(r) && r.queueName && r.queueName !== queueName && !r.queueName.startsWith("_dbos_"),
+    (r) =>
+      !otherVersion.includes(r) &&
+      r.queueName &&
+      r.queueName !== queueName &&
+      r.queueName !== sandboxQueueName &&
+      !r.queueName.startsWith("_dbos_"),
   );
   if (!otherVersion.length && !otherQueue.length) return;
   const ids = [...otherVersion, ...otherQueue].map((r) => r.workflowID);
@@ -173,7 +180,6 @@ function register(wf: WorkflowDefinition<any, any>) {
         } finally {
           // Before the outcome is written: a call still queued must find the run ended.
           run.ended = true;
-          if (state.sandboxRun === run.id) state.sandboxRun = undefined;
         }
       } catch (err) {
         const record = entry(run, { type: "run.failed", error: errorInfo(err) });
