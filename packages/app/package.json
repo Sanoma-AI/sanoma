@@ -70,6 +70,7 @@
     "@lezer/highlight": "^1.2.5",
     "@sanoma/connector-bluesky": "workspace:*",
     "@sanoma/connector-ghost": "workspace:*",
+    "@sanoma/connector-github": "workspace:*",
     "@sanoma/connector-resend": "workspace:*",
     "@sanoma/testing": "workspace:*",
     "@sanoma/workflows": "workspace:*",

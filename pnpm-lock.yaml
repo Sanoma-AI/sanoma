@@ -169,6 +169,9 @@ importers:
       '@sanoma/connector-ghost':
         specifier: workspace:*
         version: link:../../connectors/ghost
+      '@sanoma/connector-github':
+        specifier: workspace:*
+        version: link:../../connectors/github
       '@sanoma/connector-resend':
         specifier: workspace:*
         version: link:../../connectors/resend
