@@ -181,9 +181,14 @@ describe("the API", () => {
     // Each workflow's outline, read from its file when the app started; the file itself is not sent.
     expect(wf?.outline).toEqual(outlineWorkflow(announce));
     expect(wf?.outline).toMatchObject({ file: expect.stringMatching(/announce\.ts$/) });
-    expect(JSON.stringify(body)).not.toContain('"source"');
+    expect(JSON.stringify(body.workflows)).not.toContain('"source"');
     expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.effect).toBe("send");
-    expect(body.vendors.resend).toMatchObject({ title: "Resend", logo: { src: expect.stringMatching(/^data:/) } });
+    expect(body.vendors.resend).toMatchObject({
+      title: "Resend",
+      logo: { src: expect.stringMatching(/^data:/) },
+      package: "@sanoma/connector-resend",
+      source: expect.stringMatching(/^https:\/\/github\.com\/Sanoma-AI\/sanoma\//),
+    });
   });
 
   it("refuses a run without an actor, for an unknown workflow, or with input the schema refuses", async () => {

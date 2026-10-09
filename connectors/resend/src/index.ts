@@ -35,5 +35,7 @@ export const resend = defineConnector(
   {
     title: "Resend",
     logo: { svg: lettermark("black"), dark: lettermark("#FDFDFD") },
+    package: "@sanoma/connector-resend",
+    source: "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/resend",
   },
 );

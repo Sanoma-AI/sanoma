@@ -24,5 +24,10 @@ export const bluesky = defineConnector(
       },
     },
   },
-  { title: "Bluesky", logo: { svg: butterfly("#006AFF"), dark: butterfly("white") } },
+  {
+    title: "Bluesky",
+    logo: { svg: butterfly("#006AFF"), dark: butterfly("white") },
+    package: "@sanoma/connector-bluesky",
+    source: "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/bluesky",
+  },
 );

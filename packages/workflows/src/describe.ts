@@ -44,12 +44,16 @@ export interface OpEntry {
   output: Record<string, unknown>;
 }
 
-/** Who a vendor is, from its connector's `VendorInfo`: enough to name it and show its logo. */
+/** Who a vendor is, from its connector's `VendorInfo`: enough to name it, show its logo and link to its connector. */
 export interface VendorEntry {
   /** The connector's `title`, else the vendor's id. */
   title: string;
   /** The logo as `data:image/svg+xml` URLs, for an `<img>`: `dark` is for dark backgrounds. */
   logo?: { src: string; dark?: string };
+  /** The connector's npm package name. */
+  package?: string;
+  /** Where the connector's code is: an https URL. */
+  source?: string;
 }
 
 /**
@@ -120,6 +124,8 @@ const vendorEntry = (id: string, info: VendorInfo | undefined): VendorEntry => (
   ...(info?.logo && {
     logo: { src: svgDataUrl(info.logo.svg), ...(info.logo.dark && { dark: svgDataUrl(info.logo.dark) }) },
   }),
+  ...(info?.package !== undefined && { package: info.package }),
+  ...(info?.source !== undefined && { source: info.source }),
 });
 
 function toJsonSchema(schema: z.ZodType, what: string, io: "input" | "output"): Record<string, unknown> {

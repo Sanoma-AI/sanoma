@@ -39,5 +39,10 @@ export const ghost = defineConnector(
       },
     },
   },
-  { title: "Ghost", logo: { svg: glyph("#15171A"), dark: glyph("white") } },
+  {
+    title: "Ghost",
+    logo: { svg: glyph("#15171A"), dark: glyph("white") },
+    package: "@sanoma/connector-ghost",
+    source: "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/ghost",
+  },
 );
