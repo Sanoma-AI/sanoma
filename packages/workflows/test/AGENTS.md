@@ -18,6 +18,8 @@ Vitest tests for `@sanoma/workflows`. Files that start runs need Postgres (`pnpm
 | [`ledger.test.ts`](ledger.test.ts)       | The in-memory and JSONL ledgers, and how a run writes its records                        |
 | [`lint.test.ts`](lint.test.ts)           | `lintWorkflow` and the shipped `oxlint.json`                                             |
 | [`outline.test.ts`](outline.test.ts)     | `outlineWorkflow`: nodes, spans and fallbacks, from source and built JavaScript          |
+| [`resource.test.ts`](resource.test.ts)   | `defineResource`, `compareDeclared` and resource types in `describeConfig`               |
+| [`tfschema.test.ts`](tfschema.test.ts)   | `ctyToZod` per cty type, `generateResources`, `fromTfState` and `toTfState`              |
 | [`types.test.ts`](types.test.ts)         | Type-level checks for drivers, operation ids and workflow names, run by `pnpm typecheck` |
 | [`version.test.ts`](version.test.ts)     | The application version, and workers on one database: versions, queues and rollbacks     |
 | [`worker.test.ts`](worker.test.ts)       | `startWorker` and `resolveConfig` refusals, derived settings, and failure after launch   |

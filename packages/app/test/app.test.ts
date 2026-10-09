@@ -17,6 +17,8 @@ import { bluesky } from "@sanoma/connector-bluesky";
 import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
 import { ghost } from "@sanoma/connector-ghost";
 import { fakeGhost } from "@sanoma/connector-ghost/fake";
+import { github } from "@sanoma/connector-github";
+import { fakeGithub } from "@sanoma/connector-github/fake";
 import { resend } from "@sanoma/connector-resend";
 import { fakeResend } from "@sanoma/connector-resend/fake";
 import { testDatabaseUrl } from "@sanoma/testing";
@@ -79,8 +81,8 @@ const policy = definePolicy(
 const blog = fakeGhost();
 const config = defineConfig({
   workflows: [announce],
-  connectors: [ghost, resend, bluesky],
-  drivers: [blog.driver, fakeResend().driver, fakeBluesky().driver],
+  connectors: [ghost, resend, bluesky, github],
+  drivers: [blog.driver, fakeResend().driver, fakeBluesky().driver, fakeGithub().driver],
   policy,
   ledger: memoryLedger(),
   appName: "sanoma-app-test",
@@ -179,9 +181,10 @@ describe("the API", () => {
     expect(wf?.ops).toEqual(expect.arrayContaining(["ghost.post.publish", "resend.broadcast.send"]));
     expect(wf?.builtins).toEqual(["approval", "sleep"]);
     // Each workflow's outline, read from its file when the app started; the file itself is not sent.
+    // (Only the workflows are checked: GitHub's repository schema has a field named `source`.)
     expect(wf?.outline).toEqual(outlineWorkflow(announce));
     expect(wf?.outline).toMatchObject({ file: expect.stringMatching(/announce\.ts$/) });
-    expect(JSON.stringify(body)).not.toContain('"source"');
+    expect(JSON.stringify(body.workflows)).not.toContain('"source"');
     expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.effect).toBe("send");
     expect(body.vendors.resend).toMatchObject({ title: "Resend", logo: { src: expect.stringMatching(/^data:/) } });
   });
@@ -505,7 +508,7 @@ describe("the page", () => {
     expect(runs.html.match(/<html[^>]*>/)?.[0]).not.toMatch(/class="[^"]*\bdark\b/);
   });
 
-  it("renders the connectors: each one's package and homepage, its operations and the workflows that use them", async () => {
+  it("renders the connectors: each one's package and homepage, resource types, operations and the workflows that use them", async () => {
     const connectors = await page("/connectors");
     expect(connectors.status).toBe(200);
     expect(connectors.html).toMatch(/<h1[^>]*>Connectors<\/h1>/);
@@ -513,6 +516,7 @@ describe("the page", () => {
     expect(connectors.html).toContain('href="https://www.npmjs.com/package/@sanoma/connector-resend"');
     expect(connectors.html).toContain('href="https://github.com/Sanoma-AI/sanoma/tree/main/connectors/resend#readme"');
     expect(connectors.html).toContain("<code>resend.broadcast.send</code>");
+    expect(connectors.html).toMatch(/Resources: <\/span>Branch protection rule, Repository, Team membership</);
     expect(connectors.html).toContain('href="/workflows/announce"');
     // The sidebar, on every page, links to it.
     expect(connectors.html).toContain('href="/connectors"');

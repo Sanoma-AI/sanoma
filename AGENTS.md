@@ -17,6 +17,8 @@ Status: early. Business processes are written as TypeScript workflows that run o
 | [`@sanoma/connector-ghost`](connectors/ghost/AGENTS.md)     | Ghost Admin API post operations and an in-memory fake                             |
 | [`@sanoma/connector-resend`](connectors/resend/AGENTS.md)   | Resend broadcast operations and an in-memory fake                                 |
 | [`@sanoma/connector-bluesky`](connectors/bluesky/AGENTS.md) | Bluesky post operations and an in-memory fake                                     |
+| [`@sanoma/connector-github`](connectors/github/AGENTS.md)   | GitHub resources read through its OpenTofu provider, and a replay fake            |
+| [`@sanoma/connector-stripe`](connectors/stripe/AGENTS.md)   | Stripe resources read through its OpenTofu provider, and a replay fake            |
 | [`modules/`](modules/AGENTS.md)                             | Placeholder for parts not written yet                                             |
 | [`types/`](types/AGENTS.md)                                 | Ambient type declarations shared by the packages                                  |
 | [`.github/`](.github/AGENTS.md)                             | GitHub Actions CI                                                                 |

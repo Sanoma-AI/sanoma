@@ -1,0 +1,69 @@
+{
+  "name": "@sanoma/connector-stripe",
+  "version": "0.1.0",
+  "description": "Stripe resources (products, webhook endpoints) for Sanoma, read through the OpenTofu provider",
+  "keywords": [
+    "connector",
+    "opentofu",
+    "payments",
+    "resources",
+    "sanoma",
+    "stripe"
+  ],
+  "homepage": "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/stripe#readme",
+  "bugs": "https://github.com/Sanoma-AI/sanoma/issues",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sanoma-AI/sanoma.git",
+    "directory": "connectors/stripe"
+  },
+  "files": [
+    "dist",
+    "testdata/replies",
+    "AGENTS.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./resources": {
+      "types": "./dist/resources.d.ts",
+      "default": "./dist/resources.js"
+    },
+    "./driver": {
+      "types": "./dist/driver.d.ts",
+      "default": "./dist/driver.js"
+    },
+    "./fake": {
+      "types": "./dist/fake.d.ts",
+      "default": "./dist/fake.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "generate": "node ../../packages/workflows/src/tfschema/cli.ts testdata/schemas/stripe_stripe_0.3.0.json src/resources.config.ts src/resources.gen.ts && oxfmt src/resources.gen.ts",
+    "prepack": "pnpm run clean && pnpm run build"
+  },
+  "devDependencies": {
+    "@sanoma/workflows": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "@sanoma/workflows": "^0.1.0",
+    "zod": "^4"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

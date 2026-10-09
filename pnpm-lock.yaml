@@ -67,6 +67,15 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  connectors/github:
+    devDependencies:
+      '@sanoma/workflows':
+        specifier: workspace:*
+        version: link:../../packages/workflows
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
   connectors/resend:
     devDependencies:
       '@sanoma/workflows':
@@ -75,6 +84,15 @@ importers:
       msw:
         specifier: ^3.0.2
         version: 3.0.2(@types/node@26.6.4)(typescript@7.0.2)(vite@8.3.3(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
+  connectors/stripe:
+    devDependencies:
+      '@sanoma/workflows':
+        specifier: workspace:*
+        version: link:../../packages/workflows
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -151,6 +169,9 @@ importers:
       '@sanoma/connector-ghost':
         specifier: workspace:*
         version: link:../../connectors/ghost
+      '@sanoma/connector-github':
+        specifier: workspace:*
+        version: link:../../connectors/github
       '@sanoma/connector-resend':
         specifier: workspace:*
         version: link:../../connectors/resend
@@ -215,9 +236,15 @@ importers:
       '@sanoma/connector-ghost':
         specifier: workspace:*
         version: link:../../connectors/ghost
+      '@sanoma/connector-github':
+        specifier: workspace:*
+        version: link:../../connectors/github
       '@sanoma/connector-resend':
         specifier: workspace:*
         version: link:../../connectors/resend
+      '@sanoma/connector-stripe':
+        specifier: workspace:*
+        version: link:../../connectors/stripe
       '@sanoma/workflows':
         specifier: workspace:*
         version: link:../workflows

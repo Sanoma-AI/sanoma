@@ -122,7 +122,7 @@ const run = await client.run(runId); // run.status: "queued" | "running" | "wait
 
 `startedBy` is required. `start(workflow, input, { startedBy, runId })` with a `runId` makes a retried start idempotent: an id that exists returns that run when the workflow, the input (as JSON) and `startedBy` match, and is refused with `invalid_input`, naming what differs, when they do not. Of two starts racing with one new id, the first stands and the second is answered the same way. Errors the runtime and the client throw carry a `code` (`policy_denied`, `approval_rejected`, `not_approver`, `no_pending_approval`, `already_decided`, `run_not_found`, `driver_failed`, `invalid_input`, `run_ended`, `run_running`: `client.result` timed out with the run still going) and `data`. Read it with `errorCode(err)`, not `instanceof`: a run's error comes back from the database as a copy, so `errorCode(await client.result(runId).catch((e) => e))` is `"policy_denied"` for a denied call.
 
-`startWorker(config, { logLevel })` runs workflows and recovers interrupted runs. `SanomaClient` starts runs, lists them, records approval decisions and reads a run's ledger. `describeConfig(config)`, from `@sanoma/workflows/describe`, returns the same config as plain JSON (its version, each workflow's input as JSON Schema, the operations it may call and its [outline](#outline), each operation's effect and contract: its input as a caller sends it, `io: "input"`, and its output as parsed, `io: "output"`), and each vendor's title, logo, package and homepage (`vendors`, by vendor id, the logo as `data:image/svg+xml` URLs), which is what a UI renders from.
+`startWorker(config, { logLevel })` runs workflows and recovers interrupted runs. `SanomaClient` starts runs, lists them, records approval decisions and reads a run's ledger. `describeConfig(config)`, from `@sanoma/workflows/describe`, returns the same config as plain JSON (its version, each workflow's input as JSON Schema, the operations it may call and its [outline](#outline), each operation's effect and contract: its input as a caller sends it, `io: "input"`, and its output as parsed, `io: "output"`), and each vendor's title, logo, package, homepage and resource types (`vendors`, by vendor id, the logo as `data:image/svg+xml` URLs), which is what a UI renders from.
 
 The worker, the client and the app find Postgres at the config's `databaseUrl`, else the `SANOMA_DATABASE_URL` environment variable, else `postgresql://postgres:dbos@localhost:5433/sanoma`, the database `pnpm db:up` starts from this repo's docker compose file. Set one of the first two anywhere but on your own machine.
 
@@ -165,6 +165,37 @@ The lint refuses `Promise.all` and `Promise.allSettled` in workflows, pointing a
 A driver implements a connector's operations with `defineDriver(connector, { resource: { name: (input, call) => … } })`, typed by the connector's schemas. `call` carries `idempotencyKey`, the same on every retry and replay of one call: pass it to the vendor (or dedupe on it) so a crash between the vendor's reply and the checkpoint does not repeat the side effect. A driver reads its credentials when it is called, never from the config.
 
 When the vendor says no, throw a `DriverError(message, { retryable, status?, vendorCode? })`. An operation declared `idempotent` is tried up to three times (after 1 and 2 seconds) unless the error says `retryable: false` or the reply fails the output schema; any other operation is tried once. When the tries run out, the run fails with the last try's error, not a wrapper: for a `DriverError`, `errorCode(err)` is `"driver_failed"` and the ledger records the vendor's message, status and code. Anything else a driver throws (a `TypeError`, a plain `Error`) fails the run as it is, with no code.
+
+### Resources
+
+A resource type is a kind of vendor object a company declares the state of, such as a GitHub repository. `defineResource` declares one, and derives its operations, so the runtime knows only operations:
+
+```ts
+import { defineConnector, defineResource } from "@sanoma/workflows";
+
+export const repository = defineResource({
+  vendor: "github",
+  type: "repository",
+  title: "Repository",
+  identity: "name", // how `find` makes the import id, for people
+  schema, // a z.object: the fields a data file declares and a read returns
+  fields: { immutable: [], vendorOwned: ["html_url"], writeOnly: [] },
+  find: ({ name }) => name, // the vendor's id for a declared resource
+  normalize, // optional: the part of a state a drift check compares; default `compareDeclared`
+  crud: { read: {}, import: {} },
+});
+export const github = defineConnector("github", { repository: repository.ops });
+```
+
+Its operations are `<vendor>.<type>.import` (`{ id }`, the import id, to the object's `state`) and `<vendor>.<type>.read` (`{ id, state?, private?, schemaVersion? }`, a state from an earlier call, to `{ gone }` or the fresh `state`), both effect `read`, idempotent, with the import id as the policy's `target`. A driver implements them like any other. `private` and `schemaVersion` are what an OpenTofu provider keeps beside a state, passed back unchanged.
+
+Calling the type declares one resource, which is what a data file does: `repository({ name: "sanoma" })` returns `{ kind: "resource", vendor: "github", type: "repository", name: "sanoma", desired: { name: "sanoma" } }` (a `Declared`), and refuses a field the schema does not have, a value it rejects, or an empty identity.
+
+Only declared fields are compared for drift, as CloudFormation does: `compareDeclared(fields, state, desired)` keeps the fields `desired` declares, minus `vendorOwned` and `writeOnly` ones, picking objects field by field and list items against the declared item at the same index. A drift check compares `normalize(actual, desired)` with `normalize(desired, desired)`. So a field left out is never drift, which covers attributes an OpenTofu provider marks `computed` and `optional` (GitHub's `etag`, `topics`): they are the user's to set, so not `vendorOwned`, but the vendor fills them in when nobody does. A type's own `normalize` can build on it, such as sorting a set the vendor returns in its own order.
+
+`describeConfig` lists each vendor's resource types as `vendors[id].resources` (`{ vendor, type, title, identity }`). `@sanoma/workflows/shared` exports the `Resource`, `ResourceSpec`, `ResourceFields` and `Declared` types.
+
+Resource types from an OpenTofu provider are generated: `@sanoma/workflows/tfschema` turns the provider's schema document into zod schemas and flagged fields (`resources.gen.ts`), and converts states between the provider's layout and the resource's. See [`src/tfschema/`](src/tfschema/AGENTS.md).
 
 ### Secrets
 
@@ -224,7 +255,7 @@ it.each(files)("%s has no problems", (file) => {
 - `APPROVALS_EVENT` and `decisionEventOf(approvalId)`: the DBOS events a run publishes its approvals and each decision on, for a UI that reads DBOS directly. `ApprovalMessage` is the zod schema of a decision as a run reads it. `RunArgs` is what a run receives: its input and `startedBy`.
 - `mayDecide(approval, principal)` and `approverLabel(approver)`: who may decide, and how to name them, the same way the run does. `isEnded(status)` and `ENDED_STATUSES`: the run statuses that read no more decisions.
 - Errors: `errorCode(err)` for the code to branch on, `errorMessage(err)` for the text of anything thrown, `invalidInput(what, issues)` to build an `invalid_input` error from zod issues (`InputIssue` is one issue, without symbols in its path), and the classes `SanomaError`, `PolicyDeniedError`, `RejectedError` and `DriverError`. Read codes with `errorCode`, never `instanceof`.
-- `@sanoma/workflows/shared` exports `mayDecide`, `approverLabel`, `errorMessage`, `isEnded`, `ENDED_STATUSES` and the `RunStatus` type with nothing else: no DBOS or Node imports, so a browser bundle can use them. The main entry exports them too.
+- `@sanoma/workflows/shared` exports `mayDecide`, `approverLabel`, `errorMessage`, `isEnded`, `ENDED_STATUSES` and the `RunStatus` type, and the resource types' types (`Resource`, `ResourceSpec`, `ResourceFields`, `Declared`), with nothing else: no DBOS or Node imports, so a browser bundle can use them. The main entry exports them too.
 - `LedgerRecord` and `LedgerStore` for the audit record (`LedgerBody` is a record without the fields every record carries, and `LedgerGroup` a record's `ctx.all` tag), `jsonlLedger(dir)` and `memoryLedger()` to keep it, and `RUNTIME_VERSION`, this package's version as the runtime reports it.
 
 ### Outline

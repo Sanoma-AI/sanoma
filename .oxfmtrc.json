@@ -5,6 +5,7 @@
     "pnpm-lock.yaml",
     "**/dist",
     "**/routeTree.gen.ts",
+    "connectors/*/testdata",
     "**/cn-tables.ts",
     ".agents/skills",
     "skills-lock.json",
