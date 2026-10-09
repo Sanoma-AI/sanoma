@@ -243,6 +243,10 @@ export type { T };
 export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
 `,
     );
+    write(
+      "workflows/sandbox.ts",
+      `import { check } from "@sanoma/workflows/scenario";\nexport const checks = [check];\n`,
+    );
     // Outside workflows/ and policies/, nothing is restricted.
     write("lib/clock.ts", `export const now = () => Date.now() + Math.random();\n`);
   });
@@ -292,6 +296,12 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
       // A race has no ctx.all to point at: nothing races.
       bad(18, "eslint(no-restricted-properties)", /Promise\.race.*nothing races: pick one call, or sleep/),
       bad(19, "eslint(no-restricted-properties)", /Promise\.any.*nothing races/),
+      {
+        file: "workflows/sandbox.ts",
+        line: 1,
+        rule: imports,
+        text: expect.stringMatching(/@sanoma\/workflows\/scenario.*through ctx/),
+      },
     ]);
   });
 });

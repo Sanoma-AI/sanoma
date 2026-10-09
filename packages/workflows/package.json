@@ -45,6 +45,10 @@
       "types": "./dist/lint.d.ts",
       "default": "./dist/lint.js"
     },
+    "./scenario": {
+      "types": "./dist/scenario.d.ts",
+      "default": "./dist/scenario.js"
+    },
     "./shared": {
       "types": "./dist/shared.d.ts",
       "default": "./dist/shared.js"

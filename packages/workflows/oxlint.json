@@ -107,7 +107,8 @@
                   "@sanoma/connector-*/driver",
                   "@sanoma/workflows/describe",
                   "@sanoma/workflows/fake",
-                  "@sanoma/workflows/lint"
+                  "@sanoma/workflows/lint",
+                  "@sanoma/workflows/scenario"
                 ],
                 "message": "A workflow must call vendors through ctx, so the policy sees every call: import the connector itself, `@sanoma/connector-<vendor>`."
               }
