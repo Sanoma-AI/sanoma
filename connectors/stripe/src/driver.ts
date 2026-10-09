@@ -1,5 +1,5 @@
 import { defineDriver, DriverError, type DriverFn } from "@sanoma/workflows";
-import { fromTfState, type TfResourceType, toTfState } from "@sanoma/workflows/tfschema";
+import { fromTfState, type TfResourceType, toTfState } from "@sanoma/bridge/tfschema";
 import { type BridgeLike, type BridgeResource, bridgeErrorOf } from "./bridge.ts";
 import { stripe } from "./index.ts";
 import { provider, stripe_product, stripe_webhook_endpoint } from "./resources.gen.ts";

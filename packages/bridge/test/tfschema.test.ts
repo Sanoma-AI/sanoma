@@ -1,14 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import {
-  type CtyType,
-  ctyToZod,
-  fromTfState,
-  generateResources,
-  type TfBlock,
-  type TfSchemaDocument,
-  toTfState,
-} from "../src/tfschema.ts";
+import type { Block, CtyType, SchemaDocument } from "@sanoma/bridge";
+import { ctyToZod, fromTfState, generateResources, toTfState } from "@sanoma/bridge/tfschema";
 
 /** The zod schema a generated source expression builds. */
 const build = (source: string) => new Function("z", `return ${source}`)(z) as z.ZodType;
@@ -55,24 +48,24 @@ describe("ctyToZod", () => {
 });
 
 /** A schema document with one resource type, `acme_thing`. */
-const doc = (block: TfBlock, schemaVersion = 1): TfSchemaDocument => ({
+const doc = (block: Block, schemaVersion = 1): SchemaDocument => ({
   source: "acme/acme",
   version: "1.0.0",
   protocol: 5,
   formatVersion: 1,
-  providerConfig: { attributes: {} },
+  providerConfig: { attributes: {}, blocks: {} },
   resources: { acme_thing: { schemaVersion, block } },
   dataSources: {},
 });
 
-const thing: TfBlock = {
+const thing: Block = {
   attributes: {
     name: { type: "string", required: true, description: "The thing's name." },
     note: { type: "string", optional: true },
     etag: { type: "string", optional: true, computed: true },
     url: { type: "string", computed: true },
     token: { type: "string", optional: true, sensitive: true },
-    region: { type: "string", optional: true, description: "Where it lives. Changing this forces a new resource." },
+    region: { type: "string", optional: true, description: "Where it lives." },
     legacy: { type: "bool", optional: true, deprecated: true, description: "Old." },
     tags: { type: ["set", "string"], optional: true },
   },
@@ -87,21 +80,23 @@ const thing: TfBlock = {
             nesting: "list",
             minItems: 1,
             maxItems: 1,
-            block: { attributes: { branch: { type: "string", required: true } } },
+            block: { attributes: { branch: { type: "string", required: true } }, blocks: {} },
           },
         },
       },
     },
-    rule: { nesting: "list", block: { attributes: { pattern: { type: "string", required: true } } } },
+    rule: { nesting: "list", block: { attributes: { pattern: { type: "string", required: true } }, blocks: {} } },
   },
 };
 
+const sources = { provider: { source: "acme/acme", version: "1.0.0", sha256: "abc" }, config: "resources.config.ts" };
+
 /** The generated module, evaluated: its `acme_thing` export. */
-function generated(block: TfBlock, immutable: string[] = []) {
+function generated(block: Block, immutable: string[] = []) {
   const source = generateResources(
     doc(block),
-    { types: ["acme_thing"], immutable: { acme_thing: immutable }, sha256: "abc" },
-    { schema: "schema.json", config: "resources.config.ts" },
+    { provider: "acme/acme", types: ["acme_thing"], immutable: { acme_thing: immutable } },
+    sources,
   );
   const body = source
     .replace(/^import .*$/gm, "")
@@ -141,10 +136,10 @@ describe("generateResources", () => {
     expect(schema.safeParse({ name: "x", rule: [{ pattern: "main" }] }).success).toBe(true);
   });
 
-  it("flags computed-only attributes vendor-owned, sensitive ones write-only, and replacements immutable", () => {
-    const { fields } = generated(thing, ["name"]).thing;
+  it("flags computed-only attributes vendor-owned, sensitive ones write-only, and the config's immutable ones", () => {
+    const { fields } = generated(thing, ["region", "name", "pages.source.branch"]).thing;
     expect(fields).toEqual({
-      immutable: ["name", "region"],
+      immutable: ["name", "pages.source.branch", "region"],
       vendorOwned: ["url", "pages.status"],
       writeOnly: ["token"],
     });
@@ -175,6 +170,7 @@ describe("generateResources", () => {
           },
         },
       },
+      blocks: {},
     }).thing;
     expect(schema.safeParse({ name: "x", tiers: [{ up_to: 10 }] }).success).toBe(true);
     expect(schema.safeParse({ name: "x", tiers: [{ flat: 10 }] }).success).toBe(false);
@@ -184,14 +180,19 @@ describe("generateResources", () => {
     expect(generated(thing).source).toBe(generated(thing).source);
   });
 
-  it("refuses types the schema does not have, and immutable attributes a type does not have", () => {
-    const sources = { schema: "s", config: "c" };
-    expect(() => generateResources(doc(thing), { types: ["acme_other"] }, sources)).toThrow(
+  it("refuses another release, types the schema does not have, and immutable attributes a type does not have", () => {
+    const config = { provider: "acme/acme", types: ["acme_thing"] };
+    const other = { ...sources, provider: { source: "acme/acme", version: "2.0.0" } };
+    expect(() => generateResources(doc(thing), config, other)).toThrow(
+      "the schema document is of acme/acme 1.0.0, not the pinned acme/acme 2.0.0",
+    );
+    expect(() => generateResources(doc(thing), { ...config, types: ["acme_other"] }, sources)).toThrow(
       "acme/acme 1.0.0 has no resource type acme_other",
     );
-    expect(() =>
-      generateResources(doc(thing), { types: ["acme_thing"], immutable: { acme_thing: ["nope"] } }, sources),
-    ).toThrow("immutable: acme_thing has no attribute nope");
+    const immutable = (paths: string[]) => ({ ...config, immutable: { acme_thing: paths } });
+    expect(() => generateResources(doc(thing), immutable(["nope", "pages.nope", "pages.source"]), sources)).toThrow(
+      "immutable: acme_thing has no attribute nope, pages.nope",
+    );
   });
 });
 
@@ -233,5 +234,12 @@ describe("fromTfState and toTfState", () => {
       pages: [],
       rule: [],
     });
+  });
+});
+
+describe("the sanoma-tfschema CLI", () => {
+  it("runs nothing on import, and says how to call it", async () => {
+    const { main } = await import("../src/tfschema/cli.ts");
+    await expect(main([])).rejects.toThrow("usage: sanoma-tfschema <resources.config.ts> <resources.gen.ts>");
   });
 });

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { fromTfState } from "@sanoma/workflows/tfschema";
+import { fromTfState } from "@sanoma/bridge/tfschema";
 import { describe, expect, it } from "vitest";
 import { TYPES } from "../src/driver.ts";
 import { stripe } from "../src/index.ts";

@@ -6,7 +6,6 @@ Fixtures copied unchanged from [provider-bridge](https://github.com/Sanoma-AI/pr
 
 | Path                                                         | What it is                                                                                   |
 | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
-| [`schemas/integrations_github_6.13.0.json`](schemas/)        | The provider's schema document: the input to `pnpm generate`. Not shipped in the package     |
 | [`replies/integrations_github_6.13.0/`](replies/)            | Recorded import and read replies, which the fake serves. Shipped in the package              |
 
 The replies: `github_repository` `sanoma` and `provider-bridge` (import and read), and `github_branch_protection` `provider-bridge:main` (import only: it failed, the branch being unprotected). No team membership was recorded: the organization has no teams.

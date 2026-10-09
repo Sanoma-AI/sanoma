@@ -4,11 +4,11 @@ GitHub resources for [`@sanoma/workflows`](https://www.npmjs.com/package/@sanoma
 
 ## Contents
 
-| Path                              | What it is                                                                               |
-| --------------------------------- | ---------------------------------------------------------------------------------------- |
-| [`src/`](src/AGENTS.md)           | The connector, the resource types (generated and hand-owned), the driver and the fake    |
-| [`test/`](test/AGENTS.md)         | The generated types against recorded reads, the driver over a replay, and the fake       |
-| [`testdata/`](testdata/AGENTS.md) | The provider's schema and its recorded replies, copied from provider-bridge's `testdata` |
+| Path                              | What it is                                                                            |
+| --------------------------------- | ------------------------------------------------------------------------------------- |
+| [`src/`](src/AGENTS.md)           | The connector, the resource types (generated and hand-owned), the driver and the fake |
+| [`test/`](test/AGENTS.md)         | The generated types against recorded reads, the driver over a replay, and the fake    |
+| [`testdata/`](testdata/AGENTS.md) | The provider's recorded replies, copied from provider-bridge's `testdata`             |
 
 ## Usage
 
@@ -40,7 +40,7 @@ The logo is GitHub's mark from [Octicons](https://primer.style/octicons/) (`mark
 
 ## Resource types
 
-`src/resources.gen.ts` is generated from the provider's schema (`testdata/schemas/integrations_github_6.13.0.json`) by `pnpm generate`, which runs [`@sanoma/workflows/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the types to generate, the release's pin, and the attributes whose change replaces the object (ForceNew in the provider's source, which the schema does not carry). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing. `src/resources.ts` gives each type its identity and comparison.
+`src/resources.gen.ts` is generated from the provider's schema by `pnpm generate`, which runs [`@sanoma/bridge/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the provider (its release, sha256 and recorded schema are `@sanoma/bridge`'s pin and fixture), the types to generate, and the attributes whose change replaces the object (ForceNew in the provider's source, which the schema does not carry). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing. `src/resources.ts` gives each type its identity and comparison.
 
 Attributes that are computed and not optional (`html_url`, `repo_id`) are vendor-owned and never drift. Those the provider marks computed and optional (`etag`, `topics`, `visibility`, `default_branch`) are yours to set, and compared only when declared.
 

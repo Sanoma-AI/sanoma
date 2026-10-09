@@ -1,5 +1,5 @@
 import { defineDriver, DriverError, type DriverFn } from "@sanoma/workflows";
-import { fromTfState, type TfResourceType, toTfState } from "@sanoma/workflows/tfschema";
+import { fromTfState, type TfResourceType, toTfState } from "@sanoma/bridge/tfschema";
 import { type BridgeLike, type BridgeResource, bridgeErrorOf } from "./bridge.ts";
 import { github } from "./index.ts";
 import { github_branch_protection, github_repository, github_team_membership, provider } from "./resources.gen.ts";

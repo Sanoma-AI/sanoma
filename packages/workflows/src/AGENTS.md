@@ -1,6 +1,6 @@
 # packages/workflows/src
 
-The source of `@sanoma/workflows`: how connectors, workflows and policies are declared, how a worker runs them durably on DBOS, and the tools that read them (lint, outline, describe). Its entry points, from `exports` in `package.json`: `.` (`index.ts`), `./describe`, `./fake`, `./lint`, `./shared` and `./tfschema`.
+The source of `@sanoma/workflows`: how connectors, workflows and policies are declared, how a worker runs them durably on DBOS, and the tools that read them (lint, outline, describe). Its entry points, from `exports` in `package.json`: `.` (`index.ts`), `./describe`, `./fake`, `./lint` and `./shared`.
 
 ## Contents
 
@@ -25,7 +25,5 @@ The source of `@sanoma/workflows`: how connectors, workflows and policies are de
 | [`resource.ts`](resource.ts)   | `defineResource`: a resource type's schema, flagged fields, identity and its `read` and `import` ops  |
 | [`run.ts`](run.ts)             | The per-run and per-worker state the DBOS workflow receives                                           |
 | [`shared.ts`](shared.ts)       | Browser-safe helpers for run status and approvals, and resource types; no DBOS, Node or zod           |
-| [`tfschema.ts`](tfschema.ts)   | The `./tfschema` entry: re-exports `tfschema/` without its CLI                                        |
-| [`tfschema/`](tfschema/)       | OpenTofu provider schemas to zod: the generator of `resources.gen.ts` and the state conversions       |
 | [`version.ts`](version.ts)     | The package version, the step layout and `computeVersion`, the application version hash               |
 | [`worker.ts`](worker.ts)       | `startWorker`: launches DBOS, registers the workflows and returns a stoppable `Worker`                |

@@ -1,6 +1,6 @@
 # @sanoma/bridge
 
-A TypeScript client for [`provider-bridge`](https://github.com/Sanoma-AI/provider-bridge), the Go sidecar that runs OpenTofu providers and serves their schema, import and read over ConnectRPC on a unix socket, and a fake that replays the bridge's recorded replies. Connectors for bridged vendors (GitHub, Stripe) call it from their drivers; nothing in the browser may import it.
+Everything OpenTofu in Sanoma. A TypeScript client for [`provider-bridge`](https://github.com/Sanoma-AI/provider-bridge), the Go sidecar that runs OpenTofu providers and serves their schema, import and read over ConnectRPC on a unix socket; a fake that replays the bridge's recorded replies; and, at `@sanoma/bridge/tfschema`, the generator that turns a provider's schema into a connector's resource types, with its `sanoma-tfschema` bin. Connectors for bridged vendors (GitHub, Stripe) are built on it; nothing in the browser may import it. It depends on `@sanoma/workflows` (a peer), never the other way round.
 
 ## Contents
 

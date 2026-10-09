@@ -1,7 +1,7 @@
 {
   "name": "@sanoma/bridge",
   "version": "0.1.0",
-  "description": "Client for provider-bridge, which serves OpenTofu providers' schema, import and read, and a fake that replays recorded replies",
+  "description": "Client for provider-bridge, which serves OpenTofu providers' schema, import and read, a fake that replays recorded replies, and the generator of OpenTofu-backed connectors",
   "keywords": [
     "opentofu",
     "provider",
@@ -15,6 +15,9 @@
     "type": "git",
     "url": "git+https://github.com/Sanoma-AI/sanoma.git",
     "directory": "packages/bridge"
+  },
+  "bin": {
+    "sanoma-tfschema": "./dist/tfschema/cli.js"
   },
   "files": [
     "dist",
@@ -35,6 +38,10 @@
     "./fake": {
       "types": "./dist/fake.d.ts",
       "default": "./dist/fake.js"
+    },
+    "./tfschema": {
+      "types": "./dist/tfschema.d.ts",
+      "default": "./dist/tfschema.js"
     }
   },
   "publishConfig": {
@@ -51,6 +58,14 @@
     "@bufbuild/protobuf": "2.16.0",
     "@connectrpc/connect": "^2.2.0",
     "@connectrpc/connect-node": "^2.2.0"
+  },
+  "devDependencies": {
+    "@sanoma/workflows": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "@sanoma/workflows": "^0.1.0",
+    "zod": "^4"
   },
   "engines": {
     "node": ">=24"

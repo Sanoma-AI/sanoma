@@ -52,14 +52,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
-    "generate": "node ../../packages/workflows/src/tfschema/cli.ts testdata/schemas/stripe_stripe_0.3.0.json src/resources.config.ts src/resources.gen.ts && oxfmt src/resources.gen.ts",
+    "generate": "node ../../packages/bridge/src/tfschema/cli.ts src/resources.config.ts src/resources.gen.ts && oxfmt src/resources.gen.ts",
     "prepack": "pnpm run clean && pnpm run build"
   },
   "devDependencies": {
+    "@sanoma/bridge": "workspace:*",
     "@sanoma/workflows": "workspace:*",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
+    "@sanoma/bridge": "^0.1.0",
     "@sanoma/workflows": "^0.1.0",
     "zod": "^4"
   },

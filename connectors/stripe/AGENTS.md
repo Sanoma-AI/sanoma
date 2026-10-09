@@ -8,7 +8,7 @@ Stripe resources for [`@sanoma/workflows`](https://www.npmjs.com/package/@sanoma
 | --------------------------------- | ------------------------------------------------------------------------------------- |
 | [`src/`](src/AGENTS.md)           | The connector, the resource types (generated and hand-owned), the driver and the fake |
 | [`test/`](test/AGENTS.md)         | The generated types against the replies, the driver over a replay, and the fake       |
-| [`testdata/`](testdata/AGENTS.md) | The provider's schema, copied from provider-bridge, and replies written by hand       |
+| [`testdata/`](testdata/AGENTS.md) | Replies written by hand to the provider's schema                                      |
 
 ## Usage
 
@@ -39,7 +39,7 @@ The logo is Stripe's glyph from [Simple Icons](https://simpleicons.org/?q=stripe
 
 ## Resource types
 
-`src/resources.gen.ts` is generated from the provider's schema (`testdata/schemas/stripe_stripe_0.3.0.json`) by `pnpm generate`, which runs [`@sanoma/workflows/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the types, the release's pin, and the attributes whose change replaces the object (a webhook endpoint's `api_version` and `connect`, which Stripe's update does not take). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing.
+`src/resources.gen.ts` is generated from the provider's schema by `pnpm generate`, which runs [`@sanoma/bridge/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the provider (its release, sha256 and recorded schema are `@sanoma/bridge`'s pin and fixture), the types, and the attributes whose change replaces the object (a webhook endpoint's `api_version` and `connect`, which Stripe's update does not take). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing.
 
 A webhook endpoint's `secret` is sensitive (Stripe returns it only when the endpoint is created): it is write-only, never compared, and `null` in every state the driver returns.
 
