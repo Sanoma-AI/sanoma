@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { isDeepStrictEqual } from "node:util";
@@ -514,25 +514,45 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
   return scenarios;
 }
 
+/** What `loadScenarios` returns. */
+export interface LoadedScenarios {
+  scenarios: Scenario[];
+  errors: { file: string; message: string }[];
+}
+
+/**
+ * Each scope's scenarios as last read, with the stamp of the files they were read from. By
+ * scope, since what a file means depends on its operations and workflows.
+ */
+const loadedByScope = new WeakMap<Scope, { stamp: string; loaded: LoadedScenarios }>();
+
 /**
  * Every scenario in the `.feature` files under `scenarios` (a `file:` URL to a directory),
  * with an error for each file that does not parse and each name used twice. No directory,
  * or none given, is no scenarios. Throws when an operation's phrase names a field it lacks.
+ * The files are parsed again only once one is added, removed or written (its name, `mtimeMs`
+ * or size changes): until then each call returns the same object, which callers must not change.
  */
-export function loadScenarios(scope: Scope): {
-  scenarios: Scenario[];
-  errors: { file: string; message: string }[];
-} {
-  const scenarios: Scenario[] = [];
-  const errors: { file: string; message: string }[] = [];
-  if (!scope.scenarios) return { scenarios, errors };
+export function loadScenarios(scope: Scope): LoadedScenarios {
+  if (!scope.scenarios) return { scenarios: [], errors: [] };
   const dir = fileURLToPath(scope.scenarios);
-  if (!existsSync(dir)) return { scenarios, errors };
+  if (!existsSync(dir)) return { scenarios: [], errors: [] };
   rulesOf(scope);
   const files = readdirSync(dir, { recursive: true, encoding: "utf8" })
     .filter((f) => f.endsWith(".feature"))
     .map((f) => f.replaceAll("\\", "/"))
     .toSorted();
+  const stamp = JSON.stringify([
+    dir,
+    files.map((file) => {
+      const { mtimeMs, size } = statSync(join(dir, file));
+      return [file, mtimeMs, size];
+    }),
+  ]);
+  const cached = loadedByScope.get(scope);
+  if (cached?.stamp === stamp) return cached.loaded;
+  const scenarios: Scenario[] = [];
+  const errors: { file: string; message: string }[] = [];
   const seen = new Map<string, string>();
   for (const file of files) {
     let parsed: Scenario[];
@@ -553,7 +573,9 @@ export function loadScenarios(scope: Scope): {
       scenarios.push(s);
     }
   }
-  return { scenarios, errors };
+  const loaded = { scenarios, errors };
+  loadedByScope.set(scope, { stamp, loaded });
+  return loaded;
 }
 
 /** True when `actual` has every key `expected` has, with an equal value, at every depth. */

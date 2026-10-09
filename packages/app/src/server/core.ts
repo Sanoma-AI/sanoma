@@ -115,7 +115,7 @@ export async function runDetail({ client, resolved }: AppContext, runId: string)
   return { run, ledger, approvals, ...(scenario && { checks: check(scenario, ledger) }) };
 }
 
-/** Every scenario in the config's feature files, as the page lists them, read afresh each time. */
+/** Every scenario in the config's feature files, as the page lists them, as they read now. */
 export function scenarios({ resolved }: Pick<AppContext, "resolved">): ScenariosResponse {
   const loaded = loadScenarios(resolved);
   return {

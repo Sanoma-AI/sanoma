@@ -42,7 +42,7 @@ export const getActor = createServerFn(READ).handler(async ({ context }): Promis
   }
 });
 
-/** The config's scenarios, read from their feature files on every call: the agent may be editing them. */
+/** The config's scenarios, read again from their feature files whenever one has changed: the agent may be editing them. */
 export const getScenarios = createServerFn(READ).handler(({ context }) => scenarios(context.app));
 
 export const getRuns = createServerFn(READ)
