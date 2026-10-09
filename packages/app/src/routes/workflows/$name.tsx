@@ -64,7 +64,8 @@ function WorkflowPage() {
       </PageHeader>
       {errors.map((e) => (
         <Notice key={e.message} variant="destructive">
-          Could not read a scenario: {e.message}
+          {/* A step no rule matches lists the known steps, one a line. */}
+          <span className="whitespace-pre-wrap">Could not read a scenario: {e.message}</span>
         </Notice>
       ))}
       <GraphAndSource key={name} workflow={workflow} scenario={scenario} />
