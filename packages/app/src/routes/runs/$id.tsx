@@ -14,8 +14,8 @@ import {
   Expandable,
   Fact,
   Facts,
-  GraphPanel,
   ledgerTone,
+  loadCode,
   loadGraph,
   Nothing,
   Notice,
@@ -29,16 +29,27 @@ import {
   ToneBadge,
   When,
 } from "../../components/common.tsx";
+import type { GraphNode } from "../../graph/types.ts";
 import { useReducedMotion } from "#/lib/motion.ts";
 import { utcText } from "#/lib/time.ts";
 import { RUN_TONE } from "#/lib/tone.ts";
-import { configQuery, opsById, runQuery } from "../../queries.ts";
+import { GraphAndSource } from "../../components/workflow.tsx";
+import { configQuery, opsById, runQuery, sourceQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/runs/$id")({
   // The page reads the run from the query client; the loader returns only its name: its workflow.
-  loader: async ({ context, params }) => {
-    if (!import.meta.env.SSR) void loadGraph();
-    const { run } = await context.queryClient.query({ ...runQuery(params.id), staleTime: "static" });
+  loader: async ({ context: { queryClient }, params }) => {
+    if (!import.meta.env.SSR) {
+      void loadGraph();
+      void loadCode();
+    }
+    const { run } = await queryClient.query({ ...runQuery(params.id), staleTime: "static" });
+    // The workflow's source, beside the graph: none when its outline could not be read.
+    const config = await queryClient.query({ ...configQuery(), staleTime: "static" });
+    const workflow = config.workflows.find((wf) => wf.name === run.workflow);
+    if (workflow && !("error" in workflow.outline)) {
+      await queryClient.query({ ...sourceQuery(run.workflow), staleTime: "static" });
+    }
     return { crumb: run.workflow };
   },
   // A run that does not exist has no loader data: its id stands in.
@@ -78,11 +89,23 @@ function RunPage() {
   const { id } = Route.useParams();
   const { data, error, dataUpdatedAt } = useSuspenseQuery(runQuery(id));
   const { run, ledger, ledgerError, approvals } = data;
+  const { data: workflow } = useSuspenseQuery({
+    ...configQuery(),
+    select: (config) => config.workflows.find((wf) => wf.name === run.workflow),
+  });
+  const outline = workflow?.outline ?? { error: `This config has no workflow named ${run.workflow}` };
+  const nodes = "nodes" in outline ? outline.nodes : undefined;
   // A new source on every poll, even one that changed nothing: a sleep's end may have come.
-  const source = useMemo(() => ({ ledger, run, at: dataUpdatedAt }), [ledger, run, dataUpdatedAt]);
+  const source = useMemo(
+    () => ({ ledger, run, at: dataUpdatedAt, ...(nodes && { outline: nodes }) }),
+    [ledger, run, dataUpdatedAt, nodes],
+  );
   const titles = useMemo(() => new Map(approvals.map((a) => [a.id, a.title])), [approvals]);
   const reducedMotion = useReducedMotion();
-  const select = (recordId: string) => show(recordId, reducedMotion);
+  const select = (node: GraphNode) => {
+    const recordId = "state" in node ? node.state?.recordId : undefined;
+    if (recordId) show(recordId, reducedMotion);
+  };
   return (
     <div className="flex flex-col gap-6">
       <PageHeader>
@@ -110,7 +133,7 @@ function RunPage() {
 
       <div className="flex flex-col gap-3">
         <SectionTitle>Graph</SectionTitle>
-        <GraphPanel source={source} onSelect={select} />
+        <GraphAndSource key={run.runId} name={run.workflow} outline={outline} source={source} onSelect={select} />
       </div>
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">

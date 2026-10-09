@@ -1,0 +1,93 @@
+import type { WorkflowEntry } from "@sanoma/workflows/describe";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useMemo } from "react";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
+import { Separator } from "#/components/ui/separator.tsx";
+import { Fact, Facts, GraphPanel, loadGraph, Nothing, PageHeader } from "../../components/common.tsx";
+import { Section, StartButton, WorkflowSections } from "../../components/workflow.tsx";
+import { configQuery } from "../../queries.ts";
+
+export const Route = createFileRoute("/workflows/")({
+  // The root route loads the config.
+  loader: () => {
+    if (!import.meta.env.SSR) void loadGraph();
+  },
+  component: WorkflowsPage,
+});
+
+function WorkflowsPage() {
+  const { data: config } = useSuspenseQuery(configQuery());
+  return (
+    <div className="flex flex-col gap-6">
+      <PageHeader />
+      <Card size="sm">
+        <CardContent>
+          <Facts>
+            <Fact label="App">{config.appName}</Fact>
+            <Fact label="Version">
+              <code>{config.version}</code>
+            </Fact>
+            <Fact label="Policy">
+              {config.policy.defined ? (
+                <>
+                  a policy checks every operation call
+                  {config.policy.version ? (
+                    <>
+                      {" "}
+                      (version <code>{config.policy.version}</code>)
+                    </>
+                  ) : (
+                    " (no version named)"
+                  )}
+                </>
+              ) : (
+                "allowAll: every operation call is allowed"
+              )}
+            </Fact>
+          </Facts>
+        </CardContent>
+      </Card>
+      {config.workflows.length === 0 && <Nothing title="This config has no workflows" />}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {config.workflows.map((wf) => (
+          <WorkflowCard key={wf.name} workflow={wf} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function WorkflowCard({ workflow }: { workflow: WorkflowEntry }) {
+  const { outline } = workflow;
+  const source = useMemo(() => ("nodes" in outline ? { outline: outline.nodes } : undefined), [outline]);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle role="heading" aria-level={2}>
+          <Link to="/workflows/$name" params={{ name: workflow.name }} className="hover:underline">
+            {workflow.title ?? workflow.name}
+          </Link>
+        </CardTitle>
+        <CardDescription>
+          <code>{workflow.name}</code>
+        </CardDescription>
+        <CardAction>
+          <StartButton name={workflow.name} />
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <Section title="Outline">
+          <p className="text-muted-foreground">
+            {"error" in outline
+              ? outline.error
+              : "Read from the body of run; the functions it calls are not shown, even those defined in it"}
+          </p>
+          {source && <GraphPanel source={source} show="start" />}
+        </Section>
+        <Separator />
+        <WorkflowSections workflow={workflow} />
+      </CardContent>
+    </Card>
+  );
+}

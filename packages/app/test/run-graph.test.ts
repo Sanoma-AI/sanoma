@@ -1,4 +1,5 @@
 import type { ApprovalState, LedgerBody, LedgerGroup, LedgerRecord, RunStatus, RunSummary } from "@sanoma/workflows";
+import type { OutlineNode } from "@sanoma/workflows/describe";
 import { describe, expect, it } from "vitest";
 import { runGraph } from "../src/graph/run-graph.ts";
 import { pairs, summary } from "./graph-helpers.ts";
@@ -56,6 +57,15 @@ const called = (op: string, more: object = {}): Body => ({
   output: { ok: true },
   durationMs: 12,
   ...more,
+});
+/** A workflow's approval, asked for. */
+const requested = (title: string): Body => ({
+  type: "approval.requested",
+  approval: `approval-${title}`,
+  title,
+  approver: "marketing-lead",
+  requestedBy: "workflow",
+  covers: [],
 });
 const inGroup = (body: Body, index: number, size = 3, id = "all:1"): Body => ({ ...body, group: { id, index, size } });
 
@@ -294,5 +304,67 @@ describe("runGraph", () => {
     });
     const { nodes } = runGraph(ledger(started, denied), run("running"), NOW);
     expect(nodes[1]).toMatchObject({ state: { tone: "bad", decision: "deny", errorCode: "policy_denied" } });
+  });
+
+  describe("given the workflow's outline", () => {
+    // An outline that calls resend.broadcast.send in both cases of a branch.
+    const outline: OutlineNode[] = [
+      { kind: "op", id: "ghost.post.create", span: [0, 10] },
+      {
+        kind: "branch",
+        span: [15, 55],
+        cases: [
+          [{ kind: "op", id: "resend.broadcast.send", span: [20, 30] }],
+          [{ kind: "op", id: "resend.broadcast.send", span: [40, 50] }],
+        ],
+      },
+      { kind: "approval", title: "Send it?", span: [60, 70] },
+      { kind: "approval", span: [80, 90] },
+      { kind: "sleep", span: [100, 110] },
+    ];
+    const spans = (records: LedgerRecord[], status: RunStatus = "running") =>
+      runGraph(records, run(status), NOW, outline).nodes.map(
+        (n) => `${n.id} ${JSON.stringify("spans" in n ? n.spans : null)}`,
+      );
+
+    it("points an operation's call at the outline's calls of that operation, wherever they are", () => {
+      expect(
+        spans(ledger(started, called("ghost.post.create"), called("resend.broadcast.send"), called("x.post.create"))),
+      ).toEqual([
+        "start null",
+        "op:1 [[0,10]]",
+        "op:2 [[20,30],[40,50]]",
+        // Not in the outline: nowhere.
+        "op:3 null",
+        "end null",
+      ]);
+    });
+
+    it("points an approval at the outline's approvals with its title, or at all of them, and a sleep at the sleeps", () => {
+      const until = NOW + 60_000;
+      expect(
+        spans(ledger(started, requested("Send it?"), requested("Other"), { type: "sleep.started", until })),
+      ).toEqual([
+        "start null",
+        "approval:approval-Send it? [[60,70]]",
+        "approval:approval-Other [[60,70],[80,90]]",
+        "sleep:3 [[100,110]]",
+        "end null",
+      ]);
+    });
+
+    it("points a pending member nowhere", () => {
+      const records = ledger(started, inGroup(called("ghost.post.create"), 0, 2));
+      expect(spans(records)).toEqual(["start null", "op:1 [[0,10]]", "pending:all:1:1 null", "end null"]);
+    });
+
+    it("points nothing anywhere without it", () => {
+      const { nodes } = runGraph(
+        ledger(started, called("ghost.post.create"), requested("Send it?")),
+        run("running"),
+        NOW,
+      );
+      expect(nodes.some((n) => "spans" in n)).toBe(false);
+    });
   });
 });

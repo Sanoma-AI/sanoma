@@ -504,6 +504,24 @@ describe("the page", () => {
     expect(runs.html.match(/<html[^>]*>/)?.[0]).not.toMatch(/class="[^"]*\bdark\b/);
   });
 
+  it("renders a workflow's page: its graph beside its source, and not-found for one that does not exist", async () => {
+    const list = await page("/workflows");
+    expect(list.html).toContain('href="/workflows/announce"');
+
+    const found = await page("/workflows/announce");
+    expect(found.status).toBe(200);
+    expect(found.html).toMatch(/<h1[^>]*>Announce a launch<\/h1>/);
+    expect(found.text).toContain("<title>Announce a launch · Sanoma</title>");
+    // The graph is drawn in the browser; the source is there as plain text until its view loads.
+    expect(found.html).toMatch(/<div data-slot="skeleton"[^>]*aria-label="Loading the graph"/);
+    expect(found.html).toMatch(/<pre[^>]*>[^<]*ctx\.ghost\.post\.create\(/);
+    expect(found.html).toContain('href="/start?workflow=announce"');
+
+    const missing = await page("/workflows/nope");
+    expect(missing.status).toBe(404);
+    expect(missing.text).toContain("No workflow nope");
+  });
+
   it("answers any other path with the app's not-found page", async () => {
     const res = await fetch(new URL("/nonexistent", app.url));
     expect(res.status).toBe(404);
@@ -514,10 +532,12 @@ describe("the page", () => {
     const found = await page(`/runs/${runId}`);
     expect(found.status).toBe(200);
     expect(found.html).toMatch(/<h2[^>]*>Ledger<\/h2>/);
-    // React Flow draws the graph in the browser only: the server renders its heading and a skeleton.
+    // React Flow draws the graph in the browser only: the server renders its heading and a
+    // skeleton, and the workflow's source beside it as plain text until its view loads.
     expect(found.html).toMatch(
-      /<h2[^>]*>Graph<\/h2><div[^>]*><div data-slot="skeleton"[^>]*aria-label="Loading the graph"/,
+      /<h2[^>]*>Graph<\/h2>(<div[^>]*>){3}<div data-slot="skeleton"[^>]*aria-label="Loading the graph"/,
     );
+    expect(found.html).toMatch(/<pre[^>]*>[^<]*ctx\.ghost\.post\.create\(/);
     // The workflow's own approval covers no operation, and says so.
     expect(found.html).toMatch(/Lets through<\/dt><dd[^>]*><span[^>]*>no operation by itself/);
     const missing = await page("/runs/does-not-exist");

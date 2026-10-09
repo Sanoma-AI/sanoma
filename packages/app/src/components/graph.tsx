@@ -18,19 +18,17 @@ import {
   useStore,
 } from "@xyflow/react";
 import { cva } from "class-variance-authority";
-import type { LedgerRecord, RunSummary } from "@sanoma/workflows";
-import type { OpEntry, OutlineNode } from "@sanoma/workflows/describe";
+import type { OpEntry } from "@sanoma/workflows/describe";
 import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { approverLabel } from "@sanoma/workflows/shared";
 import { layout } from "../graph/layout.ts";
-import { outlineGraph } from "../graph/outline-graph.ts";
-import { runGraph } from "../graph/run-graph.ts";
-import { type GraphNode, type GraphNodeKind, isPending } from "../graph/types.ts";
+import { graphOf } from "../graph/run-graph.ts";
+import { type GraphNode, type GraphNodeKind, type GraphSource, isPending, isSelectable } from "../graph/types.ts";
 import { useReducedMotion } from "#/lib/motion.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import { configQuery, opsById } from "../queries.ts";
-import { ApprovalIcon } from "./approval.tsx";
+import { ApprovalIcon, SleepIcon } from "./approval.tsx";
 import { ApprovalStatusBadge, effectBadge, StatusDot, ToneBadge, VendorLogo } from "./common.tsx";
 import { ZoomSlider } from "./zoom-slider.tsx";
 
@@ -73,8 +71,9 @@ const frame = cva(
         off: "border-border",
       } satisfies Record<Tone, string>,
       pending: { true: "border-dashed bg-transparent text-muted-foreground" },
-      // It has a ledger record to show.
+      // A click selects it.
       clickable: { true: "cursor-pointer hover:bg-muted" },
+      selected: { true: "ring-2 ring-ring" },
     },
   },
 );
@@ -102,9 +101,15 @@ function Frame({
   children: ReactNode;
 }) {
   const state = "state" in node ? node.state : undefined;
+  const { selected, selectable } = use(Selection);
   return (
     <div
-      className={frame({ tone: state?.tone ?? "off", pending: isPending(node), clickable: !!state?.recordId })}
+      className={frame({
+        tone: state?.tone ?? "off",
+        pending: isPending(node),
+        clickable: selectable && isSelectable(node),
+        selected: node.id === selected,
+      })}
       title={node.label}
     >
       <Handles inbound={inbound} outbound={outbound} />
@@ -144,6 +149,12 @@ function EndNode({ data: { node } }: Props<"end">) {
 
 /** The config's operations by id, read once for the whole graph. */
 const Ops = createContext<Map<string, OpEntry>>(new Map());
+
+/**
+ * The page's selected node, by id, and whether a click selects one: held by the page, and read
+ * by each node as it renders, so a node is not rebuilt when the selection moves.
+ */
+const Selection = createContext<{ selected?: string | undefined; selectable: boolean }>({ selectable: false });
 
 function OpNode({ data: { node } }: Props<"op">) {
   // The effect is the config's: a call still held for its approval has no record yet.
@@ -202,6 +213,7 @@ function SleepNode({ data: { node } }: Props<"sleep">) {
     <Frame node={node}>
       <Line>
         <Dot tone={node.state?.tone} />
+        <SleepIcon className="size-4 shrink-0" />
         <span className="truncate">{node.label}</span>
       </Line>
     </Frame>
@@ -317,30 +329,26 @@ function useStable<T extends { id: string }>(items: T[], depth: number): T[] {
   }, [items, depth]);
 }
 
-/** What a graph is drawn from: a run's ledger as read at `at`, or a workflow's outline. */
-export type GraphSource = { ledger: LedgerRecord[]; run: RunSummary; at: number } | { outline: OutlineNode[] };
-
 export interface GraphProps {
   source: GraphSource;
-  /** Called with a clicked node's ledger record id. Nodes without a record do nothing. */
-  onSelect?: (recordId: string) => void;
   /** The end shown when all of the graph cannot be read at once. Defaults to `end`. */
   show?: "start" | "end";
+  /** The selected node's id, ringed. */
+  selected?: string | undefined;
+  /** Called with a clicked node that has a place in the source or a ledger record. Others do nothing. */
+  onSelect?: (node: GraphNode) => void;
 }
 
 /**
  * A graph, built, laid out and drawn left to right, here in the browser. Clicking a node with a
- * ledger record calls `onSelect` with it.
+ * place in the source or a ledger record calls `onSelect` with it.
  */
-export default function Graph({ source, onSelect, show = "end" }: GraphProps) {
+export default function Graph({ source, show = "end", selected, onSelect }: GraphProps) {
   const reducedMotion = useReducedMotion();
   const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
   // Hidden until the first fit, so the graph does not show unfitted for a frame.
   const [fitted, setFitted] = useState(false);
-  const graph = useMemo(
-    () => ("outline" in source ? outlineGraph(source.outline) : runGraph(source.ledger, source.run, source.at)),
-    [source],
-  );
+  const graph = useMemo(() => graphOf(source), [source]);
   const laidOut = useMemo(() => {
     const at = layout(graph);
     // A cluster comes before the nodes inside it, as React Flow needs.
@@ -383,37 +391,39 @@ export default function Graph({ source, onSelect, show = "end" }: GraphProps) {
     select.current = onSelect;
   });
   const onNodeClick = useCallback((_: unknown, { data: { node } }: FlowNode) => {
-    const recordId = "state" in node ? node.state?.recordId : undefined;
-    if (recordId) select.current?.(recordId);
+    if (isSelectable(node)) select.current?.(node);
   }, []);
+  const selection = useMemo(() => ({ selected, selectable: !!onSelect }), [selected, onSelect]);
 
   return (
     <ReactFlowProvider>
       <Ops value={ops}>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          className={fitted ? undefined : "invisible"}
-          onNodeClick={onNodeClick}
-          minZoom={0.25}
-          maxZoom={1.5}
-          nodesDraggable={false}
-          nodesConnectable={false}
-          elementsSelectable={false}
-          // Wheel and trackpad pan sideways; the page keeps its vertical scroll. Zoom with the
-          // zoom slider or a pinch.
-          zoomOnScroll={false}
-          zoomOnDoubleClick={false}
-          panOnScroll
-          panOnScrollMode={PanOnScrollMode.Horizontal}
-          preventScrolling={false}
-          proOptions={PRO_OPTIONS}
-        >
-          <Background gap={16} size={1} />
-          <ZoomSlider position="bottom-left" fitViewOptions={FIT} duration={reducedMotion ? 0 : 300} />
-          <FitOnChange nodes={nodes} show={show} onFitted={() => setFitted(true)} />
-        </ReactFlow>
+        <Selection value={selection}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            className={fitted ? undefined : "invisible"}
+            onNodeClick={onNodeClick}
+            minZoom={0.25}
+            maxZoom={1.5}
+            nodesDraggable={false}
+            nodesConnectable={false}
+            elementsSelectable={false}
+            // Wheel and trackpad pan sideways; the page keeps its vertical scroll. Zoom with the
+            // zoom slider or a pinch.
+            zoomOnScroll={false}
+            zoomOnDoubleClick={false}
+            panOnScroll
+            panOnScrollMode={PanOnScrollMode.Horizontal}
+            preventScrolling={false}
+            proOptions={PRO_OPTIONS}
+          >
+            <Background gap={16} size={1} />
+            <ZoomSlider position="bottom-left" fitViewOptions={FIT} duration={reducedMotion ? 0 : 300} />
+            <FitOnChange nodes={nodes} show={show} onFitted={() => setFitted(true)} />
+          </ReactFlow>
+        </Selection>
       </Ops>
     </ReactFlowProvider>
   );

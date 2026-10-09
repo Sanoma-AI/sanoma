@@ -2,7 +2,7 @@ import type { ApprovalState, RunStatus, RunSummary } from "@sanoma/workflows";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { CheckIcon, ExternalLinkIcon, UserCheckIcon, XIcon } from "lucide-react";
+import { CheckIcon, ClockIcon, ExternalLinkIcon, UserCheckIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
@@ -50,6 +50,9 @@ type Decision = DecideRequest["decision"];
 
 /** A workflow's approval as a thing, where an operation shows its vendor's logo: a person decides. */
 export const ApprovalIcon = UserCheckIcon;
+
+/** A workflow's sleep as a thing, beside the approval's: the run waits for a time. */
+export const SleepIcon = ClockIcon;
 
 /**
  * An approval: what it is for, who may decide, and the controls to decide while it is pending
