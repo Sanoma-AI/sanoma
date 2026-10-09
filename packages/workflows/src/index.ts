@@ -10,6 +10,7 @@ export {
   isOp,
   type Op,
   type OpSpec,
+  type ResourceGroup,
   retryableStatus,
   type VendorInfo,
 } from "./op.ts";
@@ -26,6 +27,15 @@ export {
   type Use,
   type WorkflowDefinition,
 } from "./define.ts";
+export {
+  compareDeclared,
+  type Declared,
+  defineResource,
+  type Resource,
+  type ResourceFields,
+  type ResourceOps,
+  type ResourceSpec,
+} from "./resource.ts";
 export { defineConfig, resolveConfig, type ResolvedConfig, type SanomaConfig } from "./config.ts";
 export {
   allow,

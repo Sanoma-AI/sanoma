@@ -1,5 +1,8 @@
 import type { ApprovalState, Approver, Principal } from "./define.ts";
 
+// Types only: resource types as a UI reads them. Erased from the bundle.
+export type { Declared, Resource, ResourceFields, ResourceSpec } from "./resource.ts";
+
 // What a UI in the browser may use from the runtime, besides types: `@sanoma/workflows/shared`.
 // Nothing here imports DBOS, Node or zod, so a browser bundle can carry it; the runtime uses the
 // same functions, so a page answers these questions the way a run does.

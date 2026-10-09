@@ -4,6 +4,7 @@ import { type Builtin, jsonSchemaOf, type Use } from "./define.ts";
 import { type Effect, isOp, VENDOR, type VendorInfo } from "./op.ts";
 import { type Outline, outlineWithSource } from "./outline.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
+import type { Resource, ResourceFields } from "./resource.ts";
 
 // `@sanoma/workflows/describe`: what a UI renders from. Apart from the main entry, so the
 // worker never loads oxc-parser, which the outline reads `run` with.
@@ -56,6 +57,26 @@ export interface VendorEntry {
   homepage?: string;
 }
 
+/** A resource type a connector declares with `defineResource`. */
+export interface ResourceTypeEntry {
+  /** `<vendor>.<type>`, such as `github.repository`. */
+  id: string;
+  vendor: string;
+  type: string;
+  title: string;
+  /** How a declared resource's import id is made, such as `name` or `repository_id:pattern`. */
+  identity: string;
+  /** Its flagged fields, by dotted path. */
+  fields: ResourceFields;
+  /**
+   * Its state, as a read returns it, as JSON Schema (`io: "output"`), with `$id`
+   * `sanoma:resource-type/<id>`: the operations' contracts `$ref` it instead of repeating it.
+   */
+  schema: Record<string, unknown>;
+  /** Its operations' ids: `<id>.import` and `<id>.read`. */
+  ops: string[];
+}
+
 /**
  * A plain-JSON description of what a config can do: its workflows, the operations they call,
  * and whether a policy gates them. The app server builds it from the config and sends it to the
@@ -69,6 +90,8 @@ export interface ConfigDescription {
   ops: OpEntry[];
   /** Every vendor the operations are from, by its id (an `OpEntry`'s `vendor`). */
   vendors: Record<string, VendorEntry>;
+  /** The resource types the connectors declare, by `id`. */
+  resourceTypes: ResourceTypeEntry[];
   /** `defined` is false for `allowAll`. */
   policy: { defined: boolean; version?: string };
 }
@@ -76,18 +99,38 @@ export interface ConfigDescription {
 /** Describes a config. Throws what `startWorker` would refuse (see `resolveConfig`); there is no partial description. */
 export function describeConfig(config: SanomaConfig): ConfigDescription {
   const resolved = resolveConfig(config);
+  const vendors: Record<string, VendorEntry> = {};
+  const resources = new Map<string, Resource>();
+  // A vendor whose operations are split over several connectors is named by the first; its
+  // resource types are every connector's.
+  for (const connector of config.connectors) {
+    const { id, info, resources: types } = connector[VENDOR];
+    vendors[id] ??= vendorEntry(id, info);
+    for (const resource of types as readonly Resource[]) resources.set(`${resource.vendor}.${resource.type}`, resource);
+  }
+  // Each resource type's state is described once, on its entry, and referenced from its operations.
+  const refs = new Map<z.ZodType, string>([...resources].map(([id, r]) => [r.schema, resourceTypeUri(id)]));
+  const resourceTypes: ResourceTypeEntry[] = [...resources]
+    .map(([id, { vendor, type, title, identity, fields, schema }]) => ({
+      id,
+      vendor,
+      type,
+      title,
+      identity,
+      fields,
+      schema: { $id: resourceTypeUri(id), ...toJsonSchema(schema, `${id} state`, "output") },
+      ops: [`${id}.import`, `${id}.read`],
+    }))
+    .toSorted((a, b) => a.id.localeCompare(b.id));
+
   const ops: OpEntry[] = [...resolved.ops.values()].map((op) => ({
     ...policyOpOf(op),
     idempotent: op.idempotent,
     description: op.description,
-    input: toJsonSchema(op.input, `${op.id} input`, "input"),
-    output: toJsonSchema(op.output, `${op.id} output`, "output"),
+    input: toJsonSchema(op.input, `${op.id} input`, "input", refs),
+    output: toJsonSchema(op.output, `${op.id} output`, "output", refs),
   }));
   ops.sort((a, b) => a.id.localeCompare(b.id));
-
-  const vendors: Record<string, VendorEntry> = {};
-  // A vendor whose operations are split over several connectors is named by the first.
-  for (const { [VENDOR]: vendor } of config.connectors) vendors[vendor.id] ??= vendorEntry(vendor.id, vendor.info);
 
   const workflows: WorkflowEntry[] = resolved.workflows.map((wf) => {
     const { outline, source } = outlineWithSource(wf);
@@ -110,6 +153,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     workflows,
     ops,
     vendors,
+    resourceTypes,
     policy: {
       defined: resolved.policy !== allowAll,
       ...(resolved.policy.version === undefined ? {} : { version: resolved.policy.version }),
@@ -128,9 +172,17 @@ const vendorEntry = (id: string, info: VendorInfo | undefined): VendorEntry => (
   ...(info?.homepage && { homepage: info.homepage }),
 });
 
-function toJsonSchema(schema: z.ZodType, what: string, io: "input" | "output"): Record<string, unknown> {
+/** Where a resource type's state schema is, for a `$ref`. */
+const resourceTypeUri = (id: string) => `sanoma:resource-type/${id}`;
+
+function toJsonSchema(
+  schema: z.ZodType,
+  what: string,
+  io: "input" | "output",
+  refs?: ReadonlyMap<unknown, string>,
+): Record<string, unknown> {
   try {
-    return jsonSchemaOf(schema, io);
+    return jsonSchemaOf(schema, io, refs);
   } catch (e) {
     throw new Error(`Cannot describe ${what} as JSON Schema: ${(e as Error).message}`, { cause: e });
   }

@@ -4,7 +4,7 @@ This package owns workflow declarations, durable execution, policy and approval 
 
 ## Read when needed
 
-- [README](README.md): public API and examples; [versions](README.md#versions) and [replay safety](README.md#keeping-workflows-replay-safe) for runtime changes.
+- [README](README.md): public API, [resources](README.md#resources), and examples; [versions](README.md#versions) and [replay safety](README.md#keeping-workflows-replay-safe) for runtime changes.
 - [Source map](src/AGENTS.md): locate execution, definitions, analysis, or browser-safe helpers.
 - [Test map](test/AGENTS.md): select coverage and the shared DBOS harness.
 

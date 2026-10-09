@@ -16,7 +16,7 @@ export const Route = createFileRoute("/connectors")({
   component: ConnectorsPage,
 });
 
-/** Every vendor the config's operations are from: where its connector lives, its operations and who uses them. */
+/** Every vendor the config's operations are from: where its connector lives, its resource types, its operations and who uses them. */
 function ConnectorsPage() {
   const { data: connectors } = useSuspenseQuery({ ...configQuery(), select: connectorsOf });
   return (
@@ -32,7 +32,7 @@ function ConnectorsPage() {
   );
 }
 
-function ConnectorCard({ connector: { id, vendor, ops, workflows } }: { connector: ConnectorEntry }) {
+function ConnectorCard({ connector: { id, vendor, ops, workflows, resourceTypes } }: { connector: ConnectorEntry }) {
   return (
     <Card>
       <CardHeader>
@@ -54,6 +54,12 @@ function ConnectorCard({ connector: { id, vendor, ops, workflows } }: { connecto
             )}
             {vendor.homepage && <ExternalLink href={vendor.homepage}>Source</ExternalLink>}
           </div>
+        )}
+        {resourceTypes.length > 0 && (
+          <p>
+            <span className="text-muted-foreground">Resources: </span>
+            {resourceTypes.map((r) => r.title).join(", ")}
+          </p>
         )}
         <Section title="Operations">
           {ops.length === 0 ? (

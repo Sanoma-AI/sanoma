@@ -22,7 +22,8 @@ The source of `@sanoma/workflows`: how connectors, workflows and policies are de
 | [`op.ts`](op.ts)               | `defineConnector`, operations, effects and drivers                                                    |
 | [`outline.ts`](outline.ts)     | `outlineWorkflow`: the calls, loops, branches and `ctx.all` groups a workflow's `run` makes           |
 | [`policy.ts`](policy.ts)       | Policy types, decisions (`allow`, `deny`, `approve`), `definePolicy` and `approvedFor`                |
+| [`resource.ts`](resource.ts)   | `defineResource`: a resource type's schema, flagged fields, identity and its `read` and `import` ops  |
 | [`run.ts`](run.ts)             | The per-run and per-worker state the DBOS workflow receives                                           |
-| [`shared.ts`](shared.ts)       | Browser-safe helpers for run status and approvals; no DBOS, Node or zod                               |
+| [`shared.ts`](shared.ts)       | Browser-safe helpers for run status and approvals, and resource types; no DBOS, Node or zod           |
 | [`version.ts`](version.ts)     | The package version, the step layout and `computeVersion`, the application version hash               |
 | [`worker.ts`](worker.ts)       | `startWorker`: launches DBOS, registers the workflows and returns a stoppable `Worker`                |

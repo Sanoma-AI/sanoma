@@ -40,7 +40,7 @@ await worker.stop();
 
 ## Fake vendors
 
-`fakeGhost`, `fakeResend` and `fakeBluesky` are re-exported from `@sanoma/connector-ghost/fake`, `@sanoma/connector-resend/fake` and `@sanoma/connector-bluesky/fake`. Each returns:
+`fakeGhost`, `fakeResend`, `fakeBluesky`, `fakeGithub` and `fakeStripe` are re-exported from `@sanoma/connector-ghost/fake`, `@sanoma/connector-resend/fake`, `@sanoma/connector-bluesky/fake`, `@sanoma/connector-github/fake` and `@sanoma/connector-stripe/fake`. Each returns:
 
 | Member                 | What it does                                                                                   |
 | ---------------------- | ---------------------------------------------------------------------------------------------- |
@@ -48,10 +48,13 @@ await worker.stop();
 | `state`                | The vendor's state, such as `posts` or `broadcasts`.                                           |
 | `calls`                | Every call received, in order, with its input and idempotency key.                             |
 | `reset()`              | Empties the state, the remembered replies and the pending faults.                              |
+| `update(change)`       | Changes the state as someone at the vendor would, in the file too, for the next call to see.   |
 | `failNext(opId, err?)` | The next call to `opId` throws `err` (default: a retryable `DriverError`) and changes nothing. |
 | `loseReply(opId)`      | The next call to `opId` takes effect, then throws once, as if the reply was lost.              |
 | `rateLimit(opId)`      | The next call to `opId` throws a retryable `DriverError` with status 429 and changes nothing.  |
 | `hold(opId)`           | The next call to `opId` waits, before it takes effect, until the returned function is called.  |
+
+`fakeGithub` and `fakeStripe` serve resources from replies recorded from (or, for Stripe, written to) the vendor's OpenTofu provider, through the connector's real driver, and add `override(type, id, fields)`, which changes what the next read returns, as if someone edited the object at the vendor (drift; `fields` in the resource's shape, as a read returns them), and `remove(type, id)`, after which a read says the object is gone. They are `tfFake` from `@sanoma/bridge/fake` over each connector's `tfConnector` record.
 
 A call that repeats an earlier call's idempotency key gets the earlier reply and changes nothing, so a test can check that a retried or replayed call has one effect.
 
