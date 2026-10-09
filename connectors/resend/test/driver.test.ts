@@ -141,6 +141,41 @@ describe("resendDriver", () => {
       await expect(send("bc_1")).rejects.toMatchObject({ name: "DriverError", retryable, status, vendorCode: name });
     });
 
+    it("fails for good on a 2xx whose body is not JSON", async () => {
+      server.use(
+        http.get(
+          "*/broadcasts/bc_1",
+          () => new Response("<html>ok</html>", { headers: { "Content-Type": "application/json" } }),
+        ),
+      );
+      await expect(send("bc_1")).rejects.toMatchObject({
+        name: "DriverError",
+        retryable: false,
+        status: 200,
+        message: "resend: broadcast.send replied 200 with a body that is not JSON",
+      });
+    });
+
+    it("fails for good when the read is no broadcast, without sending", async () => {
+      play("read-empty", [{ method: "GET", path: "/broadcasts/bc_1", status: 200, body: {} }]);
+      await expect(send("bc_1")).rejects.toMatchObject({
+        name: "DriverError",
+        retryable: false,
+        message: "resend: broadcast.send replied 200 without a broadcast id",
+      });
+      expect(sent.map((r) => r.method)).toEqual(["GET"]);
+    });
+
+    it("fails for good when the request cannot be built, without retrying a key that will never work", async () => {
+      vi.stubEnv("RESEND_API_KEY", "re_key\nwith a newline");
+      await expect(send("bc_1")).rejects.toMatchObject({
+        name: "DriverError",
+        retryable: false,
+        message: "resend: broadcast.send could not build its request",
+      });
+      expect(sent).toEqual([]);
+    });
+
     it("fails retryable when Resend does not answer in time", async () => {
       server.use(http.all("*", () => delay("infinite")));
       await expect(send("bc_1")).rejects.toMatchObject({
