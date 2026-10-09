@@ -14,44 +14,38 @@ export interface ResendDriverOptions {
 }
 
 /** Resend's error body. The spec declares none; the docs give `{ statusCode, name, message }`. */
-const errorBody = z.object({ name: z.string().optional(), message: z.string().optional() }).catch({});
-
-/** The error for a request that got no reply (a timeout, a dropped connection): it may be tried again. */
-function noReply(op: string, timeoutMs: number, cause: unknown): DriverError {
-  const timedOut = cause instanceof DOMException && cause.name === "TimeoutError";
-  return new DriverError(`resend: ${op} ${timedOut ? `timed out after ${timeoutMs} ms` : "got no reply"}`, {
-    retryable: true,
-    cause,
-  });
-}
+const errorBody = z
+  .object({ name: z.string().optional().catch(undefined), message: z.string().optional().catch(undefined) })
+  .catch({});
 
 /**
- * The DriverError for a request that failed: the client hands its error interceptor what went
- * wrong and, when Resend answered, the response. Its `fetch` turns a missing reply into one
- * already, so an error with no response was thrown before the request was sent.
+ * The DriverError for a request that failed. The client hands its error interceptor what went
+ * wrong, the response once Resend answered, and the request once it was built.
  */
 function failure(op: string, timeoutMs: number) {
-  return (error: unknown, response: Response | undefined): DriverError => {
-    if (error instanceof DriverError) return error;
-    if (!response) {
+  return (error: unknown, response: Response | undefined, request: Request | undefined): DriverError => {
+    if (!request) {
       return new DriverError(`resend: ${op} could not build its request`, { retryable: false, cause: error });
     }
+    if (!response) {
+      // No reply at all (the timeout, a dropped connection): the call may be tried again.
+      const timedOut = error instanceof Error && error.name === "TimeoutError";
+      return new DriverError(`resend: ${op} ${timedOut ? `timed out after ${timeoutMs} ms` : "got no reply"}`, {
+        retryable: true,
+        cause: error,
+      });
+    }
     const { ok, status, statusText } = response;
-    // The body could not be read: the timeout fired, or the reply was cut off. Either may be tried again.
-    const unread = error instanceof Error && !(error instanceof SyntaxError);
-    if (unread && (error as Error).name === "TimeoutError") return noReply(op, timeoutMs, error);
+    // A body that could not be read (cut off, or the timeout fired while reading it) leaves the
+    // status to decide; a 2xx whose body is not JSON is no answer to retry.
+    const cutOff = error instanceof Error && !(error instanceof SyntaxError);
     if (ok) {
-      // A 2xx whose body is not JSON is no answer to retry; one cut off is.
       return new DriverError(
-        `resend: ${op} replied ${status} with ${unread ? "a body cut off" : "a body that is not JSON"}`,
-        {
-          retryable: unread,
-          status,
-          cause: error,
-        },
+        `resend: ${op} replied ${status} with ${cutOff ? "a body cut off" : "a body that is not JSON"}`,
+        { retryable: cutOff, status, cause: error },
       );
     }
-    const { name, message } = unread ? {} : errorBody.parse(error);
+    const { name, message } = cutOff ? {} : errorBody.parse(error);
     // A daily or monthly quota does not lift in the seconds a retry waits; a 409
     // `concurrent_idempotent_requests` is another request with this key still in flight.
     const retryable =
@@ -70,8 +64,7 @@ function broadcastOf<T extends { id?: string }>(
   op: string,
   reply: { data: T; response: Response },
 ): T & { id: string } {
-  const { data } = reply;
-  if (typeof data === "object" && data !== null && data.id) return data as T & { id: string };
+  if (reply.data?.id) return reply.data as T & { id: string };
   const { status } = reply.response;
   throw new DriverError(`resend: ${op} replied ${status} without a broadcast id`, { retryable: false, status });
 }
@@ -92,10 +85,7 @@ export function resendDriver(options: ResendDriverOptions = {}) {
       auth: key,
       // Resend documents Idempotency-Key for emails only; it is sent in case broadcasts honour it too.
       headers: { "Idempotency-Key": call.idempotencyKey },
-      fetch: (input, init) =>
-        fetch(input, { ...init, signal: AbortSignal.timeout(timeoutMs) }).catch((cause: unknown) => {
-          throw noReply(op, timeoutMs, cause);
-        }),
+      fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(timeoutMs) }),
     });
     api.interceptors.error.use(failure(op, timeoutMs));
     return api;

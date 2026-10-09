@@ -1,6 +1,6 @@
 import { type Exchange, live, replay } from "@sanoma/testing/replay";
 import type { CallContext } from "@sanoma/workflows";
-import { delay, http } from "msw";
+import { delay, http, HttpResponse } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import { resendDriver } from "../src/driver.ts";
 
@@ -174,6 +174,28 @@ describe("resendDriver", () => {
         message: "resend: broadcast.send could not build its request",
       });
       expect(sent).toEqual([]);
+    });
+
+    it("fails retryable when the connection drops", async () => {
+      server.use(http.get("*/broadcasts/bc_1", () => HttpResponse.error()));
+      await expect(send("bc_1")).rejects.toMatchObject({
+        name: "DriverError",
+        retryable: true,
+        status: undefined,
+        message: "resend: broadcast.send got no reply",
+      });
+    });
+
+    it("keeps a 4xx final when its body fails while it is read", async () => {
+      // Headers arrive, then the body fails as the timeout would while it is read.
+      const body = new ReadableStream({
+        start: (c) => {
+          c.enqueue(new TextEncoder().encode('{"name":'));
+          setTimeout(() => c.error(new DOMException("The operation timed out.", "TimeoutError")), 10);
+        },
+      });
+      server.use(http.get("*/broadcasts/bc_1", () => new HttpResponse(body, { status: 422 })));
+      await expect(send("bc_1")).rejects.toMatchObject({ name: "DriverError", retryable: false, status: 422 });
     });
 
     it("fails retryable when Resend does not answer in time", async () => {
