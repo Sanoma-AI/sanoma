@@ -23,6 +23,21 @@ export const sourceQuery = (name: string) =>
 /** The config's operations by id, for `select`: built once per config, not on every render. */
 export const opsById = (config: ConfigDescription) => new Map(config.ops.map((op) => [op.id, op]));
 
+/**
+ * Each vendor with its operations (in `ops`' order) and the workflows that may call one of them,
+ * by title: for `select`.
+ */
+export const connectorsOf = (config: ConfigDescription) =>
+  Object.entries(config.vendors)
+    .map(([id, vendor]) => {
+      const ops = config.ops.filter((op) => op.vendor === id);
+      const ids = new Set(ops.map((op) => op.id));
+      return { id, vendor, ops, workflows: config.workflows.filter((wf) => wf.ops.some((op) => ids.has(op))) };
+    })
+    .toSorted((a, b) => a.vendor.title.localeCompare(b.vendor.title));
+
+export type ConnectorEntry = ReturnType<typeof connectorsOf>[number];
+
 /** The config's workflow of this name, if it has one: for `select`, or called with the config. */
 export const workflowNamed = (name: string) => (config: ConfigDescription) =>
   config.workflows.find((wf) => wf.name === name);

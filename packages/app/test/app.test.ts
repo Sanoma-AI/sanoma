@@ -510,6 +510,19 @@ describe("the page", () => {
     expect(runs.html.match(/<html[^>]*>/)?.[0]).not.toMatch(/class="[^"]*\bdark\b/);
   });
 
+  it("renders the connectors: each one's package and source, its operations and the workflows that use them", async () => {
+    const { vendors } = (await call<ConfigDescription>("/api/config")).body;
+    const connectors = await page("/connectors");
+    expect(connectors.status).toBe(200);
+    expect(connectors.html).toMatch(/<h1[^>]*>Connectors<\/h1>/);
+    expect(connectors.text).toContain("<title>Connectors · Sanoma</title>");
+    expect(connectors.html).toContain("Resend");
+    expect(connectors.html).toContain('href="https://www.npmjs.com/package/@sanoma/connector-resend"');
+    expect(connectors.html).toContain(`href="${vendors.resend!.source}"`);
+    expect(connectors.html).toContain("<code>resend.broadcast.send</code>");
+    expect(connectors.html).toContain('href="/workflows/announce"');
+  });
+
   it("renders a workflow's page: its graph beside its source, and not-found for one that does not exist", async () => {
     const found = await page("/workflows/announce");
     expect(found.status).toBe(200);
