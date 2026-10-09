@@ -532,10 +532,12 @@ describe("the page", () => {
     const found = await page(`/runs/${runId}`);
     expect(found.status).toBe(200);
     expect(found.html).toMatch(/<h2[^>]*>Ledger<\/h2>/);
-    // React Flow draws the graph in the browser only: the server renders its heading and a skeleton.
+    // React Flow draws the graph in the browser only: the server renders its heading and a
+    // skeleton, and the workflow's source beside it as plain text until its view loads.
     expect(found.html).toMatch(
-      /<h2[^>]*>Graph<\/h2><div[^>]*><div data-slot="skeleton"[^>]*aria-label="Loading the graph"/,
+      /<h2[^>]*>Graph<\/h2>(<div[^>]*>){3}<div data-slot="skeleton"[^>]*aria-label="Loading the graph"/,
     );
+    expect(found.html).toMatch(/<pre[^>]*>[^<]*ctx\.ghost\.post\.create\(/);
     // The workflow's own approval covers no operation, and says so.
     expect(found.html).toMatch(/Lets through<\/dt><dd[^>]*><span[^>]*>no operation by itself/);
     const missing = await page("/runs/does-not-exist");
