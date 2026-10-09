@@ -110,6 +110,6 @@ describeScenarios({ ...config, ledger: memoryLedger(), appName: "scenarios-test"
 
 Sandbox runs go one at a time, so a scenario that leaves its run waiting on an approval it has no decision for holds up the ones after it until they time out; fix the first failure first.
 
-`runScenario(scenario, { client, workflows, startedBy?, timeoutMs? })` runs one scenario against a worker you started, with a `SanomaClient` of it, and returns `{ runId, run, ledger, checks }`: the run's id, its summary, its ledger records and `check(scenario, ledger)`. `workflows` is the config's: the scenario names its workflow, and the client starts a definition. `timeoutMs` goes to `drive`. Load the scenarios with `loadScenarios(resolveConfig(config))` from `@sanoma/workflows/scenario`.
+`runScenario(scenario, { client, startedBy?, timeoutMs? })` runs one scenario against a worker you started, with a `SanomaClient` of it, and returns `{ runId, run, ledger, checks }`: the run's id, its summary, its ledger records and `check(scenario, ledger)`. `timeoutMs` goes to `drive`. Load the scenarios with `loadScenarios(resolveConfig(config))` from `@sanoma/workflows/scenario`.
 
 Status: early (0.x). License: Apache-2.0.
