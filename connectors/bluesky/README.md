@@ -6,9 +6,9 @@
 npm install @sanoma/connector-bluesky
 ```
 
-| Operation             | Effect    | What it does                                                |
-| --------------------- | --------- | ----------------------------------------------------------- |
-| `bluesky.post.create` | `publish` | Post publicly to the account's feed (up to 300 characters). |
+| Operation             | Effect    | What it does                                                            |
+| --------------------- | --------- | ----------------------------------------------------------------------- |
+| `bluesky.post.create` | `publish` | Post publicly to the account's feed (up to 300 characters). Idempotent. |
 
 ```ts
 import { bluesky } from "@sanoma/connector-bluesky";
@@ -51,7 +51,7 @@ It signs in with the app password on its first call, keeps that session, on that
 
 ### Idempotency
 
-`bluesky.post.create` is not idempotent, so the runtime never retries it. A worker that crashes after Bluesky replied but before the reply was recorded runs the call again on recovery, though. The driver makes that safe: the post's record key is a TID derived from the call's idempotency key, so every try of one call names the same record, and a repository holds one record per key. When the create fails, the driver looks that key up; if the post is there, it returns it instead of posting again. It does not look when Bluesky refused the create (400, 401, 403), which makes no record; and when the lookup itself fails with anything but `RecordNotFound`, the call fails retryable with the lookup's error, since whether the post exists is unknown. TIDs are the key type posts declare, a client may choose them, and their timestamps are [not validated anywhere in the network](https://docs.bsky.app/docs/advanced-guides/timestamps), so this key's timestamp is a hash, not the time of posting (`createdAt` is).
+`bluesky.post.create` is idempotent: the runtime retries it after a timeout, a 429 or a 5xx, and a worker that crashes after Bluesky replied but before the reply was recorded runs it again on recovery. Neither posts twice: the post's record key is a TID derived from the call's idempotency key, so every try of one call names the same record, and a repository holds one record per key. When the create fails, the driver looks that key up; if the post is there, it returns it instead of posting again. It does not look when Bluesky refused the create (400, 401, 403), which makes no record; and when the lookup itself fails with anything but `RecordNotFound`, the call fails retryable with the lookup's error, since whether the post exists is unknown. TIDs are the key type posts declare, a client may choose them, and their timestamps are [not validated anywhere in the network](https://docs.bsky.app/docs/advanced-guides/timestamps), so this key's timestamp is a hash, not the time of posting (`createdAt` is).
 
 The record key depends on nothing but the idempotency key, `<runId>:<seq>`, so keys are unique only as far as run ids are. Two deployments posting to one account, with run ids their callers choose, or a deployment whose database was reset and starts its run ids again, can name the same key for different calls. The second call then finds the first's post at its key: if the text is the same, it returns that post as its own and posts nothing; if it differs, it fails, not retryable, naming the post that holds the key.
 

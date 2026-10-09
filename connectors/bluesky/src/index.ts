@@ -17,6 +17,8 @@ export const bluesky = defineConnector(
       create: {
         effect: "publish",
         description: "Post publicly to the account's feed.",
+        // The driver names the post's record after the idempotency key, and the fake dedupes on it.
+        idempotent: true,
         input: z.object({ text: z.string().min(1).max(300) }),
         output: z.object({ uri: z.string(), cid: z.string(), url: z.string() }),
       },

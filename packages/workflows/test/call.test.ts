@@ -30,7 +30,7 @@ const databaseUrl = testDatabaseUrl("call");
 const alice = { id: "alice" };
 const groups = (records: LedgerRecord[]) => records.map((r) => r.group);
 
-/** One post: bluesky.post.create is not idempotent, so it is never retried. */
+/** One post to Bluesky. */
 const post = defineWorkflow({
   name: "post",
   trigger: "manual",
@@ -136,22 +136,23 @@ describe("a call that fails", () => {
   });
 
   it("fails the run with driver_failed when a non-idempotent call loses its reply, after one side effect", async () => {
-    app.vendors.bluesky.loseReply("bluesky.post.create");
-    const runId = await c().start(post, { text: "lost" }, { startedBy: alice });
+    // ghost.post.create is not idempotent, so it is never retried.
+    app.vendors.ghost.loseReply("ghost.post.create");
+    const runId = await c().start(publish, { title: "lost" }, { startedBy: alice });
 
     const err = await failure(c().result(runId));
     expect(errorCode(err)).toBe("driver_failed");
     // DBOS hands the run's error back as a copy: the code must be an own enumerable property.
     expect(Object.keys(err as object)).toContain("code");
-    expect(err).toMatchObject({ message: "fake bluesky: the reply to bluesky.post.create was lost" });
-    expect(app.ops()).toEqual(["bluesky.post.create"]);
-    expect(app.vendors.bluesky.state.posts).toHaveLength(1);
+    expect(err).toMatchObject({ message: "fake ghost: the reply to ghost.post.create was lost" });
+    expect(app.ops()).toEqual(["ghost.post.create"]);
+    expect(Object.values(app.vendors.ghost.state.posts)).toHaveLength(1);
 
     const records = await c().ledger(runId);
     const vendorError = { code: "driver_failed", name: "DriverError", message: expect.stringMatching(/was lost/) };
     expect(records.at(-2)).toMatchObject({
       type: "op.called",
-      op: "bluesky.post.create",
+      op: "ghost.post.create",
       attempt: 1,
       error: vendorError,
     });
@@ -220,6 +221,15 @@ describe("a call that fails", () => {
     expect(calls.map((call) => call.attempt)).toEqual([1, 2]);
     expect(new Set(calls.map((call) => call.idempotencyKey)).size).toBe(1);
     expect((await c().ledger(runId)).at(-2)).toMatchObject({ op: "ghost.post.publish", attempt: 2 });
+  });
+
+  it("retries a post whose reply was lost, and posts once", async () => {
+    app.vendors.bluesky.loseReply("bluesky.post.create");
+    const runId = await c().start(post, { text: "once" }, { startedBy: alice });
+
+    expect(await c().result(runId)).toMatchObject({ uri: expect.any(String) });
+    expect(app.ops()).toEqual(["bluesky.post.create", "bluesky.post.create"]);
+    expect(app.vendors.bluesky.state.posts.map((p) => p.text)).toEqual(["once"]);
   });
 
   it("records the vendor's last error, not DBOS's wrapper, when the tries run out", async () => {
