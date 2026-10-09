@@ -74,6 +74,8 @@ export interface RunSummary {
   updatedAt?: number;
   approvals: ApprovalState[];
   error?: string;
+  /** For a sandbox run, the scenario it was seeded from. */
+  sandbox?: string;
 }
 
 export interface StartOptions {
@@ -82,10 +84,15 @@ export interface StartOptions {
   /**
    * Use this run id instead of a new one, so a retried start makes one run. Starting an id
    * that exists returns it, without starting another, when the workflow, the input (compared
-   * as JSON) and `startedBy` are the same, and throws `invalid_input` naming what differs
+   * as JSON), `startedBy` and `sandbox` are the same, and throws `invalid_input` naming what differs
    * when they are not. Of two starts racing with one new id, the first's run stands.
    */
   runId?: string;
+  /**
+   * Start a sandbox run, seeded from the config's scenario of this name: it calls the config's
+   * `fakes` instead of the drivers and does not wait on sleeps. One at a time per worker.
+   */
+  sandbox?: string;
 }
 
 /** Talks to the runtime from another process (the app, a script), through the shared Postgres. */
@@ -127,8 +134,8 @@ export class SanomaClient {
       options?.startedBy,
       '`startedBy` must be a principal, such as { id: "alice" }',
     );
-    const args: RunArgs = { input, startedBy };
-    const { runId } = options;
+    const { runId, sandbox } = options;
+    const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }) };
     // An id DBOS has already returns that run, unless it is another workflow's, which DBOS refuses.
     const handle = await this.dbos
       .enqueue(
@@ -139,6 +146,8 @@ export class SanomaClient {
           applicationName: this.config.appName,
           authenticatedUser: startedBy.id,
           authenticatedRoles: startedBy.groups ?? [],
+          // Kept on the run's status row too, so a listing tells sandbox runs apart without its input.
+          ...(sandbox === undefined ? {} : { attributes: { sandbox } }),
         },
         args,
       )
@@ -303,10 +312,12 @@ export class SanomaClient {
     return this.dbos.destroy();
   }
 
-  /** Refuses a run id whose run, as stored, was started with another input or by someone else. */
+  /** Refuses a run id whose run, as stored, was started with another input, by someone else, or in another sandbox. */
   private async mustMatch(runId: string, args: RunArgs) {
     const [stored] = ((await this.dbos.getWorkflow(runId))?.input ?? []) as [RunArgs?];
-    const differs = (["input", "startedBy"] as const).filter((key) => !stored || !sameJson(stored[key], args[key]));
+    const differs = (["input", "startedBy", "sandbox"] as const).filter(
+      (key) => !stored || !sameJson(stored[key], args[key]),
+    );
     if (differs.length) {
       throw new SanomaError(
         "invalid_input",
@@ -332,6 +343,7 @@ export class SanomaClient {
     authenticatedUser?: string;
     authenticatedRoles?: string[];
     error?: unknown;
+    attributes?: Record<string, unknown>;
   }): Promise<RunSummary> {
     const approvals = await this.approvals(r.workflowID);
     const groups = r.authenticatedRoles ?? [];
@@ -344,6 +356,7 @@ export class SanomaClient {
       updatedAt: r.updatedAt,
       approvals,
       error: r.error ? String((r.error as Error).message ?? r.error) : undefined,
+      ...(typeof r.attributes?.sandbox === "string" && { sandbox: r.attributes.sandbox }),
     };
   }
 }

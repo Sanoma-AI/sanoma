@@ -1,5 +1,6 @@
 import { dirname, resolve } from "node:path";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
+import type { Fake } from "./fake.ts";
 import type { LedgerStore } from "./ledger.ts";
 import { type Connector, type Driver, type DriverFn, isOp, type Op } from "./op.ts";
 import type { Policy } from "./policy.ts";
@@ -18,6 +19,13 @@ export interface SanomaConfig {
    */
   connectors: Connector<any, any>[];
   drivers: Driver[];
+  /**
+   * Fake vendors (from `defineFake`) that sandbox runs call instead of the drivers. A sandbox
+   * run is started with `{ sandbox: "<scenario name>" }` and seeded from that scenario.
+   */
+  fakes?: Fake<any, any>[];
+  /** The directory of `.feature` files sandbox runs are seeded from, as a `file:` URL, such as `new URL("./scenarios/", import.meta.url)`. */
+  scenarios?: URL;
   /** Checked before every operation call. Required: `allowAll` says that every call is allowed. */
   policy: Policy;
   /**
@@ -50,6 +58,12 @@ export interface ResolvedConfig {
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id. */
   drivers: Map<string, DriverFn>;
+  /** The fake vendors sandbox runs call. */
+  fakes: Fake<any, any>[];
+  /** The fakes' functions, by operation id: what a sandbox run calls. */
+  fakeDrivers: Map<string, DriverFn>;
+  /** The scenarios directory, a `file:` URL. */
+  scenarios?: URL;
   /** Each checked against `ops` and `drivers`; names are unique. */
   workflows: WorkflowDefinition<any, any>[];
   policy: Policy;
@@ -98,12 +112,26 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       "The config needs a `ledger`; use `jsonlLedger(dir)` to keep records in files, or `memoryLedger()` to keep them in memory, for tests",
     );
   }
+  if (config.fakes !== undefined && !Array.isArray(config.fakes)) {
+    throw new Error("The config's `fakes` must be an array of defineFake fakes");
+  }
+  const { scenarios } = config;
+  if (scenarios !== undefined && !(scenarios instanceof URL && scenarios.protocol === "file:")) {
+    throw new Error(
+      'The config\'s `scenarios` must be a file: URL to a directory, such as new URL("./scenarios/", import.meta.url)',
+    );
+  }
   const appName = config.appName ?? "sanoma";
   // No fallback to the working directory: a config found nowhere has no data files, and says so.
   const root =
     config.root !== undefined ? resolve(config.root) : config.file !== undefined ? dirname(config.file) : undefined;
   const ops = indexConnectors(config.connectors);
   const drivers = indexDrivers(config.drivers, ops);
+  const fakes = config.fakes ?? [];
+  const fakeDrivers = indexDrivers(
+    fakes.map((f) => f.driver),
+    ops,
+  );
   const names = new Map<string, WorkflowDefinition<any, any>>();
   for (const wf of config.workflows) {
     checkUses(wf, ops, drivers);
@@ -122,6 +150,9 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     queueName: `sanoma:${appName}`,
     ops,
     drivers,
+    fakes,
+    fakeDrivers,
+    ...(scenarios && { scenarios }),
     workflows: [...names.values()],
     policy: config.policy,
     ledger,

@@ -115,6 +115,8 @@ export function useApp(
       workflows: [announce],
       connectors: [ghost, resend, bluesky],
       drivers: vendors.drivers,
+      // The same fakes, for sandbox runs.
+      fakes: [vendors.ghost, vendors.resend, vendors.bluesky],
       policy: allowAll,
       ledger: jsonlLedger(ledgerDir),
       databaseUrl,
