@@ -1,4 +1,5 @@
 import type { ErrorInfo, LedgerRecord } from "@sanoma/workflows";
+import type { ConfigDescription, OpEntry } from "@sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { memo, type ReactNode, useMemo } from "react";
@@ -21,6 +22,7 @@ import {
   OpName,
   PageHeader,
   pageTitle,
+  plural,
   RequestedBy,
   SectionTitle,
   StatusDot,
@@ -136,17 +138,28 @@ function RunPage() {
   );
 }
 
-/** An error from the ledger, with what the vendor said when the driver kept it. */
-function ErrorText({ error }: { error: ErrorInfo }) {
+/** An error from the ledger, with what the vendor said when the driver kept it, and `then`: what came of it. */
+function ErrorText({ error, then }: { error: ErrorInfo; then?: string | undefined }) {
   const vendor = [error.status === undefined ? "" : `status ${error.status}`, error.vendorCode ?? ""]
     .filter(Boolean)
     .join(", ");
   return (
-    <p className="text-destructive">
-      {error.message}
-      {vendor && <span className="text-muted-foreground"> ({vendor})</span>}
-    </p>
+    <>
+      <p className="text-destructive">
+        {error.message}
+        {vendor && <span className="text-muted-foreground"> ({vendor})</span>}
+      </p>
+      {then && <p className="text-muted-foreground">{then}</p>}
+    </>
   );
+}
+
+/** Whether a failed call was tried again, from its attempt and the config's entry for its operation. */
+function retries(attempt: number, op: OpEntry | undefined, vendors: ConfigDescription["vendors"]) {
+  if (attempt > 1 || op?.idempotent) return `Tried ${plural(attempt, "time")}`;
+  if (!op) return undefined;
+  const vendor = vendors[op.vendor]?.title ?? op.vendor;
+  return `Not retried: this operation is not safe to repeat. Check ${vendor} before starting again.`;
 }
 
 /** A ledger record's item on the page, by the record's id: where a click on the graph leads. */
@@ -156,6 +169,7 @@ const ledgerItemId = (recordId: string) => `ledger-${recordId}`;
 const LedgerRow = memo(function LedgerRow({ record, titles }: { record: LedgerRecord; titles: Map<string, string> }) {
   const title = (approval: string) => titles.get(approval) ?? approval;
   const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
+  const { data: vendors } = useSuspenseQuery({ ...configQuery(), select: (config) => config.vendors });
   let kind = "";
   let body: ReactNode;
   switch (record.type) {
@@ -179,7 +193,9 @@ const LedgerRow = memo(function LedgerRow({ record, titles }: { record: LedgerRe
               {record.durationMs} ms{record.attempt && record.attempt > 1 ? `, attempt ${record.attempt}` : ""}
             </span>
           </p>
-          {record.error && <ErrorText error={record.error} />}
+          {record.error && (
+            <ErrorText error={record.error} then={retries(record.attempt ?? 1, ops.get(record.op), vendors)} />
+          )}
           <Expandable label="Input" value={record.input} />
           {"output" in record && <Expandable label="Output" value={record.output} />}
         </>

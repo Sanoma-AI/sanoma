@@ -27,6 +27,7 @@ import {
   type ApprovalState,
   defineConfig,
   definePolicy,
+  DriverError,
   jsonlLedger,
   memoryLedger,
   type RunSummary,
@@ -75,10 +76,11 @@ const policy = definePolicy(
   { version: "test-1" },
 );
 
+const blog = fakeGhost();
 const config = defineConfig({
   workflows: [announce],
   connectors: [ghost, resend, bluesky],
-  drivers: [fakeGhost().driver, fakeResend().driver, fakeBluesky().driver],
+  drivers: [blog.driver, fakeResend().driver, fakeBluesky().driver],
   policy,
   ledger: memoryLedger(),
   appName: "sanoma-app-test",
@@ -444,6 +446,22 @@ describe("the page", () => {
     );
     expect(run.text).toContain("Started by held");
     expect(run.text).toMatch(/>finished<\/span>/);
+  });
+
+  it("says a failed call that is not safe to repeat was not retried, and where to look", async () => {
+    blog.failNext("ghost.post.create", new DriverError("ghost: the site is down", { retryable: false, status: 503 }));
+    const started = await call<{ runId: string }>("/api/runs", {
+      method: "POST",
+      actor: "alice",
+      body: { workflow: "announce", input: input("Fails at once") },
+    });
+    await waitFor(
+      () => detail(started.body.runId),
+      (d) => d.run.status === "failed",
+    );
+    const run = await page(`/runs/${started.body.runId}`);
+    expect(run.text).toContain("ghost: the site is down");
+    expect(run.text).toContain("Not retried: this operation is not safe to repeat. Check Ghost before starting again.");
   });
 
   it("renders the workflows, the start form and the theme switch on the server", async () => {
