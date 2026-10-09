@@ -225,10 +225,12 @@ it.each(files)("%s has no problems", (file) => {
 import { outlineWorkflow } from "@sanoma/workflows/describe";
 
 outlineWorkflow(announce);
-// { nodes: [{ kind: "op", id: "ghost.post.create" }, …, { kind: "approval", title: "Review launch copy" }, { kind: "sleep" }, …] }
+// { source: "import …", nodes: [{ kind: "op", id: "ghost.post.create", span: [913, 974] }, …, { kind: "approval", title: "Review launch copy", span: […] }, …] }
 ```
 
 It parses `run` with oxc-parser (TypeScript in a repo, JavaScript once built) and lists, in the order they run, the calls made on `run`'s first parameter, whatever it is named: operations (`op`, with a `*` for a computed segment such as `ctx[vendor].comments.list`), approvals (with the title, when it is a string literal), sleeps, and `ctx.all`: `all` with one branch per member of an array literal, or for anything else, such as `ids.map(…)`, `each` with the callback's calls as its `body`. Around them it shows loops and `.map`, `.forEach` and `.reduce` callbacks as `repeat`, and `if`, `switch`, `?:`, `&&`, `||` and `??` as `branch`: one case per arm that makes calls, plus one empty case for the way past them when there is one (an arm without calls, an `if` without `else`, a `switch` without `default`, the right side of `&&` not run). It is a reading of the body, not a guarantee: it does not read the functions `run` calls, whether defined outside `run` (a helper that takes `ctx`) or inside it, only callbacks passed to `ctx.all`, `.map`, `.forEach` and `.reduce`; and it cannot see how many times a loop runs, which arm is taken, or a `ctx` passed around under another name. It returns `{ error }` when the source cannot be read or parsed, or when `run` destructures its `ctx` parameter.
+
+`defineWorkflow` records the file it is called from as the workflow's `file`, by itself; nothing passes it. The outline's `source` is that file when it can be read and holds the workflow (an object literal with its `name` and a `run` function), else the text of `run` itself, with `\n` line endings either way. Each node's `span` is where its code is in `source`, as UTF-16 offsets (a string index, and what CodeMirror counts): the call, the `ctx.all(…)`, the loop or `.map(…)` call, or the whole `if` / `else` chain, `switch`, `?:` or `&&`.
 
 Status: early (0.x). The API may change between minor versions.
 
