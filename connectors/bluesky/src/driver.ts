@@ -111,6 +111,8 @@ function env(name: string): string {
  * hold it twice. Its timestamp bits are hash bits, kept at or above 2^50 so they encode to
  * the full 11 characters. A TID's timestamp is not validated anywhere in the network:
  * https://docs.bsky.app/docs/advanced-guides/timestamps
+ *
+ * Keys are as unique as run ids: the README says what happens when two calls share one.
  */
 function rkeyFor(idempotencyKey: string): string {
   const hash = createHash("sha256").update(idempotencyKey).digest();
