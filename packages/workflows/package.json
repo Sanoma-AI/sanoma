@@ -59,8 +59,14 @@
     "prepack": "pnpm run clean && pnpm run build"
   },
   "dependencies": {
+    "@cucumber/cucumber-expressions": "^20.1.0",
+    "@cucumber/gherkin": "^42.0.1",
+    "@cucumber/messages": "^34.2.1",
     "@dbos-inc/dbos-sdk": "^5.2.11",
-    "oxc-parser": "^0.153.0"
+    "@faker-js/faker": "^10.6.0",
+    "oxc-parser": "^0.153.0",
+    "randexp": "^0.5.3",
+    "zod-schema-faker": "^2.1.2"
   },
   "devDependencies": {
     "zod": "^4.6.5"
