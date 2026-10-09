@@ -43,8 +43,8 @@ export interface ResourceState {
 
 /** The provider-bridge API: one bridge process (or its fake) serving any number of providers. */
 export interface Bridge {
-  /** The provider's schema document. Needs no credentials. */
-  schema(ref: ProviderRef): Promise<{ schema: SchemaDocument; protocol: number; sha256: string }>;
+  /** The provider's schema document (`schema.protocol` is its plugin protocol) and its release's SHA256SUMS hash. Needs no credentials. */
+  schema(ref: ProviderRef): Promise<{ schema: SchemaDocument; sha256: string }>;
   /**
    * Starts and configures the provider. The same config again is a no-op; another config for the
    * same release fails (`failed_precondition`) until `close(ref)`.
@@ -101,8 +101,8 @@ export type BridgeErrorCode =
  * A failed bridge call. `code` says what kind: `invalid_argument` (bad JSON, unknown resource
  * type, config rejected), `failed_precondition` (not configured, configured differently, pin
  * mismatch, unverifiable release, an error diagnostic from the provider), `unavailable` (the
- * provider process exited: configure again) or `not_found` (an import found nothing).
- * `diagnostics` are the provider's error diagnostics.
+ * provider process exited, or the bridge cannot be reached: configure again) or `not_found`
+ * (an import found nothing). `diagnostics` are the provider's error diagnostics.
  */
 export class BridgeError extends Error {
   override name = "BridgeError";
@@ -115,16 +115,32 @@ export class BridgeError extends Error {
     this.diagnostics = diagnostics;
   }
 
-  /** Wraps a Connect error (or anything thrown by a call) with its code and diagnostics. */
+  /**
+   * Wraps a Connect error (or anything thrown by a call) with its code and diagnostics. A
+   * socket that is missing, refused or reset is `unavailable`: the bridge is not there.
+   */
   static from(error: unknown): BridgeError {
     if (error instanceof BridgeError) return error;
     const connectError = ConnectError.from(error);
     const diagnostics = connectError.findDetails(DiagnosticSchema).map(toDiagnostic);
-    return new BridgeError(codeName(connectError.code), connectError.rawMessage, diagnostics, { cause: error });
+    const code = unreachable(error) ? "unavailable" : codeName(connectError.code);
+    return new BridgeError(code, connectError.rawMessage, diagnostics, { cause: error });
   }
 }
 
 const codeName = (code: Code) => codeToString(code) as BridgeErrorCode;
+
+/** Node's codes for a socket that is not there or went away. */
+const UNREACHABLE = new Set(["ENOENT", "ECONNREFUSED", "ECONNRESET", "EPIPE"]);
+
+/** True when the error, or one it was caused by, is a socket that is not there or went away. */
+function unreachable(error: unknown): boolean {
+  for (let e = error, depth = 0; e instanceof Error && depth < 10; e = e.cause, depth++) {
+    const { code } = e as { code?: unknown };
+    if (typeof code === "string" && UNREACHABLE.has(code)) return true;
+  }
+  return false;
+}
 
 const severities = {
   [Diagnostic_Severity.ERROR]: "error",
@@ -163,11 +179,16 @@ export function bridgeClient(
   stop: () => Promise<void>,
   options: CallOptions = {},
 ): Bridge {
+  // A release's schema is pinned by its sha256, so it is parsed once (Stripe's is 2.3 MB).
+  const schemas = new Map<string, SchemaDocument>();
   return {
     schema: (ref) =>
       call(async () => {
         const res = await rpc.getSchema({ provider: providerOf(ref) }, options);
-        return { schema: parseSchema(res.schemaJson), protocol: res.protocol, sha256: res.sha256 };
+        const key = `${ref.source} ${ref.version} ${res.sha256} ${res.schemaJson.length}`;
+        let schema = schemas.get(key);
+        if (!schema) schemas.set(key, (schema = parseSchema(res.schemaJson)));
+        return { schema, sha256: res.sha256 };
       }),
     configure: (ref, configJson) =>
       call(async () => {

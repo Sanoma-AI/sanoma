@@ -59,6 +59,17 @@ describe("BridgeError", () => {
     expect(error).toMatchObject({ code: name, diagnostics: [] });
   });
 
+  it("says a socket that is missing, refused or reset is unavailable", () => {
+    for (const code of ["ENOENT", "ECONNREFUSED", "ECONNRESET"]) {
+      const socket = Object.assign(new Error(`connect ${code} /tmp/bridge.sock`), { code });
+      expect(BridgeError.from(socket)).toMatchObject({ code: "unavailable" });
+      // As connect-node wraps it.
+      expect(BridgeError.from(new ConnectError("socket", Code.Internal, undefined, undefined, socket))).toMatchObject({
+        code: "unavailable",
+      });
+    }
+  });
+
   it("wraps an error that is not a Connect error as unknown", () => {
     const cause = new Error("socket hang up");
     expect(BridgeError.from(cause)).toMatchObject({ code: "unknown", message: "socket hang up", cause });

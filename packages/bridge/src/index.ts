@@ -7,6 +7,7 @@ export {
   type ResourceState,
 } from "./bridge.ts";
 export { type BridgeLog, startBridge, type StartBridgeOptions } from "./client.ts";
+export { ensureConfigured, type ProviderClient } from "./configure.ts";
 export { readPins } from "./pins.ts";
 export {
   type Attribute,

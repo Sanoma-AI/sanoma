@@ -168,6 +168,13 @@ describe("recorder", () => {
     });
   });
 
+  it("rethrows the bridge's error when a failed call cannot be recorded", async () => {
+    // A new recorder knows no schema or config yet, so it cannot scrub, and records nothing.
+    const bridge = recordingBridge();
+    const error = await bridge.read(ref, "widget_thing", '{"id":"broken"}').catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: "failed_precondition", message: `401: bad key ${apiKey}` });
+  });
+
   it("refuses to record private data that holds a secret", async () => {
     const bridge = recordingBridge();
     await bridge.schema(ref);
@@ -187,5 +194,11 @@ describe("recorder", () => {
     expect(JSON.parse(read.resource!.stateJson)).toMatchObject({ id: "w:1", secret: "<scrubbed>" });
     const failed = await bridge.read(ref, "widget_thing", '{"id":"broken"}').catch((e: unknown) => e);
     expect(failed).toMatchObject({ code: "failed_precondition", diagnostics: [{ severity: "error" }] });
+    // The release is in no pins.json: its pin is checked against the sha256 its replies recorded.
+    expect((await bridge.schema({ ...ref, sha256: "ab".repeat(32) })).sha256).toBe("ab".repeat(32));
+    await expect(bridge.schema({ ...ref, sha256: "0".repeat(64) })).rejects.toMatchObject({
+      code: "failed_precondition",
+      message: expect.stringContaining("refusing release"),
+    });
   });
 });

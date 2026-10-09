@@ -85,6 +85,13 @@ export async function startBridge(options: StartBridgeOptions = {}): Promise<Bri
     logger(line);
   });
   const exited = new Promise((resolve) => child.once("exit", resolve));
+  // Nobody need call `stop()` (the bridge is unref'd and dies with this process), so the socket's
+  // directory goes when the bridge exits, or when this process does, whichever is first.
+  process.once("exit", cleanup);
+  child.once("exit", () => {
+    cleanup();
+    process.off("exit", cleanup);
+  });
 
   try {
     await waitForReady(child, options.readyTimeoutMs ?? 30_000);

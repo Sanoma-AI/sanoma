@@ -47,7 +47,7 @@ describe("fakeBridge", () => {
   it("serves the recorded schemas of GitHub (protocol 5) and Stripe (protocol 6)", async () => {
     const bridge = fakeBridge();
     const gh = await bridge.schema(github);
-    expect(gh.protocol).toBe(5);
+    expect(gh.schema.protocol).toBe(5);
     expect(gh.sha256).toBe(github.sha256);
     expect(gh.schema).toMatchObject({ source: "integrations/github", version: "6.13.0", formatVersion: 1 });
     expect(gh.schema.resources.github_repository?.schemaVersion).toBe(1);
@@ -58,7 +58,7 @@ describe("fakeBridge", () => {
     expect(gh.schema.resources.github_repository?.block.blocks.pages).toMatchObject({ nesting: "list", maxItems: 1 });
 
     const st = await bridge.schema(stripe);
-    expect(st.protocol).toBe(6);
+    expect(st.schema.protocol).toBe(6);
     expect(Object.keys(st.schema.resources)).toEqual(
       expect.arrayContaining(["stripe_product", "stripe_webhook_endpoint"]),
     );
@@ -87,6 +87,12 @@ describe("fakeBridge", () => {
       ["import", "provider-bridge"],
       ["read", "provider-bridge"],
     ]);
+    expect(bridge.calls[1]).toEqual({
+      method: "import",
+      ref: github,
+      typeName: "github_repository",
+      id: "provider-bridge",
+    });
   });
 
   it("finds a read by the id in the state, whatever else the state holds", async () => {

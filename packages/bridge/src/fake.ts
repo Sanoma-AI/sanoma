@@ -1,7 +1,14 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { fromJson, type JsonValue } from "@bufbuild/protobuf";
-import { Code, ConnectError, createClient, createRouterTransport, type ServiceImpl } from "@connectrpc/connect";
+import { type DescMessage, fromJson, type JsonValue, type MessageShape } from "@bufbuild/protobuf";
+import {
+  Code,
+  ConnectError,
+  createClient,
+  createRouterTransport,
+  type Interceptor,
+  type ServiceImpl,
+} from "@connectrpc/connect";
 import { codeFromString } from "@connectrpc/connect/protocol-connect";
 import { type Bridge, bridgeClient, type ProviderRef } from "./bridge.ts";
 import { startBridge, type StartBridgeOptions } from "./client.ts";
@@ -10,6 +17,7 @@ import {
   isError,
   recordHint,
   releaseName,
+  releaseSlug,
   replyDir,
   schemaFile,
   stateId,
@@ -23,9 +31,22 @@ import {
   type ProviderRef as ProviderRefMessage,
   ReadResponseSchema,
 } from "./gen/bridge/v1/bridge_pb.ts";
+import { isObject } from "./json.ts";
 import { readPins, testdata } from "./pins.ts";
 import { recorder } from "./record.ts";
+import type { BridgeCall } from "./replies.ts";
 import { parseSchema, type SchemaDocument } from "./schema.ts";
+
+export { fixturesDir } from "./pins.ts";
+export {
+  type BridgeCall,
+  type BridgeState,
+  loadReplies,
+  type StateFailure,
+  type StateObject,
+  stateBridge,
+} from "./replies.ts";
+export { type TfFake, tfFake, type TfFakeOptions, type TfFakeState } from "./tffake.ts";
 
 export interface FakeBridgeOptions {
   /** The fixtures: `pins.json`, `schemas/` and `replies/`. Default: this package's `testdata/`. */
@@ -34,20 +55,45 @@ export interface FakeBridgeOptions {
   bridge?: StartBridgeOptions;
 }
 
-/** A call the fake received, in order. */
-export interface BridgeCall {
-  method: "schema" | "configure" | "import" | "read" | "close";
-  ref?: ProviderRef;
-  typeName?: string;
-  /** The import ID, or the `id` in a read's state. */
-  id?: string;
-}
-
 export interface FakeBridge extends Bridge {
-  /** Every call, in order. */
+  /** Every call sent, in order. */
   readonly calls: BridgeCall[];
   /** True when `SANOMA_LIVE=1`: calls go to a real bridge. */
   readonly live: boolean;
+}
+
+const METHODS: Record<string, BridgeCall["method"]> = {
+  GetSchema: "schema",
+  Configure: "configure",
+  Import: "import",
+  Read: "read",
+  Close: "close",
+};
+
+/** A Connect interceptor that logs each call, on the real transport and the in-memory one alike. */
+function logCalls(calls: BridgeCall[]): Interceptor {
+  return (next) => (req) => {
+    const method = METHODS[req.method.name];
+    const msg = req.message as { provider?: ProviderRefMessage; typeName?: string; id?: string; stateJson?: string };
+    if (method) {
+      const { source = "", version = "", sha256 = "" } = msg.provider ?? {};
+      let id = msg.id || undefined;
+      if (method === "read") {
+        try {
+          id = stateId(msg.stateJson ?? "");
+        } catch {
+          // Not JSON: the bridge refuses it, and the log says so by its call alone.
+        }
+      }
+      calls.push({
+        method,
+        ...(source && { ref: { source, version, ...(sha256 && { sha256 }) } }),
+        ...(msg.typeName && { typeName: msg.typeName }),
+        ...(id !== undefined && { id }),
+      });
+    }
+    return next(req);
+  };
 }
 
 /**
@@ -62,47 +108,41 @@ export interface FakeBridge extends Bridge {
 export function fakeBridge(options: FakeBridgeOptions = {}): FakeBridge {
   const dir = toPath(options.fixtures ?? testdata);
   const live = process.env.SANOMA_LIVE === "1";
-  const recording = live && process.env.SANOMA_RECORD === "1";
   const calls: BridgeCall[] = [];
-  const inner = live ? liveBridge(dir, options.bridge ?? {}, recording) : replayBridge(dir);
-  const log = (call: BridgeCall) => calls.push(call);
-  return {
-    calls,
-    live,
-    schema: (ref) => (log({ method: "schema", ref }), inner.schema(ref)),
-    configure: (ref, configJson) => (log({ method: "configure", ref }), inner.configure(ref, configJson)),
-    import: (ref, typeName, id) => (log({ method: "import", ref, typeName, id }), inner.import(ref, typeName, id)),
-    read: (ref, typeName, stateJson, priv, schemaVersion) => {
-      const id = safeStateId(stateJson);
-      log({ method: "read", ref, typeName, ...(id === undefined ? {} : { id }) });
-      return inner.read(ref, typeName, stateJson, priv, schemaVersion);
-    },
-    close: (ref) => (log({ method: "close", ...(ref ? { ref } : {}) }), inner.close(ref)),
-    stop: () => inner.stop(),
-  };
+  const bridge = live
+    ? liveBridge(dir, options.bridge ?? {}, logCalls(calls), process.env.SANOMA_RECORD === "1")
+    : bridgeClient(
+        createClient(
+          BridgeService,
+          createRouterTransport(({ service }) => service(BridgeService, replayService(dir)), {
+            transport: { interceptors: [logCalls(calls)] },
+          }),
+        ),
+        async () => {},
+      );
+  return Object.assign(bridge, { calls, live });
 }
 
-function safeStateId(stateJson: string): string | undefined {
-  try {
-    return stateId(stateJson);
-  } catch {
-    return undefined;
-  }
-}
-
-/** The real bridge, started on the first call; recording, schema is fetched before configure so the recorder can scrub. */
-function liveBridge(dir: string, options: StartBridgeOptions, recording: boolean): Bridge {
+/**
+ * The real bridge, started on the first call. Recording, the schema is fetched before the first
+ * configure of each release, so the recorder can scrub what the provider marks sensitive.
+ */
+function liveBridge(dir: string, options: StartBridgeOptions, log: Interceptor, recording: boolean): Bridge {
   let started: Promise<Bridge> | undefined;
   const bridge = () =>
     (started ??= startBridge({
       ...options,
-      interceptors: [...(options.interceptors ?? []), ...(recording ? [recorder(dir)] : [])],
+      interceptors: [log, ...(options.interceptors ?? []), ...(recording ? [recorder(dir)] : [])],
     }));
+  const schemas = new Set<string>();
   return {
     schema: async (ref) => (await bridge()).schema(ref),
     configure: async (ref, configJson) => {
       const b = await bridge();
-      if (recording) await b.schema(ref);
+      if (recording && !schemas.has(releaseName(ref))) {
+        await b.schema(ref);
+        schemas.add(releaseName(ref));
+      }
       return b.configure(ref, configJson);
     },
     import: async (ref, typeName, id) => (await bridge()).import(ref, typeName, id),
@@ -116,16 +156,10 @@ function liveBridge(dir: string, options: StartBridgeOptions, recording: boolean
   };
 }
 
-function replayBridge(dir: string): Bridge {
-  const transport = createRouterTransport(({ service }) => service(BridgeService, replayService(dir)));
-  return bridgeClient(createClient(BridgeService, transport), async () => {});
-}
-
 const fail = (code: Code, message: string) => new ConnectError(message, code);
 
-/** Answers from a fixture file: its response, or the error it recorded. */
-function replay<T>(file: string, ok: (response: JsonValue) => T): T {
-  const fixture = JSON.parse(readFileSync(file, "utf8")) as Fixture;
+/** Answers from a fixture: its response, as a message of `schema`, or the error it recorded. */
+function replay<Desc extends DescMessage>(fixture: Fixture, schema: Desc): MessageShape<Desc> {
   const { response } = fixture;
   if (isError(response)) {
     const { code, message, diagnostics } = response.error;
@@ -135,53 +169,85 @@ function replay<T>(file: string, ok: (response: JsonValue) => T): T {
     }));
     throw new ConnectError(message, codeFromString(code) ?? Code.Unknown, undefined, details);
   }
-  return ok(response as JsonValue);
+  return fromJson(schema, response as JsonValue);
+}
+
+const readFixture = (file: string) => JSON.parse(readFileSync(file, "utf8")) as Fixture;
+
+/** Parsed schema documents by file, shared by every fake: Stripe's is 2.3 MB. A changed file is read again. */
+const documents = new Map<string, { mtimeMs: number; json: string; doc: SchemaDocument }>();
+
+function documentAt(file: string) {
+  const { mtimeMs } = statSync(file);
+  let entry = documents.get(file);
+  if (entry?.mtimeMs !== mtimeMs) {
+    const json = readFileSync(file, "utf8");
+    entry = { mtimeMs, json, doc: parseSchema(json) };
+    documents.set(file, entry);
+  }
+  return entry;
+}
+
+/** Every reply fixture of a release, for its recorded sha256. */
+function* replyFiles(root: string): Generator<string> {
+  if (!existsSync(root)) return;
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) yield* replyFiles(path);
+    else if (entry.name.endsWith(".json")) yield path;
+  }
 }
 
 /** `BridgeService` over fixture files, so the fake goes through the same Connect client and error mapping as the real one. */
 function replayService(dir: string): ServiceImpl<typeof BridgeService> {
   const pinsFile = join(dir, "pins.json");
   const pins = existsSync(pinsFile) ? readPins(pinsFile) : {};
-  const schemas = new Map<string, { json: string; doc: SchemaDocument }>();
+  const recorded = new Map<string, string | undefined>();
   const configured = new Map<string, string>();
-  const reads = new Map<string, Map<string, string>>();
+  const reads = new Map<string, Map<string, Fixture>>();
   const where = (file: string) => relative(dir, file);
 
-  /** The request's release, checked as the bridge checks it, with its SHA256SUMS hash. */
-  function release(provider: ProviderRefMessage | undefined): { ref: ProviderRef; sha256: string } {
+  /** The release's SHA256SUMS hash: its pin, else what its recorded replies say; undefined when neither knows. */
+  function sha256Of(ref: { source: string; version: string }): string | undefined {
+    const pin = pins[ref.source];
+    if (pin?.version === ref.version) return pin.sha256;
+    const name = releaseName(ref);
+    if (!recorded.has(name)) {
+      const [file] = replyFiles(join(dir, "replies", releaseSlug(ref)));
+      recorded.set(name, file && (readFixture(file).provider.sha256 || undefined));
+    }
+    return recorded.get(name);
+  }
+
+  /** The request's release, its pin checked as the bridge checks it. */
+  function release(provider: ProviderRefMessage | undefined): Required<ProviderRef> {
     if (!provider?.source || !provider.version) {
       throw fail(Code.InvalidArgument, "provider source and version are required");
     }
     const { source, version } = provider;
-    const pin = pins[source];
-    const sha256 = pin?.version === version ? (pin.sha256 ?? "") : "";
-    if (provider.sha256 && sha256 && provider.sha256 !== sha256) {
+    const sha256 = sha256Of(provider);
+    if (provider.sha256 && provider.sha256 !== sha256) {
       throw fail(
         Code.FailedPrecondition,
-        `refusing release: ${source} ${version}: SHA256SUMS sha256 is ${sha256}, pinned ${provider.sha256}`,
+        sha256 === undefined
+          ? `refusing release: ${source} ${version}: no recorded SHA256SUMS sha256 to check the pin ${provider.sha256} against`
+          : `refusing release: ${source} ${version}: SHA256SUMS sha256 is ${sha256}, pinned ${provider.sha256}`,
       );
     }
-    return { ref: { source, version, sha256 }, sha256 };
+    return { source, version, sha256: sha256 ?? "" };
   }
 
   function schemaOf(ref: ProviderRef) {
-    const name = releaseName(ref);
-    let schema = schemas.get(name);
-    if (!schema) {
-      const file = schemaFile(dir, ref);
-      if (!existsSync(file)) {
-        throw fail(Code.FailedPrecondition, `${name}: no recorded schema at ${where(file)}; ${recordHint}`);
-      }
-      const json = readFileSync(file, "utf8");
-      schema = { json, doc: parseSchema(json) };
-      schemas.set(name, schema);
+    const file = schemaFile(dir, ref);
+    if (!existsSync(file)) {
+      throw fail(Code.FailedPrecondition, `${releaseName(ref)}: no recorded schema at ${where(file)}; ${recordHint}`);
     }
-    return schema;
+    return documentAt(file);
   }
 
   /** A configured release and the resource type's schema, or the bridge's error. */
   function configuredType(provider: ProviderRefMessage | undefined, typeName: string) {
-    const { ref } = release(provider);
+    const ref = release(provider);
     if (!configured.has(releaseName(ref))) {
       throw fail(Code.FailedPrecondition, `${releaseName(ref)} is not configured; call Configure first`);
     }
@@ -192,7 +258,7 @@ function replayService(dir: string): ServiceImpl<typeof BridgeService> {
   }
 
   /** The recorded reads of a resource type, by the `id` in their request's state. */
-  function readsOf(ref: ProviderRef, typeName: string): Map<string, string> {
+  function readsOf(ref: ProviderRef, typeName: string): Map<string, Fixture> {
     const key = `${releaseName(ref)} ${typeName}`;
     let index = reads.get(key);
     if (!index) {
@@ -201,10 +267,9 @@ function replayService(dir: string): ServiceImpl<typeof BridgeService> {
       const folders = existsSync(root) ? readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()) : [];
       for (const folder of folders) {
         for (const name of readdirSync(join(root, folder.name)).filter((n) => /^read(-\d+)?\.json$/.test(n))) {
-          const file = join(root, folder.name, name);
-          const { request } = JSON.parse(readFileSync(file, "utf8")) as Fixture;
-          const id = stateId(String(request.stateJson ?? "{}"));
-          if (id !== undefined && !index.has(id)) index.set(id, file);
+          const fixture = readFixture(join(root, folder.name, name));
+          const id = stateId(String(fixture.request.stateJson ?? "{}"));
+          if (id !== undefined && !index.has(id)) index.set(id, fixture);
         }
       }
       reads.set(key, index);
@@ -214,22 +279,23 @@ function replayService(dir: string): ServiceImpl<typeof BridgeService> {
 
   return {
     getSchema(req) {
-      const { ref, sha256 } = release(req.provider);
+      const ref = release(req.provider);
       const { json, doc } = schemaOf(ref);
-      return { schemaJson: json, protocol: doc.protocol, sha256 };
+      return { schemaJson: json, protocol: doc.protocol, sha256: ref.sha256 };
     },
     configure(req) {
-      const { ref, sha256 } = release(req.provider);
-      schemaOf(ref);
+      const ref = release(req.provider);
+      const file = schemaFile(dir, ref);
+      if (!existsSync(file)) {
+        throw fail(Code.FailedPrecondition, `${releaseName(ref)}: no recorded schema at ${where(file)}; ${recordHint}`);
+      }
       let config: unknown;
       try {
         config = JSON.parse(req.configJson);
       } catch (error) {
         throw fail(Code.InvalidArgument, `config_json: ${(error as Error).message}`);
       }
-      if (typeof config !== "object" || config === null || Array.isArray(config)) {
-        throw fail(Code.InvalidArgument, "config_json must be a JSON object");
-      }
+      if (!isObject(config)) throw fail(Code.InvalidArgument, "config_json must be a JSON object");
       const name = releaseName(ref);
       const canonical = JSON.stringify(config);
       const before = configured.get(name);
@@ -237,7 +303,7 @@ function replayService(dir: string): ServiceImpl<typeof BridgeService> {
         throw fail(Code.FailedPrecondition, `${name} is already configured with a different config; Close it first`);
       }
       configured.set(name, canonical);
-      return { warnings: [], sha256 };
+      return { warnings: [], sha256: ref.sha256 };
     },
     import(req) {
       if (!req.typeName || !req.id) throw fail(Code.InvalidArgument, "type_name and id are required");
@@ -249,30 +315,30 @@ function replayService(dir: string): ServiceImpl<typeof BridgeService> {
           `import ${req.typeName} "${req.id}": no recorded reply at ${where(file)}; ${recordHint}`,
         );
       }
-      return replay(file, (response) => fromJson(ImportResponseSchema, response));
+      return replay(readFixture(file), ImportResponseSchema);
     },
     read(req) {
       const ref = configuredType(req.provider, req.typeName);
-      let id: string | undefined;
+      let state: unknown;
       try {
-        const state = JSON.parse(req.stateJson) as unknown;
-        if (typeof state !== "object" || state === null || Array.isArray(state)) throw new Error("not an object");
-        id = stateId(req.stateJson);
+        state = JSON.parse(req.stateJson);
       } catch {
-        throw fail(Code.InvalidArgument, "state_json must be a JSON object");
+        // Refused below, as anything else that is not an object.
       }
-      const file = id === undefined ? undefined : readsOf(ref, req.typeName).get(id);
-      if (!file) {
+      if (!isObject(state)) throw fail(Code.InvalidArgument, "state_json must be a JSON object");
+      const id = stateId(state);
+      const fixture = id === undefined ? undefined : readsOf(ref, req.typeName).get(id);
+      if (!fixture) {
         const expected = join(replyDir(dir, ref, req.typeName, id ?? "<id>"), "read.json");
         throw fail(
           Code.NotFound,
           `read ${req.typeName} "${id ?? ""}": no recorded reply for a state with this id (expected at ${where(expected)}); ${recordHint}`,
         );
       }
-      return replay(file, (response) => fromJson(ReadResponseSchema, response));
+      return replay(fixture, ReadResponseSchema);
     },
     close(req) {
-      if (req.provider?.source) configured.delete(releaseName(release(req.provider).ref));
+      if (req.provider?.source) configured.delete(releaseName(release(req.provider)));
       else configured.clear();
       return {};
     },

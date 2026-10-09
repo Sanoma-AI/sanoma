@@ -1,8 +1,5 @@
+import { isObject, type JsonObject as State } from "../json.ts";
 import type { TfBlockShape, TfShape } from "./types.ts";
-
-type State = Record<string, unknown>;
-
-const isObject = (v: unknown): v is State => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /**
  * The provider's state in the resource's shape: a block of at most one item becomes that item

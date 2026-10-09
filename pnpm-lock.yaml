@@ -69,6 +69,9 @@ importers:
 
   connectors/github:
     devDependencies:
+      '@sanoma/bridge':
+        specifier: workspace:*
+        version: link:../../packages/bridge
       '@sanoma/workflows':
         specifier: workspace:*
         version: link:../../packages/workflows
@@ -90,6 +93,9 @@ importers:
 
   connectors/stripe:
     devDependencies:
+      '@sanoma/bridge':
+        specifier: workspace:*
+        version: link:../../packages/bridge
       '@sanoma/workflows':
         specifier: workspace:*
         version: link:../../packages/workflows
@@ -163,6 +169,9 @@ importers:
       '@lezer/highlight':
         specifier: ^1.2.5
         version: 1.2.5
+      '@sanoma/bridge':
+        specifier: workspace:*
+        version: link:../bridge
       '@sanoma/connector-bluesky':
         specifier: workspace:*
         version: link:../../connectors/bluesky
@@ -223,6 +232,13 @@ importers:
       '@connectrpc/connect-node':
         specifier: ^2.2.0
         version: 2.2.0(@bufbuild/protobuf@2.16.0)(@connectrpc/connect@2.2.0(@bufbuild/protobuf@2.16.0))
+    devDependencies:
+      '@sanoma/workflows':
+        specifier: workspace:*
+        version: link:../workflows
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
 
   packages/testing:
     dependencies:
@@ -230,6 +246,9 @@ importers:
         specifier: ^5
         version: 5.0.3(@types/node@26.6.4)(msw@3.0.2(@types/node@26.6.4)(typescript@7.0.2)(vite@8.3.3(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)))(vite@8.3.3(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
     devDependencies:
+      '@sanoma/bridge':
+        specifier: workspace:*
+        version: link:../bridge
       '@sanoma/connector-bluesky':
         specifier: workspace:*
         version: link:../../connectors/bluesky

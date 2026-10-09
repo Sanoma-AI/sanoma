@@ -8,7 +8,7 @@ Stripe resources for [`@sanoma/workflows`](https://www.npmjs.com/package/@sanoma
 | --------------------------------- | ------------------------------------------------------------------------------------- |
 | [`src/`](src/AGENTS.md)           | The connector, the resource types (generated and hand-owned), the driver and the fake |
 | [`test/`](test/AGENTS.md)         | The generated types against the replies, the driver over a replay, and the fake       |
-| [`testdata/`](testdata/AGENTS.md) | The provider's schema, copied from provider-bridge, and replies written by hand       |
+| [`testdata/`](testdata/AGENTS.md) | Replies written by hand to the provider's schema                                      |
 
 ## Usage
 
@@ -39,7 +39,7 @@ The logo is Stripe's glyph from [Simple Icons](https://simpleicons.org/?q=stripe
 
 ## Resource types
 
-`src/resources.gen.ts` is generated from the provider's schema (`testdata/schemas/stripe_stripe_0.3.0.json`) by `pnpm generate`, which runs [`@sanoma/workflows/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the types, the release's pin, and the attributes whose change replaces the object (a webhook endpoint's `api_version` and `connect`, which Stripe's update does not take). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing.
+`src/resources.gen.ts` is generated from the provider's schema by `pnpm generate`, which runs [`@sanoma/bridge/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the provider (its release, sha256 and recorded schema are `@sanoma/bridge`'s pin and fixture), the types, and the attributes whose change replaces the object (a webhook endpoint's `api_version` and `connect`, which Stripe's update does not take). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing. `src/connector.ts` is the rest, one `tfConnector` record from [`@sanoma/bridge/connector`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/AGENTS.md#connectors-for-opentofu-providers): each type found by Stripe's `id`, and Stripe's title and logo. What Stripe sets (`created`, `livemode`) is vendor-owned and a data file may not declare it; `id` is too, but the identity names it, so a data file gives it.
 
 A webhook endpoint's `secret` is sensitive (Stripe returns it only when the endpoint is created): it is write-only, never compared, and `null` in every state the driver returns.
 
@@ -53,7 +53,7 @@ import { stripeDriver } from "@sanoma/connector-stripe/driver";
 const drivers = [stripeDriver({ bridge })]; // bridge: `startBridge()` from @sanoma/bridge
 ```
 
-It configures the provider on the first call with `{ api_key }`, and again when the key changes or the provider has exited. `read` without a state imports first, then reads what the import returned.
+It configures the provider on the first call with `{ api_key }`, and again when the key changes, when the provider has exited, or when the bridge has forgotten it. `read` without a state imports, which reads the object too.
 
 ### Environment
 
@@ -69,11 +69,9 @@ When it is unset, a call fails, not retryable, naming it. The bridge passes it t
 
 As for GitHub: the bridge's errors become `DriverError`s with its code as `vendorCode` and the provider's diagnostics in the message, retryable only on `unavailable`, after which the provider is configured again. A Stripe error (a bad key, an id that does not exist) comes back from the provider as a failed import (`failed_precondition`) with Stripe's message, the key masked.
 
-`BridgeLike` is declared in `src/bridge.ts` until `@sanoma/bridge` is in the workspace.
-
 ## Testing
 
-`@sanoma/connector-stripe/fake` serves the replies in `testdata/replies` (a test-mode product `prod_SanomaTest0001` and webhook endpoint `we_SanomaTest0001`) through the real driver over a replay of the bridge. Those replies are written by hand to the provider's schema, not recorded: no Stripe key was at hand when provider-bridge recorded GitHub's. Replace them with recorded ones (provider-bridge's `bridge-record`) when there is one.
+`@sanoma/connector-stripe/fake` serves the replies in `testdata/replies` (a test-mode product `prod_SanomaTest0001` and webhook endpoint `we_SanomaTest0001`) through the real driver over a `stateBridge` of them (`tfFake`). Those replies are written by hand to the provider's schema, not recorded: no Stripe key was at hand when provider-bridge recorded GitHub's. Replace them with recorded ones (provider-bridge's `bridge-record`) when there is one.
 
 ```ts
 import { fakeStripe } from "@sanoma/connector-stripe/fake";

@@ -19,6 +19,7 @@ import {
   type ReadResponse,
   ReadResponseSchema,
 } from "./gen/bridge/v1/bridge_pb.ts";
+import { blockOf, isObject as isJsonObject, type JsonObject as Json } from "./json.ts";
 import { type Block, parseSchema, type SchemaDocument } from "./schema.ts";
 
 /** What replaces a secret string in a recorded state. */
@@ -31,13 +32,15 @@ interface ConfigValue {
   /** `config.<path>`, as listed in a fixture's `scrubbed`. */
   name: string;
   value: string;
-  /** Replaced wherever it appears, in every encoding; a fixture that still holds it is not written. */
-  secret: boolean;
+  /**
+   * For a secret, the forms it could appear in (`encodings`): each is replaced wherever it
+   * appears, and a fixture that still holds one is not written. Empty for any other value.
+   */
+  forms: string[];
 }
 
 interface Release {
   schema: SchemaDocument;
-  protocol: number;
   sha256: string;
   config: ConfigValue[];
   /** Where the read of each imported object goes: beside its import. */
@@ -61,6 +64,23 @@ export function recorder(dir: string): Interceptor {
     return { ref, release };
   };
 
+  /** Where an import or read goes, and its request scrubbed. Throws when the release has no schema and config yet. */
+  function prepare(method: "Import" | "Read", msg: ImportRequest | ReadRequest) {
+    const { ref, release } = releaseOf(msg.provider);
+    const hits = new Set<string>();
+    if (method === "Import") {
+      const req = msg as ImportRequest;
+      const file = join(replyDir(dir, ref, req.typeName, req.id), "import.json");
+      return { release, hits, file, request: message(ImportRequestSchema, req) };
+    }
+    const req = msg as ReadRequest;
+    const request = message(ReadRequestSchema, {
+      ...req,
+      stateJson: scrubState(release, req.typeName, req.stateJson, hits),
+    });
+    return { release, hits, file: readFile(dir, ref, release, req), request };
+  }
+
   return (next) => async (req) => {
     if (req.stream) return next(req);
     const method = req.method.name;
@@ -68,18 +88,14 @@ export function recorder(dir: string): Interceptor {
     try {
       res = await next(req);
     } catch (error) {
-      if (method === "Import") {
-        const msg = req.message as ImportRequest;
-        const { ref, release } = releaseOf(msg.provider);
-        const file = join(replyDir(dir, ref, msg.typeName, msg.id), "import.json");
-        write(file, release, message(ImportRequestSchema, msg), errorJson(error), new Set());
-      }
-      if (method === "Read") {
-        const msg = req.message as ReadRequest;
-        const { ref, release } = releaseOf(msg.provider);
-        const hits = new Set<string>();
-        const request = { ...msg, stateJson: scrubState(release, msg.typeName, msg.stateJson, hits) };
-        write(readFile(dir, ref, release, msg), release, message(ReadRequestSchema, request), errorJson(error), hits);
+      if (method === "Import" || method === "Read") {
+        // Recorded when it can be; the caller gets the bridge's own error either way.
+        try {
+          const call = prepare(method, req.message as ImportRequest | ReadRequest);
+          write(call.file, call.release, call.request, errorJson(error), call.hits);
+        } catch {
+          // Not recordable (no schema or config yet, or a state that is not JSON).
+        }
       }
       throw error;
     }
@@ -88,12 +104,11 @@ export function recorder(dir: string): Interceptor {
     switch (method) {
       case "GetSchema": {
         const { provider } = req.message as GetSchemaRequest;
-        const { schemaJson, protocol, sha256 } = res.message as GetSchemaResponse;
+        const { schemaJson, sha256 } = res.message as GetSchemaResponse;
         if (!provider) break;
         const known = releases.get(releaseName(provider));
         releases.set(releaseName(provider), {
           schema: parseSchema(schemaJson),
-          protocol,
           sha256,
           config: known?.config ?? [],
           reads: known?.reads ?? new Map(),
@@ -108,34 +123,36 @@ export function recorder(dir: string): Interceptor {
         break;
       }
       case "Import": {
-        const msg = req.message as ImportRequest;
         const out = res.message as ImportResponse;
-        const { ref, release } = releaseOf(msg.provider);
-        const hits = new Set<string>();
-        const folder = replyDir(dir, ref, msg.typeName, msg.id);
+        const { release, hits, file, request } = prepare(method, req.message as ImportRequest);
+        // The read of each imported object goes beside its import.
         const resources = out.resources.map((r, i) => {
           const id = stateId(r.stateJson);
-          if (id !== undefined)
-            release.reads.set(readKey(r.typeName, id), join(folder, i ? `read-${i}.json` : "read.json"));
+          const read = join(dirname(file), i ? `read-${i}.json` : "read.json");
+          if (id !== undefined) release.reads.set(readKey(r.typeName, id), read);
           return { ...r, stateJson: scrubState(release, r.typeName, r.stateJson, hits) };
         });
         const response = message(ImportResponseSchema, { ...out, resources });
-        write(join(folder, "import.json"), release, message(ImportRequestSchema, msg), response, hits, out.resources);
+        write(
+          file,
+          release,
+          request,
+          response,
+          hits,
+          out.resources.map((r) => r.private),
+        );
         break;
       }
       case "Read": {
         const msg = req.message as ReadRequest;
         const out = res.message as ReadResponse;
-        const { ref, release } = releaseOf(msg.provider);
-        const hits = new Set<string>();
-        const request = { ...msg, stateJson: scrubState(release, msg.typeName, msg.stateJson, hits) };
+        const { release, hits, file, request } = prepare(method, msg);
         const resource = out.resource && {
           ...out.resource,
           stateJson: scrubState(release, out.resource.typeName, out.resource.stateJson, hits),
         };
         const response = message(ReadResponseSchema, { ...out, resource });
-        const privs = [msg.private, ...(out.resource ? [out.resource.private] : [])].map((p) => ({ private: p }));
-        write(readFile(dir, ref, release, msg), release, message(ReadRequestSchema, request), response, hits, privs);
+        write(file, release, request, response, hits, [msg.private, ...(out.resource ? [out.resource.private] : [])]);
         break;
       }
     }
@@ -167,26 +184,26 @@ function write(
   request: Record<string, unknown>,
   response: Fixture["response"],
   hits: Set<string>,
-  privs: { private: Uint8Array }[] = [],
+  privs: Uint8Array[] = [],
 ) {
-  const secrets = release.config.filter((c) => c.secret);
-  for (const { private: data } of privs) {
+  const secrets = release.config.filter((c) => c.forms.length > 0);
+  for (const data of privs) {
     const text = Buffer.from(data).toString("latin1");
     const leaked = secrets.find((s) => text.includes(s.value));
     if (leaked) throw new Error(`recording ${file}: private data contains ${leaked.name}; refusing to record`);
   }
   const { source, version } = request.provider as ProviderRef;
   const fixture: Fixture = {
-    provider: { source, version, sha256: release.sha256, protocol: release.protocol },
+    provider: { source, version, sha256: release.sha256, protocol: release.schema.protocol },
     request,
     response,
     scrubbed: [...new Set([...[...hits].toSorted(), ...secrets.map((s) => s.name)])],
   };
   let text = `${JSON.stringify(fixture, null, 2)}\n`;
-  for (const { name, value } of secrets) {
-    for (const form of encodings(value)) text = text.replaceAll(form, `<scrubbed:${name}>`);
+  for (const { name, forms } of secrets) {
+    for (const form of forms) text = text.replaceAll(form, `<scrubbed:${name}>`);
   }
-  const survivor = secrets.find(({ value }) => encodings(value).some((form) => text.includes(form)));
+  const survivor = secrets.find(({ forms }) => forms.some((form) => text.includes(form)));
   if (survivor) throw new Error(`recording ${file}: ${survivor.name} survived scrubbing; refusing to write`);
   writeText(file, text);
 }
@@ -212,14 +229,13 @@ function configValues(config: unknown, block: Block): ConfigValue[] {
       const secret = sensitive || SECRET_NAME.test(key);
       if (secret && value.length < 8)
         throw new Error(`recording: ${path} is too short to scrub safely; refusing to record`);
-      out.push({ name: path, value, secret });
+      out.push({ name: path, value, forms: secret ? encodings(value) : [] });
     } else if (Array.isArray(value)) {
       for (const [i, v] of value.entries()) walk(v, `${path}[${i}]`, key, sensitive, schema);
     } else if (value && typeof value === "object") {
       for (const [k, v] of Object.entries(value)) {
         const attr = schema?.attributes[k];
-        const nested =
-          schema?.blocks[k]?.block ?? (attr?.nestedType && { attributes: attr.nestedType.attributes, blocks: {} });
+        const nested = schema?.blocks[k]?.block ?? (attr?.nestedType && blockOf(attr.nestedType));
         walk(v, `${path}.${k}`, k, sensitive || attr?.sensitive === true, nested);
       }
     }
@@ -245,9 +261,8 @@ function scrubState(release: Release, typeName: string, stateJson: string, hits:
   return JSON.stringify(scrubbed);
 }
 
-type Json = Record<string, unknown>;
-const isObject = (v: unknown): v is Json =>
-  typeof v === "object" && v !== null && !Array.isArray(v) && !json.isRawJSON(v);
+/** An object of a state: a number kept as its source text (`rawJSON`) is none. */
+const isObject = (v: unknown): v is Json => isJsonObject(v) && !json.isRawJSON(v);
 
 /** Calls `fn` on each object a nested block or attribute holds: a list or set's items, a map's values, or the one object. */
 function eachObject(value: unknown, nesting: string, fn: (o: Json) => void) {
@@ -269,7 +284,7 @@ function scrubBlock(prefix: string, block: Block, value: unknown, hits: Set<stri
       value[name] = scrubLeaves(value[name]);
       hits.add(path);
     } else if (attr.nestedType) {
-      const nested = { attributes: attr.nestedType.attributes, blocks: {} };
+      const nested = blockOf(attr.nestedType);
       eachObject(value[name], attr.nestedType.nesting, (o) => scrubBlock(path, nested, o, hits));
     }
   }

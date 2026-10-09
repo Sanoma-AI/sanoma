@@ -1,6 +1,6 @@
 # connectors
 
-One workspace package per vendor, each built on `@sanoma/workflows`. A connector exposes the vendor's operations and a `./fake` in-memory version for tests.
+One workspace package per vendor, each built on `@sanoma/workflows`. A connector exposes the vendor's operations and a `./fake` in-memory version for tests. A vendor with an OpenTofu provider (GitHub, Stripe) is one `tfConnector` record from [`@sanoma/bridge/connector`](../packages/bridge/AGENTS.md#connectors-for-opentofu-providers) over the types `pnpm generate` writes, which gives its resource types, connector, driver and fake.
 
 ## Contents
 

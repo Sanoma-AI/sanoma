@@ -32,7 +32,7 @@ function ConnectorsPage() {
   );
 }
 
-function ConnectorCard({ connector: { id, vendor, ops, workflows } }: { connector: ConnectorEntry }) {
+function ConnectorCard({ connector: { id, vendor, ops, workflows, resourceTypes } }: { connector: ConnectorEntry }) {
   return (
     <Card>
       <CardHeader>
@@ -55,10 +55,10 @@ function ConnectorCard({ connector: { id, vendor, ops, workflows } }: { connecto
             {vendor.homepage && <ExternalLink href={vendor.homepage}>Source</ExternalLink>}
           </div>
         )}
-        {vendor.resources && (
+        {resourceTypes.length > 0 && (
           <p>
             <span className="text-muted-foreground">Resources: </span>
-            {vendor.resources.map((r) => r.title).join(", ")}
+            {resourceTypes.map((r) => r.title).join(", ")}
           </p>
         )}
         <Section title="Operations">
