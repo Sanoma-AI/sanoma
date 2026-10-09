@@ -22,9 +22,8 @@ const validate =
 
 export const getConfig = createServerFn(READ).handler(({ context }) => withoutSources(context.app.description));
 
-/** A workflow's source, apart from the config since it is a whole file: asked for by name, by someone named. */
+/** A workflow's source, apart from the config since it is a whole file: asked for by name. */
 export const getSource = createServerFn(READ)
-  .middleware([withPrincipal])
   .validator(validate(z.object({ name: z.string().min(1) })))
   .handler(({ data, context }) => workflowSource(context.app, data.name));
 
