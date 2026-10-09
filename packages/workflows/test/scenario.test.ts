@@ -83,6 +83,38 @@ const LAUNCH = `Feature: Announce
 `;
 
 describe("parseFeature", () => {
+  it("gives each scenario its own lines of the file as its text, tables and examples included", () => {
+    const [tabled, second, outline] = parse(`Feature: Announce
+  Some words about it.
+
+  Scenario: Tabled
+    When announce runs with
+      | title    | Acme                 |
+      | launchAt | 2030-01-01T09:00:00Z |
+
+  # Between them.
+  Scenario: Second
+    When announce runs
+
+  Scenario Outline: Launch <title>
+    When announce runs with
+      | title | <title> |
+
+    Examples:
+      | title |
+      | A     |
+`);
+    expect(tabled!.text).toBe(
+      "Scenario: Tabled\n  When announce runs with\n    | title    | Acme                 |\n    | launchAt | 2030-01-01T09:00:00Z |",
+    );
+    expect(tabled!.text).not.toContain("Second");
+    expect(second!.text).toBe("Scenario: Second\n  When announce runs");
+    expect(outline).toMatchObject({
+      name: "Launch A",
+      text: "Scenario Outline: Launch <title>\n  When announce runs with\n    | title | <title> |\n\n  Examples:\n    | title |\n    | A     |",
+    });
+  });
+
   it("reads the generic steps and the connectors' phrases into a scenario", () => {
     const [scenario, ...rest] = parse(LAUNCH);
     expect(rest).toEqual([]);
@@ -90,7 +122,8 @@ describe("parseFeature", () => {
       name: "Launch on time",
       file: "announce.feature",
       workflow: "announce",
-      text: LAUNCH,
+      // Its own lines, from its keyword on, less their indent.
+      text: LAUNCH.slice(LAUNCH.indexOf("Scenario:")).trimEnd().replaceAll("\n  ", "\n"),
       given: [
         {
           step: 'a post titled "Old news" exists',

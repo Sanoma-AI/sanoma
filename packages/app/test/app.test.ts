@@ -384,7 +384,7 @@ describe("scenarios and sandbox runs", () => {
     expect(launch).toMatchObject({
       workflow: "announce",
       file: "announce.feature",
-      text: expect.stringContaining("Feature: Announce a launch"),
+      text: expect.stringMatching(/^Scenario: Launch on time\n/),
     });
     expect(launch.steps).toContainEqual({
       text: 'a post titled "Old news" exists',
@@ -647,7 +647,13 @@ describe("the page", () => {
     expect(chosen.html).toMatch(/<select[^>]*aria-label="Scenario"/);
     expect(chosen.html).toMatch(/<option[^>]*value="Launch on time"[^>]*selected=""/);
     expect(chosen.text).toMatch(/>Test<\/button>/);
-    expect(chosen.text).toContain("Feature: Announce a launch");
+    // The scenario's own lines, not the rest of its file.
+    const shown = [...chosen.text.matchAll(/<pre[^>]*>([^<]*)<\/pre>/g)]
+      .map(([, text]) => text!)
+      .find((text) => text.startsWith("Scenario: Launch on time\n"));
+    expect(shown).toBeDefined();
+    expect(shown).not.toContain("Feature:");
+    expect(shown).not.toContain("Publish retried");
     expect(chosen.text).toContain("From <code>announce.feature</code>");
 
     const unknown = await page("/workflows/announce?scenario=nope");
