@@ -1,38 +1,33 @@
-import { fileURLToPath } from "node:url";
+import { BridgeError } from "@sanoma/bridge";
+import { type BridgeCall, fixturesDir, loadReplies, stateBridge } from "@sanoma/bridge/fake";
 import { type Driver, DriverError, errorCode } from "@sanoma/workflows";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { type BridgeLike, type ReplayCall, replayBridge } from "../src/bridge.ts";
 import { githubDriver } from "../src/driver.ts";
-import { fakeGithub, loadReplies } from "../src/fake.ts";
+import { fakeGithub } from "../src/fake.ts";
 import { github } from "../src/index.ts";
-
-const replies = fileURLToPath(new URL("../testdata/replies/", import.meta.url));
+import { provider } from "../src/resources.gen.ts";
 
 let seq = 0;
 /** Calls one of a driver's operations the way the runtime does. */
 const call = (driver: Driver, op: string, input: unknown): Promise<any> =>
   driver.ops[op]!(input, { idempotencyKey: `run:${++seq}`, runId: "run", opId: `github.${op}`, attempt: 1 });
 
-/** The bridge's error, as `@sanoma/bridge` throws it. */
-const bridgeError = (code: string, summary: string) =>
-  Object.assign(new Error(summary), { name: "BridgeError", code, diagnostics: [{ summary }] });
-
 describe("githubDriver", () => {
-  let calls: ReplayCall[];
-  let bridge: BridgeLike;
+  let bridge: ReturnType<typeof stateBridge>;
+  let state: ReturnType<typeof loadReplies>;
+  /** The calls the bridge got: method, type and id. */
+  const calls = () => bridge.calls.map(({ method, typeName, id }: BridgeCall) => [method, typeName, id]);
   beforeEach(() => {
     vi.stubEnv("GITHUB_TOKEN", "ghx_test");
-    calls = [];
-    bridge = replayBridge(loadReplies(replies), calls);
+    state = loadReplies(fixturesDir, provider);
+    bridge = stateBridge(state);
   });
 
-  it("imports, then reads what the import returned, when given no state", async () => {
-    const driver = githubDriver({ bridge, owner: "Sanoma-AI" });
-    const read = await call(driver, "repository.read", { id: "sanoma" });
-    expect(calls).toEqual([
-      { method: "configure" },
-      { method: "import", typeName: "github_repository", id: "sanoma" },
-      { method: "read", typeName: "github_repository", id: "sanoma" },
+  it("imports when given no state: the import reads the object too", async () => {
+    const read = await call(githubDriver({ bridge, owner: "Sanoma-AI" }), "repository.read", { id: "sanoma" });
+    expect(calls()).toEqual([
+      ["configure", undefined, undefined],
+      ["import", "github_repository", "sanoma"],
     ]);
     expect(read).toMatchObject({ id: "sanoma", gone: false, handle: expect.stringMatching(/^1:./) });
     expect(github.repository.read.output.parse(read).state).toMatchObject({ name: "sanoma", has_issues: true });
@@ -43,7 +38,15 @@ describe("githubDriver", () => {
     const imported = await call(driver, "repository.import", { id: "provider-bridge" });
     expect(github.repository.import.output.parse(imported).state).toMatchObject({ name: "provider-bridge" });
     await call(driver, "repository.read", imported);
-    expect(calls.map((c) => c.method)).toEqual(["configure", "import", "read"]);
+    expect(calls().map(([method]) => method)).toEqual(["configure", "import", "read"]);
+  });
+
+  it("imports a state it cannot read back, one without an id", async () => {
+    const driver = githubDriver({ bridge });
+    const imported = await call(driver, "repository.import", { id: "sanoma" });
+    const read = await call(driver, "repository.read", { ...imported, state: { ...imported.state, id: null } });
+    expect(read).toMatchObject({ id: "sanoma", gone: false, state: { id: "sanoma" } });
+    expect(calls().map(([method]) => method)).toEqual(["configure", "import", "import"]);
   });
 
   it("configures the provider with the owner and the token, read on every call", async () => {
@@ -55,9 +58,13 @@ describe("githubDriver", () => {
       expect.objectContaining({ source: "integrations/github", version: "6.13.0" }),
       JSON.stringify({ owner: "Sanoma-AI", token: "ghx_test" }),
     );
-    // A new token: the bridge refuses another config until the provider is closed.
+    // A new token: the bridge refuses another config until the provider is closed. Two calls at
+    // once configure once.
     vi.stubEnv("GITHUB_TOKEN", "ghx_other");
-    await call(driver, "repository.import", { id: "sanoma" });
+    await Promise.all([
+      call(driver, "repository.import", { id: "sanoma" }),
+      call(driver, "repository.import", { id: "provider-bridge" }),
+    ]);
     expect(close).toHaveBeenCalledTimes(1);
     expect(configure).toHaveBeenCalledTimes(2);
   });
@@ -67,7 +74,7 @@ describe("githubDriver", () => {
     const err = await call(githubDriver({ bridge }), "repository.read", { id: "sanoma" }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(DriverError);
     expect(err).toMatchObject({ message: "github: GITHUB_TOKEN is not set", retryable: false });
-    expect(calls).toEqual([]);
+    expect(calls()).toEqual([]);
   });
 
   it("fails, not retryable, with the provider's diagnostic when GitHub has no such object", async () => {
@@ -86,19 +93,42 @@ describe("githubDriver", () => {
   it("is retryable when the provider has exited, and configures it again", async () => {
     const driver = githubDriver({ bridge });
     await call(driver, "repository.import", { id: "sanoma" });
-    vi.spyOn(bridge, "import").mockRejectedValueOnce(bridgeError("unavailable", "provider exited"));
+    vi.spyOn(bridge, "import").mockRejectedValueOnce(new BridgeError("unavailable", "provider exited"));
     const err = await call(driver, "repository.import", { id: "sanoma" }).catch((e: unknown) => e);
     expect(err).toMatchObject({ retryable: true, vendorCode: "unavailable" });
     await call(driver, "repository.import", { id: "sanoma" });
-    expect(calls.filter((c) => c.method === "configure")).toHaveLength(2);
+    expect(calls().filter(([method]) => method === "configure")).toHaveLength(2);
+  });
+
+  it("configures again, and retries, when the bridge has forgotten the provider", async () => {
+    const driver = githubDriver({ bridge });
+    await call(driver, "repository.import", { id: "sanoma" });
+    await bridge.close(); // a restarted bridge
+    expect(await call(driver, "repository.import", { id: "sanoma" })).toMatchObject({ id: "sanoma" });
+    expect(calls().map(([method]) => method)).toEqual([
+      "configure",
+      "import",
+      "close",
+      "import",
+      "configure",
+      "import",
+    ]);
   });
 
   it("says a repository that no longer exists is gone", async () => {
-    const state = loadReplies(replies);
-    const driver = githubDriver({ bridge: replayBridge(state) });
+    const driver = githubDriver({ bridge });
     const imported = await call(driver, "repository.import", { id: "sanoma" });
     delete state.objects["github_repository/sanoma"];
     expect(await call(driver, "repository.read", imported)).toEqual({ id: "sanoma", gone: true });
+  });
+
+  it("refuses a handle it did not make", async () => {
+    const driver = githubDriver({ bridge });
+    const imported = await call(driver, "repository.import", { id: "sanoma" });
+    await expect(call(driver, "repository.read", { ...imported, handle: "nope" })).rejects.toMatchObject({
+      message: "github: repository.read was given a handle it did not make",
+      retryable: false,
+    });
   });
 });
 
@@ -111,12 +141,20 @@ describe("fakeGithub", () => {
     expect(fake.calls.map((c) => c.op)).toEqual(["github.repository.read"]);
   });
 
-  it("returns a field a test overrides, as if someone changed it at GitHub", async () => {
+  it("returns fields a test overrides, in the resource's shape, as if someone changed them at GitHub", async () => {
     const fake = fakeGithub();
     const before = await call(fake.driver, "repository.import", { id: "sanoma" });
-    fake.override("repository", "sanoma", { delete_branch_on_merge: true });
+    const pages = { build_type: "workflow", cname: null, source: null };
+    fake.override("repository", "sanoma", { delete_branch_on_merge: true, pages });
     const after = await call(fake.driver, "repository.read", before);
-    expect(after.state).toEqual({ ...before.state, delete_branch_on_merge: true });
+    expect(after.state).toEqual({
+      ...before.state,
+      delete_branch_on_merge: true,
+      pages: expect.objectContaining(pages),
+    });
+    expect(() => fake.override("repository", "sanoma", { nope: 1 } as never)).toThrow(
+      "fake github: repository has no field nope",
+    );
   });
 
   it("says a removed object is gone", async () => {
@@ -124,6 +162,6 @@ describe("fakeGithub", () => {
     const imported = await call(fake.driver, "repository.import", { id: "sanoma" });
     fake.remove("repository", "sanoma");
     expect(await call(fake.driver, "repository.read", imported)).toEqual({ id: "sanoma", gone: true });
-    expect(() => fake.override("repository", "sanoma", {})).toThrow("fakeGithub: no recorded github_repository/sanoma");
+    expect(() => fake.override("repository", "sanoma", {})).toThrow("fake github: no object github_repository/sanoma");
   });
 });

@@ -65,6 +65,31 @@ Fixtures, in provider-bridge's format (its `cmd/bridge-record` writes the same):
 
 `SANOMA_LIVE=1` sends the fake's calls to a real bridge (`startBridge(bridge)`), and `SANOMA_LIVE=1 SANOMA_RECORD=1` also rewrites the fixtures it touches (the same variables as [`@sanoma/testing/replay`](../testing/AGENTS.md#replaying-a-vendors-api)). Recording fetches the schema before `configure` and scrubs: every value of an attribute the schema marks `sensitive` becomes `"<scrubbed>"`; every state string equal to a string in the configure config becomes `"<scrubbed>"`; every config value that is sensitive in the provider's schema or named like a secret (`token`, `api_key`, `password`, ...) is replaced wherever it appears, raw, JSON-escaped or base64, by `<scrubbed:config.<path>>`, and a file in which one survives is not written. `private` stays as base64, and a reply whose private data holds a secret is refused. `scrubbed` lists the paths hit and the secrets. Read the diff, and grep it for credentials, before committing.
 
+## Connectors for OpenTofu providers
+
+`tfConnector({ vendor, provider, types, info })` from `@sanoma/bridge/connector` is a whole connector for a vendor with an OpenTofu provider, from its generated types (`resources.gen.ts`, see [`src/tfschema/`](src/tfschema/AGENTS.md)). A vendor package keeps only what the schema does not say:
+
+```ts
+import { tfConnector } from "@sanoma/bridge/connector";
+import { github_repository, provider } from "./resources.gen.ts";
+
+export const githubTf = tfConnector({
+  vendor: "github",
+  provider,
+  types: { repository: { tf: github_repository, title: "Repository", identity: "name", find: ({ name }) => name } },
+  info: { title: "GitHub", logo: { svg } },
+});
+githubTf.connector; // for defineConfig and workflows: github.repository.read, github.repository.import
+githubTf.resources; // the data-file constructors: githubTf.resources.repository({ name: "sanoma" })
+githubTf.driver(bridge, () => ({ token: process.env.GITHUB_TOKEN })); // the driver; the config is read per call
+```
+
+Each type becomes a resource type (`defineResource`, with the generated schema and fields, and an optional `normalize`), given to `defineConnector` under its name. The driver's `import` asks the provider to find the object (the bridge reads it too); `read` refreshes a state from an earlier call, or imports when it has none, or one without an `id`. States go out in the resource's shape, secrets dropped (`fromTfState`), and come back in the provider's (`toTfState`). The provider is configured through `ensureConfigured`. The bridge's errors become `DriverError`s with its code as `vendorCode` and the provider's diagnostics in the message, retryable only on `unavailable`.
+
+The provider's private data and state version travel in the operation's opaque `handle` (`<version>:<base64>`), so they pass through the runtime: DBOS's step records and the ledger keep them as they keep every operation's output. Providers rarely put anything but a state version there, but this is a known residual risk: the recorder refuses a fixture whose private data holds a configured secret, and nothing checks the runtime's copies.
+
+`tfFake(githubTf, { fixtures?, file?, calls? })` from `@sanoma/bridge/fake` is the connector's fake: its real driver over a `stateBridge` of the replies recorded for its release (default: this package's `testdata/`), with every fault `defineFake` gives and `override(type, id, fields)` (fields in the resource's shape) and `remove(type, id)` to simulate drift.
+
 ## Environment
 
 | Variable            | What it is                                                                                        |

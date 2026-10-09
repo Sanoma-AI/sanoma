@@ -30,9 +30,10 @@ export interface StateFailure {
 }
 
 /** What a `stateBridge` serves: objects, or failed imports, by `<typeName>/<import id>`. Plain JSON, so a fake can keep it in a file. */
-export interface BridgeState {
+// A type, not an interface, so it is a `Record<string, unknown>`, as `defineFake`'s state must be.
+export type BridgeState = {
   objects: Record<string, StateObject | StateFailure>;
-}
+};
 
 const isFailure = (o: StateObject | StateFailure): o is StateFailure => "error" in o;
 

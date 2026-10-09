@@ -1,15 +1,18 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fixturesDir } from "@sanoma/bridge/fake";
 import { fromTfState } from "@sanoma/bridge/tfschema";
 import { describe, expect, it } from "vitest";
+import { githubTf } from "../src/connector.ts";
 import { github } from "../src/index.ts";
 import { github as declare } from "../src/resources.ts";
-import { TYPES } from "../src/driver.ts";
 
-const replies = new URL("../testdata/replies/integrations_github_6.13.0/", import.meta.url);
+const replies = join(fixturesDir, "replies/integrations_github_6.13.0");
+const TYPES = githubTf.types;
 
 /** The state a recorded read returned, as the provider holds it. */
 const recorded = (path: string) => {
-  const { response } = JSON.parse(readFileSync(new URL(path, replies), "utf8"));
+  const { response } = JSON.parse(readFileSync(join(replies, path), "utf8"));
   return JSON.parse(response.resource.stateJson) as Record<string, unknown>;
 };
 
@@ -22,10 +25,18 @@ describe("the generated GitHub resource types", () => {
     expect(parsed.security_and_analysis).toMatchObject({ secret_scanning: { status: "disabled" } });
   });
 
-  it("flag what GitHub owns, and keep computed and optional attributes the user's", () => {
+  it("flag what GitHub owns, keep computed and optional attributes the user's, and mark sets", () => {
     expect(TYPES.repository.fields.vendorOwned).toEqual(expect.arrayContaining(["html_url", "repo_id", "node_id"]));
     expect(TYPES.repository.fields.vendorOwned).not.toContain("etag");
     expect(TYPES.team_membership.fields.immutable).toEqual(["team_id", "username"]);
+    expect(TYPES.repository.fields.unordered).toEqual(["topics"]);
+    expect(TYPES.branch_protection.fields.unordered).toEqual([
+      "force_push_bypassers",
+      "required_pull_request_reviews.dismissal_restrictions",
+      "required_pull_request_reviews.pull_request_bypassers",
+      "required_status_checks.contexts",
+      "restrict_pushes.push_allowances",
+    ]);
   });
 });
 
@@ -42,7 +53,15 @@ describe("the github connector", () => {
     expect(declare[type].identity).toBe(identity);
   });
 
-  it("declares resources for data files, named by their import ids", () => {
+  it("keeps the resource types beside the connector's vendor", () => {
+    expect(Object.keys(declare)).toEqual(["repository", "branch_protection", "team_membership"]);
+    expect(declare.repository.vendor).toBe("github");
+  });
+
+  it("declares resources for data files, named by their import ids, without what GitHub sets", () => {
+    expect(() => declare.repository({ name: "sanoma", html_url: "https://github.com/x" })).toThrow(
+      "github.repository: leave out html_url: the vendor sets it",
+    );
     expect(declare.repository({ name: "sanoma", delete_branch_on_merge: true })).toMatchObject({
       kind: "resource",
       vendor: "github",
@@ -53,11 +72,16 @@ describe("the github connector", () => {
     expect(declare.team_membership({ team_id: "core", username: "octocat" }).name).toBe("core:octocat");
   });
 
-  it("compares a repository's topics in any order, and only declared fields", () => {
+  it("compares a repository's topics, a set, in any order, and only declared fields", () => {
     const state = { name: "sanoma", topics: ["b", "a"], etag: 'W/"1"', has_wiki: true };
-    expect(declare.repository.normalize(state, { name: "sanoma", topics: ["a", "b"] })).toEqual({
-      name: "sanoma",
-      topics: ["a", "b"],
-    });
+    const desired = { name: "sanoma", topics: ["a", "b"] };
+    expect(declare.repository.normalize(state, desired)).toEqual({ name: "sanoma", topics: ["a", "b"] });
+    expect(declare.repository.normalize(state, desired)).toEqual(declare.repository.normalize(desired, desired));
+    // A branch protection rule's status checks are a set too, inside a block.
+    const rule = { repository_id: "sanoma", pattern: "main", required_status_checks: [{ contexts: ["b", "a"] }] };
+    const declared = { ...rule, required_status_checks: [{ contexts: ["a", "b"] }] };
+    expect(declare.branch_protection.normalize(rule, declared)).toEqual(
+      declare.branch_protection.normalize(declared, declared),
+    );
   });
 });

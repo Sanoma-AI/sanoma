@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
 import { fromTfState } from "@sanoma/bridge/tfschema";
 import { describe, expect, it } from "vitest";
-import { TYPES } from "../src/driver.ts";
+import { stripeTf } from "../src/connector.ts";
 import { stripe } from "../src/index.ts";
 import { stripe as declare } from "../src/resources.ts";
 
 const replies = new URL("../testdata/replies/stripe_stripe_0.3.0/", import.meta.url);
+const TYPES = stripeTf.types;
 
 /** The state a read in `testdata/replies` returned, as the provider holds it. */
 const replied = (path: string) => {
@@ -59,5 +60,9 @@ describe("the stripe connector", () => {
   it("declares resources by Stripe's id, which a data file must give", () => {
     expect(declare.product({ id: "prod_SanomaTest0001", name: "Pro" }).name).toBe("prod_SanomaTest0001");
     expect(() => declare.product({ name: "Pro" })).toThrow("stripe.product: its id is missing");
+    // Stripe sets `created`; only the id, which the identity names, may be declared of what it owns.
+    expect(() => declare.product({ id: "prod_SanomaTest0001", name: "Pro", created: 1 })).toThrow(
+      "stripe.product: leave out created: the vendor sets it",
+    );
   });
 });

@@ -19,7 +19,6 @@
   },
   "files": [
     "dist",
-    "testdata/replies",
     "AGENTS.md",
     "LICENSE"
   ],

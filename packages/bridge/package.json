@@ -42,6 +42,10 @@
     "./tfschema": {
       "types": "./dist/tfschema.d.ts",
       "default": "./dist/tfschema.js"
+    },
+    "./connector": {
+      "types": "./dist/connector.d.ts",
+      "default": "./dist/connector.js"
     }
   },
   "publishConfig": {

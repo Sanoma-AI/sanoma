@@ -25,6 +25,7 @@ import {
 } from "./gen/bridge/v1/bridge_pb.ts";
 import { readPins, testdata } from "./pins.ts";
 export { fixturesDir } from "./pins.ts";
+export { type TfFake, tfFake, type TfFakeOptions, type TfFakeState } from "./tffake.ts";
 import type { BridgeCall } from "./replies.ts";
 import { recorder } from "./record.ts";
 import { parseSchema, type SchemaDocument } from "./schema.ts";
