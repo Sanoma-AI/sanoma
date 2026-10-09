@@ -7,7 +7,7 @@ import { allowAll, policyOpOf } from "./policy.ts";
 
 // `@sanoma/workflows/describe`: what a UI renders from. Apart from the main entry, so the
 // worker never loads oxc-parser, which the outline reads `run` with.
-export { outlineWorkflow, type Outline, type OutlineNode } from "./outline.ts";
+export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
 
 /** What a workflow is, read from its definition: enough to draw a start form and show what it may call. */
 export interface WorkflowEntry {
@@ -20,7 +20,7 @@ export interface WorkflowEntry {
   ops: string[];
   /** Built-ins the workflow may call. */
   builtins: Builtin[];
-  /** What its `run` calls, in order, read from its source (`outlineWorkflow`). */
+  /** What its `run` calls, in order, read from its source (`outlineWorkflow`), with that source: its file, or else `run`'s text. */
   outline: Outline;
 }
 

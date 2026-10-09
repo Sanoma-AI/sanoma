@@ -44,6 +44,7 @@ describe("describeConfig", () => {
     ]);
     expect(wf.builtins).toEqual(["approval", "sleep"]);
     expect(wf.outline).toEqual(outlineWorkflow(announce));
+    expect(wf.outline).toMatchObject({ source: expect.stringContaining("defineWorkflow") });
   });
 
   it("lists ctx.all among a workflow's built-ins", () => {

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -7,8 +7,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { outlineWorkflow } from "../src/describe.ts";
-import { defineConnector, defineWorkflow } from "../src/index.ts";
+import { type Outline, type OutlineNode, outlineWorkflow } from "../src/describe.ts";
+import { defineConnector, defineWorkflow, type WorkflowDefinition } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
 import fanout from "./fixtures/fanout.ts";
 
@@ -23,6 +23,31 @@ const tally = async (
   ctx: { forum: { comments: { list(i: { thread: string }): Promise<string[]> } } },
   thread: string,
 ) => ctx.forum.comments.list({ thread });
+
+/** The outline's nodes with their source, or a failure naming the error. */
+function outlined(outline: Outline): { source: string; nodes: OutlineNode[] } {
+  if ("error" in outline) throw new Error(outline.error);
+  return outline;
+}
+
+/** The workflow as if `defineWorkflow` had been called from `file`. */
+const withFile = (wf: WorkflowDefinition<any, any>, file: string | undefined): WorkflowDefinition<any, any> => ({
+  ...wf,
+  file,
+});
+
+/** Every node, nested ones included, in order. */
+const flat = (nodes: OutlineNode[]): OutlineNode[] =>
+  nodes.flatMap((node) => [
+    node,
+    ...flat(
+      node.kind === "all" || node.kind === "branch"
+        ? (node.kind === "all" ? node.branches : node.cases).flat()
+        : node.kind === "each" || node.kind === "repeat"
+          ? node.body
+          : [],
+    ),
+  ]);
 
 const busy = defineWorkflow({
   name: "busy",
@@ -53,7 +78,7 @@ const busy = defineWorkflow({
 
 describe("outlineWorkflow", () => {
   it("outlines the fan-out fixture: two ctx.all around a sleep", () => {
-    expect(outlineWorkflow(fanout)).toEqual({
+    expect(outlineWorkflow(fanout)).toMatchObject({
       nodes: [
         {
           kind: "all",
@@ -73,7 +98,7 @@ describe("outlineWorkflow", () => {
   });
 
   it("outlines the announce workflow: its calls in order", () => {
-    expect(outlineWorkflow(announce)).toEqual({
+    expect(outlineWorkflow(announce)).toMatchObject({
       nodes: [
         { kind: "op", id: "ghost.post.create" },
         { kind: "op", id: "resend.broadcast.create" },
@@ -87,7 +112,7 @@ describe("outlineWorkflow", () => {
   });
 
   it("nests fan-outs, branches and loops, stars computed segments, and cannot see into helpers", () => {
-    expect(outlineWorkflow(busy)).toEqual({
+    expect(outlineWorkflow(busy)).toMatchObject({
       nodes: [
         {
           kind: "all",
@@ -131,7 +156,7 @@ describe("outlineWorkflow", () => {
         await (loud ? ctx.bluesky.post.create({ text: "a" }) : ctx.sleep({ ms: 1 }));
       },
     });
-    expect(outlineWorkflow(branches)).toEqual({
+    expect(outlineWorkflow(branches)).toMatchObject({
       nodes: [
         bypassed,
         bypassed,
@@ -158,7 +183,7 @@ describe("outlineWorkflow", () => {
         return threads;
       },
     });
-    expect(outlineWorkflow(helpers)).toEqual({ nodes: [] });
+    expect(outlineWorkflow(helpers)).toMatchObject({ nodes: [] });
   });
 
   it("reads a run written as a method, and whatever its ctx parameter is named", () => {
@@ -172,7 +197,7 @@ describe("outlineWorkflow", () => {
         await c.approval(`Go?`, { approver: "lead" });
       },
     });
-    expect(outlineWorkflow(method)).toEqual({ nodes: [{ kind: "sleep" }, { kind: "approval", title: "Go?" }] });
+    expect(outlineWorkflow(method)).toMatchObject({ nodes: [{ kind: "sleep" }, { kind: "approval", title: "Go?" }] });
   });
 
   it("says why when run destructures ctx, or its source cannot be parsed", () => {
@@ -194,6 +219,99 @@ describe("outlineWorkflow", () => {
       run: Math.max as never,
     });
     expect(outlineWorkflow(native)).toEqual({ error: expect.stringMatching(/^Cannot parse native's run: /) });
+  });
+});
+
+const spans = defineWorkflow({
+  name: "spans",
+  trigger: "manual",
+  input: z.object({ threads: z.array(z.string()), loud: z.boolean() }),
+  uses: [forum.comments.list, bluesky.post.create, "all", "sleep"],
+  run: async (ctx, { threads, loud }) => {
+    await ctx.all([() => ctx.forum.comments.list({ thread: "a" })]);
+    for (let i = 0; i < threads.length; i++) await ctx.sleep({ ms: i });
+    threads.map((thread) => ctx.bluesky.post.create({ text: thread }));
+    if (loud) await ctx.bluesky.post.create({ text: "loud" });
+    else await ctx.sleep({ ms: 1 });
+  },
+});
+
+describe("outlineWorkflow, spans", () => {
+  it("reads the file that defined the workflow, and spans each node's code in it", () => {
+    const { source, nodes } = outlined(outlineWorkflow(announce));
+    expect(source).toBe(readFileSync(announce.file!, "utf8").replaceAll("\r\n", "\n"));
+    expect(source.slice(...nodes[0]!.span)).toBe('ctx.ghost.post.create({ title, html: body, status: "draft" })');
+    for (const node of nodes.filter((n) => n.kind === "op")) {
+      expect(source.slice(...node.span)).toMatch(/^ctx\.[\s\S]*\)$/);
+    }
+  });
+
+  it("spans ctx.all, a loop, a .map callback and an if/else as the whole construct", () => {
+    const { source, nodes } = outlined(outlineWorkflow(spans));
+    const text = nodes.map((node) => [node.kind, source.slice(...node.span)]);
+    expect(text).toEqual([
+      ["all", 'ctx.all([() => ctx.forum.comments.list({ thread: "a" })])'],
+      ["repeat", "for (let i = 0; i < threads.length; i++) await ctx.sleep({ ms: i });"],
+      ["repeat", "threads.map((thread) => ctx.bluesky.post.create({ text: thread }))"],
+      ["branch", expect.stringMatching(/^if \(loud\) [\s\S]*else await ctx\.sleep\(\{ ms: 1 \}\);$/)],
+    ]);
+  });
+
+  // What each kind's code starts with; `(ctx as any)[vendor]` is `ctx[vendor]` once types are stripped.
+  const CALL = /^ctx[.[][\s\S]*\)$/;
+  const CODE: Partial<Record<OutlineNode["kind"], RegExp>> = { repeat: /^(for \(|threads\.map\()/, branch: /^if \(/ };
+
+  it("falls back to run's own text when the workflow has no file, with spans into that text", () => {
+    for (const wf of [spans, busy, fanout]) {
+      const { source, nodes } = outlined(outlineWorkflow(withFile(wf, undefined)));
+      expect(source).toBe(Function.prototype.toString.call(wf.run));
+      // The same nodes as read from the file, each spanning its code in the run text.
+      expect(nodes.map((n) => n.kind)).toEqual(outlined(outlineWorkflow(wf)).nodes.map((n) => n.kind));
+      for (const node of flat(nodes)) {
+        expect(source.slice(...node.span)).toMatch(CODE[node.kind] ?? CALL);
+      }
+    }
+  });
+
+  it("falls back to run's text when the file cannot be read or does not hold the workflow", () => {
+    const missing = outlined(outlineWorkflow(withFile(spans, join(tmpdir(), "sanoma-no-such-file.ts"))));
+    expect(missing.source).toBe(Function.prototype.toString.call(spans.run));
+    const elsewhere = outlined(
+      outlineWorkflow(withFile(spans, fileURLToPath(new URL("./fixtures/fanout.ts", import.meta.url)))),
+    );
+    expect(elsewhere.source).toBe(Function.prototype.toString.call(spans.run));
+  });
+
+  it("reads a file with \\r\\n line endings as if it had \\n", () => {
+    const text = `import { defineWorkflow } from "@sanoma/workflows";
+
+export default defineWorkflow({
+  name: "spans",
+  run: async (ctx) => {
+    await ctx.sleep({ ms: 1 });
+    if (ctx.runId) {
+      await ctx.forum.comments.list({ thread: "a" });
+    }
+  },
+});
+`;
+    const dir = mkdtempSync(join(tmpdir(), "sanoma-outline-"));
+    try {
+      const lf = join(dir, "lf.ts");
+      const crlf = join(dir, "crlf.ts");
+      writeFileSync(lf, text);
+      writeFileSync(crlf, text.replaceAll("\n", "\r\n"));
+      const fromLf = outlined(outlineWorkflow(withFile(spans, lf)));
+      const fromCrlf = outlined(outlineWorkflow(withFile(spans, crlf)));
+      expect(fromLf.source).toBe(text);
+      expect(fromCrlf).toEqual(fromLf);
+      expect(fromCrlf.nodes.map((node) => text.slice(...node.span))).toEqual([
+        "ctx.sleep({ ms: 1 })",
+        expect.stringMatching(/^if \(ctx\.runId\) \{[\s\S]*\}$/),
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -239,12 +357,18 @@ console.log(JSON.stringify(outlineWorkflow(built)));
       );
       const out = spawnSync(process.execPath, [script], { encoding: "utf8" });
       expect(out.status, out.stderr).toBe(0);
-      expect(JSON.parse(out.stdout)).toEqual({
+      const outline = JSON.parse(out.stdout);
+      expect(outline).toMatchObject({
         nodes: [
           { kind: "each", body: [{ kind: "op", id: "forum.comments.list" }] },
           { kind: "branch", cases: [[{ kind: "sleep" }], []] },
         ],
       });
+      // defineWorkflow was called from the script, so the outline reads the script.
+      const { source, nodes } = outlined(outline);
+      expect(source).toBe(readFileSync(script, "utf8"));
+      expect(source.slice(...nodes[0]!.span)).toMatch(/^ctx\.all\(ids\.map\([\s\S]*\)$/);
+      expect(source.slice(...nodes[1]!.span)).toBe("if (ids.length > 1) await ctx.sleep({ seconds: 1 });");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

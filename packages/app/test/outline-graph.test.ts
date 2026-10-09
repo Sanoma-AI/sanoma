@@ -5,7 +5,7 @@ import { labels, pairs } from "./graph-helpers.ts";
 
 // Hand-built outlines, in the shapes outlineWorkflow returns (packages/workflows/src/outline.ts).
 
-const op = (id: string): OutlineNode => ({ kind: "op", id });
+const op = (id: string): OutlineNode => ({ kind: "op", id, span: [0, 0] });
 
 describe("outlineGraph", () => {
   it("draws a sequence as a chain from start to end, with no state", () => {
