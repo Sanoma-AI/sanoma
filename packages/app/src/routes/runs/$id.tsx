@@ -34,7 +34,7 @@ import { useReducedMotion } from "#/lib/motion.ts";
 import { utcText } from "#/lib/time.ts";
 import { RUN_TONE } from "#/lib/tone.ts";
 import { GraphAndSource } from "../../components/workflow.tsx";
-import { configQuery, opsById, runQuery, sourceQuery } from "../../queries.ts";
+import { configQuery, opsById, runQuery, sourceQuery, workflowNamed } from "../../queries.ts";
 
 export const Route = createFileRoute("/runs/$id")({
   // The page reads the run from the query client; the loader returns only its name: its workflow.
@@ -88,7 +88,7 @@ function RunPage() {
   // Only its name when the config has no workflow of that name: the graph says so.
   const { data: workflow } = useSuspenseQuery({
     ...configQuery(),
-    select: (config) => config.workflows.find((wf) => wf.name === run.workflow) ?? { name: run.workflow },
+    select: (config) => workflowNamed(run.workflow)(config) ?? { name: run.workflow },
   });
   // The graph reads the clock only for whether the run's last record, a sleep, is over: the
   // sleep's end once it has come, else any time before it. So a poll that changed nothing keeps

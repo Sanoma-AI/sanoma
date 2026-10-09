@@ -431,6 +431,16 @@ export function SubsectionTitle({ children }: { children: ReactNode }) {
   return <h3 className="text-sm font-medium">{children}</h3>;
 }
 
+/** A card's section: its heading, and what it holds. */
+export function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <SubsectionTitle>{title}</SubsectionTitle>
+      {children}
+    </div>
+  );
+}
+
 /** Label and value pairs, as a description list of `Fact`s: labels in one column, values in the other. */
 export function Facts({ children }: { children: ReactNode }) {
   return <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5">{children}</dl>;

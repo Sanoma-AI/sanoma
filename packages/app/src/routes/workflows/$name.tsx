@@ -3,7 +3,7 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 import { Card, CardContent } from "#/components/ui/card.tsx";
 import { loadCode, loadGraph, Notice, PageHeader, pageTitle } from "../../components/common.tsx";
 import { GraphAndSource, StartButton, WorkflowSections } from "../../components/workflow.tsx";
-import { configQuery, sourceQuery } from "../../queries.ts";
+import { configQuery, sourceQuery, workflowNamed } from "../../queries.ts";
 
 export const Route = createFileRoute("/workflows/$name")({
   // The page reads the config and the source from the query client; the loader returns only its
@@ -14,7 +14,7 @@ export const Route = createFileRoute("/workflows/$name")({
       void loadCode();
     }
     const config = await queryClient.query({ ...configQuery(), staleTime: "static" });
-    const workflow = config.workflows.find((wf) => wf.name === params.name);
+    const workflow = workflowNamed(params.name)(config);
     if (!workflow) throw notFound();
     await queryClient.query({ ...sourceQuery(params.name), staleTime: "static" });
     return { crumb: workflow.title ?? workflow.name };
@@ -29,7 +29,7 @@ function WorkflowPage() {
   const { name } = Route.useParams();
   const { data: workflow } = useSuspenseQuery({
     ...configQuery(),
-    select: (config) => config.workflows.find((wf) => wf.name === name)!,
+    select: (config) => workflowNamed(name)(config)!,
   });
   return (
     <div className="flex flex-col gap-6">

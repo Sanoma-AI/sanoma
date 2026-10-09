@@ -4,8 +4,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
-import { Fact, Facts, GraphPanel, loadGraph, Nothing, PageHeader } from "../../components/common.tsx";
-import { Section, StartButton, WorkflowSections } from "../../components/workflow.tsx";
+import { Fact, Facts, GraphPanel, loadGraph, Nothing, PageHeader, Section } from "../../components/common.tsx";
+import { StartButton, WorkflowSections } from "../../components/workflow.tsx";
 import { outlineGraph } from "../../graph/outline-graph.ts";
 import { configQuery } from "../../queries.ts";
 

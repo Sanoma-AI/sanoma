@@ -15,7 +15,7 @@ import { type GraphNode, nodeAt } from "../graph/types.ts";
 import { configQuery, opsById, sourceQuery } from "../queries.ts";
 import { ApprovalIcon, SleepIcon } from "./approval.tsx";
 import type { CodeProps } from "./code.tsx";
-import { CodePanel, GraphPanel, Json, Nothing, OpName, SubsectionTitle, Tip } from "./common.tsx";
+import { CodePanel, GraphPanel, Json, Nothing, Notice, OpName, Section, Tip } from "./common.tsx";
 
 // A workflow's pieces, as the workflows page's cards and a workflow's own page show them, and
 // its graph beside its source, as a workflow's page and a run's show them.
@@ -32,18 +32,7 @@ export function StartButton({ name }: { name: string }) {
   );
 }
 
-export function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-2">
-      <SubsectionTitle>{title}</SubsectionTitle>
-      {children}
-    </div>
-  );
-}
-
-export const None = ({ children = "None." }: { children?: ReactNode }) => (
-  <p className="text-muted-foreground">{children}</p>
-);
+const None = ({ children = "None." }: { children?: ReactNode }) => <p className="text-muted-foreground">{children}</p>;
 
 /** What a workflow may call, the built-ins it uses and its input, one section each. */
 export function WorkflowSections({ workflow }: { workflow: WorkflowEntry }) {
@@ -190,7 +179,9 @@ export const GraphAndSource = memo(function GraphAndSource({
   if (!graph) return noSource;
   return (
     <div className="flex flex-col gap-2">
-      {outline && "fallback" in outline && <None>Showing the function's text, not the file: {outline.fallback}</None>}
+      {outline && "fallback" in outline && (
+        <Notice>Showing the function's text, not the file: {outline.fallback}</Notice>
+      )}
       <div className="grid gap-4 lg:grid-cols-2">
         <GraphPanel
           className={PANEL}

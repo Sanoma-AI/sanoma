@@ -6,7 +6,7 @@ import { Field, FieldGroup, FieldLabel, FieldSeparator } from "#/components/ui/f
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Nothing, Notice, PageHeader, pageTitle } from "../components/common.tsx";
 import { StartForm } from "../form/start-form.tsx";
-import { configQuery } from "../queries.ts";
+import { configQuery, workflowNamed } from "../queries.ts";
 
 export const Route = createFileRoute("/start")({
   validateSearch: z.object({ workflow: z.string().optional() }),
@@ -20,8 +20,7 @@ function StartPage() {
   const navigate = Route.useNavigate();
   const { data: config } = useSuspenseQuery(configQuery());
 
-  const name = wanted ?? config.workflows[0]?.name;
-  const workflow = config.workflows.find((w) => w.name === name);
+  const workflow = wanted === undefined ? config.workflows[0] : workflowNamed(wanted)(config);
 
   return (
     <div className="flex max-w-2xl flex-col gap-6">
@@ -60,7 +59,7 @@ function StartPage() {
                   ))}
                 </NativeSelect>
               </Field>
-              {!workflow && name && <Notice variant="destructive">No workflow named “{name}”.</Notice>}
+              {!workflow && wanted && <Notice variant="destructive">No workflow named “{wanted}”.</Notice>}
               {workflow && (
                 <>
                   <FieldSeparator />
