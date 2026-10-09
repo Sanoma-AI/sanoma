@@ -92,7 +92,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
   // A vendor whose operations are split over several connectors is named by the first.
   for (const { [VENDOR]: vendor } of config.connectors) vendors[vendor.id] ??= vendorEntry(vendor.id, vendor.info);
 
-  const workflows: WorkflowEntry[] = resolved.workflows.map((wf) => {
+  const workflows: WorkflowEntry[] = [...resolved.workflows.values()].map((wf) => {
     const { outline, source } = outlineWithSource(wf);
     return {
       name: wf.name,

@@ -46,8 +46,7 @@ describe("sandbox runs", () => {
   const c = () => app.client;
 
   const scenario = (name: string): Scenario => {
-    const { ops, workflows, scenarios } = resolveConfig(app.config);
-    const loaded = loadScenarios({ ops, workflows: new Map(workflows.map((wf) => [wf.name, wf])), scenarios });
+    const loaded = loadScenarios(resolveConfig(app.config));
     expect(loaded.errors).toEqual([]);
     return loaded.scenarios.find((s) => s.name === name)!;
   };

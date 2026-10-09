@@ -20,7 +20,7 @@ const scopeOf = (connectors: Parameters<typeof resolveConfig>[0]["connectors"], 
     policy: allowAll,
     ledger: memoryLedger(),
   });
-  return { ops: resolved.ops, workflows: new Map(resolved.workflows.map((wf) => [wf.name, wf])) } satisfies Scope;
+  return resolved satisfies Scope;
 };
 const scope = scopeOf([ghost, resend, bluesky]);
 const parse = (text: string, file = "announce.feature") => parseFeature(text, file, scope);

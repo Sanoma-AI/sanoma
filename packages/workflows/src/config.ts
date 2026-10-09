@@ -56,8 +56,8 @@ export interface ResolvedConfig {
   fakeDrivers: Map<string, DriverFn>;
   /** The scenarios directory, a `file:` URL. */
   scenarios?: URL;
-  /** Each checked against `ops` and `drivers`; names are unique. */
-  workflows: WorkflowDefinition<any, any>[];
+  /** By name; each checked against `ops` and `drivers`. */
+  workflows: Map<string, WorkflowDefinition<any, any>>;
   policy: Policy;
   ledger: LedgerStore;
 }
@@ -136,7 +136,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     fakes,
     fakeDrivers,
     ...(scenarios && { scenarios }),
-    workflows: [...names.values()],
+    workflows: names,
     policy: config.policy,
     ledger,
   };

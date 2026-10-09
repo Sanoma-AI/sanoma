@@ -113,7 +113,7 @@ export async function startRun(
   actor: Principal,
   body: StartRunRequest,
 ): Promise<StartRunResponse> {
-  const workflow = resolved.workflows.find((wf) => wf.name === body.workflow);
+  const workflow = resolved.workflows.get(body.workflow);
   if (!workflow) {
     throw new ApiError(404, {
       error: `No workflow named "${body.workflow}"`,
