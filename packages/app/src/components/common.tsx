@@ -380,8 +380,11 @@ function LazyPanel({
 }
 
 /** A graph (a run's, or a workflow's outline) in a LazyPanel, a skeleton of its size holding its place. */
-export const GraphPanel = (props: GraphProps) => (
-  <LazyPanel fallback={<Skeleton role="status" aria-label="Loading the graph" className="size-full rounded-none" />}>
+export const GraphPanel = ({ className, ...props }: GraphProps & { className?: string }) => (
+  <LazyPanel
+    className={className}
+    fallback={<Skeleton role="status" aria-label="Loading the graph" className="size-full rounded-none" />}
+  >
     <Graph {...props} />
   </LazyPanel>
 );

@@ -1,5 +1,5 @@
-import type { ApprovalState, ErrorCode, RecordedDecision } from "@sanoma/workflows";
-import type { Span } from "@sanoma/workflows/describe";
+import type { ApprovalState, ErrorCode, LedgerRecord, RecordedDecision, RunSummary } from "@sanoma/workflows";
+import type { OutlineNode, Span } from "@sanoma/workflows/describe";
 import type { Tone } from "../lib/tone.ts";
 
 /*
@@ -83,6 +83,10 @@ export type GraphNode =
 
 export type GraphNodeKind = GraphNode["kind"];
 
+/** True for a node a page can select: one with a place in the source, or a ledger record. */
+export const isSelectable = (node: GraphNode): boolean =>
+  ("spans" in node && !!node.spans) || ("state" in node && !!node.state?.recordId);
+
 export interface GraphEdge {
   id: string;
   source: string;
@@ -93,6 +97,14 @@ export interface Graph {
   nodes: GraphNode[];
   edges: GraphEdge[];
 }
+
+/**
+ * What a page's graph is drawn from: a run's ledger as read at `at`, with its workflow's outline
+ * when there is one (runGraph), or a workflow's outline (outlineGraph).
+ */
+export type GraphSource =
+  | { ledger: LedgerRecord[]; run: RunSummary; at: number; outline?: OutlineNode[] }
+  | { outline: OutlineNode[] };
 
 /** True for what a run has not reached yet: drawn dashed, as are the edges into and out of it. */
 export const isPending = (node: GraphNode): boolean =>

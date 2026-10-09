@@ -29,6 +29,7 @@ import {
   ToneBadge,
   When,
 } from "../../components/common.tsx";
+import type { GraphNode } from "../../graph/types.ts";
 import { useReducedMotion } from "#/lib/motion.ts";
 import { utcText } from "#/lib/time.ts";
 import { RUN_TONE } from "#/lib/tone.ts";
@@ -82,7 +83,10 @@ function RunPage() {
   const source = useMemo(() => ({ ledger, run, at: dataUpdatedAt }), [ledger, run, dataUpdatedAt]);
   const titles = useMemo(() => new Map(approvals.map((a) => [a.id, a.title])), [approvals]);
   const reducedMotion = useReducedMotion();
-  const select = (recordId: string) => show(recordId, reducedMotion);
+  const select = (node: GraphNode) => {
+    const recordId = "state" in node ? node.state?.recordId : undefined;
+    if (recordId) show(recordId, reducedMotion);
+  };
   return (
     <div className="flex flex-col gap-6">
       <PageHeader>
