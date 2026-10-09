@@ -17,10 +17,7 @@ export const Route = createFileRoute("/workflows/$name")({
     const config = await queryClient.query({ ...configQuery(), staleTime: "static" });
     const workflow = config.workflows.find((wf) => wf.name === params.name);
     if (!workflow) throw notFound();
-    // An outline that could not be read has no source.
-    if (!("error" in workflow.outline)) {
-      await queryClient.query({ ...sourceQuery(params.name), staleTime: "static" });
-    }
+    await queryClient.query({ ...sourceQuery(params.name), staleTime: "static" });
     return { crumb: workflow.title ?? workflow.name };
   },
   // A workflow that does not exist has no loader data: its name stands in.

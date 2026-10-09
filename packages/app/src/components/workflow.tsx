@@ -191,5 +191,9 @@ export function GraphAndSource({
 
 function SourcePanel({ name, ...props }: { name: string } & Pick<CodeProps, "highlight" | "onSelect">) {
   const { data } = useSuspenseQuery(sourceQuery(name));
-  return <CodePanel className={PANEL} source={data.source} {...props} />;
+  return data.source === null ? (
+    <Nothing title="No source to show" />
+  ) : (
+    <CodePanel className={PANEL} source={data.source} {...props} />
+  );
 }

@@ -381,14 +381,14 @@ describe("errors the app answers with", () => {
 });
 
 describe("a workflow's source", () => {
-  it("is served by name, apart from the config, and is not found for a workflow without one", () => {
+  it("is served by name, apart from the config, and is null for a workflow without one", () => {
     const description = describeConfig(config);
     expect(workflowSource({ description }, "announce")).toEqual({ source: readFileSync(announce.file!, "utf8") });
     const sourceless = withoutSources(description);
     expect(sourceless.workflows[0]).not.toHaveProperty("source");
-    const notFound = expect.objectContaining({ status: 404, body: expect.objectContaining({ code: "invalid_input" }) });
-    expect(() => workflowSource({ description }, "nope")).toThrow(notFound);
-    expect(() => workflowSource({ description: sourceless }, "announce")).toThrow(notFound);
+    // Not a 404: the page asking would take it for its own not-found.
+    expect(workflowSource({ description }, "nope")).toEqual({ source: null });
+    expect(workflowSource({ description: sourceless }, "announce")).toEqual({ source: null });
   });
 });
 

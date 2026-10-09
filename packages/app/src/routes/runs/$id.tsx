@@ -44,12 +44,8 @@ export const Route = createFileRoute("/runs/$id")({
       void loadCode();
     }
     const { run } = await queryClient.query({ ...runQuery(params.id), staleTime: "static" });
-    // The workflow's source, beside the graph: none when its outline could not be read.
-    const config = await queryClient.query({ ...configQuery(), staleTime: "static" });
-    const workflow = config.workflows.find((wf) => wf.name === run.workflow);
-    if (workflow && !("error" in workflow.outline)) {
-      await queryClient.query({ ...sourceQuery(run.workflow), staleTime: "static" });
-    }
+    // The workflow's source, beside the graph.
+    await queryClient.query({ ...sourceQuery(run.workflow), staleTime: "static" });
     return { crumb: run.workflow };
   },
   // A run that does not exist has no loader data: its id stands in.
