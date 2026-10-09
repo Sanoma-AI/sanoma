@@ -8,7 +8,7 @@ import { Button } from "#/components/ui/button.tsx";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
-import { ApprovalIcon } from "../components/approval.tsx";
+import { ApprovalIcon, SleepIcon } from "../components/approval.tsx";
 import {
   Fact,
   Facts,
@@ -139,6 +139,7 @@ function WorkflowCard({ workflow, ops }: { workflow: WorkflowEntry; ops: Map<str
               {workflow.builtins.map((b) => (
                 <Badge key={b} variant="outline">
                   {b === "approval" && <ApprovalIcon data-icon="inline-start" />}
+                  {b === "sleep" && <SleepIcon data-icon="inline-start" />}
                   {b}
                 </Badge>
               ))}

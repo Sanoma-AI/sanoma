@@ -28,7 +28,7 @@ import { type GraphNode, type GraphNodeKind, type GraphSource, isPending, isSele
 import { useReducedMotion } from "#/lib/motion.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import { configQuery, opsById } from "../queries.ts";
-import { ApprovalIcon } from "./approval.tsx";
+import { ApprovalIcon, SleepIcon } from "./approval.tsx";
 import { ApprovalStatusBadge, effectBadge, StatusDot, ToneBadge, VendorLogo } from "./common.tsx";
 import { ZoomSlider } from "./zoom-slider.tsx";
 
@@ -213,6 +213,7 @@ function SleepNode({ data: { node } }: Props<"sleep">) {
     <Frame node={node}>
       <Line>
         <Dot tone={node.state?.tone} />
+        <SleepIcon className="size-4 shrink-0" />
         <span className="truncate">{node.label}</span>
       </Line>
     </Frame>
