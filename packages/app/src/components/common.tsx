@@ -30,6 +30,7 @@ import { Button } from "#/components/ui/button.tsx";
 import { Card } from "#/components/ui/card.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
+import { Item, ItemContent, ItemDescription, ItemTitle } from "#/components/ui/item.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
 import { utcText } from "#/lib/time.ts";
@@ -138,18 +139,19 @@ const dot = cva("size-2.5 rounded-full", {
 });
 
 /**
- * A vendor's logo, 16 px, named by the vendor's title for assistive tech: its connector's light
- * variant, and its dark one under the dark theme. Nothing when the connector gives no logo.
+ * A vendor's logo, 16 px unless `className` sizes it, named by the vendor's title for assistive
+ * tech: its connector's light variant, and its dark one under the dark theme. Nothing when the
+ * connector gives no logo.
  */
-export function VendorLogo({ vendor }: { vendor: string }) {
+export function VendorLogo({ vendor, className }: { vendor: string; className?: string }) {
   const { data: entry } = useSuspenseQuery({ ...configQuery(), select: (config) => config.vendors[vendor] });
   if (!entry?.logo) return null;
   const { src, dark } = entry.logo;
   // A hidden <img> is out of the accessibility tree: one name is read either way.
   return (
     <>
-      <img src={src} alt={entry.title} className={cn("size-4 shrink-0", dark && "dark:hidden")} />
-      {dark && <img src={dark} alt={entry.title} className="hidden size-4 shrink-0 dark:block" />}
+      <img src={src} alt={entry.title} className={cn("size-4 shrink-0", dark && "dark:hidden", className)} />
+      {dark && <img src={dark} alt={entry.title} className={cn("hidden size-4 shrink-0 dark:block", className)} />}
     </>
   );
 }
@@ -173,6 +175,27 @@ export function OpName({
       <code>{id}</code>
       {effect && <Badge className={effectBadge({ effect })}>{effect}</Badge>}
     </>
+  );
+}
+
+/** An operation as a list item: its name, whether it is safe to retry, and what it does. Inside an `ItemGroup`. */
+export function OpItem({ id, op }: { id: string; op: OpEntry | undefined }) {
+  return (
+    <Item role="listitem" variant="outline" size="xs">
+      <ItemContent>
+        <ItemTitle>
+          <OpName id={id} op={op} />
+          {op?.idempotent && (
+            <Tip tip="If a call fails, it is tried again; the vendor ignores repeats.">
+              <Badge variant="outline" tabIndex={0}>
+                safe to retry
+              </Badge>
+            </Tip>
+          )}
+        </ItemTitle>
+        {op?.description && <ItemDescription>{op.description}</ItemDescription>}
+      </ItemContent>
+    </Item>
   );
 }
 
@@ -462,6 +485,11 @@ export function Section({ title, children }: { title: string; children: ReactNod
     </div>
   );
 }
+
+/** What a section says when it has nothing to list. */
+export const None = ({ children = "None." }: { children?: ReactNode }) => (
+  <p className="text-muted-foreground">{children}</p>
+);
 
 /** Label and value pairs, as a description list of `Fact`s: labels in one column, values in the other. */
 export function Facts({ children }: { children: ReactNode }) {

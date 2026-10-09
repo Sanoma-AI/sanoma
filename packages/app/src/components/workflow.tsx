@@ -1,5 +1,5 @@
 import type { LedgerRecord, RunSummary } from "@sanoma/workflows";
-import type { OpEntry, WorkflowEntry } from "@sanoma/workflows/describe";
+import type { WorkflowEntry } from "@sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { PlayIcon } from "lucide-react";
@@ -14,7 +14,7 @@ import { runGraph } from "../graph/run-graph.ts";
 import { type GraphNode, nodeAt } from "../graph/types.ts";
 import { configQuery, opsById, sourceQuery } from "../queries.ts";
 import type { CodeProps } from "./code.tsx";
-import { BUILTIN_ICON, CodePanel, GraphPanel, Json, Nothing, Notice, OpName, Section, Tip } from "./common.tsx";
+import { BUILTIN_ICON, CodePanel, GraphPanel, Json, None, Nothing, Notice, OpItem, Section } from "./common.tsx";
 
 // A workflow's pieces, as the workflows page's cards and a workflow's own page show them, and
 // its graph beside its source, as a workflow's page and a run's show them.
@@ -35,8 +35,6 @@ export function StartButton({
     </Button>
   );
 }
-
-const None = ({ children = "None." }: { children?: ReactNode }) => <p className="text-muted-foreground">{children}</p>;
 
 /** What a workflow may call, the built-ins it uses and its input, one section each. */
 export function WorkflowSections({ workflow }: { workflow: WorkflowEntry }) {
@@ -86,26 +84,6 @@ export function WorkflowSections({ workflow }: { workflow: WorkflowEntry }) {
         )}
       </Section>
     </>
-  );
-}
-
-function OpItem({ id, op }: { id: string; op: OpEntry | undefined }) {
-  return (
-    <Item role="listitem" variant="outline" size="xs">
-      <ItemContent>
-        <ItemTitle>
-          <OpName id={id} op={op} />
-          {op?.idempotent && (
-            <Tip tip="If a call fails, it is tried again; the vendor ignores repeats.">
-              <Badge variant="outline" tabIndex={0}>
-                safe to retry
-              </Badge>
-            </Tip>
-          )}
-        </ItemTitle>
-        {op?.description && <ItemDescription>{op.description}</ItemDescription>}
-      </ItemContent>
-    </Item>
   );
 }
 
