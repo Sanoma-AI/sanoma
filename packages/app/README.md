@@ -16,8 +16,8 @@ Run it beside the worker, from the same config:
 import { startApp } from "@sanoma/app";
 import config from "./sanoma.config.ts";
 
-const app = await startApp(config, { port: 4321 });
-console.log(app.url); // http://127.0.0.1:4321
+const app = await startApp(config, { port: 3000 });
+console.log(app.url); // http://127.0.0.1:3000
 ```
 
 `startApp` checks the config first and throws what the worker would refuse. The worker and the app share the config's Postgres (`databaseUrl`, else `SANOMA_DATABASE_URL`) and its ledger store. Give the config a `jsonlLedger` so the app, in its own process, can read what the worker records; a `memoryLedger` is visible only in the process that wrote it. A run that has started but has no records in the app's ledger says so on its page, since the likeliest cause is an app reading another ledger than the worker's (a `jsonlLedger` directory relative to another working directory). Without `port`, the app takes any free port and reports it in `app.url`. `app.close()` stops it.
