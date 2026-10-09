@@ -1,5 +1,6 @@
 // The tests are named after the feature files and scenarios, and one for a file that does not load fails by throwing.
 /* oxlint-disable vitest/valid-title, vitest/expect-expect */
+import { fileURLToPath } from "node:url";
 import {
   type LedgerRecord,
   memoryLedger,
@@ -62,6 +63,10 @@ export function describeScenarios(
   const resolved = resolveConfig(shared);
   if (!resolved.scenarios) throw new Error("describeScenarios needs the config's `scenarios` directory");
   const { scenarios, errors } = loadScenarios(resolved);
+  // A mistyped directory loads nothing, and a test file that registers no tests would pass.
+  if (scenarios.length === 0 && errors.length === 0) {
+    throw new Error(`describeScenarios found no scenarios in ${fileURLToPath(resolved.scenarios)}`);
+  }
   for (const { file, message } of errors) {
     it(file, () => {
       throw new Error(message);
