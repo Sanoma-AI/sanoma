@@ -123,12 +123,24 @@ export class SanomaClient {
    * Checks the input against the workflow's schema, then queues a run for the worker. The run
    * gets the input as sent, not as the schema parsed it: the worker parses it once, so a schema
    * with a `.transform` or a default sees the caller's value, and `run.started` records it.
+   * `workflow` is a definition, or the name of one in the config's `workflows`.
    */
   async start<S extends z.ZodType>(
-    workflow: WorkflowDefinition<any, S>,
+    workflow: WorkflowDefinition<any, S> | string,
     input: z.input<S>,
     options: StartOptions,
   ): Promise<string> {
+    if (typeof workflow === "string") {
+      const named = this.config.workflows.get(workflow);
+      if (!named) {
+        const known = [...this.config.workflows.keys()];
+        throw new SanomaError("invalid_input", `No workflow named "${workflow}"; the config has ${known.join(", ")}`, {
+          workflow,
+          workflows: known,
+        });
+      }
+      workflow = named;
+    }
     parseOrThrow(workflow.input, input, `The input does not match ${workflow.name}'s schema`);
     const startedBy = parseOrThrow(
       Principal,
