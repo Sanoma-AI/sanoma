@@ -32,7 +32,7 @@ Status: early. Business processes are written as TypeScript workflows that run o
 | [`.pnpmfile.cjs`](.pnpmfile.cjs)                            | pnpm hook: a packed package's readme is its AGENTS.md without the Contents table  |
 | [`skills-lock.json`](skills-lock.json)                      | Lock file for installed agent skills                                              |
 
-Community connectors live in their authors' own repos (`sanoma-connector-<vendor>`) and are listed in [`Sanoma-AI/registry`](https://github.com/Sanoma-AI/registry).
+Connectors live here under `connectors/`; one moves to its own repo only when someone outside the team maintains it.
 
 ## Develop
 
