@@ -62,11 +62,15 @@ function ConnectorCard({ connector: { id, vendor, ops, workflows } }: { connecto
           </div>
         )}
         <Section title="Operations">
-          <ItemGroup>
-            {ops.map((op) => (
-              <OpItem key={op.id} id={op.id} op={op} />
-            ))}
-          </ItemGroup>
+          {ops.length === 0 ? (
+            <None />
+          ) : (
+            <ItemGroup>
+              {ops.map((op) => (
+                <OpItem key={op.id} id={op.id} op={op} />
+              ))}
+            </ItemGroup>
+          )}
         </Section>
         <Separator />
         <Section title="Used by">
