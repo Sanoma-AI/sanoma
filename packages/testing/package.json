@@ -33,6 +33,10 @@
     "./replay": {
       "types": "./dist/replay.d.ts",
       "default": "./dist/replay.js"
+    },
+    "./scenarios": {
+      "types": "./dist/scenarios.d.ts",
+      "default": "./dist/scenarios.js"
     }
   },
   "publishConfig": {
