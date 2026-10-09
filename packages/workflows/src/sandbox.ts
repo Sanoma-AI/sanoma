@@ -54,14 +54,6 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
           { scenario: name, missing },
         );
       }
-      if (state.sandboxRun !== undefined && state.sandboxRun !== run.id) {
-        throw new SanomaError(
-          "sandbox_busy",
-          `Sandbox run ${state.sandboxRun} is still using the fakes; start another once it ends`,
-          { runId: state.sandboxRun },
-        );
-      }
-      state.sandboxRun = run.id;
       for (const f of state.fakes.values()) f.reset();
       const seeded: { op: string; input: unknown; output: unknown }[] = [];
       for (const [i, given] of scenario.given.entries()) {

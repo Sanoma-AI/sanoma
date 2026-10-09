@@ -13,7 +13,6 @@ const CODES = [
   "invalid_input",
   "run_ended",
   "run_running",
-  "sandbox_busy",
 ] as const;
 
 /**

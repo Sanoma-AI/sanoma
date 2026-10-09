@@ -31,8 +31,6 @@ export interface WorkerState {
   scenarios?: URL;
   /** The config's workflows, by name, which scenarios name. */
   workflows: Map<string, WorkflowDefinition<any, any>>;
-  /** The sandbox run using the fakes, if one is: one at a time, since they share the fakes' state. */
-  sandboxRun?: string;
   /** Its `version`, when it has one, is recorded with each of its decisions. */
   policy: Policy;
   ledger: LedgerStore;
