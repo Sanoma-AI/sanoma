@@ -1,6 +1,7 @@
 export {
   type CallContext,
   type Connector,
+  type ConnectorVendor,
   type Driver,
   type DriverFn,
   defineConnector,

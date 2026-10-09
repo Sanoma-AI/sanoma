@@ -1,7 +1,7 @@
 import type { z } from "zod";
 import { resolveConfig, type SanomaConfig } from "./config.ts";
 import { type Builtin, jsonSchemaOf, type Use } from "./define.ts";
-import { isOp, type Effect } from "./op.ts";
+import { type Effect, isOp, VENDOR, type VendorInfo } from "./op.ts";
 import { type Outline, outlineWorkflow } from "./outline.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
 
@@ -77,15 +77,8 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
   ops.sort((a, b) => a.id.localeCompare(b.id));
 
   const vendors: Record<string, VendorEntry> = {};
-  for (const { vendor, vendorInfo: info } of resolved.ops.values()) {
-    if (vendors[vendor] && !info) continue;
-    vendors[vendor] = {
-      title: info?.title ?? vendor,
-      ...(info?.logo && {
-        logo: { src: svgDataUrl(info.logo.svg), ...(info.logo.dark && { dark: svgDataUrl(info.logo.dark) }) },
-      }),
-    };
-  }
+  // A vendor whose operations are split over several connectors is named by the first.
+  for (const { [VENDOR]: vendor } of config.connectors) vendors[vendor.id] ??= vendorEntry(vendor.id, vendor.info);
 
   const workflows: WorkflowEntry[] = resolved.workflows.map((wf) => ({
     name: wf.name,
@@ -112,6 +105,13 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
 }
 
 const svgDataUrl = (svg: string) => `data:image/svg+xml,${encodeURIComponent(svg.trim())}`;
+
+const vendorEntry = (id: string, info: VendorInfo | undefined): VendorEntry => ({
+  title: info?.title ?? id,
+  ...(info?.logo && {
+    logo: { src: svgDataUrl(info.logo.svg), ...(info.logo.dark && { dark: svgDataUrl(info.logo.dark) }) },
+  }),
+});
 
 function toJsonSchema(schema: z.ZodType, what: string, io: "input" | "output"): Record<string, unknown> {
   try {

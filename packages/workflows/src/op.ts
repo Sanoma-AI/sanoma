@@ -34,8 +34,6 @@ export interface Op<V extends string = string, R extends string = string, N exte
   readonly effect: Effect;
   readonly idempotent: boolean;
   readonly description?: string;
-  /** From `defineConnector`'s third argument: who the vendor is, for a UI. */
-  readonly vendorInfo?: VendorInfo;
   /** From the spec: the resource instance a call acts on. */
   readonly target?: (input: any) => string;
   readonly input: z.ZodType<any, I>;
@@ -44,11 +42,23 @@ export interface Op<V extends string = string, R extends string = string, N exte
 
 export type Specs = Record<string, Record<string, OpSpec>>;
 
+/**
+ * Where a connector keeps its vendor. A symbol, so it names no resource: `Object.values` and
+ * `keyof` over a connector see its resources only.
+ */
+export const VENDOR: unique symbol = Symbol("sanoma.vendor");
+
 export type Connector<V extends string, S extends Specs> = {
   readonly [R in keyof S & string]: {
     readonly [N in keyof S[R] & string]: Op<V, R, N, z.input<S[R][N]["input"]>, z.output<S[R][N]["output"]>>;
   };
-};
+} & { readonly [VENDOR]: ConnectorVendor<V> };
+
+/** A connector's vendor: its id and, from `defineConnector`'s third argument, who it is, for a UI. */
+export interface ConnectorVendor<V extends string = string> {
+  readonly id: V;
+  readonly info?: VendorInfo;
+}
 
 /**
  * Who a connector's vendor is, for a UI to show beside its operations. `logo` is the vendor's
@@ -98,14 +108,14 @@ export function defineConnector<const V extends string, const S extends Specs>(
         effect: spec.effect,
         idempotent: spec.idempotent ?? false,
         description: spec.description,
-        vendorInfo,
         target: spec.target,
         input: spec.input,
         output: spec.output,
       } satisfies Op);
     }
   }
-  return out as Connector<V, S>;
+  const owner: ConnectorVendor<V> = Object.freeze({ id: vendor, info: vendorInfo });
+  return { ...out, [VENDOR]: owner } as unknown as Connector<V, S>;
 }
 
 /**
@@ -195,8 +205,7 @@ export function defineDriver<V extends string, S extends Specs>(
   for (const resource of Object.values(connector as Record<string, Record<string, unknown>>)) {
     for (const op of Object.values(resource)) if (isOp(op)) declared.set(`${op.resource}.${op.name}`, op);
   }
-  const vendor = declared.values().next().value?.vendor;
-  if (vendor === undefined) throw new Error("defineDriver: the connector declares no operations");
+  const vendor = connector[VENDOR].id;
   const ops: Record<string, DriverFn> = {};
   const extra: string[] = [];
   for (const [resource, fns] of Object.entries(impl as Record<string, Record<string, unknown>>)) {

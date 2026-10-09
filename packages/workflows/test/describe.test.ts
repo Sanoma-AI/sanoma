@@ -13,6 +13,7 @@ import {
   memoryLedger,
 } from "../src/index.ts";
 import { describeConfig, outlineWorkflow } from "../src/describe.ts";
+import { VENDOR } from "../src/op.ts";
 import announce from "./fixtures/announce.ts";
 import { marketingFakes } from "./harness.ts";
 
@@ -137,8 +138,8 @@ describe("describeConfig", () => {
     const info = { logo: { svg: "<svg></svg>" } };
     const counter = defineConnector("counter", specs, info);
     info.logo.svg = "<img src=x>";
-    expect(counter.tally.add.vendorInfo?.logo).toEqual({ svg: "<svg></svg>" });
-    expect(Object.isFrozen(counter.tally.add.vendorInfo?.logo)).toBe(true);
+    expect(counter[VENDOR].info?.logo).toEqual({ svg: "<svg></svg>" });
+    expect(Object.isFrozen(counter[VENDOR].info?.logo)).toBe(true);
   });
 
   it("says whether a policy other than allowAll is configured, and its version, and names the app and version", () => {
