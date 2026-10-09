@@ -169,9 +169,9 @@ function OpItem({ id, op }: { id: string; op: OpEntry | undefined }) {
         <ItemTitle>
           <OpName id={id} op={op} />
           {op?.idempotent && (
-            <Tip tip="Safe to retry: the vendor dedupes repeated calls">
+            <Tip tip="If a call fails, it is tried again; the vendor ignores repeats.">
               <Badge variant="outline" tabIndex={0}>
-                idempotent
+                safe to retry
               </Badge>
             </Tip>
           )}

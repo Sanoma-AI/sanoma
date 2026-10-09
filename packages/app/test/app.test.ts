@@ -451,7 +451,7 @@ describe("the page", () => {
     const workflows = await page("/workflows");
     expect(workflows.status).toBe(200);
     expect(workflows.text).toContain(`<code>${version}</code>`);
-    expect(workflows.text).toMatch(/>idempotent<\/span>/);
+    expect(workflows.text).toMatch(/>safe to retry<\/span>/);
     for (const title of ["Ghost", "Resend", "Bluesky"]) {
       expect(workflows.html).toMatch(new RegExp(`<img src="data:image/svg\\+xml,[^"]+" alt="${title}"`));
     }
