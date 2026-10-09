@@ -12,11 +12,15 @@ export const Route = createFileRoute("/api/runs/")({
           const query = parse(RunsQuery, Object.fromEntries(new URL(request.url).searchParams), "The query");
           return json(await context.app.client.runs(query));
         },
-        /** Starts a run as the actor: 201 `{ runId }`. */
+        /** Starts a run (or a sandbox run of a scenario) as the actor: 201 `{ runId }`. */
         POST: {
           middleware: [withPrincipalRoute],
           handler: async ({ request, context }) => {
-            const body = parse(StartRunRequest, await readJson(request), 'Send {"workflow": name, "input": {...}}');
+            const body = parse(
+              StartRunRequest,
+              await readJson(request),
+              'Send {"workflow": name, "input": {...}} or {"scenario": name}',
+            );
             return json(await startRun(context.app, context.principal, body), 201);
           },
         },

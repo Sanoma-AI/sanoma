@@ -5,10 +5,12 @@ import {
   errorCode,
   errorMessage,
   invalidInput,
+  type LedgerRecord,
   Principal,
   type SanomaError,
 } from "@sanoma/workflows";
 import type { ConfigDescription } from "@sanoma/workflows/describe";
+import { check, loadScenarios } from "@sanoma/workflows/scenario";
 import { isNotFound, isRedirect } from "@tanstack/react-router";
 import type { z } from "zod";
 import {
@@ -18,6 +20,7 @@ import {
   type ErrorResponse,
   type InputIssue,
   type RunDetail,
+  type ScenariosResponse,
   type StartRunRequest,
   type StartRunResponse,
 } from "../api.ts";
@@ -81,19 +84,14 @@ const NO_RECORDS = "No records for a run that has started; is the app reading th
 /** Ledger read failures already logged, by run and message: a page polls its run every 2 s. */
 const loggedReads = new Set<string>();
 
-/** The run with its ledger and approvals, or a 404. */
+/** The run with its ledger and approvals, and a sandbox run's checks, or a 404. */
 export async function runDetail({ client, resolved }: AppContext, runId: string): Promise<RunDetail> {
   const run = await client.run(runId);
   if (!run) throw new ApiError(404, { error: `No run ${runId}`, code: "run_not_found" });
   const { approvals } = run;
+  let ledger: LedgerRecord[];
   try {
-    const ledger = await resolved.ledger.read(runId);
-    // A run that has started records run.started first. Seeing none, the likeliest cause is an
-    // app reading another ledger than the worker's (a jsonl directory relative to another cwd).
-    if (ledger.length === 0 && run.status !== "queued") {
-      return { run, ledger, ledgerError: NO_RECORDS, approvals };
-    }
-    return { run, ledger, approvals };
+    ledger = await resolved.ledger.read(runId);
   } catch (err) {
     // A store reads a run nothing has recorded as no records, so this is a real failure (a
     // corrupt file, a permission): logged for the operator once, and the page shows the run and
@@ -106,21 +104,57 @@ export async function runDetail({ client, resolved }: AppContext, runId: string)
     }
     return { run, ledger: [], ledgerError, approvals };
   }
+  // A run that has started records run.started first. Seeing none, the likeliest cause is an
+  // app reading another ledger than the worker's (a jsonl directory relative to another cwd).
+  if (ledger.length === 0 && run.status !== "queued") {
+    return { run, ledger, ledgerError: NO_RECORDS, approvals };
+  }
+  // Checked against the feature file as it reads now, which the agent may have changed since.
+  const seeded = ledger.find((r) => r.type === "scenario.seeded");
+  const scenario = seeded && loadScenarios(resolved).scenarios.find((s) => s.name === seeded.scenario);
+  return { run, ledger, approvals, ...(scenario && { checks: check(scenario, ledger) }) };
 }
 
+/** Every scenario in the config's feature files, as the page lists them, read afresh each time. */
+export function scenarios({ resolved }: Pick<AppContext, "resolved">): ScenariosResponse {
+  const loaded = loadScenarios(resolved);
+  return {
+    scenarios: loaded.scenarios.map(({ name, workflow, file, text, steps }) => ({ name, workflow, file, text, steps })),
+    errors: loaded.errors,
+  };
+}
+
+/** A 404 `invalid_input` for a name the request gives that the config does not have, with an issue at its field. */
+const noSuch = (field: "workflow" | "scenario", error: string) =>
+  new ApiError(404, {
+    error,
+    code: "invalid_input",
+    issues: [{ path: [field], message: error, code: "invalid_value" }],
+  });
+
+/**
+ * Starts the workflow with the input, or a sandbox run of the scenario: its workflow with its
+ * input, seeded by the worker. Its approvals wait for people, as a live run's do.
+ */
 export async function startRun(
   { client, resolved }: AppContext,
   actor: Principal,
   body: StartRunRequest,
 ): Promise<StartRunResponse> {
-  const workflow = resolved.workflows.get(body.workflow);
-  if (!workflow) {
-    throw new ApiError(404, {
-      error: `No workflow named "${body.workflow}"`,
-      code: "invalid_input",
-      issues: [{ path: ["workflow"], message: `No workflow named "${body.workflow}"`, code: "invalid_value" }],
-    });
+  if ("scenario" in body) {
+    const all = loadScenarios(resolved).scenarios;
+    const scenario = all.find((s) => s.name === body.scenario);
+    const workflow = scenario && resolved.workflows.get(scenario.workflow);
+    if (!scenario || !workflow) {
+      const known = all.length ? `; the scenarios are ${all.map((s) => `"${s.name}"`).join(", ")}` : "; there are none";
+      throw noSuch("scenario", `No scenario named "${body.scenario}"${known}`);
+    }
+    return {
+      runId: await client.start(workflow, scenario.input, { startedBy: actor, sandbox: scenario.name }),
+    };
   }
+  const workflow = resolved.workflows.get(body.workflow);
+  if (!workflow) throw noSuch("workflow", `No workflow named "${body.workflow}"`);
   return { runId: await client.start(workflow, body.input, { startedBy: actor }) };
 }
 

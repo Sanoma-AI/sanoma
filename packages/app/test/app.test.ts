@@ -39,7 +39,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
 import { z } from "zod";
 import { type App, type ErrorResponse, type RunDetail, startApp } from "../src/index.ts";
-import { ApiError } from "../src/api.ts";
+import { ApiError, type ScenariosResponse } from "../src/api.ts";
 import { asApiError, parse, withoutSources, workflowSource } from "../src/server/core.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it when
@@ -81,6 +81,9 @@ const config = defineConfig({
   workflows: [announce],
   connectors: [ghost, resend, bluesky],
   drivers: [blog.driver, fakeResend().driver, fakeBluesky().driver],
+  // Sandbox runs call these, seeded from the scenarios, never the drivers above.
+  fakes: [fakeGhost(), fakeResend(), fakeBluesky()],
+  scenarios: new URL("./fixtures/scenarios/", import.meta.url),
   policy,
   ledger: memoryLedger(),
   appName: "sanoma-app-test",
@@ -91,6 +94,9 @@ let worker: Worker;
 let app: App;
 /** The run the API tests start, which the page tests then look for. */
 let runId: string;
+/** The sandbox run the scenario tests start, which the page tests then render. */
+let sandboxId: string;
+const SCENARIO = "Launch on time";
 
 beforeAll(async () => {
   if (needsBuild()) {
@@ -356,6 +362,73 @@ describe("the API", () => {
   });
 });
 
+describe("scenarios and sandbox runs", () => {
+  it("lists the scenarios in the config's feature files, with their steps", async () => {
+    const { status, body } = await call<ScenariosResponse>("/api/scenarios");
+    expect(status).toBe(200);
+    expect(body.errors).toEqual([]);
+    expect(body.scenarios.map((s) => s.name)).toEqual([SCENARIO, "Publish retried"]);
+    const launch = body.scenarios[0]!;
+    expect(launch).toMatchObject({
+      workflow: "announce",
+      file: "announce.feature",
+      text: expect.stringContaining("Feature: Announce a launch"),
+    });
+    expect(launch.steps).toContainEqual({
+      text: 'a post titled "Old news" exists',
+      kind: "given",
+      op: "ghost.post.create",
+    });
+    expect(launch.steps).toContainEqual({ text: "the run succeeds", kind: "then" });
+    // What the page lists, not how the worker seeds and checks it.
+    expect(launch).not.toHaveProperty("expect");
+  });
+
+  it("refuses a scenario the config does not have, naming those it has", async () => {
+    const { status, body } = await call("/api/runs", { method: "POST", actor: "tester", body: { scenario: "nope" } });
+    expect(status).toBe(404);
+    expect(body).toMatchObject({ code: "invalid_input", issues: [expect.objectContaining({ path: ["scenario"] })] });
+    expect(body.error).toBe('No scenario named "nope"; the scenarios are "Launch on time", "Publish retried"');
+  });
+
+  it("starts a sandbox run whose approval waits for a person, then checks it against the scenario", async () => {
+    const started = await call<{ runId: string }>("/api/runs", {
+      method: "POST",
+      actor: "tester",
+      body: { scenario: SCENARIO },
+    });
+    expect(started.status).toBe(201);
+    sandboxId = started.body.runId;
+
+    // The app decides nothing: the run waits on its approval as a live run does.
+    const held = await waitFor(
+      () => detail(sandboxId),
+      (d) => d.approvals.some((a) => a.status === "pending"),
+    );
+    expect(held.run).toMatchObject({ status: "waiting", sandbox: SCENARIO, startedBy: { id: "tester" } });
+    expect(held.ledger.find((r) => r.type === "scenario.seeded")).toMatchObject({
+      scenario: SCENARIO,
+      seeds: [
+        expect.objectContaining({ op: "ghost.post.create", input: expect.objectContaining({ title: "Old news" }) }),
+      ],
+    });
+    expect(held.checks).toContainEqual({ step: "the run succeeds", ok: false, detail: "run not ended" });
+
+    const decided = await call<ApprovalState>(`/api/runs/${sandboxId}/approvals/${held.approvals[0]!.id}`, {
+      method: "POST",
+      actor: "marketing-lead",
+      body: { decision: "approve" },
+    });
+    expect(decided.body.status).toBe("approved");
+    const done = await waitFor(
+      () => detail(sandboxId),
+      (d) => d.run.status === "finished",
+    );
+    expect(done.checks).toHaveLength(5);
+    expect(done.checks?.filter((c) => !c.ok)).toEqual([]);
+  });
+});
+
 describe("errors the app answers with", () => {
   it("answers anything unexpected with a 500 that names no detail", () => {
     const api = asApiError(new Error("connect ECONNREFUSED db.internal:5432"));
@@ -533,6 +606,32 @@ describe("the page", () => {
     expect(missing.text).toContain("No workflow nope");
   });
 
+  it("renders a workflow's scenario, the picker and Test, and says when a scenario does not exist", async () => {
+    const chosen = await page(`/workflows/announce?scenario=${encodeURIComponent(SCENARIO)}`);
+    expect(chosen.status).toBe(200);
+    expect(chosen.html).toMatch(/<select[^>]*aria-label="Scenario"/);
+    expect(chosen.html).toMatch(/<option[^>]*value="Launch on time"[^>]*selected=""/);
+    expect(chosen.text).toMatch(/>Test<\/button>/);
+    expect(chosen.text).toContain("Feature: Announce a launch");
+    expect(chosen.text).toContain("From <code>announce.feature</code>");
+
+    const unknown = await page("/workflows/announce?scenario=nope");
+    expect(unknown.status).toBe(200);
+    expect(unknown.text).toContain("No scenario named “nope”");
+    expect(unknown.html).toMatch(/<select[^>]*aria-label="Scenario"/);
+  });
+
+  it("renders a sandbox run: its badge, its checks and its seeding, and its badge in the runs", async () => {
+    const run = await page(`/runs/${sandboxId}`);
+    expect(run.status).toBe(200);
+    expect(run.text).toContain("sandbox · Launch on time");
+    expect(run.html).toMatch(/<h2[^>]*>Checks<\/h2>/);
+    expect(run.text).toContain("resend.broadcast.send was called");
+    expect(run.text).toContain("Seeded 1 call from scenario “Launch on time”");
+    const runs = await page("/runs");
+    expect(runs.text).toContain("sandbox · Launch on time");
+  });
+
   it("answers any other path with the app's not-found page", async () => {
     const res = await fetch(new URL("/nonexistent", app.url));
     expect(res.status).toBe(404);
@@ -568,7 +667,8 @@ describe("the page", () => {
   it("keeps the runtime out of the browser bundle", () => {
     const dir = join(distDir, "client", "assets");
     for (const file of readdirSync(dir).filter((f) => f.endsWith(".js"))) {
-      expect(readFileSync(join(dir, file), "utf8"), file).not.toMatch(/DBOSClient|systemDatabaseUrl/);
+      // Nor the scenarios' Gherkin parser and faker, which only the server loads.
+      expect(readFileSync(join(dir, file), "utf8"), file).not.toMatch(/DBOSClient|systemDatabaseUrl|@cucumber|faker/);
     }
   });
 

@@ -2,8 +2,8 @@ import type { RunSummary } from "@sanoma/workflows";
 import type { ConfigDescription } from "@sanoma/workflows/describe";
 import { isEnded } from "@sanoma/workflows/shared";
 import { queryOptions } from "@tanstack/react-query";
-import { pendingApprovals, RUNS_LIMIT } from "./api.ts";
-import { getActor, getConfig, getRun, getRuns, getSource } from "./functions.ts";
+import { pendingApprovals, RUNS_LIMIT, type ScenariosResponse } from "./api.ts";
+import { getActor, getConfig, getRun, getRuns, getScenarios, getSource } from "./functions.ts";
 
 /** How often the runs and a run's detail refresh while a page shows them. */
 export const POLL_MS = 2_000;
@@ -45,6 +45,26 @@ export type ConnectorEntry = ReturnType<typeof connectorsOf>[number];
 /** The config's workflow of this name, if it has one: for `select`, or called with the config. */
 export const workflowNamed = (name: string) => (config: ConfigDescription) =>
   config.workflows.find((wf) => wf.name === name);
+
+/**
+ * The config's scenarios. Unlike the config they change while the app runs (the agent edits the
+ * feature files), so they are read again after 5 s, and whenever the window regains focus.
+ */
+export const scenariosQuery = () =>
+  queryOptions({
+    queryKey: ["scenarios"],
+    queryFn: () => getScenarios(),
+    staleTime: 5_000,
+    refetchOnWindowFocus: true,
+  });
+
+/** The workflow's scenarios, and every feature file that could not be read: for `select`. */
+export const scenariosFor =
+  (workflow: string) =>
+  ({ scenarios, errors }: ScenariosResponse) => ({
+    scenarios: scenarios.filter((s) => s.workflow === workflow),
+    errors,
+  });
 
 /**
  * Who the server says is asking. A login lasts the page's life; the header name is kept in the
