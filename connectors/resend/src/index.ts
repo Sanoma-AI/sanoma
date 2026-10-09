@@ -27,8 +27,7 @@ export const resend = defineConnector(
       send: {
         effect: "send",
         description: "Send a broadcast to every contact in its audience. Cannot be undone.",
-        // oxlint-disable-next-line unicorn/no-thenable -- `then` is a scenario step keyword here, not a thenable
-        phrases: { then: "broadcast {id} is sent" },
+        phrases: { expect: "broadcast {id} is sent" },
         input: z.object({ id: z.string() }),
         output: z.object({ id: z.string(), status: z.enum(["queued", "sent"]) }),
       },

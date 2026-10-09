@@ -82,7 +82,7 @@ describe("describeConfig", () => {
     });
     expect(publish.input).toMatchObject({ type: "object", required: ["id"] });
     // How a scenario's steps name it; an operation without phrases has none.
-    expect(publish.phrases).toHaveProperty("then", "post {id} is published");
+    expect(publish.phrases).toHaveProperty("expect", "post {id} is published");
     expect(ops.find((o) => o.id === "resend.broadcast.create")).not.toHaveProperty("phrases");
     expect(publish.output).toMatchObject({
       type: "object",

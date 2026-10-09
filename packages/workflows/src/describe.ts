@@ -39,7 +39,7 @@ export interface OpEntry {
   idempotent: boolean;
   description?: string;
   /** How a scenario's steps name it: Cucumber expressions over its input's fields. */
-  phrases?: { given?: string; then?: string };
+  phrases?: { given?: string; expect?: string };
   /** What a call sends, as JSON Schema (`io: "input"`: fields with defaults are optional). */
   input: Record<string, unknown>;
   /** What a call returns once its schema has parsed the vendor's reply (`io: "output"`). */

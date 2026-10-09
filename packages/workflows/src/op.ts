@@ -24,10 +24,10 @@ export interface OpSpec<I extends z.ZodType = z.ZodType, O extends z.ZodType = z
   target?: (input: any) => string;
   /**
    * How a scenario says this operation was set up or called, in Gherkin steps: `given` seeds
-   * the fake through it, `then` expects a call to it. Cucumber expressions whose parameters are
+   * the fake through it, `expect` expects a call to it. Cucumber expressions whose parameters are
    * fields of the input, such as `{ given: "a post titled {title} exists" }`.
    */
-  phrases?: { given?: string; then?: string };
+  phrases?: { given?: string; expect?: string };
 }
 
 /** One vendor operation, such as `ghost.post.publish`. Declares the contract only; drivers implement it. */
@@ -43,7 +43,7 @@ export interface Op<V extends string = string, R extends string = string, N exte
   /** From the spec: the resource instance a call acts on. */
   readonly target?: (input: any) => string;
   /** From the spec: how a scenario's steps name it. */
-  readonly phrases?: { readonly given?: string; readonly then?: string };
+  readonly phrases?: { readonly given?: string; readonly expect?: string };
   readonly input: z.ZodType<any, I>;
   readonly output: z.ZodType<O>;
 }
