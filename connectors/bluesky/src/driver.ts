@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { Agent, AppBskyRichtextFacet, CredentialSession, RichText } from "@atproto/api";
+import { Agent, AppBskyRichtextFacet, CredentialSession, RichText, XRPCError } from "@atproto/api";
 import { TID } from "@atproto/common-web";
-import { ResponseType, XRPCError } from "@atproto/xrpc";
+import { ResponseType } from "@atproto/xrpc";
 import { defineDriver, DriverError, retryableStatus } from "@sanoma/workflows";
 import { bluesky } from "./index.ts";
 
@@ -26,30 +26,28 @@ export function blueskyDriver(options: BlueskyDriverOptions = {}) {
     const request = new Request(input, init);
     return fetch(request, { signal: AbortSignal.any([request.signal, AbortSignal.timeout(timeoutMs)]) });
   };
-  let current: { key: string; session: CredentialSession; agent: Agent; login?: Promise<unknown> } | undefined;
+  let session: CredentialSession | undefined;
+  let client: Agent | undefined;
+  let login: Promise<unknown> | undefined;
 
-  /** The signed-in agent for the account the environment names, logging in when there is no session. */
+  /** The signed-in agent, logging in when there is no session. */
   async function signIn() {
     const identifier = env("BLUESKY_IDENTIFIER");
     const password = env("BLUESKY_APP_PASSWORD");
-    const service = process.env.BLUESKY_SERVICE || "https://bsky.social";
-    const key = `${service} ${identifier}`;
-    if (current?.key !== key) {
-      const session = new CredentialSession(new URL(service), timedFetch);
-      current = { key, session, agent: new Agent(session) };
-    }
-    const entry = current;
+    // One session for the driver's life, on the service the first call names.
+    session ??= new CredentialSession(new URL(process.env.BLUESKY_SERVICE || "https://bsky.social"), timedFetch);
+    client ??= new Agent(session);
     // No session yet, or a refresh found the refresh token expired or revoked. Concurrent
     // calls share one login.
-    if (!entry.session.session) {
-      entry.login ??= entry.session.login({ identifier, password }).finally(() => (entry.login = undefined));
-      await entry.login.catch((err) => {
+    if (!session.session) {
+      login ??= session.login({ identifier, password }).finally(() => (login = undefined));
+      await login.catch((err) => {
         throw driverError(err, "login", timeoutMs);
       });
     }
-    const data = entry.session.session;
+    const data = session.session;
     if (!data) throw new DriverError("Bluesky login returned no session", { retryable: true });
-    return { agent: entry.agent, did: data.did, handle: data.handle };
+    return { agent: client, did: data.did, handle: data.handle };
   }
 
   return defineDriver(bluesky, {
