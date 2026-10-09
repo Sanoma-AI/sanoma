@@ -1,0 +1,7 @@
+{
+  "status": 400,
+  "body": {
+    "error": "RecordNotFound",
+    "message": "Could not locate record: at://did:plc:example/app.bsky.feed.post/{rkey}"
+  }
+}
