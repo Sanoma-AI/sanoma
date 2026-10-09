@@ -6,6 +6,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Separator } from "#/components/ui/separator.tsx";
 import { Fact, Facts, GraphPanel, loadGraph, Nothing, PageHeader } from "../../components/common.tsx";
 import { Section, StartButton, WorkflowSections } from "../../components/workflow.tsx";
+import { outlineGraph } from "../../graph/outline-graph.ts";
 import { configQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/workflows/")({
@@ -60,7 +61,7 @@ function WorkflowsPage() {
 
 function WorkflowCard({ workflow }: { workflow: WorkflowEntry }) {
   const { outline } = workflow;
-  const source = useMemo(() => ("nodes" in outline ? { outline: outline.nodes } : undefined), [outline]);
+  const graph = useMemo(() => ("nodes" in outline ? outlineGraph(outline.nodes) : undefined), [outline]);
   return (
     <Card>
       <CardHeader>
@@ -83,7 +84,7 @@ function WorkflowCard({ workflow }: { workflow: WorkflowEntry }) {
               ? outline.error
               : "Read from the body of run; the functions it calls are not shown, even those defined in it"}
           </p>
-          {source && <GraphPanel source={source} show="start" />}
+          {graph && <GraphPanel graph={graph} show="start" />}
         </Section>
         <Separator />
         <WorkflowSections workflow={workflow} />

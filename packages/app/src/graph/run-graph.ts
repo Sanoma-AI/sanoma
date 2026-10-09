@@ -4,7 +4,7 @@ import { isEnded } from "@sanoma/workflows/shared";
 import { utcText } from "../lib/time.ts";
 import { APPROVAL_TONE, RUN_TONE, type Tone } from "../lib/tone.ts";
 import { type Ends, outlineGraph } from "./outline-graph.ts";
-import type { CallStep, Graph, GraphSource, Step } from "./types.ts";
+import type { CallStep, Graph, Step } from "./types.ts";
 
 type OpStep = Extract<Step, { kind: "op" }>;
 type AllStep = Extract<Step, { kind: "all" }>;
@@ -151,10 +151,6 @@ export function runGraph(
     : { label: "pending", pending: true, state: { tone: woke ? "active" : "off" } };
   return outlineGraph(steps, { start, end }, whereIn(outline));
 }
-
-/** A page's graph, from what it is drawn from. */
-export const graphOf = (source: GraphSource): Graph =>
-  "ledger" in source ? runGraph(source.ledger, source.run, source.at, source.outline) : outlineGraph(source.outline);
 
 type Call = Extract<OutlineNode, { kind: CallStep["kind"] }>;
 

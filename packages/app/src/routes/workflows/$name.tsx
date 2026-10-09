@@ -1,8 +1,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, notFound } from "@tanstack/react-router";
-import { useMemo } from "react";
 import { Card, CardContent } from "#/components/ui/card.tsx";
-import { loadCode, loadGraph, Nothing, Notice, PageHeader, pageTitle } from "../../components/common.tsx";
+import { loadCode, loadGraph, Notice, PageHeader, pageTitle } from "../../components/common.tsx";
 import { GraphAndSource, StartButton, WorkflowSections } from "../../components/workflow.tsx";
 import { configQuery, sourceQuery } from "../../queries.ts";
 
@@ -32,8 +31,6 @@ function WorkflowPage() {
     ...configQuery(),
     select: (config) => config.workflows.find((wf) => wf.name === name)!,
   });
-  const { outline } = workflow;
-  const source = useMemo(() => ("nodes" in outline ? { outline: outline.nodes } : undefined), [outline]);
   return (
     <div className="flex flex-col gap-6">
       <PageHeader>
@@ -42,11 +39,7 @@ function WorkflowPage() {
           <StartButton name={workflow.name} />
         </div>
       </PageHeader>
-      {source ? (
-        <GraphAndSource key={name} name={name} outline={outline} source={source} show="start" />
-      ) : (
-        "error" in outline && <Nothing title="No outline">{outline.error}</Nothing>
-      )}
+      <GraphAndSource key={name} workflow={workflow} />
       <Card>
         <CardContent className="flex flex-col gap-4">
           <WorkflowSections workflow={workflow} />

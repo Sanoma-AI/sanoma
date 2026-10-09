@@ -330,9 +330,10 @@ export function Nothing({ title, children, action }: { title: string; children?:
 }
 
 /**
- * The graph's chunk: React Flow, dagre and the builders. It needs the DOM, so it loads in the
- * browser only, as one chunk for every page that draws a graph. A page's loader calls this in
- * the browser, so the chunk loads while the page hydrates rather than after.
+ * The graph's chunk: React Flow and dagre, which lay out and draw the graph the page builds. It
+ * needs the DOM, so it loads in the browser only, as one chunk for every page that draws a graph.
+ * A page's loader calls this in the browser, so the chunk loads while the page hydrates rather
+ * than after.
  */
 export const loadGraph = () => import("./graph.tsx");
 const Graph = lazy(loadGraph);

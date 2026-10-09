@@ -1,15 +1,17 @@
-import type { Outline, OpEntry, WorkflowEntry } from "@sanoma/workflows/describe";
+import type { LedgerRecord, RunSummary } from "@sanoma/workflows";
+import type { OpEntry, WorkflowEntry } from "@sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { PlayIcon } from "lucide-react";
-import { type ReactNode, useMemo, useState } from "react";
+import { memo, type ReactNode, useCallback, useMemo, useState } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
 import { type Field, fieldsOf } from "../form/schema.ts";
-import { graphOf } from "../graph/run-graph.ts";
-import { type GraphNode, type GraphSource, nodeAt } from "../graph/types.ts";
+import { outlineGraph } from "../graph/outline-graph.ts";
+import { runGraph } from "../graph/run-graph.ts";
+import { type GraphNode, nodeAt } from "../graph/types.ts";
 import { configQuery, opsById, sourceQuery } from "../queries.ts";
 import { ApprovalIcon, SleepIcon } from "./approval.tsx";
 import type { CodeProps } from "./code.tsx";
@@ -145,49 +147,63 @@ function InputFields({ fields }: { fields: Field[] }) {
 const PANEL = "h-[360px] sm:h-[420px]";
 
 /**
- * A workflow's graph, or a run's, beside the workflow's source. A click on a node, or in the
- * code, selects the node: the graph rings it and the code marks the lines it may stand for.
- * `onSelect` is told of each node selected, after. Where the outline could not be read, its
- * error shows in place of the code.
+ * A workflow's graph, or a run's (`run`: its ledger and summary, read at `at`), beside the
+ * workflow's source. A click on a node, or in the code, selects the node: the graph rings it and
+ * the code marks the lines it may stand for. `onSelect` is told of each node selected, after.
+ * Without an outline (it could not be read, or the config has no such workflow) the code's place
+ * says why; with no run either there is nothing to draw, and that says why in place of both.
  */
-export function GraphAndSource({
-  name,
-  outline,
-  source,
-  show,
+export const GraphAndSource = memo(function GraphAndSource({
+  workflow: { name, outline },
+  run,
   onSelect,
 }: {
-  name: string;
-  outline: Outline;
-  source: GraphSource;
-  show?: "start" | "end";
+  /** The workflow's entry, or only its name when the config has no workflow of that name. */
+  workflow: Pick<WorkflowEntry, "name"> & Partial<Pick<WorkflowEntry, "outline">>;
+  run?: { ledger: LedgerRecord[]; run: RunSummary; at: number };
   onSelect?: (node: GraphNode) => void;
 }) {
-  const [selected, setSelected] = useState<GraphNode>();
-  // The graph's nodes, here too: a click in the code finds its node without the graph's chunk.
-  const nodes = useMemo(() => graphOf(source).nodes, [source]);
-  const select = (node: GraphNode | undefined) => {
-    setSelected(node);
-    if (node) onSelect?.(node);
-  };
+  const steps = outline && "nodes" in outline ? outline.nodes : undefined;
+  // The page's one graph: the panel draws it, and a click in the code finds its node in it.
+  const graph = useMemo(
+    () => (run ? runGraph(run.ledger, run.run, run.at, steps) : steps && outlineGraph(steps)),
+    [run, steps],
+  );
+  // By id, so a poll's new graph cannot leave an old node selected.
+  const [selected, setSelected] = useState<string>();
+  const select = useCallback(
+    (node: GraphNode | undefined) => {
+      setSelected(node?.id);
+      if (node) onSelect?.(node);
+    },
+    [onSelect],
+  );
+  const selectAt = useCallback((offset: number) => select(graph && nodeAt(graph.nodes, offset)), [graph, select]);
+  const highlight = useMemo(() => graph?.nodes.find((node) => node.id === selected)?.spans, [graph, selected]);
+  const unread =
+    outline === undefined
+      ? `This config has no workflow named ${name}`
+      : "error" in outline
+        ? outline.error
+        : undefined;
+  const noSource = unread !== undefined && <Nothing title="No source to show">{unread}</Nothing>;
+  if (!graph) return noSource;
   return (
     <div className="flex flex-col gap-2">
-      {"fallback" in outline && <None>Showing the function's text, not the file: {outline.fallback}</None>}
+      {outline && "fallback" in outline && <None>Showing the function's text, not the file: {outline.fallback}</None>}
       <div className="grid gap-4 lg:grid-cols-2">
-        <GraphPanel className={PANEL} source={source} show={show} selected={selected?.id} onSelect={select} />
-        {"error" in outline ? (
-          <Nothing title="No source to show">{outline.error}</Nothing>
-        ) : (
-          <SourcePanel
-            name={name}
-            highlight={selected && "spans" in selected ? selected.spans : undefined}
-            onSelect={(offset) => select(nodeAt(nodes, offset))}
-          />
-        )}
+        <GraphPanel
+          className={PANEL}
+          graph={graph}
+          show={run ? "end" : "start"}
+          selected={selected}
+          onSelect={select}
+        />
+        {noSource || <SourcePanel name={name} highlight={highlight} onSelect={selectAt} />}
       </div>
     </div>
   );
-}
+});
 
 function SourcePanel({ name, ...props }: { name: string } & Pick<CodeProps, "highlight" | "onSelect">) {
   const { data } = useSuspenseQuery(sourceQuery(name));

@@ -2,7 +2,7 @@ import type { ErrorInfo, LedgerRecord } from "@sanoma/workflows";
 import type { ConfigDescription, OpEntry } from "@sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { memo, type ReactNode, useMemo } from "react";
+import { memo, type ReactNode, useCallback, useMemo } from "react";
 import { Card, CardContent } from "#/components/ui/card.tsx";
 import { Item, ItemActions, ItemContent, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { approverLabel } from "@sanoma/workflows/shared";
@@ -85,23 +85,22 @@ function RunPage() {
   const { id } = Route.useParams();
   const { data, error, dataUpdatedAt } = useSuspenseQuery(runQuery(id));
   const { run, ledger, ledgerError, approvals } = data;
+  // Only its name when the config has no workflow of that name: the graph says so.
   const { data: workflow } = useSuspenseQuery({
     ...configQuery(),
-    select: (config) => config.workflows.find((wf) => wf.name === run.workflow),
+    select: (config) => config.workflows.find((wf) => wf.name === run.workflow) ?? { name: run.workflow },
   });
-  const outline = workflow?.outline ?? { error: `This config has no workflow named ${run.workflow}` };
-  const nodes = "nodes" in outline ? outline.nodes : undefined;
-  // A new source on every poll, even one that changed nothing: a sleep's end may have come.
-  const source = useMemo(
-    () => ({ ledger, run, at: dataUpdatedAt, ...(nodes && { outline: nodes }) }),
-    [ledger, run, dataUpdatedAt, nodes],
-  );
+  // A new reading on every poll, even one that changed nothing: a sleep's end may have come.
+  const reading = useMemo(() => ({ ledger, run, at: dataUpdatedAt }), [ledger, run, dataUpdatedAt]);
   const titles = useMemo(() => new Map(approvals.map((a) => [a.id, a.title])), [approvals]);
   const reducedMotion = useReducedMotion();
-  const select = (node: GraphNode) => {
-    const recordId = "state" in node ? node.state?.recordId : undefined;
-    if (recordId) show(recordId, reducedMotion);
-  };
+  const select = useCallback(
+    (node: GraphNode) => {
+      const recordId = "state" in node ? node.state?.recordId : undefined;
+      if (recordId) show(recordId, reducedMotion);
+    },
+    [reducedMotion],
+  );
   return (
     <div className="flex flex-col gap-6">
       <PageHeader>
@@ -129,7 +128,7 @@ function RunPage() {
 
       <div className="flex flex-col gap-3">
         <SectionTitle>Graph</SectionTitle>
-        <GraphAndSource key={run.runId} name={run.workflow} outline={outline} source={source} onSelect={select} />
+        <GraphAndSource key={run.runId} workflow={workflow} run={reading} onSelect={select} />
       </div>
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">

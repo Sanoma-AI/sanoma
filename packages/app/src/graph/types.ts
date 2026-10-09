@@ -1,5 +1,5 @@
-import type { ApprovalState, ErrorCode, LedgerRecord, RecordedDecision, RunSummary } from "@sanoma/workflows";
-import type { OutlineNode, Span } from "@sanoma/workflows/describe";
+import type { ApprovalState, ErrorCode, RecordedDecision } from "@sanoma/workflows";
+import type { Span } from "@sanoma/workflows/describe";
 import type { Tone } from "../lib/tone.ts";
 
 /*
@@ -108,14 +108,6 @@ export function nodeAt(nodes: readonly GraphNode[], offset: number): GraphNode |
   }
   return found;
 }
-
-/**
- * What a page's graph is drawn from: a run's ledger as read at `at`, with its workflow's outline
- * when there is one (runGraph), or a workflow's outline (outlineGraph).
- */
-export type GraphSource =
-  | { ledger: LedgerRecord[]; run: RunSummary; at: number; outline?: OutlineNode[] }
-  | { outline: OutlineNode[] };
 
 /** True for what a run has not reached yet: drawn dashed, as are the edges into and out of it. */
 export const isPending = (node: GraphNode): boolean =>

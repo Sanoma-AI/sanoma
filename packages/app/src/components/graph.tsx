@@ -23,8 +23,13 @@ import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, us
 import { Badge } from "#/components/ui/badge.tsx";
 import { approverLabel } from "@sanoma/workflows/shared";
 import { layout } from "../graph/layout.ts";
-import { graphOf } from "../graph/run-graph.ts";
-import { type GraphNode, type GraphNodeKind, type GraphSource, isPending, isSelectable } from "../graph/types.ts";
+import {
+  type Graph as GraphData,
+  type GraphNode,
+  type GraphNodeKind,
+  isPending,
+  isSelectable,
+} from "../graph/types.ts";
 import { useReducedMotion } from "#/lib/motion.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import { configQuery, opsById } from "../queries.ts";
@@ -324,7 +329,8 @@ function useStable<T extends { id: string }>(items: T[], depth: number): T[] {
 }
 
 export interface GraphProps {
-  source: GraphSource;
+  /** Built by the page, which needs its nodes too: a click in the source finds its node there. */
+  graph: GraphData;
   /** The end shown when all of the graph cannot be read at once. Defaults to `end`. */
   show?: "start" | "end";
   /** The selected node's id, ringed. */
@@ -334,15 +340,14 @@ export interface GraphProps {
 }
 
 /**
- * A graph, built, laid out and drawn left to right, here in the browser. Clicking a node with a
- * place in the source or a ledger record calls `onSelect` with it.
+ * A graph, laid out and drawn left to right, here in the browser. Clicking a node with a place in
+ * the source or a ledger record calls `onSelect` with it.
  */
-export default function Graph({ source, show = "end", selected, onSelect }: GraphProps) {
+export default function Graph({ graph, show = "end", selected, onSelect }: GraphProps) {
   const reducedMotion = useReducedMotion();
   const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
   // Hidden until the first fit, so the graph does not show unfitted for a frame.
   const [fitted, setFitted] = useState(false);
-  const graph = useMemo(() => graphOf(source), [source]);
   const clickable = onSelect !== undefined;
   const laidOut = useMemo(() => {
     const at = layout(graph);
@@ -385,14 +390,12 @@ export default function Graph({ source, show = "end", selected, onSelect }: Grap
     });
   }, [graph, reducedMotion]);
   const edges = useStable(drawn, 2);
-  // The page's handler changes as it renders; the one React Flow holds does not.
-  const select = useRef(onSelect);
-  useEffect(() => {
-    select.current = onSelect;
-  });
-  const onNodeClick = useCallback((_: unknown, { data }: FlowNode) => {
-    if (data.selectable) select.current?.(data.node);
-  }, []);
+  const onNodeClick = useCallback(
+    (_: unknown, { data }: FlowNode) => {
+      if (data.selectable) onSelect?.(data.node);
+    },
+    [onSelect],
+  );
 
   return (
     <ReactFlowProvider>
