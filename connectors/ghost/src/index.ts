@@ -5,7 +5,8 @@ const Post = z.object({
   id: z.string(),
   url: z.string(),
   slug: z.string(),
-  status: z.enum(["draft", "scheduled", "published"]),
+  /** `sent`: emailed to a newsletter only, never on the site. */
+  status: z.enum(["draft", "scheduled", "published", "sent"]),
   publishedAt: z.string().nullable(),
 });
 

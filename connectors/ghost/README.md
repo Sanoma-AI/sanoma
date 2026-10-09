@@ -53,7 +53,7 @@ To make the key: in Ghost Admin, **Settings → Integrations → Add custom inte
 
 ### Idempotency
 
-Ghost takes no idempotency key, and the runtime never retries `post.create`. If its reply is lost, the run fails and a draft stays in Ghost; the next run makes a new one. A draft is not visible on the site; delete it in Ghost Admin. `post.publish` returns a post that is already published as it is, without saving it, so a retry after a lost reply changes nothing.
+Ghost takes no idempotency key, and the runtime never retries `post.create`. If its reply is lost, the run fails and a draft stays in Ghost; the next run makes a new one. A draft is not visible on the site; delete it in Ghost Admin. `post.publish` returns a post that is already published as it is, without saving it, so a retry after a lost reply changes nothing; so too a post Ghost sent as an email only (`status: "sent"`), which is not a draft.
 
 ### Errors and retries
 

@@ -77,7 +77,7 @@ describe("describeConfig", () => {
     expect(publish.input).toMatchObject({ type: "object", required: ["id"] });
     expect(publish.output).toMatchObject({
       type: "object",
-      properties: { status: { enum: ["draft", "scheduled", "published"] } },
+      properties: { status: { enum: ["draft", "scheduled", "published", "sent"] } },
     });
   });
 

@@ -24,7 +24,7 @@ const GhostPost = z.object({
   id: z.string(),
   url: z.string(),
   slug: z.string(),
-  status: z.enum(["draft", "scheduled", "published"]),
+  status: z.enum(["draft", "scheduled", "published", "sent"]),
   published_at: z.string().nullable(),
   updated_at: z.string(),
 });
@@ -150,7 +150,8 @@ export function ghostDriver(options: GhostDriverOptions = {}) {
         // someone saved it in between. Read it again and try once more.
         for (let attempt = 1; ; attempt++) {
           const post = await send("GET", path);
-          if (post.status === "published") return out(post);
+          // Published already, or sent as an email only: it is no draft to publish.
+          if (post.status === "published" || post.status === "sent") return out(post);
           try {
             return out(await send("PUT", path, { posts: [{ status: "published", updated_at: post.updated_at }] }));
           } catch (err) {

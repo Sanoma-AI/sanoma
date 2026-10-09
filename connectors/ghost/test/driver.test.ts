@@ -341,6 +341,12 @@ describe("ghostDriver", () => {
       expect(err).toMatchObject({ retryable: true, message: expect.stringContaining("no reply in 20 ms") });
     });
 
+    it("returns a post sent as an email only as it is, without saving it", async () => {
+      play("sent", [{ ...read!, body: { posts: [{ ...draft!, status: "sent" }] } }]);
+      expect(await publish(draft!.id)).toMatchObject({ id: draft!.id, status: "sent" });
+      expect((await requests()).map((r) => r.method)).toEqual(["GET"]);
+    });
+
     it("reads the post again after an update collision, and saves it with the newer updated_at", async () => {
       const later = "2030-01-01T00:00:00.000Z";
       const reread = { ...read!, body: { posts: [{ ...draft!, updated_at: later }] } };
