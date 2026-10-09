@@ -4,7 +4,7 @@ import { isEnded } from "@sanoma/workflows/shared";
 import { utcText } from "../lib/time.ts";
 import { APPROVAL_TONE, RUN_TONE, type Tone } from "../lib/tone.ts";
 import { type Ends, outlineGraph } from "./outline-graph.ts";
-import type { Graph, GraphSource, Step } from "./types.ts";
+import type { CallStep, Graph, GraphSource, Step } from "./types.ts";
 
 type OpStep = Extract<Step, { kind: "op" }>;
 type AllStep = Extract<Step, { kind: "all" }>;
@@ -15,8 +15,8 @@ type AllStep = Extract<Step, { kind: "all" }>;
  * workflow asked for, and how it ended. The records of one `ctx.all` (one `group.id`) are its
  * lanes, one per member (`group.index`); while the run is in the group, the members it has
  * recorded nothing for yet are pending lanes. `now` is when the ledger was read, which a sleep's
- * end is compared with. Given the workflow's `outline`, each step's node has the `spans` of the
- * outline's steps it may be (see `spansOf`).
+ * end is compared with. Given the workflow's `outline`, each call's node has the `spans` of the
+ * outline's calls it may be (see `whereIn`).
  */
 export function runGraph(
   records: readonly LedgerRecord[],
@@ -25,11 +25,6 @@ export function runGraph(
   outline: readonly OutlineNode[] = [],
 ): Graph {
   const ended = isEnded(run.status);
-  const where = spansOf(outline);
-  const inSource = (...keys: string[]) => {
-    const spans = keys.map((key) => where.get(key)).find(Boolean);
-    return spans ? { spans } : {};
-  };
   const approvals = new Map(run.approvals.map((a) => [a.id, a]));
   const steps: Step[] = [];
   /** Op steps by seq: a policy's approval finds the call it holds by `opSeq`. */
@@ -64,7 +59,6 @@ export function runGraph(
           kind: "op",
           id: record.op,
           key: `op:${record.seq}`,
-          ...inSource(`op:${record.op}`),
           state: {
             tone: failed ? "bad" : "ok",
             recordId: record.id,
@@ -91,7 +85,6 @@ export function runGraph(
               kind: "op",
               id: record.op,
               key: `op:${record.opSeq}`,
-              ...inSource(`op:${record.op}`),
               state: { tone: heldTone(status, ended), recordId: record.id, ...(approval && { approval }) },
             };
             ops.set(record.opSeq, step);
@@ -104,7 +97,6 @@ export function runGraph(
               kind: "approval",
               title: record.title,
               key: `approval:${record.approval}`,
-              ...inSource(`approval:${record.title}`, "approval"),
               state: { tone, recordId: record.id, ...(approval && { approval }) },
             },
             record.group,
@@ -119,7 +111,6 @@ export function runGraph(
           {
             kind: "sleep",
             key: `sleep:${record.seq}`,
-            ...inSource("sleep"),
             label: `sleep until ${utcText(record.until)}`,
             state: { tone: asleep ? "waiting" : "ok", recordId: record.id },
           },
@@ -158,50 +149,53 @@ export function runGraph(
   end ??= ended
     ? { label: run.status, state: { tone: RUN_TONE[run.status] } }
     : { label: "pending", pending: true, state: { tone: woke ? "active" : "off" } };
-  return outlineGraph(steps, { start, end });
+  return outlineGraph(steps, { start, end }, whereIn(outline));
 }
 
 /** A page's graph, from what it is drawn from. */
 export const graphOf = (source: GraphSource): Graph =>
   "ledger" in source ? runGraph(source.ledger, source.run, source.at, source.outline) : outlineGraph(source.outline);
 
+type Call = Extract<OutlineNode, { kind: CallStep["kind"] }>;
+
+/** The outline's calls, wherever they are in it. */
+const calls = (nodes: readonly OutlineNode[]): Call[] =>
+  nodes.flatMap((node) =>
+    node.kind === "all"
+      ? node.branches.flatMap(calls)
+      : node.kind === "branch"
+        ? node.cases.flatMap(calls)
+        : node.kind === "each" || node.kind === "repeat"
+          ? calls(node.body)
+          : [node],
+  );
+
+/** The calls' spans, or none when there are no calls. */
+const spansOf = (found: readonly Call[]) => (found.length ? found.map((call) => call.span) : undefined);
+
 /**
- * Where the outline makes each kind of call, by what a ledger record names: `op:<id>` for an
- * operation's calls, `approval:<title>` for the approvals with that title and `approval` for
- * all of them, `sleep` for the sleeps. A record is matched by what it is, not where it was
- * called from (the ledger does not say), so a step may be any of several places.
+ * Where a run's call is in the source: the spans of the outline's calls it may be. A record says
+ * what was called, not where from, so a step may be any of several calls: an operation's, the
+ * calls of that operation; an approval's, those with its title, or else every approval; a
+ * sleep's, every sleep.
  */
-function spansOf(outline: readonly OutlineNode[]): Map<string, Span[]> {
-  const spans = new Map<string, Span[]>();
-  const add = (key: string, span: Span) => spans.set(key, [...(spans.get(key) ?? []), span]);
-  const walk = (nodes: readonly OutlineNode[]): void => {
-    for (const node of nodes) {
-      switch (node.kind) {
-        case "op":
-          add(`op:${node.id}`, node.span);
-          break;
-        case "approval":
-          add("approval", node.span);
-          if (node.title !== undefined) add(`approval:${node.title}`, node.span);
-          break;
-        case "sleep":
-          add("sleep", node.span);
-          break;
-        case "all":
-          node.branches.forEach(walk);
-          break;
-        case "branch":
-          node.cases.forEach(walk);
-          break;
-        case "each":
-        case "repeat":
-          walk(node.body);
-          break;
+function whereIn(outline: readonly OutlineNode[]): (step: CallStep) => Span[] | undefined {
+  const all = calls(outline);
+  const ofKind = <K extends Call["kind"]>(kind: K) =>
+    all.filter((call): call is Extract<Call, { kind: K }> => call.kind === kind);
+  return (step) => {
+    switch (step.kind) {
+      case "op":
+        return spansOf(ofKind("op").filter((call) => call.id === step.id));
+      case "approval": {
+        const approvals = ofKind("approval");
+        const titled = approvals.filter((call) => call.title === step.title);
+        return spansOf(titled.length ? titled : approvals);
       }
+      case "sleep":
+        return spansOf(ofKind("sleep"));
     }
   };
-  walk(outline);
-  return spans;
 }
 
 /** A held call not recorded yet: waiting on its approval, or running once approved. */

@@ -1,5 +1,5 @@
 import type { Span } from "@sanoma/workflows/describe";
-import type { Graph, GraphEdge, GraphNode, Step, StepState } from "./types.ts";
+import type { CallStep, Graph, GraphEdge, GraphNode, Step, StepState } from "./types.ts";
 
 /** A graph's two ends: an outline's are plain; a run's say how it started and how it ended. */
 export interface Ends {
@@ -14,11 +14,15 @@ const OUTLINE_ENDS: Ends = { end: { label: "end" } };
  * node before it and the node after; a branch splits at a diamond into one lane per case. A
  * computed `ctx.all`'s member is a chain in a cluster labelled "for each", a loop's body one in a
  * cluster labelled "repeats". An empty member leads straight from the node before to the node
- * after; a branch's empty case, the way past it, is a lane marked "otherwise". A workflow's outline is drawn this way, and a run's ledger once runGraph has made it
- * into steps. An operation's, approval's or sleep's node has its step's place in the source, as
- * `spans`, when the step has one.
+ * after; a branch's empty case, the way past it, is a lane marked "otherwise". A workflow's
+ * outline is drawn this way, and a run's ledger once runGraph has made it into steps. A call's
+ * node has the `spans` that `where` gives for its step: by default the step's own `span`.
  */
-export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS): Graph {
+export function outlineGraph(
+  outline: readonly Step[],
+  ends: Ends = OUTLINE_ENDS,
+  where: (step: CallStep) => Span[] | undefined = (step) => step.span && [step.span],
+): Graph {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   let count = 0;
@@ -30,6 +34,11 @@ export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS
     return node.id;
   };
   const idOf = (kind: string, key: string | undefined) => key ?? `${kind}:${count++}`;
+  /** A call's node's own: its step's state, and its place in the source. */
+  const own = (step: CallStep) => {
+    const spans = where(step);
+    return { ...(step.state && { state: step.state }), ...(spans && { spans }) };
+  };
 
   /** Adds `steps` one after another from `from`, and returns the ids what follows is drawn from. */
   function chain(steps: readonly Step[], from: readonly string[], parent?: string): readonly string[] {
@@ -45,45 +54,18 @@ export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS
     for (const step of steps) {
       switch (step.kind) {
         case "op":
-          from = [
-            add(
-              { id: idOf("op", step.key), kind: "op", label: step.id, ...inside, ...whereOf(step), ...stateOf(step) },
-              from,
-            ),
-          ];
+          from = [add({ id: idOf("op", step.key), kind: "op", label: step.id, ...inside, ...own(step) }, from)];
           break;
         case "approval": {
           const label = step.title === undefined ? "approval" : `“${step.title}”`;
-          from = [
-            add(
-              {
-                id: idOf("approval", step.key),
-                kind: "approval",
-                label,
-                ...inside,
-                ...whereOf(step),
-                ...stateOf(step),
-              },
-              from,
-            ),
-          ];
+          from = [add({ id: idOf("approval", step.key), kind: "approval", label, ...inside, ...own(step) }, from)];
           break;
         }
-        case "sleep":
-          from = [
-            add(
-              {
-                id: idOf("sleep", step.key),
-                kind: "sleep",
-                label: step.label ?? "sleep",
-                ...inside,
-                ...whereOf(step),
-                ...stateOf(step),
-              },
-              from,
-            ),
-          ];
+        case "sleep": {
+          const label = step.label ?? "sleep";
+          from = [add({ id: idOf("sleep", step.key), kind: "sleep", label, ...inside, ...own(step) }, from)];
           break;
+        }
         case "pending":
           from = [add({ id: step.key, kind: "pending", label: "not started", ...inside }, from)];
           break;
@@ -117,8 +99,3 @@ export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS
   add({ id: "end", kind: "end", ...ends.end }, tails);
   return { nodes, edges };
 }
-
-const stateOf = <S>(step: { state?: S }) => (step.state === undefined ? {} : { state: step.state });
-
-/** A step's place in the source as its node's `spans`: a run's step's own, or an outline's step's one. */
-const whereOf = ({ span, spans = span && [span] }: { span?: Span; spans?: Span[] }) => (spans ? { spans } : {});

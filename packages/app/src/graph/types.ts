@@ -29,23 +29,15 @@ export interface ApprovalStepState extends StepState {
 }
 
 /**
- * Where a step is in the workflow's source: an outline's step has its `span`; a run's step has
- * the `spans` of the outline's steps it may be (the calls of its operation, say).
- */
-interface Where {
-  span?: Span;
-  spans?: Span[];
-}
-
-/**
  * What a graph is built from: a workflow's outline as `outlineWorkflow` reads it (an
- * `OutlineNode[]` is a `Step[]`), or a run's ledger made into the same shape, with each step's
- * state. `key` names a run's node, so it keeps its id from one poll to the next.
+ * `OutlineNode[]` is a `Step[]`, each call with its `span` in the source), or a run's ledger made
+ * into the same shape, with each step's state. `key` names a run's node, so it keeps its id from
+ * one poll to the next.
  */
 export type Step =
-  | ({ kind: "op"; id: string; key?: string; state?: OpState } & Where)
-  | ({ kind: "approval"; title?: string; key?: string; state?: ApprovalStepState } & Where)
-  | ({ kind: "sleep"; key?: string; label?: string; state?: StepState } & Where)
+  | { kind: "op"; id: string; key?: string; span?: Span; state?: OpState }
+  | { kind: "approval"; title?: string; key?: string; span?: Span; state?: ApprovalStepState }
+  | { kind: "sleep"; key?: string; label?: string; span?: Span; state?: StepState }
   /** A `ctx.all` member a running run has recorded nothing for yet. */
   | { kind: "pending"; key: string }
   | { kind: "all"; branches: Step[][] }
@@ -53,16 +45,16 @@ export type Step =
   | { kind: "repeat"; body: Step[] }
   | { kind: "branch"; cases: Step[][] };
 
+/** A call: a step drawn as one node, with a place in the source. */
+export type CallStep = Extract<Step, { kind: "op" | "approval" | "sleep" }>;
+
 interface Base {
   id: string;
   /** What the node says: an operation's id, an approval's title in quotes, an outcome. */
   label: string;
   /** The `cluster` node it is drawn inside, by id. */
   parent?: string;
-}
-
-/** Where a step's node is in the workflow's source, when the outline says. */
-interface InSource {
+  /** Where a call's node is in the workflow's source, when the outline says. */
   spans?: Span[];
 }
 
@@ -70,9 +62,9 @@ export type GraphNode =
   | (Base & { kind: "start"; state?: StepState })
   /** `pending` until the run has ended; an outline's end is plain. */
   | (Base & { kind: "end"; state?: StepState; pending?: true })
-  | (Base & InSource & { kind: "op"; state?: OpState })
-  | (Base & InSource & { kind: "approval"; state?: ApprovalStepState })
-  | (Base & InSource & { kind: "sleep"; state?: StepState })
+  | (Base & { kind: "op"; state?: OpState })
+  | (Base & { kind: "approval"; state?: ApprovalStepState })
+  | (Base & { kind: "sleep"; state?: StepState })
   | (Base & { kind: "pending" })
   /** A box around a loop's body or a computed `ctx.all`'s member, which `label` names. */
   | (Base & { kind: "cluster" })
@@ -84,8 +76,7 @@ export type GraphNode =
 export type GraphNodeKind = GraphNode["kind"];
 
 /** True for a node a page can select: one with a place in the source, or a ledger record. */
-export const isSelectable = (node: GraphNode): boolean =>
-  ("spans" in node && !!node.spans) || ("state" in node && !!node.state?.recordId);
+export const isSelectable = (node: GraphNode): boolean => !!node.spans || ("state" in node && !!node.state?.recordId);
 
 export interface GraphEdge {
   id: string;
@@ -107,7 +98,7 @@ export function nodeAt(nodes: readonly GraphNode[], offset: number): GraphNode |
   let found: GraphNode | undefined;
   let size = Number.POSITIVE_INFINITY;
   for (const node of nodes) {
-    for (const [start, end] of ("spans" in node && node.spans) || []) {
+    for (const [start, end] of node.spans ?? []) {
       if (start <= offset && offset <= end && end - start < size) {
         found = node;
         size = end - start;
