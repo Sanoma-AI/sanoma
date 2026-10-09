@@ -80,5 +80,6 @@
   },
   "engines": {
     "node": ">=24"
-  }
+  },
+  "//": "randexp is a dependency only because zod-schema-faker, which makes up scenario inputs, needs it as a peer."
 }
