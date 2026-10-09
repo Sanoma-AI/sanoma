@@ -23,7 +23,7 @@
     "dist",
     "proto",
     "testdata",
-    "AGENTS.md",
+    "README.md",
     "LICENSE"
   ],
   "type": "module",

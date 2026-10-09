@@ -1,61 +1,29 @@
-# sanoma
+# Working in Sanoma
 
-Open core of Sanoma. Business as Code keeps a company's operational configuration (card limits, time-off policies, access, onboarding steps) in typed code and applies it to vendors like Mercury, Gusto and Okta. An agent drafts each change, policies decide who must approve, and a ledger records what happened. This TypeScript monorepo holds the open parts.
+Read this file, then only the package guidance relevant to the task. The [README](README.md) owns product context and [development setup](README.md#develop).
 
-Status: early. Business processes are written as TypeScript workflows that run on [DBOS](https://dbos.dev): each vendor call is a durable step, approvals and sleeps survive restarts, and a lint keeps workflow code safe to replay. Versioning is automatic: each run is stamped with a hash of the workflow code it started on, and only a worker on that version resumes it (`DBOS__APPVERSION` names a version instead; see [Versions](packages/workflows/AGENTS.md#versions)).
+## Package map
 
-## Contents
+| Working on                                              | Read next                                                              |
+| ------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Runtime, policies, approvals, ledger, workflow analysis | [workflows](packages/workflows/AGENTS.md)                              |
+| Web app, HTTP API, forms, graphs                        | [app](packages/app/AGENTS.md)                                          |
+| Test workers, fakes, recorded HTTP replay               | [testing](packages/testing/AGENTS.md)                                  |
+| Provider bridge, schema generation, provider replay     | [bridge](packages/bridge/AGENTS.md)                                    |
+| Vendor connectors                                       | [connector conventions](connectors/AGENTS.md), then the vendor package |
 
-| Path                                                        | What it is                                                                        |
-| ----------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| [`packages/`](packages/AGENTS.md)                           | Core workspace packages                                                           |
-| [`@sanoma/workflows`](packages/workflows/AGENTS.md)         | Define connectors and workflows, run them durably on DBOS, and lint them          |
-| [`@sanoma/app`](packages/app/AGENTS.md)                     | Web UI and JSON API over a config, started with `startApp(config)`                |
-| [`@sanoma/testing`](packages/testing/AGENTS.md)             | `startTestWorker`, `testDatabaseUrl` and the connectors' fakes for workflow tests |
-| [`@sanoma/bridge`](packages/bridge/AGENTS.md)               | OpenTofu providers: the provider-bridge client, its fake, the resource generator  |
-| [`connectors/`](connectors/AGENTS.md)                       | Vendor connectors, one workspace package each                                     |
-| [`@sanoma/connector-ghost`](connectors/ghost/AGENTS.md)     | Ghost Admin API post operations and an in-memory fake                             |
-| [`@sanoma/connector-resend`](connectors/resend/AGENTS.md)   | Resend broadcast operations and an in-memory fake                                 |
-| [`@sanoma/connector-bluesky`](connectors/bluesky/AGENTS.md) | Bluesky post operations and an in-memory fake                                     |
-| [`@sanoma/connector-github`](connectors/github/AGENTS.md)   | GitHub resources read through its OpenTofu provider, and a replay fake            |
-| [`@sanoma/connector-stripe`](connectors/stripe/AGENTS.md)   | Stripe resources read through its OpenTofu provider, and a replay fake            |
-| [`modules/`](modules/AGENTS.md)                             | Placeholder for parts not written yet                                             |
-| [`types/`](types/AGENTS.md)                                 | Ambient type declarations shared by the packages                                  |
-| [`.github/`](.github/AGENTS.md)                             | GitHub Actions CI                                                                 |
-| [`.claude/`](.claude/)                                      | Agent skills for Claude Code                                                      |
-| [`.agents/`](.agents/)                                      | Vendored agent skills                                                             |
-| [`package.json`](package.json)                              | Root scripts: typecheck, build, lint, format, test, `db:up`, `bridge:download`    |
-| [`tsconfig.json`](tsconfig.json)                            | Root TypeScript config with `@sanoma/*` paths to each package's `src/`            |
-| [`vitest.config.ts`](vitest.config.ts)                      | Test config with aliases to the package sources                                   |
-| [`docker-compose.yml`](docker-compose.yml)                  | Postgres for DBOS on port 5433                                                    |
-| [`lefthook.yml`](lefthook.yml)                              | Pre-commit format and lint on staged files                                        |
-| [`.oxlintrc.json`](.oxlintrc.json)                          | Lint config, with the data-file rule on `**/resources/**`                         |
-| [`.oxfmtrc.json`](.oxfmtrc.json)                            | Format config                                                                     |
-| [`pnpm-workspace.yaml`](pnpm-workspace.yaml)                | Workspace globs: `packages/*` and `connectors/*`                                  |
-| [`.pnpmfile.cjs`](.pnpmfile.cjs)                            | pnpm hook: a packed package's readme is its AGENTS.md without the Contents table  |
-| [`skills-lock.json`](skills-lock.json)                      | Lock file for installed agent skills                                              |
+Source and test directory maps live below each package. Open them when navigating that area; do not read every descendant guide up front.
 
-Connectors live here under `connectors/`; one moves to its own repo only when someone outside the team maintains it.
+## Shared development rules
 
-## Develop
+- Use Node 24+ and the pnpm version in [package.json](package.json). Run commands from the repository root unless noted.
+- Workspace imports resolve to source in [tsconfig.json](tsconfig.json) and [vitest.config.ts](vitest.config.ts). Keep both mappings aligned when changing package entry points; published exports resolve to `dist/`.
+- Run the affected package's tests and relevant root checks from [README.md](README.md#develop). [CI](.github/workflows/ci.yml) defines the full check sequence.
+- For a new task, use [start-task](.agents/skills/start-task/SKILL.md). For a PR, use [create-pr](.agents/skills/create-pr/SKILL.md). Those skills own issue, worktree, and PR procedures. Sign off commits as described in [Contributing](README.md#contributing).
 
-Needs Node 24 or later, pnpm, and Docker for the workflow tests.
+## Documentation boundaries
 
-```sh
-pnpm install
-pnpm db:up          # Postgres for DBOS on port 5433
-pnpm test           # vitest, runs against the TypeScript sources
-pnpm typecheck
-pnpm lint && pnpm format:check
-pnpm build          # compiles each package to dist/ for publishing
-```
-
-Inside the repo, `@sanoma/*` imports resolve to each package's `src/` (via `paths` in `tsconfig.json` and aliases in `vitest.config.ts`), so tests and typechecks need no build. Published packages ship the compiled `dist/`, not the sources.
-
-## License
-
-[Apache License 2.0](LICENSE).
-
-## Contributing
-
-Contributions are accepted under the [Developer Certificate of Origin](https://developercertificate.org/) (DCO). Sign off every commit with `git commit -s`. See the org-wide contributing guide, code of conduct and security policy in [`Sanoma-AI/.github`](https://github.com/Sanoma-AI/.github).
+- `README.md` explains purpose, installation, usage, and public behavior. `AGENTS.md` contains a short map, maintenance constraints, and relevant checks. Link to details rather than repeat them.
+- Put shared rules at the nearest common ancestor and package-specific rules in that package. Add deeper guidance only for a distinct boundary or a useful local map.
+- Keep separate files at the root and package level. For a small directory index where the audiences need exactly the same content, use `AGENTS.md` as the source and a relative `README.md -> AGENTS.md` symlink. Do not symlink a long user manual into automatically loaded guidance.
+- Package READMEs are regular files so package archives include them. Keep full API examples there, not in ancestor agent instructions.
