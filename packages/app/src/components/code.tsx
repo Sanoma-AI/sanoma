@@ -1,16 +1,10 @@
 import { javascript } from "@codemirror/lang-javascript";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { Compartment, EditorState, RangeSetBuilder, StateEffect, StateField } from "@codemirror/state";
-import {
-  Decoration,
-  type DecorationSet,
-  EditorView,
-  GutterMarker,
-  gutterLineClass,
-  lineNumbers,
-} from "@codemirror/view";
+import { Compartment, EditorState, RangeSet } from "@codemirror/state";
+import { Decoration, EditorView, GutterMarker, gutterLineClass, lineNumbers } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
-import { useEffect, useEffectEvent, useRef } from "react";
+import type { Span } from "@sanoma/workflows/describe";
+import { useEffect, useRef } from "react";
 import { highlightedLines } from "#/lib/lines.ts";
 import { cn } from "#/lib/utils.ts";
 
@@ -19,75 +13,34 @@ import { cn } from "#/lib/utils.ts";
 // renders the source as plain text instead. Colours come from the --code-* tokens in style.css,
 // so `.dark` flips the view with the rest of the page.
 
-/** A range of `source`, in UTF-16 offsets (CodeMirror's units). */
-export type Span = readonly [start: number, end: number];
-
 export interface CodeProps {
   source: string;
   /** The lines these spans touch are marked, and the first is scrolled to the middle. */
   highlight?: Span[];
-  /** Called with the offset of a click in the text, or of the start of a clicked line number. */
+  /** Called with the offset nearest a click: in the text, or the start of a clicked line number's line. */
   onSelect?: (offset: number) => void;
   className?: string;
 }
 
-/** Replaces the highlighted spans; null clears them. */
-const setHighlight = StateEffect.define<readonly Span[] | null>();
-
 const lineMark = Decoration.line({ class: "cm-hl" });
-
-/** The highlighted lines, as line decorations. A new document clears them. */
-const highlightField = StateField.define<DecorationSet>({
-  create: () => Decoration.none,
-  update(value, tr) {
-    if (tr.docChanged) value = Decoration.none;
-    for (const effect of tr.effects) {
-      if (!effect.is(setHighlight)) continue;
-      const builder = new RangeSetBuilder<Decoration>();
-      for (const n of highlightedLines(tr.state.doc, effect.value ?? [])) {
-        const { from } = tr.state.doc.line(n);
-        builder.add(from, from, lineMark);
-      }
-      value = builder.finish();
-    }
-    return value;
-  },
-  provide: (field) => EditorView.decorations.from(field),
-});
 
 class GutterMark extends GutterMarker {
   override elementClass = "cm-hl-gutter";
 }
 const gutterMark = new GutterMark();
 
-/** The same lines' numbers, marked in the gutter. */
-const gutterMarks = gutterLineClass.compute([highlightField], (state) => {
-  const builder = new RangeSetBuilder<GutterMarker>();
-  for (let it = state.field(highlightField).iter(); it.value; it.next()) builder.add(it.from, it.from, gutterMark);
-  return builder.finish();
-});
-
-/**
- * Whether the text can be changed. Read-only for now; a later switch reconfigures this
- * compartment to make the view an editor.
- */
-const editable = new Compartment();
-const readOnly = [EditorState.readOnly.of(true), EditorView.editable.of(false)];
+/** The highlighted lines, marked in the text and in the gutter: reconfigured as the highlight changes. */
+const marks = new Compartment();
 
 const theme = EditorView.theme({
   "&": { height: "100%", color: "var(--foreground)", backgroundColor: "var(--background)" },
   ".cm-scroller": { fontFamily: "inherit", lineHeight: "1.6" },
-  ".cm-content": { caretColor: "var(--foreground)" },
-  ".cm-cursor": { borderLeftColor: "var(--foreground)" },
-  ".cm-content ::selection, .cm-selectionBackground": {
-    backgroundColor: "color-mix(in oklch, var(--ring) 35%, transparent)",
-  },
   ".cm-gutters": {
     color: "var(--muted-foreground)",
     backgroundColor: "var(--background)",
     borderRight: "1px solid var(--border)",
   },
-  ".cm-lineNumbers .cm-gutterElement": { cursor: "pointer", paddingLeft: "0.75rem" },
+  ".cm-lineNumbers .cm-gutterElement": { paddingLeft: "0.75rem" },
   ".cm-hl": { backgroundColor: "var(--code-highlight)" },
   ".cm-gutterElement.cm-hl-gutter": {
     color: "var(--foreground)",
@@ -99,71 +52,68 @@ const theme = EditorView.theme({
 const highlightStyle = HighlightStyle.define([
   { tag: tags.keyword, color: "var(--code-keyword)" },
   { tag: [tags.string, tags.regexp], color: "var(--code-string)" },
-  { tag: tags.comment, color: "var(--code-comment)", fontStyle: "italic" },
+  { tag: tags.comment, color: "var(--muted-foreground)", fontStyle: "italic" },
   { tag: [tags.number, tags.bool, tags.null], color: "var(--code-number)" },
-  { tag: tags.propertyName, color: "var(--code-property)" },
   { tag: [tags.punctuation, tags.operator], color: "var(--code-punctuation)" },
 ]);
+
+// Read-only for now: an editing switch becomes a prop then.
+const extensions = [
+  EditorView.editable.of(false),
+  lineNumbers(),
+  javascript({ typescript: true }),
+  syntaxHighlighting(highlightStyle),
+  theme,
+  marks.of([]),
+];
 
 export default function Code({ source, highlight, onSelect, className }: CodeProps) {
   const parent = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>(null);
-  const select = useEffectEvent((offset: number) => onSelect?.(offset));
+  /** The first highlighted line the view was last scrolled to. */
+  const scrolledTo = useRef<number>(undefined);
 
-  // One view for the component's life; the effects below put the source and the highlight in it.
+  // A view per source: sources change rarely.
   useEffect(() => {
-    const created = new EditorView({
-      parent: parent.current!,
-      state: EditorState.create({
-        extensions: [
-          editable.of(readOnly),
-          lineNumbers({
-            domEventHandlers: {
-              mousedown(_, line) {
-                select(line.from);
-                return false;
-              },
-            },
-          }),
-          javascript({ typescript: true }),
-          syntaxHighlighting(highlightStyle),
-          highlightField,
-          gutterMarks,
-          theme,
-          EditorView.domEventHandlers({
-            mousedown(event, target) {
-              const offset = target.posAtCoords({ x: event.clientX, y: event.clientY });
-              if (offset !== null) select(offset);
-              return false;
-            },
-          }),
-        ],
-      }),
-    });
+    const created = new EditorView({ parent: parent.current!, state: EditorState.create({ doc: source, extensions }) });
     view.current = created;
     return () => {
       created.destroy();
       view.current = null;
+      scrolledTo.current = undefined;
     };
-  }, []);
-
-  useEffect(() => {
-    const current = view.current!;
-    current.dispatch({ changes: { from: 0, to: current.state.doc.length, insert: source } });
   }, [source]);
 
-  // After the source: a new document clears the highlight, so this puts it back.
+  // After the view: a new one has no marks, so `source` is a dependency here too. `highlight` is
+  // one by value (highlightKey), so a new array of the same spans changes nothing.
+  const highlightKey = (highlight ?? []).map((span) => span.join(":")).join(",");
   useEffect(() => {
     const current = view.current!;
     const { doc } = current.state;
-    const [first] = highlightedLines(doc, highlight ?? []);
+    const lines = highlightedLines(doc, highlight ?? []);
+    const first = lines[0];
+    const scroll = first !== undefined && first !== scrolledTo.current;
+    scrolledTo.current = first;
     current.dispatch({
-      effects:
-        first === undefined
-          ? setHighlight.of(null)
-          : [setHighlight.of(highlight!), EditorView.scrollIntoView(doc.line(first).from, { y: "center" })],
+      effects: [
+        marks.reconfigure([
+          EditorView.decorations.of(Decoration.set(lines.map((n) => lineMark.range(doc.line(n).from)))),
+          gutterLineClass.of(RangeSet.of(lines.map((n) => gutterMark.range(doc.line(n).from)))),
+        ]),
+        ...(scroll ? [EditorView.scrollIntoView(doc.line(first).from, { y: "center" })] : []),
+      ],
     });
-  }, [source, highlight]);
+  }, [source, highlightKey]);
 
-  return <div ref={parent} className={cn("size-full font-mono text-xs", className)} />;
+  // The nearest position: a line number gives its line's start, a click past a line's end or
+  // below the last line the nearest line's.
+  return (
+    <div
+      ref={parent}
+      className={cn("size-full font-mono text-xs", onSelect && "cursor-pointer", className)}
+      onMouseDown={
+        onSelect && ((event) => onSelect(view.current!.posAtCoords({ x: event.clientX, y: event.clientY }, false)))
+      }
+    />
+  );
 }

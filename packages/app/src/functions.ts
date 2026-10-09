@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { type ActorInfo, DecideCall, RunsQuery, StartRunRequest } from "./api.ts";
-import { decide, parse, runDetail, startRun } from "./server/core.ts";
+import { decide, parse, runDetail, startRun, withoutSources, workflowSource } from "./server/core.ts";
 import { withPrincipal } from "./middleware.ts";
 
 // The page's reads and changes, as server functions. They do what the /api routes do, with the
@@ -20,7 +20,13 @@ const validate =
   (data: z.input<T>): z.output<T> =>
     parse(schema, data, "The request");
 
-export const getConfig = createServerFn(READ).handler(({ context }) => context.app.description);
+export const getConfig = createServerFn(READ).handler(({ context }) => withoutSources(context.app.description));
+
+/** A workflow's source, apart from the config since it is a whole file: asked for by name, by someone named. */
+export const getSource = createServerFn(READ)
+  .middleware([withPrincipal])
+  .validator(validate(z.object({ name: z.string().min(1) })))
+  .handler(({ data, context }) => workflowSource(context.app, data.name));
 
 /**
  * Who the server resolves this request to, and whether the deployment says so itself. A

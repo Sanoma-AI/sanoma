@@ -9,9 +9,14 @@ import { errorMessage } from "./shared.ts";
  * the functions `run` calls are opaque, whether defined outside it or inside it, so their calls
  * do not show.
  */
-export type Outline = { source: string; nodes: OutlineNode[] } | { error: string };
+export type Outline =
+  /** Read from the file that defined the workflow (`wf.file`): the spans index into its text. */
+  | { nodes: OutlineNode[]; file: string }
+  /** Read from `run`'s own text (`run.toString()`), which the spans index into; `fallback` says why the file was not. */
+  | { nodes: OutlineNode[]; fallback: string }
+  | { error: string };
 
-/** Where a node is in the outline's `source`: UTF-16 offsets, as a string index or CodeMirror counts them. */
+/** Where a node is in the text the outline was read from: UTF-16 offsets, as a string index or CodeMirror counts them. */
 export type Span = readonly [start: number, end: number];
 
 /**
@@ -53,31 +58,28 @@ const TRANSPARENT = new Set([
 
 /**
  * Outlines a workflow from the source of its `run` function: TypeScript or, once built,
- * JavaScript. The `source` is the file that defined it (`wf.file`) when that can be read and
- * holds it, else `run`'s own text (`wf.run.toString()`); either way with `\n` line endings, and
- * every span indexes into it. Counts only calls on `run`'s first parameter, whatever it is named.
- * Returns `{ error }` when the source cannot be read or parsed, or `run` takes no `ctx` by name.
+ * JavaScript. It reads the file that defined it (`wf.file`) when that can be read and holds it,
+ * else `run`'s own text (`wf.run.toString()`), and says which. Counts only calls on `run`'s
+ * first parameter, whatever it is named. Returns `{ error }` when `run`'s text cannot be read or
+ * parsed, or `run` takes no `ctx` by name.
  */
-export function outlineWorkflow(wf: WorkflowDefinition<any, any>): Outline {
-  let found = wf.file === undefined ? undefined : inFile(wf.file, wf.name);
-  if (!found) {
-    let text: string;
-    try {
-      text = Function.prototype.toString.call(wf.run);
-    } catch (err) {
-      return { error: `Cannot read the source of ${wf.name}'s run: ${errorMessage(err)}` };
-    }
-    const source = lf(text);
-    const parsed = parseFunction(source);
-    if (typeof parsed === "string") return { error: `Cannot parse ${wf.name}'s run: ${parsed}` };
-    found = { source, ...parsed };
-  }
+export const outlineWorkflow = (wf: WorkflowDefinition<any, any>): Outline => outlineWithSource(wf).outline;
+
+/**
+ * `outlineWorkflow`, with the text its spans index into: the file's, or `run`'s, with `\n`
+ * line endings either way. No text with an `{ error }`.
+ */
+export function outlineWithSource(wf: WorkflowDefinition<any, any>): { outline: Outline; source?: string } {
+  const read = wf.file === undefined ? `${wf.name} has no file` : inFile(wf.file, wf.name);
+  const found = typeof read === "string" ? inRun(wf) : read;
+  if (typeof found === "string") return { outline: { error: found } };
   const { source, fn, offset } = found;
   const param = unwrap(fn.params[0]);
   if (param?.type !== "Identifier") {
-    return { error: `${wf.name}'s run takes no ctx parameter by name, so its calls cannot be read` };
+    return { outline: { error: `${wf.name}'s run takes no ctx parameter by name, so its calls cannot be read` } };
   }
-  return { source, nodes: outlineBody(fn.body, param.name, offset) };
+  const nodes = outlineBody(fn.body, param.name, offset);
+  return { source, outline: typeof read === "string" ? { nodes, fallback: read } : { nodes, file: wf.file! } };
 }
 
 /** CodeMirror counts a line break as one unit, oxc counts `\r\n` as two: spans need `\n` alone. */
@@ -90,21 +92,25 @@ interface Found {
   offset: number;
 }
 
-/** The workflow's `run` in its file: the first object literal with its `name` and a `run` function. */
-function inFile(file: string, name: string): Found | undefined {
+/**
+ * The workflow's `run` in its file: the first object literal with its `name` and a `run`
+ * function. Or why not: the file cannot be read or parsed, or holds no such literal.
+ */
+function inFile(file: string, name: string): Found | string {
   let source: string;
   try {
     source = lf(readFileSync(file, "utf8"));
-  } catch {
-    return undefined;
+  } catch (err) {
+    return `${file} could not be read: ${errorMessage(err)}`;
   }
   const { program, errors } = parse(file, source);
-  if (errors.length) return undefined;
+  if (errors.length) return `${file} could not be parsed: ${errors[0]!.message}`;
   const find = (node: Node): Node | undefined => {
-    if (!node || typeof node !== "object") return undefined;
+    if (!node) return undefined;
     if (node.type === "ObjectExpression") {
       const value = (key: string) =>
-        node.properties.find((p: Node) => p.type === "Property" && !p.computed && propertyName(p.key) === key)?.value;
+        node.properties.find((p: Node) => p.type === "Property" && !p.computed && (p.key.name ?? p.key.value) === key)
+          ?.value;
       const run = value("run");
       if (stringValue(value("name")) === name && FUNCTIONS.has(run?.type)) return run;
     }
@@ -115,11 +121,20 @@ function inFile(file: string, name: string): Found | undefined {
     return undefined;
   };
   const fn = find(program);
-  return fn && { source, fn, offset: 0 };
+  return fn ? { source, fn, offset: 0 } : `${file} holds no workflow named "${name}"`;
 }
 
-/** A property key as written: `name`, `"name"` or `'name'`. */
-const propertyName = (key: Node): string | undefined => (key.type === "Identifier" ? key.name : stringValue(key));
+/** `run`'s own text, parsed, or why it could not be read or parsed. */
+function inRun(wf: WorkflowDefinition<any, any>): Found | string {
+  let source: string;
+  try {
+    source = lf(Function.prototype.toString.call(wf.run));
+  } catch (err) {
+    return `Cannot read the source of ${wf.name}'s run: ${errorMessage(err)}`;
+  }
+  const parsed = parseFunction(source);
+  return typeof parsed === "string" ? `Cannot parse ${wf.name}'s run: ${parsed}` : { source, ...parsed };
+}
 
 /** The one expression the text holds, or the first parse error. */
 function expression(text: string): Node | string {
@@ -127,17 +142,28 @@ function expression(text: string): Node | string {
   return errors.length ? errors[0]!.message : (program.body[0] as Node)?.expression;
 }
 
+/**
+ * What `run`'s text is parsed inside, in turn: as an expression, then, for a method
+ * (`async run(ctx) { … }`), which is no expression on its own, as one inside an object.
+ */
+const PREFIXES = [
+  ["(", ")"],
+  ["({", "})"],
+] as const;
+
 /** The function the source holds and the length of the wrapper parsed around it, or why it could not be parsed. */
 function parseFunction(source: string): Omit<Found, "source"> | string {
-  let offset = 1;
-  let parsed = expression(`(${source})`);
-  // A method (`async run(ctx) { … }`) is no expression on its own; it is one inside an object.
-  if (typeof parsed === "string") {
-    const method = expression(`({${source}})`);
-    if (typeof method !== "string") [parsed, offset] = [method?.properties?.[0]?.value, 2];
+  let error = "";
+  for (const [prefix, suffix] of PREFIXES) {
+    const parsed = expression(prefix + source + suffix);
+    if (typeof parsed === "string") {
+      error ||= parsed;
+      continue;
+    }
+    const fn = prefix === "({" ? parsed?.properties?.[0]?.value : parsed;
+    return FUNCTIONS.has(fn?.type) ? { fn, offset: prefix.length } : "it is not a function";
   }
-  if (typeof parsed === "string") return parsed;
-  return FUNCTIONS.has(parsed?.type) ? { fn: parsed, offset } : "it is not a function";
+  return error;
 }
 
 function outlineBody(body: Node, ctx: string, offset: number): OutlineNode[] {
@@ -195,21 +221,17 @@ function outlineBody(body: Node, ctx: string, offset: number): OutlineNode[] {
     const path = ctxPath(node.callee, ctx);
     if (path) {
       const id = path.join(".");
-      const at = span(node);
       switch (id) {
         case "all":
-          return all(args[0], at);
+          return all(node);
         case "approval": {
           const title = stringValue(args[0]);
-          return [
-            ...walk(args),
-            title === undefined ? { kind: "approval", span: at } : { kind: "approval", title, span: at },
-          ];
+          return [...walk(args), { kind: "approval", span: span(node), ...(title === undefined ? {} : { title }) }];
         }
         case "sleep":
-          return [...walk(args), { kind: "sleep", span: at }];
+          return [...walk(args), { kind: "sleep", span: span(node) }];
         default:
-          return path.length === 3 ? [...walk(args), { kind: "op", id, span: at }] : walk(args);
+          return path.length === 3 ? [...walk(args), { kind: "op", id, span: span(node) }] : walk(args);
       }
     }
     const callee = unwrap(node.callee);
@@ -222,7 +244,10 @@ function outlineBody(body: Node, ctx: string, offset: number): OutlineNode[] {
     return [...walk(node.callee), ...walk(args)];
   };
 
-  const all = (arg: Node, at: Span): OutlineNode[] => {
+  // `node` is the `ctx.all(...)` call.
+  const all = (node: Node): OutlineNode[] => {
+    const at = span(node);
+    const arg = node.arguments[0];
     if (arg?.type === "ArrayExpression") return [{ kind: "all", branches: arg.elements.map(member), span: at }];
     // Otherwise the members are computed, typically `items.map((item) => () => ctx.…)`.
     const made = unwrap(arg);

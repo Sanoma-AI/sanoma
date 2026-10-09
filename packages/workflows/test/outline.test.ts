@@ -1,5 +1,14 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -7,8 +16,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { type Outline, type OutlineNode, outlineWorkflow } from "../src/describe.ts";
+import { type OutlineNode, outlineWorkflow } from "../src/describe.ts";
 import { defineConnector, defineWorkflow, type WorkflowDefinition } from "../src/index.ts";
+import { outlineWithSource } from "../src/outline.ts";
 import announce from "./fixtures/announce.ts";
 import fanout from "./fixtures/fanout.ts";
 
@@ -24,29 +34,26 @@ const tally = async (
   thread: string,
 ) => ctx.forum.comments.list({ thread });
 
-/** The outline's nodes with their source, or a failure naming the error. */
-function outlined(outline: Outline): { source: string; nodes: OutlineNode[] } {
+/**
+ * The workflow's outline with the text its spans index into, or a failure naming the error.
+ * Takes a copy with another `file` (`{ ...wf, file }`) as the definition it stands for.
+ */
+function outlined(wf: Omit<WorkflowDefinition, "run"> & { run: (...args: never[]) => unknown }): {
+  nodes: OutlineNode[];
+  source: string;
+  file?: string;
+  fallback?: string;
+} {
+  const { outline, source } = outlineWithSource(wf as WorkflowDefinition<any, any>);
   if ("error" in outline) throw new Error(outline.error);
-  return outline;
+  return { ...outline, source: source! };
 }
-
-/** The workflow as if `defineWorkflow` had been called from `file`. */
-const withFile = (wf: WorkflowDefinition<any, any>, file: string | undefined): WorkflowDefinition<any, any> => ({
-  ...wf,
-  file,
-});
 
 /** Every node, nested ones included, in order. */
 const flat = (nodes: OutlineNode[]): OutlineNode[] =>
-  nodes.flatMap((node) => [
-    node,
-    ...flat(
-      node.kind === "all" || node.kind === "branch"
-        ? (node.kind === "all" ? node.branches : node.cases).flat()
-        : node.kind === "each" || node.kind === "repeat"
-          ? node.body
-          : [],
-    ),
+  nodes.flatMap((n) => [
+    n,
+    ...flat("body" in n ? n.body : "branches" in n ? n.branches.flat() : "cases" in n ? n.cases.flat() : []),
   ]);
 
 const busy = defineWorkflow({
@@ -69,6 +76,8 @@ const busy = defineWorkflow({
     for (const thread of threads) {
       await ctx.bluesky.post.create({ text: thread });
     }
+    for (let i = 0; i < threads.length; i++) await ctx.sleep({ ms: i });
+    threads.map((thread) => ctx.bluesky.post.create({ text: thread }));
     const replies = threads.map((thread) => thread.length);
     await (ctx as any)[vendor].comments.list({ thread: "x" });
     await tally(ctx, "y");
@@ -127,6 +136,8 @@ describe("outlineWorkflow", () => {
           // The final else logs and makes no call: the empty case.
           cases: [[{ kind: "approval", title: "Shout?" }], [{ kind: "op", id: "bluesky.post.create" }], []],
         },
+        { kind: "repeat", body: [{ kind: "op", id: "bluesky.post.create" }] },
+        { kind: "repeat", body: [{ kind: "sleep" }] },
         { kind: "repeat", body: [{ kind: "op", id: "bluesky.post.create" }] },
         { kind: "op", id: "*.comments.list" },
       ],
@@ -222,24 +233,11 @@ describe("outlineWorkflow", () => {
   });
 });
 
-const spans = defineWorkflow({
-  name: "spans",
-  trigger: "manual",
-  input: z.object({ threads: z.array(z.string()), loud: z.boolean() }),
-  uses: [forum.comments.list, bluesky.post.create, "all", "sleep"],
-  run: async (ctx, { threads, loud }) => {
-    await ctx.all([() => ctx.forum.comments.list({ thread: "a" })]);
-    for (let i = 0; i < threads.length; i++) await ctx.sleep({ ms: i });
-    threads.map((thread) => ctx.bluesky.post.create({ text: thread }));
-    if (loud) await ctx.bluesky.post.create({ text: "loud" });
-    else await ctx.sleep({ ms: 1 });
-  },
-});
-
 describe("outlineWorkflow, spans", () => {
   it("reads the file that defined the workflow, and spans each node's code in it", () => {
-    const { source, nodes } = outlined(outlineWorkflow(announce));
-    expect(source).toBe(readFileSync(announce.file!, "utf8").replaceAll("\r\n", "\n"));
+    const { source, nodes, file } = outlined(announce);
+    expect(file).toBe(announce.file);
+    expect(source).toBe(readFileSync(announce.file!, "utf8"));
     expect(source.slice(...nodes[0]!.span)).toBe('ctx.ghost.post.create({ title, html: body, status: "draft" })');
     for (const node of nodes.filter((n) => n.kind === "op")) {
       expect(source.slice(...node.span)).toMatch(/^ctx\.[\s\S]*\)$/);
@@ -247,13 +245,15 @@ describe("outlineWorkflow, spans", () => {
   });
 
   it("spans ctx.all, a loop, a .map callback and an if/else as the whole construct", () => {
-    const { source, nodes } = outlined(outlineWorkflow(spans));
-    const text = nodes.map((node) => [node.kind, source.slice(...node.span)]);
-    expect(text).toEqual([
-      ["all", 'ctx.all([() => ctx.forum.comments.list({ thread: "a" })])'],
+    const { source, nodes } = outlined(busy);
+    expect(nodes.map((node) => [node.kind, source.slice(...node.span)])).toEqual([
+      ["all", expect.stringMatching(/^ctx\.all\(\[\n[\s\S]*\]\)$/)],
+      ["each", "ctx.all(threads.map((thread) => () => ctx.forum.comments.list({ thread })))"],
+      ["branch", expect.stringMatching(/^if \(loud\) [\s\S]*else console\.log\("nothing to say"\);$/)],
+      ["repeat", expect.stringMatching(/^for \(const thread of threads\) \{[\s\S]*\}$/)],
       ["repeat", "for (let i = 0; i < threads.length; i++) await ctx.sleep({ ms: i });"],
       ["repeat", "threads.map((thread) => ctx.bluesky.post.create({ text: thread }))"],
-      ["branch", expect.stringMatching(/^if \(loud\) [\s\S]*else await ctx\.sleep\(\{ ms: 1 \}\);$/)],
+      ["op", '(ctx as any)[vendor].comments.list({ thread: "x" })'],
     ]);
   });
 
@@ -262,53 +262,52 @@ describe("outlineWorkflow, spans", () => {
   const CODE: Partial<Record<OutlineNode["kind"], RegExp>> = { repeat: /^(for \(|threads\.map\()/, branch: /^if \(/ };
 
   it("falls back to run's own text when the workflow has no file, with spans into that text", () => {
-    for (const wf of [spans, busy, fanout]) {
-      const { source, nodes } = outlined(outlineWorkflow(withFile(wf, undefined)));
+    for (const wf of [busy, fanout]) {
+      const { source, nodes, fallback } = outlined({ ...wf, file: undefined });
+      expect(fallback).toBe(`${wf.name} has no file`);
       expect(source).toBe(Function.prototype.toString.call(wf.run));
       // The same nodes as read from the file, each spanning its code in the run text.
-      expect(nodes.map((n) => n.kind)).toEqual(outlined(outlineWorkflow(wf)).nodes.map((n) => n.kind));
+      expect(nodes.map((n) => n.kind)).toEqual(outlined(wf).nodes.map((n) => n.kind));
       for (const node of flat(nodes)) {
         expect(source.slice(...node.span)).toMatch(CODE[node.kind] ?? CALL);
       }
     }
   });
 
-  it("falls back to run's text when the file cannot be read or does not hold the workflow", () => {
-    const missing = outlined(outlineWorkflow(withFile(spans, join(tmpdir(), "sanoma-no-such-file.ts"))));
-    expect(missing.source).toBe(Function.prototype.toString.call(spans.run));
-    const elsewhere = outlined(
-      outlineWorkflow(withFile(spans, fileURLToPath(new URL("./fixtures/fanout.ts", import.meta.url)))),
-    );
-    expect(elsewhere.source).toBe(Function.prototype.toString.call(spans.run));
+  it("says why it fell back: a file it cannot read or parse, or one without the workflow", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sanoma-outline-"));
+    try {
+      const fallback = (file: string) => outlined({ ...busy, file }).fallback;
+      const missing = join(dir, "missing.ts");
+      expect(fallback(missing)).toBe(
+        `${missing} could not be read: ENOENT: no such file or directory, open '${missing}'`,
+      );
+      const broken = join(dir, "broken.ts");
+      writeFileSync(broken, 'export default defineWorkflow({ name: "busy", run: async (ctx) => { ');
+      expect(fallback(broken)).toMatch(/could not be parsed: \S/);
+      expect(fallback(broken)?.startsWith(`${broken} could not be parsed: `)).toBe(true);
+      // Its name is no string literal, so this is not the workflow named "busy".
+      const elsewhere = join(dir, "elsewhere.ts");
+      writeFileSync(
+        elsewhere,
+        'const name = "busy";\nexport default defineWorkflow({ name, run: async (ctx) => {} });\n',
+      );
+      expect(fallback(elsewhere)).toBe(`${elsewhere} holds no workflow named "busy"`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("reads a file with \\r\\n line endings as if it had \\n", () => {
-    const text = `import { defineWorkflow } from "@sanoma/workflows";
-
-export default defineWorkflow({
-  name: "spans",
-  run: async (ctx) => {
-    await ctx.sleep({ ms: 1 });
-    if (ctx.runId) {
-      await ctx.forum.comments.list({ thread: "a" });
-    }
-  },
-});
-`;
+    const text = readFileSync(announce.file!, "utf8");
     const dir = mkdtempSync(join(tmpdir(), "sanoma-outline-"));
     try {
-      const lf = join(dir, "lf.ts");
-      const crlf = join(dir, "crlf.ts");
-      writeFileSync(lf, text);
+      const crlf = join(dir, "announce.ts");
       writeFileSync(crlf, text.replaceAll("\n", "\r\n"));
-      const fromLf = outlined(outlineWorkflow(withFile(spans, lf)));
-      const fromCrlf = outlined(outlineWorkflow(withFile(spans, crlf)));
-      expect(fromLf.source).toBe(text);
-      expect(fromCrlf).toEqual(fromLf);
-      expect(fromCrlf.nodes.map((node) => text.slice(...node.span))).toEqual([
-        "ctx.sleep({ ms: 1 })",
-        expect.stringMatching(/^if \(ctx\.runId\) \{[\s\S]*\}$/),
-      ]);
+      const read = outlined({ ...announce, file: crlf });
+      expect(read.file).toBe(crlf);
+      expect(read.source).toBe(text);
+      expect(read.nodes).toEqual(outlined(announce).nodes);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -365,8 +364,9 @@ console.log(JSON.stringify(outlineWorkflow(built)));
         ],
       });
       // defineWorkflow was called from the script, so the outline reads the script.
-      const { source, nodes } = outlined(outline);
-      expect(source).toBe(readFileSync(script, "utf8"));
+      expect(realpathSync(outline.file)).toBe(realpathSync(script));
+      const source = readFileSync(script, "utf8");
+      const { nodes } = outline;
       expect(source.slice(...nodes[0]!.span)).toMatch(/^ctx\.all\(ids\.map\([\s\S]*\)$/);
       expect(source.slice(...nodes[1]!.span)).toBe("if (ids.length > 1) await ctx.sleep({ seconds: 1 });");
     } finally {

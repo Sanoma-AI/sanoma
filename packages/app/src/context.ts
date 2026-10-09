@@ -11,7 +11,10 @@ export type ResolveActor = (request: Request) => Principal | undefined | Promise
 /** What `startApp` hands every request: built once at boot, shared by all requests. */
 export interface AppContext {
   resolved: ResolvedConfig;
-  /** `GET /api/config`, and the config the page reads: `describeConfig(config)`, made once. */
+  /**
+   * `describeConfig(config)`, made once: what `GET /api/config` and the page read, less the
+   * workflows' sources (`withoutSources`), which `getSource` serves one at a time.
+   */
   description: ConfigDescription;
   client: SanomaClient;
   /** The deployment's own; undefined for the default, the `x-sanoma-actor` header the page sends. */

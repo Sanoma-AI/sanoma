@@ -34,13 +34,13 @@ import {
   startWorker,
   type Worker,
 } from "@sanoma/workflows";
-import { type ConfigDescription, outlineWorkflow } from "@sanoma/workflows/describe";
+import { type ConfigDescription, describeConfig, outlineWorkflow } from "@sanoma/workflows/describe";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
 import { z } from "zod";
 import { type App, type ErrorResponse, type RunDetail, startApp } from "../src/index.ts";
 import { ApiError } from "../src/api.ts";
-import { asApiError, parse } from "../src/server/core.ts";
+import { asApiError, parse, withoutSources, workflowSource } from "../src/server/core.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it when
 // dist/server/server.js is missing or older than a file under src/.
@@ -178,8 +178,10 @@ describe("the API", () => {
     expect(wf?.ops).toHaveLength(5);
     expect(wf?.ops).toEqual(expect.arrayContaining(["ghost.post.publish", "resend.broadcast.send"]));
     expect(wf?.builtins).toEqual(["approval", "sleep"]);
-    // Each workflow's outline, read from its run's source when the app started.
+    // Each workflow's outline, read from its file when the app started; the file itself is not sent.
     expect(wf?.outline).toEqual(outlineWorkflow(announce));
+    expect(wf?.outline).toMatchObject({ file: expect.stringMatching(/announce\.ts$/) });
+    expect(JSON.stringify(body)).not.toContain('"source"');
     expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.effect).toBe("send");
     expect(body.vendors.resend).toMatchObject({ title: "Resend", logo: { src: expect.stringMatching(/^data:/) } });
   });
@@ -375,6 +377,18 @@ describe("errors the app answers with", () => {
       error: expect.stringMatching(/^The request: runId: /),
       issues: [expect.objectContaining({ path: ["runId"] })],
     });
+  });
+});
+
+describe("a workflow's source", () => {
+  it("is served by name, apart from the config, and is not found for a workflow without one", () => {
+    const description = describeConfig(config);
+    expect(workflowSource({ description }, "announce")).toEqual({ source: readFileSync(announce.file!, "utf8") });
+    const sourceless = withoutSources(description);
+    expect(sourceless.workflows[0]).not.toHaveProperty("source");
+    const notFound = expect.objectContaining({ status: 404, body: expect.objectContaining({ code: "invalid_input" }) });
+    expect(() => workflowSource({ description }, "nope")).toThrow(notFound);
+    expect(() => workflowSource({ description: sourceless }, "announce")).toThrow(notFound);
   });
 });
 

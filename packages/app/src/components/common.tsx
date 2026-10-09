@@ -5,7 +5,6 @@ import { cva } from "class-variance-authority";
 import { ChevronRightIcon, CircleAlertIcon, InfoIcon } from "lucide-react";
 import {
   type ComponentProps,
-  type CSSProperties,
   lazy,
   type ReactElement,
   type ReactNode,
@@ -357,27 +356,35 @@ function useSeen(ref: RefObject<HTMLElement | null>): boolean {
 }
 
 /**
- * A graph (a run's, or a workflow's outline) in a box 220 px high, 280 px from `sm`. It is
- * built and drawn in the browser, once the box comes near the screen; until then, and on the
- * server, a skeleton of the same size holds its place. (The server never sees the box: `useSeen`
- * flips in an effect, and effects run only in the browser.)
+ * A box 220 px high, 280 px from `sm` (or as `className` says), whose content loads and draws in
+ * the browser once the box comes near the screen; until then, and on the server, `fallback`
+ * holds its place. (The server never sees the box: `useSeen` flips in an effect, and effects run
+ * only in the browser.)
  */
-export function GraphPanel(props: GraphProps) {
+function LazyPanel({
+  fallback,
+  className,
+  children,
+}: {
+  fallback: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
   const box = useRef<HTMLDivElement>(null);
   const seen = useSeen(box);
-  const skeleton = <Skeleton role="status" aria-label="Loading the graph" className="size-full rounded-none" />;
   return (
-    <Card ref={box} className="h-[220px] gap-0 py-0 sm:h-[280px]">
-      {seen ? (
-        <Suspense fallback={skeleton}>
-          <Graph {...props} />
-        </Suspense>
-      ) : (
-        skeleton
-      )}
+    <Card ref={box} className={cn("h-[220px] gap-0 py-0 sm:h-[280px]", className)}>
+      {seen ? <Suspense fallback={fallback}>{children}</Suspense> : fallback}
     </Card>
   );
 }
+
+/** A graph (a run's, or a workflow's outline) in a LazyPanel, a skeleton of its size holding its place. */
+export const GraphPanel = (props: GraphProps) => (
+  <LazyPanel fallback={<Skeleton role="status" aria-label="Loading the graph" className="size-full rounded-none" />}>
+    <Graph {...props} />
+  </LazyPanel>
+);
 
 /**
  * The source view's chunk: CodeMirror and its TypeScript grammar. Like the graph's, it needs the
@@ -387,26 +394,17 @@ export const loadCode = () => import("./code.tsx");
 const Code = lazy(loadCode);
 
 /**
- * A workflow's source in a box 220 px high, 280 px from `sm` (or `height`), scrolling inside.
- * On the server, without JavaScript, and until the view loads, the box holds the source as
- * plain text; once the box comes near the screen, the view replaces it.
+ * A workflow's source in a LazyPanel, scrolling inside it. On the server, without JavaScript, and
+ * until the view loads, the panel holds the source as plain text.
  */
-export function CodePanel({ height, ...props }: CodeProps & { height?: CSSProperties["height"] }) {
-  const box = useRef<HTMLDivElement>(null);
-  const seen = useSeen(box);
-  const text = <pre className="size-full overflow-auto p-3 font-mono text-xs">{props.source}</pre>;
-  return (
-    <Card ref={box} className="h-[220px] gap-0 py-0 sm:h-[280px]" style={{ height }}>
-      {seen ? (
-        <Suspense fallback={text}>
-          <Code {...props} />
-        </Suspense>
-      ) : (
-        text
-      )}
-    </Card>
-  );
-}
+export const CodePanel = ({ className, ...props }: CodeProps) => (
+  <LazyPanel
+    className={className}
+    fallback={<pre className="size-full overflow-auto p-3 font-mono text-xs">{props.source}</pre>}
+  >
+    <Code {...props} />
+  </LazyPanel>
+);
 
 /** A page's heading row: its <h1>, which is its crumb, and whatever sits beside it. */
 export function PageHeader({ children }: { children?: ReactNode }) {
