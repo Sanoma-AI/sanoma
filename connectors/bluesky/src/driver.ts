@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { Agent, AppBskyRichtextFacet, CredentialSession, RichText } from "@atproto/api";
 import { TID } from "@atproto/common-web";
 import { ResponseType, XRPCError } from "@atproto/xrpc";
-import { defineDriver, DriverError } from "@sanoma/workflows";
+import { defineDriver, DriverError, retryableStatus } from "@sanoma/workflows";
 import { bluesky } from "./index.ts";
 
 export interface BlueskyDriverOptions {
@@ -105,7 +105,11 @@ function rkeyFor(idempotencyKey: string): string {
   return TID.fromTime(micros, hash.readUInt16BE(8) % 1024).toString();
 }
 
-/** Bluesky's error as a `DriverError`: retryable for a timeout, a lost connection, a 429 or a 5xx. */
+/**
+ * Bluesky's error as a `DriverError`: retryable for a timeout, a lost connection, or a status
+ * `retryableStatus` retries. A 429 stays retryable even when its limit resets hours away (the
+ * daily write limit): the runtime decides how long to wait, and the message says when.
+ */
 function driverError(err: unknown, what: string, timeoutMs: number): unknown {
   if (!(err instanceof XRPCError)) return err;
   if (err.status === ResponseType.Unknown) {
@@ -118,7 +122,7 @@ function driverError(err: unknown, what: string, timeoutMs: number): unknown {
   const reset = Number(err.headers?.["ratelimit-reset"]);
   const until = err.status === 429 && reset ? ` (the limit resets at ${new Date(reset * 1000).toISOString()})` : "";
   return new DriverError(`Bluesky ${what} failed: ${err.message}${until}`, {
-    retryable: err.status === 429 || err.status >= 500,
+    retryable: retryableStatus(err.status),
     status: err.status,
     vendorCode: err.error,
     cause: err,

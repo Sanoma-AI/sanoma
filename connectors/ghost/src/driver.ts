@@ -1,4 +1,4 @@
-import { DriverError, defineDriver } from "@sanoma/workflows";
+import { DriverError, defineDriver, retryableStatus } from "@sanoma/workflows";
 import { SignJWT } from "jose";
 import { z } from "zod";
 import { ghost } from "./index.ts";
@@ -109,7 +109,7 @@ function connect(timeoutMs: number) {
       const detail = err?.context && err.context !== err.message ? ` ${err.context}` : "";
       const message = err ? `${err.message}${detail}` : `HTTP ${status}`;
       throw new DriverError(`ghost: ${where}: ${message}`, {
-        retryable: status === 408 || status === 429 || status >= 500,
+        retryable: retryableStatus(status),
         status,
         vendorCode: err?.code ?? err?.type,
       });

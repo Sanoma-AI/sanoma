@@ -55,7 +55,7 @@ It signs in with the app password, keeps the session for the life of the driver,
 
 ### Errors and retries
 
-Bluesky's errors become a `DriverError` with its HTTP `status` and its `error` name as `vendorCode` (`InvalidRequest`, `RateLimitExceeded`, ...). A timeout, a lost connection, a 429 and a 5xx are retryable; any other 4xx is not. Writes are limited to 5,000 points an hour and 35,000 a day per account, a post costing 3 ([rate limits](https://docs.bsky.app/docs/advanced-guides/rate-limits)); a 429's message says when the limit resets.
+Bluesky's errors become a `DriverError` with its HTTP `status` and its `error` name as `vendorCode` (`InvalidRequest`, `RateLimitExceeded`, ...). A timeout, a lost connection, a 429 and a 5xx are retryable; any other 4xx is not. A 408 cannot be told apart: `@atproto/xrpc` reports it as a 400. A 429 stays retryable when the limit is the daily one, hours from resetting: the runtime decides how long to wait. Writes are limited to 5,000 points an hour and 35,000 a day per account, a post costing 3 ([rate limits](https://docs.bsky.app/docs/advanced-guides/rate-limits)); a 429's message says when the limit resets.
 
 ### Plan
 

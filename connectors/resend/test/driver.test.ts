@@ -52,11 +52,11 @@ server.events.on("response:bypass", ({ response }) => {
   );
 });
 
-/** The next request to `path` gets the fixture `name`; live, its reply is recorded as `name`. */
-function reply(name: string, path: string) {
+/** The next request to `path` gets the fixture `name` (or `given`); live, its reply is recorded as `name`. */
+function reply(name: string, path: string, given?: Fixture) {
   recordAs = name;
   if (live) return;
-  const { status, body } = fixture(name);
+  const { status, body } = given ?? fixture(name);
   server.use(http.post(`${API}${path}`, () => HttpResponse.json(body as any, { status }), { once: true }));
 }
 
@@ -149,6 +149,16 @@ describe("resendDriver", () => {
     reply(name, "/broadcasts/bc_1/send");
     const err = await failure(send("bc_1"));
     expect(err).toMatchObject({ retryable, status: fixture(name).status, vendorCode });
+  });
+
+  it.skipIf(live).each([
+    [408, "request_timeout", true],
+    [409, "concurrent_idempotent_requests", true],
+    [409, "invalid_idempotent_request", false],
+  ])("a %i %s is retryable: %s", async (status, name, retryable) => {
+    reply(name, "/broadcasts/bc_1/send", { status, body: { statusCode: status, name, message: name } });
+    const err = await failure(send("bc_1"));
+    expect(err).toMatchObject({ retryable, status, vendorCode: name });
   });
 
   it.skipIf(live)("fails retryable when Resend does not answer in time", async () => {

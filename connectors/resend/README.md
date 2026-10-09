@@ -57,7 +57,7 @@ Resend documents `Idempotency-Key` for emails only, not broadcasts. The driver s
 
 ### Errors and retries
 
-A 429 (except `daily_quota_exceeded` and `monthly_quota_exceeded`), a 5xx, a timeout (15 s; `timeoutMs` changes it) or no reply is retryable; any other 4xx is not. `status` and `vendorCode` (Resend's error `name`) are kept. Resend allows 10 requests per second per team.
+A 408, a 429 (except `daily_quota_exceeded` and `monthly_quota_exceeded`), a 409 `concurrent_idempotent_requests` (a request with the same key still in flight), a 5xx, a timeout (15 s; `timeoutMs` changes it) or no reply is retryable; any other 4xx is not. `status` and `vendorCode` (Resend's error `name`) are kept. Resend allows 10 requests per second per team.
 
 ### Plan
 

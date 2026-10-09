@@ -144,6 +144,15 @@ export class DriverError extends Error {
 }
 
 /**
+ * Whether a vendor's HTTP status is worth retrying: a request timeout (408), a rate limit (429)
+ * or a server error (5xx). It is the runtime's default rule; a driver adds its vendor's
+ * exceptions around it, such as a quota that does not lift in the seconds a retry waits.
+ */
+export function retryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+/**
  * Implements a vendor's operations, keyed `"resource.name"`. A driver reads its credentials
  * when it is called (from the environment or a secret store), never from the config file.
  */

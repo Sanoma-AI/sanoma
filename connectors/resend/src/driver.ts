@@ -1,4 +1,4 @@
-import { defineDriver, DriverError, type CallContext } from "@sanoma/workflows";
+import { defineDriver, DriverError, retryableStatus, type CallContext } from "@sanoma/workflows";
 import createClient from "openapi-fetch";
 import { z } from "zod";
 import { resend } from "./index.ts";
@@ -23,8 +23,11 @@ function idOf(op: string, reply: { data?: { id?: string }; error?: unknown; resp
   if (ok && reply.data?.id) return reply.data.id;
   if (ok) throw new DriverError(`resend: ${op} replied ${status} without a broadcast id`, { retryable: false, status });
   const { name, message } = errorBody.parse(reply.error);
-  // A daily or monthly quota does not lift in the seconds a retry waits.
-  const retryable = status >= 500 || (status === 429 && !name?.endsWith("_quota_exceeded"));
+  // A daily or monthly quota does not lift in the seconds a retry waits; a 409
+  // `concurrent_idempotent_requests` is another request with this key still in flight.
+  const retryable =
+    (retryableStatus(status) && !name?.endsWith("_quota_exceeded")) ||
+    (status === 409 && name === "concurrent_idempotent_requests");
   throw new DriverError(`resend: ${op} failed (${status}): ${message ?? statusText}`, {
     retryable,
     status,

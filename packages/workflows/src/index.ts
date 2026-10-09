@@ -9,6 +9,7 @@ export {
   isOp,
   type Op,
   type OpSpec,
+  retryableStatus,
   type VendorInfo,
 } from "./op.ts";
 export {

@@ -324,6 +324,7 @@ describe("ghostDriver", () => {
     const draft = (read?.body as { posts: [{ id: string; updated_at: string }] } | undefined)?.posts[0];
 
     it.each([
+      [408, "<html><body>408 Request Timeout</body></html>"],
       [429, { errors: [{ message: "Too many requests.", type: "TooManyRequestsError" }] }],
       [503, "<html><body>503 Service Unavailable</body></html>"],
     ])("retries a %i", async (status, body) => {
