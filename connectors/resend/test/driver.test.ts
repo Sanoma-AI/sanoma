@@ -5,10 +5,10 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { resendDriver } from "../src/driver.ts";
 
-// Replays the responses in fixtures/. With SANOMA_LIVE=1 and RESEND_API_KEY set (never in CI),
-// the same tests call Resend, creating and sending broadcasts to the segment RESEND_TEST_AUDIENCE;
+// Replays the responses in fixtures/. With SANOMA_LIVE=1 (ignored in CI), RESEND_API_KEY and
+// RESEND_TEST_AUDIENCE, the same tests call Resend, creating and sending broadcasts to that segment;
 // SANOMA_RECORD=1 then rewrites the fixtures from Resend's replies, scrubbed.
-const live = process.env.SANOMA_LIVE === "1" && !!process.env.RESEND_API_KEY && !process.env.CI;
+const live = process.env.SANOMA_LIVE === "1" && !process.env.CI;
 const record = live && process.env.SANOMA_RECORD === "1";
 
 const API = "https://api.resend.com";
@@ -72,7 +72,12 @@ const failure = (promise: Promise<unknown>) =>
     (err: DriverError) => err,
   );
 
-beforeAll(() => server.listen({ onUnhandledFrame: live ? "bypass" : "error" }));
+beforeAll(() => {
+  if (live && (!process.env.RESEND_API_KEY || !process.env.RESEND_TEST_AUDIENCE)) {
+    throw new Error("SANOMA_LIVE=1 needs RESEND_API_KEY and RESEND_TEST_AUDIENCE");
+  }
+  server.listen({ onUnhandledFrame: live ? "bypass" : "error" });
+});
 beforeEach(() => {
   requests.length = 0;
   if (!live) vi.stubEnv("RESEND_API_KEY", "re_test_key");
