@@ -78,7 +78,7 @@ beforeAll(() => {
     scrubs.set(process.env.BLUESKY_IDENTIFIER!, "alice.example.test");
     scrubs.set(process.env.BLUESKY_APP_PASSWORD!, "example-app-password");
   }
-  server.listen({ onUnhandledFrame: "error" });
+  server.listen({ onUnhandledFrame: live ? "bypass" : "error" });
 });
 beforeEach(() => {
   if (live) return;
