@@ -521,6 +521,8 @@ describe("the page", () => {
     expect(connectors.html).toContain(`href="${vendors.resend!.source}"`);
     expect(connectors.html).toContain("<code>resend.broadcast.send</code>");
     expect(connectors.html).toContain('href="/workflows/announce"');
+    // Every page's sidebar links to it.
+    expect((await page("/runs")).html).toContain('href="/connectors"');
   });
 
   it("renders a workflow's page: its graph beside its source, and not-found for one that does not exist", async () => {
