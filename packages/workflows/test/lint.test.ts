@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { lintResources, lintWorkflow } from "../src/lint.ts";
+import { BAD_DATA_FILES } from "./bad-data-files.ts";
 import { ensureBuilt } from "./build.ts";
 
 const messages = (src: string, filename?: string) => lintWorkflow(src, filename).map((p) => p.message);
@@ -158,7 +159,7 @@ describe("lintWorkflow", () => {
   });
 });
 
-const fixture = (path: string) => fileURLToPath(new URL(`./fixtures/${path}`, import.meta.url));
+const fixture = (path: string) => fileURLToPath(new URL(`./fixtures/company/${path}`, import.meta.url));
 const GOOD = ["resources/identity/github.ts", "resources/identity/rules.ts", "resources/billing/stripe.ts"];
 
 /** The lines, columns and messages lintResources gives a data file. */
@@ -170,45 +171,22 @@ describe("lintResources", () => {
     expect(lintResources(readFileSync(fixture(path), "utf8"), fixture(path))).toEqual([]);
   });
 
-  it.each([
-    ["assertion.ts", "3:65", /^a type assertion is not allowed in a data file: leave it out/],
-    ["call.ts", "3:46", /^a call is not allowed in a data file: write the value out/],
-    ["computed.ts", "3:41", /^a computed key is not allowed in a data file: write the field's name/],
-    ["default.ts", "5:16", /^export default must list this file's resources: `export default \[a, b\]`/],
-    ["function.ts", "3:1", /^a function declaration is not allowed in a data file: a data file holds only imports/],
-    ["let.ts", "3:1", /^`export let` is not allowed in a data file: use `export const`/],
-    ["member.ts", "4:66", /^member access is not allowed in a data file: .*name the resource itself/],
-    ["new.ts", "3:61", /^`new` is not allowed in a data file: write the value out/],
-    [
-      "not-constructor.ts",
-      "3:20",
-      /^export const web must be a resource constructor call, `<vendor>\.<type>\(\{ … \}\)`/,
-    ],
-    [
-      "outside.ts",
-      "2:25",
-      /^import "\.\.\/resources\/identity\/github\.ts" is not allowed .*reaches outside bad-resources\//,
-    ],
-    ["process.ts", "3:66", /^process is not allowed in a data file: .*cannot read the environment/],
-    ["spread.ts", "4:53", /^a spread is not allowed in a data file: write the fields out/],
-    ["template.ts", "3:46", /^a template with `\$\{…\}` is not allowed in a data file: write the string out/],
-    ["undefined.ts", "3:66", /^undefined is not allowed in a data file: leave the field out, or write null/],
-    ["unexported.ts", "3:1", /^`const name` is not allowed in a data file: export it as a resource/],
-  ])("refuses bad-resources/%s at %s, saying what to write instead", (file, at, message) => {
-    const path = fixture(`bad-resources/${file}`);
-    const problems = lintResources(readFileSync(path, "utf8"), path);
+  it.each(BAD_DATA_FILES)("refuses %s at %s, saying what to write instead", (name, source, at, message) => {
+    const problems = lintResources(source, `/repo/resources/bad/${name}.ts`);
     expect(problems.map((p) => `${p.line}:${p.column}`)).toEqual([at]);
     expect(problems[0]?.message).toMatch(message);
   });
 
+  it("reads every import first, as they are hoisted", () => {
+    expect(
+      dataFile(`export const rule = github.branch_protection({ repository_id: site, pattern: "main" });
+import { github } from "@sanoma/connector-github/resources";
+import { site } from "./site.ts";
+`),
+    ).toEqual([]);
+  });
+
   it("refuses an import of anything but constructors and data files", () => {
-    expect(readFileSync(fixture("bad-resources/import.ts"), "utf8")).toContain('from "zod"');
-    expect(dataFile(readFileSync(fixture("bad-resources/import.ts"), "utf8"))).toEqual([
-      expect.stringMatching(
-        /^1:19 import "zod" is not allowed in a data file: import resource constructors from a connector's resources entry/,
-      ),
-      "4:66 a call is not allowed in a data file: write the value out; the reader never runs code",
-    ]);
     expect(
       dataFile(`import * as gh from "@sanoma/connector-github/resources";
 import site from "./site.ts";
@@ -369,12 +347,13 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
     // Outside workflows/ and policies/, nothing is restricted.
     write("lib/clock.ts", `export const now = () => Date.now() + Math.random();\n`);
     for (const path of GOOD) write(path, readFileSync(fixture(path), "utf8"));
-    for (const file of ["call.ts", "process.ts", "spread.ts"]) {
-      write(`resources/bad/${file}`, readFileSync(fixture(`bad-resources/${file}`), "utf8"));
-    }
+    for (const [name, source] of BAD_DATA_FILES) write(`resources/bad/${name}.ts`, source);
+    found = lint();
   });
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
+  // oxlint runs once, over the whole project: each test reads its part.
+  let found: ReturnType<typeof lint> = [];
   const lint = () => {
     const out = spawnSync(join(repo, "node_modules/.bin/oxlint"), ["-f", "json", "."], { cwd: dir, encoding: "utf8" });
     const { diagnostics } = JSON.parse(out.stdout) as {
@@ -383,20 +362,22 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
         code: string;
         message: string;
         help?: string;
-        labels: { span: { line: number } }[];
+        labels: { span: { line: number; column: number } }[];
       }[];
     };
     return diagnostics.map((d) => ({
       file: d.filename,
       line: d.labels[0]?.span.line,
+      column: d.labels[0]?.span.column,
       rule: d.code,
       text: `${d.message} ${d.help ?? ""}`,
     }));
   };
 
   it("reports the clock, randomness, the network, timers, the environment, globals and the bypass imports", () => {
-    const problems = lint()
+    const problems = found
       .filter((d) => !d.file.startsWith("resources/"))
+      .map(({ file, line, rule, text }) => ({ file, line, rule, text }))
       .toSorted((a, b) => a.file.localeCompare(b.file) || a.line! - b.line!);
     expect(problems).toEqual([
       { file: "policies/bad.ts", line: 1, rule: globals, text: expect.stringMatching(/'Date'.*ctx\.now/) },
@@ -427,13 +408,18 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
   it("holds files under resources/ to the data-file subset, with the plugin from dist/", () => {
     const rule = "sanoma(data-file)";
     expect(
-      lint()
-        .filter((d) => d.file.startsWith("resources/"))
-        .toSorted((a, b) => a.file.localeCompare(b.file)),
-    ).toEqual([
-      { file: "resources/bad/call.ts", line: 3, rule, text: expect.stringMatching(/^a call is not allowed/) },
-      { file: "resources/bad/process.ts", line: 3, rule, text: expect.stringMatching(/^process is not allowed/) },
-      { file: "resources/bad/spread.ts", line: 4, rule, text: expect.stringMatching(/^a spread is not allowed/) },
-    ]);
+      found
+        .filter((d) => d.rule === rule)
+        .toSorted((a, b) => a.file.localeCompare(b.file))
+        .map((d) => [d.file, `${d.line}:${d.column}`, d.rule, d.text]),
+    ).toEqual(
+      // A name declared twice oxlint reports itself, as a syntax error, before any rule runs.
+      BAD_DATA_FILES.filter(([name]) => name !== "twice").map(([name, , at, message]) => [
+        `resources/bad/${name}.ts`,
+        at,
+        rule,
+        expect.stringMatching(message),
+      ]),
+    );
   });
 });

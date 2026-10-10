@@ -4,14 +4,20 @@ import { type Builtin, jsonSchemaOf, type Use } from "./define.ts";
 import { type Effect, isOp, VENDOR, type VendorInfo } from "./op.ts";
 import { type Outline, outlineWithSource } from "./outline.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
-import type { Resource, ResourceFields } from "./resource.ts";
-import { type DeclaredResource, readResourceDirs } from "./resources.ts";
+import type { ResourceFields } from "./resource.ts";
+import { type DeclaredResource, readDataFiles, type ResourceProblem, resourceTypesOf } from "./resources.ts";
 
 // `@sanoma/workflows/describe`: what a UI renders from. Apart from the main entry, so the
 // worker never loads oxc-parser, which the outline reads `run` with.
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
 // The reader parses data files with oxc-parser too.
-export { readResources, type DeclaredResource, type ResourceRef } from "./resources.ts";
+export {
+  readDataFiles,
+  readResources,
+  type DataFiles,
+  type DeclaredResource,
+  type ResourceProblem,
+} from "./resources.ts";
 
 /** What a workflow is, read from its definition: enough to draw a start form and show what it may call. */
 export interface WorkflowEntry {
@@ -80,9 +86,6 @@ export interface ResourceTypeEntry {
   ops: string[];
 }
 
-/** A resource a data file declares, read without running the file (`readResources`). */
-export type ResourceEntry = DeclaredResource;
-
 /**
  * A plain-JSON description of what a config can do: its workflows, the operations they call,
  * and whether a policy gates them. The app server builds it from the config and sends it to the
@@ -98,27 +101,31 @@ export interface ConfigDescription {
   vendors: Record<string, VendorEntry>;
   /** The resource types the connectors declare, by `id`. */
   resourceTypes: ResourceTypeEntry[];
-  /** The resources the data files under `resources` declare, by file and then in file order. */
-  resources: ResourceEntry[];
+  /**
+   * The resources the data files under `resources/` declare, by file and then in file order,
+   * less any with a problem and any that names one.
+   */
+  resources: DeclaredResource[];
+  /** What is wrong in the data files, or in finding them, by file, line and column (`readDataFiles`). */
+  problems: ResourceProblem[];
   /** `defined` is false for `allowAll`. */
   policy: { defined: boolean; version?: string };
 }
 
 /**
- * Describes a config. Throws what `startWorker` would refuse (see `resolveConfig`), and the
- * problems `readResources` finds in the data files; there is no partial description.
+ * Describes a config. Throws what `startWorker` would refuse (see `resolveConfig`). The data
+ * files' problems are data, `problems`, beside the resources read without any.
  */
 export function describeConfig(config: SanomaConfig): ConfigDescription {
   const resolved = resolveConfig(config);
   const vendors: Record<string, VendorEntry> = {};
-  const resources = new Map<string, Resource>();
   // A vendor whose operations are split over several connectors is named by the first; its
   // resource types are every connector's.
   for (const connector of config.connectors) {
-    const { id, info, resources: types } = connector[VENDOR];
+    const { id, info } = connector[VENDOR];
     vendors[id] ??= vendorEntry(id, info);
-    for (const resource of types as readonly Resource[]) resources.set(`${resource.vendor}.${resource.type}`, resource);
   }
+  const resources = resourceTypesOf(config.connectors);
   // Each resource type's state is described once, on its entry, and referenced from its operations.
   const refs = new Map<z.ZodType, string>([...resources].map(([id, r]) => [r.schema, resourceTypeUri(id)]));
   const resourceTypes: ResourceTypeEntry[] = [...resources]
@@ -165,7 +172,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     ops,
     vendors,
     resourceTypes,
-    resources: readResourceDirs(resolved.resources, config.connectors),
+    ...readDataFiles(resolved.root, config.connectors, resources),
     policy: {
       defined: resolved.policy !== allowAll,
       ...(resolved.policy.version === undefined ? {} : { version: resolved.policy.version }),

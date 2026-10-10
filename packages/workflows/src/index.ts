@@ -29,9 +29,10 @@ export {
 } from "./define.ts";
 export {
   compareDeclared,
-  type Declarable,
   type Declared,
+  type Declaring,
   defineResource,
+  type References,
   type Resource,
   type ResourceFields,
   type ResourceOps,
@@ -39,7 +40,7 @@ export {
 } from "./resource.ts";
 export { defineConfig, resolveConfig, type ResolvedConfig, type SanomaConfig } from "./config.ts";
 // readResources, which parses data files, is at `@sanoma/workflows/describe`.
-export type { DeclaredResource, ResourceRef } from "./resources.ts";
+export type { DeclaredResource, ResourceProblem } from "./resources.ts";
 export {
   allow,
   allowAll,

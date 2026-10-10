@@ -6,6 +6,7 @@ import {
   type Driver,
   type DriverFn,
   DriverError,
+  type References,
   type Resource,
   type ResourceSpec,
   type VendorInfo,
@@ -30,28 +31,38 @@ export interface TfTypeSpec<S extends z.ZodObject = z.ZodObject> {
   normalize?: ResourceSpec<S>["normalize"];
 }
 
-export interface TfConnectorSpec<V extends string, T extends Record<string, z.ZodObject>> {
+/** Per resource type, its `fields.references`: `{ branch_protection: { repository_id: "github.repository" } }`. */
+export type TfReferences<T> = { readonly [K in keyof T]?: References };
+
+export interface TfConnectorSpec<V extends string, T extends Record<string, z.ZodObject>, R extends TfReferences<T>> {
   /** The vendor's id, such as `github`: the operations are `<vendor>.<type>.read` and `.import`. */
   vendor: V;
   /** The provider release, `provider` from `resources.gen.ts`. */
   provider: TfProvider;
   /** The resource types, by the connector's name for each (`repository`). */
   types: { [K in keyof T]: TfTypeSpec<T[K]> };
+  /**
+   * Per type, the fields that name another declared resource, which the provider's schema does
+   * not say (it types them as strings): a data file gives the resource itself there.
+   */
+  references?: R;
   /** Who the vendor is, for a UI: `defineConnector`'s third argument. */
   info?: VendorInfo;
 }
 
 /** A connector's resource types, by name. */
-export type TfResources<T extends Record<string, z.ZodObject>> = { readonly [K in keyof T]: Resource<T[K]> };
+export type TfResources<V extends string, T extends Record<string, z.ZodObject>, R extends TfReferences<T> = {}> = {
+  readonly [K in keyof T & string]: Resource<T[K], `${V}.${K}`, R[K] extends References ? R[K] : {}>;
+};
 
 /** What `tfConnector` returns: the connector, its resource types, and how to drive them. */
-export interface TfConnector<V extends string, T extends Record<string, z.ZodObject>> {
+export interface TfConnector<V extends string, T extends Record<string, z.ZodObject>, R extends TfReferences<T> = {}> {
   readonly vendor: V;
   readonly provider: TfProvider;
   /** The connector, with each resource type's `read` and `import`, for `defineConfig` and workflows. */
-  readonly connector: Connector<V, TfResources<T>>;
+  readonly connector: Connector<V, TfResources<V, T, R>>;
   /** The resource types, which declare resources in data files: `resources.repository({ name: "sanoma" })`. */
-  readonly resources: TfResources<T>;
+  readonly resources: TfResources<V, T, R>;
   /** The generated types, by name. */
   readonly types: { readonly [K in keyof T]: TfResourceType<T[K]> };
   /**
@@ -78,12 +89,15 @@ const handleOf = (r: ResourceState) => `${r.schemaVersion}:${Buffer.from(r.priva
  * errors become `DriverError`s with its code as `vendorCode` and the provider's diagnostics in
  * the message, retryable only when the provider has gone (`unavailable`).
  */
-export function tfConnector<const V extends string, T extends Record<string, z.ZodObject>>(
-  spec: TfConnectorSpec<V, T>,
-): TfConnector<V, T> {
+export function tfConnector<
+  const V extends string,
+  T extends Record<string, z.ZodObject>,
+  const Refs extends TfReferences<T> = {},
+>(spec: TfConnectorSpec<V, T, Refs>): TfConnector<V, T, Refs> {
   const { vendor, provider } = spec;
   const types = spec.types as Record<string, TfTypeSpec>;
-  const resources = Object.fromEntries(
+  const references: Record<string, References | undefined> = spec.references ?? {};
+  const resources: Record<string, Resource> = Object.fromEntries(
     Object.entries(types).map(([type, { tf, title, identity, find, normalize }]) => [
       type,
       defineResource({
@@ -92,13 +106,13 @@ export function tfConnector<const V extends string, T extends Record<string, z.Z
         title,
         identity,
         schema: tf.schema,
-        fields: tf.fields,
+        fields: references[type] ? { ...tf.fields, references: references[type] } : tf.fields,
         find,
         ...(normalize && { normalize }),
       }),
     ]),
-  ) as unknown as TfResources<T>;
-  const connector = defineConnector(vendor, resources as Record<string, Resource>, spec.info);
+  );
+  const connector = defineConnector(vendor, resources, spec.info);
 
   function driver(bridge: ProviderClient, config: () => Record<string, unknown>): Driver {
     /** Runs `fn` on a configured provider, with the bridge's errors as `DriverError`s. */
@@ -163,8 +177,8 @@ export function tfConnector<const V extends string, T extends Record<string, z.Z
   return {
     vendor,
     provider,
-    connector: connector as unknown as Connector<V, TfResources<T>>,
-    resources,
+    connector: connector as unknown as Connector<V, TfResources<V, T, Refs>>,
+    resources: resources as unknown as TfResources<V, T, Refs>,
     types: Object.fromEntries(Object.entries(types).map(([type, { tf }]) => [type, tf])) as TfConnector<V, T>["types"],
     driver,
   };

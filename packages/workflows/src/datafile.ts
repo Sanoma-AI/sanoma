@@ -1,5 +1,6 @@
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { Node } from "./ast.ts";
+import { inside, nearestDir, RELATIVE } from "./paths.ts";
 
 // The one definition of what a data file may hold, over an ESTree program from oxc: the reader
 // (`resources.ts`), `lintResources` (`lint.ts`) and the oxlint plugin (`plugin.ts`) all
@@ -16,12 +17,8 @@ export interface DataFileProblem {
 /** A name in a data file that refers to a declared resource: one imported from a data file, or exported by this one. */
 export class Reference {
   readonly name: string;
-  readonly start: number;
-  readonly end: number;
-  constructor(name: string, start: number, end: number) {
+  constructor(name: string) {
     this.name = name;
-    this.start = start;
-    this.end = end;
   }
 }
 
@@ -38,7 +35,6 @@ export interface DataFileImport {
   /** The name it has in this file. */
   local: string;
   start: number;
-  end: number;
 }
 
 /** An `export const name = vendor.type({ … })`. */
@@ -62,7 +58,6 @@ export interface DataFile {
   problems: DataFileProblem[];
 }
 
-const RELATIVE = /^\.\.?\//;
 /** A connector's constructors entry: a package specifier that ends in `/resources`. */
 const CONSTRUCTORS = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*\/resources$/;
 
@@ -85,12 +80,12 @@ const VALUES = "write a string, number, boolean, null, object or array, or name 
  * and names of resources this file declares or imports; and `export default [a, b]`.
  *
  * `root` is the directory relative imports must stay in: by default the nearest `resources/`
- * directory above `filename`, else the file's own; without either, they are not checked.
+ * directory above `filename`, else the file's own.
  */
 export function readDataFile(
   program: Node,
-  filename?: string,
-  root: string | undefined = filename === undefined ? undefined : resourcesRoot(filename),
+  filename: string,
+  root: string = nearestDir(filename, ["resources"]),
 ): DataFile {
   const problems: DataFileProblem[] = [];
   const fail = (node: { start: number; end: number }, message: string) =>
@@ -100,21 +95,33 @@ export function readDataFile(
   // Names a refused import or declaration binds: reported once, where they are bound.
   const refused = new Set<string>();
 
-  // Top-level names first: a reference may name a resource declared further down. An unexported
-  // const is refused where it is declared, not again where it is used.
+  // Imports and top-level names first, each once: imports are hoisted, and a reference may name
+  // a resource declared further down. An unexported const is refused where it is declared, not
+  // again where it is used.
+  const bound = new Set<string>();
+  const bind = (id: Node) => {
+    if (bound.has(id.name)) fail(id, `${id.name} is declared twice in this file: give each its own name`);
+    bound.add(id.name);
+  };
   const declared = new Set<string>();
   for (const s of program.body) {
+    if (s.type === "ImportDeclaration") {
+      for (const sp of s.specifiers) bind(sp.local);
+      readImport(s);
+      continue;
+    }
     const decl = s.type === "ExportNamedDeclaration" ? s.declaration : s;
     if (decl?.type !== "VariableDeclaration") continue;
     for (const d of decl.declarations) {
-      if (d.id.type === "Identifier") (decl === s ? refused : declared).add(d.id.name);
+      if (d.id.type !== "Identifier") continue;
+      bind(d.id);
+      (decl === s ? refused : declared).add(d.id.name);
     }
   }
 
   for (const s of program.body) {
     switch (s.type) {
       case "ImportDeclaration":
-        readImport(s);
         break;
       case "ExportNamedDeclaration":
         readExport(s);
@@ -146,15 +153,7 @@ export function readDataFile(
       fail(s, "`import type` is not allowed in a data file: it holds values only, and the constructors type them");
       return;
     }
-    const kind = RELATIVE.test(spec) ? "file" : CONSTRUCTORS.test(spec) ? "constructors" : undefined;
-    const refusal =
-      kind === undefined
-        ? IMPORTS
-        : kind === "file" && !spec.endsWith(".ts")
-          ? "name the data file with its `.ts` extension"
-          : kind === "file" && root !== undefined && !inside(root, join(dirname(filename!), spec))
-            ? `it reaches outside ${basename(root)}/; import only other data files`
-            : undefined;
+    const refusal = whyRefused(spec);
     if (refusal) {
       fail(s.source, `import "${spec}" is not allowed in a data file: ${refusal}`);
       for (const sp of s.specifiers) refused.add(sp.local.name);
@@ -175,8 +174,19 @@ export function readDataFile(
         continue;
       }
       const imported: string = sp.imported.name ?? sp.imported.value;
-      imports.push({ kind: kind!, source: spec, imported, local: sp.local.name, start: sp.start, end: sp.end });
+      const kind = RELATIVE.test(spec) ? "file" : "constructors";
+      imports.push({ kind, source: spec, imported, local: sp.local.name, start: sp.start });
     }
+  }
+
+  /** Why an import's specifier is not allowed in a data file, or undefined when it is. */
+  function whyRefused(spec: string): string | undefined {
+    if (!RELATIVE.test(spec)) return CONSTRUCTORS.test(spec) ? undefined : IMPORTS;
+    if (!spec.endsWith(".ts")) return "name the data file with its `.ts` extension";
+    if (!inside(root, join(dirname(filename), spec))) {
+      return `it reaches outside ${basename(root)}/; import only other data files`;
+    }
+    return undefined;
   }
 
   function readExport(s: Node) {
@@ -208,6 +218,8 @@ export function readDataFile(
       return;
     }
     const name: string = d.id.name;
+    // A second declaration of the name was reported where it is bound.
+    if (exports.some((e) => e.name === name)) return;
     const init = d.init;
     const callee = init?.type === "CallExpression" ? init.callee : undefined;
     if (
@@ -224,9 +236,8 @@ export function readDataFile(
     }
     const vendor: string = callee.object.name;
     const type: string = callee.property.name;
-    const bound = imports.find((i) => i.local === vendor);
     if (refused.has(vendor)) return;
-    if (bound?.kind !== "constructors") {
+    if (imports.find((i) => i.local === vendor)?.kind !== "constructors") {
       fail(
         callee.object,
         `${vendor} is not a connector's resource constructors: import it from the connector's resources entry, \`import { ${vendor} } from "@sanoma/connector-${vendor}/resources"\``,
@@ -293,18 +304,13 @@ export function readDataFile(
         return ok ? items : undefined;
       }
       case "ObjectExpression": {
-        const fields: [string, DataValue][] = [];
-        const seen = new Set<string>();
+        const fields = new Map<string, DataValue>();
         let ok = true;
         for (const p of node.properties) {
           const field = property(p);
-          if (field && seen.has(field[0])) fail(p, `${field[0]} is given twice: give each field once`);
-          if (!field || seen.has(field[0])) {
-            ok = false;
-            continue;
-          }
-          seen.add(field[0]);
-          fields.push(field);
+          if (field && fields.has(field[0])) fail(p, `${field[0]} is given twice: give each field once`);
+          if (!field || fields.has(field[0])) ok = false;
+          else fields.set(...field);
         }
         // fromEntries makes each field an own property, even one named `__proto__`.
         return ok ? Object.fromEntries(fields) : undefined;
@@ -377,7 +383,7 @@ export function readDataFile(
     if (imported?.kind === "constructors") {
       return refuse(node, `${name} is a connector's resource constructors, not a resource: name a declared resource`);
     }
-    if (imported || declared.has(name)) return new Reference(name, node.start, node.end);
+    if (imported || declared.has(name)) return new Reference(name);
     if (refused.has(name)) return undefined;
     return refuse(
       node,
@@ -400,18 +406,4 @@ function describe(node: Node): string {
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .toLowerCase();
   return `${/^[aeiou]/.test(words) ? "an" : "a"} ${words}`;
-}
-
-/** The file's nearest `resources/` ancestor directory, else its own directory. */
-export function resourcesRoot(filename: string): string {
-  for (let dir = dirname(filename); ; dir = dirname(dir)) {
-    if (basename(dir) === "resources") return dir;
-    if (dirname(dir) === dir) return dirname(filename);
-  }
-}
-
-/** True when `path` is `dir` or inside it. */
-export function inside(dir: string, path: string): boolean {
-  const rel = relative(dir, path);
-  return rel === "" || (rel.split(sep)[0] !== ".." && !isAbsolute(rel));
 }

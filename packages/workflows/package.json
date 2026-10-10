@@ -21,7 +21,7 @@
   "files": [
     "dist",
     "oxlint.json",
-    "AGENTS.md",
+    "README.md",
     "LICENSE"
   ],
   "type": "module",

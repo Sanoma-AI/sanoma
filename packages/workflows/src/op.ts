@@ -115,7 +115,9 @@ const isResourceGroup = (group: unknown): group is ResourceGroup =>
 /**
  * Declares a vendor's operations, grouped by resource: `defineConnector("ghost", { post: { create: {...} } })`.
  * A group may be a resource type from `defineResource`, under its own `type`, for its `read` and
- * `import`: `defineConnector("github", { repository })`; it must be of the same vendor.
+ * `import`: `defineConnector("github", { repository }, { package: "@sanoma/connector-github" })`;
+ * it must be of the same vendor, and the connector needs `info.package`, whose `/resources`
+ * entry exports the types for data files.
  * `info` says who the vendor is and where the connector lives, for a UI:
  * `{ title: "Resend", logo: { svg }, package: "@sanoma/connector-resend", homepage: "https://…" }`.
  */
@@ -169,6 +171,12 @@ export function defineConnector<const V extends string, const S extends Specs>(
         output: spec.output,
       } satisfies Op);
     }
+  }
+  // A data file imports the resource types from `<package>/resources`, which the reader matches exactly.
+  if (resources.length && !vendorInfo?.package) {
+    throw new Error(
+      `defineConnector("${vendor}"): a connector with resource types needs info.package, the npm package data files import them from (\`<package>/resources\`)`,
+    );
   }
   const owner: ConnectorVendor<V> = Object.freeze({
     id: vendor,
