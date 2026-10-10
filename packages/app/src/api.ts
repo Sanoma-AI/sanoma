@@ -1,5 +1,6 @@
 import type {
   ApprovalState,
+  CredentialStatus,
   ErrorCode,
   InputIssue,
   LedgerRecord,
@@ -144,6 +145,24 @@ export interface ScenariosResponse {
   scenarios: ScenarioEntry[];
   errors: { file: string; message: string }[];
 }
+
+/**
+ * `GET /api/credentials`: each vendor's declared variables and their statuses now, by vendor id
+ * (`SanomaClient.credentials`): where each value is from and, for a stored one, who set it and
+ * when. Never a value.
+ */
+export type CredentialsResponse = Record<string, CredentialStatus[]>;
+
+/** `PUT /api/credentials`: stores the value of a declared variable, as the actor. 204; the value is never sent back. */
+export const SetCredentialRequest = z.object({
+  name: z.string().min(1, "Name a variable"),
+  value: z.string().min(1, "Enter a value").max(16_384),
+});
+export type SetCredentialRequest = z.infer<typeof SetCredentialRequest>;
+
+/** `DELETE /api/credentials`: deletes the stored value of a declared variable. 204. */
+export const ClearCredentialRequest = z.object({ name: z.string().min(1, "Name a variable") });
+export type ClearCredentialRequest = z.infer<typeof ClearCredentialRequest>;
 
 /** Every error response, and the `body` of the error a server function throws. */
 export interface ErrorResponse {

@@ -20,11 +20,14 @@ import type { z } from "zod";
 import {
   ACTOR_HEADER,
   ApiError,
+  type ClearCredentialRequest,
+  type CredentialsResponse,
   type DecideCall,
   type ErrorResponse,
   type InputIssue,
   type RunDetail,
   type ScenariosResponse,
+  type SetCredentialRequest,
   type StartRunRequest,
   type StartRunResponse,
 } from "../api.ts";
@@ -229,6 +232,18 @@ export function decide({ client }: AppContext, actor: Principal, call: DecideCal
     timeoutSeconds: 5,
   });
 }
+
+/** Each vendor's credential statuses now, from the app's environment and the stored credentials. */
+export const credentials = async ({ client }: AppContext): Promise<CredentialsResponse> =>
+  Object.fromEntries(await client.credentials());
+
+/** Stores the variable's value as the actor; refused, with the reason and never the value, as `SanomaClient.setCredential` refuses it. */
+export const setCredential = ({ client }: AppContext, actor: Principal, { name, value }: SetCredentialRequest) =>
+  client.setCredential(name, value, { by: actor.id });
+
+/** Deletes the variable's stored value, as the actor. */
+export const clearCredential = ({ client }: AppContext, actor: Principal, { name }: ClearCredentialRequest) =>
+  client.clearCredential(name, { by: actor.id });
 
 const STATUS: Partial<Record<NonNullable<ErrorResponse["code"]>, number>> = {
   invalid_input: 400,

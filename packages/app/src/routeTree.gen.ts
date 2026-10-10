@@ -19,6 +19,7 @@ import { Route as StartRouteImport } from './routes/start'
 import { Route as WorkflowsRouteRouteImport } from './routes/workflows/route'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
 import { Route as ApiConfigRouteImport } from './routes/api/config'
+import { Route as ApiCredentialsRouteImport } from './routes/api/credentials'
 import { Route as ApiScenariosRouteImport } from './routes/api/scenarios'
 import { Route as ConnectorsIndexRouteImport } from './routes/connectors/index'
 import { Route as ConnectorsVendorRouteImport } from './routes/connectors/$vendor'
@@ -78,6 +79,11 @@ const ApiSplatRoute = ApiSplatRouteImport.update({
 const ApiConfigRoute = ApiConfigRouteImport.update({
   id: '/config',
   path: '/config',
+  getParentRoute: () => ApiRoute,
+} as any)
+const ApiCredentialsRoute = ApiCredentialsRouteImport.update({
+  id: '/credentials',
+  path: '/credentials',
   getParentRoute: () => ApiRoute,
 } as any)
 const ApiScenariosRoute = ApiScenariosRouteImport.update({
@@ -143,6 +149,7 @@ export interface FileRoutesByFullPath {
   '/start': typeof StartRoute
   '/api/$': typeof ApiSplatRoute
   '/api/config': typeof ApiConfigRoute
+  '/api/credentials': typeof ApiCredentialsRoute
   '/api/scenarios': typeof ApiScenariosRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
   '/runs/$id': typeof RunsIdRoute
@@ -162,6 +169,7 @@ export interface FileRoutesByTo {
   '/start': typeof StartRoute
   '/api/$': typeof ApiSplatRoute
   '/api/config': typeof ApiConfigRoute
+  '/api/credentials': typeof ApiCredentialsRoute
   '/api/scenarios': typeof ApiScenariosRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
   '/runs/$id': typeof RunsIdRoute
@@ -185,6 +193,7 @@ export interface FileRoutesById {
   '/start': typeof StartRoute
   '/api/$': typeof ApiSplatRoute
   '/api/config': typeof ApiConfigRoute
+  '/api/credentials': typeof ApiCredentialsRoute
   '/api/scenarios': typeof ApiScenariosRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
   '/runs/$id': typeof RunsIdRoute
@@ -209,6 +218,7 @@ export interface FileRouteTypes {
     | '/start'
     | '/api/$'
     | '/api/config'
+    | '/api/credentials'
     | '/api/scenarios'
     | '/connectors/$vendor'
     | '/runs/$id'
@@ -228,6 +238,7 @@ export interface FileRouteTypes {
     | '/start'
     | '/api/$'
     | '/api/config'
+    | '/api/credentials'
     | '/api/scenarios'
     | '/connectors/$vendor'
     | '/runs/$id'
@@ -250,6 +261,7 @@ export interface FileRouteTypes {
     | '/start'
     | '/api/$'
     | '/api/config'
+    | '/api/credentials'
     | '/api/scenarios'
     | '/connectors/$vendor'
     | '/runs/$id'
@@ -343,6 +355,13 @@ declare module '@tanstack/react-router' {
       path: '/config'
       fullPath: '/api/config'
       preLoaderRoute: typeof ApiConfigRouteImport
+      parentRoute: typeof ApiRoute
+    }
+    '/api/credentials': {
+      id: '/api/credentials'
+      path: '/credentials'
+      fullPath: '/api/credentials'
+      preLoaderRoute: typeof ApiCredentialsRouteImport
       parentRoute: typeof ApiRoute
     }
     '/api/scenarios': {
@@ -463,6 +482,7 @@ const WorkflowsRouteRouteWithChildren = WorkflowsRouteRoute._addFileChildren(
 interface ApiRouteChildren {
   ApiSplatRoute: typeof ApiSplatRoute
   ApiConfigRoute: typeof ApiConfigRoute
+  ApiCredentialsRoute: typeof ApiCredentialsRoute
   ApiScenariosRoute: typeof ApiScenariosRoute
   ApiRunsIndexRoute: typeof ApiRunsIndexRoute
   ApiRunsIdIndexRoute: typeof ApiRunsIdIndexRoute
@@ -472,6 +492,7 @@ interface ApiRouteChildren {
 const ApiRouteChildren: ApiRouteChildren = {
   ApiSplatRoute: ApiSplatRoute,
   ApiConfigRoute: ApiConfigRoute,
+  ApiCredentialsRoute: ApiCredentialsRoute,
   ApiScenariosRoute: ApiScenariosRoute,
   ApiRunsIndexRoute: ApiRunsIndexRoute,
   ApiRunsIdIndexRoute: ApiRunsIdIndexRoute,

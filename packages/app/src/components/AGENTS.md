@@ -11,6 +11,7 @@ The app's React components: page chrome, shared display pieces, and the graph an
 | [`approval.tsx`](approval.tsx)       | Approval card and the approve or reject dialog                                                                            |
 | [`boundaries.tsx`](boundaries.tsx)   | Router error, not-found and pending views                                                                                 |
 | [`code.tsx`](code.tsx)               | Read-only CodeMirror view of a workflow's source with line highlights; browser only                                       |
+| [`credentials.tsx`](credentials.tsx) | A connector's Credentials section: each variable's status, and Set, Replace and Clear with their form                     |
 | [`common.tsx`](common.tsx)           | Shared pieces: badges (the sandbox badge too), tones, page headers, facts, op items, JSON views, lazy graph & code panels |
 | [`graph.tsx`](graph.tsx)             | React Flow drawing of a laid-out graph; loaded lazily                                                                     |
 | [`scenario.tsx`](scenario.tsx)       | The Test control (Test and the menu choosing a scenario), a scenario's card, and why a feature file could not be read     |
