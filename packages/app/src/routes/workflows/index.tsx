@@ -2,6 +2,7 @@ import type { WorkflowEntry } from "@sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo } from "react";
+import { Badge } from "#/components/ui/badge.tsx";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
 import { Fact, Facts, GraphPanel, loadGraph, Nothing, PageHeader, Section } from "../../components/common.tsx";
@@ -70,8 +71,9 @@ function WorkflowCard({ workflow }: { workflow: WorkflowEntry }) {
             {workflow.title ?? workflow.name}
           </Link>
         </CardTitle>
-        <CardDescription>
+        <CardDescription className="flex items-center gap-2">
           <code>{workflow.name}</code>
+          {workflow.builtin && <Badge variant="secondary">built-in</Badge>}
         </CardDescription>
         <CardAction>
           <StartButton name={workflow.name} />

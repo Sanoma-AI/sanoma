@@ -35,7 +35,7 @@ import { useReducedMotion } from "#/lib/motion.ts";
 import { utcText } from "#/lib/time.ts";
 import { RUN_TONE } from "#/lib/tone.ts";
 import { GraphAndSource } from "../../components/workflow.tsx";
-import { configQuery, opsById, runQuery, sourceQuery, workflowNamed } from "../../queries.ts";
+import { configQuery, opsById, runQuery, sourceQuery, workflowFile, workflowNamed } from "../../queries.ts";
 
 export const Route = createFileRoute("/runs/$id")({
   // The page reads the run from the query client; the loader returns only its name: its workflow.
@@ -44,9 +44,14 @@ export const Route = createFileRoute("/runs/$id")({
       void loadGraph();
       void loadCode();
     }
-    const { run } = await queryClient.query({ ...runQuery(params.id), staleTime: "static" });
-    // The workflow's source, beside the graph.
-    await queryClient.query({ ...sourceQuery(run.workflow), staleTime: "static" });
+    const [{ run }, config] = await Promise.all([
+      queryClient.query({ ...runQuery(params.id), staleTime: "static" }),
+      queryClient.query({ ...configQuery(), staleTime: "static" }),
+    ]);
+    // The workflow's file, beside the graph.
+    const workflow = workflowNamed(run.workflow)(config);
+    const file = workflow && workflowFile(workflow);
+    if (file !== undefined) await queryClient.query({ ...sourceQuery(file), staleTime: "static" });
     return { crumb: run.workflow };
   },
   // A run that does not exist has no loader data: its id stands in.

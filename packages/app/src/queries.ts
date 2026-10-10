@@ -1,9 +1,9 @@
 import type { RunSummary } from "@sanoma/workflows";
-import type { ConfigDescription } from "@sanoma/workflows/describe";
+import type { ConfigDescription, WorkflowEntry } from "@sanoma/workflows/describe";
 import { isEnded } from "@sanoma/workflows/shared";
 import { queryOptions } from "@tanstack/react-query";
-import { pendingApprovals, RUNS_LIMIT, type ScenariosResponse } from "./api.ts";
-import { getActor, getConfig, getRun, getRuns, getScenarios, getSource } from "./functions.ts";
+import { pendingApprovals, RUNS_LIMIT, type RunsQuery, type ScenariosResponse } from "./api.ts";
+import { getActor, getConfig, getDriftReport, getRun, getRuns, getScenarios, getSource } from "./functions.ts";
 
 /** How often the runs and a run's detail refresh while a page shows them. */
 export const POLL_MS = 2_000;
@@ -12,13 +12,20 @@ export const POLL_MS = 2_000;
 export const configQuery = () =>
   queryOptions({ queryKey: ["config"], queryFn: () => getConfig(), staleTime: Number.POSITIVE_INFINITY });
 
-/** A workflow's source, which cannot change while the app runs either. Not in the config: a page that shows it asks. */
-export const sourceQuery = (name: string) =>
+/**
+ * A file the config names, as it is when a page first shows it: a workflow's (its outline's
+ * `file`) or a data file (a resource's `file`). Not in the config: a page that shows one asks.
+ */
+export const sourceQuery = (file: string) =>
   queryOptions({
-    queryKey: ["source", name],
-    queryFn: () => getSource({ data: { name } }),
+    queryKey: ["source", file],
+    queryFn: () => getSource({ data: { file } }),
     staleTime: Number.POSITIVE_INFINITY,
   });
+
+/** The file a workflow's outline was read from; none when it was read from `run`'s text, or not at all. */
+export const workflowFile = (workflow: Pick<WorkflowEntry, "outline">): string | undefined =>
+  "file" in workflow.outline ? workflow.outline.file : undefined;
 
 /** The config's operations by id, for `select`: built once per config, not on every render. */
 export const opsById = (config: ConfigDescription) => new Map(config.ops.map((op) => [op.id, op]));
@@ -92,10 +99,11 @@ export const actorQuery = () =>
 /** Every list of runs is under this key: invalidating it refreshes them all. */
 export const RUNS_KEY = ["runs"] as const;
 
-export const runsQuery = (limit: number = RUNS_LIMIT.default) =>
+/** The latest runs, or the latest of a workflow or with a status (`RunsQuery`). */
+export const runsQuery = (query: RunsQuery = {}) =>
   queryOptions({
-    queryKey: [...RUNS_KEY, limit],
-    queryFn: () => getRuns({ data: { limit } }),
+    queryKey: [...RUNS_KEY, query],
+    queryFn: () => getRuns({ data: query }),
     refetchInterval: POLL_MS,
   });
 
@@ -122,4 +130,12 @@ export const runQuery = (id: string) =>
       const status = query.state.data?.run.status;
       return !status || isEnded(status) ? false : POLL_MS;
     },
+  });
+
+/** A finished drift run's report, which never changes. */
+export const driftReportQuery = (runId: string) =>
+  queryOptions({
+    queryKey: ["drift-report", runId],
+    queryFn: () => getDriftReport({ data: { runId } }),
+    staleTime: Number.POSITIVE_INFINITY,
   });

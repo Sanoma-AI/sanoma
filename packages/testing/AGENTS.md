@@ -1,6 +1,6 @@
 # Working on @sanoma/testing
 
-This package owns test-worker setup, recorded HTTP replay and scenario tests. Vendor fakes are implemented by their connector packages and re-exported here.
+This package owns test-worker setup, recorded HTTP replay and scenario tests. Vendor fakes live in their connector packages, at `@sanoma/connector-<vendor>/fake`.
 
 ## Read when needed
 
@@ -12,9 +12,10 @@ This package owns test-worker setup, recorded HTTP replay and scenario tests. Ve
 ## Maintenance boundaries
 
 - Preserve `startTestWorker`'s database isolation: ignore the config's database URL unless explicitly overridden through test options. Use a unique app name per test file.
+- This package depends on `@sanoma/workflows` only; connectors are devDependencies for its tests, never imported from `src/`.
 - Keep msw and vitest dependencies confined to `./replay` and `./scenarios`, since they are optional peers. Do not pull them into the package root.
 - Replay must fail on unexpected requests and unconsumed exchanges. Recording must scrub credentials and identifying data before fixtures are committed.
 
 ## Checks
 
-Run `pnpm vitest run packages/testing connectors` for fake and replay changes, plus `pnpm typecheck`. Test worker changes also need the workflow tests and Postgres.
+Run `pnpm vitest run packages/testing connectors` for replay changes, plus `pnpm typecheck`. Test worker changes also need the workflow tests and Postgres.

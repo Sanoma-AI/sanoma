@@ -14,4 +14,5 @@ The TanStack Router file routes of the app. Each file is served at the URL its p
 | [`api.ts`](api.ts)                    | Layout for `/api`: middleware that answers any failure as JSON                              |
 | [`inbox.tsx`](inbox.tsx)              | `/inbox`: every pending approval, newest first                                              |
 | [`index.tsx`](index.tsx)              | `/`: redirects to `/runs`                                                                   |
+| [`resources.tsx`](resources.tsx)      | `/resources`: the declared resources, their drift and data-file problems, and Run drift     |
 | [`start.tsx`](start.tsx)              | `/start`: choose a workflow and fill its input to start a run                               |

@@ -1,13 +1,14 @@
 import type { z } from "zod";
 import { resolveConfig, type SanomaConfig } from "./config.ts";
 import { type Builtin, jsonSchemaOf, type Use } from "./define.ts";
+import { DRIFT_WORKFLOW } from "./drift.ts";
 import type { Fake } from "./fake.ts";
 import { fill, isBug, seedFrom, shapeOf } from "./fill.ts";
 import { type Effect, isOp, type Op, VENDOR, type VendorInfo } from "./op.ts";
 import { type Outline, outlineWithSource } from "./outline.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
-import type { ResourceFields } from "./resource.ts";
-import { type DeclaredResource, readDataFiles, type ResourceProblem, resourceTypesOf } from "./resources.ts";
+import { type ResourceFields, resourceTypesOf } from "./resource.ts";
+import { type DeclaredResource, readDataFiles, type ResourceProblem } from "./resources.ts";
 import { errorMessage } from "./shared.ts";
 
 // `@sanoma/workflows/describe`: what a UI renders from. Apart from the main entry, so the
@@ -27,6 +28,11 @@ export interface WorkflowEntry {
   name: string;
   title?: string;
   trigger: "manual";
+  /**
+   * Set for a workflow the runtime adds itself, `drift`, rather than the config: a label. It
+   * starts like any other.
+   */
+  builtin?: true;
   /** The input, as JSON Schema (draft 2020-12), from the zod schema. */
   input: Record<string, unknown>;
   /** Operation ids the workflow may call, in the order declared. */
@@ -185,6 +191,7 @@ export async function describeConfig(config: SanomaConfig): Promise<ConfigDescri
       name: wf.name,
       title: wf.title,
       trigger: wf.trigger,
+      ...(wf.name === DRIFT_WORKFLOW && { builtin: true as const }),
       input: toJsonSchema(wf.input, `${wf.name} input`, "input"),
       ops: (wf.uses as Use[]).filter(isOp).map((op) => op.id),
       builtins: (wf.uses as Use[]).filter((u): u is Builtin => typeof u === "string"),

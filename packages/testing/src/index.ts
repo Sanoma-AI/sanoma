@@ -1,10 +1,5 @@
 import { memoryLedger, type SanomaConfig, startWorker, type Worker, type WorkerOptions } from "@sanoma/workflows";
 
-export { fakeBluesky, type FakeBlueskyPost, type FakeBlueskyState } from "@sanoma/connector-bluesky/fake";
-export { fakeGhost, type FakeGhostPost, type FakeGhostState } from "@sanoma/connector-ghost/fake";
-export { fakeGithub, type FakeGithubOptions, type FakeGithubState } from "@sanoma/connector-github/fake";
-export { fakeResend, type FakeResendBroadcast, type FakeResendState } from "@sanoma/connector-resend/fake";
-export { fakeStripe, type FakeStripeOptions, type FakeStripeState } from "@sanoma/connector-stripe/fake";
 export type { Fake, FakeCall, FakeOptions } from "@sanoma/workflows/fake";
 
 /**

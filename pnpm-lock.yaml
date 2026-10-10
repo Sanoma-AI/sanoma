@@ -182,6 +182,9 @@ importers:
       '@sanoma/connector-resend':
         specifier: workspace:*
         version: link:../../connectors/resend
+      '@sanoma/connector-stripe':
+        specifier: workspace:*
+        version: link:../../connectors/stripe
       '@sanoma/testing':
         specifier: workspace:*
         version: link:../testing
@@ -244,9 +247,6 @@ importers:
         specifier: ^5
         version: 5.0.3(@types/node@26.6.4)(msw@3.0.2(@types/node@26.6.4)(typescript@7.0.2)(vite@8.3.3(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)))(vite@8.3.3(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
     devDependencies:
-      '@sanoma/bridge':
-        specifier: workspace:*
-        version: link:../bridge
       '@sanoma/connector-bluesky':
         specifier: workspace:*
         version: link:../../connectors/bluesky

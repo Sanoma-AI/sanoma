@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { type CallContext, DriverError } from "@sanoma/workflows";
-import { type FakeCall, fakeBluesky, fakeGhost, fakeGithub, fakeResend, fakeStripe } from "../src/index.ts";
+import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
+import { fakeGhost } from "@sanoma/connector-ghost/fake";
+import { fakeGithub } from "@sanoma/connector-github/fake";
+import { fakeResend } from "@sanoma/connector-resend/fake";
+import { fakeStripe } from "@sanoma/connector-stripe/fake";
+import type { FakeCall } from "../src/index.ts";
 
 // No database: the fakes are called the way the runtime calls a driver.
 const call = (idempotencyKey: string, attempt = 1): CallContext => ({

@@ -13,7 +13,7 @@ export type FakeStripeOptions = TfFakeOptions;
  * replies are written by hand to the provider's schema, not recorded: no Stripe key was at hand
  * when the GitHub ones were. Nothing reaches Stripe, and no key is read.
  *
- * `override` changes what the next read returns, as if someone edited the object in Stripe's
- * dashboard, and `remove` deletes it, so the next read says it is gone.
+ * `put` makes an object, `override` changes what the next read returns, as if someone edited
+ * the object in Stripe's dashboard, and `remove` deletes it, so the next read says it is gone.
  */
 export const fakeStripe = (options: FakeStripeOptions = {}) => tfFake(stripeTf, { fixtures, ...options });

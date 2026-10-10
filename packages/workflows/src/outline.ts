@@ -93,8 +93,9 @@ interface Found {
 }
 
 /**
- * The workflow's `run` in its file: the first object literal with its `name` and a `run`
- * function. Or why not: the file cannot be read or parsed, or holds no such literal.
+ * The workflow's `run` in its file: the first object literal with its `name` (a string, or a
+ * top-level `const` of the file holding it) and a `run` function. Or why not: the file cannot be
+ * read or parsed, or holds no such literal.
  */
 function inFile(file: string, name: string): Found | string {
   let source: string;
@@ -105,6 +106,18 @@ function inFile(file: string, name: string): Found | string {
   }
   const { program, errors } = parse(file, source);
   if (errors.length) return `${file} could not be parsed: ${errors[0]!.message}`;
+  // The file's top-level string constants, `export const NAME = "drift"`, by name.
+  const consts = new Map<string, string>();
+  for (const statement of program.body as Node[]) {
+    const declaration = statement.type === "ExportNamedDeclaration" ? statement.declaration : statement;
+    if (declaration?.type !== "VariableDeclaration" || declaration.kind !== "const") continue;
+    for (const d of declaration.declarations as Node[]) {
+      const value = stringValue(d.init);
+      if (d.id.type === "Identifier" && value !== undefined) consts.set(d.id.name, value);
+    }
+  }
+  const nameOf = (node: Node) =>
+    unwrap(node)?.type === "Identifier" ? consts.get(unwrap(node).name) : stringValue(node);
   const find = (node: Node): Node | undefined => {
     if (!node) return undefined;
     if (node.type === "ObjectExpression") {
@@ -112,7 +125,7 @@ function inFile(file: string, name: string): Found | string {
         node.properties.find((p: Node) => p.type === "Property" && !p.computed && (p.key.name ?? p.key.value) === key)
           ?.value;
       const run = value("run");
-      if (stringValue(value("name")) === name && FUNCTIONS.has(run?.type)) return run;
+      if (nameOf(value("name")) === name && FUNCTIONS.has(run?.type)) return run;
     }
     for (const child of childrenOf(node)) {
       const fn = find(child);

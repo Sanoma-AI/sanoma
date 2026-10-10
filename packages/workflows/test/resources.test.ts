@@ -55,6 +55,7 @@ describe("readResources", () => {
     const website = resources.find((r) => r.id === "resources/identity/github.ts#website")!;
     expect(website).toEqual({
       id: "resources/identity/github.ts#website",
+      file: "resources/identity/github.ts",
       vendor: "github",
       type: "repository",
       name: "website",
