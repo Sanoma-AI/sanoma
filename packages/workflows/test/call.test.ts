@@ -256,11 +256,13 @@ const repost = defineWorkflow({
   input: z.object({}),
   uses: [bluesky.post.create],
   run: async (ctx) => {
+    let created;
     try {
-      return await ctx.bluesky.post.create({ text: "once" });
+      created = await ctx.bluesky.post.create({ text: "once" });
     } catch {
-      return ctx.bluesky.post.create({ text: "again" });
+      created = await ctx.bluesky.post.create({ text: "again" });
     }
+    return created;
   },
 });
 
@@ -605,14 +607,14 @@ describe("ctx.all", () => {
   const odd = defineWorkflow({
     name: "odd",
     trigger: "manual",
-    input: z.object({ shape: z.enum(["nested", "empty", "not-a-list", "not-functions"]) }),
+    input: z.object({ shape: z.enum(["nested", "empty", "not-functions"]) }),
     uses: ["all"],
-    run: async (ctx, { shape }) => {
-      if (shape === "nested") return ctx.all([async () => "outer", () => ctx.all([async () => "inner"])]);
-      if (shape === "empty") return ctx.all([]);
-      if (shape === "not-a-list") return ctx.all("members" as never);
-      return ctx.all([1, 2] as never);
-    },
+    run: async (ctx, { shape }) =>
+      shape === "nested"
+        ? ctx.all([async () => "outer", () => ctx.all([async () => "inner"])])
+        : shape === "empty"
+          ? ctx.all([])
+          : ctx.all([1, 2] as never),
   });
 
   /** Leaves a ctx.all un-awaited while it calls on, as the lint would refuse, to show what is recorded. */
@@ -626,16 +628,18 @@ describe("ctx.all", () => {
         () => ctx.bluesky.post.create({ text: "one" }),
         () => ctx.bluesky.post.create({ text: "two" }),
       ]);
+      let out: unknown;
       if (shape === "outside") {
         // Made while the first member runs, but not in it.
         await ctx.bluesky.post.create({ text: "outside" });
-        return (await group).length;
+        out = (await group).length;
+      } else {
+        out = await ctx
+          .all([() => ctx.bluesky.post.create({ text: "three" })])
+          .catch((err: Error) => `${errorCode(err)}: ${err.message}`);
+        await group;
       }
-      const refused = await ctx
-        .all([() => ctx.bluesky.post.create({ text: "three" })])
-        .catch((err: Error) => `${errorCode(err)}: ${err.message}`);
-      await group;
-      return refused;
+      return out;
     },
   });
 
@@ -674,15 +678,16 @@ describe("ctx.all", () => {
       "op.called stats.email.opens",
       "run.finished",
     ]);
-    // Each group is named for the seq the run was at when it began, which its first call took.
+    // Each group is named for the seq the run was at when it began, which its first call took,
+    // and its outline node: the first ctx.all is node 0, the second node 2, past the sleep.
     expect(groups(records)).toEqual([
       undefined,
-      { id: "all:1", index: 0, size: 3 },
-      { id: "all:1", index: 1, size: 3 },
-      { id: "all:1", index: 2, size: 3 },
+      { id: "all:1", index: 0, size: 3, node: "0" },
+      { id: "all:1", index: 1, size: 3, node: "0" },
+      { id: "all:1", index: 2, size: 3, node: "0" },
       undefined,
-      { id: "all:5", index: 0, size: 2 },
-      { id: "all:5", index: 1, size: 2 },
+      { id: "all:5", index: 0, size: 2, node: "2" },
+      { id: "all:5", index: 1, size: 2, node: "2" },
       undefined,
     ]);
     expect(records.map((r) => r.seq)).toEqual(records.map((_, i) => i));
@@ -702,7 +707,7 @@ describe("ctx.all", () => {
       "op.called bluesky.post.create",
       "run.finished",
     ]);
-    const group = { id: "all:1", size: 2 };
+    const group = { id: "all:1", size: 2, node: "0" };
     expect(groups(records)).toEqual([
       undefined,
       { ...group, index: 0 },
@@ -726,25 +731,28 @@ describe("ctx.all", () => {
       "op.called ghost.post.publish",
       "run.failed",
     ]);
-    expect(records[2]).toMatchObject({ group: { id: "all:1", index: 1, size: 3 }, error: { code: "driver_failed" } });
+    expect(records[2]).toMatchObject({
+      group: { id: "all:1", index: 1, size: 3, node: "0" },
+      error: { code: "driver_failed" },
+    });
     expect(records[3]).not.toHaveProperty("group");
   });
 
-  it("refuses a nested ctx.all, and an argument that is not a list of functions, with invalid_input", async () => {
-    const shapes = ["nested", "not-a-list", "not-functions"] as const;
+  // A list made elsewhere (`ctx.all(members)`) never starts: the outline refuses it (outline.test.ts).
+  it("refuses a nested ctx.all, and a list whose members are not functions, with invalid_input", async () => {
+    const shapes = ["nested", "not-functions"] as const;
     const runs = await Promise.all(shapes.map((shape) => c().start(odd, { shape }, { startedBy: alice })));
     const errors = await Promise.all(runs.map((runId) => failure(c().result(runId))));
-    expect(errors.map(errorCode)).toEqual(["invalid_input", "invalid_input", "invalid_input"]);
+    expect(errors.map(errorCode)).toEqual(["invalid_input", "invalid_input"]);
     expect(errors[0]).toMatchObject({ message: expect.stringMatching(/^ctx\.all cannot be nested/) });
-    expect(errors[1]).toMatchObject({ message: expect.stringMatching(/^ctx\.all: needs a list of functions/) });
-    expect(errors[2]).toMatchObject({ message: expect.stringMatching(/^ctx\.all: 0: each member must be a function/) });
+    expect(errors[1]).toMatchObject({ message: expect.stringMatching(/^ctx\.all: 0: each member must be a function/) });
   });
 
   it("does not tag a call made outside the group while a member runs", async () => {
     const runId = await c().start(loose, { shape: "outside" }, { startedBy: alice });
     expect(await c().result(runId)).toBe(2);
     expect(posted()).toEqual(["one", "outside", "two"]);
-    const group = { id: "all:1", size: 2 };
+    const group = { id: "all:1", size: 2, node: "0" };
     expect(groups(await c().ledger(runId))).toEqual([
       undefined,
       { ...group, index: 0 },
@@ -758,7 +766,7 @@ describe("ctx.all", () => {
     const runId = await c().start(loose, { shape: "twice" }, { startedBy: alice });
     expect(await c().result(runId)).toBe("invalid_input: a ctx.all is already running: await it before the next");
     expect(posted()).toEqual(["one", "two"]);
-    const group = { id: "all:1", size: 2 };
+    const group = { id: "all:1", size: 2, node: "0" };
     expect(groups(await c().ledger(runId))).toEqual([
       undefined,
       { ...group, index: 0 },
