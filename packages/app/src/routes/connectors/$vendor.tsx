@@ -46,6 +46,8 @@ function ConnectorPage() {
     data: { vendor, ops, workflows, resourceTypes },
   } = useSuspenseQuery({ ...configQuery(), select: (config) => connectorNamed(id)(config)! });
   const { data: scenarios } = useSuspenseQuery(scenariosQuery());
+  const resourceOps = new Set(resourceTypes.flatMap((r) => r.ops));
+  const workflowOps = ops.filter((op) => !resourceOps.has(op.id));
   return (
     <div className="flex flex-col gap-6">
       {/* Decorative: the title beside it names the heading. */}
@@ -73,8 +75,9 @@ function ConnectorPage() {
           <None />
         ) : (
           <>
-            {/* Every operation of a vendor in `fakes` has a mock, so either all have one or none. */}
-            {ops.every((op) => !op.mock) && <None>No fake in this config.</None>}
+            {/* Every workflow operation of a vendor in `fakes` has a mock, so either all have one or
+                none; a resource type's `read` and `import` never have one. */}
+            {workflowOps.length > 0 && workflowOps.every((op) => !op.mock) && <None>No fake in this config.</None>}
             <ItemGroup>
               {ops.map((op) => (
                 <OpItem key={op.id} id={op.id} op={op}>

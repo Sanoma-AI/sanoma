@@ -778,6 +778,7 @@ describe("the page", () => {
     expect(blogPage.text).toContain("<code>Given a post titled {title} exists</code>");
     // The mock: what the fake returned for a made-up input, publish publishing the post create made.
     expect(blogPage.html).toMatch(/>Mock<\/h3>/);
+    expect(blogPage.text).not.toContain("No fake in this config.");
     expect(blogPage.text).toContain(">Called with<");
     expect(blogPage.text).toMatch(/&quot;id&quot;: &quot;post_0001&quot;/);
     // The scenario that names the operation, linking to its workflow with it chosen.
@@ -791,9 +792,10 @@ describe("the page", () => {
     const socialPage = await page("/connectors/bluesky");
     expect(socialPage.text).toContain("Fails with <code>bluesky: the network is down</code>");
 
-    // A vendor without a fake in `fakes` says so, once, and shows no mock; its resource types are named.
+    // A vendor with resource operations only has nothing to fake: no mock, and no notice that it
+    // has no fake. Its resource types are named.
     const githubPage = await page("/connectors/github");
-    expect(githubPage.text.match(/No fake in this config\./g)).toHaveLength(1);
+    expect(githubPage.text).not.toContain("No fake in this config.");
     expect(githubPage.html).not.toMatch(/>Mock<\/h3>/);
     expect(githubPage.html).toMatch(/Resources: <\/span>Branch protection rule, Repository, Team membership</);
 
