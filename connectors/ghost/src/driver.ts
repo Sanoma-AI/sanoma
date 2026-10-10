@@ -53,13 +53,14 @@ const out = (post: GhostPost) => ({
 const misconfigured = (message: string) => new DriverError(`ghost: ${message}`, { retryable: false });
 
 const ADMIN_API_KEY = /^([0-9a-f]{24}):([0-9a-f]{64})$/i;
+const ADMIN_API_KEY_FORMAT = "<24 hex digits>:<64 hex digits>";
 
 /** The environment variables the driver reads, on every call. */
 const env = z.object({
   GHOST_ADMIN_URL: z.url().describe("the site's admin URL, such as https://example.ghost.io"),
   GHOST_ADMIN_API_KEY: z
     .string()
-    .regex(ADMIN_API_KEY, "an Admin API key, <24 hex digits>:<64 hex digits>")
+    .regex(ADMIN_API_KEY, `an Admin API key, ${ADMIN_API_KEY_FORMAT}`)
     .describe("a custom integration's Admin API key, <id>:<secret>"),
 });
 
@@ -70,7 +71,7 @@ const env = z.object({
 export async function adminToken(key: string): Promise<string> {
   const [, id, secret] = ADMIN_API_KEY.exec(key) ?? [];
   if (!id || !secret) {
-    throw misconfigured("GHOST_ADMIN_API_KEY is not an Admin API key (<24 hex digits>:<64 hex digits>)");
+    throw misconfigured(`GHOST_ADMIN_API_KEY is not an Admin API key (${ADMIN_API_KEY_FORMAT})`);
   }
   return new SignJWT({})
     .setProtectedHeader({ alg: "HS256", kid: id, typ: "JWT" })
