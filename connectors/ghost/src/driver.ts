@@ -54,6 +54,15 @@ const misconfigured = (message: string) => new DriverError(`ghost: ${message}`, 
 
 const ADMIN_API_KEY = /^([0-9a-f]{24}):([0-9a-f]{64})$/i;
 
+/** The environment variables the driver reads, on every call. */
+const env = z.object({
+  GHOST_ADMIN_URL: z.url().describe("the site's admin URL, such as https://example.ghost.io"),
+  GHOST_ADMIN_API_KEY: z
+    .string()
+    .regex(ADMIN_API_KEY, "an Admin API key, <24 hex digits>:<64 hex digits>")
+    .describe("a custom integration's Admin API key, <id>:<secret>"),
+});
+
 /**
  * A token for the Admin API, signed with an Admin API key (`<id>:<secret>`), as Ghost asks:
  * HS256, for `/admin/`, valid five minutes, the longest Ghost accepts.
@@ -75,9 +84,9 @@ export async function adminToken(key: string): Promise<string> {
 function connect(timeoutMs: number) {
   const url = process.env.GHOST_ADMIN_URL;
   const key = process.env.GHOST_ADMIN_API_KEY;
-  if (!url) throw misconfigured("GHOST_ADMIN_URL is not set (the site's admin URL, such as https://example.ghost.io)");
+  if (!url) throw misconfigured(`GHOST_ADMIN_URL is not set (${env.shape.GHOST_ADMIN_URL.description})`);
   if (!URL.canParse(url)) throw misconfigured("GHOST_ADMIN_URL is not a URL");
-  if (!key) throw misconfigured("GHOST_ADMIN_API_KEY is not set (a custom integration's Admin API key)");
+  if (!key) throw misconfigured(`GHOST_ADMIN_API_KEY is not set (${env.shape.GHOST_ADMIN_API_KEY.description})`);
   const base = `${url.replace(/\/+$/, "")}/ghost/api/admin`;
 
   return async (method: "GET" | "POST" | "PUT", path: string, body?: unknown): Promise<GhostPost> => {
@@ -133,29 +142,33 @@ function connect(timeoutMs: number) {
 /** The real Ghost, through the Admin API, with `GHOST_ADMIN_URL` and `GHOST_ADMIN_API_KEY`. See the README. */
 export function ghostDriver(options: GhostDriverOptions = {}) {
   const timeoutMs = options.timeoutMs ?? 10_000;
-  return defineDriver(ghost, {
-    post: {
-      create: async ({ title, html, status }) => {
-        const send = connect(timeoutMs);
-        return out(await send("POST", "/posts/?source=html", { posts: [{ title, html, status }] }));
-      },
-      publish: async ({ id }) => {
-        const send = connect(timeoutMs);
-        const path = `/posts/${encodeURIComponent(id)}/`;
-        const save = async () => {
-          const post = await send("GET", path);
-          // Published already, or sent as an email only: it is no draft to publish.
-          if (post.status === "published" || post.status === "sent") return post;
-          return send("PUT", path, { posts: [{ status: "published", updated_at: post.updated_at }] });
-        };
-        // Ghost refuses a save whose `updated_at` is not the post's latest (UPDATE_COLLISION):
-        // someone saved it in between. Read it again and save once more.
-        const post = await save().catch((err: unknown) => {
-          if (err instanceof DriverError && err.vendorCode === "UPDATE_COLLISION") return save();
-          throw err;
-        });
-        return out(post);
+  return defineDriver(
+    ghost,
+    {
+      post: {
+        create: async ({ title, html, status }) => {
+          const send = connect(timeoutMs);
+          return out(await send("POST", "/posts/?source=html", { posts: [{ title, html, status }] }));
+        },
+        publish: async ({ id }) => {
+          const send = connect(timeoutMs);
+          const path = `/posts/${encodeURIComponent(id)}/`;
+          const save = async () => {
+            const post = await send("GET", path);
+            // Published already, or sent as an email only: it is no draft to publish.
+            if (post.status === "published" || post.status === "sent") return post;
+            return send("PUT", path, { posts: [{ status: "published", updated_at: post.updated_at }] });
+          };
+          // Ghost refuses a save whose `updated_at` is not the post's latest (UPDATE_COLLISION):
+          // someone saved it in between. Read it again and save once more.
+          const post = await save().catch((err: unknown) => {
+            if (err instanceof DriverError && err.vendorCode === "UPDATE_COLLISION") return save();
+            throw err;
+          });
+          return out(post);
+        },
       },
     },
-  });
+    { env },
+  );
 }

@@ -1,3 +1,9 @@
+import { blueskyDriver } from "@sanoma/connector-bluesky/driver";
+import { ghostDriver } from "@sanoma/connector-ghost/driver";
+import { githubDriver } from "@sanoma/connector-github/driver";
+import { resendDriver } from "@sanoma/connector-resend/driver";
+import { stripeDriver } from "@sanoma/connector-stripe/driver";
+import { bluesky } from "@sanoma/connector-bluesky";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -150,5 +156,35 @@ describe("describeConfig", () => {
     const plain = defineDriver(acme, { thing: { get: async ({ id }) => ({ id }) } });
     const { vendors } = await describeConfig({ ...config, drivers: [plain] });
     expect(vendors.acme).not.toHaveProperty("credentials");
+  });
+});
+
+describe("the connectors' drivers", () => {
+  const bridge = {} as never;
+  it.each([
+    ["ghost", ghostDriver(), ["GHOST_ADMIN_URL", "GHOST_ADMIN_API_KEY"]],
+    ["resend", resendDriver(), ["RESEND_API_KEY"]],
+    ["bluesky", blueskyDriver(), ["BLUESKY_IDENTIFIER", "BLUESKY_APP_PASSWORD", "BLUESKY_SERVICE"]],
+    ["github", githubDriver({ bridge }), ["GITHUB_TOKEN"]],
+    ["stripe", stripeDriver({ bridge }), ["STRIPE_API_KEY"]],
+  ])("%s declares exactly its variables, each described", (_, driver, names) => {
+    expect(Object.keys(driver.env!.shape)).toEqual(names);
+    for (const schema of Object.values(driver.env!.shape)) expect(schema.description).toBeTruthy();
+  });
+
+  it("marks BLUESKY_SERVICE optional, and only it", () => {
+    vi.stubEnv("BLUESKY_IDENTIFIER", "");
+    vi.stubEnv("BLUESKY_APP_PASSWORD", "");
+    vi.stubEnv("BLUESKY_SERVICE", "");
+    const { credentials } = resolveConfig({
+      ...config,
+      connectors: [acme, bluesky],
+      drivers: [acmeDriver, blueskyDriver()],
+    });
+    expect(credentials.get("bluesky")?.map(({ name, optional }) => [name, optional])).toEqual([
+      ["BLUESKY_IDENTIFIER", false],
+      ["BLUESKY_APP_PASSWORD", false],
+      ["BLUESKY_SERVICE", true],
+    ]);
   });
 });
