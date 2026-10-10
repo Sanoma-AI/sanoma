@@ -4,7 +4,7 @@ import { isEnded } from "@sanoma/workflows/shared";
 import { utcText } from "../lib/time.ts";
 import { APPROVAL_TONE, RUN_TONE, type Tone } from "../lib/tone.ts";
 import { type Ends, outlineGraph } from "./outline-graph.ts";
-import type { CallStep, Graph, Step } from "./types.ts";
+import { type CallStep, fits, type Graph, type Step } from "./types.ts";
 
 type OpStep = Extract<Step, { kind: "op" }>;
 type AllStep = Extract<Step, { kind: "all" }>;
@@ -165,13 +165,6 @@ const calls = (nodes: readonly OutlineNode[]): Call[] =>
           ? calls(node.body)
           : [node],
   );
-
-/** True when an outline's op id, a computed segment shown as `*`, could be this op: `a.*.c` fits `a.b.c`. */
-function fits(pattern: string, op: string): boolean {
-  const want = pattern.split(".");
-  const got = op.split(".");
-  return want.length === got.length && want.every((segment, i) => segment === "*" || segment === got[i]);
-}
 
 /** The calls' spans, or none when there are no calls. */
 const spansOf = (found: readonly Call[]) => (found.length ? found.map((call) => call.span) : undefined);

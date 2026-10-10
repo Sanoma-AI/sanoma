@@ -7,6 +7,7 @@ import type {
   RunStatus,
   RunSummary,
 } from "@sanoma/workflows";
+import type { Check, Scenario } from "@sanoma/workflows/scenario";
 import { z } from "zod";
 
 export type { InputIssue } from "@sanoma/workflows";
@@ -34,12 +35,32 @@ export interface ActorInfo {
   error?: string;
 }
 
-/** `POST /api/runs` */
-export const StartRunRequest = z.object({
-  workflow: z.string().min(1, "Name a workflow"),
-  input: z.unknown(),
-});
-export type StartRunRequest = z.infer<typeof StartRunRequest>;
+const StartWorkflowRequest = z.object({ workflow: z.string().min(1, "Name a workflow"), input: z.unknown() });
+
+const StartScenarioRequest = z.strictObject(
+  { scenario: z.string().min(1, "Name a scenario") },
+  {
+    error: (issue) =>
+      issue.code === "unrecognized_keys" && issue.keys.some((key) => key === "workflow" || key === "input")
+        ? "Send a workflow or a scenario, not both"
+        : undefined,
+  },
+);
+
+/**
+ * `POST /api/runs`: a workflow and its input, or a scenario's name, which starts a sandbox run
+ * of the scenario's workflow with its input. The app never decides a sandbox run's approvals:
+ * people do, as in a live run.
+ */
+export type StartRunRequest = z.infer<typeof StartWorkflowRequest> | z.infer<typeof StartScenarioRequest>;
+
+/**
+ * The schema a start request is read with, picked before parsing so each refusal names its own
+ * field: the scenario's for a body with a `scenario` key (which refuses a `workflow` or `input`
+ * beside it), else the workflow's.
+ */
+export const startRunSchema = (body: unknown) =>
+  typeof body === "object" && body !== null && "scenario" in body ? StartScenarioRequest : StartWorkflowRequest;
 
 export interface StartRunResponse {
   runId: string;
@@ -93,6 +114,35 @@ export interface RunDetail {
    */
   ledgerError?: string;
   approvals: ApprovalState[];
+  /**
+   * For a sandbox run, each of its scenario's expectations checked against the ledger. Absent
+   * until the run has been seeded, and when `checksError` says why there are none.
+   */
+  checks?: RunCheck[];
+  /**
+   * Why a seeded sandbox run has no checks: its scenario is no longer in the feature files (with
+   * those that did not load), or the scenarios could not be read at all.
+   */
+  checksError?: string;
+}
+
+/** One of a sandbox run's checks, and whether its answer is final. */
+export interface RunCheck extends Check {
+  /**
+   * True once the answer cannot change: the run has ended, or the check expects a call that
+   * has been made. Until then a check not met is not failed yet, and one met (a call not made
+   * so far) may still fail.
+   */
+  settled: boolean;
+}
+
+/** A scenario as the page lists it: what it says, not how the worker seeds and checks it. */
+export type ScenarioEntry = Pick<Scenario, "name" | "workflow" | "file" | "text" | "steps">;
+
+/** `GET /api/scenarios`: every scenario, and why each feature file that could not be read could not. */
+export interface ScenariosResponse {
+  scenarios: ScenarioEntry[];
+  errors: { file: string; message: string }[];
 }
 
 /** Every error response, and the `body` of the error a server function throws. */

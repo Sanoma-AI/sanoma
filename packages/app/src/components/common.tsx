@@ -111,6 +111,11 @@ export function ToneBadge({
   return <Badge {...props} className={toneBadge({ tone })} />;
 }
 
+/** Marks a sandbox run: one seeded from the scenario named, calling fakes, not the vendors. */
+export function SandboxBadge({ name }: { name: string }) {
+  return <ToneBadge tone="idle">sandbox · {name}</ToneBadge>;
+}
+
 /** Badge colours by operation effect, one each, the same everywhere (the --effect-* tokens). */
 export const effectBadge = cva("", {
   variants: {

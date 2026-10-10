@@ -27,6 +27,7 @@ export const resend = defineConnector(
       send: {
         effect: "send",
         description: "Send a broadcast to every contact in its audience. Cannot be undone.",
+        phrases: { expect: "broadcast {id} is sent" },
         input: z.object({ id: z.string() }),
         output: z.object({ id: z.string(), status: z.enum(["queued", "sent"]) }),
       },

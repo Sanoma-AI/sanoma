@@ -14,13 +14,22 @@ export interface StepState {
   recordId?: string;
 }
 
-/** An operation call's: the policy's decision and how the call ended, once it is recorded. */
-export interface OpState extends StepState {
+/**
+ * An operation call's: the policy's decision and how the call ended, once it is recorded. On a
+ * workflow's outline, only what a scenario says of the operation, with no tone: nothing has run.
+ */
+export interface OpState extends Omit<StepState, "tone"> {
+  tone?: Tone;
   decision?: RecordedDecision["kind"];
   errorCode?: ErrorCode;
   durationMs?: number;
   /** The policy's approval holding the call, as the run tells it. */
   approval?: ApprovalState;
+  /**
+   * What a scenario says of the operation, on a workflow's outline: a `Given` seeds it, a `Then`
+   * expects a call to it, or a `Then` expects none.
+   */
+  scenario?: { seeded?: true; expected?: true; forbidden?: true };
 }
 
 /** A workflow's approval, as the run tells it. */
@@ -107,6 +116,13 @@ export function nodeAt(nodes: readonly GraphNode[], offset: number): GraphNode |
     }
   }
   return found;
+}
+
+/** True when an outline's op id, a computed segment shown as `*`, could be this op: `a.*.c` fits `a.b.c`. */
+export function fits(pattern: string, op: string): boolean {
+  const want = pattern.split(".");
+  const got = op.split(".");
+  return want.length === got.length && want.every((segment, i) => segment === "*" || segment === got[i]);
 }
 
 /** True for what a run has not reached yet: drawn dashed, as are the edges into and out of it. */

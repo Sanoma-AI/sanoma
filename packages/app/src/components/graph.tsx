@@ -184,6 +184,9 @@ function OpNode(props: Props<"op">) {
         ) : (
           state?.durationMs !== undefined && <span className="text-muted-foreground">{state.durationMs} ms</span>
         )}
+        {state?.scenario?.seeded && <Badge variant="outline">seeded</Badge>}
+        {state?.scenario?.expected && <Badge variant="outline">expected</Badge>}
+        {state?.scenario?.forbidden && <Badge variant="outline">not called</Badge>}
       </Line>
     </Frame>
   );

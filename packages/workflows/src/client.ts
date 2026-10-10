@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { DBOSClient, Error as DBOSErrors, type WorkflowStatusString } from "@dbos-inc/dbos-sdk";
-import type { z } from "zod";
+import { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, messageKeyOf, topicOf } from "./approvals.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { type ApprovalState, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
@@ -77,6 +77,8 @@ export interface RunSummary {
   updatedAt?: number;
   approvals: ApprovalState[];
   error?: string;
+  /** For a sandbox run, the scenario it was seeded from. */
+  sandbox?: string;
 }
 
 export interface StartOptions {
@@ -85,10 +87,16 @@ export interface StartOptions {
   /**
    * Use this run id instead of a new one, so a retried start makes one run. Starting an id
    * that exists returns it, without starting another, when the workflow, the input (compared
-   * as JSON) and `startedBy` are the same, and throws `invalid_input` naming what differs
+   * as JSON), `startedBy` and `sandbox` are the same, and throws `invalid_input` naming what differs
    * when they are not. Of two starts racing with one new id, the first's run stands.
    */
   runId?: string;
+  /**
+   * Start a sandbox run, seeded from the config's scenario of this name: it calls the config's
+   * `fakes` instead of the drivers and does not wait on sleeps. Sandbox runs go on their own
+   * queue, one at a time per worker: another waits, queued, until the one before it ends.
+   */
+  sandbox?: string;
 }
 
 /** Talks to the runtime from another process (the app, a script), through the shared Postgres. */
@@ -118,30 +126,49 @@ export class SanomaClient {
    * Checks the input against the workflow's schema, then queues a run for the worker. The run
    * gets the input as sent, not as the schema parsed it: the worker parses it once, so a schema
    * with a `.transform` or a default sees the caller's value, and `run.started` records it.
+   * `workflow` is a definition, or the name of one in the config's `workflows`.
    */
   async start<S extends z.ZodType>(
-    workflow: WorkflowDefinition<any, S>,
+    workflow: WorkflowDefinition<any, S> | string,
     input: z.input<S>,
     options: StartOptions,
   ): Promise<string> {
+    if (typeof workflow === "string") {
+      const named = this.config.workflows.get(workflow);
+      if (!named) {
+        const known = [...this.config.workflows.keys()];
+        throw new SanomaError("invalid_input", `No workflow named "${workflow}"; the config has ${known.join(", ")}`, {
+          workflow,
+          workflows: known,
+        });
+      }
+      workflow = named;
+    }
     parseOrThrow(workflow.input, input, `The input does not match ${workflow.name}'s schema`);
     const startedBy = parseOrThrow(
       Principal,
       options?.startedBy,
       '`startedBy` must be a principal, such as { id: "alice" }',
     );
-    const args: RunArgs = { input, startedBy };
     const { runId } = options;
+    const sandbox = parseOrThrow(
+      z.string().min(1).optional(),
+      options.sandbox,
+      "`sandbox` must be the name of a scenario in the config's `scenarios`",
+    );
+    const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }) };
     // An id DBOS has already returns that run, unless it is another workflow's, which DBOS refuses.
     const handle = await this.dbos
       .enqueue(
         {
-          queueName: this.config.queueName,
+          queueName: sandbox === undefined ? this.config.queueName : this.config.sandboxQueueName,
           workflowName: workflow.name,
           workflowID: runId,
           applicationName: this.config.appName,
           authenticatedUser: startedBy.id,
           authenticatedRoles: startedBy.groups ?? [],
+          // Kept on the run's status row too, so a listing tells sandbox runs apart without its input.
+          ...(sandbox === undefined ? {} : { attributes: { sandbox } }),
         },
         args,
       )
@@ -297,7 +324,7 @@ export class SanomaClient {
    * `invalid_input` when the config's connectors declare no resource types, so it has none.
    */
   async drift(options: StartOptions): Promise<string> {
-    const drift = this.config.workflows.find((wf) => wf.name === DRIFT_WORKFLOW);
+    const drift = this.config.workflows.get(DRIFT_WORKFLOW);
     if (!drift) {
       throw new SanomaError(
         "invalid_input",
@@ -328,10 +355,12 @@ export class SanomaClient {
     return this.dbos.destroy();
   }
 
-  /** Refuses a run id whose run, as stored, was started with another input or by someone else. */
+  /** Refuses a run id whose run, as stored, was started with another input, by someone else, or in another sandbox. */
   private async mustMatch(runId: string, args: RunArgs) {
     const [stored] = ((await this.dbos.getWorkflow(runId))?.input ?? []) as [RunArgs?];
-    const differs = (["input", "startedBy"] as const).filter((key) => !stored || !sameJson(stored[key], args[key]));
+    const differs = (["input", "startedBy", "sandbox"] as const).filter(
+      (key) => !stored || !sameJson(stored[key], args[key]),
+    );
     if (differs.length) {
       throw new SanomaError(
         "invalid_input",
@@ -375,6 +404,7 @@ export class SanomaClient {
     authenticatedUser?: string;
     authenticatedRoles?: string[];
     error?: unknown;
+    attributes?: Record<string, unknown>;
   }): Promise<RunSummary> {
     const approvals = await this.approvals(r.workflowID);
     const groups = r.authenticatedRoles ?? [];
@@ -387,6 +417,7 @@ export class SanomaClient {
       updatedAt: r.updatedAt,
       approvals,
       error: r.error ? String((r.error as Error).message ?? r.error) : undefined,
+      ...(typeof r.attributes?.sandbox === "string" && { sandbox: r.attributes.sandbox }),
     };
   }
 }

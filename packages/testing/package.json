@@ -1,7 +1,7 @@
 {
   "name": "@sanoma/testing",
   "version": "0.1.0",
-  "description": "Fake vendors for testing Sanoma workflows without vendor accounts",
+  "description": "Test workers, vendor replay and scenario tests for Sanoma workflows, without vendor accounts",
   "keywords": [
     "fakes",
     "sanoma",
@@ -33,6 +33,10 @@
     "./replay": {
       "types": "./dist/replay.d.ts",
       "default": "./dist/replay.js"
+    },
+    "./scenarios": {
+      "types": "./dist/scenarios.d.ts",
+      "default": "./dist/scenarios.js"
     }
   },
   "publishConfig": {
@@ -44,7 +48,6 @@
     "prepack": "pnpm run clean && pnpm run build"
   },
   "devDependencies": {
-    "@sanoma/bridge": "workspace:*",
     "@sanoma/connector-bluesky": "workspace:*",
     "@sanoma/connector-ghost": "workspace:*",
     "@sanoma/connector-github": "workspace:*",
@@ -55,12 +58,6 @@
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@sanoma/bridge": "^0.1.0",
-    "@sanoma/connector-bluesky": "^0.1.0",
-    "@sanoma/connector-ghost": "^0.1.0",
-    "@sanoma/connector-github": "^0.1.0",
-    "@sanoma/connector-resend": "^0.1.0",
-    "@sanoma/connector-stripe": "^0.1.0",
     "@sanoma/workflows": "^0.1.0",
     "msw": "^3",
     "vitest": "^5",

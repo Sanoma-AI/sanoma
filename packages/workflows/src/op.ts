@@ -23,6 +23,12 @@ export interface OpSpec<I extends z.ZodType = z.ZodType, O extends z.ZodType = z
    */
   target?: (input: any) => string;
   /**
+   * How a scenario says this operation was set up or called, in Gherkin steps: `given` seeds
+   * the fake through it, `expect` expects a call to it. Cucumber expressions whose parameters are
+   * fields of the input, such as `{ given: "a post titled {title} exists" }`.
+   */
+  phrases?: { given?: string; expect?: string };
+  /**
    * Top-level fields of its input and output that are the driver's own data, not the vendor's
    * (a resource type's `handle`): the ledger records each as `"<name>"`, never its value.
    */
@@ -41,6 +47,8 @@ export interface Op<V extends string = string, R extends string = string, N exte
   readonly description?: string;
   /** From the spec: the resource instance a call acts on. */
   readonly target?: (input: any) => string;
+  /** From the spec: how a scenario's steps name it. */
+  readonly phrases?: { readonly given?: string; readonly expect?: string };
   /** From the spec: fields the ledger records by name only. */
   readonly opaque?: readonly string[];
   readonly input: z.ZodType<any, I>;
@@ -174,6 +182,7 @@ export function defineConnector<const V extends string, const S extends Specs>(
         idempotent: spec.idempotent ?? false,
         description: spec.description,
         target: spec.target,
+        phrases: spec.phrases,
         ...(spec.opaque?.length ? { opaque: spec.opaque } : {}),
         input: spec.input,
         output: spec.output,

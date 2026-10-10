@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -12,7 +13,7 @@ import {
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
 import { ghost } from "@sanoma/connector-ghost";
@@ -43,8 +44,8 @@ import announce from "../../workflows/test/fixtures/announce.ts";
 import { companyFakes } from "../../workflows/test/fixtures/company/fakes.ts";
 import { z } from "zod";
 import { type App, type ErrorResponse, type RunDetail, startApp } from "../src/index.ts";
-import { ApiError } from "../src/api.ts";
-import { asApiError, fileSource, parse, withoutSources } from "../src/server/core.ts";
+import { ApiError, type ScenariosResponse } from "../src/api.ts";
+import { asApiError, fileSource, parse, scenarios, withoutSources } from "../src/server/core.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it when
 // dist/server/server.js is missing or older than a file under src/.
@@ -80,6 +81,11 @@ const policy = definePolicy(
   { version: "test-1" },
 );
 
+/** A copy of the fixtures' feature files, which a test breaks to see the app say so. */
+const scenariosDir = mkdtempSync(join(tmpdir(), "sanoma-app-scenarios-"));
+cpSync(fileURLToPath(new URL("./fixtures/scenarios/", import.meta.url)), scenariosDir, { recursive: true });
+const featureFile = join(scenariosDir, "announce.feature");
+
 const blog = fakeGhost();
 // The workflows' company fixture: its data files, and GitHub and Stripe holding them as declared.
 const company = companyFakes();
@@ -88,6 +94,9 @@ const config = defineConfig({
   workflows: [announce],
   connectors: [ghost, resend, bluesky, github, stripe],
   drivers: [blog.driver, fakeResend().driver, fakeBluesky().driver, ...company.drivers],
+  // Sandbox runs call these, seeded from the scenarios, never the drivers above.
+  fakes: [fakeGhost(), fakeResend(), fakeBluesky()],
+  scenarios: pathToFileURL(`${scenariosDir}/`),
   policy,
   ledger: memoryLedger(),
   appName: "sanoma-app-test",
@@ -99,6 +108,9 @@ let worker: Worker;
 let app: App;
 /** The run the API tests start, which the page tests then look for. */
 let runId: string;
+/** The sandbox run the scenario tests start, which the page tests then render. */
+let sandboxId: string;
+const SCENARIO = "Launch on time";
 
 beforeAll(async () => {
   if (needsBuild()) {
@@ -111,6 +123,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await app?.close();
   await worker?.stop();
+  rmSync(scenariosDir, { recursive: true, force: true });
 });
 
 interface CallInit {
@@ -149,6 +162,9 @@ async function waitFor<T>(get: () => Promise<T>, done: (value: T) => boolean, ti
 }
 
 const detail = async (id: string) => (await call<RunDetail>(`/api/runs/${id}`)).body;
+
+/** `POST /api/runs` with this body, as tester. */
+const postRun = (body: unknown) => call("/api/runs", { method: "POST", actor: "tester", body });
 
 /** A page as the server renders it, and its text without the comments React puts between text parts. */
 async function page(path: string, base = app.url) {
@@ -373,6 +389,180 @@ describe("the API", () => {
   });
 });
 
+describe("scenarios and sandbox runs", () => {
+  it("lists the scenarios in the config's feature files, with their steps", async () => {
+    const { status, body } = await call<ScenariosResponse>("/api/scenarios");
+    expect(status).toBe(200);
+    expect(body.errors).toEqual([]);
+    expect(body.scenarios.map((s) => s.name)).toEqual([SCENARIO, "Publish retried", "Copy rejected"]);
+    const launch = body.scenarios[0]!;
+    expect(launch).toMatchObject({
+      workflow: "announce",
+      file: "announce.feature",
+      text: expect.stringMatching(/^Scenario: Launch on time\n/),
+    });
+    expect(launch.steps).toContainEqual({
+      text: 'a post titled "Old news" exists',
+      kind: "given",
+      op: "ghost.post.create",
+    });
+    expect(launch.steps).toContainEqual({ text: "the run succeeds", kind: "then" });
+    // What the page lists, not how the worker seeds and checks it.
+    expect(launch).not.toHaveProperty("expect");
+  });
+
+  it("refuses a request that names both a workflow and a scenario, or neither, at its own field", async () => {
+    const both = await postRun({ workflow: "announce", input: {}, scenario: SCENARIO });
+    expect(both.status).toBe(400);
+    expect(both.body).toMatchObject({ code: "invalid_input", issues: [{ path: [] }] });
+    expect(both.body.error).toContain("Send a workflow or a scenario, not both");
+
+    const neither = await postRun({});
+    expect(neither.status).toBe(400);
+    expect(neither.body.issues).toContainEqual(expect.objectContaining({ path: ["workflow"] }));
+
+    const noWorkflow = await postRun({ workflow: "" });
+    expect(noWorkflow.body.issues).toContainEqual(
+      expect.objectContaining({ path: ["workflow"], message: "Name a workflow" }),
+    );
+
+    const noScenario = await postRun({ scenario: "" });
+    expect(noScenario.status).toBe(400);
+    expect(noScenario.body.issues).toEqual([
+      expect.objectContaining({ path: ["scenario"], message: "Name a scenario" }),
+    ]);
+  });
+
+  it("refuses a scenario the config does not have, naming those it has", async () => {
+    const { status, body } = await call("/api/runs", { method: "POST", actor: "tester", body: { scenario: "nope" } });
+    expect(status).toBe(404);
+    expect(body).toMatchObject({ code: "invalid_input", issues: [expect.objectContaining({ path: ["scenario"] })] });
+    expect(body.error).toBe(
+      'No scenario named "nope"; the scenarios are "Launch on time", "Publish retried", "Copy rejected"',
+    );
+  });
+
+  it("starts a sandbox run whose approval waits for a person, then checks it against the scenario", async () => {
+    const started = await call<{ runId: string }>("/api/runs", {
+      method: "POST",
+      actor: "tester",
+      body: { scenario: SCENARIO },
+    });
+    expect(started.status).toBe(201);
+    sandboxId = started.body.runId;
+
+    // The app decides nothing: the run waits on its approval as a live run does.
+    const held = await waitFor(
+      () => detail(sandboxId),
+      (d) => d.approvals.some((a) => a.status === "pending"),
+    );
+    expect(held.run).toMatchObject({ status: "waiting", sandbox: SCENARIO, startedBy: { id: "tester" } });
+    expect(held.ledger.find((r) => r.type === "scenario.seeded")).toMatchObject({
+      scenario: SCENARIO,
+      seeds: [
+        expect.objectContaining({ op: "ghost.post.create", input: expect.objectContaining({ title: "Old news" }) }),
+      ],
+    });
+    // A call it expects has been made, so that check is settled; the outcome is not yet.
+    expect(held.checks).toContainEqual({ step: 'a post titled "Acme Pro" is created', ok: true, settled: true });
+    expect(held.checks).toContainEqual({
+      step: "the run succeeds",
+      ok: false,
+      detail: "run not ended",
+      settled: false,
+    });
+
+    const decided = await call<ApprovalState>(`/api/runs/${sandboxId}/approvals/${held.approvals[0]!.id}`, {
+      method: "POST",
+      actor: "marketing-lead",
+      body: { decision: "approve" },
+    });
+    expect(decided.body.status).toBe("approved");
+    const done = await waitFor(
+      () => detail(sandboxId),
+      (d) => d.run.status === "finished",
+    );
+    expect(done.checks).toHaveLength(5);
+    expect(done.checks?.filter((c) => !c.ok)).toEqual([]);
+  });
+
+  it("settles a check once its answer cannot change, and fails those not met when the run ends", async () => {
+    const started = await call<{ runId: string }>("/api/runs", {
+      method: "POST",
+      actor: "tester",
+      body: { scenario: "Copy rejected" },
+    });
+    expect(started.status).toBe(201);
+    const id = started.body.runId;
+    const held = await waitFor(
+      () => detail(id),
+      (d) => d.approvals.some((a) => a.status === "pending"),
+    );
+    // A call not made so far may still be made: not settled, though met.
+    expect(held.checks).toEqual([
+      { step: "ghost.post.publish was not called", ok: true, settled: false },
+      expect.objectContaining({ step: "resend.broadcast.send was called", ok: false, settled: false }),
+      { step: 'the run fails with "approval_rejected"', ok: false, detail: "run not ended", settled: false },
+    ]);
+    expect((await page(`/runs/${id}`)).text).toMatch(/>not yet</);
+
+    const decided = await call<ApprovalState>(`/api/runs/${id}/approvals/${held.approvals[0]!.id}`, {
+      method: "POST",
+      actor: "marketing-lead",
+      body: { decision: "reject" },
+    });
+    expect(decided.body.status).toBe("rejected");
+    const failed = await waitFor(
+      () => detail(id),
+      (d) => d.run.status === "failed",
+    );
+    expect(failed.checks).toEqual([
+      { step: "ghost.post.publish was not called", ok: true, settled: true },
+      expect.objectContaining({ step: "resend.broadcast.send was called", ok: false, settled: true }),
+      { step: 'the run fails with "approval_rejected"', ok: true, settled: true },
+    ]);
+  });
+});
+
+describe("scenarios that no longer load", () => {
+  it("says why a seeded run has no checks, and why a scenario cannot start, when its file breaks", async () => {
+    const before = await detail(sandboxId);
+    expect(before.checks).toBeDefined();
+    const text = readFileSync(featureFile, "utf8");
+    try {
+      writeFileSync(featureFile, "Feature: Broken\n  Scenario: Broken\n    Then nothing\n");
+      const broken = await detail(sandboxId);
+      expect(broken.checks).toBeUndefined();
+      expect(broken.checksError).toMatch(
+        /^The feature files no longer have scenario "Launch on time"; these files did not load: announce\.feature:3: no step matches "nothing"\nKnown steps:/,
+      );
+      const run = await page(`/runs/${sandboxId}`);
+      expect(run.html).toMatch(/<h2[^>]*>Checks<\/h2>/);
+      expect(run.text).toContain("Could not check the run against its scenario: The feature files no longer have");
+
+      const start = await postRun({ scenario: SCENARIO });
+      expect(start.status).toBe(404);
+      expect(start.body.error).toMatch(/; these files did not load: announce\.feature:3: no step matches "nothing"/);
+    } finally {
+      writeFileSync(featureFile, text);
+    }
+    expect((await detail(sandboxId)).checks).toEqual(before.checks);
+  });
+
+  it("lists no scenarios, with why, when they cannot be read at all", () => {
+    const resolved = {
+      scenarios: pathToFileURL(`${scenariosDir}/`),
+      get ops(): never {
+        throw new Error("the ops are gone");
+      },
+    };
+    expect(scenarios({ resolved } as never)).toEqual({
+      scenarios: [],
+      errors: [{ file: "", message: "the ops are gone" }],
+    });
+  });
+});
+
 describe("errors the app answers with", () => {
   it("answers anything unexpected with a 500 that names no detail", () => {
     const api = asApiError(new Error("connect ECONNREFUSED db.internal:5432"));
@@ -557,6 +747,42 @@ describe("the page", () => {
     expect(missing.text).toContain("No workflow nope");
   });
 
+  it("renders a workflow's scenario, the picker and Test, and says when a scenario does not exist", async () => {
+    const chosen = await page(`/workflows/announce?scenario=${encodeURIComponent(SCENARIO)}`);
+    expect(chosen.status).toBe(200);
+    expect(chosen.html).toMatch(/<select[^>]*aria-label="Scenario"/);
+    expect(chosen.html).toMatch(/<option[^>]*value="Launch on time"[^>]*selected=""/);
+    expect(chosen.text).toMatch(/>Test<\/button>/);
+    // The scenario's own lines, not the rest of its file.
+    const shown = [...chosen.text.matchAll(/<pre[^>]*>([^<]*)<\/pre>/g)]
+      .map(([, text]) => text!)
+      .find((text) => text.startsWith("Scenario: Launch on time\n"));
+    expect(shown).toBeDefined();
+    expect(shown).not.toContain("Feature:");
+    expect(shown).not.toContain("Publish retried");
+    expect(chosen.text).toContain("From <code>announce.feature</code>");
+
+    const unknown = await page("/workflows/announce?scenario=nope");
+    expect(unknown.status).toBe(200);
+    expect(unknown.text).toContain("No scenario named “nope”");
+    expect(unknown.html).toMatch(/<select[^>]*aria-label="Scenario"/);
+
+    // A search value the router reads as a number is no scenario (or workflow), not a crash.
+    expect((await page("/workflows/announce?scenario=123")).status).toBe(200);
+    expect((await page("/start?workflow=123")).status).toBe(200);
+  });
+
+  it("renders a sandbox run: its badge, its checks and its seeding, and its badge in the runs", async () => {
+    const run = await page(`/runs/${sandboxId}`);
+    expect(run.status).toBe(200);
+    expect(run.text).toContain("sandbox · Launch on time");
+    expect(run.html).toMatch(/<h2[^>]*>Checks<\/h2>/);
+    expect(run.text).toContain("resend.broadcast.send was called");
+    expect(run.text).toContain("Seeded 1 call from scenario “Launch on time”");
+    const runs = await page("/runs");
+    expect(runs.text).toContain("sandbox · Launch on time");
+  });
+
   it("answers any other path with the app's not-found page", async () => {
     const res = await fetch(new URL("/nonexistent", app.url));
     expect(res.status).toBe(404);
@@ -592,7 +818,8 @@ describe("the page", () => {
   it("keeps the runtime out of the browser bundle", () => {
     const dir = join(distDir, "client", "assets");
     for (const file of readdirSync(dir).filter((f) => f.endsWith(".js"))) {
-      expect(readFileSync(join(dir, file), "utf8"), file).not.toMatch(/DBOSClient|systemDatabaseUrl/);
+      // Nor the scenarios' Gherkin parser and faker, which only the server loads.
+      expect(readFileSync(join(dir, file), "utf8"), file).not.toMatch(/DBOSClient|systemDatabaseUrl|@cucumber|faker/);
     }
   });
 

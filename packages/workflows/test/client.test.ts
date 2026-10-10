@@ -100,6 +100,17 @@ describe("SanomaClient", () => {
     expect((await c().runs({ limit: 1 }))[0]?.runId).toBe(before);
   });
 
+  it("starts a workflow by its name in the config, and refuses a name the config does not have", async () => {
+    const runId = await c().start("double", { n: "4" }, { startedBy: alice });
+    expect(await c().result(runId)).toBe(8);
+    const err = await caught(c().start("nope", {}, { startedBy: alice }));
+    expect(errorCode(err)).toBe("invalid_input");
+    expect(err).toMatchObject({
+      message: 'No workflow named "nope"; the config has announce, clock, double',
+      data: { workflow: "nope", workflows: ["announce", "clock", "double"] },
+    });
+  });
+
   it("requires a principal to start a run as", async () => {
     const err = await caught(c().start(announce, input, { startedBy: { id: " " } }));
     expect(errorCode(err)).toBe("invalid_input");

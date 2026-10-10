@@ -2,6 +2,7 @@ import { dirname, resolve } from "node:path";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, type DriftDeclared, driftWorkflow } from "./drift.ts";
+import type { Fake } from "./fake.ts";
 import type { LedgerStore } from "./ledger.ts";
 import { type Connector, type Driver, type DriverFn, isOp, type Op } from "./op.ts";
 import type { Policy } from "./policy.ts";
@@ -21,6 +22,13 @@ export interface SanomaConfig {
    */
   connectors: Connector<any, any>[];
   drivers: Driver[];
+  /**
+   * Fake vendors (from `defineFake`) that sandbox runs call instead of the drivers. A sandbox
+   * run is started with `{ sandbox: "<scenario name>" }` and seeded from that scenario.
+   */
+  fakes?: Fake<any, any>[];
+  /** The directory of `.feature` files sandbox runs are seeded from, as a `file:` URL, such as `new URL("./scenarios/", import.meta.url)`. */
+  scenarios?: URL;
   /** Checked before every operation call. Required: `allowAll` says that every call is allowed. */
   policy: Policy;
   /**
@@ -49,15 +57,23 @@ export interface ResolvedConfig {
   version: string;
   /** The DBOS queue runs are started on: `sanoma:<appName>`. */
   queueName: string;
+  /** The DBOS queue sandbox runs are started on, which runs one at a time per worker: `sanoma:<appName>:sandbox`. */
+  sandboxQueueName: string;
   /** The operations the connectors declare, by id. */
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id. */
   drivers: Map<string, DriverFn>;
+  /** The fake vendors sandbox runs call, by vendor id. */
+  fakes: Map<string, Fake<any, any>>;
+  /** The fakes' functions, by operation id: what a sandbox run calls. */
+  fakeDrivers: Map<string, DriverFn>;
+  /** The scenarios directory, a `file:` URL. */
+  scenarios?: URL;
   /**
-   * Each checked against `ops` and `drivers`; names are unique. The config's, and the built-in
-   * `drift` (`DRIFT_WORKFLOW`) when its connectors declare resource types.
+   * By name; each checked against `ops` and `drivers`. The config's, and the built-in `drift`
+   * (`DRIFT_WORKFLOW`) when its connectors declare resource types.
    */
-  workflows: WorkflowDefinition<any, any>[];
+  workflows: Map<string, WorkflowDefinition<any, any>>;
   policy: Policy;
   ledger: LedgerStore;
   /**
@@ -104,12 +120,31 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       "The config needs a `ledger`; use `jsonlLedger(dir)` to keep records in files, or `memoryLedger()` to keep them in memory, for tests",
     );
   }
+  if (config.fakes !== undefined && !Array.isArray(config.fakes)) {
+    throw new Error("The config's `fakes` must be an array of defineFake fakes");
+  }
+  const { scenarios } = config;
+  if (scenarios !== undefined && !(scenarios instanceof URL && scenarios.protocol === "file:")) {
+    throw new Error(
+      'The config\'s `scenarios` must be a file: URL to a directory, such as new URL("./scenarios/", import.meta.url)',
+    );
+  }
   const appName = config.appName ?? "sanoma";
   // No fallback to the working directory: a config found nowhere has no data files, and says so.
   const root =
     config.root !== undefined ? resolve(config.root) : config.file !== undefined ? dirname(config.file) : undefined;
   const ops = indexConnectors(config.connectors);
   const drivers = indexDrivers(config.drivers, ops);
+  const fakes = new Map<string, Fake<any, any>>();
+  for (const fake of config.fakes ?? []) {
+    const { vendor } = fake.driver;
+    if (fakes.has(vendor)) throw new Error(`Two fakes in \`fakes\` are for "${vendor}"; keep one per vendor`);
+    fakes.set(vendor, fake);
+  }
+  const fakeDrivers = indexDrivers(
+    [...fakes.values()].map((f) => f.driver),
+    ops,
+  );
   const names = new Map<string, WorkflowDefinition<any, any>>();
   for (const wf of config.workflows) {
     if (wf.name === DRIFT_WORKFLOW) {
@@ -133,16 +168,19 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       DBOS.runStep(() => readDeclared(root, config.connectors, types), { name: "drift:data-files" });
     names.set(DRIFT_WORKFLOW, driftWorkflow(types, ops, drivers, declared));
   }
-  const workflows = [...names.values()];
   return {
     appName,
     databaseUrl: resolveDatabaseUrl(config),
     // The built-in's code and operations are part of the app's version, like the config's own.
-    version: computeVersion({ appName: config.appName, workflows }),
+    version: computeVersion({ appName: config.appName, workflows: [...names.values()] }),
     queueName: `sanoma:${appName}`,
+    sandboxQueueName: `sanoma:${appName}:sandbox`,
     ops,
     drivers,
-    workflows,
+    fakes,
+    fakeDrivers,
+    ...(scenarios && { scenarios }),
+    workflows: names,
     policy: config.policy,
     ledger,
     ...(root !== undefined && { root }),

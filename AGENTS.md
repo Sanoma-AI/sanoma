@@ -8,7 +8,7 @@ Read this file, then only the package guidance relevant to the task. The [README
 | ------------------------------------------------------- | ---------------------------------------------------------------------- |
 | Runtime, policies, approvals, ledger, workflow analysis | [workflows](packages/workflows/AGENTS.md)                              |
 | Web app, HTTP API, forms, graphs                        | [app](packages/app/AGENTS.md)                                          |
-| Test workers, fakes, recorded HTTP replay               | [testing](packages/testing/AGENTS.md)                                  |
+| Test workers, fakes, recorded HTTP replay, scenarios    | [testing](packages/testing/AGENTS.md)                                  |
 | Provider bridge, schema generation, provider replay     | [bridge](packages/bridge/AGENTS.md)                                    |
 | Vendor connectors                                       | [connector conventions](connectors/AGENTS.md), then the vendor package |
 

@@ -55,7 +55,7 @@ describe("lintWorkflow", () => {
   it("refuses the ways around the policy: test fakes, drivers, the app and the config", () => {
     const problems = messages(
       `
-      import { fakeMarketingVendors } from "@sanoma/testing";
+      import { startTestWorker } from "@sanoma/testing";
       import { fakeGhost } from "@sanoma/connector-ghost/fake";
       import { ghostDriver } from "@sanoma/connector-ghost/driver";
       import { startApp } from "@sanoma/app";
@@ -349,6 +349,10 @@ export type { T };
 export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
 `,
     );
+    write(
+      "workflows/sandbox.ts",
+      `import { check } from "@sanoma/workflows/scenario";\nexport const checks = [check];\n`,
+    );
     // The built-in drift workflow, as if it were the company's: oxlint finds nothing in it.
     write("workflows/drift.ts", readFileSync(new URL("../src/drift.ts", import.meta.url), "utf8"));
     // Outside workflows/ and policies/, nothing is restricted.
@@ -409,6 +413,12 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
       // A race has no ctx.all to point at: nothing races.
       bad(18, "eslint(no-restricted-properties)", /Promise\.race.*nothing races: pick one call, or sleep/),
       bad(19, "eslint(no-restricted-properties)", /Promise\.any.*nothing races/),
+      {
+        file: "workflows/sandbox.ts",
+        line: 1,
+        rule: imports,
+        text: expect.stringMatching(/@sanoma\/workflows\/scenario.*through ctx/),
+      },
     ]);
   });
 

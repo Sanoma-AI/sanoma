@@ -19,6 +19,7 @@ import { Route as StartRouteImport } from './routes/start'
 import { Route as WorkflowsRouteRouteImport } from './routes/workflows/route'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
 import { Route as ApiConfigRouteImport } from './routes/api/config'
+import { Route as ApiScenariosRouteImport } from './routes/api/scenarios'
 import { Route as RunsIndexRouteImport } from './routes/runs/index'
 import { Route as RunsIdRouteImport } from './routes/runs/$id'
 import { Route as WorkflowsIndexRouteImport } from './routes/workflows/index'
@@ -77,6 +78,11 @@ const ApiConfigRoute = ApiConfigRouteImport.update({
   path: '/config',
   getParentRoute: () => ApiRoute,
 } as any)
+const ApiScenariosRoute = ApiScenariosRouteImport.update({
+  id: '/scenarios',
+  path: '/scenarios',
+  getParentRoute: () => ApiRoute,
+} as any)
 const RunsIndexRoute = RunsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -125,6 +131,7 @@ export interface FileRoutesByFullPath {
   '/start': typeof StartRoute
   '/api/$': typeof ApiSplatRoute
   '/api/config': typeof ApiConfigRoute
+  '/api/scenarios': typeof ApiScenariosRoute
   '/runs/$id': typeof RunsIdRoute
   '/workflows/$name': typeof WorkflowsNameRoute
   '/runs/': typeof RunsIndexRoute
@@ -142,6 +149,7 @@ export interface FileRoutesByTo {
   '/start': typeof StartRoute
   '/api/$': typeof ApiSplatRoute
   '/api/config': typeof ApiConfigRoute
+  '/api/scenarios': typeof ApiScenariosRoute
   '/runs/$id': typeof RunsIdRoute
   '/workflows/$name': typeof WorkflowsNameRoute
   '/runs': typeof RunsIndexRoute
@@ -162,6 +170,7 @@ export interface FileRoutesById {
   '/start': typeof StartRoute
   '/api/$': typeof ApiSplatRoute
   '/api/config': typeof ApiConfigRoute
+  '/api/scenarios': typeof ApiScenariosRoute
   '/runs/$id': typeof RunsIdRoute
   '/workflows/$name': typeof WorkflowsNameRoute
   '/runs/': typeof RunsIndexRoute
@@ -183,6 +192,7 @@ export interface FileRouteTypes {
     | '/start'
     | '/api/$'
     | '/api/config'
+    | '/api/scenarios'
     | '/runs/$id'
     | '/workflows/$name'
     | '/runs/'
@@ -200,6 +210,7 @@ export interface FileRouteTypes {
     | '/start'
     | '/api/$'
     | '/api/config'
+    | '/api/scenarios'
     | '/runs/$id'
     | '/workflows/$name'
     | '/runs'
@@ -219,6 +230,7 @@ export interface FileRouteTypes {
     | '/start'
     | '/api/$'
     | '/api/config'
+    | '/api/scenarios'
     | '/runs/$id'
     | '/workflows/$name'
     | '/runs/'
@@ -311,6 +323,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiConfigRouteImport
       parentRoute: typeof ApiRoute
     }
+    '/api/scenarios': {
+      id: '/api/scenarios'
+      path: '/scenarios'
+      fullPath: '/api/scenarios'
+      preLoaderRoute: typeof ApiScenariosRouteImport
+      parentRoute: typeof ApiRoute
+    }
     '/runs/': {
       id: '/runs/'
       path: '/'
@@ -394,6 +413,7 @@ const WorkflowsRouteRouteWithChildren = WorkflowsRouteRoute._addFileChildren(
 interface ApiRouteChildren {
   ApiSplatRoute: typeof ApiSplatRoute
   ApiConfigRoute: typeof ApiConfigRoute
+  ApiScenariosRoute: typeof ApiScenariosRoute
   ApiRunsIndexRoute: typeof ApiRunsIndexRoute
   ApiRunsIdIndexRoute: typeof ApiRunsIdIndexRoute
   ApiRunsIdApprovalsApprovalIdRoute: typeof ApiRunsIdApprovalsApprovalIdRoute
@@ -402,6 +422,7 @@ interface ApiRouteChildren {
 const ApiRouteChildren: ApiRouteChildren = {
   ApiSplatRoute: ApiSplatRoute,
   ApiConfigRoute: ApiConfigRoute,
+  ApiScenariosRoute: ApiScenariosRoute,
   ApiRunsIndexRoute: ApiRunsIndexRoute,
   ApiRunsIdIndexRoute: ApiRunsIdIndexRoute,
   ApiRunsIdApprovalsApprovalIdRoute: ApiRunsIdApprovalsApprovalIdRoute,

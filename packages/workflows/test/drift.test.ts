@@ -41,7 +41,15 @@ const policy = definePolicy((call) => {
   policyCalls.push(call);
   return call.actor.id === "no-stripe" && call.op.id === "stripe.product.import" ? deny("no Stripe") : allow();
 });
-const companyConfig = { workflows: [], connectors: company.connectors, file: company.file!, drivers, policy };
+// No `fakes`: useApp's are the marketing vendors', whose connectors this config replaces.
+const companyConfig = {
+  workflows: [],
+  connectors: company.connectors,
+  file: company.file!,
+  drivers,
+  fakes: [],
+  policy,
+};
 
 const byId = (report: DriftReport) => Object.fromEntries(report.resources.map((r) => [r.id, r]));
 const opCalls = (records: LedgerRecord[]) => records.filter((r) => r.type === "op.called");
@@ -159,7 +167,7 @@ describe("the drift workflow", () => {
   });
 
   it("refuses any input: the run reads the data files itself", async () => {
-    const definition = resolveConfig(app.config).workflows.find((wf) => wf.name === DRIFT_WORKFLOW)!;
+    const definition = resolveConfig(app.config).workflows.get(DRIFT_WORKFLOW)!;
     const forged = { resources: [{ id: "x#y", vendor: "github", type: "repository", name: "x", desired: {} }] };
     const err = await app.client.start(definition, forged as never, { startedBy: alice }).catch((e: unknown) => e);
     expect(errorCode(err)).toBe("invalid_input");
@@ -211,6 +219,7 @@ describe("a drift run's record of the data files", () => {
     workflows: [],
     connectors: [acme],
     drivers: [acmeDriver],
+    fakes: [],
     root,
   }));
   afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -263,7 +272,7 @@ describe("the built-in drift workflow in a config", () => {
   const config = { ...company, drivers };
 
   it("is added when the connectors declare resource types, using each type's import that has a driver", () => {
-    expect(resolveConfig(config).workflows.map((wf) => wf.name)).toEqual([DRIFT_WORKFLOW]);
+    expect([...resolveConfig(config).workflows.keys()]).toEqual([DRIFT_WORKFLOW]);
     const entry = describeConfig(config).workflows.find((wf) => wf.name === DRIFT_WORKFLOW);
     expect(entry).toMatchObject({ name: "drift", title: "Check resources for drift", builtin: true });
     expect(entry?.ops).toEqual([
@@ -281,7 +290,7 @@ describe("the built-in drift workflow in a config", () => {
 
   it("is not added when no connector declares a resource type, and the config's own workflows are not built-in", () => {
     const marketing = { ...company, connectors: [bluesky], drivers: [] };
-    expect(resolveConfig(marketing).workflows).toEqual([]);
+    expect(resolveConfig(marketing).workflows.size).toBe(0);
     const own = defineWorkflow({ name: "own", trigger: "manual", input: z.object({}), uses: [], run: async () => 1 });
     expect(
       describeConfig({ ...company, workflows: [own] }).workflows.find((wf) => wf.name === "own"),
