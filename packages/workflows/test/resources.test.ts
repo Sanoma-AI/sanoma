@@ -100,8 +100,8 @@ describe("readResources", () => {
     });
   });
 
-  it("is what describeConfig lists as the config's resources, without problems", () => {
-    const { resources, problems } = describeConfig(company);
+  it("is what describeConfig lists as the config's resources, without problems", async () => {
+    const { resources, problems } = await describeConfig(company);
     expect(resources).toEqual(readResources(company));
     expect(problems).toEqual([]);
     expect(JSON.parse(JSON.stringify(resources))).toEqual(resources);
@@ -267,13 +267,13 @@ export const rule = github.branch_protection({ repository_id: main, pattern: "ne
 });
 
 describe("describeConfig's problems", () => {
-  it("are data: the resources read without one are listed beside them", () => {
+  it("are data: the resources read without one are listed beside them", async () => {
     const dir = project({
       "good.ts": `import { github } from "@sanoma/connector-github/resources";\nexport const web = github.repository({ name: "web" });\n`,
       "bad.ts": `import { github } from "@sanoma/connector-github/resources";\nimport { web } from "./good.ts";\nexport const docs = github.repository({ name: "docs", description: process.env.X });\nexport const main = github.branch_protection({ repository_id: web, pattern: "main" });\n`,
     });
     try {
-      const { resources, problems } = describeConfig({ ...base, root: dir });
+      const { resources, problems } = await describeConfig({ ...base, root: dir });
       expect(resources.map((r) => r.id)).toEqual(["resources/bad.ts#main", "resources/good.ts#web"]);
       expect(problems).toEqual([
         {
@@ -288,8 +288,8 @@ describe("describeConfig's problems", () => {
     }
   });
 
-  it("say so, once, when the config has no root", () => {
-    expect(describeConfig(base)).toMatchObject({
+  it("say so, once, when the config has no root", async () => {
+    expect(await describeConfig(base)).toMatchObject({
       resources: [],
       problems: [{ message: expect.stringMatching(/no root/) }],
     });

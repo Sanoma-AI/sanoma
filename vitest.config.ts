@@ -8,10 +8,10 @@ export default defineConfig({
     // Run tests against source, not dist/. Keep in sync with `paths` in tsconfig.json.
     alias: [
       {
-        find: /^@sanoma\/workflows\/(describe|fake|lint|shared)$/,
+        find: /^@sanoma\/workflows\/(describe|fake|lint|shared|scenario)$/,
         replacement: src("./packages/workflows/src/$1.ts"),
       },
-      { find: /^@sanoma\/testing\/replay$/, replacement: src("./packages/testing/src/replay.ts") },
+      { find: /^@sanoma\/testing\/(replay|scenarios)$/, replacement: src("./packages/testing/src/$1.ts") },
       { find: /^@sanoma\/bridge\/(connector|fake|tfschema)$/, replacement: src("./packages/bridge/src/$1.ts") },
       { find: /^@sanoma\/(workflows|testing|app|bridge)$/, replacement: src("./packages/$1/src/index.ts") },
       {

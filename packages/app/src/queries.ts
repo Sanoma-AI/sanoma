@@ -2,8 +2,8 @@ import type { RunSummary } from "@sanoma/workflows";
 import type { ConfigDescription, WorkflowEntry } from "@sanoma/workflows/describe";
 import { isEnded } from "@sanoma/workflows/shared";
 import { queryOptions } from "@tanstack/react-query";
-import { pendingApprovals, RUNS_LIMIT, type RunsQuery } from "./api.ts";
-import { getActor, getConfig, getDriftReport, getRun, getRuns, getSource } from "./functions.ts";
+import { pendingApprovals, RUNS_LIMIT, type RunsQuery, type ScenariosResponse } from "./api.ts";
+import { getActor, getConfig, getDriftReport, getRun, getRuns, getScenarios, getSource } from "./functions.ts";
 
 /** How often the runs and a run's detail refresh while a page shows them. */
 export const POLL_MS = 2_000;
@@ -50,9 +50,39 @@ export const connectorsOf = (config: ConfigDescription) =>
 
 export type ConnectorEntry = ReturnType<typeof connectorsOf>[number];
 
+/** The config's connector for this vendor id, if it has one: for `select`, or called with the config. */
+export const connectorNamed = (id: string) => (config: ConfigDescription) =>
+  connectorsOf(config).find((connector) => connector.id === id);
+
 /** The config's workflow of this name, if it has one: for `select`, or called with the config. */
 export const workflowNamed = (name: string) => (config: ConfigDescription) =>
   config.workflows.find((wf) => wf.name === name);
+
+/**
+ * The config's scenarios. Unlike the config they change while the app runs (the agent edits the
+ * feature files), so they are read again every 5 seconds while the page is open and when its
+ * window regains focus.
+ */
+export const scenariosQuery = () =>
+  queryOptions({
+    queryKey: ["scenarios"],
+    queryFn: () => getScenarios(),
+    refetchInterval: 5_000,
+  });
+
+/** The workflow's scenarios, and every feature file that could not be read: for `select`. */
+export const scenariosFor =
+  (workflow: string) =>
+  ({ scenarios, errors }: ScenariosResponse) => ({
+    scenarios: scenarios.filter((s) => s.workflow === workflow),
+    errors,
+  });
+
+/** The scenarios with a step about the operation `op` (seeding it, failing it, expecting it, or forbidding it). */
+export const scenariosNaming =
+  (op: string) =>
+  ({ scenarios }: ScenariosResponse) =>
+    scenarios.filter((s) => s.steps.some((step) => step.op === op));
 
 /**
  * Who the server says is asking. A login lasts the page's life; the header name is kept in the

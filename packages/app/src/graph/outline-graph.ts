@@ -35,8 +35,8 @@ export function outlineGraph(
     return node.id;
   };
   const idOf = (kind: string, key: string | undefined) => key ?? `${kind}:${count++}`;
-  /** A call's node's own: its step's state, and its place in the source. */
-  const own = (step: CallStep) => {
+  /** A call's node's own: its step's state (of its own kind), and its place in the source. */
+  const own = <S extends CallStep>(step: S): Pick<S, "state"> & { spans?: Span[] } => {
     const spans = where(step);
     return { ...(step.state && { state: step.state }), ...(spans && { spans }) };
   };

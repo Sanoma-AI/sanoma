@@ -14,13 +14,22 @@ export interface StepState {
   recordId?: string;
 }
 
-/** An operation call's: the policy's decision and how the call ended, once it is recorded. */
-export interface OpState extends StepState {
+/**
+ * An operation call's: the policy's decision and how the call ended, once it is recorded. On a
+ * workflow's outline, only what a scenario says of the operation, with no tone: nothing has run.
+ */
+export interface OpState extends Omit<StepState, "tone"> {
+  tone?: Tone;
   decision?: RecordedDecision["kind"];
   errorCode?: ErrorCode;
   durationMs?: number;
   /** The policy's approval holding the call, as the run tells it. */
   approval?: ApprovalState;
+  /**
+   * What a scenario says of the operation, on a workflow's outline: a `Given` seeds it or makes
+   * its next call fail, a `Then` expects a call to it, or a `Then` expects none.
+   */
+  scenario?: { seeded?: true; fails?: true; expected?: true; forbidden?: true };
 }
 
 /** A workflow's approval, as the run tells it. */

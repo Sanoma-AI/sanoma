@@ -4,9 +4,9 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { memo, type ReactNode, useCallback, useMemo } from "react";
 import { Card, CardContent } from "#/components/ui/card.tsx";
-import { Item, ItemActions, ItemContent, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
+import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { approverLabel } from "@sanoma/workflows/shared";
-import { starterName } from "../../api.ts";
+import { type RunCheck, starterName } from "../../api.ts";
 import { ApprovalCard } from "../../components/approval.tsx";
 import {
   DecisionBadge,
@@ -24,6 +24,7 @@ import {
   pageTitle,
   plural,
   RequestedBy,
+  SandboxBadge,
   SectionTitle,
   StatusDot,
   ToneBadge,
@@ -89,7 +90,7 @@ function show(recordId: string, reducedMotion: boolean) {
 function RunPage() {
   const { id } = Route.useParams();
   const { data, error, dataUpdatedAt } = useSuspenseQuery(runQuery(id));
-  const { run, ledger, ledgerError, approvals } = data;
+  const { run, ledger, ledgerError, approvals, checks, checksError } = data;
   // Only its name when the config has no workflow of that name: the graph says so.
   const { data: workflow } = useSuspenseQuery({
     ...configQuery(),
@@ -114,6 +115,7 @@ function RunPage() {
     <div className="flex flex-col gap-6">
       <PageHeader>
         <ToneBadge tone={RUN_TONE[run.status]}>{run.status}</ToneBadge>
+        {run.sandbox !== undefined && <SandboxBadge name={run.sandbox} />}
       </PageHeader>
       {error && <Notice variant="destructive">Could not refresh: {error.message}</Notice>}
       <Card size="sm">
@@ -134,6 +136,25 @@ function RunPage() {
           </Facts>
         </CardContent>
       </Card>
+
+      {(checks || checksError) && (
+        <div className="flex flex-col gap-3">
+          <SectionTitle>Checks</SectionTitle>
+          {checksError && (
+            <Notice variant="destructive">
+              {/* A step no rule matches lists the known steps, one a line. */}
+              <span className="whitespace-pre-wrap">Could not check the run against its scenario: {checksError}</span>
+            </Notice>
+          )}
+          {checks && (
+            <ItemGroup aria-label="Checks">
+              {checks.map((c, i) => (
+                <CheckRow key={i} check={c} />
+              ))}
+            </ItemGroup>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-col gap-3">
         <SectionTitle>Graph</SectionTitle>
@@ -162,6 +183,26 @@ function RunPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * One of a sandbox run's checks, as a ledger row is drawn: met, failed with why, or "not yet"
+ * while its answer can still change.
+ */
+function CheckRow({ check }: { check: RunCheck }) {
+  const tone = !check.settled ? "waiting" : check.ok ? "ok" : "bad";
+  const detail = check.settled ? check.detail : "not yet";
+  return (
+    <Item role="listitem" variant="outline" size="sm">
+      <ItemContent className="min-w-0">
+        <ItemTitle>
+          <StatusDot tone={tone} />
+          {check.step}
+        </ItemTitle>
+        {detail && <ItemDescription>{detail}</ItemDescription>}
+      </ItemContent>
+    </Item>
   );
 }
 
@@ -252,6 +293,17 @@ const LedgerRow = memo(function LedgerRow({ record, titles }: { record: LedgerRe
         <p>
           Ignored a message from {record.by ?? "someone"} on “{title(record.approval)}”: {record.reason}
         </p>
+      );
+      break;
+    case "scenario.seeded":
+      kind = "seeded";
+      body = (
+        <>
+          <p>
+            Seeded {plural(record.seeds.length, "call")} from scenario “{record.scenario}”
+          </p>
+          {record.seeds.length > 0 && <Expandable label="Seeds" value={record.seeds} />}
+        </>
       );
       break;
     case "sleep.started":

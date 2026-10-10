@@ -8,9 +8,11 @@ import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
+import type { ScenarioEntry } from "../api.ts";
 import { type Field, fieldsOf } from "../form/schema.ts";
 import { outlineGraph } from "../graph/outline-graph.ts";
 import { runGraph } from "../graph/run-graph.ts";
+import { annotateGraph } from "../graph/scenario-graph.ts";
 import { type GraphNode, nodeAt } from "../graph/types.ts";
 import { configQuery, opsById, sourceQuery, workflowFile } from "../queries.ts";
 import type { CodeProps } from "./code.tsx";
@@ -121,7 +123,7 @@ const PANEL = "h-[360px] sm:h-[420px]";
 
 /**
  * A workflow's graph, or a run's (`run`: its ledger and summary, read at `at`), beside the
- * workflow's source. A click on a node, or in the code, selects the node: the graph rings it and
+ * workflow's source. A workflow's graph marks what `scenario`, when given, seeds and expects. A click on a node, or in the code, selects the node: the graph rings it and
  * the code marks the lines it may stand for. `onSelect` is told of each node selected, after.
  * Without an outline (it could not be read, or the config has no such workflow) the code's place
  * says why; with no run either there is nothing to draw, and that says why in place of both.
@@ -129,19 +131,22 @@ const PANEL = "h-[360px] sm:h-[420px]";
 export const GraphAndSource = memo(function GraphAndSource({
   workflow: { name, outline, source },
   run,
+  scenario,
   onSelect,
 }: {
   /** The workflow's entry, or only its name when the config has no workflow of that name. */
   workflow: Pick<WorkflowEntry, "name"> & Partial<Pick<WorkflowEntry, "outline" | "source">>;
   run?: { ledger: LedgerRecord[]; run: RunSummary; at: number };
+  scenario?: Pick<ScenarioEntry, "steps">;
   onSelect?: (node: GraphNode) => void;
 }) {
   const steps = outline && "nodes" in outline ? outline.nodes : undefined;
   // The page's one graph: the panel draws it, and a click in the code finds its node in it.
-  const graph = useMemo(
-    () => (run ? runGraph(run.ledger, run.run, run.at, steps) : steps && outlineGraph(steps)),
-    [run, steps],
-  );
+  const graph = useMemo(() => {
+    if (run) return runGraph(run.ledger, run.run, run.at, steps);
+    const drawn = steps && outlineGraph(steps);
+    return drawn && scenario ? annotateGraph(drawn, scenario) : drawn;
+  }, [run, steps, scenario]);
   // By id, so a poll's new graph cannot leave an old node selected.
   const [selected, setSelected] = useState<string>();
   const select = useCallback(

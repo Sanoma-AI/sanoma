@@ -306,7 +306,7 @@ describe("compareDeclared", () => {
 });
 
 describe("describeConfig with resources", () => {
-  it("lists the resource types once, top level, and refers to their state from their operations", () => {
+  it("lists the resource types once, top level, and refers to their state from their operations", async () => {
     const config = defineConfig({
       workflows: [],
       connectors: [acme, defineConnector("plain", {})],
@@ -321,7 +321,7 @@ describe("describeConfig with resources", () => {
       policy: allowAll,
       ledger: memoryLedger(),
     });
-    const { resourceTypes, ops } = describeConfig(config);
+    const { resourceTypes, ops } = await describeConfig(config);
     expect(resourceTypes).toEqual([
       {
         id: "acme.repo",

@@ -15,7 +15,7 @@ export { ACTOR_HEADER, type ErrorResponse, type InputIssue, type RunDetail, type
 export type { ResolveActor } from "./context.ts";
 
 export interface AppOptions {
-  /** Defaults to 0: any free port, which `App.url` reports. 4321 is the suggested fixed port. */
+  /** Defaults to 0: any free port, which `App.url` reports. 3000 is the suggested fixed port. */
   port?: number;
   /**
    * Defaults to 127.0.0.1, so only this machine can reach the app. There is no login:
@@ -32,7 +32,7 @@ export interface AppOptions {
 }
 
 export interface App {
-  /** Where the app listens, such as `http://127.0.0.1:4321`. */
+  /** Where the app listens, such as `http://127.0.0.1:3000`. */
   url: string;
   close(): Promise<void>;
 }
@@ -49,7 +49,7 @@ interface ServerEntry {
  */
 export async function startApp(config: SanomaConfig, options: AppOptions = {}): Promise<App> {
   const resolved = resolveConfig(config);
-  const description = describeConfig(config);
+  const description = await describeConfig(config);
   // Broken data files do not stop the app: it shows the resources it could read, and the problems.
   if (description.problems.length) {
     const lines = description.problems.map((p) => `  ${p.file === undefined ? "" : `${problemAt(p)}: `}${p.message}`);

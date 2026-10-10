@@ -9,7 +9,7 @@ import { StartForm } from "../form/start-form.tsx";
 import { configQuery, workflowNamed } from "../queries.ts";
 
 export const Route = createFileRoute("/start")({
-  validateSearch: z.object({ workflow: z.string().optional() }),
+  validateSearch: z.object({ workflow: z.string().optional().catch(undefined) }),
   staticData: { crumb: "Start a run" },
   head: ({ match }) => pageTitle(match.staticData.crumb),
   component: StartPage,
