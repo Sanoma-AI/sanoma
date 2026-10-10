@@ -22,11 +22,6 @@
   "ignorePatterns": ["**/node_modules", "**/.sanoma", "**/dist", "**/generated", "packages/bridge/src/gen"],
   "overrides": [
     {
-      "files": ["**/resources/**"],
-      "jsPlugins": ["./packages/workflows/src/plugin.ts"],
-      "rules": { "sanoma/data-file": "error" }
-    },
-    {
       "files": ["packages/app/src/components/ui/**"],
       "rules": {
         "eslint/no-shadow": "off",
