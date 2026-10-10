@@ -50,6 +50,10 @@ export const connectorsOf = (config: ConfigDescription) =>
 
 export type ConnectorEntry = ReturnType<typeof connectorsOf>[number];
 
+/** The config's connector for this vendor id, if it has one: for `select`, or called with the config. */
+export const connectorNamed = (id: string) => (config: ConfigDescription) =>
+  connectorsOf(config).find((connector) => connector.id === id);
+
 /** The config's workflow of this name, if it has one: for `select`, or called with the config. */
 export const workflowNamed = (name: string) => (config: ConfigDescription) =>
   config.workflows.find((wf) => wf.name === name);
@@ -73,6 +77,12 @@ export const scenariosFor =
     scenarios: scenarios.filter((s) => s.workflow === workflow),
     errors,
   });
+
+/** The scenarios with a step about the operation `op` (seeding it, failing it, expecting it, or forbidding it). */
+export const scenariosNaming =
+  (op: string) =>
+  ({ scenarios }: ScenariosResponse) =>
+    scenarios.filter((s) => s.steps.some((step) => step.op === op));
 
 /**
  * Who the server says is asking. A login lasts the page's life; the header name is kept in the

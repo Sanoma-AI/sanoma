@@ -5,7 +5,7 @@ This package owns the local web UI and HTTP API over a Sanoma config.
 ## Read when needed
 
 - [README](README.md): startup, [actor and authentication behavior](README.md#no-authentication), and [HTTP API](README.md#http-api).
-- [Scenarios](README.md#screens): the Workflow page's scenario picker and Test, a sandbox run's Checks, and `/api/scenarios` in the [HTTP API](README.md#http-api).
+- [Scenarios](README.md#screens): the Workflow page's Test control, the Connector page's mocks, a sandbox run's Checks, and `/api/scenarios` in the [HTTP API](README.md#http-api).
 - [Source map](src/AGENTS.md): routes, server functions, components, form schema, and graph code; follow the relevant child map.
 - [Test map](test/AGENTS.md): API, graph, schema, and loopback coverage.
 

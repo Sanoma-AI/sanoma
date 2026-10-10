@@ -271,9 +271,9 @@ describe("SanomaClient's drift", () => {
 describe("the built-in drift workflow in a config", () => {
   const config = { ...company, drivers };
 
-  it("is added when the connectors declare resource types, using each type's import that has a driver", () => {
+  it("is added when the connectors declare resource types, using each type's import that has a driver", async () => {
     expect([...resolveConfig(config).workflows.keys()]).toEqual([DRIFT_WORKFLOW]);
-    const entry = describeConfig(config).workflows.find((wf) => wf.name === DRIFT_WORKFLOW);
+    const entry = (await describeConfig(config)).workflows.find((wf) => wf.name === DRIFT_WORKFLOW);
     expect(entry).toMatchObject({ name: "drift", title: "Check resources for drift", builtin: true });
     expect(entry?.ops).toEqual([
       "github.branch_protection.import",
@@ -285,15 +285,15 @@ describe("the built-in drift workflow in a config", () => {
     expect(entry?.input).toMatchObject({ type: "object", additionalProperties: false });
     expect(entry?.outline).toMatchObject({ file: expect.stringMatching(/src\/drift\.ts$/) });
     // Without drivers it is there all the same, and uses nothing: each resource reports the missing driver.
-    expect(describeConfig(company).workflows).toMatchObject([{ name: "drift", builtin: true, ops: [] }]);
+    expect((await describeConfig(company)).workflows).toMatchObject([{ name: "drift", builtin: true, ops: [] }]);
   });
 
-  it("is not added when no connector declares a resource type, and the config's own workflows are not built-in", () => {
+  it("is not added when no connector declares a resource type, and the config's own workflows are not built-in", async () => {
     const marketing = { ...company, connectors: [bluesky], drivers: [] };
     expect(resolveConfig(marketing).workflows.size).toBe(0);
     const own = defineWorkflow({ name: "own", trigger: "manual", input: z.object({}), uses: [], run: async () => 1 });
     expect(
-      describeConfig({ ...company, workflows: [own] }).workflows.find((wf) => wf.name === "own"),
+      (await describeConfig({ ...company, workflows: [own] })).workflows.find((wf) => wf.name === "own"),
     ).not.toHaveProperty("builtin");
   });
 

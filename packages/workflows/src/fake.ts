@@ -58,6 +58,11 @@ export interface Fake<T, Id extends string = string> {
   rateLimit(opId: Id): void;
   /** The next call to `opId` waits, before it takes effect, until the returned function is called. */
   hold(opId: Id): () => void;
+  /**
+   * A new in-memory fake of the same vendor: the initial state, its own call log, no file and no
+   * faults. What it is called with leaves this one untouched, as for a sample call.
+   */
+  fresh(): Fake<T, Id>;
 }
 
 type Fault =
@@ -176,5 +181,6 @@ export function defineFake<V extends string, S extends Specs, T extends Record<s
       inject(opId, { kind: "hold", released: new Promise<void>((resolve) => (release = resolve)) });
       return release;
     },
+    fresh: () => defineFake(connector, definition, {}),
   };
 }

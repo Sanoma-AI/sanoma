@@ -49,7 +49,7 @@ interface ServerEntry {
  */
 export async function startApp(config: SanomaConfig, options: AppOptions = {}): Promise<App> {
   const resolved = resolveConfig(config);
-  const description = describeConfig(config);
+  const description = await describeConfig(config);
   // Broken data files do not stop the app: it shows the resources it could read, and the problems.
   if (description.problems.length) {
     const lines = description.problems.map((p) => `  ${p.file === undefined ? "" : `${problemAt(p)}: `}${p.message}`);

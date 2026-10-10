@@ -87,6 +87,14 @@ cpSync(fileURLToPath(new URL("./fixtures/scenarios/", import.meta.url)), scenari
 const featureFile = join(scenariosDir, "announce.feature");
 
 const blog = fakeGhost();
+/** Bluesky's fake for sandbox runs, whose sample post fails, so its connector page shows a mock's error. */
+const social = fakeBluesky();
+const freshSocial = social.fresh;
+social.fresh = () => {
+  const copy = freshSocial();
+  copy.failNext("bluesky.post.create", new DriverError("bluesky: the network is down", { retryable: false }));
+  return copy;
+};
 // The workflows' company fixture: its data files, and GitHub and Stripe holding them as declared.
 const company = companyFakes();
 const companyDir = fileURLToPath(new URL("../../workflows/test/fixtures/company/", import.meta.url));
@@ -95,7 +103,7 @@ const config = defineConfig({
   connectors: [ghost, resend, bluesky, github, stripe],
   drivers: [blog.driver, fakeResend().driver, fakeBluesky().driver, ...company.drivers],
   // Sandbox runs call these, seeded from the scenarios, never the drivers above.
-  fakes: [fakeGhost(), fakeResend(), fakeBluesky()],
+  fakes: [fakeGhost(), fakeResend(), social],
   scenarios: pathToFileURL(`${scenariosDir}/`),
   policy,
   ledger: memoryLedger(),
@@ -173,6 +181,10 @@ async function page(path: string, base = app.url) {
   return { status: res.status, html, text: html.replaceAll("<!-- -->", "") };
 }
 
+/** The Test control's buttons, as the workflow page renders them: its group's inner HTML. */
+const testControl = (html: string) =>
+  html.match(/<div role="group" data-slot="button-group"[^>]*aria-label="Test a scenario"[^>]*>(.*?)<\/div>/)?.[1];
+
 /** A request's status, sent as written: no normalising of the path, and any Host header. */
 function rawStatus(base: string, path: string, headers?: Record<string, string>) {
   const { hostname, port } = new URL(base);
@@ -211,6 +223,21 @@ describe("the API", () => {
     expect(readFileSync(announce.file!, "utf8")).toContain(line);
     expect(JSON.stringify(body)).not.toContain(line);
     expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.effect).toBe("send");
+    // Each faked operation's sample exchange; GitHub and Stripe have no fake in `fakes`.
+    expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.mock).toEqual({
+      input: { id: "bc_0001" },
+      output: { id: "bc_0001", status: "queued" },
+    });
+    expect(body.ops.find((o) => o.id === "bluesky.post.create")?.mock).toEqual({
+      input: expect.objectContaining({ text: expect.any(String) }),
+      error: "bluesky: the network is down",
+    });
+    expect(
+      body.ops.filter((o) => o.vendor === "ghost" || o.vendor === "resend").every((o) => o.mock && "output" in o.mock),
+    ).toBe(true);
+    expect(
+      body.ops.filter((o) => o.vendor === "github" || o.vendor === "stripe").every((o) => o.mock === undefined),
+    ).toBe(true);
     expect(body.vendors.resend).toMatchObject({ title: "Resend", logo: { src: expect.stringMatching(/^data:/) } });
     // The data files under the config's root, without problems, passed through as they are.
     expect(body.resources.map((r) => r.id)).toEqual(company.declared.map((r) => r.id));
@@ -539,6 +566,15 @@ describe("scenarios that no longer load", () => {
       const run = await page(`/runs/${sandboxId}`);
       expect(run.html).toMatch(/<h2[^>]*>Checks<\/h2>/);
       expect(run.text).toContain("Could not check the run against its scenario: The feature files no longer have");
+      // A workflow with no scenarios still has its Test control, enabled: it opens the menu, which says so.
+      const workflow = await page("/workflows/announce");
+      expect(testControl(workflow.text)).toMatch(/>Test<\/button><button[^>]*aria-label="Scenario"/);
+      expect(testControl(workflow.text)).not.toContain('disabled=""');
+      // A connector's page says why too, above its operations.
+      const connector = await page("/connectors/ghost");
+      expect(connector.text).toMatch(
+        /Could not read a scenario: announce\.feature:3: no step matches &quot;nothing&quot;[\s\S]*<h2[^>]*>Operations<\/h2>/,
+      );
 
       const start = await postRun({ scenario: SCENARIO });
       expect(start.status).toBe(404);
@@ -589,7 +625,7 @@ describe("errors the app answers with", () => {
 
 describe("a file's source", () => {
   it("is served for a file the description names, a workflow's or a data file, apart from the config", async () => {
-    const description = describeConfig(config);
+    const description = await describeConfig(config);
     const context = { resolved: { root: companyDir } as never, description };
     expect(await fileSource(context, announce.file!)).toEqual({
       source: readFileSync(announce.file!, "utf8").replaceAll("\r\n", "\n"),
@@ -718,18 +754,52 @@ describe("the page", () => {
     expect(runs.html.match(/<html[^>]*>/)?.[0]).not.toMatch(/class="[^"]*\bdark\b/);
   });
 
-  it("renders the connectors: each one's package and homepage, resource types, operations and the workflows that use them", async () => {
+  it("lists the connectors, each linking to its page, without their operations", async () => {
     const connectors = await page("/connectors");
     expect(connectors.status).toBe(200);
     expect(connectors.html).toMatch(/<h1[^>]*>Connectors<\/h1>/);
     expect(connectors.text).toContain("<title>Connectors · Sanoma</title>");
-    expect(connectors.html).toContain('href="https://www.npmjs.com/package/@sanoma/connector-resend"');
-    expect(connectors.html).toContain('href="https://github.com/Sanoma-AI/sanoma/tree/main/connectors/resend#readme"');
-    expect(connectors.html).toContain("<code>resend.broadcast.send</code>");
-    expect(connectors.html).toMatch(/Resources: <\/span>Branch protection rule, Repository, Team membership</);
-    expect(connectors.html).toContain('href="/workflows/announce"');
+    for (const title of ["Ghost", "Resend", "Bluesky", "GitHub"]) expect(connectors.text).toContain(`>${title}<`);
+    expect(connectors.html).toContain('href="/connectors/ghost"');
+    expect(connectors.text).toContain("2 operations · used by 1 workflow");
+    // Only the hydration data, which carries the whole config, names an operation.
+    expect(connectors.html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, "")).not.toMatch(/ghost\.post\.create/);
     // The sidebar, on every page, links to it.
     expect(connectors.html).toContain('href="/connectors"');
+  });
+
+  it("renders a connector's page: its links, each operation's contract, phrases, mock and scenarios, and who uses it", async () => {
+    const blogPage = await page("/connectors/ghost");
+    expect(blogPage.status).toBe(200);
+    expect(blogPage.html).toMatch(/<h1[^>]*>(<img[^>]*>)+Ghost<\/h1>/);
+    expect(blogPage.text).toContain("<title>Ghost · Sanoma</title>");
+    expect(blogPage.html).toContain('href="https://www.npmjs.com/package/@sanoma/connector-ghost"');
+    expect(blogPage.html).toContain("<code>ghost.post.create</code>");
+    expect(blogPage.text).toContain("<code>Given a post titled {title} exists</code>");
+    // The mock: what the fake returned for a made-up input, publish publishing the post create made.
+    expect(blogPage.html).toMatch(/>Mock<\/h3>/);
+    expect(blogPage.text).toContain(">Called with<");
+    expect(blogPage.text).toMatch(/&quot;id&quot;: &quot;post_0001&quot;/);
+    // The scenario that names the operation, linking to its workflow with it chosen.
+    expect(blogPage.html).toContain('href="/workflows/announce?scenario=Launch+on+time"');
+    // What each scenario does with an operation: create is seeded and expected; publish fails
+    // once ("Publish retried"), is expected, and must not be called ("Copy rejected").
+    for (const label of ["seeds", "fails", "expects", "must not call"]) expect(blogPage.text).toContain(`>${label}<`);
+    expect(blogPage.html).toContain('href="/workflows/announce"');
+
+    // A sample the fake failed says how.
+    const socialPage = await page("/connectors/bluesky");
+    expect(socialPage.text).toContain("Fails with <code>bluesky: the network is down</code>");
+
+    // A vendor without a fake in `fakes` says so, once, and shows no mock; its resource types are named.
+    const githubPage = await page("/connectors/github");
+    expect(githubPage.text.match(/No fake in this config\./g)).toHaveLength(1);
+    expect(githubPage.html).not.toMatch(/>Mock<\/h3>/);
+    expect(githubPage.html).toMatch(/Resources: <\/span>Branch protection rule, Repository, Team membership</);
+
+    const missing = await page("/connectors/nope");
+    expect(missing.status).toBe(404);
+    expect(missing.text).toContain("No connector nope");
   });
 
   it("renders a workflow's page: its graph beside its source, and not-found for one that does not exist", async () => {
@@ -747,12 +817,13 @@ describe("the page", () => {
     expect(missing.text).toContain("No workflow nope");
   });
 
-  it("renders a workflow's scenario, the picker and Test, and says when a scenario does not exist", async () => {
+  it("renders a workflow's scenario, the Test control, and says when a scenario does not exist", async () => {
     const chosen = await page(`/workflows/announce?scenario=${encodeURIComponent(SCENARIO)}`);
     expect(chosen.status).toBe(200);
-    expect(chosen.html).toMatch(/<select[^>]*aria-label="Scenario"/);
-    expect(chosen.html).toMatch(/<option[^>]*value="Launch on time"[^>]*selected=""/);
-    expect(chosen.text).toMatch(/>Test<\/button>/);
+    // One split control: Test, naming the chosen scenario, and the menu that chooses one.
+    expect(chosen.html).toMatch(
+      /<div role="group" data-slot="button-group"[^>]*><button[^>]*>.*?Test “Launch on time”<\/button><button[^>]*aria-label="Scenario"/,
+    );
     // The scenario's own lines, not the rest of its file.
     const shown = [...chosen.text.matchAll(/<pre[^>]*>([^<]*)<\/pre>/g)]
       .map(([, text]) => text!)
@@ -765,7 +836,11 @@ describe("the page", () => {
     const unknown = await page("/workflows/announce?scenario=nope");
     expect(unknown.status).toBe(200);
     expect(unknown.text).toContain("No scenario named “nope”");
-    expect(unknown.html).toMatch(/<select[^>]*aria-label="Scenario"/);
+    // With none chosen, Test opens the menu, and is enabled.
+    const control = testControl(unknown.text);
+    expect(control).toMatch(/>Test<\/button><button[^>]*aria-label="Scenario"/);
+    expect(control).toContain('aria-haspopup="menu"');
+    expect(control).not.toContain('disabled=""');
 
     // A search value the router reads as a number is no scenario (or workflow), not a crash.
     expect((await page("/workflows/announce?scenario=123")).status).toBe(200);

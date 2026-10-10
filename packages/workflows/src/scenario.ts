@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -18,12 +17,11 @@ import {
   PickleStepType,
   type Step as GherkinStep,
 } from "@cucumber/messages";
-import { faker } from "@faker-js/faker";
-import { fake, seed, setFaker } from "zod-schema-faker/v4";
-import { z } from "zod";
+import type { z } from "zod";
 import type { RunSummary, SanomaClient } from "./client.ts";
 import type { ResolvedConfig } from "./config.ts";
 import { SanomaError } from "./errors.ts";
+import { fill, isBug, seedFrom, shapeOf } from "./fill.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import { type OutlineNode, outlineWorkflow } from "./outline.ts";
 import { errorMessage, isEnded } from "./shared.ts";
@@ -35,8 +33,6 @@ import { errorMessage, isEnded } from "./shared.ts";
  * Gherkin parser or faker; the worker imports it (through `sandbox.ts`) only for a sandbox run.
  */
 
-setFaker(faker);
-
 /** One step of a scenario, as written, for a list and for marking the graph node it is about. */
 export interface ScenarioStep {
   text: string;
@@ -45,6 +41,8 @@ export interface ScenarioStep {
   op?: string;
   /** For a `Then` step about an operation: true when it expects a call, false for `was not called`. */
   called?: boolean;
+  /** For a `Given` that injects a fault into the operation's next call (`fails once` and the like), rather than seeding it. */
+  fault?: true;
 }
 
 /** A fake's state to seed through one of its operations, or a fault to inject into its next call. */
@@ -139,17 +137,9 @@ const FAULTS = {
   "loses its reply once": "loseReply",
 } as const;
 
-/** A mistake in this code, not in a feature file: thrown as it is, never filed as the file's error. */
-const isBug = (err: unknown) => err instanceof TypeError || err instanceof RangeError || err instanceof ReferenceError;
-
-/** The schema's value with every field `given` does not set made up, parsed by the schema. */
-function fill(schema: z.ZodType, given: Record<string, unknown>): unknown {
-  return schema.parse({ ...(fake(schema) as object), ...given });
-}
-
 /** The schema of the field `name` of an object schema; throws naming the fields it has. */
 function fieldOf(schema: z.ZodType, name: string, owner: string): z.ZodType {
-  const shape: Record<string, z.ZodType> = schema instanceof z.ZodObject ? schema.shape : {};
+  const shape = shapeOf(schema);
   if (!Object.hasOwn(shape, name)) {
     throw new Error(`no field "${name}" in ${owner}'s input; it has ${Object.keys(shape).join(", ") || "none"}`);
   }
@@ -452,9 +442,6 @@ function approvalsOf(wf: Parameters<typeof outlineWorkflow>[0]): string[] {
   return found;
 }
 
-/** A number from the scenario's name, so one name always makes up the same values. */
-const seedOf = (name: string) => createHash("sha256").update(name).digest().readUInt32BE(0);
-
 /**
  * The scenarios in a feature file: one per Gherkin pickle (each row of a `Scenario Outline`'s
  * examples is one; rows whose names would be the same get their line appended, such as
@@ -499,7 +486,7 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
       decisions: [],
       expect: [],
     };
-    seed(seedOf(name));
+    seedFrom(name);
     for (const ps of pickle.steps) {
       const line = lines.get(ps.astNodeIds[0]!);
       const kind = ps.type && KINDS[ps.type];
@@ -519,6 +506,7 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
       const [{ rule, args }] = matches as [{ rule: Rule; args: readonly Argument[] }];
       let op: string | undefined;
       let called: boolean | undefined;
+      let fault: true | undefined;
       try {
         const values = args.map((a) => a.getValue<unknown>(null));
         const step = ps.text;
@@ -527,6 +515,7 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
             const item = rule.read(values, ps);
             scenario.given.push({ step, ...item });
             op = item.op;
+            if ("fault" in item) fault = true;
             break;
           }
           case "then": {
@@ -552,6 +541,7 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
         kind,
         ...(op === undefined ? {} : { op }),
         ...(called === undefined ? {} : { called }),
+        ...(fault && { fault }),
       });
     }
     const { workflow } = scenario;

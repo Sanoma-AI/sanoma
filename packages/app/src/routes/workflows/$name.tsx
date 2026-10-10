@@ -4,7 +4,7 @@ import { z } from "zod";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Card, CardContent } from "#/components/ui/card.tsx";
 import { loadCode, loadGraph, Nothing, Notice, PageHeader, pageTitle } from "../../components/common.tsx";
-import { ScenarioCard, ScenarioPicker, TestButton } from "../../components/scenario.tsx";
+import { ScenarioCard, ScenarioErrors, TestControl } from "../../components/scenario.tsx";
 import { GraphAndSource, StartButton, WorkflowSections } from "../../components/workflow.tsx";
 import { configQuery, scenariosFor, scenariosQuery, sourceQuery, workflowFile, workflowNamed } from "../../queries.ts";
 
@@ -51,13 +51,12 @@ function WorkflowPage() {
       <PageHeader
         action={
           <div className="flex flex-wrap items-center gap-2">
-            <ScenarioPicker
+            <TestControl
               scenarios={scenarios}
               value={scenario?.name}
               // Choosing another scenario replaces the page in the history rather than adding one.
               onChange={(chosen) => void navigate({ search: { scenario: chosen }, replace: true })}
             />
-            <TestButton scenario={scenario?.name} />
             <StartButton name={workflow.name} />
           </div>
         }
@@ -65,19 +64,14 @@ function WorkflowPage() {
         <code className="text-muted-foreground">{workflow.name}</code>
         {workflow.builtin && <Badge variant="secondary">built-in</Badge>}
       </PageHeader>
-      {errors.map((e) => (
-        <Notice key={e.message} variant="destructive">
-          {/* A step no rule matches lists the known steps, one a line. */}
-          <span className="whitespace-pre-wrap">Could not read a scenario: {e.message}</span>
-        </Notice>
-      ))}
+      <ScenarioErrors errors={errors} />
       <GraphAndSource key={name} workflow={workflow} scenario={scenario} />
       {wanted !== undefined &&
         (scenario ? (
           <ScenarioCard scenario={scenario} />
         ) : (
           <Nothing title={`No scenario named “${wanted}”`}>
-            This workflow’s scenarios are in the list above, beside Test.
+            This workflow’s scenarios are in the menu beside Test, above.
           </Nothing>
         ))}
       <Card>

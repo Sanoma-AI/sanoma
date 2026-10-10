@@ -2,21 +2,37 @@ import { errorMessage } from "@sanoma/workflows/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { FlaskConicalIcon } from "lucide-react";
+import { ChevronDownIcon, FlaskConicalIcon } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
+import { ButtonGroup } from "#/components/ui/button-group.tsx";
 import { Card, CardContent } from "#/components/ui/card.tsx";
-import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "#/components/ui/dropdown-menu.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
-import { errorBodyOf, type ScenarioEntry } from "../api.ts";
+import { errorBodyOf, type ScenarioEntry, type ScenariosResponse } from "../api.ts";
 import { startRunFn } from "../functions.ts";
 import { RUNS_KEY } from "../queries.ts";
-import { Section } from "./common.tsx";
+import { Notice, Section } from "./common.tsx";
 
-// A workflow's scenarios, as its page offers them: to pick, to Test, and to read.
+// A workflow's scenarios, as its page offers them: to choose and Test, and to read; and why a
+// feature file could not be read, on every page that lists scenarios.
 
-/** One of the workflow's scenarios to try, or none: the page keeps the choice in its URL. */
-export function ScenarioPicker({
+/**
+ * Test, split in two. The menu chooses one of the workflow's scenarios (the page keeps the choice
+ * in its URL, so its graph and the scenario's card show it before anything runs); the button
+ * starts a sandbox run of the chosen one, then opens it, as the start form does a run, or opens
+ * the menu when none is chosen (which says so when the workflow has no scenarios). A sandbox
+ * run's approvals wait for people, as a live run's do.
+ */
+export function TestControl({
   scenarios,
   value,
   onChange,
@@ -26,33 +42,7 @@ export function ScenarioPicker({
   value: string | undefined;
   onChange: (name: string) => void;
 }) {
-  return (
-    <NativeSelect
-      size="sm"
-      aria-label="Scenario"
-      value={value ?? ""}
-      disabled={scenarios.length === 0}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      {value === undefined && (
-        <NativeSelectOption value="" disabled>
-          {scenarios.length ? "Choose a scenario" : "No scenarios"}
-        </NativeSelectOption>
-      )}
-      {scenarios.map((s) => (
-        <NativeSelectOption key={s.name} value={s.name}>
-          {s.name}
-        </NativeSelectOption>
-      ))}
-    </NativeSelect>
-  );
-}
-
-/**
- * Starts a sandbox run of the scenario, then opens it, as the start form does a run. Its
- * approvals wait for people, as a live run's do.
- */
-export function TestButton({ scenario }: { scenario: string | undefined }) {
+  const [open, setOpen] = useState(false);
   const start = useServerFn(startRunFn);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -71,15 +61,41 @@ export function TestButton({ scenario }: { scenario: string | undefined }) {
     },
   });
   return (
-    <Button
-      size="sm"
-      variant="outline"
-      disabled={scenario === undefined || mutation.isPending}
-      onClick={() => scenario !== undefined && mutation.mutate(scenario)}
-    >
-      {mutation.isPending ? <Spinner data-icon="inline-start" /> : <FlaskConicalIcon data-icon="inline-start" />}
-      Test
-    </Button>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <ButtonGroup aria-label="Test a scenario">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={mutation.isPending}
+          // With none chosen, Test opens the menu, and says so.
+          aria-haspopup={value === undefined ? "menu" : undefined}
+          aria-expanded={value === undefined ? open : undefined}
+          onClick={() => (value === undefined ? setOpen(true) : mutation.mutate(value))}
+        >
+          {mutation.isPending ? <Spinner data-icon="inline-start" /> : <FlaskConicalIcon data-icon="inline-start" />}
+          {value === undefined ? "Test" : `Test “${value}”`}
+        </Button>
+        <DropdownMenuTrigger asChild>
+          <Button size="icon-sm" variant="outline" aria-label="Scenario">
+            <ChevronDownIcon />
+          </Button>
+        </DropdownMenuTrigger>
+      </ButtonGroup>
+      <DropdownMenuContent align="end" className="w-auto max-w-80">
+        {/* With none, the menu says so: Test, and the arrow, still open it. */}
+        {scenarios.length === 0 ? (
+          <DropdownMenuLabel>No scenarios for this workflow</DropdownMenuLabel>
+        ) : (
+          <DropdownMenuRadioGroup value={value ?? ""} onValueChange={onChange}>
+            {scenarios.map((s) => (
+              <DropdownMenuRadioItem key={s.name} value={s.name}>
+                {s.name}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -97,4 +113,14 @@ export function ScenarioCard({ scenario }: { scenario: ScenarioEntry }) {
       </CardContent>
     </Card>
   );
+}
+
+/** Why each feature file that could not be read could not, from `scenariosQuery`'s `errors`. */
+export function ScenarioErrors({ errors }: Pick<ScenariosResponse, "errors">) {
+  return errors.map((e) => (
+    <Notice key={`${e.file}:${e.message}`} variant="destructive">
+      {/* A step no rule matches lists the known steps, one a line. */}
+      <span className="whitespace-pre-wrap">Could not read a scenario: {e.message}</span>
+    </Notice>
+  ));
 }
