@@ -43,7 +43,9 @@ export type Step =
   | { kind: "all"; branches: Step[][] }
   | { kind: "each"; body: Step[] }
   | { kind: "repeat"; body: Step[] }
-  | { kind: "branch"; cases: Step[][] };
+  | { kind: "branch"; cases: Step[][] }
+  /** A `try`: the `handler` runs when the `body` fails. */
+  | { kind: "try"; body: Step[]; handler: Step[] };
 
 /** A call: a step drawn as one node, with a place in the source. */
 export type CallStep = Extract<Step, { kind: "op" | "approval" | "sleep" }>;

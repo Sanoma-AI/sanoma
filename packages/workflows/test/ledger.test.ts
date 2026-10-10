@@ -154,6 +154,7 @@ const runOn = (ledger: LedgerStore): Run => ({
   tail: Promise.resolve(),
   inAll: false,
   ended: false,
+  outline: { file: "w.ts", source: "", lineStarts: [0], calls: [] },
   state: {
     app: "acme",
     ops: new Map(),
@@ -161,6 +162,7 @@ const runOn = (ledger: LedgerStore): Run => ({
     policy: allowAll,
     ledger,
     workflows: new Map(),
+    outlines: new Map(),
     stopped: false,
   },
 });

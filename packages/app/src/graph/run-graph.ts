@@ -1,6 +1,6 @@
 import type { ApprovalState, LedgerGroup, LedgerRecord, RunSummary } from "@sanoma/workflows";
 import type { OutlineNode, Span } from "@sanoma/workflows/describe";
-import { isEnded } from "@sanoma/workflows/shared";
+import { fitsOp, isEnded } from "@sanoma/workflows/shared";
 import { utcText } from "../lib/time.ts";
 import { APPROVAL_TONE, RUN_TONE, type Tone } from "../lib/tone.ts";
 import { type Ends, outlineGraph } from "./outline-graph.ts";
@@ -163,15 +163,10 @@ const calls = (nodes: readonly OutlineNode[]): Call[] =>
         ? node.cases.flatMap(calls)
         : node.kind === "each" || node.kind === "repeat"
           ? calls(node.body)
-          : [node],
+          : node.kind === "try"
+            ? calls([...node.body, ...node.handler])
+            : [node],
   );
-
-/** True when an outline's op id, a computed segment shown as `*`, could be this op: `a.*.c` fits `a.b.c`. */
-function fits(pattern: string, op: string): boolean {
-  const want = pattern.split(".");
-  const got = op.split(".");
-  return want.length === got.length && want.every((segment, i) => segment === "*" || segment === got[i]);
-}
 
 /** The calls' spans, or none when there are no calls. */
 const spansOf = (found: readonly Call[]) => (found.length ? found.map((call) => call.span) : undefined);
@@ -193,7 +188,7 @@ function whereIn(outline: readonly OutlineNode[]): (step: CallStep) => Span[] | 
       case "op": {
         const ops = ofKind("op");
         const same = ops.filter((call) => call.id === step.id);
-        return spansOf(same.length ? same : ops.filter((call) => fits(call.id, step.id)));
+        return spansOf(same.length ? same : ops.filter((call) => fitsOp(call.id, step.id)));
       }
       case "approval": {
         const approvals = ofKind("approval");

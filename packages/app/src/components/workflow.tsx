@@ -14,7 +14,7 @@ import { runGraph } from "../graph/run-graph.ts";
 import { type GraphNode, nodeAt } from "../graph/types.ts";
 import { configQuery, opsById, sourceQuery, workflowFile } from "../queries.ts";
 import type { CodeProps } from "./code.tsx";
-import { BUILTIN_ICON, CodePanel, GraphPanel, Json, None, Nothing, Notice, OpItem, Section } from "./common.tsx";
+import { BUILTIN_ICON, CodePanel, GraphPanel, Json, None, Nothing, OpItem, Section } from "./common.tsx";
 
 // A workflow's pieces, as the workflows page's cards and a workflow's own page show them, and
 // its graph beside its source, as a workflow's page and a run's show them.
@@ -164,9 +164,6 @@ export const GraphAndSource = memo(function GraphAndSource({
   if (!graph) return noSource;
   return (
     <div className="flex flex-col gap-2">
-      {outline && "fallback" in outline && (
-        <Notice>Showing the function's text, not the file: {outline.fallback}</Notice>
-      )}
       <div className="grid gap-4 lg:grid-cols-2">
         <GraphPanel
           className={PANEL}

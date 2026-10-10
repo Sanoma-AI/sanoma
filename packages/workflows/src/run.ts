@@ -1,6 +1,7 @@
 import type { ApprovalState, Principal, WorkflowDefinition } from "./define.ts";
 import type { LedgerStore } from "./ledger.ts";
 import type { DriverFn, Op } from "./op.ts";
+import type { CallNode } from "./outline.ts";
 import type { Policy } from "./policy.ts";
 
 /** What the DBOS workflow receives: the workflow's input and who started the run. */
@@ -31,6 +32,11 @@ export interface WorkerState {
    */
   workflows: Map<string, WorkflowDefinition<any, any>>;
   /**
+   * Each workflow's outline, by name, with the text of its file the spans index into (`\n` line
+   * endings). Read once when the worker starts; a `ctx` call is held to it (`call_not_in_outline`).
+   */
+  outlines: Map<string, WorkflowOutline>;
+  /**
    * Set when the worker stops, before DBOS shuts down. DBOS abandons a stopped worker's run
    * functions, which then fail as their next DBOS call finds the database closed. Such a failure,
    * one with none of our codes, is not recorded: the run recovered on the next worker records
@@ -59,5 +65,18 @@ export interface Run {
   inAll: boolean;
   /** Set when the workflow body has returned or thrown. A call still queued then is refused. */
   ended: boolean;
+  /** The workflow's outline, which every `ctx` call is placed in (`placeCall`). */
+  outline: WorkflowOutline;
   state: WorkerState;
+}
+
+/**
+ * A workflow's outline as the worker holds it: its nodes, the file text their spans index into,
+ * and what placing a call needs ready: the text's line starts and the call nodes (`callsOf`).
+ */
+export interface WorkflowOutline {
+  file: string;
+  source: string;
+  lineStarts: number[];
+  calls: CallNode[];
 }

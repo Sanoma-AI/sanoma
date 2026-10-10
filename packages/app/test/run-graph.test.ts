@@ -303,19 +303,20 @@ describe("runGraph", () => {
   describe("given the workflow's outline", () => {
     // An outline that calls resend.broadcast.send in both cases of a branch.
     const outline: OutlineNode[] = [
-      { kind: "op", id: "ghost.post.create", span: [0, 10] },
+      { kind: "op", path: "0", id: "ghost.post.create", span: [0, 10] },
       {
         kind: "branch",
+        path: "1",
         span: [15, 55],
         cases: [
-          [{ kind: "op", id: "resend.broadcast.send", span: [20, 30] }],
-          [{ kind: "op", id: "resend.broadcast.send", span: [40, 50] }],
+          [{ kind: "op", path: "1.0.0", id: "resend.broadcast.send", span: [20, 30] }],
+          [{ kind: "op", path: "1.1.0", id: "resend.broadcast.send", span: [40, 50] }],
         ],
       },
-      { kind: "approval", title: "Send it?", span: [60, 70] },
-      { kind: "approval", span: [80, 90] },
-      { kind: "sleep", span: [100, 110] },
-      { kind: "op", id: "*.post.create", span: [120, 130] },
+      { kind: "approval", path: "2", title: "Send it?", span: [60, 70] },
+      { kind: "approval", path: "3", span: [80, 90] },
+      { kind: "sleep", path: "4", span: [100, 110] },
+      { kind: "op", path: "5", id: "*.post.create", span: [120, 130] },
     ];
     const spansIn = (records: LedgerRecord[]) => spans(runGraph(records, run("running"), NOW, outline).nodes);
 
@@ -357,7 +358,7 @@ describe("runGraph", () => {
     });
 
     it("points an approval nowhere when no approval has its title and none is untitled", () => {
-      const titled: OutlineNode[] = [{ kind: "approval", title: "Send it?", span: [60, 70] }];
+      const titled: OutlineNode[] = [{ kind: "approval", path: "0", title: "Send it?", span: [60, 70] }];
       const { nodes } = runGraph(ledger(started, requested("Other")), run("running"), NOW, titled);
       expect(spans(nodes)).toEqual(["start null", "approval:approval-Other null", "end null"]);
     });

@@ -1,5 +1,6 @@
 import { DBOS, DBOSWorkflowConflictError, Error as DBOSErrors } from "@dbos-inc/dbos-sdk";
 import { awaitApproval, type CheckedApproval } from "./approvals.ts";
+import { offsetOf } from "./ast.ts";
 import {
   AllMembers,
   type ApprovalRequest,
@@ -7,6 +8,7 @@ import {
   SleepFor,
   type SleepRequest,
   SleepUntil,
+  scriptPath,
   type Use,
   type WorkflowDefinition,
 } from "./define.ts";
@@ -14,9 +16,10 @@ import { errorCode, errorInfo, isFinal, keepCode, parseOrThrow, PolicyDeniedErro
 import { currentGroup, entry, skipped, write, writeFailure } from "./ledger.ts";
 import { shown } from "./log.ts";
 import { type CallContext, isOp, type Op } from "./op.ts";
+import { callAt, callName, type CallNode } from "./outline.ts";
 import { DecisionSchema, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
 import type { Run, WorkerState } from "./run.ts";
-import { approverLabel, errorMessage } from "./shared.ts";
+import { approverLabel, errorMessage, fitsOp } from "./shared.ts";
 
 /** The error and the ones it was caused by, a few deep. */
 function causes(err: unknown): Error[] {
@@ -115,28 +118,54 @@ function refuseIfEnded(run: Run) {
   }
 }
 
-/** The run's `ctx`: the operations and built-ins its workflow `uses`, and nothing else. */
+/**
+ * The run's `ctx`: the operations and built-ins its workflow `uses`, and nothing else. Each
+ * member takes the outline node it is called at first (`placeCall`), then the workflow's arguments.
+ */
 export function buildCtx(wf: WorkflowDefinition<any, any>, run: Run): any {
   const uses = wf.uses as readonly Use[];
   const members: Record<string, any> = {};
   for (const op of uses.filter(isOp)) {
     const vendor = (members[op.vendor] ??= {});
     const resource = (vendor[op.resource] ??= {});
-    resource[op.name] = (input: unknown) => callOp(run, op.id, input);
+    resource[op.name] = (node: string, input: unknown) => callOp(run, op.id, input, node);
   }
   members.runId = run.id;
   members.now = () => DBOS.now();
   if (uses.includes("approval")) {
-    members.approval = (title: string, req: ApprovalRequest) => awaitApproval(run, title, checkApproval(title, req));
+    members.approval = (node: string, title: string, req: ApprovalRequest) =>
+      awaitApproval(run, title, checkApproval(title, req), node);
   }
-  if (uses.includes("sleep")) members.sleep = (req: unknown) => sleep(run, req);
+  if (uses.includes("sleep")) members.sleep = (node: string, req: unknown) => sleep(run, req, node);
 
-  // Every function goes through the run's queue, so no member can be added that skips it.
+  /**
+   * A member placed in the outline where the workflow calls it (`placeCall`), then `call`ed with
+   * its node. A refusal rejects, as a member's failure always has, rather than throwing.
+   */
+  const placing = (what: string, call: (node: string, ...args: unknown[]) => Promise<unknown>) =>
+    function placed(...args: unknown[]) {
+      let at: CallNode;
+      try {
+        at = placeCall(run, placed, what);
+      } catch (err) {
+        return Promise.reject(err);
+      }
+      return call(at.path, ...args);
+    };
+
+  // Every function goes through the run's queue, so no member can be added that skips it, and
+  // is placed in the outline, so none can be called from elsewhere.
   const queued = (node: Record<string, unknown>, path: string): Record<string, unknown> => {
     const out: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(node)) {
-      if (typeof value === "function") out[key] = (...args: unknown[]) => serial(run, () => value(...args));
-      else if (typeof value === "object" && value !== null) {
+      if (typeof value === "function") {
+        const what = `${path}.${key}`;
+        // `ctx.now()` reads the clock: it writes no record and is no node of the outline.
+        out[key] =
+          what === "ctx.now"
+            ? (...args: unknown[]) => serial(run, () => value(...args))
+            : placing(what, (at, ...args) => serial(run, () => value(at, ...args)));
+      } else if (typeof value === "object" && value !== null) {
         out[key] = queued(value as Record<string, unknown>, `${path}.${key}`);
       } else out[key] = value;
     }
@@ -146,8 +175,68 @@ export function buildCtx(wf: WorkflowDefinition<any, any>, run: Run): any {
   // ctx.all alone skips the queue: it makes no DBOS call or record itself, it only calls its
   // members, whose ctx calls are queued. Queued, it would hold the queue until its members
   // settled, and their calls, queued behind it, would never start.
-  if (uses.includes("all")) ctx.all = (list: unknown) => all(run, list);
+  if (uses.includes("all")) ctx.all = placing("ctx.all", (at, list) => all(run, list, at));
   return ctx;
+}
+
+/** Where a `ctx` member was called from, as a stack frame says. */
+interface CallSite {
+  file: string;
+  line: number;
+  column: number;
+}
+
+/**
+ * The frame above `fn`, the `ctx` member running, read from a stack trace rather than
+ * `util.getCallSites`: a test runner that transforms the source maps the trace back to it, and
+ * Node runs TypeScript stripped in place, so the position is the file's either way. One frame is
+ * captured: the rest would only be formatted and dropped.
+ */
+function callSite(fn: Function): CallSite | undefined {
+  const holder: { stack?: string } = {};
+  const limit = Error.stackTraceLimit;
+  Error.stackTraceLimit = 1;
+  try {
+    Error.captureStackTrace(holder, fn);
+  } finally {
+    Error.stackTraceLimit = limit;
+  }
+  // `at run (/dir/file.ts:21:37)`, `at /dir/file.ts:21:37` or `at async run (file:///dir/file.ts:21:37)`.
+  const frame = holder.stack?.split("\n")[1]?.trim();
+  const m = frame === undefined ? null : /^at (?:.*?\()?(.+?):(\d+):(\d+)\)?$/.exec(frame);
+  const file = m && scriptPath(m[1]);
+  return file ? { file, line: Number(m[2]), column: Number(m[3]) } : undefined;
+}
+
+/**
+ * The outline node the workflow calls a `ctx` member at: the call whose code holds the position
+ * the workflow called from (`callSite`). The outline refuses most ways around it before a run
+ * (`outlineBody`'s problems); this is the run's own check, for what reaches a `ctx` member from
+ * code the outline has no node for: another file, a function defined inside `run` the outline
+ * does not read, `arguments`, or a node of another kind. The run fails with
+ * `call_not_in_outline`, and every record the call writes names the node, so a run's steps are
+ * the outline's calls and nothing else.
+ */
+function placeCall(run: Run, fn: Function, what: string): CallNode {
+  const { outline, workflow } = run;
+  const site = callSite(fn);
+  const refuse = (why: string) => {
+    const where = site ? `${site.file}:${site.line}:${site.column}` : "a place the stack does not show";
+    return new SanomaError(
+      "call_not_in_outline",
+      `${what} was called from ${where}, ${why}: call ctx directly in run, not from a helper or a function ` +
+        "defined inside run (inline it), so the run's graph shows the call",
+      { call: what, site: where, workflow },
+    );
+  };
+  if (!site) throw refuse("which the outline cannot place");
+  if (site.file !== outline.file) throw refuse(`which is not in ${workflow}'s file ${outline.file}`);
+  const offset = offsetOf(outline.source, site.line, site.column, outline.lineStarts);
+  const node = offset === undefined ? undefined : callAt(outline.calls, offset);
+  if (!node) throw refuse(`which is no ctx call in ${workflow}'s outline`);
+  // The member called is the node's call: `ctx.all` at an `all` or `each`, an operation at its op.
+  if (!fitsOp(callName(node), what.slice("ctx.".length))) throw refuse(`where the outline has ctx.${callName(node)}`);
+  return node;
 }
 
 /** Refuses anything not declared in `uses`, with a message that says so. */
@@ -204,7 +293,7 @@ async function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecisio
   return policyVersion === undefined ? decision : { ...decision, policyVersion };
 }
 
-async function callOp(run: Run, id: string, input: unknown) {
+async function callOp(run: Run, id: string, input: unknown, node: string) {
   // The worker's declaration, never the workflow's: its effect, schemas and retry setting.
   const op = run.state.ops.get(id);
   const fn = run.state.drivers.get(id);
@@ -220,7 +309,7 @@ async function callOp(run: Run, id: string, input: unknown) {
   // before the step is recorded asks again.
   const decision = await DBOS.runStep(() => decide(run, op, parsed), { name: `policy:${op.id}` });
   const logged = recorded(op, parsed);
-  const call = { type: "op.called", op: op.id, effect: op.effect, input: logged, decision } as const;
+  const call = { type: "op.called", op: op.id, node, effect: op.effect, input: logged, decision } as const;
 
   if (decision.kind === "deny") {
     const err = new PolicyDeniedError(op.id, decision.reason);
@@ -232,7 +321,7 @@ async function callOp(run: Run, id: string, input: unknown) {
     // A hold covers the call it held, and any other operations the policy named.
     const covers = [...new Set([op.id, ...(decision.covers ?? [])])];
     try {
-      await awaitApproval(run, title, { approver: decision.approver, covers }, { op: op.id, seq, input: logged });
+      await awaitApproval(run, title, { approver: decision.approver, covers }, node, { op: op.id, seq, input: logged });
     } catch (err) {
       if (errorCode(err) === "approval_rejected") {
         const approval = (err as SanomaError).data.approvalId as string;
@@ -312,7 +401,7 @@ function checkSleep(req: unknown): SleepRequest {
  * the group and is rethrown as it is. The id is the run's next `seq` when ctx.all begins, which
  * depends only on the calls made before it, so a replay names the group the same.
  */
-async function all(run: Run, list: unknown): Promise<unknown[]> {
+async function all(run: Run, list: unknown, node: string): Promise<unknown[]> {
   const outer = currentGroup.getStore();
   if (outer) {
     throw new SanomaError("invalid_input", "ctx.all cannot be nested: a member of a ctx.all called ctx.all", {
@@ -327,7 +416,7 @@ async function all(run: Run, list: unknown): Promise<unknown[]> {
   run.inAll = true;
   try {
     for (const [index, member] of members.entries()) {
-      outputs.push(await currentGroup.run({ id, index, size: members.length }, member));
+      outputs.push(await currentGroup.run({ id, index, size: members.length, node }, member));
     }
   } finally {
     run.inAll = false;
@@ -341,7 +430,7 @@ async function all(run: Run, list: unknown): Promise<unknown[]> {
  * it (`Date.now()`, which adds no DBOS call): a replay may compute another, but the store keeps
  * the first record with the id, so the record says what the first execution waited for.
  */
-async function sleep(run: Run, raw: unknown) {
+async function sleep(run: Run, raw: unknown, node: string) {
   const req = checkSleep(raw);
   const seq = run.seq++;
   let until: number;
@@ -358,7 +447,7 @@ async function sleep(run: Run, raw: unknown) {
       (req.days ?? 0) * 86_400_000;
     until = Date.now() + ms;
   }
-  await write(run, entry(run, { type: "sleep.started", until }, { seq }));
+  await write(run, entry(run, { type: "sleep.started", node, until }, { seq }));
   // A time already past waits not at all, and adds no step.
   if (ms > 0) await DBOS.sleep(ms);
 }
