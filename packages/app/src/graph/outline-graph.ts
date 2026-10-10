@@ -9,20 +9,23 @@ export interface Ends {
 
 const OUTLINE_ENDS: Ends = { end: { label: "end" } };
 
+/** A call's node's own: its step's state (of its own kind), and its place in the source. */
+const own = <S extends CallStep>(step: S): Pick<S, "state"> & { span?: Span } => ({
+  ...(step.state && { state: step.state }),
+  ...(step.span && { span: step.span }),
+});
+
 /**
  * Steps as a graph: a chain from start to end. A `ctx.all` is one lane per member between the
  * node before it and the node after; a branch splits at a diamond into one lane per case. A
  * computed `ctx.all`'s member is a chain in a cluster labelled "for each", a loop's body one in a
- * cluster labelled "repeats". An empty member leads straight from the node before to the node
- * after; a branch's empty case, the way past it, is a lane marked "otherwise". A workflow's
+ * cluster labelled "repeats". A `try` is its body's chain beside a cluster labelled "on error"
+ * holding the handler's, both from the node before. An empty member leads straight from the node
+ * before to the node after; a branch's empty case, the way past it, is a lane marked "otherwise". A workflow's
  * outline is drawn this way, and a run's ledger once runGraph has made it into steps. A call's
- * node has the `spans` that `where` gives for its step: by default the step's own `span`.
+ * node has its step's `span`.
  */
-export function outlineGraph(
-  outline: readonly Step[],
-  ends: Ends = OUTLINE_ENDS,
-  where: (step: CallStep) => Span[] | undefined = (step) => step.span && [step.span],
-): Graph {
+export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS): Graph {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   let count = 0;
@@ -34,11 +37,6 @@ export function outlineGraph(
     return node.id;
   };
   const idOf = (kind: string, key: string | undefined) => key ?? `${kind}:${count++}`;
-  /** A call's node's own: its step's state (of its own kind), and its place in the source. */
-  const own = <S extends CallStep>(step: S): Pick<S, "state"> & { spans?: Span[] } => {
-    const spans = where(step);
-    return { ...(step.state && { state: step.state }), ...(spans && { spans }) };
-  };
 
   /** Adds `steps` one after another from `from`, and returns the ids what follows is drawn from. */
   function chain(steps: readonly Step[], from: readonly string[], parent?: string): readonly string[] {
@@ -78,6 +76,11 @@ export function outlineGraph(
         case "repeat":
           from = cluster("repeats", step.body);
           break;
+        case "try": {
+          const after = chain(step.body, from, parent);
+          from = step.handler.length ? [...after, ...cluster("on error", step.handler)] : after;
+          break;
+        }
         case "branch": {
           const split = add({ id: idOf("split", undefined), kind: "split", label: "branch", ...inside }, from);
           // The way past the cases gets a node of its own: an edge alone would run straight from

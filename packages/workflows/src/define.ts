@@ -228,8 +228,11 @@ export interface WorkflowDefinition<U extends readonly Use[] = readonly Use[], S
   /** Every operation and built-in the workflow may call. `ctx` is built from this list and nothing else. */
   readonly uses: U;
   readonly run: (ctx: Ctx<U>, input: z.output<S>) => Promise<unknown>;
-  /** The file that defined it, absolute, when known. Set by defineWorkflow from its call site; the app reads it for the code view. */
-  readonly file?: string;
+  /**
+   * The file that defined it, absolute. Set by defineWorkflow from its call site: the outline is
+   * read from it, the worker holds each run to that outline, and the app shows it as the code view.
+   */
+  readonly file: string;
 }
 
 export function defineWorkflow<const U extends readonly Use[], S extends z.ZodType>(
@@ -238,7 +241,14 @@ export function defineWorkflow<const U extends readonly Use[], S extends z.ZodTy
   if (!/^[a-z][a-z0-9-]*$/.test(def.name)) {
     throw new Error(`Workflow name "${def.name}" must be lowercase letters, digits and dashes`);
   }
-  return Object.freeze({ kind: "workflow", ...def, file: callerFile() });
+  const file = callerFile();
+  if (file === undefined) {
+    throw new Error(
+      `Workflow "${def.name}" was defined from code with no file (an eval, or a bundle without one): ` +
+        "its outline is read from the file, and a run is held to the outline",
+    );
+  }
+  return Object.freeze({ kind: "workflow", ...def, file });
 }
 
 /**
@@ -247,7 +257,11 @@ export function defineWorkflow<const U extends readonly Use[], S extends z.ZodTy
  */
 export function callerFile(): string | undefined {
   // Frame 0 is this function, frame 1 its caller, frame 2 theirs: by index, since a bundle may hold all three.
-  const script = getCallSites(3)[2]?.scriptName;
+  return scriptPath(getCallSites(3)[2]?.scriptName);
+}
+
+/** A V8 script name (a `file:` URL for a module, a path for a script) as a path; undefined for none. */
+export function scriptPath(script: string | undefined): string | undefined {
   if (!script?.startsWith("file:")) return script || undefined;
   try {
     return fileURLToPath(script);

@@ -1,5 +1,6 @@
 import type { ScenarioEntry } from "../api.ts";
-import { fits, type Graph, type GraphNode, type OpState } from "./types.ts";
+import { fitsOp } from "@sanoma/workflows/shared";
+import type { Graph, GraphNode, OpState } from "./types.ts";
 
 /** What a scenario's steps do with an operation. */
 export type ScenarioRoles = NonNullable<OpState["scenario"]>;
@@ -29,8 +30,8 @@ export function annotateGraph(graph: Graph, { steps }: Pick<ScenarioEntry, "step
   if (!steps.some((step) => step.op !== undefined)) return graph;
   const nodes = graph.nodes.map((node): GraphNode => {
     if (node.kind !== "op") return node;
-    // `fits` holds for the same id too.
-    const scenario = scenarioRoles(steps, (op) => fits(node.label, op));
+    // `fitsOp` holds for the same id too.
+    const scenario = scenarioRoles(steps, (op) => fitsOp(node.label, op));
     if (Object.keys(scenario).length === 0) return node;
     return { ...node, state: { ...node.state, scenario } };
   });

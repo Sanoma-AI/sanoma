@@ -58,12 +58,14 @@ export interface HeldCall {
 
 /**
  * Waits, durably, for a decision from someone who may make it. Throws `RejectedError` on a
- * rejection. Without `held`, the workflow asked (`ctx.approval`); with it, the policy did.
+ * rejection. Without `held`, the workflow asked (`ctx.approval`); with it, the policy did, and
+ * `node` is the held call's outline node.
  */
 export async function awaitApproval(
   run: Run,
   title: string,
   req: CheckedApproval,
+  node: string,
   held?: HeldCall,
 ): Promise<ApprovalResult> {
   const { covers } = req;
@@ -91,6 +93,7 @@ export async function awaitApproval(
       {
         type: "approval.requested",
         approval: state.id,
+        node,
         title,
         approver: state.approver,
         requestedBy: state.requestedBy,

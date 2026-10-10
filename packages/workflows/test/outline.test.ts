@@ -6,9 +6,12 @@ import { pathToFileURL } from "node:url";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { lineStartsOf, offsetOf } from "../src/ast.ts";
 import { type OutlineNode, outlineWorkflow } from "../src/describe.ts";
+import * as sanoma from "../src/index.ts";
 import { defineConnector, defineWorkflow, type WorkflowDefinition } from "../src/index.ts";
-import { outlineWithSource } from "../src/outline.ts";
+import { callAt, callsOf, outlineWithSource } from "../src/outline.ts";
+import { flatten } from "../src/shared.ts";
 import announce from "./fixtures/announce.ts";
 import { ensureBuilt, pkg } from "./build.ts";
 import fanout from "./fixtures/fanout.ts";
@@ -19,12 +22,6 @@ const forum = defineConnector("forum", {
   },
 });
 
-/** Defined outside `run`, so the outline cannot see the call it makes. */
-const tally = async (
-  ctx: { forum: { comments: { list(i: { thread: string }): Promise<string[]> } } },
-  thread: string,
-) => ctx.forum.comments.list({ thread });
-
 /**
  * The workflow's outline with the text its spans index into, or a failure naming the error.
  * Takes a copy with another `file` (`{ ...wf, file }`) as the definition it stands for.
@@ -32,20 +29,19 @@ const tally = async (
 function outlined(wf: Omit<WorkflowDefinition, "run"> & { run: (...args: never[]) => unknown }): {
   nodes: OutlineNode[];
   source: string;
-  file?: string;
-  fallback?: string;
+  file: string;
 } {
   const { outline, source } = outlineWithSource(wf as WorkflowDefinition<any, any>);
   if ("error" in outline) throw new Error(outline.error);
   return { ...outline, source: source! };
 }
 
-/** Every node, nested ones included, in order. */
-const flat = (nodes: OutlineNode[]): OutlineNode[] =>
-  nodes.flatMap((n) => [
-    n,
-    ...flat("body" in n ? n.body : "branches" in n ? n.branches.flat() : "cases" in n ? n.cases.flat() : []),
-  ]);
+/** Why the workflow cannot be outlined. */
+const unread = (wf: Omit<WorkflowDefinition, "run"> & { run: (...args: never[]) => unknown }): string => {
+  const outline = outlineWorkflow(wf as WorkflowDefinition<any, any>);
+  if (!("error" in outline)) throw new Error(`outlined: ${JSON.stringify(outline)}`);
+  return outline.error;
+};
 
 const busy = defineWorkflow({
   name: "busy",
@@ -71,10 +67,12 @@ const busy = defineWorkflow({
     threads.map((thread) => ctx.bluesky.post.create({ text: thread }));
     const replies = threads.map((thread) => thread.length);
     await (ctx as any)[vendor].comments.list({ thread: "x" });
-    await tally(ctx, "y");
     return [counts, replies];
   },
 });
+
+/** Takes ctx, which the outline refuses: a helper's calls would not be in the graph. */
+const tally = (c: unknown) => c;
 
 describe("outlineWorkflow", () => {
   it("outlines the fan-out fixture: two ctx.all around a sleep", () => {
@@ -111,7 +109,7 @@ describe("outlineWorkflow", () => {
     });
   });
 
-  it("nests fan-outs, branches and loops, stars computed segments, and cannot see into helpers", () => {
+  it("nests fan-outs, branches and loops, and stars computed segments", () => {
     expect(outlineWorkflow(busy)).toMatchObject({
       nodes: [
         {
@@ -170,7 +168,7 @@ describe("outlineWorkflow", () => {
     });
   });
 
-  it("does not read a function defined inside run: its calls run where it is called", () => {
+  it("refuses a function defined inside run that uses ctx, and ctx passed on: the graph could not show their calls", () => {
     const helpers = defineWorkflow({
       name: "helpers",
       trigger: "manual",
@@ -182,10 +180,17 @@ describe("outlineWorkflow", () => {
           await ctx.bluesky.post.create({ text });
         }
         for (const thread of threads) await post(String(await list(thread)));
-        return threads;
+        return [threads, tally(ctx)];
       },
     });
-    expect(outlineWorkflow(helpers)).toMatchObject({ nodes: [] });
+    // One line per problem, at file:line:column.
+    expect(unread(helpers).split("\n")).toEqual([
+      expect.stringMatching(
+        /^\/.*outline\.test\.ts:\d+:\d+: a function defined in run uses ctx, and the outline does not read it: inline/,
+      ),
+      expect.stringMatching(/^\/.*outline\.test\.ts:\d+:\d+: a function defined in run uses ctx/),
+      expect.stringMatching(/^\/.*outline\.test\.ts:\d+:\d+: ctx is only called, directly/),
+    ]);
   });
 
   it("reads a run written as a method, and whatever its ctx parameter is named", () => {
@@ -202,7 +207,18 @@ describe("outlineWorkflow", () => {
     expect(outlineWorkflow(method)).toMatchObject({ nodes: [{ kind: "sleep" }, { kind: "approval", title: "Go?" }] });
   });
 
-  it("says why when run destructures ctx, or its source cannot be parsed", () => {
+  it("finds a workflow defined through a namespace import", () => {
+    const spaced = sanoma.defineWorkflow({
+      name: "spaced",
+      trigger: "manual",
+      input: z.object({}),
+      uses: ["sleep"],
+      run: async (ctx) => ctx.sleep({ ms: 1 }),
+    });
+    expect(outlineWorkflow(spaced)).toMatchObject({ nodes: [{ kind: "sleep", path: "0" }] });
+  });
+
+  it("says why when run destructures ctx, or is no function written in the file", () => {
     const destructured = defineWorkflow({
       name: "destructured",
       trigger: "manual",
@@ -210,9 +226,11 @@ describe("outlineWorkflow", () => {
       uses: [bluesky.post.create],
       run: async ({ bluesky: b }) => b.post.create({ text: "x" }),
     });
-    expect(outlineWorkflow(destructured)).toEqual({ error: expect.stringMatching(/takes no ctx parameter by name/) });
+    expect(unread(destructured)).toMatch(
+      /outline\.test\.ts:\d+:\d+: run must take ctx as its first parameter, by one name/,
+    );
 
-    // A native function's source is `function max() { [native code] }`.
+    // The file holds the literal, but its `run` is no function to read.
     const native = defineWorkflow({
       name: "native",
       trigger: "manual",
@@ -220,7 +238,110 @@ describe("outlineWorkflow", () => {
       uses: [],
       run: Math.max as never,
     });
-    expect(outlineWorkflow(native)).toEqual({ error: expect.stringMatching(/^Cannot parse native's run: /) });
+    expect(unread(native)).toBe(`${native.file} holds no workflow named "native"`);
+  });
+
+  it("outlines a try as its body and its handler", () => {
+    const tried = defineWorkflow({
+      name: "tried",
+      trigger: "manual",
+      input: z.object({ text: z.string() }),
+      uses: [bluesky.post.create, "sleep"],
+      run: async (ctx, { text }) => {
+        try {
+          await ctx.bluesky.post.create({ text });
+        } catch {
+          await ctx.sleep({ ms: 1 });
+        } finally {
+          console.log("done");
+        }
+        try {
+          console.log("no calls");
+        } catch {
+          console.log("none here either");
+        }
+      },
+    });
+    const { nodes, source } = outlined(tried);
+    expect(nodes).toMatchObject([
+      { kind: "try", path: "0", body: [{ kind: "op", path: "0.0.0" }], handler: [{ kind: "sleep", path: "0.1.0" }] },
+    ]);
+    expect(source.slice(...nodes[0]!.span)).toMatch(/^try \{[\s\S]*finally \{[\s\S]*\}$/);
+  });
+
+  it("gives each node its path: its index among its siblings, under its parent's and the list it is in", () => {
+    expect(outlineWorkflow(announce)).toMatchObject({
+      nodes: ["0", "1", "2", "3", "4", "5", "6"].map((path) => ({ path })),
+    });
+    const { nodes } = outlined(busy);
+    expect(flatten(nodes).map((node) => `${node.path} ${node.kind}`)).toEqual([
+      "0 all",
+      "0.0.0 op",
+      "0.1.0 sleep",
+      "0.1.1 op",
+      "1 each",
+      "1.0.0 op",
+      "2 branch",
+      "2.0.0 approval",
+      "2.1.0 op",
+      "3 repeat",
+      "3.0.0 op",
+      "4 repeat",
+      "4.0.0 sleep",
+      "5 repeat",
+      "5.0.0 op",
+      "6 op",
+    ]);
+  });
+});
+
+describe("callAt", () => {
+  it("finds the call whose code holds a position, the innermost: where a stack frame places a call, at its callee", () => {
+    const { nodes: outline, source } = outlined(busy);
+    const nodes = callsOf(outline);
+    // `ctx.all([` is the all node; a member's call inside it is the member's.
+    const all = source.indexOf("ctx.all([");
+    expect(callAt(nodes, all)).toMatchObject({ kind: "all", path: "0" });
+    expect(callAt(nodes, all + "ctx.".length)).toMatchObject({ kind: "all", path: "0" });
+    expect(callAt(nodes, source.indexOf('comments.list({ thread: "a" })') + "comments.".length)).toMatchObject({
+      kind: "op",
+      path: "0.0.0",
+    });
+    expect(callAt(nodes, source.indexOf("ctx.sleep({ minutes: 1 })") + "ctx.".length)).toMatchObject({
+      kind: "sleep",
+      path: "0.1.0",
+    });
+    // A computed `ctx.all`'s member: the each node for the all call, its body's op for the inner call.
+    expect(callAt(nodes, source.indexOf("ctx.all(threads.map") + "ctx.".length)).toMatchObject({
+      kind: "each",
+      path: "1",
+    });
+    // The call in the member, not the helper's higher up the file.
+    const inMember = source.indexOf("ctx.forum.comments.list({ thread })", source.indexOf("ctx.all(threads.map"));
+    expect(callAt(nodes, inMember + "ctx.forum.comments.".length)).toMatchObject({ kind: "op", path: "1.0.0" });
+    // The call in a loop, and the computed one.
+    expect(callAt(nodes, source.indexOf("ctx.bluesky.post.create({ text: thread })") + 4)).toMatchObject({
+      path: "3.0.0",
+    });
+    expect(callAt(nodes, source.indexOf("[vendor].comments.list") + 1)).toMatchObject({
+      kind: "op",
+      id: "*.comments.list",
+    });
+    // Not a call's code: a branch's test, the end of a call.
+    expect(callAt(nodes, source.indexOf("if (loud)") + 4)).toBeUndefined();
+    expect(callAt(nodes, outline[6]!.span[1])).toBeUndefined();
+  });
+
+  it("offsetOf turns a frame's line and column, from 1, into an offset, or none past the end", () => {
+    const lines = lineStartsOf("ab\ncd\n\nefg");
+    expect(offsetOf(lines, 1, 1)).toBe(0);
+    expect(offsetOf(lines, 2, 2)).toBe(4);
+    expect(offsetOf(lines, 4, 3)).toBe(9);
+    expect(offsetOf(lines, 5, 1)).toBeUndefined();
+    expect(offsetOf(lines, 0, 1)).toBeUndefined();
+    // A column past the line's end is none, not the next line's start.
+    expect(offsetOf(lines, 1, 3)).toBeUndefined();
+    expect(offsetOf(lines, 4, 4)).toBeUndefined();
   });
 });
 
@@ -228,7 +349,7 @@ describe("outlineWorkflow, spans", () => {
   it("reads the file that defined the workflow, and spans each node's code in it", () => {
     const { source, nodes, file } = outlined(announce);
     expect(file).toBe(announce.file);
-    expect(source).toBe(readFileSync(announce.file!, "utf8"));
+    expect(source).toBe(readFileSync(announce.file, "utf8"));
     expect(source.slice(...nodes[0]!.span)).toBe('ctx.ghost.post.create({ title, html: body, status: "draft" })');
     for (const node of nodes.filter((n) => n.kind === "op")) {
       expect(source.slice(...node.span)).toMatch(/^ctx\.[\s\S]*\)$/);
@@ -248,42 +369,23 @@ describe("outlineWorkflow, spans", () => {
     ]);
   });
 
-  // What each kind's code starts with; `(ctx as any)[vendor]` is `ctx[vendor]` once types are stripped.
-  const CALL = /^ctx[.[][\s\S]*\)$/;
-  const CODE: Partial<Record<OutlineNode["kind"], RegExp>> = { repeat: /^(for \(|threads\.map\()/, branch: /^if \(/ };
-
-  it("falls back to run's own text when the workflow has no file, with spans into that text", () => {
-    for (const wf of [busy, fanout]) {
-      const { source, nodes, fallback } = outlined({ ...wf, file: undefined });
-      expect(fallback).toBe(`${wf.name} has no file`);
-      expect(source).toBe(Function.prototype.toString.call(wf.run));
-      // The same nodes as read from the file, each spanning its code in the run text.
-      expect(nodes.map((n) => n.kind)).toEqual(outlined(wf).nodes.map((n) => n.kind));
-      for (const node of flat(nodes)) {
-        expect(source.slice(...node.span)).toMatch(CODE[node.kind] ?? CALL);
-      }
-    }
-  });
-
-  it("says why it fell back: a file it cannot read or parse, or one without the workflow", () => {
+  it("says why it cannot read the file: missing, unparsable, or without the workflow; there is no other source", () => {
     const dir = mkdtempSync(join(tmpdir(), "sanoma-outline-"));
     try {
-      const fallback = (file: string) => outlined({ ...busy, file }).fallback;
+      const why = (file: string) => unread({ ...busy, file });
       const missing = join(dir, "missing.ts");
-      expect(fallback(missing)).toBe(
-        `${missing} could not be read: ENOENT: no such file or directory, open '${missing}'`,
-      );
+      expect(why(missing)).toBe(`${missing} could not be read: ENOENT: no such file or directory, open '${missing}'`);
       const broken = join(dir, "broken.ts");
       writeFileSync(broken, 'export default defineWorkflow({ name: "busy", run: async (ctx) => { ');
-      expect(fallback(broken)).toMatch(/could not be parsed: \S/);
-      expect(fallback(broken)?.startsWith(`${broken} could not be parsed: `)).toBe(true);
+      expect(why(broken)).toMatch(/could not be parsed: \S/);
+      expect(why(broken).startsWith(`${broken} could not be parsed: `)).toBe(true);
       // Its name is no string, nor a top-level const holding one, so this is not the workflow named "busy".
       const elsewhere = join(dir, "elsewhere.ts");
       writeFileSync(
         elsewhere,
         'let name = "busy";\nexport default defineWorkflow({ name, run: async (ctx) => {} });\n',
       );
-      expect(fallback(elsewhere)).toBe(`${elsewhere} holds no workflow named "busy"`);
+      expect(why(elsewhere)).toBe(`${elsewhere} holds no workflow named "busy"`);
       // A top-level const is read for its string, as the built-in drift names itself.
       const named = join(dir, "named.ts");
       writeFileSync(
@@ -296,8 +398,19 @@ describe("outlineWorkflow, spans", () => {
     }
   });
 
+  it("reads a .tsx file, with its JSX", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sanoma-outline-"));
+    try {
+      const tsx = join(dir, "announce.tsx");
+      writeFileSync(tsx, `${readFileSync(announce.file, "utf8")}\nexport const view = () => <b>{announce.name}</b>;\n`);
+      expect(outlined({ ...announce, file: tsx }).nodes).toEqual(outlined(announce).nodes);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("reads a file with \\r\\n line endings as if it had \\n", () => {
-    const text = readFileSync(announce.file!, "utf8");
+    const text = readFileSync(announce.file, "utf8");
     const dir = mkdtempSync(join(tmpdir(), "sanoma-outline-"));
     try {
       const crlf = join(dir, "announce.ts");
