@@ -23,6 +23,7 @@ import {
   memoryLedger,
 } from "../src/index.ts";
 import { describeConfig, outlineWorkflow } from "../src/describe.ts";
+import { defineFake } from "../src/fake.ts";
 import { VENDOR } from "../src/op.ts";
 import announce from "./fixtures/announce.ts";
 import { marketingFakes } from "./harness.ts";
@@ -161,6 +162,80 @@ describe("describeConfig", () => {
     });
   });
 
+  it("parses a sample's reply, and mocks a reply off the contract, one JSON cannot carry, or an operation the fake lacks as an error", async () => {
+    const shop = defineConnector("shop", {
+      item: {
+        create: { effect: "write", input: z.object({}), output: z.object({ id: z.number() }) },
+        get: {
+          effect: "read",
+          input: z.object({ id: z.string() }),
+          output: z.object({ id: z.string(), unit: z.string().default("items") }),
+        },
+        bad: { effect: "read", input: z.object({}), output: z.object({ id: z.string() }) },
+        count: { effect: "read", input: z.object({}), output: z.object({ n: z.bigint() }) },
+      },
+    });
+    // The same vendor's other connector, which the fake is not for.
+    const stock = defineConnector("shop", {
+      stock: { take: { effect: "write", input: z.object({}), output: z.object({}) } },
+    });
+    const fake = defineFake(shop, {
+      initial: () => ({}),
+      ops: () => ({
+        item: {
+          create: async () => ({ id: 7 }),
+          get: async ({ id }) => ({ id }) as never,
+          bad: async () => ({ id: 1 }) as never,
+          count: async () => ({ n: 3n }),
+        },
+      }),
+    });
+    const drivers = [fake.driver, { vendor: "shop", ops: { "stock.take": async () => ({}) } }];
+    const { ops } = await describeConfig({ ...base, workflows: [], connectors: [shop, stock], drivers, fakes: [fake] });
+    const mock = (id: string) => ops.find((o) => o.id === id)?.mock;
+    // Parsed: the default filled in. The earlier `id`, a number, is no string: get makes up its own.
+    expect(mock("shop.item.get")).toEqual({
+      input: { id: expect.any(String) },
+      output: { id: expect.any(String), unit: "items" },
+    });
+    expect(mock("shop.item.bad")).toEqual({
+      input: {},
+      error: expect.stringMatching(/^shop\.item\.bad's fake answered off its contract: id: /),
+    });
+    expect(mock("shop.item.count")).toEqual({
+      input: {},
+      error: expect.stringMatching(/^The reply is not plain JSON: /),
+    });
+    expect(mock("shop.stock.take")).toEqual({ input: null, error: "The shop fake does not implement shop.stock.take" });
+  });
+
+  it("refuses, naming the operation, a fake that crashes and an input faker cannot make up", async () => {
+    const shop = defineConnector("shop", {
+      item: { get: { effect: "read", input: z.object({}), output: z.object({}) } },
+    });
+    const crash = defineFake(shop, {
+      initial: () => ({}),
+      ops: () => ({
+        item: {
+          get: async () => {
+            throw new TypeError("state.items is undefined");
+          },
+        },
+      }),
+    });
+    const one = { ...base, workflows: [], connectors: [shop], drivers: [crash.driver] };
+    await expect(describeConfig({ ...one, fakes: [crash] })).rejects.toThrow(
+      /^Sampling shop\.item\.get on its fake: state\.items is undefined$/,
+    );
+    const note = defineConnector("note", {
+      line: { put: { effect: "write", input: z.string(), output: z.object({}) } },
+    });
+    const notes = defineFake(note, { initial: () => ({}), ops: () => ({ line: { put: async () => ({}) } }) });
+    await expect(
+      describeConfig({ ...base, workflows: [], connectors: [note], drivers: [notes.driver], fakes: [notes] }),
+    ).rejects.toThrow(/^Cannot make up an input for note\.line\.put: /);
+  });
+
   it("describes an operation's input as a caller sends it and its output as parsed", async () => {
     const counter = defineConnector("counter", {
       tally: {
@@ -262,8 +337,10 @@ describe("describeConfig", () => {
   });
 
   it("is plain JSON: it round-trips through JSON.stringify unchanged", async () => {
-    const c = await describeConfig(base);
-    expect(JSON.parse(JSON.stringify(c))).toEqual(c);
+    for (const config of [base, { ...base, fakes: [fakeGhost(), fakeResend(), fakeBluesky()] }]) {
+      const c = await describeConfig(config);
+      expect(JSON.parse(JSON.stringify(c))).toEqual(c);
+    }
   });
 
   it("describes what JSON Schema cannot express as open, rather than failing", async () => {
