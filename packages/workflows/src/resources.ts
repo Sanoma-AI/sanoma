@@ -5,7 +5,7 @@ import { resolveConfig, type SanomaConfig } from "./config.ts";
 import { type DataFile, type DataFileExport, type DataValue, readDataFile, Reference } from "./datafile.ts";
 import { type Connector, VENDOR } from "./op.ts";
 import type { Span } from "./outline.ts";
-import type { Declared, Resource } from "./resource.ts";
+import { type Declared, type Resource, resourceTypesOf } from "./resource.ts";
 
 /** A resource a data file declares, as read from the file without running it. */
 export interface DeclaredResource {
@@ -60,15 +60,6 @@ export function readResources(config: SanomaConfig): DeclaredResource[] {
     throw new Error(`The resources' data files have problems:\n${lines.join("\n")}`);
   }
   return resources;
-}
-
-/** Every resource type the connectors declare, by `<vendor>.<type>`. */
-export function resourceTypesOf(connectors: readonly Connector<any, any>[]): Map<string, Resource> {
-  const types = new Map<string, Resource>();
-  for (const connector of connectors) {
-    for (const r of connector[VENDOR].resources as readonly Resource[]) types.set(`${r.vendor}.${r.type}`, r);
-  }
-  return types;
 }
 
 interface FileEntry {

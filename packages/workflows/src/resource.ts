@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { type OpSpec, RESOURCE } from "./op.ts";
+import { type Connector, type OpSpec, RESOURCE, VENDOR } from "./op.ts";
 
 /** Which fields of a resource are flagged, by dotted path (`pages.html_url`; a list's items have no index). */
 export interface ResourceFields {
@@ -301,4 +301,13 @@ export function defineResource<
     [RESOURCE]: true as const,
   });
   return Object.freeze(resource);
+}
+
+/** Every resource type the connectors declare, by `<vendor>.<type>`. */
+export function resourceTypesOf(connectors: readonly Connector<any, any>[]): Map<string, Resource> {
+  const types = new Map<string, Resource>();
+  for (const connector of connectors) {
+    for (const r of connector[VENDOR].resources as readonly Resource[]) types.set(`${r.vendor}.${r.type}`, r);
+  }
+  return types;
 }
