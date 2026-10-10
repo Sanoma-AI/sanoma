@@ -1,4 +1,5 @@
-import { fakeGithub, fakeStripe, type FakeGithubState } from "@sanoma/testing";
+import { fakeGithub, type FakeGithubState } from "@sanoma/connector-github/fake";
+import { fakeStripe } from "@sanoma/connector-stripe/fake";
 import { readResources } from "../../../src/describe.ts";
 import company from "./sanoma.config.ts";
 

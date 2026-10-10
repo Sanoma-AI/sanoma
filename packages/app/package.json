@@ -73,6 +73,7 @@
     "@sanoma/connector-ghost": "workspace:*",
     "@sanoma/connector-github": "workspace:*",
     "@sanoma/connector-resend": "workspace:*",
+    "@sanoma/connector-stripe": "workspace:*",
     "@sanoma/testing": "workspace:*",
     "@sanoma/workflows": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
