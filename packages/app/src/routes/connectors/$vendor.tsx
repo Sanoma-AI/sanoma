@@ -1,4 +1,5 @@
-import type { CredentialStatus, OpEntry } from "@sanoma/workflows/describe";
+import type { OpEntry } from "@sanoma/workflows/describe";
+import { type CredentialStatus, credentialReady } from "@sanoma/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { ExternalLinkIcon } from "lucide-react";
@@ -113,14 +114,14 @@ function Credentials({ credentials }: { credentials: CredentialStatus[] }) {
     <section className="flex flex-col gap-3">
       <SectionTitle>Credentials</SectionTitle>
       <ul className="flex flex-col gap-1.5">
-        {credentials.map(({ name, description, optional, status, problem }) => (
-          <li key={name} className="flex flex-wrap items-center gap-1.5">
-            <code>{name}</code>
-            <ToneBadge tone={status === "set" ? "ok" : status === "missing" && optional ? "off" : "bad"}>
-              {status === "invalid" ? `invalid: ${problem}` : status}
+        {credentials.map((c) => (
+          <li key={c.name} className="flex flex-wrap items-center gap-1.5">
+            <code>{c.name}</code>
+            <ToneBadge tone={!credentialReady(c) ? "bad" : c.status === "set" ? "ok" : "off"}>
+              {c.status === "invalid" ? `invalid: ${c.problem}` : c.status}
             </ToneBadge>
-            {optional && <Badge variant="outline">optional</Badge>}
-            {description && <span className="text-muted-foreground">{description}</span>}
+            {c.optional && <Badge variant="outline">optional</Badge>}
+            {c.description && <span className="text-muted-foreground">{c.description}</span>}
           </li>
         ))}
       </ul>
