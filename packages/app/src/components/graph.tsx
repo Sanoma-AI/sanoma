@@ -31,6 +31,7 @@ import {
   isSelectable,
 } from "../graph/types.ts";
 import { useReducedMotion } from "#/lib/motion.ts";
+import { cn } from "#/lib/utils.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import { configQuery, opsById } from "../queries.ts";
 import { ApprovalStatusBadge, BUILTIN_ICON, effectBadge, StatusDot, ToneBadge, VendorLogo } from "./common.tsx";
@@ -113,7 +114,8 @@ function Frame({
   const state = "state" in node ? node.state : undefined;
   return (
     <div
-      className={frame({ tone: state?.tone ?? "off", pending: isPending(node), clickable: selectable, selected })}
+      // Through cn, so a pending node's colours replace the base ones rather than sit beside them.
+      className={cn(frame({ tone: state?.tone ?? "off", pending: isPending(node), clickable: selectable, selected }))}
       title={nameOf(node)}
     >
       <Handles inbound={inbound} outbound={outbound} />
