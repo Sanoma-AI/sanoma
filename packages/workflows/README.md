@@ -301,7 +301,7 @@ it.each(files)("%s has no problems", (file) => {
 
 ## Fakes for tests
 
-`@sanoma/workflows/fake` exports `defineFake(connector, { initial, ops }, { file?, calls? })`, which builds an in-memory vendor for a connector: `ops` implements every operation against the fake's state, typed by the connector as `defineDriver` is, and the fake adds what a real vendor does around them (a repeated idempotency key gets the first reply and changes nothing) and faults a test can inject (`failNext`, `loseReply`, `rateLimit`, `hold`). `update(change)` changes the state as someone at the vendor would: it re-reads the file, applies `change` and saves it, so the next call in any process sees it. The connectors' own fakes (`@sanoma/connector-ghost/fake` and the others) are built with it, and `@sanoma/testing` re-exports them. It is a separate entry so the runtime carries no test tooling, and the lint refuses it in workflow files.
+`@sanoma/workflows/fake` exports `defineFake(connector, { initial, ops }, { file?, calls? })`, which builds an in-memory vendor for a connector: `ops` implements every operation against the fake's state, typed by the connector as `defineDriver` is, and the fake adds what a real vendor does around them (a repeated idempotency key gets the first reply and changes nothing) and faults a test can inject (`failNext`, `loseReply`, `rateLimit`, `hold`). `update(change)` changes the state as someone at the vendor would: it re-reads the file, applies `change` and saves it, so the next call in any process sees it. The connectors' own fakes (`@sanoma/connector-ghost/fake` and the others) are built with it. It is a separate entry so the runtime carries no test tooling, and the lint refuses it in workflow files.
 
 ## Scenarios and sandbox runs
 

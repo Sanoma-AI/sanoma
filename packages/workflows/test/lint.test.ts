@@ -50,7 +50,7 @@ describe("lintWorkflow", () => {
   it("refuses the ways around the policy: test fakes, drivers, the app and the config", () => {
     const problems = messages(
       `
-      import { fakeMarketingVendors } from "@sanoma/testing";
+      import { startTestWorker } from "@sanoma/testing";
       import { fakeGhost } from "@sanoma/connector-ghost/fake";
       import { ghostDriver } from "@sanoma/connector-ghost/driver";
       import { startApp } from "@sanoma/app";
