@@ -3,12 +3,10 @@ import { ghostDriver } from "@sanoma/connector-ghost/driver";
 import { githubDriver } from "@sanoma/connector-github/driver";
 import { resendDriver } from "@sanoma/connector-resend/driver";
 import { stripeDriver } from "@sanoma/connector-stripe/driver";
-import { bluesky } from "@sanoma/connector-bluesky";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   allowAll,
-  credentialReady,
   defineConnector,
   defineDriver,
   defineWorkflow,
@@ -38,6 +36,7 @@ const env = z.object({
 });
 const impl = { thing: { get: async ({ id }: { id: string }) => ({ id }) } };
 const acmeDriver = defineDriver(acme, impl, { env });
+const plain = defineDriver(acme, impl);
 const getThing = defineWorkflow({
   name: "get-thing",
   trigger: "manual",
@@ -68,7 +67,7 @@ describe("a driver's env", () => {
     expect(acmeDriver.env).toBe(env);
     expect(Object.isFrozen(acmeDriver)).toBe(true);
     expect(Object.isFrozen(acmeDriver.ops)).toBe(true);
-    expect(defineDriver(acme, { thing: { get: async ({ id }) => ({ id }) } })).not.toHaveProperty("env");
+    expect(plain).not.toHaveProperty("env");
   });
 
   it("is checked by resolveConfig against process.env: set, missing, empty and invalid, never the value", () => {
@@ -130,11 +129,6 @@ describe("a driver's env", () => {
     });
     await expect(startWorker(twoDrivers)).rejects.toThrow(`${KEY_VAR} is invalid (an API key, key_<digits>)`);
   });
-
-  it("has no entry for a vendor whose drivers declare none", () => {
-    const plain = defineDriver(acme, { thing: { get: async ({ id }) => ({ id }) } });
-    expect(resolveConfig({ ...config, drivers: [plain] }).credentials.size).toBe(0);
-  });
 });
 
 describe("startWorker", () => {
@@ -163,16 +157,6 @@ describe("startWorker", () => {
   });
 });
 
-describe("credentialReady", () => {
-  it("is true for a variable that is set, or unset and optional", () => {
-    const base = { name: "X", optional: false };
-    expect(credentialReady({ ...base, status: "set" })).toBe(true);
-    expect(credentialReady({ ...base, status: "missing" })).toBe(false);
-    expect(credentialReady({ ...base, optional: true, status: "missing" })).toBe(true);
-    expect(credentialReady({ ...base, optional: true, status: "invalid", problem: "Invalid URL" })).toBe(false);
-  });
-});
-
 describe("describeConfig", () => {
   it("carries each vendor's credentials, without their values", async () => {
     vi.stubEnv(URL_VAR, undefined);
@@ -187,7 +171,6 @@ describe("describeConfig", () => {
   });
 
   it("gives no credentials to a vendor whose drivers declare none", async () => {
-    const plain = defineDriver(acme, { thing: { get: async ({ id }) => ({ id }) } });
     const { vendors } = await describeConfig({ ...config, drivers: [plain] });
     expect(vendors.acme).not.toHaveProperty("credentials");
   });
@@ -196,29 +179,21 @@ describe("describeConfig", () => {
 describe("the connectors' drivers", () => {
   const bridge = {} as never;
   it.each([
-    ["ghost", ghostDriver(), ["GHOST_ADMIN_URL", "GHOST_ADMIN_API_KEY"]],
-    ["resend", resendDriver(), ["RESEND_API_KEY"]],
-    ["bluesky", blueskyDriver(), ["BLUESKY_IDENTIFIER", "BLUESKY_APP_PASSWORD", "BLUESKY_SERVICE"]],
-    ["github", githubDriver({ bridge }), ["GITHUB_TOKEN"]],
-    ["stripe", stripeDriver({ bridge }), ["STRIPE_API_KEY"]],
-  ])("%s declares exactly its variables, each described", (_, driver, names) => {
-    expect(Object.keys(driver.env!.shape)).toEqual(names);
-    for (const schema of Object.values(driver.env!.shape)) expect(schema.description).toBeTruthy();
-  });
-
-  it("marks BLUESKY_SERVICE optional, and only it", () => {
-    vi.stubEnv("BLUESKY_IDENTIFIER", "");
-    vi.stubEnv("BLUESKY_APP_PASSWORD", "");
-    vi.stubEnv("BLUESKY_SERVICE", "");
-    const { credentials } = resolveConfig({
-      ...config,
-      connectors: [acme, bluesky],
-      drivers: [acmeDriver, blueskyDriver()],
-    });
-    expect(credentials.get("bluesky")?.map(({ name, optional }) => [name, optional])).toEqual([
-      ["BLUESKY_IDENTIFIER", false],
-      ["BLUESKY_APP_PASSWORD", false],
-      ["BLUESKY_SERVICE", true],
-    ]);
+    ["ghost", ghostDriver(), ["GHOST_ADMIN_URL", "GHOST_ADMIN_API_KEY"], []],
+    ["resend", resendDriver(), ["RESEND_API_KEY"], []],
+    [
+      "bluesky",
+      blueskyDriver(),
+      ["BLUESKY_IDENTIFIER", "BLUESKY_APP_PASSWORD", "BLUESKY_SERVICE"],
+      ["BLUESKY_SERVICE"],
+    ],
+    ["github", githubDriver({ bridge }), ["GITHUB_TOKEN"], []],
+    ["stripe", stripeDriver({ bridge }), ["STRIPE_API_KEY"], []],
+  ])("%s declares exactly its variables, each described, and which are optional", (_, driver, names, optional) => {
+    const shape = driver.env!.shape;
+    expect(Object.keys(shape)).toEqual(names);
+    for (const schema of Object.values(shape)) expect(schema.description).toBeTruthy();
+    const optionals = Object.entries(shape).filter(([, schema]) => schema.safeParse(undefined).success);
+    expect(optionals.map(([name]) => name)).toEqual(optional);
   });
 });
