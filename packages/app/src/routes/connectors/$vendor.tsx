@@ -1,4 +1,4 @@
-import type { OpEntry } from "@sanoma/workflows/describe";
+import type { CredentialStatus, OpEntry } from "@sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { ExternalLinkIcon } from "lucide-react";
@@ -17,6 +17,7 @@ import {
   pageTitle,
   Section,
   SectionTitle,
+  ToneBadge,
   VendorLogo,
 } from "../../components/common.tsx";
 import { ScenarioErrors } from "../../components/scenario.tsx";
@@ -67,6 +68,7 @@ function ConnectorPage() {
         </p>
       )}
       <ScenarioErrors errors={scenarios.errors} />
+      {vendor.credentials && <Credentials credentials={vendor.credentials} />}
       <section className="flex flex-col gap-3">
         <SectionTitle>Operations</SectionTitle>
         {ops.length === 0 ? (
@@ -102,6 +104,27 @@ function ConnectorPage() {
         )}
       </section>
     </div>
+  );
+}
+
+/** The environment variables the vendor's drivers read: each one's manual and status, never its value. */
+function Credentials({ credentials }: { credentials: CredentialStatus[] }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionTitle>Credentials</SectionTitle>
+      <ul className="flex flex-col gap-1.5">
+        {credentials.map(({ name, description, optional, status, problem }) => (
+          <li key={name} className="flex flex-wrap items-center gap-1.5">
+            <code>{name}</code>
+            <ToneBadge tone={status === "set" ? "ok" : status === "missing" && optional ? "off" : "bad"}>
+              {status === "invalid" ? `invalid: ${problem}` : status}
+            </ToneBadge>
+            {optional && <Badge variant="outline">optional</Badge>}
+            {description && <span className="text-muted-foreground">{description}</span>}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
