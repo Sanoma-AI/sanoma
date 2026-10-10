@@ -1,11 +1,14 @@
-import type { z } from "zod";
+import { z } from "zod";
 import { resolveConfig, type SanomaConfig } from "./config.ts";
 import { type Builtin, jsonSchemaOf, type Use } from "./define.ts";
-import { type Effect, isOp, VENDOR, type VendorInfo } from "./op.ts";
+import type { Fake } from "./fake.ts";
+import { fill, seedFrom } from "./fill.ts";
+import { type Effect, isOp, type Op, VENDOR, type VendorInfo } from "./op.ts";
 import { type Outline, outlineWithSource } from "./outline.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
 import type { ResourceFields } from "./resource.ts";
 import { type DeclaredResource, readDataFiles, type ResourceProblem, resourceTypesOf } from "./resources.ts";
+import { errorMessage } from "./shared.ts";
 
 // `@sanoma/workflows/describe`: what a UI renders from. Apart from the main entry, so the
 // worker never loads oxc-parser, which the outline reads `run` with.
@@ -54,6 +57,11 @@ export interface OpEntry {
   input: Record<string, unknown>;
   /** What a call returns once its schema has parsed the vendor's reply (`io: "output"`). */
   output: Record<string, unknown>;
+  /**
+   * A sample exchange with the vendor's fake, when the config has one in `fakes`: a made-up
+   * input, and what the fake returned for it or the message of what it threw.
+   */
+  mock?: { input: unknown; output: unknown } | { input: unknown; error: string };
 }
 
 /** Who a vendor is, from its connector's `VendorInfo`: enough to name it, show its logo and link to its connector. */
@@ -116,9 +124,10 @@ export interface ConfigDescription {
 
 /**
  * Describes a config. Throws what `startWorker` would refuse (see `resolveConfig`). The data
- * files' problems are data, `problems`, beside the resources read without any.
+ * files' problems are data, `problems`, beside the resources read without any. Asynchronous
+ * only for the operations' `mock`s, which call a fresh copy of each fake.
  */
-export function describeConfig(config: SanomaConfig): ConfigDescription {
+export async function describeConfig(config: SanomaConfig): Promise<ConfigDescription> {
   const resolved = resolveConfig(config);
   const vendors: Record<string, VendorEntry> = {};
   // A vendor whose operations are split over several connectors is named by the first; its
@@ -143,13 +152,23 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     }))
     .toSorted((a, b) => a.id.localeCompare(b.id));
 
-  const ops: OpEntry[] = [...resolved.ops.values()].map((op) => ({
+  const declared = [...resolved.ops.values()];
+  const mocks = new Map<string, NonNullable<OpEntry["mock"]>>();
+  for (const [vendor, fake] of resolved.fakes) {
+    for (const [id, mock] of await samples(
+      fake,
+      declared.filter((op) => op.vendor === vendor),
+    ))
+      mocks.set(id, mock);
+  }
+  const ops: OpEntry[] = declared.map((op) => ({
     ...policyOpOf(op),
     idempotent: op.idempotent,
     description: op.description,
     ...(op.phrases && { phrases: op.phrases }),
     input: toJsonSchema(op.input, `${op.id} input`, "input", refs),
     output: toJsonSchema(op.output, `${op.id} output`, "output", refs),
+    ...(mocks.has(op.id) && { mock: mocks.get(op.id) }),
   }));
   ops.sort((a, b) => a.id.localeCompare(b.id));
 
@@ -181,6 +200,43 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       ...(resolved.policy.version === undefined ? {} : { version: resolved.policy.version }),
     },
   };
+}
+
+/**
+ * One sample call of each of a vendor's operations, in their declared order, on one fresh copy
+ * of its fake, so the configured fake's state, calls and file are untouched. Each input is made
+ * up from the operation's schema, seeded by its id so it is the same on every start, except
+ * that a field named as a field of an earlier output takes that value (when its schema takes
+ * it): a sample `publish` publishes the post the sample `create` made.
+ */
+async function samples(fake: Fake<any, any>, ops: Op[]) {
+  const fresh = fake.fresh();
+  const earlier: Record<string, unknown> = {};
+  const mocks = new Map<string, NonNullable<OpEntry["mock"]>>();
+  for (const op of ops) {
+    const fn = fresh.driver.ops[op.id.slice(op.vendor.length + 1)];
+    if (!fn) continue;
+    const shape: Record<string, z.ZodType> = op.input instanceof z.ZodObject ? op.input.shape : {};
+    const given = Object.fromEntries(
+      Object.entries(earlier).filter(([name, value]) => shape[name]?.safeParse(value).success),
+    );
+    let input: unknown;
+    try {
+      seedFrom(op.id);
+      input = fill(op.input, given);
+    } catch (err) {
+      mocks.set(op.id, { input: given, error: `Could not make up an input: ${errorMessage(err)}` });
+      continue;
+    }
+    try {
+      const output = await fn(input, { idempotencyKey: `sample:${op.id}`, runId: "sample", opId: op.id, attempt: 1 });
+      mocks.set(op.id, { input, output });
+      if (output !== null && typeof output === "object") Object.assign(earlier, output);
+    } catch (err) {
+      mocks.set(op.id, { input, error: errorMessage(err) });
+    }
+  }
+  return mocks;
 }
 
 const svgDataUrl = (svg: string) => `data:image/svg+xml,${encodeURIComponent(svg.trim())}`;

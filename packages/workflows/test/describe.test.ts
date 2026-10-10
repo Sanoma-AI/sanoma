@@ -4,7 +4,13 @@ import { resend } from "@sanoma/connector-resend";
 import blueskyPkg from "../../../connectors/bluesky/package.json" with { type: "json" };
 import ghostPkg from "../../../connectors/ghost/package.json" with { type: "json" };
 import resendPkg from "../../../connectors/resend/package.json" with { type: "json" };
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
+import { fakeGhost } from "@sanoma/connector-ghost/fake";
+import { fakeResend } from "@sanoma/connector-resend/fake";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   allow,
@@ -13,6 +19,7 @@ import {
   defineConnector,
   definePolicy,
   defineWorkflow,
+  DriverError,
   memoryLedger,
 } from "../src/index.ts";
 import { describeConfig, outlineWorkflow } from "../src/describe.ts";
@@ -29,8 +36,8 @@ const base = defineConfig({
 });
 
 describe("describeConfig", () => {
-  it("describes each workflow: its input as JSON Schema, the operations it may call, its built-ins and outline", () => {
-    const wf = describeConfig(base).workflows[0]!;
+  it("describes each workflow: its input as JSON Schema, the operations it may call, its built-ins and outline", async () => {
+    const wf = (await describeConfig(base)).workflows[0]!;
     expect(wf.name).toBe("announce");
     expect(wf.title).toBe("Announce a launch");
     expect(wf.input).toMatchObject({
@@ -51,7 +58,7 @@ describe("describeConfig", () => {
     expect(wf.source).toContain("defineWorkflow");
   });
 
-  it("lists ctx.all among a workflow's built-ins", () => {
+  it("lists ctx.all among a workflow's built-ins", async () => {
     const fan = defineWorkflow({
       name: "fan",
       trigger: "manual",
@@ -59,12 +66,12 @@ describe("describeConfig", () => {
       uses: [bluesky.post.create, "all"],
       run: async (ctx) => ctx.all([() => ctx.bluesky.post.create({ text: "x" })]),
     });
-    const wf = describeConfig({ ...base, workflows: [fan] }).workflows[0]!;
+    const wf = (await describeConfig({ ...base, workflows: [fan] })).workflows[0]!;
     expect(wf.builtins).toEqual(["all"]);
   });
 
-  it("describes every operation the connectors declare, with its effect and contract, sorted by id", () => {
-    const { ops } = describeConfig(base);
+  it("describes every operation the connectors declare, with its effect and contract, sorted by id", async () => {
+    const { ops } = await describeConfig(base);
     expect(ops.map((o) => o.id)).toEqual([
       "bluesky.post.create",
       "ghost.post.create",
@@ -90,7 +97,71 @@ describe("describeConfig", () => {
     });
   });
 
-  it("describes an operation's input as a caller sends it and its output as parsed", () => {
+  it("samples each operation of a vendor with a fake: made-up input, in declared order, earlier outputs carried", async () => {
+    const { ops } = await describeConfig({ ...base, fakes: [fakeGhost(), fakeResend(), fakeBluesky()] });
+    const mock = (id: string) => ops.find((o) => o.id === id)?.mock;
+    expect(mock("ghost.post.create")).toMatchObject({ input: { status: "draft" }, output: { id: "post_0001" } });
+    // publish runs after create on the same fresh fake, and publishes the post create made.
+    expect(mock("ghost.post.publish")).toEqual({
+      input: { id: "post_0001" },
+      output: expect.objectContaining({ id: "post_0001", status: "published" }),
+    });
+    expect(mock("resend.broadcast.send")).toEqual({
+      input: { id: "bc_0001" },
+      output: { id: "bc_0001", status: "queued" },
+    });
+    expect(mock("bluesky.post.create")).toMatchObject({ output: { uri: expect.stringMatching(/^at:\/\//) } });
+    // A vendor without a fake in `fakes` has no samples.
+    expect((await describeConfig(base)).ops.every((o) => !("mock" in o))).toBe(true);
+  });
+
+  it("gives the same samples on every call, and leaves the configured fake's state, calls and file alone", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sanoma-describe-"));
+    const file = join(dir, "ghost.json");
+    try {
+      const blog = fakeGhost({ file });
+      blog.update((state) => {
+        state.seq = 7;
+      });
+      const before = readFileSync(file, "utf8");
+      const config = { ...base, fakes: [blog, fakeResend()] };
+      // The fake stamps a publish with the time.
+      vi.useFakeTimers({ toFake: ["Date"], now: new Date("2030-01-01T09:00:00Z") });
+      const first = (await describeConfig(config)).ops.map((o) => o.mock);
+      const second = (await describeConfig(config)).ops.map((o) => o.mock);
+      expect(second).toEqual(first);
+      expect(first.filter(Boolean)).toHaveLength(4);
+      expect(blog.calls).toEqual([]);
+      expect(blog.state.seq).toBe(7);
+      expect(readFileSync(file, "utf8")).toBe(before);
+    } finally {
+      vi.useRealTimers();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("says what a fake threw as the sample's error", async () => {
+    const blog = fakeGhost();
+    const fresh = blog.fresh;
+    blog.fresh = () => {
+      const copy = fresh();
+      copy.failNext("ghost.post.create", new DriverError("ghost: down", { retryable: false }));
+      return copy;
+    };
+    const { ops } = await describeConfig({ ...base, fakes: [blog] });
+    const mock = (id: string) => ops.find((o) => o.id === id)?.mock;
+    expect(mock("ghost.post.create")).toEqual({
+      input: expect.objectContaining({ status: "draft" }),
+      error: "ghost: down",
+    });
+    // With no post made, publish gets a made-up id, which the fake has no post for.
+    expect(mock("ghost.post.publish")).toEqual({
+      input: { id: expect.any(String) },
+      error: expect.stringMatching(/^ghost: no post /),
+    });
+  });
+
+  it("describes an operation's input as a caller sends it and its output as parsed", async () => {
     const counter = defineConnector("counter", {
       tally: {
         add: {
@@ -101,19 +172,19 @@ describe("describeConfig", () => {
       },
     });
     const drivers = [{ vendor: "counter", ops: { "tally.add": async () => ({ total: 1 }) } }];
-    const { ops } = describeConfig({ ...base, workflows: [], connectors: [counter], drivers });
+    const { ops } = await describeConfig({ ...base, workflows: [], connectors: [counter], drivers });
     const [add] = ops;
     // A default makes an input field optional to send, and an output field always there.
     expect(add?.input).not.toHaveProperty("required");
     expect(add?.output).toMatchObject({ required: ["total", "unit"] });
   });
 
-  it("describes each vendor once, its logo as data: URLs, its package and homepage; a connector that names no vendor gets its id as title", () => {
+  it("describes each vendor once, its logo as data: URLs, its package and homepage; a connector that names no vendor gets its id as title", async () => {
     const counter = defineConnector("counter", {
       tally: { add: { effect: "write", input: z.object({}), output: z.object({}) } },
     });
     const drivers = [...base.drivers, { vendor: "counter", ops: { "tally.add": async () => ({}) } }];
-    const { vendors } = describeConfig({ ...base, connectors: [ghost, resend, bluesky, counter], drivers });
+    const { vendors } = await describeConfig({ ...base, connectors: [ghost, resend, bluesky, counter], drivers });
     expect(Object.keys(vendors).toSorted()).toEqual(["bluesky", "counter", "ghost", "resend"]);
     expect(vendors.counter).toEqual({ title: "counter" });
     expect(vendors.resend).toMatchObject({
@@ -170,28 +241,32 @@ describe("describeConfig", () => {
     expect(Object.isFrozen(counter[VENDOR].info?.logo)).toBe(true);
   });
 
-  it("says whether a policy other than allowAll is configured, and its version, and names the app and version", () => {
-    expect(describeConfig(base).policy).toEqual({ defined: false });
-    expect(describeConfig(base).appName).toBe("sanoma");
-    expect(describeConfig(base).version).toMatch(/^sanoma@[0-9a-f]{64}$/);
+  it("says whether a policy other than allowAll is configured, and its version, and names the app and version", async () => {
+    const plain = await describeConfig(base);
+    expect(plain.policy).toEqual({ defined: false });
+    expect(plain.appName).toBe("sanoma");
+    expect(plain.version).toMatch(/^sanoma@[0-9a-f]{64}$/);
     const gated = defineConfig({ ...base, appName: "acme", policy: definePolicy(() => allow()) });
-    expect(describeConfig(gated)).toMatchObject({
+    expect(await describeConfig(gated)).toMatchObject({
       appName: "acme",
       version: expect.stringMatching(/^acme@/),
       policy: { defined: true },
     });
     const versioned = definePolicy(() => allow(), { version: "2026-10-07" });
     expect(versioned.version).toBe("2026-10-07");
-    expect(describeConfig({ ...base, policy: versioned }).policy).toEqual({ defined: true, version: "2026-10-07" });
+    expect((await describeConfig({ ...base, policy: versioned })).policy).toEqual({
+      defined: true,
+      version: "2026-10-07",
+    });
     expect(() => definePolicy(() => allow(), { version: "" })).toThrow("`version` must be a non-empty string");
   });
 
-  it("is plain JSON: it round-trips through JSON.stringify unchanged", () => {
-    const c = describeConfig(base);
+  it("is plain JSON: it round-trips through JSON.stringify unchanged", async () => {
+    const c = await describeConfig(base);
     expect(JSON.parse(JSON.stringify(c))).toEqual(c);
   });
 
-  it("describes what JSON Schema cannot express as open, rather than failing", () => {
+  it("describes what JSON Schema cannot express as open, rather than failing", async () => {
     const odd = defineConnector("odd", {
       thing: { get: { effect: "read", input: z.object({ id: z.string() }), output: z.custom<Map<string, string>>() } },
     });
@@ -204,19 +279,19 @@ describe("describeConfig", () => {
     });
     const drivers = [{ vendor: "odd", ops: { "thing.get": async () => new Map() } }];
     // `unrepresentable: "any"` keeps custom types as {}; only a schema that throws is reported.
-    expect(() =>
+    await expect(
       describeConfig(
         defineConfig({ workflows: [wf], connectors: [odd], drivers, policy: allowAll, ledger: memoryLedger() }),
       ),
-    ).not.toThrow();
+    ).resolves.toBeDefined();
   });
 
-  it("names the schema it cannot describe at all", () => {
+  it("names the schema it cannot describe at all", async () => {
     // zod refuses two schemas with one id in a single conversion, whatever `unrepresentable` says.
     const twice = z.object({ a: z.string().meta({ id: "twice" }), b: z.number().meta({ id: "twice" }) });
     const clash = defineConnector("clash", { thing: { get: { effect: "read", input: z.object({}), output: twice } } });
     const drivers = [{ vendor: "clash", ops: { "thing.get": async () => ({ a: "", b: 0 }) } }];
-    expect(() => describeConfig({ ...base, workflows: [], connectors: [clash], drivers })).toThrow(
+    await expect(describeConfig({ ...base, workflows: [], connectors: [clash], drivers })).rejects.toThrow(
       /^Cannot describe clash\.thing\.get output as JSON Schema: Duplicate schema id "twice"/,
     );
   });

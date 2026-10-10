@@ -580,8 +580,8 @@ describe("errors the app answers with", () => {
 });
 
 describe("a workflow's source", () => {
-  it("is served by name, apart from the config, and is null for a workflow without one", () => {
-    const description = describeConfig(config);
+  it("is served by name, apart from the config, and is null for a workflow without one", async () => {
+    const description = await describeConfig(config);
     expect(workflowSource({ description }, "announce")).toEqual({ source: readFileSync(announce.file!, "utf8") });
     const sourceless = withoutSources(description);
     expect(sourceless.workflows[0]).not.toHaveProperty("source");
