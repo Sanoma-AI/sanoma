@@ -42,8 +42,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     drivers: resolved.drivers,
     policy: resolved.policy,
     ledger: resolved.ledger,
-    workflows: new Map(resolved.workflows.map((wf) => [wf.name, wf])),
-    outlines: new Map(resolved.workflows.map((wf) => [wf.name, outlineOf(wf)])),
+    workflows: new Map(resolved.workflows.map((wf) => [wf.name, { wf, outline: outlineOf(wf) }])),
     stopped: false,
   };
   for (const { name } of resolved.workflows) {
@@ -116,7 +115,7 @@ function outlineOf(wf: WorkflowDefinition<any, any>): WorkflowOutline {
       `Workflow "${wf.name}" cannot be outlined, so its runs could not be held to its code: ${outline.error}`,
     );
   }
-  return { file: outline.file, source: source!, lineStarts: lineStartsOf(source!), calls: callsOf(outline.nodes) };
+  return { file: outline.file, lineStarts: lineStartsOf(source!), calls: callsOf(outline.nodes) };
 }
 
 /**
@@ -154,11 +153,10 @@ function register(name: string) {
       const state = current;
       // A stopped worker's state stays current while DBOS shuts down.
       if (!state || state.stopped) throw new Error(`Run of "${name}" started with no worker running`);
-      const wf = state.workflows.get(name);
-      const outline = state.outlines.get(name);
+      const running = state.workflows.get(name);
       // Registered by an earlier worker in this process, whose config had it; this one's has not.
-      if (!wf || !outline)
-        throw new Error(`Run of "${name}" refused: this worker's config has no workflow of that name`);
+      if (!running) throw new Error(`Run of "${name}" refused: this worker's config has no workflow of that name`);
+      const { wf, outline } = running;
       const run: Run = {
         id: DBOS.workflowID!,
         workflow: wf.name,

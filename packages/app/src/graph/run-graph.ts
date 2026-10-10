@@ -1,6 +1,6 @@
 import type { ApprovalState, LedgerGroup, LedgerRecord, RunSummary } from "@sanoma/workflows";
 import type { OutlineNode, Span } from "@sanoma/workflows/describe";
-import { fitsOp, isEnded } from "@sanoma/workflows/shared";
+import { fitsOp, flatten, isEnded } from "@sanoma/workflows/shared";
 import { utcText } from "../lib/time.ts";
 import { APPROVAL_TONE, RUN_TONE, type Tone } from "../lib/tone.ts";
 import { type Ends, outlineGraph } from "./outline-graph.ts";
@@ -154,19 +154,11 @@ export function runGraph(
 
 type Call = Extract<OutlineNode, { kind: CallStep["kind"] }>;
 
+const CALL_KINDS = new Set<OutlineNode["kind"]>(["op", "approval", "sleep"]);
+
 /** The outline's calls, wherever they are in it. */
 const calls = (nodes: readonly OutlineNode[]): Call[] =>
-  nodes.flatMap((node) =>
-    node.kind === "all"
-      ? node.branches.flatMap(calls)
-      : node.kind === "branch"
-        ? node.cases.flatMap(calls)
-        : node.kind === "each" || node.kind === "repeat"
-          ? calls(node.body)
-          : node.kind === "try"
-            ? calls([...node.body, ...node.handler])
-            : [node],
-  );
+  flatten(nodes).filter((node): node is Call => CALL_KINDS.has(node.kind));
 
 /** The calls' spans, or none when there are no calls. */
 const spansOf = (found: readonly Call[]) => (found.length ? found.map((call) => call.span) : undefined);

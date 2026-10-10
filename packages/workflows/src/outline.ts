@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
-import { childrenOf, locator, type Node, parse } from "./ast.ts";
+import { childrenOf, type Node, parsed } from "./ast.ts";
 import type { WorkflowDefinition } from "./define.ts";
-import { errorMessage } from "./shared.ts";
+import { childLists, errorMessage, flatten } from "./shared.ts";
 
 /**
  * What a workflow's `run` calls through `ctx`, in the order it makes the calls, with the loops,
@@ -37,7 +37,7 @@ export type OutlineNode = { path: string; span: Span } &
     | { kind: "sleep" }
     /** `ctx.all([...])` over an array literal: one branch per element. */
     | { kind: "all"; branches: OutlineNode[][] }
-    /** `ctx.all(...)` over computed members (`items.map(cb)`): what the callback's member does, if one is found. */
+    /** `ctx.all(items.map(cb))`: what the callback's member does. */
     | { kind: "each"; body: OutlineNode[] }
     /** A loop, or a `.map` / `.forEach` / `.reduce` callback, whose body makes ctx calls. */
     | { kind: "repeat"; body: OutlineNode[] }
@@ -47,7 +47,7 @@ export type OutlineNode = { path: string; span: Span } &
      * a `switch` without `default`, the right side of `&&` not run).
      */
     | { kind: "branch"; cases: OutlineNode[][] }
-    /** `try { body } catch { handler }`: the handler runs when the body fails. A `finally` is not read. */
+    /** `try { body } catch { handler }`: the handler runs when the body fails. A `finally` makes no calls. */
     | { kind: "try"; body: OutlineNode[]; handler: OutlineNode[] }
   );
 
@@ -60,17 +60,10 @@ export interface OutlineProblem {
   message: string;
 }
 
-export const FUNCTIONS = new Set(["ArrowFunctionExpression", "FunctionExpression", "FunctionDeclaration"]);
-export const LOOPS = new Set([
-  "ForStatement",
-  "ForOfStatement",
-  "ForInStatement",
-  "WhileStatement",
-  "DoWhileStatement",
-]);
+const FUNCTIONS = new Set(["ArrowFunctionExpression", "FunctionExpression", "FunctionDeclaration"]);
 const ITERATING = new Set(["map", "forEach", "reduce"]);
 // Wrappers that leave the expression's value as it is: `ctx!.x`, `(ctx as Ctx).x`, `ctx?.x`.
-export const TRANSPARENT = new Set([
+const TRANSPARENT = new Set([
   "TSNonNullExpression",
   "TSAsExpression",
   "TSSatisfiesExpression",
@@ -94,15 +87,9 @@ export const outlineWorkflow = (wf: WorkflowDefinition<any, any>): Outline => ou
 export function outlineWithSource(wf: WorkflowDefinition<any, any>): { outline: Outline; source?: string } {
   const found = inFile(wf.file, wf.name);
   if (typeof found === "string") return { outline: { error: found } };
-  const { source, fn } = found;
-  // A run without a ctx parameter makes no calls; one that destructures it cannot be read.
-  const param = unwrap(fn.params[0]);
-  if (param !== undefined && param.type !== "Identifier") {
-    return { outline: { error: `${wf.name}'s run takes no ctx parameter by name, so its calls cannot be read` } };
-  }
-  const { nodes, problems } = param === undefined ? { nodes: [], problems: [] } : outlineBody(fn, param.name);
+  const { source, fn, at } = found;
+  const { nodes, problems } = outlineBody(fn);
   if (problems.length) {
-    const at = locator(source);
     const lines = problems.map((p) => {
       const { line, column } = at(p.start);
       return `${wf.file}:${line}:${column}: ${p.message}`;
@@ -120,15 +107,18 @@ const lf = (text: string) => text.replaceAll("\r\n", "\n");
  * `name` (a string, or a top-level `const` of the file holding it) and a `run` function. Or why
  * not: the file cannot be read or parsed, or holds no such literal.
  */
-function inFile(file: string, name: string): { source: string; fn: Node } | string {
+function inFile(
+  file: string,
+  name: string,
+): { source: string; fn: Node; at: (offset: number) => { line: number; column: number } } | string {
   let source: string;
   try {
     source = lf(readFileSync(file, "utf8"));
   } catch (err) {
     return `${file} could not be read: ${errorMessage(err)}`;
   }
-  const { program, errors } = parse(file, source);
-  if (errors.length) return `${file} could not be parsed: ${errors[0]!.message}`;
+  const { program, problems: syntax, at } = parsed(source, file);
+  if (syntax.length) return `${file} could not be parsed: ${syntax[0]!.message.replace(/^syntax: /, "")}`;
   // The file's top-level string constants, `export const NAME = "drift"`, by name.
   const consts = new Map<string, string>();
   for (const statement of program.body as Node[]) {
@@ -142,25 +132,8 @@ function inFile(file: string, name: string): { source: string; fn: Node } | stri
   const nameOf = (node: Node) =>
     unwrap(node)?.type === "Identifier" ? consts.get(unwrap(node).name) : stringValue(node);
   const fn = workflowLiterals(program).find((literal) => nameOf(literal.name) === name)?.run;
-  return fn ? { source, fn } : `${file} holds no workflow named "${name}"`;
+  return fn ? { source, fn, at } : `${file} holds no workflow named "${name}"`;
 }
-
-/** A node's child lists, in order: the lists a path's segments index into. */
-const childLists = (node: OutlineNode): OutlineNode[][] => {
-  switch (node.kind) {
-    case "all":
-      return node.branches;
-    case "branch":
-      return node.cases;
-    case "each":
-    case "repeat":
-      return [node.body];
-    case "try":
-      return [node.body, node.handler];
-    default:
-      return [];
-  }
-};
 
 /**
  * Numbers the nodes: each its index under `prefix`, its children under its path and their
@@ -177,9 +150,17 @@ function withPaths(nodes: OutlineNode[], prefix: string): OutlineNode[] {
 
 const span = (node: Node): Span => [node.start, node.end];
 
+const PARAM =
+  "run must take ctx as its first parameter, by one name: destructured, its calls cannot be read into the graph";
 const CTX_USE =
   "ctx is only called, directly (`await ctx.<vendor>.<resource>.<op>(…)`, `ctx.approval(…)`, `ctx.sleep(…)`, " +
   "`ctx.all([…])`) or read for ctx.runId: passed on, aliased or destructured, its calls are not in the graph";
+const CTX_CALL = (what: string) =>
+  `ctx.${what} is not a call the graph can draw: an operation is ctx.<vendor>.<resource>.<op>(…), ` +
+  "and the built-ins are ctx.approval(…), ctx.sleep(…), ctx.all([…]) and ctx.now()";
+const ALL_MEMBERS =
+  "ctx.all's members must be written in the call, so the graph shows what each does: a list, " +
+  "`ctx.all([() => …, () => …])`, or one per item, `ctx.all(items.map((item) => () => …))`";
 const UNREAD =
   "a function defined in run uses ctx, and the outline does not read it: inline its calls, or pass it to " +
   "ctx.all, .map, .forEach or .reduce, so the run's graph shows them";
@@ -190,57 +171,73 @@ const RETURN =
 const THROW =
   "`throw` outside a catch is not allowed in a workflow: the graph shows no way out; let the failing call end the run, or use if/else";
 const BREAK =
-  "`break` out of a loop is not allowed in a workflow: the graph repeats the whole body; use if/else, or a condition in the loop";
+  "`break` out of a loop, or to a label, is not allowed in a workflow: the graph repeats the whole body; use if/else, or a condition in the loop";
 const CONTINUE =
   "`continue` is not allowed in a workflow: the graph repeats the whole body; use if/else around the rest of it";
 
 /** Where a function's body starts: its own statement rules, nothing of the caller's. */
-const bodyOf = (fn: Node): Where => ({ parent: fn, fn, inCatch: false, labels: new Map() });
+const bodyOf = (fn: Node): Where => ({ fn, inCatch: false });
 
 /** Where the walk is: what a statement may do there. */
 interface Where {
-  parent: Node;
   /** The function whose body is being read: `run`, or a callback the outline reads. */
   fn: Node;
   inCatch: boolean;
   /** The nearest statement a plain `break` leaves. */
   breakable?: "loop" | "switch";
-  /** The labels in scope, and whether each names a loop. */
-  labels: ReadonlyMap<string, boolean>;
 }
+
+/** The members of `ctx` that are read, not placed: no record, no node. */
+const READS = new Set(["now", "runId"]);
 
 /**
  * The nodes of `fn`'s body (`run`'s, or a callback's the outline reads), each with an empty `path`
  * for `withPaths` to fill, and the problems: what the body does that the graph could not show.
- * `ctx` is only called, directly, or read for `ctx.runId`; a function defined inside that uses
- * `ctx` is read only where the outline reads callbacks (`ctx.all`'s members, `.map`, `.forEach`
- * and `.reduce`), elsewhere it is a problem; a `finally` may not use `ctx`; and in a body the
- * outline reads, `return` comes last, `throw` only in a `catch`, `break` leaves only a `switch`,
- * and there is no `continue`. A callback without `ctx` computes, and is not read.
+ * `ctx` is `fn`'s first parameter, taken by one name (destructured is a problem; none, and the
+ * body makes no calls). `ctx` is only called, directly, as an operation or a built-in, or read
+ * for `ctx.runId`; a function defined inside that uses `ctx` is read only where the outline
+ * reads callbacks (`ctx.all`'s members, `.map`, `.forEach` and `.reduce`), elsewhere it is a
+ * problem; a `finally` may not use `ctx`; and in a body the outline reads, `return` comes last,
+ * `throw` only in a `catch`, `break` leaves only a `switch`, and there is no `continue`. A
+ * callback without `ctx` computes, and is not read.
  */
-export function outlineBody(fn: Node, ctx: string): { nodes: OutlineNode[]; problems: OutlineProblem[] } {
+export function outlineBody(fn: Node): { nodes: OutlineNode[]; problems: OutlineProblem[] } {
   const problems: OutlineProblem[] = [];
   const problem = (node: Node, message: string): OutlineNode[] => {
     problems.push({ start: node.start, message });
     return [];
   };
+  const param = unwrap(fn.params[0]);
+  if (param === undefined) return { nodes: [], problems };
+  if (param.type !== "Identifier") return { nodes: problem(param, PARAM), problems };
+  const ctx: string = param.name;
   const path = "";
 
-  /** True when the code mentions `ctx` anywhere but as a property name. */
+  /** True when the code mentions `ctx` anywhere but as a property name. A function's answer is kept: `walk` asks again inside it. */
+  const functionsUsing = new WeakMap<object, boolean>();
   const usesCtx = (node: Node): boolean => {
     if (!node || typeof node !== "object") return false;
     if (Array.isArray(node)) return node.some(usesCtx);
     if (node.type === "Identifier") return node.name === ctx;
     if (node.type === "Property" && !node.computed) return usesCtx(node.value);
     if (node.type === "MemberExpression" && !node.computed) return usesCtx(node.object);
-    return childrenOf(node).some(usesCtx);
+    if (!FUNCTIONS.has(node.type)) return childrenOf(node).some(usesCtx);
+    let uses = functionsUsing.get(node);
+    if (uses === undefined) functionsUsing.set(node, (uses = childrenOf(node).some(usesCtx)));
+    return uses;
   };
+
+  /** `ctx.runId`, read. */
+  const isRead = (member: Node) =>
+    !member.computed &&
+    unwrap(member.object)?.type === "Identifier" &&
+    unwrap(member.object).name === ctx &&
+    READS.has(member.property.name);
 
   const walk = (node: Node, at: Where): OutlineNode[] => {
     if (!node || typeof node !== "object") return [];
     if (Array.isArray(node)) return node.flatMap((n) => walk(n, at));
-    const inner: Where = { ...at, parent: node };
-    const children = (...nodes: Node[]) => nodes.flatMap((n) => walk(n, inner));
+    const children = (...nodes: Node[]) => nodes.flatMap((n) => walk(n, at));
     switch (node.type) {
       case "Identifier":
         return node.name === ctx ? problem(node, CTX_USE) : [];
@@ -248,50 +245,49 @@ export function outlineBody(fn: Node, ctx: string): { nodes: OutlineNode[]; prob
       case "Property":
         return node.computed ? children(node.key, node.value) : children(node.value);
       case "MemberExpression":
-        if (ctxPath(node, ctx)?.join(".") === "runId") return [];
+        if (isRead(node)) return [];
         return node.computed ? children(node.object, node.property) : children(node.object);
       case "CallExpression":
-        return call(node, inner);
+        return call(node, at);
       case "IfStatement":
-        return [...children(node.test), ...branch(node, ifArms(node), inner)];
+        return [...children(node.test), ...branch(node, ifArms(node), at)];
       case "ConditionalExpression":
-        return [...children(node.test), ...branch(node, [node.consequent, node.alternate], inner)];
+        return [...children(node.test), ...branch(node, [node.consequent, node.alternate], at)];
       case "LogicalExpression":
         // The right side may not run: the way past it is an arm with no calls.
-        return [...children(node.left), ...branch(node, [node.right, null], inner)];
+        return [...children(node.left), ...branch(node, [node.right, null], at)];
       case "SwitchStatement":
-        return [...children(node.discriminant), ...branch(node, switchArms(node), { ...inner, breakable: "switch" })];
+        return [...children(node.discriminant), ...branch(node, switchArms(node), { ...at, breakable: "switch" })];
       case "ForStatement":
-        return [...children(node.init), ...repeat(node, [node.test, node.body, node.update], inner)];
+        return [...children(node.init), ...repeat(node, [node.test, node.body, node.update], at)];
       case "ForOfStatement":
       case "ForInStatement":
-        return [...children(node.right), ...repeat(node, [node.left, node.body], inner)];
+        return [...children(node.right), ...repeat(node, [node.left, node.body], at)];
       case "WhileStatement":
-        return repeat(node, [node.test, node.body], inner);
+        return repeat(node, [node.test, node.body], at);
       case "DoWhileStatement":
-        return repeat(node, [node.body, node.test], inner);
+        return repeat(node, [node.body, node.test], at);
       case "LabeledStatement":
-        return walk(node.body, {
-          ...inner,
-          labels: new Map(at.labels).set(node.label.name, LOOPS.has(node.body?.type)),
-        });
+        return children(node.body);
       case "TryStatement": {
         const inside = children(node.block);
-        const handler = walk(node.handler?.body, { ...inner, inCatch: true });
+        const handler = walk(node.handler?.body, { ...at, inCatch: true });
+        // A finally makes no calls, and keeps to the statement rules like the rest.
         if (usesCtx(node.finalizer)) problem(node.finalizer, FINALLY);
+        children(node.finalizer);
         return inside.length || handler.length ? [{ kind: "try", path, body: inside, handler, span: span(node) }] : [];
       }
       case "ReturnStatement": {
+        // Last at the top of the function's body: anywhere else, what follows would be drawn as run.
         const body = at.fn.body;
-        if (!(body?.type === "BlockStatement" && at.parent === body && body.body.at(-1) === node))
-          problem(node, RETURN);
+        if (!(body?.type === "BlockStatement" && body.body.at(-1) === node)) problem(node, RETURN);
         return children(node.argument);
       }
       case "ThrowStatement":
         if (!at.inCatch) problem(node, THROW);
         return children(node.argument);
       case "BreakStatement":
-        if (node.label ? at.labels.get(node.label.name) : at.breakable === "loop") problem(node, BREAK);
+        if (node.label || at.breakable === "loop") problem(node, BREAK);
         return [];
       case "ContinueStatement":
         return problem(node, CONTINUE);
@@ -300,7 +296,7 @@ export function outlineBody(fn: Node, ctx: string): { nodes: OutlineNode[]; prob
     // which a reading of the source cannot follow. Only the callbacks of ctx.all and of `.map`,
     // `.forEach` and `.reduce` are read, where they are passed (`call`, `all`).
     if (FUNCTIONS.has(node.type)) return usesCtx(node) ? problem(node, UNREAD) : [];
-    return childrenOf(node).flatMap((child) => walk(child, inner));
+    return children(...childrenOf(node));
   };
 
   // The arms that make calls, and one empty arm when some arm makes none: the way past them.
@@ -336,9 +332,8 @@ export function outlineBody(fn: Node, ctx: string): { nodes: OutlineNode[]; prob
         case "sleep":
           return [...walk(args, at), { kind: "sleep", path, span: span(node) }];
         default:
-          return members.length === 3
-            ? [...walk(args, at), { kind: "op", path, id, span: span(node) }]
-            : walk(args, at);
+          if (members.length === 3) return [...walk(args, at), { kind: "op", path, id, span: span(node) }];
+          return READS.has(id) ? walk(args, at) : [...walk(args, at), ...problem(node, CTX_CALL(id))];
       }
     }
     const callee = unwrap(node.callee);
@@ -354,17 +349,17 @@ export function outlineBody(fn: Node, ctx: string): { nodes: OutlineNode[]; prob
   // `node` is the `ctx.all(...)` call.
   const all = (node: Node, at: Where): OutlineNode[] => {
     const whole = span(node);
-    const arg = node.arguments[0];
+    const arg = unwrap(node.arguments[0]);
     if (arg?.type === "ArrayExpression") {
       return [{ kind: "all", path, branches: arg.elements.map((m: Node) => member(m, at)), span: whole }];
     }
-    // Otherwise the members are computed, typically `items.map((item) => () => ctx.…)`.
-    const made = unwrap(arg);
+    // Otherwise the members are made in the call, `items.map((item) => () => ctx.…)`: made anywhere
+    // else, the graph could not say what each does.
     const callback =
-      made?.type === "CallExpression" ? made.arguments.find((a: Node) => FUNCTIONS.has(a?.type)) : undefined;
-    if (!callback) return [...walk(arg, at), { kind: "each", path, body: [], span: whole }];
+      arg?.type === "CallExpression" ? arg.arguments.find((a: Node) => FUNCTIONS.has(a?.type)) : undefined;
+    if (!callback) return [...walk(arg, at), ...problem(node, ALL_MEMBERS)];
     return [
-      ...walk(made.callee, at),
+      ...walk(arg.callee, at),
       { kind: "each", path, body: member(callback.body, bodyOf(callback)), span: whole },
     ];
   };
@@ -377,11 +372,6 @@ export function outlineBody(fn: Node, ctx: string): { nodes: OutlineNode[]; prob
   };
 
   return { nodes: walk(fn.body, bodyOf(fn)), problems };
-}
-
-/** Every node of the outline, nested ones included, in order. */
-export function flatten(nodes: readonly OutlineNode[]): OutlineNode[] {
-  return nodes.flatMap((node) => [node, ...flatten(childLists(node).flat())]);
 }
 
 const CALLS = new Set<OutlineNode["kind"]>(["op", "approval", "sleep", "all", "each"]);
@@ -436,7 +426,7 @@ function switchArms(node: Node): Node[] {
 }
 
 /** The member names from `ctx` to the callee, `*` for a computed one, when the callee is on `ctx`. */
-export function ctxPath(callee: Node, ctx: string): string[] | undefined {
+function ctxPath(callee: Node, ctx: string): string[] | undefined {
   const path: string[] = [];
   let node = unwrap(callee);
   while (node?.type === "MemberExpression") {
@@ -465,19 +455,17 @@ export function unwrap(node: Node): Node {
 
 /**
  * Every workflow literal in a parsed file: the object literal `defineWorkflow({ name, …, run })`
- * is called with, when it has a `name` and a `run` function. For the outline, which picks the
- * one by its name, and the lint, which checks each `run`.
+ * (or `sanoma.defineWorkflow(…)`) is called with, when it has a `name` and a `run` function. For
+ * the outline, which picks the one by its name, and the lint, which checks each `run`.
  */
 export function workflowLiterals(program: Node): { name: Node; run: Node }[] {
   const found: { name: Node; run: Node }[] = [];
   const find = (node: Node) => {
     if (!node) return;
     const literal = unwrap(node.arguments?.[0]);
-    if (
-      node.type === "CallExpression" &&
-      unwrap(node.callee)?.name === "defineWorkflow" &&
-      literal?.type === "ObjectExpression"
-    ) {
+    const callee = unwrap(node.callee);
+    const called = callee?.type === "MemberExpression" && !callee.computed ? callee.property.name : callee?.name;
+    if (node.type === "CallExpression" && called === "defineWorkflow" && literal?.type === "ObjectExpression") {
       const value = (key: string) =>
         literal.properties.find(
           (p: Node) => p.type === "Property" && !p.computed && (p.key.name ?? p.key.value) === key,

@@ -119,64 +119,49 @@ function refuseIfEnded(run: Run) {
 }
 
 /**
- * The run's `ctx`: the operations and built-ins its workflow `uses`, and nothing else. Each
- * member takes the outline node it is called at first (`placeCall`), then the workflow's arguments.
+ * The run's `ctx`: the operations and built-ins its workflow `uses`, and nothing else. Every
+ * member that writes a record is placed in the outline where the workflow calls it (`placeCall`)
+ * and goes through the run's queue (`serial`); `ctx.now()` only reads the clock, queued, and
+ * `ctx.runId` is a value. `ctx.all` alone skips the queue: it makes no DBOS call or record
+ * itself, it only calls its members, whose ctx calls are queued. Queued, it would hold the queue
+ * until its members settled, and their calls, queued behind it, would never start.
  */
 export function buildCtx(wf: WorkflowDefinition<any, any>, run: Run): any {
   const uses = wf.uses as readonly Use[];
+  /** A member placed where it is called, then `call`ed with its node. A refusal rejects, as a member's failure always has. */
+  const placed = (what: string, call: (node: string, ...args: any[]) => Promise<unknown>) =>
+    async function member(...args: unknown[]) {
+      const at = placeCall(run, member, what);
+      return call(at.path, ...args);
+    };
   const members: Record<string, any> = {};
   for (const op of uses.filter(isOp)) {
     const vendor = (members[op.vendor] ??= {});
     const resource = (vendor[op.resource] ??= {});
-    resource[op.name] = (node: string, input: unknown) => callOp(run, op.id, input, node);
+    resource[op.name] = placed(op.id, (node, input) => serial(run, () => callOp(run, op.id, input, node)));
   }
   members.runId = run.id;
-  members.now = () => DBOS.now();
+  members.now = () => serial(run, () => DBOS.now());
   if (uses.includes("approval")) {
-    members.approval = (node: string, title: string, req: ApprovalRequest) =>
-      awaitApproval(run, title, checkApproval(title, req), node);
+    members.approval = placed("approval", (node, title: string, req: ApprovalRequest) =>
+      serial(run, () => awaitApproval(run, title, checkApproval(title, req), node)),
+    );
   }
-  if (uses.includes("sleep")) members.sleep = (node: string, req: unknown) => sleep(run, req, node);
+  if (uses.includes("sleep")) members.sleep = placed("sleep", (node, req) => serial(run, () => sleep(run, req, node)));
+  if (uses.includes("all")) members.all = placed("all", (node, list) => all(run, list, node));
+  return guarded(members, "ctx", wf.name);
+}
 
-  /**
-   * A member placed in the outline where the workflow calls it (`placeCall`), then `call`ed with
-   * its node. A refusal rejects, as a member's failure always has, rather than throwing.
-   */
-  const placing = (what: string, call: (node: string, ...args: unknown[]) => Promise<unknown>) =>
-    function placed(...args: unknown[]) {
-      let at: CallNode;
-      try {
-        at = placeCall(run, placed, what);
-      } catch (err) {
-        return Promise.reject(err);
-      }
-      return call(at.path, ...args);
-    };
-
-  // Every function goes through the run's queue, so no member can be added that skips it, and
-  // is placed in the outline, so none can be called from elsewhere.
-  const queued = (node: Record<string, unknown>, path: string): Record<string, unknown> => {
-    const out: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(node)) {
-      if (typeof value === "function") {
-        const what = `${path}.${key}`;
-        // `ctx.now()` reads the clock: it writes no record and is no node of the outline.
-        out[key] =
-          what === "ctx.now"
-            ? (...args: unknown[]) => serial(run, () => value(...args))
-            : placing(what, (at, ...args) => serial(run, () => value(at, ...args)));
-      } else if (typeof value === "object" && value !== null) {
-        out[key] = queued(value as Record<string, unknown>, `${path}.${key}`);
-      } else out[key] = value;
-    }
-    return strict(out, path, wf.name);
-  };
-  const ctx = queued(members, "ctx");
-  // ctx.all alone skips the queue: it makes no DBOS call or record itself, it only calls its
-  // members, whose ctx calls are queued. Queued, it would hold the queue until its members
-  // settled, and their calls, queued behind it, would never start.
-  if (uses.includes("all")) ctx.all = placing("ctx.all", (at, list) => all(run, list, at));
-  return ctx;
+/** `members`, each object in it included, refusing any member not in it (`strict`). */
+function guarded(members: Record<string, unknown>, path: string, workflow: string): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(members)) {
+    out[key] =
+      typeof value === "object" && value !== null
+        ? guarded(value as Record<string, unknown>, `${path}.${key}`, workflow)
+        : value;
+  }
+  return strict(out, path, workflow);
 }
 
 /** Where a `ctx` member was called from, as a stack frame says. */
@@ -210,33 +195,35 @@ function callSite(fn: Function): CallSite | undefined {
 
 /**
  * The outline node the workflow calls a `ctx` member at: the call whose code holds the position
- * the workflow called from (`callSite`). The outline refuses most ways around it before a run
- * (`outlineBody`'s problems); this is the run's own check, for what reaches a `ctx` member from
- * code the outline has no node for: another file, a function defined inside `run` the outline
- * does not read, `arguments`, or a node of another kind. The run fails with
- * `call_not_in_outline`, and every record the call writes names the node, so a run's steps are
- * the outline's calls and nothing else.
+ * the workflow called from (`callSite`). `what` is the member's path on `ctx` (`ghost.post.create`,
+ * `approval`, `all`). The outline refuses most ways around it before a run (`outlineBody`'s
+ * problems); this is the run's own check, for what reaches a `ctx` member from code the outline
+ * has no node for: another file, a function defined inside `run` the outline does not read,
+ * `arguments`, or a node of another kind. The run fails with `call_not_in_outline`, and every
+ * record the call writes names the node, so a run's steps are the outline's calls and nothing else.
  */
 function placeCall(run: Run, fn: Function, what: string): CallNode {
   const { outline, workflow } = run;
   const site = callSite(fn);
-  const refuse = (why: string) => {
-    const where = site ? `${site.file}:${site.line}:${site.column}` : "a place the stack does not show";
-    return new SanomaError(
-      "call_not_in_outline",
-      `${what} was called from ${where}, ${why}: call ctx directly in run, not from a helper or a function ` +
-        "defined inside run (inline it), so the run's graph shows the call",
-      { call: what, site: where, workflow },
-    );
-  };
-  if (!site) throw refuse("which the outline cannot place");
-  if (site.file !== outline.file) throw refuse(`which is not in ${workflow}'s file ${outline.file}`);
-  const offset = offsetOf(outline.source, site.line, site.column, outline.lineStarts);
+  if (!site) throw notInOutline(run, what, site, "which the outline cannot place");
+  if (site.file !== outline.file)
+    throw notInOutline(run, what, site, `which is not in ${workflow}'s file ${outline.file}`);
+  const offset = offsetOf(outline.lineStarts, site.line, site.column);
   const node = offset === undefined ? undefined : callAt(outline.calls, offset);
-  if (!node) throw refuse(`which is no ctx call in ${workflow}'s outline`);
+  if (!node) throw notInOutline(run, what, site, `which is no ctx call in ${workflow}'s outline`);
   // The member called is the node's call: `ctx.all` at an `all` or `each`, an operation at its op.
-  if (!fitsOp(callName(node), what.slice("ctx.".length))) throw refuse(`where the outline has ctx.${callName(node)}`);
+  if (!fitsOp(callName(node), what)) throw notInOutline(run, what, site, `where the outline has ctx.${callName(node)}`);
   return node;
+}
+
+function notInOutline(run: Run, what: string, site: CallSite | undefined, why: string): SanomaError {
+  const where = site ? `${site.file}:${site.line}:${site.column}` : "a place the stack does not show";
+  return new SanomaError(
+    "call_not_in_outline",
+    `ctx.${what} was called from ${where}, ${why}: call ctx directly in run, not from a helper or a function ` +
+      "defined inside run (inline it), so the run's graph shows the call",
+    { call: `ctx.${what}`, site: where, workflow: run.workflow },
+  );
 }
 
 /** Refuses anything not declared in `uses`, with a message that says so. */

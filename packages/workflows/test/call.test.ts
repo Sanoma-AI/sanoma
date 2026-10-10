@@ -607,16 +607,14 @@ describe("ctx.all", () => {
   const odd = defineWorkflow({
     name: "odd",
     trigger: "manual",
-    input: z.object({ shape: z.enum(["nested", "empty", "not-a-list", "not-functions"]) }),
+    input: z.object({ shape: z.enum(["nested", "empty", "not-functions"]) }),
     uses: ["all"],
     run: async (ctx, { shape }) =>
       shape === "nested"
         ? ctx.all([async () => "outer", () => ctx.all([async () => "inner"])])
         : shape === "empty"
           ? ctx.all([])
-          : shape === "not-a-list"
-            ? ctx.all("members" as never)
-            : ctx.all([1, 2] as never),
+          : ctx.all([1, 2] as never),
   });
 
   /** Leaves a ctx.all un-awaited while it calls on, as the lint would refuse, to show what is recorded. */
@@ -740,14 +738,14 @@ describe("ctx.all", () => {
     expect(records[3]).not.toHaveProperty("group");
   });
 
-  it("refuses a nested ctx.all, and an argument that is not a list of functions, with invalid_input", async () => {
-    const shapes = ["nested", "not-a-list", "not-functions"] as const;
+  // A list made elsewhere (`ctx.all(members)`) never starts: the outline refuses it (outline.test.ts).
+  it("refuses a nested ctx.all, and a list whose members are not functions, with invalid_input", async () => {
+    const shapes = ["nested", "not-functions"] as const;
     const runs = await Promise.all(shapes.map((shape) => c().start(odd, { shape }, { startedBy: alice })));
     const errors = await Promise.all(runs.map((runId) => failure(c().result(runId))));
-    expect(errors.map(errorCode)).toEqual(["invalid_input", "invalid_input", "invalid_input"]);
+    expect(errors.map(errorCode)).toEqual(["invalid_input", "invalid_input"]);
     expect(errors[0]).toMatchObject({ message: expect.stringMatching(/^ctx\.all cannot be nested/) });
-    expect(errors[1]).toMatchObject({ message: expect.stringMatching(/^ctx\.all: needs a list of functions/) });
-    expect(errors[2]).toMatchObject({ message: expect.stringMatching(/^ctx\.all: 0: each member must be a function/) });
+    expect(errors[1]).toMatchObject({ message: expect.stringMatching(/^ctx\.all: 0: each member must be a function/) });
   });
 
   it("does not tag a call made outside the group while a member runs", async () => {

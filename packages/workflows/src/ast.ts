@@ -31,10 +31,14 @@ const CODE_KEYS = new Map(
 /** A node's children in source order, by oxc-parser's `visitorKeys`, without its types. A hole in a list is `null`. */
 export const childrenOf = (node: Node): Node[] => (CODE_KEYS.get(node.type) ?? []).flatMap((key) => node[key] ?? []);
 
-/** The offset each line of `source` starts at, from line 1. */
+/**
+ * The offset each line of `source` starts at, from line 1, and one past the end of the text as
+ * the start of the line after the last: where each line ends is the next start, less its `\n`.
+ */
 export const lineStartsOf = (source: string): number[] => {
   const lineStarts = [0];
   for (let i = 0; i < source.length; i++) if (source[i] === "\n") lineStarts.push(i + 1);
+  lineStarts.push(source.length + 1);
   return lineStarts;
 };
 
@@ -49,23 +53,17 @@ export function locator(source: string): (offset: number) => { line: number; col
 }
 
 /**
- * The offset into `source` of a line and column, both from 1, as a stack frame gives them; or
- * undefined when `source` has no such line, or the line no such column (a frame mapped wrong
- * must not land in the next line). The column is taken as a UTF-16 unit index, as V8 counts it.
- * `lineStarts` is `lineStartsOf(source)`, passed in when the same source is asked about often.
+ * The offset into a text of a line and column, both from 1, as a stack frame gives them, from
+ * the text's `lineStartsOf`; or undefined when the text has no such line, or the line no such
+ * column (a frame mapped wrong must not land in the next line). The column is taken as a UTF-16
+ * unit index, as V8 counts it.
  */
-export function offsetOf(
-  source: string,
-  line: number,
-  column: number,
-  lineStarts: readonly number[] = lineStartsOf(source),
-): number | undefined {
+export function offsetOf(lineStarts: readonly number[], line: number, column: number): number | undefined {
   const start = lineStarts[line - 1];
-  if (start === undefined || line < 1 || column < 1) return undefined;
+  const next = lineStarts[line];
+  if (line < 1 || column < 1 || start === undefined || next === undefined) return undefined;
   const offset = start + column - 1;
-  // The line ends before its `\n`, or at the end of the text.
-  const end = (lineStarts[line] ?? source.length + 1) - 1;
-  return offset < end ? offset : undefined;
+  return offset < next - 1 ? offset : undefined;
 }
 
 /** Something wrong in a file, at a line and column from 1. */

@@ -1,7 +1,7 @@
 import { basename, dirname, join } from "node:path";
 import { byPosition, childrenOf, type LintProblem, type Node, parsed } from "./ast.ts";
 import { readDataFile } from "./datafile.ts";
-import { outlineBody, unwrap, workflowLiterals } from "./outline.ts";
+import { outlineBody, workflowLiterals } from "./outline.ts";
 import { inside, nearestDir, RELATIVE } from "./paths.ts";
 // From src/ and from dist/ alike, the package's own oxlint.json: the one list of allowed names.
 import oxlint from "../oxlint.json" with { type: "json" };
@@ -145,28 +145,11 @@ export function lintWorkflow(source: string, filename?: string): LintProblem[] {
   };
 
   visit(program);
+  // Each workflow's `run` as the worker reads it when it starts: what the outline cannot draw,
+  // the worker refuses to start with. One reading, so the lint and the worker agree.
   for (const { run } of workflowLiterals(program))
-    checkRun(run, (start, message) => problems.push({ ...at(start), message }));
+    for (const { start, message } of outlineBody(run).problems) problems.push({ ...at(start), message });
   return byPosition(problems);
-}
-
-/**
- * Checks a workflow's `run` as the worker does when it starts: `ctx` taken by one name, and
- * nothing the outline cannot draw (`outlineBody`'s problems, which the worker refuses to start
- * with). One reading, so the lint and the worker agree.
- */
-function checkRun(run: Node, report: (start: number, message: string) => void) {
-  const param = unwrap(run.params[0]);
-  // Without a ctx parameter, run makes no calls, and has no graph to keep to.
-  if (param === undefined) return;
-  if (param.type !== "Identifier") {
-    report(
-      param.start,
-      "run must take ctx as its first parameter, by one name: destructured, its calls cannot be read into the graph",
-    );
-    return;
-  }
-  for (const problem of outlineBody(run, param.name).problems) report(problem.start, problem.message);
 }
 
 /**

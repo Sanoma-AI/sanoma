@@ -30,12 +30,7 @@ export interface WorkerState {
    * from here, by the name it was registered under: a process registers each name with DBOS once,
    * and each worker's config says what it runs.
    */
-  workflows: Map<string, WorkflowDefinition<any, any>>;
-  /**
-   * Each workflow's outline, by name, with the text of its file the spans index into (`\n` line
-   * endings). Read once when the worker starts; a `ctx` call is held to it (`call_not_in_outline`).
-   */
-  outlines: Map<string, WorkflowOutline>;
+  workflows: Map<string, Registered>;
   /**
    * Set when the worker stops, before DBOS shuts down. DBOS abandons a stopped worker's run
    * functions, which then fail as their next DBOS call finds the database closed. Such a failure,
@@ -70,13 +65,16 @@ export interface Run {
   state: WorkerState;
 }
 
-/**
- * A workflow's outline as the worker holds it: its nodes, the file text their spans index into,
- * and what placing a call needs ready: the text's line starts and the call nodes (`callsOf`).
- */
+/** A workflow the worker runs, with its outline, read once when the worker starts and every run held to (`call_not_in_outline`). */
+export interface Registered {
+  wf: WorkflowDefinition<any, any>;
+  outline: WorkflowOutline;
+}
+
+/** What `placeCall` holds a run's `ctx` calls to: the file's lines, so a frame's line and column become an offset, and the outline's call nodes. */
 export interface WorkflowOutline {
   file: string;
-  source: string;
-  lineStarts: number[];
-  calls: CallNode[];
+  /** `lineStartsOf` the file's text, `\n` line endings. */
+  lineStarts: readonly number[];
+  calls: readonly CallNode[];
 }

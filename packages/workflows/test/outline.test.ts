@@ -6,10 +6,12 @@ import { pathToFileURL } from "node:url";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { offsetOf } from "../src/ast.ts";
+import { lineStartsOf, offsetOf } from "../src/ast.ts";
 import { type OutlineNode, outlineWorkflow } from "../src/describe.ts";
+import * as sanoma from "../src/index.ts";
 import { defineConnector, defineWorkflow, type WorkflowDefinition } from "../src/index.ts";
-import { callAt, callsOf, flatten, outlineWithSource } from "../src/outline.ts";
+import { callAt, callsOf, outlineWithSource } from "../src/outline.ts";
+import { flatten } from "../src/shared.ts";
 import announce from "./fixtures/announce.ts";
 import { ensureBuilt, pkg } from "./build.ts";
 import fanout from "./fixtures/fanout.ts";
@@ -205,6 +207,17 @@ describe("outlineWorkflow", () => {
     expect(outlineWorkflow(method)).toMatchObject({ nodes: [{ kind: "sleep" }, { kind: "approval", title: "Go?" }] });
   });
 
+  it("finds a workflow defined through a namespace import", () => {
+    const spaced = sanoma.defineWorkflow({
+      name: "spaced",
+      trigger: "manual",
+      input: z.object({}),
+      uses: ["sleep"],
+      run: async (ctx) => ctx.sleep({ ms: 1 }),
+    });
+    expect(outlineWorkflow(spaced)).toMatchObject({ nodes: [{ kind: "sleep", path: "0" }] });
+  });
+
   it("says why when run destructures ctx, or is no function written in the file", () => {
     const destructured = defineWorkflow({
       name: "destructured",
@@ -213,7 +226,9 @@ describe("outlineWorkflow", () => {
       uses: [bluesky.post.create],
       run: async ({ bluesky: b }) => b.post.create({ text: "x" }),
     });
-    expect(unread(destructured)).toMatch(/takes no ctx parameter by name/);
+    expect(unread(destructured)).toMatch(
+      /outline\.test\.ts:\d+:\d+: run must take ctx as its first parameter, by one name/,
+    );
 
     // The file holds the literal, but its `run` is no function to read.
     const native = defineWorkflow({
@@ -318,15 +333,15 @@ describe("callAt", () => {
   });
 
   it("offsetOf turns a frame's line and column, from 1, into an offset, or none past the end", () => {
-    const source = "ab\ncd\n\nefg";
-    expect(offsetOf(source, 1, 1)).toBe(0);
-    expect(offsetOf(source, 2, 2)).toBe(4);
-    expect(offsetOf(source, 4, 3)).toBe(9);
-    expect(offsetOf(source, 5, 1)).toBeUndefined();
-    expect(offsetOf(source, 0, 1)).toBeUndefined();
+    const lines = lineStartsOf("ab\ncd\n\nefg");
+    expect(offsetOf(lines, 1, 1)).toBe(0);
+    expect(offsetOf(lines, 2, 2)).toBe(4);
+    expect(offsetOf(lines, 4, 3)).toBe(9);
+    expect(offsetOf(lines, 5, 1)).toBeUndefined();
+    expect(offsetOf(lines, 0, 1)).toBeUndefined();
     // A column past the line's end is none, not the next line's start.
-    expect(offsetOf(source, 1, 3)).toBeUndefined();
-    expect(offsetOf(source, 4, 4)).toBeUndefined();
+    expect(offsetOf(lines, 1, 3)).toBeUndefined();
+    expect(offsetOf(lines, 4, 4)).toBeUndefined();
   });
 });
 

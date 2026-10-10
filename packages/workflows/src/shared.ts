@@ -1,5 +1,6 @@
 import type { ApprovalState, Approver, Principal } from "./define.ts";
 import type { ResourceProblem } from "./resources.ts";
+import type { OutlineNode } from "./outline.ts";
 
 // Types only: resource types as a UI reads them. Erased from the bundle.
 export type {
@@ -51,6 +52,28 @@ export function fitsOp(pattern: string, op: string): boolean {
   const want = pattern.split(".");
   const got = op.split(".");
   return want.length === got.length && want.every((segment, i) => segment === "*" || segment === got[i]);
+}
+
+/** A node's child lists, in order: the lists a `path`'s segments index into. */
+export const childLists = (node: OutlineNode): OutlineNode[][] => {
+  switch (node.kind) {
+    case "all":
+      return node.branches;
+    case "branch":
+      return node.cases;
+    case "each":
+    case "repeat":
+      return [node.body];
+    case "try":
+      return [node.body, node.handler];
+    default:
+      return [];
+  }
+};
+
+/** Every node of an outline, nested ones included, in order. */
+export function flatten(nodes: readonly OutlineNode[]): OutlineNode[] {
+  return nodes.flatMap((node) => [node, ...flatten(childLists(node).flat())]);
 }
 
 /** Where a data-file problem is, `file:line:column`; undefined for one that is the config's, with no file. */

@@ -241,6 +241,15 @@ describe("lintWorkflow on run, which the worker holds to the outline", () => {
     expect(inRun(`const create = ctx.ghost.post.create; await create({ title: "a" });`)).toEqual([only]);
     expect(inRun(`const { ghost } = ctx; await ghost.post.create({ title: "a" });`)).toEqual([only]);
     expect(inRun(`console.log(ctx.ghost);`)).toEqual([only]);
+    expect(inRun(`await ctx.ghost.post({ title: "a" }); await ctx.log("x");`)).toEqual([
+      expect.stringMatching(/^ctx\.ghost\.post is not a call the graph can draw: an operation is ctx\.<vendor>/),
+      expect.stringMatching(/^ctx\.log is not a call the graph can draw/),
+    ]);
+    // Members made before the call: the closures are not read where they are made, and the call says nothing.
+    expect(inRun(`const members = input.ts.map((t) => () => ctx.sleep({ ms: t })); await ctx.all(members);`)).toEqual([
+      expect.stringMatching(/^a function defined in run uses ctx, and the outline does not read it/),
+      expect.stringMatching(/^ctx\.all's members must be written in the call, so the graph shows what each does/),
+    ]);
     expect(inRun(`await ctx.sleep({ ms: 1 });`, "{ sleep }, input")).toEqual([
       expect.stringMatching(/^run must take ctx as its first parameter, by one name: destructured/),
     ]);
@@ -276,13 +285,20 @@ describe("lintWorkflow on run, which the worker holds to the outline", () => {
       expect.stringMatching(/^`throw` outside a catch is not allowed in a workflow/),
     ]);
     expect(inRun(`for (const t of input.ts) { await ctx.sleep({ ms: 1 }); if (t) break; }`)).toEqual([
-      expect.stringMatching(/^`break` out of a loop is not allowed in a workflow/),
+      expect.stringMatching(/^`break` out of a loop, or to a label, is not allowed in a workflow/),
     ]);
     expect(
       inRun(
         `outer: for (const t of input.ts) { for (const u of t) { await ctx.sleep({ ms: 1 }); if (u) break outer; } }`,
       ),
-    ).toEqual([expect.stringMatching(/^`break` out of a loop is not allowed in a workflow/)]);
+    ).toEqual([expect.stringMatching(/^`break` out of a loop, or to a label, is not allowed in a workflow/)]);
+    expect(
+      inRun(`work: { await ctx.sleep({ ms: 1 }); if (input.skip) break work; await ctx.sleep({ ms: 2 }); }`),
+    ).toEqual([expect.stringMatching(/^`break` out of a loop, or to a label, is not allowed in a workflow/)]);
+    // A finally keeps to the same rules.
+    expect(inRun(`try { await ctx.sleep({ ms: 1 }); } finally { return "done"; }`)).toEqual([
+      expect.stringMatching(/^`return` before the end of run is not allowed/),
+    ]);
     expect(inRun(`for (const t of input.ts) { if (!t) continue; await ctx.sleep({ ms: 1 }); }`)).toEqual([
       expect.stringMatching(/^`continue` is not allowed in a workflow: .*use if\/else around the rest of it/),
     ]);

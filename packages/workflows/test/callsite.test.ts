@@ -45,28 +45,6 @@ const helper = defineWorkflow({
   run: async (ctx, { text }) => post(ctx, text),
 });
 
-const inner = defineWorkflow({
-  name: "inner",
-  trigger: "manual",
-  input: z.object({ text: z.string() }),
-  uses: [bluesky.post.create],
-  run: async (ctx, { text }) => {
-    const send = () => ctx.bluesky.post.create({ text });
-    return send();
-  },
-});
-
-const aliased = defineWorkflow({
-  name: "aliased",
-  trigger: "manual",
-  input: z.object({ text: z.string() }),
-  uses: [bluesky.post.create],
-  run: async (ctx, { text }) => {
-    const create = ctx.bluesky.post.create;
-    return create({ text });
-  },
-});
-
 /** Reaches ctx without naming it, which the outline cannot see: the run's own check catches the call. */
 const sneaky = defineWorkflow({
   name: "sneaky",
@@ -172,17 +150,10 @@ describe("where a ctx call is made", () => {
 });
 
 describe("a workflow the outline cannot draw", () => {
-  it.each([
-    ["passes ctx to a helper", helper, /callsite\.test\.ts:\d+:\d+: ctx is only called, directly/],
-    [
-      "defines a function in run that uses ctx",
-      inner,
-      /callsite\.test\.ts:\d+:\d+: a function defined in run uses ctx, and the outline does not read it/,
-    ],
-    ["aliases a ctx member", aliased, /callsite\.test\.ts:\d+:\d+: ctx is only called, directly/],
-  ])("does not start: the worker refuses a workflow that %s, naming the line", async (_, wf, message) => {
+  // What the outline refuses is covered in outline.test.ts and lint.test.ts; here, that the worker does not start.
+  it("does not start: the worker refuses a workflow that passes ctx to a helper, naming the line", async () => {
     const config = {
-      workflows: [wf],
+      workflows: [helper],
       connectors: [bluesky],
       drivers: [fakeBluesky().driver],
       policy: allowAll,
@@ -191,9 +162,7 @@ describe("a workflow the outline cannot draw", () => {
       appName: "callsite-refused",
     };
     await expect(startWorker(config)).rejects.toThrow(
-      new RegExp(
-        `^Workflow "${wf.name}" cannot be outlined, so its runs could not be held to its code: .*/${message.source}`,
-      ),
+      /^Workflow "helper" cannot be outlined, so its runs could not be held to its code: .*\/callsite\.test\.ts:\d+:\d+: ctx is only called, directly/,
     );
   });
 });
