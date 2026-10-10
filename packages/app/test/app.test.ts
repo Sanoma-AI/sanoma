@@ -990,7 +990,9 @@ describe("the page", () => {
     expect(pane.html).toMatch(/<input[^>]*id="field-launchAt"[^>]*value="2030-01-01T09:00:00Z"/);
     expect(pane.html).toMatch(/<button[^>]*aria-pressed="true"[^>]*>(<svg.*?<\/svg>)?Sandbox<\/button>/);
     expect(pane.html).toMatch(/<select[^>]*aria-label="Scenario"/);
-    expect(pane.text).toContain("Nothing leaves Sanoma: the scenario supplies the input and answers the approvals");
+    expect(pane.text).toContain(
+      "Nothing leaves Sanoma: the scenario supplies the input and the fakes answer the calls.",
+    );
     expect(pane.text).not.toContain("for real");
     expect(pane.text).toContain(">Start sandbox run<");
     // The scenario's text is behind its disclosure, closed until opened in the browser.

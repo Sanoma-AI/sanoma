@@ -30,7 +30,7 @@ const RAIL_ACTIVE = { "aria-current": "page" } as const;
  * reads the runs itself, so a poll draws the rail again and not the pane beside it.
  */
 export function RunRail({ name }: { name: string }) {
-  // Only `?runs=`: another search param (About's `?scenario=`) does not draw the rail again.
+  // Only `?runs=`: another search param (New run's `?scenario=`) does not draw the rail again.
   const filter = useSearch({ from: "/workflows/$name", select: (search) => search.runs }) ?? "all";
   const navigate = useNavigate();
   const { data: runs, error } = useSuspenseQuery(railQuery(name, filter));

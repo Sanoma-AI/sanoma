@@ -106,7 +106,10 @@ function NewRunPage() {
                 )}
                 {scenario ? (
                   <>
-                    <Notice>Nothing leaves Sanoma: the scenario supplies the input and answers the approvals</Notice>
+                    <Notice>
+                      Nothing leaves Sanoma: the scenario supplies the input and the fakes answer the calls. Its
+                      approvals wait for people, as a live run’s do.
+                    </Notice>
                     <StartForm key={scenario.name} workflow={workflow} scenario={scenario} />
                     <Disclosure label="Scenario">
                       <ScenarioCard scenario={scenario} />
