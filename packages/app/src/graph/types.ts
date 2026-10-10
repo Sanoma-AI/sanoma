@@ -26,10 +26,10 @@ export interface OpState extends Omit<StepState, "tone"> {
   /** The policy's approval holding the call, as the run tells it. */
   approval?: ApprovalState;
   /**
-   * What a scenario says of the operation, on a workflow's outline: a `Given` seeds it, a `Then`
-   * expects a call to it, or a `Then` expects none.
+   * What a scenario says of the operation, on a workflow's outline: a `Given` seeds it or makes
+   * its next call fail, a `Then` expects a call to it, or a `Then` expects none.
    */
-  scenario?: { seeded?: true; expected?: true; forbidden?: true };
+  scenario?: { seeded?: true; fails?: true; expected?: true; forbidden?: true };
 }
 
 /** A workflow's approval, as the run tells it. */

@@ -6,7 +6,6 @@ import type { ReactNode } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { ItemGroup } from "#/components/ui/item.tsx";
-import type { ScenarioEntry } from "../../api.ts";
 import {
   Expandable,
   Json,
@@ -19,6 +18,7 @@ import {
   SectionTitle,
   VendorLogo,
 } from "../../components/common.tsx";
+import { type ScenarioRoles, scenarioRoles } from "../../graph/scenario-graph.ts";
 import { configQuery, connectorNamed, scenariosNaming, scenariosQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/connectors/$vendor")({
@@ -150,23 +150,28 @@ function OpDetails({ op }: { op: OpEntry }) {
           <None />
         ) : (
           <ul className="flex flex-col gap-1">
-            {scenarios.map((s) => (
-              <li key={s.name} className="flex flex-wrap items-center gap-1.5">
-                <Link
-                  to="/workflows/$name"
-                  params={{ name: s.workflow }}
-                  search={{ scenario: s.name }}
-                  className="hover:underline"
-                >
-                  {s.name}
-                </Link>
-                {rolesOf(s, op.id).map((role) => (
-                  <Badge key={role} variant="outline">
-                    {role}
-                  </Badge>
-                ))}
-              </li>
-            ))}
+            {scenarios.map((s) => {
+              const roles = scenarioRoles(s.steps, (id) => id === op.id);
+              return (
+                <li key={s.name} className="flex flex-wrap items-center gap-1.5">
+                  <Link
+                    to="/workflows/$name"
+                    params={{ name: s.workflow }}
+                    search={{ scenario: s.name }}
+                    className="hover:underline"
+                  >
+                    {s.name}
+                  </Link>
+                  {(Object.keys(ROLE_LABELS) as (keyof ScenarioRoles)[])
+                    .filter((role) => roles[role])
+                    .map((role) => (
+                      <Badge key={role} variant="outline">
+                        {ROLE_LABELS[role]}
+                      </Badge>
+                    ))}
+                </li>
+              );
+            })}
           </ul>
         )}
       </Section>
@@ -174,14 +179,16 @@ function OpDetails({ op }: { op: OpEntry }) {
   );
 }
 
-/** What a scenario's steps do with the operation: seed it (Given), expect it, or forbid it (Then). */
-const rolesOf = (scenario: ScenarioEntry, op: string) => [
-  ...new Set(
-    scenario.steps
-      .filter((step) => step.op === op && step.kind !== "when")
-      .map((step) => (step.kind === "given" ? "seeds" : step.called === false ? "must not call" : "expects")),
-  ),
-];
+/**
+ * What a scenario does with the operation, in the order a scenario says it, as verbs: the
+ * graph's badges say the same of a node as states ("seeded", "not called").
+ */
+const ROLE_LABELS: Record<keyof ScenarioRoles, string> = {
+  seeded: "seeds",
+  fails: "fails",
+  expected: "expects",
+  forbidden: "must not call",
+};
 
 /** A link off the app, in a new tab, which its icon says. */
 function ExternalLink({ href, children }: { href: string; children: ReactNode }) {

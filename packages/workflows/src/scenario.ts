@@ -41,6 +41,8 @@ export interface ScenarioStep {
   op?: string;
   /** For a `Then` step about an operation: true when it expects a call, false for `was not called`. */
   called?: boolean;
+  /** For a `Given` that injects a fault into the operation's next call (`fails once` and the like), rather than seeding it. */
+  fault?: true;
 }
 
 /** A fake's state to seed through one of its operations, or a fault to inject into its next call. */
@@ -504,6 +506,7 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
       const [{ rule, args }] = matches as [{ rule: Rule; args: readonly Argument[] }];
       let op: string | undefined;
       let called: boolean | undefined;
+      let fault: true | undefined;
       try {
         const values = args.map((a) => a.getValue<unknown>(null));
         const step = ps.text;
@@ -512,6 +515,7 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
             const item = rule.read(values, ps);
             scenario.given.push({ step, ...item });
             op = item.op;
+            if ("fault" in item) fault = true;
             break;
           }
           case "then": {
@@ -537,6 +541,7 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
         kind,
         ...(op === undefined ? {} : { op }),
         ...(called === undefined ? {} : { called }),
+        ...(fault && { fault }),
       });
     }
     const { workflow } = scenario;

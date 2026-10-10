@@ -19,7 +19,7 @@ const graph = outlineGraph([
 
 const steps: ScenarioEntry["steps"] = [
   { text: 'a post titled "Old news" exists', kind: "given", op: "ghost.post.create" },
-  { text: "ghost.post.publish fails once", kind: "given", op: "ghost.post.publish" },
+  { text: "ghost.post.publish fails once", kind: "given", op: "ghost.post.publish", fault: true },
   { text: "announce runs", kind: "when" },
   { text: '"Review launch copy" is approved by marketing-lead', kind: "when" },
   { text: 'a post titled "Acme Pro" is created', kind: "then", op: "ghost.post.create", called: true },
@@ -35,13 +35,14 @@ const marks = (nodes: readonly GraphNode[]) =>
   });
 
 describe("annotateGraph", () => {
-  it("marks what the scenario seeds, expects and forbids on the operations it names, and nothing elsewhere", () => {
+  it("marks what the scenario seeds, fails, expects and forbids on the operations it names, and nothing elsewhere", () => {
     const marked = annotateGraph(graph, { steps });
     expect(marks(marked.nodes)).toEqual([
       "start -",
       "op:0 seeded expected",
       "approval:1 -",
-      "op:2 seeded",
+      // A fault is no seed.
+      "op:2 fails",
       "op:3 forbidden",
       "op:4 -",
       "end -",

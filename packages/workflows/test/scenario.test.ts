@@ -171,6 +171,14 @@ describe("parseFeature", () => {
       ["then", "ghost.post.create", false],
       ["then", undefined, undefined],
     ]);
+    // A Given that injects a fault says so; one that seeds does not.
+    expect(scenario!.steps[1]).toEqual({
+      text: "bluesky.post.create fails once",
+      kind: "given",
+      op: "bluesky.post.create",
+      fault: true,
+    });
+    expect(scenario!.steps[0]).not.toHaveProperty("fault");
   });
 
   it("reads a workflow's input from a two-column table", () => {

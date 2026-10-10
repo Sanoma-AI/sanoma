@@ -738,7 +738,9 @@ describe("the page", () => {
     expect(blogPage.text).toMatch(/&quot;id&quot;: &quot;post_0001&quot;/);
     // The scenario that names the operation, linking to its workflow with it chosen.
     expect(blogPage.html).toContain('href="/workflows/announce?scenario=Launch+on+time"');
-    expect(blogPage.text).toContain(">seeds<");
+    // What each scenario does with an operation: create is seeded and expected; publish fails
+    // once ("Publish retried"), is expected, and must not be called ("Copy rejected").
+    for (const label of ["seeds", "fails", "expects", "must not call"]) expect(blogPage.text).toContain(`>${label}<`);
     expect(blogPage.html).toContain('href="/workflows/announce"');
 
     // A vendor without a fake in `fakes` says so; its resource types are named.
