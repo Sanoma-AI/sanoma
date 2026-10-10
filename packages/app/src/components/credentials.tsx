@@ -1,4 +1,4 @@
-import { type CredentialStatus, credentialReady } from "@sanoma/workflows/shared";
+import { type CredentialStatus, credentialReady, errorMessage } from "@sanoma/workflows/shared";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
@@ -56,7 +56,7 @@ function CredentialRow({ credential: c }: { credential: CredentialStatus }) {
       toast.success(`${c.name} cleared`);
       await queryClient.invalidateQueries({ queryKey: credentialsQuery().queryKey });
     },
-    onError: (err) => toast.error(errorBodyOf(err)?.error ?? err.message),
+    onError: (err) => toast.error(errorMessage(err).trim() || `Could not clear ${c.name}, and no reason was given`),
   });
   return (
     <li className="flex flex-wrap items-center gap-1.5">
@@ -117,9 +117,12 @@ function SetDialog({
   const set = useServerFn(setCredentialFn);
   const mutation = useMutation({
     mutationFn: () => set({ data: { name, value } }),
+    // Dropped from the cache at once, with the closure that holds the value.
+    gcTime: 0,
     onSuccess: async () => {
       toast.success(`${name} set`);
       setValue("");
+      mutation.reset();
       onClose();
       await queryClient.invalidateQueries({ queryKey: credentialsQuery().queryKey });
     },
@@ -160,7 +163,10 @@ function SetDialog({
             <Input
               id={id}
               type="password"
-              autoComplete="off"
+              // What browsers and password managers honour: nothing to fill in, nothing to save.
+              autoComplete="new-password"
+              data-1p-ignore
+              data-lpignore="true"
               value={value}
               onChange={(e) => setValue(e.target.value)}
               disabled={mutation.isPending}
