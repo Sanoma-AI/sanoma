@@ -1,5 +1,4 @@
 import type { OpEntry } from "@sanoma/workflows/describe";
-import { type CredentialStatus, credentialReady } from "@sanoma/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { ExternalLinkIcon } from "lucide-react";
@@ -18,21 +17,24 @@ import {
   pageTitle,
   Section,
   SectionTitle,
-  ToneBadge,
   VendorLogo,
 } from "../../components/common.tsx";
+import { Credentials } from "../../components/credentials.tsx";
 import { ScenarioErrors } from "../../components/scenario.tsx";
 import { type ScenarioRoles, scenarioRoles } from "../../graph/scenario-graph.ts";
-import { configQuery, connectorNamed, scenariosNaming, scenariosQuery } from "../../queries.ts";
+import { configQuery, connectorNamed, credentialsQuery, scenariosNaming, scenariosQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/connectors/$vendor")({
-  // The page reads the config and the scenarios from the query client; the loader returns only
-  // its name: the connector's title.
+  // The page reads the config, the scenarios and the credentials from the query client; the
+  // loader returns only its name: the connector's title.
   loader: async ({ context: { queryClient }, params }) => {
     const config = await queryClient.query({ ...configQuery(), staleTime: "static" });
     const connector = connectorNamed(params.vendor)(config);
     if (!connector) throw notFound();
-    await queryClient.query({ ...scenariosQuery(), staleTime: "static" });
+    await Promise.all([
+      queryClient.query({ ...scenariosQuery(), staleTime: "static" }),
+      queryClient.query({ ...credentialsQuery(), staleTime: "static" }),
+    ]);
     return { crumb: connector.vendor.title };
   },
   // A connector that does not exist has no loader data: its id stands in.
@@ -69,7 +71,7 @@ function ConnectorPage() {
         </p>
       )}
       <ScenarioErrors errors={scenarios.errors} />
-      {vendor.credentials && <Credentials credentials={vendor.credentials} />}
+      <Credentials vendor={id} />
       <section className="flex flex-col gap-3">
         <SectionTitle>Operations</SectionTitle>
         {ops.length === 0 ? (
@@ -105,27 +107,6 @@ function ConnectorPage() {
         )}
       </section>
     </div>
-  );
-}
-
-/** The environment variables the vendor's drivers read: each one's manual and status, never its value. */
-function Credentials({ credentials }: { credentials: CredentialStatus[] }) {
-  return (
-    <section className="flex flex-col gap-3">
-      <SectionTitle>Credentials</SectionTitle>
-      <ul className="flex flex-col gap-1.5">
-        {credentials.map((c) => (
-          <li key={c.name} className="flex flex-wrap items-center gap-1.5">
-            <code>{c.name}</code>
-            <ToneBadge tone={!credentialReady(c) ? "bad" : c.status === "set" ? "ok" : "off"}>
-              {c.status === "invalid" ? `invalid: ${c.problem}` : c.status}
-            </ToneBadge>
-            {c.optional && <Badge variant="outline">optional</Badge>}
-            {c.description && <span className="text-muted-foreground">{c.description}</span>}
-          </li>
-        ))}
-      </ul>
-    </section>
   );
 }
 

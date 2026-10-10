@@ -179,14 +179,14 @@ describe("startWorker", () => {
 });
 
 describe("describeConfig", () => {
-  it("carries each vendor's credentials, without their values", async () => {
+  it("carries each vendor's declared variables, without a status or a value", async () => {
     vi.stubEnv(URL_VAR, undefined);
     vi.stubEnv(KEY_VAR, KEY);
     const { vendors } = await describeConfig(config);
-    expect(vendors.acme?.credentials?.map(({ name, status }) => [name, status])).toEqual([
-      [URL_VAR, "missing"],
-      [KEY_VAR, "set"],
-      [REGION_VAR, "missing"],
+    expect(vendors.acme?.credentials).toEqual([
+      { name: URL_VAR, description: "the account's API URL", optional: false },
+      { name: KEY_VAR, description: "an API key", optional: false },
+      { name: REGION_VAR, description: "the region; default us", optional: true },
     ]);
     expect(JSON.stringify(vendors)).not.toContain(KEY);
   });
