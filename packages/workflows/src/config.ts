@@ -1,8 +1,10 @@
 import { dirname, resolve } from "node:path";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
+import { DRIFT_WORKFLOW, driftWorkflow } from "./drift.ts";
 import type { LedgerStore } from "./ledger.ts";
 import { type Connector, type Driver, type DriverFn, isOp, type Op } from "./op.ts";
 import type { Policy } from "./policy.ts";
+import { resourceTypesOf } from "./resource.ts";
 import { computeVersion } from "./version.ts";
 
 /**
@@ -50,8 +52,15 @@ export interface ResolvedConfig {
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id. */
   drivers: Map<string, DriverFn>;
-  /** Each checked against `ops` and `drivers`; names are unique. */
+  /**
+   * Each checked against `ops` and `drivers`; names are unique. The config's, and the built-in
+   * `drift` when its connectors declare resource types.
+   */
   workflows: WorkflowDefinition<any, any>[];
+  /** The built-in drift workflow, also in `workflows`: absent when the connectors declare no resource types. */
+  drift?: WorkflowDefinition<any, any>;
+  /** The connectors, as given: the data files' constructors are matched to them. */
+  connectors: Connector<any, any>[];
   policy: Policy;
   ledger: LedgerStore;
   /**
@@ -106,6 +115,11 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const drivers = indexDrivers(config.drivers, ops);
   const names = new Map<string, WorkflowDefinition<any, any>>();
   for (const wf of config.workflows) {
+    if (wf.name === DRIFT_WORKFLOW) {
+      throw new Error(
+        `A workflow is named "${DRIFT_WORKFLOW}", the name of the built-in drift workflow; name it otherwise`,
+      );
+    }
     checkUses(wf, ops, drivers);
     const other = names.get(wf.name);
     if (other && other !== wf) {
@@ -115,14 +129,22 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     }
     names.set(wf.name, wf);
   }
+  // Built-in: checking the resources the data files declare against their vendors.
+  const types = resourceTypesOf(config.connectors);
+  const drift = types.size ? driftWorkflow(types, ops, drivers) : undefined;
+  if (drift) names.set(drift.name, drift);
+  const workflows = [...names.values()];
   return {
     appName,
     databaseUrl: resolveDatabaseUrl(config),
-    version: computeVersion(config),
+    // The built-in's code and operations are part of the app's version, like the config's own.
+    version: computeVersion({ appName: config.appName, workflows }),
     queueName: `sanoma:${appName}`,
     ops,
     drivers,
-    workflows: [...names.values()],
+    workflows,
+    ...(drift && { drift }),
+    connectors: config.connectors,
     policy: config.policy,
     ledger,
     ...(root !== undefined && { root }),

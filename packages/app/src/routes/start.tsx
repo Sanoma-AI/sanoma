@@ -6,7 +6,7 @@ import { Field, FieldGroup, FieldLabel, FieldSeparator } from "#/components/ui/f
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Nothing, Notice, PageHeader, pageTitle } from "../components/common.tsx";
 import { StartForm } from "../form/start-form.tsx";
-import { configQuery, workflowNamed } from "../queries.ts";
+import { configQuery } from "../queries.ts";
 
 export const Route = createFileRoute("/start")({
   validateSearch: z.object({ workflow: z.string().optional() }),
@@ -19,13 +19,15 @@ function StartPage() {
   const { workflow: wanted } = Route.useSearch();
   const navigate = Route.useNavigate();
   const { data: config } = useSuspenseQuery(configQuery());
+  // A built-in starts from its own page: drift, from Resources, on the data files as they are.
+  const workflows = config.workflows.filter((w) => !w.builtin);
 
-  const workflow = wanted === undefined ? config.workflows[0] : workflowNamed(wanted)(config);
+  const workflow = wanted === undefined ? workflows[0] : workflows.find((w) => w.name === wanted);
 
   return (
     <div className="flex max-w-2xl flex-col gap-6">
       <PageHeader />
-      {config.workflows.length === 0 ? (
+      {workflows.length === 0 ? (
         <Nothing title="This config has no workflows" />
       ) : (
         <Card>
@@ -52,7 +54,7 @@ function StartPage() {
                       Choose a workflow
                     </NativeSelectOption>
                   )}
-                  {config.workflows.map((w) => (
+                  {workflows.map((w) => (
                     <NativeSelectOption key={w.name} value={w.name}>
                       {w.title ? `${w.title} (${w.name})` : w.name}
                     </NativeSelectOption>

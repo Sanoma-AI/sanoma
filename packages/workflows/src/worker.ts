@@ -3,6 +3,7 @@ import { buildCtx, isInfrastructureError } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import type { WorkflowDefinition } from "./define.ts";
+import { isBuiltin } from "./drift.ts";
 import { errorInfo, parseOrThrow } from "./errors.ts";
 import { entry, skipped, write, writeFailure } from "./ledger.ts";
 import { warn } from "./log.ts";
@@ -38,7 +39,8 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   const resolved = resolveConfig(config);
   for (const wf of resolved.workflows) {
     const other = registered.get(wf.name)?.definition;
-    if (other && other !== wf) {
+    // A built-in is made afresh for each config, from its connectors: a run takes its worker's.
+    if (other && other !== wf && !(isBuiltin(other) && isBuiltin(wf))) {
       throw new Error(
         `Two different workflow definitions are named "${wf.name}"; a name can be registered once per process`,
       );
@@ -50,6 +52,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     drivers: resolved.drivers,
     policy: resolved.policy,
     ledger: resolved.ledger,
+    workflows: new Map(resolved.workflows.map((wf) => [wf.name, wf])),
     stopped: false,
   };
   for (const wf of resolved.workflows) {
@@ -136,12 +139,14 @@ async function warnAboutStrandedRuns({ appName, version, queueName }: ResolvedCo
   );
 }
 
-function register(wf: WorkflowDefinition<any, any>) {
+function register(registeredAs: WorkflowDefinition<any, any>) {
   return DBOS.registerWorkflow(
     async ({ input, startedBy }: RunArgs) => {
       const state = current;
       // A stopped worker's state stays current while DBOS shuts down.
-      if (!state || state.stopped) throw new Error(`Run of "${wf.name}" started with no worker running`);
+      if (!state || state.stopped) throw new Error(`Run of "${registeredAs.name}" started with no worker running`);
+      // The worker's own definition: the one registered, but for a built-in, made for its config.
+      const wf = state.workflows.get(registeredAs.name) ?? registeredAs;
       const run: Run = {
         id: DBOS.workflowID!,
         workflow: wf.name,
@@ -173,6 +178,6 @@ function register(wf: WorkflowDefinition<any, any>) {
       await write(run, entry(run, { type: "run.finished", output }));
       return output;
     },
-    { name: wf.name },
+    { name: registeredAs.name },
   );
 }

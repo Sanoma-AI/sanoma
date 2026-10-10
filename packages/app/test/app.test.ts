@@ -18,9 +18,9 @@ import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
 import { ghost } from "@sanoma/connector-ghost";
 import { fakeGhost } from "@sanoma/connector-ghost/fake";
 import { github } from "@sanoma/connector-github";
-import { fakeGithub } from "@sanoma/connector-github/fake";
 import { resend } from "@sanoma/connector-resend";
 import { fakeResend } from "@sanoma/connector-resend/fake";
+import { stripe } from "@sanoma/connector-stripe";
 import { testDatabaseUrl } from "@sanoma/testing";
 import {
   allow,
@@ -39,10 +39,11 @@ import {
 import { type ConfigDescription, describeConfig, outlineWorkflow } from "@sanoma/workflows/describe";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
+import { companyFakes } from "../../workflows/test/fixtures/company/fakes.ts";
 import { z } from "zod";
 import { type App, type ErrorResponse, type RunDetail, startApp } from "../src/index.ts";
-import { ApiError } from "../src/api.ts";
-import { asApiError, parse, withoutSources, workflowSource } from "../src/server/core.ts";
+import { ApiError, type ResourcesView } from "../src/api.ts";
+import { asApiError, dataFileSource, parse, withoutSources, workflowSource } from "../src/server/core.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it when
 // dist/server/server.js is missing or older than a file under src/.
@@ -79,14 +80,18 @@ const policy = definePolicy(
 );
 
 const blog = fakeGhost();
+// The workflows' company fixture: its data files, and GitHub and Stripe holding them as declared.
+const company = companyFakes();
+const companyDir = fileURLToPath(new URL("../../workflows/test/fixtures/company/", import.meta.url));
 const config = defineConfig({
   workflows: [announce],
-  connectors: [ghost, resend, bluesky, github],
-  drivers: [blog.driver, fakeResend().driver, fakeBluesky().driver, fakeGithub().driver],
+  connectors: [ghost, resend, bluesky, github, stripe],
+  drivers: [blog.driver, fakeResend().driver, fakeBluesky().driver, ...company.drivers],
   policy,
   ledger: memoryLedger(),
   appName: "sanoma-app-test",
   databaseUrl: testDatabaseUrl("app"),
+  root: companyDir,
 });
 
 let worker: Worker;
@@ -190,9 +195,11 @@ describe("the API", () => {
     expect(JSON.stringify(body)).not.toContain(line);
     expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.effect).toBe("send");
     expect(body.vendors.resend).toMatchObject({ title: "Resend", logo: { src: expect.stringMatching(/^data:/) } });
-    // No data files beside the config: no declared resources and no problems, passed through as they are.
-    expect(body.resources).toEqual([]);
+    // The data files under the config's root, without problems, passed through as they are.
+    expect(body.resources.map((r) => r.id)).toEqual(company.declared.map((r) => r.id));
     expect(body.problems).toEqual([]);
+    // And the built-in drift workflow, since the connectors declare resource types.
+    expect(body.workflows.find((w) => w.name === "drift")).toMatchObject({ builtin: true });
   });
 
   it("refuses a run without an actor, for an unknown workflow, or with input the schema refuses", async () => {
@@ -590,6 +597,90 @@ describe("the page", () => {
 // One more app on the file's database, to test four things a deployment may change: its own
 // resolveActor, listening on every interface, a ledger the worker does not write to, and data
 // files, one of them broken.
+describe("resources and drift", () => {
+  let driftRun: string;
+  let view: ResourcesView;
+  beforeAll(async () => {
+    // GitHub and Stripe hold what the data files declare, but for one field each.
+    company.seed();
+    company.github.override("repository", "website", { has_wiki: true });
+    company.stripe.override("product", "prod_SanomaFixturePro", { name: "Sanoma Professional" });
+    const started = await call<{ runId: string }>("/api/resources/drift", { method: "POST", actor: "alice" });
+    if (started.status !== 201) throw new Error(`POST /api/resources/drift answered ${started.status}`);
+    driftRun = started.body.runId;
+    view = await waitFor(
+      async () => (await call<ResourcesView>("/api/resources")).body,
+      (v) => v.lastReport?.runId === driftRun,
+    );
+  });
+
+  it("starts a drift check as the actor, and refuses one without an actor", async () => {
+    expect(view.latest?.startedBy).toEqual({ id: "alice" });
+    const anonymous = await call("/api/resources/drift", { method: "POST" });
+    expect(anonymous.status).toBe(400);
+    expect(anonymous.body.code).toBe("invalid_input");
+  });
+
+  it("answers the declared resources, and the latest drift run with its report", async () => {
+    expect(view.canDrift).toBe(true);
+    expect(view.resources.map((r) => r.id)).toEqual(company.declared.map((r) => r.id));
+    expect(view.problems).toEqual([]);
+    expect(view.latest).toMatchObject({
+      runId: driftRun,
+      workflow: "drift",
+      status: "finished",
+      startedBy: { id: "alice" },
+    });
+    expect(view.lastReport?.report.resources.filter((r) => r.status === "drifted")).toEqual([
+      expect.objectContaining({
+        id: "resources/billing/stripe.ts#pro",
+        fields: [{ path: "name", desired: "Sanoma Pro", actual: "Sanoma Professional" }],
+      }),
+      expect.objectContaining({
+        id: "resources/identity/github.ts#website",
+        fields: [{ path: "has_wiki", desired: false, actual: true }],
+      }),
+    ]);
+    expect(view.lastReport?.report.resources.filter((r) => r.status === "clean")).toHaveLength(4);
+  });
+
+  it("renders each resource with its drift badge, the fields that differ, and a link to the run", async () => {
+    const resources = await page("/resources");
+    expect(resources.status).toBe(200);
+    expect(resources.html).toMatch(/<h1[^>]*>Resources<\/h1>/);
+    expect(resources.text).toContain("<title>Resources · Sanoma</title>");
+    expect(resources.text).toContain(`href="/runs/${driftRun}"`);
+    expect(resources.text).toContain('href="/resources?resource=resources%2Fidentity%2Fgithub.ts%23website"');
+    expect(resources.text).toMatch(/>drifted: 1 field</);
+    expect(resources.text.match(/>clean</g)).toHaveLength(4);
+    // Each drifted field, as declared and as the vendor holds it.
+    expect(resources.text).toMatch(/<code>has_wiki<\/code>.*?<code>false<\/code>.*?<code>true<\/code>/s);
+    expect(resources.text).toMatch(
+      /<code>name<\/code>.*?<code>&quot;Sanoma Pro&quot;<\/code>.*?<code>&quot;Sanoma Professional&quot;<\/code>/s,
+    );
+    expect(resources.html).toContain('href="/resources"');
+    // A resource's declaration in its file, from the search: as plain text on the server.
+    const chosen = await page("/resources?resource=resources%2Fidentity%2Fgithub.ts%23website");
+    expect(chosen.text).toMatch(/<h2[^>]*><code>resources\/identity\/github\.ts<\/code><\/h2>/);
+  });
+
+  it("serves a data file the config names, and nothing else", async () => {
+    const context = { resolved: { root: companyDir } as never, description: describeConfig(config) };
+    expect(await dataFileSource(context, "resources/identity/rules.ts")).toEqual({
+      source: readFileSync(join(companyDir, "resources/identity/rules.ts"), "utf8"),
+    });
+    expect(await dataFileSource(context, "sanoma.config.ts")).toEqual({ source: null });
+    expect(await dataFileSource(context, "resources/../sanoma.config.ts")).toEqual({ source: null });
+  });
+
+  it("sends a built-in workflow to its page rather than the Start form", async () => {
+    const workflows = await page("/workflows");
+    expect(workflows.text).toMatch(/href="\/resources"[^>]*>.*?Run from Resources/s);
+    const start = await page("/start?workflow=drift");
+    expect(start.text).toContain("No workflow named “drift”.");
+  });
+});
+
 describe("an app configured otherwise", () => {
   let dir: string;
   let other: App;
@@ -635,6 +726,14 @@ describe("an app configured otherwise", () => {
         message: expect.stringMatching(/^export const docs: github\.repository: /),
       },
     ]);
+  });
+
+  it("shows the data files' problems on the resources page, and the resources it could read", async () => {
+    const resources = await page("/resources", other.url);
+    expect(resources.status).toBe(200);
+    expect(resources.text).toContain("1 problem in the data files: their resources are left out");
+    expect(resources.text).toMatch(/<code>resources\/bad\.ts:2:1<\/code> export const docs: github\.repository: /);
+    expect(resources.text).toContain("resources/good.ts#web");
   });
 
   const post = (user?: string) =>

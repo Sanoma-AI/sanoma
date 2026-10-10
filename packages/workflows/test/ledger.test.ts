@@ -154,7 +154,15 @@ const runOn = (ledger: LedgerStore): Run => ({
   tail: Promise.resolve(),
   inAll: false,
   ended: false,
-  state: { app: "acme", ops: new Map(), drivers: new Map(), policy: allowAll, ledger, stopped: false },
+  state: {
+    app: "acme",
+    ops: new Map(),
+    drivers: new Map(),
+    policy: allowAll,
+    ledger,
+    workflows: new Map(),
+    stopped: false,
+  },
 });
 
 describe("writing a run's records", () => {

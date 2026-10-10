@@ -36,6 +36,22 @@ export function StartButton({
   );
 }
 
+/**
+ * What starts the workflow: the Start page, or for a built-in, its own page. The one built-in,
+ * drift, runs from Resources, on the data files as they are then.
+ */
+export function StartAction({ workflow }: { workflow: Pick<WorkflowEntry, "name" | "builtin"> }) {
+  if (!workflow.builtin) return <StartButton name={workflow.name} />;
+  return (
+    <Button asChild variant="outline" size="sm">
+      <Link to="/resources">
+        <PlayIcon data-icon="inline-start" />
+        Run from Resources
+      </Link>
+    </Button>
+  );
+}
+
 /** What a workflow may call, the built-ins it uses and its input, one section each. */
 export function WorkflowSections({ workflow }: { workflow: WorkflowEntry }) {
   const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
