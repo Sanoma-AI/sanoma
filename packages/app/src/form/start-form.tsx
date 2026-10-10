@@ -19,7 +19,7 @@ import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import { errorMessage } from "@sanoma/workflows/shared";
-import { errorBodyOf } from "../api.ts";
+import { errorBodyOf, type ScenarioEntry, type StartRunRequest } from "../api.ts";
 import { Notice, Tip } from "../components/common.tsx";
 import { useStartRun } from "../queries.ts";
 import {
@@ -31,13 +31,18 @@ import {
   issueTarget,
   pathName,
   type ScalarField,
+  valuesFrom,
 } from "./schema.ts";
 
 /** When the input is not an object with properties, the whole input is one JSON field. */
 const WHOLE = "input";
 
-/** A form for a workflow's input, from its JSON Schema. Starts the run and opens it. */
-export function StartForm({ workflow }: { workflow: WorkflowEntry }) {
+/**
+ * A form for a workflow's input, from its JSON Schema. Starts the run and opens it. With
+ * `scenario`, it shows the scenario's input, read-only, and starts a sandbox run of it: the
+ * server takes the input from the scenario, not from the form.
+ */
+export function StartForm({ workflow, scenario }: { workflow: WorkflowEntry; scenario?: ScenarioEntry }) {
   const { fields, whole } = useMemo(() => {
     const read = fieldsOf(workflow.input);
     const all: SchemaField[] = read ?? [
@@ -45,7 +50,8 @@ export function StartForm({ workflow }: { workflow: WorkflowEntry }) {
     ];
     return { fields: all, whole: !read };
   }, [workflow.input]);
-  const form = useStartForm(workflow.name, fields, whole);
+  const form = useStartForm(workflow.name, fields, whole, scenario);
+  const disabled = scenario !== undefined;
 
   return (
     <form
@@ -57,7 +63,7 @@ export function StartForm({ workflow }: { workflow: WorkflowEntry }) {
     >
       <FieldGroup>
         {fields.map((field) => (
-          <FieldView key={field.key} form={form} field={field} path={[field.key]} />
+          <FieldView key={field.key} form={form} field={field} path={[field.key]} disabled={disabled} />
         ))}
         <form.Subscribe selector={(s) => [s.errorMap.onSubmit, s.isSubmitting] as const}>
           {([error, submitting]) => (
@@ -66,7 +72,7 @@ export function StartForm({ workflow }: { workflow: WorkflowEntry }) {
               <Field orientation="horizontal">
                 <Button type="submit" disabled={submitting}>
                   {submitting ? <Spinner data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}
-                  {submitting ? "Starting…" : `Start ${workflow.name}`}
+                  {submitting ? "Starting…" : disabled ? "Start sandbox run" : "Start run"}
                 </Button>
               </Field>
             </>
@@ -79,9 +85,15 @@ export function StartForm({ workflow }: { workflow: WorkflowEntry }) {
 
 type FormValues = Record<string, any>;
 
-function useStartForm(workflow: string, fields: SchemaField[], whole: boolean) {
+function useStartForm(workflow: string, fields: SchemaField[], whole: boolean, scenario?: ScenarioEntry) {
   const start = useStartRun();
-  const defaultValues = useMemo(() => initialValues(fields) as FormValues, [fields]);
+  const defaultValues = useMemo(
+    () =>
+      (scenario
+        ? valuesFrom(fields, whole ? { [WHOLE]: scenario.input } : scenario.input)
+        : initialValues(fields)) as FormValues,
+    [fields, whole, scenario],
+  );
   return useForm({
     defaultValues,
     validators: {
@@ -89,10 +101,16 @@ function useStartForm(workflow: string, fields: SchemaField[], whole: boolean) {
       // zod schema and answers with its issues, which land on the fields they name. Once it
       // has started, `useStartRun` moves the page on to the run.
       onSubmitAsync: async ({ value }) => {
-        const built = buildInput(fields, value);
-        if (Object.keys(built.errors).length) return { fields: built.errors };
+        // A sandbox run takes its input from the scenario, on the server.
+        let request: StartRunRequest;
+        if (scenario) request = { scenario: scenario.name };
+        else {
+          const built = buildInput(fields, value);
+          if (Object.keys(built.errors).length) return { fields: built.errors };
+          request = { workflow, input: whole ? built.input[WHOLE] : built.input };
+        }
         try {
-          await start.mutateAsync({ workflow, input: whole ? built.input[WHOLE] : built.input });
+          await start.mutateAsync(request);
           return undefined;
         } catch (err) {
           const body = errorBodyOf(err);
@@ -126,8 +144,14 @@ function useStartForm(workflow: string, fields: SchemaField[], whole: boolean) {
 
 type StartFormApi = ReturnType<typeof useStartForm>;
 
-/** One field, by its kind: a control, a set of controls, or a list with Add and Remove. */
-function FieldView({ form, field, path }: { form: StartFormApi; field: SchemaField; path: (string | number)[] }) {
+interface FieldProps {
+  form: StartFormApi;
+  /** Read-only: a scenario's input, shown, not entered. */
+  disabled: boolean;
+}
+
+/** One field, by its kind: a control, a set of controls, or a list with Add and Remove (unless disabled). */
+function FieldView({ form, field, path, disabled }: FieldProps & { field: SchemaField; path: (string | number)[] }) {
   const name = pathName(path);
   if (field.kind === "object") {
     return (
@@ -138,7 +162,7 @@ function FieldView({ form, field, path }: { form: StartFormApi; field: SchemaFie
         {field.description && <FieldDescription>{field.description}</FieldDescription>}
         <FieldGroup>
           {field.fields.map((sub) => (
-            <FieldView key={sub.key} form={form} field={sub} path={[...path, sub.key]} />
+            <FieldView key={sub.key} form={form} field={sub} path={[...path, sub.key]} disabled={disabled} />
           ))}
         </FieldGroup>
       </FieldSet>
@@ -161,29 +185,33 @@ function FieldView({ form, field, path }: { form: StartFormApi; field: SchemaFie
                 return (
                   <Field key={i} orientation="horizontal" className="items-start">
                     <FieldContent>
-                      <FieldView form={form} field={{ ...item, label }} path={[...path, i]} />
+                      <FieldView form={form} field={{ ...item, label }} path={[...path, i]} disabled={disabled} />
                     </FieldContent>
                     {/* The button's name says it already: hidden from the tooltip's description, so it is not read twice. */}
-                    <Tip tip={<span aria-hidden>{remove}</span>}>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => f.removeValue(i)}
-                        aria-label={remove}
-                      >
-                        <Trash2Icon />
-                      </Button>
-                    </Tip>
+                    {!disabled && (
+                      <Tip tip={<span aria-hidden>{remove}</span>}>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => f.removeValue(i)}
+                          aria-label={remove}
+                        >
+                          <Trash2Icon />
+                        </Button>
+                      </Tip>
+                    )}
                   </Field>
                 );
               })}
-              <Field orientation="horizontal">
-                <Button type="button" variant="outline" onClick={() => f.pushValue(initialValue(item, item.default))}>
-                  <PlusIcon data-icon="inline-start" />
-                  Add {item.kind === "object" ? "an item" : "a value"}
-                </Button>
-              </Field>
+              {!disabled && (
+                <Field orientation="horizontal">
+                  <Button type="button" variant="outline" onClick={() => f.pushValue(initialValue(item, item.default))}>
+                    <PlusIcon data-icon="inline-start" />
+                    Add {item.kind === "object" ? "an item" : "a value"}
+                  </Button>
+                </Field>
+              )}
             </FieldGroup>
             <Errors errors={f.state.meta.errors} />
           </FieldSet>
@@ -191,7 +219,7 @@ function FieldView({ form, field, path }: { form: StartFormApi; field: SchemaFie
       </form.Field>
     );
   }
-  return <ScalarView form={form} field={field} name={name} />;
+  return <ScalarView form={form} field={field} name={name} disabled={disabled} />;
 }
 
 /** The text-like kinds, each one <Input>. */
@@ -202,7 +230,7 @@ const INPUT_TYPE = {
   integer: { type: "number", step: 1 },
 } as const;
 
-function ScalarView({ form, field, name }: { form: StartFormApi; field: ScalarField; name: string }) {
+function ScalarView({ form, field, name, disabled }: FieldProps & { field: ScalarField; name: string }) {
   const id = `field-${name}`;
   return (
     <form.Field name={name}>
@@ -211,7 +239,7 @@ function ScalarView({ form, field, name }: { form: StartFormApi; field: ScalarFi
         const text = typeof value === "string" ? value : "";
         const invalid = f.state.meta.errors.length ? true : undefined;
         const onText = (e: { target: { value: string } }) => f.handleChange(e.target.value);
-        const common = { id, "aria-invalid": invalid, onBlur: f.handleBlur };
+        const common = { id, "aria-invalid": invalid, onBlur: f.handleBlur, disabled };
         const description = (
           <>
             {field.description && <FieldDescription>{field.description}</FieldDescription>}
@@ -224,6 +252,7 @@ function ScalarView({ form, field, name }: { form: StartFormApi; field: ScalarFi
             <Field orientation="horizontal" data-invalid={invalid}>
               <Checkbox
                 id={id}
+                disabled={disabled}
                 aria-invalid={invalid}
                 checked={value === true}
                 onCheckedChange={(checked) => f.handleChange(checked === true)}
@@ -244,9 +273,12 @@ function ScalarView({ form, field, name }: { form: StartFormApi; field: ScalarFi
           case "string":
           case "datetime":
           case "number":
-          case "integer":
-            control = <Input {...common} {...INPUT_TYPE[field.kind]} value={text} onChange={onText} />;
+          case "integer": {
+            // A read-only date-time is its ISO text (see `valuesFrom`), not a local one.
+            const type = disabled && field.kind === "datetime" ? INPUT_TYPE.string : INPUT_TYPE[field.kind];
+            control = <Input {...common} {...type} value={text} onChange={onText} />;
             break;
+          }
           case "enum":
             control = (
               <NativeSelect {...common} name={name} className="w-full" value={text} onChange={onText}>

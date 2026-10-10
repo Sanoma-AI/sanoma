@@ -139,8 +139,11 @@ export interface RunCheck extends Check {
   settled: boolean;
 }
 
-/** A scenario as the page lists it: what it says, not how the worker seeds and checks it. */
-export type ScenarioEntry = Pick<Scenario, "name" | "workflow" | "file" | "text" | "steps">;
+/**
+ * A scenario as the page lists it: what it says and the input its run starts with, not how the
+ * worker seeds and checks it.
+ */
+export type ScenarioEntry = Pick<Scenario, "name" | "workflow" | "file" | "text" | "steps" | "input">;
 
 /** `GET /api/scenarios`: every scenario, and why each feature file that could not be read could not. */
 export interface ScenariosResponse {

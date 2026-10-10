@@ -181,10 +181,6 @@ async function page(path: string, base = app.url) {
   return { status: res.status, html, text: html.replaceAll("<!-- -->", "") };
 }
 
-/** The Test control's buttons, as the workflow page renders them: its group's inner HTML. */
-const testControl = (html: string) =>
-  html.match(/<div role="group" data-slot="button-group"[^>]*aria-label="Test a scenario"[^>]*>(.*?)<\/div>/)?.[1];
-
 /** The runs announce's rail links to, sorted, with `?runs=<filter>` kept on each link. */
 const railRunIds = (html: string, filter: string) =>
   [...html.matchAll(new RegExp(`href="/workflows/announce/runs/([^"?]+)\\?runs=${filter}"`, "g"))]
@@ -574,10 +570,13 @@ describe("scenarios that no longer load", () => {
       const run = await page(`/workflows/announce/runs/${sandboxId}`);
       expect(run.html).toMatch(/<h2[^>]*>Checks<\/h2>/);
       expect(run.text).toContain("Could not check the run against its scenario: The feature files no longer have");
-      // A workflow with no scenarios still has its Test control, enabled: it opens the menu, which says so.
-      const workflow = await page("/workflows/announce");
-      expect(testControl(workflow.text)).toMatch(/>Test<\/button><button[^>]*aria-label="Scenario"/);
-      expect(testControl(workflow.text)).not.toContain('disabled=""');
+      // A workflow with no scenarios has its New run pane's Sandbox disabled, and says why.
+      const pane = await page("/workflows/announce/new");
+      expect(pane.text).toContain("Could not read a scenario: announce.feature:3");
+      expect(pane.html).toMatch(
+        /<button[^>]*aria-pressed="false"[^>]*disabled=""[^>]*>(<svg.*?<\/svg>)?Sandbox<\/button>/,
+      );
+      expect(pane.text).toContain("No scenarios for this workflow yet");
       // A connector's page says why too, above its operations.
       const connector = await page("/connectors/ghost");
       expect(connector.text).toMatch(
@@ -782,11 +781,17 @@ describe("the page", () => {
     expect(workflows.html).toContain('href="/workflows/announce/new"');
   });
 
-  it("renders the start form on the server", async () => {
-    const start = await page("/start");
-    expect(start.status).toBe(200);
-    expect(start.html).toContain('id="field-title"');
-    expect(start.html).toContain('type="datetime-local"');
+  it("redirects the old Start page to the workflow's New run pane, or to the workflows when it names none", async () => {
+    const redirected = async (path: string) => {
+      const res = await fetch(new URL(path, app.url), { redirect: "manual" });
+      expect(res.status, path).toBe(307);
+      return res.headers.get("location");
+    };
+    expect(await redirected("/start?workflow=announce")).toMatch(/\/workflows\/announce\/new$/);
+    for (const path of ["/start", "/start?workflow=nope"]) expect(await redirected(path), path).toMatch(/\/workflows$/);
+    // A search value the router reads as a number names no workflow: the router drops it first.
+    const numeric = await fetch(new URL("/start?workflow=123", app.url));
+    expect(new URL(numeric.url).pathname).toBe("/workflows");
   });
 
   it("lists the connectors, each linking to its page, without their operations", async () => {
@@ -815,8 +820,8 @@ describe("the page", () => {
     expect(blogPage.html).toMatch(/>Mock<\/h3>/);
     expect(blogPage.text).toContain(">Called with<");
     expect(blogPage.text).toMatch(/&quot;id&quot;: &quot;post_0001&quot;/);
-    // The scenario that names the operation, linking to its workflow with it chosen.
-    expect(blogPage.html).toContain('href="/workflows/announce?scenario=Launch+on+time"');
+    // The scenario that names the operation, linking to its workflow's New run pane in Sandbox mode with it chosen.
+    expect(blogPage.html).toContain('href="/workflows/announce/new?scenario=Launch+on+time"');
     // What each scenario does with an operation: create is seeded and expected; publish fails
     // once ("Publish retried"), is expected, and must not be called ("Copy rejected").
     for (const label of ["seeds", "fails", "expects", "must not call"]) expect(blogPage.text).toContain(`>${label}<`);
@@ -854,34 +859,18 @@ describe("the page", () => {
     expect(missing.text).toContain("No workflow nope");
   });
 
-  it("renders a workflow's scenario, the Test control, and says when a scenario does not exist", async () => {
-    const chosen = await page(`/workflows/announce?scenario=${encodeURIComponent(SCENARIO)}`);
-    expect(chosen.status).toBe(200);
-    // One split control: Test, naming the chosen scenario, and the menu that chooses one.
-    expect(chosen.html).toMatch(
-      /<div role="group" data-slot="button-group"[^>]*><button[^>]*>.*?Test “Launch on time”<\/button><button[^>]*aria-label="Scenario"/,
-    );
-    // The scenario's own lines, not the rest of its file.
-    const shown = [...chosen.text.matchAll(/<pre[^>]*>([^<]*)<\/pre>/g)]
-      .map(([, text]) => text!)
-      .find((text) => text.startsWith("Scenario: Launch on time\n"));
-    expect(shown).toBeDefined();
-    expect(shown).not.toContain("Feature:");
-    expect(shown).not.toContain("Publish retried");
-    expect(chosen.text).toContain("From <code>announce.feature</code>");
-
-    const unknown = await page("/workflows/announce?scenario=nope");
-    expect(unknown.status).toBe(200);
-    expect(unknown.text).toContain("No scenario named “nope”");
-    // With none chosen, Test opens the menu, and is enabled.
-    const control = testControl(unknown.text);
-    expect(control).toMatch(/>Test<\/button><button[^>]*aria-label="Scenario"/);
-    expect(control).toContain('aria-haspopup="menu"');
-    expect(control).not.toContain('disabled=""');
-
-    // A search value the router reads as a number is no scenario (or workflow), not a crash.
-    expect((await page("/workflows/announce?scenario=123")).status).toBe(200);
-    expect((await page("/start?workflow=123")).status).toBe(200);
+  it("renders a workflow's About without scenarios: no Test control, and ?scenario= left alone", async () => {
+    for (const path of [
+      `/workflows/announce?scenario=${encodeURIComponent(SCENARIO)}`,
+      "/workflows/announce?scenario=nope",
+    ]) {
+      const about = await page(path);
+      expect(about.status, path).toBe(200);
+      expect(about.text, path).not.toContain('aria-label="Test a scenario"');
+      expect(about.text, path).not.toContain("Test “");
+      expect(about.text, path).not.toContain("No scenario named");
+      expect(about.html, path).not.toMatch(/<pre[^>]*>Scenario: /);
+    }
   });
 
   it("renders a sandbox run: its badge, its checks and its seeding, and its badge in the runs", async () => {
@@ -976,6 +965,56 @@ describe("the page", () => {
     expect(await rawStatus(app.url, "/api/config", { host: "attacker.example:80" })).toBe(403);
   });
   // wave 2 B: New run
+  it("renders the New run pane live: the start form, Live vendors and Sandbox, and the vendors it calls for real", async () => {
+    const pane = await page("/workflows/announce/new");
+    expect(pane.status).toBe(200);
+    expect(pane.html).toContain('id="field-title"');
+    expect(pane.html).toContain('type="datetime-local"');
+    expect(pane.html).toMatch(/<button[^>]*aria-pressed="true"[^>]*>(<svg.*?<\/svg>)?Live vendors<\/button>/);
+    expect(pane.html).toMatch(/<button[^>]*aria-pressed="false"[^>]*>(<svg.*?<\/svg>)?Sandbox<\/button>/);
+    expect(pane.text).toContain("Calls Bluesky, Ghost, Resend for real");
+    expect(pane.text).toContain(">Start run<");
+    expect(pane.text).not.toContain("Nothing leaves Sanoma");
+    // The sidebar has no Start page any more.
+    expect(pane.html).not.toContain('href="/start');
+  });
+
+  it("renders the New run pane in Sandbox mode: the scenario's input read-only, and the scenario", async () => {
+    const { body } = await call<ScenariosResponse>("/api/scenarios");
+    const launch = body.scenarios.find((s) => s.name === SCENARIO)!;
+    // Only the fields its When sets: the rest are made up.
+    expect(launch.input).toMatchObject({ title: "Acme Pro", launchAt: "2030-01-01T09:00:00Z" });
+    const { title } = launch.input as { title: string };
+
+    const pane = await page("/workflows/announce/new?scenario=Launch+on+time");
+    expect(pane.status).toBe(200);
+    const titleInput = pane.html.match(/<input[^>]*id="field-title"[^>]*>/)?.[0];
+    expect(titleInput).toContain('disabled=""');
+    expect(titleInput).toContain(`value="${title}"`);
+    // A date-time as the scenario gives it, not in this process's time zone.
+    expect(pane.html).not.toContain('type="datetime-local"');
+    expect(pane.html).toMatch(/<input[^>]*id="field-launchAt"[^>]*value="2030-01-01T09:00:00Z"/);
+    expect(pane.html).toMatch(/<button[^>]*aria-pressed="true"[^>]*>(<svg.*?<\/svg>)?Sandbox<\/button>/);
+    expect(pane.html).toMatch(/<select[^>]*aria-label="Scenario"/);
+    expect(pane.text).toContain(
+      "Nothing leaves Sanoma: the scenario supplies the input and the fakes answer the calls.",
+    );
+    expect(pane.text).not.toContain("for real");
+    expect(pane.text).toContain(">Start sandbox run<");
+    // The scenario's text is behind its disclosure, closed until opened in the browser.
+    expect(pane.html).toMatch(/<button[^>]*aria-expanded="false"[^>]*>(<svg.*?<\/svg>)?Scenario<\/button>/);
+
+    const unknown = await page("/workflows/announce/new?scenario=nope");
+    expect(unknown.status).toBe(200);
+    expect(unknown.text).toContain("No scenario named “nope”");
+    expect(unknown.html).toMatch(/<select[^>]*aria-label="Scenario"/);
+    expect(unknown.html).not.toContain('id="field-title"');
+
+    // A search value the router reads as a number is no scenario: Live.
+    const numeric = await page("/workflows/announce/new?scenario=123");
+    expect(numeric.status).toBe(200);
+    expect(numeric.text).toContain(">Start run<");
+  });
 });
 
 // One more app on the file's database, to test four things a deployment may change: its own
@@ -1066,12 +1105,13 @@ describe("resources and drift", () => {
     expect(chosen.text).toMatch(/<h2[^>]*><code>resources\/identity\/github\.ts<\/code><\/h2>/);
   });
 
-  it("lists the built-in drift workflow like any other, labelled built-in, with its Run, and starts it from the Start page", async () => {
+  it("lists the built-in drift workflow like any other, labelled built-in, with its Run, and starts it from its New run pane", async () => {
     const workflows = await page("/workflows");
     expect(workflows.text).toContain(">built-in<");
     expect(workflows.text).toContain('href="/workflows/drift/new"');
-    const start = await page("/start?workflow=drift");
-    expect(start.text).not.toContain("No workflow named");
+    const start = await page("/workflows/drift/new");
+    expect(start.status).toBe(200);
+    expect(start.text).toContain(">Start run<");
   });
   // wave 2 C: Home
   it("toggles the home between a card per workflow and every run, each view its own link", async () => {

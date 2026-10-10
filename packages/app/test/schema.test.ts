@@ -8,6 +8,7 @@ import {
   initialValues,
   issueTarget,
   toLocalInput,
+  valuesFrom,
 } from "../src/form/schema.ts";
 import { jsonSchemaOf } from "../../workflows/src/define.ts";
 
@@ -112,6 +113,31 @@ describe("buildInput", () => {
   it("names the fields whose values it cannot read", () => {
     const { errors } = filled({ count: "three", extra: "{", launchAt: "not a time", people: [{ name: "" }] });
     expect(errors).toEqual({ count: "Not a number", extra: "Not valid JSON", launchAt: "Not a date and time" });
+  });
+});
+
+describe("valuesFrom", () => {
+  it("shows a given input as the form holds it, defaults where it has none, and date-times as given", () => {
+    const values = valuesFrom(fields, {
+      title: "Launch",
+      launchAt: "2030-01-01T09:00:00Z",
+      channel: "email",
+      people: [{ name: "Ann" }],
+      extra: { k: 1 },
+    });
+    expect(values).toMatchObject({
+      title: "Launch",
+      note: "",
+      count: "1",
+      launchAt: "2030-01-01T09:00:00Z",
+      channel: "1",
+      tags: [],
+      people: [{ name: "Ann", email: "" }],
+      details: { owner: "" },
+      extra: '{\n  "k": 1\n}',
+    });
+    // Not an object: each field's default.
+    expect(valuesFrom(fields, null)).toEqual(initialValues(fields));
   });
 });
 
