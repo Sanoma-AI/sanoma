@@ -1,9 +1,10 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, notFound } from "@tanstack/react-router";
+import { Badge } from "#/components/ui/badge.tsx";
 import { Card, CardContent } from "#/components/ui/card.tsx";
 import { loadCode, loadGraph, Notice, PageHeader, pageTitle } from "../../components/common.tsx";
-import { GraphAndSource, StartAction, WorkflowSections } from "../../components/workflow.tsx";
-import { configQuery, sourceQuery, workflowNamed } from "../../queries.ts";
+import { GraphAndSource, StartButton, WorkflowSections } from "../../components/workflow.tsx";
+import { configQuery, sourceQuery, workflowFile, workflowNamed } from "../../queries.ts";
 
 export const Route = createFileRoute("/workflows/$name")({
   // The page reads the config and the source from the query client; the loader returns only its
@@ -16,7 +17,8 @@ export const Route = createFileRoute("/workflows/$name")({
     const config = await queryClient.query({ ...configQuery(), staleTime: "static" });
     const workflow = workflowNamed(params.name)(config);
     if (!workflow) throw notFound();
-    await queryClient.query({ ...sourceQuery(params.name), staleTime: "static" });
+    const file = workflowFile(workflow);
+    if (file !== undefined) await queryClient.query({ ...sourceQuery(file), staleTime: "static" });
     return { crumb: workflow.title ?? workflow.name };
   },
   // A workflow that does not exist has no loader data: its name stands in.
@@ -33,8 +35,9 @@ function WorkflowPage() {
   });
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader action={<StartAction workflow={workflow} />}>
+      <PageHeader action={<StartButton name={workflow.name} />}>
         <code className="text-muted-foreground">{workflow.name}</code>
+        {workflow.builtin && <Badge variant="secondary">built-in</Badge>}
       </PageHeader>
       <GraphAndSource key={name} workflow={workflow} />
       <Card>

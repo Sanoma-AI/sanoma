@@ -23,8 +23,6 @@ import { Route as RunsIndexRouteImport } from './routes/runs/index'
 import { Route as RunsIdRouteImport } from './routes/runs/$id'
 import { Route as WorkflowsIndexRouteImport } from './routes/workflows/index'
 import { Route as WorkflowsNameRouteImport } from './routes/workflows/$name'
-import { Route as ApiResourcesIndexRouteImport } from './routes/api/resources/index'
-import { Route as ApiResourcesDriftRouteImport } from './routes/api/resources/drift'
 import { Route as ApiRunsIndexRouteImport } from './routes/api/runs/index'
 import { Route as ApiRunsIdIndexRouteImport } from './routes/api/runs/$id/index'
 import { Route as ApiRunsIdApprovalsApprovalIdRouteImport } from './routes/api/runs/$id/approvals/$approvalId'
@@ -99,16 +97,6 @@ const WorkflowsNameRoute = WorkflowsNameRouteImport.update({
   path: '/$name',
   getParentRoute: () => WorkflowsRouteRoute,
 } as any)
-const ApiResourcesIndexRoute = ApiResourcesIndexRouteImport.update({
-  id: '/resources/',
-  path: '/resources/',
-  getParentRoute: () => ApiRoute,
-} as any)
-const ApiResourcesDriftRoute = ApiResourcesDriftRouteImport.update({
-  id: '/resources/drift',
-  path: '/resources/drift',
-  getParentRoute: () => ApiRoute,
-} as any)
 const ApiRunsIndexRoute = ApiRunsIndexRouteImport.update({
   id: '/runs/',
   path: '/runs/',
@@ -141,8 +129,6 @@ export interface FileRoutesByFullPath {
   '/workflows/$name': typeof WorkflowsNameRoute
   '/runs/': typeof RunsIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
-  '/api/resources/drift': typeof ApiResourcesDriftRoute
-  '/api/resources/': typeof ApiResourcesIndexRoute
   '/api/runs/': typeof ApiRunsIndexRoute
   '/api/runs/$id/': typeof ApiRunsIdIndexRoute
   '/api/runs/$id/approvals/$approvalId': typeof ApiRunsIdApprovalsApprovalIdRoute
@@ -160,8 +146,6 @@ export interface FileRoutesByTo {
   '/workflows/$name': typeof WorkflowsNameRoute
   '/runs': typeof RunsIndexRoute
   '/workflows': typeof WorkflowsIndexRoute
-  '/api/resources/drift': typeof ApiResourcesDriftRoute
-  '/api/resources': typeof ApiResourcesIndexRoute
   '/api/runs': typeof ApiRunsIndexRoute
   '/api/runs/$id': typeof ApiRunsIdIndexRoute
   '/api/runs/$id/approvals/$approvalId': typeof ApiRunsIdApprovalsApprovalIdRoute
@@ -182,8 +166,6 @@ export interface FileRoutesById {
   '/workflows/$name': typeof WorkflowsNameRoute
   '/runs/': typeof RunsIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
-  '/api/resources/drift': typeof ApiResourcesDriftRoute
-  '/api/resources/': typeof ApiResourcesIndexRoute
   '/api/runs/': typeof ApiRunsIndexRoute
   '/api/runs/$id/': typeof ApiRunsIdIndexRoute
   '/api/runs/$id/approvals/$approvalId': typeof ApiRunsIdApprovalsApprovalIdRoute
@@ -205,8 +187,6 @@ export interface FileRouteTypes {
     | '/workflows/$name'
     | '/runs/'
     | '/workflows/'
-    | '/api/resources/drift'
-    | '/api/resources/'
     | '/api/runs/'
     | '/api/runs/$id/'
     | '/api/runs/$id/approvals/$approvalId'
@@ -224,8 +204,6 @@ export interface FileRouteTypes {
     | '/workflows/$name'
     | '/runs'
     | '/workflows'
-    | '/api/resources/drift'
-    | '/api/resources'
     | '/api/runs'
     | '/api/runs/$id'
     | '/api/runs/$id/approvals/$approvalId'
@@ -245,8 +223,6 @@ export interface FileRouteTypes {
     | '/workflows/$name'
     | '/runs/'
     | '/workflows/'
-    | '/api/resources/drift'
-    | '/api/resources/'
     | '/api/runs/'
     | '/api/runs/$id/'
     | '/api/runs/$id/approvals/$approvalId'
@@ -363,20 +339,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkflowsNameRouteImport
       parentRoute: typeof WorkflowsRouteRoute
     }
-    '/api/resources/': {
-      id: '/api/resources/'
-      path: '/resources'
-      fullPath: '/api/resources/'
-      preLoaderRoute: typeof ApiResourcesIndexRouteImport
-      parentRoute: typeof ApiRoute
-    }
-    '/api/resources/drift': {
-      id: '/api/resources/drift'
-      path: '/resources/drift'
-      fullPath: '/api/resources/drift'
-      preLoaderRoute: typeof ApiResourcesDriftRouteImport
-      parentRoute: typeof ApiRoute
-    }
     '/api/runs/': {
       id: '/api/runs/'
       path: '/runs'
@@ -432,8 +394,6 @@ const WorkflowsRouteRouteWithChildren = WorkflowsRouteRoute._addFileChildren(
 interface ApiRouteChildren {
   ApiSplatRoute: typeof ApiSplatRoute
   ApiConfigRoute: typeof ApiConfigRoute
-  ApiResourcesDriftRoute: typeof ApiResourcesDriftRoute
-  ApiResourcesIndexRoute: typeof ApiResourcesIndexRoute
   ApiRunsIndexRoute: typeof ApiRunsIndexRoute
   ApiRunsIdIndexRoute: typeof ApiRunsIdIndexRoute
   ApiRunsIdApprovalsApprovalIdRoute: typeof ApiRunsIdApprovalsApprovalIdRoute
@@ -442,8 +402,6 @@ interface ApiRouteChildren {
 const ApiRouteChildren: ApiRouteChildren = {
   ApiSplatRoute: ApiSplatRoute,
   ApiConfigRoute: ApiConfigRoute,
-  ApiResourcesDriftRoute: ApiResourcesDriftRoute,
-  ApiResourcesIndexRoute: ApiResourcesIndexRoute,
   ApiRunsIndexRoute: ApiRunsIndexRoute,
   ApiRunsIdIndexRoute: ApiRunsIdIndexRoute,
   ApiRunsIdApprovalsApprovalIdRoute: ApiRunsIdApprovalsApprovalIdRoute,

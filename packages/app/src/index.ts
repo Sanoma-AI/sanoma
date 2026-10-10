@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { errorMessage, resolveConfig, SanomaClient, type SanomaConfig } from "@sanoma/workflows";
+import { errorMessage, problemAt, resolveConfig, SanomaClient, type SanomaConfig } from "@sanoma/workflows";
 import { describeConfig } from "@sanoma/workflows/describe";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import type { AppContext, ResolveActor } from "./context.ts";
@@ -52,7 +52,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   const description = describeConfig(config);
   // Broken data files do not stop the app: it shows the resources it could read, and the problems.
   if (description.problems.length) {
-    const lines = description.problems.map((p) => `  ${p.file ? `${p.file}:${p.line}:${p.column}: ` : ""}${p.message}`);
+    const lines = description.problems.map((p) => `  ${p.file === undefined ? "" : `${problemAt(p)}: `}${p.message}`);
     console.warn(`sanoma app: the data files have problems; their resources are left out:\n${lines.join("\n")}`);
   }
   const distDir = resolve(options.distDir ?? defaultDistDir());
