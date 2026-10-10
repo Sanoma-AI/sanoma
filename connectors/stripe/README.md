@@ -59,7 +59,7 @@ When it is unset, a call fails, not retryable, naming it. The bridge passes it t
 
 ### Errors and retries
 
-As for GitHub: the bridge's errors become `DriverError`s with its code as `vendorCode` and the provider's diagnostics in the message, retryable only on `unavailable`, after which the provider is configured again. A Stripe error (a bad key, an id that does not exist) comes back from the provider as a failed import (`failed_precondition`) with Stripe's message, the key masked.
+As for GitHub: the bridge's errors become `DriverError`s with its code as `vendorCode` and the provider's diagnostics in the message, retryable only on `unavailable`, after which the provider is configured again. A Stripe error (a bad key, an id that does not exist) comes back from the provider as a failed import (`failed_precondition`) with Stripe's message, the key masked. Only the bridge's `not_found` counts as gone for now (the connector's `missing` is the default): how the provider reports a missing object is not recorded yet.
 
 ## Testing
 
@@ -72,6 +72,6 @@ const fake = fakeStripe();
 fake.override("product", "prod_SanomaTest0001", { name: "Renamed" }); // drift: the next read returns it
 ```
 
-It has `remove` and the faults every fake has, like `fakeGithub`. `@sanoma/testing` re-exports `fakeStripe`.
+It has `put`, `remove` and the faults every fake has, like `fakeGithub`. Import it from `@sanoma/connector-stripe/fake`.
 
 License: Apache-2.0.

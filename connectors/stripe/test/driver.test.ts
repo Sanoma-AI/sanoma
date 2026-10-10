@@ -48,11 +48,11 @@ describe("stripeDriver", () => {
     expect(calls()).toEqual([]);
   });
 
-  it("fails, not retryable, for an id nothing answers to", async () => {
-    const err = await call(stripeDriver({ bridge }), "webhook_endpoint.import", { id: "we_missing" }).catch(
-      (e: unknown) => e,
-    );
-    expect(err).toMatchObject({ retryable: false, vendorCode: "not_found" });
+  it("answers gone for an id nothing answers to", async () => {
+    expect(await call(stripeDriver({ bridge }), "webhook_endpoint.import", { id: "we_missing" })).toEqual({
+      id: "we_missing",
+      gone: true,
+    });
   });
 });
 

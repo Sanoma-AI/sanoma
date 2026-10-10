@@ -37,6 +37,7 @@ import { recorder } from "./record.ts";
 import type { BridgeCall } from "./replies.ts";
 import { parseSchema, type SchemaDocument } from "./schema.ts";
 
+export type { FixtureError } from "./fixtures.ts";
 export { fixturesDir } from "./pins.ts";
 export {
   type BridgeCall,

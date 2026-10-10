@@ -63,7 +63,7 @@ When it is unset, a call fails, not retryable, naming it. The bridge passes it t
 
 ### Errors and retries
 
-The bridge's errors become `DriverError`s whose `vendorCode` is the bridge's code and whose message carries the provider's diagnostics. `unavailable` (the provider process failed or exited) is retryable, and the next try configures the provider again; anything else is not. GitHub's provider reports an object that does not exist as a failed import (`failed_precondition`, "could not find a branch protection rule with the pattern 'main'"), not as `not_found`.
+The bridge's errors become `DriverError`s whose `vendorCode` is the bridge's code and whose message carries the provider's diagnostics. `unavailable` (the provider process failed or exited) is retryable, and the next try configures the provider again; anything else is not. GitHub's provider reports an object that does not exist as a failed import (`failed_precondition`, "could not find a branch protection rule with the pattern 'main'"), not as `not_found`; the connector's `missing` says so, so `import` answers `{ gone: true }` for it, as for `not_found`.
 
 ## Testing
 
@@ -75,10 +75,11 @@ import { fakeGithub } from "@sanoma/connector-github/fake";
 const fake = fakeGithub();
 const worker = await startWorker({ connectors: [github], drivers: [fake.driver] /* , ... */ });
 
+fake.put("repository", "website", { name: "website", has_wiki: false }, { from: "sanoma" }); // a copy of a recorded one
 fake.override("repository", "sanoma", { delete_branch_on_merge: true }); // drift: the next read returns it
-fake.remove("repository", "sanoma"); // the next read says it is gone
+fake.remove("repository", "sanoma"); // the next read and import say it is gone
 ```
 
-`override` takes fields in the resource's shape, as a read returns them (a block of one is an object). It has the faults every fake has (`failNext`, `loseReply`, `rateLimit`, `hold`, `reset`, `update`); see [Fakes for tests](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#fakes-for-tests). `@sanoma/testing` re-exports `fakeGithub`.
+`put` and `override` take fields in the resource's shape, as a read returns them (a block of one is an object). `remove` answers an import as the provider does: a branch protection rule with the provider's `failed_precondition` diagnostic, anything else `not_found`. It has the faults every fake has (`failNext`, `loseReply`, `rateLimit`, `hold`, `reset`, `update`); see [Fakes for tests](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#fakes-for-tests). Import it from `@sanoma/connector-github/fake`.
 
 License: Apache-2.0.
