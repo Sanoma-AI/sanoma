@@ -99,6 +99,7 @@ export {
   type RunStatus,
 } from "./shared.ts";
 // lintWorkflow lives at `@sanoma/workflows/lint`, and describeConfig with the outline at
-// `@sanoma/workflows/describe`, so the runtime never loads oxc-parser.
+// `@sanoma/workflows/describe`: what a UI renders from, apart from what runs. The worker reads
+// each workflow's outline too, to hold its runs to it.
 export { defineDriver, type DriverImpl, type OpIdOf } from "./op.ts";
 // defineFake lives at `@sanoma/workflows/fake`: test tooling, not runtime.

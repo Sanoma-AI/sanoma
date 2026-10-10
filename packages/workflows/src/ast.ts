@@ -6,9 +6,13 @@ import { parseSync, visitorKeys } from "oxc-parser";
 /** oxc-parser's ESTree nodes, read by shape. */
 export type Node = any;
 
-/** Parses TypeScript, which covers the JavaScript a built package holds, as a module. */
+/** Parses TypeScript, which covers the JavaScript a built package holds, as a module; a `.tsx` or `.jsx` file with its JSX. */
 export const parse = (filename: string, source: string) =>
-  parseSync(filename, source, { lang: "ts", sourceType: "module", preserveParens: false });
+  parseSync(filename, source, {
+    lang: /\.[jt]sx$/.test(filename) ? "tsx" : "ts",
+    sourceType: "module",
+    preserveParens: false,
+  });
 
 // The keys that hold types, not code: nothing the lint or the outline looks for is in them.
 const TYPE_KEYS = new Set([
@@ -27,15 +31,39 @@ const CODE_KEYS = new Map(
 /** A node's children in source order, by oxc-parser's `visitorKeys`, without its types. A hole in a list is `null`. */
 export const childrenOf = (node: Node): Node[] => (CODE_KEYS.get(node.type) ?? []).flatMap((key) => node[key] ?? []);
 
-/** Where an offset into `source` is, as a line and a column, both from 1. */
-export function locator(source: string): (offset: number) => { line: number; column: number } {
+/**
+ * The offset each line of `source` starts at, from line 1, and one past the end of the text as
+ * the start of the line after the last: where each line ends is the next start, less its `\n`.
+ */
+export const lineStartsOf = (source: string): number[] => {
   const lineStarts = [0];
   for (let i = 0; i < source.length; i++) if (source[i] === "\n") lineStarts.push(i + 1);
+  lineStarts.push(source.length + 1);
+  return lineStarts;
+};
+
+/** Where an offset into `source` is, as a line and a column, both from 1. */
+export function locator(source: string): (offset: number) => { line: number; column: number } {
+  const lineStarts = lineStartsOf(source);
   return (offset) => {
     let line = 0;
     while (line + 1 < lineStarts.length && lineStarts[line + 1]! <= offset) line++;
     return { line: line + 1, column: offset - lineStarts[line]! + 1 };
   };
+}
+
+/**
+ * The offset into a text of a line and column, both from 1, as a stack frame gives them, from
+ * the text's `lineStartsOf`; or undefined when the text has no such line, or the line no such
+ * column (a frame mapped wrong must not land in the next line). The column is taken as a UTF-16
+ * unit index, as V8 counts it.
+ */
+export function offsetOf(lineStarts: readonly number[], line: number, column: number): number | undefined {
+  const start = lineStarts[line - 1];
+  const next = lineStarts[line];
+  if (line < 1 || column < 1 || start === undefined || next === undefined) return undefined;
+  const offset = start + column - 1;
+  return offset < next - 1 ? offset : undefined;
 }
 
 /** Something wrong in a file, at a line and column from 1. */

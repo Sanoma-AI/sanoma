@@ -11,8 +11,7 @@ import { type ResourceFields, resourceTypesOf } from "./resource.ts";
 import { type DeclaredResource, readDataFiles, type ResourceProblem } from "./resources.ts";
 import { errorMessage } from "./shared.ts";
 
-// `@sanoma/workflows/describe`: what a UI renders from. Apart from the main entry, so the
-// worker never loads oxc-parser, which the outline reads `run` with.
+// `@sanoma/workflows/describe`: what a UI renders from, apart from the main entry.
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
 // The reader parses data files with oxc-parser too.
 export {
@@ -39,10 +38,10 @@ export interface WorkflowEntry {
   ops: string[];
   /** Built-ins the workflow may call. */
   builtins: Builtin[];
-  /** What its `run` calls, in order, read from its source (`outlineWorkflow`): its file, or else `run`'s text. */
+  /** What its `run` calls, in order, read from its file (`outlineWorkflow`), which the worker holds its runs to. */
   outline: Outline;
   /**
-   * The text the outline's spans index into: the file's, or `run`'s, with `\n` line endings.
+   * The text the outline's spans index into: the workflow's file, with `\n` line endings.
    * Absent only when the outline is `{ error }`. Whole files: a server may keep it from clients.
    */
   source?: string;

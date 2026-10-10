@@ -36,6 +36,11 @@ export type LedgerRecord = {
   | {
       type: "op.called";
       op: string;
+      /**
+       * The outline node of the call that made it (`OutlineNode.path`): where the step is in the
+       * code. Absent in records written before the worker placed calls (ledgers from 0.1).
+       */
+      node?: string;
       effect: Effect;
       input: unknown;
       /** The policy's decision, with its `reasons` and the policy's `policyVersion` when there are any. */
@@ -55,6 +60,8 @@ export type LedgerRecord = {
   | {
       type: "approval.requested";
       approval: string;
+      /** The outline node of the `ctx.approval` call, or of the held operation's call for a policy request; as for `op.called`. */
+      node?: string;
       title: string;
       approver: Approver;
       requestedBy: "workflow" | "policy";
@@ -73,7 +80,7 @@ export type LedgerRecord = {
    * for a duration the time the sleep started plus the duration, as the runtime saw it. Written
    * for a time already past too, which waits not at all.
    */
-  | { type: "sleep.started"; until: number }
+  | { type: "sleep.started"; node?: string; until: number }
   /**
    * A sandbox run seeded its fakes from the scenario named: each `Given` operation called
    * through its fake, with what the fake returned. Follows `run.started`.
@@ -86,13 +93,15 @@ export type LedgerRecord = {
 
 /**
  * The `ctx.all` member a record was written in. `id` is `all:<seq>`, the run's next `seq` when
- * the `ctx.all` began, so a replay names it the same; `index` is the member's position and
- * `size` the member count.
+ * the `ctx.all` began, so a replay names it the same; `index` is the member's position, `size`
+ * the member count and `node` the `ctx.all` call's outline node.
  */
 export interface LedgerGroup {
   id: string;
   index: number;
   size: number;
+  /** The outline node of the `ctx.all` call; as for `op.called`'s. */
+  node?: string;
 }
 
 /**

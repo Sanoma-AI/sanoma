@@ -164,6 +164,151 @@ describe("lintWorkflow", () => {
   });
 });
 
+/** A workflow file whose `run` has `body`, for the run rules. */
+const workflow = (body: string, params = "ctx, input") => `
+  import { defineWorkflow, errorCode } from "@sanoma/workflows";
+  import { ghost } from "@sanoma/connector-ghost";
+  import { z } from "zod";
+  const helper = (ctx: any) => ctx.ghost.post.create({ title: "h" });
+  export default defineWorkflow({
+    name: "x",
+    trigger: "manual",
+    input: z.object({ ts: z.array(z.string()), k: z.string(), skip: z.boolean(), ok: z.boolean() }),
+    uses: [ghost.post.create, "all", "sleep"],
+    run: async (${params}) => {
+      ${body}
+    },
+  });
+`;
+
+const inRun = (body: string, params?: string) => messages(workflow(body, params), "workflows/x.ts");
+
+describe("lintWorkflow on run, which the worker holds to the outline", () => {
+  it("passes loops, a switch with break, a try with a rethrow, ctx.all over .map, ctx.runId and ctx.now, and a return at the end", () => {
+    expect(
+      inRun(`
+        for (const t of input.ts) await ctx.ghost.post.create({ title: t });
+        switch (input.k) {
+          case "a":
+            await ctx.sleep({ ms: 1 });
+            break;
+        }
+        try {
+          await ctx.ghost.post.create({ title: "t" });
+        } catch (err) {
+          if (errorCode(err) === "run_ended") throw err;
+        }
+        await ctx.all(input.ts.map((t) => () => ctx.ghost.post.create({ title: t })));
+        console.log(ctx.runId, await ctx.now());
+        return input.ts.length;
+      `),
+    ).toEqual([]);
+  });
+
+  it("checks only the literal defineWorkflow is called with: another object with a name and a run is not a workflow", () => {
+    expect(
+      messages(
+        `export const jobs = [{ name: "nightly", run: (job: { enabled: boolean }) => { if (!job.enabled) return; return 1; } }];`,
+        "workflows/jobs.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("leaves a function without ctx calls its control flow: it computes, the graph does not draw it", () => {
+    expect(
+      inRun(`
+        const pick = () => {
+          for (const t of input.ts) {
+            if (t) return t;
+          }
+          throw new Error("none");
+        };
+        const sizes = input.ts.map((t) => {
+          if (!t) return 0;
+          return t.length;
+        });
+        await ctx.sleep({ ms: pick().length + sizes.length });
+      `),
+    ).toEqual([]);
+  });
+
+  it("refuses ctx passed on, aliased, read for anything but runId, or destructured", () => {
+    const only = expect.stringMatching(
+      /^ctx is only called, directly .*or read for ctx\.runId: passed on, aliased or destructured/,
+    );
+    expect(inRun(`await helper(ctx);`)).toEqual([only]);
+    expect(inRun(`const c = ctx; await c.ghost.post.create({ title: "a" });`)).toEqual([only]);
+    expect(inRun(`const create = ctx.ghost.post.create; await create({ title: "a" });`)).toEqual([only]);
+    expect(inRun(`const { ghost } = ctx; await ghost.post.create({ title: "a" });`)).toEqual([only]);
+    expect(inRun(`console.log(ctx.ghost);`)).toEqual([only]);
+    expect(inRun(`await ctx.ghost.post({ title: "a" }); await ctx.log("x");`)).toEqual([
+      expect.stringMatching(/^ctx\.ghost\.post is not a call the graph can draw: an operation is ctx\.<vendor>/),
+      expect.stringMatching(/^ctx\.log is not a call the graph can draw/),
+    ]);
+    // Members made before the call: the closures are not read where they are made, and the call says nothing.
+    expect(inRun(`const members = input.ts.map((t) => () => ctx.sleep({ ms: t })); await ctx.all(members);`)).toEqual([
+      expect.stringMatching(/^a function defined in run uses ctx, and the outline does not read it/),
+      expect.stringMatching(/^ctx\.all's members must be written in the call, so the graph shows what each does/),
+    ]);
+    expect(inRun(`await ctx.sleep({ ms: 1 });`, "{ sleep }, input")).toEqual([
+      expect.stringMatching(/^run must take ctx as its first parameter, by one name: destructured/),
+    ]);
+  });
+
+  it("refuses a function defined in run that uses ctx where the outline does not read it, and ctx in a finally", () => {
+    const notInOutline =
+      /^a function defined in run uses ctx, and the outline does not read it: inline its calls, or pass it to ctx\.all, \.map, \.forEach or \.reduce, so the run's graph shows them$/;
+    expect(inRun(`const send = async () => ctx.ghost.post.create({ title: "a" }); await send();`)).toEqual([
+      expect.stringMatching(notInOutline),
+    ]);
+    expect(inRun(`const titles = input.ts.filter((t) => ctx.ghost.post.create({ title: t }));`)).toEqual([
+      expect.stringMatching(notInOutline),
+    ]);
+    expect(
+      inRun(`
+        try {
+          await ctx.sleep({ ms: 1 });
+        } finally {
+          await ctx.ghost.post.create({ title: "f" });
+        }
+      `),
+    ).toEqual([expect.stringMatching(/^ctx is not allowed in a finally: the graph does not draw one/)]);
+  });
+
+  it("refuses control flow the graph cannot draw: an early return, a throw outside a catch, a break out of a loop, continue", () => {
+    expect(inRun(`if (input.skip) return; await ctx.sleep({ ms: 1 });`)).toEqual([
+      expect.stringMatching(
+        /^`return` before the end of run is not allowed in a workflow: .*use if\/else around the rest/,
+      ),
+    ]);
+    expect(inRun(`if (!input.ok) throw new Error("no"); await ctx.sleep({ ms: 1 });`)).toEqual([
+      expect.stringMatching(/^`throw` outside a catch is not allowed in a workflow/),
+    ]);
+    expect(inRun(`for (const t of input.ts) { await ctx.sleep({ ms: 1 }); if (t) break; }`)).toEqual([
+      expect.stringMatching(/^`break` out of a loop, or to a label, is not allowed in a workflow/),
+    ]);
+    expect(
+      inRun(
+        `outer: for (const t of input.ts) { for (const u of t) { await ctx.sleep({ ms: 1 }); if (u) break outer; } }`,
+      ),
+    ).toEqual([expect.stringMatching(/^`break` out of a loop, or to a label, is not allowed in a workflow/)]);
+    expect(
+      inRun(`work: { await ctx.sleep({ ms: 1 }); if (input.skip) break work; await ctx.sleep({ ms: 2 }); }`),
+    ).toEqual([expect.stringMatching(/^`break` out of a loop, or to a label, is not allowed in a workflow/)]);
+    // A finally keeps to the same rules.
+    expect(inRun(`try { await ctx.sleep({ ms: 1 }); } finally { return "done"; }`)).toEqual([
+      expect.stringMatching(/^`return` before the end of run is not allowed/),
+    ]);
+    expect(inRun(`for (const t of input.ts) { if (!t) continue; await ctx.sleep({ ms: 1 }); }`)).toEqual([
+      expect.stringMatching(/^`continue` is not allowed in a workflow: .*use if\/else around the rest of it/),
+    ]);
+    // In a member the outline reads, the same rules.
+    expect(inRun(`await ctx.all([async () => { if (input.skip) return 1; return ctx.sleep({ ms: 1 }); }]);`)).toEqual([
+      expect.stringMatching(/^`return` before the end of run is not allowed/),
+    ]);
+  });
+});
+
 const fixture = (path: string) => fileURLToPath(new URL(`./fixtures/company/${path}`, import.meta.url));
 const GOOD = ["resources/identity/github.ts", "resources/identity/rules.ts", "resources/billing/stripe.ts"];
 

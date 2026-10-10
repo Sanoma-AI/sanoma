@@ -2,6 +2,7 @@ import type { ApprovalState, Principal, WorkflowDefinition } from "./define.ts";
 import type { Fake } from "./fake.ts";
 import type { LedgerStore } from "./ledger.ts";
 import type { DriverFn, Op } from "./op.ts";
+import type { CallNode } from "./outline.ts";
 import type { Policy } from "./policy.ts";
 
 /** What the DBOS workflow receives: the workflow's input, who started the run, and for a sandbox run its scenario. */
@@ -38,6 +39,8 @@ export interface WorkerState {
    * and each worker's config says what it runs. Scenarios name them too.
    */
   workflows: Map<string, WorkflowDefinition<any, any>>;
+  /** Each workflow's outline, by name: read once when the worker starts, every run is held to it (`call_not_in_outline`). */
+  outlines: Map<string, WorkflowOutline>;
   /**
    * Set when the worker stops, before DBOS shuts down. DBOS abandons a stopped worker's run
    * functions, which then fail as their next DBOS call finds the database closed. Such a failure,
@@ -69,5 +72,15 @@ export interface Run {
   inAll: boolean;
   /** Set when the workflow body has returned or thrown. A call still queued then is refused. */
   ended: boolean;
+  /** The workflow's outline, which every `ctx` call is placed in (`placeCall`). */
+  outline: WorkflowOutline;
   state: WorkerState;
+}
+
+/** What `placeCall` holds a run's `ctx` calls to: the file's lines, so a frame's line and column become an offset, and the outline's call nodes. */
+export interface WorkflowOutline {
+  file: string;
+  /** `lineStartsOf` the file's text, `\n` line endings. */
+  lineStarts: readonly number[];
+  calls: readonly CallNode[];
 }

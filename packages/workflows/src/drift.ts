@@ -116,16 +116,16 @@ export function driftWorkflow(
       for (const { id, vendor, type, name } of resources) {
         const key = `${vendor}.${type}`;
         const why = types.has(key) ? unreadable.get(key) : `the config's connectors declare no resource type ${key}`;
-        if (why !== undefined) {
-          found.set(id, { error: why });
-          continue;
-        }
-        try {
-          const out = await ctx[vendor]![type]!.import({ id: name });
-          found.set(id, out.gone || !out.state ? { gone: true } : { state: out.state });
-        } catch (err) {
-          if (isRunControlError(err)) throw err;
-          found.set(id, { error: errorMessage(err) });
+        // An if/else, not a `continue`: the outline draws the import as the way past the error.
+        if (why !== undefined) found.set(id, { error: why });
+        else {
+          try {
+            const out = await ctx[vendor]![type]!.import({ id: name });
+            found.set(id, out.gone || !out.state ? { gone: true } : { state: out.state });
+          } catch (err) {
+            if (isRunControlError(err)) throw err;
+            found.set(id, { error: errorMessage(err) });
+          }
         }
       }
       const results = resources.map(({ id, vendor, type, name, desired, refs }): DriftResult => {
