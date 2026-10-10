@@ -18,7 +18,8 @@ import { parseOrThrow, SanomaError } from "./errors.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { Driver } from "./op.ts";
 import type { RunArgs } from "./run.ts";
-import { isEnded, mayDecide, type RunStatus } from "./shared.ts";
+import { warn } from "./log.ts";
+import { errorMessage, isEnded, mayDecide, type RunStatus } from "./shared.ts";
 
 /**
  * The run status each DBOS status maps to. `waiting` is PENDING with an approval pending, so
@@ -444,7 +445,11 @@ export class SanomaClient {
       throw err;
     });
     await this.table;
-    this.pool ??= new Pool({ connectionString: this.config.databaseUrl });
+    if (!this.pool) {
+      this.pool = new Pool({ connectionString: this.config.databaseUrl });
+      // An idle connection that drops (Postgres restarted) is replaced on the next query; unheard, it would end the process.
+      this.pool.on("error", (err) => warn(`a credentials connection failed: ${errorMessage(err)}`));
+    }
     return this.pool;
   }
 
