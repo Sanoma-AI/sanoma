@@ -1,4 +1,4 @@
-import type { ApprovalState, Principal } from "./define.ts";
+import type { ApprovalState, Principal, WorkflowDefinition } from "./define.ts";
 import type { LedgerStore } from "./ledger.ts";
 import type { DriverFn, Op } from "./op.ts";
 import type { Policy } from "./policy.ts";
@@ -24,6 +24,12 @@ export interface WorkerState {
   /** Its `version`, when it has one, is recorded with each of its decisions. */
   policy: Policy;
   ledger: LedgerStore;
+  /**
+   * The config's workflows by name, the built-in `drift` among them. A run takes its definition
+   * from here, by the name it was registered under: a process registers each name with DBOS once,
+   * and each worker's config says what it runs.
+   */
+  workflows: Map<string, WorkflowDefinition<any, any>>;
   /**
    * Set when the worker stops, before DBOS shuts down. DBOS abandons a stopped worker's run
    * functions, which then fail as their next DBOS call finds the database closed. Such a failure,

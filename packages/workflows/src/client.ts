@@ -5,6 +5,7 @@ import type { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, messageKeyOf, topicOf } from "./approvals.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { type ApprovalState, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
+import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
 import { parseOrThrow, SanomaError } from "./errors.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { RunArgs } from "./run.ts";
@@ -62,6 +63,8 @@ export interface RunsFilter {
   limit?: number;
   /** Only runs with this status. */
   status?: RunStatus;
+  /** Only runs of the workflow of this name. */
+  workflow?: string;
 }
 
 export interface RunSummary {
@@ -169,11 +172,12 @@ export class SanomaClient {
    * Only the approvals tell `running` from `waiting`, so those read PENDING runs a page at a
    * time until `limit` have that status.
    */
-  async runs({ limit = 20, status }: RunsFilter = {}): Promise<RunSummary[]> {
+  async runs({ limit = 20, status, workflow }: RunsFilter = {}): Promise<RunSummary[]> {
     const list = (more: { limit: number; offset?: number }) =>
       this.dbos.listWorkflows({
         ...more,
         status: status && dbosStatusesOf(status),
+        workflowName: workflow,
         sortDesc: true,
         applicationName: this.config.appName,
         loadInput: false,
@@ -284,19 +288,40 @@ export class SanomaClient {
    */
   async result(runId: string, timeoutMs = 30_000): Promise<unknown> {
     await this.mustExist(runId);
-    const running = () =>
-      new SanomaError("run_running", `Run ${runId} is still running after ${timeoutMs} ms`, { runId, timeoutMs });
-    let timer: NodeJS.Timeout | undefined;
-    try {
-      return await Promise.race([
-        this.dbos.retrieveWorkflow(runId).getResult(),
-        new Promise((_, reject) => {
-          timer = setTimeout(() => reject(running()), timeoutMs).unref();
-        }),
-      ]);
-    } finally {
-      clearTimeout(timer);
+    return this.awaitResult(runId, timeoutMs);
+  }
+
+  /**
+   * Starts the built-in drift workflow, which reads the config's data files itself: `start`
+   * with its input, `{}`. Returns the run id; `driftReport` waits for its report. Throws
+   * `invalid_input` when the config's connectors declare no resource types, so it has none.
+   */
+  async drift(options: StartOptions): Promise<string> {
+    const drift = this.config.workflows.find((wf) => wf.name === DRIFT_WORKFLOW);
+    if (!drift) {
+      throw new SanomaError(
+        "invalid_input",
+        "The config's connectors declare no resource types, so there is nothing to check for drift",
+      );
     }
+    return this.start(drift, {}, options);
+  }
+
+  /**
+   * The report of a drift run once it ends. Throws `run_not_found`, `invalid_input` for another
+   * workflow's run, the run's error when it failed, and `run_running` when it has not ended
+   * within 30 s.
+   */
+  async driftReport(runId: string): Promise<DriftReport> {
+    const row = await this.mustExist(runId, { loadOutput: true });
+    if (row.workflowName !== DRIFT_WORKFLOW) {
+      throw new SanomaError("invalid_input", `Run ${runId} is a run of ${row.workflowName}, not of ${DRIFT_WORKFLOW}`, {
+        runId,
+        workflow: row.workflowName,
+      });
+    }
+    // A finished run's report came with its row; else wait for the run.
+    return (row.status === "SUCCESS" ? row.output : await this.awaitResult(runId, 30_000)) as DriftReport;
   }
 
   close() {
@@ -316,11 +341,29 @@ export class SanomaClient {
     }
   }
 
-  /** The run's status row, read without its input or output, or `run_not_found`. */
-  private async mustExist(runId: string) {
-    const [row] = await this.dbos.listWorkflows({ workflowIDs: [runId], loadInput: false, loadOutput: false });
+  /** The run's status row, read without its input (and its output, unless asked), or `run_not_found`. */
+  private async mustExist(runId: string, { loadOutput = false } = {}) {
+    const [row] = await this.dbos.listWorkflows({ workflowIDs: [runId], loadInput: false, loadOutput });
     if (!row) throw new SanomaError("run_not_found", `No run ${runId}`, { runId });
     return row;
+  }
+
+  /** The run's output once it ends, or its error, polled every 100 ms; `run_running` after `timeoutMs`. */
+  private async awaitResult(runId: string, timeoutMs: number): Promise<unknown> {
+    const running = () =>
+      new SanomaError("run_running", `Run ${runId} is still running after ${timeoutMs} ms`, { runId, timeoutMs });
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      // DBOSClient's wait takes no timeout of its own.
+      return await Promise.race([
+        this.dbos.retrieveWorkflow(runId).getResult({ pollingIntervalMs: 100 }),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(running()), timeoutMs).unref();
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private async summarize(r: {

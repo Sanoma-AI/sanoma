@@ -15,5 +15,5 @@ The app's React components: page chrome, shared display pieces, and the graph an
 | [`graph.tsx`](graph.tsx)             | React Flow drawing of a laid-out graph; loaded lazily                                             |
 | [`nav-user.tsx`](nav-user.tsx)       | Sidebar footer menu for who you are and the theme                                                 |
 | [`who-are-you.tsx`](who-are-you.tsx) | Dialog asking for a name under the default actor resolver                                         |
-| [`workflow.tsx`](workflow.tsx)       | A workflow's sections and its graph beside its source                                             |
+| [`workflow.tsx`](workflow.tsx)       | A workflow's sections, its start action and its graph beside its source                           |
 | [`zoom-slider.tsx`](zoom-slider.tsx) | Zoom controls for the React Flow graph                                                            |

@@ -12,7 +12,7 @@ import { type Field, fieldsOf } from "../form/schema.ts";
 import { outlineGraph } from "../graph/outline-graph.ts";
 import { runGraph } from "../graph/run-graph.ts";
 import { type GraphNode, nodeAt } from "../graph/types.ts";
-import { configQuery, opsById, sourceQuery } from "../queries.ts";
+import { configQuery, opsById, sourceQuery, workflowFile } from "../queries.ts";
 import type { CodeProps } from "./code.tsx";
 import { BUILTIN_ICON, CodePanel, GraphPanel, Json, None, Nothing, Notice, OpItem, Section } from "./common.tsx";
 
@@ -127,12 +127,12 @@ const PANEL = "h-[360px] sm:h-[420px]";
  * says why; with no run either there is nothing to draw, and that says why in place of both.
  */
 export const GraphAndSource = memo(function GraphAndSource({
-  workflow: { name, outline },
+  workflow: { name, outline, source },
   run,
   onSelect,
 }: {
   /** The workflow's entry, or only its name when the config has no workflow of that name. */
-  workflow: Pick<WorkflowEntry, "name"> & Partial<Pick<WorkflowEntry, "outline">>;
+  workflow: Pick<WorkflowEntry, "name"> & Partial<Pick<WorkflowEntry, "outline" | "source">>;
   run?: { ledger: LedgerRecord[]; run: RunSummary; at: number };
   onSelect?: (node: GraphNode) => void;
 }) {
@@ -160,6 +160,7 @@ export const GraphAndSource = memo(function GraphAndSource({
         ? outline.error
         : undefined;
   const noSource = unread !== undefined && <Nothing title="No source to show">{unread}</Nothing>;
+  const file = outline && workflowFile({ outline });
   if (!graph) return noSource;
   return (
     <div className="flex flex-col gap-2">
@@ -174,17 +175,30 @@ export const GraphAndSource = memo(function GraphAndSource({
           selected={selected}
           onSelect={select}
         />
-        {noSource || <SourcePanel name={name} highlight={highlight} onSelect={selectAt} />}
+        {noSource ||
+          (file !== undefined ? (
+            <FileSourcePanel file={file} highlight={highlight} onSelect={selectAt} />
+          ) : (
+            <SourcePanel source={source} highlight={highlight} onSelect={selectAt} />
+          ))}
       </div>
     </div>
   );
 });
 
-function SourcePanel({ name, ...props }: { name: string } & Pick<CodeProps, "highlight" | "onSelect">) {
-  const { data } = useSuspenseQuery(sourceQuery(name));
-  return data.source === null ? (
+type SourceProps = Pick<CodeProps, "highlight" | "onSelect">;
+
+/** A workflow's file, as it is now. */
+function FileSourcePanel({ file, ...props }: { file: string } & SourceProps) {
+  const { data } = useSuspenseQuery(sourceQuery(file));
+  return <SourcePanel source={data.source} {...props} />;
+}
+
+/** The text the outline's spans index into, or why there is none. */
+function SourcePanel({ source, ...props }: { source: string | null | undefined } & SourceProps) {
+  return source == null ? (
     <Nothing title="No source to show" />
   ) : (
-    <CodePanel className={PANEL} source={data.source} {...props} />
+    <CodePanel className={PANEL} source={source} {...props} />
   );
 }

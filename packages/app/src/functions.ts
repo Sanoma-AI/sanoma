@@ -1,12 +1,13 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { type ActorInfo, DecideCall, RunsQuery, StartRunRequest } from "./api.ts";
-import { decide, parse, runDetail, startRun, withoutSources, workflowSource } from "./server/core.ts";
+import { decide, driftReport, fileSource, parse, runDetail, startRun, withoutSources } from "./server/core.ts";
 import { withPrincipal } from "./middleware.ts";
 
 // The page's reads and changes, as server functions. Most do what an /api route does, with the
-// same schemas; the routes stay the stable surface for scripts. getSource has no route: only the
-// page shows a workflow's source. Failures, the actor header and the actor itself are handled
+// same schemas; the routes stay the stable surface for scripts. getSource and getDriftReport have
+// no route: only the page shows a file's text, and a script reads a drift run's report from its
+// run. Failures, the actor header and the actor itself are handled
 // once for all of them, in start.ts.
 //
 // Runs carry `unknown` inputs and outputs, which Start's type check can't prove serializable.
@@ -23,10 +24,10 @@ const validate =
 
 export const getConfig = createServerFn(READ).handler(({ context }) => withoutSources(context.app.description));
 
-/** A workflow's source, apart from the config since it is a whole file: asked for by name, `null` when it has none. */
+/** A file the config names (a workflow's or a data file), as it is now; `null` for any other. */
 export const getSource = createServerFn(READ)
-  .validator(validate(z.object({ name: z.string().min(1) })))
-  .handler(({ data, context }) => workflowSource(context.app, data.name));
+  .validator(validate(z.object({ file: z.string().min(1) })))
+  .handler(({ data, context }) => fileSource(context.app, data.file));
 
 /**
  * Who the server resolves this request to, and whether the deployment says so itself. A
@@ -60,3 +61,8 @@ export const decideFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .validator(validate(DecideCall))
   .handler(({ data, context }) => decide(context.app, context.principal, data));
+
+/** A drift run's report, once it has ended. */
+export const getDriftReport = createServerFn(READ)
+  .validator(validate(z.object({ runId: z.string().min(1) })))
+  .handler(({ data, context }) => driftReport(context.app, data.runId));

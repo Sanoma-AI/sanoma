@@ -1,7 +1,7 @@
 import type { RunSummary } from "@sanoma/workflows";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { ClientOnly, Link, linkOptions } from "@tanstack/react-router";
-import { ActivityIcon, InboxIcon, PlayIcon, PlugIcon, ShieldCheckIcon, WorkflowIcon } from "lucide-react";
+import { ActivityIcon, BoxesIcon, InboxIcon, PlayIcon, PlugIcon, ShieldCheckIcon, WorkflowIcon } from "lucide-react";
 import { NavUser } from "#/components/nav-user.tsx";
 import {
   Sidebar,
@@ -24,6 +24,7 @@ const PAGES = linkOptions([
   { to: "/inbox", label: "Inbox", icon: InboxIcon },
   { to: "/start", label: "Start", icon: PlayIcon },
   { to: "/workflows", label: "Workflows", icon: WorkflowIcon },
+  { to: "/resources", label: "Resources", icon: BoxesIcon },
   { to: "/connectors", label: "Connectors", icon: PlugIcon },
 ]);
 

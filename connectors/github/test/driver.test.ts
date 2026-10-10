@@ -1,6 +1,6 @@
 import { BridgeError } from "@sanoma/bridge";
 import { type BridgeCall, fixturesDir, loadReplies, stateBridge } from "@sanoma/bridge/fake";
-import { type Driver, DriverError, errorCode } from "@sanoma/workflows";
+import { type Driver, DriverError } from "@sanoma/workflows";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { githubDriver } from "../src/driver.ts";
 import { fakeGithub } from "../src/fake.ts";
@@ -77,17 +77,14 @@ describe("githubDriver", () => {
     expect(calls()).toEqual([]);
   });
 
-  it("fails, not retryable, with the provider's diagnostic when GitHub has no such object", async () => {
-    const err = await call(githubDriver({ bridge }), "branch_protection.read", { id: "provider-bridge:main" }).catch(
-      (e: unknown) => e,
-    );
-    expect(errorCode(err)).toBe("driver_failed");
-    expect(err).toMatchObject({
-      message:
-        "github: branch_protection.read failed (failed_precondition): could not find a branch protection rule with the pattern 'main'",
-      retryable: false,
-      vendorCode: "failed_precondition",
-    });
+  it("answers gone when GitHub has no such object, which its provider reports as failed_precondition", async () => {
+    const driver = githubDriver({ bridge });
+    for (const op of ["branch_protection.import", "branch_protection.read"]) {
+      expect(await call(driver, op, { id: "provider-bridge:main" })).toEqual({
+        id: "provider-bridge:main",
+        gone: true,
+      });
+    }
   });
 
   it("is retryable when the provider has exited, and configures it again", async () => {

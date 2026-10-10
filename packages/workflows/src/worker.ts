@@ -2,7 +2,6 @@ import { DBOS } from "@dbos-inc/dbos-sdk";
 import { buildCtx, isInfrastructureError } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
-import type { WorkflowDefinition } from "./define.ts";
 import { errorInfo, parseOrThrow } from "./errors.ts";
 import { entry, skipped, write, writeFailure } from "./ledger.ts";
 import { warn } from "./log.ts";
@@ -13,13 +12,11 @@ export interface Worker {
   stop(): Promise<void>;
 }
 
-// DBOS registrations are process-wide and survive shutdown, so a registered function reads
-// the state of the worker running when a run starts, and the run keeps that state.
+// DBOS registrations are process-wide and survive shutdown, so a name is registered once, and
+// its function reads the state of the worker running when a run starts, definition and all; the
+// run keeps that state.
 let current: WorkerState | undefined;
-const registered = new Map<
-  string,
-  { definition: WorkflowDefinition<any, any>; fn: (args: RunArgs) => Promise<unknown> }
->();
+const registered = new Set<string>();
 
 export interface WorkerOptions {
   logLevel?: string;
@@ -36,24 +33,20 @@ export interface WorkerOptions {
 export async function startWorker(config: SanomaConfig, options: WorkerOptions = {}): Promise<Worker> {
   // Check everything before touching the state a running worker reads.
   const resolved = resolveConfig(config);
-  for (const wf of resolved.workflows) {
-    const other = registered.get(wf.name)?.definition;
-    if (other && other !== wf) {
-      throw new Error(
-        `Two different workflow definitions are named "${wf.name}"; a name can be registered once per process`,
-      );
-    }
-  }
   const state: WorkerState = {
     app: resolved.appName,
     ops: resolved.ops,
     drivers: resolved.drivers,
     policy: resolved.policy,
     ledger: resolved.ledger,
+    workflows: new Map(resolved.workflows.map((wf) => [wf.name, wf])),
     stopped: false,
   };
-  for (const wf of resolved.workflows) {
-    if (!registered.has(wf.name)) registered.set(wf.name, { definition: wf, fn: register(wf) });
+  for (const { name } of resolved.workflows) {
+    if (!registered.has(name)) {
+      register(name);
+      registered.add(name);
+    }
   }
   const worker: Worker = {
     async stop() {
@@ -136,12 +129,16 @@ async function warnAboutStrandedRuns({ appName, version, queueName }: ResolvedCo
   );
 }
 
-function register(wf: WorkflowDefinition<any, any>) {
-  return DBOS.registerWorkflow(
+/** Registers the name with DBOS: its runs take the definition of that name from the running worker. */
+function register(name: string) {
+  DBOS.registerWorkflow(
     async ({ input, startedBy }: RunArgs) => {
       const state = current;
       // A stopped worker's state stays current while DBOS shuts down.
-      if (!state || state.stopped) throw new Error(`Run of "${wf.name}" started with no worker running`);
+      if (!state || state.stopped) throw new Error(`Run of "${name}" started with no worker running`);
+      const wf = state.workflows.get(name);
+      // Registered by an earlier worker in this process, whose config had it; this one's has not.
+      if (!wf) throw new Error(`Run of "${name}" refused: this worker's config has no workflow of that name`);
       const run: Run = {
         id: DBOS.workflowID!,
         workflow: wf.name,
@@ -173,6 +170,6 @@ function register(wf: WorkflowDefinition<any, any>) {
       await write(run, entry(run, { type: "run.finished", output }));
       return output;
     },
-    { name: wf.name },
+    { name },
   );
 }

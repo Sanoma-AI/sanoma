@@ -31,7 +31,13 @@ export const githubTf = tfConnector({
       find: ({ team_id, username }) => `${team_id}:${username}`,
     },
   },
-  references: { branch_protection: { repository_id: "github.repository" } },
+  // GitHub holds a rule's repository by its node id (`R_…`); a data file names it by its name.
+  references: { branch_protection: { repository_id: { type: "github.repository", by: ["name", "node_id"] } } },
+  // The provider answers an import of a rule that is not there `failed_precondition`, saying it
+  // "could not find" it (recorded: testdata/replies/…/github_branch_protection/provider-bridge_main).
+  missing: (e) =>
+    e.code === "not_found" ||
+    (e.code === "failed_precondition" && e.diagnostics.some((d) => d.summary.startsWith("could not find "))),
   info: {
     title: "GitHub",
     logo: { svg: mark("#1F2328"), dark: mark("#FFFFFF") },
