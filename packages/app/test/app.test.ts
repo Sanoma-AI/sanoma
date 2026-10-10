@@ -85,12 +85,20 @@ cpSync(fileURLToPath(new URL("./fixtures/scenarios/", import.meta.url)), scenari
 const featureFile = join(scenariosDir, "announce.feature");
 
 const blog = fakeGhost();
+/** Bluesky's fake for sandbox runs, whose sample post fails, so its connector page shows a mock's error. */
+const social = fakeBluesky();
+const freshSocial = social.fresh;
+social.fresh = () => {
+  const copy = freshSocial();
+  copy.failNext("bluesky.post.create", new DriverError("bluesky: the network is down", { retryable: false }));
+  return copy;
+};
 const config = defineConfig({
   workflows: [announce],
   connectors: [ghost, resend, bluesky, github],
   drivers: [blog.driver, fakeResend().driver, fakeBluesky().driver, fakeGithub().driver],
   // Sandbox runs call these, seeded from the scenarios, never the drivers above.
-  fakes: [fakeGhost(), fakeResend(), fakeBluesky()],
+  fakes: [fakeGhost(), fakeResend(), social],
   scenarios: pathToFileURL(`${scenariosDir}/`),
   policy,
   ledger: memoryLedger(),
@@ -210,7 +218,13 @@ describe("the API", () => {
       input: { id: "bc_0001" },
       output: { id: "bc_0001", status: "queued" },
     });
-    expect(body.ops.filter((o) => o.vendor !== "github").every((o) => o.mock && "output" in o.mock)).toBe(true);
+    expect(body.ops.find((o) => o.id === "bluesky.post.create")?.mock).toEqual({
+      input: expect.objectContaining({ text: expect.any(String) }),
+      error: "bluesky: the network is down",
+    });
+    expect(
+      body.ops.filter((o) => o.vendor === "ghost" || o.vendor === "resend").every((o) => o.mock && "output" in o.mock),
+    ).toBe(true);
     expect(body.ops.filter((o) => o.vendor === "github").every((o) => o.mock === undefined)).toBe(true);
     expect(body.vendors.resend).toMatchObject({ title: "Resend", logo: { src: expect.stringMatching(/^data:/) } });
     // No data files beside the config: no declared resources and no problems, passed through as they are.
@@ -739,6 +753,7 @@ describe("the page", () => {
     expect(blogPage.html).toContain("<code>ghost.post.create</code>");
     expect(blogPage.text).toContain("<code>Given a post titled {title} exists</code>");
     // The mock: what the fake returned for a made-up input, publish publishing the post create made.
+    expect(blogPage.html).toMatch(/>Mock<\/h3>/);
     expect(blogPage.text).toContain(">Called with<");
     expect(blogPage.text).toMatch(/&quot;id&quot;: &quot;post_0001&quot;/);
     // The scenario that names the operation, linking to its workflow with it chosen.
@@ -748,9 +763,14 @@ describe("the page", () => {
     for (const label of ["seeds", "fails", "expects", "must not call"]) expect(blogPage.text).toContain(`>${label}<`);
     expect(blogPage.html).toContain('href="/workflows/announce"');
 
-    // A vendor without a fake in `fakes` says so; its resource types are named.
+    // A sample the fake failed says how.
+    const socialPage = await page("/connectors/bluesky");
+    expect(socialPage.text).toContain("Fails with <code>bluesky: the network is down</code>");
+
+    // A vendor without a fake in `fakes` says so, once, and shows no mock; its resource types are named.
     const githubPage = await page("/connectors/github");
-    expect(githubPage.text).toContain("No fake in this config.");
+    expect(githubPage.text.match(/No fake in this config\./g)).toHaveLength(1);
+    expect(githubPage.html).not.toMatch(/>Mock<\/h3>/);
     expect(githubPage.html).toMatch(/Resources: <\/span>Branch protection rule, Repository, Team membership</);
 
     const missing = await page("/connectors/nope");

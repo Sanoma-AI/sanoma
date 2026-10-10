@@ -67,21 +67,25 @@ function ConnectorPage() {
         </p>
       )}
       <ScenarioErrors errors={scenarios.errors} />
-      <section className="flex flex-col gap-2">
+      <section className="flex flex-col gap-3">
         <SectionTitle>Operations</SectionTitle>
         {ops.length === 0 ? (
           <None />
         ) : (
-          <ItemGroup>
-            {ops.map((op) => (
-              <OpItem key={op.id} id={op.id} op={op}>
-                <OpDetails op={op} scenarios={scenariosNaming(op.id)(scenarios)} />
-              </OpItem>
-            ))}
-          </ItemGroup>
+          <>
+            {/* Every operation of a vendor in `fakes` has a mock, so either all have one or none. */}
+            {ops.every((op) => !op.mock) && <None>No fake in this config.</None>}
+            <ItemGroup>
+              {ops.map((op) => (
+                <OpItem key={op.id} id={op.id} op={op}>
+                  <OpDetails op={op} scenarios={scenariosNaming(op.id)(scenarios)} />
+                </OpItem>
+              ))}
+            </ItemGroup>
+          </>
         )}
       </section>
-      <section className="flex flex-col gap-2">
+      <section className="flex flex-col gap-3">
         <SectionTitle>Used by</SectionTitle>
         {workflows.length === 0 ? (
           <None />
@@ -128,10 +132,8 @@ function OpDetails({ op, scenarios }: { op: OpEntry; scenarios: ScenarioEntry[] 
           </ul>
         </Section>
       )}
-      <Section title="Mock">
-        {!mock ? (
-          <None>No fake in this config.</None>
-        ) : (
+      {mock && (
+        <Section title="Mock">
           <div>
             <p className="text-muted-foreground">Called with</p>
             <Json value={mock.input} />
@@ -146,8 +148,8 @@ function OpDetails({ op, scenarios }: { op: OpEntry; scenarios: ScenarioEntry[] 
               </>
             )}
           </div>
-        )}
-      </Section>
+        </Section>
+      )}
       <Section title="Scenarios">
         {scenarios.length === 0 ? (
           <None />
