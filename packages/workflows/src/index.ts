@@ -32,6 +32,8 @@ export {
   type Declared,
   type Declaring,
   defineResource,
+  diffDeclared,
+  type FieldReference,
   type References,
   type Resource,
   type ResourceFields,
@@ -39,7 +41,14 @@ export {
   type ResourceSpec,
 } from "./resource.ts";
 export { defineConfig, resolveConfig, type ResolvedConfig, type SanomaConfig } from "./config.ts";
-export { DRIFT_WORKFLOW, type DriftField, type DriftReport, type DriftResult, type DriftStatus } from "./drift.ts";
+export {
+  DRIFT_WORKFLOW,
+  type DriftDeclared,
+  type DriftField,
+  type DriftReport,
+  type DriftResult,
+  type DriftStatus,
+} from "./drift.ts";
 // readResources, which parses data files, is at `@sanoma/workflows/describe`.
 export type { DeclaredResource, ResourceProblem } from "./resources.ts";
 export {
@@ -78,9 +87,17 @@ export { ApprovalMessage, APPROVALS_EVENT, decisionEventOf } from "./approvals.t
 export { RUNTIME_VERSION } from "./version.ts";
 export type { RunArgs } from "./run.ts";
 export { startWorker, type Worker, type WorkerOptions } from "./worker.ts";
-export { type DriftOptions, SanomaClient, type RunsFilter, type RunSummary, type StartOptions } from "./client.ts";
+export { SanomaClient, type RunsFilter, type RunSummary, type StartOptions } from "./client.ts";
 // Also at `@sanoma/workflows/shared`, which a browser bundle can import.
-export { approverLabel, ENDED_STATUSES, errorMessage, isEnded, mayDecide, type RunStatus } from "./shared.ts";
+export {
+  approverLabel,
+  ENDED_STATUSES,
+  errorMessage,
+  isEnded,
+  mayDecide,
+  problemAt,
+  type RunStatus,
+} from "./shared.ts";
 // lintWorkflow lives at `@sanoma/workflows/lint`, and describeConfig with the outline at
 // `@sanoma/workflows/describe`, so the runtime never loads oxc-parser.
 export { defineDriver, type DriverImpl, type OpIdOf } from "./op.ts";

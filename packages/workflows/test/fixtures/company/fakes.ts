@@ -1,24 +1,17 @@
-import { fakeGithub, type FakeGithubState } from "@sanoma/connector-github/fake";
+import { fakeGithub } from "@sanoma/connector-github/fake";
 import { fakeStripe } from "@sanoma/connector-stripe/fake";
 import { readResources } from "../../../src/describe.ts";
 import company from "./sanoma.config.ts";
 
-/** Each resource type's provider type, and a recorded object of it to copy, when the fakes have one. */
-const PROVIDER: Record<string, { typeName: string; template?: string }> = {
-  "github.repository": { typeName: "github_repository", template: "github_repository/sanoma" },
-  "github.branch_protection": { typeName: "github_branch_protection" },
-  "stripe.product": { typeName: "stripe_product", template: "stripe_product/prod_SanomaTest0001" },
-  "stripe.webhook_endpoint": {
-    typeName: "stripe_webhook_endpoint",
-    template: "stripe_webhook_endpoint/we_SanomaTest0001",
-  },
-};
+/** GitHub's node id for a repository, as the fake holds it: what a rule's `repository_id` holds. */
+export const nodeIdOf = (repository: string) => `R_${repository}`;
 
 /**
- * The company's GitHub and Stripe, as fakes. `seed()` resets them and gives them an object for
- * each resource the data files declare, holding what it declares: a recorded object of its type
- * copied (so it has the fields the vendor sets), or a new one, under its import id, with the
- * declared fields over it. A test then changes one with `override` or `remove`.
+ * The company's GitHub and Stripe, as fakes. `seed()` resets them and puts an object for each
+ * resource the data files declare, holding what it declares the way the vendor would: over a
+ * recorded object of its type where there is one (so it has the fields the vendor sets), a
+ * repository with its node id, and a branch protection rule naming its repository by that node
+ * id, as GitHub's provider does. A test then changes one with `override` or `remove`.
  */
 export function companyFakes() {
   const github = fakeGithub();
@@ -27,20 +20,24 @@ export function companyFakes() {
   function seed() {
     github.reset();
     stripe.reset();
-    for (const r of declared) {
-      const fake = r.vendor === "github" ? github : stripe;
-      const { typeName, template } = PROVIDER[`${r.vendor}.${r.type}`]!;
-      fake.update((state: FakeGithubState) => {
-        const copied = template && state.objects[template];
-        const object =
-          copied && !("error" in copied)
-            ? structuredClone(copied)
-            : { typeName, state: {}, private: "", schemaVersion: 0 };
-        // A read finds the object by its state's id: a repository's is its name, a rule's GitHub's own.
-        object.state.id = r.type === "branch_protection" ? `BP_${r.name}` : r.name;
-        state.objects[`${typeName}/${r.name}`] = object;
-      });
-      (fake.override as (type: string, id: string, fields: Record<string, unknown>) => void)(r.type, r.name, r.desired);
+    for (const { vendor, type, name, desired } of declared) {
+      const key = `${vendor}.${type}`;
+      if (key === "github.repository") {
+        github.put("repository", name, { ...desired, node_id: nodeIdOf(name) }, { from: "sanoma" });
+      } else if (key === "github.branch_protection") {
+        const { repository_id } = desired as { repository_id: string };
+        github.put("branch_protection", name, {
+          ...desired,
+          id: `BPR_${name}`,
+          repository_id: nodeIdOf(repository_id),
+        });
+      } else if (key === "stripe.product") {
+        stripe.put("product", name, desired, { from: "prod_SanomaTest0001" });
+      } else if (key === "stripe.webhook_endpoint") {
+        stripe.put("webhook_endpoint", name, desired, { from: "we_SanomaTest0001" });
+      } else {
+        throw new Error(`companyFakes: no fake holds ${key}`);
+      }
     }
   }
   return { github, stripe, drivers: [github.driver, stripe.driver], declared, seed };

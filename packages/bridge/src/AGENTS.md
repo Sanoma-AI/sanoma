@@ -9,7 +9,7 @@ Source of `@sanoma/bridge`: the client exported from the package root, the fakes
 | [`index.ts`](index.ts)            | The package root: `startBridge`, `readPins`, `BridgeError`, `parseSchema` and the types                                                                              |
 | [`bridge.ts`](bridge.ts)          | The `Bridge` interface, `ProviderRef`, `ResourceState`, `Diagnostic`, `BridgeError`, and `bridgeClient`, which maps a Connect client's messages and errors onto them |
 | [`connector.ts`](connector.ts)    | `tfConnector`: an OpenTofu connector (resource types, connector, driver) from the generated types; the `./connector` entry                                           |
-| [`tffake.ts`](tffake.ts)          | `tfFake`: a connector's fake, its driver over a `stateBridge`, with `override` and `remove`                                                                          |
+| [`tffake.ts`](tffake.ts)          | `tfFake`: a connector's fake, its driver over a `stateBridge`, with `put`, `override` and `remove`                                                                   |
 | [`configure.ts`](configure.ts)    | `ensureConfigured`: configures a provider once per bridge and config, serialized, and again after it has gone                                                        |
 | [`replies.ts`](replies.ts)        | `loadReplies` and `stateBridge`: recorded replies as mutable state, and a bridge over it, for connectors' fakes                                                      |
 | [`client.ts`](client.ts)          | `startBridge`: spawns `provider-bridge serve`, waits for the ready line, connects over the unix socket                                                               |

@@ -25,8 +25,9 @@ export interface WorkerState {
   policy: Policy;
   ledger: LedgerStore;
   /**
-   * The config's workflows by name. A run takes its definition from here: the one registered,
-   * except for a built-in, which each config makes for itself (its operations are the config's).
+   * The config's workflows by name, the built-in `drift` among them. A run takes its definition
+   * from here, by the name it was registered under: a process registers each name with DBOS once,
+   * and each worker's config says what it runs.
    */
   workflows: Map<string, WorkflowDefinition<any, any>>;
   /**

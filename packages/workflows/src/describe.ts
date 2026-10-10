@@ -1,7 +1,7 @@
 import type { z } from "zod";
 import { resolveConfig, type SanomaConfig } from "./config.ts";
 import { type Builtin, jsonSchemaOf, type Use } from "./define.ts";
-import { isBuiltin } from "./drift.ts";
+import { DRIFT_WORKFLOW } from "./drift.ts";
 import { type Effect, isOp, VENDOR, type VendorInfo } from "./op.ts";
 import { type Outline, outlineWithSource } from "./outline.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
@@ -25,7 +25,10 @@ export interface WorkflowEntry {
   name: string;
   title?: string;
   trigger: "manual";
-  /** Set for a workflow the runtime adds itself, such as `drift`, rather than the config. */
+  /**
+   * Set for a workflow the runtime adds itself, `drift`, rather than the config: a label. It
+   * starts like any other.
+   */
   builtin?: true;
   /** The input, as JSON Schema (draft 2020-12), from the zod schema. */
   input: Record<string, unknown>;
@@ -159,7 +162,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       name: wf.name,
       title: wf.title,
       trigger: wf.trigger,
-      ...(isBuiltin(wf) && { builtin: true as const }),
+      ...(wf.name === DRIFT_WORKFLOW && { builtin: true as const }),
       input: toJsonSchema(wf.input, `${wf.name} input`, "input"),
       ops: (wf.uses as Use[]).filter(isOp).map((op) => op.id),
       builtins: (wf.uses as Use[]).filter((u): u is Builtin => typeof u === "string"),
