@@ -205,6 +205,13 @@ describe("the API", () => {
     expect(readFileSync(announce.file!, "utf8")).toContain(line);
     expect(JSON.stringify(body)).not.toContain(line);
     expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.effect).toBe("send");
+    // Each faked operation's sample exchange; GitHub has no fake in `fakes`.
+    expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.mock).toEqual({
+      input: { id: "bc_0001" },
+      output: { id: "bc_0001", status: "queued" },
+    });
+    expect(body.ops.filter((o) => o.vendor !== "github").every((o) => o.mock && "output" in o.mock)).toBe(true);
+    expect(body.ops.filter((o) => o.vendor === "github").every((o) => o.mock === undefined)).toBe(true);
     expect(body.vendors.resend).toMatchObject({ title: "Resend", logo: { src: expect.stringMatching(/^data:/) } });
     // No data files beside the config: no declared resources and no problems, passed through as they are.
     expect(body.resources).toEqual([]);
@@ -704,18 +711,44 @@ describe("the page", () => {
     expect(runs.html.match(/<html[^>]*>/)?.[0]).not.toMatch(/class="[^"]*\bdark\b/);
   });
 
-  it("renders the connectors: each one's package and homepage, resource types, operations and the workflows that use them", async () => {
+  it("lists the connectors, each linking to its page, without their operations", async () => {
     const connectors = await page("/connectors");
     expect(connectors.status).toBe(200);
     expect(connectors.html).toMatch(/<h1[^>]*>Connectors<\/h1>/);
     expect(connectors.text).toContain("<title>Connectors · Sanoma</title>");
-    expect(connectors.html).toContain('href="https://www.npmjs.com/package/@sanoma/connector-resend"');
-    expect(connectors.html).toContain('href="https://github.com/Sanoma-AI/sanoma/tree/main/connectors/resend#readme"');
-    expect(connectors.html).toContain("<code>resend.broadcast.send</code>");
-    expect(connectors.html).toMatch(/Resources: <\/span>Branch protection rule, Repository, Team membership</);
-    expect(connectors.html).toContain('href="/workflows/announce"');
+    for (const title of ["Ghost", "Resend", "Bluesky", "GitHub"]) expect(connectors.text).toContain(`>${title}<`);
+    expect(connectors.html).toContain('href="/connectors/ghost"');
+    expect(connectors.text).toContain("2 operations · used by 1 workflow");
+    // Only the hydration data, which carries the whole config, names an operation.
+    expect(connectors.html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, "")).not.toMatch(/ghost\.post\.create/);
     // The sidebar, on every page, links to it.
     expect(connectors.html).toContain('href="/connectors"');
+  });
+
+  it("renders a connector's page: its links, each operation's contract, phrases, mock and scenarios, and who uses it", async () => {
+    const blogPage = await page("/connectors/ghost");
+    expect(blogPage.status).toBe(200);
+    expect(blogPage.html).toMatch(/<h1[^>]*>(<img[^>]*>)+Ghost<\/h1>/);
+    expect(blogPage.text).toContain("<title>Ghost · Sanoma</title>");
+    expect(blogPage.html).toContain('href="https://www.npmjs.com/package/@sanoma/connector-ghost"');
+    expect(blogPage.html).toContain("<code>ghost.post.create</code>");
+    expect(blogPage.text).toContain("<code>Given a post titled {title} exists</code>");
+    // The mock: what the fake returned for a made-up input, publish publishing the post create made.
+    expect(blogPage.text).toContain(">Called with<");
+    expect(blogPage.text).toMatch(/&quot;id&quot;: &quot;post_0001&quot;/);
+    // The scenario that names the operation, linking to its workflow with it chosen.
+    expect(blogPage.html).toContain('href="/workflows/announce?scenario=Launch+on+time"');
+    expect(blogPage.text).toContain(">seeds<");
+    expect(blogPage.html).toContain('href="/workflows/announce"');
+
+    // A vendor without a fake in `fakes` says so; its resource types are named.
+    const githubPage = await page("/connectors/github");
+    expect(githubPage.text).toContain("No fake in this config.");
+    expect(githubPage.html).toMatch(/Resources: <\/span>Branch protection rule, Repository, Team membership</);
+
+    const missing = await page("/connectors/nope");
+    expect(missing.status).toBe(404);
+    expect(missing.text).toContain("No connector nope");
   });
 
   it("renders a workflow's page: its graph beside its source, and not-found for one that does not exist", async () => {

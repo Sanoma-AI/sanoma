@@ -11,7 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiRouteImport } from './routes/api'
-import { Route as ConnectorsRouteImport } from './routes/connectors'
+import { Route as ConnectorsRouteRouteImport } from './routes/connectors/route'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as RunsRouteRouteImport } from './routes/runs/route'
 import { Route as StartRouteImport } from './routes/start'
@@ -19,6 +19,8 @@ import { Route as WorkflowsRouteRouteImport } from './routes/workflows/route'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
 import { Route as ApiConfigRouteImport } from './routes/api/config'
 import { Route as ApiScenariosRouteImport } from './routes/api/scenarios'
+import { Route as ConnectorsIndexRouteImport } from './routes/connectors/index'
+import { Route as ConnectorsVendorRouteImport } from './routes/connectors/$vendor'
 import { Route as RunsIndexRouteImport } from './routes/runs/index'
 import { Route as RunsIdRouteImport } from './routes/runs/$id'
 import { Route as WorkflowsIndexRouteImport } from './routes/workflows/index'
@@ -37,7 +39,7 @@ const ApiRoute = ApiRouteImport.update({
   path: '/api',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ConnectorsRoute = ConnectorsRouteImport.update({
+const ConnectorsRouteRoute = ConnectorsRouteRouteImport.update({
   id: '/connectors',
   path: '/connectors',
   getParentRoute: () => rootRouteImport,
@@ -76,6 +78,16 @@ const ApiScenariosRoute = ApiScenariosRouteImport.update({
   id: '/scenarios',
   path: '/scenarios',
   getParentRoute: () => ApiRoute,
+} as any)
+const ConnectorsIndexRoute = ConnectorsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ConnectorsRouteRoute,
+} as any)
+const ConnectorsVendorRoute = ConnectorsVendorRouteImport.update({
+  id: '/$vendor',
+  path: '/$vendor',
+  getParentRoute: () => ConnectorsRouteRoute,
 } as any)
 const RunsIndexRoute = RunsIndexRouteImport.update({
   id: '/',
@@ -116,17 +128,19 @@ const ApiRunsIdApprovalsApprovalIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/connectors': typeof ConnectorsRouteRouteWithChildren
   '/runs': typeof RunsRouteRouteWithChildren
   '/workflows': typeof WorkflowsRouteRouteWithChildren
   '/api': typeof ApiRouteWithChildren
-  '/connectors': typeof ConnectorsRoute
   '/inbox': typeof InboxRoute
   '/start': typeof StartRoute
   '/api/$': typeof ApiSplatRoute
   '/api/config': typeof ApiConfigRoute
   '/api/scenarios': typeof ApiScenariosRoute
+  '/connectors/$vendor': typeof ConnectorsVendorRoute
   '/runs/$id': typeof RunsIdRoute
   '/workflows/$name': typeof WorkflowsNameRoute
+  '/connectors/': typeof ConnectorsIndexRoute
   '/runs/': typeof RunsIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
   '/api/runs/': typeof ApiRunsIndexRoute
@@ -136,14 +150,15 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api': typeof ApiRouteWithChildren
-  '/connectors': typeof ConnectorsRoute
   '/inbox': typeof InboxRoute
   '/start': typeof StartRoute
   '/api/$': typeof ApiSplatRoute
   '/api/config': typeof ApiConfigRoute
   '/api/scenarios': typeof ApiScenariosRoute
+  '/connectors/$vendor': typeof ConnectorsVendorRoute
   '/runs/$id': typeof RunsIdRoute
   '/workflows/$name': typeof WorkflowsNameRoute
+  '/connectors': typeof ConnectorsIndexRoute
   '/runs': typeof RunsIndexRoute
   '/workflows': typeof WorkflowsIndexRoute
   '/api/runs': typeof ApiRunsIndexRoute
@@ -153,17 +168,19 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/connectors': typeof ConnectorsRouteRouteWithChildren
   '/runs': typeof RunsRouteRouteWithChildren
   '/workflows': typeof WorkflowsRouteRouteWithChildren
   '/api': typeof ApiRouteWithChildren
-  '/connectors': typeof ConnectorsRoute
   '/inbox': typeof InboxRoute
   '/start': typeof StartRoute
   '/api/$': typeof ApiSplatRoute
   '/api/config': typeof ApiConfigRoute
   '/api/scenarios': typeof ApiScenariosRoute
+  '/connectors/$vendor': typeof ConnectorsVendorRoute
   '/runs/$id': typeof RunsIdRoute
   '/workflows/$name': typeof WorkflowsNameRoute
+  '/connectors/': typeof ConnectorsIndexRoute
   '/runs/': typeof RunsIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
   '/api/runs/': typeof ApiRunsIndexRoute
@@ -174,17 +191,19 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/connectors'
     | '/runs'
     | '/workflows'
     | '/api'
-    | '/connectors'
     | '/inbox'
     | '/start'
     | '/api/$'
     | '/api/config'
     | '/api/scenarios'
+    | '/connectors/$vendor'
     | '/runs/$id'
     | '/workflows/$name'
+    | '/connectors/'
     | '/runs/'
     | '/workflows/'
     | '/api/runs/'
@@ -194,14 +213,15 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/api'
-    | '/connectors'
     | '/inbox'
     | '/start'
     | '/api/$'
     | '/api/config'
     | '/api/scenarios'
+    | '/connectors/$vendor'
     | '/runs/$id'
     | '/workflows/$name'
+    | '/connectors'
     | '/runs'
     | '/workflows'
     | '/api/runs'
@@ -210,17 +230,19 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/connectors'
     | '/runs'
     | '/workflows'
     | '/api'
-    | '/connectors'
     | '/inbox'
     | '/start'
     | '/api/$'
     | '/api/config'
     | '/api/scenarios'
+    | '/connectors/$vendor'
     | '/runs/$id'
     | '/workflows/$name'
+    | '/connectors/'
     | '/runs/'
     | '/workflows/'
     | '/api/runs/'
@@ -230,10 +252,10 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ConnectorsRouteRoute: typeof ConnectorsRouteRouteWithChildren
   RunsRouteRoute: typeof RunsRouteRouteWithChildren
   WorkflowsRouteRoute: typeof WorkflowsRouteRouteWithChildren
   ApiRoute: typeof ApiRouteWithChildren
-  ConnectorsRoute: typeof ConnectorsRoute
   InboxRoute: typeof InboxRoute
   StartRoute: typeof StartRoute
 }
@@ -258,7 +280,7 @@ declare module '@tanstack/react-router' {
       id: '/connectors'
       path: '/connectors'
       fullPath: '/connectors'
-      preLoaderRoute: typeof ConnectorsRouteImport
+      preLoaderRoute: typeof ConnectorsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/inbox': {
@@ -309,6 +331,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/scenarios'
       preLoaderRoute: typeof ApiScenariosRouteImport
       parentRoute: typeof ApiRoute
+    }
+    '/connectors/': {
+      id: '/connectors/'
+      path: '/'
+      fullPath: '/connectors/'
+      preLoaderRoute: typeof ConnectorsIndexRouteImport
+      parentRoute: typeof ConnectorsRouteRoute
+    }
+    '/connectors/$vendor': {
+      id: '/connectors/$vendor'
+      path: '/$vendor'
+      fullPath: '/connectors/$vendor'
+      preLoaderRoute: typeof ConnectorsVendorRouteImport
+      parentRoute: typeof ConnectorsRouteRoute
     }
     '/runs/': {
       id: '/runs/'
@@ -362,6 +398,20 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface ConnectorsRouteRouteChildren {
+  ConnectorsVendorRoute: typeof ConnectorsVendorRoute
+  ConnectorsIndexRoute: typeof ConnectorsIndexRoute
+}
+
+const ConnectorsRouteRouteChildren: ConnectorsRouteRouteChildren = {
+  ConnectorsVendorRoute: ConnectorsVendorRoute,
+  ConnectorsIndexRoute: ConnectorsIndexRoute,
+}
+
+const ConnectorsRouteRouteWithChildren = ConnectorsRouteRoute._addFileChildren(
+  ConnectorsRouteRouteChildren,
+)
+
 interface RunsRouteRouteChildren {
   RunsIdRoute: typeof RunsIdRoute
   RunsIndexRoute: typeof RunsIndexRoute
@@ -412,10 +462,10 @@ const ApiRouteWithChildren = ApiRoute._addFileChildren(ApiRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ConnectorsRouteRoute: ConnectorsRouteRouteWithChildren,
   RunsRouteRoute: RunsRouteRouteWithChildren,
   WorkflowsRouteRoute: WorkflowsRouteRouteWithChildren,
   ApiRoute: ApiRouteWithChildren,
-  ConnectorsRoute: ConnectorsRoute,
   InboxRoute: InboxRoute,
   StartRoute: StartRoute,
 }
