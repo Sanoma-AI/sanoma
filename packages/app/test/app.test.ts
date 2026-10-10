@@ -185,6 +185,12 @@ async function page(path: string, base = app.url) {
 const testControl = (html: string) =>
   html.match(/<div role="group" data-slot="button-group"[^>]*aria-label="Test a scenario"[^>]*>(.*?)<\/div>/)?.[1];
 
+/** The runs announce's rail links to, sorted, with `?runs=<filter>` kept on each link. */
+const railRunIds = (html: string, filter: string) =>
+  [...html.matchAll(new RegExp(`href="/workflows/announce/runs/([^"?]+)\\?runs=${filter}"`, "g"))]
+    .map(([, id]) => id)
+    .toSorted();
+
 /** A request's status, sent as written: no normalising of the path, and any Host header. */
 function rawStatus(base: string, path: string, headers?: Record<string, string>) {
   const { hostname, port } = new URL(base);
@@ -644,15 +650,18 @@ describe("a file's source", () => {
 });
 
 describe("the page", () => {
-  it("renders the workflows on the server, and the sidebar links to each workflow and no runs page", async () => {
+  it("renders the workflows on the server, with the sidebar linking to each workflow and no runs page, and the theme left to the browser", async () => {
     const res = await fetch(new URL("/workflows", app.url));
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toMatch(/text\/html/);
     const html = await res.text();
     expect(html).toContain('<div id="app">');
     expect(html).toMatch(/<h1[^>]*>Workflows<\/h1>/);
+    expect(html).toContain('data-slot="sidebar-wrapper"');
     expect(html).toContain('href="/workflows/announce"');
     expect(html).not.toContain('href="/runs"');
+    expect(html).toContain("sanoma.theme");
+    expect(html.match(/<html[^>]*>/)?.[0]).not.toMatch(/class="[^"]*\bdark\b/);
   });
 
   it("redirects /, /runs and a run's old URL to their pages under /workflows, and not-found for a run that does not exist", async () => {
@@ -664,10 +673,13 @@ describe("the page", () => {
     const old = await fetch(new URL(`/runs/${runId}`, app.url), { redirect: "manual" });
     expect(old.status).toBe(307);
     expect(old.headers.get("location")?.endsWith(`/workflows/announce/runs/${runId}`)).toBe(true);
-    // A run under another workflow's page goes to its own workflow's.
-    const elsewhere = await fetch(new URL(`/workflows/drift/runs/${runId}`, app.url), { redirect: "manual" });
-    expect(elsewhere.status).toBe(307);
-    expect(elsewhere.headers.get("location")?.endsWith(`/workflows/announce/runs/${runId}`)).toBe(true);
+    // A run under another workflow's page goes to its own workflow's, under one that does not
+    // exist too: the run is read before the page could say there is no such workflow.
+    for (const name of ["drift", "typo"]) {
+      const elsewhere = await fetch(new URL(`/workflows/${name}/runs/${runId}`, app.url), { redirect: "manual" });
+      expect(elsewhere.status, name).toBe(307);
+      expect(elsewhere.headers.get("location")?.endsWith(`/workflows/announce/runs/${runId}`), name).toBe(true);
+    }
     const missing = await page("/runs/does-not-exist");
     expect(missing.status).toBe(404);
     expect(missing.text).toContain("No run does-not-exist");
@@ -769,13 +781,6 @@ describe("the page", () => {
     expect(start.status).toBe(200);
     expect(start.html).toContain('id="field-title"');
     expect(start.html).toContain('type="datetime-local"');
-  });
-
-  it("renders the theme switch and the sidebar on the server, the theme left to the browser", async () => {
-    const workflows = await page("/workflows");
-    expect(workflows.html).toContain("sanoma.theme");
-    expect(workflows.html).toContain('data-slot="sidebar-wrapper"');
-    expect(workflows.html.match(/<html[^>]*>/)?.[0]).not.toMatch(/class="[^"]*\bdark\b/);
   });
 
   it("lists the connectors, each linking to its page, without their operations", async () => {
@@ -890,9 +895,14 @@ describe("the page", () => {
     expect(await res.text()).toContain('<div id="app">');
   });
 
-  it("renders a run, and answers a run that does not exist with not-found", async () => {
+  it("renders a run under its workflow's heading, marked in the rail, and answers a run that does not exist with not-found", async () => {
     const found = await page(`/workflows/announce/runs/${runId}`);
     expect(found.status).toBe(200);
+    expect(found.html).toMatch(/<h1[^>]*>Announce a launch<\/h1>/);
+    expect(found.text).toContain(`<title>${runId} · Sanoma</title>`);
+    expect(found.html).toContain('aria-label="Runs of this workflow"');
+    const link = found.html.match(new RegExp(`<a[^>]*href="/workflows/announce/runs/${runId}"[^>]*>`))?.[0];
+    expect(link).toContain('aria-current="page"');
     expect(found.html).toMatch(/<h2[^>]*>Ledger<\/h2>/);
     // React Flow draws the graph in the browser only: the server renders its heading and a
     // skeleton, and the workflow's source beside it as plain text until its view loads.
@@ -906,29 +916,25 @@ describe("the page", () => {
     expect(missing.text).toContain("No run does-not-exist");
   });
 
-  it("renders a run under its workflow: the workflow's heading, the run's ledger, and the run marked in the rail", async () => {
-    const found = await page(`/workflows/announce/runs/${runId}`);
-    expect(found.status).toBe(200);
-    expect(found.html).toMatch(/<h1[^>]*>Announce a launch<\/h1>/);
-    expect(found.html).toMatch(/<h2[^>]*>Ledger<\/h2>/);
-    expect(found.text).toContain(`<title>${runId} · Sanoma</title>`);
-    const link = found.html.match(new RegExp(`<a[^>]*href="/workflows/announce/runs/${runId}"[^>]*>`))?.[0];
-    expect(link).toContain('aria-current="page"');
-    expect(found.html).toContain('aria-label="Runs of this workflow"');
-  });
-
-  it("filters the rail by ?runs=, and keeps the filter on the rail's links", async () => {
+  it("filters the rail by ?runs=, asking the server for a status, and keeps the filter on the rail's links", async () => {
     const { body: runs } = await call<RunSummary[]>("/api/runs?workflow=announce&limit=50");
     const sandbox = runs.filter((r) => r.sandbox !== undefined).map((r) => r.runId);
     expect(sandbox).toContain(sandboxId);
     const filtered = await page("/workflows/announce?runs=sandbox");
     expect(filtered.status).toBe(200);
-    const listed = [...filtered.html.matchAll(/href="\/workflows\/announce\/runs\/([^"?]+)\?runs=sandbox"/g)].map(
-      ([, id]) => id,
-    );
-    expect(listed.toSorted()).toEqual(sandbox.toSorted());
+    expect(railRunIds(filtered.html, "sandbox")).toEqual(sandbox.toSorted());
     expect(filtered.html).not.toContain(`href="/workflows/announce/runs/${runId}`);
     expect(filtered.html).toContain('href="/workflows/announce/new?runs=sandbox"');
+
+    // Failed is the server's to pick (`status=failed`), not a pick from the latest 50, so an
+    // older failed run is not lost behind them.
+    const { body: failed } = await call<RunSummary[]>("/api/runs?workflow=announce&status=failed&limit=50");
+    expect(failed).not.toEqual([]);
+    const failedPage = await page("/workflows/announce?runs=failed");
+    expect(failedPage.status).toBe(200);
+    expect(railRunIds(failedPage.html, "failed")).toEqual(failed.map((r) => r.runId).toSorted());
+    // The rail's query as the server hands it to the browser: its hash, keys sorted.
+    expect(failedPage.html).toContain(String.raw`\"limit\":50,\"status\":\"failed\",\"workflow\":\"announce\"`);
   });
 
   it("renders the New run pane: the start form for the workflow", async () => {
@@ -1051,13 +1057,10 @@ describe("resources and drift", () => {
     expect(chosen.text).toMatch(/<h2[^>]*><code>resources\/identity\/github\.ts<\/code><\/h2>/);
   });
 
-  it("lists the built-in drift workflow like any other, labelled built-in, with its Run", async () => {
+  it("lists the built-in drift workflow like any other, labelled built-in, with its Run, and starts it from the Start page", async () => {
     const workflows = await page("/workflows");
     expect(workflows.text).toContain(">built-in<");
     expect(workflows.text).toContain('href="/workflows/drift/new"');
-  });
-
-  it("starts the built-in drift workflow from the Start page like any other", async () => {
     const start = await page("/start?workflow=drift");
     expect(start.text).not.toContain("No workflow named");
   });
@@ -1204,6 +1207,49 @@ describe("an app configured otherwise", () => {
       expect(logged).toHaveBeenCalledOnce();
       expect(String(logged.mock.calls[0]?.[0])).toContain(`could not read the ledger of run ${runId}`);
     });
+  });
+});
+
+describe("an app whose config no longer has a workflow", () => {
+  // The file's database, where announce has runs, read by a config without announce.
+  let retired: App;
+  beforeAll(async () => {
+    retired = await startApp({ ...config, workflows: [] }, { port: 0 });
+  });
+  afterAll(async () => {
+    await retired?.close();
+  });
+
+  it("keeps the retired workflow's page while it has runs: its name, its runs, and no Run", async () => {
+    const about = await page("/workflows/announce", retired.url);
+    expect(about.status).toBe(200);
+    expect(about.html).toMatch(/<h1[^>]*>announce<\/h1>/);
+    expect(about.text).toContain(
+      "This config has no workflow named <code>announce</code>. Its past runs are in the rail.",
+    );
+    expect(about.html).toContain(`href="/workflows/announce/runs/${runId}"`);
+    const pane = await page("/workflows/announce/new", retired.url);
+    expect(pane.status).toBe(200);
+    expect(pane.text).toContain("This config has no workflow named <code>announce</code>.");
+    expect(pane.html).not.toContain('id="field-title"');
+    // The header's Run is the only button-styled link to the New run pane.
+    expect(about.html).not.toMatch(/<a[^>]*data-slot="button"[^>]*href="\/workflows\/announce\/new"/);
+  });
+
+  it("renders a run of it with only the workflow's name, and its old URL leads there", async () => {
+    const run = await page(`/workflows/announce/runs/${runId}`, retired.url);
+    expect(run.status).toBe(200);
+    expect(run.html).toMatch(/<h2[^>]*>Ledger<\/h2>/);
+    expect(run.text).toContain("This config has no workflow named announce");
+    const old = await fetch(new URL(`/runs/${runId}`, retired.url), { redirect: "manual" });
+    expect(old.status).toBe(307);
+    expect(old.headers.get("location")?.endsWith(`/workflows/announce/runs/${runId}`)).toBe(true);
+  });
+
+  it("answers a workflow with neither a config entry nor runs with not-found", async () => {
+    const missing = await page("/workflows/nope", retired.url);
+    expect(missing.status).toBe(404);
+    expect(missing.text).toContain("No workflow nope");
   });
 });
 
