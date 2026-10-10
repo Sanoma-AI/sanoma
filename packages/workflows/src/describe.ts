@@ -67,7 +67,8 @@ export interface OpEntry {
    * A sample exchange with the vendor's fake, when the config has one in `fakes`: a made-up
    * input, and what the fake returned for it, parsed by `output`, or why it did not (what it
    * threw, or how its reply is off the contract). `input` is null when the fake does not
-   * implement the operation.
+   * implement the operation. Mocks are for workflow operations; resource reads and imports read
+   * real state and a Test run never calls them, so they have none.
    */
   mock?: { input: unknown; output: unknown } | { input: unknown; error: string };
 }
@@ -167,7 +168,8 @@ export async function describeConfig(config: SanomaConfig): Promise<ConfigDescri
     await samples(
       vendor,
       fake,
-      declared.filter((op) => op.vendor === vendor),
+      // Workflow operations only: a resource type's `read` and `import` are never sampled.
+      declared.filter((op) => op.vendor === vendor && !resources.has(`${op.vendor}.${op.resource}`)),
       mocks,
     );
   }
@@ -219,9 +221,9 @@ export async function describeConfig(config: SanomaConfig): Promise<ConfigDescri
 type Mock = NonNullable<OpEntry["mock"]>;
 
 /**
- * One sample call of each of a vendor's operations, in their declared order, on one fresh copy
- * of its fake, so the configured fake's state, calls and file are untouched, into `mocks`. Each
- * input is made up from the operation's schema, seeded by its id so it is the same on every
+ * One sample call of each of a vendor's workflow operations, in their declared order, on one
+ * fresh copy of its fake, so the configured fake's state, calls and file are untouched, into
+ * `mocks`. Each input is made up from the operation's schema, seeded by its id so it is the same on every
  * start, except that a field named as a field of an earlier output takes that value (when its
  * schema takes it): a sample `publish` publishes the post the sample `create` made. The reply is
  * parsed by the operation's output schema. What a vendor may do, failing or answering off its
