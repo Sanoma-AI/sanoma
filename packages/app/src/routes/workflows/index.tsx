@@ -183,8 +183,7 @@ function WorkflowCard({ workflow, waiting }: { workflow: WorkflowEntry; waiting:
         <CardAction className="flex gap-2">
           {scenario !== undefined && (
             <Button asChild variant="outline" size="sm">
-              {/* wave 2 merge: add search={{ scenario }} */}
-              <Link to="/workflows/$name/new" params={{ name }}>
+              <Link to="/workflows/$name/new" params={{ name }} search={{ scenario }}>
                 <FlaskConicalIcon data-icon="inline-start" />
                 Test
               </Link>

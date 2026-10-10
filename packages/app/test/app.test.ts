@@ -779,6 +779,8 @@ describe("the page", () => {
     );
 
     expect(workflows.html).toContain('href="/workflows/announce/new"');
+    // Test opens New run in Sandbox mode with the workflow's first scenario chosen.
+    expect(workflows.html).toContain('href="/workflows/announce/new?scenario=Launch+on+time"');
   });
 
   it("redirects the old Start page to the workflow's New run pane, or to the workflows when it names none", async () => {
@@ -1141,7 +1143,7 @@ describe("resources and drift", () => {
     const card = workflows.text.slice(at("announce"), at("drift"));
     for (const title of ["Ghost", "Resend", "Bluesky"]) expect(card).toMatch(new RegExp(`/>${title}</span>`));
     // Announce has scenarios, so a Test; drift has none.
-    expect(card).toMatch(/href="\/workflows\/announce\/new"[^>]*>.*?Test<\/a>/);
+    expect(card).toMatch(/href="\/workflows\/announce\/new\?scenario=Launch\+on\+time"[^>]*>.*?Test<\/a>/);
     expect(workflows.text.slice(at("drift"))).not.toContain("Test</a>");
     // The strips read their runs in the browser: the server sends one skeleton per card.
     expect(
