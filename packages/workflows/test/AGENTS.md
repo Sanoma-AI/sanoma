@@ -7,7 +7,7 @@ Vitest tests for `@sanoma/workflows`. Files that start runs need Postgres (`pnpm
 | Path                                     | What it is                                                                                             |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | [`bad-data-files.ts`](bad-data-files.ts) | Data files outside the subset, one construct each, for the lint and reader tests                       |
-| [`fixtures/`](fixtures/)                 | Example workflows; `company/`, a config with data files in its `resources/`                            |
+| [`fixtures/`](fixtures/)                 | Example workflows; `company/`, a config with data files in its `resources/`, and fakes holding them    |
 | [`announce.test.ts`](announce.test.ts)   | The announce workflow end to end: approvals, sleep, restart and policy holds                           |
 | [`approvals.test.ts`](approvals.test.ts) | `approvedFor`, `mayDecide`, and approvals a workflow or a policy asks for, on Postgres                 |
 | [`build.ts`](build.ts)                   | `ensureBuilt`: builds dist/ when missing or stale, for tests of what the package ships                 |
