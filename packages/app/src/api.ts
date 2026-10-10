@@ -88,7 +88,8 @@ export type DecideCall = z.infer<typeof DecideCall>;
 /** How many runs one read lists. */
 export const RUNS_LIMIT = { default: 50, max: 500 } as const;
 
-const RUN_STATUSES = [
+/** Every run status, in the order a run may pass through them: the one list the API and the page check against. */
+export const RUN_STATUSES = [
   "queued",
   "running",
   "waiting",

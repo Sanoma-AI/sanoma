@@ -6,6 +6,16 @@ import type { ApprovalState, DriftStatus, RecordedDecision, RunStatus } from "@s
 /** What a status means, one colour each (the --tone-* tokens in style.css). */
 export type Tone = "ok" | "bad" | "waiting" | "active" | "idle" | "off";
 
+/** A tone as a solid fill, readable against the page (3:1): status dots and the run strips' squares. */
+export const TONE_FILL: Record<Tone, string> = {
+  ok: "bg-tone-ok-foreground",
+  bad: "bg-tone-bad-foreground",
+  waiting: "bg-tone-waiting-foreground",
+  active: "bg-tone-active-foreground",
+  idle: "bg-tone-idle-foreground",
+  off: "bg-tone-off-foreground",
+};
+
 export const RUN_TONE: Record<RunStatus, Tone> = {
   queued: "idle",
   running: "active",
