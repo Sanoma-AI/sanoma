@@ -137,7 +137,8 @@ export interface ConfigDescription {
 }
 
 /**
- * Describes a config. Throws what `startWorker` would refuse (see `resolveConfig`). The data
+ * Describes a config. Throws what `startWorker` would refuse (see `resolveConfig`), except missing
+ * credentials, which it records (`credentials` on a vendor's entry). The data
  * files' problems are data, `problems`, beside the resources read without any. Asynchronous
  * only for the operations' `mock`s, which call a fresh copy of each fake: a fake that crashes,
  * or an input faker cannot make up, throws too.
