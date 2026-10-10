@@ -17,11 +17,11 @@ import {
   PickleStepType,
   type Step as GherkinStep,
 } from "@cucumber/messages";
-import { z } from "zod";
+import type { z } from "zod";
 import type { RunSummary, SanomaClient } from "./client.ts";
 import type { ResolvedConfig } from "./config.ts";
 import { SanomaError } from "./errors.ts";
-import { fill, seedFrom } from "./fill.ts";
+import { fill, isBug, seedFrom, shapeOf } from "./fill.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import { type OutlineNode, outlineWorkflow } from "./outline.ts";
 import { errorMessage, isEnded } from "./shared.ts";
@@ -135,12 +135,9 @@ const FAULTS = {
   "loses its reply once": "loseReply",
 } as const;
 
-/** A mistake in this code, not in a feature file: thrown as it is, never filed as the file's error. */
-const isBug = (err: unknown) => err instanceof TypeError || err instanceof RangeError || err instanceof ReferenceError;
-
 /** The schema of the field `name` of an object schema; throws naming the fields it has. */
 function fieldOf(schema: z.ZodType, name: string, owner: string): z.ZodType {
-  const shape: Record<string, z.ZodType> = schema instanceof z.ZodObject ? schema.shape : {};
+  const shape = shapeOf(schema);
   if (!Object.hasOwn(shape, name)) {
     throw new Error(`no field "${name}" in ${owner}'s input; it has ${Object.keys(shape).join(", ") || "none"}`);
   }
@@ -487,7 +484,6 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
       decisions: [],
       expect: [],
     };
-    // One name always makes up the same values.
     seedFrom(name);
     for (const ps of pickle.steps) {
       const line = lines.get(ps.astNodeIds[0]!);
