@@ -205,29 +205,21 @@ describe("outlineGraph", () => {
     ]);
   });
 
-  it("finds the node a click in the source is in: the innermost, the first of equals, or none", () => {
+  it("finds the node a click in the source is in: the innermost, the last of equals (a loop's latest pass), or none", () => {
     const nodes: GraphNode[] = [
-      { id: "op:0", kind: "op", label: "a.b.outer", spans: [[0, 40]] },
-      { id: "op:1", kind: "op", label: "a.b.inner", spans: [[10, 20]] },
-      { id: "op:2", kind: "op", label: "a.b.inner", spans: [[10, 20]] },
-      {
-        id: "sleep:3",
-        kind: "sleep",
-        label: "sleep",
-        spans: [
-          [50, 60],
-          [70, 80],
-        ],
-      },
+      { id: "op:0", kind: "op", label: "a.b.outer", span: [0, 40] },
+      { id: "op:1", kind: "op", label: "a.b.inner", span: [10, 20] },
+      { id: "op:2", kind: "op", label: "a.b.inner", span: [10, 20] },
+      { id: "sleep:3", kind: "sleep", label: "sleep", span: [50, 60] },
       { id: "end", kind: "end", label: "end" },
     ];
     const at = (offset: number) => nodeAt(nodes, offset)?.id;
     // A span's end is outside it.
-    expect([at(5), at(10), at(15), at(19), at(20), at(75), at(40)]).toEqual([
+    expect([at(5), at(10), at(15), at(19), at(20), at(55), at(40)]).toEqual([
       "op:0",
-      "op:1",
-      "op:1",
-      "op:1",
+      "op:2",
+      "op:2",
+      "op:2",
       "op:0",
       "sleep:3",
       undefined,

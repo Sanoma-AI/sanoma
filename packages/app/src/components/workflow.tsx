@@ -152,7 +152,10 @@ export const GraphAndSource = memo(function GraphAndSource({
     [onSelect],
   );
   const selectAt = useCallback((offset: number) => select(graph && nodeAt(graph.nodes, offset)), [graph, select]);
-  const highlight = useMemo(() => graph?.nodes.find((node) => node.id === selected)?.spans, [graph, selected]);
+  const highlight = useMemo(() => {
+    const span = graph?.nodes.find((node) => node.id === selected)?.span;
+    return span && [span];
+  }, [graph, selected]);
   const unread =
     outline === undefined
       ? `This config has no workflow named ${name}`

@@ -68,6 +68,8 @@ const requested = (title: string, id = `approval-${title}`, more: object = {}): 
   covers: [],
   ...more,
 });
+/** A sleep, until a time. */
+const slept = (until: number, more: object = {}): Body => ({ type: "sleep.started", until, ...more });
 const inGroup = (body: Body, index: number, size = 3, id = "all:1"): Body => ({ ...body, group: { id, index, size } });
 
 describe("runGraph", () => {
@@ -343,44 +345,60 @@ describe("runGraph", () => {
             called("ghost.post.create", { node: "0" }),
             called("resend.broadcast.send", { node: "1.1.0" }),
             requested("Send it?", "a1", { node: "2.0.0" }),
-            { type: "sleep.started", until, node: "2.0.1" },
+            slept(until, { node: "2.0.1" }),
             requested("Send it?", "a2", { node: "2.0.0" }),
-            { type: "sleep.started", until, node: "2.0.1" },
-            called("ghost.post.create", { node: "3.0.0", error: { name: "Error", message: "down" } }),
+            slept(until, { node: "2.0.1" }),
+            called("ghost.post.create", { node: "3.0.0" }),
             called("ghost.post.create", { node: "3.1.0" }),
           ),
         ),
       ).toEqual([
         "start null",
-        "op:1 [[0,10]]",
-        "op:2 [[40,50]]",
-        "approval:a1 [[70,80]]",
-        "sleep:4 [[100,110]]",
-        "approval:a2 [[70,80]]",
-        "sleep:6 [[100,110]]",
-        "op:7 [[140,150]]",
-        "op:8 [[160,170]]",
+        "op:1 [0,10]",
+        "op:2 [40,50]",
+        "approval:a1 [70,80]",
+        "sleep:4 [100,110]",
+        "approval:a2 [70,80]",
+        "sleep:6 [100,110]",
+        "op:7 [140,150]",
+        "op:8 [160,170]",
         "end null",
       ]);
     });
 
-    it("points a call nowhere when its record names no node, or a node the outline lacks or of another kind", () => {
+    it("points a call nowhere when its record names no node, or the outline has no such node or another call there", () => {
       expect(
         spansIn(
           ledger(
             started,
             called("ghost.post.create"),
             called("ghost.post.create", { node: "9" }),
+            // The file changed since the run: a sleep, and another operation, where the call was.
             called("ghost.post.create", { node: "2.0.1" }),
-            requested("Send it?", "a1", { node: "1.0.0" }),
+            called("ghost.post.create", { node: "1.0.0" }),
+            requested("Other", "a1", { node: "2.0.0" }),
           ),
         ),
-      ).toEqual(["start null", "op:1 null", "op:2 null", "op:3 null", "approval:a1 null", "end null"]);
+      ).toEqual(["start null", "op:1 null", "op:2 null", "op:3 null", "op:4 null", "approval:a1 null", "end null"]);
+    });
+
+    it("places a call at a computed operation (`*`) that fits it, and an approval at a computed title", () => {
+      const computed: OutlineNode[] = [
+        { kind: "op", path: "0", id: "*.post.create", span: [0, 10] },
+        { kind: "approval", path: "1", span: [20, 30] },
+      ];
+      const { nodes } = runGraph(
+        ledger(started, called("ghost.post.create", { node: "0" }), requested("Any", "a1", { node: "1" })),
+        run("running"),
+        NOW,
+        computed,
+      );
+      expect(spans(nodes)).toEqual(["start null", "op:1 [0,10]", "approval:a1 [20,30]", "end null"]);
     });
 
     it("places a policy's held call at the node its approval names", () => {
       const held = requested("Hold", "h1", { op: "ghost.post.create", opSeq: 2, node: "3.0.0", requestedBy: "policy" });
-      expect(spansIn(ledger(started, held))).toEqual(["start null", "op:2 [[140,150]]", "end null"]);
+      expect(spansIn(ledger(started, held))).toEqual(["start null", "op:2 [140,150]", "end null"]);
     });
   });
 });

@@ -1,4 +1,3 @@
-import type { Span } from "@sanoma/workflows/describe";
 import type { CallStep, Graph, GraphEdge, GraphNode, Step, StepState } from "./types.ts";
 
 /** A graph's two ends: an outline's are plain; a run's say how it started and how it ended. */
@@ -9,6 +8,9 @@ export interface Ends {
 
 const OUTLINE_ENDS: Ends = { end: { label: "end" } };
 
+/** A call's node's own: its step's state, and its place in the source. */
+const own = (step: CallStep) => ({ ...(step.state && { state: step.state }), ...(step.span && { span: step.span }) });
+
 /**
  * Steps as a graph: a chain from start to end. A `ctx.all` is one lane per member between the
  * node before it and the node after; a branch splits at a diamond into one lane per case. A
@@ -17,13 +19,9 @@ const OUTLINE_ENDS: Ends = { end: { label: "end" } };
  * holding the handler's, both from the node before. An empty member leads straight from the node
  * before to the node after; a branch's empty case, the way past it, is a lane marked "otherwise". A workflow's
  * outline is drawn this way, and a run's ledger once runGraph has made it into steps. A call's
- * node has the `spans` that `where` gives for its step: by default the step's own `span`.
+ * node has its step's `span`.
  */
-export function outlineGraph(
-  outline: readonly Step[],
-  ends: Ends = OUTLINE_ENDS,
-  where: (step: CallStep) => Span[] | undefined = (step) => step.span && [step.span],
-): Graph {
+export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS): Graph {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   let count = 0;
@@ -35,11 +33,6 @@ export function outlineGraph(
     return node.id;
   };
   const idOf = (kind: string, key: string | undefined) => key ?? `${kind}:${count++}`;
-  /** A call's node's own: its step's state, and its place in the source. */
-  const own = (step: CallStep) => {
-    const spans = where(step);
-    return { ...(step.state && { state: step.state }), ...(spans && { spans }) };
-  };
 
   /** Adds `steps` one after another from `from`, and returns the ids what follows is drawn from. */
   function chain(steps: readonly Step[], from: readonly string[], parent?: string): readonly string[] {
