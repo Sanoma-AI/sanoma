@@ -12,7 +12,7 @@ import { watchCredentials } from "./credentials.ts";
 import type { WorkflowDefinition } from "./define.ts";
 import { errorInfo, parseOrThrow } from "./errors.ts";
 import { entry, skipped, write, writeFailure } from "./ledger.ts";
-import { warn } from "./log.ts";
+import { setLogLevel, warn } from "./log.ts";
 import { lineStartsOf } from "./ast.ts";
 import { callsOf, outlineWithSource } from "./outline.ts";
 import type { Run, RunArgs, WorkerState, WorkflowOutline } from "./run.ts";
@@ -48,6 +48,7 @@ export interface WorkerOptions {
 export async function startWorker(config: SanomaConfig, options: WorkerOptions = {}): Promise<Worker> {
   // Check everything before touching the state a running worker reads.
   const resolved = resolveConfig(config);
+  setLogLevel(options.logLevel);
   const credentials = config.drivers.some((d) => d.env)
     ? await watchCredentials(resolved.databaseUrl, config.drivers)
     : undefined;

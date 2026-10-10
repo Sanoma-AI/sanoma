@@ -324,13 +324,14 @@ describe("a worker's credentials", () => {
     vi.stubEnv(REGION_VAR, undefined);
     await client.setCredential(KEY_VAR, KEY, { by: "alice" });
     await client.setCredential(URL_VAR, "https://stored.example.test", { by: "alice" });
-    const said = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const said = () => info.mock.calls.flat().filter((m) => String(m).startsWith("sanoma:"));
     // KEY_VAR is not in the environment: only its stored value lets the worker start.
-    const worker = await startWorker(config);
+    const worker = await startWorker(config, { logLevel: "info" });
     try {
       expect(process.env[KEY_VAR]).toBe(KEY);
       expect(process.env[URL_VAR]).toBe(FROM_ENV);
-      expect(said).toHaveBeenCalledWith("sanoma: credentials loaded for acme (1 variable)");
+      expect(said()).toEqual(["sanoma: credentials loaded for acme (1 variable)"]);
 
       await client.setCredential(KEY_VAR, "key_rotated", { by: "bob" });
       await vi.waitFor(() => expect(process.env[KEY_VAR]).toBe("key_rotated"));
@@ -344,7 +345,7 @@ describe("a worker's credentials", () => {
       await client.setCredential(REGION_VAR, "us", { by: "bob" });
       await vi.waitFor(() => expect(process.env[REGION_VAR]).toBe("us"));
       expect(process.env[URL_VAR]).toBe(FROM_ENV);
-      expect(said.mock.calls.flat()).toEqual([
+      expect(said()).toEqual([
         "sanoma: credentials loaded for acme (1 variable)",
         ...Array(4).fill("sanoma: credentials reloaded for acme (1 variable)"),
       ]);
