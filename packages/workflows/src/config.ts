@@ -1,10 +1,11 @@
 import { dirname, resolve } from "node:path";
 import { DBOS } from "@dbos-inc/dbos-sdk";
+import type { z } from "zod";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, type DriftDeclared, driftWorkflow } from "./drift.ts";
 import type { Fake } from "./fake.ts";
 import type { LedgerStore } from "./ledger.ts";
-import { type Connector, type Driver, type DriverFn, isOp, type Op } from "./op.ts";
+import { type Connector, type Driver, type DriverEnv, type DriverFn, isOp, type Op } from "./op.ts";
 import type { Policy } from "./policy.ts";
 import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
 import { computeVersion } from "./version.ts";
@@ -49,6 +50,20 @@ export interface SanomaConfig {
   root?: string;
 }
 
+/** One environment variable a driver declares in `env`, as `process.env` holds it: never its value. */
+export interface CredentialStatus {
+  /** The variable's name, such as `GHOST_ADMIN_API_KEY`. */
+  name: string;
+  /** Its one-line manual, from its schema's `.describe()`. */
+  description?: string;
+  /** It may be unset. */
+  optional: boolean;
+  /** `missing` when unset or empty; `invalid` when its schema refuses the value. */
+  status: "set" | "missing" | "invalid";
+  /** Why it is `invalid`: the schema's first issue, never the value. */
+  problem?: string;
+}
+
 /** A config, checked, with everything a worker, client or app derives from it. */
 export interface ResolvedConfig {
   appName: string;
@@ -76,6 +91,12 @@ export interface ResolvedConfig {
   workflows: Map<string, WorkflowDefinition<any, any>>;
   policy: Policy;
   ledger: LedgerStore;
+  /**
+   * The environment variables each driver declares in `env`, by vendor, in declared order, as
+   * `process.env` held them when the config was resolved. A vendor whose drivers declare none
+   * has no entry. `startWorker` refuses to start while one is not `credentialReady`.
+   */
+  credentials: Map<string, CredentialStatus[]>;
   /**
    * The config's directory, absolute: its `root`, else its `file`'s directory. Its data files
    * are `resources/` in it. Absent when the config has neither, so it has no data files.
@@ -183,8 +204,79 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     workflows: names,
     policy: config.policy,
     ledger,
+    credentials: credentialsOf(config.drivers),
     ...(root !== undefined && { root }),
   };
+}
+
+/**
+ * Each driver's `env`, checked against `process.env`, one variable at a time: only the declared
+ * names are read, an empty value counts as unset, and a value is never kept. A variable two
+ * drivers of one vendor declare is checked against each declaration, and the results merged.
+ */
+function credentialsOf(drivers: readonly Driver[]): Map<string, CredentialStatus[]> {
+  const map = new Map<string, CredentialStatus[]>();
+  for (const { vendor, env } of drivers) {
+    if (!env) continue;
+    const list = map.get(vendor) ?? [];
+    map.set(vendor, list);
+    for (const [name, schema] of Object.entries(env.shape)) {
+      const status = credentialStatus(name, schema, process.env[name] || undefined);
+      const i = list.findIndex((c) => c.name === name);
+      if (i === -1) list.push(status);
+      else list[i] = merged(list[i]!, status);
+    }
+  }
+  return map;
+}
+
+const SEVERITY: Record<CredentialStatus["status"], number> = { set: 0, missing: 1, invalid: 2 };
+
+/**
+ * Two declarations of one variable: the worse status (`invalid`, then `missing`) with its problem,
+ * the first description, and optional only when both allow it unset.
+ */
+function merged(first: CredentialStatus, next: CredentialStatus): CredentialStatus {
+  const worse = SEVERITY[next.status] > SEVERITY[first.status] ? next : first;
+  const description = first.description ?? next.description;
+  return { ...worse, ...(description !== undefined && { description }), optional: first.optional && next.optional };
+}
+
+function credentialStatus(
+  name: string,
+  schema: DriverEnv["shape"][string],
+  value: string | undefined,
+): CredentialStatus {
+  const description = descriptionOf(schema);
+  const parsed = value === undefined ? undefined : check(schema, value);
+  const problem = parsed?.problem;
+  return {
+    name,
+    ...(description !== undefined && { description }),
+    optional: check(schema, undefined).success,
+    status: !parsed ? "missing" : parsed.success ? "set" : "invalid",
+    ...(problem !== undefined && { problem }),
+  };
+}
+
+/**
+ * `schema.safeParse(value)`, with its first issue's message as the problem. A check that throws
+ * (zod lets a `.refine()` or `.transform()` throw) fails without its error, which may carry the value.
+ */
+function check(schema: z.ZodType, value: string | undefined): { success: boolean; problem?: string } {
+  try {
+    const { success, error } = schema.safeParse(value);
+    return { success, ...(error && { problem: error.issues[0]!.message }) };
+  } catch {
+    return { success: false, problem: "its check threw" };
+  }
+}
+
+/** A schema's `.describe()`, also through `.optional()`, `.default()` and `.prefault()` in any order. */
+function descriptionOf(schema: z.ZodType): string | undefined {
+  let s: z.ZodType | undefined = schema;
+  while (s && !s.description) s = "unwrap" in s ? (s as { unwrap(): z.ZodType }).unwrap() : undefined;
+  return s?.description;
 }
 
 /**

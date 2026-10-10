@@ -45,7 +45,8 @@ interface ServerEntry {
  * Serves the web UI and JSON API over a config: its runs, their ledgers and approvals, and a
  * form to start each workflow. Reads the same config the worker runs, through Postgres and the
  * config's ledger store; it runs no workflows itself. Refuses, at once, a config the worker
- * would refuse; data files with problems it warns about and leaves out (`/api/config` lists them).
+ * would refuse, except missing credentials, which it records (the connector pages show them);
+ * data files with problems it warns about and leaves out (`/api/config` lists them).
  */
 export async function startApp(config: SanomaConfig, options: AppOptions = {}): Promise<App> {
   const resolved = resolveConfig(config);

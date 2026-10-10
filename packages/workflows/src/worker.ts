@@ -9,7 +9,7 @@ import { warn } from "./log.ts";
 import { lineStartsOf } from "./ast.ts";
 import { callsOf, outlineWithSource } from "./outline.ts";
 import type { Run, RunArgs, WorkerState, WorkflowOutline } from "./run.ts";
-import { errorMessage } from "./shared.ts";
+import { credentialReady, errorMessage } from "./shared.ts";
 
 export interface Worker {
   stop(): Promise<void>;
@@ -36,6 +36,7 @@ export interface WorkerOptions {
 export async function startWorker(config: SanomaConfig, options: WorkerOptions = {}): Promise<Worker> {
   // Check everything before touching the state a running worker reads.
   const resolved = resolveConfig(config);
+  refuseUnconfigured(resolved);
   const state: WorkerState = {
     app: resolved.appName,
     ops: resolved.ops,
@@ -108,6 +109,26 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     throw err;
   }
   return worker;
+}
+
+/**
+ * Refuses a worker whose drivers would fail on their first call: a variable a driver's `env`
+ * declares is missing or invalid. One error, naming each vendor and its variables.
+ */
+function refuseUnconfigured({ credentials }: ResolvedConfig) {
+  const vendors = [...credentials].flatMap(([vendor, list]) => {
+    const items = list
+      .filter((c) => !credentialReady(c))
+      .map((c) =>
+        c.status === "invalid"
+          ? `${c.name} is invalid (${c.problem})`
+          : `${c.name} is missing${c.description ? ` (${c.description})` : ""}`,
+      );
+    return items.length ? [`${vendor}: ${items.join(", ")}`] : [];
+  });
+  if (vendors.length) {
+    throw new Error(`The worker cannot start: ${vendors.join("; ")}. Set them in its environment (locally, in .env)`);
+  }
 }
 
 /**

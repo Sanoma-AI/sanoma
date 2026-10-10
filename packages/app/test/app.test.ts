@@ -1143,6 +1143,52 @@ describe("an app configured otherwise", () => {
   });
 });
 
+describe("an app whose drivers declare environment variables", () => {
+  // Made-up variables and value: nothing here is a credential.
+  const URL_VAR = "SANOMA_TEST_GHOST_URL";
+  const KEY_VAR = "SANOMA_TEST_GHOST_KEY";
+  const SITE = "https://madeup-site.example.test";
+  const env = z.object({
+    [URL_VAR]: z.url().describe("the made-up site's URL"),
+    [KEY_VAR]: z.string().describe("a made-up key"),
+  });
+  let declaring: App;
+  beforeAll(async () => {
+    vi.stubEnv(URL_VAR, SITE);
+    vi.stubEnv(KEY_VAR, undefined);
+    // The ghost driver, with an env: startApp does not refuse what startWorker would.
+    const drivers = config.drivers.map((d) => (d.vendor === "ghost" ? { ...d, env } : d));
+    declaring = await startApp({ ...config, drivers }, { port: 0 });
+  });
+  afterAll(async () => {
+    vi.unstubAllEnvs();
+    await declaring?.close();
+  });
+
+  it("says on /connectors how many variables a vendor needs, and nothing for a vendor that declares none", async () => {
+    const connectors = await page("/connectors", declaring.url);
+    expect(connectors.text).toContain("2 operations · used by 1 workflow · needs 1 variable");
+    expect(connectors.text).not.toContain("configured");
+    expect((await page("/connectors")).text).not.toMatch(/needs \d+ variable|configured/);
+  });
+
+  it("lists each variable on the connector's page with its description and status, never its value", async () => {
+    const blogPage = await page("/connectors/ghost", declaring.url);
+    expect(blogPage.html).toMatch(/>Credentials<\/h2>/);
+    expect(blogPage.text).toMatch(new RegExp(`<code>${URL_VAR}</code>.*?>set<.*?the made-up site&#x27;s URL`));
+    expect(blogPage.text).toMatch(new RegExp(`<code>${KEY_VAR}</code>.*?>missing<.*?a made-up key`));
+    expect(blogPage.html).not.toContain(SITE);
+    // A vendor whose drivers declare nothing has no such section.
+    expect((await page("/connectors/resend", declaring.url)).html).not.toMatch(/>Credentials</);
+  });
+
+  it("carries the statuses in /api/config, without the values", async () => {
+    const { body } = await call<ConfigDescription>("/api/config", { base: declaring.url });
+    expect(body.vendors.ghost).toHaveProperty("credentials");
+    expect(JSON.stringify(body)).not.toContain(SITE);
+  });
+});
+
 describe("startApp", () => {
   it("says to build the app when it is not built", async () => {
     const empty = mkdtempSync(join(tmpdir(), "sanoma-app-dist-"));

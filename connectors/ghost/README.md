@@ -51,7 +51,7 @@ It reads two environment variables on every call, never when the config loads:
 | `GHOST_ADMIN_URL`     | The site's admin URL, such as `https://example.ghost.io` (on Ghost(Pro), the `ghost.io` one). |
 | `GHOST_ADMIN_API_KEY` | A custom integration's Admin API key, `<id>:<secret>`.                                        |
 
-To make the key: in Ghost Admin, **Settings → Integrations → Add custom integration**, name it, and copy its **Admin API key** (not the Content API key). A missing or malformed variable fails the call, naming the variable, and is not retried.
+To make the key: in Ghost Admin, **Settings → Integrations → Add custom integration**, name it, and copy its **Admin API key** (not the Content API key). A missing or malformed variable fails the call, naming the variable, and is not retried. The driver declares them in its `env` ([Credentials](https://www.npmjs.com/package/@sanoma/workflows#credentials)), so a worker refuses to start while one is missing or malformed, and the app's connector page shows each one's status.
 
 ### Idempotency
 

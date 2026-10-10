@@ -1,3 +1,4 @@
+import type { CredentialStatus } from "./config.ts";
 import type { ApprovalState, Approver, Principal } from "./define.ts";
 import type { ResourceProblem } from "./resources.ts";
 import type { OutlineNode } from "./outline.ts";
@@ -14,6 +15,7 @@ export type {
 } from "./resource.ts";
 export type { DeclaredResource, ResourceProblem } from "./resources.ts";
 export type { DriftField, DriftReport, DriftResult, DriftStatus } from "./drift.ts";
+export type { CredentialStatus } from "./config.ts";
 
 // What a UI in the browser may use from the runtime, besides types: `@sanoma/workflows/shared`.
 // Nothing here imports DBOS, Node or zod, so a browser bundle can carry it; the runtime uses the
@@ -79,3 +81,7 @@ export function flatten(nodes: readonly OutlineNode[]): OutlineNode[] {
 /** Where a data-file problem is, `file:line:column`; undefined for one that is the config's, with no file. */
 export const problemAt = (p: ResourceProblem): string | undefined =>
   p.file === undefined ? undefined : `${p.file}:${p.line}:${p.column}`;
+
+/** Whether a driver's environment variable lets it run: set, or unset and optional. */
+export const credentialReady = ({ status, optional }: CredentialStatus): boolean =>
+  status === "set" || (status === "missing" && optional);
