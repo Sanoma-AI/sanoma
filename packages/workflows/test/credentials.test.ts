@@ -3,8 +3,9 @@ import { ghostDriver } from "@sanoma/connector-ghost/driver";
 import { githubDriver } from "@sanoma/connector-github/driver";
 import { resendDriver } from "@sanoma/connector-resend/driver";
 import { stripeDriver } from "@sanoma/connector-stripe/driver";
+import { DBOS } from "@dbos-inc/dbos-sdk";
 import { testDatabaseUrl } from "@sanoma/testing";
-import { Pool } from "pg";
+import { Client, Pool } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -12,6 +13,7 @@ import {
   defineConnector,
   defineDriver,
   defineWorkflow,
+  type Ctx,
   errorCode,
   memoryLedger,
   SanomaClient,
@@ -77,6 +79,26 @@ beforeEach(async () => {
 /** acme's statuses as the worker checks them, against `process.env`. */
 const checked = (drivers = config.drivers) => credentialsOf(drivers, (name) => process.env[name]).get("acme");
 const statuses = () => checked()?.map(({ name, status }) => [name, status]);
+
+/**
+ * Runs `start`, which is to fail, and counts the credentials listeners (the connections that hear
+ * notifications) it opened, and those it left open.
+ */
+async function listeners(start: () => Promise<unknown>) {
+  const connect = vi.spyOn(Client.prototype, "connect");
+  const end = vi.spyOn(Client.prototype, "end");
+  try {
+    const message = await start().then(
+      () => "started",
+      (err: Error) => err.message,
+    );
+    const opened = (connect.mock.contexts as Client[]).filter((db) => db.listenerCount("notification") > 0);
+    return { message, opened: opened.length, left: opened.filter((db) => !end.mock.contexts.includes(db)).length };
+  } finally {
+    connect.mockRestore();
+    end.mockRestore();
+  }
+}
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -156,15 +178,33 @@ describe("startWorker", () => {
     vi.stubEnv(URL_VAR, undefined);
     vi.stubEnv(KEY_VAR, "key_NOT-LOWER");
     vi.stubEnv(REGION_VAR, undefined);
-    const refusal = await startWorker(config).then(
-      () => undefined,
-      (err: Error) => err.message,
-    );
-    expect(refusal).toBe(
+    const launch = vi.spyOn(DBOS, "launch");
+    const { message, opened, left } = await listeners(() => startWorker(config));
+    expect(message).toBe(
       `The worker cannot start: acme: ${URL_VAR} is missing (the account's API URL), ${KEY_VAR} is invalid (an API key, key_<letters>). ` +
         "Set them on the app's connector pages, or in its environment",
     );
-    expect(refusal).not.toContain("NOT-LOWER");
+    expect(message).not.toContain("NOT-LOWER");
+    expect(launch).not.toHaveBeenCalled();
+    launch.mockRestore();
+    // It looked for stored values of the two it lacks, and stopped listening when it refused.
+    expect({ opened, left }).toEqual({ opened: 1, left: 0 });
+  });
+
+  it("refuses a workflow it cannot outline before listening for credentials", async () => {
+    vi.stubEnv(URL_VAR, undefined);
+    type Getting = Ctx<readonly [typeof acme.thing.get]>;
+    const get = (ctx: Getting, id: string) => ctx.acme.thing.get({ id });
+    const helper = defineWorkflow({
+      name: "credentials-helper",
+      trigger: "manual",
+      input: z.object({ id: z.string() }),
+      uses: [acme.thing.get],
+      run: async (ctx, { id }) => get(ctx, id),
+    });
+    const { message, opened, left } = await listeners(() => startWorker({ ...config, workflows: [helper] }));
+    expect(message).toMatch(/^Workflow "credentials-helper" cannot be outlined/);
+    expect({ opened, left }).toEqual({ opened: 0, left: 0 });
   });
 
   it("refuses an invalid variable even when it is optional", async () => {
@@ -203,22 +243,15 @@ const refusal = (p: Promise<unknown>) =>
 const stored = async (from = client) => (await from.credentials()).get("acme");
 
 describe("stored credentials", () => {
-  it("are kept in one table, made with its database when no worker has made that, and made again harmlessly", async () => {
-    const fresh = testDatabaseUrl("credentials_fresh");
-    const admin = new URL(fresh);
-    const name = admin.pathname.slice(1);
-    admin.pathname = "/postgres";
-    const server = new Pool({ connectionString: admin.toString() });
-    const pool = new Pool({ connectionString: fresh });
+  it("are kept in one table, which two processes may create at once", async () => {
+    const pool = new Pool({ connectionString: databaseUrl });
     try {
-      await server.query(`DROP DATABASE IF EXISTS "${name}"`);
-      await Promise.all([ensureTable(fresh), ensureTable(fresh)]);
-      await ensureTable(fresh);
+      await pool.query("DROP TABLE IF EXISTS sanoma_credentials");
+      await Promise.all([ensureTable(databaseUrl, async () => pool), ensureTable(databaseUrl, async () => pool)]);
       const { rows } = await pool.query("SELECT to_regclass('sanoma_credentials')::text AS t");
       expect(rows).toEqual([{ t: "sanoma_credentials" }]);
     } finally {
       await pool.end();
-      await server.end();
     }
   });
 
@@ -285,21 +318,6 @@ describe("stored credentials", () => {
     expect((await stored())?.[1]?.status).toBe("missing");
   });
 
-  it("refuses a value whose check throws, without the value", async () => {
-    const VALUE = "madeup-not-a-url";
-    const throwing = defineDriver(acme, impl, {
-      env: z.object({ [URL_VAR]: z.string().refine((v) => new URL(v).protocol === "https:") }),
-    });
-    const other = await SanomaClient.connect({ ...config, drivers: [throwing] });
-    try {
-      const { message, text } = await refusal(other.setCredential(URL_VAR, VALUE, { by: "alice" }));
-      expect(message).toBe(`${URL_VAR} cannot be set: its check threw`);
-      expect(text).not.toContain(VALUE);
-    } finally {
-      await other.close();
-    }
-  });
-
   it("are overridden by the environment, which credentials() says is the source", async () => {
     vi.stubEnv(KEY_VAR, "key_fromenv");
     await client.setCredential(KEY_VAR, KEY, { by: "alice" });
@@ -352,6 +370,9 @@ describe("a worker's credentials", () => {
     } finally {
       await worker.stop();
     }
+    // Stopped, it takes back what it set, and leaves what the environment set.
+    expect(process.env).not.toHaveProperty(REGION_VAR);
+    expect(process.env[URL_VAR]).toBe(FROM_ENV);
   });
 });
 

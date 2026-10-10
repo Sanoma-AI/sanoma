@@ -11,7 +11,7 @@ import {
   resolveConfig,
   type SanomaConfig,
 } from "./config.ts";
-import { declared, deleteCredential, ensureTable, storeCredential, storedCredentials } from "./credentials.ts";
+import { deleteCredential, ensureTable, storeCredential, storedCredentials } from "./credentials.ts";
 import { type ApprovalState, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
 import { parseOrThrow, SanomaError } from "./errors.ts";
@@ -374,12 +374,9 @@ export class SanomaClient {
    * Nothing records the value but its row, which records `by` and when.
    */
   async setCredential(name: string, value: string, options: { by: string }): Promise<void> {
-    const vendor = this.declaredVendor(name);
-    const setBy = actorOf(options);
     // Checked against every declaration of the name, as the worker checks it.
-    const statuses = [...credentialsOf(this.drivers, (n) => (n === name ? value : undefined)).values()]
-      .flat()
-      .filter((c) => c.name === name);
+    const statuses = this.declared(name, (n) => (n === name ? value : undefined));
+    const setBy = actorOf(options);
     const refused = statuses.find((c) => c.status !== "set");
     if (refused) {
       const problem = refused.problem ?? "it is empty; clear it to unset it";
@@ -388,7 +385,7 @@ export class SanomaClient {
         issues: [{ path: ["value"], message: problem, code: "custom" }],
       });
     }
-    await storeCredential(await this.credentialsDb(), { name, vendor, value, setBy });
+    await storeCredential(await this.credentialsDb(), { name, value, setBy });
   }
 
   /**
@@ -397,7 +394,7 @@ export class SanomaClient {
    * Refuses (`invalid_input`) a name no driver declares.
    */
   async clearCredential(name: string, options: { by: string }): Promise<void> {
-    this.declaredVendor(name);
+    this.declared(name, () => undefined);
     actorOf(options);
     await deleteCredential(await this.credentialsDb(), name);
   }
@@ -408,12 +405,12 @@ export class SanomaClient {
    * stored one and when. Never a value.
    */
   async credentials(): Promise<Map<string, CredentialStatus[]>> {
-    const names = [...declared(this.drivers).keys()];
+    const names = [...credentialsOf(this.drivers, () => undefined).values()].flat().map((c) => c.name);
     if (!names.length) return new Map();
     const rows = await storedCredentials(await this.credentialsDb(), names);
-    const statuses = credentialsOf(this.drivers, (name) => fromEnv(name) ?? rows.get(name)?.value);
+    const statuses = credentialsOf(this.drivers, (name) => process.env[name] || rows.get(name)?.value);
     const sourced = (c: CredentialStatus): CredentialStatus => {
-      if (fromEnv(c.name) !== undefined) return { ...c, source: "environment" };
+      if (process.env[c.name]) return { ...c, source: "environment" };
       const row = rows.get(c.name);
       return row ? { ...c, source: "stored", setBy: row.setBy, setAt: row.setAt } : c;
     };
@@ -424,12 +421,15 @@ export class SanomaClient {
     await Promise.all([this.dbos.destroy(), this.pool?.end()]);
   }
 
-  /** The vendor of the first driver that declares the variable, or `invalid_input`. */
-  private declaredVendor(name: string): string {
-    const vendors = declared(this.drivers);
-    const vendor = vendors.get(name);
-    if (vendor !== undefined) return vendor;
-    const known = [...vendors.keys()];
+  /**
+   * The name's statuses with `lookup`'s value, one per vendor whose drivers declare it, or
+   * `invalid_input` when none does.
+   */
+  private declared(name: string, lookup: (name: string) => string | undefined): CredentialStatus[] {
+    const all = [...credentialsOf(this.drivers, lookup).values()].flat();
+    const statuses = all.filter((c) => c.name === name);
+    if (statuses.length) return statuses;
+    const known = [...new Set(all.map((c) => c.name))];
     const message = `No driver declares ${name}; ${known.length ? `the declared variables are ${known.join(", ")}` : "none declares any"}`;
     throw new SanomaError("invalid_input", message, {
       name,
@@ -439,18 +439,19 @@ export class SanomaClient {
 
   /** The pool the credentials are read and written with, its table created once. */
   private async credentialsDb(): Promise<Pool> {
-    // A failed create is tried again on the next call.
-    this.table ??= ensureTable(this.config.databaseUrl).catch((err: unknown) => {
-      this.table = undefined;
-      throw err;
-    });
-    await this.table;
     if (!this.pool) {
       this.pool = new Pool({ connectionString: this.config.databaseUrl });
       // An idle connection that drops (Postgres restarted) is replaced on the next query; unheard, it would end the process.
       this.pool.on("error", (err) => warn(`a credentials connection failed: ${errorMessage(err)}`));
     }
-    return this.pool;
+    const pool = this.pool;
+    // A failed create is tried again on the next call.
+    this.table ??= ensureTable(this.config.databaseUrl, async () => pool).catch((err: unknown) => {
+      this.table = undefined;
+      throw err;
+    });
+    await this.table;
+    return pool;
   }
 
   /** Refuses a run id whose run, as stored, was started with another input, by someone else, or in another sandbox. */
@@ -525,9 +526,6 @@ const asJson = (v: unknown): unknown => (v === undefined ? undefined : JSON.pars
 
 /** True when the two are the same JSON, whatever the order of their keys. */
 const sameJson = (a: unknown, b: unknown): boolean => isDeepStrictEqual(asJson(a), asJson(b));
-
-/** The variable as this process's environment sets it; empty is unset. */
-const fromEnv = (name: string) => process.env[name] || undefined;
 
 /** `options.by`, who sets or clears a credential: a name, or `invalid_input`. */
 const actorOf = (options: { by: string }): string =>

@@ -41,23 +41,14 @@ export interface WorkerOptions {
 
 /**
  * Registers the workflows, connects to Postgres and recovers any runs that were interrupted.
- * When a driver declares variables, it first loads their stored values into `process.env`
- * (skipping those the environment sets) and keeps them current while it runs, then refuses to
- * start while one is missing or invalid.
+ * When a driver declares variables the environment leaves unset, it first loads their stored
+ * values into `process.env` and keeps them current while it runs, then refuses to start while one
+ * is missing or invalid.
  */
 export async function startWorker(config: SanomaConfig, options: WorkerOptions = {}): Promise<Worker> {
   // Check everything before touching the state a running worker reads.
   const resolved = resolveConfig(config);
   setLogLevel(options.logLevel);
-  const credentials = config.drivers.some((d) => d.env)
-    ? await watchCredentials(resolved.databaseUrl, config.drivers)
-    : undefined;
-  try {
-    refuseUnconfigured(credentialsOf(config.drivers, (name) => process.env[name]));
-  } catch (err) {
-    await credentials?.close();
-    throw err;
-  }
   const state: WorkerState = {
     app: resolved.appName,
     ops: resolved.ops,
@@ -71,19 +62,14 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     outlines: new Map([...resolved.workflows].map(([name, wf]) => [name, outlineOf(wf)])),
     stopped: false,
   };
-  for (const name of resolved.workflows.keys()) {
-    if (!registered.has(name)) {
-      register(name);
-      registered.add(name);
-    }
-  }
+  const credentials = await watchCredentials(resolved.databaseUrl, config.drivers);
   const worker: Worker = {
     async stop() {
       state.stopped = true;
       try {
         await DBOS.shutdown();
       } finally {
-        await credentials?.close();
+        await credentials.close();
       }
     },
   };
@@ -91,9 +77,16 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   // state. If starting fails, a worker still running in the process gets its own back, once
   // DBOS has stopped: until then a run DBOS dispatches finds this state stopped, and is refused.
   const previous = current;
-  current = state;
   let launched = false;
   try {
+    refuseUnconfigured(credentialsOf(config.drivers, (name) => process.env[name]));
+    for (const name of resolved.workflows.keys()) {
+      if (!registered.has(name)) {
+        register(name);
+        registered.add(name);
+      }
+    }
+    current = state;
     DBOS.setConfig({
       name: resolved.appName,
       systemDatabaseUrl: resolved.databaseUrl,
@@ -123,10 +116,11 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     // in a worker nobody holds, and the next startWorker launches afresh.
     let stopFailed: { error: unknown } | undefined;
     if (launched) await worker.stop().catch((error: unknown) => (stopFailed = { error }));
-    else
+    else {
       await credentials
-        ?.close()
+        .close()
         .catch((e: unknown) => warn(`closing the credentials listener failed: ${errorMessage(e)}`));
+    }
     current = previous;
     if (stopFailed) {
       throw new AggregateError(

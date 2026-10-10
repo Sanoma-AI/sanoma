@@ -35,4 +35,4 @@ The source of `@sanoma/workflows`: how connectors, workflows and policies are de
 | [`scenario.ts`](scenario.ts)       | Gherkin scenarios: `parseFeature`, `loadScenarios`, `check` and `drive`                                                                                                    |
 | [`shared.ts`](shared.ts)           | Browser-safe helpers for run status and approvals, and resource types; no DBOS, Node or zod                                                                                |
 | [`version.ts`](version.ts)         | The package version, the step layout and `computeVersion`, the application version hash                                                                                    |
-| [`worker.ts`](worker.ts)           | `startWorker`: loads stored credentials, refuses missing ones, reads each workflow's outline, launches DBOS, registers each workflow by name, returns a stoppable `Worker` |
+| [`worker.ts`](worker.ts)           | `startWorker`: reads each workflow's outline, loads stored credentials, refuses missing ones, launches DBOS, registers each workflow by name, returns a stoppable `Worker` |
