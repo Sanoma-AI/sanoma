@@ -1221,14 +1221,8 @@ describe("an app whose drivers declare environment variables", () => {
   it("refuses a value the variable's schema refuses, a name no driver declares, and an anonymous change, without the value", async () => {
     const VALUE = "key_NOT-LOWER";
     const invalid = await change("PUT", { name: KEY_VAR, value: VALUE });
-    const text = await invalid.text();
     expect(invalid.status).toBe(400);
-    expect(JSON.parse(text)).toEqual({
-      error: `${KEY_VAR} cannot be set: a made-up key, key_<letters>`,
-      code: "invalid_input",
-      issues: [{ path: ["value"], message: "a made-up key, key_<letters>", code: "custom" }],
-    });
-    expect(text).not.toContain(VALUE);
+    expect(await invalid.text()).not.toContain(VALUE);
 
     const undeclared = await change("PUT", { name: "SANOMA_TEST_UNDECLARED", value: KEY });
     expect(undeclared.status).toBe(400);

@@ -156,7 +156,7 @@ export type CredentialsResponse = Record<string, CredentialStatus[]>;
 /** `PUT /api/credentials`: stores the value of a declared variable, as the actor. 204; the value is never sent back. */
 export const SetCredentialRequest = z.object({
   name: z.string().min(1, "Name a variable"),
-  value: z.string().min(1, "Enter a value"),
+  value: z.string().min(1, "Enter a value").max(16_384),
 });
 export type SetCredentialRequest = z.infer<typeof SetCredentialRequest>;
 

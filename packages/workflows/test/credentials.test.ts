@@ -297,6 +297,12 @@ describe("stored credentials", () => {
       );
       expect(text).not.toContain(KEY);
     }
+    // The value in the name's place, as a script that swaps them sends it: not repeated.
+    const swapped = await refusal(client.setCredential(KEY, KEY_VAR, { by: "alice" }));
+    expect(swapped.message).toBe(
+      `That is not a variable name; the declared variables are ${URL_VAR}, ${KEY_VAR}, ${REGION_VAR}`,
+    );
+    expect(swapped.text).not.toContain(KEY);
     expect((await refusal(client.setCredential(KEY_VAR, KEY, { by: "" }))).code).toBe("invalid_input");
     expect((await stored())?.[1]?.status).toBe("missing");
   });
@@ -331,6 +337,9 @@ describe("stored credentials", () => {
     });
     vi.stubEnv(KEY_VAR, "key_NOT-LOWER");
     expect((await stored())?.[1]).toMatchObject({ status: "invalid", source: "environment" });
+    // The stored value, as a worker in this process loads it, is the stored one.
+    vi.stubEnv(KEY_VAR, KEY);
+    expect((await stored())?.[1]).toMatchObject({ status: "set", source: "stored", setBy: "alice" });
   });
 });
 

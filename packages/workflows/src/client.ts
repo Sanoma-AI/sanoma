@@ -117,6 +117,7 @@ export class SanomaClient {
   /** On the config's database, for the credentials table: made on first use. */
   private pool?: Pool;
   private table?: Promise<void>;
+  private closed = false;
 
   private constructor(dbos: DBOSClient, config: ResolvedConfig, drivers: readonly Driver[]) {
     this.dbos = dbos;
@@ -401,8 +402,9 @@ export class SanomaClient {
 
   /**
    * Each vendor's declared variables and their statuses now: from this process's environment,
-   * which wins, else from the stored credentials, with `source` saying which, and who set a
-   * stored one and when. Never a value.
+   * which wins, else from the stored credentials, with `source` saying which (a value equal to
+   * the stored one, as a worker in this process loads it, is `stored`), and who set a stored one
+   * and when. Never a value.
    */
   async credentials(): Promise<Map<string, CredentialStatus[]>> {
     const names = [...credentialsOf(this.drivers, () => undefined).values()].flat().map((c) => c.name);
@@ -410,14 +412,17 @@ export class SanomaClient {
     const rows = await storedCredentials(await this.credentialsDb(), names);
     const statuses = credentialsOf(this.drivers, (name) => process.env[name] || rows.get(name)?.value);
     const sourced = (c: CredentialStatus): CredentialStatus => {
-      if (process.env[c.name]) return { ...c, source: "environment" };
       const row = rows.get(c.name);
+      const env = process.env[c.name];
+      // A worker in this process loads the stored values into its environment: those are stored.
+      if (env && env !== row?.value) return { ...c, source: "environment" };
       return row ? { ...c, source: "stored", setBy: row.setBy, setAt: row.setAt } : c;
     };
     return new Map([...statuses].map(([vendor, list]) => [vendor, list.map(sourced)]));
   }
 
   async close() {
+    this.closed = true;
     await Promise.all([this.dbos.destroy(), this.pool?.end()]);
   }
 
@@ -430,15 +435,20 @@ export class SanomaClient {
     const statuses = all.filter((c) => c.name === name);
     if (statuses.length) return statuses;
     const known = [...new Set(all.map((c) => c.name))];
-    const message = `No driver declares ${name}; ${known.length ? `the declared variables are ${known.join(", ")}` : "none declares any"}`;
+    // A name that is no variable's may be a value sent in its place: it is not repeated.
+    const named = VARIABLE.test(name);
+    const message = `${named ? `No driver declares ${name}` : "That is not a variable name"}; ${
+      known.length ? `the declared variables are ${known.join(", ")}` : "none declares any"
+    }`;
     throw new SanomaError("invalid_input", message, {
-      name,
+      ...(named && { name }),
       issues: [{ path: ["name"], message, code: "custom" }],
     });
   }
 
   /** The pool the credentials are read and written with, its table created once. */
   private async credentialsDb(): Promise<Pool> {
+    if (this.closed) throw new Error("The client is closed");
     if (!this.pool) {
       this.pool = new Pool({ connectionString: this.config.databaseUrl });
       // An idle connection that drops (Postgres restarted) is replaced on the next query; unheard, it would end the process.
@@ -526,6 +536,9 @@ const asJson = (v: unknown): unknown => (v === undefined ? undefined : JSON.pars
 
 /** True when the two are the same JSON, whatever the order of their keys. */
 const sameJson = (a: unknown, b: unknown): boolean => isDeepStrictEqual(asJson(a), asJson(b));
+
+/** What an environment variable's name looks like. */
+const VARIABLE = /^[A-Z_][A-Z0-9_]*$/;
 
 /** `options.by`, who sets or clears a credential: a name, or `invalid_input`. */
 const actorOf = (options: { by: string }): string =>
