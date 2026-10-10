@@ -462,16 +462,26 @@ export const CodePanel = ({ className, ...props }: CodeProps) => (
 );
 
 /**
- * A page's heading row: its <h1>, which is its crumb, after `icon` when given, whatever sits
- * beside it, and the page's `action` at the far end.
+ * A page's heading row: its <h1>, which is `title` or else its crumb, after `icon` when given,
+ * whatever sits beside it, and the page's `action` at the far end.
  */
-export function PageHeader({ icon, children, action }: { icon?: ReactNode; children?: ReactNode; action?: ReactNode }) {
-  const title = useCrumbs().at(-1)?.label;
+export function PageHeader({
+  title,
+  icon,
+  children,
+  action,
+}: {
+  title?: string;
+  icon?: ReactNode;
+  children?: ReactNode;
+  action?: ReactNode;
+}) {
+  const crumb = useCrumbs().at(-1)?.label;
   return (
     <header className="flex flex-wrap items-center gap-x-4 gap-y-2">
       <h1 className="flex items-center gap-2 font-heading text-2xl font-semibold tracking-tight">
         {icon}
-        {title}
+        {title ?? crumb}
       </h1>
       {children}
       {action && <div className="ml-auto">{action}</div>}

@@ -1,9 +1,22 @@
-import type { RunSummary } from "@sanoma/workflows";
+import type { RunStatus, RunSummary } from "@sanoma/workflows";
 import type { ConfigDescription, WorkflowEntry } from "@sanoma/workflows/describe";
 import { isEnded } from "@sanoma/workflows/shared";
-import { queryOptions } from "@tanstack/react-query";
-import { pendingApprovals, RUNS_LIMIT, type RunsQuery, type ScenariosResponse } from "./api.ts";
-import { getActor, getConfig, getDriftReport, getRun, getRuns, getScenarios, getSource } from "./functions.ts";
+import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { linkOptions, useNavigate } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
+import { toast } from "sonner";
+import { z } from "zod";
+import { pendingApprovals, RUNS_LIMIT, type RunsQuery, type ScenariosResponse, type StartRunRequest } from "./api.ts";
+import {
+  getActor,
+  getConfig,
+  getDriftReport,
+  getRun,
+  getRuns,
+  getScenarios,
+  getSource,
+  startRunFn,
+} from "./functions.ts";
 
 /** How often the runs and a run's detail refresh while a page shows them. */
 export const POLL_MS = 2_000;
@@ -57,6 +70,12 @@ export const connectorNamed = (id: string) => (config: ConfigDescription) =>
 /** The config's workflow of this name, if it has one: for `select`, or called with the config. */
 export const workflowNamed = (name: string) => (config: ConfigDescription) =>
   config.workflows.find((wf) => wf.name === name);
+
+/**
+ * The config's workflow of this name, for a page under its own. The root route has loaded the
+ * config. None for a retired workflow: one the config no longer has, whose runs remain.
+ */
+export const useWorkflow = (name: string) => useSuspenseQuery({ ...configQuery(), select: workflowNamed(name) }).data;
 
 /**
  * The config's scenarios. Unlike the config they change while the app runs (the agent edits the
@@ -120,6 +139,85 @@ export const pendingOf = (runs: RunSummary[]) =>
   runs
     .flatMap((run) => pendingApprovals(run).map((approval) => ({ run, approval })))
     .toSorted((a, b) => b.approval.requestedAt - a.approval.requestedAt);
+
+/**
+ * How many approvals are pending, as `pendingOf` lists them: in all, and by workflow. For
+ * `select`: a plain object, so a poll that changed nothing keeps it.
+ */
+export const pendingByWorkflow = (runs: RunSummary[]) => {
+  let total = 0;
+  const byWorkflow: Record<string, number> = Object.create(null);
+  for (const run of runs) {
+    const count = pendingApprovals(run).length;
+    if (count === 0) continue;
+    total += count;
+    byWorkflow[run.workflow] = (byWorkflow[run.workflow] ?? 0) + count;
+  }
+  return { total, byWorkflow };
+};
+
+/** What a workflow page's rail may show (`?runs=`), the first (all) by default. */
+export const RUN_FILTERS = ["all", "live", "sandbox", "waiting", "failed"] as const;
+export type RunFilter = (typeof RUN_FILTERS)[number];
+
+/**
+ * How each filter picks runs: a `status` the server is asked for, so an older failed run is not
+ * lost behind the newest; or a `match` over the latest runs, for what the server cannot pick.
+ */
+const FILTERS: Record<RunFilter, { status?: RunStatus; match?: (run: RunSummary) => boolean }> = {
+  all: {},
+  live: { match: (run) => run.sandbox === undefined },
+  sandbox: { match: (run) => run.sandbox !== undefined },
+  waiting: { status: "waiting" },
+  failed: { status: "failed" },
+};
+
+/** A workflow page's search: `?runs=`, the rail's filter. Any other value reads as all. */
+export const WorkflowSearch = z.object({ runs: z.enum(RUN_FILTERS).optional().catch(undefined) });
+
+/** How many runs the rail lists: the latest. */
+export const RAIL_LIMIT = RUNS_LIMIT.default;
+
+/**
+ * The rail's runs for a filter: the workflow's latest, with the filter's status. Polled quickly
+ * while one of them can still change; starting a run or deciding refreshes it at once.
+ */
+export const railQuery = (name: string, filter: RunFilter = "all") =>
+  queryOptions({
+    ...runsQuery({ workflow: name, limit: RAIL_LIMIT, status: FILTERS[filter].status }),
+    refetchInterval: (query) => (query.state.data?.some((run) => !isEnded(run.status)) ? POLL_MS : 30_000),
+  });
+
+/** Of the runs `railQuery` read, those the filter keeps: all of them, unless it picks by `match`. */
+export const railRuns = (filter: RunFilter, runs: RunSummary[]) => {
+  const { match } = FILTERS[filter];
+  return match ? runs.filter(match) : runs;
+};
+
+/** A run's page, under its workflow's: for `<Link>`, `navigate` and `redirect`. */
+export const runLink = (run: Pick<RunSummary, "runId" | "workflow">) =>
+  linkOptions({ to: "/workflows/$name/runs/$id", params: { name: run.workflow, id: run.runId } });
+
+/**
+ * Starts a run (or a scenario's sandbox run), then says so, refreshes the lists of runs and opens
+ * the run's page. A failure is the caller's to show: the start form puts it on its fields.
+ */
+export function useStartRun() {
+  const start = useServerFn(startRunFn);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: StartRunRequest) => start({ data: request }),
+    onSuccess: async (started, request) => {
+      toast.success(
+        "scenario" in request ? `Started a sandbox run of “${request.scenario}”` : `Started ${started.workflow}`,
+      );
+      // The lists show the new run at once, not at their next poll.
+      void queryClient.invalidateQueries({ queryKey: RUNS_KEY });
+      await navigate(runLink(started));
+    },
+  });
+}
 
 export const runQuery = (id: string) =>
   queryOptions({
