@@ -62,8 +62,10 @@ export type StartRunRequest = z.infer<typeof StartWorkflowRequest> | z.infer<typ
 export const startRunSchema = (body: unknown) =>
   typeof body === "object" && body !== null && "scenario" in body ? StartScenarioRequest : StartWorkflowRequest;
 
+/** `POST /api/runs` answers 201 with the run's id and its workflow (for a scenario, the scenario's): its page's address. */
 export interface StartRunResponse {
   runId: string;
+  workflow: string;
 }
 
 /**

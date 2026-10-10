@@ -4,20 +4,10 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { RUN_TONE } from "#/lib/tone.ts";
 import { pendingApprovals, starterName } from "../api.ts";
-import { runsQuery } from "../queries.ts";
+import { RAIL_LIMIT, railQuery, railRuns, RUN_FILTERS, type RunFilter } from "../queries.ts";
 import { Nothing, SandboxBadge, StatusDot, When } from "./common.tsx";
 
 // The rail on a workflow's page: its panes, and its latest runs, each linking to its own pane.
-
-/** How many runs the rail lists: the latest. */
-const RAIL_LIMIT = 50;
-
-/** The rail's runs: the workflow's latest, polled while its page shows. The layout loads it first. */
-export const railQuery = (name: string) => runsQuery({ workflow: name, limit: RAIL_LIMIT });
-
-/** What `?runs=` may show, the first (all) by default. */
-export const RUN_FILTERS = ["all", "live", "sandbox", "waiting", "failed"] as const;
-type RunFilter = (typeof RUN_FILTERS)[number];
 
 const FILTER_LABEL: Record<RunFilter, string> = {
   all: "All",
@@ -25,14 +15,6 @@ const FILTER_LABEL: Record<RunFilter, string> = {
   sandbox: "Sandbox",
   waiting: "Waiting",
   failed: "Failed",
-};
-
-const MATCHES: Record<RunFilter, (run: RunSummary) => boolean> = {
-  all: () => true,
-  live: (run) => run.sandbox === undefined,
-  sandbox: (run) => run.sandbox !== undefined,
-  waiting: (run) => run.status === "waiting",
-  failed: (run) => run.status === "failed",
 };
 
 /** A link in the rail; `aria-current` marks the pane that shows. */
@@ -45,8 +27,8 @@ const RAIL_LINK = "flex flex-col gap-0.5 rounded-md px-2 py-1.5 text-sm hover:bg
 export function RunRail({ name }: { name: string }) {
   const { runs: filter = "all" } = useSearch({ from: "/workflows/$name" });
   const navigate = useNavigate();
-  const { data: runs, error } = useSuspenseQuery(railQuery(name));
-  const shown = runs.filter(MATCHES[filter]);
+  const { data: runs, error } = useSuspenseQuery(railQuery(name, filter));
+  const shown = railRuns(filter, runs);
   return (
     <aside
       aria-label="Runs of this workflow"

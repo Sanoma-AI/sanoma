@@ -44,7 +44,7 @@ import announce from "../../workflows/test/fixtures/announce.ts";
 import { companyFakes } from "../../workflows/test/fixtures/company/fakes.ts";
 import { z } from "zod";
 import { type App, type ErrorResponse, type RunDetail, startApp } from "../src/index.ts";
-import { ApiError, type ScenariosResponse } from "../src/api.ts";
+import { ApiError, type ScenariosResponse, type StartRunResponse } from "../src/api.ts";
 import { asApiError, fileSource, parse, scenarios, withoutSources } from "../src/server/core.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it when
@@ -297,14 +297,14 @@ describe("the API", () => {
   });
 
   it("starts a run as the actor, holds it for the approver, refuses anyone else, then finishes", async () => {
-    const started = await call<{ runId: string }>("/api/runs", {
+    const started = await call<StartRunResponse>("/api/runs", {
       method: "POST",
       actor: encodeURIComponent("Ålice"),
       body: { workflow: "announce", input: input("From the app") },
     });
     expect(started.status).toBe(201);
+    expect(started.body).toEqual({ runId: expect.any(String), workflow: "announce" });
     runId = started.body.runId;
-    expect(runId).toEqual(expect.any(String));
 
     const runs = await call<RunSummary[]>("/api/runs?limit=50");
     expect(runs.body.find((r) => r.runId === runId)).toMatchObject({
@@ -470,12 +470,14 @@ describe("scenarios and sandbox runs", () => {
   });
 
   it("starts a sandbox run whose approval waits for a person, then checks it against the scenario", async () => {
-    const started = await call<{ runId: string }>("/api/runs", {
+    const started = await call<StartRunResponse>("/api/runs", {
       method: "POST",
       actor: "tester",
       body: { scenario: SCENARIO },
     });
     expect(started.status).toBe(201);
+    // The scenario's workflow, which the request did not name: the run's page is under it.
+    expect(started.body.workflow).toBe("announce");
     sandboxId = started.body.runId;
 
     // The app decides nothing: the run waits on its approval as a live run does.

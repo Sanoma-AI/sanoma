@@ -1,11 +1,7 @@
 import type { WorkflowEntry } from "@sanoma/workflows/describe";
 import { useForm } from "@tanstack/react-form";
-import { useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
 import { PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useMemo } from "react";
-import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
 import { Checkbox } from "#/components/ui/checkbox.tsx";
 import {
@@ -25,8 +21,7 @@ import { Textarea } from "#/components/ui/textarea.tsx";
 import { errorMessage } from "@sanoma/workflows/shared";
 import { errorBodyOf } from "../api.ts";
 import { Notice, Tip } from "../components/common.tsx";
-import { startRunFn } from "../functions.ts";
-import { RUNS_KEY } from "../queries.ts";
+import { useStartRun } from "../queries.ts";
 import {
   buildInput,
   type Field as SchemaField,
@@ -85,22 +80,20 @@ export function StartForm({ workflow }: { workflow: WorkflowEntry }) {
 type FormValues = Record<string, any>;
 
 function useStartForm(workflow: string, fields: SchemaField[], whole: boolean) {
-  const start = useServerFn(startRunFn);
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
+  const start = useStartRun();
   const defaultValues = useMemo(() => initialValues(fields) as FormValues, [fields]);
   return useForm({
     defaultValues,
     validators: {
       // Starting the run is the validation: the server checks the input against the workflow's
       // zod schema and answers with its issues, which land on the fields they name. Once it
-      // has started, the page moves on to the run.
+      // has started, `useStartRun` moves the page on to the run.
       onSubmitAsync: async ({ value }) => {
         const built = buildInput(fields, value);
         if (Object.keys(built.errors).length) return { fields: built.errors };
-        let runId: string;
         try {
-          ({ runId } = await start({ data: { workflow, input: whole ? built.input[WHOLE] : built.input } }));
+          await start.mutateAsync({ workflow, input: whole ? built.input[WHOLE] : built.input });
+          return undefined;
         } catch (err) {
           const body = errorBodyOf(err);
           if (!body?.issues?.length) {
@@ -126,11 +119,6 @@ function useStartForm(workflow: string, fields: SchemaField[], whole: boolean) {
               : "The input does not match the workflow's schema";
           return { form: message, fields: byField };
         }
-        toast.success(`Started ${workflow}`);
-        // The lists show the new run at once, not at their next poll.
-        void queryClient.invalidateQueries({ queryKey: RUNS_KEY });
-        await navigate({ to: "/workflows/$name/runs/$id", params: { name: workflow, id: runId } });
-        return undefined;
       },
     },
   });

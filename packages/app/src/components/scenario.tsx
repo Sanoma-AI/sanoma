@@ -1,7 +1,4 @@
 import { errorMessage } from "@sanoma/workflows/shared";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
 import { ChevronDownIcon, FlaskConicalIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -18,8 +15,7 @@ import {
 } from "#/components/ui/dropdown-menu.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { errorBodyOf, type ScenarioEntry, type ScenariosResponse } from "../api.ts";
-import { startRunFn } from "../functions.ts";
-import { RUNS_KEY } from "../queries.ts";
+import { useStartRun } from "../queries.ts";
 import { Notice, Section } from "./common.tsx";
 
 // A workflow's scenarios, as its page offers them: to choose and Test, and to read; and why a
@@ -44,23 +40,18 @@ export function TestControl({
 }) {
   const [open, setOpen] = useState(false);
   const chosen = scenarios.find((s) => s.name === value);
-  const start = useServerFn(startRunFn);
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const mutation = useMutation({
-    mutationFn: (scenario: ScenarioEntry) => start({ data: { scenario: scenario.name } }),
-    onSuccess: async ({ runId }, { name, workflow }) => {
-      toast.success(`Started a sandbox run of “${name}”`);
-      // The lists show the new run at once, not at their next poll.
-      void queryClient.invalidateQueries({ queryKey: RUNS_KEY });
-      await navigate({ to: "/workflows/$name/runs/$id", params: { name: workflow, id: runId } });
-    },
-    onError: (err) => {
-      // Not the server's answer (the network, a bug): keep the raw value for whoever debugs it.
-      if (!errorBodyOf(err)) console.error("sanoma app: starting the sandbox run failed:", err);
-      toast.error(errorMessage(err).trim() || "Could not start the sandbox run, and no reason was given");
-    },
-  });
+  const mutation = useStartRun();
+  const test = (scenario: ScenarioEntry) =>
+    mutation.mutate(
+      { scenario: scenario.name },
+      {
+        onError: (err) => {
+          // Not the server's answer (the network, a bug): keep the raw value for whoever debugs it.
+          if (!errorBodyOf(err)) console.error("sanoma app: starting the sandbox run failed:", err);
+          toast.error(errorMessage(err).trim() || "Could not start the sandbox run, and no reason was given");
+        },
+      },
+    );
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <ButtonGroup aria-label="Test a scenario">
@@ -71,7 +62,7 @@ export function TestControl({
           // With none chosen, Test opens the menu, and says so.
           aria-haspopup={value === undefined ? "menu" : undefined}
           aria-expanded={value === undefined ? open : undefined}
-          onClick={() => (chosen === undefined ? setOpen(true) : mutation.mutate(chosen))}
+          onClick={() => (chosen === undefined ? setOpen(true) : test(chosen))}
         >
           {mutation.isPending ? <Spinner data-icon="inline-start" /> : <FlaskConicalIcon data-icon="inline-start" />}
           {value === undefined ? "Test" : `Test “${value}”`}

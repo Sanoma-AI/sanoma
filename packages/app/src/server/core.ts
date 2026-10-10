@@ -209,11 +209,12 @@ export async function startRun(
     }
     return {
       runId: await client.start(workflow, scenario.input, { startedBy: actor, sandbox: scenario.name }),
+      workflow: scenario.workflow,
     };
   }
   const workflow = resolved.workflows.get(body.workflow);
   if (!workflow) throw noSuch("workflow", `No workflow named "${body.workflow}"`);
-  return { runId: await client.start(workflow, body.input, { startedBy: actor }) };
+  return { runId: await client.start(workflow, body.input, { startedBy: actor }), workflow: body.workflow };
 }
 
 /** The report of a drift run once it ends (`SanomaClient.driftReport`). */

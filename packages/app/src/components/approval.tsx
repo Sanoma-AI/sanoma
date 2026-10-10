@@ -31,7 +31,7 @@ import { Textarea } from "#/components/ui/textarea.tsx";
 import { approverLabel, isEnded } from "@sanoma/workflows/shared";
 import { type DecideRequest, errorBodyOf, starterName } from "../api.ts";
 import { decideFn } from "../functions.ts";
-import { configQuery, opsById, RUNS_KEY, runQuery } from "../queries.ts";
+import { configQuery, opsById, RUNS_KEY, runLink, runQuery } from "../queries.ts";
 import {
   ApprovalStatusBadge,
   DecisionNote,
@@ -101,7 +101,7 @@ export function ApprovalCard({
           </Fact>
           {showRun && (
             <Fact label="Run">
-              <Link to="/workflows/$name/runs/$id" params={{ name: run.workflow, id: run.runId }}>
+              <Link {...runLink(run)}>
                 <code>{run.runId}</code>
               </Link>
             </Fact>

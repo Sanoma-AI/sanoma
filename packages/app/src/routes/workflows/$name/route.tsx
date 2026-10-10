@@ -1,12 +1,19 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound, Outlet, retainSearchParams } from "@tanstack/react-router";
 import { PlayIcon } from "lucide-react";
-import { z } from "zod";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { loadCode, loadGraph, Notice, pageTitle } from "#/components/common.tsx";
-import { railQuery, RUN_FILTERS, RunRail } from "#/components/run-rail.tsx";
-import { configQuery, scenariosQuery, sourceQuery, workflowFile, workflowNamed } from "#/queries.ts";
+import { RunRail } from "#/components/run-rail.tsx";
+import {
+  configQuery,
+  railQuery,
+  scenariosQuery,
+  sourceQuery,
+  workflowFile,
+  workflowNamed,
+  WorkflowSearch,
+} from "#/queries.ts";
 
 /**
  * One workflow's page: its header, the rail of its runs, and the pane the URL picks (About, New
@@ -14,9 +21,10 @@ import { configQuery, scenariosQuery, sourceQuery, workflowFile, workflowNamed }
  */
 export const Route = createFileRoute("/workflows/$name")({
   // `?runs=` filters the rail; every link under this page keeps it.
-  validateSearch: z.object({ runs: z.enum(RUN_FILTERS).optional().catch(undefined) }),
+  validateSearch: WorkflowSearch,
   search: { middlewares: [retainSearchParams(["runs"])] },
-  loader: async ({ context: { queryClient }, params }) => {
+  loaderDeps: ({ search }) => ({ runs: search.runs }),
+  loader: async ({ context: { queryClient }, params, deps }) => {
     if (!import.meta.env.SSR) {
       void loadGraph();
       void loadCode();
@@ -28,7 +36,7 @@ export const Route = createFileRoute("/workflows/$name")({
     await Promise.all([
       file !== undefined && queryClient.query({ ...sourceQuery(file), staleTime: "static" }),
       queryClient.query({ ...scenariosQuery(), staleTime: "static" }),
-      queryClient.query({ ...railQuery(params.name), staleTime: "static" }),
+      queryClient.query({ ...railQuery(params.name, deps.runs), staleTime: "static" }),
     ]);
     return { crumb: workflow.title ?? workflow.name };
   },

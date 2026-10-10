@@ -29,7 +29,7 @@ import {
   When,
 } from "../components/common.tsx";
 import { startRunFn } from "../functions.ts";
-import { configQuery, driftReportQuery, RUNS_KEY, runsQuery, sourceQuery } from "../queries.ts";
+import { configQuery, driftReportQuery, RUNS_KEY, runLink, runsQuery, sourceQuery } from "../queries.ts";
 
 export const Route = createFileRoute("/resources")({
   // `resource` names the resource whose declaration the source view shows.
@@ -249,11 +249,7 @@ function LastCheck({
 }
 
 const RunLink = ({ run, children }: { run: Pick<RunSummary, "runId" | "workflow">; children: ReactNode }) => (
-  <Link
-    to="/workflows/$name/runs/$id"
-    params={{ name: run.workflow, id: run.runId }}
-    className="text-foreground underline-offset-4 hover:underline"
-  >
+  <Link {...runLink(run)} className="text-foreground underline-offset-4 hover:underline">
     {children}
   </Link>
 );
