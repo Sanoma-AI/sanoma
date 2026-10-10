@@ -47,13 +47,6 @@ export const approverLabel = (approver: Approver): string =>
 /** An error's message, or the value as text when it is not an Error. */
 export const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** True when an outline's op id, a computed segment shown as `*`, could be this op: `a.*.c` fits `a.b.c`. */
-export function fitsOp(pattern: string, op: string): boolean {
-  const want = pattern.split(".");
-  const got = op.split(".");
-  return want.length === got.length && want.every((segment, i) => segment === "*" || segment === got[i]);
-}
-
 /** A node's child lists, in order: the lists a `path`'s segments index into. */
 export const childLists = (node: OutlineNode): OutlineNode[][] => {
   switch (node.kind) {

@@ -32,12 +32,13 @@ export interface ApprovalStepState extends StepState {
  * What a graph is built from: a workflow's outline as `outlineWorkflow` reads it (an
  * `OutlineNode[]` is a `Step[]`, each call with its `span` in the source), or a run's ledger made
  * into the same shape, with each step's state. `key` names a run's node, so it keeps its id from
- * one poll to the next.
+ * one poll to the next; `node` is the outline node's `path` its record names, which places it in
+ * the source.
  */
 export type Step =
-  | { kind: "op"; id: string; key?: string; span?: Span; state?: OpState }
-  | { kind: "approval"; title?: string; key?: string; span?: Span; state?: ApprovalStepState }
-  | { kind: "sleep"; key?: string; label?: string; span?: Span; state?: StepState }
+  | { kind: "op"; id: string; key?: string; node?: string; span?: Span; state?: OpState }
+  | { kind: "approval"; title?: string; key?: string; node?: string; span?: Span; state?: ApprovalStepState }
+  | { kind: "sleep"; key?: string; node?: string; label?: string; span?: Span; state?: StepState }
   /** A `ctx.all` member a running run has recorded nothing for yet. */
   | { kind: "pending"; key: string }
   | { kind: "all"; branches: Step[][] }

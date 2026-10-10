@@ -19,7 +19,7 @@ import { type CallContext, isOp, type Op } from "./op.ts";
 import { callAt, callName, type CallNode } from "./outline.ts";
 import { DecisionSchema, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
 import type { Run, WorkerState } from "./run.ts";
-import { approverLabel, errorMessage, fitsOp } from "./shared.ts";
+import { approverLabel, errorMessage } from "./shared.ts";
 
 /** The error and the ones it was caused by, a few deep. */
 function causes(err: unknown): Error[] {
@@ -214,6 +214,13 @@ function placeCall(run: Run, fn: Function, what: string): CallNode {
   // The member called is the node's call: `ctx.all` at an `all` or `each`, an operation at its op.
   if (!fitsOp(callName(node), what)) throw notInOutline(run, what, site, `where the outline has ctx.${callName(node)}`);
   return node;
+}
+
+/** True when an outline's op id, a computed segment shown as `*`, could be this op: `a.*.c` fits `a.b.c`. */
+function fitsOp(pattern: string, op: string): boolean {
+  const want = pattern.split(".");
+  const got = op.split(".");
+  return want.length === got.length && want.every((segment, i) => segment === "*" || segment === got[i]);
 }
 
 function notInOutline(run: Run, what: string, site: CallSite | undefined, why: string): SanomaError {

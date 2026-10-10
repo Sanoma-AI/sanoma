@@ -1,6 +1,6 @@
 import type { ApprovalState, LedgerGroup, LedgerRecord, RunSummary } from "@sanoma/workflows";
 import type { OutlineNode, Span } from "@sanoma/workflows/describe";
-import { fitsOp, flatten, isEnded } from "@sanoma/workflows/shared";
+import { flatten, isEnded } from "@sanoma/workflows/shared";
 import { utcText } from "../lib/time.ts";
 import { APPROVAL_TONE, RUN_TONE, type Tone } from "../lib/tone.ts";
 import { type Ends, outlineGraph } from "./outline-graph.ts";
@@ -16,7 +16,7 @@ type AllStep = Extract<Step, { kind: "all" }>;
  * lanes, one per member (`group.index`); while the run is in the group, the members it has
  * recorded nothing for yet are pending lanes. `now` is when the ledger was read, which a sleep's
  * end is compared with. Given the workflow's `outline`, each call's node has the `spans` of the
- * outline's calls it may be (see `whereIn`).
+ * outline node its record names (see `whereIn`).
  */
 export function runGraph(
   records: readonly LedgerRecord[],
@@ -59,6 +59,7 @@ export function runGraph(
           kind: "op",
           id: record.op,
           key: `op:${record.seq}`,
+          ...(record.node !== undefined && { node: record.node }),
           state: {
             tone: failed ? "bad" : "ok",
             recordId: record.id,
@@ -85,6 +86,7 @@ export function runGraph(
               kind: "op",
               id: record.op,
               key: `op:${record.opSeq}`,
+              ...(record.node !== undefined && { node: record.node }),
               state: { tone: heldTone(status, ended), recordId: record.id, ...(approval && { approval }) },
             };
             ops.set(record.opSeq, step);
@@ -97,6 +99,7 @@ export function runGraph(
               kind: "approval",
               title: record.title,
               key: `approval:${record.approval}`,
+              ...(record.node !== undefined && { node: record.node }),
               state: { tone, recordId: record.id, ...(approval && { approval }) },
             },
             record.group,
@@ -111,6 +114,7 @@ export function runGraph(
           {
             kind: "sleep",
             key: `sleep:${record.seq}`,
+            ...(record.node !== undefined && { node: record.node }),
             label: `until ${utcText(record.until)}`,
             state: { tone: asleep ? "waiting" : "ok", recordId: record.id },
           },
@@ -152,44 +156,18 @@ export function runGraph(
   return outlineGraph(steps, { start, end }, whereIn(outline));
 }
 
-type Call = Extract<OutlineNode, { kind: CallStep["kind"] }>;
-
-const CALL_KINDS = new Set<OutlineNode["kind"]>(["op", "approval", "sleep"]);
-
-/** The outline's calls, wherever they are in it. */
-const calls = (nodes: readonly OutlineNode[]): Call[] =>
-  flatten(nodes).filter((node): node is Call => CALL_KINDS.has(node.kind));
-
-/** The calls' spans, or none when there are no calls. */
-const spansOf = (found: readonly Call[]) => (found.length ? found.map((call) => call.span) : undefined);
-
 /**
- * Where a run's call is in the source: the spans of the outline's calls it may be, matched by what
- * the record names. A record says what was called, not where from, so a step may be any of
- * several calls: an operation's, the outline's calls of that operation, or else those whose id has
- * a computed segment (`*`) that fits it; an approval's, those with its title, or else the untitled
- * ones (a computed title is one); a sleep's, every sleep. None when nothing matches: a step is
- * never pointed at a call it is not.
+ * Where a run's call is in the source: the span of the outline node its record names (`node`, the
+ * node's `path`), which the worker placed the call at. A loop's every pass is on its one node, and
+ * two calls of one operation on their two. None when the record names no node (a ledger from
+ * before calls were placed) or the outline has none by that path (the file changed since the
+ * run): a step is never pointed at a call it is not.
  */
 function whereIn(outline: readonly OutlineNode[]): (step: CallStep) => Span[] | undefined {
-  const all = calls(outline);
-  const ofKind = <K extends Call["kind"]>(kind: K) =>
-    all.filter((call): call is Extract<Call, { kind: K }> => call.kind === kind);
+  const byPath = new Map(flatten(outline).map((node) => [node.path, node]));
   return (step) => {
-    switch (step.kind) {
-      case "op": {
-        const ops = ofKind("op");
-        const same = ops.filter((call) => call.id === step.id);
-        return spansOf(same.length ? same : ops.filter((call) => fitsOp(call.id, step.id)));
-      }
-      case "approval": {
-        const approvals = ofKind("approval");
-        const titled = approvals.filter((call) => call.title === step.title);
-        return spansOf(titled.length ? titled : approvals.filter((call) => call.title === undefined));
-      }
-      case "sleep":
-        return spansOf(ofKind("sleep"));
-    }
+    const node = step.node === undefined ? undefined : byPath.get(step.node);
+    return node?.kind === step.kind ? [node.span] : undefined;
   };
 }
 

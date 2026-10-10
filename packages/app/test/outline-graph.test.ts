@@ -83,6 +83,33 @@ describe("outlineGraph", () => {
     expect(pairs(edges)).toEqual(["start->cluster:0", "op:1->op:2", "cluster:0->cluster:3", "cluster:3->end"]);
   });
 
+  it("draws a try as its body beside a cluster labelled on error, both from the node before", () => {
+    const { nodes, edges } = outlineGraph([
+      op("x.item.get"),
+      { kind: "try", body: [op("x.item.send")], handler: [op("x.item.log"), { kind: "sleep" }] },
+      op("x.item.done"),
+    ]);
+    expect(labels(nodes)).toEqual([
+      "start start",
+      "op:0 x.item.get",
+      "op:1 x.item.send",
+      "cluster:2 on error",
+      "op:3 x.item.log in cluster:2",
+      "sleep:4 sleep in cluster:2",
+      "op:5 x.item.done",
+      "end end",
+    ]);
+    expect(pairs(edges)).toEqual([
+      "start->op:0",
+      "op:0->op:1",
+      "op:0->cluster:2",
+      "op:3->sleep:4",
+      "op:1->op:5",
+      "cluster:2->op:5",
+      "op:5->end",
+    ]);
+  });
+
   it("draws a loop's body as a chain in a cluster labelled repeats", () => {
     const { nodes, edges } = outlineGraph([
       { kind: "repeat", body: [op("x.item.get"), { kind: "sleep" }] },
