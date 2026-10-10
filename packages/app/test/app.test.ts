@@ -665,10 +665,13 @@ describe("the page", () => {
   });
 
   it("redirects /, /runs and a run's old URL to their pages under /workflows, and not-found for a run that does not exist", async () => {
-    for (const path of ["/", "/runs"]) {
+    for (const [path, to] of [
+      ["/", /\/workflows$/],
+      ["/runs", /\/workflows\?view=runs$/],
+    ] as const) {
       const res = await fetch(new URL(path, app.url), { redirect: "manual" });
       expect(res.status, path).toBe(307);
-      expect(res.headers.get("location"), path).toMatch(/\/workflows$/);
+      expect(res.headers.get("location"), path).toMatch(to);
     }
     const old = await fetch(new URL(`/runs/${runId}`, app.url), { redirect: "manual" });
     expect(old.status).toBe(307);
@@ -757,17 +760,20 @@ describe("the page", () => {
     expect(run.text).toContain("Not retried: this operation is not safe to repeat. Check Ghost before starting again.");
   });
 
-  it("renders the workflows on the server: each one's outline, operations and input, and a link to its page", async () => {
+  it("renders the workflows on the server: each one's outline and a link to its page, whose About has its operations and input", async () => {
     const version = (await call<ConfigDescription>("/api/config")).body.version;
     const workflows = await page("/workflows");
     expect(workflows.status).toBe(200);
     expect(workflows.text).toContain(`<code>${version}</code>`);
-    expect(workflows.text).toMatch(/>safe to retry<\/span>/);
-    for (const title of ["Ghost", "Resend", "Bluesky"]) {
-      expect(workflows.html).toMatch(new RegExp(`<img src="data:image/svg\\+xml,[^"]+" alt="${title}"`));
-    }
-    expect(workflows.text).toMatch(/default (&quot;|")newsletter(&quot;|")/);
     expect(workflows.html).toContain('href="/workflows/announce"');
+    // What it may call and its input are About's, not the card's.
+    expect(workflows.text).not.toMatch(/>safe to retry<\/span>/);
+    const about = await page("/workflows/announce");
+    expect(about.text).toMatch(/>safe to retry<\/span>/);
+    for (const title of ["Ghost", "Resend", "Bluesky"]) {
+      expect(about.html).toMatch(new RegExp(`<img src="data:image/svg\\+xml,[^"]+" alt="${title}"`));
+    }
+    expect(about.text).toMatch(/default (&quot;|")newsletter(&quot;|")/);
     // Each workflow's outline, drawn in the browser like the run graph: a heading, what it is, a skeleton.
     expect(workflows.text).toMatch(
       /<h3[^>]*>Outline<\/h3><p[^>]*>Read from the body of run; the functions it calls are not shown, even those defined in it<\/p><div[^>]*><div data-slot="skeleton"[^>]*aria-label="Loading the graph"/,
@@ -1068,6 +1074,90 @@ describe("resources and drift", () => {
     expect(start.text).not.toContain("No workflow named");
   });
   // wave 2 C: Home
+  it("toggles the home between a card per workflow and every run, each view its own link", async () => {
+    // Each page marks its own view; the other view's link is plain.
+    for (const [path, shown, other] of [
+      ["/workflows", "By workflow", "All runs"],
+      ["/workflows?view=runs&status=failed", "All runs", "By workflow"],
+    ] as const) {
+      const { html } = await page(path);
+      const group = html.match(
+        /<div role="group" data-slot="button-group"[^>]*aria-label="View"[^>]*>(.*?)<\/div>/,
+      )?.[1];
+      expect(group, path).toMatch(/<a[^>]*href="\/workflows"[^>]*>By workflow<\/a>/);
+      expect(group, path).toMatch(/<a[^>]*href="\/workflows\?view=runs"[^>]*>All runs<\/a>/);
+      expect(group, path).toMatch(new RegExp(`aria-current="page"[^>]*>${shown}</a>`));
+      expect(group, path).not.toMatch(new RegExp(`aria-current="page"[^>]*>${other}</a>`));
+    }
+  });
+
+  it("renders each workflow's card: the vendors it calls, its Test and Run, and its strip in the browser", async () => {
+    const workflows = await page("/workflows");
+    // Each card's heading links to its page; the sidebar's links come before them.
+    const at = (name: string) =>
+      workflows.text.search(new RegExp(`aria-level="2"[^>]*><a[^>]*href="/workflows/${name}"`));
+    expect(at("announce")).toBeGreaterThan(0);
+    expect(at("drift")).toBeGreaterThan(at("announce"));
+    const card = workflows.text.slice(at("announce"), at("drift"));
+    for (const title of ["Ghost", "Resend", "Bluesky"]) expect(card).toMatch(new RegExp(`/>${title}</span>`));
+    // Announce has scenarios, so a Test; drift has none.
+    expect(card).toMatch(/href="\/workflows\/announce\/new"[^>]*>.*?Test<\/a>/);
+    expect(workflows.text.slice(at("drift"))).not.toContain("Test</a>");
+    // The strips read their runs in the browser: the server sends one skeleton per card.
+    expect(
+      workflows.html.match(/<div data-slot="skeleton"[^>]*role="status"[^>]*aria-label="Loading the runs"/g),
+    ).toHaveLength(2);
+    expect(workflows.html).not.toContain('aria-label="Last 12 runs"');
+  });
+
+  it("lists every run under All runs, linking each to its page, sandbox runs badged", async () => {
+    const all = await page("/workflows?view=runs");
+    expect(all.status).toBe(200);
+    expect(all.html).toContain('aria-label="Status"');
+    expect(all.text).toContain(`href="/workflows/announce/runs/${runId}"`);
+    expect(all.text).toContain(`href="/workflows/drift/runs/${driftRun}"`);
+    expect(all.text).toContain(`sandbox · ${SCENARIO}`);
+  });
+
+  it("filters All runs by ?status=, as the API does", async () => {
+    const { body: finished } = await call<RunSummary[]>("/api/runs?status=finished");
+    expect(finished.length).toBeGreaterThan(0);
+    // The runs each page's table links to, by its search.
+    const pages: Record<string, string> = {};
+    for (const search of ["status=finished", "status=asleep", ""]) {
+      pages[search] = (await page(`/workflows?view=runs&${search}`)).html;
+    }
+    const rows = Object.fromEntries(
+      Object.entries(pages).map(([search, html]) => [
+        search,
+        [...html.matchAll(/<a[^>]*href="\/workflows\/[^/"]+\/runs\/([^"?]+)"/g)].map(([, id]) => id).toSorted(),
+      ]),
+    );
+    expect(pages["status=finished"]).toMatch(/<option[^>]*value="finished"[^>]*selected=""/);
+    expect(rows["status=finished"]).toEqual(finished.map((run) => run.runId).toSorted());
+    // One that is not a status reads as any; a status with no runs says so.
+    expect(rows["status=asleep"]).toEqual(rows[""]);
+    expect((await page("/workflows?view=runs&status=cancelled")).text).toContain("No runs with that status");
+  });
+
+  it("pills a workflow's card with the approvals its runs wait on", async () => {
+    const started = await call<{ runId: string }>("/api/runs", {
+      method: "POST",
+      actor: "tester",
+      body: { workflow: "announce", input: input("Pill") },
+    });
+    await waitFor(
+      () => detail(started.body.runId),
+      (d) => d.run.status === "waiting",
+    );
+    const { body: waiting } = await call<RunSummary[]>("/api/runs?status=waiting&workflow=announce");
+    const pending = waiting.reduce((n, run) => n + run.approvals.filter((a) => a.status === "pending").length, 0);
+    expect(pending).toBeGreaterThan(0);
+    const workflows = await page("/workflows");
+    expect(workflows.text).toContain(`>${pending} approval${pending === 1 ? "" : "s"} waiting<`);
+    // Drift asks no one.
+    expect(workflows.text.match(/>\d+ approvals? waiting</g)).toHaveLength(1);
+  });
 });
 
 describe("an app configured otherwise", () => {
