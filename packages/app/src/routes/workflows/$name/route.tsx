@@ -1,15 +1,15 @@
-import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, notFound, Outlet, retainSearchParams } from "@tanstack/react-router";
-import { PlayIcon } from "lucide-react";
+import type { QueryClient } from "@tanstack/react-query";
+import { createFileRoute, notFound, Outlet, retainSearchParams } from "@tanstack/react-router";
 import { Badge } from "#/components/ui/badge.tsx";
-import { Button } from "#/components/ui/button.tsx";
-import { loadCode, loadGraph, Notice, pageTitle } from "#/components/common.tsx";
+import { loadCode, loadGraph, Notice, PageHeader, pageTitle } from "#/components/common.tsx";
 import { RunRail } from "#/components/run-rail.tsx";
+import { RunButton } from "#/components/workflow.tsx";
 import {
   configQuery,
   railQuery,
   scenariosQuery,
   sourceQuery,
+  useWorkflow,
   workflowFile,
   workflowNamed,
   WorkflowSearch,
@@ -29,16 +29,13 @@ export const Route = createFileRoute("/workflows/$name")({
       void loadGraph();
       void loadCode();
     }
-    const config = await queryClient.query({ ...configQuery(), staleTime: "static" });
-    const workflow = workflowNamed(params.name)(config);
-    if (!workflow) throw notFound();
-    const file = workflowFile(workflow);
-    await Promise.all([
-      file !== undefined && queryClient.query({ ...sourceQuery(file), staleTime: "static" }),
-      queryClient.query({ ...scenariosQuery(), staleTime: "static" }),
+    // The rail and the scenarios do not need the config: they load beside it.
+    const [workflow] = await Promise.all([
+      loadWorkflow(queryClient, params.name),
       queryClient.query({ ...railQuery(params.name, deps.runs), staleTime: "static" }),
+      queryClient.query({ ...scenariosQuery(), staleTime: "static" }),
     ]);
-    return { crumb: workflow.title ?? workflow.name };
+    return { crumb: workflow?.title ?? params.name };
   },
   // A workflow that does not exist has no loader data: its name stands in.
   head: ({ loaderData, params }) => pageTitle(loaderData?.crumb ?? params.name),
@@ -46,26 +43,34 @@ export const Route = createFileRoute("/workflows/$name")({
   notFoundComponent: () => <Notice variant="destructive">No workflow {Route.useParams().name}.</Notice>,
 });
 
+/**
+ * The config's workflow of this name, with its file's source loaded. None for a retired workflow,
+ * one the config no longer has: its page stays while it has runs to show; without, not-found.
+ */
+async function loadWorkflow(queryClient: QueryClient, name: string) {
+  const config = await queryClient.query({ ...configQuery(), staleTime: "static" });
+  const workflow = workflowNamed(name)(config);
+  if (!workflow) {
+    const runs = await queryClient.query({ ...railQuery(name), staleTime: "static" });
+    if (runs.length === 0) throw notFound();
+    return undefined;
+  }
+  const file = workflowFile(workflow);
+  if (file !== undefined) await queryClient.query({ ...sourceQuery(file), staleTime: "static" });
+  return workflow;
+}
+
 function WorkflowLayout() {
   const { name } = Route.useParams();
-  const { data: workflow } = useSuspenseQuery({
-    ...configQuery(),
-    select: (config) => workflowNamed(name)(config)!,
-  });
-  // Not PageHeader: it names the last crumb, which on a run's page is the run.
+  const workflow = useWorkflow(name);
+  // Titled by the workflow: the last crumb, PageHeader's default, is the run on a run's page.
+  // A retired workflow has only its name, and no Run.
   return (
     <div className="flex flex-col gap-6">
-      <header className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <h1 className="font-heading text-2xl font-semibold tracking-tight">{workflow.title ?? workflow.name}</h1>
-        <code className="text-muted-foreground">{workflow.name}</code>
-        {workflow.builtin && <Badge variant="secondary">built-in</Badge>}
-        <Button asChild className="ml-auto">
-          <Link to="/workflows/$name/new" params={{ name }}>
-            <PlayIcon data-icon="inline-start" />
-            Run
-          </Link>
-        </Button>
-      </header>
+      <PageHeader title={workflow?.title ?? name} action={workflow && <RunButton name={name} />}>
+        {workflow && <code className="text-muted-foreground">{name}</code>}
+        {workflow?.builtin && <Badge variant="secondary">built-in</Badge>}
+      </PageHeader>
       {/* The rail beside the pane, or above it once the pane would be narrower than 560px. */}
       <div className="flex flex-wrap items-start gap-6">
         <RunRail name={name} />

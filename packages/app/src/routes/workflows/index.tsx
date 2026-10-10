@@ -1,14 +1,12 @@
 import type { WorkflowEntry } from "@sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { PlayIcon } from "lucide-react";
 import { useMemo } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
-import { Button } from "#/components/ui/button.tsx";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
 import { Fact, Facts, GraphPanel, loadGraph, Nothing, PageHeader, Section } from "../../components/common.tsx";
-import { WorkflowSections } from "../../components/workflow.tsx";
+import { RunButton, WorkflowSections } from "../../components/workflow.tsx";
 import { outlineGraph } from "../../graph/outline-graph.ts";
 import { configQuery } from "../../queries.ts";
 
@@ -78,12 +76,7 @@ function WorkflowCard({ workflow }: { workflow: WorkflowEntry }) {
           {workflow.builtin && <Badge variant="secondary">built-in</Badge>}
         </CardDescription>
         <CardAction>
-          <Button asChild variant="outline" size="sm">
-            <Link to="/workflows/$name/new" params={{ name: workflow.name }}>
-              <PlayIcon data-icon="inline-start" />
-              Run
-            </Link>
-          </Button>
+          <RunButton name={workflow.name} variant="outline" size="sm" />
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">

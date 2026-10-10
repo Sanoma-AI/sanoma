@@ -1,5 +1,5 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, redirect } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import { Card, CardContent } from "#/components/ui/card.tsx";
 import { ItemGroup } from "#/components/ui/item.tsx";
@@ -23,27 +23,22 @@ import { GraphAndSource } from "#/components/workflow.tsx";
 import type { GraphNode } from "#/graph/types.ts";
 import { useReducedMotion } from "#/lib/motion.ts";
 import { RUN_TONE } from "#/lib/tone.ts";
-import { configQuery, runQuery, sourceQuery, workflowFile, workflowNamed } from "#/queries.ts";
+import { runLink, runQuery, useWorkflow } from "#/queries.ts";
 
 export const Route = createFileRoute("/workflows/$name/runs/$id")({
-  // The page reads the run from the query client; the loader returns only its name: its id.
-  loader: async ({ context: { queryClient }, params }) => {
+  // Before any loader, so the layout never loads the wrong workflow's page: a run under another
+  // workflow's page, from an edited URL, goes to its own workflow's.
+  beforeLoad: async ({ context: { queryClient }, params }) => {
+    const { run } = await queryClient.query({ ...runQuery(params.id), staleTime: "static" });
+    if (run.workflow !== params.name) throw redirect(runLink(run));
+  },
+  // The page reads the run from the query client, read above; the layout loads the workflow's
+  // source. The loader returns only the run's name: its id.
+  loader: ({ params }) => {
     if (!import.meta.env.SSR) {
       void loadGraph();
       void loadCode();
     }
-    const [{ run }, config] = await Promise.all([
-      queryClient.query({ ...runQuery(params.id), staleTime: "static" }),
-      queryClient.query({ ...configQuery(), staleTime: "static" }),
-    ]);
-    // A run under another workflow's page, from an edited URL: its own workflow's.
-    if (run.workflow !== params.name) {
-      throw redirect({ to: "/workflows/$name/runs/$id", params: { name: run.workflow, id: params.id } });
-    }
-    // The workflow's file, beside the graph.
-    const workflow = workflowNamed(run.workflow)(config);
-    const file = workflow && workflowFile(workflow);
-    if (file !== undefined) await queryClient.query({ ...sourceQuery(file), staleTime: "static" });
     return { crumb: params.id };
   },
   head: ({ params }) => pageTitle(params.id),
@@ -56,11 +51,9 @@ function RunPage() {
   const { id } = Route.useParams();
   const { data, error, dataUpdatedAt } = useSuspenseQuery(runQuery(id));
   const { run, ledger, ledgerError, approvals, checks, checksError } = data;
-  // Only its name when the config has no workflow of that name: the graph says so.
-  const { data: workflow } = useSuspenseQuery({
-    ...configQuery(),
-    select: (config) => workflowNamed(run.workflow)(config) ?? { name: run.workflow },
-  });
+  // Only its name when the workflow is retired (the config no longer has it): the graph says so.
+  const found = useWorkflow(run.workflow);
+  const workflow = useMemo(() => found ?? { name: run.workflow }, [found, run.workflow]);
   // The graph reads the clock only for whether the run's last record, a sleep, is over: the
   // sleep's end once it has come, else any time before it. So a poll that changed nothing keeps
   // the same reading, and the graph is not built again.
@@ -148,16 +141,6 @@ function RunPage() {
           ))}
         </div>
       </div>
-
-      <p className="text-sm text-muted-foreground">
-        <Link
-          to="/workflows/$name/new"
-          params={{ name: run.workflow }}
-          className="underline-offset-4 hover:text-foreground hover:underline"
-        >
-          New run
-        </Link>
-      </p>
     </div>
   );
 }

@@ -1,11 +1,11 @@
-import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Card, CardContent } from "#/components/ui/card.tsx";
 import { pageTitle } from "#/components/common.tsx";
+import { Retired } from "#/components/workflow.tsx";
 import { StartForm } from "#/form/start-form.tsx";
-import { configQuery, workflowNamed } from "#/queries.ts";
+import { useWorkflow } from "#/queries.ts";
 
-/** A new run of the workflow: its input, from its schema. The layout loads the config and checks the workflow. */
+/** A new run of the workflow: its input, from its schema. A retired workflow has none to start. */
 export const Route = createFileRoute("/workflows/$name/new")({
   staticData: { crumb: "New run" },
   head: ({ match }) => pageTitle(match.staticData.crumb),
@@ -14,10 +14,8 @@ export const Route = createFileRoute("/workflows/$name/new")({
 
 function NewRunPage() {
   const { name } = Route.useParams();
-  const { data: workflow } = useSuspenseQuery({
-    ...configQuery(),
-    select: (config) => workflowNamed(name)(config)!,
-  });
+  const workflow = useWorkflow(name);
+  if (!workflow) return <Retired name={name} />;
   return (
     <div className="flex max-w-2xl flex-col gap-4">
       <p className="text-sm text-muted-foreground">

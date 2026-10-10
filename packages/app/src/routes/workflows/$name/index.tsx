@@ -4,8 +4,8 @@ import { z } from "zod";
 import { Card, CardContent } from "#/components/ui/card.tsx";
 import { Nothing } from "#/components/common.tsx";
 import { ScenarioCard, ScenarioErrors, TestControl } from "#/components/scenario.tsx";
-import { GraphAndSource, WorkflowSections } from "#/components/workflow.tsx";
-import { configQuery, scenariosFor, scenariosQuery, workflowNamed } from "#/queries.ts";
+import { GraphAndSource, Retired, WorkflowSections } from "#/components/workflow.tsx";
+import { scenariosFor, scenariosQuery, useWorkflow } from "#/queries.ts";
 
 /** A workflow's About: its graph beside its source, its scenarios, and what it may call. The layout loads all of it. */
 export const Route = createFileRoute("/workflows/$name/")({
@@ -18,14 +18,11 @@ function AboutPage() {
   const { name } = Route.useParams();
   const { scenario: wanted } = Route.useSearch();
   const navigate = Route.useNavigate();
-  // The layout has checked the workflow is there.
-  const { data: workflow } = useSuspenseQuery({
-    ...configQuery(),
-    select: (config) => workflowNamed(name)(config)!,
-  });
+  const workflow = useWorkflow(name);
   const {
     data: { scenarios, errors },
   } = useSuspenseQuery({ ...scenariosQuery(), select: scenariosFor(name) });
+  if (!workflow) return <Retired name={name} />;
   const scenario = scenarios.find((s) => s.name === wanted);
   return (
     <div className="flex flex-col gap-6">
