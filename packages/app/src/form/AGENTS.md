@@ -1,10 +1,10 @@
 # packages/app/src/form
 
-The start form: it turns a workflow's input JSON Schema into form fields and renders them. The server still validates the input, so the form only shapes entry.
+The start form: it turns a workflow's input JSON Schema into form fields and renders them, empty for a live run or filled read-only with a scenario's input for a sandbox run. The server still validates the input, so the form only shapes entry.
 
 ## Contents
 
-| Path                               | What it is                                                                                       |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------ |
-| [`schema.ts`](schema.ts)           | Reads a JSON Schema into field descriptions: scalars, enums, one level of nesting, JSON fallback |
-| [`start-form.tsx`](start-form.tsx) | TanStack Form that renders those fields and starts the run                                       |
+| Path                               | What it is                                                                                                                                                                              |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`schema.ts`](schema.ts)           | Reads a JSON Schema into field descriptions: scalars, enums, one level of nesting, JSON fallback; the form's values, empty or from a given input (`valuesFrom`), and the input it sends |
+| [`start-form.tsx`](start-form.tsx) | TanStack Form that renders those fields and starts the run, or with a scenario shows its input read-only and starts a sandbox run of it                                                 |

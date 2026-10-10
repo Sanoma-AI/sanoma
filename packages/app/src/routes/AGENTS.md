@@ -15,4 +15,4 @@ The TanStack Router file routes of the app. Each file is served at the URL its p
 | [`inbox.tsx`](inbox.tsx)              | `/inbox`: every pending approval, newest first                                              |
 | [`index.tsx`](index.tsx)              | `/`: redirects to `/workflows`                                                              |
 | [`resources.tsx`](resources.tsx)      | `/resources`: the declared resources, their drift and data-file problems, and Run drift     |
-| [`start.tsx`](start.tsx)              | `/start`: choose a workflow and fill its input to start a run                               |
+| [`start.tsx`](start.tsx)              | `/start`: redirects old links to a workflow's New run pane (`?workflow=`) or `/workflows`   |
