@@ -16,7 +16,7 @@ The source of `@sanoma/workflows`: how connectors, workflows and policies are de
 | [`describe.ts`](describe.ts)   | `describeConfig` and `outlineWorkflow`, re-exporting the reader: the config as plain JSON for a UI    |
 | [`errors.ts`](errors.ts)       | Error codes, `SanomaError` and its subclasses, input parsing and `errorInfo`                          |
 | [`fake.ts`](fake.ts)           | `defineFake`: fake vendors for tests                                                                  |
-| [`fill.ts`](fill.ts)           | Internal: made-up values for a zod schema, seeded by name, for scenario inputs and operation mocks    |
+| [`fill.ts`](fill.ts)           | Internal: seeded made-up values for zod schemas (scenario inputs, op mocks); `shapeOf`, `isBug`       |
 | [`index.ts`](index.ts)         | The main entry; re-exports the public API                                                             |
 | [`ledger.ts`](ledger.ts)       | The audit record of a run, with JSONL and in-memory stores                                            |
 | [`lint.ts`](lint.ts)           | `lintWorkflow` (import rules oxlint cannot express) and `lintResources` (the data-file subset)        |

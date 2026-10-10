@@ -59,7 +59,9 @@ export interface OpEntry {
   output: Record<string, unknown>;
   /**
    * A sample exchange with the vendor's fake, when the config has one in `fakes`: a made-up
-   * input, and what the fake returned for it or the message of what it threw.
+   * input, and what the fake returned for it, parsed by `output`, or why it did not (what it
+   * threw, or how its reply is off the contract). `input` is null when the fake does not
+   * implement the operation.
    */
   mock?: { input: unknown; output: unknown } | { input: unknown; error: string };
 }
