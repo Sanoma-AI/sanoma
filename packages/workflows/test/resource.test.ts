@@ -5,13 +5,14 @@ import {
   allowAll,
   compareDeclared,
   defineConfig,
+  diffDeclared,
   defineConnector,
   defineDriver,
   defineResource,
   memoryLedger,
 } from "../src/index.ts";
 import { VENDOR } from "../src/op.ts";
-import { DECLARED } from "../src/resource.ts";
+import { DECLARED, withoutWriteOnly } from "../src/resource.ts";
 
 const fields = {
   immutable: ["name"],
@@ -48,7 +49,8 @@ describe("defineResource", () => {
       id: "acme.repo.import",
       effect: "read",
       idempotent: true,
-      description: "Find a repo by its name and read it",
+      description: "Find a repo by its name and read it; gone when there is none",
+      opaque: ["handle"],
     });
     expect(acme.repo.read.description).toBe("Read a repo as it is now; gone when it no longer exists");
     expect(acme.repo.read.target?.({ id: "sanoma" })).toBe("sanoma");
@@ -57,9 +59,12 @@ describe("defineResource", () => {
   it("types the operations' state with the resource's schema", () => {
     expect(acme.repo.import.input.safeParse({ id: "sanoma" }).success).toBe(true);
     expect(
-      acme.repo.import.output.safeParse({ id: "sanoma", state: { name: "sanoma" }, handle: "1:e30=" }).success,
+      acme.repo.import.output.safeParse({ id: "sanoma", gone: false, state: { name: "sanoma" }, handle: "1:e30=" })
+        .success,
     ).toBe(true);
-    expect(acme.repo.import.output.safeParse({ id: "sanoma", state: { wiki: true } }).success).toBe(false);
+    expect(acme.repo.import.output.safeParse({ id: "sanoma", gone: false, state: { wiki: true } }).success).toBe(false);
+    // Like read, import answers gone when the vendor has no such object.
+    expect(acme.repo.import.output.safeParse({ id: "sanoma", gone: true }).success).toBe(true);
     expect(acme.repo.read.output.safeParse({ id: "sanoma", gone: true }).success).toBe(true);
     expect(acme.repo.read.input.safeParse({ id: "sanoma", state: { name: "sanoma" }, handle: "1:e30=" }).success).toBe(
       true,
@@ -140,7 +145,7 @@ describe("defineResource", () => {
         immutable: ["repository"],
         vendorOwned: [],
         writeOnly: [],
-        references: { repository: "acme.repo", "reviewers.repository": "acme.repo" },
+        references: { repository: { type: "acme.repo" }, "reviewers.repository": { type: "acme.repo" } },
       },
       find: ({ repository, pattern }) => `${repository}:${pattern}`,
     });
@@ -192,11 +197,46 @@ describe("defineResource", () => {
   it("is implemented by an ordinary driver", () => {
     const driver = defineDriver(acme, {
       repo: {
-        import: async ({ id }) => ({ id, state: { name: id } }),
+        import: async ({ id }) => ({ id, gone: false, state: { name: id } }),
         read: async ({ id }) => ({ id, gone: true }),
       },
     });
     expect(Object.keys(driver.ops)).toEqual(["repo.import", "repo.read"]);
+  });
+});
+
+describe("diffDeclared", () => {
+  it("names each declared leaf that differs, a list item's with its index, never a vendor-owned one", () => {
+    const desired = { name: "sanoma", wiki: false, url: "x", rules: [{ pattern: "main", strict: true }] };
+    const state = { name: "sanoma", wiki: true, url: "y", rules: [{ pattern: "main", strict: false }], etag: "e" };
+    // A set (`rules` is one) has no item positions: it differs whole.
+    expect(diffDeclared(repo, state, desired)).toEqual([
+      { path: "wiki", desired: false, actual: true },
+      { path: "rules", desired: desired.rules, actual: state.rules },
+    ]);
+    const ordered = { ...repo, fields: { ...fields, unordered: [] } };
+    expect(diffDeclared(ordered, state, desired)).toEqual([
+      { path: "wiki", desired: false, actual: true },
+      { path: "rules.0.strict", desired: true, actual: false },
+    ]);
+  });
+
+  it("takes any value `accept` gives for a reference as the declared one", () => {
+    const desired = { name: "sanoma", pages: { cname: "site" } };
+    const state = { name: "sanoma", pages: { cname: "R_site" } };
+    expect(diffDeclared(repo, state, desired, { "pages.cname": ["site", "R_site"] })).toEqual([]);
+    expect(diffDeclared(repo, state, desired, { "pages.cname": ["R_other"] })).toEqual([
+      { path: "pages.cname", desired: "site", actual: "R_site" },
+    ]);
+  });
+});
+
+describe("withoutWriteOnly", () => {
+  it("drops write-only fields, in list items too, and keeps the rest", () => {
+    const nested = { ...fields, writeOnly: ["token", "rules.secret"] };
+    expect(withoutWriteOnly(nested, { name: "sanoma", token: "t", rules: [{ pattern: "main", secret: "s" }] })).toEqual(
+      { name: "sanoma", rules: [{ pattern: "main" }] },
+    );
   });
 });
 
@@ -273,7 +313,7 @@ describe("describeConfig with resources", () => {
       drivers: [
         defineDriver(acme, {
           repo: {
-            import: async ({ id }) => ({ id, state: { name: id } }),
+            import: async ({ id }) => ({ id, gone: false, state: { name: id } }),
             read: async ({ id }) => ({ id, gone: true }),
           },
         }),

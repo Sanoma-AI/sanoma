@@ -18,6 +18,26 @@ import { DecisionSchema, type PolicyCall, policyOpOf, type RecordedDecision } fr
 import type { Run, WorkerState } from "./run.ts";
 import { approverLabel, errorMessage } from "./shared.ts";
 
+/** The error and the ones it was caused by, a few deep. */
+function causes(err: unknown): Error[] {
+  const out: Error[] = [];
+  for (let e = err; e instanceof Error && out.length < 5; e = e.cause) out.push(e);
+  return out;
+}
+
+/** DBOS took the run from this execution: it cancelled the run, or another process took it over. */
+const takenByDbos = (err: unknown) =>
+  causes(err).some((e) => e instanceof DBOSErrors.DBOSWorkflowCancelledError || e instanceof DBOSWorkflowConflictError);
+
+/**
+ * True for a failure that ends the run rather than one call: anything DBOS throws (it cancelled
+ * the run, another process took it over, the worker is shutting down, the run is not
+ * deterministic) and `run_ended` (a call queued after the run's body ended). Looked for in the
+ * error and its causes. A workflow that goes on past a failed call, as `drift` does, rethrows these.
+ */
+export const isRunControlError = (err: unknown): boolean =>
+  causes(err).some((e) => e instanceof DBOSErrors.DBOSError || errorCode(e) === "run_ended");
+
 /**
  * True for a failure that is not the run's outcome, so the ledger does not record it: DBOS
  * cancelled the run or another process took it over, or the run's worker is stopping and the
@@ -25,13 +45,20 @@ import { approverLabel, errorMessage } from "./shared.ts";
  * then on whatever fails without a code (DBOS's "system database has been shut down", pg's
  * closed pool) is the shutdown, and the run recovered on the next worker records how it ends.
  * A coded failure then (a driver's final answer, a denial, a rejection) is still the outcome:
- * DBOS records the run's error and never runs it again, so the ledger records it too.
+ * DBOS records the run's error and never runs it again, so the ledger records it too. Narrower
+ * than `isRunControlError`: DBOS's other errors (a run that is not deterministic) end the run
+ * for good, and are recorded.
  */
 export function isInfrastructureError(err: unknown, state: Pick<WorkerState, "stopped">): boolean {
-  for (let e = err, depth = 0; e instanceof Error && depth < 5; e = e.cause, depth++) {
-    if (e instanceof DBOSErrors.DBOSWorkflowCancelledError || e instanceof DBOSWorkflowConflictError) return true;
-  }
-  return state.stopped && errorCode(err) === undefined;
+  return takenByDbos(err) || (state.stopped && errorCode(err) === undefined);
+}
+
+/** The value as the ledger records it: each of the operation's `opaque` fields as `"<name>"`. */
+function recorded(op: Op, value: unknown): unknown {
+  if (!op.opaque?.length || typeof value !== "object" || value === null || Array.isArray(value)) return value;
+  const out: Record<string, unknown> = { ...value };
+  for (const name of op.opaque) if (out[name] !== undefined) out[name] = `<${name}>`;
+  return out;
 }
 
 /** How many times an idempotent operation is tried. */
@@ -192,7 +219,8 @@ async function callOp(run: Run, id: string, input: unknown) {
   // that may have changed since. The policy must still be deterministic: a run that fails
   // before the step is recorded asks again.
   const decision = await DBOS.runStep(() => decide(run, op, parsed), { name: `policy:${op.id}` });
-  const call = { type: "op.called", op: op.id, effect: op.effect, input: parsed, decision } as const;
+  const logged = recorded(op, parsed);
+  const call = { type: "op.called", op: op.id, effect: op.effect, input: logged, decision } as const;
 
   if (decision.kind === "deny") {
     const err = new PolicyDeniedError(op.id, decision.reason);
@@ -204,7 +232,7 @@ async function callOp(run: Run, id: string, input: unknown) {
     // A hold covers the call it held, and any other operations the policy named.
     const covers = [...new Set([op.id, ...(decision.covers ?? [])])];
     try {
-      await awaitApproval(run, title, { approver: decision.approver, covers }, { op: op.id, seq, input: parsed });
+      await awaitApproval(run, title, { approver: decision.approver, covers }, { op: op.id, seq, input: logged });
     } catch (err) {
       if (errorCode(err) === "approval_rejected") {
         const approval = (err as SanomaError).data.approvalId as string;
@@ -250,7 +278,10 @@ async function callOp(run: Run, id: string, input: unknown) {
   }
   const { output, at, durationMs } = result;
   try {
-    await write(run, entry(run, { ...call, output, durationMs, attempt: result.attempt }, { seq, at }));
+    await write(
+      run,
+      entry(run, { ...call, output: recorded(op, output), durationMs, attempt: result.attempt }, { seq, at }),
+    );
   } catch (err) {
     // The vendor acted, and nothing records it. A workflow that caught this and called again
     // would repeat the side effect under a new key, so the run makes no further calls.
