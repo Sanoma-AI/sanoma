@@ -3,7 +3,7 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 import { z } from "zod";
 import { Card, CardContent } from "#/components/ui/card.tsx";
 import { loadCode, loadGraph, Nothing, Notice, PageHeader, pageTitle } from "../../components/common.tsx";
-import { ScenarioCard, ScenarioPicker, TestButton } from "../../components/scenario.tsx";
+import { ScenarioCard, TestControl } from "../../components/scenario.tsx";
 import { GraphAndSource, StartButton, WorkflowSections } from "../../components/workflow.tsx";
 import { configQuery, scenariosFor, scenariosQuery, sourceQuery, workflowNamed } from "../../queries.ts";
 
@@ -49,13 +49,12 @@ function WorkflowPage() {
       <PageHeader
         action={
           <div className="flex flex-wrap items-center gap-2">
-            <ScenarioPicker
+            <TestControl
               scenarios={scenarios}
               value={scenario?.name}
               // Choosing another scenario replaces the page in the history rather than adding one.
               onChange={(chosen) => void navigate({ search: { scenario: chosen }, replace: true })}
             />
-            <TestButton scenario={scenario?.name} />
             <StartButton name={workflow.name} />
           </div>
         }
@@ -74,7 +73,7 @@ function WorkflowPage() {
           <ScenarioCard scenario={scenario} />
         ) : (
           <Nothing title={`No scenario named “${wanted}”`}>
-            This workflow’s scenarios are in the list above, beside Test.
+            This workflow’s scenarios are in the menu beside Test, above.
           </Nothing>
         ))}
       <Card>

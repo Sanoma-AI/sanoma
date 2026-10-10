@@ -766,12 +766,13 @@ describe("the page", () => {
     expect(missing.text).toContain("No workflow nope");
   });
 
-  it("renders a workflow's scenario, the picker and Test, and says when a scenario does not exist", async () => {
+  it("renders a workflow's scenario, the Test control, and says when a scenario does not exist", async () => {
     const chosen = await page(`/workflows/announce?scenario=${encodeURIComponent(SCENARIO)}`);
     expect(chosen.status).toBe(200);
-    expect(chosen.html).toMatch(/<select[^>]*aria-label="Scenario"/);
-    expect(chosen.html).toMatch(/<option[^>]*value="Launch on time"[^>]*selected=""/);
-    expect(chosen.text).toMatch(/>Test<\/button>/);
+    // One split control: Test, naming the chosen scenario, and the menu that chooses one.
+    expect(chosen.html).toMatch(
+      /<div role="group" data-slot="button-group"[^>]*><button[^>]*>.*?Test “Launch on time”<\/button><button[^>]*aria-label="Scenario"/,
+    );
     // The scenario's own lines, not the rest of its file.
     const shown = [...chosen.text.matchAll(/<pre[^>]*>([^<]*)<\/pre>/g)]
       .map(([, text]) => text!)
@@ -784,7 +785,7 @@ describe("the page", () => {
     const unknown = await page("/workflows/announce?scenario=nope");
     expect(unknown.status).toBe(200);
     expect(unknown.text).toContain("No scenario named “nope”");
-    expect(unknown.html).toMatch(/<select[^>]*aria-label="Scenario"/);
+    expect(unknown.text).toMatch(/>Test<\/button><button[^>]*aria-label="Scenario"/);
 
     // A search value the router reads as a number is no scenario (or workflow), not a crash.
     expect((await page("/workflows/announce?scenario=123")).status).toBe(200);
