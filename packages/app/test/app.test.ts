@@ -175,6 +175,10 @@ async function page(path: string, base = app.url) {
   return { status: res.status, html, text: html.replaceAll("<!-- -->", "") };
 }
 
+/** The Test control's buttons, as the workflow page renders them: its group's inner HTML. */
+const testControl = (html: string) =>
+  html.match(/<div role="group" data-slot="button-group"[^>]*aria-label="Test a scenario"[^>]*>(.*?)<\/div>/)?.[1];
+
 /** A request's status, sent as written: no normalising of the path, and any Host header. */
 function rawStatus(base: string, path: string, headers?: Record<string, string>) {
   const { hostname, port } = new URL(base);
@@ -552,6 +556,10 @@ describe("scenarios that no longer load", () => {
       const run = await page(`/runs/${sandboxId}`);
       expect(run.html).toMatch(/<h2[^>]*>Checks<\/h2>/);
       expect(run.text).toContain("Could not check the run against its scenario: The feature files no longer have");
+      // A workflow with no scenarios still has its Test control, enabled: it opens the menu, which says so.
+      const workflow = await page("/workflows/announce");
+      expect(testControl(workflow.text)).toMatch(/>Test<\/button><button[^>]*aria-label="Scenario"/);
+      expect(testControl(workflow.text)).not.toContain('disabled=""');
       // A connector's page says why too, above its operations.
       const connector = await page("/connectors/ghost");
       expect(connector.text).toMatch(
@@ -812,7 +820,11 @@ describe("the page", () => {
     const unknown = await page("/workflows/announce?scenario=nope");
     expect(unknown.status).toBe(200);
     expect(unknown.text).toContain("No scenario named “nope”");
-    expect(unknown.text).toMatch(/>Test<\/button><button[^>]*aria-label="Scenario"/);
+    // With none chosen, Test opens the menu, and is enabled.
+    const control = testControl(unknown.text);
+    expect(control).toMatch(/>Test<\/button><button[^>]*aria-label="Scenario"/);
+    expect(control).toContain('aria-haspopup="menu"');
+    expect(control).not.toContain('disabled=""');
 
     // A search value the router reads as a number is no scenario (or workflow), not a crash.
     expect((await page("/workflows/announce?scenario=123")).status).toBe(200);

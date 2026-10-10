@@ -29,7 +29,8 @@ import { Notice, Section } from "./common.tsx";
  * Test, split in two. The menu chooses one of the workflow's scenarios (the page keeps the choice
  * in its URL, so its graph and the scenario's card show it before anything runs); the button
  * starts a sandbox run of the chosen one, then opens it, as the start form does a run, or opens
- * the menu when none is chosen. A sandbox run's approvals wait for people, as a live run's do.
+ * the menu when none is chosen (which says so when the workflow has no scenarios). A sandbox
+ * run's approvals wait for people, as a live run's do.
  */
 export function TestControl({
   scenarios,
@@ -59,29 +60,31 @@ export function TestControl({
       toast.error(errorMessage(err).trim() || "Could not start the sandbox run, and no reason was given");
     },
   });
-  const none = scenarios.length === 0;
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <ButtonGroup>
+      <ButtonGroup aria-label="Test a scenario">
         <Button
           size="sm"
           variant="outline"
-          disabled={none || mutation.isPending}
+          disabled={mutation.isPending}
+          // With none chosen, Test opens the menu, and says so.
+          aria-haspopup={value === undefined ? "menu" : undefined}
+          aria-expanded={value === undefined ? open : undefined}
           onClick={() => (value === undefined ? setOpen(true) : mutation.mutate(value))}
         >
           {mutation.isPending ? <Spinner data-icon="inline-start" /> : <FlaskConicalIcon data-icon="inline-start" />}
           {value === undefined ? "Test" : `Test “${value}”`}
         </Button>
         <DropdownMenuTrigger asChild>
-          <Button size="icon-sm" variant="outline" aria-label="Scenario" disabled={none}>
+          <Button size="icon-sm" variant="outline" aria-label="Scenario">
             <ChevronDownIcon />
           </Button>
         </DropdownMenuTrigger>
       </ButtonGroup>
-      <DropdownMenuContent align="end">
-        {/* Reached only when the scenarios go while the menu is open: with none, the group is disabled. */}
-        {none ? (
-          <DropdownMenuLabel>No scenarios</DropdownMenuLabel>
+      <DropdownMenuContent align="end" className="w-auto max-w-80">
+        {/* With none, the menu says so: Test, and the arrow, still open it. */}
+        {scenarios.length === 0 ? (
+          <DropdownMenuLabel>No scenarios for this workflow</DropdownMenuLabel>
         ) : (
           <DropdownMenuRadioGroup value={value ?? ""} onValueChange={onChange}>
             {scenarios.map((s) => (
