@@ -34,7 +34,6 @@ const env = z.object({
     .string()
     .regex(/^key_[a-z]+$/, "an API key, key_<letters>")
     .describe("an API key"),
-  // Described before it is made optional: the description is still found.
   [REGION_VAR]: z.enum(["us", "eu"]).describe("the region; default us").optional(),
 });
 const acmeDriver = defineDriver(acme, { thing: { get: async ({ id }) => ({ id }) } }, { env });

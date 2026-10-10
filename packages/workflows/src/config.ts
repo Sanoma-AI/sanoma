@@ -1,10 +1,10 @@
 import { dirname, resolve } from "node:path";
 import { DBOS } from "@dbos-inc/dbos-sdk";
+import type { z } from "zod";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, type DriftDeclared, driftWorkflow } from "./drift.ts";
 import type { Fake } from "./fake.ts";
 import type { LedgerStore } from "./ledger.ts";
-import { z } from "zod";
 import { type Connector, type Driver, type DriverEnv, type DriverFn, isOp, type Op } from "./op.ts";
 import type { Policy } from "./policy.ts";
 import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
@@ -227,20 +227,28 @@ function credentialsOf(drivers: readonly Driver[]): Map<string, CredentialStatus
   return map;
 }
 
-function credentialStatus(name: string, schema: DriverEnv["shape"][string], value: string | undefined) {
-  // `.describe()` before `.optional()` describes the inner schema.
-  const description =
-    schema.description ??
-    (schema instanceof z.ZodOptional ? z.globalRegistry.get(schema.unwrap())?.description : undefined);
-  const status: CredentialStatus = {
+function credentialStatus(
+  name: string,
+  schema: DriverEnv["shape"][string],
+  value: string | undefined,
+): CredentialStatus {
+  const description = descriptionOf(schema);
+  const parsed = value === undefined ? undefined : schema.safeParse(value);
+  const problem = parsed?.error?.issues[0]!.message;
+  return {
     name,
     ...(description !== undefined && { description }),
     optional: schema.safeParse(undefined).success,
-    status: "set",
+    status: !parsed ? "missing" : parsed.success ? "set" : "invalid",
+    ...(problem !== undefined && { problem }),
   };
-  if (value === undefined) return { ...status, status: "missing" as const };
-  const parsed = schema.safeParse(value);
-  return parsed.success ? status : { ...status, status: "invalid" as const, problem: parsed.error.issues[0]!.message };
+}
+
+/** A schema's `.describe()`, also through `.optional()`, `.default()` and `.prefault()` in any order. */
+function descriptionOf(schema: z.ZodType): string | undefined {
+  let s: z.ZodType | undefined = schema;
+  while (s && !s.description) s = "unwrap" in s ? (s as { unwrap(): z.ZodType }).unwrap() : undefined;
+  return s?.description;
 }
 
 /**
