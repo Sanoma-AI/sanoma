@@ -51,7 +51,7 @@ It reads this on every call, never when the config loads:
 | ---------------- | ----------------- |
 | `RESEND_API_KEY` | A Resend API key. |
 
-When it is unset, a call fails, not retryable, naming it.
+When it is unset, a call fails, not retryable, naming it. The driver declares it in its `env` ([Credentials](https://www.npmjs.com/package/@sanoma/workflows#credentials)), so a worker refuses to start while it is unset, and the app's connector page shows its status.
 
 ### Idempotency
 
