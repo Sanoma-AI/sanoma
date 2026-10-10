@@ -538,6 +538,11 @@ describe("scenarios that no longer load", () => {
       const run = await page(`/runs/${sandboxId}`);
       expect(run.html).toMatch(/<h2[^>]*>Checks<\/h2>/);
       expect(run.text).toContain("Could not check the run against its scenario: The feature files no longer have");
+      // A connector's page says why too, above its operations.
+      const connector = await page("/connectors/ghost");
+      expect(connector.text).toMatch(
+        /Could not read a scenario: announce\.feature:3: no step matches &quot;nothing&quot;[\s\S]*<h2[^>]*>Operations<\/h2>/,
+      );
 
       const start = await postRun({ scenario: SCENARIO });
       expect(start.status).toBe(404);

@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { ItemGroup } from "#/components/ui/item.tsx";
+import type { ScenarioEntry } from "../../api.ts";
 import {
   Expandable,
   Json,
@@ -18,6 +19,7 @@ import {
   SectionTitle,
   VendorLogo,
 } from "../../components/common.tsx";
+import { ScenarioErrors } from "../../components/scenario.tsx";
 import { type ScenarioRoles, scenarioRoles } from "../../graph/scenario-graph.ts";
 import { configQuery, connectorNamed, scenariosNaming, scenariosQuery } from "../../queries.ts";
 
@@ -43,6 +45,7 @@ function ConnectorPage() {
   const {
     data: { vendor, ops, workflows, resourceTypes },
   } = useSuspenseQuery({ ...configQuery(), select: (config) => connectorNamed(id)(config)! });
+  const { data: scenarios } = useSuspenseQuery(scenariosQuery());
   return (
     <div className="flex flex-col gap-6">
       {/* Decorative: the title beside it names the heading. */}
@@ -63,6 +66,7 @@ function ConnectorPage() {
           {resourceTypes.map((r) => r.title).join(", ")}
         </p>
       )}
+      <ScenarioErrors errors={scenarios.errors} />
       <section className="flex flex-col gap-2">
         <SectionTitle>Operations</SectionTitle>
         {ops.length === 0 ? (
@@ -71,7 +75,7 @@ function ConnectorPage() {
           <ItemGroup>
             {ops.map((op) => (
               <OpItem key={op.id} id={op.id} op={op}>
-                <OpDetails op={op} />
+                <OpDetails op={op} scenarios={scenariosNaming(op.id)(scenarios)} />
               </OpItem>
             ))}
           </ItemGroup>
@@ -98,8 +102,7 @@ function ConnectorPage() {
 }
 
 /** Under an operation: its contract, the steps that name it, what its fake does, and the scenarios about it. */
-function OpDetails({ op }: { op: OpEntry }) {
-  const { data: scenarios } = useSuspenseQuery({ ...scenariosQuery(), select: scenariosNaming(op.id) });
+function OpDetails({ op, scenarios }: { op: OpEntry; scenarios: ScenarioEntry[] }) {
   const { mock, phrases } = op;
   return (
     <div className="mt-2 flex flex-col gap-3">

@@ -3,7 +3,7 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 import { z } from "zod";
 import { Card, CardContent } from "#/components/ui/card.tsx";
 import { loadCode, loadGraph, Nothing, Notice, PageHeader, pageTitle } from "../../components/common.tsx";
-import { ScenarioCard, TestControl } from "../../components/scenario.tsx";
+import { ScenarioCard, ScenarioErrors, TestControl } from "../../components/scenario.tsx";
 import { GraphAndSource, StartButton, WorkflowSections } from "../../components/workflow.tsx";
 import { configQuery, scenariosFor, scenariosQuery, sourceQuery, workflowNamed } from "../../queries.ts";
 
@@ -61,12 +61,7 @@ function WorkflowPage() {
       >
         <code className="text-muted-foreground">{workflow.name}</code>
       </PageHeader>
-      {errors.map((e) => (
-        <Notice key={e.message} variant="destructive">
-          {/* A step no rule matches lists the known steps, one a line. */}
-          <span className="whitespace-pre-wrap">Could not read a scenario: {e.message}</span>
-        </Notice>
-      ))}
+      <ScenarioErrors errors={errors} />
       <GraphAndSource key={name} workflow={workflow} scenario={scenario} />
       {wanted !== undefined &&
         (scenario ? (

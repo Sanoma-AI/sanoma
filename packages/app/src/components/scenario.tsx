@@ -17,12 +17,13 @@ import {
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
-import { errorBodyOf, type ScenarioEntry } from "../api.ts";
+import { errorBodyOf, type ScenarioEntry, type ScenariosResponse } from "../api.ts";
 import { startRunFn } from "../functions.ts";
 import { RUNS_KEY } from "../queries.ts";
-import { Section } from "./common.tsx";
+import { Notice, Section } from "./common.tsx";
 
-// A workflow's scenarios, as its page offers them: to choose and Test, and to read.
+// A workflow's scenarios, as its page offers them: to choose and Test, and to read; and why a
+// feature file could not be read, on every page that lists scenarios.
 
 /**
  * Test, split in two. The menu chooses one of the workflow's scenarios (the page keeps the choice
@@ -109,4 +110,14 @@ export function ScenarioCard({ scenario }: { scenario: ScenarioEntry }) {
       </CardContent>
     </Card>
   );
+}
+
+/** Why each feature file that could not be read could not, from `scenariosQuery`'s `errors`. */
+export function ScenarioErrors({ errors }: Pick<ScenariosResponse, "errors">) {
+  return errors.map((e) => (
+    <Notice key={`${e.file}:${e.message}`} variant="destructive">
+      {/* A step no rule matches lists the known steps, one a line. */}
+      <span className="whitespace-pre-wrap">Could not read a scenario: {e.message}</span>
+    </Notice>
+  ));
 }

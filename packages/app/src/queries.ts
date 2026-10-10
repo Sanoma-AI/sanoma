@@ -71,7 +71,7 @@ export const scenariosFor =
     errors,
   });
 
-/** The scenarios with a step about the operation `op` (seeding it, expecting it, or forbidding it): for `select`. */
+/** The scenarios with a step about the operation `op` (seeding it, failing it, expecting it, or forbidding it). */
 export const scenariosNaming =
   (op: string) =>
   ({ scenarios }: ScenariosResponse) =>
