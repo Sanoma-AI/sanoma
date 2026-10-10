@@ -101,7 +101,7 @@ export function ApprovalCard({
           </Fact>
           {showRun && (
             <Fact label="Run">
-              <Link to="/runs/$id" params={{ id: run.runId }}>
+              <Link to="/workflows/$name/runs/$id" params={{ name: run.workflow, id: run.runId }}>
                 <code>{run.runId}</code>
               </Link>
             </Fact>

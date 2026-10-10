@@ -129,7 +129,7 @@ function useStartForm(workflow: string, fields: SchemaField[], whole: boolean) {
         toast.success(`Started ${workflow}`);
         // The lists show the new run at once, not at their next poll.
         void queryClient.invalidateQueries({ queryKey: RUNS_KEY });
-        await navigate({ to: "/runs/$id", params: { id: runId } });
+        await navigate({ to: "/workflows/$name/runs/$id", params: { name: workflow, id: runId } });
         return undefined;
       },
     },

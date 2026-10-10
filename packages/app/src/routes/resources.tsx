@@ -227,7 +227,7 @@ function LastCheck({
       {finished ? (
         <p>
           Last checked <When at={finished.report.finishedAt} />, by{" "}
-          <RunLink runId={finished.run.runId}>run {finished.run.runId}</RunLink>
+          <RunLink run={finished.run}>run {finished.run.runId}</RunLink>
           {found && `: ${found}`}.
         </p>
       ) : (
@@ -235,12 +235,12 @@ function LastCheck({
       )}
       {checking && latest && (
         <p className="flex items-center gap-2">
-          <Spinner /> Checking now, in <RunLink runId={latest.runId}>run {latest.runId}</RunLink>.
+          <Spinner /> Checking now, in <RunLink run={latest}>run {latest.runId}</RunLink>.
         </p>
       )}
       {failed && (
         <p className="text-destructive">
-          The latest check <RunLink runId={failed.runId}>{failed.status}</RunLink>
+          The latest check <RunLink run={failed}>{failed.status}</RunLink>
           {failed.error && `: ${failed.error}`}.
         </p>
       )}
@@ -248,8 +248,12 @@ function LastCheck({
   );
 }
 
-const RunLink = ({ runId, children }: { runId: string; children: ReactNode }) => (
-  <Link to="/runs/$id" params={{ id: runId }} className="text-foreground underline-offset-4 hover:underline">
+const RunLink = ({ run, children }: { run: Pick<RunSummary, "runId" | "workflow">; children: ReactNode }) => (
+  <Link
+    to="/workflows/$name/runs/$id"
+    params={{ name: run.workflow, id: run.runId }}
+    className="text-foreground underline-offset-4 hover:underline"
+  >
     {children}
   </Link>
 );

@@ -43,16 +43,17 @@ export function TestControl({
   onChange: (name: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const chosen = scenarios.find((s) => s.name === value);
   const start = useServerFn(startRunFn);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const mutation = useMutation({
-    mutationFn: (name: string) => start({ data: { scenario: name } }),
-    onSuccess: async ({ runId }, name) => {
+    mutationFn: (scenario: ScenarioEntry) => start({ data: { scenario: scenario.name } }),
+    onSuccess: async ({ runId }, { name, workflow }) => {
       toast.success(`Started a sandbox run of “${name}”`);
       // The lists show the new run at once, not at their next poll.
       void queryClient.invalidateQueries({ queryKey: RUNS_KEY });
-      await navigate({ to: "/runs/$id", params: { id: runId } });
+      await navigate({ to: "/workflows/$name/runs/$id", params: { name: workflow, id: runId } });
     },
     onError: (err) => {
       // Not the server's answer (the network, a bug): keep the raw value for whoever debugs it.
@@ -70,7 +71,7 @@ export function TestControl({
           // With none chosen, Test opens the menu, and says so.
           aria-haspopup={value === undefined ? "menu" : undefined}
           aria-expanded={value === undefined ? open : undefined}
-          onClick={() => (value === undefined ? setOpen(true) : mutation.mutate(value))}
+          onClick={() => (chosen === undefined ? setOpen(true) : mutation.mutate(chosen))}
         >
           {mutation.isPending ? <Spinner data-icon="inline-start" /> : <FlaskConicalIcon data-icon="inline-start" />}
           {value === undefined ? "Test" : `Test “${value}”`}
