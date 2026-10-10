@@ -1206,12 +1206,9 @@ describe("an app whose drivers declare environment variables", () => {
     expect((await page("/connectors/resend", declaring.url)).html).not.toMatch(/>Credentials</);
   });
 
-  it("carries the declarations in /api/config and the statuses in /api/credentials, never a value", async () => {
+  it("carries the statuses in /api/credentials, not /api/config, never a value", async () => {
     const { body } = await call<ConfigDescription>("/api/config", { base: declaring.url });
-    expect(body.vendors.ghost?.credentials).toEqual([
-      { name: URL_VAR, description: "the made-up site's URL", optional: false },
-      { name: KEY_VAR, description: "a made-up key", optional: false },
-    ]);
+    expect(body.vendors.ghost).not.toHaveProperty("credentials");
     const credentials = await statuses();
     expect(Object.keys(credentials)).toEqual(["ghost"]);
     expect(credentials.ghost).toEqual([

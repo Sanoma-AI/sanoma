@@ -14,11 +14,11 @@ import {
   defineWorkflow,
   errorCode,
   memoryLedger,
-  resolveConfig,
   SanomaClient,
   type SanomaConfig,
   startWorker,
 } from "../src/index.ts";
+import { credentialsOf } from "../src/config.ts";
 import { ensureTable } from "../src/credentials.ts";
 import { describeConfig } from "../src/describe.ts";
 
@@ -74,10 +74,9 @@ afterAll(async () => {
 beforeEach(async () => {
   for (const name of [URL_VAR, KEY_VAR, REGION_VAR]) await client.clearCredential(name, { by: "tester" });
 });
-const statuses = () =>
-  resolveConfig(config)
-    .credentials.get("acme")
-    ?.map(({ name, status }) => [name, status]);
+/** acme's statuses as the worker checks them, against `process.env`. */
+const checked = (drivers = config.drivers) => credentialsOf(drivers, (name) => process.env[name]).get("acme");
+const statuses = () => checked()?.map(({ name, status }) => [name, status]);
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -91,11 +90,11 @@ describe("a driver's env", () => {
     expect(plain).not.toHaveProperty("env");
   });
 
-  it("is checked by resolveConfig against process.env: set, missing, empty and invalid, never the value", () => {
+  it("is checked against process.env: set, missing, empty and invalid, never the value", () => {
     vi.stubEnv(URL_VAR, "https://acme.example.test");
     vi.stubEnv(KEY_VAR, KEY);
     vi.stubEnv(REGION_VAR, undefined);
-    expect(resolveConfig(config).credentials.get("acme")).toEqual([
+    expect(checked()).toEqual([
       { name: URL_VAR, description: "the account's API URL", optional: false, status: "set" },
       { name: KEY_VAR, description: "an API key", optional: false, status: "set" },
       { name: REGION_VAR, description: "the region; default us", optional: true, status: "missing" },
@@ -111,7 +110,7 @@ describe("a driver's env", () => {
 
     vi.stubEnv(URL_VAR, "not a url");
     vi.stubEnv(KEY_VAR, "key_NOT-LOWER");
-    const [url, key] = resolveConfig(config).credentials.get("acme")!;
+    const [url, key] = checked()!;
     expect(url).toMatchObject({ status: "invalid", problem: "Invalid URL" });
     expect(key).toMatchObject({ status: "invalid", problem: "an API key, key_<letters>" });
     expect(JSON.stringify([url, key])).not.toMatch(/not a url|NOT-LOWER/);
@@ -124,7 +123,7 @@ describe("a driver's env", () => {
       env: z.object({ [URL_VAR]: z.string().refine((v) => new URL(v).protocol === "https:") }),
     });
     const throwingConfig = { ...config, drivers: [throwing] };
-    const credentials = resolveConfig(throwingConfig).credentials.get("acme");
+    const credentials = checked(throwingConfig.drivers);
     expect(credentials).toEqual([{ name: URL_VAR, optional: false, status: "invalid", problem: "its check threw" }]);
     const refusal = await startWorker(throwingConfig).then(
       () => undefined,
@@ -141,7 +140,7 @@ describe("a driver's env", () => {
       env: z.object({ [KEY_VAR]: z.string().regex(/^key_[0-9]+$/, "an API key, key_<digits>") }),
     });
     const twoDrivers = { ...config, drivers: [acmeDriver, stricter] };
-    expect(resolveConfig(twoDrivers).credentials.get("acme")?.[1]).toEqual({
+    expect(checked(twoDrivers.drivers)?.[1]).toEqual({
       name: KEY_VAR,
       description: "an API key",
       optional: false,
@@ -179,21 +178,11 @@ describe("startWorker", () => {
 });
 
 describe("describeConfig", () => {
-  it("carries each vendor's declared variables, without a status or a value", async () => {
-    vi.stubEnv(URL_VAR, undefined);
+  it("carries no credentials, and no value: SanomaClient.credentials has their statuses", async () => {
     vi.stubEnv(KEY_VAR, KEY);
     const { vendors } = await describeConfig(config);
-    expect(vendors.acme?.credentials).toEqual([
-      { name: URL_VAR, description: "the account's API URL", optional: false },
-      { name: KEY_VAR, description: "an API key", optional: false },
-      { name: REGION_VAR, description: "the region; default us", optional: true },
-    ]);
-    expect(JSON.stringify(vendors)).not.toContain(KEY);
-  });
-
-  it("gives no credentials to a vendor whose drivers declare none", async () => {
-    const { vendors } = await describeConfig({ ...config, drivers: [plain] });
     expect(vendors.acme).not.toHaveProperty("credentials");
+    expect(JSON.stringify(vendors)).not.toContain(KEY);
   });
 });
 

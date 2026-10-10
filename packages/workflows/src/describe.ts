@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import { type CredentialDeclaration, credentialsOf, resolveConfig, type SanomaConfig } from "./config.ts";
+import { resolveConfig, type SanomaConfig } from "./config.ts";
 import { type Builtin, jsonSchemaOf, type Use } from "./define.ts";
 import { DRIFT_WORKFLOW } from "./drift.ts";
 import type { Fake } from "./fake.ts";
@@ -14,7 +14,6 @@ import { errorMessage } from "./shared.ts";
 // `@sanoma/workflows/describe`: what a UI renders from, apart from the main entry.
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
 // The reader parses data files with oxc-parser too.
-export type { CredentialDeclaration, CredentialStatus } from "./config.ts";
 export {
   readDataFiles,
   readResources,
@@ -82,12 +81,6 @@ export interface VendorEntry {
   package?: string;
   /** The connector package's `homepage` from its package.json: where its code and README are, as an https URL. */
   homepage?: string;
-  /**
-   * The environment variables its drivers declare (`defineDriver`'s `env`): names and manuals
-   * only. Their statuses are `SanomaClient.credentials`', read when asked, since they change
-   * while the app runs. Absent when its drivers declare none.
-   */
-  credentials?: CredentialDeclaration[];
 }
 
 /** A resource type a connector declares with `defineResource`. */
@@ -138,7 +131,7 @@ export interface ConfigDescription {
 
 /**
  * Describes a config. Throws what `startWorker` would refuse (see `resolveConfig`), except missing
- * credentials: it lists the variables each vendor's drivers declare (`credentials`). The data
+ * credentials (`SanomaClient.credentials` gives their statuses). The data
  * files' problems are data, `problems`, beside the resources read without any. Asynchronous
  * only for the operations' `mock`s, which call a fresh copy of each fake: a fake that crashes,
  * or an input faker cannot make up, throws too.
@@ -146,13 +139,11 @@ export interface ConfigDescription {
 export async function describeConfig(config: SanomaConfig): Promise<ConfigDescription> {
   const resolved = resolveConfig(config);
   const vendors: Record<string, VendorEntry> = {};
-  const declarations = declarationsOf(config.drivers);
   // A vendor whose operations are split over several connectors is named by the first; its
   // resource types are every connector's.
   for (const connector of config.connectors) {
     const { id, info } = connector[VENDOR];
-    const credentials = declarations.get(id);
-    vendors[id] ??= { ...vendorEntry(id, info), ...(credentials && { credentials }) };
+    vendors[id] ??= vendorEntry(id, info);
   }
   const resources = resourceTypesOf(config.connectors);
   // Each resource type's state is described once, on its entry, and referenced from its operations.
@@ -294,19 +285,6 @@ function firstIssue({ issues: [issue] }: z.ZodError): string {
 }
 
 const svgDataUrl = (svg: string) => `data:image/svg+xml,${encodeURIComponent(svg.trim())}`;
-
-/** Each vendor's declared variables, merged as their statuses are, without looking any up. */
-const declarationsOf = (drivers: SanomaConfig["drivers"]): Map<string, CredentialDeclaration[]> =>
-  new Map(
-    [...credentialsOf(drivers, () => undefined)].map(([vendor, list]) => [
-      vendor,
-      list.map(({ name, description, optional }) => ({
-        name,
-        ...(description !== undefined && { description }),
-        optional,
-      })),
-    ]),
-  );
 
 const vendorEntry = (id: string, info: VendorInfo | undefined): VendorEntry => ({
   title: info?.title ?? id,

@@ -50,18 +50,14 @@ export interface SanomaConfig {
   root?: string;
 }
 
-/** One environment variable a driver declares in `env`: its name and manual, never a value. */
-export interface CredentialDeclaration {
+/** One environment variable a driver declares in `env`, and whether its value lets the driver run: never the value. */
+export interface CredentialStatus {
   /** The variable's name, such as `GHOST_ADMIN_API_KEY`. */
   name: string;
   /** Its one-line manual, from its schema's `.describe()`. */
   description?: string;
   /** It may be unset. */
   optional: boolean;
-}
-
-/** A declared variable and whether its value lets the driver run: never the value. */
-export interface CredentialStatus extends CredentialDeclaration {
   /** `missing` when unset or empty; `invalid` when its schema refuses the value. */
   status: "set" | "missing" | "invalid";
   /** Why it is `invalid`: the schema's first issue, never the value. */
@@ -104,12 +100,6 @@ export interface ResolvedConfig {
   workflows: Map<string, WorkflowDefinition<any, any>>;
   policy: Policy;
   ledger: LedgerStore;
-  /**
-   * The environment variables each driver declares in `env`, by vendor, in declared order, as
-   * `process.env` held them when the config was resolved, without the stored credentials
-   * (`SanomaClient.credentials` reads both). A vendor whose drivers declare none has no entry.
-   */
-  credentials: Map<string, CredentialStatus[]>;
   /**
    * The config's directory, absolute: its `root`, else its `file`'s directory. Its data files
    * are `resources/` in it. Absent when the config has neither, so it has no data files.
@@ -217,16 +207,16 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     workflows: names,
     policy: config.policy,
     ledger,
-    credentials: credentialsOf(config.drivers, (name) => process.env[name]),
     ...(root !== undefined && { root }),
   };
 }
 
 /**
- * Each driver's `env`, by vendor, each variable checked against the value `lookup` gives for its
- * name: only the declared names are looked up, an empty value counts as unset, and a value is
- * never kept. A variable two drivers of one vendor declare is checked against each declaration,
- * and the results merged.
+ * Each driver's `env`, by vendor, in declared order (a vendor whose drivers declare none has no
+ * entry), each variable checked against the value `lookup` gives for its name: only the declared
+ * names are looked up, an empty value counts as unset, and a value is never kept. A variable two
+ * drivers of one vendor declare is checked against each declaration, and the results merged. The
+ * one walk of the declarations: the worker, the client and its checks all read them through it.
  */
 export function credentialsOf(
   drivers: readonly Driver[],
