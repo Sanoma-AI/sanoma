@@ -5,6 +5,7 @@ import type { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, messageKeyOf, topicOf } from "./approvals.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { type ApprovalState, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
+import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
 import { parseOrThrow, SanomaError } from "./errors.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { RunArgs } from "./run.ts";
@@ -62,6 +63,8 @@ export interface RunsFilter {
   limit?: number;
   /** Only runs with this status. */
   status?: RunStatus;
+  /** Only runs of the workflow of this name. */
+  workflow?: string;
 }
 
 export interface RunSummary {
@@ -87,6 +90,9 @@ export interface StartOptions {
    */
   runId?: string;
 }
+
+/** `StartOptions`, for `SanomaClient.drift`. */
+export type DriftOptions = StartOptions;
 
 /** Talks to the runtime from another process (the app, a script), through the shared Postgres. */
 export class SanomaClient {
@@ -169,11 +175,12 @@ export class SanomaClient {
    * Only the approvals tell `running` from `waiting`, so those read PENDING runs a page at a
    * time until `limit` have that status.
    */
-  async runs({ limit = 20, status }: RunsFilter = {}): Promise<RunSummary[]> {
+  async runs({ limit = 20, status, workflow }: RunsFilter = {}): Promise<RunSummary[]> {
     const list = (more: { limit: number; offset?: number }) =>
       this.dbos.listWorkflows({
         ...more,
         status: status && dbosStatusesOf(status),
+        workflowName: workflow,
         sortDesc: true,
         applicationName: this.config.appName,
         loadInput: false,
@@ -297,6 +304,43 @@ export class SanomaClient {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /**
+   * Starts the built-in drift workflow on the resources the config's data files declare now,
+   * read as `readDataFiles` reads them: a file with problems contributes none, as in
+   * `describeConfig`. Returns the run id; `driftReport` waits for its report. Throws
+   * `invalid_input` when the config's connectors declare no resource types.
+   */
+  async drift(options: DriftOptions): Promise<string> {
+    const { drift, root, connectors } = this.config;
+    if (!drift) {
+      throw new SanomaError(
+        "invalid_input",
+        "The config's connectors declare no resource types, so there is nothing to check for drift",
+      );
+    }
+    // Loaded here, not with the client: the reader parses with oxc-parser, which a worker never needs.
+    const { readDataFiles } = await import("./resources.ts");
+    const declared = readDataFiles(root, connectors).resources;
+    const resources = declared.map(({ id, vendor, type, name, desired }) => ({ id, vendor, type, name, desired }));
+    return this.start(drift, { resources }, options);
+  }
+
+  /**
+   * The report of a drift run (`drift`) once it ends: `result`, checked to be a drift run's.
+   * Throws `run_not_found`, `invalid_input` for another workflow's run, the run's error when it
+   * failed, and `run_running` when it has not ended within `timeoutMs`.
+   */
+  async driftReport(runId: string, timeoutMs = 30_000): Promise<DriftReport> {
+    const row = await this.mustExist(runId);
+    if (row.workflowName !== DRIFT_WORKFLOW) {
+      throw new SanomaError("invalid_input", `Run ${runId} is a run of ${row.workflowName}, not of ${DRIFT_WORKFLOW}`, {
+        runId,
+        workflow: row.workflowName,
+      });
+    }
+    return (await this.result(runId, timeoutMs)) as DriftReport;
   }
 
   close() {
