@@ -147,7 +147,7 @@ describe("startWorker", () => {
       (err: Error) => err.message,
     );
     expect(refusal).toBe(
-      `The worker cannot start: acme needs ${URL_VAR} (the account's API URL), ${KEY_VAR} is invalid (an API key, key_<letters>). ` +
+      `The worker cannot start: acme: ${URL_VAR} is missing (the account's API URL), ${KEY_VAR} is invalid (an API key, key_<letters>). ` +
         "Set them in its environment (locally, in .env)",
     );
     expect(refusal).not.toContain("NOT-LOWER");

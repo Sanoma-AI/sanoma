@@ -113,13 +113,14 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
  */
 function refuseUnconfigured({ credentials }: ResolvedConfig) {
   const vendors = [...credentials].flatMap(([vendor, list]) => {
-    const unready = list.filter((c) => !credentialReady(c));
-    if (!unready.length) return [];
-    const missing = unready.filter((c) => c.status === "missing");
-    const needs = missing.map((c) => (c.description ? `${c.name} (${c.description})` : c.name)).join(", ");
-    const invalid = unready.filter((c) => c.status === "invalid").map((c) => `${c.name} is invalid (${c.problem})`);
-    const problems = [...(missing.length ? [`needs ${needs}`] : []), ...invalid].join(", ");
-    return [`${vendor}${missing.length ? "" : ":"} ${problems}`];
+    const items = list
+      .filter((c) => !credentialReady(c))
+      .map((c) =>
+        c.status === "invalid"
+          ? `${c.name} is invalid (${c.problem})`
+          : `${c.name} is missing${c.description ? ` (${c.description})` : ""}`,
+      );
+    return items.length ? [`${vendor}: ${items.join(", ")}`] : [];
   });
   if (vendors.length) {
     throw new Error(`The worker cannot start: ${vendors.join("; ")}. Set them in its environment (locally, in .env)`);
