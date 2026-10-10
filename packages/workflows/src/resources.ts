@@ -1,266 +1,262 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { locator, parse } from "./ast.ts";
+import { parsed } from "./ast.ts";
 import { resolveConfig, type SanomaConfig } from "./config.ts";
 import { type DataFile, type DataFileExport, type DataValue, readDataFile, Reference } from "./datafile.ts";
 import { type Connector, VENDOR } from "./op.ts";
-import type { Resource } from "./resource.ts";
+import type { Span } from "./outline.ts";
+import type { Declared, Resource } from "./resource.ts";
 
 /** A resource a data file declares, as read from the file without running it. */
 export interface DeclaredResource {
-  /** `<file>#<export>`: `identity/github.ts#site`. */
+  /** `<file>#<export>`, the file relative to the config's root, with `/`: `resources/identity/github.ts#website`. */
   id: string;
   vendor: string;
   type: string;
   /** Its import id: what the type's `find` makes of its fields. */
   name: string;
-  /** The data file, relative to its resources directory, with `/`: `identity/github.ts`. */
-  file: string;
   /** Its `export const` statement, as UTF-16 offsets into the file's text. */
-  span: { start: number; end: number };
-  /** The line its `export const` starts on, from 1. */
-  line: number;
-  /** Its fields as declared, with each name of another declared resource as `{ ref: "<id>" }`. */
+  span: Span;
+  /** Its fields, as its type checked them: each resource it names as that resource's `name`. */
   desired: Record<string, unknown>;
+  /**
+   * Where it names another declared resource: the field's dotted path (a list item's with its
+   * index, `teams.0`) to that resource's id.
+   */
+  refs: Record<string, string>;
 }
 
-/** A data file's reference to another declared resource, by its id, in a `DeclaredResource`'s `desired`. */
-export interface ResourceRef {
-  ref: string;
-}
-
-/**
- * Reads the resources the config's data files declare (`resources`, default `resources/`), without
- * importing or running them: each `.ts` file under the directories but `*.test.ts` and `*.d.ts`,
- * parsed with oxc and held to the data-file subset (`readDataFile`). A constructor
- * (`github.repository`) is found among the resource types of the config's `connectors`, never by
- * importing the connector; its fields are checked by calling the resource type, as running the
- * file would, with each name of another resource standing for that resource's `name`.
- *
- * Throws one error listing every problem, each at `file:line:column`: anything outside the
- * subset, an import or constructor the config does not know, a value the type refuses, a
- * reference cycle, and two resources of one type with one name.
- */
-export function readResources(config: SanomaConfig): DeclaredResource[] {
-  return readResourceDirs(resolveConfig(config).resources, config.connectors);
-}
-
-interface FileEntry {
-  path: string;
-  /** Relative to its resources directory, with `/`. */
-  rel: string;
-  /** Lines and columns of the file's offsets. */
-  at: (offset: number) => { line: number; column: number };
-  data: DataFile;
-}
-
-interface Problem {
-  file: Pick<FileEntry, "path" | "at">;
-  start: number;
+/** Something wrong in the data files, or in finding them. */
+export interface ResourceProblem {
+  /**
+   * The data file, relative to the config's root, with `/`: `resources/identity/github.ts`.
+   * Absent, with `line` and `column`, when the problem is the config's: it has no root.
+   */
+  file?: string;
+  /** From 1. */
+  line?: number;
+  /** From 1, in UTF-16 code units. */
+  column?: number;
   message: string;
 }
 
-/** `readResources` over resolved directories and the config's connectors. */
-export function readResourceDirs(
-  dirs: readonly string[],
-  connectors: readonly Connector<any, any>[],
-): DeclaredResource[] {
-  const problems: Problem[] = [];
-  const files = new Map<string, FileEntry>();
-  const byRel = new Map<string, string>();
-  for (const dir of dirs) {
-    const found = (readdirSync(dir, { recursive: true, encoding: "utf8" }) as string[])
-      .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && !f.endsWith(".d.ts"))
-      .filter((f) => !f.split(sep).includes("node_modules"))
-      .toSorted();
-    for (const f of found) {
-      const path = join(dir, f);
-      const rel = f.split(sep).join("/");
-      const source = readFileSync(path, "utf8");
-      const { program, errors } = parse(path, source);
-      const file = { path, rel, at: locator(source), data: readDataFile(program, path, dir) };
-      for (const e of errors) {
-        problems.push({ file, start: e.labels?.[0]?.start ?? 0, message: `syntax: ${e.message}` });
-      }
-      for (const p of file.data.problems) problems.push({ file, start: p.start, message: p.message });
-      const other = byRel.get(rel);
-      if (other !== undefined) {
-        problems.push({
-          file,
-          start: 0,
-          message: `${rel} is also a data file in ${dirname(other)}: ids would clash; rename one`,
-        });
-      }
-      byRel.set(rel, path);
-      files.set(path, file);
-    }
-  }
+/** What the data files declare: each resource read without problems, and the problems. */
+export interface DataFiles {
+  /** By file and then in file order, less any with a problem, and any that names one. */
+  resources: DeclaredResource[];
+  /** By file, line and column. */
+  problems: ResourceProblem[];
+}
 
-  // Every resource type the connectors declare, by vendor, and each vendor's constructors entry.
-  const types = new Map<string, Map<string, Resource>>();
-  const packages = new Map<string, string>();
+/**
+ * The resources the config's data files declare, read without importing or running them; throws
+ * one error listing every problem, each at `file:line:column`, for a test or CI to fail on.
+ * `describeConfig` lists the same, with the problems beside them instead.
+ */
+export function readResources(config: SanomaConfig): DeclaredResource[] {
+  const { resources, problems } = readDataFiles(resolveConfig(config).root, config.connectors);
+  if (problems.length) {
+    const lines = problems.map((p) => `  ${p.file ? `${p.file}:${p.line}:${p.column}: ` : ""}${p.message}`);
+    throw new Error(`The resources' data files have problems:\n${lines.join("\n")}`);
+  }
+  return resources;
+}
+
+/** Every resource type the connectors declare, by `<vendor>.<type>`. */
+export function resourceTypesOf(connectors: readonly Connector<any, any>[]): Map<string, Resource> {
+  const types = new Map<string, Resource>();
   for (const connector of connectors) {
-    const { id, info, resources } = connector[VENDOR];
-    const vendor = types.get(id) ?? new Map<string, Resource>();
-    for (const r of resources as readonly Resource[]) vendor.set(r.type, r);
-    types.set(id, vendor);
-    if (info?.package && !packages.has(info.package)) packages.set(info.package, id);
+    for (const r of connector[VENDOR].resources as readonly Resource[]) types.set(`${r.vendor}.${r.type}`, r);
   }
-  const vendorOf = (spec: string) => {
-    const pkg = spec.slice(0, -"/resources".length);
-    return packages.get(pkg) ?? /^@sanoma\/connector-([a-z0-9-]+)$/.exec(pkg)?.[1];
-  };
+  return types;
+}
 
-  /** What each file's top-level names stand for: a vendor's types, or a resource id. */
-  const bindings = new Map<string, Map<string, { vendor: string } | { id: string }>>();
-  for (const file of files.values()) {
-    const names = new Map<string, { vendor: string } | { id: string }>();
-    const at = (start: number, message: string) => problems.push({ file, start, message });
+interface FileEntry {
+  /** Relative to the config's root, with `/`. */
+  rel: string;
+  data: DataFile;
+  /** Records a problem at an offset into the file. */
+  problem: (offset: number, message: string) => void;
+}
+
+/**
+ * Reads `resources/` under `root`, the config's directory: each `.ts` file in it but
+ * `*.test.ts`, `*.d.ts` and `node_modules`, parsed with oxc and held to the data-file subset
+ * (`readDataFile`). A constructor import (`@sanoma/connector-github/resources`) is matched to the
+ * connector whose `info.package` it names, never imported; each resource is checked by calling
+ * its type, as running the file would, with each resource it names given as that resource.
+ *
+ * Problems: anything outside the subset, a constructor or data file the config does not know, a
+ * type the connector does not declare, a value the type refuses (a reference where its type
+ * takes none among them), a reference cycle, and two resources of one type with one name.
+ */
+export function readDataFiles(
+  root: string | undefined,
+  connectors: readonly Connector<any, any>[],
+  types: ReadonlyMap<string, Resource> = resourceTypesOf(connectors),
+): DataFiles {
+  const problems: ResourceProblem[] = [];
+  if (root === undefined) {
+    problems.push({
+      message:
+        "The config has no root, so its data files cannot be found: make it with defineConfig, which records its file, or set its `root`",
+    });
+    return { resources: [], problems };
+  }
+
+  const files = new Map<string, FileEntry>();
+  for (const path of dataFilesUnder(join(root, "resources"))) {
+    const rel = relative(root, path).split(sep).join("/");
+    const source = readFileSync(path, "utf8");
+    const { program, problems: syntax, at } = parsed(source, path);
+    const data = readDataFile(program, path, join(root, "resources"));
+    const problem = (offset: number, message: string) => problems.push({ file: rel, ...at(offset), message });
+    for (const p of syntax) problems.push({ file: rel, ...p });
+    for (const p of data.problems) problem(p.start, p.message);
+    files.set(path, { rel, data, problem });
+  }
+
+  // Each connector's constructors entry, `<info.package>/resources`, to its vendor.
+  const entries = new Map<string, string>();
+  for (const connector of connectors) {
+    const { id, info } = connector[VENDOR];
+    if (info?.package) entries.set(`${info.package}/resources`, id);
+  }
+
+  // What each file's names stand for, and every resource read by its id.
+  const vendors = new Map<FileEntry, Map<string, string>>();
+  const named = new Map<FileEntry, Map<string, string>>();
+  const declarations = new Map<string, { file: FileEntry; exp: DataFileExport }>();
+  for (const [path, file] of files) {
+    const fileVendors = new Map<string, string>();
+    const fileNamed = new Map<string, string>();
     for (const imp of file.data.imports) {
       if (imp.kind === "constructors") {
-        const vendor = vendorOf(imp.source);
-        if (vendor === undefined || !types.has(vendor)) {
-          at(
+        const vendor = entries.get(imp.source);
+        if (vendor === undefined) {
+          file.problem(
             imp.start,
-            `"${imp.source}" is not the resources entry of a connector in the config's \`connectors\`: add the connector`,
+            `"${imp.source}" is not the resources entry of a connector in the config's \`connectors\`: add the connector, and import from its package's \`/resources\``,
           );
         } else if (imp.imported !== vendor) {
-          at(
+          file.problem(
             imp.start,
             `"${imp.source}" exports its constructors as ${vendor}: \`import { ${vendor} } from "${imp.source}"\``,
           );
         } else {
-          names.set(imp.local, { vendor });
+          fileVendors.set(imp.local, vendor);
         }
         continue;
       }
-      const target = resolve(dirname(file.path), imp.source);
-      const other = files.get(target);
+      const other = files.get(resolve(dirname(path), imp.source));
       if (!other) {
-        at(imp.start, `"${imp.source}" is not a data file in the config's \`resources\` directories`);
+        file.problem(imp.start, `"${imp.source}" is not a data file under resources/`);
       } else if (!other.data.declared.includes(imp.imported)) {
-        at(imp.start, `${imp.imported} is not a resource ${other.rel} declares`);
+        file.problem(imp.start, `${imp.imported} is not a resource ${other.rel} declares`);
       } else if (other.data.exports.some((e) => e.name === imp.imported)) {
-        names.set(imp.local, { id: `${other.rel}#${imp.imported}` });
+        fileNamed.set(imp.local, `${other.rel}#${imp.imported}`);
       }
       // Else its value was refused, and reported in its file: a reference to it fails quietly.
     }
-    for (const e of file.data.exports) names.set(e.name, { id: `${file.rel}#${e.name}` });
-    bindings.set(file.path, names);
+    for (const exp of file.data.exports) {
+      const id = `${file.rel}#${exp.name}`;
+      fileNamed.set(exp.name, id);
+      declarations.set(id, { file, exp });
+    }
+    vendors.set(file, fileVendors);
+    named.set(file, fileNamed);
   }
 
-  const declarations = new Map<string, { file: FileEntry; exp: DataFileExport }>();
-  for (const file of files.values()) {
-    for (const exp of file.data.exports) declarations.set(`${file.rel}#${exp.name}`, { file, exp });
-  }
-
-  // Each resource after the ones it names, so a reference can stand for their `name`.
-  const done = new Map<string, DeclaredResource | undefined>();
+  // Each resource after the ones it names, which it is given as they are declared.
+  const done = new Map<string, { declared: Declared; refs: Record<string, string> } | undefined>();
   const visiting: string[] = [];
-  function declare(id: string): DeclaredResource | undefined {
+  const byName = new Map<string, string>();
+  function declare(id: string) {
     if (done.has(id)) return done.get(id);
     const { file, exp } = declarations.get(id)!;
-    const at = (start: number, message: string) => problems.push({ file, start, message });
     if (visiting.includes(id)) {
-      at(exp.start, `${id} refers to itself: ${[...visiting.slice(visiting.indexOf(id)), id].join(" → ")}`);
+      file.problem(exp.start, `${id} refers to itself: ${[...visiting.slice(visiting.indexOf(id)), id].join(" → ")}`);
       return undefined;
     }
     visiting.push(id);
-    const result = build(file, exp, id, at);
+    const result = build(file, exp);
     visiting.pop();
+    if (result) {
+      const { vendor, type, name } = result.declared;
+      const key = `${vendor}.${type} ${JSON.stringify(name)}`;
+      const first = byName.get(key);
+      if (first === undefined) byName.set(key, id);
+      else {
+        file.problem(
+          exp.start,
+          `${key} is declared twice, also as ${first}: declare each resource once, and import it where it is used`,
+        );
+        done.set(id, undefined);
+        return undefined;
+      }
+    }
     done.set(id, result);
     return result;
   }
 
-  function build(
-    file: FileEntry,
-    exp: DataFileExport,
-    id: string,
-    at: (start: number, message: string) => void,
-  ): DeclaredResource | undefined {
-    const names = bindings.get(file.path)!;
-    const constructors = names.get(exp.vendor);
-    // An unknown vendor import was reported with the import.
-    if (!constructors || !("vendor" in constructors)) return undefined;
-    const vendor = constructors.vendor;
-    const resource = types.get(vendor)!.get(exp.type);
+  function build(file: FileEntry, exp: DataFileExport) {
+    // An unknown constructors import was reported with the import.
+    const vendor = vendors.get(file)!.get(exp.vendor);
+    if (vendor === undefined) return undefined;
+    const resource = types.get(`${vendor}.${exp.type}`);
     if (!resource) {
-      at(
-        exp.start,
-        `${vendor} has no resource type ${exp.type}: its types are ${[...types.get(vendor)!.keys()].join(", ")}`,
-      );
+      const known = [...types.values()].filter((r) => r.vendor === vendor).map((r) => r.type);
+      file.problem(exp.start, `${vendor} has no resource type ${exp.type}: its types are ${known.join(", ")}`);
       return undefined;
     }
+    const refs: Record<string, string> = {};
     let ok = true;
-    const refs = new Map<Reference, { id: string; name: string }>();
-    const walk = (v: DataValue): void => {
+    // The fields with each name of a resource as that resource, and where each is named.
+    const given = (v: DataValue, at: string): unknown => {
       if (v instanceof Reference) {
-        const bound = names.get(v.name);
-        // An import that did not resolve was reported with the import.
-        if (!bound || !("id" in bound)) return void (ok = false);
-        const target = declare(bound.id);
-        if (!target) return void (ok = false);
-        refs.set(v, { id: bound.id, name: target.name });
-      } else if (Array.isArray(v)) v.forEach(walk);
-      else if (v !== null && typeof v === "object") Object.values(v).forEach(walk);
+        // A name that did not resolve was reported where it is bound.
+        const target = named.get(file)!.get(v.name);
+        const declared = target === undefined ? undefined : declare(target)?.declared;
+        if (!declared) ok = false;
+        else refs[at] = target!;
+        return declared;
+      }
+      if (Array.isArray(v)) return v.map((item, i) => given(item, `${at}.${i}`));
+      if (v === null || typeof v !== "object") return v;
+      return Object.fromEntries(Object.entries(v).map(([k, item]) => [k, given(item, at ? `${at}.${k}` : k)]));
     };
-    walk(exp.desired);
+    const fields = given(exp.desired, "");
     if (!ok) return undefined;
-    const map = (v: DataValue, to: (ref: { id: string; name: string }) => unknown): unknown =>
-      v instanceof Reference
-        ? to(refs.get(v)!)
-        : Array.isArray(v)
-          ? v.map((item) => map(item, to))
-          : v !== null && typeof v === "object"
-            ? Object.fromEntries(Object.entries(v).map(([k, item]) => [k, map(item, to)]))
-            : v;
-    // Checked as running the file would check it: by the resource type, a reference standing for its name.
-    let name: string;
     try {
-      name = resource(map(exp.desired, (r) => r.name) as never).name;
+      // Checked as running the file would: by the resource type, which allows a resource only where its `fields.references` say.
+      return { declared: resource(fields as never), refs };
     } catch (e) {
       // One line per problem: zod's own spans lines.
-      at(exp.start, `export const ${exp.name}: ${(e as Error).message.replaceAll(/\s*\n\s*/g, " ")}`);
+      file.problem(exp.start, `export const ${exp.name}: ${(e as Error).message.replaceAll(/\s*\n\s*/g, " ")}`);
       return undefined;
     }
-    return {
-      id,
-      vendor,
-      type: exp.type,
-      name,
-      file: file.rel,
-      span: { start: exp.start, end: exp.end },
-      line: file.at(exp.start).line,
-      desired: map(exp.desired, (r): ResourceRef => ({ ref: r.id })) as Record<string, unknown>,
-    };
   }
 
-  const out: DeclaredResource[] = [];
-  const named = new Map<string, string>();
-  for (const id of declarations.keys()) {
-    const r = declare(id);
-    if (!r) continue;
-    const key = `${r.vendor}.${r.type} ${JSON.stringify(r.name)}`;
-    const first = named.get(key);
-    if (first !== undefined) {
-      const { file, exp } = declarations.get(id)!;
-      problems.push({
-        file,
-        start: exp.start,
-        message: `${key} is declared twice, also as ${first}: declare each resource once, and import it where it is used`,
-      });
-      continue;
-    }
-    named.set(key, id);
-    out.push(r);
+  const resources: DeclaredResource[] = [];
+  for (const [id, { exp }] of declarations) {
+    const result = declare(id);
+    if (!result) continue;
+    const { vendor, type, name, desired } = result.declared;
+    resources.push({ id, vendor, type, name, span: [exp.start, exp.end], desired, refs: result.refs });
   }
+  problems.sort(
+    (a, b) =>
+      (a.file ?? "").localeCompare(b.file ?? "") || (a.line ?? 0) - (b.line ?? 0) || (a.column ?? 0) - (b.column ?? 0),
+  );
+  return { resources, problems };
+}
 
-  if (problems.length) {
-    const lines = problems
-      .map((p) => ({ ...p, ...p.file.at(p.start) }))
-      .toSorted((a, b) => a.file.path.localeCompare(b.file.path) || a.line - b.line || a.column - b.column)
-      .map((p) => `  ${relative(process.cwd(), p.file.path)}:${p.line}:${p.column}: ${p.message}`);
-    throw new Error(`The resources' data files have problems:\n${lines.join("\n")}`);
-  }
-  return out;
+/** The data files under `dir`, sorted: regular `.ts` files, less tests, declarations and `node_modules`; none when `dir` is not a directory. */
+function dataFilesUnder(dir: string): string[] {
+  if (!statSync(dir, { throwIfNoEntry: false })?.isDirectory()) return [];
+  return readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((d) => d.isFile() && d.name.endsWith(".ts") && !d.name.endsWith(".test.ts") && !d.name.endsWith(".d.ts"))
+    .map((d) => join(d.parentPath, d.name))
+    .filter((path) => !relative(dir, path).split(sep).includes("node_modules"))
+    .toSorted();
 }

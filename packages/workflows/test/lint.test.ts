@@ -159,7 +159,7 @@ describe("lintWorkflow", () => {
   });
 });
 
-const fixture = (path: string) => fileURLToPath(new URL(`./fixtures/${path}`, import.meta.url));
+const fixture = (path: string) => fileURLToPath(new URL(`./fixtures/company/${path}`, import.meta.url));
 const GOOD = ["resources/identity/github.ts", "resources/identity/rules.ts", "resources/billing/stripe.ts"];
 
 /** The lines, columns and messages lintResources gives a data file. */

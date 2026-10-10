@@ -45,11 +45,16 @@ interface ServerEntry {
  * Serves the web UI and JSON API over a config: its runs, their ledgers and approvals, and a
  * form to start each workflow. Reads the same config the worker runs, through Postgres and the
  * config's ledger store; it runs no workflows itself. Refuses, at once, a config the worker
- * would refuse.
+ * would refuse; data files with problems it warns about and leaves out (`/api/config` lists them).
  */
 export async function startApp(config: SanomaConfig, options: AppOptions = {}): Promise<App> {
   const resolved = resolveConfig(config);
   const description = describeConfig(config);
+  // Broken data files do not stop the app: it shows the resources it could read, and the problems.
+  if (description.problems.length) {
+    const lines = description.problems.map((p) => `  ${p.file ? `${p.file}:${p.line}:${p.column}: ` : ""}${p.message}`);
+    console.warn(`sanoma app: the data files have problems; their resources are left out:\n${lines.join("\n")}`);
+  }
   const distDir = resolve(options.distDir ?? defaultDistDir());
   const host = options.host ?? "127.0.0.1";
   const loopbackOnly = isLoopback(host);
