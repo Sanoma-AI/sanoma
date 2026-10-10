@@ -250,20 +250,15 @@ export function retryableStatus(status: number): boolean {
 
 /**
  * The environment variables a driver reads, as a Zod object of string schemas keyed by variable
- * name: each `.describe()` is the variable's one-line manual (what to put there, where to get
- * it), `.optional()` marks one that may be unset. `resolveConfig` checks it against `process.env`.
+ * name, such as `z.object({ ACME_API_KEY: z.string().describe("an API key, from Settings, API keys") })`:
+ * each `.describe()` is the variable's one-line manual (what to put there, where to get it),
+ * `.optional()` marks one that may be unset. `resolveConfig` checks it against `process.env` and
+ * never keeps a value. The driver still reads the raw environment when it is called, so a
+ * `.default()` or `.transform()` is not applied to what it reads (use `.optional()` and name the
+ * default in `.describe()`), and a `.refine()` or `.superRefine()` on the object is not evaluated,
+ * only its fields.
  */
 export type DriverEnv = z.ZodObject<Record<string, z.ZodType<string | undefined, string | undefined>>>;
-
-export interface DriverOptions {
-  /**
-   * The environment variables the driver reads, such as
-   * `z.object({ ACME_API_KEY: z.string().describe("an API key, from Settings, API keys") })`.
-   * Checked by `resolveConfig` against `process.env`, and its values never kept: the driver
-   * still reads them when it is called.
-   */
-  env?: DriverEnv;
-}
 
 /**
  * Implements a vendor's operations, keyed `"resource.name"`. A driver reads its credentials
@@ -302,12 +297,12 @@ export type OpIdOf<V extends string, S extends Specs> = {
  * Implements a connector's operations, typed by its schemas. A driver must be complete: an
  * operation the connector declares that `impl` leaves out, or one `impl` adds that the
  * connector doesn't declare, is refused here rather than when a run calls it. `options.env`
- * declares the environment variables it reads.
+ * declares the environment variables it reads (see `DriverEnv`).
  */
 export function defineDriver<V extends string, S extends Specs>(
   connector: Connector<V, S>,
   impl: DriverImpl<S>,
-  options: DriverOptions = {},
+  options: { env?: DriverEnv } = {},
 ): Driver {
   const declared = new Map<string, Op>();
   for (const resource of Object.values(connector as Record<string, Record<string, unknown>>)) {

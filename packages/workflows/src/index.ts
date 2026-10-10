@@ -5,7 +5,6 @@ export {
   type Driver,
   type DriverEnv,
   type DriverFn,
-  type DriverOptions,
   defineConnector,
   DriverError,
   type Effect,
