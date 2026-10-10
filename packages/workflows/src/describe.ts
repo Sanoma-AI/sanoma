@@ -163,13 +163,15 @@ export async function describeConfig(config: SanomaConfig): Promise<ConfigDescri
     .toSorted((a, b) => a.id.localeCompare(b.id));
 
   const declared = [...resolved.ops.values()];
+  // Workflow operations only: a resource type's `read` and `import` are never sampled. By id, not
+  // by group: a vendor split over several connectors may have a plain group named as its type.
+  const resourceOps = new Set(resourceTypes.flatMap((r) => r.ops));
   const mocks = new Map<string, Mock>();
   for (const [vendor, fake] of resolved.fakes) {
     await samples(
       vendor,
       fake,
-      // Workflow operations only: a resource type's `read` and `import` are never sampled.
-      declared.filter((op) => op.vendor === vendor && !resources.has(`${op.vendor}.${op.resource}`)),
+      declared.filter((op) => op.vendor === vendor && !resourceOps.has(op.id)),
       mocks,
     );
   }
@@ -223,9 +225,9 @@ type Mock = NonNullable<OpEntry["mock"]>;
 /**
  * One sample call of each of a vendor's workflow operations, in their declared order, on one
  * fresh copy of its fake, so the configured fake's state, calls and file are untouched, into
- * `mocks`. Each input is made up from the operation's schema, seeded by its id so it is the same on every
- * start, except that a field named as a field of an earlier output takes that value (when its
- * schema takes it): a sample `publish` publishes the post the sample `create` made. The reply is
+ * `mocks`. Each input is made up from the operation's schema, seeded by its id so it is the same
+ * on every start, except that a field named as a field of an earlier output takes that value (when
+ * its schema takes it): a sample `publish` publishes the post the sample `create` made. The reply is
  * parsed by the operation's output schema. What a vendor may do, failing or answering off its
  * contract, is the mock's `error`; a bug in the fake (a `TypeError` and the like) or an input
  * faker cannot make up throws, naming the operation.

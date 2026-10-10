@@ -225,6 +225,10 @@ describe("describeConfig", () => {
       { repo, issue: { open: { effect: "write", input: z.object({}), output: z.object({ id: z.string() }) } } },
       { package: "@forge/sanoma-connector" },
     );
+    // The same vendor in a second connector, with a plain group named as the resource type.
+    const forgeMore = defineConnector("forge", {
+      repo: { archive: { effect: "write", input: z.object({}), output: z.object({}) } },
+    });
     const fake = defineFake(forge, {
       initial: () => ({}),
       ops: () => ({
@@ -235,13 +239,18 @@ describe("describeConfig", () => {
     const { ops } = await describeConfig({
       ...base,
       workflows: [],
-      connectors: [forge],
+      connectors: [forge, forgeMore],
       drivers: [fake.driver],
       fakes: [fake],
     });
     const mock = (id: string) => ops.find((o) => o.id === id)?.mock;
     expect(mock("forge.issue.open")).toEqual({ input: {}, output: { id: "issue_1" } });
+    expect(mock("forge.repo.archive")).toEqual({
+      input: null,
+      error: "The forge fake does not implement forge.repo.archive",
+    });
     expect(ops.filter((o) => o.resource === "repo").map((o) => [o.id, "mock" in o])).toEqual([
+      ["forge.repo.archive", true],
       ["forge.repo.import", false],
       ["forge.repo.read", false],
     ]);
