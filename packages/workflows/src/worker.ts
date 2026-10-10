@@ -1,7 +1,14 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { buildCtx, isInfrastructureError } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
-import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
+import {
+  type CredentialStatus,
+  credentialsOf,
+  type ResolvedConfig,
+  resolveConfig,
+  type SanomaConfig,
+} from "./config.ts";
+import { watchCredentials } from "./credentials.ts";
 import { errorInfo, parseOrThrow } from "./errors.ts";
 import { entry, skipped, write, writeFailure } from "./ledger.ts";
 import { warn } from "./log.ts";
@@ -29,11 +36,24 @@ export interface WorkerOptions {
   promote?: boolean;
 }
 
-/** Registers the workflows, connects to Postgres and recovers any runs that were interrupted. */
+/**
+ * Registers the workflows, connects to Postgres and recovers any runs that were interrupted.
+ * When a driver declares variables, it first loads their stored values into `process.env`
+ * (skipping those the environment sets) and keeps them current while it runs, then refuses to
+ * start while one is missing or invalid.
+ */
 export async function startWorker(config: SanomaConfig, options: WorkerOptions = {}): Promise<Worker> {
   // Check everything before touching the state a running worker reads.
   const resolved = resolveConfig(config);
-  refuseUnconfigured(resolved);
+  const credentials = config.drivers.some((d) => d.env)
+    ? await watchCredentials(resolved.databaseUrl, config.drivers)
+    : undefined;
+  try {
+    refuseUnconfigured(credentialsOf(config.drivers, (name) => process.env[name]));
+  } catch (err) {
+    await credentials?.close();
+    throw err;
+  }
   const state: WorkerState = {
     app: resolved.appName,
     ops: resolved.ops,
@@ -55,7 +75,11 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   const worker: Worker = {
     async stop() {
       state.stopped = true;
-      await DBOS.shutdown();
+      try {
+        await DBOS.shutdown();
+      } finally {
+        await credentials?.close();
+      }
     },
   };
   // Runs recovered during launch start before it returns, so they must already find this
@@ -94,6 +118,10 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     // in a worker nobody holds, and the next startWorker launches afresh.
     let stopFailed: { error: unknown } | undefined;
     if (launched) await worker.stop().catch((error: unknown) => (stopFailed = { error }));
+    else
+      await credentials
+        ?.close()
+        .catch((e: unknown) => warn(`closing the credentials listener failed: ${errorMessage(e)}`));
     current = previous;
     if (stopFailed) {
       throw new AggregateError(
@@ -111,7 +139,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
  * Refuses a worker whose drivers would fail on their first call: a variable a driver's `env`
  * declares is missing or invalid. One error, naming each vendor and its variables.
  */
-function refuseUnconfigured({ credentials }: ResolvedConfig) {
+function refuseUnconfigured(credentials: Map<string, CredentialStatus[]>) {
   const vendors = [...credentials].flatMap(([vendor, list]) => {
     const items = list
       .filter((c) => !credentialReady(c))
@@ -123,7 +151,9 @@ function refuseUnconfigured({ credentials }: ResolvedConfig) {
     return items.length ? [`${vendor}: ${items.join(", ")}`] : [];
   });
   if (vendors.length) {
-    throw new Error(`The worker cannot start: ${vendors.join("; ")}. Set them in its environment (locally, in .env)`);
+    throw new Error(
+      `The worker cannot start: ${vendors.join("; ")}. Set them on the app's connector pages, or in its environment`,
+    );
   }
 }
 

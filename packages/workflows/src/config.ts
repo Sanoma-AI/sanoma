@@ -50,18 +50,31 @@ export interface SanomaConfig {
   root?: string;
 }
 
-/** One environment variable a driver declares in `env`, as `process.env` holds it: never its value. */
-export interface CredentialStatus {
+/** One environment variable a driver declares in `env`: its name and manual, never a value. */
+export interface CredentialDeclaration {
   /** The variable's name, such as `GHOST_ADMIN_API_KEY`. */
   name: string;
   /** Its one-line manual, from its schema's `.describe()`. */
   description?: string;
   /** It may be unset. */
   optional: boolean;
+}
+
+/** A declared variable and whether its value lets the driver run: never the value. */
+export interface CredentialStatus extends CredentialDeclaration {
   /** `missing` when unset or empty; `invalid` when its schema refuses the value. */
   status: "set" | "missing" | "invalid";
   /** Why it is `invalid`: the schema's first issue, never the value. */
   problem?: string;
+  /**
+   * Where the value is from, when there is one: the process environment, which wins, or the
+   * credentials stored with `SanomaClient.setCredential`. Only `SanomaClient.credentials` says.
+   */
+  source?: "environment" | "stored";
+  /** Who set the stored value (`setCredential`'s `by`). */
+  setBy?: string;
+  /** When the stored value was set, as an ISO 8601 time. */
+  setAt?: string;
 }
 
 /** A config, checked, with everything a worker, client or app derives from it. */
@@ -93,8 +106,8 @@ export interface ResolvedConfig {
   ledger: LedgerStore;
   /**
    * The environment variables each driver declares in `env`, by vendor, in declared order, as
-   * `process.env` held them when the config was resolved. A vendor whose drivers declare none
-   * has no entry. `startWorker` refuses to start while one is not `credentialReady`.
+   * `process.env` held them when the config was resolved, without the stored credentials
+   * (`SanomaClient.credentials` reads both). A vendor whose drivers declare none has no entry.
    */
   credentials: Map<string, CredentialStatus[]>;
   /**
@@ -204,24 +217,28 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     workflows: names,
     policy: config.policy,
     ledger,
-    credentials: credentialsOf(config.drivers),
+    credentials: credentialsOf(config.drivers, (name) => process.env[name]),
     ...(root !== undefined && { root }),
   };
 }
 
 /**
- * Each driver's `env`, checked against `process.env`, one variable at a time: only the declared
- * names are read, an empty value counts as unset, and a value is never kept. A variable two
- * drivers of one vendor declare is checked against each declaration, and the results merged.
+ * Each driver's `env`, by vendor, each variable checked against the value `lookup` gives for its
+ * name: only the declared names are looked up, an empty value counts as unset, and a value is
+ * never kept. A variable two drivers of one vendor declare is checked against each declaration,
+ * and the results merged.
  */
-function credentialsOf(drivers: readonly Driver[]): Map<string, CredentialStatus[]> {
+export function credentialsOf(
+  drivers: readonly Driver[],
+  lookup: (name: string) => string | undefined,
+): Map<string, CredentialStatus[]> {
   const map = new Map<string, CredentialStatus[]>();
   for (const { vendor, env } of drivers) {
     if (!env) continue;
     const list = map.get(vendor) ?? [];
     map.set(vendor, list);
     for (const [name, schema] of Object.entries(env.shape)) {
-      const status = credentialStatus(name, schema, process.env[name] || undefined);
+      const status = credentialStatus(name, schema, lookup(name) || undefined);
       const i = list.findIndex((c) => c.name === name);
       if (i === -1) list.push(status);
       else list[i] = merged(list[i]!, status);

@@ -42,6 +42,7 @@ export {
   type ResourceSpec,
 } from "./resource.ts";
 export {
+  type CredentialDeclaration,
   type CredentialStatus,
   defineConfig,
   resolveConfig,

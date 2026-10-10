@@ -3,18 +3,23 @@ import { ghostDriver } from "@sanoma/connector-ghost/driver";
 import { githubDriver } from "@sanoma/connector-github/driver";
 import { resendDriver } from "@sanoma/connector-resend/driver";
 import { stripeDriver } from "@sanoma/connector-stripe/driver";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { testDatabaseUrl } from "@sanoma/testing";
+import { Pool } from "pg";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   allowAll,
   defineConnector,
   defineDriver,
   defineWorkflow,
+  errorCode,
   memoryLedger,
   resolveConfig,
+  SanomaClient,
   type SanomaConfig,
   startWorker,
 } from "../src/index.ts";
+import { ensureTable } from "../src/credentials.ts";
 import { describeConfig } from "../src/describe.ts";
 
 // Made-up variables and values: nothing here is a credential.
@@ -44,15 +49,31 @@ const getThing = defineWorkflow({
   uses: [acme.thing.get],
   run: async (ctx, { id }) => ctx.acme.thing.get({ id }),
 });
-// Refused before the worker connects, so no database is needed.
+const databaseUrl = testDatabaseUrl("credentials");
 const config: SanomaConfig = {
   workflows: [getThing],
   connectors: [acme],
   drivers: [acmeDriver],
   policy: allowAll,
   ledger: memoryLedger(),
-  databaseUrl: "postgresql://unused@localhost:1/unused",
+  appName: "credentials",
+  databaseUrl,
 };
+/** Sets and clears the stored credentials, as the app does. */
+let client: SanomaClient;
+
+beforeAll(async () => {
+  client = await SanomaClient.connect(config);
+});
+
+afterAll(async () => {
+  await client?.close();
+});
+
+// The table outlives a run of the tests: each starts with nothing stored.
+beforeEach(async () => {
+  for (const name of [URL_VAR, KEY_VAR, REGION_VAR]) await client.clearCredential(name, { by: "tester" });
+});
 const statuses = () =>
   resolveConfig(config)
     .credentials.get("acme")
@@ -132,7 +153,7 @@ describe("a driver's env", () => {
 });
 
 describe("startWorker", () => {
-  it("refuses, before connecting, naming the vendor and each variable that is missing or invalid", async () => {
+  it("refuses, before launching, naming the vendor and each variable that is missing or invalid", async () => {
     vi.stubEnv(URL_VAR, undefined);
     vi.stubEnv(KEY_VAR, "key_NOT-LOWER");
     vi.stubEnv(REGION_VAR, undefined);
@@ -142,7 +163,7 @@ describe("startWorker", () => {
     );
     expect(refusal).toBe(
       `The worker cannot start: acme: ${URL_VAR} is missing (the account's API URL), ${KEY_VAR} is invalid (an API key, key_<letters>). ` +
-        "Set them in its environment (locally, in .env)",
+        "Set them on the app's connector pages, or in its environment",
     );
     expect(refusal).not.toContain("NOT-LOWER");
   });
@@ -173,6 +194,174 @@ describe("describeConfig", () => {
   it("gives no credentials to a vendor whose drivers declare none", async () => {
     const { vendors } = await describeConfig({ ...config, drivers: [plain] });
     expect(vendors.acme).not.toHaveProperty("credentials");
+  });
+});
+
+/** What the call throws, as its code, message and data in one string, to look for a value in. */
+const refusal = (p: Promise<unknown>) =>
+  p.then(
+    () => {
+      throw new Error("expected a refusal");
+    },
+    (err: { message: string; data?: unknown }) => ({
+      code: errorCode(err),
+      message: err.message,
+      text: `${err.message} ${JSON.stringify(err.data)}`,
+    }),
+  );
+
+/** acme's statuses as `credentials()` gives them. */
+const stored = async (from = client) => (await from.credentials()).get("acme");
+
+describe("stored credentials", () => {
+  it("are kept in one table, made with its database when no worker has made that, and made again harmlessly", async () => {
+    const fresh = testDatabaseUrl("credentials_fresh");
+    const admin = new URL(fresh);
+    const name = admin.pathname.slice(1);
+    admin.pathname = "/postgres";
+    const server = new Pool({ connectionString: admin.toString() });
+    const pool = new Pool({ connectionString: fresh });
+    try {
+      await server.query(`DROP DATABASE IF EXISTS "${name}"`);
+      await Promise.all([ensureTable(fresh), ensureTable(fresh)]);
+      await ensureTable(fresh);
+      const { rows } = await pool.query("SELECT to_regclass('sanoma_credentials')::text AS t");
+      expect(rows).toEqual([{ t: "sanoma_credentials" }]);
+    } finally {
+      await pool.end();
+      await server.end();
+    }
+  });
+
+  it("are set, replaced and cleared, with who set them and when, never the value", async () => {
+    vi.stubEnv(URL_VAR, undefined);
+    vi.stubEnv(KEY_VAR, undefined);
+    vi.stubEnv(REGION_VAR, undefined);
+    expect((await stored())?.[1]).toEqual({
+      name: KEY_VAR,
+      description: "an API key",
+      optional: false,
+      status: "missing",
+    });
+
+    const before = Date.now() - 60_000;
+    await client.setCredential(KEY_VAR, KEY, { by: "alice" });
+    const [, key] = (await stored())!;
+    expect(key).toMatchObject({ name: KEY_VAR, status: "set", source: "stored", setBy: "alice" });
+    expect(Date.parse(key!.setAt!)).toBeGreaterThan(before);
+
+    await client.setCredential(KEY_VAR, "key_replaced", { by: "bob" });
+    expect((await stored())?.[1]).toMatchObject({ status: "set", source: "stored", setBy: "bob" });
+    expect(JSON.stringify([...(await client.credentials())])).not.toMatch(/key_madeupvalue|key_replaced/);
+
+    await client.clearCredential(KEY_VAR, { by: "bob" });
+    expect((await stored())?.[1]).toEqual({
+      name: KEY_VAR,
+      description: "an API key",
+      optional: false,
+      status: "missing",
+    });
+  });
+
+  it("are refused for a name no driver declares, and without someone setting them", async () => {
+    for (const p of [
+      client.setCredential("SANOMA_TEST_UNDECLARED", KEY, { by: "alice" }),
+      client.clearCredential("SANOMA_TEST_UNDECLARED", { by: "alice" }),
+    ]) {
+      const { code, message, text } = await refusal(p);
+      expect(code).toBe("invalid_input");
+      expect(message).toBe(
+        `No driver declares SANOMA_TEST_UNDECLARED; the declared variables are ${URL_VAR}, ${KEY_VAR}, ${REGION_VAR}`,
+      );
+      expect(text).not.toContain(KEY);
+    }
+    expect((await refusal(client.setCredential(KEY_VAR, KEY, { by: "" }))).code).toBe("invalid_input");
+    expect((await stored())?.[1]?.status).toBe("missing");
+  });
+
+  it("refuses a value its schema refuses, or an empty one, with the reason and without the value", async () => {
+    const VALUE = "key_NOT-LOWER";
+    const invalid = await refusal(client.setCredential(KEY_VAR, VALUE, { by: "alice" }));
+    expect(invalid).toMatchObject({
+      code: "invalid_input",
+      message: `${KEY_VAR} cannot be set: an API key, key_<letters>`,
+    });
+    expect(invalid.text).toContain(
+      '"issues":[{"path":["value"],"message":"an API key, key_<letters>","code":"custom"}]',
+    );
+    expect(invalid.text).not.toContain(VALUE);
+
+    const empty = await refusal(client.setCredential(KEY_VAR, "", { by: "alice" }));
+    expect(empty.message).toBe(`${KEY_VAR} cannot be set: it is empty; clear it to unset it`);
+    expect((await stored())?.[1]?.status).toBe("missing");
+  });
+
+  it("refuses a value whose check throws, without the value", async () => {
+    const VALUE = "madeup-not-a-url";
+    const throwing = defineDriver(acme, impl, {
+      env: z.object({ [URL_VAR]: z.string().refine((v) => new URL(v).protocol === "https:") }),
+    });
+    const other = await SanomaClient.connect({ ...config, drivers: [throwing] });
+    try {
+      const { message, text } = await refusal(other.setCredential(URL_VAR, VALUE, { by: "alice" }));
+      expect(message).toBe(`${URL_VAR} cannot be set: its check threw`);
+      expect(text).not.toContain(VALUE);
+    } finally {
+      await other.close();
+    }
+  });
+
+  it("are overridden by the environment, which credentials() says is the source", async () => {
+    vi.stubEnv(KEY_VAR, "key_fromenv");
+    await client.setCredential(KEY_VAR, KEY, { by: "alice" });
+    const [, key] = (await stored())!;
+    expect(key).toEqual({
+      name: KEY_VAR,
+      description: "an API key",
+      optional: false,
+      status: "set",
+      source: "environment",
+    });
+    vi.stubEnv(KEY_VAR, "key_NOT-LOWER");
+    expect((await stored())?.[1]).toMatchObject({ status: "invalid", source: "environment" });
+  });
+});
+
+describe("a worker's credentials", () => {
+  it("are loaded from the table at start, reloaded on each change, and never replace the environment's", async () => {
+    const FROM_ENV = "https://acme.example.test";
+    vi.stubEnv(URL_VAR, FROM_ENV);
+    vi.stubEnv(KEY_VAR, undefined);
+    vi.stubEnv(REGION_VAR, undefined);
+    await client.setCredential(KEY_VAR, KEY, { by: "alice" });
+    await client.setCredential(URL_VAR, "https://stored.example.test", { by: "alice" });
+    const said = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    // KEY_VAR is not in the environment: only its stored value lets the worker start.
+    const worker = await startWorker(config);
+    try {
+      expect(process.env[KEY_VAR]).toBe(KEY);
+      expect(process.env[URL_VAR]).toBe(FROM_ENV);
+      expect(said).toHaveBeenCalledWith("sanoma: credentials loaded for acme (1 variable)");
+
+      await client.setCredential(KEY_VAR, "key_rotated", { by: "bob" });
+      await vi.waitFor(() => expect(process.env[KEY_VAR]).toBe("key_rotated"));
+      await client.setCredential(REGION_VAR, "eu", { by: "bob" });
+      await vi.waitFor(() => expect(process.env[REGION_VAR]).toBe("eu"));
+      await client.clearCredential(KEY_VAR, { by: "bob" });
+      await vi.waitFor(() => expect(process.env).not.toHaveProperty(KEY_VAR));
+      // Its stored value was never loaded, so clearing it leaves the environment's. The worker
+      // reloads one change at a time, so once it has the next, it has handled this one.
+      await client.clearCredential(URL_VAR, { by: "bob" });
+      await client.setCredential(REGION_VAR, "us", { by: "bob" });
+      await vi.waitFor(() => expect(process.env[REGION_VAR]).toBe("us"));
+      expect(process.env[URL_VAR]).toBe(FROM_ENV);
+      expect(said.mock.calls.flat()).toEqual([
+        "sanoma: credentials loaded for acme (1 variable)",
+        ...Array(4).fill("sanoma: credentials reloaded for acme (1 variable)"),
+      ]);
+    } finally {
+      await worker.stop();
+    }
   });
 });
 

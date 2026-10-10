@@ -1,3 +1,6 @@
+/** Tells the operator what the runtime did, such as loading credentials (never their values). */
+export const info = (message: string) => console.info(`sanoma: ${message}`);
+
 /** Tells the operator something went wrong or was skipped, without failing anything. */
 export const warn = (message: string) => console.warn(`sanoma: ${message}`);
 
