@@ -36,7 +36,8 @@ const env = z.object({
     .describe("an API key"),
   [REGION_VAR]: z.enum(["us", "eu"]).describe("the region; default us").optional(),
 });
-const acmeDriver = defineDriver(acme, { thing: { get: async ({ id }) => ({ id }) } }, { env });
+const impl = { thing: { get: async ({ id }: { id: string }) => ({ id }) } };
+const acmeDriver = defineDriver(acme, impl, { env });
 const getThing = defineWorkflow({
   name: "get-thing",
   trigger: "manual",
@@ -94,6 +95,23 @@ describe("a driver's env", () => {
     expect(url).toMatchObject({ status: "invalid", problem: "Invalid URL" });
     expect(key).toMatchObject({ status: "invalid", problem: "an API key, key_<letters>" });
     expect(JSON.stringify([url, key])).not.toMatch(/not a url|NOT-LOWER/);
+  });
+
+  it("is invalid, without the value, when its check throws", async () => {
+    const VALUE = "madeup-not-a-url";
+    vi.stubEnv(URL_VAR, VALUE);
+    const throwing = defineDriver(acme, impl, {
+      env: z.object({ [URL_VAR]: z.string().refine((v) => new URL(v).protocol === "https:") }),
+    });
+    const throwingConfig = { ...config, drivers: [throwing] };
+    const credentials = resolveConfig(throwingConfig).credentials.get("acme");
+    expect(credentials).toEqual([{ name: URL_VAR, optional: false, status: "invalid", problem: "its check threw" }]);
+    const refusal = await startWorker(throwingConfig).then(
+      () => undefined,
+      (err: Error) => err.message,
+    );
+    expect(refusal).toContain(`${URL_VAR} is invalid (its check threw)`);
+    expect(JSON.stringify([credentials, refusal])).not.toContain(VALUE);
   });
 
   it("has no entry for a vendor whose drivers declare none", () => {

@@ -233,15 +233,28 @@ function credentialStatus(
   value: string | undefined,
 ): CredentialStatus {
   const description = descriptionOf(schema);
-  const parsed = value === undefined ? undefined : schema.safeParse(value);
-  const problem = parsed?.error?.issues[0]!.message;
+  const parsed = value === undefined ? undefined : check(schema, value);
+  const problem = parsed?.problem;
   return {
     name,
     ...(description !== undefined && { description }),
-    optional: schema.safeParse(undefined).success,
+    optional: check(schema, undefined).success,
     status: !parsed ? "missing" : parsed.success ? "set" : "invalid",
     ...(problem !== undefined && { problem }),
   };
+}
+
+/**
+ * `schema.safeParse(value)`, with its first issue's message as the problem. A check that throws
+ * (zod lets a `.refine()` or `.transform()` throw) fails without its error, which may carry the value.
+ */
+function check(schema: z.ZodType, value: string | undefined): { success: boolean; problem?: string } {
+  try {
+    const { success, error } = schema.safeParse(value);
+    return { success, ...(error && { problem: error.issues[0]!.message }) };
+  } catch {
+    return { success: false, problem: "its check threw" };
+  }
 }
 
 /** A schema's `.describe()`, also through `.optional()`, `.default()` and `.prefault()` in any order. */
