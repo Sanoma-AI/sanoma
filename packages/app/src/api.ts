@@ -1,9 +1,12 @@
 import type {
   ApprovalState,
+  DeclaredResource,
+  DriftReport,
   ErrorCode,
   InputIssue,
   LedgerRecord,
   Principal,
+  ResourceProblem,
   RunStatus,
   RunSummary,
 } from "@sanoma/workflows";
@@ -92,6 +95,21 @@ export interface RunDetail {
    */
   ledgerError?: string;
   approvals: ApprovalState[];
+}
+
+/**
+ * `GET /api/resources`: the resources the data files declare and what is wrong in them, as the
+ * app read them when it started, and the latest drift check.
+ */
+export interface ResourcesView {
+  resources: DeclaredResource[];
+  problems: ResourceProblem[];
+  /** True when the config has the built-in drift workflow: its connectors declare resource types. */
+  canDrift: boolean;
+  /** The latest drift run, whatever its status; null before the first. */
+  latest: RunSummary | null;
+  /** The report of the latest drift run that finished, with its run; null before one has. */
+  lastReport: { runId: string; report: DriftReport } | null;
 }
 
 /** Every error response, and the `body` of the error a server function throws. */

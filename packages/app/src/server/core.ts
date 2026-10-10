@@ -1,7 +1,10 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   type ApprovalState,
+  DRIFT_WORKFLOW,
   errorCode,
   errorMessage,
   invalidInput,
@@ -17,6 +20,7 @@ import {
   type DecideCall,
   type ErrorResponse,
   type InputIssue,
+  type ResourcesView,
   type RunDetail,
   type StartRunRequest,
   type StartRunResponse,
@@ -122,6 +126,45 @@ export async function startRun(
     });
   }
   return { runId: await client.start(workflow, body.input, { startedBy: actor }) };
+}
+
+/** The declared resources and their problems, the latest drift run, and the latest finished one's report. */
+export async function resourcesView({ client, description }: AppContext): Promise<ResourcesView> {
+  const { resources, problems } = description;
+  const canDrift = description.workflows.some((wf) => wf.builtin && wf.name === DRIFT_WORKFLOW);
+  if (!canDrift) return { resources, problems, canDrift, latest: null, lastReport: null };
+  const [latest] = await client.runs({ workflow: DRIFT_WORKFLOW, limit: 1 });
+  const [finished] =
+    latest?.status === "finished"
+      ? [latest]
+      : await client.runs({ workflow: DRIFT_WORKFLOW, status: "finished", limit: 1 });
+  const lastReport = finished ? { runId: finished.runId, report: await client.driftReport(finished.runId) } : null;
+  return { resources, problems, canDrift, latest: latest ?? null, lastReport };
+}
+
+/** Starts a drift check of the resources the data files declare now, as the actor. */
+export async function startDrift({ client }: AppContext, actor: Principal): Promise<StartRunResponse> {
+  return { runId: await client.drift({ startedBy: actor }) };
+}
+
+/**
+ * A data file's text, for the source view: only a file the description names (a declared
+ * resource's, or one with a problem), never a path the request makes up. `null` when it names
+ * none, or the file can no longer be read.
+ */
+export async function dataFileSource(
+  { resolved, description }: Pick<AppContext, "resolved" | "description">,
+  file: string,
+): Promise<{ source: string | null }> {
+  const named =
+    description.resources.some((r) => r.id.slice(0, r.id.lastIndexOf("#")) === file) ||
+    description.problems.some((p) => p.file === file);
+  if (!named || resolved.root === undefined) return { source: null };
+  try {
+    return { source: await readFile(join(resolved.root, file), "utf8") };
+  } catch {
+    return { source: null };
+  }
 }
 
 /**

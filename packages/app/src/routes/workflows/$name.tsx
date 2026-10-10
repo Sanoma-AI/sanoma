@@ -2,7 +2,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { Card, CardContent } from "#/components/ui/card.tsx";
 import { loadCode, loadGraph, Notice, PageHeader, pageTitle } from "../../components/common.tsx";
-import { GraphAndSource, StartButton, WorkflowSections } from "../../components/workflow.tsx";
+import { GraphAndSource, StartAction, WorkflowSections } from "../../components/workflow.tsx";
 import { configQuery, sourceQuery, workflowNamed } from "../../queries.ts";
 
 export const Route = createFileRoute("/workflows/$name")({
@@ -33,7 +33,7 @@ function WorkflowPage() {
   });
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader action={<StartButton name={workflow.name} />}>
+      <PageHeader action={<StartAction workflow={workflow} />}>
         <code className="text-muted-foreground">{workflow.name}</code>
       </PageHeader>
       <GraphAndSource key={name} workflow={workflow} />

@@ -10,5 +10,5 @@ Small helpers shared by components and graph code.
 | [`lines.ts`](lines.ts)         | Line numbers touched by a list of source spans                |
 | [`motion.ts`](motion.ts)       | `useReducedMotion` hook                                       |
 | [`time.ts`](time.ts)           | `utcText`: a time as UTC text, the same on server and browser |
-| [`tone.ts`](tone.ts)           | Status-to-tone maps for runs, approvals and decisions         |
+| [`tone.ts`](tone.ts)           | Status-to-tone maps for runs, approvals, decisions and drift  |
 | [`utils.ts`](utils.ts)         | `cn`, shadcn's class merger bound to the generated tables     |

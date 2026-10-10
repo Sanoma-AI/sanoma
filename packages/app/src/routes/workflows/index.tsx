@@ -5,7 +5,7 @@ import { useMemo } from "react";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
 import { Fact, Facts, GraphPanel, loadGraph, Nothing, PageHeader, Section } from "../../components/common.tsx";
-import { StartButton, WorkflowSections } from "../../components/workflow.tsx";
+import { StartAction, WorkflowSections } from "../../components/workflow.tsx";
 import { outlineGraph } from "../../graph/outline-graph.ts";
 import { configQuery } from "../../queries.ts";
 
@@ -74,7 +74,7 @@ function WorkflowCard({ workflow }: { workflow: WorkflowEntry }) {
           <code>{workflow.name}</code>
         </CardDescription>
         <CardAction>
-          <StartButton name={workflow.name} />
+          <StartAction workflow={workflow} />
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">

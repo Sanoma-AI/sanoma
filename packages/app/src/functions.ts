@@ -1,7 +1,17 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { type ActorInfo, DecideCall, RunsQuery, StartRunRequest } from "./api.ts";
-import { decide, parse, runDetail, startRun, withoutSources, workflowSource } from "./server/core.ts";
+import {
+  dataFileSource,
+  decide,
+  parse,
+  resourcesView,
+  runDetail,
+  startDrift,
+  startRun,
+  withoutSources,
+  workflowSource,
+} from "./server/core.ts";
 import { withPrincipal } from "./middleware.ts";
 
 // The page's reads and changes, as server functions. Most do what an /api route does, with the
@@ -60,3 +70,15 @@ export const decideFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .validator(validate(DecideCall))
   .handler(({ data, context }) => decide(context.app, context.principal, data));
+
+/** The declared resources, their problems and the latest drift check. */
+export const getResources = createServerFn(READ).handler(({ context }) => resourcesView(context.app));
+
+/** A data file's text, by its path relative to the config's root; `null` for a file the config does not name. */
+export const getDataFile = createServerFn(READ)
+  .validator(validate(z.object({ file: z.string().min(1) })))
+  .handler(({ data, context }) => dataFileSource(context.app, data.file));
+
+export const startDriftFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .handler(({ context }) => startDrift(context.app, context.principal));

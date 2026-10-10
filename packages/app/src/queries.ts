@@ -3,7 +3,7 @@ import type { ConfigDescription } from "@sanoma/workflows/describe";
 import { isEnded } from "@sanoma/workflows/shared";
 import { queryOptions } from "@tanstack/react-query";
 import { pendingApprovals, RUNS_LIMIT } from "./api.ts";
-import { getActor, getConfig, getRun, getRuns, getSource } from "./functions.ts";
+import { getActor, getConfig, getDataFile, getResources, getRun, getRuns, getSource } from "./functions.ts";
 
 /** How often the runs and a run's detail refresh while a page shows them. */
 export const POLL_MS = 2_000;
@@ -92,4 +92,23 @@ export const runQuery = (id: string) =>
       const status = query.state.data?.run.status;
       return !status || isEnded(status) ? false : POLL_MS;
     },
+  });
+
+/** The declared resources and the latest drift check: refreshed while a check runs. */
+export const resourcesQuery = () =>
+  queryOptions({
+    queryKey: ["resources"],
+    queryFn: () => getResources(),
+    refetchInterval: (query) => {
+      const latest = query.state.data?.latest;
+      return latest && !isEnded(latest.status) ? POLL_MS : false;
+    },
+  });
+
+/** A data file's text, read when a page first shows it. */
+export const dataFileQuery = (file: string) =>
+  queryOptions({
+    queryKey: ["data-file", file],
+    queryFn: () => getDataFile({ data: { file } }),
+    staleTime: Number.POSITIVE_INFINITY,
   });
