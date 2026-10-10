@@ -16,6 +16,8 @@ The app's React components: page chrome, shared display pieces, and the graph an
 | [`ledger.tsx`](ledger.tsx)           | A run's ledger rows and check rows, and `show`, which scrolls to a graph node's ledger row                                |
 | [`nav-user.tsx`](nav-user.tsx)       | Sidebar footer menu for who you are and the theme                                                                         |
 | [`run-rail.tsx`](run-rail.tsx)       | The workflow page's rail: About, New run, and the workflow's latest runs, filtered by `?runs=`                            |
+| [`run-strip.tsx`](run-strip.tsx)     | A Workflows card's strip: the workflow's last 12 runs as squares in their status's colour, read in the browser            |
+| [`runs-table.tsx`](runs-table.tsx)   | Every workflow's runs as a table, each row opening its run: the Workflows page's All runs                                 |
 | [`scenario.tsx`](scenario.tsx)       | The Test control (Test and the menu choosing a scenario), a scenario's card, and why a feature file could not be read     |
 | [`who-are-you.tsx`](who-are-you.tsx) | Dialog asking for a name under the default actor resolver                                                                 |
 | [`workflow.tsx`](workflow.tsx)       | A workflow's sections, its `RunButton`, the notice for a retired one, and its graph beside its source                     |
