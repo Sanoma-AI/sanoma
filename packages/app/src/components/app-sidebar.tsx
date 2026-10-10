@@ -1,3 +1,4 @@
+import type { WorkflowEntry } from "@sanoma/workflows/describe";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { ClientOnly, Link, linkOptions } from "@tanstack/react-router";
 import { BoxesIcon, InboxIcon, PlayIcon, PlugIcon, ShieldCheckIcon, WorkflowIcon } from "lucide-react";
@@ -79,27 +80,8 @@ export function AppSidebar() {
                     {pending && pending.total > 0 && <SidebarMenuBadge>{pending.total}</SidebarMenuBadge>}
                   </ClientOnly>
                 )}
-                {/* Each workflow's page, with how many approvals its runs wait on. Hidden in icon mode. */}
-                {link.to === "/workflows" && config.workflows.length > 0 && (
-                  <SidebarMenuSub>
-                    {config.workflows.map((wf) => (
-                      <SidebarMenuSubItem key={wf.name}>
-                        <SidebarMenuSubButton asChild>
-                          <Link to="/workflows/$name" params={{ name: wf.name }} activeProps={ACTIVE} onClick={close}>
-                            <span className="truncate">{wf.title ?? wf.name}</span>
-                            {/* Not SidebarMenuBadge: its offset is set for a menu button, not a sub-item's. */}
-                            <ClientOnly>
-                              {!!pending?.byWorkflow[wf.name] && (
-                                <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
-                                  {pending.byWorkflow[wf.name]}
-                                </span>
-                              )}
-                            </ClientOnly>
-                          </Link>
-                        </SidebarMenuSubButton>
-                      </SidebarMenuSubItem>
-                    ))}
-                  </SidebarMenuSub>
+                {link.to === "/workflows" && (
+                  <WorkflowLinks workflows={config.workflows} pending={pending?.byWorkflow} onClick={close} />
                 )}
               </SidebarMenuItem>
             ))}
@@ -111,5 +93,40 @@ export function AppSidebar() {
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
+  );
+}
+
+/** Each workflow's page, under Workflows, with how many approvals its runs wait on. Hidden in icon mode. */
+function WorkflowLinks({
+  workflows,
+  pending,
+  onClick,
+}: {
+  workflows: WorkflowEntry[];
+  /** By workflow, once the browser has read them. */
+  pending: Record<string, number> | undefined;
+  onClick: () => void;
+}) {
+  if (workflows.length === 0) return null;
+  return (
+    <SidebarMenuSub>
+      {workflows.map((wf) => (
+        <SidebarMenuSubItem key={wf.name}>
+          <SidebarMenuSubButton asChild>
+            <Link to="/workflows/$name" params={{ name: wf.name }} activeProps={ACTIVE} onClick={onClick}>
+              <span className="truncate">{wf.title ?? wf.name}</span>
+              {/* Not SidebarMenuBadge: its offset is set for a menu button, not a sub-item's. */}
+              <ClientOnly>
+                {!!pending?.[wf.name] && (
+                  <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
+                    {pending[wf.name]}
+                  </span>
+                )}
+              </ClientOnly>
+            </Link>
+          </SidebarMenuSubButton>
+        </SidebarMenuSubItem>
+      ))}
+    </SidebarMenuSub>
   );
 }
