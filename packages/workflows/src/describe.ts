@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import { resolveConfig, type SanomaConfig } from "./config.ts";
+import { type CredentialStatus, resolveConfig, type SanomaConfig } from "./config.ts";
 import { type Builtin, jsonSchemaOf, type Use } from "./define.ts";
 import { DRIFT_WORKFLOW } from "./drift.ts";
 import type { Fake } from "./fake.ts";
@@ -15,6 +15,7 @@ import { errorMessage } from "./shared.ts";
 // worker never loads oxc-parser, which the outline reads `run` with.
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
 // The reader parses data files with oxc-parser too.
+export type { CredentialStatus } from "./config.ts";
 export {
   readDataFiles,
   readResources,
@@ -82,6 +83,11 @@ export interface VendorEntry {
   package?: string;
   /** The connector package's `homepage` from its package.json: where its code and README are, as an https URL. */
   homepage?: string;
+  /**
+   * The environment variables its drivers declare (`defineDriver`'s `env`), each with its status
+   * in this process's environment, never its value. Absent when its drivers declare none.
+   */
+  credentials?: CredentialStatus[];
 }
 
 /** A resource type a connector declares with `defineResource`. */
@@ -143,7 +149,8 @@ export async function describeConfig(config: SanomaConfig): Promise<ConfigDescri
   // resource types are every connector's.
   for (const connector of config.connectors) {
     const { id, info } = connector[VENDOR];
-    vendors[id] ??= vendorEntry(id, info);
+    const credentials = resolved.credentials.get(id);
+    vendors[id] ??= { ...vendorEntry(id, info), ...(credentials && { credentials }) };
   }
   const resources = resourceTypesOf(config.connectors);
   // Each resource type's state is described once, on its entry, and referenced from its operations.

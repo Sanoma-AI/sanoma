@@ -6,7 +6,7 @@ import { errorInfo, parseOrThrow } from "./errors.ts";
 import { entry, skipped, write, writeFailure } from "./ledger.ts";
 import { warn } from "./log.ts";
 import type { Run, RunArgs, WorkerState } from "./run.ts";
-import { errorMessage } from "./shared.ts";
+import { credentialReady, errorMessage } from "./shared.ts";
 
 export interface Worker {
   stop(): Promise<void>;
@@ -33,6 +33,7 @@ export interface WorkerOptions {
 export async function startWorker(config: SanomaConfig, options: WorkerOptions = {}): Promise<Worker> {
   // Check everything before touching the state a running worker reads.
   const resolved = resolveConfig(config);
+  refuseUnconfigured(resolved);
   const state: WorkerState = {
     app: resolved.appName,
     ops: resolved.ops,
@@ -104,6 +105,25 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     throw err;
   }
   return worker;
+}
+
+/**
+ * Refuses a worker whose drivers would fail on their first call: a variable a driver's `env`
+ * declares is missing or invalid. One error, naming each vendor and its variables.
+ */
+function refuseUnconfigured({ credentials }: ResolvedConfig) {
+  const vendors = [...credentials].flatMap(([vendor, list]) => {
+    const unready = list.filter((c) => !credentialReady(c));
+    if (!unready.length) return [];
+    const missing = unready.filter((c) => c.status === "missing");
+    const needs = missing.map((c) => (c.description ? `${c.name} (${c.description})` : c.name)).join(", ");
+    const invalid = unready.filter((c) => c.status === "invalid").map((c) => `${c.name} is invalid (${c.problem})`);
+    const problems = [...(missing.length ? [`needs ${needs}`] : []), ...invalid].join(", ");
+    return [`${vendor}${missing.length ? "" : ":"} ${problems}`];
+  });
+  if (vendors.length) {
+    throw new Error(`The worker cannot start: ${vendors.join("; ")}. Set them in its environment (locally, in .env)`);
+  }
 }
 
 /**

@@ -249,12 +249,30 @@ export function retryableStatus(status: number): boolean {
 }
 
 /**
+ * The environment variables a driver reads, as a Zod object of string schemas keyed by variable
+ * name: each `.describe()` is the variable's one-line manual (what to put there, where to get
+ * it), `.optional()` marks one that may be unset. `resolveConfig` checks it against `process.env`.
+ */
+export type DriverEnv = z.ZodObject<Record<string, z.ZodType<string | undefined, string | undefined>>>;
+
+export interface DriverOptions {
+  /**
+   * The environment variables the driver reads, such as
+   * `z.object({ ACME_API_KEY: z.string().describe("an API key, from Settings, API keys") })`.
+   * Checked by `resolveConfig` against `process.env`, and its values never kept: the driver
+   * still reads them when it is called.
+   */
+  env?: DriverEnv;
+}
+
+/**
  * Implements a vendor's operations, keyed `"resource.name"`. A driver reads its credentials
- * when it is called (from the environment or a secret store), never from the config file.
+ * from the environment when it is called, never from the config file; `env` declares them.
  */
 export interface Driver {
-  vendor: string;
-  ops: Record<string, DriverFn>;
+  readonly vendor: string;
+  readonly ops: Readonly<Record<string, DriverFn>>;
+  readonly env?: DriverEnv;
 }
 
 export function isOp(x: unknown): x is Op {
@@ -283,11 +301,13 @@ export type OpIdOf<V extends string, S extends Specs> = {
 /**
  * Implements a connector's operations, typed by its schemas. A driver must be complete: an
  * operation the connector declares that `impl` leaves out, or one `impl` adds that the
- * connector doesn't declare, is refused here rather than when a run calls it.
+ * connector doesn't declare, is refused here rather than when a run calls it. `options.env`
+ * declares the environment variables it reads.
  */
 export function defineDriver<V extends string, S extends Specs>(
   connector: Connector<V, S>,
   impl: DriverImpl<S>,
+  options: DriverOptions = {},
 ): Driver {
   const declared = new Map<string, Op>();
   for (const resource of Object.values(connector as Record<string, Record<string, unknown>>)) {
@@ -309,5 +329,5 @@ export function defineDriver<V extends string, S extends Specs>(
     ...(extra.length ? [`it implements ${extra.join(", ")}, which the connector does not declare`] : []),
   ];
   if (problems.length) throw new Error(`defineDriver("${vendor}"): ${problems.join("; ")}`);
-  return { vendor, ops };
+  return Object.freeze({ vendor, ops: Object.freeze(ops), ...(options.env && { env: options.env }) });
 }

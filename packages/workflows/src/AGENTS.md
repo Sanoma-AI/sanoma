@@ -10,7 +10,7 @@ The source of `@sanoma/workflows`: how connectors, workflows and policies are de
 | [`ast.ts`](ast.ts)             | Shared oxc parsing, tree walking, line numbers and syntax problems for the lints, outline and reader                   |
 | [`call.ts`](call.ts)           | Builds a workflow's `ctx`: policy, approval, driver call and ledger write around each operation; `isRunControlError`   |
 | [`client.ts`](client.ts)       | `SanomaClient`: starts runs and drift checks, lists them and decides approvals from outside the worker                 |
-| [`config.ts`](config.ts)       | `SanomaConfig`, `defineConfig` and `resolveConfig`, which adds the built-in `drift` and its data-file step             |
+| [`config.ts`](config.ts)       | `SanomaConfig`, `defineConfig` and `resolveConfig`, which adds the built-in `drift` and checks the drivers' `env`      |
 | [`datafile.ts`](datafile.ts)   | `readDataFile`: the data-file subset over an oxc ESTree program, for the reader and both lints                         |
 | [`define.ts`](define.ts)       | `defineWorkflow` and the types for principals, approvers, approval requests and built-ins                              |
 | [`describe.ts`](describe.ts)   | `describeConfig` and `outlineWorkflow`, re-exporting the reader: the config as plain JSON for a UI                     |
@@ -34,4 +34,4 @@ The source of `@sanoma/workflows`: how connectors, workflows and policies are de
 | [`scenario.ts`](scenario.ts)   | Gherkin scenarios: `parseFeature`, `loadScenarios`, `check` and `drive`                                                |
 | [`shared.ts`](shared.ts)       | Browser-safe helpers for run status and approvals, and resource types; no DBOS, Node or zod                            |
 | [`version.ts`](version.ts)     | The package version, the step layout and `computeVersion`, the application version hash                                |
-| [`worker.ts`](worker.ts)       | `startWorker`: launches DBOS, registers each workflow by name and returns a stoppable `Worker`                         |
+| [`worker.ts`](worker.ts)       | `startWorker`: refuses missing credentials, launches DBOS, registers each workflow by name, returns a `Worker`         |
