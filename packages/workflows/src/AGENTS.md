@@ -13,7 +13,7 @@ The source of `@sanoma/workflows`: how connectors, workflows and policies are de
 | [`config.ts`](config.ts)       | `SanomaConfig`, `defineConfig` and `resolveConfig`: what a worker runs, with which drivers and policy |
 | [`datafile.ts`](datafile.ts)   | `readDataFile`: the data-file subset over an oxc ESTree program, for the reader and both lints        |
 | [`define.ts`](define.ts)       | `defineWorkflow` and the types for principals, approvers, approval requests and built-ins             |
-| [`describe.ts`](describe.ts)   | `describeConfig`, `outlineWorkflow` and `readResources`: the config as plain JSON for a UI            |
+| [`describe.ts`](describe.ts)   | `describeConfig` and `outlineWorkflow`, re-exporting the reader: the config as plain JSON for a UI    |
 | [`errors.ts`](errors.ts)       | Error codes, `SanomaError` and its subclasses, input parsing and `errorInfo`                          |
 | [`fake.ts`](fake.ts)           | `defineFake`: fake vendors for tests                                                                  |
 | [`index.ts`](index.ts)         | The main entry; re-exports the public API                                                             |
@@ -26,7 +26,7 @@ The source of `@sanoma/workflows`: how connectors, workflows and policies are de
 | [`paths.ts`](paths.ts)         | Where a relative import may reach: `nearestDir` and `inside`, for both lints and the reader           |
 | [`policy.ts`](policy.ts)       | Policy types, decisions (`allow`, `deny`, `approve`), `definePolicy` and `approvedFor`                |
 | [`resource.ts`](resource.ts)   | `defineResource`: a resource type's schema, fields, identity, constructor, and `read` and `import`    |
-| [`resources.ts`](resources.ts) | `readResources`: the resources the data files declare, read without running them                      |
+| [`resources.ts`](resources.ts) | `readDataFiles` and `readResources`: the resources the data files declare, and their problems         |
 | [`run.ts`](run.ts)             | The per-run and per-worker state the DBOS workflow receives                                           |
 | [`shared.ts`](shared.ts)       | Browser-safe helpers for run status and approvals, and resource types; no DBOS, Node or zod           |
 | [`version.ts`](version.ts)     | The package version, the step layout and `computeVersion`, the application version hash               |
