@@ -16,6 +16,11 @@ describe("lintWorkflow", () => {
     expect(lintWorkflow(src)).toEqual([]);
   });
 
+  it("passes the built-in drift workflow, which is held to the same rules", () => {
+    const path = fileURLToPath(new URL("../src/drift.ts", import.meta.url));
+    expect(lintWorkflow(readFileSync(path, "utf8"), path)).toEqual([]);
+  });
+
   it("passes a policy file", () => {
     expect(
       lintWorkflow(
@@ -348,6 +353,8 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
       "workflows/sandbox.ts",
       `import { check } from "@sanoma/workflows/scenario";\nexport const checks = [check];\n`,
     );
+    // The built-in drift workflow, as if it were the company's: oxlint finds nothing in it.
+    write("workflows/drift.ts", readFileSync(new URL("../src/drift.ts", import.meta.url), "utf8"));
     // Outside workflows/ and policies/, nothing is restricted.
     write("lib/clock.ts", `export const now = () => Date.now() + Math.random();\n`);
     for (const path of GOOD) write(path, readFileSync(fixture(path), "utf8"));

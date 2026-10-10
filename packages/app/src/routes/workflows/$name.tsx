@@ -1,11 +1,12 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { z } from "zod";
+import { Badge } from "#/components/ui/badge.tsx";
 import { Card, CardContent } from "#/components/ui/card.tsx";
 import { loadCode, loadGraph, Nothing, Notice, PageHeader, pageTitle } from "../../components/common.tsx";
 import { ScenarioCard, ScenarioPicker, TestButton } from "../../components/scenario.tsx";
 import { GraphAndSource, StartButton, WorkflowSections } from "../../components/workflow.tsx";
-import { configQuery, scenariosFor, scenariosQuery, sourceQuery, workflowNamed } from "../../queries.ts";
+import { configQuery, scenariosFor, scenariosQuery, sourceQuery, workflowFile, workflowNamed } from "../../queries.ts";
 
 export const Route = createFileRoute("/workflows/$name")({
   // `?scenario=` names the scenario shown, marked on the graph, and tried by Test.
@@ -20,8 +21,9 @@ export const Route = createFileRoute("/workflows/$name")({
     const config = await queryClient.query({ ...configQuery(), staleTime: "static" });
     const workflow = workflowNamed(params.name)(config);
     if (!workflow) throw notFound();
+    const file = workflowFile(workflow);
     await Promise.all([
-      queryClient.query({ ...sourceQuery(params.name), staleTime: "static" }),
+      file !== undefined && queryClient.query({ ...sourceQuery(file), staleTime: "static" }),
       queryClient.query({ ...scenariosQuery(), staleTime: "static" }),
     ]);
     return { crumb: workflow.title ?? workflow.name };
@@ -61,6 +63,7 @@ function WorkflowPage() {
         }
       >
         <code className="text-muted-foreground">{workflow.name}</code>
+        {workflow.builtin && <Badge variant="secondary">built-in</Badge>}
       </PageHeader>
       {errors.map((e) => (
         <Notice key={e.message} variant="destructive">

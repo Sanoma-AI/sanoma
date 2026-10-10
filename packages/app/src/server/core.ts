@@ -1,7 +1,10 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   type ApprovalState,
+  type DriftReport,
   errorCode,
   errorMessage,
   invalidInput,
@@ -58,26 +61,41 @@ export function parse<T extends z.ZodType>(schema: T, value: unknown, what: stri
 }
 
 /**
- * The description as the page and `GET /api/config` get it: without each workflow's `source`,
- * which is a whole file. `workflowSource` serves it, one workflow at a time.
+ * The description as the page and `GET /api/config` get it: without the source of a workflow
+ * read from its file, which is a whole file: `fileSource` serves it, one file at a time. A
+ * workflow read from `run`'s own text keeps it.
  */
 export const withoutSources = (description: ConfigDescription): ConfigDescription => ({
   ...description,
   workflows: description.workflows.map((workflow) => {
+    if (!("file" in workflow.outline)) return workflow;
     const { source: _, ...entry } = workflow;
     return entry;
   }),
 });
 
 /**
- * The text a workflow's outline was read from, or `null` when there is no such workflow or it
- * has none: not a 404, which a page's loader would take for its own page not being found.
+ * A file the description names, as it is now: a workflow's file (its outline's `file`, read
+ * as the outline read it, with `\n` line endings) or a data file (a resource's or a problem's
+ * `file`, relative to the config's root). Never a path the request makes up. `null` when the
+ * description names no such file, or it can no longer be read: not a 404, which a page's
+ * loader would take for its own page not being found.
  */
-export function workflowSource(
-  { description }: Pick<AppContext, "description">,
-  name: string,
-): { source: string | null } {
-  return { source: description.workflows.find((wf) => wf.name === name)?.source ?? null };
+export async function fileSource(
+  { resolved, description }: Pick<AppContext, "resolved" | "description">,
+  file: string,
+): Promise<{ source: string | null }> {
+  const workflowFile = description.workflows.some((wf) => "file" in wf.outline && wf.outline.file === file);
+  const dataFile =
+    resolved.root !== undefined &&
+    (description.resources.some((r) => r.file === file) || description.problems.some((p) => p.file === file));
+  if (!workflowFile && !dataFile) return { source: null };
+  try {
+    const text = await readFile(workflowFile ? file : join(resolved.root!, file), "utf8");
+    return { source: workflowFile ? text.replaceAll("\r\n", "\n") : text };
+  } catch {
+    return { source: null };
+  }
 }
 
 const NO_RECORDS = "No records for a run that has started; is the app reading the same ledger as the worker?";
@@ -197,6 +215,9 @@ export async function startRun(
   if (!workflow) throw noSuch("workflow", `No workflow named "${body.workflow}"`);
   return { runId: await client.start(workflow, body.input, { startedBy: actor }) };
 }
+
+/** The report of a drift run once it ends (`SanomaClient.driftReport`). */
+export const driftReport = ({ client }: AppContext, runId: string): Promise<DriftReport> => client.driftReport(runId);
 
 /**
  * Sends the decision, then answers with the approval once the run has read it, or as it stands

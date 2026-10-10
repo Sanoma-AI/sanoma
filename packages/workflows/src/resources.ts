@@ -5,12 +5,15 @@ import { resolveConfig, type SanomaConfig } from "./config.ts";
 import { type DataFile, type DataFileExport, type DataValue, readDataFile, Reference } from "./datafile.ts";
 import { type Connector, VENDOR } from "./op.ts";
 import type { Span } from "./outline.ts";
-import type { Declared, Resource } from "./resource.ts";
+import { type Declared, type Resource, resourceTypesOf } from "./resource.ts";
+import { problemAt } from "./shared.ts";
 
 /** A resource a data file declares, as read from the file without running it. */
 export interface DeclaredResource {
   /** `<file>#<export>`, the file relative to the config's root, with `/`: `resources/identity/github.ts#website`. */
   id: string;
+  /** The data file it is declared in, as `id` names it: `resources/identity/github.ts`. */
+  file: string;
   vendor: string;
   type: string;
   /** Its import id: what the type's `find` makes of its fields. */
@@ -56,19 +59,10 @@ export interface DataFiles {
 export function readResources(config: SanomaConfig): DeclaredResource[] {
   const { resources, problems } = readDataFiles(resolveConfig(config).root, config.connectors);
   if (problems.length) {
-    const lines = problems.map((p) => `  ${p.file ? `${p.file}:${p.line}:${p.column}: ` : ""}${p.message}`);
+    const lines = problems.map((p) => `  ${p.file === undefined ? "" : `${problemAt(p)}: `}${p.message}`);
     throw new Error(`The resources' data files have problems:\n${lines.join("\n")}`);
   }
   return resources;
-}
-
-/** Every resource type the connectors declare, by `<vendor>.<type>`. */
-export function resourceTypesOf(connectors: readonly Connector<any, any>[]): Map<string, Resource> {
-  const types = new Map<string, Resource>();
-  for (const connector of connectors) {
-    for (const r of connector[VENDOR].resources as readonly Resource[]) types.set(`${r.vendor}.${r.type}`, r);
-  }
-  return types;
 }
 
 interface FileEntry {
@@ -238,11 +232,11 @@ export function readDataFiles(
   }
 
   const resources: DeclaredResource[] = [];
-  for (const [id, { exp }] of declarations) {
+  for (const [id, { file, exp }] of declarations) {
     const result = declare(id);
     if (!result) continue;
     const { vendor, type, name, desired } = result.declared;
-    resources.push({ id, vendor, type, name, span: [exp.start, exp.end], desired, refs: result.refs });
+    resources.push({ id, file: file.rel, vendor, type, name, span: [exp.start, exp.end], desired, refs: result.refs });
   }
   problems.sort(
     (a, b) =>

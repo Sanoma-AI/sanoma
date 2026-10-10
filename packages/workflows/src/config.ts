@@ -1,9 +1,12 @@
 import { dirname, resolve } from "node:path";
+import { DBOS } from "@dbos-inc/dbos-sdk";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
+import { DRIFT_WORKFLOW, type DriftDeclared, driftWorkflow } from "./drift.ts";
 import type { Fake } from "./fake.ts";
 import type { LedgerStore } from "./ledger.ts";
 import { type Connector, type Driver, type DriverFn, isOp, type Op } from "./op.ts";
 import type { Policy } from "./policy.ts";
+import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
 import { computeVersion } from "./version.ts";
 
 /**
@@ -66,7 +69,10 @@ export interface ResolvedConfig {
   fakeDrivers: Map<string, DriverFn>;
   /** The scenarios directory, a `file:` URL. */
   scenarios?: URL;
-  /** By name; each checked against `ops` and `drivers`. */
+  /**
+   * By name; each checked against `ops` and `drivers`. The config's, and the built-in `drift`
+   * (`DRIFT_WORKFLOW`) when its connectors declare resource types.
+   */
   workflows: Map<string, WorkflowDefinition<any, any>>;
   policy: Policy;
   ledger: LedgerStore;
@@ -141,6 +147,11 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   );
   const names = new Map<string, WorkflowDefinition<any, any>>();
   for (const wf of config.workflows) {
+    if (wf.name === DRIFT_WORKFLOW) {
+      throw new Error(
+        `A workflow is named "${DRIFT_WORKFLOW}", the name of the built-in drift workflow; name it otherwise`,
+      );
+    }
     checkUses(wf, ops, drivers);
     const other = names.get(wf.name);
     if (other && other !== wf) {
@@ -150,10 +161,18 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     }
     names.set(wf.name, wf);
   }
+  // Built-in: checking the resources the data files declare against their vendors.
+  const types = resourceTypesOf(config.connectors);
+  if (types.size) {
+    const declared = () =>
+      DBOS.runStep(() => readDeclared(root, config.connectors, types), { name: "drift:data-files" });
+    names.set(DRIFT_WORKFLOW, driftWorkflow(types, ops, drivers, declared));
+  }
   return {
     appName,
     databaseUrl: resolveDatabaseUrl(config),
-    version: computeVersion(config),
+    // The built-in's code and operations are part of the app's version, like the config's own.
+    version: computeVersion({ appName: config.appName, workflows: [...names.values()] }),
     queueName: `sanoma:${appName}`,
     sandboxQueueName: `sanoma:${appName}:sandbox`,
     ops,
@@ -165,6 +184,31 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     policy: config.policy,
     ledger,
     ...(root !== undefined && { root }),
+  };
+}
+
+/**
+ * The data files under `root`, as a drift run records them: each resource without its write-only
+ * values, which a run never compares and never records, and the problems.
+ */
+async function readDeclared(
+  root: string | undefined,
+  connectors: readonly Connector<any, any>[],
+  types: ReadonlyMap<string, Resource>,
+): Promise<DriftDeclared> {
+  // Loaded when a drift run reads the files, not with the worker: the reader parses with oxc-parser.
+  const { readDataFiles } = await import("./resources.ts");
+  const { resources, problems } = readDataFiles(root, connectors, types);
+  return {
+    resources: resources.map(({ id, vendor, type, name, desired, refs }) => ({
+      id,
+      vendor,
+      type,
+      name,
+      desired: withoutWriteOnly(types.get(`${vendor}.${type}`)!.fields, desired),
+      refs,
+    })),
+    problems,
   };
 }
 

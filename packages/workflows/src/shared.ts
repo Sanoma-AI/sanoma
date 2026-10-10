@@ -1,8 +1,18 @@
 import type { ApprovalState, Approver, Principal } from "./define.ts";
+import type { ResourceProblem } from "./resources.ts";
 
 // Types only: resource types as a UI reads them. Erased from the bundle.
-export type { Declared, Declaring, References, Resource, ResourceFields, ResourceSpec } from "./resource.ts";
+export type {
+  Declared,
+  Declaring,
+  FieldReference,
+  References,
+  Resource,
+  ResourceFields,
+  ResourceSpec,
+} from "./resource.ts";
 export type { DeclaredResource, ResourceProblem } from "./resources.ts";
+export type { DriftField, DriftReport, DriftResult, DriftStatus } from "./drift.ts";
 
 // What a UI in the browser may use from the runtime, besides types: `@sanoma/workflows/shared`.
 // Nothing here imports DBOS, Node or zod, so a browser bundle can carry it; the runtime uses the
@@ -35,3 +45,7 @@ export const approverLabel = (approver: Approver): string =>
 
 /** An error's message, or the value as text when it is not an Error. */
 export const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/** Where a data-file problem is, `file:line:column`; undefined for one that is the config's, with no file. */
+export const problemAt = (p: ResourceProblem): string | undefined =>
+  p.file === undefined ? undefined : `${p.file}:${p.line}:${p.column}`;

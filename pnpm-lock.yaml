@@ -182,6 +182,9 @@ importers:
       '@sanoma/connector-resend':
         specifier: workspace:*
         version: link:../../connectors/resend
+      '@sanoma/connector-stripe':
+        specifier: workspace:*
+        version: link:../../connectors/stripe
       '@sanoma/testing':
         specifier: workspace:*
         version: link:../testing

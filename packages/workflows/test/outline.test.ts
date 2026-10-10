@@ -277,13 +277,20 @@ describe("outlineWorkflow, spans", () => {
       writeFileSync(broken, 'export default defineWorkflow({ name: "busy", run: async (ctx) => { ');
       expect(fallback(broken)).toMatch(/could not be parsed: \S/);
       expect(fallback(broken)?.startsWith(`${broken} could not be parsed: `)).toBe(true);
-      // Its name is no string literal, so this is not the workflow named "busy".
+      // Its name is no string, nor a top-level const holding one, so this is not the workflow named "busy".
       const elsewhere = join(dir, "elsewhere.ts");
       writeFileSync(
         elsewhere,
-        'const name = "busy";\nexport default defineWorkflow({ name, run: async (ctx) => {} });\n',
+        'let name = "busy";\nexport default defineWorkflow({ name, run: async (ctx) => {} });\n',
       );
       expect(fallback(elsewhere)).toBe(`${elsewhere} holds no workflow named "busy"`);
+      // A top-level const is read for its string, as the built-in drift names itself.
+      const named = join(dir, "named.ts");
+      writeFileSync(
+        named,
+        'export const NAME = "busy";\nexport default defineWorkflow({ name: NAME, run: async (ctx) => {} });\n',
+      );
+      expect(outlined({ ...busy, file: named })).toMatchObject({ file: named });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
