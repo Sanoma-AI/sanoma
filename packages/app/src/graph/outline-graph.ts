@@ -1,3 +1,4 @@
+import type { Span } from "@sanoma/workflows/describe";
 import type { CallStep, Graph, GraphEdge, GraphNode, Step, StepState } from "./types.ts";
 
 /** A graph's two ends: an outline's are plain; a run's say how it started and how it ended. */
@@ -8,8 +9,11 @@ export interface Ends {
 
 const OUTLINE_ENDS: Ends = { end: { label: "end" } };
 
-/** A call's node's own: its step's state, and its place in the source. */
-const own = (step: CallStep) => ({ ...(step.state && { state: step.state }), ...(step.span && { span: step.span }) });
+/** A call's node's own: its step's state (of its own kind), and its place in the source. */
+const own = <S extends CallStep>(step: S): Pick<S, "state"> & { span?: Span } => ({
+  ...(step.state && { state: step.state }),
+  ...(step.span && { span: step.span }),
+});
 
 /**
  * Steps as a graph: a chain from start to end. A `ctx.all` is one lane per member between the

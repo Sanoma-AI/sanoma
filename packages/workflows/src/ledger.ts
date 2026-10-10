@@ -81,6 +81,11 @@ export type LedgerRecord = {
    * for a time already past too, which waits not at all.
    */
   | { type: "sleep.started"; node?: string; until: number }
+  /**
+   * A sandbox run seeded its fakes from the scenario named: each `Given` operation called
+   * through its fake, with what the fake returned. Follows `run.started`.
+   */
+  | { type: "scenario.seeded"; scenario: string; seeds: { op: string; input: unknown; output: unknown }[] }
   | { type: "run.finished"; output: unknown }
   /** `error` as for `op.called`. */
   | { type: "run.failed"; error: ErrorInfo }

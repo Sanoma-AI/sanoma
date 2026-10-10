@@ -1,7 +1,16 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { type ActorInfo, DecideCall, RunsQuery, StartRunRequest } from "./api.ts";
-import { decide, driftReport, fileSource, parse, runDetail, startRun, withoutSources } from "./server/core.ts";
+import { type ActorInfo, DecideCall, RunsQuery, type StartRunRequest, startRunSchema } from "./api.ts";
+import {
+  decide,
+  driftReport,
+  fileSource,
+  parse,
+  runDetail,
+  scenarios,
+  startRun,
+  withoutSources,
+} from "./server/core.ts";
 import { withPrincipal } from "./middleware.ts";
 
 // The page's reads and changes, as server functions. Most do what an /api route does, with the
@@ -43,6 +52,9 @@ export const getActor = createServerFn(READ).handler(async ({ context }): Promis
   }
 });
 
+/** The config's scenarios, read again from their feature files whenever one has changed: the agent may be editing them. */
+export const getScenarios = createServerFn(READ).handler(({ context }) => scenarios(context.app));
+
 export const getRuns = createServerFn(READ)
   .validator(validate(RunsQuery))
   .handler(({ data, context }) => context.app.client.runs(data));
@@ -54,7 +66,7 @@ export const getRun = createServerFn(READ)
 
 export const startRunFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
-  .validator(validate(StartRunRequest))
+  .validator((data: StartRunRequest) => parse(startRunSchema(data), data, "The request"))
   .handler(({ data, context }) => startRun(context.app, context.principal, data));
 
 export const decideFn = createServerFn(CHANGE)

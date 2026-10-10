@@ -247,9 +247,6 @@ importers:
         specifier: ^5
         version: 5.0.3(@types/node@26.6.4)(msw@3.0.2(@types/node@26.6.4)(typescript@7.0.2)(vite@8.3.3(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)))(vite@8.3.3(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
     devDependencies:
-      '@sanoma/bridge':
-        specifier: workspace:*
-        version: link:../bridge
       '@sanoma/connector-bluesky':
         specifier: workspace:*
         version: link:../../connectors/bluesky
@@ -277,12 +274,30 @@ importers:
 
   packages/workflows:
     dependencies:
+      '@cucumber/cucumber-expressions':
+        specifier: ^20.1.0
+        version: 20.1.0
+      '@cucumber/gherkin':
+        specifier: ^42.0.1
+        version: 42.0.1
+      '@cucumber/messages':
+        specifier: ^34.2.1
+        version: 34.2.1
       '@dbos-inc/dbos-sdk':
         specifier: ^5.2.11
         version: 5.2.11
+      '@faker-js/faker':
+        specifier: ^10.6.0
+        version: 10.6.0
       oxc-parser:
         specifier: ^0.153.0
         version: 0.153.0
+      randexp:
+        specifier: ^0.5.3
+        version: 0.5.3
+      zod-schema-faker:
+        specifier: ^2.1.2
+        version: 2.1.2(@faker-js/faker@10.6.0)(randexp@0.5.3)(zod@4.6.5)
     devDependencies:
       zod:
         specifier: ^4.6.5
@@ -483,6 +498,15 @@ packages:
     peerDependencies:
       '@bufbuild/protobuf': ^2.7.0
 
+  '@cucumber/cucumber-expressions@20.1.0':
+    resolution: {integrity: sha512-KXQJChHTyHdg6HI7fHy3zpjfoS205vV1B/aJQKB82VFgMGbdVdiaSy7sTtap/5Q787anLmZt25Tg0FqQ2n4fqw==}
+
+  '@cucumber/gherkin@42.0.1':
+    resolution: {integrity: sha512-Kqg0ULhWqbXp/a1c04ND4sS4KTlIL831tQ0NhZLXWdEhT6LiNsZ5LFRzy/lBy7QQpcKhroKp/i3C2WdEnRBKNg==}
+
+  '@cucumber/messages@34.2.1':
+    resolution: {integrity: sha512-aj2iCAG9ZOpMVcMxcgShifv5fbR96b7SMgdWcPXXh2QbFp7OEcAnQ5MC5YfWUDSDasmw7FU5NJEsOrXdTQOU1A==}
+
   '@dagrejs/dagre@3.1.1':
     resolution: {integrity: sha512-zroZB1dFOFiGgv4Xcrn1DckB1o4aOikPqD2NDQPV0WM//CXGcS6xiD0rNkqHmw6FEg4tabt4nxPLwgCWT+Vb2A==}
 
@@ -500,6 +524,10 @@ packages:
 
   '@dotenvx/primitives@0.8.0':
     resolution: {integrity: sha512-VYJy0uhFm9zTJ1TxBaW/pA8bjbOM/OttaNMwZ1RHG4JKyRG7DhSdiqD1ipQoAyoD22olUtxbP78W9xY3Wd11bg==}
+
+  '@faker-js/faker@10.6.0':
+    resolution: {integrity: sha512-3RQHgEtvL1Frl/d1cSreo7qhJ3Gk1OdNUai/CtZ8G+wYeRQnJih3s9xJ9/kgYekPQRdwgh0HXRPqMlzWGwivIQ==}
+    engines: {node: ^20.19.0 || ^22.13.0 || ^23.5.0 || >=24.0.0, npm: '>=10'}
 
   '@floating-ui/core@1.8.0':
     resolution: {integrity: sha512-0CIZ5itps/8x7BG8dEIhs53BvCUH2PCoogtakwRTut+Arm58sJooJ0AuZhLw2HJYIR5cMLNPBSS728sPho2khQ==}
@@ -2638,6 +2666,10 @@ packages:
     resolution: {integrity: sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw==}
     engines: {node: '>=12'}
 
+  drange@1.1.1:
+    resolution: {integrity: sha512-pYxfDYpued//QpnLIm4Avk7rsNtAtQkUES2cwAYSvD/wd2pKD71gN2Ebj3e7klzXwjocvE8c5vx/1fxwpqmSxA==}
+    engines: {node: '>=4'}
+
   dunder-proto@1.0.1:
     resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
     engines: {node: '>= 0.4'}
@@ -3619,6 +3651,10 @@ packages:
       '@types/react-dom':
         optional: true
 
+  randexp@0.5.3:
+    resolution: {integrity: sha512-U+5l2KrcMNOUPYvazA3h5ekF80FHTUG+87SEAmHZmolh1M+i/WyTCxVzmi+tidIa1tM4BSe8g2Y/D3loWDjj+w==}
+    engines: {node: '>=4'}
+
   range-parser@1.3.0:
     resolution: {integrity: sha512-hek2mFQpPuI4E1BBKrSto+BU3e3x4xuarsbiwr3+lf7p44juvFMV0XFWQAP3xUyqXA4RrXLIoaSUGbSt056ZMw==}
     engines: {node: '>= 0.6'}
@@ -3674,6 +3710,13 @@ packages:
     resolution: {integrity: sha512-mFAyJq9vUbSTARLZUvAEf1z3YxlvAwswbmxMx2mPA/MSm4KmpwvwvhsH/NIrZhyOuwD60Lzyw2qh83uCbgTPYw==}
     engines: {node: '>= 4'}
 
+  regexp-match-indices@1.0.2:
+    resolution: {integrity: sha512-DwZuAkt8NF5mKwGGER1EGh2PRqyvhRhhLviH+R8y8dIuaQROlUfXjt4s9ZTXstIsSkptf06BSvwcEmmfheJJWQ==}
+
+  regexp-tree@0.1.27:
+    resolution: {integrity: sha512-iETxpjK6YoRWJG5o6hXLwvjYAoW+FEZn9os0PD/b6AP6xQwsa/Y7lCVgIixBbUPMfhu+i2LtdeAqVTgGlQarfA==}
+    hasBin: true
+
   require-from-string@2.0.2:
     resolution: {integrity: sha512-Xf0nWe6RseziFMu+Ap9biiUbmplq6S9/p+7w7YXP/JBHhrUDDUhwa+vANyubuqfZWTveU//DYVGsDG7RKL/vEw==}
     engines: {node: '>=0.10.0'}
@@ -3681,6 +3724,10 @@ packages:
   restore-cursor@5.1.0:
     resolution: {integrity: sha512-oMA2dcrw6u0YfxJQXm342bFKX/E4sG9rbTzO9ptUcR/e8A33cHuvStiYOwH7fszkZlZ1z/ta9AAoPk2F4qIOHA==}
     engines: {node: '>=18'}
+
+  ret@0.2.2:
+    resolution: {integrity: sha512-M0b3YWQs7R3Z917WRQy1HHA7Ba7D8hvZg6UE5mLykJxQVE2ju0IXbGlaHPPlkY+WN7wFP+wUMXmBFA0aV6vYGQ==}
+    engines: {node: '>=4'}
 
   rettime@0.11.12:
     resolution: {integrity: sha512-5ExtR1ppiDBQkVoPw5NAqdbfH4Iq2VOmQKHMtUoaFxA9bo2krzFYBtyq6K40xxbYp+2w/YOr6D+1ToF6tTN53A==}
@@ -4250,6 +4297,14 @@ packages:
     resolution: {integrity: sha512-xYqdZFUK/VYazNl/oCDYN+3WloWQwMfZxBoiNt6qNyk+xfOdi598muWE42rNZFp1kNOiqW936q5RhUdnpqElSg==}
     engines: {node: '>=18'}
 
+  zod-schema-faker@2.1.2:
+    resolution: {integrity: sha512-8Hy5JkO9FqD8LN97YRyWxyB+5bCf6B8Ic51L2FaUkLjG4ZI3gHTQDGjRPREuzPg0ZZf5KT6sD0wTmUtsjKaQVA==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@faker-js/faker': ^10.0.0
+      randexp: ^0.5.3
+      zod: ^3.25.0 || ^4.0.0
+
   zod-to-json-schema@3.25.2:
     resolution: {integrity: sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA==}
     peerDependencies:
@@ -4567,6 +4622,16 @@ snapshots:
     dependencies:
       '@bufbuild/protobuf': 2.16.0
 
+  '@cucumber/cucumber-expressions@20.1.0':
+    dependencies:
+      regexp-match-indices: 1.0.2
+
+  '@cucumber/gherkin@42.0.1':
+    dependencies:
+      '@cucumber/messages': 34.2.1
+
+  '@cucumber/messages@34.2.1': {}
+
   '@dagrejs/dagre@3.1.1':
     dependencies:
       '@dagrejs/graphlib': 4.0.5
@@ -4606,6 +4671,8 @@ snapshots:
       yocto-spinner: 1.2.2
 
   '@dotenvx/primitives@0.8.0': {}
+
+  '@faker-js/faker@10.6.0': {}
 
   '@floating-ui/core@1.8.0':
     dependencies:
@@ -6526,6 +6593,8 @@ snapshots:
 
   dotenv@17.4.2: {}
 
+  drange@1.1.1: {}
+
   dunder-proto@1.0.1:
     dependencies:
       call-bind-apply-helpers: 1.0.2
@@ -7453,6 +7522,11 @@ snapshots:
       '@types/react': 19.3.0
       '@types/react-dom': 19.3.0(@types/react@19.3.0)
 
+  randexp@0.5.3:
+    dependencies:
+      drange: 1.1.1
+      ret: 0.2.2
+
   range-parser@1.3.0: {}
 
   raw-body@3.0.2:
@@ -7506,12 +7580,20 @@ snapshots:
       tiny-invariant: 1.3.3
       tslib: 2.8.1
 
+  regexp-match-indices@1.0.2:
+    dependencies:
+      regexp-tree: 0.1.27
+
+  regexp-tree@0.1.27: {}
+
   require-from-string@2.0.2: {}
 
   restore-cursor@5.1.0:
     dependencies:
       onetime: 7.0.0
       signal-exit: 4.1.0
+
+  ret@0.2.2: {}
 
   rettime@0.11.12: {}
 
@@ -7995,6 +8077,12 @@ snapshots:
       yoctocolors: 2.2.0
 
   yoctocolors@2.2.0: {}
+
+  zod-schema-faker@2.1.2(@faker-js/faker@10.6.0)(randexp@0.5.3)(zod@4.6.5):
+    dependencies:
+      '@faker-js/faker': 10.6.0
+      randexp: 0.5.3
+      zod: 4.6.5
 
   zod-to-json-schema@3.25.2(zod@3.25.76):
     dependencies:

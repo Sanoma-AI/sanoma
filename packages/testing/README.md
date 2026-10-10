@@ -17,7 +17,9 @@ npm install --save-dev @sanoma/testing
 ```ts
 import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
-import { type FakeCall, fakeGhost, fakeResend, startTestWorker } from "@sanoma/testing";
+import { fakeGhost } from "@sanoma/connector-ghost/fake";
+import { fakeResend } from "@sanoma/connector-resend/fake";
+import { type FakeCall, startTestWorker } from "@sanoma/testing";
 import { allowAll } from "@sanoma/workflows";
 import announce from "./workflows/announce.ts";
 
@@ -40,7 +42,7 @@ await worker.stop();
 
 ## Fake vendors
 
-`fakeGhost`, `fakeResend`, `fakeBluesky`, `fakeGithub` and `fakeStripe` are re-exported from `@sanoma/connector-ghost/fake`, `@sanoma/connector-resend/fake`, `@sanoma/connector-bluesky/fake`, `@sanoma/connector-github/fake` and `@sanoma/connector-stripe/fake`. Each returns:
+Each connector ships its fake at its own `/fake` entry, not in this package: `import { fakeGhost } from "@sanoma/connector-ghost/fake";`. Install the connectors you use; their READMEs ([Ghost](https://www.npmjs.com/package/@sanoma/connector-ghost#testing), [Resend](https://www.npmjs.com/package/@sanoma/connector-resend#testing), [Bluesky](https://www.npmjs.com/package/@sanoma/connector-bluesky#testing), [GitHub](https://www.npmjs.com/package/@sanoma/connector-github#testing), [Stripe](https://www.npmjs.com/package/@sanoma/connector-stripe#testing)) say what each fake holds and adds. Each returns:
 
 | Member                 | What it does                                                                                   |
 | ---------------------- | ---------------------------------------------------------------------------------------------- |
@@ -53,8 +55,6 @@ await worker.stop();
 | `loseReply(opId)`      | The next call to `opId` takes effect, then throws once, as if the reply was lost.              |
 | `rateLimit(opId)`      | The next call to `opId` throws a retryable `DriverError` with status 429 and changes nothing.  |
 | `hold(opId)`           | The next call to `opId` waits, before it takes effect, until the returned function is called.  |
-
-`fakeGithub` and `fakeStripe` serve resources from replies recorded from (or, for Stripe, written to) the vendor's OpenTofu provider, through the connector's real driver, and add `override(type, id, fields)`, which changes what the next read returns, as if someone edited the object at the vendor (drift; `fields` in the resource's shape, as a read returns them), `put(type, id, fields, { from? })`, which makes one, and `remove(type, id)`, after which a read and an import say the object is gone (an import answering as the provider would). They are `tfFake` from `@sanoma/bridge/fake` over each connector's `tfConnector` record.
 
 A call that repeats an earlier call's idempotency key gets the earlier reply and changes nothing, so a test can check that a retried or replayed call has one effect.
 
@@ -91,5 +91,27 @@ Two variables change what the same tests do:
 
 - `SANOMA_LIVE=1` calls the vendor instead: every request goes through to it. A run without the `needs` variables fails at once rather than replaying. Tests that only replay skip themselves with `it.skipIf(live)`.
 - `SANOMA_RECORD=1`, with `SANOMA_LIVE=1`, rewrites each played fixture from the vendor's replies, passed through `scrub` first. Read the diff, and run `pnpm format`, before committing it.
+
+## Scenarios
+
+`@sanoma/testing/scenarios` runs a config's [scenarios](https://www.npmjs.com/package/@sanoma/workflows#scenarios-and-sandbox-runs) as vitest tests (install `vitest` beside it). Each scenario is a sandbox run: the worker calls the config's `fakes`, never a driver.
+
+`describeScenarios(config, options?)` reads the `.feature` files in the config's `scenarios` directory and registers a test for each scenario, in a `describe` per file; it throws, naming the directory, when it finds none. A test starts the scenario's sandbox run, decides its approvals as the scenario says, and fails listing each `Then` step that did not hold, with why. A file that does not load (a step no rule matches, bad JSON, a name used twice) is a failing test named after the file, whose message names the file (and the line, for a step or JSON error). It starts one worker for all its scenarios, before them, with `startTestWorker(config, options)`, and stops it after; `appName` is required, as there. `options.startedBy` starts the runs (default `{ id: "scenarios" }`), and `options.timeoutMs` is how long each may take (`drive`'s, 15 seconds by default); the tests it registers get twice that, so `drive`'s error is the one you see.
+
+```ts
+// test/scenarios.test.ts
+import { describeScenarios } from "@sanoma/testing/scenarios";
+import { memoryLedger } from "@sanoma/workflows";
+import config from "../sanoma.config.ts";
+
+// appName names the test database.
+describeScenarios({ ...config, ledger: memoryLedger(), appName: "scenarios-test" });
+```
+
+A company config spread into `describeScenarios` keeps its `ledger`, so pass `ledger: memoryLedger()`, as above, to keep test runs out of the project's ledger.
+
+Sandbox runs go one at a time, so a scenario that leaves its run waiting on an approval it has no decision for holds up the ones after it until they time out; fix the first failure first.
+
+`runScenario(scenario, { client, startedBy?, timeoutMs? })` runs one scenario against a worker you started, with a `SanomaClient` of it, and returns `{ runId, run, ledger, checks }`: the run's id, its summary, its ledger records and `check(scenario, ledger)`. `timeoutMs` goes to `drive`. Load the scenarios with `loadScenarios(resolveConfig(config))` from `@sanoma/workflows/scenario`.
 
 Status: early (0.x). License: Apache-2.0.

@@ -1,6 +1,6 @@
 # packages/workflows/src
 
-The source of `@sanoma/workflows`: how connectors, workflows and policies are declared, how a worker runs them durably on DBOS, and the tools that read them (lint, outline, describe). Its entry points, from `exports` in `package.json`: `.` (`index.ts`), `./describe`, `./fake`, `./lint` and `./shared`.
+The source of `@sanoma/workflows`: how connectors, workflows and policies are declared, how a worker runs them durably on DBOS, and the tools that read them (lint, outline, describe). Its entry points, from `exports` in `package.json`: `.` (`index.ts`), `./describe`, `./fake`, `./lint`, `./scenario` and `./shared`.
 
 ## Contents
 
@@ -17,6 +17,7 @@ The source of `@sanoma/workflows`: how connectors, workflows and policies are de
 | [`drift.ts`](drift.ts)         | The built-in `drift` workflow (linted as any workflow): declared resources against their vendors, the `DriftReport`                  |
 | [`errors.ts`](errors.ts)       | Error codes, `SanomaError` and its subclasses, input parsing and `errorInfo`                                                         |
 | [`fake.ts`](fake.ts)           | `defineFake`: fake vendors for tests                                                                                                 |
+| [`fill.ts`](fill.ts)           | Internal: seeded made-up values for zod schemas (scenario inputs, op mocks); `shapeOf`, `isBug`                                      |
 | [`index.ts`](index.ts)         | The main entry; re-exports the public API                                                                                            |
 | [`ledger.ts`](ledger.ts)       | The audit record of a run, with JSONL and in-memory stores                                                                           |
 | [`lint.ts`](lint.ts)           | `lintWorkflow` (import rules oxlint cannot express, and `run` against its outline) and `lintResources` (the data-file subset)        |
@@ -29,6 +30,8 @@ The source of `@sanoma/workflows`: how connectors, workflows and policies are de
 | [`resource.ts`](resource.ts)   | `defineResource`: a resource type's schema, fields, references, `read` and `import`; `compareDeclared`, `diffDeclared`               |
 | [`resources.ts`](resources.ts) | `readDataFiles` and `readResources`: the resources the data files declare, and their problems                                        |
 | [`run.ts`](run.ts)             | The per-run and per-worker state the DBOS workflow receives                                                                          |
+| [`sandbox.ts`](sandbox.ts)     | `seedSandbox`: a sandbox run's seeding of the fakes, which the worker imports only for such a run                                    |
+| [`scenario.ts`](scenario.ts)   | Gherkin scenarios: `parseFeature`, `loadScenarios`, `check` and `drive`                                                              |
 | [`shared.ts`](shared.ts)       | Browser-safe helpers for run status and approvals, and resource types; no DBOS, Node or zod                                          |
 | [`version.ts`](version.ts)     | The package version, the step layout and `computeVersion`, the application version hash                                              |
 | [`worker.ts`](worker.ts)       | `startWorker`: reads each workflow's outline, launches DBOS, registers each workflow by name, returns a stoppable `Worker`           |

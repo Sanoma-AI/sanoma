@@ -40,12 +40,16 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     app: resolved.appName,
     ops: resolved.ops,
     drivers: resolved.drivers,
+    fakes: resolved.fakes,
+    fakeDrivers: resolved.fakeDrivers,
+    ...(resolved.scenarios && { scenarios: resolved.scenarios }),
     policy: resolved.policy,
     ledger: resolved.ledger,
-    workflows: new Map(resolved.workflows.map((wf) => [wf.name, { wf, outline: outlineOf(wf) }])),
+    workflows: resolved.workflows,
+    outlines: new Map([...resolved.workflows].map(([name, wf]) => [name, outlineOf(wf)])),
     stopped: false,
   };
-  for (const { name } of resolved.workflows) {
+  for (const name of resolved.workflows.keys()) {
     if (!registered.has(name)) {
       register(name);
       registered.add(name);
@@ -85,6 +89,8 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       }
     }
     await DBOS.registerQueue(resolved.queueName);
+    // Sandbox runs share the worker's fakes, so it runs one at a time; another waits, queued.
+    await DBOS.registerQueue(resolved.sandboxQueueName, { workerConcurrency: 1 });
     await warnAboutStrandedRuns(resolved);
   } catch (err) {
     // Once DBOS is launched, the caller gets no worker to stop: stop it here, so no run goes on
@@ -123,7 +129,7 @@ function outlineOf(wf: WorkflowDefinition<any, any>): WorkflowOutline {
  * the app, or queued on another queue (such as the single "sanoma" queue before queues were
  * named per app).
  */
-async function warnAboutStrandedRuns({ appName, version, queueName }: ResolvedConfig) {
+async function warnAboutStrandedRuns({ appName, version, queueName, sandboxQueueName }: ResolvedConfig) {
   const runs = await DBOS.listWorkflows({
     status: dbosStatusesOf("queued", "running"),
     applicationName: appName,
@@ -133,7 +139,12 @@ async function warnAboutStrandedRuns({ appName, version, queueName }: ResolvedCo
   const otherVersion = runs.filter((r) => r.applicationVersion && r.applicationVersion !== version);
   // Recovery moves a worker's own runs to DBOS's internal queues, which are fine.
   const otherQueue = runs.filter(
-    (r) => !otherVersion.includes(r) && r.queueName && r.queueName !== queueName && !r.queueName.startsWith("_dbos_"),
+    (r) =>
+      !otherVersion.includes(r) &&
+      r.queueName &&
+      r.queueName !== queueName &&
+      r.queueName !== sandboxQueueName &&
+      !r.queueName.startsWith("_dbos_"),
   );
   if (!otherVersion.length && !otherQueue.length) return;
   const ids = [...otherVersion, ...otherQueue].map((r) => r.workflowID);
@@ -149,18 +160,20 @@ async function warnAboutStrandedRuns({ appName, version, queueName }: ResolvedCo
 /** Registers the name with DBOS: its runs take the definition of that name from the running worker. */
 function register(name: string) {
   DBOS.registerWorkflow(
-    async ({ input, startedBy }: RunArgs) => {
+    async ({ input, startedBy, sandbox }: RunArgs) => {
       const state = current;
       // A stopped worker's state stays current while DBOS shuts down.
       if (!state || state.stopped) throw new Error(`Run of "${name}" started with no worker running`);
-      const running = state.workflows.get(name);
+      const wf = state.workflows.get(name);
+      const outline = state.outlines.get(name);
       // Registered by an earlier worker in this process, whose config had it; this one's has not.
-      if (!running) throw new Error(`Run of "${name}" refused: this worker's config has no workflow of that name`);
-      const { wf, outline } = running;
+      if (!wf || !outline)
+        throw new Error(`Run of "${name}" refused: this worker's config has no workflow of that name`);
       const run: Run = {
         id: DBOS.workflowID!,
         workflow: wf.name,
         actor: startedBy,
+        ...(sandbox === undefined ? {} : { sandbox }),
         approvals: [],
         seq: 0,
         tail: Promise.resolve(),
@@ -175,6 +188,11 @@ function register(name: string) {
         try {
           // The one parse of the input: the client checked it, but sent it as given.
           const parsed = parseOrThrow(wf.input, input, `The input does not match ${wf.name}'s schema`);
+          if (sandbox !== undefined) {
+            // Imported here, so a live worker never loads the Gherkin parser or faker.
+            const { seedSandbox } = await import("./sandbox.ts");
+            await seedSandbox(run, sandbox);
+          }
           output = await wf.run(buildCtx(wf, run), parsed);
         } finally {
           // Before the outcome is written: a call still queued must find the run ended.
