@@ -68,7 +68,7 @@ export interface OpEntry {
    * input, and what the fake returned for it, parsed by `output`, or why it did not (what it
    * threw, or how its reply is off the contract). `input` is null when the fake does not
    * implement the operation. Mocks are for workflow operations; resource reads and imports read
-   * real state and a Test run never calls them, so they have none.
+   * real state and a sandbox run never calls them, so they have none.
    */
   mock?: { input: unknown; output: unknown } | { input: unknown; error: string };
 }
