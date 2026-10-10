@@ -105,25 +105,37 @@ export function initialValues(fields: Field[]): Values {
   return Object.fromEntries(fields.map((f) => [f.key, initialValue(f, f.default)]));
 }
 
-export function initialValue(field: Field, d: unknown): Value {
+/**
+ * The values of a given input (a scenario's), each field's default where it has none, to show
+ * read-only. Date-times stay as given: a `datetime-local` value is in this process's time zone,
+ * so the server and the browser would render different text.
+ */
+export function valuesFrom(fields: Field[], input: unknown): Values {
+  return Object.fromEntries(
+    fields.map((f) => [f.key, initialValue(f, isRecord(input) && f.key in input ? input[f.key] : f.default, true)]),
+  );
+}
+
+/** A field's starting value from `d`; with `iso`, a date-time is kept as given rather than made local. */
+export function initialValue(field: Field, d: unknown, iso = false): Value {
   switch (field.kind) {
     case "array":
-      return Array.isArray(d) ? d.map((v) => initialValue(field.item, v)) : [];
+      return Array.isArray(d) ? d.map((v) => initialValue(field.item, v, iso)) : [];
     case "object":
       return Object.fromEntries(
-        field.fields.map((f) => [f.key, initialScalar(f, isRecord(d) && f.key in d ? d[f.key] : f.default)]),
+        field.fields.map((f) => [f.key, initialScalar(f, isRecord(d) && f.key in d ? d[f.key] : f.default, iso)]),
       );
     default:
-      return initialScalar(field, d);
+      return initialScalar(field, d, iso);
   }
 }
 
-function initialScalar(field: ScalarField, d: unknown): ScalarValue {
+function initialScalar(field: ScalarField, d: unknown, iso = false): ScalarValue {
   switch (field.kind) {
     case "string":
       return typeof d === "string" ? d : "";
     case "datetime":
-      return typeof d === "string" ? toLocalInput(d) : "";
+      return typeof d === "string" ? (iso ? d : toLocalInput(d)) : "";
     case "number":
     case "integer":
       return typeof d === "number" ? String(d) : "";

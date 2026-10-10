@@ -160,7 +160,7 @@ function OpDetails({ op, scenarios }: { op: OpEntry; scenarios: ScenarioEntry[] 
               return (
                 <li key={s.name} className="flex flex-wrap items-center gap-1.5">
                   <Link
-                    to="/workflows/$name"
+                    to="/workflows/$name/new"
                     params={{ name: s.workflow }}
                     search={{ scenario: s.name }}
                     className="hover:underline"
