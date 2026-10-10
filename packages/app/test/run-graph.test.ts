@@ -59,14 +59,17 @@ const called = (op: string, more: object = {}): Body => ({
   ...more,
 });
 /** A workflow's approval, asked for. */
-const requested = (title: string, id = `approval-${title}`): Body => ({
+const requested = (title: string, id = `approval-${title}`, more: object = {}): Body => ({
   type: "approval.requested",
   approval: id,
   title,
   approver: "marketing-lead",
   requestedBy: "workflow",
   covers: [],
+  ...more,
 });
+/** A sleep, until a time. */
+const slept = (until: number, more: object = {}): Body => ({ type: "sleep.started", until, ...more });
 const inGroup = (body: Body, index: number, size = 3, id = "all:1"): Body => ({ ...body, group: { id, index, size } });
 
 describe("runGraph", () => {
@@ -301,7 +304,8 @@ describe("runGraph", () => {
   });
 
   describe("given the workflow's outline", () => {
-    // An outline that calls resend.broadcast.send in both cases of a branch.
+    // ghost.post.create, then resend.broadcast.send in both arms of a branch, then an approval and a
+    // sleep in a loop, then a try whose handler posts again.
     const outline: OutlineNode[] = [
       { kind: "op", path: "0", id: "ghost.post.create", span: [0, 10] },
       {
@@ -313,54 +317,88 @@ describe("runGraph", () => {
           [{ kind: "op", path: "1.1.0", id: "resend.broadcast.send", span: [40, 50] }],
         ],
       },
-      { kind: "approval", path: "2", title: "Send it?", span: [60, 70] },
-      { kind: "approval", path: "3", span: [80, 90] },
-      { kind: "sleep", path: "4", span: [100, 110] },
-      { kind: "op", path: "5", id: "*.post.create", span: [120, 130] },
+      {
+        kind: "repeat",
+        path: "2",
+        span: [60, 120],
+        body: [
+          { kind: "approval", path: "2.0.0", title: "Send it?", span: [70, 80] },
+          { kind: "sleep", path: "2.0.1", span: [100, 110] },
+        ],
+      },
+      {
+        kind: "try",
+        path: "3",
+        span: [130, 180],
+        body: [{ kind: "op", path: "3.0.0", id: "ghost.post.create", span: [140, 150] }],
+        handler: [{ kind: "op", path: "3.1.0", id: "ghost.post.create", span: [160, 170] }],
+      },
     ];
     const spansIn = (records: LedgerRecord[]) => spans(runGraph(records, run("running"), NOW, outline).nodes);
 
-    it("points an operation's call at the outline's calls of that operation, wherever they are", () => {
+    it("points each call at the node its record names: a loop's passes at one, two calls of one operation at their two", () => {
+      const until = NOW + 60_000;
+      expect(
+        spansIn(
+          ledger(
+            started,
+            called("ghost.post.create", { node: "0" }),
+            called("resend.broadcast.send", { node: "1.1.0" }),
+            requested("Send it?", "a1", { node: "2.0.0" }),
+            slept(until, { node: "2.0.1" }),
+            requested("Send it?", "a2", { node: "2.0.0" }),
+            slept(until, { node: "2.0.1" }),
+            called("ghost.post.create", { node: "3.0.0" }),
+            called("ghost.post.create", { node: "3.1.0" }),
+          ),
+        ),
+      ).toEqual([
+        "start null",
+        "op:1 [0,10]",
+        "op:2 [40,50]",
+        "approval:a1 [70,80]",
+        "sleep:4 [100,110]",
+        "approval:a2 [70,80]",
+        "sleep:6 [100,110]",
+        "op:7 [140,150]",
+        "op:8 [160,170]",
+        "end null",
+      ]);
+    });
+
+    it("points a call nowhere when its record names no node, or the outline has no such node or another call there", () => {
       expect(
         spansIn(
           ledger(
             started,
             called("ghost.post.create"),
-            called("resend.broadcast.send"),
-            called("x.post.create"),
-            called("x.mail.send"),
+            called("ghost.post.create", { node: "9" }),
+            // The file changed since the run: a sleep, and another operation, where the call was.
+            called("ghost.post.create", { node: "2.0.1" }),
+            called("ghost.post.create", { node: "1.0.0" }),
+            requested("Other", "a1", { node: "2.0.0" }),
           ),
         ),
-      ).toEqual([
-        "start null",
-        // Its own calls, not the computed one it also fits.
-        "op:1 [[0,10]]",
-        "op:2 [[20,30],[40,50]]",
-        // None of its own: the calls with a computed segment that fits it.
-        "op:3 [[120,130]]",
-        // Nothing fits: nowhere.
-        "op:4 null",
-        "end null",
-      ]);
+      ).toEqual(["start null", "op:1 null", "op:2 null", "op:3 null", "op:4 null", "approval:a1 null", "end null"]);
     });
 
-    it("points an approval at the outline's approvals with its title, or else at the untitled ones, and a sleep at the sleeps", () => {
-      const until = NOW + 60_000;
-      expect(
-        spansIn(ledger(started, requested("Send it?"), requested("Other"), { type: "sleep.started", until })),
-      ).toEqual([
-        "start null",
-        "approval:approval-Send it? [[60,70]]",
-        "approval:approval-Other [[80,90]]",
-        "sleep:3 [[100,110]]",
-        "end null",
-      ]);
+    it("places a call at a computed operation (`*`) that fits it, and an approval at a computed title", () => {
+      const computed: OutlineNode[] = [
+        { kind: "op", path: "0", id: "*.post.create", span: [0, 10] },
+        { kind: "approval", path: "1", span: [20, 30] },
+      ];
+      const { nodes } = runGraph(
+        ledger(started, called("ghost.post.create", { node: "0" }), requested("Any", "a1", { node: "1" })),
+        run("running"),
+        NOW,
+        computed,
+      );
+      expect(spans(nodes)).toEqual(["start null", "op:1 [0,10]", "approval:a1 [20,30]", "end null"]);
     });
 
-    it("points an approval nowhere when no approval has its title and none is untitled", () => {
-      const titled: OutlineNode[] = [{ kind: "approval", path: "0", title: "Send it?", span: [60, 70] }];
-      const { nodes } = runGraph(ledger(started, requested("Other")), run("running"), NOW, titled);
-      expect(spans(nodes)).toEqual(["start null", "approval:approval-Other null", "end null"]);
+    it("places a policy's held call at the node its approval names", () => {
+      const held = requested("Hold", "h1", { op: "ghost.post.create", opSeq: 2, node: "3.0.0", requestedBy: "policy" });
+      expect(spansIn(ledger(started, held))).toEqual(["start null", "op:2 [140,150]", "end null"]);
     });
   });
 });

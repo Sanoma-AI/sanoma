@@ -83,6 +83,33 @@ describe("outlineGraph", () => {
     expect(pairs(edges)).toEqual(["start->cluster:0", "op:1->op:2", "cluster:0->cluster:3", "cluster:3->end"]);
   });
 
+  it("draws a try as its body beside a cluster labelled on error, both from the node before", () => {
+    const { nodes, edges } = outlineGraph([
+      op("x.item.get"),
+      { kind: "try", body: [op("x.item.send")], handler: [op("x.item.log"), { kind: "sleep" }] },
+      op("x.item.done"),
+    ]);
+    expect(labels(nodes)).toEqual([
+      "start start",
+      "op:0 x.item.get",
+      "op:1 x.item.send",
+      "cluster:2 on error",
+      "op:3 x.item.log in cluster:2",
+      "sleep:4 sleep in cluster:2",
+      "op:5 x.item.done",
+      "end end",
+    ]);
+    expect(pairs(edges)).toEqual([
+      "start->op:0",
+      "op:0->op:1",
+      "op:0->cluster:2",
+      "op:3->sleep:4",
+      "op:1->op:5",
+      "cluster:2->op:5",
+      "op:5->end",
+    ]);
+  });
+
   it("draws a loop's body as a chain in a cluster labelled repeats", () => {
     const { nodes, edges } = outlineGraph([
       { kind: "repeat", body: [op("x.item.get"), { kind: "sleep" }] },
@@ -178,29 +205,21 @@ describe("outlineGraph", () => {
     ]);
   });
 
-  it("finds the node a click in the source is in: the innermost, the first of equals, or none", () => {
+  it("finds the node a click in the source is in: the innermost, the last of equals (a loop's latest pass), or none", () => {
     const nodes: GraphNode[] = [
-      { id: "op:0", kind: "op", label: "a.b.outer", spans: [[0, 40]] },
-      { id: "op:1", kind: "op", label: "a.b.inner", spans: [[10, 20]] },
-      { id: "op:2", kind: "op", label: "a.b.inner", spans: [[10, 20]] },
-      {
-        id: "sleep:3",
-        kind: "sleep",
-        label: "sleep",
-        spans: [
-          [50, 60],
-          [70, 80],
-        ],
-      },
+      { id: "op:0", kind: "op", label: "a.b.outer", span: [0, 40] },
+      { id: "op:1", kind: "op", label: "a.b.inner", span: [10, 20] },
+      { id: "op:2", kind: "op", label: "a.b.inner", span: [10, 20] },
+      { id: "sleep:3", kind: "sleep", label: "sleep", span: [50, 60] },
       { id: "end", kind: "end", label: "end" },
     ];
     const at = (offset: number) => nodeAt(nodes, offset)?.id;
     // A span's end is outside it.
-    expect([at(5), at(10), at(15), at(19), at(20), at(75), at(40)]).toEqual([
+    expect([at(5), at(10), at(15), at(19), at(20), at(55), at(40)]).toEqual([
       "op:0",
-      "op:1",
-      "op:1",
-      "op:1",
+      "op:2",
+      "op:2",
+      "op:2",
       "op:0",
       "sleep:3",
       undefined,

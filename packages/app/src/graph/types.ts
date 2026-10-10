@@ -40,8 +40,9 @@ export interface ApprovalStepState extends StepState {
 /**
  * What a graph is built from: a workflow's outline as `outlineWorkflow` reads it (an
  * `OutlineNode[]` is a `Step[]`, each call with its `span` in the source), or a run's ledger made
- * into the same shape, with each step's state. `key` names a run's node, so it keeps its id from
- * one poll to the next.
+ * into the same shape, with each step's state and, where its record names an outline node that
+ * is still its call, that node's `span`. `key` names a run's node, so it keeps its id from one poll
+ * to the next.
  */
 export type Step =
   | { kind: "op"; id: string; key?: string; span?: Span; state?: OpState }
@@ -66,7 +67,7 @@ interface Base {
   /** The `cluster` node it is drawn inside, by id. */
   parent?: string;
   /** Where a call's node is in the workflow's source, when the outline says. */
-  spans?: Span[];
+  span?: Span;
 }
 
 export type GraphNode =
@@ -87,7 +88,7 @@ export type GraphNode =
 export type GraphNodeKind = GraphNode["kind"];
 
 /** True for a node a page can select: one with a place in the source, or a ledger record. */
-export const isSelectable = (node: GraphNode): boolean => !!node.spans || ("state" in node && !!node.state?.recordId);
+export const isSelectable = (node: GraphNode): boolean => !!node.span || ("state" in node && !!node.state?.recordId);
 
 export interface GraphEdge {
   id: string;
@@ -103,18 +104,18 @@ export interface Graph {
 /**
  * The node a click at `offset` in the source is in: of the nodes with a span that holds it (its
  * end exclusive, as `highlightedLines` reads it), the one whose span is smallest, so a call made
- * in another's arguments wins over the outer call. The first of equals: a run's steps of one call
- * site share its spans.
+ * in another's arguments wins over the outer call. The last of equals: a run's steps of one call
+ * (a loop's passes) share its span, and the latest is the one the run is on.
  */
 export function nodeAt(nodes: readonly GraphNode[], offset: number): GraphNode | undefined {
   let found: GraphNode | undefined;
   let size = Number.POSITIVE_INFINITY;
   for (const node of nodes) {
-    for (const [start, end] of node.spans ?? []) {
-      if (start <= offset && offset < end && end - start < size) {
-        found = node;
-        size = end - start;
-      }
+    if (!node.span) continue;
+    const [start, end] = node.span;
+    if (start <= offset && offset < end && end - start <= size) {
+      found = node;
+      size = end - start;
     }
   }
   return found;
