@@ -35,6 +35,8 @@ export function RunRail({ name }: { name: string }) {
   const navigate = useNavigate();
   const { data: runs, error } = useSuspenseQuery(railQuery(name, filter));
   const shown = railRuns(filter, runs);
+  // The rail's links keep the filter; All leaves the URL without `?runs=`.
+  const search = { runs: filter === "all" ? undefined : filter };
   return (
     <aside
       aria-label="Runs of this workflow"
@@ -44,6 +46,7 @@ export function RunRail({ name }: { name: string }) {
         <Link
           to="/workflows/$name"
           params={{ name }}
+          search={search}
           activeOptions={{ exact: true, includeSearch: false }}
           activeProps={RAIL_ACTIVE}
           className={PANE_LINK}
@@ -53,6 +56,7 @@ export function RunRail({ name }: { name: string }) {
         <Link
           to="/workflows/$name/new"
           params={{ name }}
+          search={search}
           activeOptions={{ includeSearch: false }}
           activeProps={RAIL_ACTIVE}
           className={PANE_LINK}
@@ -91,7 +95,7 @@ export function RunRail({ name }: { name: string }) {
         <ul className="flex max-h-[70vh] flex-col overflow-y-auto">
           {shown.map((run) => (
             <li key={run.runId}>
-              <RunLink run={run} />
+              <RunLink run={run} search={search} />
             </li>
           ))}
         </ul>
@@ -107,10 +111,16 @@ export function RunRail({ name }: { name: string }) {
  * A run in the rail: its status (and what it waits on), its sandbox, who started it and when.
  * Memoised: a poll keeps an unchanged run's object, so only the runs that changed draw again.
  */
-const RunLink = memo(function RunLink({ run }: { run: RunSummary }) {
+const RunLink = memo(function RunLink({ run, search }: { run: RunSummary; search: { runs: RunFilter | undefined } }) {
   const waitingOn = run.status === "waiting" ? pendingApprovals(run)[0]?.title : undefined;
   return (
-    <Link {...runLink(run)} activeOptions={{ includeSearch: false }} activeProps={RAIL_ACTIVE} className={RAIL_LINK}>
+    <Link
+      {...runLink(run)}
+      search={search}
+      activeOptions={{ includeSearch: false }}
+      activeProps={RAIL_ACTIVE}
+      className={RAIL_LINK}
+    >
       <span className="flex min-w-0 items-center gap-2">
         <StatusDot tone={RUN_TONE[run.status]} />
         <span className="shrink-0">{run.status}</span>

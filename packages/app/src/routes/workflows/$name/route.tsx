@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { createFileRoute, notFound, Outlet, retainSearchParams } from "@tanstack/react-router";
+import { createFileRoute, notFound, Outlet } from "@tanstack/react-router";
 import { Badge } from "#/components/ui/badge.tsx";
 import { loadCode, loadGraph, Notice, PageHeader, pageTitle } from "#/components/common.tsx";
 import { RunRail } from "#/components/run-rail.tsx";
@@ -20,9 +20,9 @@ import {
  * run, or one run). The panes read what this loader puts in the query client.
  */
 export const Route = createFileRoute("/workflows/$name")({
-  // `?runs=` filters the rail; every link under this page keeps it.
+  // `?runs=` filters the rail. The rail's own links carry it; a middleware retaining it would
+  // put it on the sidebar's links to other workflows too.
   validateSearch: WorkflowSearch,
-  search: { middlewares: [retainSearchParams(["runs"])] },
   loaderDeps: ({ search }) => ({ runs: search.runs }),
   loader: async ({ context: { queryClient }, params, deps }) => {
     if (!import.meta.env.SSR) {
