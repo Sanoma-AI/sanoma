@@ -211,7 +211,8 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
 
 /**
  * Each driver's `env`, checked against `process.env`, one variable at a time: only the declared
- * names are read, an empty value counts as unset, and a value is never kept.
+ * names are read, an empty value counts as unset, and a value is never kept. A variable two
+ * drivers of one vendor declare is checked against each declaration, and the results merged.
  */
 function credentialsOf(drivers: readonly Driver[]): Map<string, CredentialStatus[]> {
   const map = new Map<string, CredentialStatus[]>();
@@ -220,11 +221,25 @@ function credentialsOf(drivers: readonly Driver[]): Map<string, CredentialStatus
     const list = map.get(vendor) ?? [];
     map.set(vendor, list);
     for (const [name, schema] of Object.entries(env.shape)) {
-      if (list.some((c) => c.name === name)) continue;
-      list.push(credentialStatus(name, schema, process.env[name] || undefined));
+      const status = credentialStatus(name, schema, process.env[name] || undefined);
+      const i = list.findIndex((c) => c.name === name);
+      if (i === -1) list.push(status);
+      else list[i] = merged(list[i]!, status);
     }
   }
   return map;
+}
+
+const SEVERITY: Record<CredentialStatus["status"], number> = { set: 0, missing: 1, invalid: 2 };
+
+/**
+ * Two declarations of one variable: the worse status (`invalid`, then `missing`) with its problem,
+ * the first description, and optional only when both allow it unset.
+ */
+function merged(first: CredentialStatus, next: CredentialStatus): CredentialStatus {
+  const worse = SEVERITY[next.status] > SEVERITY[first.status] ? next : first;
+  const description = first.description ?? next.description;
+  return { ...worse, ...(description !== undefined && { description }), optional: first.optional && next.optional };
 }
 
 function credentialStatus(

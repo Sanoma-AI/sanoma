@@ -114,6 +114,23 @@ describe("a driver's env", () => {
     expect(JSON.stringify([credentials, refusal])).not.toContain(VALUE);
   });
 
+  it("merges two drivers' declarations of one variable, keeping the worse status", async () => {
+    vi.stubEnv(URL_VAR, "https://acme.example.test");
+    vi.stubEnv(KEY_VAR, KEY);
+    const stricter = defineDriver(acme, impl, {
+      env: z.object({ [KEY_VAR]: z.string().regex(/^key_[0-9]+$/, "an API key, key_<digits>") }),
+    });
+    const twoDrivers = { ...config, drivers: [acmeDriver, stricter] };
+    expect(resolveConfig(twoDrivers).credentials.get("acme")?.[1]).toEqual({
+      name: KEY_VAR,
+      description: "an API key",
+      optional: false,
+      status: "invalid",
+      problem: "an API key, key_<digits>",
+    });
+    await expect(startWorker(twoDrivers)).rejects.toThrow(`${KEY_VAR} is invalid (an API key, key_<digits>)`);
+  });
+
   it("has no entry for a vendor whose drivers declare none", () => {
     const plain = defineDriver(acme, { thing: { get: async ({ id }) => ({ id }) } });
     expect(resolveConfig({ ...config, drivers: [plain] }).credentials.size).toBe(0);
