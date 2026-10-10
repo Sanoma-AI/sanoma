@@ -63,7 +63,7 @@ With its own `resolveActor`, the page never asks for a name: it shows who the de
 
 The page uses server functions; scripts (and later Slack or access-request callbacks) use this JSON API. Requests that change something name the actor in the `x-sanoma-actor` header (URI-encoded), or are refused with 400.
 
-- `GET /api/config`: `describeConfig(config)`, including `version` and `policy`, with each workflow's `outline`.
+- `GET /api/config`: `describeConfig(config)`, including `version` and `policy`, with each workflow's `outline`, and the resources the data files declare with the data files' `problems`. A data file with a problem does not stop the app: `startApp` warns about it on the console and leaves its resources out.
 - `GET /api/runs?limit=50&status=waiting`: recent runs, newest first (`limit` 1 to 500), only those with `status` when given (`queued`, `running`, `waiting`, `finished`, `failed` or `cancelled`).
 - `GET /api/runs/:id`: `{ run, ledger, ledgerError?, approvals }`. `ledgerError` says why `ledger` is empty: the ledger could not be read, or it has no records for a run that has started.
 - `POST /api/runs` with `{ "workflow": name, "input": {...} }`: 201 `{ runId }`.

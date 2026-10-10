@@ -1,6 +1,7 @@
 import { parseSync, visitorKeys } from "oxc-parser";
 
-// What the lint and the outline share: one way to parse a file and one way to walk it.
+// What the lints, the outline and the data-file reader share: one way to parse a file, walk it
+// and say where in it a problem is.
 
 /** oxc-parser's ESTree nodes, read by shape. */
 export type Node = any;
@@ -25,3 +26,36 @@ const CODE_KEYS = new Map(
 
 /** A node's children in source order, by oxc-parser's `visitorKeys`, without its types. A hole in a list is `null`. */
 export const childrenOf = (node: Node): Node[] => (CODE_KEYS.get(node.type) ?? []).flatMap((key) => node[key] ?? []);
+
+/** Where an offset into `source` is, as a line and a column, both from 1. */
+export function locator(source: string): (offset: number) => { line: number; column: number } {
+  const lineStarts = [0];
+  for (let i = 0; i < source.length; i++) if (source[i] === "\n") lineStarts.push(i + 1);
+  return (offset) => {
+    let line = 0;
+    while (line + 1 < lineStarts.length && lineStarts[line + 1]! <= offset) line++;
+    return { line: line + 1, column: offset - lineStarts[line]! + 1 };
+  };
+}
+
+/** Something wrong in a file, at a line and column from 1. */
+export interface LintProblem {
+  line: number;
+  column: number;
+  message: string;
+}
+
+/** A file parsed, its syntax errors as problems, and offsets as lines and columns from 1. */
+export function parsed(source: string, filename: string) {
+  const { program, errors } = parse(filename, source);
+  const at = locator(source);
+  const problems: LintProblem[] = errors.map((e) => ({
+    ...at(e.labels?.[0]?.start ?? 0),
+    message: `syntax: ${e.message}`,
+  }));
+  return { program: program as Node, problems, at };
+}
+
+/** Problems in the order of their place in the file. */
+export const byPosition = <P extends Omit<LintProblem, "message">>(problems: P[]): P[] =>
+  problems.toSorted((a, b) => a.line - b.line || a.column - b.column);

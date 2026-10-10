@@ -190,6 +190,9 @@ describe("the API", () => {
     expect(JSON.stringify(body)).not.toContain(line);
     expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.effect).toBe("send");
     expect(body.vendors.resend).toMatchObject({ title: "Resend", logo: { src: expect.stringMatching(/^data:/) } });
+    // No data files beside the config: no declared resources and no problems, passed through as they are.
+    expect(body.resources).toEqual([]);
+    expect(body.problems).toEqual([]);
   });
 
   it("refuses a run without an actor, for an unknown workflow, or with input the schema refuses", async () => {
@@ -584,16 +587,23 @@ describe("the page", () => {
   });
 });
 
-// One more app on the file's database, to test three things a deployment may change: its own
-// resolveActor, listening on every interface, and a ledger the worker does not write to.
+// One more app on the file's database, to test four things a deployment may change: its own
+// resolveActor, listening on every interface, a ledger the worker does not write to, and data
+// files, one of them broken.
 describe("an app configured otherwise", () => {
   let dir: string;
   let other: App;
+  const warned: string[] = [];
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), "sanoma-app-ledger-"));
+    mkdirSync(join(dir, "resources"));
+    const GH = `import { github } from "@sanoma/connector-github/resources";\n`;
+    writeFileSync(join(dir, "resources", "good.ts"), `${GH}export const web = github.repository({ name: "web" });\n`);
+    writeFileSync(join(dir, "resources", "bad.ts"), `${GH}export const docs = github.repository({ name: 1 });\n`);
+    const warn = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => void warned.push(args.join(" ")));
     other = await startApp(
       // A directory nothing has written to yet: the worker keeps its records in memory.
-      { ...config, ledger: jsonlLedger(join(dir, "ledger")) },
+      { ...config, ledger: jsonlLedger(join(dir, "ledger")), root: dir },
       {
         host: "0.0.0.0",
         // Says who is asking from a test header, the way a hosted deployment reads its login.
@@ -604,11 +614,29 @@ describe("an app configured otherwise", () => {
         },
       },
     );
+    warn.mockRestore();
   });
   afterAll(async () => {
     await other?.close();
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it("boots with broken data files: lists the resources it could read, and the problems", async () => {
+    expect(warned).toEqual([
+      expect.stringMatching(/^sanoma app: the data files have problems.*\n {2}resources\/bad\.ts:2:1: /s),
+    ]);
+    const { body } = await call<ConfigDescription>("/api/config", { base: other.url });
+    expect(body.resources.map((r) => r.id)).toEqual(["resources/good.ts#web"]);
+    expect(body.problems).toEqual([
+      {
+        file: "resources/bad.ts",
+        line: 2,
+        column: 1,
+        message: expect.stringMatching(/^export const docs: github\.repository: /),
+      },
+    ]);
+  });
+
   const post = (user?: string) =>
     call<ErrorResponse & { runId?: string }>("/api/runs", {
       method: "POST",

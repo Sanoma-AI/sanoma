@@ -24,7 +24,10 @@ A data file declares resources with the constructors in `@sanoma/connector-githu
 import { github } from "@sanoma/connector-github/resources";
 
 export const site = github.repository({ name: "website", delete_branch_on_merge: true, has_wiki: false });
+export const siteMain = github.branch_protection({ repository_id: site, pattern: "main", enforce_admins: true });
 ```
+
+A branch protection rule names its repository by the declared repository itself (`repository_id: site`), which stands for its name: the rule is `website:main`. Only `repository_id` takes a resource, and only a repository; see [Data files](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#data-files).
 
 The fields are the provider's attributes, by their names. A list block of at most one item (`pages`, `security_and_analysis`, `template`) is one object. Only declared fields are compared for drift; sets (`topics`, and five lists in a branch protection rule) are compared in any order.
 
@@ -32,7 +35,7 @@ The logo is GitHub's mark from [Octicons](https://primer.style/octicons/) (`mark
 
 ## Resource types
 
-`src/resources.gen.ts` is generated from the provider's schema by `pnpm generate`, which runs [`@sanoma/bridge/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the provider (its release, sha256 and recorded schema are `@sanoma/bridge`'s pin and fixture), the types to generate, and the attributes whose change replaces the object (ForceNew in the provider's source, which the schema does not carry). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing. `src/connector.ts` is the rest, one `tfConnector` record from [`@sanoma/bridge/connector`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/README.md#connectors-for-opentofu-providers): each type's title, identity and `find`, and GitHub's title and logo. The connector, the constructors, the driver and the fake all derive from it.
+`src/resources.gen.ts` is generated from the provider's schema by `pnpm generate`, which runs [`@sanoma/bridge/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the provider (its release, sha256 and recorded schema are `@sanoma/bridge`'s pin and fixture), the types to generate, and the attributes whose change replaces the object (ForceNew in the provider's source, which the schema does not carry). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing. `src/connector.ts` is the rest, one `tfConnector` record from [`@sanoma/bridge/connector`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/README.md#connectors-for-opentofu-providers): each type's title, identity and `find`, the field that names another resource (`branch_protection.repository_id`), and GitHub's title, logo and package. The connector, the constructors, the driver and the fake all derive from it.
 
 Attributes that are computed and not optional (`html_url`, `repo_id`) are vendor-owned: never drift, and a data file may not declare them. Those the provider marks computed and optional (`etag`, `topics`, `visibility`, `default_branch`) are yours to set, and compared only when declared.
 

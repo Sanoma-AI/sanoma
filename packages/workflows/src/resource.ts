@@ -11,7 +11,16 @@ export interface ResourceFields {
   readonly writeOnly: readonly string[];
   /** Lists whose order is the vendor's (a set): compared as multisets, in no order. */
   readonly unordered?: readonly string[];
+  /**
+   * Fields that name another declared resource, by dotted path, to the `<vendor>.<type>` it is:
+   * `{ repository_id: "github.repository" }`. A data file gives that resource there
+   * (`repository_id: site`), which stands for its `name`; anywhere else a resource is refused.
+   */
+  readonly references?: References;
 }
+
+/** A resource type's `fields.references`: by dotted path, the `<vendor>.<type>` each names. */
+export type References = { readonly [path: string]: string };
 
 type State = Record<string, unknown>;
 
@@ -41,15 +50,50 @@ export interface ResourceSpec<S extends z.ZodObject = z.ZodObject> {
   normalize?: (state: State, desired: z.input<S>) => State;
 }
 
-/** A resource a data file declares: `github.repository({ name: "sanoma" })`. Plain data, so a reader can parse it. */
-export interface Declared<T = State> {
-  readonly kind: "resource";
+/**
+ * Where a declared resource keeps its brand, its type's `<vendor>.<type>`: a symbol, so a field
+ * holding a resource is told from data.
+ */
+export const DECLARED: unique symbol = Symbol("sanoma.declared");
+
+/** A resource a data file declares: `github.repository({ name: "sanoma" })`. */
+export interface Declared<Id extends string = string, T = State> {
+  readonly [DECLARED]: Id;
   readonly vendor: string;
   readonly type: string;
   /** The vendor's id for it: what `find` made of `desired`. */
   readonly name: string;
+  /**
+   * Its fields, each resource it names replaced by that resource's `name`: what its type
+   * checked, and what a drift check compares.
+   */
   readonly desired: T;
+  /**
+   * Where it names another resource: the field's dotted path (a list item's with its index,
+   * `teams.0`) to that resource's `<vendor>.<type>:<name>`.
+   */
+  readonly refs: Readonly<Record<string, string>>;
 }
+
+/**
+ * What a resource type's constructor takes: its fields, where `R` (its `fields.references`)
+ * names a path, a declared resource of that type instead of a value (`repository_id: site`).
+ */
+export type Declaring<T, R extends References = {}> = [keyof R] extends [never] ? T : DeclaringAt<T, R, "">;
+
+type DeclaringAt<T, R extends References, P extends string> = T extends readonly (infer I)[]
+  ? DeclaringAt<I, R, P>[]
+  : T extends object
+    ? { [K in keyof T]: K extends string ? DeclaringField<T[K], R, P extends "" ? K : `${P}.${K}`> : T[K] }
+    : T;
+
+type DeclaringField<V, R extends References, P extends string> = P extends keyof R
+  ? V | DeclaredOf<R[P]>
+  : [Extract<keyof R, `${P}.${string}`>] extends [never]
+    ? V
+    : DeclaringAt<V, R, P>;
+
+type DeclaredOf<Id> = Id extends string ? Declared<Id> : never;
 
 const importId = z.string().min(1);
 /** What a driver keeps beside a state (an OpenTofu provider's private data and state version), passed back unchanged. */
@@ -77,14 +121,20 @@ export type ResourceOps<S extends z.ZodObject> = {
  * A resource type: call it to declare a resource in a data file, and give it to
  * `defineConnector` as a group, under its `type`: `defineConnector("github", { repository })`.
  */
-export interface Resource<S extends z.ZodObject = z.ZodObject> extends Readonly<Required<ResourceSpec<S>>> {
-  (desired: z.input<S>): Declared<z.input<S>>;
+export interface Resource<
+  S extends z.ZodObject = z.ZodObject,
+  Id extends string = string,
+  R extends References = {},
+> extends Readonly<Required<ResourceSpec<S>>> {
+  (desired: Declaring<z.input<S>, R>): Declared<Id, z.input<S>>;
   /** `read` and `import`, each effect `read`, idempotent, with the import id as `target`. */
   readonly ops: ResourceOps<S>;
   readonly [RESOURCE]: true;
 }
 
 const isObject = (v: unknown): v is State => typeof v === "object" && v !== null && !Array.isArray(v);
+
+const isDeclared = (v: unknown): v is Declared => isObject(v) && typeof (v as Partial<Declared>)[DECLARED] === "string";
 
 /** One order for a list compared as a multiset: by each item's JSON. */
 const canonical = (items: unknown[]) =>
@@ -163,14 +213,21 @@ function pathsIn(value: unknown, paths: ReadonlySet<string>, prefix = ""): strin
  *   returns `{ gone: true }` when the object no longer exists, else its fresh `state`. A
  *   driver may import first when it is given no state.
  *
- * Calling the result declares one resource, for a data file:
- * `repository({ name: "sanoma" })` is `{ kind: "resource", vendor, type, name: "sanoma", desired }`.
- * It refuses fields the schema does not have, fields the vendor owns (unless the identity names
- * them), values the schema rejects, and an empty identity.
+ * Calling the result declares one resource, for a data file: `repository({ name: "sanoma" })`
+ * is a `Declared`, `{ vendor, type, name: "sanoma", desired, refs: {} }`. It refuses fields the
+ * schema does not have, fields the vendor owns (unless the identity names them), values the
+ * schema rejects, and an empty identity. Where `fields.references` allows it, a field may name
+ * another declared resource of that type (`repository_id: site`): `desired` holds, and the
+ * schema and `find` read, that resource's `name`, and `refs` says where it was named.
  */
-export function defineResource<S extends z.ZodObject>(spec: ResourceSpec<S>): Resource<S> {
+export function defineResource<
+  S extends z.ZodObject,
+  const V extends string,
+  const T extends string,
+  const R extends References = {},
+>(spec: ResourceSpec<S> & { vendor: V; type: T; fields: { references?: R } }): Resource<S, `${V}.${T}`, R> {
   const { vendor, type, schema, fields, find } = spec;
-  const what = `${vendor}.${type}`;
+  const what: `${V}.${T}` = `${vendor}.${type}`;
   const io = opsOf(schema);
   const ops = {
     import: {
@@ -191,7 +248,31 @@ export function defineResource<S extends z.ZodObject>(spec: ResourceSpec<S>): Re
 
   const named = new Set(spec.identity.match(/[A-Za-z_][\w.]*/g));
   const owned = new Set(fields.vendorOwned.filter((path) => !named.has(path)));
-  const declare = (desired: z.input<S>): Declared<z.input<S>> => {
+  const references: References = fields.references ?? {};
+  const declare = (given: Declaring<z.input<S>, R>): Declared<`${V}.${T}`, z.input<S>> => {
+    const refs: Record<string, string> = {};
+    // Each resource `given` names, where `references` allows one of its type, replaced by its name.
+    // `path` is the field's, as `references` names it; `at` has list items' indexes too.
+    const resolve = (value: unknown, path: string, at: string): unknown => {
+      if (isDeclared(value)) {
+        const id = value[DECLARED];
+        const wants = references[path];
+        if (wants === undefined) throw new Error(`${what}: ${at} takes a value, not a resource (${id} ${value.name})`);
+        if (wants !== id)
+          throw new Error(`${what}: ${at} names a resource of type ${wants}, not ${id} (${value.name})`);
+        refs[at] = `${id}:${value.name}`;
+        return value.name;
+      }
+      if (Array.isArray(value)) return value.map((item, i) => resolve(item, path, `${at}.${i}`));
+      if (!isObject(value)) return value;
+      return Object.fromEntries(
+        Object.entries(value).map(([field, v]) => [
+          field,
+          resolve(v, path ? `${path}.${field}` : field, at ? `${at}.${field}` : field),
+        ]),
+      );
+    };
+    const desired = resolve(given, "", "") as z.input<S>;
     const unknown = Object.keys(desired ?? {}).filter((name) => !Object.hasOwn(schema.shape, name));
     if (unknown.length) throw new Error(`${what}: no field ${unknown.join(", ")}`);
     const vendors = pathsIn(desired, owned);
@@ -204,7 +285,7 @@ export function defineResource<S extends z.ZodObject>(spec: ResourceSpec<S>): Re
     if (!parsed.success) throw new Error(`${what}: ${z.prettifyError(parsed.error)}`);
     const name = find(desired);
     if (typeof name !== "string" || name === "") throw new Error(`${what}: its ${spec.identity} is missing`);
-    return Object.freeze({ kind: "resource", vendor, type, name, desired });
+    return Object.freeze({ [DECLARED]: what, vendor, type, name, desired, refs: Object.freeze(refs) });
   };
   const resource = Object.assign(declare, {
     vendor,
@@ -216,8 +297,8 @@ export function defineResource<S extends z.ZodObject>(spec: ResourceSpec<S>): Re
     find,
     normalize: spec.normalize ?? ((state: State, desired: z.input<S>) => compareDeclared(fields, state, desired)),
     ops,
+    // A symbol, so `defineConnector` tells a resource type from a group of operations.
+    [RESOURCE]: true as const,
   });
-  // A symbol, so `defineConnector` tells a resource type from a group of operations.
-  Object.defineProperty(resource, RESOURCE, { value: true });
-  return Object.freeze(resource) as Resource<S>;
+  return Object.freeze(resource);
 }

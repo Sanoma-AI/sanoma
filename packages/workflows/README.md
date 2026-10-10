@@ -114,7 +114,7 @@ const run = await client.run(runId); // run.status: "queued" | "running" | "wait
 
 `startedBy` is required. `start(workflow, input, { startedBy, runId })` with a `runId` makes a retried start idempotent: an id that exists returns that run when the workflow, the input (as JSON) and `startedBy` match, and is refused with `invalid_input`, naming what differs, when they do not. Of two starts racing with one new id, the first stands and the second is answered the same way. Errors the runtime and the client throw carry a `code` (`policy_denied`, `approval_rejected`, `not_approver`, `no_pending_approval`, `already_decided`, `run_not_found`, `driver_failed`, `invalid_input`, `run_ended`, `run_running`: `client.result` timed out with the run still going) and `data`. Read it with `errorCode(err)`, not `instanceof`: a run's error comes back from the database as a copy, so `errorCode(await client.result(runId).catch((e) => e))` is `"policy_denied"` for a denied call.
 
-`startWorker(config, { logLevel })` runs workflows and recovers interrupted runs. `SanomaClient` starts runs, lists them, records approval decisions and reads a run's ledger. `describeConfig(config)`, from `@sanoma/workflows/describe`, returns the same config as plain JSON (its version, each workflow's input as JSON Schema, the operations it may call and its [outline](#outline), each operation's effect and contract: its input as a caller sends it, `io: "input"`, and its output as parsed, `io: "output"`), each vendor's title, logo, package and homepage (`vendors`, by vendor id, the logo as `data:image/svg+xml` URLs), and the resource types (`resourceTypes`, see [Resources](#resources)), which is what a UI renders from.
+`startWorker(config, { logLevel })` runs workflows and recovers interrupted runs. `SanomaClient` starts runs, lists them, records approval decisions and reads a run's ledger. `describeConfig(config)`, from `@sanoma/workflows/describe`, returns the same config as plain JSON (its version, each workflow's input as JSON Schema, the operations it may call and its [outline](#outline), each operation's effect and contract: its input as a caller sends it, `io: "input"`, and its output as parsed, `io: "output"`), each vendor's title, logo, package and homepage (`vendors`, by vendor id, the logo as `data:image/svg+xml` URLs), the resource types (`resourceTypes`, see [Resources](#resources)), and the resources the data files declare with what is wrong in them (`resources` and `problems`, see [Data files](#data-files)), which is what a UI renders from.
 
 The worker, the client and the app find Postgres at the config's `databaseUrl`, else the `SANOMA_DATABASE_URL` environment variable, else `postgresql://postgres:dbos@localhost:5433/sanoma`, the database `pnpm db:up` starts from this repo's docker compose file. Set one of the first two anywhere but on your own machine.
 
@@ -171,20 +171,86 @@ export const repository = defineResource({
   title: "Repository",
   identity: "name", // how `find` makes the import id, for people
   schema, // a z.object: the fields a read returns, and a data file declares (less the vendor-owned ones)
-  fields: { immutable: [], vendorOwned: ["html_url"], writeOnly: [], unordered: ["topics"] },
+  fields: { immutable: [], vendorOwned: ["html_url"], writeOnly: [], unordered: ["topics"] }, // and `references`, below
   find: ({ name }) => name, // the vendor's id for a declared resource
   normalize, // optional: the part of a state a drift check compares; default `compareDeclared`
 });
 export const github = defineConnector("github", { repository });
 ```
 
-A resource type is a connector's group under its own `type`; `defineConnector` refuses one of another vendor, or under another key, and keeps the list on the connector, beside its vendor info. Its operations are `<vendor>.<type>.import` (`{ id }`, the import id, to the object's `state`) and `<vendor>.<type>.read` (`{ id, state?, handle? }`, a state from an earlier call, to `{ gone }` or the fresh `state`), both effect `read`, idempotent, with the import id as the policy's `target`. A driver implements them like any other. `handle` is the driver's own data about the object, opaque to everyone else, passed back unchanged (an OpenTofu driver keeps the provider's private data and state version in it).
+A resource type is a connector's group under its own `type`; `defineConnector` refuses one of another vendor, or under another key, or on a connector without `info.package` (data files import the types from `<package>/resources`), and keeps the list on the connector, beside its vendor info. Its operations are `<vendor>.<type>.import` (`{ id }`, the import id, to the object's `state`) and `<vendor>.<type>.read` (`{ id, state?, handle? }`, a state from an earlier call, to `{ gone }` or the fresh `state`), both effect `read`, idempotent, with the import id as the policy's `target`. A driver implements them like any other. `handle` is the driver's own data about the object, opaque to everyone else, passed back unchanged (an OpenTofu driver keeps the provider's private data and state version in it).
 
-Calling the type declares one resource, which is what a data file does: `repository({ name: "sanoma" })` returns `{ kind: "resource", vendor: "github", type: "repository", name: "sanoma", desired: { name: "sanoma" } }` (a `Declared`), and refuses a field the schema does not have, a field the vendor owns (unless `identity` names it, as Stripe's `id`), a value the schema rejects, or an empty identity.
+Calling the type declares one resource, which is what a data file does: `repository({ name: "sanoma" })` returns a frozen `Declared`, `{ vendor: "github", type: "repository", name: "sanoma", desired: { name: "sanoma" }, refs: {} }`, branded with its `<vendor>.<type>` under the `DECLARED` symbol. It refuses a field the schema does not have, a field the vendor owns (unless `identity` names it, as Stripe's `id`), a value the schema rejects, or an empty identity.
+
+A field may name another declared resource where the type's `fields.references` says so, by dotted path, with the type it names: GitHub's `branch_protection` has `{ repository_id: "github.repository" }`, so `branch_protection({ repository_id: site, pattern: "main" })` takes the repository `site`. It stands for that resource's `name`: `desired` holds `repository_id: "website"`, which the schema, `find` (the rule is `website:main`) and a drift check read, and `refs` says where a resource was named, `{ repository_id: "github.repository:website" }` (a list item's path has its index, `teams.0`). Anywhere else, or of another type, a resource is refused, and the constructor's type (`Declaring`) says the same, so the editor marks it first.
 
 Only declared fields are compared for drift, as CloudFormation does: `compareDeclared(fields, state, desired)` keeps the fields `desired` declares, minus `vendorOwned` and `writeOnly` ones, picking objects field by field, list items against the declared item at the same index, and the items of an `unordered` list (a set) against what any declared item declares, sorted, so a set is compared as a multiset whatever order the vendor returns it in. A drift check compares `normalize(actual, desired)` with `normalize(desired, desired)`. So a field left out is never drift, which covers attributes an OpenTofu provider marks `computed` and `optional` (GitHub's `etag`, `topics`): they are the user's to set, so not `vendorOwned`, but the vendor fills them in when nobody does.
 
-`describeConfig` lists the resource types as `resourceTypes`, each `{ id: "<vendor>.<type>", vendor, type, title, identity, fields, schema, ops }`: `schema` is its state as JSON Schema, with `$id` `sanoma:resource-type/<id>`, which its operations' contracts `$ref` rather than repeat. `@sanoma/workflows/shared` exports the `Resource`, `ResourceSpec`, `ResourceFields` and `Declared` types.
+`describeConfig` lists the resource types as `resourceTypes`, each `{ id: "<vendor>.<type>", vendor, type, title, identity, fields, schema, ops }`: `schema` is its state as JSON Schema, with `$id` `sanoma:resource-type/<id>`, which its operations' contracts `$ref` rather than repeat. `@sanoma/workflows/shared` exports the `Resource`, `ResourceSpec`, `ResourceFields`, `References`, `Declared`, `Declaring`, `DeclaredResource` and `ResourceProblem` types.
+
+### Data files
+
+A company declares the resources it wants in TypeScript data files under `resources/` beside its config, `resources/<area>/<file>.ts`, as its workflows are in `workflows/`. A data file holds plain values and references only, so Sanoma reads it without running it:
+
+```ts
+// resources/identity/github.ts
+import { github } from "@sanoma/connector-github/resources";
+
+export const website = github.repository({ name: "website", visibility: "public", has_wiki: false });
+
+export const websiteMain = github.branch_protection({
+  repository_id: website, // a reference: stands for the repository's name
+  pattern: "main",
+  enforce_admins: true,
+});
+
+export default [website, websiteMain];
+```
+
+Another data file names `website` by importing it: `import { website } from "./github.ts"`.
+
+What a data file may hold: named imports, of a connector's constructors from its `<package>/resources` entry (exported under the vendor's id) and of resources from other `.ts` data files in `resources/`; `export const <name> = <vendor>.<type>({ … })`, one resource per statement and each name once, whose fields are strings (and template literals without `${}`), numbers, booleans, null, objects, arrays and, where the type's `fields.references` allows one, names of resources the file declares or imports; and `export default [a, b]`, the file's resources. Nothing else: no other calls, `new`, functions, spreads, computed keys, member access (`site.name`: name `site`), `process`, `undefined` (leave the field out) or type assertions. Each refusal says what to write instead.
+
+The data files are found from the config's root: `defineConfig` records the file it is called from as the config's `file`, and `resolveConfig` gives its directory as `root`. A config bundled into one file sets `root` itself. A config with neither has no data files, and says so, rather than guess the working directory.
+
+`readDataFiles(root, connectors)`, from `@sanoma/workflows/describe`, reads every regular `.ts` file under `<root>/resources` (but `*.test.ts`, `*.d.ts` and `node_modules`), parsing it with oxc-parser and never importing it. A constructors import must be exactly a connector's `<info.package>/resources`, matched among the config's `connectors`; each resource is checked by calling its type, as running the file would, with each resource it names given as that resource. It returns `{ resources, problems }`: one `DeclaredResource` per `export const`, by file and then in file order, less any with a problem and any that names one, and the problems, by file, line and column:
+
+```ts
+interface DeclaredResource {
+  id: string; // "<file>#<export>", the file relative to the root: "resources/identity/github.ts#websiteMain"
+  vendor: string; // "github"
+  type: string; // "branch_protection"
+  name: string; // its import id, from `find`: "website:main"
+  span: readonly [start: number, end: number]; // its `export const`, as UTF-16 offsets into the file
+  desired: Record<string, unknown>; // its fields as its type checked them: { repository_id: "website", … }
+  refs: Record<string, string>; // where it names a resource, to that resource's id: { repository_id: "resources/identity/github.ts#website" }
+}
+
+interface ResourceProblem {
+  file?: string; // "resources/identity/github.ts"; absent, with line and column, when the config has no root
+  line?: number;
+  column?: number;
+  message: string;
+}
+```
+
+A problem is anything outside the subset, a constructors import of no connector in the config or a data file that is not one, a type the connector does not declare, a value the type refuses (a resource where it takes none among them), a reference cycle, or two resources of one type with one name. `describeConfig` lists both, as `resources` and `problems`, so the app starts with the resources it could read and shows what is wrong in the rest. `readResources(config)` is the strict reading, for a test or CI: it returns the resources, or throws one error listing every problem at `file:line:column`.
+
+oxlint holds `resources/**` to the subset with the rule `sanoma/data-file`, an oxlint JS plugin the package's `oxlint.json` loads from `dist/plugin.js`, so extending it (see [Keeping workflows replay-safe](#keeping-workflows-replay-safe)) covers data files as well. `lintResources(source, filename)`, from `@sanoma/workflows/lint`, is the same check for a test, without oxlint; neither knows the config, so whether a connector, type or value is known is the reader's to say:
+
+```ts
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { lintResources } from "@sanoma/workflows/lint";
+
+const files = readdirSync("resources", { recursive: true, encoding: "utf8" })
+  .filter((f) => f.endsWith(".ts"))
+  .map((f) => join("resources", f));
+
+it.each(files)("%s is a data file", (file) => {
+  expect(lintResources(readFileSync(file, "utf8"), file)).toEqual([]);
+});
+```
 
 This package knows nothing of OpenTofu. Resource types from an OpenTofu provider are generated by [`@sanoma/bridge/tfschema`](../bridge/src/tfschema/AGENTS.md), which turns the provider's schema document into zod schemas and flagged fields (`resources.gen.ts`); `@sanoma/bridge` depends on this package, never the other way round.
 
@@ -241,12 +307,12 @@ it.each(files)("%s has no problems", (file) => {
 
 `@sanoma/app` is one UI over a config; another (a Slack bot, an internal tool) can be built on the same pieces, which the package exports for that:
 
-- `describeConfig(config)` and its types (`ConfigDescription`, `WorkflowEntry`, `OpEntry`, `VendorEntry`, `ResourceTypeEntry`), from `@sanoma/workflows/describe`: what to render, as plain JSON, with each workflow's outline. It is a separate entry so the worker never loads the parser the outline uses, and the lint refuses it in workflow files. `resolveConfig(config)` returns the checked config as a `ResolvedConfig`, with the operations and drivers by id; `isOp(x)` tells an operation from a built-in in a workflow's `uses`.
+- `describeConfig(config)` and its types (`ConfigDescription`, `WorkflowEntry`, `OpEntry`, `VendorEntry`, `ResourceTypeEntry`, `DeclaredResource`, `ResourceProblem`), and `readDataFiles(root, connectors)` and `readResources(config)`, from `@sanoma/workflows/describe`: what to render, as plain JSON, with each workflow's outline. It is a separate entry so the worker never loads the parser the outline uses, and the lint refuses it in workflow files. `resolveConfig(config)` returns the checked config as a `ResolvedConfig`, with the operations and drivers by id and its `root`; `isOp(x)` tells an operation from a built-in in a workflow's `uses`.
 - `SanomaClient`: start runs, list them, read a run's ledger and approvals, and decide approvals, with the checks described above.
 - `APPROVALS_EVENT` and `decisionEventOf(approvalId)`: the DBOS events a run publishes its approvals and each decision on, for a UI that reads DBOS directly. `ApprovalMessage` is the zod schema of a decision as a run reads it. `RunArgs` is what a run receives: its input and `startedBy`.
 - `mayDecide(approval, principal)` and `approverLabel(approver)`: who may decide, and how to name them, the same way the run does. `isEnded(status)` and `ENDED_STATUSES`: the run statuses that read no more decisions.
 - Errors: `errorCode(err)` for the code to branch on, `errorMessage(err)` for the text of anything thrown, `invalidInput(what, issues)` to build an `invalid_input` error from zod issues (`InputIssue` is one issue, without symbols in its path), and the classes `SanomaError`, `PolicyDeniedError`, `RejectedError` and `DriverError`. Read codes with `errorCode`, never `instanceof`.
-- `@sanoma/workflows/shared` exports `mayDecide`, `approverLabel`, `errorMessage`, `isEnded`, `ENDED_STATUSES` and the `RunStatus` type, and the resource types' types (`Resource`, `ResourceSpec`, `ResourceFields`, `Declared`), with nothing else: no DBOS or Node imports, so a browser bundle can use them. The main entry exports them too.
+- `@sanoma/workflows/shared` exports `mayDecide`, `approverLabel`, `errorMessage`, `isEnded`, `ENDED_STATUSES` and the `RunStatus` type, and the resource types' types (`Resource`, `ResourceSpec`, `ResourceFields`, `References`, `Declared`, `Declaring`, `DeclaredResource`, `ResourceProblem`), with nothing else: no DBOS or Node imports, so a browser bundle can use them. The main entry exports them too.
 - `LedgerRecord` and `LedgerStore` for the audit record (`LedgerBody` is a record without the fields every record carries, and `LedgerGroup` a record's `ctx.all` tag), `jsonlLedger(dir)` and `memoryLedger()` to keep it, and `RUNTIME_VERSION`, this package's version as the runtime reports it.
 
 ### Outline

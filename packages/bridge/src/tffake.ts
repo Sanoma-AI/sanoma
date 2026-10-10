@@ -17,7 +17,7 @@ export interface TfFakeOptions extends FakeOptions {
 /** A connector's fake: its faults, and `override` and `remove` to change the vendor's objects between calls. */
 export type TfFake<V extends string, T extends Record<string, z.ZodObject>> = Fake<
   TfFakeState,
-  OpIdOf<V, TfResources<T>>
+  OpIdOf<V, TfResources<V, T>>
 > & {
   /**
    * Sets fields of the object of type `type` and import id `id`, in the resource's shape, for

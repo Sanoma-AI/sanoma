@@ -1,4 +1,5 @@
-import type { Use, WorkflowDefinition } from "./define.ts";
+import { dirname, resolve } from "node:path";
+import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import type { LedgerStore } from "./ledger.ts";
 import { type Connector, type Driver, type DriverFn, isOp, type Op } from "./op.ts";
 import type { Policy } from "./policy.ts";
@@ -28,6 +29,13 @@ export interface SanomaConfig {
   appName?: string;
   /** Postgres for the runtime. Defaults to `SANOMA_DATABASE_URL`, then the local docker compose database. */
   databaseUrl?: string;
+  /** The file that defined the config, absolute, when known. Set by `defineConfig` from its call site. */
+  file?: string;
+  /**
+   * The directory the config's conventions are relative to: the data files are `resources/`
+   * in it. Defaults to `file`'s directory; set it where that is not the source's, as in a bundle.
+   */
+  root?: string;
 }
 
 /** A config, checked, with everything a worker, client or app derives from it. */
@@ -46,12 +54,18 @@ export interface ResolvedConfig {
   workflows: WorkflowDefinition<any, any>[];
   policy: Policy;
   ledger: LedgerStore;
+  /**
+   * The config's directory, absolute: its `root`, else its `file`'s directory. Its data files
+   * are `resources/` in it. Absent when the config has neither, so it has no data files.
+   */
+  root?: string;
 }
 
 export const DEFAULT_DATABASE_URL = "postgresql://postgres:dbos@localhost:5433/sanoma";
 
+/** Returns the config, with the file it is called from as its `file`: its directory is the config's `root`. */
 export function defineConfig(config: SanomaConfig): SanomaConfig {
-  return config;
+  return { ...config, file: config.file ?? callerFile() };
 }
 
 export function resolveDatabaseUrl(config: { databaseUrl?: string }): string {
@@ -85,6 +99,9 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     );
   }
   const appName = config.appName ?? "sanoma";
+  // No fallback to the working directory: a config found nowhere has no data files, and says so.
+  const root =
+    config.root !== undefined ? resolve(config.root) : config.file !== undefined ? dirname(config.file) : undefined;
   const ops = indexConnectors(config.connectors);
   const drivers = indexDrivers(config.drivers, ops);
   const names = new Map<string, WorkflowDefinition<any, any>>();
@@ -108,6 +125,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     workflows: [...names.values()],
     policy: config.policy,
     ledger,
+    ...(root !== undefined && { root }),
   };
 }
 

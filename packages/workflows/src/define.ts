@@ -238,12 +238,16 @@ export function defineWorkflow<const U extends readonly Use[], S extends z.ZodTy
   if (!/^[a-z][a-z0-9-]*$/.test(def.name)) {
     throw new Error(`Workflow name "${def.name}" must be lowercase letters, digits and dashes`);
   }
-  // Frame 0 is this function, frame 1 its caller: by index, since a bundle may hold both.
-  return Object.freeze({ kind: "workflow", ...def, file: pathOf(getCallSites(2)[1]?.scriptName) });
+  return Object.freeze({ kind: "workflow", ...def, file: callerFile() });
 }
 
-/** The file of the code that called into this one, from V8's call site: its script as a path; undefined where there is none. */
-function pathOf(script: string | undefined): string | undefined {
+/**
+ * The file of the code that called the function calling this one (`defineWorkflow`'s caller),
+ * from V8's call sites, as a path; undefined where there is none.
+ */
+export function callerFile(): string | undefined {
+  // Frame 0 is this function, frame 1 its caller, frame 2 theirs: by index, since a bundle may hold all three.
+  const script = getCallSites(3)[2]?.scriptName;
   if (!script?.startsWith("file:")) return script || undefined;
   try {
     return fileURLToPath(script);
