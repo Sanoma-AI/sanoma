@@ -12,8 +12,8 @@ Vitest tests for `@sanoma/workflows`. Files that start runs need Postgres (`pnpm
 | [`approvals.test.ts`](approvals.test.ts)     | `approvedFor`, `mayDecide`, and approvals a workflow or a policy asks for, on Postgres                             |
 | [`build.ts`](build.ts)                       | `ensureBuilt`: builds dist/ when missing or stale, for tests of what the package ships                             |
 | [`call.test.ts`](call.test.ts)               | How calls run: failures, retries, restarts, `ctx.sleep`, the policy's view and `ctx.all`                           |
-| [`credentials.test.ts`](credentials.test.ts) | A driver's `env`: `resolveConfig`'s statuses, `startWorker`'s refusal, `describeConfig`, the connectors' variables |
 | [`client.test.ts`](client.test.ts)           | `runStatus`, `firstMatching` and `SanomaClient` against Postgres                                                   |
+| [`credentials.test.ts`](credentials.test.ts) | A driver's `env`: `resolveConfig`'s statuses, `startWorker`'s refusal, `describeConfig`, the connectors' variables |
 | [`define.test.ts`](define.test.ts)           | `defineWorkflow` records the file that called it                                                                   |
 | [`describe.test.ts`](describe.test.ts)       | `describeConfig`: workflows, operations and their mocks, vendors and policy                                        |
 | [`drift.test.ts`](drift.test.ts)             | The built-in drift workflow on `useApp` and the company fakes: its report, ledger, references and record           |
