@@ -794,14 +794,17 @@ describe("the page", () => {
     expect(workflows.html).toContain('href="/workflows/announce/new?scenario=Launch+on+time"');
   });
 
-  it("redirects the old Start page to the workflow's New run pane, or to the workflows when it names none", async () => {
+  it("redirects the old Start page to the named workflow's New run pane, or to the workflows when it names none", async () => {
     const redirected = async (path: string) => {
       const res = await fetch(new URL(path, app.url), { redirect: "manual" });
       expect(res.status, path).toBe(307);
       return res.headers.get("location");
     };
     expect(await redirected("/start?workflow=announce")).toMatch(/\/workflows\/announce\/new$/);
-    for (const path of ["/start", "/start?workflow=nope"]) expect(await redirected(path), path).toMatch(/\/workflows$/);
+    // The pane's page, not the redirect, says the workflow does not exist.
+    expect(await redirected("/start?workflow=nope")).toMatch(/\/workflows\/nope\/new$/);
+    expect((await page("/workflows/nope/new")).status).toBe(404);
+    expect(await redirected("/start")).toMatch(/\/workflows$/);
     // A search value the router reads as a number names no workflow: the router drops it first.
     const numeric = await fetch(new URL("/start?workflow=123", app.url));
     expect(new URL(numeric.url).pathname).toBe("/workflows");
