@@ -1,18 +1,15 @@
-import type { WorkflowEntry } from "@sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { FlaskConicalIcon, GlobeIcon } from "lucide-react";
 import { useMemo } from "react";
 import { z } from "zod";
-import { Button } from "#/components/ui/button.tsx";
-import { ButtonGroup } from "#/components/ui/button-group.tsx";
 import { Card, CardContent } from "#/components/ui/card.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
-import { Disclosure, Nothing, Notice, pageTitle } from "#/components/common.tsx";
-import { ScenarioCard, ScenarioErrors } from "#/components/scenario.tsx";
+import { Disclosure, Nothing, Notice, pageTitle, Segment, Segmented } from "#/components/common.tsx";
+import { ScenarioErrors } from "#/components/scenario.tsx";
 import { GraphAndSource, Retired } from "#/components/workflow.tsx";
 import { StartForm } from "#/form/start-form.tsx";
-import { configQuery, opsById, scenariosFor, scenariosQuery, useWorkflow } from "#/queries.ts";
+import { configQuery, scenariosFor, scenariosQuery, useWorkflow, vendorsOf, workflowNamed } from "#/queries.ts";
 
 /**
  * A new run of the workflow, live or in the sandbox: its input from its schema, or a scenario's,
@@ -24,7 +21,14 @@ export const Route = createFileRoute("/workflows/$name/new")({
   // server renders the mode the link asks for.
   validateSearch: z.object({ scenario: z.string().optional().catch(undefined) }),
   staticData: { crumb: "New run" },
-  head: ({ match }) => pageTitle(match.staticData.crumb),
+  // The tab names the workflow too, as the layout's crumb does: its title, else its name. The
+  // root route has loaded the config.
+  loader: async ({ context: { queryClient }, params }) => {
+    const config = await queryClient.query({ ...configQuery(), staleTime: "static" });
+    return { workflow: workflowNamed(params.name)(config)?.title ?? params.name };
+  },
+  head: ({ match, loaderData, params }) =>
+    pageTitle(`${match.staticData.crumb} · ${loaderData?.workflow ?? params.name}`),
   component: NewRunPage,
 });
 
@@ -33,15 +37,14 @@ function NewRunPage() {
   const { scenario: wanted } = Route.useSearch();
   const navigate = Route.useNavigate();
   const workflow = useWorkflow(name);
+  const forWorkflow = useMemo(() => scenariosFor(name), [name]);
   const {
     data: { scenarios, errors },
-  } = useSuspenseQuery({ ...scenariosQuery(), select: scenariosFor(name) });
+  } = useSuspenseQuery({ ...scenariosQuery(), select: forWorkflow });
   if (!workflow) return <Retired name={name} />;
   const sandbox = wanted !== undefined;
-  const scenario = sandbox ? scenarios.find((s) => s.name === wanted) : undefined;
-  // Each choice replaces the page in the history rather than adding one; `?runs=` stays.
-  const choose = (chosen: string | undefined) =>
-    void navigate({ search: (prev) => ({ ...prev, scenario: chosen }), replace: true });
+  const scenario = scenarios.find((s) => s.name === wanted);
+  const none = scenarios.length === 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -51,74 +54,79 @@ function NewRunPage() {
         <Card>
           <CardContent className="flex flex-col gap-4">
             <div className="flex flex-wrap items-center gap-3">
-              <ButtonGroup aria-label="Mode">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={sandbox ? "outline" : "secondary"}
-                  aria-pressed={!sandbox}
-                  onClick={() => choose(undefined)}
-                >
-                  <GlobeIcon data-icon="inline-start" />
-                  Live vendors
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={sandbox ? "secondary" : "outline"}
-                  aria-pressed={sandbox}
-                  disabled={scenarios.length === 0}
-                  onClick={() => choose(scenarios[0]?.name)}
-                >
-                  <FlaskConicalIcon data-icon="inline-start" />
-                  Sandbox
-                </Button>
-              </ButtonGroup>
-              {scenarios.length === 0 && (
-                <p className="text-sm text-muted-foreground">No scenarios for this workflow yet</p>
-              )}
+              {/* Each mode is a URL. A choice replaces the page in the history rather than adding
+                  one, and keeps `?runs=`. */}
+              <Segmented label="Mode">
+                <Segment>
+                  <Link
+                    from={Route.fullPath}
+                    to="."
+                    search={(prev) => ({ ...prev, scenario: undefined })}
+                    activeOptions={{ exact: true }}
+                    replace
+                  >
+                    <GlobeIcon data-icon="inline-start" />
+                    Live vendors
+                  </Link>
+                </Segment>
+                <Segment>
+                  {/* Keeps the scenario chosen, so it is the current page whichever that is. */}
+                  <Link
+                    from={Route.fullPath}
+                    to="."
+                    search={(prev) => ({ ...prev, scenario: prev.scenario ?? scenarios[0]?.name })}
+                    disabled={none}
+                    replace
+                  >
+                    <FlaskConicalIcon data-icon="inline-start" />
+                    Sandbox
+                  </Link>
+                </Segment>
+              </Segmented>
+              {none && <p className="text-sm text-muted-foreground">No scenarios for this workflow yet</p>}
             </div>
-            {!sandbox ? (
-              <>
-                <VendorsNotice workflow={workflow} />
-                <StartForm key="live" workflow={workflow} />
-              </>
+            {sandbox && !none && (
+              <NativeSelect
+                aria-label="Scenario"
+                className="w-full"
+                value={scenario?.name ?? ""}
+                onChange={(e) =>
+                  void navigate({ search: (prev) => ({ ...prev, scenario: e.target.value }), replace: true })
+                }
+              >
+                {!scenario && (
+                  <NativeSelectOption value="" disabled>
+                    Choose a scenario
+                  </NativeSelectOption>
+                )}
+                {scenarios.map((s) => (
+                  <NativeSelectOption key={s.name} value={s.name}>
+                    {s.name}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            )}
+            {sandbox && !scenario ? (
+              <Nothing title={`No scenario named “${wanted}”`}>
+                {!none && "Choose one of this workflow’s scenarios above."}
+              </Nothing>
             ) : (
               <>
-                {scenarios.length > 0 && (
-                  <NativeSelect
-                    aria-label="Scenario"
-                    className="w-full"
-                    value={scenario?.name ?? ""}
-                    onChange={(e) => choose(e.target.value)}
-                  >
-                    {!scenario && (
-                      <NativeSelectOption value="" disabled>
-                        Choose a scenario
-                      </NativeSelectOption>
-                    )}
-                    {scenarios.map((s) => (
-                      <NativeSelectOption key={s.name} value={s.name}>
-                        {s.name}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                )}
                 {scenario ? (
-                  <>
-                    <Notice>
-                      Nothing leaves Sanoma: the scenario supplies the input and the fakes answer the calls. Its
-                      approvals wait for people, as a live run’s do.
-                    </Notice>
-                    <StartForm key={scenario.name} workflow={workflow} scenario={scenario} />
-                    <Disclosure label="Scenario">
-                      <ScenarioCard scenario={scenario} />
-                    </Disclosure>
-                  </>
+                  <Notice>
+                    Nothing leaves Sanoma: the scenario supplies the input and the fakes answer the calls. Its approvals
+                    wait for people, as a live run’s do.
+                  </Notice>
                 ) : (
-                  <Nothing title={`No scenario named “${wanted}”`}>
-                    {scenarios.length > 0 ? "Choose one of this workflow’s scenarios above." : undefined}
-                  </Nothing>
+                  <VendorsNotice name={name} />
+                )}
+                <StartForm key={scenario?.name ?? "live"} workflow={workflow} scenario={scenario} />
+                {scenario && (
+                  <Disclosure label="Scenario">
+                    <pre className="mt-1 overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs">
+                      {scenario.text}
+                    </pre>
+                  </Disclosure>
                 )}
               </>
             )}
@@ -130,13 +138,9 @@ function NewRunPage() {
 }
 
 /** What a live run calls for real: the vendors of the workflow's operations, by title. None, no notice. */
-function VendorsNotice({ workflow }: { workflow: WorkflowEntry }) {
-  const { data: config } = useSuspenseQuery(configQuery());
-  const titles = useMemo(() => {
-    const ops = opsById(config);
-    const vendors = workflow.ops.flatMap((id) => ops.get(id)?.vendor ?? []);
-    return [...new Set(vendors.map((v) => config.vendors[v]?.title ?? v))].toSorted();
-  }, [config, workflow.ops]);
-  if (titles.length === 0) return null;
-  return <Notice>Calls {titles.join(", ")} for real</Notice>;
+function VendorsNotice({ name }: { name: string }) {
+  const select = useMemo(() => vendorsOf(name), [name]);
+  const { data: vendors } = useSuspenseQuery({ ...configQuery(), select });
+  if (vendors.length === 0) return null;
+  return <Notice>Calls {vendors.map((v) => v.title).join(", ")} for real</Notice>;
 }

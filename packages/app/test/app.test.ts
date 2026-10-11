@@ -187,6 +187,14 @@ const railRunIds = (html: string, filter: string) =>
     .map(([, id]) => id)
     .toSorted();
 
+/** The opening tag of the link whose text, after any icon, is `label`. */
+function linkTag(html: string, label: string) {
+  const at = html.search(new RegExp(`>${label}</a>`));
+  if (at < 0) return undefined;
+  const start = html.lastIndexOf("<a ", at);
+  return html.slice(start, html.indexOf(">", start) + 1);
+}
+
 /** A request's status, sent as written: no normalising of the path, and any Host header. */
 function rawStatus(base: string, path: string, headers?: Record<string, string>) {
   const { hostname, port } = new URL(base);
@@ -436,6 +444,9 @@ describe("scenarios and sandbox runs", () => {
       op: "ghost.post.create",
     });
     expect(launch.steps).toContainEqual({ text: "the run succeeds", kind: "then" });
+    // Its own lines of the feature file: not the feature's, nor the next scenario's.
+    expect(launch.text).not.toContain("Feature:");
+    expect(launch.text).not.toContain("Publish retried");
     // What the page lists, not how the worker seeds and checks it.
     expect(launch).not.toHaveProperty("expect");
   });
@@ -573,9 +584,9 @@ describe("scenarios that no longer load", () => {
       // A workflow with no scenarios has its New run pane's Sandbox disabled, and says why.
       const pane = await page("/workflows/announce/new");
       expect(pane.text).toContain("Could not read a scenario: announce.feature:3");
-      expect(pane.html).toMatch(
-        /<button[^>]*aria-pressed="false"[^>]*disabled=""[^>]*>(<svg.*?<\/svg>)?Sandbox<\/button>/,
-      );
+      const sandboxLink = linkTag(pane.html, "Sandbox");
+      expect(sandboxLink).toContain('aria-disabled="true"');
+      expect(sandboxLink).not.toContain("href=");
       expect(pane.text).toContain("No scenarios for this workflow yet");
       // A connector's page says why too, above its operations.
       const connector = await page("/connectors/ghost");
@@ -942,7 +953,7 @@ describe("the page", () => {
     expect(pane.status).toBe(200);
     expect(pane.html).toMatch(/<h1[^>]*>Announce a launch<\/h1>/);
     expect(pane.html).toContain('id="field-title"');
-    expect(pane.text).toContain("<title>New run · Sanoma</title>");
+    expect(pane.text).toContain("<title>New run · Announce a launch · Sanoma</title>");
   });
 
   it("serves the built assets, hashed ones as immutable, and nothing outside them", async () => {
@@ -976,8 +987,11 @@ describe("the page", () => {
     const launchAt = pane.html.match(/<input[^>]*id="field-launchAt"[^>]*>/)?.[0];
     expect(launchAt).toContain('type="text"');
     expect(launchAt).toContain('value=""');
-    expect(pane.html).toMatch(/<button[^>]*aria-pressed="true"[^>]*>(<svg.*?<\/svg>)?Live vendors<\/button>/);
-    expect(pane.html).toMatch(/<button[^>]*aria-pressed="false"[^>]*>(<svg.*?<\/svg>)?Sandbox<\/button>/);
+    // Each mode is a link; Sandbox opens the first scenario.
+    expect(linkTag(pane.html, "Live vendors")).toContain('aria-current="page"');
+    const sandboxLink = linkTag(pane.html, "Sandbox");
+    expect(sandboxLink).toContain('href="/workflows/announce/new?scenario=Launch+on+time"');
+    expect(sandboxLink).not.toContain("aria-current");
     expect(pane.text).toContain("Calls Bluesky, Ghost, Resend for real");
     expect(pane.text).toContain(">Start run<");
     expect(pane.text).not.toContain("Nothing leaves Sanoma");
@@ -1000,7 +1014,8 @@ describe("the page", () => {
     // A date-time as the scenario gives it, not in this process's time zone.
     expect(pane.html).not.toContain('type="datetime-local"');
     expect(pane.html).toMatch(/<input[^>]*id="field-launchAt"[^>]*value="2030-01-01T09:00:00Z"/);
-    expect(pane.html).toMatch(/<button[^>]*aria-pressed="true"[^>]*>(<svg.*?<\/svg>)?Sandbox<\/button>/);
+    expect(linkTag(pane.html, "Sandbox")).toContain('aria-current="page"');
+    expect(linkTag(pane.html, "Live vendors")).not.toContain("aria-current");
     expect(pane.html).toMatch(/<select[^>]*aria-label="Scenario"/);
     expect(pane.text).toContain(
       "Nothing leaves Sanoma: the scenario supplies the input and the fakes answer the calls.",
