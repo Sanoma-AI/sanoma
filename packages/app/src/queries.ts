@@ -1,5 +1,5 @@
 import type { RunStatus, RunSummary } from "@sanoma/workflows";
-import type { ConfigDescription, WorkflowEntry } from "@sanoma/workflows/describe";
+import type { ConfigDescription, OpEntry, WorkflowEntry } from "@sanoma/workflows/describe";
 import { isEnded } from "@sanoma/workflows/shared";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { linkOptions, useNavigate } from "@tanstack/react-router";
@@ -43,6 +43,25 @@ export const workflowFile = (workflow: Pick<WorkflowEntry, "outline">): string |
 /** The config's operations by id, for `select`: built once per config, not on every render. */
 export const opsById = (config: ConfigDescription) => new Map(config.ops.map((op) => [op.id, op]));
 
+/** One collation, so the server and the browser sort alike. */
+const byTitle = (a: string, b: string) => a.localeCompare(b, "en");
+
+/** The vendors these operations are from, each once with its title (its id when it has none), sorted by title. */
+const vendorsCalling = (config: ConfigDescription, ops: Map<string, OpEntry>, ids: readonly string[]) =>
+  [...new Set(ids.flatMap((id) => ops.get(id)?.vendor ?? []))]
+    .map((id) => ({ id, title: config.vendors[id]?.title ?? id }))
+    .toSorted((a, b) => byTitle(a.title, b.title));
+
+/** The vendors the workflow's operations call, sorted by title: for `select`. None for a workflow the config does not have. */
+export const vendorsOf = (name: string) => (config: ConfigDescription) =>
+  vendorsCalling(config, opsById(config), workflowNamed(name)(config)?.ops ?? []);
+
+/** `vendorsOf` for every workflow of the config, by name, in one pass: for `select`. */
+export const vendorsByWorkflow = (config: ConfigDescription) => {
+  const ops = opsById(config);
+  return Object.fromEntries(config.workflows.map((wf) => [wf.name, vendorsCalling(config, ops, wf.ops)]));
+};
+
 /**
  * Each vendor, sorted by title, with its operations (in `ops`' order) and the workflows that may
  * call one of them: for `select`.
@@ -58,8 +77,7 @@ export const connectorsOf = (config: ConfigDescription) =>
       const resourceTypes = config.resourceTypes.filter((type) => type.vendor === id);
       return { id, vendor, ops, workflows, resourceTypes };
     })
-    // One collation, so the server and the browser sort alike.
-    .toSorted((a, b) => a.vendor.title.localeCompare(b.vendor.title, "en"));
+    .toSorted((a, b) => byTitle(a.vendor.title, b.vendor.title));
 
 export type ConnectorEntry = ReturnType<typeof connectorsOf>[number];
 
@@ -117,6 +135,13 @@ export const actorQuery = () =>
 
 /** Every list of runs is under this key: invalidating it refreshes them all. */
 export const RUNS_KEY = ["runs"] as const;
+
+/**
+ * How often a list of runs refreshes, for `refetchInterval`: every `fast` ms while one of them
+ * can still change, else every 30 s. Starting a run or deciding refreshes it at once.
+ */
+export const runsRefetchInterval = (fast: number) => (query: { state: { data?: RunSummary[] | undefined } }) =>
+  query.state.data?.some((run) => !isEnded(run.status)) ? fast : 30_000;
 
 /** The latest runs, or the latest of a workflow or with a status (`RunsQuery`). */
 export const runsQuery = (query: RunsQuery = {}) =>
@@ -178,14 +203,11 @@ export const WorkflowSearch = z.object({ runs: z.enum(RUN_FILTERS).optional().ca
 /** How many runs the rail lists: the latest. */
 export const RAIL_LIMIT = RUNS_LIMIT.default;
 
-/**
- * The rail's runs for a filter: the workflow's latest, with the filter's status. Polled quickly
- * while one of them can still change; starting a run or deciding refreshes it at once.
- */
+/** The rail's runs for a filter: the workflow's latest, with the filter's status. */
 export const railQuery = (name: string, filter: RunFilter = "all") =>
   queryOptions({
     ...runsQuery({ workflow: name, limit: RAIL_LIMIT, status: FILTERS[filter].status }),
-    refetchInterval: (query) => (query.state.data?.some((run) => !isEnded(run.status)) ? POLL_MS : 30_000),
+    refetchInterval: runsRefetchInterval(POLL_MS),
   });
 
 /** Of the runs `railQuery` read, those the filter keeps: all of them, unless it picks by `match`. */

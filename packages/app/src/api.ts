@@ -1,13 +1,6 @@
-import type {
-  ApprovalState,
-  ErrorCode,
-  InputIssue,
-  LedgerRecord,
-  Principal,
-  RunStatus,
-  RunSummary,
-} from "@sanoma/workflows";
+import type { ApprovalState, ErrorCode, InputIssue, LedgerRecord, Principal, RunSummary } from "@sanoma/workflows";
 import type { Check, Scenario } from "@sanoma/workflows/scenario";
+import { RUN_STATUSES } from "@sanoma/workflows/shared";
 import { z } from "zod";
 
 export type { InputIssue } from "@sanoma/workflows";
@@ -87,16 +80,6 @@ export type DecideCall = z.infer<typeof DecideCall>;
 
 /** How many runs one read lists. */
 export const RUNS_LIMIT = { default: 50, max: 500 } as const;
-
-/** Every run status, in the order a run may pass through them: the one list the API and the page check against. */
-export const RUN_STATUSES = [
-  "queued",
-  "running",
-  "waiting",
-  "finished",
-  "failed",
-  "cancelled",
-] as const satisfies readonly RunStatus[];
 
 /** `GET /api/runs?limit=&status=&workflow=`: the latest runs, or the latest with that status, of that workflow. */
 export const RunsQuery = z.object({

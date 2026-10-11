@@ -1,16 +1,16 @@
 import type { RunStatus } from "@sanoma/workflows";
+import { RUN_STATUSES } from "@sanoma/workflows/shared";
 import type { WorkflowEntry } from "@sanoma/workflows/describe";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { FlaskConicalIcon } from "lucide-react";
 import { useMemo } from "react";
 import { z } from "zod";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
-import { ButtonGroup } from "#/components/ui/button-group.tsx";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
-import { RUN_STATUSES, RUNS_LIMIT } from "../../api.ts";
+import { RUNS_LIMIT } from "../../api.ts";
 import {
   Fact,
   Facts,
@@ -21,6 +21,8 @@ import {
   PageHeader,
   plural,
   Section,
+  Segment,
+  Segmented,
   ToneBadge,
   VendorLogo,
 } from "../../components/common.tsx";
@@ -32,7 +34,9 @@ import {
   configQuery,
   opsById,
   pendingByWorkflow,
+  POLL_MS,
   runsQuery,
+  runsRefetchInterval,
   scenariosFor,
   scenariosQuery,
   waitingRunsQuery,
@@ -44,8 +48,9 @@ const HomeSearch = z.object({
   status: z.enum(RUN_STATUSES).optional().catch(undefined),
 });
 
-/** The All runs table's runs: the latest of every workflow, or the latest with a status. */
-const allRunsQuery = (status: RunStatus | undefined) => runsQuery({ status, limit: RUNS_LIMIT.default });
+/** The All runs table's runs: the latest of every workflow, or the latest with a status. Polled as the rail is. */
+const allRunsQuery = (status: RunStatus | undefined) =>
+  queryOptions({ ...runsQuery({ status, limit: RUNS_LIMIT.default }), refetchInterval: runsRefetchInterval(POLL_MS) });
 
 export const Route = createFileRoute("/workflows/")({
   validateSearch: HomeSearch,
@@ -112,25 +117,22 @@ function ConfigFacts() {
   );
 }
 
-/** The view's link while it shows: Link marks it `aria-current="page"`. */
-const VIEW_LINK = "aria-[current=page]:bg-muted aria-[current=page]:font-semibold";
-
 /** By workflow or All runs: two links, so each view has its own URL. */
 function ViewToggle() {
   return (
-    <ButtonGroup aria-label="View">
-      <Button asChild variant="outline" size="sm" className={VIEW_LINK}>
+    <Segmented label="View">
+      <Segment>
         {/* Exact: else it would match every search, `?view=runs` too. */}
         <Link to="/workflows" activeOptions={{ exact: true }}>
           By workflow
         </Link>
-      </Button>
-      <Button asChild variant="outline" size="sm" className={VIEW_LINK}>
+      </Segment>
+      <Segment>
         <Link to="/workflows" search={{ view: "runs" }}>
           All runs
         </Link>
-      </Button>
-    </ButtonGroup>
+      </Segment>
+    </Segmented>
   );
 }
 

@@ -27,6 +27,7 @@ import {
 import { Alert, AlertDescription } from "#/components/ui/alert.tsx";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
+import { ButtonGroup } from "#/components/ui/button-group.tsx";
 import { Card } from "#/components/ui/card.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
@@ -326,6 +327,27 @@ export function Disclosure({ label, children }: { label: ReactNode; children: Re
       </CollapsibleTrigger>
       <CollapsibleContent>{children}</CollapsibleContent>
     </Collapsible>
+  );
+}
+
+/** A segment while its URL shows (Link marks it `aria-current="page"`), or while Link's `disabled` leaves it no href. */
+const SEGMENT =
+  "aria-[current=page]:bg-muted aria-[current=page]:font-semibold aria-disabled:pointer-events-none aria-disabled:opacity-50";
+
+/**
+ * A choice between URLs, as one control: `children` are `Segment`s. Links rather than buttons, so
+ * the server renders the choice the URL makes, and each choice is a page of its own.
+ */
+export function Segmented({ label, children }: { label: string; children: ReactNode }) {
+  return <ButtonGroup aria-label={label}>{children}</ButtonGroup>;
+}
+
+/** One choice of a `Segmented`: its `<Link>`, as a small outline button. */
+export function Segment({ children }: { children: ReactElement }) {
+  return (
+    <Button asChild variant="outline" size="sm" className={SEGMENT}>
+      {children}
+    </Button>
   );
 }
 

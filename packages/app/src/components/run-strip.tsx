@@ -5,7 +5,7 @@ import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { utcText } from "#/lib/time.ts";
 import { RUN_TONE, TONE_FILL } from "#/lib/tone.ts";
 import { cn } from "#/lib/utils.ts";
-import { runLink, runsQuery } from "../queries.ts";
+import { runLink, runsQuery, runsRefetchInterval } from "../queries.ts";
 
 /** How many of a workflow's runs its strip shows: the latest. */
 const STRIP_LIMIT = 12;
@@ -28,8 +28,11 @@ function StripSkeleton() {
 }
 
 function Strip({ workflow }: { workflow: string }) {
-  // Every 5 s, as the sidebar overrides its own poll: a glance, which a start or a decision refreshes at once.
-  const { data: runs, error } = useQuery({ ...runsQuery({ workflow, limit: STRIP_LIMIT }), refetchInterval: 5_000 });
+  // A glance: every 5 s while a run can still change, as the sidebar polls, not the rail's 2 s.
+  const { data: runs, error } = useQuery({
+    ...runsQuery({ workflow, limit: STRIP_LIMIT }),
+    refetchInterval: runsRefetchInterval(5_000),
+  });
   if (!runs) {
     return error ? (
       <p className="text-sm text-destructive">Could not read the runs: {error.message}</p>

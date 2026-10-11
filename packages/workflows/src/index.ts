@@ -96,6 +96,7 @@ export {
   isEnded,
   mayDecide,
   problemAt,
+  RUN_STATUSES,
   type RunStatus,
 } from "./shared.ts";
 // lintWorkflow lives at `@sanoma/workflows/lint`, and describeConfig with the outline at
