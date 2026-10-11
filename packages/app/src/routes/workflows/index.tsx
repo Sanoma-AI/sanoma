@@ -4,13 +4,13 @@ import type { WorkflowEntry } from "@sanoma/workflows/describe";
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { FlaskConicalIcon } from "lucide-react";
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { z } from "zod";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
-import { RUNS_LIMIT } from "../../api.ts";
+import { RUNS_LIMIT, type ScenariosResponse } from "../../api.ts";
 import {
   Fact,
   Facts,
@@ -31,20 +31,20 @@ import { RunsTable } from "../../components/runs-table.tsx";
 import { RunButton } from "../../components/workflow.tsx";
 import { outlineGraph } from "../../graph/outline-graph.ts";
 import {
+  type CalledVendor,
   configQuery,
-  opsById,
   pendingByWorkflow,
   POLL_MS,
   runsQuery,
   runsRefetchInterval,
-  scenariosFor,
   scenariosQuery,
+  vendorsByWorkflow,
   waitingRunsQuery,
 } from "../../queries.ts";
 
 /** `?view=runs` shows every run as a table, `?status=` filtering it; anything else, a card per workflow. */
 const HomeSearch = z.object({
-  view: z.enum(["workflows", "runs"]).optional().catch(undefined),
+  view: z.literal("runs").optional().catch(undefined),
   status: z.enum(RUN_STATUSES).optional().catch(undefined),
 });
 
@@ -136,33 +136,54 @@ function ViewToggle() {
   );
 }
 
+/** Each workflow's first scenario, by workflow: what its card's Test opens. For `select`. */
+const firstScenarios = ({ scenarios }: ScenariosResponse) => {
+  const first: Record<string, string> = Object.create(null);
+  for (const s of scenarios) first[s.workflow] ??= s.name;
+  return first;
+};
+
+/**
+ * A card per workflow. It reads what the cards show, each query in one pass, and hands each card
+ * its share: a poll that changed one card's count draws that card alone.
+ */
 function ByWorkflow() {
   const { data: config } = useSuspenseQuery(configQuery());
+  const { data: vendors } = useSuspenseQuery({ ...configQuery(), select: vendorsByWorkflow });
+  const { data: tests } = useSuspenseQuery({ ...scenariosQuery(), select: firstScenarios });
   const { data: pending } = useSuspenseQuery({ ...waitingRunsQuery(), select: pendingByWorkflow });
   if (config.workflows.length === 0) return <Nothing title="This config has no workflows" />;
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       {config.workflows.map((wf) => (
-        <WorkflowCard key={wf.name} workflow={wf} waiting={pending.byWorkflow[wf.name] ?? 0} />
+        <WorkflowCard
+          key={wf.name}
+          workflow={wf}
+          vendors={vendors[wf.name] ?? NO_VENDORS}
+          scenario={tests[wf.name]}
+          waiting={pending.byWorkflow[wf.name] ?? 0}
+        />
       ))}
     </div>
   );
 }
 
+const NO_VENDORS: CalledVendor[] = [];
+
 /** A workflow at a glance: the vendors it calls, its latest runs, what waits on people, and its outline. */
-function WorkflowCard({ workflow, waiting }: { workflow: WorkflowEntry; waiting: number }) {
+const WorkflowCard = memo(function WorkflowCard({
+  workflow,
+  vendors,
+  scenario,
+  waiting,
+}: {
+  workflow: WorkflowEntry;
+  vendors: CalledVendor[];
+  /** The scenario Test opens: the workflow's first; none, no Test. */
+  scenario: string | undefined;
+  waiting: number;
+}) {
   const { name, outline } = workflow;
-  const { data: config } = useSuspenseQuery(configQuery());
-  const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
-  const { data: scenario } = useSuspenseQuery({
-    ...scenariosQuery(),
-    select: (response) => scenariosFor(name)(response).scenarios[0]?.name,
-  });
-  // Each vendor once, in the order the workflow's operations first name it.
-  const vendors = useMemo(
-    () => [...new Set(workflow.ops.flatMap((id) => ops.get(id)?.vendor ?? []))],
-    [workflow.ops, ops],
-  );
   const graph = useMemo(() => ("nodes" in outline ? outlineGraph(outline.nodes) : undefined), [outline]);
   return (
     <Card>
@@ -176,9 +197,9 @@ function WorkflowCard({ workflow, waiting }: { workflow: WorkflowEntry; waiting:
           <code>{name}</code>
           {workflow.builtin && <Badge variant="secondary">built-in</Badge>}
           {vendors.map((vendor) => (
-            <Badge key={vendor} variant="outline">
-              <VendorLogo vendor={vendor} alt="" className="size-3" />
-              {config.vendors[vendor]?.title ?? vendor}
+            <Badge key={vendor.id} variant="outline">
+              <VendorLogo vendor={vendor.id} alt="" className="size-3" />
+              {vendor.title}
             </Badge>
           ))}
         </CardDescription>
@@ -210,7 +231,7 @@ function WorkflowCard({ workflow, waiting }: { workflow: WorkflowEntry; waiting:
       </CardContent>
     </Card>
   );
-}
+});
 
 /** Every workflow's latest runs as a table, filtered by `?status=`. */
 function AllRuns({ status }: { status: RunStatus | undefined }) {

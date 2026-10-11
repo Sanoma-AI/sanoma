@@ -1,6 +1,7 @@
 import type { RunSummary } from "@sanoma/workflows";
 import { useQuery } from "@tanstack/react-query";
 import { ClientOnly, Link } from "@tanstack/react-router";
+import { memo } from "react";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { utcText } from "#/lib/time.ts";
 import { RUN_TONE, TONE_FILL } from "#/lib/tone.ts";
@@ -52,7 +53,8 @@ function Strip({ workflow }: { workflow: string }) {
   );
 }
 
-function RunSquare({ run }: { run: RunSummary }) {
+/** Memoised: a poll keeps an unchanged run's object, so only the squares that changed draw again. */
+const RunSquare = memo(function RunSquare({ run }: { run: RunSummary }) {
   const label = [
     run.status,
     run.workflow,
@@ -74,4 +76,4 @@ function RunSquare({ run }: { run: RunSummary }) {
       )}
     />
   );
-}
+});

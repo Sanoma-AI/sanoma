@@ -46,8 +46,11 @@ export const opsById = (config: ConfigDescription) => new Map(config.ops.map((op
 /** One collation, so the server and the browser sort alike. */
 const byTitle = (a: string, b: string) => a.localeCompare(b, "en");
 
-/** The vendors these operations are from, each once with its title (its id when it has none), sorted by title. */
-const vendorsCalling = (config: ConfigDescription, ops: Map<string, OpEntry>, ids: readonly string[]) =>
+/** A vendor a workflow calls, by id, and its title (its id when the config gives none). */
+export type CalledVendor = { id: string; title: string };
+
+/** The vendors these operations are from, each once, sorted by title. */
+const vendorsCalling = (config: ConfigDescription, ops: Map<string, OpEntry>, ids: readonly string[]): CalledVendor[] =>
   [...new Set(ids.flatMap((id) => ops.get(id)?.vendor ?? []))]
     .map((id) => ({ id, title: config.vendors[id]?.title ?? id }))
     .toSorted((a, b) => byTitle(a.title, b.title));
