@@ -29,6 +29,7 @@ import {
   approvedFor,
   type ApprovalState,
   defineConfig,
+  defineConnector,
   definePolicy,
   type DriftReport,
   DriverError,
@@ -98,9 +99,13 @@ social.fresh = () => {
 // The workflows' company fixture: its data files, and GitHub and Stripe holding them as declared.
 const company = companyFakes();
 const companyDir = fileURLToPath(new URL("../../workflows/test/fixtures/company/", import.meta.url));
+/** A vendor with a workflow operation and no fake in `fakes`, so its connector page says so. */
+const chat = defineConnector("chat", {
+  message: { send: { effect: "send", input: z.object({ text: z.string() }), output: z.object({}) } },
+});
 const config = defineConfig({
   workflows: [announce],
-  connectors: [ghost, resend, bluesky, github, stripe],
+  connectors: [ghost, resend, bluesky, github, stripe, chat],
   drivers: [blog.driver, fakeResend().driver, fakeBluesky().driver, ...company.drivers],
   // Sandbox runs call these, seeded from the scenarios, never the drivers above.
   fakes: [fakeGhost(), fakeResend(), social],
@@ -778,6 +783,7 @@ describe("the page", () => {
     expect(blogPage.text).toContain("<code>Given a post titled {title} exists</code>");
     // The mock: what the fake returned for a made-up input, publish publishing the post create made.
     expect(blogPage.html).toMatch(/>Mock<\/h3>/);
+    expect(blogPage.text).not.toContain("No fake in this config.");
     expect(blogPage.text).toContain(">Called with<");
     expect(blogPage.text).toMatch(/&quot;id&quot;: &quot;post_0001&quot;/);
     // The scenario that names the operation, linking to its workflow with it chosen.
@@ -791,11 +797,17 @@ describe("the page", () => {
     const socialPage = await page("/connectors/bluesky");
     expect(socialPage.text).toContain("Fails with <code>bluesky: the network is down</code>");
 
-    // A vendor without a fake in `fakes` says so, once, and shows no mock; its resource types are named.
+    // A vendor with resource operations only has nothing to fake: no mock, and no notice that it
+    // has no fake. Its resource types are named.
     const githubPage = await page("/connectors/github");
-    expect(githubPage.text.match(/No fake in this config\./g)).toHaveLength(1);
+    expect(githubPage.text).not.toContain("No fake in this config.");
     expect(githubPage.html).not.toMatch(/>Mock<\/h3>/);
     expect(githubPage.html).toMatch(/Resources: <\/span>Branch protection rule, Repository, Team membership</);
+
+    // One with workflow operations and no fake in `fakes` says so, once, and shows no mock.
+    const chatPage = await page("/connectors/chat");
+    expect(chatPage.text.match(/No fake in this config\./g)).toHaveLength(1);
+    expect(chatPage.html).not.toMatch(/>Mock<\/h3>/);
 
     const missing = await page("/connectors/nope");
     expect(missing.status).toBe(404);
