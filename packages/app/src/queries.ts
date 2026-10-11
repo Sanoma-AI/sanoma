@@ -6,10 +6,18 @@ import { linkOptions, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { z } from "zod";
-import { pendingApprovals, RUNS_LIMIT, type RunsQuery, type ScenariosResponse, type StartRunRequest } from "./api.ts";
+import {
+  type CredentialsResponse,
+  pendingApprovals,
+  RUNS_LIMIT,
+  type RunsQuery,
+  type ScenariosResponse,
+  type StartRunRequest,
+} from "./api.ts";
 import {
   getActor,
   getConfig,
+  getCredentials,
   getDriftReport,
   getRun,
   getRuns,
@@ -123,6 +131,16 @@ export const scenariosNaming =
   (op: string) =>
   ({ scenarios }: ScenariosResponse) =>
     scenarios.filter((s) => s.steps.some((step) => step.op === op));
+
+/**
+ * Each vendor's credential statuses. They change while the app runs (someone sets one, here or
+ * elsewhere), so a page reads them again once they are 5 seconds old.
+ */
+export const credentialsQuery = () =>
+  queryOptions({ queryKey: ["credentials"], queryFn: () => getCredentials(), staleTime: 5_000 });
+
+/** The vendor's credential statuses, if its drivers declare any: for `select`. */
+export const credentialsFor = (vendor: string) => (all: CredentialsResponse) => all[vendor];
 
 /**
  * Who the server says is asking. A login lasts the page's life; the header name is kept in the

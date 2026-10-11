@@ -4,9 +4,10 @@ The JSON API routes, mounted under `/api`. They sit beside the pages and call th
 
 ## Contents
 
-| Path                           | What it is                                                                          |
-| ------------------------------ | ----------------------------------------------------------------------------------- |
-| [`runs/`](runs/AGENTS.md)      | Routes under `/api/runs`: list, start, detail and approval decisions                |
-| [`$.ts`](%24.ts)               | Any other `/api` path, by any method: a JSON 404 instead of the page                |
-| [`config.ts`](config.ts)       | `GET /api/config`: the config description without workflow sources                  |
-| [`scenarios.ts`](scenarios.ts) | `GET /api/scenarios`: the scenarios in the config's feature files, with their steps |
+| Path                               | What it is                                                                                            |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| [`runs/`](runs/AGENTS.md)          | Routes under `/api/runs`: list, start, detail and approval decisions                                  |
+| [`$.ts`](%24.ts)                   | Any other `/api` path, by any method: a JSON 404 instead of the page                                  |
+| [`credentials.ts`](credentials.ts) | `GET`, `PUT` and `DELETE /api/credentials`: the credential statuses, and setting and clearing a value |
+| [`config.ts`](config.ts)           | `GET /api/config`: the config description without workflow sources                                    |
+| [`scenarios.ts`](scenarios.ts)     | `GET /api/scenarios`: the scenarios in the config's feature files, with their steps                   |
