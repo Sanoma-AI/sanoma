@@ -47,7 +47,7 @@ It reads these when it is called, never at import:
 | `BLUESKY_APP_PASSWORD` | An [app password](https://bsky.app/settings/app-passwords), not the account password. |
 | `BLUESKY_SERVICE`      | Optional. The PDS or entryway to log in to; default `https://bsky.social`.            |
 
-A missing variable fails the call without calling Bluesky, naming it, and is not retried.
+A missing variable fails the call without calling Bluesky, naming it, and is not retried. The driver declares them in its `env` ([Credentials](https://www.npmjs.com/package/@sanoma/workflows#credentials)), so a worker refuses to start while a required one is unset or any is malformed, and the app's connector page shows each one's status.
 
 It signs in with the app password on its first call, keeps that session, on that service and account, for the life of the driver, and lets `@atproto/api` refresh it when the access token expires: Bluesky allows 30 logins per 5 minutes and 300 a day per account, fewer than a long-lived worker may post. If the refresh token has expired or been revoked, the next call logs in again. Bluesky's [OAuth](https://docs.bsky.app/docs/advanced-guides/oauth-client) needs a hosted client metadata document, a browser redirect and a session store, which a worker posting to its own account does not have; `@atproto/api` marks app-password sessions deprecated in favour of OAuth, so this may change.
 

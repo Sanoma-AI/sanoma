@@ -1,5 +1,6 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { type CredentialStatus, credentialReady } from "@sanoma/workflows/shared";
 import { ChevronRightIcon } from "lucide-react";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "#/components/ui/item.tsx";
 import { Nothing, PageHeader, plural, VendorLogo } from "../../components/common.tsx";
@@ -36,6 +37,7 @@ function ConnectorsPage() {
                     </ItemTitle>
                     <ItemDescription>
                       {plural(ops.length, "operation")} · used by {plural(workflows.length, "workflow")}
+                      {vendor.credentials && ` · ${configured(vendor.credentials)}`}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
@@ -49,4 +51,10 @@ function ConnectorsPage() {
       )}
     </div>
   );
+}
+
+/** Whether the drivers' environment variables are all ready, or how many are not. */
+function configured(credentials: CredentialStatus[]) {
+  const needs = credentials.filter((c) => !credentialReady(c)).length;
+  return needs ? `needs ${plural(needs, "variable")}` : "configured";
 }
