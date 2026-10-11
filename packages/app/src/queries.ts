@@ -213,6 +213,9 @@ export const railQuery = (name: string, filter: RunFilter = "all") =>
     refetchInterval: runsRefetchInterval(POLL_MS),
   });
 
+/** True when the filter picks from the latest runs (`match`), so older runs it would keep go unseen. */
+export const picksFromLatest = (filter: RunFilter) => FILTERS[filter].match !== undefined;
+
 /** Of the runs `railQuery` read, those the filter keeps: all of them, unless it picks by `match`. */
 export const railRuns = (filter: RunFilter, runs: RunSummary[]) => {
   const { match } = FILTERS[filter];

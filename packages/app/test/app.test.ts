@@ -936,6 +936,8 @@ describe("the page", () => {
     // The filter is the rail's: the sidebar's link to another workflow does not carry it.
     expect(filtered.html).toContain('href="/workflows/drift"');
     expect(filtered.html).not.toContain('href="/workflows/drift?runs=sandbox"');
+    // Sandbox is a pick from the latest runs, so none there is all it can say.
+    expect((await page("/workflows/drift?runs=sandbox")).text).toContain("No sandbox runs among the latest 50");
 
     // Failed is the server's to pick (`status=failed`), not a pick from the latest 50, so an
     // older failed run is not lost behind them.

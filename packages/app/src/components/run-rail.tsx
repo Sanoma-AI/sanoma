@@ -5,7 +5,7 @@ import { memo } from "react";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { RUN_TONE } from "#/lib/tone.ts";
 import { pendingApprovals, starterName } from "../api.ts";
-import { RAIL_LIMIT, railQuery, railRuns, RUN_FILTERS, type RunFilter, runLink } from "../queries.ts";
+import { picksFromLatest, RAIL_LIMIT, railQuery, railRuns, RUN_FILTERS, type RunFilter, runLink } from "../queries.ts";
 import { Nothing, SandboxBadge, StatusDot, When } from "./common.tsx";
 
 // The rail on a workflow's page: its panes, and its latest runs, each linking to its own pane.
@@ -18,12 +18,13 @@ const FILTER_LABEL: Record<RunFilter, string> = {
   failed: "Failed",
 };
 
-/** A link in the rail; `aria-current` marks the pane that shows. */
+/** A link in the rail; `aria-current`, which Link sets on an active link, marks the pane that shows. */
 const RAIL_LINK = "flex flex-col gap-0.5 rounded-md px-2 py-1.5 text-sm hover:bg-muted aria-[current=page]:bg-muted";
 /** A pane's link (About, New run): its name in bold while it shows. */
 const PANE_LINK = `${RAIL_LINK} aria-[current=page]:font-medium`;
-/** A rail link's props while its pane shows. */
-const RAIL_ACTIVE = { "aria-current": "page" } as const;
+
+/** The rail's links keep the filter; All leaves the URL without `?runs=`. */
+const railSearch = (filter: RunFilter) => ({ runs: filter === "all" ? undefined : filter });
 
 /**
  * The workflow's panes (About, New run) and its runs, newest first, filtered by `?runs=`. It
@@ -35,8 +36,9 @@ export function RunRail({ name }: { name: string }) {
   const navigate = useNavigate();
   const { data: runs, error } = useSuspenseQuery(railQuery(name, filter));
   const shown = railRuns(filter, runs);
-  // The rail's links keep the filter; All leaves the URL without `?runs=`.
-  const search = { runs: filter === "all" ? undefined : filter };
+  const search = railSearch(filter);
+  // Live and sandbox are picked from the latest runs: what they show is only of those.
+  const fromLatest = picksFromLatest(filter);
   return (
     <aside
       aria-label="Runs of this workflow"
@@ -48,7 +50,6 @@ export function RunRail({ name }: { name: string }) {
           params={{ name }}
           search={search}
           activeOptions={{ exact: true, includeSearch: false }}
-          activeProps={RAIL_ACTIVE}
           className={PANE_LINK}
         >
           About
@@ -58,7 +59,6 @@ export function RunRail({ name }: { name: string }) {
           params={{ name }}
           search={search}
           activeOptions={{ includeSearch: false }}
-          activeProps={RAIL_ACTIVE}
           className={PANE_LINK}
         >
           New run
@@ -90,18 +90,28 @@ export function RunRail({ name }: { name: string }) {
       </div>
       {error && <p className="px-2 text-xs text-destructive">Could not refresh: {error.message}</p>}
       {shown.length === 0 ? (
-        <Nothing title={filter === "all" ? "No runs yet" : "No runs match"} />
+        <Nothing
+          title={
+            filter === "all"
+              ? "No runs yet"
+              : fromLatest
+                ? `No ${filter} runs among the latest ${RAIL_LIMIT}`
+                : "No runs match"
+          }
+        />
       ) : (
         <ul className="flex max-h-[70vh] flex-col overflow-y-auto">
           {shown.map((run) => (
             <li key={run.runId}>
-              <RunLink run={run} search={search} />
+              <RunLink run={run} filter={filter} />
             </li>
           ))}
         </ul>
       )}
       {runs.length === RAIL_LIMIT && (
-        <p className="px-2 text-xs text-muted-foreground">Showing the latest {RAIL_LIMIT}</p>
+        <p className="px-2 text-xs text-muted-foreground">
+          {fromLatest ? "From" : "Showing"} the latest {RAIL_LIMIT}
+        </p>
       )}
     </aside>
   );
@@ -111,16 +121,10 @@ export function RunRail({ name }: { name: string }) {
  * A run in the rail: its status (and what it waits on), its sandbox, who started it and when.
  * Memoised: a poll keeps an unchanged run's object, so only the runs that changed draw again.
  */
-const RunLink = memo(function RunLink({ run, search }: { run: RunSummary; search: { runs: RunFilter | undefined } }) {
+const RunLink = memo(function RunLink({ run, filter }: { run: RunSummary; filter: RunFilter }) {
   const waitingOn = run.status === "waiting" ? pendingApprovals(run)[0]?.title : undefined;
   return (
-    <Link
-      {...runLink(run)}
-      search={search}
-      activeOptions={{ includeSearch: false }}
-      activeProps={RAIL_ACTIVE}
-      className={RAIL_LINK}
-    >
+    <Link {...runLink(run)} search={railSearch(filter)} activeOptions={{ includeSearch: false }} className={RAIL_LINK}>
       <span className="flex min-w-0 items-center gap-2">
         <StatusDot tone={RUN_TONE[run.status]} />
         <span className="shrink-0">{run.status}</span>
