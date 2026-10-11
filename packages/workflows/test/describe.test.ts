@@ -18,6 +18,7 @@ import {
   defineConfig,
   defineConnector,
   definePolicy,
+  defineResource,
   defineWorkflow,
   DriverError,
   memoryLedger,
@@ -207,6 +208,52 @@ describe("describeConfig", () => {
       error: expect.stringMatching(/^The reply is not plain JSON: /),
     });
     expect(mock("shop.stock.take")).toEqual({ input: null, error: "The shop fake does not implement shop.stock.take" });
+  });
+
+  it("samples workflow operations only: a resource type's read and import get no mock, even with a fake", async () => {
+    const repo = defineResource({
+      vendor: "forge",
+      type: "repo",
+      title: "Repo",
+      identity: "name",
+      schema: z.object({ name: z.string() }),
+      fields: { immutable: [], vendorOwned: [], writeOnly: [] },
+      find: ({ name }) => name,
+    });
+    const forge = defineConnector(
+      "forge",
+      { repo, issue: { open: { effect: "write", input: z.object({}), output: z.object({ id: z.string() }) } } },
+      { package: "@forge/sanoma-connector" },
+    );
+    // The same vendor in a second connector, with a plain group named as the resource type.
+    const forgeMore = defineConnector("forge", {
+      repo: { archive: { effect: "write", input: z.object({}), output: z.object({}) } },
+    });
+    const fake = defineFake(forge, {
+      initial: () => ({}),
+      ops: () => ({
+        repo: { import: async ({ id }) => ({ id, gone: true }), read: async ({ id }) => ({ id, gone: true }) },
+        issue: { open: async () => ({ id: "issue_1" }) },
+      }),
+    });
+    const { ops } = await describeConfig({
+      ...base,
+      workflows: [],
+      connectors: [forge, forgeMore],
+      drivers: [fake.driver],
+      fakes: [fake],
+    });
+    const mock = (id: string) => ops.find((o) => o.id === id)?.mock;
+    expect(mock("forge.issue.open")).toEqual({ input: {}, output: { id: "issue_1" } });
+    expect(mock("forge.repo.archive")).toEqual({
+      input: null,
+      error: "The forge fake does not implement forge.repo.archive",
+    });
+    expect(ops.filter((o) => o.resource === "repo").map((o) => [o.id, "mock" in o])).toEqual([
+      ["forge.repo.archive", true],
+      ["forge.repo.import", false],
+      ["forge.repo.read", false],
+    ]);
   });
 
   it("refuses, naming the operation, a fake that crashes and an input faker cannot make up", async () => {
