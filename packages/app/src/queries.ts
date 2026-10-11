@@ -2,8 +2,23 @@ import type { RunSummary } from "@sanoma/workflows";
 import type { ConfigDescription, WorkflowEntry } from "@sanoma/workflows/describe";
 import { isEnded } from "@sanoma/workflows/shared";
 import { queryOptions } from "@tanstack/react-query";
-import { pendingApprovals, RUNS_LIMIT, type RunsQuery, type ScenariosResponse } from "./api.ts";
-import { getActor, getConfig, getDriftReport, getRun, getRuns, getScenarios, getSource } from "./functions.ts";
+import {
+  type CredentialsResponse,
+  pendingApprovals,
+  RUNS_LIMIT,
+  type RunsQuery,
+  type ScenariosResponse,
+} from "./api.ts";
+import {
+  getActor,
+  getConfig,
+  getCredentials,
+  getDriftReport,
+  getRun,
+  getRuns,
+  getScenarios,
+  getSource,
+} from "./functions.ts";
 
 /** How often the runs and a run's detail refresh while a page shows them. */
 export const POLL_MS = 2_000;
@@ -83,6 +98,16 @@ export const scenariosNaming =
   (op: string) =>
   ({ scenarios }: ScenariosResponse) =>
     scenarios.filter((s) => s.steps.some((step) => step.op === op));
+
+/**
+ * Each vendor's credential statuses. They change while the app runs (someone sets one, here or
+ * elsewhere), so a page reads them again once they are 5 seconds old.
+ */
+export const credentialsQuery = () =>
+  queryOptions({ queryKey: ["credentials"], queryFn: () => getCredentials(), staleTime: 5_000 });
+
+/** The vendor's credential statuses, if its drivers declare any: for `select`. */
+export const credentialsFor = (vendor: string) => (all: CredentialsResponse) => all[vendor];
 
 /**
  * Who the server says is asking. A login lasts the page's life; the header name is kept in the

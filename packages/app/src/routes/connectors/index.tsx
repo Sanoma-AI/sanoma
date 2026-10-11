@@ -4,16 +4,20 @@ import { type CredentialStatus, credentialReady } from "@sanoma/workflows/shared
 import { ChevronRightIcon } from "lucide-react";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "#/components/ui/item.tsx";
 import { Nothing, PageHeader, plural, VendorLogo } from "../../components/common.tsx";
-import { configQuery, connectorsOf } from "../../queries.ts";
+import { configQuery, connectorsOf, credentialsQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/connectors/")({
-  // The root route loads the config.
+  // The root route loads the config; the statuses are read here.
+  loader: async ({ context: { queryClient } }) => {
+    await queryClient.query({ ...credentialsQuery(), staleTime: "static" });
+  },
   component: ConnectorsPage,
 });
 
 /** Every vendor the config's operations are from, one row each, linking to its page. */
 function ConnectorsPage() {
   const { data: connectors } = useSuspenseQuery({ ...configQuery(), select: connectorsOf });
+  const { data: credentials } = useSuspenseQuery(credentialsQuery());
   return (
     <div className="flex flex-col gap-6">
       <PageHeader />
@@ -37,7 +41,7 @@ function ConnectorsPage() {
                     </ItemTitle>
                     <ItemDescription>
                       {plural(ops.length, "operation")} · used by {plural(workflows.length, "workflow")}
-                      {vendor.credentials && ` · ${configured(vendor.credentials)}`}
+                      {credentials[id] && ` · ${configured(credentials[id])}`}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
