@@ -3,6 +3,7 @@ export {
   type Connector,
   type ConnectorVendor,
   type Driver,
+  type DriverEnv,
   type DriverFn,
   defineConnector,
   DriverError,
@@ -40,7 +41,13 @@ export {
   type ResourceOps,
   type ResourceSpec,
 } from "./resource.ts";
-export { defineConfig, resolveConfig, type ResolvedConfig, type SanomaConfig } from "./config.ts";
+export {
+  type CredentialStatus,
+  defineConfig,
+  resolveConfig,
+  type ResolvedConfig,
+  type SanomaConfig,
+} from "./config.ts";
 export {
   DRIFT_WORKFLOW,
   type DriftDeclared,
@@ -91,6 +98,7 @@ export { SanomaClient, type RunsFilter, type RunSummary, type StartOptions } fro
 // Also at `@sanoma/workflows/shared`, which a browser bundle can import.
 export {
   approverLabel,
+  credentialReady,
   ENDED_STATUSES,
   errorMessage,
   isEnded,

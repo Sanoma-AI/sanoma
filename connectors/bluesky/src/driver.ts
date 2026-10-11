@@ -3,7 +3,15 @@ import { Agent, AppBskyRichtextFacet, CredentialSession, RichText, XRPCError } f
 import { TID } from "@atproto/common-web";
 import { ResponseType } from "@atproto/xrpc";
 import { defineDriver, DriverError, retryableStatus } from "@sanoma/workflows";
+import { z } from "zod";
 import { bluesky } from "./index.ts";
+
+/** The environment variables the driver reads, on every call. */
+const env = z.object({
+  BLUESKY_IDENTIFIER: z.string().describe("the account's handle or email"),
+  BLUESKY_APP_PASSWORD: z.string().describe("an app password (Settings, App passwords), not the account password"),
+  BLUESKY_SERVICE: z.url().optional().describe("the PDS to log in to; default https://bsky.social"),
+});
 
 export interface BlueskyDriverOptions {
   /** How long one request to Bluesky may take, in ms, before the call fails as retryable. Default 10 000. */
@@ -27,8 +35,8 @@ export function blueskyDriver(options: BlueskyDriverOptions = {}) {
 
   /** The signed-in agent, logging in when there is no session. */
   async function signIn() {
-    const identifier = env("BLUESKY_IDENTIFIER");
-    const password = env("BLUESKY_APP_PASSWORD");
+    const identifier = variable("BLUESKY_IDENTIFIER");
+    const password = variable("BLUESKY_APP_PASSWORD");
     // One session for the driver's life, on the service the first call names.
     session ??= new CredentialSession(new URL(process.env.BLUESKY_SERVICE || "https://bsky.social"), timedFetch);
     client ??= new Agent(session);
@@ -45,54 +53,61 @@ export function blueskyDriver(options: BlueskyDriverOptions = {}) {
     return { agent: client, did: data.did, handle: data.handle };
   }
 
-  return defineDriver(bluesky, {
-    post: {
-      create: async ({ text }, call) => {
-        const { agent, did, handle } = await signIn();
-        const rt = new RichText({ text });
-        await rt.detectFacets(agent);
-        const record = {
-          text: rt.text,
-          // A mention of a handle that does not resolve keeps no DID, which the PDS refuses.
-          facets: rt.facets?.filter((f) => f.features.every((x) => !AppBskyRichtextFacet.isMention(x) || x.did)),
-          createdAt: new Date().toISOString(),
-        };
-        const rkey = rkeyFor(call.idempotencyKey);
-        let ref: { uri: string; cid: string };
-        try {
-          ref = await agent.app.bsky.feed.post.create({ repo: did, rkey }, record);
-        } catch (err) {
-          // Refused outright: no record was made, so there is nothing to look for.
-          if (err instanceof XRPCError && REFUSED.has(err.status)) throw driverError(err, "post", timeoutMs);
-          // A repo holds one record per key, so a repeated create fails (Bluesky's PDS answers
-          // 500). If this key's post exists, an earlier try of this call made it (its reply was
-          // lost): return it. Only RecordNotFound says it does not; any other failure to read
-          // it back leaves that unknown, so the call may be tried again.
-          const existing = await agent.app.bsky.feed.post.get({ repo: did, rkey }).catch((lookup: unknown) => {
-            if (lookup instanceof XRPCError && lookup.error === "RecordNotFound") return undefined;
-            throw new DriverError(`Bluesky post failed, and reading it back failed too: ${(lookup as Error).message}`, {
-              retryable: true,
-              cause: lookup,
+  return defineDriver(
+    bluesky,
+    {
+      post: {
+        create: async ({ text }, call) => {
+          const { agent, did, handle } = await signIn();
+          const rt = new RichText({ text });
+          await rt.detectFacets(agent);
+          const record = {
+            text: rt.text,
+            // A mention of a handle that does not resolve keeps no DID, which the PDS refuses.
+            facets: rt.facets?.filter((f) => f.features.every((x) => !AppBskyRichtextFacet.isMention(x) || x.did)),
+            createdAt: new Date().toISOString(),
+          };
+          const rkey = rkeyFor(call.idempotencyKey);
+          let ref: { uri: string; cid: string };
+          try {
+            ref = await agent.app.bsky.feed.post.create({ repo: did, rkey }, record);
+          } catch (err) {
+            // Refused outright: no record was made, so there is nothing to look for.
+            if (err instanceof XRPCError && REFUSED.has(err.status)) throw driverError(err, "post", timeoutMs);
+            // A repo holds one record per key, so a repeated create fails (Bluesky's PDS answers
+            // 500). If this key's post exists, an earlier try of this call made it (its reply was
+            // lost): return it. Only RecordNotFound says it does not; any other failure to read
+            // it back leaves that unknown, so the call may be tried again.
+            const existing = await agent.app.bsky.feed.post.get({ repo: did, rkey }).catch((lookup: unknown) => {
+              if (lookup instanceof XRPCError && lookup.error === "RecordNotFound") return undefined;
+              throw new DriverError(
+                `Bluesky post failed, and reading it back failed too: ${(lookup as Error).message}`,
+                {
+                  retryable: true,
+                  cause: lookup,
+                },
+              );
             });
-          });
-          if (!existing) throw driverError(err, "post", timeoutMs);
-          if (existing.value.text !== text) {
-            throw new DriverError(`Bluesky already has a different post at ${existing.uri}`, { retryable: false });
+            if (!existing) throw driverError(err, "post", timeoutMs);
+            if (existing.value.text !== text) {
+              throw new DriverError(`Bluesky already has a different post at ${existing.uri}`, { retryable: false });
+            }
+            ref = existing;
           }
-          ref = existing;
-        }
-        // A handle that fails verification reads "handle.invalid"; the DID always resolves.
-        const profile = handle === "handle.invalid" ? did : handle;
-        return { uri: ref.uri, cid: ref.cid, url: `https://bsky.app/profile/${profile}/post/${rkey}` };
+          // A handle that fails verification reads "handle.invalid"; the DID always resolves.
+          const profile = handle === "handle.invalid" ? did : handle;
+          return { uri: ref.uri, cid: ref.cid, url: `https://bsky.app/profile/${profile}/post/${rkey}` };
+        },
       },
     },
-  });
+    { env },
+  );
 }
 
 /** A create that failed with one of these made no record: the request was bad or not allowed. */
 const REFUSED = new Set([400, 401, 403]);
 
-function env(name: string): string {
+function variable(name: string): string {
   const value = process.env[name];
   if (!value) throw new DriverError(`${name} is not set: the Bluesky driver needs it`, { retryable: false });
   return value;

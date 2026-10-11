@@ -29,6 +29,7 @@ import {
   approvedFor,
   type ApprovalState,
   defineConfig,
+  defineConnector,
   definePolicy,
   type DriftReport,
   DriverError,
@@ -44,7 +45,7 @@ import announce from "../../workflows/test/fixtures/announce.ts";
 import { companyFakes } from "../../workflows/test/fixtures/company/fakes.ts";
 import { z } from "zod";
 import { type App, type ErrorResponse, type RunDetail, startApp } from "../src/index.ts";
-import { ApiError, type ScenariosResponse, type StartRunResponse } from "../src/api.ts";
+import { ApiError, type CredentialsResponse, type ScenariosResponse, type StartRunResponse } from "../src/api.ts";
 import { asApiError, fileSource, parse, scenarios, withoutSources } from "../src/server/core.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it when
@@ -98,9 +99,13 @@ social.fresh = () => {
 // The workflows' company fixture: its data files, and GitHub and Stripe holding them as declared.
 const company = companyFakes();
 const companyDir = fileURLToPath(new URL("../../workflows/test/fixtures/company/", import.meta.url));
+/** A vendor with a workflow operation and no fake in `fakes`, so its connector page says so. */
+const chat = defineConnector("chat", {
+  message: { send: { effect: "send", input: z.object({ text: z.string() }), output: z.object({}) } },
+});
 const config = defineConfig({
   workflows: [announce],
-  connectors: [ghost, resend, bluesky, github, stripe],
+  connectors: [ghost, resend, bluesky, github, stripe, chat],
   drivers: [blog.driver, fakeResend().driver, fakeBluesky().driver, ...company.drivers],
   // Sandbox runs call these, seeded from the scenarios, never the drivers above.
   fakes: [fakeGhost(), fakeResend(), social],
@@ -807,6 +812,7 @@ describe("the page", () => {
     expect(blogPage.text).toContain("<code>Given a post titled {title} exists</code>");
     // The mock: what the fake returned for a made-up input, publish publishing the post create made.
     expect(blogPage.html).toMatch(/>Mock<\/h3>/);
+    expect(blogPage.text).not.toContain("No fake in this config.");
     expect(blogPage.text).toContain(">Called with<");
     expect(blogPage.text).toMatch(/&quot;id&quot;: &quot;post_0001&quot;/);
     // The scenario that names the operation, linking to its workflow with it chosen.
@@ -820,11 +826,17 @@ describe("the page", () => {
     const socialPage = await page("/connectors/bluesky");
     expect(socialPage.text).toContain("Fails with <code>bluesky: the network is down</code>");
 
-    // A vendor without a fake in `fakes` says so, once, and shows no mock; its resource types are named.
+    // A vendor with resource operations only has nothing to fake: no mock, and no notice that it
+    // has no fake. Its resource types are named.
     const githubPage = await page("/connectors/github");
-    expect(githubPage.text.match(/No fake in this config\./g)).toHaveLength(1);
+    expect(githubPage.text).not.toContain("No fake in this config.");
     expect(githubPage.html).not.toMatch(/>Mock<\/h3>/);
     expect(githubPage.html).toMatch(/Resources: <\/span>Branch protection rule, Repository, Team membership</);
+
+    // One with workflow operations and no fake in `fakes` says so, once, and shows no mock.
+    const chatPage = await page("/connectors/chat");
+    expect(chatPage.text.match(/No fake in this config\./g)).toHaveLength(1);
+    expect(chatPage.html).not.toMatch(/>Mock<\/h3>/);
 
     const missing = await page("/connectors/nope");
     expect(missing.status).toBe(404);
@@ -963,6 +975,11 @@ describe("the page", () => {
     for (const file of readdirSync(dir).filter((f) => f.endsWith(".js"))) {
       // Nor the scenarios' Gherkin parser and faker, which only the server loads.
       expect(readFileSync(join(dir, file), "utf8"), file).not.toMatch(/DBOSClient|systemDatabaseUrl|@cucumber|faker/);
+      // Nor Postgres's client, which reads and writes the credentials.
+      expect(file).not.toMatch(/^pg[-.]/);
+      expect(readFileSync(join(dir, file), "utf8"), file).not.toMatch(
+        /pg-protocol|pg-pool|sanoma_credentials|pg_notify/,
+      );
     }
   });
 
@@ -1253,6 +1270,123 @@ describe("an app whose config no longer has a workflow", () => {
     const missing = await page("/workflows/nope", retired.url);
     expect(missing.status).toBe(404);
     expect(missing.text).toContain("No workflow nope");
+  });
+});
+
+describe("an app whose drivers declare environment variables", () => {
+  // Made-up variables and values: nothing here is a credential.
+  const URL_VAR = "SANOMA_TEST_GHOST_URL";
+  const KEY_VAR = "SANOMA_TEST_GHOST_KEY";
+  const SITE = "https://madeup-site.example.test";
+  const KEY = "key_madeupvalue";
+  const env = z.object({
+    [URL_VAR]: z.url().describe("the made-up site's URL"),
+    [KEY_VAR]: z
+      .string()
+      .regex(/^key_[a-z]+$/, "a made-up key, key_<letters>")
+      .describe("a made-up key"),
+  });
+  let declaring: App;
+  /** A credentials request to the declaring app, as tester. */
+  const change = (method: "PUT" | "DELETE", body: unknown) =>
+    fetch(new URL("/api/credentials", declaring.url), {
+      method,
+      headers: { "content-type": "application/json", "x-sanoma-actor": "tester" },
+      body: JSON.stringify(body),
+    });
+  const statuses = async () => (await call<CredentialsResponse>("/api/credentials", { base: declaring.url })).body;
+  beforeAll(async () => {
+    vi.stubEnv(URL_VAR, SITE);
+    vi.stubEnv(KEY_VAR, undefined);
+    // The ghost driver, with an env: startApp does not refuse what startWorker would.
+    const drivers = config.drivers.map((d) => (d.vendor === "ghost" ? { ...d, env } : d));
+    declaring = await startApp({ ...config, drivers }, { port: 0 });
+    // The table outlives a run of the tests.
+    await change("DELETE", { name: KEY_VAR });
+    await change("DELETE", { name: URL_VAR });
+  });
+  afterAll(async () => {
+    vi.unstubAllEnvs();
+    await declaring?.close();
+  });
+
+  it("says on /connectors how many variables a vendor needs, and nothing for a vendor that declares none", async () => {
+    const connectors = await page("/connectors", declaring.url);
+    expect(connectors.text).toContain("2 operations · used by 1 workflow · needs 1 variable");
+    expect(connectors.text).not.toContain("configured");
+    expect((await page("/connectors")).text).not.toMatch(/needs \d+ variable|configured/);
+  });
+
+  it("lists each variable on the connector's page with its status and Set, or that the environment sets it", async () => {
+    const blogPage = await page("/connectors/ghost", declaring.url);
+    expect(blogPage.html).toMatch(/>Credentials<\/h2>/);
+    expect(blogPage.text).toMatch(
+      new RegExp(`<code>${URL_VAR}</code>.*?>set<.*?the made-up site&#x27;s URL.*?set in the environment`),
+    );
+    expect(blogPage.text).toMatch(new RegExp(`<code>${KEY_VAR}</code>.*?>missing<.*?a made-up key.*?>Set</button>`));
+    // One Set: the environment's variable has no controls.
+    expect(blogPage.text.match(/>(Set|Replace|Clear)<\/button>/g)).toEqual([">Set</button>"]);
+    expect(blogPage.html).not.toContain(SITE);
+    // A vendor whose drivers declare nothing has no such section.
+    expect((await page("/connectors/resend", declaring.url)).html).not.toMatch(/>Credentials</);
+  });
+
+  it("carries the statuses in /api/credentials, not /api/config, never a value", async () => {
+    const { body } = await call<ConfigDescription>("/api/config", { base: declaring.url });
+    expect(body.vendors.ghost).not.toHaveProperty("credentials");
+    const credentials = await statuses();
+    expect(Object.keys(credentials)).toEqual(["ghost"]);
+    expect(credentials.ghost).toEqual([
+      { name: URL_VAR, description: "the made-up site's URL", optional: false, status: "set", source: "environment" },
+      { name: KEY_VAR, description: "a made-up key", optional: false, status: "missing" },
+    ]);
+    expect(JSON.stringify([body, credentials])).not.toContain(SITE);
+  });
+
+  it("refuses a value the variable's schema refuses, a name no driver declares, and an anonymous change, without the value", async () => {
+    const VALUE = "key_NOT-LOWER";
+    const invalid = await change("PUT", { name: KEY_VAR, value: VALUE });
+    expect(invalid.status).toBe(400);
+    expect(await invalid.text()).not.toContain(VALUE);
+
+    const undeclared = await change("PUT", { name: "SANOMA_TEST_UNDECLARED", value: KEY });
+    expect(undeclared.status).toBe(400);
+    expect(await undeclared.text()).not.toContain(KEY);
+    const empty = await change("PUT", { name: KEY_VAR, value: "" });
+    expect(((await empty.json()) as ErrorResponse).issues?.[0]).toMatchObject({
+      path: ["value"],
+      message: "Enter a value",
+    });
+
+    const anonymous = await fetch(new URL("/api/credentials", declaring.url), {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: KEY_VAR, value: KEY }),
+    });
+    expect(anonymous.status).toBe(400);
+    expect((await statuses()).ghost?.[1]?.status).toBe("missing");
+  });
+
+  it("stores a value as the actor, says who set it on the page, then clears it", async () => {
+    const set = await change("PUT", { name: KEY_VAR, value: KEY });
+    expect(set.status).toBe(204);
+    expect(await set.text()).toBe("");
+    const [, key] = (await statuses()).ghost!;
+    expect(key).toMatchObject({ name: KEY_VAR, status: "set", source: "stored", setBy: "tester" });
+
+    const blogPage = await page("/connectors/ghost", declaring.url);
+    expect(blogPage.text).toMatch(new RegExp(`<code>${KEY_VAR}</code>.*?>set<.*?· by tester · <time`));
+    expect(blogPage.text.match(/>(Set|Replace|Clear)<\/button>/g)).toEqual([">Replace</button>", ">Clear</button>"]);
+    expect((await page("/connectors", declaring.url)).text).toContain("· configured");
+    for (const html of [blogPage.html, JSON.stringify(await statuses())]) expect(html).not.toContain(KEY);
+
+    expect((await change("DELETE", { name: KEY_VAR })).status).toBe(204);
+    expect((await statuses()).ghost?.[1]).toEqual({
+      name: KEY_VAR,
+      description: "a made-up key",
+      optional: false,
+      status: "missing",
+    });
   });
 });
 

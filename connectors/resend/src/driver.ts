@@ -13,6 +13,9 @@ export interface ResendDriverOptions {
   timeoutMs?: number;
 }
 
+/** The environment variables the driver reads, on every call. */
+const env = z.object({ RESEND_API_KEY: z.string().describe("an API key") });
+
 /** Resend's error body. The spec declares none; the docs give `{ statusCode, name, message }`. */
 const errorBody = z
   .object({ name: z.string().optional().catch(undefined), message: z.string().optional().catch(undefined) })
@@ -91,47 +94,51 @@ export function resendDriver(options: ResendDriverOptions = {}) {
     return api;
   }
 
-  return defineDriver(resend, {
-    broadcast: {
-      create: async (input, call) => {
-        const from = input.from ?? options.from;
-        if (!from) {
-          throw new DriverError("resend: broadcast.create needs `from` in its input or resendDriver({ from })", {
-            retryable: false,
-          });
-        }
-        const reply = await broadcastsCreate({
-          client: client("broadcast.create", call),
-          // `name` shows in Resend's dashboard only: it ties the broadcast to the call that made it.
-          body: {
-            segment_id: input.audience,
-            from,
-            subject: input.subject,
-            html: input.html,
-            name: call.idempotencyKey,
-          },
-        });
-        return { id: broadcastOf("broadcast.create", reply).id };
-      },
-      send: async ({ id }, call) => {
-        const api = client("broadcast.send", call);
-        // A replay of a send whose reply was lost must not send again: send only a broadcast that
-        // is still a draft or scheduled, and otherwise say where it is.
-        const { status } = broadcastOf("broadcast.send", await broadcastsGet({ client: api, path: { id } }));
-        if (status === "sent") return { id, status: "sent" as const };
-        if (status === "queued") return { id, status: "queued" as const };
-        if (status !== "draft" && status !== "scheduled") {
-          throw new DriverError(
-            `resend: broadcast.send: broadcast ${id} is ${status ?? "of no status"}, not sendable`,
-            {
+  return defineDriver(
+    resend,
+    {
+      broadcast: {
+        create: async (input, call) => {
+          const from = input.from ?? options.from;
+          if (!from) {
+            throw new DriverError("resend: broadcast.create needs `from` in its input or resendDriver({ from })", {
               retryable: false,
+            });
+          }
+          const reply = await broadcastsCreate({
+            client: client("broadcast.create", call),
+            // `name` shows in Resend's dashboard only: it ties the broadcast to the call that made it.
+            body: {
+              segment_id: input.audience,
+              from,
+              subject: input.subject,
+              html: input.html,
+              name: call.idempotencyKey,
             },
-          );
-        }
-        const reply = await broadcastsSend({ client: api, path: { id }, body: {} });
-        // Resend replies with the id only: it accepts the broadcast and sends it in the background.
-        return { id: broadcastOf("broadcast.send", reply).id, status: "queued" as const };
+          });
+          return { id: broadcastOf("broadcast.create", reply).id };
+        },
+        send: async ({ id }, call) => {
+          const api = client("broadcast.send", call);
+          // A replay of a send whose reply was lost must not send again: send only a broadcast that
+          // is still a draft or scheduled, and otherwise say where it is.
+          const { status } = broadcastOf("broadcast.send", await broadcastsGet({ client: api, path: { id } }));
+          if (status === "sent") return { id, status: "sent" as const };
+          if (status === "queued") return { id, status: "queued" as const };
+          if (status !== "draft" && status !== "scheduled") {
+            throw new DriverError(
+              `resend: broadcast.send: broadcast ${id} is ${status ?? "of no status"}, not sendable`,
+              {
+                retryable: false,
+              },
+            );
+          }
+          const reply = await broadcastsSend({ client: api, path: { id }, body: {} });
+          // Resend replies with the id only: it accepts the broadcast and sends it in the background.
+          return { id: broadcastOf("broadcast.send", reply).id, status: "queued" as const };
+        },
       },
     },
-  });
+    { env },
+  );
 }
