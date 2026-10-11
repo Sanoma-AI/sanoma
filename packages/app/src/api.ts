@@ -1,13 +1,6 @@
-import type {
-  ApprovalState,
-  ErrorCode,
-  InputIssue,
-  LedgerRecord,
-  Principal,
-  RunStatus,
-  RunSummary,
-} from "@sanoma/workflows";
+import type { ApprovalState, ErrorCode, InputIssue, LedgerRecord, Principal, RunSummary } from "@sanoma/workflows";
 import type { Check, Scenario } from "@sanoma/workflows/scenario";
+import { RUN_STATUSES } from "@sanoma/workflows/shared";
 import { z } from "zod";
 
 export type { InputIssue } from "@sanoma/workflows";
@@ -88,15 +81,6 @@ export type DecideCall = z.infer<typeof DecideCall>;
 /** How many runs one read lists. */
 export const RUNS_LIMIT = { default: 50, max: 500 } as const;
 
-const RUN_STATUSES = [
-  "queued",
-  "running",
-  "waiting",
-  "finished",
-  "failed",
-  "cancelled",
-] as const satisfies readonly RunStatus[];
-
 /** `GET /api/runs?limit=&status=&workflow=`: the latest runs, or the latest with that status, of that workflow. */
 export const RunsQuery = z.object({
   limit: z.coerce.number().int().min(1).max(RUNS_LIMIT.max).default(RUNS_LIMIT.default),
@@ -138,8 +122,11 @@ export interface RunCheck extends Check {
   settled: boolean;
 }
 
-/** A scenario as the page lists it: what it says, not how the worker seeds and checks it. */
-export type ScenarioEntry = Pick<Scenario, "name" | "workflow" | "file" | "text" | "steps">;
+/**
+ * A scenario as the page lists it: what it says and the input its run starts with, not how the
+ * worker seeds and checks it.
+ */
+export type ScenarioEntry = Pick<Scenario, "name" | "workflow" | "file" | "text" | "steps" | "input">;
 
 /** `GET /api/scenarios`: every scenario, and why each feature file that could not be read could not. */
 export interface ScenariosResponse {

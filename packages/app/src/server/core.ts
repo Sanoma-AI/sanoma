@@ -168,12 +168,13 @@ export function scenarios({ resolved }: Pick<AppContext, "resolved">): Scenarios
   try {
     const loaded = loadScenarios(resolved);
     return {
-      scenarios: loaded.scenarios.map(({ name, workflow, file, text, steps }) => ({
+      scenarios: loaded.scenarios.map(({ name, workflow, file, text, steps, input }) => ({
         name,
         workflow,
         file,
         text,
         steps,
+        input,
       })),
       errors: loaded.errors,
     };

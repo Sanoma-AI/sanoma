@@ -20,10 +20,13 @@ export type { DriftField, DriftReport, DriftResult, DriftStatus } from "./drift.
 // same functions, so a page answers these questions the way a run does.
 
 /**
- * Where a run is: waiting on the queue, running, waiting for an approval, or ended.
- * `waiting` is `running` with an approval pending.
+ * Every run status, in the order a run may pass through them: waiting on the queue, running,
+ * waiting for an approval, or ended. `waiting` is `running` with an approval pending.
  */
-export type RunStatus = "queued" | "running" | "waiting" | "finished" | "failed" | "cancelled";
+export const RUN_STATUSES = ["queued", "running", "waiting", "finished", "failed", "cancelled"] as const;
+
+/** Where a run is: one of `RUN_STATUSES`, so a new status reaches every list and map of them. */
+export type RunStatus = (typeof RUN_STATUSES)[number];
 
 /** The statuses of a run that has ended: it reads no more decisions. */
 export const ENDED_STATUSES = ["finished", "failed", "cancelled"] as const satisfies readonly RunStatus[];

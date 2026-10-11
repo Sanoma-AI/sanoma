@@ -84,9 +84,10 @@ describe("buildInput", () => {
     expect(owned).toEqual({ details: { owner: "Bo", notify: false } });
   });
 
-  it("reads numbers, choices, lists and JSON as their values", () => {
+  it("reads numbers, choices, lists and JSON as their values, and sends a date-time as the ISO text it holds", () => {
     const { input: built } = filled({
       title: "Launch",
+      launchAt: "2030-01-01T09:00:00Z",
       count: "3",
       ratio: "0.5",
       channel: "1",
@@ -98,6 +99,7 @@ describe("buildInput", () => {
     });
     expect(built).toMatchObject({
       title: "Launch",
+      launchAt: "2030-01-01T09:00:00Z",
       count: 3,
       ratio: 0.5,
       channel: "email",
@@ -110,8 +112,39 @@ describe("buildInput", () => {
   });
 
   it("names the fields whose values it cannot read", () => {
-    const { errors } = filled({ count: "three", extra: "{", launchAt: "not a time", people: [{ name: "" }] });
-    expect(errors).toEqual({ count: "Not a number", extra: "Not valid JSON", launchAt: "Not a date and time" });
+    const { errors } = filled({ count: "three", extra: "{", people: [{ name: "" }] });
+    expect(errors).toEqual({ count: "Not a number", extra: "Not valid JSON" });
+  });
+});
+
+describe("initialValues", () => {
+  it("shows a given input as the form holds it, defaults where it has none, and date-times as given", () => {
+    const values = initialValues(fields, {
+      title: "Launch",
+      launchAt: "2030-01-01T09:00:00Z",
+      channel: "email",
+      people: [{ name: "Ann" }],
+      extra: { k: 1 },
+    });
+    expect(values).toMatchObject({
+      title: "Launch",
+      note: "",
+      count: "1",
+      launchAt: "2030-01-01T09:00:00Z",
+      channel: "1",
+      tags: [],
+      people: [{ name: "Ann", email: "" }],
+      details: { owner: "" },
+      extra: '{\n  "k": 1\n}',
+    });
+    // Not an object: each field's default.
+    expect(initialValues(fields, null)).toEqual(initialValues(fields));
+  });
+
+  it("holds a schema's default date-time as its ISO text, not in this machine's time zone", () => {
+    // What the server renders until the browser shows it in its own zone (the page tests see that markup).
+    const probe = fieldsOf(jsonSchemaOf(z.object({ at: z.iso.datetime().default("2030-01-01T09:00:00Z") })))!;
+    expect(initialValues(probe)).toEqual({ at: "2030-01-01T09:00:00Z" });
   });
 });
 

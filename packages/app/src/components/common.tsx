@@ -27,6 +27,7 @@ import {
 import { Alert, AlertDescription } from "#/components/ui/alert.tsx";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
+import { ButtonGroup } from "#/components/ui/button-group.tsx";
 import { Card } from "#/components/ui/card.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
@@ -35,7 +36,7 @@ import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
 import { utcText } from "#/lib/time.ts";
 import { cn } from "#/lib/utils.ts";
-import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
+import { APPROVAL_TONE, DECISION_TONE, type Tone, TONE_FILL } from "#/lib/tone.ts";
 import type { OpEntry } from "@sanoma/workflows/describe";
 import { approverLabel } from "@sanoma/workflows/shared";
 import { configQuery } from "../queries.ts";
@@ -130,19 +131,6 @@ export const effectBadge = cva("", {
   },
 });
 
-const dot = cva("size-2.5 rounded-full", {
-  variants: {
-    tone: {
-      ok: "bg-tone-ok-foreground",
-      bad: "bg-tone-bad-foreground",
-      waiting: "bg-tone-waiting-foreground",
-      active: "bg-tone-active-foreground",
-      idle: "bg-tone-idle-foreground",
-      off: "bg-muted-foreground/50",
-    } satisfies Record<Tone, string>,
-  },
-});
-
 /**
  * A vendor's logo, 16 px unless `className` sizes it, named by the vendor's title for assistive
  * tech unless `alt` says otherwise (`""` where the title is beside it): its connector's light
@@ -221,7 +209,7 @@ export const BUILTIN_ICON = {
 
 /** A tone as a dot, where a badge would be too much. */
 export function StatusDot({ tone }: { tone: Tone }) {
-  return <span aria-hidden className={dot({ tone })} />;
+  return <span aria-hidden className={cn("size-2.5 rounded-full", TONE_FILL[tone])} />;
 }
 
 export function ApprovalStatusBadge({ status }: { status: ApprovalState["status"] }) {
@@ -339,6 +327,27 @@ export function Disclosure({ label, children }: { label: ReactNode; children: Re
       </CollapsibleTrigger>
       <CollapsibleContent>{children}</CollapsibleContent>
     </Collapsible>
+  );
+}
+
+/** A segment while its URL shows (Link marks it `aria-current="page"`), or while Link's `disabled` leaves it no href. */
+const SEGMENT =
+  "aria-[current=page]:bg-muted aria-[current=page]:font-semibold aria-disabled:pointer-events-none aria-disabled:opacity-50";
+
+/**
+ * A choice between URLs, as one control: `children` are `Segment`s. Links rather than buttons, so
+ * the server renders the choice the URL makes, and each choice is a page of its own.
+ */
+export function Segmented({ label, children }: { label: string; children: ReactNode }) {
+  return <ButtonGroup aria-label={label}>{children}</ButtonGroup>;
+}
+
+/** One choice of a `Segmented`: its `<Link>`, as a small outline button. */
+export function Segment({ children }: { children: ReactElement }) {
+  return (
+    <Button asChild variant="outline" size="sm" className={SEGMENT}>
+      {children}
+    </Button>
   );
 }
 

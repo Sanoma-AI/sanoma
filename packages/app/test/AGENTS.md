@@ -11,7 +11,7 @@ Vitest tests for `@sanoma/app`. They start the app against a real config and cal
 | [`outline-graph.test.ts`](outline-graph.test.ts)   | `outlineGraph` for a workflow before it runs                                                            |
 | [`scenario-graph.test.ts`](scenario-graph.test.ts) | `annotateGraph` and `scenarioRoles`: a scenario's marks on an outline                                   |
 | [`layout.test.ts`](layout.test.ts)                 | Graph layout: sequences, lanes and clusters                                                             |
-| [`schema.test.ts`](schema.test.ts)                 | The start form's schema code: fields, input, issue targets and datetime-local values                    |
+| [`schema.test.ts`](schema.test.ts)                 | The start form's schema code: fields, starting values, input, issue targets, and datetime-local values  |
 | [`lines.test.ts`](lines.test.ts)                   | `highlightedLines` for the source panel                                                                 |
 | [`loopback.test.ts`](loopback.test.ts)             | The loopback rule for Host names                                                                        |
 | [`fixtures/scenarios/`](fixtures/scenarios/)       | The feature file the app tests copy and read their scenarios from                                       |
