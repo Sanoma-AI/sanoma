@@ -971,7 +971,11 @@ describe("the page", () => {
     const pane = await page("/workflows/announce/new");
     expect(pane.status).toBe(200);
     expect(pane.html).toContain('id="field-title"');
-    expect(pane.html).toContain('type="datetime-local"');
+    expect(pane.html).not.toMatch(/<fieldset[^>]*disabled/);
+    // A date-time is its ISO text until the browser shows it in its own time zone: empty here.
+    const launchAt = pane.html.match(/<input[^>]*id="field-launchAt"[^>]*>/)?.[0];
+    expect(launchAt).toContain('type="text"');
+    expect(launchAt).toContain('value=""');
     expect(pane.html).toMatch(/<button[^>]*aria-pressed="true"[^>]*>(<svg.*?<\/svg>)?Live vendors<\/button>/);
     expect(pane.html).toMatch(/<button[^>]*aria-pressed="false"[^>]*>(<svg.*?<\/svg>)?Sandbox<\/button>/);
     expect(pane.text).toContain("Calls Bluesky, Ghost, Resend for real");
@@ -990,9 +994,9 @@ describe("the page", () => {
 
     const pane = await page("/workflows/announce/new?scenario=Launch+on+time");
     expect(pane.status).toBe(200);
-    const titleInput = pane.html.match(/<input[^>]*id="field-title"[^>]*>/)?.[0];
-    expect(titleInput).toContain('disabled=""');
-    expect(titleInput).toContain(`value="${title}"`);
+    // One disabled fieldset around the fields: the browser disables every control in it.
+    expect(pane.html).toMatch(/<fieldset[^>]*disabled=""[^>]*>(?:(?!<\/fieldset>)[\s\S])*id="field-title"/);
+    expect(pane.html).toMatch(new RegExp(`<input[^>]*id="field-title"[^>]*value="${title}"`));
     // A date-time as the scenario gives it, not in this process's time zone.
     expect(pane.html).not.toContain('type="datetime-local"');
     expect(pane.html).toMatch(/<input[^>]*id="field-launchAt"[^>]*value="2030-01-01T09:00:00Z"/);

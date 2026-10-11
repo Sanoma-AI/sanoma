@@ -35,7 +35,10 @@ export interface ArrayField extends Base {
 
 export type Field = ScalarField | ObjectField | ArrayField;
 
-/** What the form holds for a scalar: text for most (an enum holds its option's index), a checkbox state for booleans. */
+/**
+ * What the form holds for a scalar: text for most (an enum holds its option's index, a date-time
+ * its ISO text, which `DateTimeInput` shows in the browser's time zone), a checkbox state for booleans.
+ */
 export type ScalarValue = string | boolean | undefined;
 export type Value = ScalarValue | Record<string, ScalarValue> | Value[];
 export type Values = Record<string, Value>;
@@ -100,42 +103,32 @@ function scalarKind(prop: Schema): Scalar {
   }
 }
 
-/** The form's starting values: each field's default, or empty. */
-export function initialValues(fields: Field[]): Values {
-  return Object.fromEntries(fields.map((f) => [f.key, initialValue(f, f.default)]));
-}
-
-/**
- * The values of a given input (a scenario's), each field's default where it has none, to show
- * read-only. Date-times stay as given: a `datetime-local` value is in this process's time zone,
- * so the server and the browser would render different text.
- */
-export function valuesFrom(fields: Field[], input: unknown): Values {
+/** The form's starting values: each field's value in `input` (a scenario's), else its default, else empty. */
+export function initialValues(fields: Field[], input?: unknown): Values {
   return Object.fromEntries(
-    fields.map((f) => [f.key, initialValue(f, isRecord(input) && f.key in input ? input[f.key] : f.default, true)]),
+    fields.map((f) => [f.key, initialValue(f, isRecord(input) && f.key in input ? input[f.key] : f.default)]),
   );
 }
 
-/** A field's starting value from `d`; with `iso`, a date-time is kept as given rather than made local. */
-export function initialValue(field: Field, d: unknown, iso = false): Value {
+/** A field's starting value from `d`. */
+export function initialValue(field: Field, d: unknown): Value {
   switch (field.kind) {
     case "array":
-      return Array.isArray(d) ? d.map((v) => initialValue(field.item, v, iso)) : [];
+      return Array.isArray(d) ? d.map((v) => initialValue(field.item, v)) : [];
     case "object":
       return Object.fromEntries(
-        field.fields.map((f) => [f.key, initialScalar(f, isRecord(d) && f.key in d ? d[f.key] : f.default, iso)]),
+        field.fields.map((f) => [f.key, initialScalar(f, isRecord(d) && f.key in d ? d[f.key] : f.default)]),
       );
     default:
-      return initialScalar(field, d, iso);
+      return initialScalar(field, d);
   }
 }
 
-function initialScalar(field: ScalarField, d: unknown, iso = false): ScalarValue {
+function initialScalar(field: ScalarField, d: unknown): ScalarValue {
   switch (field.kind) {
     case "string":
-      return typeof d === "string" ? d : "";
     case "datetime":
-      return typeof d === "string" ? (iso ? d : toLocalInput(d)) : "";
+      return typeof d === "string" ? d : "";
     case "number":
     case "integer":
       return typeof d === "number" ? String(d) : "";
@@ -216,12 +209,9 @@ function readScalar(field: ScalarField, raw: unknown, name: string, errors: Reco
   if (field.kind === "string") return text !== "" || field.required ? text : OMIT;
   if (!text.trim()) return OMIT;
   switch (field.kind) {
-    case "datetime": {
-      const iso = fromLocalInput(text);
-      if (iso) return iso;
-      errors[name] = "Not a date and time";
-      return OMIT;
-    }
+    // Already ISO (`DateTimeInput`): the server's schema says whether it is a date and time.
+    case "datetime":
+      return text;
     case "number":
     case "integer": {
       const n = Number(text);

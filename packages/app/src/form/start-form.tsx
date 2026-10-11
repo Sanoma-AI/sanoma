@@ -1,7 +1,8 @@
 import type { WorkflowEntry } from "@sanoma/workflows/describe";
 import { useForm } from "@tanstack/react-form";
+import { useHydrated } from "@tanstack/react-router";
 import { PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
-import { useMemo } from "react";
+import { type ComponentProps, useMemo } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Checkbox } from "#/components/ui/checkbox.tsx";
 import {
@@ -26,12 +27,13 @@ import {
   buildInput,
   type Field as SchemaField,
   fieldsOf,
+  fromLocalInput,
   initialValue,
   initialValues,
   issueTarget,
   pathName,
   type ScalarField,
-  valuesFrom,
+  toLocalInput,
 } from "./schema.ts";
 
 /** When the input is not an object with properties, the whole input is one JSON field. */
@@ -51,7 +53,6 @@ export function StartForm({ workflow, scenario }: { workflow: WorkflowEntry; sce
     return { fields: all, whole: !read };
   }, [workflow.input]);
   const form = useStartForm(workflow.name, fields, whole, scenario);
-  const disabled = scenario !== undefined;
 
   return (
     <form
@@ -62,9 +63,13 @@ export function StartForm({ workflow, scenario }: { workflow: WorkflowEntry; sce
       }}
     >
       <FieldGroup>
-        {fields.map((field) => (
-          <FieldView key={field.key} form={form} field={field} path={[field.key]} disabled={disabled} />
-        ))}
+        {/* A scenario's input is shown, not entered: the browser disables every control inside,
+            and Add and Remove hide. `contents`, so the fields lay out as the group's own. */}
+        <fieldset disabled={scenario !== undefined} className="group/ro contents">
+          {fields.map((field) => (
+            <FieldView key={field.key} form={form} field={field} path={[field.key]} />
+          ))}
+        </fieldset>
         <form.Subscribe selector={(s) => [s.errorMap.onSubmit, s.isSubmitting] as const}>
           {([error, submitting]) => (
             <>
@@ -72,7 +77,7 @@ export function StartForm({ workflow, scenario }: { workflow: WorkflowEntry; sce
               <Field orientation="horizontal">
                 <Button type="submit" disabled={submitting}>
                   {submitting ? <Spinner data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}
-                  {submitting ? "Starting…" : disabled ? "Start sandbox run" : "Start run"}
+                  {submitting ? "Starting…" : scenario ? "Start sandbox run" : "Start run"}
                 </Button>
               </Field>
             </>
@@ -87,56 +92,52 @@ type FormValues = Record<string, any>;
 
 function useStartForm(workflow: string, fields: SchemaField[], whole: boolean, scenario?: ScenarioEntry) {
   const start = useStartRun();
-  const defaultValues = useMemo(
-    () =>
-      (scenario
-        ? valuesFrom(fields, whole ? { [WHOLE]: scenario.input } : scenario.input)
-        : initialValues(fields)) as FormValues,
-    [fields, whole, scenario],
-  );
+  const defaultValues = useMemo(() => {
+    const input = scenario && (whole ? { [WHOLE]: scenario.input } : scenario.input);
+    return initialValues(fields, input) as FormValues;
+  }, [fields, whole, scenario]);
+  // Starting the run is the validation: the server checks the input against the workflow's zod
+  // schema and answers with its issues, which land on the fields they name. Once it has started,
+  // `useStartRun` moves the page on to the run.
+  const submit = async (request: StartRunRequest) => {
+    try {
+      await start.mutateAsync(request);
+      return undefined;
+    } catch (err) {
+      const body = errorBodyOf(err);
+      if (!body?.issues?.length) {
+        // Not the server's answer (the network, a bug): keep the raw value for whoever debugs it.
+        if (!body) console.error("sanoma app: starting the run failed:", err);
+        const message = errorMessage(err).trim() || "Could not start the run, and no reason was given";
+        // `fields` must be there, even empty, for the form to read `form` as its own error.
+        return { form: message, fields: {} };
+      }
+      const byField: Record<string, string> = {};
+      const rest: string[] = [];
+      for (const issue of body.issues) {
+        const target = issueTarget(fields, whole ? [WHOLE, ...issue.path] : issue.path, issue.message);
+        if (target) byField[target.name] ??= target.message;
+        else rest.push(issue.path.length ? `${pathName(issue.path)}: ${issue.message}` : issue.message);
+      }
+      // A form-level message only for what no field shows.
+      const placed = Object.keys(byField).length > 0;
+      const message = rest.length
+        ? rest.join("; ")
+        : placed
+          ? undefined
+          : "The input does not match the workflow's schema";
+      return { form: message, fields: byField };
+    }
+  };
   return useForm({
     defaultValues,
     validators: {
-      // Starting the run is the validation: the server checks the input against the workflow's
-      // zod schema and answers with its issues, which land on the fields they name. Once it
-      // has started, `useStartRun` moves the page on to the run.
       onSubmitAsync: async ({ value }) => {
         // A sandbox run takes its input from the scenario, on the server.
-        let request: StartRunRequest;
-        if (scenario) request = { scenario: scenario.name };
-        else {
-          const built = buildInput(fields, value);
-          if (Object.keys(built.errors).length) return { fields: built.errors };
-          request = { workflow, input: whole ? built.input[WHOLE] : built.input };
-        }
-        try {
-          await start.mutateAsync(request);
-          return undefined;
-        } catch (err) {
-          const body = errorBodyOf(err);
-          if (!body?.issues?.length) {
-            // Not the server's answer (the network, a bug): keep the raw value for whoever debugs it.
-            if (!body) console.error("sanoma app: starting the run failed:", err);
-            const message = errorMessage(err).trim() || "Could not start the run, and no reason was given";
-            // `fields` must be there, even empty, for the form to read `form` as its own error.
-            return { form: message, fields: {} };
-          }
-          const byField: Record<string, string> = {};
-          const rest: string[] = [];
-          for (const issue of body.issues) {
-            const target = issueTarget(fields, whole ? [WHOLE, ...issue.path] : issue.path, issue.message);
-            if (target) byField[target.name] ??= target.message;
-            else rest.push(issue.path.length ? `${pathName(issue.path)}: ${issue.message}` : issue.message);
-          }
-          // A form-level message only for what no field shows.
-          const placed = Object.keys(byField).length > 0;
-          const message = rest.length
-            ? rest.join("; ")
-            : placed
-              ? undefined
-              : "The input does not match the workflow's schema";
-          return { form: message, fields: byField };
-        }
+        if (scenario) return submit({ scenario: scenario.name });
+        const built = buildInput(fields, value);
+        if (Object.keys(built.errors).length) return { fields: built.errors };
+        return submit({ workflow, input: whole ? built.input[WHOLE] : built.input });
       },
     },
   });
@@ -144,14 +145,8 @@ function useStartForm(workflow: string, fields: SchemaField[], whole: boolean, s
 
 type StartFormApi = ReturnType<typeof useStartForm>;
 
-interface FieldProps {
-  form: StartFormApi;
-  /** Read-only: a scenario's input, shown, not entered. */
-  disabled: boolean;
-}
-
-/** One field, by its kind: a control, a set of controls, or a list with Add and Remove (unless disabled). */
-function FieldView({ form, field, path, disabled }: FieldProps & { field: SchemaField; path: (string | number)[] }) {
+/** One field, by its kind: a control, a set of controls, or a list with Add and Remove (hidden while read-only). */
+function FieldView({ form, field, path }: { form: StartFormApi; field: SchemaField; path: (string | number)[] }) {
   const name = pathName(path);
   if (field.kind === "object") {
     return (
@@ -162,7 +157,7 @@ function FieldView({ form, field, path, disabled }: FieldProps & { field: Schema
         {field.description && <FieldDescription>{field.description}</FieldDescription>}
         <FieldGroup>
           {field.fields.map((sub) => (
-            <FieldView key={sub.key} form={form} field={sub} path={[...path, sub.key]} disabled={disabled} />
+            <FieldView key={sub.key} form={form} field={sub} path={[...path, sub.key]} />
           ))}
         </FieldGroup>
       </FieldSet>
@@ -185,33 +180,30 @@ function FieldView({ form, field, path, disabled }: FieldProps & { field: Schema
                 return (
                   <Field key={i} orientation="horizontal" className="items-start">
                     <FieldContent>
-                      <FieldView form={form} field={{ ...item, label }} path={[...path, i]} disabled={disabled} />
+                      <FieldView form={form} field={{ ...item, label }} path={[...path, i]} />
                     </FieldContent>
                     {/* The button's name says it already: hidden from the tooltip's description, so it is not read twice. */}
-                    {!disabled && (
-                      <Tip tip={<span aria-hidden>{remove}</span>}>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => f.removeValue(i)}
-                          aria-label={remove}
-                        >
-                          <Trash2Icon />
-                        </Button>
-                      </Tip>
-                    )}
+                    <Tip tip={<span aria-hidden>{remove}</span>}>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="group-disabled/ro:hidden"
+                        onClick={() => f.removeValue(i)}
+                        aria-label={remove}
+                      >
+                        <Trash2Icon />
+                      </Button>
+                    </Tip>
                   </Field>
                 );
               })}
-              {!disabled && (
-                <Field orientation="horizontal">
-                  <Button type="button" variant="outline" onClick={() => f.pushValue(initialValue(item, item.default))}>
-                    <PlusIcon data-icon="inline-start" />
-                    Add {item.kind === "object" ? "an item" : "a value"}
-                  </Button>
-                </Field>
-              )}
+              <Field orientation="horizontal" className="group-disabled/ro:hidden">
+                <Button type="button" variant="outline" onClick={() => f.pushValue(initialValue(item, item.default))}>
+                  <PlusIcon data-icon="inline-start" />
+                  Add {item.kind === "object" ? "an item" : "a value"}
+                </Button>
+              </Field>
             </FieldGroup>
             <Errors errors={f.state.meta.errors} />
           </FieldSet>
@@ -219,18 +211,17 @@ function FieldView({ form, field, path, disabled }: FieldProps & { field: Schema
       </form.Field>
     );
   }
-  return <ScalarView form={form} field={field} name={name} disabled={disabled} />;
+  return <ScalarView form={form} field={field} name={name} />;
 }
 
 /** The text-like kinds, each one <Input>. */
 const INPUT_TYPE = {
   string: { type: "text" },
-  datetime: { type: "datetime-local" },
   number: { type: "number", step: "any" },
   integer: { type: "number", step: 1 },
 } as const;
 
-function ScalarView({ form, field, name, disabled }: FieldProps & { field: ScalarField; name: string }) {
+function ScalarView({ form, field, name }: { form: StartFormApi; field: ScalarField; name: string }) {
   const id = `field-${name}`;
   return (
     <form.Field name={name}>
@@ -239,7 +230,7 @@ function ScalarView({ form, field, name, disabled }: FieldProps & { field: Scala
         const text = typeof value === "string" ? value : "";
         const invalid = f.state.meta.errors.length ? true : undefined;
         const onText = (e: { target: { value: string } }) => f.handleChange(e.target.value);
-        const common = { id, "aria-invalid": invalid, onBlur: f.handleBlur, disabled };
+        const common = { id, "aria-invalid": invalid, onBlur: f.handleBlur };
         const description = (
           <>
             {field.description && <FieldDescription>{field.description}</FieldDescription>}
@@ -252,7 +243,6 @@ function ScalarView({ form, field, name, disabled }: FieldProps & { field: Scala
             <Field orientation="horizontal" data-invalid={invalid}>
               <Checkbox
                 id={id}
-                disabled={disabled}
                 aria-invalid={invalid}
                 checked={value === true}
                 onCheckedChange={(checked) => f.handleChange(checked === true)}
@@ -271,14 +261,13 @@ function ScalarView({ form, field, name, disabled }: FieldProps & { field: Scala
         let control;
         switch (field.kind) {
           case "string":
-          case "datetime":
           case "number":
-          case "integer": {
-            // A read-only date-time is its ISO text (see `valuesFrom`), not a local one.
-            const type = disabled && field.kind === "datetime" ? INPUT_TYPE.string : INPUT_TYPE[field.kind];
-            control = <Input {...common} {...type} value={text} onChange={onText} />;
+          case "integer":
+            control = <Input {...common} {...INPUT_TYPE[field.kind]} value={text} onChange={onText} />;
             break;
-          }
+          case "datetime":
+            control = <DateTimeInput {...common} value={text} onChange={f.handleChange} />;
+            break;
           case "enum":
             control = (
               <NativeSelect {...common} name={name} className="w-full" value={text} onChange={onText}>
@@ -311,6 +300,32 @@ function ScalarView({ form, field, name, disabled }: FieldProps & { field: Scala
         );
       }}
     </form.Field>
+  );
+}
+
+/**
+ * A date and time, held as ISO text: a `datetime-local` control in the browser's time zone once
+ * the page has hydrated. The server knows no browser's zone, so it, and the browser until then,
+ * render the ISO text itself: the same markup on both, whatever the zones.
+ */
+function DateTimeInput({
+  value,
+  onChange,
+  ...props
+}: Omit<ComponentProps<typeof Input>, "type" | "value" | "onChange"> & {
+  value: string;
+  onChange: (iso: string) => void;
+}) {
+  const hydrated = useHydrated();
+  if (!hydrated) return <Input {...props} type="text" value={value} readOnly />;
+  return (
+    <Input
+      {...props}
+      type="datetime-local"
+      value={toLocalInput(value)}
+      // An incomplete date and time reads as none.
+      onChange={(e) => onChange(fromLocalInput(e.target.value) ?? "")}
+    />
   );
 }
 
