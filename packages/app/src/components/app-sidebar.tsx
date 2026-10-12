@@ -1,7 +1,7 @@
 import type { WorkflowEntry } from "@sanoma/workflows/describe";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { ClientOnly, Link, linkOptions } from "@tanstack/react-router";
-import { BoxesIcon, InboxIcon, PlayIcon, PlugIcon, ShieldCheckIcon, WorkflowIcon } from "lucide-react";
+import { BoxesIcon, InboxIcon, PlugIcon, ShieldCheckIcon, WorkflowIcon } from "lucide-react";
 import { NavUser } from "#/components/nav-user.tsx";
 import {
   Sidebar,
@@ -24,7 +24,6 @@ import { configQuery, pendingByWorkflow, waitingRunsQuery } from "../queries.ts"
 /** The sidebar's nav. (Each page's own name is its route's crumb.) */
 const PAGES = linkOptions([
   { to: "/inbox", label: "Inbox", icon: InboxIcon },
-  { to: "/start", label: "Start", icon: PlayIcon },
   { to: "/workflows", label: "Workflows", icon: WorkflowIcon },
   { to: "/resources", label: "Resources", icon: BoxesIcon },
   { to: "/connectors", label: "Connectors", icon: PlugIcon },

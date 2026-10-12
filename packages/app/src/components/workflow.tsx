@@ -178,8 +178,9 @@ export const GraphAndSource = memo(function GraphAndSource({
   const file = outline && workflowFile({ outline });
   if (!graph) return noSource;
   return (
-    <div className="flex flex-col gap-2">
-      <div className="grid gap-4 lg:grid-cols-2">
+    // Split by its own width, not the screen's: a pane may give it half the page.
+    <div className="@container flex flex-col gap-2">
+      <div className="grid gap-4 @3xl:grid-cols-2">
         <GraphPanel
           className={PANEL}
           graph={graph}

@@ -4,15 +4,15 @@ The TanStack Router file routes of the app. Each file is served at the URL its p
 
 ## Contents
 
-| Path                                  | What it is                                                                                  |
-| ------------------------------------- | ------------------------------------------------------------------------------------------- |
-| [`api/`](api/AGENTS.md)               | The JSON API under `/api`                                                                   |
-| [`connectors/`](connectors/AGENTS.md) | Pages under `/connectors`: the connector list and one connector                             |
-| [`runs/`](runs/AGENTS.md)             | Redirects from the old `/runs` URLs to their pages under `/workflows`                       |
-| [`workflows/`](workflows/AGENTS.md)   | Pages under `/workflows`: the workflow list and one workflow's page with its runs           |
-| [`__root.tsx`](__root.tsx)            | Root route: the HTML shell, navigation, breadcrumbs and actor name prompt around every page |
-| [`api.ts`](api.ts)                    | Layout for `/api`: middleware that answers any failure as JSON                              |
-| [`inbox.tsx`](inbox.tsx)              | `/inbox`: every pending approval, newest first                                              |
-| [`index.tsx`](index.tsx)              | `/`: redirects to `/workflows`                                                              |
-| [`resources.tsx`](resources.tsx)      | `/resources`: the declared resources, their drift and data-file problems, and Run drift     |
-| [`start.tsx`](start.tsx)              | `/start`: choose a workflow and fill its input to start a run                               |
+| Path                                  | What it is                                                                                     |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| [`api/`](api/AGENTS.md)               | The JSON API under `/api`                                                                      |
+| [`connectors/`](connectors/AGENTS.md) | Pages under `/connectors`: the connector list and one connector                                |
+| [`runs/`](runs/AGENTS.md)             | Redirects from the old `/runs` URLs to their pages under `/workflows`: All runs, or the run    |
+| [`workflows/`](workflows/AGENTS.md)   | Pages under `/workflows`: the home (a card per workflow, or every run) and one workflow's page |
+| [`__root.tsx`](__root.tsx)            | Root route: the HTML shell, navigation, breadcrumbs and actor name prompt around every page    |
+| [`api.ts`](api.ts)                    | Layout for `/api`: middleware that answers any failure as JSON                                 |
+| [`inbox.tsx`](inbox.tsx)              | `/inbox`: every pending approval, newest first                                                 |
+| [`index.tsx`](index.tsx)              | `/`: redirects to `/workflows`, a card per workflow                                            |
+| [`resources.tsx`](resources.tsx)      | `/resources`: the declared resources, their drift and data-file problems, and Run drift        |
+| [`start.tsx`](start.tsx)              | `/start`: redirects old links to a workflow's New run pane (`?workflow=`) or `/workflows`      |

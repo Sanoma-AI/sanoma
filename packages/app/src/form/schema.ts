@@ -35,7 +35,10 @@ export interface ArrayField extends Base {
 
 export type Field = ScalarField | ObjectField | ArrayField;
 
-/** What the form holds for a scalar: text for most (an enum holds its option's index), a checkbox state for booleans. */
+/**
+ * What the form holds for a scalar: text for most (an enum holds its option's index, a date-time
+ * its ISO text, which `DateTimeInput` shows in the browser's time zone), a checkbox state for booleans.
+ */
 export type ScalarValue = string | boolean | undefined;
 export type Value = ScalarValue | Record<string, ScalarValue> | Value[];
 export type Values = Record<string, Value>;
@@ -100,11 +103,14 @@ function scalarKind(prop: Schema): Scalar {
   }
 }
 
-/** The form's starting values: each field's default, or empty. */
-export function initialValues(fields: Field[]): Values {
-  return Object.fromEntries(fields.map((f) => [f.key, initialValue(f, f.default)]));
+/** The form's starting values: each field's value in `input` (a scenario's), else its default, else empty. */
+export function initialValues(fields: Field[], input?: unknown): Values {
+  return Object.fromEntries(
+    fields.map((f) => [f.key, initialValue(f, isRecord(input) && f.key in input ? input[f.key] : f.default)]),
+  );
 }
 
+/** A field's starting value from `d`. */
 export function initialValue(field: Field, d: unknown): Value {
   switch (field.kind) {
     case "array":
@@ -121,9 +127,8 @@ export function initialValue(field: Field, d: unknown): Value {
 function initialScalar(field: ScalarField, d: unknown): ScalarValue {
   switch (field.kind) {
     case "string":
-      return typeof d === "string" ? d : "";
     case "datetime":
-      return typeof d === "string" ? toLocalInput(d) : "";
+      return typeof d === "string" ? d : "";
     case "number":
     case "integer":
       return typeof d === "number" ? String(d) : "";
@@ -204,12 +209,9 @@ function readScalar(field: ScalarField, raw: unknown, name: string, errors: Reco
   if (field.kind === "string") return text !== "" || field.required ? text : OMIT;
   if (!text.trim()) return OMIT;
   switch (field.kind) {
-    case "datetime": {
-      const iso = fromLocalInput(text);
-      if (iso) return iso;
-      errors[name] = "Not a date and time";
-      return OMIT;
-    }
+    // Already ISO (`DateTimeInput`): the server's schema says whether it is a date and time.
+    case "datetime":
+      return text;
     case "number":
     case "integer": {
       const n = Number(text);
