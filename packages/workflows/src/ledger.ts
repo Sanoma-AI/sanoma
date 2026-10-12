@@ -125,10 +125,28 @@ export interface LedgerStore {
   /** A run's records in `seq` order. */
   read(runId: string): Promise<LedgerRecord[]>;
   /**
-   * Releases what the store holds (a connection pool). The worker's `stop`, the app's `close` and
-   * `SanomaClient.close` call it when there is one; a store they share may be closed by each.
+   * Releases what the store holds (a connection pool), for good. Called by the one owner of the
+   * store: the worker's `stop` and `SanomaClient.close` close the Postgres store each made for a
+   * config without a `ledger` (`ownedLedger`); a store a config gives is its own to close.
    */
   close?(): Promise<void>;
+}
+
+/** The store a worker or client runs on, and `close`, which ends it only when it was made for them. */
+export interface OwnedLedger {
+  store: LedgerStore;
+  close(): Promise<void>;
+}
+
+/**
+ * The config's `ledger`, which stays the config's to close, or `postgresLedger` on its database,
+ * made here for the caller, and so the caller's to close: the worker and the client each make
+ * their own, and close it with themselves. Two of them on one database share the table, not a pool.
+ */
+export function ownedLedger(config: { ledger?: LedgerStore; databaseUrl: string }): OwnedLedger {
+  if (config.ledger) return { store: config.ledger, close: async () => undefined };
+  const store = postgresLedger(config.databaseUrl);
+  return { store, close: () => store.close() };
 }
 
 const bySeq = (a: LedgerRecord, b: LedgerRecord) => a.seq - b.seq;
@@ -262,14 +280,16 @@ const DATA_EXCEPTION = /^22/;
  * tables: the default store, which the worker, the app and the client share through Postgres.
  * The table is created on first use; the database must exist, which the first worker's launch
  * sees to, so a read before any worker has run fails saying so rather than creating anything.
- * The pool is opened on first use and ended by `close()`; a later append or read opens another.
+ * The pool is opened on first use and ended by `close()`, after which the store refuses use.
  */
-export function postgresLedger(databaseUrl: string): LedgerStore {
+export function postgresLedger(databaseUrl: string): LedgerStore & { close(): Promise<void> } {
   let pool: Pool | undefined;
+  let closed = false;
   /** The table, being or having been created on `pool`; a failed create is tried again on the next use. */
   let table: Promise<void> | undefined;
 
   async function db(): Promise<Pool> {
+    if (closed) throw new Error("the ledger store is closed");
     const current = (pool ??= openPool(databaseUrl, "ledger"));
     table ??= createTable(current, DDL, "ledger").catch((err: unknown) => {
       if (pool === current) table = undefined;
@@ -310,9 +330,9 @@ export function postgresLedger(databaseUrl: string): LedgerStore {
       return rows.map((r) => r.record).toSorted(bySeq);
     },
     async close() {
+      closed = true;
       const current = pool;
       pool = undefined;
-      table = undefined;
       await current?.end();
     },
   };

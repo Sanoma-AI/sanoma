@@ -3,7 +3,7 @@ import { DBOS } from "@dbos-inc/dbos-sdk";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, type DriftDeclared, driftWorkflow } from "./drift.ts";
 import type { Fake } from "./fake.ts";
-import { type LedgerStore, postgresLedger } from "./ledger.ts";
+import type { LedgerStore } from "./ledger.ts";
 import { type Connector, type Driver, type DriverEnv, type DriverFn, isOp, type Op } from "./op.ts";
 import type { Policy } from "./policy.ts";
 import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
@@ -34,8 +34,10 @@ export interface SanomaConfig {
   policy: Policy;
   /**
    * Where the audit record goes. Default: `postgresLedger` on the config's database, which the
-   * worker, the app and other processes share. `jsonlLedger(dir)` keeps it in files instead;
-   * `memoryLedger()` keeps it in this process only, for tests.
+   * worker, the app and other processes share; the worker and the client each make their own
+   * and close it with themselves. A store given here is never closed by the runtime.
+   * `jsonlLedger(dir)` keeps it in files instead; `memoryLedger()` keeps it in this process
+   * only, for tests.
    */
   ledger?: LedgerStore;
   /** Scopes workflows, queues and versions in the system database. Defaults to "sanoma". */
@@ -77,7 +79,8 @@ export interface ResolvedConfig {
    */
   workflows: Map<string, WorkflowDefinition<any, any>>;
   policy: Policy;
-  ledger: LedgerStore;
+  /** The config's `ledger`, when it gives one; the worker and the client otherwise make `postgresLedger` on `databaseUrl` (`ownedLedger`). */
+  ledger?: LedgerStore;
   /**
    * The config's directory, absolute: its `root`, else its `file`'s directory. Its data files
    * are `resources/` in it. Absent when the config has neither, so it has no data files.
@@ -96,35 +99,24 @@ export function resolveDatabaseUrl(config: { databaseUrl?: string }): string {
   return config.databaseUrl ?? process.env.SANOMA_DATABASE_URL ?? DEFAULT_DATABASE_URL;
 }
 
-/**
- * The Postgres ledger made for each config without one, by config object: the worker, the app
- * and the client resolving one config in one process share the store, and its pool.
- */
-const defaultLedgers = new WeakMap<SanomaConfig, LedgerStore>();
-
 const isStore = (x: unknown): x is LedgerStore =>
   typeof (x as LedgerStore | null)?.append === "function" && typeof (x as LedgerStore).read === "function";
 
-/** The config's `ledger`, or the Postgres store on its database, the same one each time for one config. */
-function ledgerOf(config: SanomaConfig): LedgerStore {
-  if (config.ledger !== undefined) {
-    if (!isStore(config.ledger)) {
-      throw new Error(
-        "The config's `ledger` must be a ledger store: leave it out for `postgresLedger` on the config's database, " +
-          "or use `jsonlLedger(dir)` to keep records in files, or `memoryLedger()` to keep them in memory, for tests",
-      );
-    }
-    return config.ledger;
+/** The config's `ledger`, checked, when it gives one. */
+function ledgerOf(config: SanomaConfig): LedgerStore | undefined {
+  if (config.ledger !== undefined && !isStore(config.ledger)) {
+    throw new Error(
+      "The config's `ledger` must be a ledger store: leave it out for `postgresLedger` on the config's database, " +
+        "or use `jsonlLedger(dir)` to keep records in files, or `memoryLedger()` to keep them in memory, for tests",
+    );
   }
-  let store = defaultLedgers.get(config);
-  if (!store) defaultLedgers.set(config, (store = postgresLedger(resolveDatabaseUrl(config))));
-  return store;
+  return config.ledger;
 }
 
 /**
  * Checks a config and derives what the runtime needs from it. Throws what `startWorker` would
  * refuse, with the same message, so `describeConfig`, `SanomaClient.connect` and the app fail
- * the same way the worker does.
+ * the same way the worker does. Pure: it opens nothing, and is called per request by the app.
  */
 export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   if (!Array.isArray(config.connectors)) {
@@ -208,7 +200,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     ...(scenarios && { scenarios }),
     workflows: names,
     policy: config.policy,
-    ledger,
+    ...(ledger !== undefined && { ledger }),
     ...(root !== undefined && { root }),
   };
 }

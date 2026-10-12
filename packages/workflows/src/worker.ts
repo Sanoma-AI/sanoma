@@ -6,7 +6,7 @@ import { watchCredentials } from "./credentials.ts";
 import type { WorkflowDefinition } from "./define.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { errorInfo, parseOrThrow } from "./errors.ts";
-import { entry, skipped, write, writeFailure } from "./ledger.ts";
+import { entry, ownedLedger, skipped, write, writeFailure } from "./ledger.ts";
 import { setLogLevel, warn } from "./log.ts";
 import { lineStartsOf } from "./ast.ts";
 import { callsOf, outlineWithSource } from "./outline.ts";
@@ -45,6 +45,8 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   // Check everything before touching the state a running worker reads.
   const resolved = resolveConfig(config);
   setLogLevel(options.logLevel);
+  // The config's own, or a Postgres store made for this worker, which `stop` then closes.
+  const ledger = ownedLedger(resolved);
   const state: WorkerState = {
     app: resolved.appName,
     ops: resolved.ops,
@@ -54,7 +56,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     fakeDrivers: resolved.fakeDrivers,
     ...(resolved.scenarios && { scenarios: resolved.scenarios }),
     policy: resolved.policy,
-    ledger: resolved.ledger,
+    ledger: ledger.store,
     workflows: resolved.workflows,
     outlines: new Map([...resolved.workflows].map(([name, wf]) => [name, outlineOf(wf)])),
     stopped: false,
@@ -69,7 +71,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
         try {
           await credentials.close();
         } finally {
-          await state.ledger.close?.();
+          await ledger.close();
         }
       }
     },

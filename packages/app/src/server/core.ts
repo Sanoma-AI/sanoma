@@ -125,7 +125,7 @@ export async function runDetail({ client, resolved }: AppContext, runId: string)
   const { approvals } = run;
   let ledger: LedgerRecord[];
   try {
-    ledger = await resolved.ledger.read(runId);
+    ledger = await client.ledger(runId);
   } catch (err) {
     // A store reads a run nothing has recorded as no records, so this is a real failure (a
     // corrupt file, a permission): logged for the operator once, and the page shows the run and

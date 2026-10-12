@@ -11,7 +11,7 @@ import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { type ApprovalState, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
 import { parseOrThrow, SanomaError } from "./errors.ts";
-import type { LedgerRecord } from "./ledger.ts";
+import { type LedgerRecord, type OwnedLedger, ownedLedger } from "./ledger.ts";
 import type { Driver } from "./op.ts";
 import type { RunArgs } from "./run.ts";
 import { isEnded, mayDecide, type RunStatus } from "./shared.ts";
@@ -109,6 +109,8 @@ export class SanomaClient {
   private readonly dbos: DBOSClient;
   private readonly config: ResolvedConfig;
   private readonly drivers: readonly Driver[];
+  /** The config's own ledger store, or a Postgres one made for this client, which `close` then closes. */
+  private readonly audit: OwnedLedger;
   /** On the config's database, for the credentials table: made on first use. */
   private pool?: Pool;
   private table?: Promise<void>;
@@ -118,11 +120,13 @@ export class SanomaClient {
     this.dbos = dbos;
     this.config = config;
     this.drivers = drivers;
+    this.audit = ownedLedger(config);
   }
 
   /**
    * Connects to the runtime's Postgres for the config's app. Checks the config first and throws
-   * what the worker would refuse. Reads ledgers from the config's ledger store.
+   * what the worker would refuse. Reads ledgers from the config's ledger store, or from the
+   * Postgres store on its database when it has none.
    */
   static async connect(config: SanomaConfig): Promise<SanomaClient> {
     const resolved = resolveConfig(config);
@@ -199,10 +203,10 @@ export class SanomaClient {
     return handle.workflowID;
   }
 
-  /** The run's audit record, in order, from the config's ledger store. */
+  /** The run's audit record, in order, from the ledger store. */
   async ledger(runId: string): Promise<LedgerRecord[]> {
     await this.mustExist(runId);
-    return this.config.ledger.read(runId);
+    return this.audit.store.read(runId);
   }
 
   /**
@@ -418,7 +422,7 @@ export class SanomaClient {
 
   async close() {
     this.closed = true;
-    await Promise.all([this.dbos.destroy(), this.pool?.end(), this.config.ledger.close?.()]);
+    await Promise.all([this.dbos.destroy(), this.pool?.end(), this.audit.close()]);
   }
 
   /**

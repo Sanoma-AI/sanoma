@@ -20,7 +20,9 @@ import {
   PolicyDeniedError,
   postgresLedger,
   resolveConfig,
+  SanomaClient,
   type SanomaConfig,
+  startWorker,
 } from "../src/index.ts";
 import { currentGroup, entry, write, writeFailure } from "../src/ledger.ts";
 import type { Run } from "../src/run.ts";
@@ -29,11 +31,11 @@ const dir = mkdtempSync(join(tmpdir(), "sanoma-ledger-unit-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 const databaseUrl = testDatabaseUrl("ledger");
-/** One Postgres store for the file, as the worker, the app and the client share one. */
+/** One Postgres store for the file; the worker and the client make their own on the same table. */
 const postgres = postgresLedger(databaseUrl);
 // The database, which a worker's launch would have made; the store makes only its table.
 beforeAll(() => DBOS.migrate(databaseUrl));
-afterAll(() => postgres.close!());
+afterAll(() => postgres.close());
 
 const rec = (
   runId: string,
@@ -120,7 +122,7 @@ describe("postgresLedger", () => {
       ]);
       expect((await stores[1]!.read(run)).map((r) => r.seq)).toEqual([0, 1]);
     } finally {
-      for (const store of stores) await store.close!();
+      for (const store of stores) await store.close();
       await pool.end();
     }
   });
@@ -138,7 +140,7 @@ describe("postgresLedger", () => {
       await postgres.append({ ...rec(run, 1, "run.finished"), id: `${run}:a` });
       expect((await postgres.read(run)).map((r) => r.id)).toEqual([first.id, `${run}:b`, `${run}:a`]);
     } finally {
-      await other.close!();
+      await other.close();
     }
   });
 
@@ -152,16 +154,15 @@ describe("postgresLedger", () => {
     expect(await postgres.read(run)).toEqual([]);
   });
 
-  it("releases its pool on close, opens another on the next use, and may be closed again", async () => {
+  it("releases its pool on close, which is final, and may be closed again", async () => {
     const end = vi.spyOn(Pool.prototype, "end");
     const store = postgresLedger(databaseUrl);
     await store.append(rec("closing", 0));
-    await store.close!();
+    await store.close();
     expect(end).toHaveBeenCalledTimes(1);
-    expect((await store.read("closing")).map((r) => r.seq)).toEqual([0]);
-    await store.close!();
-    await store.close!();
-    expect(end).toHaveBeenCalledTimes(2);
+    await expect(store.read("closing")).rejects.toThrow("the ledger store is closed");
+    await store.close();
+    expect(end).toHaveBeenCalledTimes(1);
   });
 
   it("fails saying so when the database does not exist, rather than making it", async () => {
@@ -169,7 +170,7 @@ describe("postgresLedger", () => {
     try {
       await expect(store.read("r")).rejects.toThrow(/^could not prepare the ledger table: .*does not exist/);
     } finally {
-      await store.close!();
+      await store.close();
     }
   });
 });
@@ -183,20 +184,38 @@ const minimal = (): SanomaConfig => ({
   databaseUrl,
 });
 
-describe("resolveConfig without a ledger", () => {
-  it("uses the Postgres store on the config's database, the same one each time for one config", async () => {
-    const config = minimal();
-    const { ledger } = resolveConfig(config);
-    expect(resolveConfig(config).ledger).toBe(ledger);
-    expect(resolveConfig({ ...config }).ledger).not.toBe(ledger);
-    expect(resolveConfig(minimal()).ledger).not.toBe(ledger);
+describe("a config without a ledger", () => {
+  it("resolves to none; the worker and the client each make a Postgres store on its database, and share the table", async () => {
+    const config = { ...minimal(), appName: "ledger-default" };
+    expect(resolveConfig(config).ledger).toBeUndefined();
+    expect("ledger" in resolveConfig(config)).toBe(false);
+    const worker = await startWorker(config);
+    const client = await SanomaClient.connect(config);
+    let runId: string;
     try {
-      const run = randomUUID();
-      await ledger.append(rec(run, 0));
-      expect((await postgres.read(run)).map((r) => r.id)).toEqual([`${run}:run.started:0`]);
+      runId = await client.start(noop, {}, { startedBy: { id: "alice" } });
+      expect(await client.result(runId)).toBe(1);
+      // Written by the worker's store, read by the client's and by this file's: one table.
+      const types = ["run.started", "run.finished"];
+      expect((await client.ledger(runId)).map((r) => r.type)).toEqual(types);
+      expect((await postgres.read(runId)).map((r) => r.type)).toEqual(types);
     } finally {
-      await ledger.close!();
+      await client.close();
+      await worker.stop();
     }
+    // Each closed what it made, for good.
+    await expect(client.ledger(runId)).rejects.toThrow(/closed|end/);
+  });
+
+  it("never closes a store the config gives", async () => {
+    const close = vi.fn<() => Promise<void>>(async () => undefined);
+    const config = { ...minimal(), appName: "ledger-given", ledger: { ...memoryLedger(), close } };
+    expect(resolveConfig(config).ledger).toBe(config.ledger);
+    const worker = await startWorker(config);
+    await worker.stop();
+    const client = await SanomaClient.connect(config);
+    await client.close();
+    expect(close).not.toHaveBeenCalled();
   });
 
   it("refuses a ledger that is not a store", () => {
