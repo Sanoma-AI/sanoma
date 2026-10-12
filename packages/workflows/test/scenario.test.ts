@@ -4,22 +4,23 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
-import { github } from "@sanoma/connector-github";
 import { resend } from "@sanoma/connector-resend";
-import { stripe } from "@sanoma/connector-stripe";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { defineFake } from "../src/fake.ts";
 import {
   allowAll,
   defineConnector,
+  defineResource,
   defineWorkflow,
   type LedgerRecord,
   memoryLedger,
   resolveConfig,
 } from "../src/index.ts";
+import { missingResourceFake } from "../src/sandbox.ts";
 import { check, loadScenarios, parseFeature, type Scenario, type Scope } from "../src/scenario.ts";
 import announce from "./fixtures/announce.ts";
-import { companyFakes } from "./fixtures/company/fakes.ts";
+import { companyConfig } from "./fixtures/company/fakes.ts";
 import inspect from "./fixtures/company/workflows/inspect.ts";
 import { marketingFakes } from "./harness.ts";
 
@@ -606,14 +607,8 @@ describe("check", () => {
 });
 
 describe("resources and policy outcomes", () => {
-  // The company fixture's connectors, which declare resource types, and its inspect workflow.
-  const company = resolveConfig({
-    workflows: [inspect],
-    connectors: [github, stripe],
-    drivers: companyFakes().drivers,
-    policy: allowAll,
-    ledger: memoryLedger(),
-  });
+  // The company fixture's connectors, which declare resource types, its fakes and its inspect workflow.
+  const company = resolveConfig({ ...companyConfig([inspect], allowAll), ledger: memoryLedger() });
   const parseCompany = (text: string) => parseFeature(text, "company.feature", company);
   const DRIFT = `Feature: Drift
 
@@ -687,6 +682,54 @@ describe("resources and policy outcomes", () => {
       { text: "github.repository.import was denied", kind: "then", op: "github.repository.import" },
       { text: "stripe.product.import was held for finance", kind: "then", op: "stripe.product.import" },
     ]);
+  });
+
+  it("refuses, before anything is copied, a resource seed of a vendor whose fake holds no resources", () => {
+    const [drift] = parseCompany(DRIFT);
+    expect(missingResourceFake(drift!, company.fakes)).toBeUndefined();
+    // A resource type whose fake is a plain `defineFake`, with no `override`, `put` or `remove`.
+    const hook = defineResource({
+      vendor: "acme",
+      type: "hook",
+      title: "Hook",
+      identity: "name",
+      schema: z.object({ name: z.string(), url: z.string().nullish() }),
+      fields: { immutable: [], vendorOwned: [], writeOnly: [] },
+      find: ({ name }) => name,
+    });
+    const acme = defineConnector("acme", { hook }, { title: "Acme", package: "@acme/connector" });
+    const ops = {
+      hook: { import: async () => ({ id: "x", gone: true }), read: async () => ({ id: "x", gone: true }) },
+    };
+    const plain = defineFake(acme, { initial: () => ({}), ops: () => ops });
+    const ping = defineWorkflow({
+      name: "ping",
+      trigger: "manual",
+      input: z.object({}),
+      uses: [acme.hook.import],
+      run: async (ctx) => ctx.acme.hook.import({ id: "deploys" }),
+    });
+    const resolved = resolveConfig({
+      workflows: [ping],
+      connectors: [acme],
+      drivers: [plain.driver],
+      fakes: [plain],
+      policy: allowAll,
+      ledger: memoryLedger(),
+    });
+    const [seeded] = parseFeature(
+      `Feature: Ping\n  Scenario: Seeded\n    Given acme.hook "deploys" has\n      | url | https://example.com |\n    And acme.hook "other" is gone\n    When ping runs\n`,
+      "ping.feature",
+      resolved,
+    );
+    const problem = missingResourceFake(seeded!, resolved.fakes);
+    expect(problem?.code).toBe("invalid_input");
+    expect(problem?.message).toBe(
+      'Scenario "Seeded" seeds acme.hook, but acme\'s fake holds no resources (it is not a tfFake)',
+    );
+    expect(problem?.data).toEqual({ scenario: "Seeded", resources: ["acme.hook"] });
+    // A vendor with no fake at all is refused the same way.
+    expect(missingResourceFake(seeded!, new Map())?.message).toBe(problem?.message);
   });
 
   it("names an unknown resource type, field or value, and a drift result in a scenario that does not run drift", () => {

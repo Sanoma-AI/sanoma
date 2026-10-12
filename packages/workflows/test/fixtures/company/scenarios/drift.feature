@@ -13,12 +13,7 @@ Feature: Drift in the company's resources
     Then resources/identity/github.ts#website is drifted in has_wiki
 
   Scenario: A repository GitHub no longer has
-    Given github.repository "docs" has
-      | name        | docs                  |
-      | description | Product documentation |
-      | visibility  | public                |
-      | has_issues  | true                  |
-    And github.repository "docs" is gone
+    Given github.repository "docs" is gone
     When drift runs
     Then resources/identity/github.ts#docs is gone
 
