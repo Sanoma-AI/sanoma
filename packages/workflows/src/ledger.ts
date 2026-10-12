@@ -166,14 +166,6 @@ function serialize(record: LedgerRecord): string {
 /** The line `jsonlLedger` writes for a record: its JSON and a newline. */
 const lineOf = (record: LedgerRecord) => `${serialize(record)}\n`;
 
-/**
- * The records as `jsonlLedger` writes them: one JSON object per line, each ending in a newline,
- * so a run read from any store (the Postgres one) can be written out as a `.jsonl` file.
- */
-export function jsonlLines(records: readonly LedgerRecord[]): string {
-  return records.map(lineOf).join("");
-}
-
 const COMPARED = ["type", "input", "decision", "error", "output"] as const;
 
 /**

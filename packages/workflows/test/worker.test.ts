@@ -16,6 +16,7 @@ import {
 } from "../src/index.ts";
 import { describeConfig } from "../src/describe.ts";
 import announce from "./fixtures/announce.ts";
+import { noop } from "./fixtures/minimal.ts";
 import { marketingFakes, useApp } from "./harness.ts";
 
 // These configs are refused before the worker connects, so no database is needed.
@@ -155,16 +156,16 @@ describe("startWorker failing after DBOS has launched", () => {
 });
 
 describe("a worker whose config has no workflow of a name registered earlier in the process", () => {
-  const gone = defineWorkflow({ name: "gone", trigger: "manual", input: z.object({}), uses: [], run: async () => 1 });
-  const app = useApp(testDatabaseUrl("worker-by-name"), "worker-by-name", () => ({ workflows: [announce, gone] }));
+  const app = useApp(testDatabaseUrl("worker-by-name"), "worker-by-name", () => ({ workflows: [announce, noop] }));
 
   it("refuses its runs, rather than running the earlier worker's definition", async () => {
     await app.stop();
-    const without = await startWorker({ ...app.config, workflows: [announce] });
+    // Promoted: its version has been seen before, so runs queued without one would otherwise wait for the stopped worker's.
+    const without = await startWorker({ ...app.config, workflows: [announce] }, { promote: true });
     try {
-      const runId = await app.client.start(gone, {}, { startedBy: { id: "alice" } });
+      const runId = await app.client.start(noop, {}, { startedBy: { id: "alice" } });
       await expect(app.client.result(runId)).rejects.toThrow(
-        /Run of "gone" refused: this worker's config has no workflow of that name/,
+        /Run of "noop" refused: this worker's config has no workflow of that name/,
       );
     } finally {
       await without.stop();

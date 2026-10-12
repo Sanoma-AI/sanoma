@@ -5,14 +5,10 @@ import { join } from "node:path";
 import { testDatabaseUrl } from "@sanoma/testing";
 import { Pool } from "pg";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { z } from "zod";
 import {
   allowAll,
-  defineConnector,
-  defineWorkflow,
   errorCode,
   jsonlLedger,
-  jsonlLines,
   type LedgerRecord,
   type LedgerStore,
   memoryLedger,
@@ -20,11 +16,11 @@ import {
   postgresLedger,
   resolveConfig,
   SanomaClient,
-  type SanomaConfig,
   startWorker,
 } from "../src/index.ts";
 import { currentGroup, entry, write, writeFailure } from "../src/ledger.ts";
 import type { Run } from "../src/run.ts";
+import { minimal, noop } from "./fixtures/minimal.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "sanoma-ledger-unit-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -170,18 +166,9 @@ describe("postgresLedger", () => {
   });
 });
 
-const noop = defineWorkflow({ name: "noop", trigger: "manual", input: z.object({}), uses: [], run: async () => 1 });
-const minimal = (): SanomaConfig => ({
-  workflows: [noop],
-  connectors: [defineConnector("none", {})],
-  drivers: [],
-  policy: allowAll,
-  databaseUrl,
-});
-
 describe("a config without a ledger", () => {
   it("resolves to none; the worker and the client each make a Postgres store on its database, and share the table", async () => {
-    const config = { ...minimal(), appName: "ledger-default" };
+    const config = { ...minimal(databaseUrl), appName: "ledger-default" };
     expect(resolveConfig(config).ledger).toBeUndefined();
     expect("ledger" in resolveConfig(config)).toBe(false);
     const worker = await startWorker(config);
@@ -204,7 +191,7 @@ describe("a config without a ledger", () => {
 
   it("never closes a store the config gives", async () => {
     const close = vi.fn<() => Promise<void>>(async () => undefined);
-    const config = { ...minimal(), appName: "ledger-given", ledger: { ...memoryLedger(), close } };
+    const config = { ...minimal(databaseUrl), appName: "ledger-given", ledger: { ...memoryLedger(), close } };
     expect(resolveConfig(config).ledger).toBe(config.ledger);
     const worker = await startWorker(config);
     await worker.stop();
@@ -214,20 +201,9 @@ describe("a config without a ledger", () => {
   });
 
   it("refuses a ledger that is not a store", () => {
-    expect(() => resolveConfig({ ...minimal(), ledger: { read: 1 } as never })).toThrow(
+    expect(() => resolveConfig({ ...minimal(databaseUrl), ledger: { read: 1 } as never })).toThrow(
       /^The config's `ledger` must be a ledger store: leave it out for `postgresLedger`/,
     );
-  });
-});
-
-describe("jsonlLines", () => {
-  it("is the format jsonlLedger writes, one record per line", async () => {
-    const records = [rec("j1", 0), rec("j1", 1, "run.finished")];
-    const store = jsonlLedger(join(dir, "lines"));
-    for (const r of records) await store.append(r);
-    expect(jsonlLines(records)).toBe(readFileSync(join(dir, "lines", "j1.jsonl"), "utf8"));
-    expect(jsonlLines([])).toBe("");
-    expect(() => jsonlLines([rec("j1", 2, "run.finished", { n: 1n })])).toThrow("can't be written as JSON");
   });
 });
 

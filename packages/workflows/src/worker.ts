@@ -64,15 +64,12 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   const worker: Worker = {
     async stop() {
       state.stopped = true;
-      try {
-        await DBOS.shutdown();
-      } finally {
-        try {
-          await credentials.close();
-        } finally {
-          await ledger.close();
-        }
+      // Each is closed whatever the one before did; the first failure is what stop throws.
+      let failed: { error: unknown } | undefined;
+      for (const close of [() => DBOS.shutdown(), () => credentials.close(), () => ledger.close()]) {
+        await close().catch((error: unknown) => (failed ??= { error }));
       }
+      if (failed) throw failed.error;
     },
   };
   // Runs recovered during launch start before it returns, so they must already find this
