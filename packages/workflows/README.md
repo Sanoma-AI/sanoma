@@ -285,7 +285,7 @@ Every run is stamped with the application version of the worker that runs it, `<
 
 When a worker starts, it warns about unfinished runs it will not pick up, naming them: runs started on another version, and runs queued on another queue. Run the version that started them, or fork each onto the current version with `DBOSClient.forkWorkflow(id, step, { applicationVersion, queueName })` and cancel the original.
 
-Queues used to be one `sanoma` queue for every app and are now `sanoma:<appName>`, so runs queued before the change are never started. Sandbox runs had their own queue, `sanoma:<appName>:sandbox`, until they went on the app's; the warning names the runs left on it. On a local database, `pnpm db:down && pnpm db:up` resets it.
+Queues used to be one `sanoma` queue for every app and are now `sanoma:<appName>`, so runs queued before the change are never started. Sandbox runs had their own queue, `sanoma:<appName>:sandbox`, until they went on the app's; the warning names the runs left on it, and a sandbox run forked or resumed past its seed step fails at once, so start its scenario again or cancel it. On a local database, `pnpm db:down && pnpm db:up` resets it.
 
 ## Keeping workflows replay-safe
 
