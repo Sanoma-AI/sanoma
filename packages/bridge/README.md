@@ -110,6 +110,6 @@ The provider's private data and state version travel in the operation's opaque `
 
 - `pnpm run generate` rewrites `src/gen/` from `proto/` with buf and `protoc-gen-es` (versions pinned in `package.json`; `@bufbuild/protobuf` at the same version). Never edit `src/gen/` by hand; CI checks it is up to date. When the bridge's proto changes, copy it here verbatim, note the bridge commit above, and regenerate.
 - `testdata/` is a verbatim copy of provider-bridge's (not formatted, not hand-edited): copy it again when the bridge re-records.
-- `SANOMA_LIVE=1 pnpm vitest run packages/bridge` also builds the bridge and runs `hashicorp/null`, downloaded once into `provider-bridge-test` in the user cache directory, recording its replies through the test helpers and replaying them ([above](#replaying-and-recording-the-bridge-in-this-packages-tests)).
+- `SANOMA_LIVE=1 pnpm vitest run packages/bridge` also builds the bridge and runs `hashicorp/null`, downloaded once into `provider-bridge-test` in the user cache directory.
 
 Status: early (0.x). License: Apache-2.0.
