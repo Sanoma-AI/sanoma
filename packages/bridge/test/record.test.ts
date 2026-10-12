@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { Code, ConnectError, createClient, createRouterTransport, type ServiceImpl } from "@connectrpc/connect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Bridge, BridgeError, type SchemaDocument } from "@sanoma/bridge";
-import { fakeBridge } from "@sanoma/bridge/fake";
+import { fakeBridge } from "./fake-bridge.ts";
 import { bridgeClient } from "../src/bridge.ts";
 import { BridgeService, Diagnostic_Severity, DiagnosticSchema } from "../src/gen/bridge/v1/bridge_pb.ts";
-import { recorder } from "../src/record.ts";
+import { recorder } from "./record.ts";
 
 // The recorder against an in-memory provider whose state holds every kind of secret.
 const ref = { source: "example/widget", version: "1.0.0" };

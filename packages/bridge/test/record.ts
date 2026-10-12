@@ -3,8 +3,8 @@ import { dirname, join } from "node:path";
 import { type DescMessage, type MessageShape, toJson } from "@bufbuild/protobuf";
 import { ConnectError, type Interceptor } from "@connectrpc/connect";
 import { codeToString } from "@connectrpc/connect/protocol-connect";
-import type { ProviderRef } from "./bridge.ts";
-import { type Fixture, releaseName, replyDir, schemaFile, stateId } from "./fixtures.ts";
+import type { ProviderRef } from "../src/bridge.ts";
+import { type Fixture, releaseName, replyDir, schemaFile, stateId } from "../src/fixtures.ts";
 import {
   type ConfigureRequest,
   DiagnosticSchema,
@@ -18,9 +18,9 @@ import {
   ReadRequestSchema,
   type ReadResponse,
   ReadResponseSchema,
-} from "./gen/bridge/v1/bridge_pb.ts";
-import { blockOf, isObject as isJsonObject, type JsonObject as Json } from "./json.ts";
-import { type Block, parseSchema, type SchemaDocument } from "./schema.ts";
+} from "../src/gen/bridge/v1/bridge_pb.ts";
+import { blockOf, isObject as isJsonObject, type JsonObject as Json } from "../src/json.ts";
+import { type Block, parseSchema, type SchemaDocument } from "../src/schema.ts";
 
 /** What replaces a secret string in a recorded state. */
 export const SCRUBBED = "<scrubbed>";

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BridgeError, readPins } from "@sanoma/bridge";
-import { fakeBridge } from "@sanoma/bridge/fake";
+import { fakeBridge } from "./fake-bridge.ts";
 
 const testdata = fileURLToPath(new URL("../testdata/", import.meta.url));
 const pins = readPins();
