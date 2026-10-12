@@ -27,7 +27,7 @@ import { fill, isBug, seedFrom, shapeOf } from "./fill.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import { type OutlineNode, outlineWorkflow } from "./outline.ts";
 import type { RecordedDecision } from "./policy.ts";
-import { approverLabel, errorMessage, isEnded } from "./shared.ts";
+import { approverLabel, DRIFT_WORKFLOW, errorMessage, isEnded } from "./shared.ts";
 
 /*
  * Scenarios, at `@sanoma/workflows/scenario`: Gherkin feature files that say what a sandbox run
@@ -228,9 +228,6 @@ const TAKES_OBJECT = "a JSON doc string or a two-column table";
 
 /** What a field belongs to, in errors: an operation's or a workflow's input. */
 const inputOf = (name: unknown) => `${name as string}'s input`;
-
-/** The built-in drift workflow's name (`DRIFT_WORKFLOW`, kept off this entry's imports): the run whose report the drift steps read. */
-const DRIFT = "drift";
 
 const rulesByScope = new WeakMap<Scope, Rule[]>();
 
@@ -628,9 +625,9 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
       );
     }
     const drift = scenario.expect.find((e) => "declared" in e);
-    if (drift && workflow !== DRIFT) {
+    if (drift && workflow !== DRIFT_WORKFLOW) {
       throw new Error(
-        `${where()}: "${drift.step}" reads a drift report, so the scenario must run ${DRIFT}, not ${workflow}`,
+        `${where()}: "${drift.step}" reads a drift report, so the scenario must run ${DRIFT_WORKFLOW}, not ${workflow}`,
       );
     }
     scenarios.push({ ...scenario, workflow, approvals: approvalsOf(scope.workflows.get(workflow)!) });

@@ -35,6 +35,6 @@ The source of `@sanoma/workflows`: how connectors, workflows and policies are de
 | [`run.ts`](run.ts)                 | The per-run and per-worker state the DBOS workflow receives                                                                                                                 |
 | [`sandbox.ts`](sandbox.ts)         | `seedSandbox`: a sandbox run's own copies of the fakes, seeded; the worker imports it only for such a run                                                                   |
 | [`scenario.ts`](scenario.ts)       | Gherkin scenarios: `parseFeature`, `loadScenarios`, `check` and `drive`                                                                                                     |
-| [`shared.ts`](shared.ts)           | Browser-safe helpers for run status and approvals, and resource types; no DBOS, Node or zod                                                                                 |
+| [`shared.ts`](shared.ts)           | Browser-safe helpers for run status and approvals, `DRIFT_WORKFLOW`, and resource types; no DBOS, Node or zod                                                               |
 | [`version.ts`](version.ts)         | The package version, the step layout and `computeVersion`, the application version hash                                                                                     |
 | [`worker.ts`](worker.ts)           | `startWorker`: reads each workflow's outline, loads stored credentials, warns of missing ones, launches DBOS, registers each workflow by name, returns a stoppable `Worker` |

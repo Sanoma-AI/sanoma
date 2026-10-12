@@ -21,6 +21,9 @@ export type { CredentialStatus } from "./env.ts";
 // Nothing here imports DBOS, Node or zod, so a browser bundle can carry it; the runtime uses the
 // same functions, so a page answers these questions the way a run does.
 
+/** The built-in drift workflow's name, which a config's own workflows may not take; a UI and the scenarios name its runs by it. */
+export const DRIFT_WORKFLOW = "drift";
+
 /**
  * Every run status, in the order a run may pass through them: waiting on the queue, running,
  * waiting for an approval, or ended. `waiting` is `running` with an approval pending.

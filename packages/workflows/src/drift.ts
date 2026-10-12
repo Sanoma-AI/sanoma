@@ -4,16 +4,14 @@ import { isRunControlError } from "./errors.ts";
 import type { Op } from "./op.ts";
 import { type DriftField, diffDeclared, type Resource } from "./resource.ts";
 import type { DeclaredResource, ResourceProblem } from "./resources.ts";
-import { errorMessage } from "./shared.ts";
+import { type DRIFT_WORKFLOW, errorMessage } from "./shared.ts";
 
 export type { DriftField } from "./resource.ts";
+export { DRIFT_WORKFLOW } from "./shared.ts";
 
 // The built-in `drift` workflow: for each resource the data files declare, what the vendor holds
 // now against what is declared. It is a workflow like any other, held to the same lint, so every
 // vendor call goes through `ctx`: the policy sees each (effect `read`) and the ledger records it.
-
-/** The built-in drift workflow's name, which a config's own workflows may not take. */
-export const DRIFT_WORKFLOW = "drift";
 
 /**
  * How a declared resource compares: `clean` when every declared field holds its declared value,
@@ -103,7 +101,8 @@ export function driftWorkflow(
     if (!uses.some((op) => op.id === `${type}.import`)) unreadable.set(type, `no driver for ${type}.import`);
   }
   return defineWorkflow({
-    name: DRIFT_WORKFLOW,
+    // The literal, held to the one name: the outline finds a workflow by a string, or a const of its own file.
+    name: "drift" satisfies typeof DRIFT_WORKFLOW,
     title: "Check resources for drift",
     trigger: "manual",
     input: DriftInput,
