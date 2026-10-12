@@ -48,6 +48,14 @@ describe("stripeDriver", () => {
     expect(calls()).toEqual([]);
   });
 
+  it("reads through the process's default bridge when given none, and declares the bridge's variable", () => {
+    const driver = stripeDriver();
+    expect(Object.keys(driver.env!.shape)).toEqual(["STRIPE_API_KEY", "SANOMA_BRIDGE_BIN"]);
+    expect(driver.env!.shape.SANOMA_BRIDGE_BIN!.safeParse(undefined).success).toBe(true);
+    expect(driver.env!.shape.STRIPE_API_KEY!.safeParse(undefined).success).toBe(false);
+    expect(Object.keys(driver.ops)).toContain("product.read");
+  });
+
   it("answers gone for an id nothing answers to", async () => {
     expect(await call(stripeDriver({ bridge }), "webhook_endpoint.import", { id: "we_missing" })).toEqual({
       id: "we_missing",

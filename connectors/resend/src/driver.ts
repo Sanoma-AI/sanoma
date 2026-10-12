@@ -7,14 +7,21 @@ import { createClient } from "./generated/client/index.ts";
 import { broadcastsCreate, broadcastsGet, broadcastsSend } from "./generated/index.ts";
 
 export interface ResendDriverOptions {
-  /** The sender of a broadcast whose input has no `from`. Resend requires one. */
-  from?: string;
   /** How long one request may take before it fails, retryable. Default 15 seconds. */
   timeoutMs?: number;
 }
 
 /** The environment variables the driver reads, on every call. */
-const env = z.object({ RESEND_API_KEY: z.string().describe("an API key") });
+const env = z.object({
+  RESEND_API_KEY: z.string().describe("an API key"),
+  RESEND_FROM: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "the sender of a broadcast whose input has no `from`, such as `Acme <news@acme.example>`, on a domain verified in Resend",
+    ),
+});
 
 /** Resend's error body. The spec declares none; the docs give `{ statusCode, name, message }`. */
 const errorBody = z
@@ -73,8 +80,9 @@ function broadcastOf<T extends { id?: string }>(
 }
 
 /**
- * Calls Resend's Broadcasts API with the key in `RESEND_API_KEY`, read on every call. The
- * contract's `audience` is Resend's `segment_id`: Resend renamed audiences to segments.
+ * Calls Resend's Broadcasts API with the key in `RESEND_API_KEY`, read on every call, as is
+ * `RESEND_FROM`, the sender of a broadcast whose input names none. The contract's `audience` is
+ * Resend's `segment_id`: Resend renamed audiences to segments.
  */
 export function resendDriver(options: ResendDriverOptions = {}) {
   const timeoutMs = options.timeoutMs ?? 15_000;
@@ -99,9 +107,9 @@ export function resendDriver(options: ResendDriverOptions = {}) {
     {
       broadcast: {
         create: async (input, call) => {
-          const from = input.from ?? options.from;
+          const from = input.from ?? process.env.RESEND_FROM;
           if (!from) {
-            throw new DriverError("resend: broadcast.create needs `from` in its input or resendDriver({ from })", {
+            throw new DriverError("resend: broadcast.create needs `from` in its input, or RESEND_FROM set", {
               retryable: false,
             });
           }

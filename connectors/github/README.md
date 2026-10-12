@@ -46,20 +46,22 @@ Attributes that are computed and not optional (`html_url`, `repo_id`) are vendor
 ```ts
 import { githubDriver } from "@sanoma/connector-github/driver";
 
-const drivers = [githubDriver({ bridge, owner: "Sanoma-AI" })]; // bridge: `startBridge()` from @sanoma/bridge
+const drivers = [githubDriver()]; // or githubDriver({ bridge }) to read through a bridge of your own
 ```
 
-`bridge` is any `ProviderClient` (a `Bridge` from `startBridge()`, or `stateBridge` in tests). It configures the provider on the first call with `{ owner, token }`, and again when the token changes (closing it first: the bridge refuses a second config), when the provider has exited, or when the bridge has forgotten it (`ensureConfigured`). `read` without a state (or with one that has no `id`) imports, which reads the object too. States leave the driver in the resource's shape, with sensitive attributes set to `null`; the provider's private data and state version travel in the opaque `handle`.
+Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma/bridge`, started on the first call from `SANOMA_BRIDGE_BIN`; `bridge` is any `ProviderClient` (a `Bridge` from `startBridge()`, or `stateBridge` in tests). It configures the provider on the first call with `{ owner, token }` from the environment, and again when either changes (closing it first: the bridge refuses a second config), when the provider has exited, or when the bridge has forgotten it (`ensureConfigured`). `read` without a state (or with one that has no `id`) imports, which reads the object too. States leave the driver in the resource's shape, with sensitive attributes set to `null`; the provider's private data and state version travel in the opaque `handle`.
 
 ### Environment
 
 Read on every call, never when the config loads:
 
-| Variable       | What it is                                                            |
-| -------------- | --------------------------------------------------------------------- |
-| `GITHUB_TOKEN` | A GitHub token that can read the repositories, rules and teams named. |
+| Variable            | What it is                                                                                                                                    |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GITHUB_TOKEN`      | A GitHub token that can read the repositories, rules and teams named.                                                                         |
+| `GITHUB_OWNER`      | Optional: the organization or user whose repositories the data files describe. Default: the token's own user.                                 |
+| `SANOMA_BRIDGE_BIN` | Optional: the `provider-bridge` binary the default bridge starts; see [the bridge](https://www.npmjs.com/package/@sanoma/bridge#environment). |
 
-When it is unset, a call fails, not retryable, naming it. The bridge passes it to the provider through its config only, never through the provider's environment.
+When the token is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets the three. The bridge passes the token and the owner to the provider through its config only, never through the provider's environment.
 
 ### Errors and retries
 

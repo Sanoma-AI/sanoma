@@ -19,12 +19,13 @@ describe("githubDriver", () => {
   const calls = () => bridge.calls.map(({ method, typeName, id }: BridgeCall) => [method, typeName, id]);
   beforeEach(() => {
     vi.stubEnv("GITHUB_TOKEN", "ghx_test");
+    vi.stubEnv("GITHUB_OWNER", "Sanoma-AI");
     state = loadReplies(fixturesDir, provider);
     bridge = stateBridge(state);
   });
 
   it("imports when given no state: the import reads the object too", async () => {
-    const read = await call(githubDriver({ bridge, owner: "Sanoma-AI" }), "repository.read", { id: "sanoma" });
+    const read = await call(githubDriver({ bridge }), "repository.read", { id: "sanoma" });
     expect(calls()).toEqual([
       ["configure", undefined, undefined],
       ["import", "github_repository", "sanoma"],
@@ -52,12 +53,17 @@ describe("githubDriver", () => {
   it("configures the provider with the owner and the token, read on every call", async () => {
     const configure = vi.spyOn(bridge, "configure");
     const close = vi.spyOn(bridge, "close");
-    const driver = githubDriver({ bridge, owner: "Sanoma-AI" });
+    const driver = githubDriver({ bridge });
     await call(driver, "repository.import", { id: "sanoma" });
     expect(configure).toHaveBeenLastCalledWith(
       expect.objectContaining({ source: "integrations/github", version: "6.13.0" }),
       JSON.stringify({ owner: "Sanoma-AI", token: "ghx_test" }),
     );
+    // No owner: the token's own user, which the provider takes as null.
+    vi.stubEnv("GITHUB_OWNER", "");
+    await call(driver, "repository.import", { id: "sanoma" });
+    expect(configure).toHaveBeenLastCalledWith(expect.anything(), JSON.stringify({ owner: null, token: "ghx_test" }));
+    vi.stubEnv("GITHUB_OWNER", "Sanoma-AI");
     // A new token: the bridge refuses another config until the provider is closed. Two calls at
     // once configure once.
     vi.stubEnv("GITHUB_TOKEN", "ghx_other");
@@ -65,8 +71,17 @@ describe("githubDriver", () => {
       call(driver, "repository.import", { id: "sanoma" }),
       call(driver, "repository.import", { id: "provider-bridge" }),
     ]);
-    expect(close).toHaveBeenCalledTimes(1);
-    expect(configure).toHaveBeenCalledTimes(2);
+    expect(close).toHaveBeenCalledTimes(2);
+    expect(configure).toHaveBeenCalledTimes(3);
+  });
+
+  it("reads through the process's default bridge when given none, and declares the bridge's and the owner's variables", () => {
+    const driver = githubDriver();
+    expect(Object.keys(driver.env!.shape)).toEqual(["GITHUB_TOKEN", "GITHUB_OWNER", "SANOMA_BRIDGE_BIN"]);
+    expect(driver.env!.shape.GITHUB_OWNER!.safeParse(undefined).success).toBe(true);
+    expect(driver.env!.shape.SANOMA_BRIDGE_BIN!.safeParse(undefined).success).toBe(true);
+    expect(driver.env!.shape.GITHUB_TOKEN!.safeParse(undefined).success).toBe(false);
+    expect(Object.keys(driver.ops)).toContain("repository.read");
   });
 
   it("fails, not retryable, without GITHUB_TOKEN, and calls nothing", async () => {

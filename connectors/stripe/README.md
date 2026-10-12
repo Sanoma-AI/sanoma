@@ -42,20 +42,21 @@ A webhook endpoint's `secret` is sensitive (Stripe returns it only when the endp
 ```ts
 import { stripeDriver } from "@sanoma/connector-stripe/driver";
 
-const drivers = [stripeDriver({ bridge })]; // bridge: `startBridge()` from @sanoma/bridge
+const drivers = [stripeDriver()]; // or stripeDriver({ bridge }) to read through a bridge of your own
 ```
 
-It configures the provider on the first call with `{ api_key }`, and again when the key changes, when the provider has exited, or when the bridge has forgotten it. `read` without a state imports, which reads the object too.
+Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma/bridge`, started on the first call from `SANOMA_BRIDGE_BIN`. It configures the provider on the first call with `{ api_key }`, and again when the key changes, when the provider has exited, or when the bridge has forgotten it. `read` without a state imports, which reads the object too.
 
 ### Environment
 
 Read on every call, never when the config loads:
 
-| Variable         | What it is                                                   |
-| ---------------- | ------------------------------------------------------------ |
-| `STRIPE_API_KEY` | A Stripe secret or restricted key; a test-mode one in tests. |
+| Variable            | What it is                                                                                                                                    |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STRIPE_API_KEY`    | A Stripe secret or restricted key; a test-mode one in tests.                                                                                  |
+| `SANOMA_BRIDGE_BIN` | Optional: the `provider-bridge` binary the default bridge starts; see [the bridge](https://www.npmjs.com/package/@sanoma/bridge#environment). |
 
-When it is unset, a call fails, not retryable, naming it. The bridge passes it to the provider through its config only.
+When the key is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets both. The bridge passes the key to the provider through its config only.
 
 ### Errors and retries
 

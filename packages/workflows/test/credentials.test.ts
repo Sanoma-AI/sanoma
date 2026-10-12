@@ -389,15 +389,20 @@ describe("the connectors' drivers", () => {
   const bridge = {} as never;
   it.each([
     ["ghost", ghostDriver(), ["GHOST_ADMIN_URL", "GHOST_ADMIN_API_KEY"], []],
-    ["resend", resendDriver(), ["RESEND_API_KEY"], []],
+    ["resend", resendDriver(), ["RESEND_API_KEY", "RESEND_FROM"], ["RESEND_FROM"]],
     [
       "bluesky",
       blueskyDriver(),
       ["BLUESKY_IDENTIFIER", "BLUESKY_APP_PASSWORD", "BLUESKY_SERVICE"],
       ["BLUESKY_SERVICE"],
     ],
-    ["github", githubDriver({ bridge }), ["GITHUB_TOKEN"], []],
-    ["stripe", stripeDriver({ bridge }), ["STRIPE_API_KEY"], []],
+    [
+      "github",
+      githubDriver({ bridge }),
+      ["GITHUB_TOKEN", "GITHUB_OWNER", "SANOMA_BRIDGE_BIN"],
+      ["GITHUB_OWNER", "SANOMA_BRIDGE_BIN"],
+    ],
+    ["stripe", stripeDriver({ bridge }), ["STRIPE_API_KEY", "SANOMA_BRIDGE_BIN"], ["SANOMA_BRIDGE_BIN"]],
   ])("%s declares exactly its variables, each described, and which are optional", (_, driver, names, optional) => {
     const shape = driver.env!.shape;
     expect(Object.keys(shape)).toEqual(names);
