@@ -59,7 +59,7 @@ const loaded = new Map<string, BridgeState>();
 
 /**
  * The recorded replies of a provider release under `fixtures` (`replies/<release>/<type>/<id>/`,
- * as `fakeBridge` reads them) as a `BridgeState`: each object by its type and import id, with
+ * in provider-bridge's fixture format) as a `BridgeState`: each object by its type and import id, with
  * the state its `read.json` returned, else its import's; or the failure its import was answered
  * with. A folder with a read and no import (a read recorded on its own) is keyed by the `id` in
  * the read's state. Parsed once per directory; each call returns a fresh copy to change.
