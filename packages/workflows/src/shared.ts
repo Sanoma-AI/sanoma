@@ -88,6 +88,15 @@ export function flatten(nodes: readonly OutlineNode[]): OutlineNode[] {
 export const problemAt = (p: ResourceProblem): string | undefined =>
   p.file === undefined ? undefined : `${p.file}:${p.line}:${p.column}`;
 
+/**
+ * A problem as one line: `file:line:column: message`, or `file: message` without a position, or
+ * the message alone without a file.
+ */
+export function problemLine(p: { file?: string; line?: number; column?: number; message: string }): string {
+  if (p.file === undefined) return p.message;
+  return p.line === undefined ? `${p.file}: ${p.message}` : `${p.file}:${p.line}:${p.column ?? 1}: ${p.message}`;
+}
+
 /** Whether a driver's environment variable lets it run: set, or unset and optional. */
 export const credentialReady = ({ status, optional }: CredentialStatus): boolean =>
   status === "set" || (status === "missing" && optional);

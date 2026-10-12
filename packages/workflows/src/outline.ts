@@ -1,7 +1,6 @@
-import { readFileSync } from "node:fs";
-import { childrenOf, type Node, parsed } from "./ast.ts";
+import { childrenOf, type Node, readSource, type SourceFile } from "./ast.ts";
 import { opIdsOf, type WorkflowDefinition } from "./define.ts";
-import { childLists, errorMessage, fitsOp, flatten } from "./shared.ts";
+import { childLists, fitsOp, flatten } from "./shared.ts";
 
 /**
  * What a workflow's `run` calls through `ctx`, in the order it makes the calls, with the loops,
@@ -82,25 +81,40 @@ const TRANSPARENT = new Set([
  * takes no `ctx` by name, or `run` holds what the outline cannot draw (each problem at
  * `file:line:column`).
  */
-export const outlineWorkflow = (wf: WorkflowDefinition<any, any>): Outline => outlineWithSource(wf).outline;
+export const outlineWorkflow = (wf: WorkflowDefinition<any, any>): Outline =>
+  outlineWithSource(wf, readSource(wf.file)).outline;
 
 /**
- * `outlineWorkflow`, with the text its spans index into: the file's, with `\n` line endings.
- * No text with an `{ error }`.
+ * `outlineWorkflow` over `file`, the workflow's file as `readSource` read it, with the text its
+ * spans index into (none with an `{ error }`). `found` is whether the file was parsed and holds
+ * the workflow's `run`: an `{ error }` with it found is what `run` holds that the outline cannot
+ * draw, which the lint reports too; one without is the file's (unread, unparsed, or no workflow
+ * of that name).
  */
-export function outlineWithSource(wf: WorkflowDefinition<any, any>): { outline: Outline; source?: string } {
-  const found = inFile(wf.file, wf.name);
-  if (typeof found === "string") return { outline: { error: found } };
-  const { source, fn, at } = found;
+export function outlineWithSource(
+  wf: WorkflowDefinition<any, any>,
+  file: SourceFile | string,
+): { outline: Outline; source?: string; found: boolean } {
+  if (typeof file === "string") return { outline: { error: file }, found: false };
+  if (file.problems.length) {
+    const why = file.problems[0]!.message.replace(/^syntax: /, "");
+    return { outline: { error: `${file.file} could not be parsed: ${why}` }, found: false };
+  }
+  const fn = runIn(file, wf.name);
+  if (!fn) return { outline: { error: `${file.file} holds no workflow named "${wf.name}"` }, found: false };
   const { nodes, problems } = outlineBody(fn);
   if (problems.length) {
     const lines = problems.map((p) => {
-      const { line, column } = at(p.start);
-      return `${wf.file}:${line}:${column}: ${p.message}`;
+      const { line, column } = file.at(p.start);
+      return `${file.file}:${line}:${column}: ${p.message}`;
     });
-    return { outline: { error: lines.join("\n") } };
+    return { outline: { error: lines.join("\n") }, found: true };
   }
-  return { source, outline: { nodes: withOps(withPaths(nodes, ""), opIdsOf(wf)), file: wf.file } };
+  return {
+    source: file.source,
+    outline: { nodes: withOps(withPaths(nodes, ""), opIdsOf(wf)), file: wf.file },
+    found: true,
+  };
 }
 
 /** Gives each op node with a computed segment the ids in `uses` it fits, in place. */
@@ -111,26 +125,11 @@ function withOps(nodes: OutlineNode[], uses: readonly string[]): OutlineNode[] {
   return nodes;
 }
 
-/** CodeMirror counts a line break as one unit, oxc counts `\r\n` as two: spans need `\n` alone. */
-const lf = (text: string) => text.replaceAll("\r\n", "\n");
-
 /**
  * The workflow's `run` in its file: the literal `defineWorkflow` is called with that has its
- * `name` (a string, or a top-level `const` of the file holding it) and a `run` function. Or why
- * not: the file cannot be read or parsed, or holds no such literal.
+ * `name` (a string, or a top-level `const` of the file holding it) and a `run` function.
  */
-function inFile(
-  file: string,
-  name: string,
-): { source: string; fn: Node; at: (offset: number) => { line: number; column: number } } | string {
-  let source: string;
-  try {
-    source = lf(readFileSync(file, "utf8"));
-  } catch (err) {
-    return `${file} could not be read: ${errorMessage(err)}`;
-  }
-  const { program, problems: syntax, at } = parsed(source, file);
-  if (syntax.length) return `${file} could not be parsed: ${syntax[0]!.message.replace(/^syntax: /, "")}`;
+function runIn({ program }: SourceFile, name: string): Node | undefined {
   // The file's top-level string constants, `export const NAME = "drift"`, by name.
   const consts = new Map<string, string>();
   for (const statement of program.body as Node[]) {
@@ -143,8 +142,7 @@ function inFile(
   }
   const nameOf = (node: Node) =>
     unwrap(node)?.type === "Identifier" ? consts.get(unwrap(node).name) : stringValue(node);
-  const fn = workflowLiterals(program).find((literal) => nameOf(literal.name) === name)?.run;
-  return fn ? { source, fn, at } : `${file} holds no workflow named "${name}"`;
+  return workflowLiterals(program).find((literal) => nameOf(literal.name) === name)?.run;
 }
 
 /**

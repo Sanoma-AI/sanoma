@@ -1,8 +1,7 @@
-import { readFileSync } from "node:fs";
 import type { z } from "zod";
-import { byPosition } from "./ast.ts";
+import { type LintProblem, readSource, type SourceFile } from "./ast.ts";
 import { resolveConfig, type SanomaConfig } from "./config.ts";
-import { type Builtin, jsonSchemaOf, opIdsOf, type Use, type WorkflowDefinition } from "./define.ts";
+import { type Builtin, jsonSchemaOf, opIdsOf, type Use } from "./define.ts";
 import { DRIFT_WORKFLOW } from "./drift.ts";
 import { lintWorkflow } from "./lint.ts";
 import { type Effect, VENDOR, type VendorInfo } from "./op.ts";
@@ -14,6 +13,7 @@ import { type DeclaredResource, readDataFiles, type ResourceProblem } from "./re
 // `@sanoma/workflows/describe`: what a UI renders from, apart from the main entry.
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
 // The reader parses data files with oxc-parser too.
+export type { LintProblem } from "./ast.ts";
 export {
   readDataFiles,
   readResources,
@@ -38,8 +38,19 @@ export interface WorkflowEntry {
   ops: string[];
   /** Built-ins the workflow may call. */
   builtins: Builtin[];
+  /** The file that defined it, absolute. */
+  file: string;
   /** What its `run` calls, in order, read from its file (`outlineWorkflow`), which the worker holds its runs to. */
   outline: Outline;
+  /**
+   * What is wrong in its file, by position: what `lintWorkflow` finds (syntax, an import a
+   * workflow may not make, `instanceof` against the runtime's error classes, what the outline
+   * cannot draw in each `run`), read the one way the outline is, so a check sees what the
+   * worker refuses; and, at 1:1, an outline error that is the file's (it cannot be read, or holds
+   * no workflow of this name). A file defining several workflows gives each its problems. Empty
+   * for the built-in `drift`, which the package's tests hold to the lint.
+   */
+  problems: LintProblem[];
   /**
    * The text the outline's spans index into: the workflow's file, with `\n` line endings.
    * Absent only when the outline is `{ error }`. Whole files: a server may keep it from clients.
@@ -118,13 +129,7 @@ export interface ConfigDescription {
    * less any with a problem and any that names one.
    */
   resources: DeclaredResource[];
-  /**
-   * What is wrong in the config's files, each at its file, line and column: the data files
-   * (`readDataFiles`; their `file` is relative to the root, `resources/…`), then the workflows'
-   * files (`file` absolute, as `WorkflowEntry.outline` names it), where an import a workflow may
-   * not make, `instanceof` against the runtime's error classes, and what the outline cannot draw
-   * are read the one way `lintWorkflow` reads them, so a check sees what the worker refuses.
-   */
+  /** What is wrong in the data files (`readDataFiles`), each at its file, relative to the root, line and column. A workflow's are on its entry. */
   problems: ResourceProblem[];
   /** `defined` is false for `allowAll`. */
   policy: { defined: boolean; version?: string };
@@ -133,8 +138,9 @@ export interface ConfigDescription {
 /**
  * Describes a config. Throws what `startWorker` would refuse (see `resolveConfig`), except missing
  * credentials (`SanomaClient.credentials` gives their statuses) and what is wrong in a workflow's
- * file, which the worker refuses when it reads the outline: that, and the data files' problems,
- * are data, `problems`, beside the resources read without any.
+ * file, which the worker refuses when it reads the outline: that is data, on each workflow's
+ * entry, as the data files' problems are, `problems`, beside the resources read without any.
+ * Each workflow's file is read and parsed once, however many workflows it defines.
  */
 export function describeConfig(config: SanomaConfig): ConfigDescription {
   const resolved = resolveConfig(config);
@@ -171,8 +177,20 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
   }));
   ops.sort((a, b) => a.id.localeCompare(b.id));
 
+  const read = memoised(readSource);
+  const lint = memoised((file: SourceFile) => lintWorkflow(file));
   const workflows: WorkflowEntry[] = [...resolved.workflows.values()].map((wf) => {
-    const { outline, source } = outlineWithSource(wf);
+    const file = read(wf.file);
+    const { outline, source, found } = outlineWithSource(wf, file);
+    // What the lint does not report: the file unread, or no workflow of this name in it.
+    const own = "error" in outline && !found && (typeof file === "string" || !file.problems.length);
+    const problems =
+      wf.name === DRIFT_WORKFLOW
+        ? []
+        : [
+            ...(typeof file === "string" ? [] : lint(file)),
+            ...(own ? [{ line: 1, column: 1, message: outline.error }] : []),
+          ];
     return {
       name: wf.name,
       title: wf.title,
@@ -181,7 +199,9 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       input: toJsonSchema(wf.input, `${wf.name} input`, "input"),
       ops: opIdsOf(wf),
       builtins: (wf.uses as Use[]).filter((u): u is Builtin => typeof u === "string"),
+      file: wf.file,
       outline,
+      problems,
       ...(source === undefined ? {} : { source }),
     };
   });
@@ -196,7 +216,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     vendors,
     resourceTypes,
     resources: dataFiles.resources,
-    problems: [...dataFiles.problems, ...workflowProblems(resolved.workflows.values(), workflows)],
+    problems: dataFiles.problems,
     policy: {
       defined: resolved.policy !== allowAll,
       ...(resolved.policy.version === undefined ? {} : { version: resolved.policy.version }),
@@ -204,39 +224,13 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
   };
 }
 
-/**
- * What is wrong in the workflows' files, each file read once however many workflows it defines:
- * `lintWorkflow`'s problems (the import rules, syntax, and what the outline cannot draw in each
- * `run`), each at its position; and, for a workflow whose outline is `{ error }` for a reason
- * the lint does not report (its file cannot be read, or holds no workflow of its name), that
- * error at no position. The built-in `drift` is the package's own, held to the lint by its
- * tests, and is not read here.
- */
-function workflowProblems(
-  definitions: Iterable<WorkflowDefinition<any, any>>,
-  entries: readonly WorkflowEntry[],
-): ResourceProblem[] {
-  const problems: ResourceProblem[] = [];
-  const linted = new Set<string>();
-  for (const wf of definitions) {
-    if (wf.name === DRIFT_WORKFLOW) continue;
-    if (!linted.has(wf.file)) {
-      linted.add(wf.file);
-      let found: ReturnType<typeof lintWorkflow> = [];
-      try {
-        found = lintWorkflow(readFileSync(wf.file, "utf8"), wf.file);
-      } catch {
-        // Unreadable: its outline's error says so, below.
-      }
-      for (const p of byPosition(found)) problems.push({ file: wf.file, ...p });
-    }
-    const outline = entries.find((e) => e.name === wf.name)?.outline;
-    if (!outline || !("error" in outline)) continue;
-    // Positioned (`file:line:column: …`) and syntax errors are the lint's, above.
-    const own = outline.error.startsWith(`${wf.file}:`) || outline.error.startsWith(`${wf.file} could not be parsed`);
-    if (!own) problems.push({ file: wf.file, message: outline.error });
-  }
-  return problems;
+/** `fn`, called once per argument for as long as the returned function lives. */
+function memoised<A, R>(fn: (arg: A) => R): (arg: A) => R {
+  const seen = new Map<A, R>();
+  return (arg) => {
+    if (!seen.has(arg)) seen.set(arg, fn(arg));
+    return seen.get(arg)!;
+  };
 }
 
 const svgDataUrl = (svg: string) => `data:image/svg+xml,${encodeURIComponent(svg.trim())}`;

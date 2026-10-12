@@ -1,5 +1,5 @@
 import { basename, dirname, join } from "node:path";
-import { byPosition, childrenOf, type LintProblem, type Node, parsed } from "./ast.ts";
+import { byPosition, childrenOf, type LintProblem, type Node, parsed, type SourceFile } from "./ast.ts";
 import { readDataFile } from "./datafile.ts";
 import { outlineBody, workflowLiterals } from "./outline.ts";
 import { inside, nearestDir, RELATIVE } from "./paths.ts";
@@ -73,8 +73,14 @@ const ERROR_CLASSES = new Set(["DriverError", "SanomaError", "PolicyDeniedError"
  * It guards against accidental non-determinism and accidental ways around the policy; it is
  * not a sandbox, and code written to get around it can.
  */
-export function lintWorkflow(source: string, filename?: string): LintProblem[] {
-  const { program, problems, at } = parsed(source, filename ?? "workflow.ts");
+export function lintWorkflow(source: string, filename?: string): LintProblem[];
+/** The same, over a file `readSource` read: the reading `describeConfig` shares with the outline. */
+export function lintWorkflow(file: SourceFile): LintProblem[];
+export function lintWorkflow(input: string | SourceFile, path?: string): LintProblem[] {
+  const filename = typeof input === "string" ? path : input.file;
+  const read = typeof input === "string" ? parsed(input, filename ?? "workflow.ts") : input;
+  const { program, at } = read;
+  const problems = [...read.problems];
   const root = filename === undefined ? undefined : nearestDir(filename, ["workflows", "policies"]);
 
   const checkSource = (node: Node) => {

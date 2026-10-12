@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { errorMessage, problemAt, resolveConfig, SanomaClient, type SanomaConfig } from "@sanoma/workflows";
+import { errorMessage, problemLine, resolveConfig, SanomaClient, type SanomaConfig } from "@sanoma/workflows";
 import { describeConfig } from "@sanoma/workflows/describe";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import type { AppContext, ResolveActor } from "./context.ts";
@@ -53,9 +53,13 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   const description = describeConfig(config);
   // Problems in the files do not stop the app: a data file's resources are left out (the Resources
   // page lists the problems), and a workflow the worker will refuse is shown with its outline's error.
-  if (description.problems.length) {
-    const lines = description.problems.map((p) => `  ${p.file === undefined ? "" : `${problemAt(p)}: `}${p.message}`);
-    console.warn(`sanoma app: the config's files have problems (\`sanoma check\` lists them):\n${lines.join("\n")}`);
+  const lines = new Set([
+    ...description.problems.map(problemLine),
+    ...description.workflows.flatMap((wf) => wf.problems.map((p) => problemLine({ file: wf.file, ...p }))),
+  ]);
+  if (lines.size) {
+    const list = [...lines].map((line) => `  ${line}`).join("\n");
+    console.warn(`sanoma app: the config's files have problems (\`sanoma check\` lists them):\n${list}`);
   }
   const distDir = resolve(options.distDir ?? defaultDistDir());
   const host = options.host ?? "127.0.0.1";

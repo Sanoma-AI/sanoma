@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { problemAt } from "@sanoma/workflows";
+import { problemLine } from "@sanoma/workflows";
 import { describeConfig } from "@sanoma/workflows/describe";
 import { runScenarios } from "@sanoma/workflows/scenarios";
 import type { LoadedConfig } from "./config.ts";
@@ -39,8 +39,6 @@ export async function check(
 ): Promise<CheckResult> {
   const { config, root } = loaded;
   const problems: string[] = [];
-  const at = (file: string) =>
-    isAbsolute(file) && !relative(root, file).startsWith("..") ? relative(root, file) : file;
 
   log("tsc");
   const tsc = await run(binOf("typescript"), ["-p", "tsconfig.json", "--pretty", "false"], root);
@@ -55,10 +53,15 @@ export async function check(
   }
 
   log("config");
-  for (const p of describeConfig(config).problems) {
-    const where = problemAt(p);
-    problems.push(where === undefined ? p.message : `${at(p.file!)}:${p.line}:${p.column}: ${p.message}`);
-  }
+  const description = describeConfig(config);
+  const lines = new Set([
+    ...description.problems.map(problemLine),
+    // A file defining several workflows gives each its problems: one line each here.
+    ...description.workflows.flatMap((wf) =>
+      wf.problems.map((p) => problemLine({ file: relative(root, wf.file), ...p })),
+    ),
+  ]);
+  problems.push(...lines);
 
   if (!scenarios) {
     log("scenarios skipped");

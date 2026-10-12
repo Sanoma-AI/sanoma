@@ -23,6 +23,7 @@ import {
 } from "../src/index.ts";
 import { describeConfig, outlineWorkflow } from "../src/describe.ts";
 import { VENDOR } from "../src/op.ts";
+import { problemLine } from "../src/shared.ts";
 import announce from "./fixtures/announce.ts";
 import { marketingFakes } from "./harness.ts";
 
@@ -242,7 +243,7 @@ describe("describeConfig's workflow problems", () => {
   let dir = "";
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  it("are what lintWorkflow finds in each workflow's file, at their positions, beside the data files' problems", () => {
+  it("are what lintWorkflow finds in the workflow's file, at their positions, on its entry", () => {
     dir = mkdtempSync(join(tmpdir(), "sanoma-describe-"));
     const file = join(dir, "announce.ts");
     writeFileSync(
@@ -264,33 +265,56 @@ export default defineWorkflow({
 `,
     );
     const { workflows, problems } = describeConfig({ ...base, workflows: [definedIn(file)], root: dir });
+    expect(problems).toEqual([]);
+    expect(workflows[0]!.file).toBe(file);
     expect(workflows[0]!.outline).toEqual({
       error: expect.stringMatching(/^.*announce\.ts:11:15: ctx is only called/),
     });
-    expect(problems).toEqual([
-      { file, line: 1, column: 26, message: expect.stringMatching(/^SanomaClient is not allowed in a workflow/) },
-      { file, line: 2, column: 30, message: expect.stringMatching(/^import "node:fs" is not allowed in a workflow/) },
-      { file, line: 11, column: 15, message: expect.stringMatching(/^ctx is only called, directly/) },
-    ]);
-    // The same file defining two workflows is read once.
+    const found = [
+      { line: 1, column: 26, message: expect.stringMatching(/^SanomaClient is not allowed in a workflow/) },
+      { line: 2, column: 30, message: expect.stringMatching(/^import "node:fs" is not allowed in a workflow/) },
+      { line: 11, column: 15, message: expect.stringMatching(/^ctx is only called, directly/) },
+    ];
+    expect(workflows[0]!.problems).toEqual(found);
+    // A file defining two workflows gives each its problems; one it does not define, the outline's error too.
     const again = { ...definedIn(file), name: "again" } as typeof announce;
-    const twice = describeConfig({ ...base, workflows: [definedIn(file), again], root: dir });
-    expect(twice.problems).toHaveLength(4);
-    expect(twice.problems.filter((p) => p.line === undefined)).toEqual([
-      { file, message: expect.stringMatching(/holds no workflow named "again"|no workflow/) },
+    const twice = describeConfig({ ...base, workflows: [definedIn(file), again], root: dir }).workflows;
+    expect(twice.map((wf) => [wf.name, wf.problems])).toEqual([
+      ["again", [...found, { line: 1, column: 1, message: expect.stringMatching(/holds no workflow named "again"$/) }]],
+      ["announce", found],
     ]);
   });
 
-  it("name an outline error at no position when the lint finds nothing: a file that cannot be read", () => {
+  it("are the syntax problems for a file that does not parse, and the outline's error for one that cannot be read", () => {
     dir = mkdtempSync(join(tmpdir(), "sanoma-describe-"));
-    const file = join(dir, "gone.ts");
-    const { workflows, problems } = describeConfig({ ...base, workflows: [definedIn(file)], root: dir });
-    expect(workflows[0]!.outline).toEqual({ error: expect.stringMatching(/could not be read/) });
-    expect(problems).toEqual([{ file, message: expect.stringMatching(/^.*gone\.ts could not be read/) }]);
+    const broken = join(dir, "broken.ts");
+    writeFileSync(broken, 'export default defineWorkflow({ name: "announce", run: async (ctx) => { ctx. } });\n');
+    const [parsed] = describeConfig({ ...base, workflows: [definedIn(broken)], root: dir }).workflows;
+    expect(parsed!.outline).toEqual({ error: expect.stringMatching(/broken\.ts could not be parsed/) });
+    expect(parsed!.problems).toEqual([
+      { line: 1, column: expect.any(Number), message: expect.stringMatching(/^syntax: /) },
+    ]);
+
+    const gone = join(dir, "gone.ts");
+    const [unread] = describeConfig({ ...base, workflows: [definedIn(gone)], root: dir }).workflows;
+    expect(unread!.outline).toEqual({ error: expect.stringMatching(/could not be read/) });
+    expect(unread!.problems).toEqual([
+      { line: 1, column: 1, message: expect.stringMatching(/^.*gone\.ts could not be read/) },
+    ]);
   });
 
   it("are empty for the example workflow", () => {
     dir = mkdtempSync(join(tmpdir(), "sanoma-describe-"));
-    expect(describeConfig({ ...base, root: dir }).problems).toEqual([]);
+    const description = describeConfig({ ...base, root: dir });
+    expect(description.problems).toEqual([]);
+    expect(description.workflows.flatMap((wf) => wf.problems)).toEqual([]);
+  });
+});
+
+describe("problemLine", () => {
+  it("is file:line:column: message, file: message without a position, the message alone without a file", () => {
+    expect(problemLine({ file: "w.ts", line: 2, column: 3, message: "m" })).toBe("w.ts:2:3: m");
+    expect(problemLine({ file: "w.ts", message: "m" })).toBe("w.ts: m");
+    expect(problemLine({ message: "m" })).toBe("m");
   });
 });

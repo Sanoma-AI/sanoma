@@ -107,6 +107,7 @@ export {
   isEnded,
   mayDecide,
   problemAt,
+  problemLine,
   RUN_STATUSES,
   type RunStatus,
 } from "./shared.ts";

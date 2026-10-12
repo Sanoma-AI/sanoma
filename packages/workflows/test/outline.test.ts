@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { lineStartsOf, offsetOf } from "../src/ast.ts";
+import { lineStartsOf, offsetOf, readSource } from "../src/ast.ts";
 import { type OutlineNode, outlineWorkflow } from "../src/describe.ts";
 import * as sanoma from "../src/index.ts";
 import { defineConnector, defineWorkflow, type WorkflowDefinition } from "../src/index.ts";
@@ -31,7 +31,7 @@ function outlined(wf: Omit<WorkflowDefinition, "run"> & { run: (...args: never[]
   source: string;
   file: string;
 } {
-  const { outline, source } = outlineWithSource(wf as WorkflowDefinition<any, any>);
+  const { outline, source } = outlineWithSource(wf as WorkflowDefinition<any, any>, readSource(wf.file));
   if ("error" in outline) throw new Error(outline.error);
   return { ...outline, source: source! };
 }
