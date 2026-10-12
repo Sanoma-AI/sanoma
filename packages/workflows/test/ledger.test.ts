@@ -2,10 +2,9 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DBOS } from "@dbos-inc/dbos-sdk";
 import { testDatabaseUrl } from "@sanoma/testing";
 import { Pool } from "pg";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   allowAll,
@@ -33,8 +32,6 @@ afterAll(() => rmSync(dir, { recursive: true, force: true }));
 const databaseUrl = testDatabaseUrl("ledger");
 /** One Postgres store for the file; the worker and the client make their own on the same table. */
 const postgres = postgresLedger(databaseUrl);
-// The database, which a worker's launch would have made; the store makes only its table.
-beforeAll(() => DBOS.migrate(databaseUrl));
 afterAll(() => postgres.close());
 
 const rec = (
@@ -109,21 +106,28 @@ describe.each<[string, () => LedgerStore]>([
 });
 
 describe("postgresLedger", () => {
-  it("creates its table on first use, which another store on the database then shares", async () => {
-    const pool = new Pool({ connectionString: databaseUrl });
-    const stores = [postgresLedger(databaseUrl), postgresLedger(databaseUrl)];
+  it("makes the database and its tables on first use, which another store then shares", async () => {
+    const url = testDatabaseUrl("ledger_made");
+    const name = new URL(url).pathname.slice(1);
+    const maintenance = new Pool({ connectionString: new URL("/postgres", url).toString() });
+    await maintenance.query(`DROP DATABASE IF EXISTS "${name}"`);
+    const stores = [postgresLedger(url), postgresLedger(url)];
     try {
-      await pool.query("DROP TABLE IF EXISTS sanoma_ledger");
       const run = randomUUID();
-      // Two writers at once, each on a pool of its own (two processes), both making the table.
       await Promise.all(stores.map((store, seq) => store.append(rec(run, seq))));
-      expect((await pool.query("SELECT to_regclass('sanoma_ledger')::text AS t")).rows).toEqual([
-        { t: "sanoma_ledger" },
-      ]);
       expect((await stores[1]!.read(run)).map((r) => r.seq)).toEqual([0, 1]);
+      const made = new Pool({ connectionString: url });
+      try {
+        const { rows } = await made.query(
+          "SELECT to_regclass('sanoma_ledger')::text AS ledger, to_regclass('sanoma_credentials')::text AS credentials",
+        );
+        expect(rows).toEqual([{ ledger: "sanoma_ledger", credentials: "sanoma_credentials" }]);
+      } finally {
+        await made.end();
+      }
     } finally {
       for (const store of stores) await store.close();
-      await pool.end();
+      await maintenance.end();
     }
   });
 
@@ -163,15 +167,6 @@ describe("postgresLedger", () => {
     await expect(store.read("closing")).rejects.toThrow("the ledger store is closed");
     await store.close();
     expect(end).toHaveBeenCalledTimes(1);
-  });
-
-  it("fails saying so when the database does not exist, rather than making it", async () => {
-    const store = postgresLedger(testDatabaseUrl("ledger_nowhere"));
-    try {
-      await expect(store.read("r")).rejects.toThrow(/^could not prepare the ledger table: .*does not exist/);
-    } finally {
-      await store.close();
-    }
   });
 });
 

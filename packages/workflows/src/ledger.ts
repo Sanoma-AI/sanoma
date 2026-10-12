@@ -3,8 +3,7 @@ import { appendFile, mkdir, readFile, truncate } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { isDeepStrictEqual } from "node:util";
-import type { Pool } from "pg";
-import { createTable, openPool } from "./db.ts";
+import { LEDGER_TABLE as TABLE, lazyPool, pgCode } from "./db.ts";
 import type { Approver, Principal } from "./define.ts";
 import { type ErrorInfo, isFinal, keepCode } from "./errors.ts";
 import { shown, warn } from "./log.ts";
@@ -265,56 +264,33 @@ export function jsonlLedger(dir: string): LedgerStore {
   };
 }
 
-const TABLE = "sanoma_ledger";
-
-/** One table beside DBOS's: `n` is the write order, `id` the record's, which the first write of takes. */
-const DDL =
-  `CREATE TABLE IF NOT EXISTS ${TABLE} (n bigserial PRIMARY KEY, id text NOT NULL UNIQUE, ` +
-  `run_id text NOT NULL, record jsonb NOT NULL); CREATE INDEX IF NOT EXISTS ${TABLE}_run ON ${TABLE} (run_id)`;
-
 /** Postgres's class for a value it cannot store (a string with a NUL in `jsonb`): trying again would only repeat it. */
 const DATA_EXCEPTION = /^22/;
 
 /**
  * Keeps records in the `sanoma_ledger` table of the database at `databaseUrl`, beside DBOS's
  * tables: the default store, which the worker, the app and the client share through Postgres.
- * The table is created on first use; the database must exist, which the first worker's launch
- * sees to, so a read before any worker has run fails saying so rather than creating anything.
+ * The database and the table are made on first use when they are not there (`prepareDatabase`).
  * The pool is opened on first use and ended by `close()`, after which the store refuses use.
  */
 export function postgresLedger(databaseUrl: string): LedgerStore & { close(): Promise<void> } {
-  let pool: Pool | undefined;
-  let closed = false;
-  /** The table, being or having been created on `pool`; a failed create is tried again on the next use. */
-  let table: Promise<void> | undefined;
-
-  async function db(): Promise<Pool> {
-    if (closed) throw new Error("the ledger store is closed");
-    const current = (pool ??= openPool(databaseUrl, "ledger"));
-    table ??= createTable(current, DDL, "ledger").catch((err: unknown) => {
-      if (pool === current) table = undefined;
-      throw err;
-    });
-    await table;
-    return current;
-  }
+  const pool = lazyPool(databaseUrl, "ledger");
 
   return {
     async append(record) {
       const line = lineOf(record);
-      const conn = await db();
-      let inserted: { rows: unknown[] };
-      try {
-        inserted = await conn.query(
+      const conn = await pool.db();
+      const inserted = await conn
+        .query(
           `INSERT INTO ${TABLE} (id, run_id, record) VALUES ($1, $2, $3::jsonb) ON CONFLICT (id) DO NOTHING RETURNING n`,
           [record.id, record.runId, line],
-        );
-      } catch (err) {
-        if (DATA_EXCEPTION.test((err as { code?: string }).code ?? "")) {
-          throw final(`Ledger record ${record.id} can't be stored: ${errorMessage(err)}`, err);
-        }
-        throw err;
-      }
+        )
+        .catch((err: unknown) => {
+          if (DATA_EXCEPTION.test(pgCode(err))) {
+            throw final(`Ledger record ${record.id} can't be stored: ${errorMessage(err)}`, err);
+          }
+          throw err;
+        });
       if (inserted.rows.length) return;
       // Another write of the id was first: the record it stored stands.
       const { rows } = await conn.query<{ record: LedgerRecord }>(`SELECT record FROM ${TABLE} WHERE id = $1`, [
@@ -324,17 +300,12 @@ export function postgresLedger(databaseUrl: string): LedgerStore & { close(): Pr
     },
     async read(runId) {
       const { rows } = await (
-        await db()
+        await pool.db()
       ).query<{ record: LedgerRecord }>(`SELECT record FROM ${TABLE} WHERE run_id = $1 ORDER BY n`, [runId]);
       // In seq order, as the other stores read; two records of one seq stay in write order.
       return rows.map((r) => r.record).toSorted(bySeq);
     },
-    async close() {
-      closed = true;
-      const current = pool;
-      pool = undefined;
-      await current?.end();
-    },
+    close: pool.close,
   };
 }
 

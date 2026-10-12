@@ -5,7 +5,7 @@ import { resendDriver } from "@sanoma/connector-resend/driver";
 import { stripeDriver } from "@sanoma/connector-stripe/driver";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { testDatabaseUrl } from "@sanoma/testing";
-import { Client, Pool } from "pg";
+import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -21,7 +21,6 @@ import {
   startWorker,
 } from "../src/index.ts";
 import { credentialsOf } from "../src/env.ts";
-import { ensureTable } from "../src/credentials.ts";
 import { describeConfig } from "../src/describe.ts";
 
 // Made-up variables and values: nothing here is a credential.
@@ -289,18 +288,6 @@ const refusal = (p: Promise<unknown>) =>
 const stored = async (from = client) => (await from.credentials()).get("acme");
 
 describe("stored credentials", () => {
-  it("are kept in one table, which two processes may create at once", async () => {
-    const pool = new Pool({ connectionString: databaseUrl });
-    try {
-      await pool.query("DROP TABLE IF EXISTS sanoma_credentials");
-      await Promise.all([ensureTable(databaseUrl, async () => pool), ensureTable(databaseUrl, async () => pool)]);
-      const { rows } = await pool.query("SELECT to_regclass('sanoma_credentials')::text AS t");
-      expect(rows).toEqual([{ t: "sanoma_credentials" }]);
-    } finally {
-      await pool.end();
-    }
-  });
-
   it("are set, replaced and cleared, with who set them and when, never the value", async () => {
     vi.stubEnv(URL_VAR, undefined);
     vi.stubEnv(KEY_VAR, undefined);

@@ -5,8 +5,8 @@ import type { Pool } from "pg";
 import { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, messageKeyOf, topicOf } from "./approvals.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
-import { deleteCredential, ensureTable, storeCredential, storedCredentials } from "./credentials.ts";
-import { openPool } from "./db.ts";
+import { deleteCredential, storeCredential, storedCredentials } from "./credentials.ts";
+import { lazyPool, type LazyPool } from "./db.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { type ApprovalState, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
@@ -111,16 +111,15 @@ export class SanomaClient {
   private readonly drivers: readonly Driver[];
   /** The config's own ledger store, or a Postgres one made for this client, which `close` then closes. */
   private readonly audit: OwnedLedger;
-  /** On the config's database, for the credentials table: made on first use. */
-  private pool?: Pool;
-  private table?: Promise<void>;
-  private closed = false;
+  /** On the config's database, for the credentials table: opened on first use. */
+  private readonly credentialsPool: LazyPool;
 
   private constructor(dbos: DBOSClient, config: ResolvedConfig, drivers: readonly Driver[]) {
     this.dbos = dbos;
     this.config = config;
     this.drivers = drivers;
     this.audit = ownedLedger(config);
+    this.credentialsPool = lazyPool(config.databaseUrl, "credentials");
   }
 
   /**
@@ -421,8 +420,7 @@ export class SanomaClient {
   }
 
   async close() {
-    this.closed = true;
-    await Promise.all([this.dbos.destroy(), this.pool?.end(), this.audit.close()]);
+    await Promise.all([this.dbos.destroy(), this.credentialsPool.close(), this.audit.close()]);
   }
 
   /**
@@ -445,17 +443,9 @@ export class SanomaClient {
     });
   }
 
-  /** The pool the credentials are read and written with, its table created once. */
-  private async credentialsDb(): Promise<Pool> {
-    if (this.closed) throw new Error("The client is closed");
-    const pool = (this.pool ??= openPool(this.config.databaseUrl, "credentials"));
-    // A failed create is tried again on the next call.
-    this.table ??= ensureTable(this.config.databaseUrl, async () => pool).catch((err: unknown) => {
-      this.table = undefined;
-      throw err;
-    });
-    await this.table;
-    return pool;
+  /** The pool the credentials are read and written with, on the database once it is prepared. */
+  private credentialsDb(): Promise<Pool> {
+    return this.credentialsPool.db();
   }
 
   /** Refuses a run id whose run, as stored, was started with another input, by someone else, or in another sandbox. */
