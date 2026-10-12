@@ -282,8 +282,8 @@ export function postgresLedger(databaseUrl: string): LedgerStore & { close(): Pr
       const conn = await pool.db();
       const inserted = await conn
         .query(
-          `INSERT INTO ${TABLE} (id, run_id, record) VALUES ($1, $2, $3::jsonb) ON CONFLICT (id) DO NOTHING RETURNING n`,
-          [record.id, record.runId, line],
+          `INSERT INTO ${TABLE} (id, run_id, seq, record) VALUES ($1, $2, $3, $4::jsonb) ON CONFLICT (id) DO NOTHING RETURNING n`,
+          [record.id, record.runId, record.seq, line],
         )
         .catch((err: unknown) => {
           if (DATA_EXCEPTION.test(pgCode(err))) {
@@ -301,9 +301,9 @@ export function postgresLedger(databaseUrl: string): LedgerStore & { close(): Pr
     async read(runId) {
       const { rows } = await (
         await pool.db()
-      ).query<{ record: LedgerRecord }>(`SELECT record FROM ${TABLE} WHERE run_id = $1 ORDER BY n`, [runId]);
-      // In seq order, as the other stores read; two records of one seq stay in write order.
-      return rows.map((r) => r.record).toSorted(bySeq);
+      ).query<{ record: LedgerRecord }>(`SELECT record FROM ${TABLE} WHERE run_id = $1 ORDER BY seq, n`, [runId]);
+      // In seq order, as the other stores read; two records of one seq in write order.
+      return rows.map((r) => r.record);
     },
     close: pool.close,
   };

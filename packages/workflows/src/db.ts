@@ -24,10 +24,11 @@ const TABLES: readonly [what: string, ddl: string][] = [
   ],
   [
     "ledger",
-    // `n` is the write order, `id` the record's, which the first write of takes.
+    // `n` is the write order, `id` the record's, which the first write of takes, and `seq` the
+    // record's place in its run: a run reads in `seq` order, then write order.
     `CREATE TABLE IF NOT EXISTS ${LEDGER_TABLE} (n bigserial PRIMARY KEY, id text NOT NULL UNIQUE, ` +
-      `run_id text NOT NULL, record jsonb NOT NULL); ` +
-      `CREATE INDEX IF NOT EXISTS ${LEDGER_TABLE}_run ON ${LEDGER_TABLE} (run_id)`,
+      `run_id text NOT NULL, seq integer NOT NULL, record jsonb NOT NULL); ` +
+      `CREATE INDEX IF NOT EXISTS ${LEDGER_TABLE}_run_seq ON ${LEDGER_TABLE} (run_id, seq, n)`,
   ],
 ];
 
