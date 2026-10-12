@@ -48,10 +48,9 @@ describe("stripeDriver", () => {
     expect(calls()).toEqual([]);
   });
 
-  it("reads through the process's default bridge when given none, and declares the bridge's variable", () => {
+  it("reads through the process's default bridge when given none, and declares the key's variable", () => {
     const driver = stripeDriver();
-    expect(Object.keys(driver.env!.shape)).toEqual(["STRIPE_API_KEY", "SANOMA_BRIDGE_BIN"]);
-    expect(driver.env!.shape.SANOMA_BRIDGE_BIN!.safeParse(undefined).success).toBe(true);
+    expect(Object.keys(driver.env!.shape)).toEqual(["STRIPE_API_KEY"]);
     expect(driver.env!.shape.STRIPE_API_KEY!.safeParse(undefined).success).toBe(false);
     expect(Object.keys(driver.ops)).toContain("product.read");
   });

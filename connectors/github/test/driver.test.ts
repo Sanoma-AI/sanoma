@@ -75,11 +75,10 @@ describe("githubDriver", () => {
     expect(configure).toHaveBeenCalledTimes(3);
   });
 
-  it("reads through the process's default bridge when given none, and declares the bridge's and the owner's variables", () => {
+  it("reads through the process's default bridge when given none, and declares the token's and the owner's variables", () => {
     const driver = githubDriver();
-    expect(Object.keys(driver.env!.shape)).toEqual(["GITHUB_TOKEN", "GITHUB_OWNER", "SANOMA_BRIDGE_BIN"]);
+    expect(Object.keys(driver.env!.shape)).toEqual(["GITHUB_TOKEN", "GITHUB_OWNER"]);
     expect(driver.env!.shape.GITHUB_OWNER!.safeParse(undefined).success).toBe(true);
-    expect(driver.env!.shape.SANOMA_BRIDGE_BIN!.safeParse(undefined).success).toBe(true);
     expect(driver.env!.shape.GITHUB_TOKEN!.safeParse(undefined).success).toBe(false);
     expect(Object.keys(driver.ops)).toContain("repository.read");
   });

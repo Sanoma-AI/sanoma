@@ -17,11 +17,6 @@ const env = z.object({
     .string()
     .min(1)
     .describe("a secret or restricted key that can read the resources the data files declare"),
-  SANOMA_BRIDGE_BIN: z
-    .string()
-    .min(1)
-    .optional()
-    .describe("the provider-bridge binary the resources are read through; see the bridge README"),
 });
 
 /**

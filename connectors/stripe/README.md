@@ -51,12 +51,11 @@ Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma
 
 Read on every call, never when the config loads:
 
-| Variable            | What it is                                                                                                                                    |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `STRIPE_API_KEY`    | A Stripe secret or restricted key; a test-mode one in tests.                                                                                  |
-| `SANOMA_BRIDGE_BIN` | Optional: the `provider-bridge` binary the default bridge starts; see [the bridge](https://www.npmjs.com/package/@sanoma/bridge#environment). |
+| Variable         | What it is                                                   |
+| ---------------- | ------------------------------------------------------------ |
+| `STRIPE_API_KEY` | A Stripe secret or restricted key; a test-mode one in tests. |
 
-When the key is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets both. The bridge passes the key to the provider through its config only.
+When the key is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets it. The bridge passes the key to the provider through its config only. The default bridge's binary is the process's to set (`SANOMA_BRIDGE_BIN`, see [the bridge](https://www.npmjs.com/package/@sanoma/bridge#environment)), not a credential of the connector.
 
 ### Errors and retries
 

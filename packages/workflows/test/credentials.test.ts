@@ -438,13 +438,8 @@ describe("the connectors' drivers", () => {
       ["BLUESKY_IDENTIFIER", "BLUESKY_APP_PASSWORD", "BLUESKY_SERVICE"],
       ["BLUESKY_SERVICE"],
     ],
-    [
-      "github",
-      githubDriver({ bridge }),
-      ["GITHUB_TOKEN", "GITHUB_OWNER", "SANOMA_BRIDGE_BIN"],
-      ["GITHUB_OWNER", "SANOMA_BRIDGE_BIN"],
-    ],
-    ["stripe", stripeDriver({ bridge }), ["STRIPE_API_KEY", "SANOMA_BRIDGE_BIN"], ["SANOMA_BRIDGE_BIN"]],
+    ["github", githubDriver({ bridge }), ["GITHUB_TOKEN", "GITHUB_OWNER"], ["GITHUB_OWNER"]],
+    ["stripe", stripeDriver({ bridge }), ["STRIPE_API_KEY"], []],
   ])("%s declares exactly its variables, each described, and which are optional", (_, driver, names, optional) => {
     const shape = driver.env!.shape;
     expect(Object.keys(shape)).toEqual(names);

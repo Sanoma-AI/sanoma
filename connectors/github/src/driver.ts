@@ -24,11 +24,6 @@ const env = z.object({
     .min(1)
     .optional()
     .describe("the organization or user whose repositories the data files describe; default: the token's own user"),
-  SANOMA_BRIDGE_BIN: z
-    .string()
-    .min(1)
-    .optional()
-    .describe("the provider-bridge binary the resources are read through; see the bridge README"),
 });
 
 /**

@@ -55,13 +55,12 @@ Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma
 
 Read on every call, never when the config loads:
 
-| Variable            | What it is                                                                                                                                    |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GITHUB_TOKEN`      | A GitHub token that can read the repositories, rules and teams named.                                                                         |
-| `GITHUB_OWNER`      | Optional: the organization or user whose repositories the data files describe. Default: the token's own user.                                 |
-| `SANOMA_BRIDGE_BIN` | Optional: the `provider-bridge` binary the default bridge starts; see [the bridge](https://www.npmjs.com/package/@sanoma/bridge#environment). |
+| Variable       | What it is                                                                                                    |
+| -------------- | ------------------------------------------------------------------------------------------------------------- |
+| `GITHUB_TOKEN` | A GitHub token that can read the repositories, rules and teams named.                                         |
+| `GITHUB_OWNER` | Optional: the organization or user whose repositories the data files describe. Default: the token's own user. |
 
-When the token is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets the three. The bridge passes the token and the owner to the provider through its config only, never through the provider's environment.
+When the token is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets both. The bridge passes the token and the owner to the provider through its config only, never through the provider's environment. The default bridge's binary is the process's to set (`SANOMA_BRIDGE_BIN`, see [the bridge](https://www.npmjs.com/package/@sanoma/bridge#environment)), not a credential of the connector.
 
 ### Errors and retries
 
