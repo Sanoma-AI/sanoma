@@ -59,8 +59,8 @@ export interface Fake<T, Id extends string = string> {
   /** The next call to `opId` waits, before it takes effect, until the returned function is called. */
   hold(opId: Id): () => void;
   /**
-   * A new in-memory fake of the same vendor: the initial state, its own call log, no file and no
-   * faults. What it is called with leaves this one untouched, as for a sandbox run.
+   * A new fake of the same connector and definition, in memory with no file, its own call log and
+   * no faults. What it is called with leaves this one untouched.
    */
   fresh(): Fake<T, Id>;
 }
