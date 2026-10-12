@@ -44,17 +44,15 @@ await worker.stop();
 
 `@sanoma/testing/harness` starts a worker and its clients for the tests of a `describe` (or a file), and stops them after (install `vitest` and `@dbos-inc/dbos-sdk` beside it). `useTestApp(config, options?)` takes `startTestWorker`'s arguments and returns a `TestApp`:
 
-| Member        | What it is                                                                                                                                                                           |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `config`      | The config the worker and the clients share: yours, with `ledger` (default `memoryLedger()`) and `databaseUrl` (default `testDatabaseUrl(appName)`) filled in once.                  |
-| `worker`      | The running worker.                                                                                                                                                                  |
-| `client`      | A `SanomaClient` of the worker: start runs, decide approvals, read the ledger.                                                                                                       |
-| `raw`         | A `DBOSClient` of the same app, which sends messages and reads a run's steps without `SanomaClient`'s checks.                                                                        |
-| `stop()`      | Stops the worker, as a process that stopped would.                                                                                                                                   |
-| `restart()`   | Stops the worker (unless `stop` did) and starts another on the same config and ledger, as a restarted process would: the runs it had in progress resume, and their records are kept. |
-| `leftPending` | Push the ids of runs a test leaves unfinished on purpose; they are cancelled after the tests.                                                                                        |
+| Member      | What it is                                                                                                                                                                           |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `config`    | The config the worker and the clients share: yours, with `ledger` (default `memoryLedger()`) and `databaseUrl` (default `testDatabaseUrl(appName)`) filled in once.                  |
+| `client`    | A `SanomaClient` of the worker: start runs, decide approvals, read the ledger.                                                                                                       |
+| `raw`       | A `DBOSClient` of the same app, which sends messages and reads a run's steps without `SanomaClient`'s checks.                                                                        |
+| `stop()`    | Stops the worker, as a process that stopped would.                                                                                                                                   |
+| `restart()` | Stops the worker (unless `stop` did) and starts another on the same config and ledger, as a restarted process would: the runs it had in progress resume, and their records are kept. |
 
-`worker`, `client` and `raw` throw "is not started" outside the tests. Fakes are yours: create them beside the call and reset them in your own `beforeEach`.
+`client` and `raw` throw "is not started" outside the tests. Fakes are yours: create them beside the call and reset them in your own `beforeEach`.
 
 ```ts
 import { ghost } from "@sanoma/connector-ghost";

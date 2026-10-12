@@ -7,7 +7,6 @@ import { startTestWorker, testDatabaseUrl, type TestWorkerOptions } from "./inde
 export interface TestApp {
   /** The config the worker and the clients share, with its `ledger` and `databaseUrl` resolved. */
   readonly config: SanomaConfig;
-  readonly worker: Worker;
   readonly client: SanomaClient;
   /** A DBOS client of the same app, which sends messages and reads steps without SanomaClient's checks. */
   readonly raw: DBOSClient;
@@ -15,8 +14,6 @@ export interface TestApp {
   stop(): Promise<void>;
   /** Stops the worker (unless `stop` did) and starts another on the same config and ledger, as a restarted process would. */
   restart(): Promise<void>;
-  /** Runs a test leaves unfinished on purpose; cancelled through `raw` after the tests. */
-  readonly leftPending: string[];
 }
 
 const started = <T>(x: T | undefined, what: string): T => {
@@ -26,9 +23,9 @@ const started = <T>(x: T | undefined, what: string): T => {
 
 /**
  * Starts a test worker, a `SanomaClient` and a raw `DBOSClient` in `beforeAll`, and stops them
- * in `afterAll`, after cancelling `leftPending`. `config` and `options` are `startTestWorker`'s,
- * resolved once (the ledger, default `memoryLedger()`, and the database) so the clients read the
- * worker's runs and a restarted worker keeps its ledger.
+ * in `afterAll`. `config` and `options` are `startTestWorker`'s, resolved once (the ledger,
+ * default `memoryLedger()`, and the database) so the clients read the worker's runs and a
+ * restarted worker keeps its ledger.
  */
 export function useTestApp(config: Parameters<typeof startTestWorker>[0], options: TestWorkerOptions = {}): TestApp {
   const shared = {
@@ -39,7 +36,6 @@ export function useTestApp(config: Parameters<typeof startTestWorker>[0], option
   let worker: Worker | undefined;
   let client: SanomaClient | undefined;
   let raw: DBOSClient | undefined;
-  const leftPending: string[] = [];
 
   beforeAll(async () => {
     worker = await startTestWorker(shared, options);
@@ -49,7 +45,6 @@ export function useTestApp(config: Parameters<typeof startTestWorker>[0], option
 
   afterAll(async () => {
     try {
-      if (leftPending.length) await raw?.cancelWorkflows(leftPending);
       await client?.close();
       await raw?.destroy();
     } finally {
@@ -59,9 +54,6 @@ export function useTestApp(config: Parameters<typeof startTestWorker>[0], option
 
   return {
     config: shared,
-    get worker() {
-      return started(worker, "worker");
-    },
     get client() {
       return started(client, "client");
     },
@@ -76,6 +68,5 @@ export function useTestApp(config: Parameters<typeof startTestWorker>[0], option
       await worker?.stop();
       worker = await startTestWorker(shared, options);
     },
-    leftPending,
   };
 }
