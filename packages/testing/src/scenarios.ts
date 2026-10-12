@@ -7,12 +7,12 @@ import {
   type Principal,
   resolveConfig,
   type RunSummary,
-  SanomaClient,
-  type Worker,
+  type SanomaClient,
 } from "@sanoma/workflows";
 import { type Check, check, drive, loadScenarios, type Scenario } from "@sanoma/workflows/scenario";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { startTestWorker, testDatabaseUrl, type TestWorkerOptions } from "./index.ts";
+import { describe, expect, it } from "vitest";
+import { useTestApp } from "./harness.ts";
+import type { startTestWorker, TestWorkerOptions } from "./index.ts";
 
 export interface RunScenarioOptions {
   /** A client of the worker that runs the scenario, which has the config's `fakes` and `scenarios`. */
@@ -40,21 +40,16 @@ export async function runScenario(
 /**
  * Registers a vitest test for each scenario in the config's `scenarios` directory, in a
  * `describe` per feature file, that runs it and expects every check to pass; and a failing test
- * for each file that does not load. Starts one test worker for the scenarios, before them, and
- * stops it after. `config` and `options` are `startTestWorker`'s; `startedBy` starts the runs, and
+ * for each file that does not load. Starts one test app (`useTestApp`) for the scenarios, before
+ * them, and stops it after. `config` and `options` are `startTestWorker`'s; `startedBy` starts the runs, and
  * `timeoutMs` is how long each may take (`drive`'s).
  */
 export function describeScenarios(
   config: Parameters<typeof startTestWorker>[0],
   { startedBy, timeoutMs, ...options }: TestWorkerOptions & { startedBy?: Principal; timeoutMs?: number } = {},
 ): void {
-  // The worker and the client share the ledger and the database, so the client reads the runs.
-  const shared = {
-    ...config,
-    ledger: config.ledger ?? memoryLedger(),
-    databaseUrl: options.databaseUrl ?? testDatabaseUrl(config.appName),
-  };
-  const resolved = resolveConfig(shared);
+  // Only to read the scenarios: the test app resolves the config the worker runs.
+  const resolved = resolveConfig({ ...config, ledger: config.ledger ?? memoryLedger() });
   if (!resolved.scenarios) throw new Error("describeScenarios needs the config's `scenarios` directory");
   const { scenarios, errors } = loadScenarios(resolved);
   // A mistyped directory loads nothing, and a test file that registers no tests would pass.
@@ -68,22 +63,10 @@ export function describeScenarios(
   }
   if (scenarios.length === 0) return;
 
-  let worker: Worker | undefined;
-  let client: SanomaClient | undefined;
+  const app = useTestApp(config, options);
   // Each test gets twice drive's deadline (15 s by default), so drive's error, naming what the run
   // waits on, is the one reported rather than vitest's timeout.
   const testTimeout = (timeoutMs ?? 15_000) * 2;
-  beforeAll(async () => {
-    worker = await startTestWorker(shared, options);
-    client = await SanomaClient.connect(shared);
-  }, 60_000);
-  afterAll(async () => {
-    try {
-      await client?.close();
-    } finally {
-      await worker?.stop();
-    }
-  });
 
   for (const [file, inFile] of Map.groupBy(scenarios, (s) => s.file)) {
     describe(file, () => {
@@ -91,8 +74,7 @@ export function describeScenarios(
         it(
           scenario.name,
           async () => {
-            if (!client) throw new Error("The scenarios' worker did not start");
-            const { checks } = await runScenario(scenario, { client, startedBy, timeoutMs });
+            const { checks } = await runScenario(scenario, { client: app.client, startedBy, timeoutMs });
             const failed = checks.filter((c) => !c.ok);
             const lines = failed.map((c) => `  ${c.step}: ${c.detail}`);
             expect(failed, [`${file}: "${scenario.name}" failed:`, ...lines].join("\n")).toEqual([]);
