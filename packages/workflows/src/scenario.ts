@@ -17,7 +17,7 @@ import {
   PickleStepType,
   type Step as GherkinStep,
 } from "@cucumber/messages";
-import { z } from "zod";
+import type { z } from "zod";
 import type { RunSummary, SanomaClient } from "./client.ts";
 import type { ResolvedConfig } from "./config.ts";
 import type { Approver } from "./define.ts";
@@ -50,14 +50,15 @@ export interface ScenarioStep {
 
 /**
  * A fake's state to seed through one of its operations, a fault to inject into its next call, or
- * an object a vendor's fake holds: `resource` is its type (`github.repository`) and `name` its
- * import id, with `fields` to set on it (put, when the vendor has none) or `gone` to remove it.
+ * an object a vendor's fake holds: `resource` is its type's id (`github.repository`, its `vendor`
+ * and `type`) and `name` its import id, with `fields` to set on it (put, when the vendor has
+ * none) or `gone` to remove it.
  */
 export type Given =
   | { step: string; op: string; input: unknown }
   | { step: string; op: string; fault: "failNext" | "rateLimit" | "loseReply" }
-  | { step: string; resource: string; name: string; fields: Record<string, unknown> }
-  | { step: string; resource: string; name: string; gone: true };
+  | { step: string; resource: string; vendor: string; type: string; name: string; fields: Record<string, unknown> }
+  | { step: string; resource: string; vendor: string; type: string; name: string; gone: true };
 
 /** How one approval is decided; `approval` is its title or its id. */
 export interface Decision {
@@ -113,8 +114,8 @@ export interface Check {
   detail?: string;
 }
 
-/** What steps can name, the config's operations and workflows by id and name, and where the feature files are. */
-export type Scope = Pick<ResolvedConfig, "ops" | "workflows" | "scenarios">;
+/** What steps can name: the config's operations, workflows and resource types by id, and where the feature files are. */
+export type Scope = Pick<ResolvedConfig, "ops" | "workflows" | "scenarios" | "types">;
 
 type Kind = ScenarioStep["kind"];
 type Unstepped<T> = T extends unknown ? Omit<T, "step"> : never;
@@ -218,7 +219,7 @@ function fieldsFrom(pickle: PickleStep, schema: z.ZodType, owner: string): Recor
 }
 
 /** A parameter's transform: the name, when `ids` has it. */
-const known = (what: string, ids: Map<string, unknown>) => (name: string) => {
+const known = (what: string, ids: ReadonlyMap<string, unknown>) => (name: string) => {
   if (!ids.has(name)) throw new Error(`no ${what} "${name}"; the config has ${[...ids.keys()].toSorted().join(", ")}`);
   return name;
 };
@@ -231,20 +232,6 @@ const inputOf = (name: unknown) => `${name as string}'s input`;
 /** The built-in drift workflow's name (`DRIFT_WORKFLOW`, kept off this entry's imports): the run whose report the drift steps read. */
 const DRIFT = "drift";
 
-/**
- * The resource types the scope's operations declare, by `<vendor>.<type>`, each with the schema
- * of its state: what its `import` returns as `state` (`defineResource`'s operations).
- */
-function resourceTypesIn(ops: Scope["ops"]): Map<string, z.ZodType> {
-  const types = new Map<string, z.ZodType>();
-  for (const [id, op] of ops) {
-    const state = id.endsWith(".import") ? shapeOf(op.output).state : undefined;
-    if (!state) continue;
-    types.set(id.slice(0, -".import".length), state instanceof z.ZodOptional ? (state.unwrap() as z.ZodType) : state);
-  }
-  return types;
-}
-
 const rulesByScope = new WeakMap<Scope, Rule[]>();
 
 /**
@@ -255,7 +242,7 @@ const rulesByScope = new WeakMap<Scope, Rule[]>();
 function rulesOf(scope: Scope): Rule[] {
   const cached = rulesByScope.get(scope);
   if (cached) return cached;
-  const types = resourceTypesIn(scope.ops);
+  const { types } = scope;
   const registry = new ParameterTypeRegistry();
   registry.defineParameterType(new ParameterType("op", /\S+/, null, known("operation", scope.ops), false));
   registry.defineParameterType(new ParameterType("workflow", /\S+/, null, known("workflow", scope.workflows), false));
@@ -267,6 +254,11 @@ function rulesOf(scope: Scope): Rule[] {
   const expression = (source: string) => new CucumberExpression(source, registry);
   const opOf = (id: unknown) => scope.ops.get(id as string)!;
   const workflowOf = (name: unknown) => scope.workflows.get(name as string)!;
+  /** A resource step's object: its type's id, vendor and type, and its import id. */
+  const object = (id: unknown, name: unknown) => {
+    const { vendor, type } = types.get(id as string)!;
+    return { resource: id as string, vendor, type, name: name as string };
+  };
 
   const rules: Rule[] = [
     {
@@ -291,16 +283,15 @@ function rulesOf(scope: Scope): Rule[] {
       takes: TAKES_OBJECT,
       expression: expression("{resource} {string} has"),
       read: ([resource, name], pickle) => ({
-        resource: resource as string,
-        name: name as string,
-        fields: fieldsFrom(pickle, types.get(resource as string)!, `${resource as string} "${name as string}"`),
+        ...object(resource, name),
+        fields: fieldsFrom(pickle, types.get(resource as string)!.schema, `${resource as string} "${name as string}"`),
       }),
     },
     {
       kind: "given",
       source: "{resource} {string} is gone",
       expression: expression("{resource} {string} is gone"),
-      read: ([resource, name]) => ({ resource: resource as string, name: name as string, gone: true }),
+      read: ([resource, name]) => ({ ...object(resource, name), gone: true }),
     },
     {
       kind: "when",

@@ -645,11 +645,20 @@ describe("resources and policy outcomes", () => {
         {
           step: 'github.repository "website" has',
           resource: "github.repository",
+          vendor: "github",
+          type: "repository",
           name: "website",
           // Text where the field takes it, else JSON, as a table gives an operation's input.
           fields: { name: "website", has_wiki: true, topics: ["website", "astro"] },
         },
-        { step: 'github.repository "docs" is gone', resource: "github.repository", name: "docs", gone: true },
+        {
+          step: 'github.repository "docs" is gone',
+          resource: "github.repository",
+          vendor: "github",
+          type: "repository",
+          name: "docs",
+          gone: true,
+        },
       ],
       expect: [
         { declared: "resources/identity/github.ts#website", status: "drifted", field: "has_wiki" },

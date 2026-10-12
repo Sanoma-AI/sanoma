@@ -72,6 +72,8 @@ export interface ResolvedConfig {
   fakeDrivers: Map<string, DriverFn>;
   /** The scenarios directory, a `file:` URL. */
   scenarios?: URL;
+  /** The resource types the connectors declare, by `<vendor>.<type>`: what the drift workflow checks and scenarios seed. */
+  types: ReadonlyMap<string, Resource>;
   /**
    * By name; each checked against `ops` and `drivers`. The config's, and the built-in `drift`
    * (`DRIFT_WORKFLOW`) when its connectors declare resource types.
@@ -192,6 +194,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     fakes,
     fakeDrivers,
     ...(scenarios && { scenarios }),
+    types,
     workflows: names,
     policy: config.policy,
     ...(ledger !== undefined && { ledger }),

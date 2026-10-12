@@ -4,6 +4,7 @@ import type { LedgerStore } from "./ledger.ts";
 import type { DriverFn, Op } from "./op.ts";
 import type { CallNode } from "./outline.ts";
 import type { Policy } from "./policy.ts";
+import type { Resource } from "./resource.ts";
 
 /** What the DBOS workflow receives: the workflow's input, who started the run, and for a sandbox run its scenario. */
 export interface RunArgs {
@@ -31,8 +32,9 @@ export interface WorkerState {
    */
   fakes: Map<string, Fake<any, any>>;
   fakeDrivers: Map<string, DriverFn>;
-  /** Where sandbox runs' scenarios are. */
+  /** Where sandbox runs' scenarios are, and the resource types their steps may name. */
   scenarios?: URL;
+  types: ReadonlyMap<string, Resource>;
   /** Its `version`, when it has one, is recorded with each of its decisions. */
   policy: Policy;
   ledger: LedgerStore;
