@@ -110,6 +110,24 @@ describe("lintWorkflow", () => {
     ]);
   });
 
+  it("accepts sanoma as the import source, with the same names, and refuses its subpaths", () => {
+    expect(
+      messages(`
+        import { defineWorkflow, definePolicy, allow, deny, approve, approvedFor, allowAll } from "sanoma";
+        import { mayDecide, errorCode, z, type Ctx } from "sanoma";
+        import { defineConfig } from "sanoma";
+        import * as s from "sanoma";
+        import { main } from "sanoma/dist/cli.js";
+      `),
+    ).toEqual([
+      expect.stringMatching(/^defineConfig is not allowed in a workflow: .*types from @sanoma\/workflows or sanoma/),
+      expect.stringMatching(/^import \* from "sanoma" is not allowed/),
+      expect.stringMatching(
+        /^import "sanoma\/dist\/cli\.js" is not allowed in a workflow: `sanoma` has no entry points/,
+      ),
+    ]);
+  });
+
   it("allows only the names a workflow or policy needs from @sanoma/workflows, and any type", () => {
     expect(
       messages(`

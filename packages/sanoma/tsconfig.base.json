@@ -1,0 +1,21 @@
+{
+  // The compiler options a company repo extends (as `sanoma/tsconfig.json`), and this checkout's
+  // root tsconfig.json too. `typeRoots` finds `@types/node` in the repo's own node_modules, or in
+  // sanoma's, which depends on it, where an installer such as pnpm does not hoist it.
+  "compilerOptions": {
+    "target": "es2024",
+    "lib": ["es2024"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+    "typeRoots": ["${configDir}/node_modules/@types", "${configDir}/node_modules/sanoma/node_modules/@types"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": false,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true
+  }
+}

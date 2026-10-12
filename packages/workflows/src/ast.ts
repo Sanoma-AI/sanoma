@@ -1,4 +1,6 @@
+import { readFileSync } from "node:fs";
 import { parseSync, visitorKeys } from "oxc-parser";
+import { errorMessage } from "./shared.ts";
 
 // What the lints, the outline and the data-file reader share: one way to parse a file, walk it
 // and say where in it a problem is.
@@ -82,6 +84,30 @@ export function parsed(source: string, filename: string) {
     message: `syntax: ${e.message}`,
   }));
   return { program: program as Node, problems, at };
+}
+
+/**
+ * A file read and parsed once, for the outline and the lint alike: its text with `\n` line
+ * endings (CodeMirror counts a line break as one unit, oxc counts `\r\n` as two, and spans need
+ * `\n` alone), its program, offsets as lines and columns, and its syntax problems.
+ */
+export interface SourceFile {
+  file: string;
+  source: string;
+  program: Node;
+  at: (offset: number) => { line: number; column: number };
+  problems: LintProblem[];
+}
+
+/** Reads and parses `file`; or why it could not be read, as a message naming it. */
+export function readSource(file: string): SourceFile | string {
+  let source: string;
+  try {
+    source = readFileSync(file, "utf8").replaceAll("\r\n", "\n");
+  } catch (err) {
+    return `${file} could not be read: ${errorMessage(err)}`;
+  }
+  return { file, source, ...parsed(source, file) };
 }
 
 /** Problems in the order of their place in the file. */

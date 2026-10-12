@@ -47,7 +47,8 @@
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
     "generate": "pnpm --package=@hey-api/openapi-ts@0.99.0 --package=typescript@5.9.3 dlx openapi-ts",
-    "prepack": "pnpm run clean && pnpm run build"
+    "prepack": "pnpm run clean && pnpm run build",
+    "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
   "devDependencies": {
     "@sanoma/workflows": "workspace:*",

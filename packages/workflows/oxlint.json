@@ -94,7 +94,8 @@
                   "approvedFor",
                   "allowAll",
                   "mayDecide",
-                  "errorCode"
+                  "errorCode",
+                  "z"
                 ],
                 "allowTypeImports": true,
                 "message": "A workflow or policy imports only these and types from @sanoma/workflows: the rest (SanomaClient, startWorker, the ledger stores, config helpers) could start runs, approve its own approvals, forge the ledger or read credentials. Ask for approval with `ctx.approval`."
@@ -107,8 +108,9 @@
                   "@sanoma/connector-*/driver",
                   "@sanoma/workflows/describe",
                   "@sanoma/workflows/fake",
-                  "@sanoma/workflows/lint",
-                  "@sanoma/workflows/scenario"
+                  "@sanoma/workflows/plugin",
+                  "@sanoma/workflows/scenario",
+                  "@sanoma/workflows/scenarios"
                 ],
                 "message": "A workflow must call vendors through ctx, so the policy sees every call: import the connector itself, `@sanoma/connector-<vendor>`."
               }

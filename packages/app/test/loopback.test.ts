@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { hostName, isLoopback } from "../src/loopback.ts";
+import { isLoopback } from "@sanoma/workflows/shared";
+import { hostName } from "../src/loopback.ts";
 
 // The Host names a loopback-only app answers to. No database, no build.
 const answers = (host: string) => isLoopback(hostName(host));

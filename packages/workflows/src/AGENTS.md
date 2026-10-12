@@ -1,13 +1,13 @@
 # packages/workflows/src
 
-The source of `@sanoma/workflows`: how connectors, workflows and policies are declared, how a worker runs them durably on DBOS, and the tools that read them (lint, outline, describe). Its entry points, from `exports` in `package.json`: `.` (`index.ts`), `./describe`, `./fake`, `./lint`, `./scenario` and `./shared`.
+The source of `@sanoma/workflows`: how connectors, workflows and policies are declared, how a worker runs them durably on DBOS, and the tools that read them (lint, outline, describe). Its entry points, from `exports` in `package.json`: `.` (`index.ts`), `./describe`, `./fake`, `./plugin`, `./scenario`, `./scenarios` and `./shared`.
 
 ## Contents
 
 | Path                               | What it is                                                                                                                                                                  |
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`approvals.ts`](approvals.ts)     | Approval events, decision messages and the durable wait for a decision                                                                                                      |
-| [`ast.ts`](ast.ts)                 | Shared oxc parsing, tree walking, line numbers and syntax problems for the lints, outline and reader                                                                        |
+| [`ast.ts`](ast.ts)                 | Shared oxc parsing, `readSource` (a file read and parsed once), tree walking, line numbers and syntax problems for the lints, outline and reader                            |
 | [`call.ts`](call.ts)               | Builds a workflow's `ctx`: each call placed in the outline, then policy, approval, driver call and ledger write; `isInfrastructureError`                                    |
 | [`client.ts`](client.ts)           | `SanomaClient`: starts runs and drift checks, lists them, decides approvals, and sets and reads credentials                                                                 |
 | [`config.ts`](config.ts)           | `SanomaConfig`, `defineConfig` and `resolveConfig`, which adds the built-in `drift` and its data-file step and guards each driver's functions by its `env`; pure            |
@@ -15,7 +15,7 @@ The source of `@sanoma/workflows`: how connectors, workflows and policies are de
 | [`datafile.ts`](datafile.ts)       | `readDataFile`: the data-file subset over an oxc ESTree program, for the reader and both lints                                                                              |
 | [`db.ts`](db.ts)                   | Internal: what the runtime's tables share: `prepareDatabase` (the database, DBOS's tables and both of ours, once per URL), `lazyPool` over it, `pgCode`, a racing create    |
 | [`define.ts`](define.ts)           | `defineWorkflow` and the types for principals, approvers, approval requests and built-ins                                                                                   |
-| [`describe.ts`](describe.ts)       | `describeConfig` and `outlineWorkflow`, re-exporting the reader: the config as plain JSON for a UI                                                                          |
+| [`describe.ts`](describe.ts)       | `describeConfig` and `outlineWorkflow`, re-exporting the reader: the config as plain JSON for a UI, each workflow with its file's problems, the data files' beside          |
 | [`drift.ts`](drift.ts)             | The built-in `drift` workflow (linted as any workflow): declared resources against their vendors, the `DriftReport`                                                         |
 | [`env.ts`](env.ts)                 | A driver's `env` against an environment: `CredentialStatus`, `credentialsOf` by vendor, and `unconfigured`, the one message for a vendor that cannot run                    |
 | [`errors.ts`](errors.ts)           | Error codes, `SanomaError` and its subclasses, input parsing, `errorInfo` and `isRunControlError` (no import of the call path, which `drift.ts` must not reach)             |
@@ -23,11 +23,11 @@ The source of `@sanoma/workflows`: how connectors, workflows and policies are de
 | [`fill.ts`](fill.ts)               | Internal: seeded made-up values for zod schemas (scenario inputs); `shapeOf`, `isBug`                                                                                       |
 | [`index.ts`](index.ts)             | The main entry; re-exports the public API                                                                                                                                   |
 | [`ledger.ts`](ledger.ts)           | The audit record of a run, with Postgres (the default), JSONL and in-memory stores, and `ownedLedger` (the worker's and the client's own store)                             |
-| [`lint.ts`](lint.ts)               | `lintWorkflow` (import rules oxlint cannot express, and `run` against its outline) and `lintResources` (the data-file subset)                                               |
+| [`lint.ts`](lint.ts)               | Internal: `lintWorkflow` (import rules oxlint cannot express, and `run` against its outline; over source or a `readSource` file) and `lintResources` (the data-file subset) |
 | [`log.ts`](log.ts)                 | Operator messages (`info`, `warn`) at the last `startWorker`'s `logLevel`, and value formatting for messages                                                                |
 | [`op.ts`](op.ts)                   | `defineConnector`, operations, effects and drivers                                                                                                                          |
 | [`outline.ts`](outline.ts)         | `outlineWorkflow`: the calls, loops, branches, tries and `ctx.all` groups of a workflow's `run`, by path; `callAt` places a call                                            |
-| [`plugin.ts`](plugin.ts)           | The oxlint JS plugin `sanoma`, its rule `data-file`; `oxlint.json` loads it from `dist/`                                                                                    |
+| [`plugin.ts`](plugin.ts)           | The oxlint JS plugin `sanoma`, its rule `data-file` (the `./plugin` entry); `oxlint.json` loads it from `dist/`                                                             |
 | [`paths.ts`](paths.ts)             | Where a relative import may reach: `nearestDir` and `inside`, for both lints and the reader                                                                                 |
 | [`policy.ts`](policy.ts)           | Policy types, decisions (`allow`, `deny`, `approve`), `definePolicy` and `approvedFor`                                                                                      |
 | [`resource.ts`](resource.ts)       | `defineResource`: a resource type's schema, fields, references, `read` and `import`; `compareDeclared`, `diffDeclared`                                                      |
@@ -36,5 +36,6 @@ The source of `@sanoma/workflows`: how connectors, workflows and policies are de
 | [`sandbox.ts`](sandbox.ts)         | `seedSandbox`: a sandbox run's own copies of the fakes, seeded; the worker imports it only for such a run                                                                   |
 | [`scenario.ts`](scenario.ts)       | Gherkin scenarios: `parseFeature`, `loadScenarios`, `check` and `drive`                                                                                                     |
 | [`shared.ts`](shared.ts)           | Browser-safe helpers for run status and approvals, `DRIFT_WORKFLOW`, and resource types; no DBOS, Node or zod                                                               |
+| [`scenarios.ts`](scenarios.ts)     | `runScenario` (one, as a sandbox run) and `runScenarios` (every scenario of a config on a worker it starts), with no test framework                                         |
 | [`version.ts`](version.ts)         | The package version, the step layout and `computeVersion`, the application version hash                                                                                     |
 | [`worker.ts`](worker.ts)           | `startWorker`: reads each workflow's outline, loads stored credentials, warns of missing ones, launches DBOS, registers each workflow by name, returns a stoppable `Worker` |

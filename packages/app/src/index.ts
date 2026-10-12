@@ -5,11 +5,12 @@ import type { AddressInfo } from "node:net";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { errorMessage, problemAt, resolveConfig, SanomaClient, type SanomaConfig } from "@sanoma/workflows";
+import { errorMessage, problemLine, resolveConfig, SanomaClient, type SanomaConfig } from "@sanoma/workflows";
 import { describeConfig } from "@sanoma/workflows/describe";
+import { isLoopback } from "@sanoma/workflows/shared";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import type { AppContext, ResolveActor } from "./context.ts";
-import { hostName, isLoopback, refuseHost } from "./loopback.ts";
+import { hostName, refuseHost } from "./loopback.ts";
 
 export { ACTOR_HEADER, type ErrorResponse, type InputIssue, type RunDetail, type StartRunResponse } from "./api.ts";
 export type { ResolveActor } from "./context.ts";
@@ -51,10 +52,15 @@ interface ServerEntry {
 export async function startApp(config: SanomaConfig, options: AppOptions = {}): Promise<App> {
   const resolved = resolveConfig(config);
   const description = describeConfig(config);
-  // Broken data files do not stop the app: it shows the resources it could read, and the problems.
-  if (description.problems.length) {
-    const lines = description.problems.map((p) => `  ${p.file === undefined ? "" : `${problemAt(p)}: `}${p.message}`);
-    console.warn(`sanoma app: the data files have problems; their resources are left out:\n${lines.join("\n")}`);
+  // Problems in the files do not stop the app: a data file's resources are left out (the Resources
+  // page lists the problems), and a workflow the worker will refuse is shown with its outline's error.
+  const lines = new Set([
+    ...description.problems.map(problemLine),
+    ...description.workflows.flatMap((wf) => wf.problems.map((p) => problemLine({ file: wf.file, ...p }))),
+  ]);
+  if (lines.size) {
+    const list = [...lines].map((line) => `  ${line}`).join("\n");
+    console.warn(`sanoma app: the config's files have problems (\`sanoma check\` lists them):\n${list}`);
   }
   const distDir = resolve(options.distDir ?? defaultDistDir());
   const host = options.host ?? "127.0.0.1";

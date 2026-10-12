@@ -1,0 +1,68 @@
+{
+  "name": "sanoma",
+  "version": "0.1.0",
+  "description": "One command over a Sanoma repo: run the worker and the app, check it, write its .env.example, export a run's ledger",
+  "keywords": [
+    "approvals",
+    "business-as-code",
+    "cli",
+    "sanoma",
+    "workflows"
+  ],
+  "homepage": "https://github.com/Sanoma-AI/sanoma/tree/main/packages/sanoma#readme",
+  "bugs": "https://github.com/Sanoma-AI/sanoma/issues",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sanoma-AI/sanoma.git",
+    "directory": "packages/sanoma"
+  },
+  "bin": {
+    "sanoma": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "tsconfig.base.json",
+    "oxlint.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./tsconfig.json": "./tsconfig.base.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/oxlint.ts && tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "prepack": "pnpm run clean && pnpm run build",
+    "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
+  },
+  "dependencies": {
+    "@sanoma/app": "workspace:*",
+    "@sanoma/bridge": "workspace:*",
+    "@sanoma/workflows": "workspace:*",
+    "@types/node": "^26.6.4",
+    "oxlint": "^1.87.0",
+    "pg": "^8.23.1",
+    "typescript": "^7.0.2",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@sanoma/connector-ghost": "workspace:*",
+    "@sanoma/testing": "workspace:*",
+    "@types/pg": "^8.23.1"
+  },
+  "engines": {
+    "node": ">=24.2"
+  }
+}

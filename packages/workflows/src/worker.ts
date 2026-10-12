@@ -8,7 +8,7 @@ import { type CredentialStatus, credentialsOf, unconfigured } from "./env.ts";
 import { errorInfo, parseOrThrow } from "./errors.ts";
 import { entry, ownedLedger, skipped, write, writeFailure } from "./ledger.ts";
 import { setLogLevel, warn } from "./log.ts";
-import { lineStartsOf } from "./ast.ts";
+import { lineStartsOf, readSource } from "./ast.ts";
 import { callsOf, outlineWithSource } from "./outline.ts";
 import type { Run, RunArgs, WorkerState, WorkflowOutline } from "./run.ts";
 import { errorMessage } from "./shared.ts";
@@ -149,7 +149,7 @@ function warnUnconfigured(credentials: Map<string, CredentialStatus[]>) {
  * outline cannot be read does not start: nothing could say where its calls are.
  */
 function outlineOf(wf: WorkflowDefinition<any, any>): WorkflowOutline {
-  const { outline, source } = outlineWithSource(wf);
+  const { outline, source } = outlineWithSource(wf, readSource(wf.file));
   if ("error" in outline) {
     throw new Error(
       `Workflow "${wf.name}" cannot be outlined, so its runs could not be held to its code: ${outline.error}`,

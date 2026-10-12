@@ -51,7 +51,8 @@
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
     "generate": "node ../../packages/bridge/src/tfschema/cli.ts src/resources.config.ts src/resources.gen.ts && oxfmt src/resources.gen.ts",
-    "prepack": "pnpm run clean && pnpm run build"
+    "prepack": "pnpm run clean && pnpm run build",
+    "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
   "devDependencies": {
     "@sanoma/bridge": "workspace:*",

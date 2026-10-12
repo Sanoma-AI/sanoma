@@ -41,8 +41,8 @@ export {
   type ResourceOps,
   type ResourceSpec,
 } from "./resource.ts";
-export { defineConfig, resolveConfig, type ResolvedConfig, type SanomaConfig } from "./config.ts";
-export type { CredentialStatus } from "./env.ts";
+export { defineConfig, resolveConfig, resolveDatabaseUrl, type ResolvedConfig, type SanomaConfig } from "./config.ts";
+export { type CredentialStatus, credentialsOf } from "./env.ts";
 export {
   DRIFT_WORKFLOW,
   type DriftDeclared,
@@ -98,12 +98,14 @@ export {
   ENDED_STATUSES,
   errorMessage,
   isEnded,
+  isLoopback,
   mayDecide,
   problemAt,
+  problemLine,
   RUN_STATUSES,
   type RunStatus,
 } from "./shared.ts";
-// lintWorkflow lives at `@sanoma/workflows/lint`, and describeConfig with the outline at
+// describeConfig, with the outline and every problem lintWorkflow finds, lives at
 // `@sanoma/workflows/describe`: what a UI renders from, apart from what runs. The worker reads
 // each workflow's outline too, to hold its runs to it.
 export { defineDriver, type DriverImpl, type OpIdOf } from "./op.ts";

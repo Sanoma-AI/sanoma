@@ -244,6 +244,43 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  packages/sanoma:
+    dependencies:
+      '@sanoma/app':
+        specifier: workspace:*
+        version: link:../app
+      '@sanoma/bridge':
+        specifier: workspace:*
+        version: link:../bridge
+      '@sanoma/workflows':
+        specifier: workspace:*
+        version: link:../workflows
+      '@types/node':
+        specifier: ^26.6.4
+        version: 26.6.4
+      oxlint:
+        specifier: ^1.87.0
+        version: 1.87.0
+      pg:
+        specifier: ^8.23.1
+        version: 8.23.1
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@sanoma/connector-ghost':
+        specifier: workspace:*
+        version: link:../../connectors/ghost
+      '@sanoma/testing':
+        specifier: workspace:*
+        version: link:../testing
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
+
   packages/testing:
     dependencies:
       vitest:

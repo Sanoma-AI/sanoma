@@ -1,48 +1,23 @@
 // The tests are named after the feature files and scenarios, and one for a file that does not load fails by throwing.
 /* oxlint-disable vitest/valid-title, vitest/expect-expect */
 import { fileURLToPath } from "node:url";
-import {
-  type LedgerRecord,
-  memoryLedger,
-  type Principal,
-  resolveConfig,
-  type RunSummary,
-  type SanomaClient,
-} from "@sanoma/workflows";
-import { type Check, check, drive, loadScenarios, type Scenario } from "@sanoma/workflows/scenario";
+import { memoryLedger, type Principal, resolveConfig } from "@sanoma/workflows";
+import { loadScenarios } from "@sanoma/workflows/scenario";
+import { runScenario } from "@sanoma/workflows/scenarios";
 import { describe, expect, it } from "vitest";
 import { useTestApp } from "./harness.ts";
 import type { startTestWorker, TestWorkerOptions } from "./index.ts";
 
-export interface RunScenarioOptions {
-  /** A client of the worker that runs the scenario, which has the config's `fakes` and `scenarios`. */
-  client: SanomaClient;
-  /** Who starts the run. Defaults to `{ id: "scenarios" }`. */
-  startedBy?: Principal;
-  /** How long the run may take, passed to `drive`. */
-  timeoutMs?: number;
-}
-
-/**
- * Runs a scenario as a sandbox run: starts its workflow with its input, decides its approvals
- * as it says, and checks its expectations against the run's ledger.
- */
-export async function runScenario(
-  scenario: Scenario,
-  { client, startedBy = { id: "scenarios" }, timeoutMs }: RunScenarioOptions,
-): Promise<{ runId: string; run: RunSummary; ledger: LedgerRecord[]; checks: Check[] }> {
-  const runId = await client.start(scenario.workflow, scenario.input, { startedBy, sandbox: scenario.name });
-  const run = await drive(client, runId, scenario, { timeoutMs });
-  const ledger = await client.ledger(runId);
-  return { runId, run, ledger, checks: check(scenario, ledger) };
-}
+// One scenario as a sandbox run, from `@sanoma/workflows/scenarios`, where `runScenarios` (what
+// `sanoma check` runs) is built on it too.
+export { runScenario, type RunScenarioOptions } from "@sanoma/workflows/scenarios";
 
 /**
  * Registers a vitest test for each scenario in the config's `scenarios` directory, in a
- * `describe` per feature file, that runs it and expects every check to pass; and a failing test
- * for each file that does not load. Starts one test app (`useTestApp`) for the scenarios, before
- * them, and stops it after. `config` and `options` are `startTestWorker`'s; `startedBy` starts the runs, and
- * `timeoutMs` is how long each may take (`drive`'s).
+ * `describe` per feature file, that runs it (`runScenario`) and expects every check to pass; and
+ * a failing test for each file that does not load. Starts one test app (`useTestApp`) for the
+ * scenarios, before them, and stops it after. `config` and `options` are `startTestWorker`'s;
+ * `startedBy` starts the runs, and `timeoutMs` is how long each may take (`drive`'s).
  */
 export function describeScenarios(
   config: Parameters<typeof startTestWorker>[0],

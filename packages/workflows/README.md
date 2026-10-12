@@ -8,6 +8,8 @@ Business processes as TypeScript functions, run durably on [DBOS](https://dbos.d
 npm install @sanoma/workflows zod
 ```
 
+A company repo usually installs [`sanoma`](https://www.npmjs.com/package/sanoma) instead, whose bin runs the worker and the app over its `sanoma.config.ts` and re-exports what a workflow imports from this package; `startWorker` and `startApp` remain for a custom host.
+
 A connector declares a vendor's operations: their inputs, outputs and effect. A workflow lists the operations it `uses`, and its `ctx` exposes those and nothing else.
 
 ```ts
@@ -113,7 +115,7 @@ const run = await client.run(runId); // run.status: "queued" | "running" | "wait
 
 `workflow` is a definition or the name of one in the config's `workflows` (`client.start("refund", …)`); a name the config does not have is refused with `invalid_input`, naming the ones it has. `startedBy` is required. `start(workflow, input, { startedBy, runId })` with a `runId` makes a retried start idempotent: an id that exists returns that run when the workflow, the input (as JSON) and `startedBy` match, and is refused with `invalid_input`, naming what differs, when they do not. Of two starts racing with one new id, the first stands and the second is answered the same way. Errors the runtime and the client throw carry a `code` (`policy_denied`, `approval_rejected`, `not_approver`, `no_pending_approval`, `already_decided`, `run_not_found`, `driver_failed`, `invalid_input`, `run_ended`, `run_running`: `client.result` timed out with the run still going) and `data`. Read it with `errorCode(err)`, not `instanceof`: a run's error comes back from the database as a copy, so `errorCode(await client.result(runId).catch((e) => e))` is `"policy_denied"` for a denied call.
 
-`startWorker(config, { logLevel })` runs workflows and recovers interrupted runs. `SanomaClient` starts runs, lists them, records approval decisions and reads a run's ledger. `describeConfig(config)`, from `@sanoma/workflows/describe`, returns the same config as plain JSON (its version, each workflow's input as JSON Schema, the operations it may call and its [outline](#outline), each operation's effect and contract: its input as a caller sends it, `io: "input"`, and its output as parsed, `io: "output"`), each vendor's title, logo, package and homepage and whether `fakes` holds a fake of it (`vendors`, by vendor id, the logo as `data:image/svg+xml` URLs), the resource types (`resourceTypes`, see [Resources](#resources)), and the resources the data files declare with what is wrong in them (`resources` and `problems`, see [Data files](#data-files)), which is what a UI renders from.
+`startWorker(config, { logLevel })` runs workflows and recovers interrupted runs. `SanomaClient` starts runs, lists them, records approval decisions and reads a run's ledger. `describeConfig(config)`, from `@sanoma/workflows/describe`, returns the same config as plain JSON (its version, each workflow's input as JSON Schema, the operations it may call and its [outline](#outline), each operation's effect and contract: its input as a caller sends it, `io: "input"`, and its output as parsed, `io: "output"`), each vendor's title, logo, package and homepage and whether `fakes` holds a fake of it (`vendors`, by vendor id, the logo as `data:image/svg+xml` URLs), the resource types (`resourceTypes`, see [Resources](#resources)), and the resources the data files declare with what is wrong in them (`resources` and `problems`, see [Data files](#data-files); a workflow's file's problems are on its entry, beside its `file` and `outline`), which is what a UI renders from.
 
 The worker, the client and the app find Postgres at the config's `databaseUrl`, else the `SANOMA_DATABASE_URL` environment variable, else `postgresql://postgres:dbos@localhost:5433/sanoma`, the database `pnpm db:up` starts from this repo's docker compose file. Set one of the first two anywhere but on your own machine.
 
@@ -254,21 +256,7 @@ interface ResourceProblem {
 
 A problem is anything outside the subset, a constructors import of no connector in the config or a data file that is not one, a type the connector does not declare, a value the type refuses (a resource where it takes none among them), a reference cycle, or two resources of one type with one name. `describeConfig` lists both, as `resources` and `problems`, so the app starts with the resources it could read and shows what is wrong in the rest. `readResources(config)` is the strict reading, for a test or CI: it returns the resources, or throws one error listing every problem at `file:line:column`.
 
-oxlint holds `resources/**` to the subset with the rule `sanoma/data-file`, an oxlint JS plugin the package's `oxlint.json` loads from `dist/plugin.js`, so extending it (see [Keeping workflows replay-safe](#keeping-workflows-replay-safe)) covers data files as well. `lintResources(source, filename)`, from `@sanoma/workflows/lint`, is the same check for a test, without oxlint; neither knows the config, so whether a connector, type or value is known is the reader's to say:
-
-```ts
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { lintResources } from "@sanoma/workflows/lint";
-
-const files = readdirSync("resources", { recursive: true, encoding: "utf8" })
-  .filter((f) => f.endsWith(".ts"))
-  .map((f) => join("resources", f));
-
-it.each(files)("%s is a data file", (file) => {
-  expect(lintResources(readFileSync(file, "utf8"), file)).toEqual([]);
-});
-```
+oxlint holds `resources/**` to the subset with the rule `sanoma/data-file`, an oxlint JS plugin the package's `oxlint.json` loads from `dist/plugin.js`, so extending it (see [Keeping workflows replay-safe](#keeping-workflows-replay-safe)) covers data files as well; it does not know the config, so whether a connector, type or value is known is the reader's to say, in `describeConfig(config).problems`, which `sanoma check` prints.
 
 ### Drift
 
@@ -300,7 +288,7 @@ Queues used to be one `sanoma` queue for every app and are now `sanoma:<appName>
 
 A run is replayed after a restart by calling the function again and reading each step's result back, so workflows and policies must do the same thing every time, and must reach vendors only through `ctx` so the policy sees every call. Two checks guard against getting that wrong by accident, on files under `workflows/` and `policies/`. They are not a sandbox: they read the source, and code written to get around them can.
 
-oxlint, with the rules this package ships in `oxlint.json`, refuses the clock (`Date`, `performance`), randomness (`Math.random`, `crypto`), the network (`fetch`, `WebSocket`), timers, `process`, `globalThis`, `Promise.all` and its kin (use `ctx.all`; nothing races), and imports of `@sanoma/testing`, `@sanoma/app`, `@sanoma/workflows/describe`, `@sanoma/workflows/scenario`, `@sanoma/connector-*/fake` and `@sanoma/connector-*/driver`. From `@sanoma/workflows` it allows only `defineWorkflow`, `definePolicy`, `allow`, `deny`, `approve`, `approvedFor`, `allowAll`, `mayDecide`, `errorCode` and types (the list is `allowImportNames` in `oxlint.json`): the rest could start runs or approve the run's own approvals (`SanomaClient`, `startWorker`), forge the audit record (`jsonlLedger`, `memoryLedger`: a store keeps the first record per id) or read credentials. Each message names the `ctx` replacement. Extend it from your `.oxlintrc.json` by its path: oxlint resolves `extends` as a file, not a package name, so `@sanoma/workflows/oxlint` would not load. The `workflows/**` and `policies/**` globs resolve against your config:
+oxlint, with the rules this package ships in `oxlint.json`, refuses the clock (`Date`, `performance`), randomness (`Math.random`, `crypto`), the network (`fetch`, `WebSocket`), timers, `process`, `globalThis`, `Promise.all` and its kin (use `ctx.all`; nothing races), and imports of `@sanoma/testing`, `@sanoma/app`, `@sanoma/workflows/describe`, `@sanoma/workflows/fake`, `@sanoma/workflows/plugin`, `@sanoma/workflows/scenario`, `@sanoma/workflows/scenarios`, `@sanoma/connector-*/fake` and `@sanoma/connector-*/driver`. From `@sanoma/workflows` it allows only `defineWorkflow`, `definePolicy`, `allow`, `deny`, `approve`, `approvedFor`, `allowAll`, `mayDecide`, `errorCode`, `z` (which `sanoma` re-exports) and types (the list is `allowImportNames` in `oxlint.json`; the `sanoma` package's own `oxlint.json` allows the same names from `sanoma` and refuses its subpaths): the rest could start runs or approve the run's own approvals (`SanomaClient`, `startWorker`), forge the audit record (`jsonlLedger`, `memoryLedger`: a store keeps the first record per id) or read credentials. Each message names the `ctx` replacement. `sanoma check` runs it, through `sanoma/oxlint.json`, which carries these rules; without `sanoma`, extend this package's from your `.oxlintrc.json` by its path: oxlint resolves `extends` as a file, not a package name, so `@sanoma/workflows/oxlint` would not load. The `workflows/**` and `policies/**` globs resolve against your config:
 
 ```json
 {
@@ -308,28 +296,20 @@ oxlint, with the rules this package ships in `oxlint.json`, refuses the clock (`
 }
 ```
 
-`lintWorkflow` from `@sanoma/workflows/lint` checks the same names from `@sanoma/workflows`, read from that `oxlint.json`, and what oxlint can't express: imports come only from `@sanoma/workflows`, a `@sanoma/connector-<vendor>` package, zod, or a relative file that stays inside the file's `workflows/` or `policies/` directory (so not `../sanoma.config.ts`, which holds the drivers); no namespace import of `@sanoma/workflows`; no dynamic `import()`; and no `instanceof` against `DriverError`, `SanomaError`, `PolicyDeniedError` or `RejectedError`. On a replay DBOS rethrows a serialized copy of an error, which is no instance of its class, so a branch on `instanceof` would go another way than the first time and the run's steps would fall out of step. Read `errorCode(err)` instead.
+`describeConfig` (`@sanoma/workflows/describe`) reads each workflow's file once, the one way the worker does, and lists on the workflow's entry, in `problems`, what oxlint can't express: imports come only from `@sanoma/workflows` or `sanoma`, a `@sanoma/connector-<vendor>` package, zod, or a relative file that stays inside the file's `workflows/` or `policies/` directory (so not `../sanoma.config.ts`, which holds the drivers); no namespace import of either package; no dynamic `import()`; and no `instanceof` against `DriverError`, `SanomaError`, `PolicyDeniedError` or `RejectedError`. On a replay DBOS rethrows a serialized copy of an error, which is no instance of its class, so a branch on `instanceof` would go another way than the first time and the run's steps would fall out of step. Read `errorCode(err)` instead.
 
-In each workflow's `run` it also refuses what the run's graph could not show, the same problems that make the outline `{ error }` and `startWorker` refuse (see [Outline](#outline)): `ctx` used other than called directly or read for `ctx.runId` (passed to a helper, aliased, destructured, or `run` taking it destructured); a call on `ctx` that is no operation or built-in (`ctx.ghost.post()`); `ctx.all` over members made elsewhere (write the list, or `items.map(…)`, in the call); a `ctx` call inside a function the outline does not read (one defined inside `run`, or a callback not passed to `ctx.all`, `.map`, `.forEach` or `.reduce`) or in a `finally`; and, in `run`, in a `finally` and in the callbacks that make `ctx` calls, a `return` before the end, a `throw` outside a `catch`, a `break` out of a loop or to a label, and `continue`. A function without `ctx` calls computes, and may do as it likes. Each message says what to write instead: inline the helper, use `if`/`else` around the rest. Run it over those directories in a test:
+In each workflow's `run` it also lists what the run's graph could not show, the same problems that make the outline `{ error }` and `startWorker` refuse (see [Outline](#outline)): `ctx` used other than called directly or read for `ctx.runId` (passed to a helper, aliased, destructured, or `run` taking it destructured); a call on `ctx` that is no operation or built-in (`ctx.ghost.post()`); `ctx.all` over members made elsewhere (write the list, or `items.map(…)`, in the call); a `ctx` call inside a function the outline does not read (one defined inside `run`, or a callback not passed to `ctx.all`, `.map`, `.forEach` or `.reduce`) or in a `finally`; and, in `run`, in a `finally` and in the callbacks that make `ctx` calls, a `return` before the end, a `throw` outside a `catch`, a `break` out of a loop or to a label, and `continue`. A function without `ctx` calls computes, and may do as it likes. Each message says what to write instead: inline the helper, use `if`/`else` around the rest. Each problem has its `line` and `column` in the entry's `file` (an unreadable file, or one that holds no workflow of the entry's name, is the outline's error at 1:1); `sanoma check` prints them, as `problemLine` does, and the app's startup warns of them. A test holds a repo to the same:
 
 ```ts
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { lintWorkflow } from "@sanoma/workflows/lint";
+import { describeConfig } from "@sanoma/workflows/describe";
 import { expect, it } from "vitest";
+import config from "../sanoma.config.ts";
 
-const files = ["workflows", "policies"].flatMap((dir) =>
-  readdirSync(dir)
-    .filter((f) => f.endsWith(".ts"))
-    .map((f) => join(dir, f)),
-);
-
-it.each(files)("%s has no problems", (file) => {
-  expect(lintWorkflow(readFileSync(file, "utf8"), file)).toEqual([]);
+it("has no problems", () => {
+  const { problems, workflows } = describeConfig(config);
+  expect([...problems, ...workflows.flatMap((wf) => wf.problems)]).toEqual([]);
 });
 ```
-
-`@sanoma/workflows/lint` is a separate entry so the runtime never loads its parser.
 
 ## Fakes for tests
 
@@ -423,7 +403,7 @@ A sandbox run does not survive a worker restart: its copies of the fakes keep th
 
 `RunSummary.sandbox` names the scenario a sandbox run was seeded from (kept in DBOS's `attributes` for the run). Reusing a run id with another `sandbox`, or none, is `invalid_input`, as with another input.
 
-To run a config's scenarios as tests, a vitest test each, use `describeScenarios` from [`@sanoma/testing/scenarios`](https://www.npmjs.com/package/@sanoma/testing#scenarios).
+`runScenarios(config, { databaseUrl, startedBy?, timeoutMs?, log? })` from `@sanoma/workflows/scenarios` (server-side only, like `/scenario`) runs every scenario of the config as a sandbox run, on a worker it starts on `databaseUrl` with an in-memory ledger and stops after, and returns `{ passed, failed }`: the names of the scenarios whose every check held, and one `{ scenario, step, message }` per step that did not (with `check`'s detail), per run that could not be driven to its end (at its `When` step), and per feature file that did not load (`step: "did not load"`). `sanoma check` runs it. `runScenario(scenario, { client, startedBy?, timeoutMs? })` runs one against a worker you started. To run them as tests, a vitest test each, use `describeScenarios` from [`@sanoma/testing/scenarios`](https://www.npmjs.com/package/@sanoma/testing#scenarios), which wraps the same `runScenario`.
 
 ## Building your own UI
 
@@ -434,7 +414,7 @@ To run a config's scenarios as tests, a vitest test each, use `describeScenarios
 - `APPROVALS_EVENT` and `decisionEventOf(approvalId)`: the DBOS events a run publishes its approvals and each decision on, for a UI that reads DBOS directly. `ApprovalMessage` is the zod schema of a decision as a run reads it. `RunArgs` is what a run receives: its input, `startedBy` and, for a sandbox run, its scenario as `sandbox`.
 - `mayDecide(approval, principal)` and `approverLabel(approver)`: who may decide, and how to name them, the same way the run does. `isEnded(status)` and `ENDED_STATUSES`: the run statuses that read no more decisions; `RUN_STATUSES`: every run status, in the order a run may pass through them.
 - Errors: `errorCode(err)` for the code to branch on, `errorMessage(err)` for the text of anything thrown, `invalidInput(what, issues)` to build an `invalid_input` error from zod issues (`InputIssue` is one issue, without symbols in its path), and the classes `SanomaError`, `PolicyDeniedError`, `RejectedError` and `DriverError`. Read codes with `errorCode`, never `instanceof`.
-- `@sanoma/workflows/shared` exports `mayDecide`, `approverLabel`, `errorMessage`, `isEnded`, `ENDED_STATUSES`, `RUN_STATUSES`, `DRIFT_WORKFLOW`, `problemAt` (a data-file problem's `file:line:column`), `credentialReady` (a variable is set, or optional and unset) and the `RunStatus` and `CredentialStatus` types, the resource types' types (`Resource`, `ResourceSpec`, `ResourceFields`, `References`, `FieldReference`, `Declared`, `Declaring`, `DeclaredResource`, `ResourceProblem`) and the drift report's (`DriftReport`, `DriftResult`, `DriftField`, `DriftStatus`), with nothing else: no DBOS or Node imports, so a browser bundle can use them. The main entry exports them too.
+- `@sanoma/workflows/shared` exports `mayDecide`, `approverLabel`, `errorMessage`, `isEnded`, `ENDED_STATUSES`, `RUN_STATUSES`, `DRIFT_WORKFLOW`, `isLoopback` (whether a host is this machine: `localhost`, `127.x.x.x`, `::1`), `problemAt` (a data-file problem's `file:line:column`), `problemLine` (a problem as one line: `file:line:column: message`, `file: message` or the message), `credentialReady` (a variable is set, or optional and unset) and the `RunStatus` and `CredentialStatus` types, the resource types' types (`Resource`, `ResourceSpec`, `ResourceFields`, `References`, `FieldReference`, `Declared`, `Declaring`, `DeclaredResource`, `ResourceProblem`) and the drift report's (`DriftReport`, `DriftResult`, `DriftField`, `DriftStatus`), with nothing else: no DBOS or Node imports, so a browser bundle can use them. The main entry exports them too.
 - `LedgerRecord` and `LedgerStore` for the audit record (`LedgerBody` is a record without the fields every record carries, and `LedgerGroup` a record's `ctx.all` tag), `postgresLedger(databaseUrl)` (the default), `jsonlLedger(dir)` and `memoryLedger()` to keep it, and `RUNTIME_VERSION`, this package's version as the runtime reports it.
 
 ### Outline

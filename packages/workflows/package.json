@@ -42,13 +42,17 @@
       "types": "./dist/fake.d.ts",
       "default": "./dist/fake.js"
     },
-    "./lint": {
-      "types": "./dist/lint.d.ts",
-      "default": "./dist/lint.js"
+    "./plugin": {
+      "types": "./dist/plugin.d.ts",
+      "default": "./dist/plugin.js"
     },
     "./scenario": {
       "types": "./dist/scenario.d.ts",
       "default": "./dist/scenario.js"
+    },
+    "./scenarios": {
+      "types": "./dist/scenarios.d.ts",
+      "default": "./dist/scenarios.js"
     },
     "./shared": {
       "types": "./dist/shared.d.ts",
@@ -61,7 +65,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
-    "prepack": "pnpm run clean && pnpm run build"
+    "prepack": "pnpm run clean && pnpm run build",
+    "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
   "dependencies": {
     "@cucumber/cucumber-expressions": "^20.1.0",

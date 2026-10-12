@@ -1,18 +1,10 @@
 {
+  // The compiler options are the ones a company repo extends; this adds the checkout's paths.
+  "extends": "./packages/sanoma/tsconfig.base.json",
   "compilerOptions": {
-    "target": "es2024",
-    "lib": ["es2024"],
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "types": ["node"],
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noEmit": true,
-    "allowImportingTsExtensions": true,
-    "rewriteRelativeImportExtensions": false,
-    "verbatimModuleSyntax": true,
-    "erasableSyntaxOnly": true,
-    "skipLibCheck": true,
+    // The packages' build configs extend this from their own directories, where the base's
+    // `${configDir}` type roots hold no `@types/node`: the checkout's root holds it for all.
+    "typeRoots": ["./node_modules/@types"],
     // Inside the repo, @sanoma/* resolves to source so nothing needs building first.
     // Published packages resolve to dist/ through their package.json exports.
     // Keep in sync with resolve.alias in vitest.config.ts.
@@ -20,8 +12,9 @@
       "@sanoma/workflows": ["./packages/workflows/src/index.ts"],
       "@sanoma/workflows/describe": ["./packages/workflows/src/describe.ts"],
       "@sanoma/workflows/fake": ["./packages/workflows/src/fake.ts"],
-      "@sanoma/workflows/lint": ["./packages/workflows/src/lint.ts"],
+      "@sanoma/workflows/plugin": ["./packages/workflows/src/plugin.ts"],
       "@sanoma/workflows/scenario": ["./packages/workflows/src/scenario.ts"],
+      "@sanoma/workflows/scenarios": ["./packages/workflows/src/scenarios.ts"],
       "@sanoma/workflows/shared": ["./packages/workflows/src/shared.ts"],
       "@sanoma/testing": ["./packages/testing/src/index.ts"],
       "@sanoma/testing/harness": ["./packages/testing/src/harness.ts"],
@@ -32,6 +25,7 @@
       "@sanoma/bridge/fake": ["./packages/bridge/src/fake.ts"],
       "@sanoma/bridge/connector": ["./packages/bridge/src/connector.ts"],
       "@sanoma/bridge/tfschema": ["./packages/bridge/src/tfschema.ts"],
+      "sanoma": ["./packages/sanoma/src/index.ts"],
       // Before the bare pattern: TypeScript takes the first of two patterns with equal prefixes.
       "@sanoma/connector-*/fake": ["./connectors/*/src/fake.ts"],
       "@sanoma/connector-*/driver": ["./connectors/*/src/driver.ts"],

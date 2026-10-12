@@ -1,0 +1,16 @@
+# packages/sanoma/test
+
+Vitest tests for `sanoma`. `cli.test.ts`, `check.test.ts` and `postgres.test.ts` need Postgres (`pnpm db:up`); `cli.test.ts` and `check.test.ts` run a copy of the fixture repo against the packages' builds, which `fixture.ts` makes when stale.
+
+## Contents
+
+| Path                                     | What it is                                                                                                                                                                                        |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`fixtures/project/`](fixtures/project/) | A company repo: `sanoma.config.ts` on the Ghost fake, `workflows/hello.ts` and `policies/policy.ts` importing from `sanoma` alone, a scenario, a `tsconfig.json` extending `sanoma/tsconfig.json` |
+| [`fixture.ts`](fixture.ts)               | `ensureBuilt` (the packages the fixture loads, through `@sanoma/testing`'s), `copyFixture` (a copy whose `node_modules` links only `sanoma` and `@sanoma/connector-ghost`), `startCli`/`runCli`   |
+| [`check.test.ts`](check.test.ts)         | `check` on the fixture, with its scenario on the test database: nothing; tsc's, oxlint's and `describeConfig`'s problems at their positions; a scenario step that does not hold                   |
+| [`cli.test.ts`](cli.test.ts)             | The bin on a fixture copy: `serve` and SIGINT, `env` and `--check`, one passing `check`, `--help`, and usage errors (command, option, value, no config)                                           |
+| [`dev.test.ts`](dev.test.ts)             | `devRepo` and `linkedPackages` on linked and installed packages; `supervise` restarting a stub child after a write, and after it exits on its own; `end` on a process group                       |
+| [`env.test.ts`](env.test.ts)             | `renderEnvExample` for drivers with required and optional variables, `writeEnvExample` with and without `check`                                                                                   |
+| [`oxlint.test.ts`](oxlint.test.ts)       | The generated `oxlint.json`: self-contained, the `sanoma` entry's names, and oxlint on a fixture copy extending it                                                                                |
+| [`postgres.test.ts`](postgres.test.ts)   | `ensurePostgres`: answered, the loopback rule, the Docker cases on `execFile` and pg's `Client` mocked (fake timers for the wait), and real Docker where installed                                |

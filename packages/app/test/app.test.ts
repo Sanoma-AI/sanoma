@@ -1,15 +1,4 @@
-import { execFileSync } from "node:child_process";
-import {
-  cpSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,7 +11,7 @@ import { github } from "@sanoma/connector-github";
 import { resend } from "@sanoma/connector-resend";
 import { fakeResend } from "@sanoma/connector-resend/fake";
 import { stripe } from "@sanoma/connector-stripe";
-import { testDatabaseUrl } from "@sanoma/testing";
+import { ensureBuilt, testDatabaseUrl, waitFor } from "@sanoma/testing";
 import {
   allow,
   approve,
@@ -52,16 +41,6 @@ import { asApiError, fileSource, parse, scenarios, withoutSources } from "../src
 // dist/server/server.js is missing or older than a file under src/.
 const appDir = fileURLToPath(new URL("..", import.meta.url));
 const distDir = join(appDir, "dist");
-
-function needsBuild(): boolean {
-  const built = join(distDir, "server", "server.js");
-  if (!existsSync(built)) return true;
-  const builtAt = statSync(built).mtimeMs;
-  const src = join(appDir, "src");
-  return readdirSync(src, { recursive: true, encoding: "utf8" }).some(
-    (file) => statSync(join(src, file)).mtimeMs > builtAt,
-  );
-}
 
 const HOLD_TITLE = "Publish the held post";
 
@@ -118,9 +97,7 @@ let sandboxId: string;
 const SCENARIO = "Launch on time";
 
 beforeAll(async () => {
-  if (needsBuild()) {
-    execFileSync("pnpm", ["exec", "vite", "build"], { cwd: appDir, stdio: "inherit" });
-  }
+  ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
   worker = await startWorker(config);
   app = await startApp(config, { port: 0 });
 });
@@ -154,16 +131,6 @@ async function call<T = ErrorResponse>(path: string, init: CallInit = {}) {
     body: json ? JSON.stringify(init.body) : (init.body as string | undefined),
   });
   return { status: res.status, body: (await res.json()) as T };
-}
-
-async function waitFor<T>(get: () => Promise<T>, done: (value: T) => boolean, timeoutMs = 15_000): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const value = await get();
-    if (done(value)) return value;
-    if (Date.now() > deadline) throw new Error(`timed out waiting; last saw ${JSON.stringify(value)}`);
-    await new Promise((r) => setTimeout(r, 100));
-  }
 }
 
 const detail = async (id: string) => (await call<RunDetail>(`/api/runs/${id}`)).body;
@@ -1274,7 +1241,7 @@ describe("an app configured otherwise", () => {
 
   it("boots with broken data files: lists the resources it could read, and the problems", async () => {
     expect(warned).toEqual([
-      expect.stringMatching(/^sanoma app: the data files have problems.*\n {2}resources\/bad\.ts:2:1: /s),
+      expect.stringMatching(/^sanoma app: the config's files have problems.*\n {2}resources\/bad\.ts:2:1: /s),
     ]);
     const { body } = await call<ConfigDescription>("/api/config", { base: other.url });
     expect(body.resources.map((r) => r.id)).toEqual(["resources/good.ts#web"]);

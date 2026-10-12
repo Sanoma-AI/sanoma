@@ -6,7 +6,7 @@ import { type DataFile, type DataFileExport, type DataValue, readDataFile, Refer
 import { type Connector, VENDOR } from "./op.ts";
 import type { Span } from "./outline.ts";
 import { type Declared, type Resource, resourceTypesOf } from "./resource.ts";
-import { problemAt } from "./shared.ts";
+import { problemLine } from "./shared.ts";
 
 /** A resource a data file declares, as read from the file without running it. */
 export interface DeclaredResource {
@@ -59,7 +59,7 @@ export interface DataFiles {
 export function readResources(config: SanomaConfig): DeclaredResource[] {
   const { resources, problems } = readDataFiles(resolveConfig(config).root, config.connectors);
   if (problems.length) {
-    const lines = problems.map((p) => `  ${p.file === undefined ? "" : `${problemAt(p)}: `}${p.message}`);
+    const lines = problems.map((p) => `  ${problemLine(p)}`);
     throw new Error(`The resources' data files have problems:\n${lines.join("\n")}`);
   }
   return resources;

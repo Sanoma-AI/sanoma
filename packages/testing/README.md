@@ -14,6 +14,8 @@ npm install --save-dev @sanoma/testing
 
 `testDatabaseUrl(suffix)` is `SANOMA_TEST_DATABASE_URL` (default `postgresql://postgres:dbos@localhost:5433/sanoma_test`) with `_<suffix>` appended to the database name. Give each test file its own suffix, so files don't recover each other's runs. DBOS creates the database if it is missing.
 
+`ensureBuilt(pkgDir, outputs, build)` runs `build` (a command and its arguments) in `pkgDir` when one of `outputs` is missing or older than a file under its `src/`, for tests of what a package ships from `dist/`. `waitFor(get, done?, timeoutMs?)` calls `get` every 100 ms until `done` holds for its value (by default, until it is truthy), returns that value, and throws after `timeoutMs` (default 15 seconds) naming the last one.
+
 ```ts
 import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
@@ -138,7 +140,7 @@ Two variables change what the same tests do:
 
 `@sanoma/testing/scenarios` runs a config's [scenarios](https://www.npmjs.com/package/@sanoma/workflows#scenarios-and-sandbox-runs) as vitest tests (install `vitest` and `@dbos-inc/dbos-sdk` beside it). Each scenario is a sandbox run: the worker calls the config's `fakes`, never a driver.
 
-`describeScenarios(config, options?)` reads the `.feature` files in the config's `scenarios` directory and registers a test for each scenario, in a `describe` per file; it throws, naming the directory, when it finds none. A test starts the scenario's sandbox run, decides its approvals as the scenario says, and fails listing each `Then` step that did not hold, with why. A file that does not load (a step no rule matches, bad JSON, a name used twice) is a failing test named after the file, whose message names the file (and the line, for a step or JSON error). It starts one [test app](#a-test-app) for all its scenarios, before them, with `useTestApp(config, options)`, and stops it after; `appName` is required, as for `startTestWorker`. `options.startedBy` starts the runs (default `{ id: "scenarios" }`), and `options.timeoutMs` is how long each may take (`drive`'s, 15 seconds by default); the tests it registers get twice that, so `drive`'s error is the one you see.
+`describeScenarios(config, options?)` reads the `.feature` files in the config's `scenarios` directory and registers a test for each scenario, in a `describe` per file, each over `runScenario` from `@sanoma/workflows/scenarios` (the one implementation; `runScenarios` there, which `sanoma check` runs, needs no vitest); it throws, naming the directory, when it finds none. A test starts the scenario's sandbox run, decides its approvals as the scenario says, and fails listing each `Then` step that did not hold, with why. A file that does not load (a step no rule matches, bad JSON, a name used twice) is a failing test named after the file, whose message names the file (and the line, for a step or JSON error). It starts one [test app](#a-test-app) for all its scenarios, before them, with `useTestApp(config, options)`, and stops it after; `appName` is required, as for `startTestWorker`. `options.startedBy` starts the runs (default `{ id: "scenarios" }`), and `options.timeoutMs` is how long each may take (`drive`'s, 15 seconds by default); the tests it registers get twice that, so `drive`'s error is the one you see.
 
 ```ts
 // test/scenarios.test.ts
@@ -186,6 +188,6 @@ Scenario: A repository GitHub no longer has
 
 `Given <resource> "<name>" has` and `is gone` change the run's own copy of the vendor's fake before it starts (a GitHub repository by its name, a Stripe object by its id: the resource's import id), for fakes that hold objects, as the GitHub and Stripe ones do; a failed `Then` says what the run did instead (`github.repository.import was allowed, not denied`, `resources/identity/github.ts#docs is gone, not clean`).
 
-`runScenario(scenario, { client, startedBy?, timeoutMs? })` runs one scenario against a worker you started, with a `SanomaClient` of it, and returns `{ runId, run, ledger, checks }`: the run's id, its summary, its ledger records and `check(scenario, ledger)`. `timeoutMs` goes to `drive`. Load the scenarios with `loadScenarios(resolveConfig(config))` from `@sanoma/workflows/scenario`.
+`runScenario(scenario, { client, startedBy?, timeoutMs? })`, re-exported from `@sanoma/workflows/scenarios`, runs one scenario against a worker you started, with a `SanomaClient` of it, and returns `{ runId, run, ledger, checks }`: the run's id, its summary, its ledger records and `check(scenario, ledger)`. `timeoutMs` goes to `drive`. Load the scenarios with `loadScenarios(resolveConfig(config))` from `@sanoma/workflows/scenario`.
 
 Status: early (0.x). License: Apache-2.0.

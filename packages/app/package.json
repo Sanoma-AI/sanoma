@@ -42,6 +42,7 @@
     "build": "vite build && tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
     "prepack": "pnpm run clean && pnpm run build",
+    "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput & vite build --watch",
     "typecheck:ui": "tsc -p tsconfig.json"
   },
   "dependencies": {
