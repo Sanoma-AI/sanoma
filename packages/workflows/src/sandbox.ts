@@ -3,7 +3,7 @@ import { indexDrivers } from "./config.ts";
 import type { Use } from "./define.ts";
 import { SanomaError } from "./errors.ts";
 import { entry, write } from "./ledger.ts";
-import { isOp } from "./op.ts";
+import { type DriverFn, isOp } from "./op.ts";
 import type { Run } from "./run.ts";
 import { loadScenarios } from "./scenario.ts";
 
@@ -15,14 +15,15 @@ import { loadScenarios } from "./scenario.ts";
 /**
  * Seeds a sandbox run of the scenario `name`, from the worker, in one step: reads the scenario,
  * checks that it runs this workflow and that every operation the workflow uses or the scenario
- * seeds has a fake, puts on the run its own copies of the worker's fakes (`Fake.fresh`), calls
- * each `Given` operation through them, then injects the faults into them. The run then calls
- * those copies only, so sandbox runs never share state. The step's checkpoint never stands in
- * for the copies: a run whose seeding is replayed from it has none, and fails, since a sandbox
- * run does not survive a worker restart.
+ * seeds has a fake, makes its own copies of the worker's fakes (`Fake.fresh`), calls each
+ * `Given` operation through them, injects the faults into them, then puts their functions on the
+ * run. The run then calls those copies only, so sandbox runs never share state. The step's
+ * checkpoint never stands in for the copies: a run whose seeding is replayed from it has none,
+ * and fails, since a sandbox run does not survive a worker restart.
  */
 export async function seedSandbox(run: Run, name: string): Promise<void> {
   const { state } = run;
+  let copies: Map<string, DriverFn> | undefined;
   const { seeds } = await DBOS.runStep(
     async () => {
       // Read in the step, so a recovered run never reads a feature file edited or renamed since.
@@ -49,26 +50,27 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
           { scenario: name, missing },
         );
       }
-      run.fakes = new Map([...state.fakes].map(([vendor, f]) => [vendor, f.fresh()]));
-      run.fakeDrivers = indexDrivers(
-        [...run.fakes.values()].map((f) => f.driver),
+      const fakes = new Map([...state.fakes].map(([vendor, f]) => [vendor, f.fresh()]));
+      const drivers = indexDrivers(
+        [...fakes.values()].map((f) => f.driver),
         state.ops,
       );
       const seeded: { op: string; input: unknown; output: unknown }[] = [];
       for (const [i, given] of scenario.given.entries()) {
         if (!("input" in given)) continue;
         const call = { idempotencyKey: `${run.id}:seed:${i}`, runId: run.id, opId: given.op, attempt: 1 };
-        const output = await run.fakeDrivers.get(given.op)!(given.input, call);
+        const output = await drivers.get(given.op)!(given.input, call);
         seeded.push({ op: given.op, input: given.input, output });
       }
       for (const given of scenario.given) {
-        if ("fault" in given) run.fakes.get(state.ops.get(given.op)!.vendor)![given.fault](given.op);
+        if ("fault" in given) fakes.get(state.ops.get(given.op)!.vendor)![given.fault](given.op);
       }
+      copies = drivers;
       return { seeds: seeded };
     },
     { name: "sandbox:seed" },
   );
-  if (run.fakeDrivers === undefined) {
+  if (!copies) {
     // Replayed from its checkpoint (after a worker restart, or in a fork), so the run has no fakes.
     // The records written before the restart hold the seqs from here on: the failure goes after them.
     run.seq = Math.max(run.seq, ...(await state.ledger.read(run.id)).map((r) => r.seq + 1));
@@ -78,5 +80,6 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
       { runId: run.id, scenario: name },
     );
   }
+  run.fakeDrivers = copies;
   await write(run, entry(run, { type: "scenario.seeded", scenario: name, seeds }));
 }

@@ -60,12 +60,7 @@ export interface Run {
   actor: Principal;
   /** The scenario a sandbox run is seeded from; unset for a live run. */
   sandbox?: string;
-  /**
-   * A sandbox run's own copies of the worker's fakes, by vendor id, and their functions by
-   * operation id: set by its `sandbox:seed` step, so no other run sees its state. Unset for a
-   * live run, and for a sandbox run whose seed step was replayed from its checkpoint.
-   */
-  fakes?: Map<string, Fake<any, any>>;
+  /** A sandbox run's own fakes' functions, by operation id, from `seedSandbox`; unset for a live run. */
   fakeDrivers?: Map<string, DriverFn>;
   approvals: ApprovalState[];
   /** The next ledger `seq`. Advanced only outside steps, so a replay counts the same way. */
