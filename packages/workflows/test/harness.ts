@@ -98,6 +98,7 @@ export function useApp(
     { databaseUrl },
   );
   beforeEach(() => vendors.reset());
+  // Object.assign keeps the getters; a spread would read them before beforeAll.
   return Object.assign(app, { vendors, ops: () => vendors.calls.map((c) => c.op) });
 }
 
