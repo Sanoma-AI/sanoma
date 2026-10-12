@@ -173,6 +173,12 @@ Scenario: A setting changed at GitHub
 
 Scenario: A repository GitHub no longer has
   Given github.repository "docs" is gone
+  And github.repository "website" has
+    | name        | website              |
+    | description | The company website  |
+    | visibility  | public               |
+    | has_wiki    | false                |
+    | topics      | ["website", "astro"] |
   When drift runs
   Then resources/identity/github.ts#docs is gone
   And resources/identity/github.ts#website is clean

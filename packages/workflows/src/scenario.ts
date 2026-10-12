@@ -417,7 +417,7 @@ function rulesOf(scope: Scope): Rule[] {
       }
       const given = (values: unknown[]) =>
         Object.fromEntries(
-          fields.map((name, i) => [name, valueFor(schemas[i]!, values[i] as string, `${name} in ${op.id}'s input`)]),
+          fields.map((name, i) => [name, valueFor(schemas[i]!, values[i] as string, `${name} in ${inputOf(op.id)}`)]),
         );
       const compiled = template.replaceAll(/\{([^}]*)\}/g, "{field_$1}");
       const common = { source: template, phrase: op.id, expression: expression(compiled) };
