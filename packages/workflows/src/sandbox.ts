@@ -4,58 +4,53 @@ import { opIdsOf } from "./define.ts";
 import { SanomaError } from "./errors.ts";
 import type { Fake, ResourceFake } from "./fake.ts";
 import { entry, write } from "./ledger.ts";
-import type { CallContext, DriverFn } from "./op.ts";
+import type { DriverFn } from "./op.ts";
 import type { Run } from "./run.ts";
-import { type Given, loadScenarios } from "./scenario.ts";
+import { type Given, loadScenarios, type Scenario } from "./scenario.ts";
 
 /*
  * What a worker does for a sandbox run, imported only when it starts one: kept apart from
  * `scenario.ts`, which the app reads too, because it needs DBOS and the ledger.
  */
 
-/** A resource type's vendor: `github` of `github.repository`. */
-const vendorOf = (resource: string) => resource.slice(0, resource.indexOf("."));
-
 /** True for a fake that holds resources (`ResourceFake`, as `@sanoma/bridge`'s `tfFake` is). */
 const holdsResources = (fake: Fake<unknown>): fake is Fake<unknown> & ResourceFake =>
   "override" in fake && "put" in fake && "remove" in fake;
 
 /**
- * Seeds one resource into the run's copy of its vendor's fake: `fields` set on the object, put
- * when the vendor has none (the copy's `import` says), or the object removed. `Fake.fresh` gives
- * a plain fake, so the template's `override`, `put` and `remove` do the work; they write through
- * its `update`, which the copy's stands in for while they run (synchronous, so no other call sees it).
+ * The error a sandbox run of the scenario fails with when it seeds a resource of a vendor whose
+ * fake (one of `fakes`, by vendor) holds none, or that has no fake; undefined when every vendor
+ * it seeds a resource of has a `ResourceFake`. Pure: the check `seedSandbox` makes before it
+ * copies anything.
  */
-async function seedResource(
-  template: Fake<unknown> & ResourceFake,
-  copy: Fake<unknown>,
-  importOp: DriverFn,
-  given: Extract<Given, { resource: string }>,
-  call: CallContext,
-): Promise<void> {
-  const type = given.resource.slice(given.resource.indexOf(".") + 1);
-  const { gone } = (await importOp({ id: given.name }, call)) as { gone: boolean };
-  const { update } = template;
-  template.update = copy.update;
-  try {
-    if ("gone" in given) {
-      if (!gone) template.remove(type, given.name);
-    } else if (gone) template.put(type, given.name, given.fields);
-    else template.override(type, given.name, given.fields);
-  } finally {
-    template.update = update;
-  }
+export function missingResourceFake(
+  scenario: Pick<Scenario, "name" | "given">,
+  fakes: ReadonlyMap<string, Fake<unknown>>,
+): SanomaError | undefined {
+  const plain = scenario.given.filter((g): g is Extract<Given, { resource: string }> => {
+    if (!("resource" in g)) return false;
+    const fake = fakes.get(g.vendor);
+    return !fake || !holdsResources(fake);
+  });
+  if (plain.length === 0) return undefined;
+  const resources = [...new Set(plain.map((g) => g.resource))];
+  const vendors = [...new Set(plain.map((g) => g.vendor))];
+  return new SanomaError(
+    "invalid_input",
+    `Scenario "${scenario.name}" seeds ${resources.join(", ")}, but ${vendors.join(", ")}'s fake holds no resources (it is not a tfFake)`,
+    { scenario: scenario.name, resources },
+  );
 }
 
 /**
  * Seeds a sandbox run of the scenario `name`, from the worker, in one step: reads the scenario,
- * checks that it runs this workflow and that every operation the workflow uses or the scenario
- * seeds has a fake (and every resource it seeds a fake holding resources), makes its own copies
- * of the worker's fakes (`Fake.fresh`), calls each `Given` operation through them, puts or
- * removes each `Given` resource in them, injects the faults into them, then puts their functions
- * on the run. The run then calls those copies only, so sandbox runs never share state. The
- * step's checkpoint never stands in for the copies: a run whose seeding is replayed from it has
- * none, and fails, since a sandbox run does not survive a worker restart.
+ * checks that it runs this workflow, that every operation the workflow uses or the scenario
+ * seeds has a fake and that every resource it seeds has a fake holding resources, makes its own
+ * copies of the worker's fakes (`Fake.fresh`), calls each `Given` operation through them, puts
+ * or removes each `Given` resource in them, injects the faults into them, then puts their
+ * functions on the run. The run then calls those copies only, so sandbox runs never share
+ * state. The step's checkpoint never stands in for the copies: a run whose seeding is replayed
+ * from it has none, and fails, since a sandbox run does not survive a worker restart.
  */
 export async function seedSandbox(run: Run, name: string): Promise<void> {
   const { state } = run;
@@ -76,7 +71,7 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
         });
       }
       const uses = opIdsOf(state.workflows.get(run.workflow)!);
-      const seeding = scenario.given.flatMap((g) => ("op" in g ? [g.op] : [`${g.resource}.import`]));
+      const seeding = scenario.given.flatMap((g) => ("op" in g ? [g.op] : []));
       const missing = [...new Set([...uses, ...seeding])].filter((id) => !state.fakeDrivers.has(id));
       if (missing.length) {
         throw new SanomaError(
@@ -85,16 +80,8 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
           { scenario: name, missing },
         );
       }
-      const plain = scenario.given
-        .flatMap((g) => ("resource" in g ? [g.resource] : []))
-        .filter((resource) => !holdsResources(state.fakes.get(vendorOf(resource))!));
-      if (plain.length) {
-        throw new SanomaError(
-          "invalid_input",
-          `Scenario "${name}" seeds ${[...new Set(plain)].join(", ")}, but ${[...new Set(plain.map(vendorOf))].join(", ")}'s fake holds no resources (it is not a tfFake)`,
-          { scenario: name, resources: [...new Set(plain)] },
-        );
-      }
+      const plain = missingResourceFake(scenario, state.fakes);
+      if (plain) throw plain;
       const fakes = new Map([...state.fakes].map(([vendor, f]) => [vendor, f.fresh()]));
       const drivers = indexDrivers(
         [...fakes.values()].map((f) => f.driver),
@@ -103,16 +90,16 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
       const seeded: { op: string; input: unknown; output: unknown }[] = [];
       for (const [i, given] of scenario.given.entries()) {
         if ("fault" in given) continue;
-        const opId = "op" in given ? given.op : `${given.resource}.import`;
-        const call = { idempotencyKey: `${run.id}:seed:${i}`, runId: run.id, opId, attempt: 1 };
         if ("op" in given) {
+          const call = { idempotencyKey: `${run.id}:seed:${i}`, runId: run.id, opId: given.op, attempt: 1 };
           const output = await drivers.get(given.op)!(given.input, call);
           seeded.push({ op: given.op, input: given.input, output });
-        } else {
-          const vendor = vendorOf(given.resource);
-          const template = state.fakes.get(vendor) as Fake<unknown> & ResourceFake;
-          await seedResource(template, fakes.get(vendor)!, drivers.get(opId)!, given, call);
+          continue;
         }
+        // Checked above: the vendor's copy holds resources, as its template does.
+        const copy = fakes.get(given.vendor) as Fake<unknown> & ResourceFake;
+        if ("gone" in given) copy.remove(given.type, given.name);
+        else copy.put(given.type, given.name, given.fields);
       }
       for (const given of scenario.given) {
         if ("fault" in given) fakes.get(state.ops.get(given.op)!.vendor)![given.fault](given.op);
