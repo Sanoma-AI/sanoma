@@ -2,8 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { jsonSchemaOf, type Use, type WorkflowDefinition } from "./define.ts";
-import { isOp } from "./op.ts";
+import { jsonSchemaOf, opIdsOf, type WorkflowDefinition } from "./define.ts";
 
 /** This package's version. A unit test keeps it equal to package.json. */
 export const RUNTIME_VERSION = "0.1.0";
@@ -62,7 +61,7 @@ export function computeVersion(config: {
         [
           wf.name,
           wf.run.toString(),
-          (wf.uses as readonly Use[]).filter(isOp).map((op) => op.id),
+          opIdsOf(wf),
           // The input schema is parsed outside steps on replay, so a change to it must change the version.
           inputSchemaOf(wf),
         ] as const,

@@ -136,9 +136,20 @@ export const effectBadge = cva("", {
  * tech unless `alt` says otherwise (`""` where the title is beside it): its connector's light
  * variant, and its dark one under the dark theme. Nothing when the connector gives no logo.
  */
-export function VendorLogo({ vendor, alt, className }: { vendor: string; alt?: string; className?: string }) {
+/** A vendor's logo; `fallback` draws in its place when the config has no logo for the vendor. */
+export function VendorLogo({
+  vendor,
+  alt,
+  className,
+  fallback = null,
+}: {
+  vendor: string;
+  alt?: string;
+  className?: string;
+  fallback?: ReactNode;
+}) {
   const { data: entry } = useSuspenseQuery({ ...configQuery(), select: (config) => config.vendors[vendor] });
-  if (!entry?.logo) return null;
+  if (!entry?.logo) return fallback;
   const { src, dark } = entry.logo;
   const name = alt ?? entry.title;
   // A hidden <img> is out of the accessibility tree: one name is read either way.

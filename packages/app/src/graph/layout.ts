@@ -1,10 +1,12 @@
 import { Graph as Dagre, layout as dagreLayout } from "@dagrejs/dagre";
-import type { Graph, GraphNodeKind } from "./types.ts";
+import type { Graph, GraphNode, GraphNodeKind } from "./types.ts";
+import { LIST_HEADER, ROW_HEIGHT, wildcardRows } from "./wildcard.ts";
 
 /**
  * Each kind's box, in px. The node components draw to these sizes: an operation's two lines
  * (its id, then its effect, decision and duration badges) need the widest. A `cluster` is sized
- * to what it holds; this is its size when it holds nothing.
+ * to what it holds; this is its size when it holds nothing. An operation with `ops` is taller
+ * by its rows (`nodeSize`).
  */
 export const NODE_SIZE: Record<GraphNodeKind, { width: number; height: number }> = {
   start: { width: 96, height: 40 },
@@ -18,6 +20,13 @@ export const NODE_SIZE: Record<GraphNodeKind, { width: number; height: number }>
   split: { width: 24, height: 24 },
   skip: { width: 88, height: 28 },
 };
+
+/** A node's box: its kind's, and for an operation with `ops`, taller by the rows it draws. A fresh object: dagre writes into it. */
+export function nodeSize(node: GraphNode): { width: number; height: number } {
+  if (node.kind !== "op" || !node.ops) return { ...NODE_SIZE[node.kind] };
+  const { width, height } = NODE_SIZE.op;
+  return { width, height: height + LIST_HEADER + wildcardRows(node.label, node.ops).length * ROW_HEIGHT };
+}
 
 /** The room a `cluster` leaves above what it holds, for its label. */
 export const CLUSTER_HEADER = 28;
@@ -52,7 +61,7 @@ export function layout({ nodes, edges }: Graph): Map<string, Box> {
     g.setDefaultEdgeLabel(() => ({}));
     const members = children.get(parent) ?? [];
     for (const node of members) {
-      g.setNode(node.id, children.has(node.id) ? place(node.id) : { ...NODE_SIZE[node.kind] });
+      g.setNode(node.id, children.has(node.id) ? place(node.id) : nodeSize(node));
     }
     for (const edge of links.get(parent) ?? []) g.setEdge(edge.source, edge.target);
     // dagre's crossing reduction would reorder lanes that never cross, last member on top: the

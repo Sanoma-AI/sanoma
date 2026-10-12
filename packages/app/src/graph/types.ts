@@ -45,7 +45,8 @@ export interface ApprovalStepState extends StepState {
  * to the next.
  */
 export type Step =
-  | { kind: "op"; id: string; key?: string; span?: Span; state?: OpState }
+  /** `ops`: for an id with a computed segment, the operations it can reach (the outline's `ops`). */
+  | { kind: "op"; id: string; ops?: string[]; key?: string; span?: Span; state?: OpState }
   | { kind: "approval"; title?: string; key?: string; span?: Span; state?: ApprovalStepState }
   | { kind: "sleep"; key?: string; label?: string; span?: Span; state?: StepState }
   /** A `ctx.all` member a running run has recorded nothing for yet. */
@@ -74,7 +75,8 @@ export type GraphNode =
   | (Base & { kind: "start"; state?: StepState })
   /** `pending` until the run has ended; an outline's end is plain. */
   | (Base & { kind: "end"; state?: StepState; pending?: true })
-  | (Base & { kind: "op"; state?: OpState })
+  /** `ops`: the operations an id with a computed segment can reach, drawn as rows under it. */
+  | (Base & { kind: "op"; ops?: string[]; state?: OpState })
   | (Base & { kind: "approval"; state?: ApprovalStepState })
   | (Base & { kind: "sleep"; state?: StepState })
   | (Base & { kind: "pending" })
