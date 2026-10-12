@@ -37,7 +37,7 @@ export interface StartBridgeOptions {
   readyTimeoutMs?: number;
   /** Deadline of each call. Default: none (a first `schema` downloads the provider). */
   timeoutMs?: number;
-  /** Connect interceptors around every call (the fake's recorder is one). */
+  /** Connect interceptors around every call (the tests' recorder is one). */
   interceptors?: Interceptor[];
 }
 
