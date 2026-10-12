@@ -17,7 +17,7 @@ import {
   memoryLedger,
   resolveConfig,
 } from "../src/index.ts";
-import { missingResourceFake } from "../src/sandbox.ts";
+import { missingResourceFake, seedResource } from "../src/sandbox.ts";
 import { check, loadScenarios, parseFeature, type Scenario, type Scope } from "../src/scenario.ts";
 import announce from "./fixtures/announce.ts";
 import { companyConfig } from "./fixtures/company/fakes.ts";
@@ -735,6 +735,45 @@ describe("resources and policy outcomes", () => {
     expect(problem?.data).toEqual({ scenario: "Seeded", resources: ["acme.hook"] });
     // A vendor with no fake at all is refused the same way.
     expect(missingResourceFake(seeded!, new Map())?.message).toBe(problem?.message);
+  });
+
+  it("seeds a resource on the copy as the step says, and fails the scenario, naming the step, when the fake refuses it", () => {
+    const [drift] = parseCompany(DRIFT);
+    const [has, gone] = drift!.given as Extract<Scenario["given"][number], { resource: string }>[];
+    const done: unknown[] = [];
+    const copy = {
+      override: () => {},
+      put: (...args: unknown[]) => void done.push(["put", ...args]),
+      remove: (...args: unknown[]) => void done.push(["remove", ...args]),
+    };
+    expect(seedResource("S", copy, has!)).toEqual({
+      resource: "github.repository",
+      name: "website",
+      fields: { name: "website", has_wiki: true, topics: ["website", "astro"] },
+    });
+    expect(seedResource("S", copy, gone!)).toEqual({ resource: "github.repository", name: "docs", gone: true });
+    expect(done).toEqual([
+      ["put", "repository", "website", { name: "website", has_wiki: true, topics: ["website", "astro"] }],
+      ["remove", "repository", "docs"],
+    ]);
+    const refusing = {
+      ...copy,
+      put: () => {
+        throw new Error("fake github: repository has no field has_wiki");
+      },
+    };
+    let err: unknown;
+    try {
+      seedResource("S", refusing, has!);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toMatchObject({
+      code: "invalid_input",
+      message:
+        'Scenario "S" cannot seed github.repository "website" ("github.repository "website" has"): fake github: repository has no field has_wiki',
+      data: { scenario: "S", step: 'github.repository "website" has', resource: "github.repository", name: "website" },
+    });
   });
 
   it("names an unknown resource type, field or value, and a drift result in a scenario that does not run drift", () => {

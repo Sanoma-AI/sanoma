@@ -7,6 +7,7 @@ import { entry, type LedgerRecord, write } from "./ledger.ts";
 import type { DriverFn } from "./op.ts";
 import type { Run } from "./run.ts";
 import { type Given, loadScenarios, type Scenario } from "./scenario.ts";
+import { errorMessage } from "./shared.ts";
 
 /*
  * What a worker does for a sandbox run, imported only when it starts one: kept apart from
@@ -40,6 +41,34 @@ export function missingResourceFake(
     `Scenario "${scenario.name}" seeds ${resources.join(", ")}, but ${vendors.join(", ")}'s fake holds no resources (it is not a tfFake)`,
     { scenario: scenario.name, resources },
   );
+}
+
+/**
+ * Seeds one resource into the run's copy of its vendor's fake: put with its fields, or removed.
+ * A seed the fake refuses (a field the provider's shape lacks, say) fails the scenario, naming
+ * the step, as the other seed-time refusals do.
+ */
+export function seedResource(
+  scenario: string,
+  copy: ResourceFake,
+  given: Extract<Given, { resource: string }>,
+): Extract<LedgerRecord, { type: "scenario.seeded" }>["seeds"][number] {
+  const { resource, type, name } = given;
+  try {
+    if ("gone" in given) {
+      copy.remove(type, name);
+      return { resource, name, gone: true };
+    }
+    copy.put(type, name, given.fields);
+    return { resource, name, fields: given.fields };
+  } catch (err) {
+    throw new SanomaError(
+      "invalid_input",
+      `Scenario "${scenario}" cannot seed ${resource} "${name}" ("${given.step}"): ${errorMessage(err)}`,
+      { scenario, step: given.step, resource, name },
+      { cause: err },
+    );
+  }
 }
 
 /**
@@ -97,15 +126,7 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
           continue;
         }
         // Checked above: the vendor's copy holds resources, as its template does.
-        const copy = fakes.get(given.vendor) as Fake<unknown> & ResourceFake;
-        const { resource, type, name: id } = given;
-        if ("gone" in given) {
-          copy.remove(type, id);
-          seeded.push({ resource, name: id, gone: true });
-        } else {
-          copy.put(type, id, given.fields);
-          seeded.push({ resource, name: id, fields: given.fields });
-        }
+        seeded.push(seedResource(name, fakes.get(given.vendor) as Fake<unknown> & ResourceFake, given));
       }
       for (const given of scenario.given) {
         if ("fault" in given) fakes.get(state.ops.get(given.op)!.vendor)![given.fault](given.op);
