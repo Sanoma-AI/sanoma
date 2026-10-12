@@ -231,7 +231,7 @@ describe("the API", () => {
     expect(JSON.stringify(body)).not.toContain(line);
     expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.effect).toBe("send");
     // Whether each vendor has a fake in `fakes`: Ghost does, GitHub does not.
-    expect([body.vendors.ghost?.fake, body.vendors.github?.fake]).toEqual([true, false]);
+    expect(body.vendors).toMatchObject({ ghost: { fake: true }, github: { fake: false } });
     expect(body.vendors.resend).toMatchObject({ title: "Resend", logo: { src: expect.stringMatching(/^data:/) } });
     // The data files under the config's root, without problems, passed through as they are.
     expect(body.resources.map((r) => r.id)).toEqual(company.declared.map((r) => r.id));
