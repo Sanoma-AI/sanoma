@@ -1,9 +1,9 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BridgeError, readPins } from "@sanoma/bridge";
-import { fakeBridge } from "@sanoma/bridge/fake";
+import { fakeBridge } from "./fake-bridge.ts";
 
 const testdata = fileURLToPath(new URL("../testdata/", import.meta.url));
 const pins = readPins();
@@ -31,6 +31,7 @@ beforeEach(() => {
   vi.stubEnv("SANOMA_LIVE", "");
   vi.stubEnv("SANOMA_RECORD", "");
 });
+afterEach(() => vi.unstubAllEnvs());
 
 describe("readPins", () => {
   it("reads the pinned releases, keyed by source", () => {
@@ -133,6 +134,13 @@ describe("fakeBridge", () => {
     const missingSchema = await failure(bridge.schema({ source: "hashicorp/random", version: "3.7.2" }));
     expect(missingSchema.code).toBe("failed_precondition");
     expect(missingSchema.message).toContain("schemas/hashicorp_random_3.7.2.json");
+  });
+
+  it("refuses a live run without the variables it needs, and a replay does not need them", () => {
+    vi.stubEnv("GITHUB_TOKEN", "");
+    expect(fakeBridge({ needs: ["GITHUB_TOKEN"] }).live).toBe(false);
+    vi.stubEnv("SANOMA_LIVE", "1");
+    expect(() => fakeBridge({ needs: ["GITHUB_TOKEN"] })).toThrow("SANOMA_LIVE=1 needs GITHUB_TOKEN");
   });
 
   it("refuses what the bridge refuses", async () => {

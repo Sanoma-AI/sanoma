@@ -25,7 +25,10 @@ export interface WorkerState {
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id. */
   drivers: Map<string, DriverFn>;
-  /** The fake vendors sandbox runs call, and their functions by operation id. */
+  /**
+   * The config's fake vendors, by vendor id, and their functions by operation id: the templates a
+   * sandbox run copies (`Fake.fresh`) when it is seeded. No run calls them.
+   */
   fakes: Map<string, Fake<any, any>>;
   fakeDrivers: Map<string, DriverFn>;
   /** Where sandbox runs' scenarios are. */
@@ -57,6 +60,8 @@ export interface Run {
   actor: Principal;
   /** The scenario a sandbox run is seeded from; unset for a live run. */
   sandbox?: string;
+  /** A sandbox run's own fakes' functions, by operation id, from `seedSandbox`; unset for a live run. */
+  fakeDrivers?: Map<string, DriverFn>;
   approvals: ApprovalState[];
   /** The next ledger `seq`. Advanced only outside steps, so a replay counts the same way. */
   seq: number;

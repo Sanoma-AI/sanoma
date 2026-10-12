@@ -16,14 +16,14 @@ Vitest tests for `@sanoma/workflows`. Files that start runs need Postgres (`pnpm
 | [`client.test.ts`](client.test.ts)           | `runStatus`, `firstMatching` and `SanomaClient` against Postgres                                                         |
 | [`credentials.test.ts`](credentials.test.ts) | A driver's `env`: statuses, refusals, stored credentials and the worker's reload, on Postgres; the connectors' variables |
 | [`define.test.ts`](define.test.ts)           | `defineWorkflow` records the file that called it, and refuses code with none                                             |
-| [`describe.test.ts`](describe.test.ts)       | `describeConfig`: workflows, operations and their mocks, vendors and policy                                              |
+| [`describe.test.ts`](describe.test.ts)       | `describeConfig`: workflows, operations and their contracts, vendors and policy                                          |
 | [`drift.test.ts`](drift.test.ts)             | The built-in drift workflow on `useApp` and the company fakes: its report, ledger, references and record                 |
 | [`errors.test.ts`](errors.test.ts)           | `errorCode` and `errorInfo`                                                                                              |
 | [`fake.test.ts`](fake.test.ts)               | `Fake.fresh`: a new in-memory copy that shares nothing with its fake                                                     |
 | [`harness.ts`](harness.ts)                   | Shared setup: fake vendors, a started worker and client, and wait helpers                                                |
 | [`ledger.test.ts`](ledger.test.ts)           | The in-memory and JSONL ledgers, and how a run writes its records                                                        |
 | [`lint.test.ts`](lint.test.ts)               | `lintWorkflow` (imports, and `run` against its outline), `lintResources` and the shipped `oxlint.json`                   |
-| [`sandbox.test.ts`](sandbox.test.ts)         | Sandbox runs on Postgres: seeding, fakes, skipped sleeps, `drive` and restarts                                           |
+| [`sandbox.test.ts`](sandbox.test.ts)         | Sandbox runs on Postgres: seeding, the ledger, two at once, skipped sleeps, `drive` and restarts                         |
 | [`scenario.test.ts`](scenario.test.ts)       | Feature files to scenarios, their errors, `loadScenarios` and `check`                                                    |
 | [`outline.test.ts`](outline.test.ts)         | `outlineWorkflow`: nodes, paths, spans, errors and `callAt`, from source and built JavaScript                            |
 | [`resource.test.ts`](resource.test.ts)       | `defineResource` and references, `compareDeclared`, `diffDeclared`, resource types in `describeConfig`                   |
