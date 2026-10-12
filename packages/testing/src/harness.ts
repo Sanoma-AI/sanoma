@@ -45,8 +45,11 @@ export function useTestApp(config: Parameters<typeof startTestWorker>[0], option
 
   afterAll(async () => {
     try {
-      await client?.close();
-      await raw?.destroy();
+      try {
+        await client?.close();
+      } finally {
+        await raw?.destroy();
+      }
     } finally {
       await worker?.stop();
     }
