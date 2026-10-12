@@ -17,14 +17,17 @@ import {
   PickleStepType,
   type Step as GherkinStep,
 } from "@cucumber/messages";
-import type { z } from "zod";
+import { z } from "zod";
 import type { RunSummary, SanomaClient } from "./client.ts";
 import type { ResolvedConfig } from "./config.ts";
+import type { Approver } from "./define.ts";
+import type { DriftReport, DriftResult } from "./drift.ts";
 import { SanomaError } from "./errors.ts";
 import { fill, isBug, seedFrom, shapeOf } from "./fill.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import { type OutlineNode, outlineWorkflow } from "./outline.ts";
-import { errorMessage, isEnded } from "./shared.ts";
+import type { RecordedDecision } from "./policy.ts";
+import { approverLabel, errorMessage, isEnded } from "./shared.ts";
 
 /*
  * Scenarios, at `@sanoma/workflows/scenario`: Gherkin feature files that say what a sandbox run
@@ -45,10 +48,16 @@ export interface ScenarioStep {
   fault?: true;
 }
 
-/** A fake's state to seed through one of its operations, or a fault to inject into its next call. */
+/**
+ * A fake's state to seed through one of its operations, a fault to inject into its next call, or
+ * an object a vendor's fake holds: `resource` is its type (`github.repository`) and `name` its
+ * import id, with `fields` to set on it (put, when the vendor has none) or `gone` to remove it.
+ */
 export type Given =
   | { step: string; op: string; input: unknown }
-  | { step: string; op: string; fault: "failNext" | "rateLimit" | "loseReply" };
+  | { step: string; op: string; fault: "failNext" | "rateLimit" | "loseReply" }
+  | { step: string; resource: string; name: string; fields: Record<string, unknown> }
+  | { step: string; resource: string; name: string; gone: true };
 
 /** How one approval is decided; `approval` is its title or its id. */
 export interface Decision {
@@ -59,10 +68,18 @@ export interface Decision {
   note?: string;
 }
 
-/** What the run should do: call an operation (with at least this input) or not, or end a certain way. */
+/**
+ * What the run should do: call an operation (with at least this input) or not, have the policy
+ * deny one (`denied`) or hold one for an approver (`held`), end a certain way, or, for a drift
+ * run, report the resource `declared` (`<file>#<export>`) clean, gone, or drifted in a field.
+ */
 export type Expectation =
   | { step: string; op: string; input?: unknown; called: boolean }
-  | { step: string; outcome: "finished" | "failed"; code?: string };
+  | { step: string; denied: string }
+  | { step: string; held: string; approver: string }
+  | { step: string; outcome: "finished" | "failed"; code?: string }
+  | { step: string; declared: string; status: "clean" | "gone" }
+  | { step: string; declared: string; status: "drifted"; field: string };
 
 export interface Scenario {
   name: string;
@@ -137,11 +154,11 @@ const FAULTS = {
   "loses its reply once": "loseReply",
 } as const;
 
-/** The schema of the field `name` of an object schema; throws naming the fields it has. */
+/** The schema of the field `name` of an object schema (`owner`, for the error); throws naming the fields it has. */
 function fieldOf(schema: z.ZodType, name: string, owner: string): z.ZodType {
   const shape = shapeOf(schema);
   if (!Object.hasOwn(shape, name)) {
-    throw new Error(`no field "${name}" in ${owner}'s input; it has ${Object.keys(shape).join(", ") || "none"}`);
+    throw new Error(`no field "${name}" in ${owner}; it has ${Object.keys(shape).join(", ") || "none"}`);
   }
   return shape[name]!;
 }
@@ -167,12 +184,13 @@ function valueFor(field: z.ZodType, text: string, what: string): unknown {
 }
 
 /**
- * The fields the step's doc string (a JSON object) or two-column table gives an input, each
- * checked against its field in `schema`: a field the input lacks, or a value it refuses, is an error.
+ * The fields the step's doc string (a JSON object) or two-column table gives `owner` (an
+ * operation's input, or a resource), each checked against its field in `schema`: a field it
+ * lacks, or a value it refuses, is an error.
  */
 function fieldsFrom(pickle: PickleStep, schema: z.ZodType, owner: string): Record<string, unknown> {
   const { docString, dataTable } = pickle.argument ?? {};
-  const what = (name: string) => `${name} in ${owner}'s input`;
+  const what = (name: string) => `${name} in ${owner}`;
   if (dataTable) {
     return Object.fromEntries(
       dataTable.rows.map(({ cells }) => {
@@ -207,6 +225,26 @@ const known = (what: string, ids: Map<string, unknown>) => (name: string) => {
 
 const TAKES_OBJECT = "a JSON doc string or a two-column table";
 
+/** What a field belongs to, in errors: an operation's or a workflow's input. */
+const inputOf = (name: unknown) => `${name as string}'s input`;
+
+/** The built-in drift workflow's name (`DRIFT_WORKFLOW`, kept off this entry's imports): the run whose report the drift steps read. */
+const DRIFT = "drift";
+
+/**
+ * The resource types the scope's operations declare, by `<vendor>.<type>`, each with the schema
+ * of its state: what its `import` returns as `state` (`defineResource`'s operations).
+ */
+function resourceTypesIn(ops: Scope["ops"]): Map<string, z.ZodType> {
+  const types = new Map<string, z.ZodType>();
+  for (const [id, op] of ops) {
+    const state = id.endsWith(".import") ? shapeOf(op.output).state : undefined;
+    if (!state) continue;
+    types.set(id.slice(0, -".import".length), state instanceof z.ZodOptional ? (state.unwrap() as z.ZodType) : state);
+  }
+  return types;
+}
+
 const rulesByScope = new WeakMap<Scope, Rule[]>();
 
 /**
@@ -217,10 +255,15 @@ const rulesByScope = new WeakMap<Scope, Rule[]>();
 function rulesOf(scope: Scope): Rule[] {
   const cached = rulesByScope.get(scope);
   if (cached) return cached;
+  const types = resourceTypesIn(scope.ops);
   const registry = new ParameterTypeRegistry();
   registry.defineParameterType(new ParameterType("op", /\S+/, null, known("operation", scope.ops), false));
   registry.defineParameterType(new ParameterType("workflow", /\S+/, null, known("workflow", scope.workflows), false));
   registry.defineParameterType(new ParameterType("who", /\S+/, null, (s: string) => s, false));
+  registry.defineParameterType(new ParameterType("resource", /\S+/, null, known("resource type", types), false));
+  // A declared resource, as a drift report names it: `<file>#<export>`.
+  registry.defineParameterType(new ParameterType("declared", /[^\s#]+#\S+/, null, (s: string) => s, false));
+  registry.defineParameterType(new ParameterType("field", /\S+/, null, (s: string) => s, false));
   const expression = (source: string) => new CucumberExpression(source, registry);
   const opOf = (id: unknown) => scope.ops.get(id as string)!;
   const workflowOf = (name: unknown) => scope.workflows.get(name as string)!;
@@ -233,7 +276,7 @@ function rulesOf(scope: Scope): Rule[] {
       expression: expression("{op} was called with"),
       read: ([op], pickle) => ({
         op: op as string,
-        input: fill(opOf(op).input, fieldsFrom(pickle, opOf(op).input, op as string)),
+        input: fill(opOf(op).input, fieldsFrom(pickle, opOf(op).input, inputOf(op))),
       }),
     },
     ...Object.entries(FAULTS).map(([words, fault]): Rule => ({
@@ -243,13 +286,30 @@ function rulesOf(scope: Scope): Rule[] {
       read: ([op]) => ({ op: op as string, fault }),
     })),
     {
+      kind: "given",
+      source: "{resource} {string} has",
+      takes: TAKES_OBJECT,
+      expression: expression("{resource} {string} has"),
+      read: ([resource, name], pickle) => ({
+        resource: resource as string,
+        name: name as string,
+        fields: fieldsFrom(pickle, types.get(resource as string)!, `${resource as string} "${name as string}"`),
+      }),
+    },
+    {
+      kind: "given",
+      source: "{resource} {string} is gone",
+      expression: expression("{resource} {string} is gone"),
+      read: ([resource, name]) => ({ resource: resource as string, name: name as string, gone: true }),
+    },
+    {
       kind: "when",
       source: "{workflow} runs with",
       takes: TAKES_OBJECT,
       expression: expression("{workflow} runs with"),
       read: ([name], pickle) => {
         const { input } = workflowOf(name);
-        return { workflow: name as string, input: fill(input, fieldsFrom(pickle, input, name as string)) };
+        return { workflow: name as string, input: fill(input, fieldsFrom(pickle, input, inputOf(name))) };
       },
     },
     {
@@ -281,7 +341,7 @@ function rulesOf(scope: Scope): Rule[] {
       expression: expression("{op} was called with"),
       read: ([op], pickle) => ({
         op: op as string,
-        input: fieldsFrom(pickle, opOf(op).input, op as string),
+        input: fieldsFrom(pickle, opOf(op).input, inputOf(op)),
         called: true,
       }),
     },
@@ -290,6 +350,30 @@ function rulesOf(scope: Scope): Rule[] {
       source: `{op} was ${called ? "" : "not "}called`,
       expression: expression(`{op} was ${called ? "" : "not "}called`),
       read: ([op]) => ({ op: op as string, called }),
+    })),
+    {
+      kind: "then",
+      source: "{op} was denied",
+      expression: expression("{op} was denied"),
+      read: ([op]) => ({ denied: op as string }),
+    },
+    {
+      kind: "then",
+      source: "{op} was held for {who}",
+      expression: expression("{op} was held for {who}"),
+      read: ([op, who]) => ({ held: op as string, approver: who as string }),
+    },
+    {
+      kind: "then",
+      source: "{declared} is drifted in {field}",
+      expression: expression("{declared} is drifted in {field}"),
+      read: ([declared, field]) => ({ declared: declared as string, status: "drifted", field: field as string }),
+    },
+    ...(["clean", "gone"] as const).map((status): Rule => ({
+      kind: "then",
+      source: `{declared} is ${status}`,
+      expression: expression(`{declared} is ${status}`),
+      read: ([declared]) => ({ declared: declared as string, status }),
     })),
     {
       kind: "then",
@@ -328,7 +412,7 @@ function rulesOf(scope: Scope): Rule[] {
       const fields = [...template.matchAll(/\{([^}]*)\}/g)].map(([, name]) => name!);
       const schemas = fields.map((name) => {
         try {
-          return fieldOf(op.input, name, op.id);
+          return fieldOf(op.input, name, inputOf(op.id));
         } catch {
           throw new Error(
             `${op.id}: its ${key} phrase "${template}" names {${name}}, which is not a field of its input`,
@@ -514,7 +598,7 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
           case "given": {
             const item = rule.read(values, ps);
             scenario.given.push({ step, ...item });
-            op = item.op;
+            if ("op" in item) op = item.op;
             if ("fault" in item) fault = true;
             break;
           }
@@ -522,6 +606,8 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
             const item = rule.read(values, ps);
             scenario.expect.push({ step, ...item });
             if ("op" in item) ({ op, called } = item);
+            else if ("denied" in item) op = item.denied;
+            else if ("held" in item) op = item.held;
             break;
           }
           case "any":
@@ -548,6 +634,12 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
     if (workflow === undefined) {
       throw new Error(
         `${where()}: scenario "${name}" has no When: say which workflow runs, such as "When <workflow> runs with"`,
+      );
+    }
+    const drift = scenario.expect.find((e) => "declared" in e);
+    if (drift && workflow !== DRIFT) {
+      throw new Error(
+        `${where()}: "${drift.step}" reads a drift report, so the scenario must run ${DRIFT}, not ${workflow}`,
       );
     }
     scenarios.push({ ...scenario, workflow, approvals: approvalsOf(scope.workflows.get(workflow)!) });
@@ -629,16 +721,76 @@ function contains(actual: unknown, expected: unknown): boolean {
 }
 
 type Call = Extract<LedgerRecord, { type: "op.called" }>;
+type Request = Extract<LedgerRecord, { type: "approval.requested" }>;
 const isCall = (r: LedgerRecord): r is Call => r.type === "op.called";
+const isRequest = (r: LedgerRecord): r is Request => r.type === "approval.requested";
+
+/** A policy's decision as words: `allowed`, `denied`, `held for finance`. */
+const words = (d: RecordedDecision) =>
+  d.kind === "allow" ? "allowed" : d.kind === "deny" ? "denied" : `held for ${approverLabel(d.approver)}`;
+
+/** What the policy decided for the calls, each decision once: `allowed and held for finance`. */
+const decisions = (calls: Call[]) => [...new Set(calls.map((r) => words(r.decision)))].join(" and ");
+
+/** True when `who` names the approver: a person by id, or a group by its name. */
+const isApprover = (approver: Approver, who: string) =>
+  typeof approver === "string" ? approver === who : approver.group === who;
+
+/** How a drift report found a resource, as words: `clean`, `gone`, `drifted in has_wiki, topics`. */
+const found = (r: DriftResult) =>
+  r.status === "drifted" ? `drifted in ${r.fields.map((f) => f.path).join(", ")}` : r.status;
 
 /**
  * Checks each of the scenario's expectations against a run's ledger records. Pure. A call is an
  * `op.called` record without an `error`; one with an error (a policy denial, a rejected
- * approval, a vendor's final failure) was attempted, not made.
+ * approval, a vendor's final failure) was attempted, not made. An operation `was denied` when
+ * the policy's decision on some call to it is `deny`, and `was held for` an approver when an
+ * approval for that approver holds it: one the policy asked for on its call, or one that
+ * `covers` it. A drift expectation reads the report a finished drift run returned.
  */
 export function check(scenario: Scenario, records: readonly LedgerRecord[]): Check[] {
   const end = records.find((r) => r.type === "run.finished" || r.type === "run.failed");
+  const callsTo = (op: string) => records.filter(isCall).filter((r) => r.op === op);
   return scenario.expect.map((e): Check => {
+    if ("denied" in e) {
+      const calls = callsTo(e.denied);
+      if (calls.some((r) => r.decision.kind === "deny")) return { step: e.step, ok: true };
+      const detail = calls.length ? `${e.denied} was ${decisions(calls)}, not denied` : `no call to ${e.denied}`;
+      return { step: e.step, ok: false, detail };
+    }
+    if ("held" in e) {
+      const requests = records.filter(isRequest).filter((r) => r.op === e.held || r.covers.includes(e.held));
+      if (requests.some((r) => isApprover(r.approver, e.approver))) return { step: e.step, ok: true };
+      const calls = callsTo(e.held);
+      const detail = requests.length
+        ? `${e.held} was held for ${[...new Set(requests.map((r) => approverLabel(r.approver)))].join(" and ")}, not ${e.approver}`
+        : calls.length
+          ? `${e.held} was ${decisions(calls)}, not held`
+          : `no call to ${e.held}`;
+      return { step: e.step, ok: false, detail };
+    }
+    if ("declared" in e) {
+      if (!end) return { step: e.step, ok: false, detail: "run not ended" };
+      if (end.type === "run.failed") return { step: e.step, ok: false, detail: `the run failed: ${end.error.message}` };
+      const report = end.output as Partial<DriftReport> | null | undefined;
+      if (!Array.isArray(report?.resources)) {
+        return { step: e.step, ok: false, detail: "the run's output is not a drift report" };
+      }
+      const resource = report.resources.find((r) => r.id === e.declared);
+      if (!resource) {
+        const ids = report.resources.map((r) => r.id).join(", ") || "none";
+        return { step: e.step, ok: false, detail: `no resource ${e.declared} in the report; it has ${ids}` };
+      }
+      if (resource.status === "error") {
+        return { step: e.step, ok: false, detail: `${e.declared} could not be read: ${resource.error}` };
+      }
+      const wanted = e.status === "drifted" ? `drifted in ${e.field}` : e.status;
+      const ok =
+        resource.status === e.status && (e.status !== "drifted" || resource.fields.some((f) => f.path === e.field));
+      return ok
+        ? { step: e.step, ok }
+        : { step: e.step, ok, detail: `${e.declared} is ${found(resource)}, not ${wanted}` };
+    }
     if ("op" in e) {
       const tries = records.filter(isCall).filter((r) => r.op === e.op);
       const calls = tries.filter((r) => !r.error);
