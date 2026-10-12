@@ -1274,7 +1274,7 @@ describe("an app configured otherwise", () => {
 
   it("boots with broken data files: lists the resources it could read, and the problems", async () => {
     expect(warned).toEqual([
-      expect.stringMatching(/^sanoma app: the data files have problems.*\n {2}resources\/bad\.ts:2:1: /s),
+      expect.stringMatching(/^sanoma app: the config's files have problems.*\n {2}resources\/bad\.ts:2:1: /s),
     ]);
     const { body } = await call<ConfigDescription>("/api/config", { base: other.url });
     expect(body.resources.map((r) => r.id)).toEqual(["resources/good.ts#web"]);

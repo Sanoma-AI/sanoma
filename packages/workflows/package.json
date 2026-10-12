@@ -42,13 +42,13 @@
       "types": "./dist/fake.d.ts",
       "default": "./dist/fake.js"
     },
-    "./lint": {
-      "types": "./dist/lint.d.ts",
-      "default": "./dist/lint.js"
-    },
     "./scenario": {
       "types": "./dist/scenario.d.ts",
       "default": "./dist/scenario.js"
+    },
+    "./scenarios": {
+      "types": "./dist/scenarios.d.ts",
+      "default": "./dist/scenarios.js"
     },
     "./shared": {
       "types": "./dist/shared.d.ts",

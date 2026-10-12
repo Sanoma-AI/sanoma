@@ -51,10 +51,11 @@ interface ServerEntry {
 export async function startApp(config: SanomaConfig, options: AppOptions = {}): Promise<App> {
   const resolved = resolveConfig(config);
   const description = describeConfig(config);
-  // Broken data files do not stop the app: it shows the resources it could read, and the problems.
+  // Problems in the files do not stop the app: a data file's resources are left out (the Resources
+  // page lists the problems), and a workflow the worker will refuse is shown with its outline's error.
   if (description.problems.length) {
     const lines = description.problems.map((p) => `  ${p.file === undefined ? "" : `${problemAt(p)}: `}${p.message}`);
-    console.warn(`sanoma app: the data files have problems; their resources are left out:\n${lines.join("\n")}`);
+    console.warn(`sanoma app: the config's files have problems (\`sanoma check\` lists them):\n${lines.join("\n")}`);
   }
   const distDir = resolve(options.distDir ?? defaultDistDir());
   const host = options.host ?? "127.0.0.1";

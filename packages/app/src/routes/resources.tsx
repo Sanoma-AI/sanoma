@@ -100,10 +100,14 @@ function rowsOf(resources: DeclaredResource[], report: DriftReport | undefined):
 /** A problem, as text: where it is and what it says. */
 const problemKey = (p: ResourceProblem) => `${problemAt(p) ?? ""} ${p.message}`;
 
-/** The description's problems, then any other the last check found. */
+/** Whether a description problem is a data file's (its `file` is relative to the root), not a workflow's (absolute). */
+const inDataFile = (p: ResourceProblem) => p.file === undefined || p.file.startsWith("resources/");
+
+/** The description's data-file problems, then any other the last check found. */
 function problemsOf(problems: ResourceProblem[], report: DriftReport | undefined): ResourceProblem[] {
-  const seen = new Set(problems.map(problemKey));
-  return [...problems, ...(report?.problems ?? []).filter((p) => !seen.has(problemKey(p)))];
+  const own = problems.filter(inDataFile);
+  const seen = new Set(own.map(problemKey));
+  return [...own, ...(report?.problems ?? []).filter((p) => !seen.has(problemKey(p)))];
 }
 
 /**

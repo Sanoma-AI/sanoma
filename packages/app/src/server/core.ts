@@ -1,7 +1,7 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import {
   type ApprovalState,
   type DriftReport,
@@ -91,7 +91,9 @@ export async function fileSource(
   const workflowFile = description.workflows.some((wf) => "file" in wf.outline && wf.outline.file === file);
   const dataFile =
     resolved.root !== undefined &&
-    (description.resources.some((r) => r.file === file) || description.problems.some((p) => p.file === file));
+    (description.resources.some((r) => r.file === file) ||
+      // A data file's problem names it relative to the root; a workflow's names its absolute file.
+      description.problems.some((p) => p.file === file && !isAbsolute(file)));
   if (!workflowFile && !dataFile) return { source: null };
   try {
     const text = await readFile(workflowFile ? file : join(resolved.root!, file), "utf8");

@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
@@ -7,7 +10,7 @@ import resendPkg from "../../../connectors/resend/package.json" with { type: "js
 import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
 import { fakeGhost } from "@sanoma/connector-ghost/fake";
 import { fakeResend } from "@sanoma/connector-resend/fake";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   allow,
@@ -229,5 +232,65 @@ describe("describeConfig", () => {
     expect(() => describeConfig({ ...base, workflows: [], connectors: [clash], drivers })).toThrow(
       /^Cannot describe clash\.thing\.get output as JSON Schema: Duplicate schema id "twice"/,
     );
+  });
+});
+
+/** `announce`, as if defined in `file`: its outline and lint read that file. */
+const definedIn = (file: string) => ({ ...announce, file }) as typeof announce;
+
+describe("describeConfig's workflow problems", () => {
+  let dir = "";
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("are what lintWorkflow finds in each workflow's file, at their positions, beside the data files' problems", () => {
+    dir = mkdtempSync(join(tmpdir(), "sanoma-describe-"));
+    const file = join(dir, "announce.ts");
+    writeFileSync(
+      file,
+      `import { defineWorkflow, SanomaClient } from "@sanoma/workflows";
+import { readFileSync } from "node:fs";
+import { ghost } from "@sanoma/connector-ghost";
+import { z } from "zod";
+export default defineWorkflow({
+  name: "announce",
+  trigger: "manual",
+  input: z.object({ title: z.string() }),
+  uses: [ghost.post.create],
+  run: async (ctx, { title }) => {
+    const c = ctx;
+    await c.ghost.post.create({ title, html: "" });
+  },
+});
+`,
+    );
+    const { workflows, problems } = describeConfig({ ...base, workflows: [definedIn(file)], root: dir });
+    expect(workflows[0]!.outline).toEqual({
+      error: expect.stringMatching(/^.*announce\.ts:11:15: ctx is only called/),
+    });
+    expect(problems).toEqual([
+      { file, line: 1, column: 26, message: expect.stringMatching(/^SanomaClient is not allowed in a workflow/) },
+      { file, line: 2, column: 30, message: expect.stringMatching(/^import "node:fs" is not allowed in a workflow/) },
+      { file, line: 11, column: 15, message: expect.stringMatching(/^ctx is only called, directly/) },
+    ]);
+    // The same file defining two workflows is read once.
+    const again = { ...definedIn(file), name: "again" } as typeof announce;
+    const twice = describeConfig({ ...base, workflows: [definedIn(file), again], root: dir });
+    expect(twice.problems).toHaveLength(4);
+    expect(twice.problems.filter((p) => p.line === undefined)).toEqual([
+      { file, message: expect.stringMatching(/holds no workflow named "again"|no workflow/) },
+    ]);
+  });
+
+  it("name an outline error at no position when the lint finds nothing: a file that cannot be read", () => {
+    dir = mkdtempSync(join(tmpdir(), "sanoma-describe-"));
+    const file = join(dir, "gone.ts");
+    const { workflows, problems } = describeConfig({ ...base, workflows: [definedIn(file)], root: dir });
+    expect(workflows[0]!.outline).toEqual({ error: expect.stringMatching(/could not be read/) });
+    expect(problems).toEqual([{ file, message: expect.stringMatching(/^.*gone\.ts could not be read/) }]);
+  });
+
+  it("are empty for the example workflow", () => {
+    dir = mkdtempSync(join(tmpdir(), "sanoma-describe-"));
+    expect(describeConfig({ ...base, root: dir }).problems).toEqual([]);
   });
 });
