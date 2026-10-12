@@ -326,7 +326,8 @@ function indexConnectors(list: Connector<any, any>[]) {
   return map;
 }
 
-function indexDrivers(list: Driver[], ops: Map<string, Op>) {
+/** The drivers' functions by operation id, refusing one no connector declares. */
+export function indexDrivers(list: Driver[], ops: Map<string, Op>) {
   const map = new Map<string, DriverFn>();
   for (const d of list) {
     for (const [key, fn] of Object.entries(d.ops)) {
