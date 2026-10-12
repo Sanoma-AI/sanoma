@@ -2,9 +2,11 @@ import { type QueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createRootRouteWithContext, HeadContent, Link, Outlet, Scripts } from "@tanstack/react-router";
 import { createIsomorphicFn } from "@tanstack/react-start";
 import { getCookie } from "@tanstack/react-start/server";
+import { Maximize2Icon, Minimize2Icon } from "lucide-react";
 import { ThemeProvider } from "next-themes";
 import { Fragment, lazy, type ReactNode, Suspense } from "react";
 import { AppSidebar } from "#/components/app-sidebar.tsx";
+import { DENSITY_COOKIE, DensityProvider, useDensity } from "#/components/density.tsx";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -13,12 +15,13 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "#/components/ui/breadcrumb.tsx";
+import { Button } from "#/components/ui/button.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "#/components/ui/sidebar.tsx";
+import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "#/components/ui/sidebar.tsx";
 import { Toaster } from "#/components/ui/sonner.tsx";
 import { TooltipProvider } from "#/components/ui/tooltip.tsx";
 import { ActorContext, useActorState } from "../actor.ts";
-import { useCrumbs } from "../components/common.tsx";
+import { Tip, useCrumbs } from "../components/common.tsx";
 import { actorQuery, configQuery, waitingRunsQuery } from "../queries.ts";
 // lucide's shield-check, the sidebar's brand icon.
 import favicon from "../favicon.svg?url";
@@ -43,7 +46,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   // Who the server says is asking, in the first render: a deployment's login shows at once.
   // And the config, which every page reads and which cannot change while the app runs.
   // Both stay in the query client, where the page reads them: a loader returns only what no
-  // query holds (here, whether the sidebar was left open), since the page carries loader data too.
+  // query holds (here, whether the sidebar was left open and the density), since the page carries
+  // loader data too.
   loader: async ({ context: { queryClient } }) => {
     // The inbox badge's count, started here and not awaited: it streams in with the page, and a
     // slow or failed read never holds the page up (the badge shows nothing until it comes).
@@ -52,7 +56,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       queryClient.query({ ...actorQuery(), staleTime: "static" }),
       queryClient.query({ ...configQuery(), staleTime: "static" }),
     ]);
-    return { sidebarOpen: readSidebarOpen() };
+    return { sidebarOpen: readSidebarOpen(), compact: readCompact() };
   },
   // The document, around everything the root renders: its page, error or not-found included.
   shellComponent: Document,
@@ -72,41 +76,94 @@ const SIDEBAR_COOKIE = "sidebar_state";
  */
 const readSidebarOpen = createIsomorphicFn().server(() => getCookie(SIDEBAR_COOKIE) !== "false");
 
+/**
+ * Whether the page is Compact: its cookie (density.tsx) says so. Read on the server only, as
+ * `readSidebarOpen` is: DensityProvider takes it once, as it mounts, and hydration has the
+ * server's answer.
+ */
+const readCompact = createIsomorphicFn().server(() => getCookie(DENSITY_COOKIE) === "compact");
+
 /** Asked once per browser, so loaded only when no name is stored. */
 const WhoAreYou = lazy(() => import("../components/who-are-you.tsx"));
 
 function Root() {
   const { data: server } = useSuspenseQuery(actorQuery());
   const actor = useActorState(server);
-  // Only this field: the root's loader data is new on every navigation, the field is not.
+  // Only these fields: the root's loader data is new on every navigation, a field is not.
   const sidebarOpen = Route.useLoaderData({ select: (data) => data.sidebarOpen });
+  const compact = Route.useLoaderData({ select: (data) => data.compact });
   return (
     <ActorContext value={actor}>
       {/* Radix's tooltips need one provider: the sidebar's, and any a page shows. */}
       <TooltipProvider>
-        <div id="app">
-          <SidebarProvider defaultOpen={sidebarOpen}>
-            <AppSidebar />
-            <SidebarInset>
-              <header className="flex h-12 shrink-0 items-center gap-2 px-4">
-                <SidebarTrigger className="-ml-1" />
-                <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
-                <Crumbs />
-              </header>
-              <div className="mx-auto w-full max-w-6xl p-4 pt-0 sm:px-6">
-                <Outlet />
-              </div>
-            </SidebarInset>
-          </SidebarProvider>
-          {!actor.fromServer && actor.actor === null && (
-            <Suspense fallback={null}>
-              <WhoAreYou />
-            </Suspense>
-          )}
-          <Toaster />
-        </div>
+        <DensityProvider defaultCompact={compact}>
+          <App>
+            <SidebarProvider defaultOpen={sidebarOpen}>
+              <AppSidebar />
+              <SidebarInset>
+                <header className="flex h-12 shrink-0 items-center gap-2 px-4">
+                  <SidebarTrigger className="-ml-1" />
+                  <DensityToggle />
+                  <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
+                  <Crumbs />
+                </header>
+                <div className="mx-auto w-full max-w-6xl p-4 pt-0 sm:px-6">
+                  <Outlet />
+                </div>
+              </SidebarInset>
+            </SidebarProvider>
+            {!actor.fromServer && actor.actor === null && (
+              <Suspense fallback={null}>
+                <WhoAreYou />
+              </Suspense>
+            )}
+            <Toaster />
+          </App>
+        </DensityProvider>
       </TooltipProvider>
     </ActorContext>
+  );
+}
+
+/**
+ * The app's box, marked `data-density="compact"` while Compact (and unmarked otherwise), which
+ * the `compact:` variant and style.css's card rules key on. Here rather than on <html>: the
+ * density is Root's state. Radix portals (menus, dialogs) land in <body>, outside it, and keep
+ * the comfortable spacing.
+ */
+function App({ children }: { children: ReactNode }) {
+  const { compact } = useDensity();
+  return (
+    <div id="app" data-density={compact ? "compact" : undefined}>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Compact, a toggle beside the sidebar's: its name stays "Compact" and `aria-pressed` says
+ * whether it is on, while its tooltip names what a click switches to. Switching to Compact folds
+ * the sidebar to its icons once (not on a phone, where it is a sheet); switching back leaves the
+ * sidebar as it is.
+ */
+function DensityToggle() {
+  const { compact, setCompact } = useDensity();
+  const { setOpen, isMobile } = useSidebar();
+  return (
+    <Tip tip={compact ? "Comfortable" : "Compact"}>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-pressed={compact}
+        onClick={() => {
+          if (!compact && !isMobile) setOpen(false);
+          setCompact(!compact);
+        }}
+      >
+        {compact ? <Maximize2Icon /> : <Minimize2Icon />}
+        <span className="sr-only">Compact</span>
+      </Button>
+    </Tip>
   );
 }
 
