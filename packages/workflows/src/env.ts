@@ -59,13 +59,24 @@ export function statusesOf(env: DriverEnv, lookup: (name: string) => string | un
 }
 
 /**
- * Why the driver cannot run now: each variable its `env` declares that the environment leaves
- * missing (and not optional) or invalid, as `<NAME>` or `<NAME> (invalid: <why>)`; none when it can.
+ * Why the vendor's drivers cannot run on `statuses`, as the worker warns at start and a call
+ * fails: `<vendor> is not configured: <problems>; <hint>`, a missing variable (not optional) as
+ * `NAME (description)`, an invalid one as `NAME is invalid: <why>`, never a value. The hint says
+ * where to set them: in the environment when an invalid value is there (the environment wins
+ * over a stored value, so the connector page cannot replace it), else on the connector page.
+ * Undefined when the drivers can run.
  */
-export function unconfigured(env: DriverEnv): string[] {
-  return statusesOf(env, (name) => process.env[name])
-    .filter((c) => !credentialReady(c))
-    .map((c) => (c.status === "invalid" ? `${c.name} (invalid: ${c.problem})` : c.name));
+export function unconfigured(vendor: string, statuses: readonly CredentialStatus[]): string | undefined {
+  const unready = statuses.filter((c) => !credentialReady(c));
+  if (!unready.length) return undefined;
+  const problems = unready.map((c) =>
+    c.status === "invalid"
+      ? `${c.name} is invalid: ${c.problem}`
+      : `${c.name}${c.description ? ` (${c.description})` : ""}`,
+  );
+  const inEnvironment = unready.some((c) => c.status === "invalid" && process.env[c.name]);
+  const hint = inEnvironment ? "set in the environment" : "set it on the connector page";
+  return `${vendor} is not configured: ${problems.join(", ")}; ${hint}`;
 }
 
 const SEVERITY: Record<CredentialStatus["status"], number> = { set: 0, missing: 1, invalid: 2 };

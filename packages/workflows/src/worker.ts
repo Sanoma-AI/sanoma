@@ -4,14 +4,14 @@ import { dbosStatusesOf } from "./client.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { watchCredentials } from "./credentials.ts";
 import type { WorkflowDefinition } from "./define.ts";
-import { type CredentialStatus, credentialsOf } from "./env.ts";
+import { type CredentialStatus, credentialsOf, unconfigured } from "./env.ts";
 import { errorInfo, parseOrThrow } from "./errors.ts";
 import { entry, ownedLedger, skipped, write, writeFailure } from "./ledger.ts";
 import { setLogLevel, warn } from "./log.ts";
 import { lineStartsOf } from "./ast.ts";
 import { callsOf, outlineWithSource } from "./outline.ts";
 import type { Run, RunArgs, WorkerState, WorkflowOutline } from "./run.ts";
-import { credentialReady, errorMessage } from "./shared.ts";
+import { errorMessage } from "./shared.ts";
 
 export interface Worker {
   stop(): Promise<void>;
@@ -136,23 +136,13 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
 
 /**
  * Warns, once per vendor whose drivers would fail when called: a variable a driver's `env`
- * declares is missing or invalid. The worker starts anyway; each such call fails saying the same
- * (`guarded` in config.ts), until the variables are set on the app's connector page.
+ * declares is missing or invalid. The worker starts anyway; each such call fails with the same
+ * message (`guarded` in config.ts), until the variables are set.
  */
 function warnUnconfigured(credentials: Map<string, CredentialStatus[]>) {
   for (const [vendor, list] of credentials) {
-    const items = list
-      .filter((c) => !credentialReady(c))
-      .map((c) =>
-        c.status === "invalid"
-          ? `${c.name} is invalid (${c.problem})`
-          : `${c.name} is missing${c.description ? ` (${c.description})` : ""}`,
-      );
-    if (items.length) {
-      warn(
-        `${vendor} is not configured: ${items.join(", ")}; its calls will fail until they are set on the connector page`,
-      );
-    }
+    const why = unconfigured(vendor, list);
+    if (why) warn(why);
   }
 }
 

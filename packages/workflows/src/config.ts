@@ -2,7 +2,7 @@ import { dirname, resolve } from "node:path";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, type DriftDeclared, driftWorkflow } from "./drift.ts";
-import { unconfigured } from "./env.ts";
+import { statusesOf, unconfigured } from "./env.ts";
 import type { Fake } from "./fake.ts";
 import type { LedgerStore } from "./ledger.ts";
 import { type Connector, type Driver, DriverError, type DriverEnv, type DriverFn, isOp, type Op } from "./op.ts";
@@ -269,12 +269,11 @@ export function indexDrivers(list: Driver[], ops: Map<string, Op>) {
  */
 function guarded(vendor: string, env: DriverEnv, fn: DriverFn): DriverFn {
   return async (input, call) => {
-    const missing = unconfigured(env);
-    if (missing.length) {
-      throw new DriverError(`${vendor} is not configured: set ${missing.join(", ")} on the connector page`, {
-        retryable: false,
-      });
-    }
+    const why = unconfigured(
+      vendor,
+      statusesOf(env, (name) => process.env[name]),
+    );
+    if (why) throw new DriverError(why, { retryable: false });
     return fn(input, call);
   };
 }

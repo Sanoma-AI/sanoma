@@ -147,7 +147,7 @@ describe("a driver's env", () => {
     const credentials = checked(throwingConfig.drivers);
     expect(credentials).toEqual([{ name: URL_VAR, optional: false, status: "invalid", problem: "its check threw" }]);
     const warning = await warnedAtStart(throwingConfig);
-    expect(warning).toContain(`${URL_VAR} is invalid (its check threw)`);
+    expect(warning).toContain(`${URL_VAR} is invalid: its check threw`);
     expect(JSON.stringify([credentials, warning])).not.toContain(VALUE);
   });
 
@@ -165,7 +165,7 @@ describe("a driver's env", () => {
       status: "invalid",
       problem: "an API key, key_<digits>",
     });
-    expect(await warnedAtStart(twoDrivers)).toContain(`${KEY_VAR} is invalid (an API key, key_<digits>)`);
+    expect(await warnedAtStart(twoDrivers)).toContain(`${KEY_VAR} is invalid: an API key, key_<digits>`);
   });
 });
 
@@ -190,8 +190,8 @@ describe("startWorker", () => {
     });
     expect(message).toBe("started");
     expect(warn).toHaveBeenCalledWith(
-      `sanoma: acme is not configured: ${URL_VAR} is missing (the account's API URL), ${KEY_VAR} is invalid (an API key, key_<letters>); ` +
-        "its calls will fail until they are set on the connector page",
+      `sanoma: acme is not configured: ${URL_VAR} (the account's API URL), ${KEY_VAR} is invalid: an API key, key_<letters>; ` +
+        "set in the environment",
     );
     expect(warn.mock.calls.flat().join("\n")).not.toContain("NOT-LOWER");
     expect(launch).toHaveBeenCalledTimes(1);
@@ -220,14 +220,23 @@ describe("startWorker", () => {
     vi.stubEnv(KEY_VAR, KEY);
     vi.stubEnv(REGION_VAR, "mars");
     expect(await warnedAtStart(config)).toBe(
-      `sanoma: acme is not configured: ${REGION_VAR} is invalid (Invalid option: expected one of "us"|"eu"); ` +
-        "its calls will fail until they are set on the connector page",
+      `sanoma: acme is not configured: ${REGION_VAR} is invalid: Invalid option: expected one of "us"|"eu"; ` +
+        "set in the environment",
+    );
+  });
+
+  it("points at the connector page when nothing invalid is in the environment", async () => {
+    vi.stubEnv(URL_VAR, undefined);
+    vi.stubEnv(KEY_VAR, undefined);
+    vi.stubEnv(REGION_VAR, undefined);
+    expect(await warnedAtStart(config)).toBe(
+      `sanoma: acme is not configured: ${URL_VAR} (the account's API URL), ${KEY_VAR} (an API key); set it on the connector page`,
     );
   });
 });
 
 describe("a call to a vendor the worker started without", () => {
-  it("fails at the call, naming the variables and the connector page, until they are set", async () => {
+  it("fails at the call, saying what the worker warned at start, until they are set", async () => {
     vi.stubEnv(URL_VAR, undefined);
     vi.stubEnv(KEY_VAR, "key_NOT-LOWER");
     vi.stubEnv(REGION_VAR, undefined);
@@ -236,7 +245,7 @@ describe("a call to a vendor the worker started without", () => {
     try {
       const runId = await client.start(getThing, { id: "1" }, { startedBy: { id: "alice" } });
       const err = (await client.result(runId).catch((e: unknown) => e)) as Error;
-      const message = `acme is not configured: set ${URL_VAR}, ${KEY_VAR} (invalid: an API key, key_<letters>) on the connector page`;
+      const message = `acme is not configured: ${URL_VAR} (the account's API URL), ${KEY_VAR} is invalid: an API key, key_<letters>; set in the environment`;
       expect(err.message).toBe(message);
       expect(errorCode(err)).toBe("driver_failed");
       // The call's own failure, final, in the ledger as any driver's would be.
