@@ -30,6 +30,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./harness": {
+      "types": "./dist/harness.d.ts",
+      "default": "./dist/harness.js"
+    },
     "./replay": {
       "types": "./dist/replay.d.ts",
       "default": "./dist/replay.js"
@@ -48,6 +52,7 @@
     "prepack": "pnpm run clean && pnpm run build"
   },
   "devDependencies": {
+    "@dbos-inc/dbos-sdk": "^5.2.11",
     "@sanoma/connector-bluesky": "workspace:*",
     "@sanoma/connector-ghost": "workspace:*",
     "@sanoma/connector-github": "workspace:*",
@@ -58,6 +63,7 @@
     "zod": "^4.6.5"
   },
   "peerDependencies": {
+    "@dbos-inc/dbos-sdk": "^5.2.11",
     "@sanoma/workflows": "^0.1.0",
     "msw": "^3",
     "vitest": "^5",
