@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { check } from "../src/check.ts";
@@ -20,7 +20,10 @@ describe("check", () => {
       ok: true,
       problems: [],
     });
-    expect(log).toEqual(["tsc", "oxlint workflows policies", "config", "scenarios skipped"]);
+    expect(log).toEqual(["tsc", "wrote .oxlintrc.json", "oxlint workflows policies", "config", "scenarios skipped"]);
+    expect(readFileSync(join(dir, ".oxlintrc.json"), "utf8")).toBe(
+      `{\n  "extends": [\n    "./node_modules/sanoma/oxlint.json"\n  ]\n}\n`,
+    );
 
     // An import a workflow may not make (describeConfig, through lintWorkflow), the clock (oxlint,
     // with the shipped rules), and a data file naming a resource type its connector lacks (describeConfig).

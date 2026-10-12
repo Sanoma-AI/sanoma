@@ -1,6 +1,6 @@
 # packages/workflows/src
 
-The source of `@sanoma/workflows`: how connectors, workflows and policies are declared, how a worker runs them durably on DBOS, and the tools that read them (lint, outline, describe). Its entry points, from `exports` in `package.json`: `.` (`index.ts`), `./describe`, `./fake`, `./scenario`, `./scenarios` and `./shared`.
+The source of `@sanoma/workflows`: how connectors, workflows and policies are declared, how a worker runs them durably on DBOS, and the tools that read them (lint, outline, describe). Its entry points, from `exports` in `package.json`: `.` (`index.ts`), `./describe`, `./fake`, `./plugin`, `./scenario`, `./scenarios` and `./shared`.
 
 ## Contents
 
@@ -27,7 +27,7 @@ The source of `@sanoma/workflows`: how connectors, workflows and policies are de
 | [`log.ts`](log.ts)                 | Operator messages (`info`, `warn`) at the last `startWorker`'s `logLevel`, and value formatting for messages                                                                |
 | [`op.ts`](op.ts)                   | `defineConnector`, operations, effects and drivers                                                                                                                          |
 | [`outline.ts`](outline.ts)         | `outlineWorkflow`: the calls, loops, branches, tries and `ctx.all` groups of a workflow's `run`, by path; `callAt` places a call                                            |
-| [`plugin.ts`](plugin.ts)           | The oxlint JS plugin `sanoma`, its rule `data-file`; `oxlint.json` loads it from `dist/`                                                                                    |
+| [`plugin.ts`](plugin.ts)           | The oxlint JS plugin `sanoma`, its rule `data-file` (the `./plugin` entry); `oxlint.json` loads it from `dist/`                                                             |
 | [`paths.ts`](paths.ts)             | Where a relative import may reach: `nearestDir` and `inside`, for both lints and the reader                                                                                 |
 | [`policy.ts`](policy.ts)           | Policy types, decisions (`allow`, `deny`, `approve`), `definePolicy` and `approvedFor`                                                                                      |
 | [`resource.ts`](resource.ts)       | `defineResource`: a resource type's schema, fields, references, `read` and `import`; `compareDeclared`, `diffDeclared`                                                      |

@@ -15,10 +15,14 @@ export type { LintProblem } from "./ast.ts";
  */
 const THROUGH_CTX = "a workflow must call vendors through ctx, so the policy sees every call";
 
-/** The packages the author surface is imported from: `sanoma` re-exports what `@sanoma/workflows` allows. */
-const AUTHOR_PACKAGES = new Set(["@sanoma/workflows", "sanoma"]);
+/**
+ * The packages the author surface is imported from, each allowing the same names: `sanoma`
+ * re-exports what `@sanoma/workflows` allows (and `z`). Adding one here accepts it.
+ */
+const AUTHOR_PACKAGES: readonly string[] = ["@sanoma/workflows", "sanoma"];
 
-const ALLOWED_PACKAGE = /^(@sanoma\/workflows|sanoma|@sanoma\/connector-[a-z0-9-]+|zod)$/;
+/** The packages a workflow may import from at all: the author packages, connectors and zod. */
+const ALLOWED_PACKAGE = new RegExp(`^(${[...AUTHOR_PACKAGES, "@sanoma/connector-[a-z0-9-]+", "zod"].join("|")})$`);
 
 /** Packages refused by name, with the reason. */
 const REFUSED_PACKAGES: [RegExp, string][] = [
@@ -29,8 +33,9 @@ const REFUSED_PACKAGES: [RegExp, string][] = [
 ];
 
 /**
- * What a workflow or policy may import from `@sanoma/workflows` (and from `sanoma`, which
- * re-exports exactly these), besides types: oxlint.json's `allowImportNames`. Everything else is
+ * What a workflow or policy may import from an author package, besides types: the one list,
+ * `allowImportNames` of oxlint.json's `@sanoma/workflows` entry (`sanoma`'s generated
+ * `oxlint.json` derives its own entry from it). Everything else is
  * refused: the client, the worker and the app could start runs or approve the run's own
  * approvals, a ledger store could forge the audit record (a store keeps the first record per
  * id), and config helpers can read credentials.
@@ -41,9 +46,8 @@ const WORKFLOW_IMPORTS: readonly string[] =
 const ALLOWED_NAMES = new Set(WORKFLOW_IMPORTS);
 
 const NOT_ALLOWED =
-  "a workflow or policy imports only " +
-  WORKFLOW_IMPORTS.join(", ") +
-  " and types from @sanoma/workflows or sanoma: the rest could start runs, approve its own approvals, forge the ledger or read credentials";
+  `a workflow or policy imports only ${WORKFLOW_IMPORTS.join(", ")} and types from ` +
+  `${AUTHOR_PACKAGES.join(" or ")}: the rest could start runs, approve its own approvals, forge the ledger or read credentials`;
 
 /**
  * Error classes a run must not test with `instanceof`: on a replay DBOS rethrows a serialized
@@ -80,7 +84,7 @@ export function lintWorkflow(source: string, filename?: string): LintProblem[] {
       problems.push({ ...at(node.source.start), message: `import "${spec}" is not allowed in a workflow: ${refusal}` });
       return;
     }
-    if (!AUTHOR_PACKAGES.has(spec)) return;
+    if (!AUTHOR_PACKAGES.includes(spec)) return;
     if (node.type === "ExportAllDeclaration") {
       problems.push({
         ...at(node.start),

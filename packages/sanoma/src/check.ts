@@ -1,7 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { problemAt } from "@sanoma/workflows";
@@ -28,8 +27,8 @@ const LINTED = ["workflows", "policies", "resources"];
 
 /**
  * Checks a repo the way its tests would, without a test framework: `tsc -p tsconfig.json` in
- * its root; oxlint, with this package's `oxlint.json` (which carries `@sanoma/workflows`'s
- * rules), over `workflows/`, `policies/` and `resources/`; every problem `describeConfig` finds
+ * its root; oxlint in the root, with the repo's `.oxlintrc.json` (written when missing, to extend
+ * this package's `oxlint.json`), over `workflows/`, `policies/` and `resources/`; every problem `describeConfig` finds
  * in the data files and the workflows' files (the import rules and what the outline cannot
  * draw: what the worker refuses to start with); then every scenario against the fakes
  * (`runScenarios`), each step that did not hold a problem. `ok` when there are no problems.
@@ -44,19 +43,15 @@ export async function check(
     isAbsolute(file) && !relative(root, file).startsWith("..") ? relative(root, file) : file;
 
   log("tsc");
-  const tsc = await run(binOf("typescript", "bin/tsc"), ["-p", "tsconfig.json", "--pretty", "false"], root);
+  const tsc = await run(binOf("typescript"), ["-p", "tsconfig.json", "--pretty", "false"], root);
   if (tsc.code !== 0) problems.push(...tscProblems(tsc));
 
   const dirs = LINTED.filter((dir) => existsSync(join(root, dir)));
   if (dirs.length) {
+    if (writeOxlintrc(root)) log("wrote .oxlintrc.json");
     log(`oxlint ${dirs.join(" ")}`);
-    const configFile = oxlintConfig(root);
-    try {
-      const args = ["-c", configFile, "--deny-warnings", "-f", "json", ...dirs];
-      problems.push(...oxlintProblems(await run(binOf("oxlint", "bin/oxlint"), args, root)));
-    } finally {
-      rmSync(configFile, { force: true });
-    }
+    const args = ["--deny-warnings", "-f", "json", ...dirs];
+    problems.push(...oxlintProblems(await run(binOf("oxlint"), args, root)));
   }
 
   log("config");
@@ -99,10 +94,11 @@ async function run(bin: string, args: string[], cwd: string): Promise<Ran> {
   }
 }
 
-/** A package's bin, found from this package: neither `typescript` nor `oxlint` exports it, so by its `package.json`. */
-function binOf(pkg: string, bin: string): string {
-  const require = createRequire(import.meta.url);
-  return join(dirname(require.resolve(`${pkg}/package.json`)), bin);
+/** A package's bin (its only one), found from this package by its `package.json`: neither `typescript` nor `oxlint` exports it. */
+function binOf(pkg: string): string {
+  const manifest = new URL(import.meta.resolve(`${pkg}/package.json`));
+  const { bin } = JSON.parse(readFileSync(manifest, "utf8")) as { bin: string | Record<string, string> };
+  return fileURLToPath(new URL(typeof bin === "string" ? bin : Object.values(bin)[0]!, manifest));
 }
 
 /**
@@ -115,20 +111,18 @@ function tscProblems({ code, stdout, stderr }: Ran): string[] {
   return lines.map((line) => line.replace(/^(.+?)\((\d+),(\d+)\): /, "$1:$2:$3: "));
 }
 
+/** The repo's `.oxlintrc.json`: this package's lint, for `sanoma check` and an editor alike. */
+const OXLINTRC = `${JSON.stringify({ extends: ["./node_modules/sanoma/oxlint.json"] }, null, 2)}\n`;
+
 /**
- * This package's `oxlint.json`, written into the root as `.oxlintrc.sanoma-check.json` for the
- * run (removed after), with its `extends` pointing at `@sanoma/workflows`'s `oxlint.json` where
- * it is installed: oxlint resolves `extends` as a file path, which the installed layout
- * decides, and matches the `workflows/**` globs of the rules against the directory of the
- * config it was given, so the config must be in the root.
+ * Writes `<root>/.oxlintrc.json` when there is none, and says whether it did. oxlint, run in the
+ * root, reads it and matches the rules' `workflows/**` globs against the root.
  */
-function oxlintConfig(root: string): string {
-  const own = fileURLToPath(new URL("../oxlint.json", import.meta.url));
-  const config = JSON.parse(readFileSync(own, "utf8")) as Record<string, unknown>;
-  const workflows = fileURLToPath(new URL("../oxlint.json", import.meta.resolve("@sanoma/workflows")));
-  const file = join(root, ".oxlintrc.sanoma-check.json");
-  writeFileSync(file, JSON.stringify({ ...config, extends: [workflows] }, null, 2));
-  return file;
+function writeOxlintrc(root: string): boolean {
+  const file = join(root, ".oxlintrc.json");
+  if (existsSync(file)) return false;
+  writeFileSync(file, OXLINTRC);
+  return true;
 }
 
 interface Diagnostic {

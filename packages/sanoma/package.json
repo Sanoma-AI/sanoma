@@ -42,7 +42,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node scripts/oxlint.ts && tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
     "prepack": "pnpm run clean && pnpm run build"
   },

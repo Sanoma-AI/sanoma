@@ -15,23 +15,26 @@ export const cli = join(repo, "packages/sanoma/src/cli.ts");
  * be: by its `exports`, from `dist/`. `ensureBuilt` builds each whose output is missing or older
  * than a file under its `src/`, in dependency order.
  */
-const BUILT: { dir: string; output: string }[] = [
-  { dir: "packages/workflows", output: "dist/index.js" },
-  { dir: "connectors/ghost", output: "dist/index.js" },
-  { dir: "packages/app", output: "dist/server/server.js" },
-  { dir: "packages/sanoma", output: "dist/index.js" },
+const BUILT: { dir: string; outputs: string[] }[] = [
+  { dir: "packages/workflows", outputs: ["dist/index.js"] },
+  { dir: "connectors/ghost", outputs: ["dist/index.js"] },
+  { dir: "packages/app", outputs: ["dist/server/server.js"] },
+  { dir: "packages/sanoma", outputs: ["dist/index.js", "dist/oxlint-plugin.js", "oxlint.json"] },
 ];
 
 export function ensureBuilt(): void {
-  for (const { dir, output } of BUILT) {
+  for (const { dir, outputs } of BUILT) {
     const pkg = join(repo, dir);
-    const built = join(pkg, output);
     const src = join(pkg, "src");
-    const stale =
-      !existsSync(built) ||
-      readdirSync(src, { recursive: true, encoding: "utf8" }).some(
-        (file) => statSync(join(src, file)).mtimeMs > statSync(built).mtimeMs,
+    const stale = outputs.some((output) => {
+      const built = join(pkg, output);
+      return (
+        !existsSync(built) ||
+        readdirSync(src, { recursive: true, encoding: "utf8" }).some(
+          (file) => statSync(join(src, file)).mtimeMs > statSync(built).mtimeMs,
+        )
       );
+    });
     if (stale) execFileSync("pnpm", ["run", "build"], { cwd: pkg, stdio: "inherit" });
   }
 }

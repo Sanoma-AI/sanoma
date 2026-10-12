@@ -12,6 +12,7 @@
       "@sanoma/workflows": ["./packages/workflows/src/index.ts"],
       "@sanoma/workflows/describe": ["./packages/workflows/src/describe.ts"],
       "@sanoma/workflows/fake": ["./packages/workflows/src/fake.ts"],
+      "@sanoma/workflows/plugin": ["./packages/workflows/src/plugin.ts"],
       "@sanoma/workflows/scenario": ["./packages/workflows/src/scenario.ts"],
       "@sanoma/workflows/scenarios": ["./packages/workflows/src/scenarios.ts"],
       "@sanoma/workflows/shared": ["./packages/workflows/src/shared.ts"],
