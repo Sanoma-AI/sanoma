@@ -1,7 +1,16 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { allowAll, type Driver, memoryLedger, type SanomaConfig } from "@sanoma/workflows";
+import { withFake } from "@sanoma/testing";
+import {
+  allowAll,
+  type Connector,
+  defineConnector,
+  type Driver,
+  memoryLedger,
+  type SanomaConfig,
+} from "@sanoma/workflows";
+import { defineFake } from "@sanoma/workflows/fake";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { renderEnvExample, writeEnvExample } from "../src/env.ts";
@@ -16,10 +25,15 @@ const shop: Driver = {
 };
 const mail: Driver = { vendor: "mail", ops: {}, env: z.object({ MAIL_TOKEN: z.string().min(1) }) };
 
+/** A connector of `driver`'s vendor, with no operations, carrying `driver`. */
+const carrying = (driver: Driver): Connector<any, any> => {
+  const connector = defineConnector(driver.vendor, {});
+  return withFake(connector, defineFake(connector, { initial: () => ({}), ops: () => ({}) }), driver);
+};
+
 const config: SanomaConfig = {
   workflows: [],
-  connectors: [],
-  drivers: [shop, mail],
+  connectors: [carrying(shop), carrying(mail)],
   policy: allowAll,
   ledger: memoryLedger(),
 };
@@ -45,7 +59,7 @@ MAIL_TOKEN=
 `;
 
 describe("renderEnvExample", () => {
-  it("lists sanoma's variables, then each vendor's in the drivers' order, optional ones commented out", () => {
+  it("lists sanoma's variables, then each vendor's in the connectors' order, optional ones commented out", () => {
     expect(renderEnvExample(config)).toBe(expected);
   });
 

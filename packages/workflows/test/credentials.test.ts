@@ -4,7 +4,7 @@ import { githubDriver } from "@sanoma/connector-github/driver";
 import { resendDriver } from "@sanoma/connector-resend/driver";
 import { stripeDriver } from "@sanoma/connector-stripe/driver";
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { testDatabaseUrl } from "@sanoma/testing";
+import { testDatabaseUrl, testRoot, withFake } from "@sanoma/testing";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -14,13 +14,16 @@ import {
   defineDriver,
   defineWorkflow,
   type Ctx,
+  type Driver,
   errorCode,
   memoryLedger,
+  resolveConfig,
   SanomaClient,
   type SanomaConfig,
   startWorker,
 } from "../src/index.ts";
 import { credentialsOf } from "../src/env.ts";
+import { defineFake } from "../src/fake.ts";
 import { describeConfig } from "../src/describe.ts";
 
 // Made-up variables and values: nothing here is a credential.
@@ -43,6 +46,9 @@ const env = z.object({
 const impl = { thing: { get: async ({ id }: { id: string }) => ({ id }) } };
 const acmeDriver = defineDriver(acme, impl, { env });
 const plain = defineDriver(acme, impl);
+const acmeFake = defineFake(acme, { initial: () => ({}), ops: () => impl });
+/** acme, set up with `driver`. */
+const acmeOn = (driver: Driver) => withFake(acme, acmeFake, driver);
 const getThing = defineWorkflow({
   name: "get-thing",
   trigger: "manual",
@@ -53,11 +59,10 @@ const getThing = defineWorkflow({
 const databaseUrl = testDatabaseUrl("credentials");
 const config: SanomaConfig = {
   workflows: [getThing],
-  connectors: [acme],
-  drivers: [acmeDriver],
+  connectors: [acmeOn(acmeDriver)],
   policy: allowAll,
   ledger: memoryLedger(),
-  appName: "credentials",
+  root: testRoot("credentials"),
   databaseUrl,
 };
 /** Sets and clears the stored credentials, as the app does. */
@@ -76,7 +81,7 @@ beforeEach(async () => {
   for (const name of [URL_VAR, KEY_VAR, REGION_VAR]) await client.clearCredential(name, { by: "tester" });
 });
 /** acme's statuses as the worker checks them, against `process.env`. */
-const checked = (drivers = config.drivers) => credentialsOf(drivers, (name) => process.env[name]).get("acme");
+const checked = (cfg = config) => credentialsOf(resolveConfig(cfg).driverList, (name) => process.env[name]).get("acme");
 const statuses = () => checked()?.map(({ name, status }) => [name, status]);
 
 /**
@@ -143,8 +148,8 @@ describe("a driver's env", () => {
     const throwing = defineDriver(acme, impl, {
       env: z.object({ [URL_VAR]: z.string().refine((v) => new URL(v).protocol === "https:") }),
     });
-    const throwingConfig = { ...config, drivers: [throwing] };
-    const credentials = checked(throwingConfig.drivers);
+    const throwingConfig = { ...config, connectors: [acmeOn(throwing)] };
+    const credentials = checked(throwingConfig);
     expect(credentials).toEqual([{ name: URL_VAR, optional: false, status: "invalid", problem: "its check threw" }]);
     const warning = await warnedAtStart(throwingConfig);
     expect(warning).toContain(`${URL_VAR} is invalid: its check threw`);
@@ -157,8 +162,8 @@ describe("a driver's env", () => {
     const stricter = defineDriver(acme, impl, {
       env: z.object({ [KEY_VAR]: z.string().regex(/^key_[0-9]+$/, "an API key, key_<digits>") }),
     });
-    const twoDrivers = { ...config, drivers: [acmeDriver, stricter] };
-    expect(checked(twoDrivers.drivers)?.[1]).toEqual({
+    const twoDrivers = { ...config, connectors: [acmeOn(acmeDriver), acmeOn(stricter)] };
+    expect(checked(twoDrivers)?.[1]).toEqual({
       name: KEY_VAR,
       description: "an API key",
       optional: false,

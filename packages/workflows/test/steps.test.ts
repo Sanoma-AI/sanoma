@@ -13,11 +13,11 @@ import inspect from "./fixtures/company/workflows/inspect.ts";
 const databaseUrl = testDatabaseUrl("steps");
 const alice = { id: "alice" };
 
-// The config's fakes are the templates each sandbox run copies, and the drivers, as a company
-// running on fakes would pass them. Unseeded: each fake holds what its replies were recorded with.
+// The connectors' fakes are the templates each sandbox run copies, and the drivers. Unseeded:
+// each fake holds what its replies were recorded with.
 const fakes = companyFakes();
 const { github, stripe } = fakes;
-const config = { ...companyConfig([inspect], policy, fakes), ledger: memoryLedger(), appName: "steps" };
+const config = { ...companyConfig([inspect], policy, fakes), ledger: memoryLedger() };
 const loaded = loadScenarios(resolveConfig(config));
 const scenario = (name: string): Scenario => loaded.scenarios.find((s) => s.name === name)!;
 const passes = (s: Scenario) => s.expect.map((e) => ({ step: e.step, ok: true }));

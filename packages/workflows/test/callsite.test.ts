@@ -1,5 +1,4 @@
 import { bluesky } from "@sanoma/connector-bluesky";
-import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
 import { testDatabaseUrl } from "@sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -155,11 +154,9 @@ describe("a workflow the outline cannot draw", () => {
     const config = {
       workflows: [helper],
       connectors: [bluesky],
-      drivers: [fakeBluesky().driver],
       policy: allowAll,
       ledger: memoryLedger(),
       databaseUrl: "postgresql://unused@localhost:1/unused",
-      appName: "callsite-refused",
     };
     await expect(startWorker(config)).rejects.toThrow(
       /^Workflow "helper" cannot be outlined, so its runs could not be held to its code: .*\/callsite\.test\.ts:\d+:\d+: ctx is only called, directly/,

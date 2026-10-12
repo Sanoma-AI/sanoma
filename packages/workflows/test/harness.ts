@@ -7,10 +7,19 @@ import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
 import { fakeGhost } from "@sanoma/connector-ghost/fake";
 import { resend } from "@sanoma/connector-resend";
 import { fakeResend } from "@sanoma/connector-resend/fake";
+import { testRoot, withFake } from "@sanoma/testing";
 import { type TestApp, useTestApp } from "@sanoma/testing/harness";
 import type { Fake, FakeCall, FakeOptions } from "@sanoma/workflows/fake";
 import { afterAll, beforeEach } from "vitest";
-import { allowAll, jsonlLedger, type LedgerRecord, type SanomaClient, type SanomaConfig } from "../src/index.ts";
+import {
+  allowAll,
+  type Connector,
+  type Driver,
+  jsonlLedger,
+  type LedgerRecord,
+  type SanomaClient,
+  type SanomaConfig,
+} from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
 
 export async function waitFor(check: () => Promise<boolean> | boolean, timeoutMs = 15_000) {
@@ -39,23 +48,38 @@ export const failure = (p: Promise<unknown>) =>
 /** A fake vendor's maker, such as `fakeGhost`. */
 type MakeFake = (options: FakeOptions) => Fake<any, any>;
 
+/** Another vendor a test adds: its connector, and the maker of its fake. */
+export type Extra = readonly [Connector<any, any>, MakeFake];
+
 /**
  * The fakes the announce workflow calls, and the `extra` ones a test adds, all logging into one
- * list so the order across vendors shows.
+ * list so the order across vendors shows. `connectors` are their connectors set up with them
+ * (`withFake`), so live runs call these very fakes; `connectorsWith(driver, …)` are the same with
+ * each driver given called instead of its vendor's fake.
  */
-export function marketingFakes({ extra = [] }: { extra?: MakeFake[] } = {}) {
+export function marketingFakes({ extra = [] }: { extra?: readonly Extra[] } = {}) {
   const calls: FakeCall[] = [];
   const blog = fakeGhost({ calls });
   const email = fakeResend({ calls });
   const social = fakeBluesky({ calls });
-  const fakes = [blog, email, social, ...extra.map((make) => make({ calls }))];
+  const pairs: (readonly [Connector<any, any>, Fake<any, any>])[] = [
+    [ghost, blog],
+    [resend, email],
+    [bluesky, social],
+    ...extra.map(([connector, make]) => [connector, make({ calls })] as const),
+  ];
+  const connectorsWith = (...drivers: Driver[]) =>
+    pairs.map(([connector, fake]) =>
+      withFake(connector, fake, drivers.find((d) => d.vendor === fake.driver.vendor) ?? fake.driver),
+    );
   return {
     calls,
     ghost: blog,
     resend: email,
     bluesky: social,
-    drivers: fakes.map((fake) => fake.driver),
-    reset: () => fakes.forEach((fake) => fake.reset()),
+    connectors: connectorsWith(),
+    connectorsWith,
+    reset: () => pairs.forEach(([, fake]) => fake.reset()),
   };
 }
 
@@ -69,15 +93,15 @@ export type App = TestApp & {
 
 /**
  * `useTestApp` on the announce workflow and the marketing fakes, which `overrides` may replace,
- * for one `describe`, on its own app name in the file's database. The fakes, and the `extra`
- * ones, reset before each test; the ledger is on disk so it outlives a restart the way it would
- * across processes.
+ * for one `describe`, on its own app name (`testRoot`) in the file's database. The fakes, and the
+ * `extra` ones, reset before each test; the ledger is on disk so it outlives a restart the way it
+ * would across processes.
  */
 export function useApp(
   databaseUrl: string,
   appName: string,
   overrides: (vendors: Vendors) => Partial<SanomaConfig> = () => ({}),
-  { extra }: { extra?: MakeFake[] } = {},
+  { extra }: { extra?: readonly Extra[] } = {},
 ): App {
   const vendors = marketingFakes({ extra });
   const ledgerDir = mkdtempSync(join(tmpdir(), `sanoma-ledger-${appName}-`));
@@ -86,13 +110,11 @@ export function useApp(
   const app = useTestApp(
     {
       workflows: [announce],
-      connectors: [ghost, resend, bluesky],
-      drivers: vendors.drivers,
-      // The same fakes, which each sandbox run copies.
-      fakes: [vendors.ghost, vendors.resend, vendors.bluesky],
+      // On the fakes, which each sandbox run also copies.
+      connectors: vendors.connectors,
       policy: allowAll,
       ledger: jsonlLedger(ledgerDir),
-      appName,
+      root: testRoot(appName),
       ...overrides(vendors),
     },
     { databaseUrl },

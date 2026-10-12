@@ -4,20 +4,18 @@ import { promisify } from "node:util";
 import { resolveConfig, SanomaClient } from "@sanoma/workflows";
 import { loadScenarios } from "@sanoma/workflows/scenario";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { testDatabaseUrl } from "../src/index.ts";
+import { testDatabaseUrlOf, testRoot } from "../src/index.ts";
 import { describeScenarios, runScenario } from "../src/scenarios.ts";
 import { config } from "./fixtures/config.ts";
 
 // Needs Postgres: `pnpm db:up`.
-const appName = "testing_scenarios";
-const scenarios = new URL("./fixtures/scenarios/", import.meta.url);
 
 // What a company repo's test/scenarios.test.ts holds: a test per scenario in fixtures/scenarios/.
-describeScenarios({ ...config, scenarios, appName });
+describeScenarios(config);
 
 describe("runScenario", () => {
   // The worker is describeScenarios'; this client shares its database and ledger.
-  const shared = { ...config, scenarios, appName, databaseUrl: testDatabaseUrl(appName) };
+  const shared = { ...config, databaseUrl: testDatabaseUrlOf(config) };
   let client: SanomaClient;
   beforeAll(async () => {
     client = await SanomaClient.connect(shared);
@@ -36,10 +34,10 @@ describe("runScenario", () => {
 });
 
 describe("describeScenarios", () => {
-  it("throws, naming the directory, when it finds no scenarios", () => {
-    const none = new URL("./fixtures/none/", import.meta.url);
-    expect(() => describeScenarios({ ...config, scenarios: none, appName })).toThrow(
-      `describeScenarios found no scenarios in ${fileURLToPath(none)}`,
+  it("throws, naming the root, when it has no scenarios/", () => {
+    const root = testRoot("testing_none");
+    expect(() => describeScenarios({ ...config, root })).toThrow(
+      `describeScenarios found no \`scenarios/\` in ${root}`,
     );
   });
 

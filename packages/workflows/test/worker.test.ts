@@ -1,8 +1,8 @@
 import { bluesky } from "@sanoma/connector-bluesky";
-import { ghost } from "@sanoma/connector-ghost";
+import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
 import { resend } from "@sanoma/connector-resend";
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { testDatabaseUrl } from "@sanoma/testing";
+import { testDatabaseUrl, testRoot, withFake } from "@sanoma/testing";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -24,13 +24,13 @@ const vendors = marketingFakes();
 const ledger = memoryLedger();
 const config = (options: Partial<SanomaConfig>): SanomaConfig => ({
   workflows: [announce],
-  connectors: [ghost, resend, bluesky],
-  drivers: vendors.drivers,
+  connectors: vendors.connectors,
   policy: allowAll,
   ledger,
   databaseUrl: "postgresql://unused@localhost:1/unused",
   ...options,
 });
+const [onGhost, onResend] = vendors.connectors;
 
 const forged = defineConnector("ghost", {
   post: { publish: { effect: "read", idempotent: true, input: z.any(), output: z.any() } },
@@ -42,7 +42,6 @@ const sneaky = defineWorkflow({
   uses: [forged.post.publish],
   run: async (ctx, { id }) => ctx.ghost.post.publish({ id }),
 });
-const withoutBluesky = vendors.drivers.filter((d) => d.vendor !== "bluesky");
 
 const refused: [string, Partial<SanomaConfig>, RegExp][] = [
   [
@@ -52,15 +51,19 @@ const refused: [string, Partial<SanomaConfig>, RegExp][] = [
   ],
   [
     "a driver for an operation no connector declares",
-    { connectors: [ghost, resend] },
+    { connectors: [onGhost!, withFake(resend, vendors.bluesky)] },
     /^Driver "bluesky" implements bluesky\.post\.create, which no connector/,
   ],
   [
     "a workflow using an operation no connector declares",
-    { connectors: [ghost, resend], drivers: withoutBluesky },
+    { connectors: [onGhost!, onResend!] },
     /^Workflow "announce": bluesky\.post\.create is not declared by any connector/,
   ],
-  ["a workflow using an operation with no driver", { drivers: withoutBluesky }, /bluesky\.post\.create has no driver$/],
+  [
+    "a workflow using an operation whose connector carries no driver (a copy carries no setup)",
+    { connectors: [onGhost!, onResend!, { ...bluesky }] },
+    /`bluesky\.post\.create` has no driver: the connector package must attach one$/,
+  ],
   [
     "two different workflows with one name",
     { workflows: [announce, { ...announce }] },
@@ -75,13 +78,18 @@ const refused: [string, Partial<SanomaConfig>, RegExp][] = [
   ["no connectors", { connectors: undefined as never }, /^The config needs `connectors`/],
   [
     "two fakes for one vendor",
-    { fakes: [vendors.ghost, vendors.ghost] },
-    /^Two fakes in `fakes` are for "ghost"; keep one per vendor$/,
+    { connectors: [...vendors.connectors, withFake(bluesky, fakeBluesky())] },
+    /^Two connectors in `connectors` attach a fake for "bluesky"; keep one per vendor$/,
   ],
   [
-    "scenarios that are not a file: URL",
-    { scenarios: new URL("https://example.com/scenarios/") },
-    /^The config's `scenarios` must be a file: URL to a directory/,
+    "`drivers`, which a connector now carries",
+    { drivers: [] } as never,
+    /^The config's `drivers` is no longer read; leave it out: each connector carries its driver$/,
+  ],
+  [
+    "`fakes`, `appName` and `scenarios`, which the connectors and the root now give",
+    { fakes: [], appName: "acme", scenarios: new URL("file:///srv/acme/scenarios/") } as never,
+    /^The config's `fakes`, `appName`, `scenarios` are no longer read; leave them out: each connector carries its fake; the app's name is its package\.json's; the scenarios are `scenarios\/` in the config's root$/,
   ],
 ];
 
@@ -101,7 +109,7 @@ describe("startWorker, resolveConfig and describeConfig", () => {
   });
 
   it("derive the queue, version, policy version and ledger from the config", () => {
-    const resolved = resolveConfig(config({ appName: "acme" }));
+    const resolved = resolveConfig(config({ root: testRoot("acme") }));
     expect(resolved).toMatchObject({
       appName: "acme",
       databaseUrl: "postgresql://unused@localhost:1/unused",
@@ -118,34 +126,16 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       "resend.broadcast.send",
     ]);
     expect([...resolved.drivers.keys()].toSorted()).toEqual([...resolved.ops.keys()].toSorted());
-    expect(resolved.fakes.size).toBe(0);
-    expect(resolved.fakeDrivers.size).toBe(0);
     expect(resolved.ledger).toBe(ledger);
+    // Neither a root nor a file: no package.json names the app.
     expect(resolveConfig(config({})).appName).toBe("sanoma");
     expect(resolveConfig(config({})).queueName).toBe("sanoma:sanoma");
-  });
-
-  it("index the fakes' functions by operation id, apart from the drivers', for sandbox runs", () => {
-    const scenarios = new URL("file:///srv/acme/scenarios/");
-    const fakes = [vendors.ghost, vendors.bluesky];
-    const resolved = resolveConfig(config({ fakes, scenarios }));
-    expect([...resolved.fakes]).toEqual([
-      ["ghost", vendors.ghost],
-      ["bluesky", vendors.bluesky],
-    ]);
-    expect([...resolved.fakeDrivers.keys()].toSorted()).toEqual([
-      "bluesky.post.create",
-      "ghost.post.create",
-      "ghost.post.publish",
-    ]);
-    expect(resolved.fakeDrivers.get("ghost.post.create")).toBe(vendors.ghost.driver.ops["post.create"]);
-    expect(resolved.scenarios).toBe(scenarios);
   });
 });
 
 describe("startWorker failing after DBOS has launched", () => {
   it("stops DBOS and throws, so nothing runs in a worker nobody holds and the next start launches afresh", async () => {
-    const ok = config({ appName: "worker-launch", databaseUrl: testDatabaseUrl("worker") });
+    const ok = config({ root: testRoot("worker-launch"), databaseUrl: testDatabaseUrl("worker") });
     vi.spyOn(DBOS, "registerQueue").mockRejectedValueOnce(new Error("no queue for you"));
     await expect(startWorker(ok)).rejects.toThrow("no queue for you");
     expect(DBOS.isInitialized()).toBe(false);

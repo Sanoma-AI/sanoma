@@ -1,10 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { testDatabaseUrl } from "@sanoma/testing";
+import { fileURLToPath } from "node:url";
+import { testDatabaseUrl, withFake } from "@sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { ghost } from "@sanoma/connector-ghost";
-import { resend } from "@sanoma/connector-resend";
-import { bluesky } from "@sanoma/connector-bluesky";
 import {
   defineConnector,
   defineWorkflow,
@@ -13,6 +11,7 @@ import {
   type LedgerRecord,
   resolveConfig,
 } from "../src/index.ts";
+import { defineFake } from "../src/fake.ts";
 import { check, drive, loadScenarios, type Scenario } from "../src/scenario.ts";
 import announce from "./fixtures/announce.ts";
 import { failure, inSeconds, pending, types, useApp, waitFor } from "./harness.ts";
@@ -34,10 +33,11 @@ const review = defineWorkflow({
   },
 });
 
-/** A vendor with a driver and no fake. */
+/** A vendor with a driver, and a fake that implements none of its operations. */
 const lab = defineConnector("lab", {
   sample: { take: { effect: "write", input: z.object({}), output: z.object({}) } },
 });
+const labFake = defineFake(defineConnector("lab", {}), { initial: () => ({}), ops: () => ({}) });
 const sample = defineWorkflow({
   name: "sample",
   trigger: "manual",
@@ -49,22 +49,27 @@ const sample = defineWorkflow({
 describe("sandbox runs", () => {
   /** Operations the drivers were called with: a sandbox run calls none. */
   const live: string[] = [];
+  /** `driver`, each of whose functions records the call and throws. */
+  const tripwire = ({ vendor, ops }: Driver): Driver => ({
+    vendor,
+    ops: Object.fromEntries(
+      Object.keys(ops).map((key) => [
+        key,
+        async () => {
+          live.push(`${vendor}.${key}`);
+          throw new Error("a sandbox run called a driver");
+        },
+      ]),
+    ),
+  });
   const app = useApp(databaseUrl, "sandbox", (vendors) => ({
     workflows: [announce, review, sample],
-    connectors: [ghost, resend, bluesky, lab],
-    drivers: [...vendors.drivers, { vendor: "lab", ops: { "sample.take": async () => ({}) } }].map((d): Driver => ({
-      vendor: d.vendor,
-      ops: Object.fromEntries(
-        Object.keys(d.ops).map((key) => [
-          key,
-          async () => {
-            live.push(`${d.vendor}.${key}`);
-            throw new Error("a sandbox run called a driver");
-          },
-        ]),
-      ),
-    })),
-    scenarios: new URL("./fixtures/scenarios/", import.meta.url),
+    connectors: [
+      ...vendors.connectorsWith(...[vendors.ghost, vendors.resend, vendors.bluesky].map((f) => tripwire(f.driver))),
+      withFake(lab, labFake, tripwire({ vendor: "lab", ops: { "sample.take": async () => ({}) } })),
+    ],
+    // Its scenarios are fixtures/scenarios/.
+    root: fileURLToPath(new URL("./fixtures/", import.meta.url)),
   }));
   const c = () => app.client;
 
@@ -202,7 +207,7 @@ describe("sandbox runs", () => {
     const err = await failure(c().result(runId));
     expect(errorCode(err)).toBe("invalid_input");
     expect((err as Error).message).toBe(
-      "A sandbox run of sample has no fake for lab.sample.take: add their vendors' fakes to the config's `fakes`",
+      "A sandbox run of sample has no fake for lab.sample.take: no fake its connectors attach implements it",
     );
     expect(live).toEqual([]);
 
@@ -245,7 +250,7 @@ describe("sandbox runs", () => {
     for (const sandbox of [7, ""]) {
       const err = await failure(c().start(review, {}, { startedBy: alice, sandbox: sandbox as never }));
       expect(errorCode(err)).toBe("invalid_input");
-      expect((err as Error).message).toMatch(/^`sandbox` must be the name of a scenario in the config's `scenarios`/);
+      expect((err as Error).message).toMatch(/^`sandbox` must be the name of a scenario in the config's `scenarios\/`/);
     }
   });
 

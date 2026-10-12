@@ -22,13 +22,13 @@ import { check, loadScenarios, parseFeature, type Scenario, type Scope } from ".
 import announce from "./fixtures/announce.ts";
 import { companyConfig } from "./fixtures/company/fakes.ts";
 import inspect from "./fixtures/company/workflows/inspect.ts";
-import { marketingFakes } from "./harness.ts";
+import { withFake } from "@sanoma/testing";
 
-const scopeOf = (connectors: Parameters<typeof resolveConfig>[0]["connectors"], drivers = marketingFakes().drivers) => {
+// The packages' connectors carry their drivers: announce's operations have one.
+const scopeOf = (connectors: Parameters<typeof resolveConfig>[0]["connectors"]) => {
   const resolved = resolveConfig({
     workflows: [announce],
     connectors,
-    drivers,
     policy: allowAll,
     ledger: memoryLedger(),
   });
@@ -316,10 +316,9 @@ describe("parseFeature", () => {
         },
       },
     });
-    const drivers = [...marketingFakes().drivers, { vendor: "flaky", ops: { "thing.poke": async () => ({}) } }];
     const message = thrown(
       `Feature: A\n  Scenario: S\n    Given ghost.post.publish fails once\n    When announce runs\n`,
-      scopeOf([ghost, resend, bluesky, flaky], drivers),
+      scopeOf([ghost, resend, bluesky, flaky]),
     );
     expect(message).toBe(
       'x.feature:3: "ghost.post.publish fails once" is ambiguous: it matches "{op} fails once" and "{id} fails once"',
@@ -395,11 +394,10 @@ describe("parseFeature", () => {
           },
         },
       });
-      const drivers = [...marketingFakes().drivers, { vendor: "runs", ops: { "run.start": async () => ({}) } }];
       const [scenario] = parseFeature(
         `Feature: A\n  Scenario: S\n    Given a run of "refund all" with 3 tries exists\n    When announce runs\n`,
         "x.feature",
-        scopeOf([ghost, resend, bluesky, runs], drivers),
+        scopeOf([ghost, resend, bluesky, runs]),
       );
       expect(scenario?.given).toEqual([
         {
@@ -422,8 +420,7 @@ describe("parseFeature", () => {
         },
       },
     });
-    const drivers = [...marketingFakes().drivers, { vendor: "odd", ops: { "thing.poke": async () => ({}) } }];
-    expect(() => parseFeature("Feature: A\n", "x.feature", scopeOf([ghost, resend, bluesky, odd], drivers))).toThrow(
+    expect(() => parseFeature("Feature: A\n", "x.feature", scopeOf([ghost, resend, bluesky, odd]))).toThrow(
       'odd.thing.poke: its given phrase "{nope} poked" names {nope}, which is not a field of its input',
     );
   });
@@ -716,9 +713,7 @@ describe("resources and policy outcomes", () => {
     });
     const resolved = resolveConfig({
       workflows: [ping],
-      connectors: [acme],
-      drivers: [plain.driver],
-      fakes: [plain],
+      connectors: [withFake(acme, plain)],
       policy: allowAll,
       ledger: memoryLedger(),
     });

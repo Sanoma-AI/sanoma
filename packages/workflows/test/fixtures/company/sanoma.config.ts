@@ -7,7 +7,6 @@ import { allowAll, defineConfig, memoryLedger } from "../../../src/index.ts";
 export default defineConfig({
   workflows: [],
   connectors: [github, stripe],
-  drivers: [],
   policy: allowAll,
   ledger: memoryLedger(),
 });

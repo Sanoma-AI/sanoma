@@ -417,20 +417,16 @@ describe("announce under a policy", () => {
 describe("announce with a vendor that replies off-contract", () => {
   let publishes = 0;
   const app = useApp(databaseUrl, "announce-off-contract", (vendors) => ({
-    drivers: vendors.drivers.map((d) =>
-      d.vendor === "ghost"
-        ? {
-            ...d,
-            ops: {
-              ...d.ops,
-              "post.publish": async () => {
-                publishes++;
-                return { id: 42 };
-              },
-            },
-          }
-        : d,
-    ),
+    connectors: vendors.connectorsWith({
+      ...vendors.ghost.driver,
+      ops: {
+        ...vendors.ghost.driver.ops,
+        "post.publish": async () => {
+          publishes++;
+          return { id: 42 };
+        },
+      },
+    }),
   }));
   const c = () => app.client;
 

@@ -1,5 +1,9 @@
+import { dirname } from "node:path";
+import { github as githubConnector } from "@sanoma/connector-github";
 import { fakeGithub } from "@sanoma/connector-github/fake";
+import { stripe as stripeConnector } from "@sanoma/connector-stripe";
 import { fakeStripe } from "@sanoma/connector-stripe/fake";
+import { withFake } from "@sanoma/testing";
 import { readResources } from "../../../src/describe.ts";
 import type { Policy, SanomaConfig, WorkflowDefinition } from "../../../src/index.ts";
 import company from "./sanoma.config.ts";
@@ -13,6 +17,7 @@ export const nodeIdOf = (repository: string) => `R_${repository}`;
  * recorded object of its type where there is one (so it has the fields the vendor sets), a
  * repository with its node id, and a branch protection rule naming its repository by that node
  * id, as GitHub's provider does. A test then changes one with `override` or `remove`.
+ * `connectors` are the company's, set up with these fakes (`withFake`).
  */
 export function companyFakes() {
   const github = fakeGithub();
@@ -41,26 +46,19 @@ export function companyFakes() {
       }
     }
   }
-  return { github, stripe, drivers: [github.driver, stripe.driver], declared, seed };
+  const connectors = [withFake(githubConnector, github), withFake(stripeConnector, stripe)];
+  return { github, stripe, connectors, declared, seed };
 }
 
 /**
- * The company's config as a test's app runs it: its connectors, data files and scenarios, with
- * these workflows under this policy, on `fakes` (default: fresh `companyFakes()`, unseeded) as
- * both the drivers and the fakes sandbox runs copy.
+ * The company's config as a test's app runs it: its connectors, and its root for the data files
+ * and scenarios, with these workflows under this policy, on `fakes` (default: fresh
+ * `companyFakes()`, unseeded) as both the drivers and the fakes sandbox runs copy.
  */
 export function companyConfig(
   workflows: WorkflowDefinition<any, any>[],
   policy: Policy,
   fakes = companyFakes(),
-): Omit<SanomaConfig, "ledger"> {
-  return {
-    workflows,
-    connectors: company.connectors,
-    file: company.file!,
-    drivers: fakes.drivers,
-    fakes: [fakes.github, fakes.stripe],
-    policy,
-    scenarios: new URL("./scenarios/", import.meta.url),
-  };
+): SanomaConfig {
+  return { workflows, connectors: fakes.connectors, root: dirname(company.file!), policy };
 }

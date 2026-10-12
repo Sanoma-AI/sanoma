@@ -4,7 +4,7 @@ import { allowAll, defineWorkflow } from "@sanoma/workflows";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { useTestApp } from "../src/harness.ts";
-import { testDatabaseUrl } from "../src/index.ts";
+import { testDatabaseUrl, testRoot, withFake } from "../src/index.ts";
 
 // Needs Postgres: `pnpm db:up`.
 const appName = "testing_harness";
@@ -23,14 +23,14 @@ const alice = { id: "alice" };
 describe("useTestApp", () => {
   const app = useTestApp({
     workflows: [draft],
-    connectors: [ghost],
-    drivers: [blog.driver],
+    connectors: [withFake(ghost, blog)],
     policy: allowAll,
-    appName,
+    root: testRoot(appName),
   });
 
   it("keeps one config, so the client reads both runs across a restart", async () => {
-    expect(app.config).toMatchObject({ appName, databaseUrl: testDatabaseUrl(appName) });
+    // Its database is named after its app, which its root's package.json names.
+    expect(app.config).toMatchObject({ root: testRoot(appName), databaseUrl: testDatabaseUrl(appName) });
     const first = await app.client.start(draft, { title: "Before" }, { startedBy: alice });
     await app.client.result(first);
 

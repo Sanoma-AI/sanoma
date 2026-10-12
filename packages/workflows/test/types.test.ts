@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { defineConnector, defineDriver, defineWorkflow, type SanomaClient } from "../src/index.ts";
+import { ghost } from "@sanoma/connector-ghost";
+import { defineConnector, defineDriver, defineWorkflow, type Op, type SanomaClient, withSetup } from "../src/index.ts";
 
 // These assertions are checked by `pnpm typecheck`; the runtime test only keeps vitest happy.
 const shop = defineConnector("shop", {
@@ -106,6 +107,28 @@ export const startsTyped = (client: SanomaClient) => [
   // @ts-expect-error the input is the schema's input: `id` is required
   client.start(wf, {}, { startedBy: { id: "alice" } }),
 ];
+
+// `ghost`, as its package exports it (`withSetup`), keeps each operation's type.
+export const draft = defineWorkflow({
+  name: "draft-typed",
+  trigger: "manual",
+  input: z.object({ title: z.string() }),
+  uses: [ghost.post.create],
+  run: async (ctx, { title }) => {
+    const post = await ctx.ghost.post.create({ title, html: "<p>x</p>" });
+    const slug: string = post.slug;
+    // @ts-expect-error input is checked against the operation's schema
+    await ctx.ghost.post.create({ title: 1, html: "" });
+    return slug;
+  },
+});
+export const createId: "ghost.post.create" = ghost.post.create.id;
+// withSetup gives back the connector's own type, and adds no group of operations.
+const attached = withSetup(shop, { driver: () => ({ vendor: "shop", ops: {} }), fake: () => undefined as never });
+export const sameShop: typeof shop = attached;
+export const orderGet: Op<"shop", "order", "get", { id: string }, { total: number }> = attached.order.get;
+// @ts-expect-error the setup is under a symbol, never a group
+export const noGroup = attached.setup;
 
 describe("types", () => {
   it("keys a driver's operations by resource and name", () => {

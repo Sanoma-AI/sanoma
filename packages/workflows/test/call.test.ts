@@ -1,14 +1,12 @@
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
-import { resend } from "@sanoma/connector-resend";
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { testDatabaseUrl } from "@sanoma/testing";
+import { testDatabaseUrl, withFake } from "@sanoma/testing";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   allow,
   defineConnector,
-  defineDriver,
   definePolicy,
   defineWorkflow,
   deny,
@@ -21,6 +19,7 @@ import {
   policyOpOf,
   SanomaError,
 } from "../src/index.ts";
+import { defineFake } from "../src/fake.ts";
 import announce from "./fixtures/announce.ts";
 import fanout, { fakeStats, stats } from "./fixtures/fanout.ts";
 import { failure, inSeconds, pending, types, useApp, waitFor } from "./harness.ts";
@@ -94,8 +93,11 @@ const tags = defineConnector("tags", {
     },
   },
 });
-const notesDriver = defineDriver(notes, { note: { update: async ({ id }) => ({ id }) } });
-const tagsDriver = defineDriver(tags, { tag: { add: async ({ id }) => ({ id }) } });
+const notesFake = defineFake(notes, {
+  initial: () => ({}),
+  ops: () => ({ note: { update: async ({ id }) => ({ id }) } }),
+});
+const tagsFake = defineFake(tags, { initial: () => ({}), ops: () => ({ tag: { add: async ({ id }) => ({ id }) } }) });
 const tag = defineWorkflow({
   name: "tag",
   trigger: "manual",
@@ -299,20 +301,16 @@ describe("a worker stopping while a call fails for good", () => {
   const released = Promise.withResolvers<void>();
   const app = useApp(databaseUrl, "call-stopping", (vendors) => ({
     workflows: [post],
-    drivers: [
-      vendors.ghost.driver,
-      vendors.resend.driver,
-      {
-        vendor: "bluesky",
-        ops: {
-          "post.create": async () => {
-            entered.resolve();
-            await released.promise;
-            throw new DriverError("bluesky: the post is too long", { retryable: false, status: 400 });
-          },
+    connectors: vendors.connectorsWith({
+      vendor: "bluesky",
+      ops: {
+        "post.create": async () => {
+          entered.resolve();
+          await released.promise;
+          throw new DriverError("bluesky: the post is too long", { retryable: false, status: 400 });
         },
       },
-    ],
+    }),
   }));
   const c = () => app.client;
 
@@ -490,8 +488,7 @@ describe("the call a policy sees", () => {
   );
   const app = useApp(databaseUrl, "call-policy", (vendors) => ({
     workflows: [edit, post, tag],
-    connectors: [ghost, resend, bluesky, notes, tags],
-    drivers: [...vendors.drivers, notesDriver, tagsDriver],
+    connectors: [...vendors.connectors, withFake(notes, notesFake), withFake(tags, tagsFake)],
     policy,
     ledger: memoryLedger(),
   }));
@@ -643,16 +640,9 @@ describe("ctx.all", () => {
     },
   });
 
-  const app = useApp(
-    databaseUrl,
-    "call-all",
-    (vendors) => ({
-      workflows: [fanout, signed, broken, odd, loose],
-      connectors: [ghost, resend, bluesky, stats],
-      drivers: vendors.drivers,
-    }),
-    { extra: [fakeStats] },
-  );
+  const app = useApp(databaseUrl, "call-all", () => ({ workflows: [fanout, signed, broken, odd, loose] }), {
+    extra: [[stats, fakeStats]],
+  });
   const c = () => app.client;
   const posted = () => app.vendors.bluesky.state.posts.map((p) => p.text);
 
