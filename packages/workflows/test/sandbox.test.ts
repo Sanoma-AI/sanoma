@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { setTimeout as delay } from "node:timers/promises";
 import { testDatabaseUrl } from "@sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -90,18 +89,8 @@ describe("sandbox runs", () => {
     expect(run).toMatchObject({ status: "finished", sandbox: "Launch on time" });
     expect(Date.now() - started).toBeLessThan(15_000);
     expect(live).toEqual([]);
-    // The seed went through the fake, but is not in the call log: the log holds the run's calls only.
-    expect(app.ops()).toEqual([
-      "ghost.post.create",
-      "resend.broadcast.create",
-      "ghost.post.publish",
-      "resend.broadcast.send",
-      "bluesky.post.create",
-    ]);
-    expect(Object.values(app.vendors.ghost.state.posts).map((p) => [p.id, p.title, p.status])).toEqual([
-      ["post_0001", "Old news", "draft"],
-      ["post_0002", "Acme Pro", "published"],
-    ]);
+    // The worker's fakes are templates: the run seeded and called its own copies.
+    expect(app.ops()).toEqual([]);
 
     const records = await ledger(runId);
     expect(types(records)).toEqual([
@@ -153,6 +142,7 @@ describe("sandbox runs", () => {
       "policy:bluesky.post.create",
       "bluesky.post.create",
     ]);
+    // The run's own Ghost: the seeded draft is post_0001, so the run's post is post_0002.
     expect(check(launch, records)).toEqual(launch.expect.map((e) => ({ step: e.step, ok: true })));
 
     expect((await c().run(runId))?.sandbox).toBe("Launch on time");
@@ -164,9 +154,12 @@ describe("sandbox runs", () => {
     const retried = scenario("Publish retried");
     const runId = await c().start(announce, retried.input as never, { startedBy: alice, sandbox: retried.name });
     expect(await drive(c(), runId, retried)).toMatchObject({ status: "finished" });
-    const publishes = app.vendors.calls.filter((call) => call.op === "ghost.post.publish");
-    expect(publishes.map((call) => call.attempt)).toEqual([1, 2]);
-    expect(check(retried, await ledger(runId)).every((r) => r.ok)).toBe(true);
+    const records = await ledger(runId);
+    // One record per call, with the try that produced its output.
+    expect(records.filter((r) => r.type === "op.called" && r.op === "ghost.post.publish")).toMatchObject([
+      { attempt: 2, output: { id: "post_0001", status: "published" } },
+    ]);
+    expect(check(retried, records).every((r) => r.ok)).toBe(true);
   });
 
   it("decides each approval by its title first, then in order", async () => {
@@ -180,21 +173,22 @@ describe("sandbox runs", () => {
     }
   });
 
-  it("starts a second sandbox run once the one waiting on an approval ends, and refuses a scenario that does not exist", async () => {
+  it("runs two sandbox runs of one scenario at once, each on its own fakes, and refuses a scenario that does not exist", async () => {
     const launch = scenario("Launch on time");
-    const first = await c().start(announce, launch.input as never, { startedBy: alice, sandbox: launch.name });
-    await waitFor(pending(c, first));
+    const start = () => c().start(announce, launch.input as never, { startedBy: alice, sandbox: launch.name });
+    const runIds = await Promise.all([start(), start()]);
+    // Each waits on its own approval: neither is queued behind the other.
+    for (const runId of runIds) await waitFor(pending(c, runId));
 
-    const second = await c().start(announce, launch.input as never, { startedBy: alice, sandbox: launch.name });
-    // Longer than the queue's dispatch interval (a second): it would have started by now.
-    await delay(2_000);
-    expect((await c().run(second))?.status).toBe("queued");
-    expect(await ledger(second)).toEqual([]);
-
-    expect(await drive(c(), first, launch)).toMatchObject({ status: "finished" });
-    expect(await drive(c(), second, launch)).toMatchObject({ status: "finished" });
-    const [one, two] = await Promise.all([ledger(first), ledger(second)]);
-    expect(two[0]!.at).toBeGreaterThanOrEqual(one.at(-1)!.at);
+    const runs = await Promise.all(runIds.map((runId) => drive(c(), runId, launch)));
+    expect(runs.map((r) => r.status)).toEqual(["finished", "finished"]);
+    for (const runId of runIds) {
+      const records = await ledger(runId);
+      // Each seeded its own Ghost: the scenario's `post_0002` is published in both, which a shared
+      // one could not do.
+      expect(check(launch, records)).toEqual(launch.expect.map((e) => ({ step: e.step, ok: true })));
+    }
+    expect(app.ops()).toEqual([]);
 
     const unknown = await c().start(announce, launch.input as never, { startedBy: alice, sandbox: "Nope" });
     const missing = await failure(c().result(unknown));
@@ -272,7 +266,6 @@ describe("sandbox runs", () => {
     await expect(drive(c(), runId, second)).rejects.toThrow(
       'Scenario "Decided for the second only" has no decision for "Legal review" (approval-1); the decisions left are for "Final check"',
     );
-    // Finished by hand, so the next sandbox run can start.
     await c().decide(runId, { decision: "approve", by: { id: "legal" } });
     await waitFor(pending(c, runId, 2));
     await c().decide(runId, { decision: "approve", by: { id: "boss" } });
@@ -285,7 +278,6 @@ describe("sandbox runs", () => {
     await expect(drive(c(), runId, short)).rejects.toThrow(
       'Scenario "Missing a decision" has no decision for "Final check" (approval-2)',
     );
-    // Finished by hand, so the fakes are free for the next sandbox run.
     await c().decide(runId, { decision: "approve", by: { id: "boss" } });
     expect(await c().result(runId)).toBe("reviewed");
   });

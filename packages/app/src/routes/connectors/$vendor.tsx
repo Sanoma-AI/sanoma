@@ -9,7 +9,6 @@ import { ItemGroup } from "#/components/ui/item.tsx";
 import type { ScenarioEntry } from "../../api.ts";
 import {
   Expandable,
-  Json,
   None,
   Notice,
   OpItem,
@@ -43,7 +42,7 @@ export const Route = createFileRoute("/connectors/$vendor")({
   notFoundComponent: () => <Notice variant="destructive">No connector {Route.useParams().vendor}.</Notice>,
 });
 
-/** One connector: where it lives, its resource types, every operation with its contract and mock, and who uses it. */
+/** One connector: where it lives, its resource types, every operation with its contract and scenarios, and who uses it. */
 function ConnectorPage() {
   const { vendor: id } = Route.useParams();
   const {
@@ -80,9 +79,8 @@ function ConnectorPage() {
           <None />
         ) : (
           <>
-            {/* Every workflow operation of a vendor in `fakes` has a mock, so either all have one or
-                none; a resource type's `read` and `import` never have one. */}
-            {workflowOps.length > 0 && workflowOps.every((op) => !op.mock) && <None>No fake in this config.</None>}
+            {/* A resource type's `read` and `import` read real state: a vendor with only those needs no fake. */}
+            {workflowOps.length > 0 && !vendor.fake && <None>No fake in this config.</None>}
             <ItemGroup>
               {ops.map((op) => (
                 <OpItem key={op.id} id={op.id} op={op}>
@@ -113,9 +111,9 @@ function ConnectorPage() {
   );
 }
 
-/** Under an operation: its contract, the steps that name it, what its fake does, and the scenarios about it. */
+/** Under an operation: its contract, the steps that name it, and the scenarios about it. */
 function OpDetails({ op, scenarios }: { op: OpEntry; scenarios: ScenarioEntry[] }) {
-  const { mock, phrases } = op;
+  const { phrases } = op;
   return (
     <div className="mt-2 flex flex-col gap-3">
       <Section title="Contract">
@@ -138,24 +136,6 @@ function OpDetails({ op, scenarios }: { op: OpEntry; scenarios: ScenarioEntry[] 
               </li>
             )}
           </ul>
-        </Section>
-      )}
-      {mock && (
-        <Section title="Mock">
-          <div>
-            <p className="text-muted-foreground">Called with</p>
-            <Json value={mock.input} />
-            {"error" in mock ? (
-              <p className="mt-2">
-                Fails with <code>{mock.error}</code>
-              </p>
-            ) : (
-              <>
-                <p className="mt-2 text-muted-foreground">Returns</p>
-                <Json value={mock.output} />
-              </>
-            )}
-          </div>
         </Section>
       )}
       <Section title="Scenarios">

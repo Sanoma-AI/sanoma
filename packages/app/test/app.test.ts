@@ -88,14 +88,6 @@ cpSync(fileURLToPath(new URL("./fixtures/scenarios/", import.meta.url)), scenari
 const featureFile = join(scenariosDir, "announce.feature");
 
 const blog = fakeGhost();
-/** Bluesky's fake for sandbox runs, whose sample post fails, so its connector page shows a mock's error. */
-const social = fakeBluesky();
-const freshSocial = social.fresh;
-social.fresh = () => {
-  const copy = freshSocial();
-  copy.failNext("bluesky.post.create", new DriverError("bluesky: the network is down", { retryable: false }));
-  return copy;
-};
 // The workflows' company fixture: its data files, and GitHub and Stripe holding them as declared.
 const company = companyFakes();
 const companyDir = fileURLToPath(new URL("../../workflows/test/fixtures/company/", import.meta.url));
@@ -108,7 +100,7 @@ const config = defineConfig({
   connectors: [ghost, resend, bluesky, github, stripe, chat],
   drivers: [blog.driver, fakeResend().driver, fakeBluesky().driver, ...company.drivers],
   // Sandbox runs call these, seeded from the scenarios, never the drivers above.
-  fakes: [fakeGhost(), fakeResend(), social],
+  fakes: [fakeGhost(), fakeResend(), fakeBluesky()],
   scenarios: pathToFileURL(`${scenariosDir}/`),
   policy,
   ledger: memoryLedger(),
@@ -238,21 +230,8 @@ describe("the API", () => {
     expect(readFileSync(announce.file!, "utf8")).toContain(line);
     expect(JSON.stringify(body)).not.toContain(line);
     expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.effect).toBe("send");
-    // Each faked operation's sample exchange; GitHub and Stripe have no fake in `fakes`.
-    expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.mock).toEqual({
-      input: { id: "bc_0001" },
-      output: { id: "bc_0001", status: "queued" },
-    });
-    expect(body.ops.find((o) => o.id === "bluesky.post.create")?.mock).toEqual({
-      input: expect.objectContaining({ text: expect.any(String) }),
-      error: "bluesky: the network is down",
-    });
-    expect(
-      body.ops.filter((o) => o.vendor === "ghost" || o.vendor === "resend").every((o) => o.mock && "output" in o.mock),
-    ).toBe(true);
-    expect(
-      body.ops.filter((o) => o.vendor === "github" || o.vendor === "stripe").every((o) => o.mock === undefined),
-    ).toBe(true);
+    // Whether each vendor has a fake in `fakes`: Ghost does, GitHub does not.
+    expect(body.vendors).toMatchObject({ ghost: { fake: true }, github: { fake: false } });
     expect(body.vendors.resend).toMatchObject({ title: "Resend", logo: { src: expect.stringMatching(/^data:/) } });
     // The data files under the config's root, without problems, passed through as they are.
     expect(body.resources.map((r) => r.id)).toEqual(company.declared.map((r) => r.id));
@@ -648,7 +627,7 @@ describe("errors the app answers with", () => {
 
 describe("a file's source", () => {
   it("is served for a file the description names, a workflow's or a data file, apart from the config", async () => {
-    const description = await describeConfig(config);
+    const description = describeConfig(config);
     const context = { resolved: { root: companyDir } as never, description };
     expect(await fileSource(context, announce.file!)).toEqual({
       source: readFileSync(announce.file!, "utf8").replaceAll("\r\n", "\n"),
@@ -818,7 +797,7 @@ describe("the page", () => {
     expect(connectors.html).toContain('href="/connectors"');
   });
 
-  it("renders a connector's page: its links, each operation's contract, phrases, mock and scenarios, and who uses it", async () => {
+  it("renders a connector's page: its links, each operation's contract, phrases and scenarios, and who uses it", async () => {
     const blogPage = await page("/connectors/ghost");
     expect(blogPage.status).toBe(200);
     expect(blogPage.html).toMatch(/<h1[^>]*>(<img[^>]*>)+Ghost<\/h1>/);
@@ -826,11 +805,7 @@ describe("the page", () => {
     expect(blogPage.html).toContain('href="https://www.npmjs.com/package/@sanoma/connector-ghost"');
     expect(blogPage.html).toContain("<code>ghost.post.create</code>");
     expect(blogPage.text).toContain("<code>Given a post titled {title} exists</code>");
-    // The mock: what the fake returned for a made-up input, publish publishing the post create made.
-    expect(blogPage.html).toMatch(/>Mock<\/h3>/);
     expect(blogPage.text).not.toContain("No fake in this config.");
-    expect(blogPage.text).toContain(">Called with<");
-    expect(blogPage.text).toMatch(/&quot;id&quot;: &quot;post_0001&quot;/);
     // The scenario that names the operation, linking to its workflow's New run pane in Sandbox mode with it chosen.
     expect(blogPage.html).toContain('href="/workflows/announce/new?scenario=Launch+on+time"');
     // What each scenario does with an operation: create is seeded and expected; publish fails
@@ -838,21 +813,15 @@ describe("the page", () => {
     for (const label of ["seeds", "fails", "expects", "must not call"]) expect(blogPage.text).toContain(`>${label}<`);
     expect(blogPage.html).toContain('href="/workflows/announce"');
 
-    // A sample the fake failed says how.
-    const socialPage = await page("/connectors/bluesky");
-    expect(socialPage.text).toContain("Fails with <code>bluesky: the network is down</code>");
-
-    // A vendor with resource operations only has nothing to fake: no mock, and no notice that it
-    // has no fake. Its resource types are named.
+    // A vendor with resource operations only has nothing to fake: no notice that it has no fake.
+    // Its resource types are named.
     const githubPage = await page("/connectors/github");
     expect(githubPage.text).not.toContain("No fake in this config.");
-    expect(githubPage.html).not.toMatch(/>Mock<\/h3>/);
     expect(githubPage.html).toMatch(/Resources: <\/span>Branch protection rule, Repository, Team membership</);
 
-    // One with workflow operations and no fake in `fakes` says so, once, and shows no mock.
+    // One with workflow operations and no fake in `fakes` says so, once.
     const chatPage = await page("/connectors/chat");
     expect(chatPage.text.match(/No fake in this config\./g)).toHaveLength(1);
-    expect(chatPage.html).not.toMatch(/>Mock<\/h3>/);
 
     const missing = await page("/connectors/nope");
     expect(missing.status).toBe(404);

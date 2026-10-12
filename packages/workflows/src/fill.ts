@@ -3,8 +3,7 @@ import { faker } from "@faker-js/faker";
 import { fake, seed, setFaker } from "zod-schema-faker/v4";
 import { z } from "zod";
 
-// Made-up values for zod schemas: scenarios' inputs, and each operation's sample call in
-// `describeConfig`. Internal, and apart from `scenario.ts`, so `describe` does not load Gherkin.
+// Made-up values for zod schemas: scenarios' inputs. Internal.
 
 setFaker(faker);
 
