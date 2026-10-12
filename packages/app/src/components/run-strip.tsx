@@ -43,7 +43,7 @@ function Strip({ workflow }: { workflow: string }) {
   }
   if (runs.length === 0) return <p className="text-sm text-muted-foreground">No runs yet</p>;
   return (
-    <ol aria-label={`Last ${STRIP_LIMIT} runs`} className="flex flex-wrap gap-1">
+    <ol aria-label={`Last ${STRIP_LIMIT} runs`} className="flex flex-wrap gap-1 compact:gap-0.5">
       {runs.toReversed().map((run) => (
         <li key={run.runId} className="flex">
           <RunSquare run={run} />
@@ -69,7 +69,7 @@ const RunSquare = memo(function RunSquare({ run }: { run: RunSummary }) {
       title={label}
       aria-label={label}
       className={cn(
-        "size-3 rounded-[3px] outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring",
+        "size-3 rounded-[3px] compact:size-2.5 outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring",
         TONE_FILL[RUN_TONE[run.status]],
         // A sandbox run is a rehearsal: shown fainter than a live one.
         run.sandbox !== undefined && "opacity-60",

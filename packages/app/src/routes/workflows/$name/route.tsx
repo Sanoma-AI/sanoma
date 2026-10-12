@@ -65,18 +65,18 @@ function WorkflowLayout() {
   // Titled by the workflow (on a run's pane the last crumb, PageHeader's default, is the run), or
   // only its name when it is retired.
   return (
-    <div className="flex flex-col gap-6">
+    <>
       <PageHeader title={workflow?.title ?? name}>
         {workflow && <code className="text-muted-foreground">{name}</code>}
         {workflow?.builtin && <Badge variant="secondary">built-in</Badge>}
       </PageHeader>
       {/* The rail beside the pane, or above it once the pane would be narrower than 560px. */}
-      <div className="flex flex-wrap items-start gap-6">
+      <div className="flex flex-wrap items-start gap-(--gap-region)">
         <RunRail name={name} />
         <div className="min-w-0 flex-[999_1_560px]">
           <Outlet />
         </div>
       </div>
-    </div>
+    </>
   );
 }

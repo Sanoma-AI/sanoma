@@ -26,18 +26,18 @@ function InboxPage() {
     : 0;
 
   return (
-    <div className="flex flex-col gap-4">
+    <>
       <PageHeader>
         <Badge variant="secondary">{pending.length} waiting</Badge>
         {actor && <ToneBadge tone={mine ? "waiting" : "off"}>{mine} for you</ToneBadge>}
       </PageHeader>
       {error && <Notice variant="destructive">Could not refresh approvals: {error.message}</Notice>}
       {pending.length === 0 && <Nothing title="Nothing is waiting for a decision" />}
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-(--gap-region) lg:grid-cols-2">
         {pending.map(({ run, approval }) => (
           <ApprovalCard key={`${run.runId}/${approval.id}`} run={run} approval={approval} showRun />
         ))}
       </div>
-    </div>
+    </>
   );
 }

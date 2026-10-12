@@ -12,6 +12,7 @@ The app's React components: page chrome, shared display pieces, and the graph an
 | [`boundaries.tsx`](boundaries.tsx)     | Router error, not-found and pending views                                                                                                                                                                                             |
 | [`code.tsx`](code.tsx)                 | Read-only CodeMirror view of a workflow's source with line highlights; browser only                                                                                                                                                   |
 | [`credentials.tsx`](credentials.tsx)   | A connector's Credentials section: each variable's status, and Set, Replace and Clear with their form                                                                                                                                 |
+| [`density.tsx`](density.tsx)           | `DensityProvider` (it renders `#app`, marked with the density) and `useDensity`: comfortable or Compact, kept in the `sanoma_density` cookie                                                                                          |
 | [`graph-source.tsx`](graph-source.tsx) | `GraphAndSource`: a workflow's or a run's graph (marked with a scenario's steps, when given) above its source in one card, with a drag handle and a Code toggle                                                                       |
 | [`common.tsx`](common.tsx)             | Shared pieces: badges (the sandbox badge too), tones, page headers, `Region` (a titled section), facts, op items and `ItemHeading`, JSON views, a segmented control of links, lazy graph & code panels (bare; `PanelCard` for a card) |
 | [`graph.tsx`](graph.tsx)               | React Flow drawing of a laid-out graph; loaded lazily                                                                                                                                                                                 |
@@ -28,5 +29,6 @@ The app's React components: page chrome, shared display pieces, and the graph an
 
 ## Layout conventions
 
-- Spacing scale: `gap-6` between a page's regions, `gap-4` inside a card, `gap-3` inside a section (a titled one is a `Region`), `gap-2` inside an item.
+- Spacing scale: `gap-(--gap-region)` between a page's regions, `gap-(--card-spacing)` inside a card (Card's own variable), `gap-(--gap-section)` inside a section (a titled one is a `Region`), `gap-2` inside an item.
+- Compact (`data-density="compact"` on `#app`) re-sets the first three once, in `src/style.css`: the two gap tokens on `#app` and Card's `--card-spacing` in two unlayered rules. The `compact:` variant is for shape (the graph box's height and header padding, the rail's one-line rows, the strip's squares, `Facts`' rows), not spacing.
 - Every pane of a workflow's page is a [`Workbench`](workbench.tsx): its notices, the graph card, then the primary and secondary columns (3 : 2), one column while the pane itself is narrower than `@3xl`.

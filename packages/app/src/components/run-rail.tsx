@@ -19,7 +19,8 @@ const FILTER_LABEL: Record<RunFilter, string> = {
 };
 
 /** A link in the rail; `aria-current`, which Link sets on an active link, marks the pane that shows. */
-const RAIL_LINK = "flex flex-col gap-0.5 rounded-md px-2 py-1.5 text-sm hover:bg-muted aria-[current=page]:bg-muted";
+const RAIL_LINK =
+  "flex flex-col gap-0.5 rounded-md px-2 py-1.5 text-sm hover:bg-muted aria-[current=page]:bg-muted compact:flex-row compact:items-center compact:gap-2 compact:py-1";
 
 /** The rail's links keep the filter; All leaves the URL without `?runs=`. */
 const railSearch = (filter: RunFilter) => ({ runs: filter === "all" ? undefined : filter });
@@ -123,7 +124,9 @@ const RunLink = memo(function RunLink({ run, filter }: { run: RunSummary; filter
         {run.sandbox !== undefined && <SandboxBadge name={run.sandbox} />}
       </span>
       <span className="truncate text-xs text-muted-foreground">
-        {starterName(run)} · <When at={run.createdAt} />
+        {/* Compact keeps one line: status · when. */}
+        <span className="compact:hidden">{starterName(run)} · </span>
+        <When at={run.createdAt} />
       </span>
     </Link>
   );
