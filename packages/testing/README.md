@@ -152,6 +152,34 @@ describeScenarios({ ...config, ledger: memoryLedger(), appName: "scenarios-test"
 
 A company config spread into `describeScenarios` keeps its `ledger`, so pass `ledger: memoryLedger()`, as above, to keep test runs out of the project's ledger.
 
+Besides a run's calls and outcome, a scenario can say what the policy did and, with the vendors' fakes holding what the data files declare, what the built-in [drift](https://www.npmjs.com/package/@sanoma/workflows#drift) check finds (the full list of steps is in the workflows package):
+
+```gherkin
+Scenario: A secret repository is refused
+  When inspect runs with
+    | repository | secret-plans |
+  Then github.repository.import was denied
+
+Scenario: A product is read once finance says so
+  When inspect runs
+  And "Read a product" is approved by finance
+  Then stripe.product.import was held for finance
+
+Scenario: A setting changed at GitHub
+  Given github.repository "website" has
+    | has_wiki | true |
+  When drift runs
+  Then resources/identity/github.ts#website is drifted in has_wiki
+
+Scenario: A repository GitHub no longer has
+  Given github.repository "docs" is gone
+  When drift runs
+  Then resources/identity/github.ts#docs is gone
+  And resources/identity/github.ts#website is clean
+```
+
+`Given <resource> "<name>" has` and `is gone` change the run's own copy of the vendor's fake before it starts (a GitHub repository by its name, a Stripe object by its id: the resource's import id), for fakes that hold objects, as the GitHub and Stripe ones do; a failed `Then` says what the run did instead (`github.repository.import was allowed, not denied`, `resources/identity/github.ts#docs is gone, not clean`).
+
 `runScenario(scenario, { client, startedBy?, timeoutMs? })` runs one scenario against a worker you started, with a `SanomaClient` of it, and returns `{ runId, run, ledger, checks }`: the run's id, its summary, its ledger records and `check(scenario, ledger)`. `timeoutMs` goes to `drive`. Load the scenarios with `loadScenarios(resolveConfig(config))` from `@sanoma/workflows/scenario`.
 
 Status: early (0.x). License: Apache-2.0.
