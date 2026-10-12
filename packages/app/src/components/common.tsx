@@ -184,6 +184,15 @@ export function OpName({
 }
 
 /**
+ * An item's title that wraps rather than clips, for a title with badges: a narrow column (About's,
+ * on a workflow's page) may be narrower than they are. (`flex` again: given a `line-clamp-*`,
+ * `cn` drops ItemTitle's `flex`, which shares its `display`.)
+ */
+export function ItemHeading({ children }: { children: ReactNode }) {
+  return <ItemTitle className="line-clamp-none flex flex-wrap">{children}</ItemTitle>;
+}
+
+/**
  * An operation as a list item: its name, whether it is safe to retry, and what it does, then
  * `children`, when given, under that. Inside an `ItemGroup`.
  */
@@ -191,7 +200,7 @@ export function OpItem({ id, op, children }: { id: string; op: OpEntry | undefin
   return (
     <Item role="listitem" variant="outline" size="xs">
       <ItemContent>
-        <ItemTitle>
+        <ItemHeading>
           <OpName id={id} op={op} />
           {op?.idempotent && (
             <Tip tip="If a call fails, it is tried again; the vendor ignores repeats.">
@@ -200,7 +209,7 @@ export function OpItem({ id, op, children }: { id: string; op: OpEntry | undefin
               </Badge>
             </Tip>
           )}
-        </ItemTitle>
+        </ItemHeading>
         {op?.description && <ItemDescription>{op.description}</ItemDescription>}
         {children}
       </ItemContent>
@@ -428,35 +437,29 @@ function useSeen(ref: RefObject<HTMLElement | null>): boolean {
 }
 
 /**
- * A box 220 px high, 280 px from `sm` (or as `className` says), whose content loads and draws in
- * the browser once the box comes near the screen; until then, and on the server, `fallback`
- * holds its place. (The server never sees the box: `useSeen` flips in an effect, and effects run
- * only in the browser.)
+ * A box filling its parent, whose content loads and draws in the browser once the box comes near
+ * the screen; until then, and on the server, `fallback` holds its place. (The server never sees
+ * the box: `useSeen` flips in an effect, and effects run only in the browser.) Bare: a caller that
+ * wants a card puts it in a `PanelCard`, or sizes its parent (a resizable panel).
  */
-function LazyPanel({
-  fallback,
-  className,
-  children,
-}: {
-  fallback: ReactNode;
-  className?: string;
-  children: ReactNode;
-}) {
+function LazyPanel({ fallback, children }: { fallback: ReactNode; children: ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
   const seen = useSeen(box);
   return (
-    <Card ref={box} className={cn("h-[220px] gap-0 py-0 sm:h-[280px]", className)}>
+    <div ref={box} className="size-full">
       {seen ? <Suspense fallback={fallback}>{children}</Suspense> : fallback}
-    </Card>
+    </div>
   );
 }
 
+/** A card for a graph or code panel: 220 px high, 280 px from `sm`, or as `className` says. */
+export function PanelCard({ className, children }: { className?: string; children: ReactNode }) {
+  return <Card className={cn("h-[220px] gap-0 py-0 sm:h-[280px]", className)}>{children}</Card>;
+}
+
 /** A graph (a run's, or a workflow's outline) in a LazyPanel, a skeleton of its size holding its place. */
-export const GraphPanel = ({ className, ...props }: GraphProps & { className?: string }) => (
-  <LazyPanel
-    className={className}
-    fallback={<Skeleton role="status" aria-label="Loading the graph" className="size-full rounded-none" />}
-  >
+export const GraphPanel = (props: GraphProps) => (
+  <LazyPanel fallback={<Skeleton role="status" aria-label="Loading the graph" className="size-full rounded-none" />}>
     <Graph {...props} />
   </LazyPanel>
 );
@@ -472,11 +475,8 @@ const Code = lazy(loadCode);
  * A workflow's source in a LazyPanel, scrolling inside it. On the server, without JavaScript, and
  * until the view loads, the panel holds the source as plain text.
  */
-export const CodePanel = ({ className, ...props }: CodeProps) => (
-  <LazyPanel
-    className={className}
-    fallback={<pre className="size-full overflow-auto p-3 font-mono text-xs">{props.source}</pre>}
-  >
+export const CodePanel = (props: CodeProps) => (
+  <LazyPanel fallback={<pre className="size-full overflow-auto p-3 font-mono text-xs">{props.source}</pre>}>
     <Code {...props} />
   </LazyPanel>
 );
@@ -517,6 +517,16 @@ export function SectionTitle({ children }: { children: ReactNode }) {
 /** A heading inside a card's section. */
 export function SubsectionTitle({ children }: { children: ReactNode }) {
   return <h3 className="text-sm font-medium">{children}</h3>;
+}
+
+/** A titled region of a page: its <h2>, and what it holds. */
+export function Region({ title, children }: { title: ReactNode; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionTitle>{title}</SectionTitle>
+      {children}
+    </section>
+  );
 }
 
 /** A card's section: its heading, and what it holds. */

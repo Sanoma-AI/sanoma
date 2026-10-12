@@ -221,6 +221,9 @@ const FILTERS: Record<RunFilter, { status?: RunStatus; match?: (run: RunSummary)
 /** A workflow page's search: `?runs=`, the rail's filter. Any other value reads as all. */
 export const WorkflowSearch = z.object({ runs: z.enum(RUN_FILTERS).optional().catch(undefined) });
 
+/** The Workflow pane's search: `?scenario=`, Sandbox mode and the scenario it runs; without it, Live. */
+export const ScenarioSearch = z.object({ scenario: z.string().optional().catch(undefined) });
+
 /** How many runs the rail lists: the latest. */
 export const RAIL_LIMIT = RUNS_LIMIT.default;
 

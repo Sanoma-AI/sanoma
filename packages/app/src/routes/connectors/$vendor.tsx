@@ -14,8 +14,8 @@ import {
   OpItem,
   PageHeader,
   pageTitle,
+  Region,
   Section,
-  SectionTitle,
   VendorLogo,
 } from "../../components/common.tsx";
 import { Credentials } from "../../components/credentials.tsx";
@@ -73,8 +73,7 @@ function ConnectorPage() {
       )}
       <ScenarioErrors errors={scenarios.errors} />
       <Credentials vendor={id} />
-      <section className="flex flex-col gap-3">
-        <SectionTitle>Operations</SectionTitle>
+      <Region title="Operations">
         {ops.length === 0 ? (
           <None />
         ) : (
@@ -90,9 +89,8 @@ function ConnectorPage() {
             </ItemGroup>
           </>
         )}
-      </section>
-      <section className="flex flex-col gap-3">
-        <SectionTitle>Used by</SectionTitle>
+      </Region>
+      <Region title="Used by">
         {workflows.length === 0 ? (
           <None />
         ) : (
@@ -106,7 +104,7 @@ function ConnectorPage() {
             ))}
           </ul>
         )}
-      </section>
+      </Region>
     </div>
   );
 }
@@ -148,7 +146,7 @@ function OpDetails({ op, scenarios }: { op: OpEntry; scenarios: ScenarioEntry[] 
               return (
                 <li key={s.name} className="flex flex-wrap items-center gap-1.5">
                   <Link
-                    to="/workflows/$name/new"
+                    to="/workflows/$name"
                     params={{ name: s.workflow }}
                     search={{ scenario: s.name }}
                     className="hover:underline"

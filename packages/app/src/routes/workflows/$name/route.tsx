@@ -3,7 +3,6 @@ import { createFileRoute, notFound, Outlet } from "@tanstack/react-router";
 import { Badge } from "#/components/ui/badge.tsx";
 import { loadCode, loadGraph, Notice, PageHeader, pageTitle } from "#/components/common.tsx";
 import { RunRail } from "#/components/run-rail.tsx";
-import { RunButton } from "#/components/workflow.tsx";
 import {
   configQuery,
   railQuery,
@@ -16,8 +15,8 @@ import {
 } from "#/queries.ts";
 
 /**
- * One workflow's page: its header, the rail of its runs, and the pane the URL picks (About, New
- * run, or one run). The panes read what this loader puts in the query client.
+ * One workflow's page: its header, the rail of its runs, and the pane the URL picks (the
+ * workflow's own, or one run's). The panes read what this loader puts in the query client.
  */
 export const Route = createFileRoute("/workflows/$name")({
   // `?runs=` filters the rail. The rail's own links carry it; a middleware retaining it would
@@ -63,11 +62,11 @@ async function loadWorkflow(queryClient: QueryClient, name: string) {
 function WorkflowLayout() {
   const { name } = Route.useParams();
   const workflow = useWorkflow(name);
-  // Titled by the workflow: the last crumb, PageHeader's default, is the run on a run's page.
-  // A retired workflow has only its name, and no Run.
+  // Titled by the workflow (on a run's pane the last crumb, PageHeader's default, is the run), or
+  // only its name when it is retired.
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title={workflow?.title ?? name} action={workflow && <RunButton name={name} />}>
+      <PageHeader title={workflow?.title ?? name}>
         {workflow && <code className="text-muted-foreground">{name}</code>}
         {workflow?.builtin && <Badge variant="secondary">built-in</Badge>}
       </PageHeader>

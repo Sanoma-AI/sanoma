@@ -20,7 +20,7 @@ import { Spinner } from "#/components/ui/spinner.tsx";
 import { errorBodyOf } from "../api.ts";
 import { clearCredentialFn, setCredentialFn } from "../functions.ts";
 import { credentialsFor, credentialsQuery } from "../queries.ts";
-import { SectionTitle, ToneBadge, When } from "./common.tsx";
+import { Region, ToneBadge, When } from "./common.tsx";
 
 // A connector's credentials as its page shows them: each variable's manual and status, and the
 // controls that set and clear a stored value. A value goes to the server and is never read back.
@@ -30,14 +30,13 @@ export function Credentials({ vendor }: { vendor: string }) {
   const { data: credentials } = useSuspenseQuery({ ...credentialsQuery(), select: credentialsFor(vendor) });
   if (!credentials) return null;
   return (
-    <section className="flex flex-col gap-3">
-      <SectionTitle>Credentials</SectionTitle>
+    <Region title="Credentials">
       <ul className="flex flex-col gap-1.5">
         {credentials.map((c) => (
           <CredentialRow key={c.name} credential={c} />
         ))}
       </ul>
-    </section>
+    </Region>
   );
 }
 

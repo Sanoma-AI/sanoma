@@ -19,6 +19,7 @@ import {
   Nothing,
   Notice,
   PageHeader,
+  PanelCard,
   plural,
   Section,
   Segment,
@@ -206,7 +207,7 @@ const WorkflowCard = memo(function WorkflowCard({
         <CardAction className="flex gap-2">
           {scenario !== undefined && (
             <Button asChild variant="outline" size="sm">
-              <Link to="/workflows/$name/new" params={{ name }} search={{ scenario }}>
+              <Link to="/workflows/$name" params={{ name }} search={{ scenario }}>
                 <FlaskConicalIcon data-icon="inline-start" />
                 Test
               </Link>
@@ -226,7 +227,11 @@ const WorkflowCard = memo(function WorkflowCard({
               ? outline.error
               : "Read from the body of run; the functions it calls are not shown, even those defined in it"}
           </p>
-          {graph && <GraphPanel graph={graph} show="start" />}
+          {graph && (
+            <PanelCard>
+              <GraphPanel graph={graph} show="start" />
+            </PanelCard>
+          )}
         </Section>
       </CardContent>
     </Card>
