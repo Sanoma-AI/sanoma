@@ -1,0 +1,111 @@
+import { DriverError } from "@sanoma/workflows";
+import { describe, expect, it, vi } from "vitest";
+import { type Bridge, BridgeError, defaultBridge, lazyBridge, type StartBridgeOptions } from "@sanoma/bridge";
+
+const ref = { source: "integrations/github", version: "6.13.0" };
+
+/** A bridge whose every call answers at once, and counts. */
+function stub(): Bridge {
+  return {
+    schema: vi.fn<Bridge["schema"]>(async () => ({ schema: {} as never, sha256: "" })),
+    configure: vi.fn<Bridge["configure"]>(async () => ({ warnings: [] })),
+    import: vi.fn<Bridge["import"]>(async () => ({ resources: [], warnings: [] })),
+    read: vi.fn<Bridge["read"]>(async () => ({ gone: true, warnings: [] })),
+    close: vi.fn<Bridge["close"]>(async () => undefined),
+    stop: vi.fn<Bridge["stop"]>(async () => undefined),
+  };
+}
+
+/** `start` that answers with a new `stub()` each time, keeping those it made. */
+function starter() {
+  const bridges: Bridge[] = [];
+  const start = vi.fn<(options?: StartBridgeOptions) => Promise<Bridge>>(async () => {
+    const b = stub();
+    bridges.push(b);
+    return b;
+  });
+  return { start, bridges };
+}
+
+describe("lazyBridge", () => {
+  it("starts once, on the first call, with the options given, and closes nothing before it has started", async () => {
+    const { start, bridges } = starter();
+    const lazy = lazyBridge({ start, readyTimeoutMs: 5 });
+    await lazy.close();
+    expect(start).not.toHaveBeenCalled();
+    await Promise.all([lazy.configure(ref, "{}"), lazy.import(ref, "github_repository", "sanoma")]);
+    await lazy.read(ref, "github_repository", "{}");
+    await lazy.close(ref);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledWith({ readyTimeoutMs: 5 });
+    const [b] = bridges;
+    expect(b!.configure).toHaveBeenCalledTimes(1);
+    expect(b!.import).toHaveBeenCalledTimes(1);
+    expect(b!.read).toHaveBeenCalledTimes(1);
+    expect(b!.close).toHaveBeenCalledWith(ref);
+  });
+
+  it("tries a failed start again on the next call, and surfaces the failure as a final DriverError", async () => {
+    const { start, bridges } = starter();
+    start.mockRejectedValueOnce(new Error("provider-bridge: no binary"));
+    const lazy = lazyBridge({ start });
+    const err = await lazy.read(ref, "github_repository", "{}").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(DriverError);
+    expect(err).toMatchObject({ message: "provider-bridge: no binary", retryable: false });
+    expect(await lazy.read(ref, "github_repository", "{}")).toMatchObject({ gone: true });
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(bridges).toHaveLength(1);
+  });
+
+  it("throws a BridgeError from the start as it is", async () => {
+    const { start } = starter();
+    const refused = new BridgeError("unavailable", "socket refused");
+    start.mockRejectedValueOnce(refused);
+    await expect(lazyBridge({ start }).configure(ref, "{}")).rejects.toBe(refused);
+  });
+
+  it("stops a bridge whose configure finds it unavailable, and starts another on the next call", async () => {
+    const { start, bridges } = starter();
+    const lazy = lazyBridge({ start });
+    await lazy.configure(ref, "{}");
+    const [first] = bridges;
+    vi.mocked(first!.configure).mockRejectedValueOnce(new BridgeError("unavailable", "bridge exited"));
+    await expect(lazy.configure(ref, "{}")).rejects.toMatchObject({ code: "unavailable" });
+    expect(first!.stop).toHaveBeenCalledTimes(1);
+    await lazy.configure(ref, "{}");
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(bridges[1]!.configure).toHaveBeenCalledTimes(1);
+    // Any other failure leaves the bridge as it is.
+    vi.mocked(bridges[1]!.configure).mockRejectedValueOnce(new BridgeError("invalid_argument", "bad config"));
+    await expect(lazy.configure(ref, "{}")).rejects.toMatchObject({ code: "invalid_argument" });
+    expect(bridges[1]!.stop).not.toHaveBeenCalled();
+    await lazy.import(ref, "github_repository", "sanoma");
+    expect(start).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops the bridge it started, and starts another on the next call", async () => {
+    const { start, bridges } = starter();
+    const lazy = lazyBridge({ start });
+    await lazy.stop();
+    await lazy.read(ref, "github_repository", "{}");
+    await lazy.stop();
+    expect(bridges[0]!.stop).toHaveBeenCalledTimes(1);
+    await lazy.close();
+    expect(bridges[0]!.close).not.toHaveBeenCalled();
+    await lazy.read(ref, "github_repository", "{}");
+    expect(start).toHaveBeenCalledTimes(2);
+    // A start that fails has nothing to stop.
+    start.mockRejectedValueOnce(new Error("no binary"));
+    await lazy.stop();
+    await lazy.read(ref, "github_repository", "{}").catch(() => undefined);
+    await lazy.stop();
+  });
+});
+
+describe("defaultBridge", () => {
+  it("is one lazy bridge for the process", () => {
+    const bridge = defaultBridge();
+    expect(defaultBridge()).toBe(bridge);
+    expect(typeof bridge.stop).toBe("function");
+  });
+});

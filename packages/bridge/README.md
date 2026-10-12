@@ -34,6 +34,8 @@ await bridge.stop();
 | `close(ref?)`                                           | nothing                                        | Stops one configured provider, or all.                                                                                                                           |
 | `stop()`                                                | nothing                                        | Stops the bridge.                                                                                                                                                |
 
+`lazyBridge(options?)` is a `ProviderClient` (`configure`, `import`, `read`, `close`: the calls a driver makes) over a bridge started on its first call, with `startBridge`'s options, so loading a config never spawns one. A start that fails is tried again on the next call, and surfaces as a `DriverError` with `retryable: false` unless it was a `BridgeError`; a configure that finds the bridge `unavailable` stops it, and the next call starts another; `stop()` stops the bridge it started, if any, and the next call starts another. `defaultBridge()` is the process's one lazy bridge, made on the first call: the GitHub and Stripe drivers read through it when given no `bridge`, so a config need not start or pass one. Tests pass `{ start }` to stand in for `startBridge`.
+
 A `ProviderRef` is `{ source, version, sha256? }`; `readPins()` returns the pinned ones keyed by source (`integrations/github`, `stripe/stripe`, `hashicorp/null`). A `ResourceState` is `{ typeName, stateJson, private, schemaVersion }`. JSON values stay strings (`configJson`, `stateJson`) so numbers keep full precision: parse them where that does not matter. The schema document is parsed (`SchemaDocument`, with `Block`, `Attribute`, `NestedType`, `NestedBlock` and `CtyType` mirroring the bridge README).
 
 A failed call throws a `BridgeError` with `code` (Connect's, spelled `invalid_argument`, `failed_precondition`, `unavailable`, `not_found`, ...) and `diagnostics` (the provider's error diagnostics: `{ severity, summary, detail, attributePath }`). `unavailable` means the provider exited, or the bridge's socket is missing, refused or reset: configure again.
@@ -90,12 +92,12 @@ The provider's private data and state version travel in the operation's opaque `
 
 ## Environment
 
-| Variable            | What it is                                                                                        |
-| ------------------- | ------------------------------------------------------------------------------------------------- |
-| `SANOMA_BRIDGE_BIN` | The `provider-bridge` binary `startBridge` runs when no `bin` is given.                           |
-| `SANOMA_BRIDGE_SRC` | The provider-bridge checkout `pnpm bridge:download` builds from (default: found beside the repo). |
-| `SANOMA_LIVE`       | `1`: the live test runs, and the tests' `fakeBridge` calls a real bridge.                         |
-| `SANOMA_RECORD`     | `1`, with `SANOMA_LIVE=1`: the tests' `fakeBridge` rewrites the fixtures it touches.              |
+| Variable            | What it is                                                                                                                                                                                                                |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SANOMA_BRIDGE_BIN` | The `provider-bridge` binary `startBridge` runs when no `bin` is given; read when the bridge starts. The GitHub and Stripe drivers declare it as an optional variable, so the app's connector page describes and sets it. |
+| `SANOMA_BRIDGE_SRC` | The provider-bridge checkout `pnpm bridge:download` builds from (default: found beside the repo).                                                                                                                         |
+| `SANOMA_LIVE`       | `1`: the live test runs, and the tests' `fakeBridge` calls a real bridge.                                                                                                                                                 |
+| `SANOMA_RECORD`     | `1`, with `SANOMA_LIVE=1`: the tests' `fakeBridge` rewrites the fixtures it touches.                                                                                                                                      |
 
 `pnpm bridge:download` (at the repo root or here) runs `go build -mod=vendor -o packages/bridge/bin/provider-bridge ./cmd/provider-bridge` in the checkout, with the Go the checkout pins (through `mise x` when mise is installed), and prints the `export SANOMA_BRIDGE_BIN=...` line. `bin/` is gitignored. Downloading a pinned release by checksum is a stub (`RELEASE` and `downloadRelease` in the script) until provider-bridge publishes releases.
 
