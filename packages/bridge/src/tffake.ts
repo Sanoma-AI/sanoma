@@ -1,5 +1,5 @@
 import type { Driver, DriverFn, OpIdOf } from "@sanoma/workflows";
-import { defineFake, type Fake, type FakeOptions } from "@sanoma/workflows/fake";
+import { defineFake, type Fake, type FakeOptions, type ResourceFake } from "@sanoma/workflows/fake";
 import type { z } from "zod";
 import type { TfConnector, TfResources } from "./connector.ts";
 import type { FixtureError } from "./fixtures.ts";
@@ -22,11 +22,13 @@ export interface TfFakeOptions extends FakeOptions {
   missingReply?: (type: string, id: string) => FixtureError | undefined;
 }
 
-/** A connector's fake: its faults, and `put`, `override` and `remove` to change the vendor's objects between calls. */
-export type TfFake<V extends string, T extends Record<string, z.ZodObject>> = Fake<
-  TfFakeState,
-  OpIdOf<V, TfResources<V, T>>
-> & {
+/**
+ * A connector's fake: its faults, and `put`, `override` and `remove` to change the vendor's
+ * objects between calls, typed by the connector's resources, as a `ResourceFake` (what a
+ * scenario's resource steps need).
+ */
+export interface TfFake<V extends string, T extends Record<string, z.ZodObject>>
+  extends Fake<TfFakeState, OpIdOf<V, TfResources<V, T>>>, ResourceFake {
   /**
    * Sets fields of the object of type `type` and import id `id`, in the resource's shape, for
    * the next `read` and `import` to return, as if someone edited the object at the vendor.
@@ -53,7 +55,7 @@ export type TfFake<V extends string, T extends Record<string, z.ZodObject>> = Fa
   remove(type: keyof T & string, id: string): void;
   /** A new fake of the same connector and replies, in memory with no file, keeping `override`, `put` and `remove`. */
   fresh(): TfFake<V, T>;
-};
+}
 
 /** A driver's flat operations (`repository.read`) grouped by resource again, as `defineFake` takes them. */
 function grouped(driver: Driver) {

@@ -2,7 +2,7 @@ import { DBOS } from "@dbos-inc/dbos-sdk";
 import { indexDrivers } from "./config.ts";
 import { opIdsOf } from "./define.ts";
 import { SanomaError } from "./errors.ts";
-import type { Fake } from "./fake.ts";
+import type { Fake, ResourceFake } from "./fake.ts";
 import { entry, write } from "./ledger.ts";
 import type { CallContext, DriverFn } from "./op.ts";
 import type { Run } from "./run.ts";
@@ -13,20 +13,12 @@ import { type Given, loadScenarios } from "./scenario.ts";
  * `scenario.ts`, which the app reads too, because it needs DBOS and the ledger.
  */
 
-/** A fake that holds a vendor's objects, as `@sanoma/bridge`'s `tfFake` does, by resource type and import id. */
-interface HoldsResources {
-  override(type: string, id: string, fields: Record<string, unknown>): void;
-  put(type: string, id: string, fields: Record<string, unknown>): void;
-  remove(type: string, id: string): void;
-}
-
 /** A resource type's vendor: `github` of `github.repository`. */
 const vendorOf = (resource: string) => resource.slice(0, resource.indexOf("."));
 
-const holdsResources = (fake: Fake<unknown>): fake is Fake<unknown> & HoldsResources =>
-  ["override", "put", "remove"].every(
-    (name) => typeof (fake as Partial<HoldsResources>)[name as keyof HoldsResources] === "function",
-  );
+/** True for a fake that holds resources (`ResourceFake`, as `@sanoma/bridge`'s `tfFake` is). */
+const holdsResources = (fake: Fake<unknown>): fake is Fake<unknown> & ResourceFake =>
+  "override" in fake && "put" in fake && "remove" in fake;
 
 /**
  * Seeds one resource into the run's copy of its vendor's fake: `fields` set on the object, put
@@ -35,7 +27,7 @@ const holdsResources = (fake: Fake<unknown>): fake is Fake<unknown> & HoldsResou
  * its `update`, which the copy's stands in for while they run (synchronous, so no other call sees it).
  */
 async function seedResource(
-  template: Fake<unknown> & HoldsResources,
+  template: Fake<unknown> & ResourceFake,
   copy: Fake<unknown>,
   importOp: DriverFn,
   given: Extract<Given, { resource: string }>,
@@ -118,7 +110,7 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
           seeded.push({ op: given.op, input: given.input, output });
         } else {
           const vendor = vendorOf(given.resource);
-          const template = state.fakes.get(vendor) as Fake<unknown> & HoldsResources;
+          const template = state.fakes.get(vendor) as Fake<unknown> & ResourceFake;
           await seedResource(template, fakes.get(vendor)!, drivers.get(opId)!, given, call);
         }
       }
