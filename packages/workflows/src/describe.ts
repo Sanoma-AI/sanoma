@@ -82,6 +82,8 @@ export interface VendorEntry {
   package?: string;
   /** The connector package's `homepage` from its package.json: where its code and README are, as an https URL. */
   homepage?: string;
+  /** Whether the config's `fakes` holds a fake of this vendor, for sandbox runs. */
+  fake: boolean;
 }
 
 /** A resource type a connector declares with `defineResource`. */
@@ -144,7 +146,7 @@ export async function describeConfig(config: SanomaConfig): Promise<ConfigDescri
   // resource types are every connector's.
   for (const connector of config.connectors) {
     const { id, info } = connector[VENDOR];
-    vendors[id] ??= vendorEntry(id, info);
+    vendors[id] ??= vendorEntry(id, info, resolved.fakes.has(id));
   }
   const resources = resourceTypesOf(config.connectors);
   // Each resource type's state is described once, on its entry, and referenced from its operations.
@@ -290,13 +292,14 @@ function firstIssue({ issues: [issue] }: z.ZodError): string {
 
 const svgDataUrl = (svg: string) => `data:image/svg+xml,${encodeURIComponent(svg.trim())}`;
 
-const vendorEntry = (id: string, info: VendorInfo | undefined): VendorEntry => ({
+const vendorEntry = (id: string, info: VendorInfo | undefined, fake: boolean): VendorEntry => ({
   title: info?.title ?? id,
   ...(info?.logo && {
     logo: { src: svgDataUrl(info.logo.svg), ...(info.logo.dark && { dark: svgDataUrl(info.logo.dark) }) },
   }),
   ...(info?.package && { package: info.package }),
   ...(info?.homepage && { homepage: info.homepage }),
+  fake,
 });
 
 /** Where a resource type's state schema is, for a `$ref`. */

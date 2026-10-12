@@ -80,9 +80,8 @@ function ConnectorPage() {
           <None />
         ) : (
           <>
-            {/* Every workflow operation of a vendor in `fakes` has a mock, so either all have one or
-                none; a resource type's `read` and `import` never have one. */}
-            {workflowOps.length > 0 && workflowOps.every((op) => !op.mock) && <None>No fake in this config.</None>}
+            {/* A resource type's `read` and `import` read real state: a vendor with only those needs no fake. */}
+            {workflowOps.length > 0 && !vendor.fake && <None>No fake in this config.</None>}
             <ItemGroup>
               {ops.map((op) => (
                 <OpItem key={op.id} id={op.id} op={op}>

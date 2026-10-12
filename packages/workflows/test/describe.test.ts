@@ -308,7 +308,7 @@ describe("describeConfig", () => {
     const drivers = [...base.drivers, { vendor: "counter", ops: { "tally.add": async () => ({}) } }];
     const { vendors } = await describeConfig({ ...base, connectors: [ghost, resend, bluesky, counter], drivers });
     expect(Object.keys(vendors).toSorted()).toEqual(["bluesky", "counter", "ghost", "resend"]);
-    expect(vendors.counter).toEqual({ title: "counter" });
+    expect(vendors.counter).toEqual({ title: "counter", fake: false });
     expect(vendors.resend).toMatchObject({
       title: "Resend",
       package: "@sanoma/connector-resend",
