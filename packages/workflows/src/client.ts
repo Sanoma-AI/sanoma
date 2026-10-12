@@ -102,9 +102,9 @@ export interface StartOptions {
    */
   runId?: string;
   /**
-   * Start a sandbox run, seeded from the config's scenario of this name: it calls the config's
-   * `fakes` instead of the drivers and does not wait on sleeps. Each sandbox run calls its own
-   * copies of the fakes, so several run at once, on the app's queue like any run.
+   * Start a sandbox run, seeded from the config's scenario of this name: it calls its own copies
+   * (`fresh()`) of the config's `fakes` instead of the drivers, and does not wait on sleeps.
+   * Sandbox runs go on the app's queue like any run, so several run at once.
    */
   sandbox?: string;
 }
