@@ -1,6 +1,13 @@
 import { DriverError } from "@sanoma/workflows";
 import { describe, expect, it, vi } from "vitest";
-import { type Bridge, BridgeError, defaultBridge, lazyBridge, type StartBridgeOptions } from "@sanoma/bridge";
+import {
+  type Bridge,
+  BridgeError,
+  defaultBridge,
+  ensureConfigured,
+  lazyBridge,
+  type StartBridgeOptions,
+} from "@sanoma/bridge";
 
 const ref = { source: "integrations/github", version: "6.13.0" };
 
@@ -64,23 +71,52 @@ describe("lazyBridge", () => {
     await expect(lazyBridge({ start }).configure(ref, "{}")).rejects.toBe(refused);
   });
 
-  it("stops a bridge whose configure finds it unavailable, and starts another on the next call", async () => {
+  it.each(["configure", "import", "read"] as const)(
+    "stops a bridge whose %s finds it unavailable, even if stopping fails, and starts another on the next call",
+    async (method) => {
+      const { start, bridges } = starter();
+      const lazy = lazyBridge({ start });
+      const call = () =>
+        method === "configure"
+          ? lazy.configure(ref, "{}")
+          : method === "import"
+            ? lazy.import(ref, "github_repository", "sanoma")
+            : lazy.read(ref, "github_repository", "{}");
+      await call();
+      const [first] = bridges;
+      vi.mocked(first![method]).mockRejectedValueOnce(new BridgeError("unavailable", "bridge exited"));
+      vi.mocked(first!.stop).mockRejectedValueOnce(new Error("already gone"));
+      await expect(call()).rejects.toMatchObject({ code: "unavailable" });
+      expect(first!.stop).toHaveBeenCalledTimes(1);
+      await call();
+      expect(start).toHaveBeenCalledTimes(2);
+      expect(bridges[1]![method]).toHaveBeenCalledTimes(1);
+      // Any other failure leaves the bridge as it is.
+      vi.mocked(bridges[1]![method]).mockRejectedValueOnce(new BridgeError("invalid_argument", "bad input"));
+      await expect(call()).rejects.toMatchObject({ code: "invalid_argument" });
+      expect(bridges[1]!.stop).not.toHaveBeenCalled();
+      await lazy.import(ref, "github_repository", "sanoma");
+      expect(start).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("starts the next bridge unconfigured, as ensureConfigured sees it", async () => {
     const { start, bridges } = starter();
     const lazy = lazyBridge({ start });
-    await lazy.configure(ref, "{}");
-    const [first] = bridges;
-    vi.mocked(first!.configure).mockRejectedValueOnce(new BridgeError("unavailable", "bridge exited"));
-    await expect(lazy.configure(ref, "{}")).rejects.toMatchObject({ code: "unavailable" });
-    expect(first!.stop).toHaveBeenCalledTimes(1);
-    await lazy.configure(ref, "{}");
+    await ensureConfigured(lazy, ref, "{}", () => lazy.import(ref, "github_repository", "sanoma"));
+    await ensureConfigured(lazy, ref, "{}", () => lazy.import(ref, "github_repository", "sanoma"));
+    expect(bridges[0]!.configure).toHaveBeenCalledTimes(1);
+    // The read, not the configure, finds the bridge gone: ensureConfigured did not see it.
+    vi.mocked(bridges[0]!.read).mockRejectedValueOnce(new BridgeError("unavailable", "bridge exited"));
+    await expect(lazy.read(ref, "github_repository", "{}")).rejects.toMatchObject({ code: "unavailable" });
+    await ensureConfigured(lazy, ref, "{}", () => lazy.import(ref, "github_repository", "sanoma"));
     expect(start).toHaveBeenCalledTimes(2);
     expect(bridges[1]!.configure).toHaveBeenCalledTimes(1);
-    // Any other failure leaves the bridge as it is.
-    vi.mocked(bridges[1]!.configure).mockRejectedValueOnce(new BridgeError("invalid_argument", "bad config"));
-    await expect(lazy.configure(ref, "{}")).rejects.toMatchObject({ code: "invalid_argument" });
-    expect(bridges[1]!.stop).not.toHaveBeenCalled();
-    await lazy.import(ref, "github_repository", "sanoma");
-    expect(start).toHaveBeenCalledTimes(2);
+    expect(bridges[1]!.import).toHaveBeenCalledTimes(1);
+    // So does one stopped by hand.
+    await lazy.stop();
+    await ensureConfigured(lazy, ref, "{}");
+    expect(bridges[2]!.configure).toHaveBeenCalledTimes(1);
   });
 
   it("stops the bridge it started, and starts another on the next call", async () => {

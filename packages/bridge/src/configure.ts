@@ -12,6 +12,11 @@ interface Configured {
 
 const configured = new WeakMap<ProviderClient, Map<string, Configured>>();
 
+/** Forgets what `bridge` was configured with: its next call configures each provider afresh, as a new bridge needs. */
+export function forgetConfigured(bridge: ProviderClient): void {
+  configured.delete(bridge);
+}
+
 function stateOf(bridge: ProviderClient, ref: ProviderRef): Configured {
   let releases = configured.get(bridge);
   if (!releases) configured.set(bridge, (releases = new Map()));
