@@ -218,9 +218,9 @@ describe("startWorker", () => {
 });
 
 describe("describeConfig", () => {
-  it("carries no credentials, and no value: SanomaClient.credentials has their statuses", async () => {
+  it("carries no credentials, and no value: SanomaClient.credentials has their statuses", () => {
     vi.stubEnv(KEY_VAR, KEY);
-    const { vendors } = await describeConfig(config);
+    const { vendors } = describeConfig(config);
     expect(vendors.acme).not.toHaveProperty("credentials");
     expect(JSON.stringify(vendors)).not.toContain(KEY);
   });
