@@ -2,6 +2,9 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { appendFile, mkdir, readFile, truncate } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { isDeepStrictEqual } from "node:util";
+import type { Pool } from "pg";
+import { createTable, openPool } from "./db.ts";
 import type { Approver, Principal } from "./define.ts";
 import { type ErrorInfo, isFinal, keepCode } from "./errors.ts";
 import { shown, warn } from "./log.ts";
@@ -121,6 +124,11 @@ export interface LedgerStore {
   append(record: LedgerRecord): Promise<void>;
   /** A run's records in `seq` order. */
   read(runId: string): Promise<LedgerRecord[]>;
+  /**
+   * Releases what the store holds (a connection pool). The worker's `stop`, the app's `close` and
+   * `SanomaClient.close` call it when there is one; a store they share may be closed by each.
+   */
+  close?(): Promise<void>;
 }
 
 const bySeq = (a: LedgerRecord, b: LedgerRecord) => a.seq - b.seq;
@@ -138,20 +146,30 @@ function serialize(record: LedgerRecord): string {
   }
 }
 
+/** The line `jsonlLedger` writes for a record: its JSON and a newline. */
+const lineOf = (record: LedgerRecord) => `${serialize(record)}\n`;
+
+/**
+ * The records as `jsonlLedger` writes them: one JSON object per line, each ending in a newline,
+ * so a run read from any store (the Postgres one) can be written out as a `.jsonl` file.
+ */
+export function jsonlLines(records: readonly LedgerRecord[]): string {
+  return records.map(lineOf).join("");
+}
+
 const COMPARED = ["type", "input", "decision", "error", "output"] as const;
 
 /**
  * The first record with an id stands. Says so when a later one with that id differs where it
- * matters, showing both, so a replay that went another way can be told from a retry.
+ * matters, showing both, so a replay that went another way can be told from a retry. Compared
+ * as values, not text: a store may give the kept record's keys back in another order (`jsonb`).
  */
 function warnIfDifferent(stored: LedgerRecord, line: string) {
   const later = JSON.parse(line) as Record<string, unknown>;
   const differs = COMPARED.flatMap((k) => {
     const kept = (stored as Record<string, unknown>)[k];
     const sent = later[k];
-    return JSON.stringify(kept) === JSON.stringify(sent)
-      ? []
-      : [`${k} (kept ${shown(kept, 200)}, later ${shown(sent, 200)})`];
+    return isDeepStrictEqual(kept, sent) ? [] : [`${k} (kept ${shown(kept, 200)}, later ${shown(sent, 200)})`];
   });
   if (differs.length) {
     warn(`ledger: kept the first record ${stored.id}; a later write differed in ${differs.join("; ")}`);
@@ -200,7 +218,7 @@ export function jsonlLedger(dir: string): LedgerStore {
       const next = (queues.get(path) ?? Promise.resolve())
         .catch(() => {})
         .then(async () => {
-          const line = serialize(record);
+          const line = lineOf(record);
           const { records, tornAt } = await load(path);
           const stored = records.find((r) => r.id === record.id);
           if (stored) return warnIfDifferent(stored, line);
@@ -209,7 +227,7 @@ export function jsonlLedger(dir: string): LedgerStore {
             warn(`ledger: ${path} ended in a cut-off line; removed it before appending ${record.id}`);
             await truncate(path, tornAt);
           }
-          await appendFile(path, `${line}\n`);
+          await appendFile(path, line);
         });
       queues.set(path, next);
       const forget = () => {
@@ -225,6 +243,77 @@ export function jsonlLedger(dir: string): LedgerStore {
       // `load` reads either as no records. Any other failure is thrown.
       // A case-insensitive file system can map two run ids to one file.
       return (await load(path)).records.filter((r) => r.runId === runId).toSorted(bySeq);
+    },
+  };
+}
+
+const TABLE = "sanoma_ledger";
+
+/** One table beside DBOS's: `n` is the write order, `id` the record's, which the first write of takes. */
+const DDL =
+  `CREATE TABLE IF NOT EXISTS ${TABLE} (n bigserial PRIMARY KEY, id text NOT NULL UNIQUE, ` +
+  `run_id text NOT NULL, record jsonb NOT NULL); CREATE INDEX IF NOT EXISTS ${TABLE}_run ON ${TABLE} (run_id)`;
+
+/** Postgres's class for a value it cannot store (a string with a NUL in `jsonb`): trying again would only repeat it. */
+const DATA_EXCEPTION = /^22/;
+
+/**
+ * Keeps records in the `sanoma_ledger` table of the database at `databaseUrl`, beside DBOS's
+ * tables: the default store, which the worker, the app and the client share through Postgres.
+ * The table is created on first use; the database must exist, which the first worker's launch
+ * sees to, so a read before any worker has run fails saying so rather than creating anything.
+ * The pool is opened on first use and ended by `close()`; a later append or read opens another.
+ */
+export function postgresLedger(databaseUrl: string): LedgerStore {
+  let pool: Pool | undefined;
+  /** The table, being or having been created on `pool`; a failed create is tried again on the next use. */
+  let table: Promise<void> | undefined;
+
+  async function db(): Promise<Pool> {
+    const current = (pool ??= openPool(databaseUrl, "ledger"));
+    table ??= createTable(current, DDL, "ledger").catch((err: unknown) => {
+      if (pool === current) table = undefined;
+      throw err;
+    });
+    await table;
+    return current;
+  }
+
+  return {
+    async append(record) {
+      const line = lineOf(record);
+      const conn = await db();
+      let inserted: { rows: unknown[] };
+      try {
+        inserted = await conn.query(
+          `INSERT INTO ${TABLE} (id, run_id, record) VALUES ($1, $2, $3::jsonb) ON CONFLICT (id) DO NOTHING RETURNING n`,
+          [record.id, record.runId, line],
+        );
+      } catch (err) {
+        if (DATA_EXCEPTION.test((err as { code?: string }).code ?? "")) {
+          throw final(`Ledger record ${record.id} can't be stored: ${errorMessage(err)}`, err);
+        }
+        throw err;
+      }
+      if (inserted.rows.length) return;
+      // Another write of the id was first: the record it stored stands.
+      const { rows } = await conn.query<{ record: LedgerRecord }>(`SELECT record FROM ${TABLE} WHERE id = $1`, [
+        record.id,
+      ]);
+      if (rows[0]) warnIfDifferent(rows[0].record, line);
+    },
+    async read(runId) {
+      const { rows } = await (
+        await db()
+      ).query<{ record: LedgerRecord }>(`SELECT record FROM ${TABLE} WHERE run_id = $1 ORDER BY n`, [runId]);
+      // In seq order, as the other stores read; two records of one seq stay in write order.
+      return rows.map((r) => r.record).toSorted(bySeq);
+    },
+    async close() {
+      const current = pool;
+      pool = undefined;
+      table = undefined;
+      await current?.end();
     },
   };
 }

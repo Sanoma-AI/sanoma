@@ -21,7 +21,7 @@ Vitest tests for `@sanoma/workflows`. Files that start runs need Postgres (`pnpm
 | [`errors.test.ts`](errors.test.ts)           | `errorCode` and `errorInfo`                                                                                                                        |
 | [`fake.test.ts`](fake.test.ts)               | `Fake.fresh`: a new in-memory copy that shares nothing with its fake                                                                               |
 | [`harness.ts`](harness.ts)                   | The marketing fakes, `useApp` (`useTestApp` on the announce workflow and those fakes, reset before each test, ledger on disk) and the wait helpers |
-| [`ledger.test.ts`](ledger.test.ts)           | The in-memory and JSONL ledgers, and how a run writes its records                                                                                  |
+| [`ledger.test.ts`](ledger.test.ts)           | The in-memory, JSONL and Postgres ledgers, `jsonlLines`, the default ledger of a config, and how a run writes its records                          |
 | [`lint.test.ts`](lint.test.ts)               | `lintWorkflow` (imports, and `run` against its outline), `lintResources` and the shipped `oxlint.json`                                             |
 | [`sandbox.test.ts`](sandbox.test.ts)         | Sandbox runs on Postgres: seeding, the ledger, two at once, skipped sleeps, `drive` and restarts                                                   |
 | [`scenario.test.ts`](scenario.test.ts)       | Feature files to scenarios, their errors, `loadScenarios` and `check`                                                                              |

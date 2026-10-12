@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { DBOSClient, Error as DBOSErrors, type WorkflowStatusString } from "@dbos-inc/dbos-sdk";
-import { Pool } from "pg";
+import type { Pool } from "pg";
 import { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, messageKeyOf, topicOf } from "./approvals.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { deleteCredential, ensureTable, storeCredential, storedCredentials } from "./credentials.ts";
+import { openPool } from "./db.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { type ApprovalState, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
@@ -13,8 +14,7 @@ import { parseOrThrow, SanomaError } from "./errors.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { Driver } from "./op.ts";
 import type { RunArgs } from "./run.ts";
-import { warn } from "./log.ts";
-import { errorMessage, isEnded, mayDecide, type RunStatus } from "./shared.ts";
+import { isEnded, mayDecide, type RunStatus } from "./shared.ts";
 
 /**
  * The run status each DBOS status maps to. `waiting` is PENDING with an approval pending, so
@@ -418,7 +418,7 @@ export class SanomaClient {
 
   async close() {
     this.closed = true;
-    await Promise.all([this.dbos.destroy(), this.pool?.end()]);
+    await Promise.all([this.dbos.destroy(), this.pool?.end(), this.config.ledger.close?.()]);
   }
 
   /**
@@ -444,12 +444,7 @@ export class SanomaClient {
   /** The pool the credentials are read and written with, its table created once. */
   private async credentialsDb(): Promise<Pool> {
     if (this.closed) throw new Error("The client is closed");
-    if (!this.pool) {
-      this.pool = new Pool({ connectionString: this.config.databaseUrl });
-      // An idle connection that drops (Postgres restarted) is replaced on the next query; unheard, it would end the process.
-      this.pool.on("error", (err) => warn(`a credentials connection failed: ${errorMessage(err)}`));
-    }
-    const pool = this.pool;
+    const pool = (this.pool ??= openPool(this.config.databaseUrl, "credentials"));
     // A failed create is tried again on the next call.
     this.table ??= ensureTable(this.config.databaseUrl, async () => pool).catch((err: unknown) => {
       this.table = undefined;

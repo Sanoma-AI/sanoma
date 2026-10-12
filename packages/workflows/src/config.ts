@@ -3,7 +3,7 @@ import { DBOS } from "@dbos-inc/dbos-sdk";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, type DriftDeclared, driftWorkflow } from "./drift.ts";
 import type { Fake } from "./fake.ts";
-import type { LedgerStore } from "./ledger.ts";
+import { type LedgerStore, postgresLedger } from "./ledger.ts";
 import { type Connector, type Driver, type DriverFn, isOp, type Op } from "./op.ts";
 import type { Policy } from "./policy.ts";
 import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
@@ -33,10 +33,11 @@ export interface SanomaConfig {
   /** Checked before every operation call. Required: `allowAll` says that every call is allowed. */
   policy: Policy;
   /**
-   * Where the audit record goes. Required: `jsonlLedger(dir)` keeps it in files that the app
-   * and other processes read; `memoryLedger()` keeps it in this process only, for tests.
+   * Where the audit record goes. Default: `postgresLedger` on the config's database, which the
+   * worker, the app and other processes share. `jsonlLedger(dir)` keeps it in files instead;
+   * `memoryLedger()` keeps it in this process only, for tests.
    */
-  ledger: LedgerStore;
+  ledger?: LedgerStore;
   /** Scopes workflows, queues and versions in the system database. Defaults to "sanoma". */
   appName?: string;
   /** Postgres for the runtime. Defaults to `SANOMA_DATABASE_URL`, then the local docker compose database. */
@@ -94,6 +95,31 @@ export function resolveDatabaseUrl(config: { databaseUrl?: string }): string {
 }
 
 /**
+ * The Postgres ledger made for each config without one, by config object: the worker, the app
+ * and the client resolving one config in one process share the store, and its pool.
+ */
+const defaultLedgers = new WeakMap<SanomaConfig, LedgerStore>();
+
+const isStore = (x: unknown): x is LedgerStore =>
+  typeof (x as LedgerStore | null)?.append === "function" && typeof (x as LedgerStore).read === "function";
+
+/** The config's `ledger`, or the Postgres store on its database, the same one each time for one config. */
+function ledgerOf(config: SanomaConfig): LedgerStore {
+  if (config.ledger !== undefined) {
+    if (!isStore(config.ledger)) {
+      throw new Error(
+        "The config's `ledger` must be a ledger store: leave it out for `postgresLedger` on the config's database, " +
+          "or use `jsonlLedger(dir)` to keep records in files, or `memoryLedger()` to keep them in memory, for tests",
+      );
+    }
+    return config.ledger;
+  }
+  let store = defaultLedgers.get(config);
+  if (!store) defaultLedgers.set(config, (store = postgresLedger(resolveDatabaseUrl(config))));
+  return store;
+}
+
+/**
  * Checks a config and derives what the runtime needs from it. Throws what `startWorker` would
  * refuse, with the same message, so `describeConfig`, `SanomaClient.connect` and the app fail
  * the same way the worker does.
@@ -113,12 +139,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   if (typeof config.policy !== "function") {
     throw new Error("The config needs a `policy`; use `allowAll` to allow every operation call");
   }
-  const { ledger } = config;
-  if (typeof ledger?.append !== "function" || typeof ledger.read !== "function") {
-    throw new Error(
-      "The config needs a `ledger`; use `jsonlLedger(dir)` to keep records in files, or `memoryLedger()` to keep them in memory, for tests",
-    );
-  }
+  const ledger = ledgerOf(config);
   if (config.fakes !== undefined && !Array.isArray(config.fakes)) {
     throw new Error("The config's `fakes` must be an array of defineFake fakes");
   }

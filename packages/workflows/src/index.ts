@@ -79,7 +79,9 @@ export {
 } from "./errors.ts";
 export {
   jsonlLedger,
+  jsonlLines,
   memoryLedger,
+  postgresLedger,
   type LedgerBody,
   type LedgerGroup,
   type LedgerRecord,

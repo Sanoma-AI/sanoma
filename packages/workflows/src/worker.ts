@@ -64,7 +64,11 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       try {
         await DBOS.shutdown();
       } finally {
-        await credentials.close();
+        try {
+          await credentials.close();
+        } finally {
+          await state.ledger.close?.();
+        }
       }
     },
   };

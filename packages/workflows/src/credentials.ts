@@ -1,7 +1,8 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { Client, type Pool } from "pg";
+import { Client } from "pg";
 import { credentialsOf } from "./env.ts";
+import { createTable, type Db, madeAlready } from "./db.ts";
 import { info, warn } from "./log.ts";
 import type { Driver } from "./op.ts";
 import { errorMessage } from "./shared.ts";
@@ -16,10 +17,9 @@ const TABLE = "sanoma_credentials";
 /** Where a change is announced, with the variable's name as the payload. */
 const CHANNEL = "sanoma_credentials";
 
-type Db = Pick<Pool | Client, "query">;
-
-/** Postgres's codes for a row type or a table another process made first. */
-const MADE_ALREADY = new Set(["23505", "42P07"]);
+const DDL =
+  `CREATE TABLE IF NOT EXISTS ${TABLE} (name text PRIMARY KEY, value text NOT NULL, ` +
+  "set_by text NOT NULL, set_at timestamptz NOT NULL DEFAULT now())";
 
 /**
  * Creates the config's database and DBOS's tables when they are not there yet, as a worker's
@@ -29,16 +29,13 @@ const MADE_ALREADY = new Set(["23505", "42P07"]);
 export async function ensureTable(databaseUrl: string, connected: () => Promise<Db>): Promise<void> {
   try {
     await DBOS.migrate(databaseUrl);
-    await (
-      await connected()
-    ).query(
-      `CREATE TABLE IF NOT EXISTS ${TABLE} (name text PRIMARY KEY, value text NOT NULL, ` +
-        "set_by text NOT NULL, set_at timestamptz NOT NULL DEFAULT now())",
-    );
   } catch (err) {
-    if (MADE_ALREADY.has((err as { code?: string }).code ?? "")) return;
-    throw new Error(`could not prepare the credentials table: ${errorMessage(err)}`, { cause: err });
+    // The database, or a DBOS table, made by another process meanwhile: it is there.
+    if (!madeAlready(err)) {
+      throw new Error(`could not prepare the credentials table: ${errorMessage(err)}`, { cause: err });
+    }
   }
+  await createTable(await connected(), DDL, "credentials");
 }
 
 /** The stored rows of these names, values included: for loading into an environment or checking, never for showing. */

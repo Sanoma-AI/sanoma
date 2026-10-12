@@ -67,9 +67,9 @@ const refused: [string, Partial<SanomaConfig>, RegExp][] = [
   ],
   ["no policy", { policy: undefined as never }, /^The config needs a `policy`; use `allowAll`/],
   [
-    "no ledger",
-    { ledger: undefined as never },
-    /^The config needs a `ledger`; use `jsonlLedger\(dir\)`.*`memoryLedger\(\)`/,
+    "a ledger that is not a store",
+    { ledger: { read: 1 } as never },
+    /^The config's `ledger` must be a ledger store: leave it out for `postgresLedger`/,
   ],
   ["no connectors", { connectors: undefined as never }, /^The config needs `connectors`/],
   [
