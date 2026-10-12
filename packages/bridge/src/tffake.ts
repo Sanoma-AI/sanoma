@@ -35,8 +35,9 @@ export type TfFake<V extends string, T extends Record<string, z.ZodObject>> = Fa
   /**
    * Puts an object of type `type` under import id `id`, with `fields` in the resource's shape,
    * as if it were made at the vendor: over a copy of the recorded object with import id `from`,
-   * so it has the fields the vendor sets, or else over nothing. Its provider `id` is `fields.id`,
-   * else the import id. Replaces any object there.
+   * so it has the fields the vendor sets (replacing any object there, its provider `id` then
+   * `fields.id`, else the import id), else over the object already there, whose other fields it
+   * keeps, else over nothing.
    */
   put<K extends keyof T & string>(
     type: K,
@@ -47,8 +48,11 @@ export type TfFake<V extends string, T extends Record<string, z.ZodObject>> = Fa
   /**
    * Deletes the object: the next `read` of it says it is gone, and `import` answers as the
    * provider does for a missing object (`missingReply`), which the driver reads as gone.
+   * Nothing when there is no such object.
    */
   remove(type: keyof T & string, id: string): void;
+  /** A new fake of the same connector and replies, in memory with no file, keeping `override`, `put` and `remove`. */
+  fresh(): TfFake<V, T>;
 };
 
 /** A driver's flat operations (`repository.read`) grouped by resource again, as `defineFake` takes them. */
@@ -65,8 +69,8 @@ function grouped(driver: Driver) {
  * A fake vendor for an OpenTofu connector: its real driver over a `stateBridge` of the replies
  * recorded from the provider, so nothing reaches the vendor and no credentials are read. It has
  * the faults every fake has (`failNext`, `loseReply`, `rateLimit`, `hold`, `reset`, `update`),
- * and `override` and `remove` to simulate drift. With `file`, another process's fake on the same
- * file sees the changes.
+ * and `put`, `override` and `remove` to simulate drift. With `file`, another process's fake on
+ * the same file sees the changes; `fresh()` copies (as a sandbox run does) hold resources too.
  */
 export function tfFake<V extends string, T extends Record<string, z.ZodObject>>(
   tf: TfConnector<V, T>,
@@ -113,22 +117,30 @@ export function tfFake<V extends string, T extends Record<string, z.ZodObject>>(
       const set = providerFields(type, fields as Record<string, unknown>);
       const { typeName, schemaVersion } = tf.types[type];
       fake.update((state) => {
+        const at = `${typeName}/${id}`;
+        const there = state.objects[at];
+        if (from === undefined && there && !("error" in there)) {
+          Object.assign(there.state, set);
+          return;
+        }
         const o: StateObject =
           from === undefined
             ? { typeName, state: {}, private: "", schemaVersion }
             : structuredClone(objectAt(state, type, from));
         Object.assign(o.state, { id }, set);
-        state.objects[`${typeName}/${id}`] = o;
+        state.objects[at] = o;
       });
     },
     remove(type: keyof T & string, id: string) {
       const error = missingReply?.(type, id);
       fake.update((state) => {
-        objectAt(state, type, id);
         const at = `${tf.types[type].typeName}/${id}`;
+        const there = state.objects[at];
+        if (!there || "error" in there) return;
         if (error) state.objects[at] = { error };
         else delete state.objects[at];
       });
     },
+    fresh: () => tfFake(tf, { fixtures, missingReply }),
   });
 }
