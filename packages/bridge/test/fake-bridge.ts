@@ -86,8 +86,7 @@ function logCalls(calls: BridgeCall[]): Interceptor {
  * for a schema, `not_found` for an import or read) naming the file to record.
  *
  * `SANOMA_LIVE=1` sends the calls to a real bridge instead (`startBridge(options.bridge)`), and
- * with `SANOMA_RECORD=1` as well, rewrites the fixtures from its replies, scrubbed. A live run
- * missing a variable in `options.needs` fails here, before the bridge starts.
+ * with `SANOMA_RECORD=1` as well, rewrites the fixtures from its replies, scrubbed.
  */
 export function fakeBridge(options: FakeBridgeOptions = {}): FakeBridge {
   const dir = toPath(options.fixtures ?? testdata);
