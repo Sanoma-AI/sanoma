@@ -68,7 +68,9 @@ export function useTestApp(config: Parameters<typeof startTestWorker>[0], option
       worker = undefined;
     },
     async restart() {
-      await worker?.stop();
+      const old = worker;
+      worker = undefined;
+      await old?.stop();
       worker = await startTestWorker(shared, options);
     },
   };
