@@ -180,8 +180,8 @@ const detail = async (id: string) => (await call<RunDetail>(`/api/runs/${id}`)).
 const postRun = (body: unknown) => call("/api/runs", { method: "POST", actor: "tester", body });
 
 /** A page as the server renders it, and its text without the comments React puts between text parts. */
-async function page(path: string, base = app.url) {
-  const res = await fetch(new URL(path, base));
+async function page(path: string, base = app.url, init?: RequestInit) {
+  const res = await fetch(new URL(path, base), init);
   const html = await res.text();
   return { status: res.status, html, text: html.replaceAll("<!-- -->", "") };
 }
@@ -191,6 +191,15 @@ const railRunIds = (html: string, filter: string) =>
   [...html.matchAll(new RegExp(`href="/workflows/announce/runs/([^"?]+)\\?runs=${filter}"`, "g"))]
     .map(([, id]) => id)
     .toSorted();
+
+/** Whether the density toggle (named Compact) is pressed: "true" or "false". */
+const densityToggle = (html: string) =>
+  html.match(
+    /<button[^>]*aria-pressed="(true|false)"[^>]*>(?:<svg.*?<\/svg>)?<span class="sr-only">Compact<\/span>/,
+  )?.[1];
+
+/** The desktop sidebar's state: "expanded" or "collapsed". */
+const sidebarState = (html: string) => html.match(/data-state="(expanded|collapsed)"[^>]*data-slot="sidebar"/)?.[1];
 
 /** The opening tag of the link whose text, after any icon, is `label`. */
 function linkTag(html: string, label: string) {
@@ -928,6 +937,39 @@ describe("the page", () => {
     expect(run.text).toContain("Seeded 1 call from scenario “Launch on time”");
     const runs = await page("/workflows/announce");
     expect(runs.text).toContain("sandbox · Launch on time");
+  });
+
+  it("renders compact when its cookie says so", async () => {
+    const source = /<pre[^>]*>[^<]*ctx\.ghost\.post\.create\(/;
+
+    // Comfortable without the cookie: #app unmarked, the toggle not pressed, the source shown.
+    const comfortable = await page("/workflows/announce");
+    expect(comfortable.html).toContain('<div id="app">');
+    expect(densityToggle(comfortable.html)).toBe("false");
+    expect(comfortable.html).toMatch(source);
+    expect(sidebarState(comfortable.html)).toBe("expanded");
+
+    // Compact: #app marked, the toggle pressed, the source hidden and not rendered, Code not pressed.
+    // The sidebar follows its own cookie alone.
+    for (const open of [true, false]) {
+      const compact = await page("/workflows/announce", app.url, {
+        headers: { cookie: `sanoma_density=compact; sidebar_state=${open}` },
+      });
+      expect(compact.status).toBe(200);
+      expect(compact.html).toContain('<div id="app" data-density="compact">');
+      expect(densityToggle(compact.html)).toBe("true");
+      expect(compact.html).not.toMatch(source);
+      expect(compact.html).toMatch(/<button[^>]*aria-pressed="false"[^>]*>(<svg.*?<\/svg>)?Code<\/button>/);
+      expect(compact.html).toMatch(
+        /data-panel[^>]*id="graph-source-code"[^>]*hidden|hidden[^>]*id="graph-source-code"/,
+      );
+      expect(sidebarState(compact.html)).toBe(open ? "expanded" : "collapsed");
+    }
+
+    // Any other value is comfortable; the toggle is on every page.
+    const other = await page("/workflows", app.url, { headers: { cookie: "sanoma_density=comfortable" } });
+    expect(other.html).toContain('<div id="app">');
+    expect(densityToggle(other.html)).toBe("false");
   });
 
   it("answers any other path with the app's not-found page", async () => {
