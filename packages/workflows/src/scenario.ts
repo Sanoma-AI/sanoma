@@ -727,6 +727,31 @@ const isApprover = (approver: Approver, who: string) =>
 const found = (r: DriftResult) =>
   r.status === "drifted" ? `drifted in ${r.fields.map((f) => f.path).join(", ")}` : r.status;
 
+/** A check of `step`: passed when there is no `detail`. */
+const verdict = (step: string, detail?: string): Check =>
+  detail === undefined ? { step, ok: true } : { step, ok: false, detail };
+
+/**
+ * Why a drift expectation fails against the report a finished drift run returned as its
+ * output, or undefined when the report found the resource as expected.
+ */
+function driftDetail(
+  e: Extract<Expectation, { declared: string }>,
+  end: Extract<LedgerRecord, { type: "run.finished" }>,
+): string | undefined {
+  const report = end.output as Partial<DriftReport> | null | undefined;
+  if (!Array.isArray(report?.resources)) return "the run's output is not a drift report";
+  const resource = report.resources.find((r) => r.id === e.declared);
+  if (!resource) {
+    return `no resource ${e.declared} in the report; it has ${report.resources.map((r) => r.id).join(", ") || "none"}`;
+  }
+  if (resource.status === "error") return `${e.declared} could not be read: ${resource.error}`;
+  const ok =
+    resource.status === e.status && (e.status !== "drifted" || resource.fields.some((f) => f.path === e.field));
+  if (ok) return undefined;
+  return `${e.declared} is ${found(resource)}, not ${e.status === "drifted" ? `drifted in ${e.field}` : e.status}`;
+}
+
 /**
  * Checks each of the scenario's expectations against a run's ledger records. Pure. A call is an
  * `op.called` record without an `error`; one with an error (a policy denial, a rejected
@@ -737,79 +762,55 @@ const found = (r: DriftResult) =>
  */
 export function check(scenario: Scenario, records: readonly LedgerRecord[]): Check[] {
   const end = records.find((r) => r.type === "run.finished" || r.type === "run.failed");
-  const callsTo = (op: string) => records.filter(isCall).filter((r) => r.op === op);
+  const calls = records.filter(isCall);
+  const requests = records.filter(isRequest);
+  const callsTo = (op: string) => calls.filter((r) => r.op === op);
   return scenario.expect.map((e): Check => {
     if ("decision" in e) {
-      const calls = callsTo(e.op);
+      const tries = callsTo(e.op);
       if (e.decision === "denied") {
-        if (calls.some((r) => r.decision.kind === "deny")) return { step: e.step, ok: true };
-        const detail = calls.length ? `${e.op} was ${decisions(calls)}, not denied` : `no call to ${e.op}`;
-        return { step: e.step, ok: false, detail };
+        if (tries.some((r) => r.decision.kind === "deny")) return verdict(e.step);
+        return verdict(e.step, tries.length ? `${e.op} was ${decisions(tries)}, not denied` : `no call to ${e.op}`);
       }
-      const requests = records.filter(isRequest).filter((r) => r.op === e.op || r.covers.includes(e.op));
-      if (requests.some((r) => isApprover(r.approver, e.approver))) return { step: e.step, ok: true };
-      const detail = requests.length
-        ? `${e.op} was held for ${[...new Set(requests.map((r) => approverLabel(r.approver)))].join(" and ")}, not ${e.approver}`
-        : calls.length
-          ? `${e.op} was ${decisions(calls)}, not held`
-          : `no call to ${e.op}`;
-      return { step: e.step, ok: false, detail };
+      const holds = requests.filter((r) => r.op === e.op || r.covers.includes(e.op));
+      if (holds.some((r) => isApprover(r.approver, e.approver))) return verdict(e.step);
+      return verdict(
+        e.step,
+        holds.length
+          ? `${e.op} was held for ${[...new Set(holds.map((r) => approverLabel(r.approver)))].join(" and ")}, not ${e.approver}`
+          : tries.length
+            ? `${e.op} was ${decisions(tries)}, not held`
+            : `no call to ${e.op}`,
+      );
     }
-    if ("declared" in e) {
-      if (!end) return { step: e.step, ok: false, detail: "run not ended" };
-      if (end.type === "run.failed") return { step: e.step, ok: false, detail: `the run failed: ${end.error.message}` };
-      const report = end.output as Partial<DriftReport> | null | undefined;
-      if (!Array.isArray(report?.resources)) {
-        return { step: e.step, ok: false, detail: "the run's output is not a drift report" };
-      }
-      const resource = report.resources.find((r) => r.id === e.declared);
-      if (!resource) {
-        const ids = report.resources.map((r) => r.id).join(", ") || "none";
-        return { step: e.step, ok: false, detail: `no resource ${e.declared} in the report; it has ${ids}` };
-      }
-      if (resource.status === "error") {
-        return { step: e.step, ok: false, detail: `${e.declared} could not be read: ${resource.error}` };
-      }
-      const wanted = e.status === "drifted" ? `drifted in ${e.field}` : e.status;
-      const ok =
-        resource.status === e.status && (e.status !== "drifted" || resource.fields.some((f) => f.path === e.field));
-      return ok
-        ? { step: e.step, ok }
-        : { step: e.step, ok, detail: `${e.declared} is ${found(resource)}, not ${wanted}` };
-    }
-    if ("op" in e) {
-      const tries = records.filter(isCall).filter((r) => r.op === e.op);
-      const calls = tries.filter((r) => !r.error);
-      const matching = calls.filter((r) => e.input === undefined || contains(r.input, e.input));
-      const ok = matching.length > 0 === e.called;
-      if (ok) return { step: e.step, ok };
-      const what = e.input === undefined ? e.op : `${e.op} with ${JSON.stringify(e.input)}`;
+    if ("called" in e) {
+      const tries = callsTo(e.op);
+      const made = tries.filter((r) => !r.error);
+      const matching = made.filter((r) => e.input === undefined || contains(r.input, e.input));
+      if (matching.length > 0 === e.called) return verdict(e.step);
       const inputs = (list: Call[]) => list.map((r) => JSON.stringify(r.input)).join(", ");
-      if (!e.called) return { step: e.step, ok, detail: `${e.op} was called with ${inputs(matching)}` };
+      if (!e.called) return verdict(e.step, `${e.op} was called with ${inputs(matching)}`);
+      const what = e.input === undefined ? e.op : `${e.op} with ${JSON.stringify(e.input)}`;
       const tried = tries.flatMap(({ error }) => (error ? [`${error.code ?? error.name}: ${error.message}`] : []));
-      return {
-        step: e.step,
-        ok,
-        detail: [
+      return verdict(
+        e.step,
+        [
           `no call to ${what}`,
-          ...(calls.length ? [`its calls had ${inputs(calls)}`] : []),
+          ...(made.length ? [`its calls had ${inputs(made)}`] : []),
           ...(tried.length ? [`attempted: ${tried.join(", ")}`] : []),
         ].join("; "),
-      };
+      );
     }
-    if (!end) return { step: e.step, ok: false, detail: "run not ended" };
-    if (e.outcome === "finished") {
-      return end.type === "run.finished"
-        ? { step: e.step, ok: true }
-        : { step: e.step, ok: false, detail: `the run failed: ${end.error.message}` };
+    // The rest read how the run ended.
+    if (!end) return verdict(e.step, "run not ended");
+    if ("outcome" in e && e.outcome === "failed") {
+      if (end.type !== "run.failed") return verdict(e.step, "the run finished");
+      if (e.code === undefined || end.error.code === e.code) return verdict(e.step);
+      return verdict(e.step, `the run failed with ${end.error.code ?? "no code"}: ${end.error.message}`);
     }
-    if (end.type !== "run.failed") return { step: e.step, ok: false, detail: "the run finished" };
-    if (e.code === undefined || end.error.code === e.code) return { step: e.step, ok: true };
-    return {
-      step: e.step,
-      ok: false,
-      detail: `the run failed with ${end.error.code ?? "no code"}: ${end.error.message}`,
-    };
+    // A finished run: what `the run succeeds` expects, and what a drift expectation reads its report from.
+    if (end.type === "run.failed") return verdict(e.step, `the run failed: ${end.error.message}`);
+    return verdict(e.step, "declared" in e ? driftDetail(e, end) : undefined);
   });
 }
 
