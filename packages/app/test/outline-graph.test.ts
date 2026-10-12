@@ -41,6 +41,12 @@ describe("outlineGraph", () => {
     expect(nodes.some((n) => "state" in n)).toBe(false);
   });
 
+  it("carries the operations a computed id can reach onto its node", () => {
+    const ops = ["ghost.post.create", "mastodon.post.create"];
+    const { nodes } = outlineGraph([{ kind: "op", id: "*.post.create", ops }]);
+    expect(nodes[1]).toEqual({ id: "op:0", kind: "op", label: "*.post.create", ops });
+  });
+
   it("draws a literal ctx.all as one lane per member, from the node before to the node after", () => {
     const { nodes, edges } = outlineGraph([
       op("ghost.post.create"),

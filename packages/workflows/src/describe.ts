@@ -1,10 +1,10 @@
 import type { z } from "zod";
 import { resolveConfig, type SanomaConfig } from "./config.ts";
-import { type Builtin, jsonSchemaOf, type Use } from "./define.ts";
+import { type Builtin, jsonSchemaOf, opIdsOf, type Use } from "./define.ts";
 import { DRIFT_WORKFLOW } from "./drift.ts";
 import type { Fake } from "./fake.ts";
 import { fill, isBug, seedFrom, shapeOf } from "./fill.ts";
-import { type Effect, isOp, type Op, VENDOR, type VendorInfo } from "./op.ts";
+import { type Effect, type Op, VENDOR, type VendorInfo } from "./op.ts";
 import { type Outline, outlineWithSource } from "./outline.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
 import { type ResourceFields, resourceTypesOf } from "./resource.ts";
@@ -197,7 +197,7 @@ export async function describeConfig(config: SanomaConfig): Promise<ConfigDescri
       trigger: wf.trigger,
       ...(wf.name === DRIFT_WORKFLOW && { builtin: true as const }),
       input: toJsonSchema(wf.input, `${wf.name} input`, "input"),
-      ops: (wf.uses as Use[]).filter(isOp).map((op) => op.id),
+      ops: opIdsOf(wf),
       builtins: (wf.uses as Use[]).filter((u): u is Builtin => typeof u === "string"),
       outline,
       ...(source === undefined ? {} : { source }),

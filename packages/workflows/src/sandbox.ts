@@ -1,8 +1,7 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import type { Use } from "./define.ts";
+import { opIdsOf } from "./define.ts";
 import { SanomaError } from "./errors.ts";
 import { entry, write } from "./ledger.ts";
-import { isOp } from "./op.ts";
 import type { Run } from "./run.ts";
 import { loadScenarios } from "./scenario.ts";
 
@@ -43,7 +42,7 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
           workflow: scenario.workflow,
         });
       }
-      const uses = (state.workflows.get(run.workflow)!.uses as readonly Use[]).filter(isOp).map((op) => op.id);
+      const uses = opIdsOf(state.workflows.get(run.workflow)!);
       const missing = [...new Set([...uses, ...scenario.given.map((g) => g.op)])].filter(
         (id) => !state.fakeDrivers.has(id),
       );
