@@ -22,9 +22,9 @@ import {
 } from "../src/gen/bridge/v1/bridge_pb.ts";
 import { isObject } from "../src/json.ts";
 import { readPins, testdata } from "../src/pins.ts";
-import { recordHint, recorder, replyDir, typeDir } from "./record.ts";
 import type { BridgeCall } from "../src/replies.ts";
 import { parseSchema, type SchemaDocument } from "../src/schema.ts";
+import { recordHint, recorder, replyDir, typeDir } from "./record.ts";
 
 export interface FakeBridgeOptions {
   /** The fixtures: `pins.json`, `schemas/` and `replies/`. Default: this package's `testdata/`. */
