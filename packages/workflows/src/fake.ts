@@ -60,7 +60,7 @@ export interface Fake<T, Id extends string = string> {
   hold(opId: Id): () => void;
   /**
    * A new in-memory fake of the same vendor: the initial state, its own call log, no file and no
-   * faults. What it is called with leaves this one untouched, as for a sample call.
+   * faults. What it is called with leaves this one untouched, as for a sandbox run.
    */
   fresh(): Fake<T, Id>;
 }

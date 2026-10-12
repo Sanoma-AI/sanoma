@@ -16,7 +16,7 @@ Vitest tests for `@sanoma/workflows`. Files that start runs need Postgres (`pnpm
 | [`client.test.ts`](client.test.ts)           | `runStatus`, `firstMatching` and `SanomaClient` against Postgres                                                         |
 | [`credentials.test.ts`](credentials.test.ts) | A driver's `env`: statuses, refusals, stored credentials and the worker's reload, on Postgres; the connectors' variables |
 | [`define.test.ts`](define.test.ts)           | `defineWorkflow` records the file that called it, and refuses code with none                                             |
-| [`describe.test.ts`](describe.test.ts)       | `describeConfig`: workflows, operations and their mocks, vendors and policy                                              |
+| [`describe.test.ts`](describe.test.ts)       | `describeConfig`: workflows, operations and their contracts, vendors and policy                                          |
 | [`drift.test.ts`](drift.test.ts)             | The built-in drift workflow on `useApp` and the company fakes: its report, ledger, references and record                 |
 | [`errors.test.ts`](errors.test.ts)           | `errorCode` and `errorInfo`                                                                                              |
 | [`fake.test.ts`](fake.test.ts)               | `Fake.fresh`: a new in-memory copy that shares nothing with its fake                                                     |
