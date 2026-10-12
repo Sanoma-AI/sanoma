@@ -110,6 +110,24 @@ describe("lintWorkflow", () => {
     ]);
   });
 
+  it("accepts sanoma as the import source, with the same names, and refuses its subpaths", () => {
+    expect(
+      messages(`
+        import { defineWorkflow, definePolicy, allow, deny, approve, approvedFor, allowAll } from "sanoma";
+        import { mayDecide, errorCode, type Ctx } from "sanoma";
+        import { defineConfig } from "sanoma";
+        import * as s from "sanoma";
+        import { main } from "sanoma/dist/cli.js";
+      `),
+    ).toEqual([
+      expect.stringMatching(/^defineConfig is not allowed in a workflow: .*types from @sanoma\/workflows or sanoma/),
+      expect.stringMatching(/^import \* from "sanoma" is not allowed/),
+      expect.stringMatching(
+        /^import "sanoma\/dist\/cli\.js" is not allowed in a workflow: `sanoma` has no entry points/,
+      ),
+    ]);
+  });
+
   it("allows only the names a workflow or policy needs from @sanoma/workflows, and any type", () => {
     expect(
       messages(`
@@ -498,6 +516,11 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
       "workflows/sandbox.ts",
       `import { check } from "@sanoma/workflows/scenario";\nexport const checks = [check];\n`,
     );
+    // The same names from `sanoma`, which re-exports them; its subpaths are nothing for a workflow.
+    write(
+      "workflows/via-sanoma.ts",
+      `import { defineWorkflow, allow, defineConfig } from "sanoma";\nimport type { Ctx } from "sanoma";\nimport { main } from "sanoma/dist/cli.js";\nexport const all = [defineWorkflow, allow, defineConfig, main] as [unknown, unknown, Ctx<[]>, unknown];\n`,
+    );
     // The built-in drift workflow, as if it were the company's: oxlint finds nothing in it.
     write("workflows/drift.ts", readFileSync(new URL("../src/drift.ts", import.meta.url), "utf8"));
     // Outside workflows/ and policies/, nothing is restricted.
@@ -564,7 +587,29 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
         rule: imports,
         text: expect.stringMatching(/@sanoma\/workflows\/scenario.*through ctx/),
       },
+      {
+        file: "workflows/via-sanoma.ts",
+        line: 1,
+        rule: imports,
+        text: expect.stringMatching(/'defineConfig'.*belongs in sanoma\.config\.ts/),
+      },
+      {
+        file: "workflows/via-sanoma.ts",
+        line: 3,
+        rule: imports,
+        text: expect.stringMatching(/sanoma\/dist\/cli\.js.*no entry points for a workflow/),
+      },
     ]);
+  });
+
+  it("allows the same names from sanoma as from @sanoma/workflows", () => {
+    const { overrides } = JSON.parse(readFileSync(fragment, "utf8")) as {
+      overrides: { rules: Record<string, [string, { paths: { name: string; allowImportNames?: string[] }[] }]> }[];
+    };
+    const paths = overrides.flatMap((o) => o.rules["no-restricted-imports"]?.[1].paths ?? []);
+    const names = (pkg: string) => paths.find((p) => p.name === pkg)?.allowImportNames;
+    expect(names("sanoma")).toEqual(names("@sanoma/workflows"));
+    expect(names("sanoma")).toContain("defineWorkflow");
   });
 
   it("holds files under resources/ to the data-file subset, with the plugin from dist/", () => {

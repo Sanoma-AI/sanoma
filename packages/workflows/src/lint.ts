@@ -15,20 +15,25 @@ export type { LintProblem } from "./ast.ts";
  */
 const THROUGH_CTX = "a workflow must call vendors through ctx, so the policy sees every call";
 
-const ALLOWED_PACKAGE = /^(@sanoma\/workflows|@sanoma\/connector-[a-z0-9-]+|zod)$/;
+/** The packages the author surface is imported from: `sanoma` re-exports what `@sanoma/workflows` allows. */
+const AUTHOR_PACKAGES = new Set(["@sanoma/workflows", "sanoma"]);
+
+const ALLOWED_PACKAGE = /^(@sanoma\/workflows|sanoma|@sanoma\/connector-[a-z0-9-]+|zod)$/;
 
 /** Packages refused by name, with the reason. */
 const REFUSED_PACKAGES: [RegExp, string][] = [
   [/^@sanoma\/testing(\/|$)/, `fakes and test helpers belong in tests; ${THROUGH_CTX}`],
   [/^@sanoma\/app(\/|$)/, "the app starts runs and decides approvals, so a workflow could approve itself"],
   [/^@sanoma\/connector-[^/]+\/(fake|driver)(\/|$)/, `${THROUGH_CTX}; import the connector itself`],
+  [/^sanoma\//, "`sanoma` has no entry points for a workflow: import its names from `sanoma` itself"],
 ];
 
 /**
- * What a workflow or policy may import from `@sanoma/workflows`, besides types: oxlint.json's
- * `allowImportNames`. Everything else is refused: the client, the worker and the app could start
- * runs or approve the run's own approvals, a ledger store could forge the audit record (a store
- * keeps the first record per id), and config helpers can read credentials.
+ * What a workflow or policy may import from `@sanoma/workflows` (and from `sanoma`, which
+ * re-exports exactly these), besides types: oxlint.json's `allowImportNames`. Everything else is
+ * refused: the client, the worker and the app could start runs or approve the run's own
+ * approvals, a ledger store could forge the audit record (a store keeps the first record per
+ * id), and config helpers can read credentials.
  */
 const WORKFLOW_IMPORTS: readonly string[] =
   restrictedImports(oxlint).find((p) => p.name === "@sanoma/workflows")?.allowImportNames ?? [];
@@ -38,7 +43,7 @@ const ALLOWED_NAMES = new Set(WORKFLOW_IMPORTS);
 const NOT_ALLOWED =
   "a workflow or policy imports only " +
   WORKFLOW_IMPORTS.join(", ") +
-  " and types from @sanoma/workflows: the rest could start runs, approve its own approvals, forge the ledger or read credentials";
+  " and types from @sanoma/workflows or sanoma: the rest could start runs, approve its own approvals, forge the ledger or read credentials";
 
 /**
  * Error classes a run must not test with `instanceof`: on a replay DBOS rethrows a serialized
@@ -49,7 +54,7 @@ const ERROR_CLASSES = new Set(["DriverError", "SanomaError", "PolicyDeniedError"
 
 /**
  * Checks a workflow or policy file. Imports allowed: the names in `WORKFLOW_IMPORTS` and any
- * type from `@sanoma/workflows`, `@sanoma/connector-<vendor>`, `zod`, and relative files. With
+ * type from `@sanoma/workflows` or `sanoma`, `@sanoma/connector-<vendor>`, `zod`, and relative files. With
  * `filename`, a relative import must stay inside the file's nearest `workflows/` or `policies/`
  * directory, or its own directory when it has neither. No `instanceof` against the runtime's
  * error classes: read `errorCode(err)`.
@@ -75,18 +80,18 @@ export function lintWorkflow(source: string, filename?: string): LintProblem[] {
       problems.push({ ...at(node.source.start), message: `import "${spec}" is not allowed in a workflow: ${refusal}` });
       return;
     }
-    if (spec !== "@sanoma/workflows") return;
+    if (!AUTHOR_PACKAGES.has(spec)) return;
     if (node.type === "ExportAllDeclaration") {
       problems.push({
         ...at(node.start),
-        message: `export * from "@sanoma/workflows" is not allowed in a workflow: it would re-export SanomaClient`,
+        message: `export * from "${spec}" is not allowed in a workflow: it would re-export what a workflow may not import`,
       });
     }
     for (const s of node.specifiers ?? []) {
       if (s.type === "ImportNamespaceSpecifier") {
         problems.push({
           ...at(s.start),
-          message: `import * from "@sanoma/workflows" is not allowed in a workflow: import the names you use, so SanomaClient stays out`,
+          message: `import * from "${spec}" is not allowed in a workflow: import the names you use, so the rest stays out`,
         });
         continue;
       }
@@ -187,5 +192,5 @@ function whyRefused(spec: string, filename: string | undefined, root: string | u
   }
   for (const [pattern, reason] of REFUSED_PACKAGES) if (pattern.test(spec)) return reason;
   if (ALLOWED_PACKAGE.test(spec)) return undefined;
-  return "import only from `@sanoma/workflows`, a `@sanoma/connector-*` package, zod, or a file beside this one";
+  return "import only from `sanoma` (or `@sanoma/workflows`), a `@sanoma/connector-*` package, zod, or a file beside this one";
 }
