@@ -3,7 +3,7 @@ import type { WorkflowEntry } from "@sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { PlayIcon } from "lucide-react";
-import { type ComponentProps, memo, type ReactNode, useCallback, useMemo, useState } from "react";
+import { type ComponentProps, memo, useCallback, useMemo, useState } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
@@ -16,25 +16,32 @@ import { annotateGraph } from "../graph/scenario-graph.ts";
 import { type GraphNode, nodeAt } from "../graph/types.ts";
 import { configQuery, opsById, sourceQuery, workflowFile } from "../queries.ts";
 import type { CodeProps } from "./code.tsx";
-import { BUILTIN_ICON, CodePanel, GraphPanel, Json, None, Nothing, OpItem, Section } from "./common.tsx";
+import { BUILTIN_ICON, CodePanel, GraphPanel, Json, None, Nothing, Notice, OpItem, Section } from "./common.tsx";
 
 // A workflow's pieces, as the workflows page's cards and a workflow's own page show them, and
 // its graph beside its source, as a workflow's page and a run's show them.
 
-/** The Start page, with the workflow chosen when `name` names one. Small and outlined unless told otherwise. */
-export function StartButton({
+/** Run: opens the workflow's New run pane. A Button otherwise, styled as given. */
+export function RunButton({
   name,
-  children = "Start",
-  variant = "outline",
-  size = "sm",
-}: { name?: string; children?: ReactNode } & Pick<ComponentProps<typeof Button>, "variant" | "size">) {
+  ...props
+}: { name: string } & Omit<ComponentProps<typeof Button>, "asChild" | "children">) {
   return (
-    <Button asChild variant={variant} size={size}>
-      <Link to="/start" search={name === undefined ? {} : { workflow: name }}>
+    <Button asChild {...props}>
+      <Link to="/workflows/$name/new" params={{ name }}>
         <PlayIcon data-icon="inline-start" />
-        {children}
+        Run
       </Link>
     </Button>
+  );
+}
+
+/** Where a pane of a retired workflow's page would be: the config no longer has it, but its runs remain. */
+export function Retired({ name }: { name: string }) {
+  return (
+    <Notice>
+      This config has no workflow named <code>{name}</code>. Its past runs are in the rail.
+    </Notice>
   );
 }
 

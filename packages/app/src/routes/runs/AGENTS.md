@@ -1,11 +1,10 @@
 # packages/app/src/routes/runs
 
-The pages under `/runs`: the list of runs and the page for one run.
+Redirects from the old `/runs` URLs, kept so old links and bookmarks still work: runs now live on their workflow's page.
 
 ## Contents
 
 | Path                     | What it is                                                                                                       |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| [`$id.tsx`](%24id.tsx)   | `/runs/:id`: one run with its status, ledger, approvals and workflow graph, and a sandbox run's badge and checks |
-| [`index.tsx`](index.tsx) | `/runs`: a table of recent runs, sandbox runs badged, with a button to start one                                 |
-| [`route.tsx`](route.tsx) | Layout for `/runs`, with no component: sets the "Runs" breadcrumb and page title                                 |
+| [`$id.tsx`](%24id.tsx)   | `/runs/:id`: reads the run and redirects to `/workflows/:name/runs/:id`; not-found for a run that does not exist |
+| [`index.tsx`](index.tsx) | `/runs`: redirects to `/workflows`                                                                               |
