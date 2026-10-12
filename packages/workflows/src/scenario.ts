@@ -76,8 +76,8 @@ export interface Decision {
  */
 export type Expectation =
   | { step: string; op: string; input?: unknown; called: boolean }
-  | { step: string; denied: string }
-  | { step: string; held: string; approver: string }
+  | { step: string; op: string; decision: "denied" }
+  | { step: string; op: string; decision: "held"; approver: string }
   | { step: string; outcome: "finished" | "failed"; code?: string }
   | { step: string; declared: string; status: "clean" | "gone" }
   | { step: string; declared: string; status: "drifted"; field: string };
@@ -343,13 +343,13 @@ function rulesOf(scope: Scope): Rule[] {
       kind: "then",
       source: "{op} was denied",
       expression: expression("{op} was denied"),
-      read: ([op]) => ({ denied: op as string }),
+      read: ([op]) => ({ op: op as string, decision: "denied" }),
     },
     {
       kind: "then",
       source: "{op} was held for {who}",
       expression: expression("{op} was held for {who}"),
-      read: ([op, who]) => ({ held: op as string, approver: who as string }),
+      read: ([op, who]) => ({ op: op as string, decision: "held", approver: who as string }),
     },
     {
       kind: "then",
@@ -593,9 +593,8 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
           case "then": {
             const item = rule.read(values, ps);
             scenario.expect.push({ step, ...item });
-            if ("op" in item) ({ op, called } = item);
-            else if ("denied" in item) op = item.denied;
-            else if ("held" in item) op = item.held;
+            if ("op" in item) op = item.op;
+            if ("called" in item) ({ called } = item);
             break;
           }
           case "any":
@@ -740,21 +739,20 @@ export function check(scenario: Scenario, records: readonly LedgerRecord[]): Che
   const end = records.find((r) => r.type === "run.finished" || r.type === "run.failed");
   const callsTo = (op: string) => records.filter(isCall).filter((r) => r.op === op);
   return scenario.expect.map((e): Check => {
-    if ("denied" in e) {
-      const calls = callsTo(e.denied);
-      if (calls.some((r) => r.decision.kind === "deny")) return { step: e.step, ok: true };
-      const detail = calls.length ? `${e.denied} was ${decisions(calls)}, not denied` : `no call to ${e.denied}`;
-      return { step: e.step, ok: false, detail };
-    }
-    if ("held" in e) {
-      const requests = records.filter(isRequest).filter((r) => r.op === e.held || r.covers.includes(e.held));
+    if ("decision" in e) {
+      const calls = callsTo(e.op);
+      if (e.decision === "denied") {
+        if (calls.some((r) => r.decision.kind === "deny")) return { step: e.step, ok: true };
+        const detail = calls.length ? `${e.op} was ${decisions(calls)}, not denied` : `no call to ${e.op}`;
+        return { step: e.step, ok: false, detail };
+      }
+      const requests = records.filter(isRequest).filter((r) => r.op === e.op || r.covers.includes(e.op));
       if (requests.some((r) => isApprover(r.approver, e.approver))) return { step: e.step, ok: true };
-      const calls = callsTo(e.held);
       const detail = requests.length
-        ? `${e.held} was held for ${[...new Set(requests.map((r) => approverLabel(r.approver)))].join(" and ")}, not ${e.approver}`
+        ? `${e.op} was held for ${[...new Set(requests.map((r) => approverLabel(r.approver)))].join(" and ")}, not ${e.approver}`
         : calls.length
-          ? `${e.held} was ${decisions(calls)}, not held`
-          : `no call to ${e.held}`;
+          ? `${e.op} was ${decisions(calls)}, not held`
+          : `no call to ${e.op}`;
       return { step: e.step, ok: false, detail };
     }
     if ("declared" in e) {

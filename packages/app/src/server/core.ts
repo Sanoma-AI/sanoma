@@ -150,7 +150,7 @@ export async function runDetail({ client, resolved }: AppContext, runId: string)
       const ended = isEnded(run.status);
       const checks = check(scenario, ledger).map((c, i) => {
         const e = scenario.expect[i]!;
-        return { ...c, settled: ended || (c.ok && "op" in e && e.called) };
+        return { ...c, settled: ended || (c.ok && "called" in e && e.called) };
       });
       return { run, ledger, approvals, checks };
     }

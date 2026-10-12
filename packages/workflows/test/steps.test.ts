@@ -99,10 +99,10 @@ describe("the company's scenarios", () => {
       against(
         held,
         [
-          { denied: "github.repository.import" },
-          { denied: "stripe.product.import" },
-          { held: "github.repository.import", approver: "finance" },
-          { held: "stripe.product.import", approver: "marketing-lead" },
+          { op: "github.repository.import", decision: "denied" },
+          { op: "stripe.product.import", decision: "denied" },
+          { op: "github.repository.import", decision: "held", approver: "finance" },
+          { op: "stripe.product.import", decision: "held", approver: "marketing-lead" },
         ],
         await run(held),
       ),

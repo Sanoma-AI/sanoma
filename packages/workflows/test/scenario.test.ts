@@ -673,8 +673,13 @@ describe("resources and policy outcomes", () => {
     expect(held).toMatchObject({
       workflow: "inspect",
       expect: [
-        { step: "github.repository.import was denied", denied: "github.repository.import" },
-        { step: "stripe.product.import was held for finance", held: "stripe.product.import", approver: "finance" },
+        { step: "github.repository.import was denied", op: "github.repository.import", decision: "denied" },
+        {
+          step: "stripe.product.import was held for finance",
+          op: "stripe.product.import",
+          decision: "held",
+          approver: "finance",
+        },
       ],
     });
     // A policy outcome is about its operation, and neither expects a call nor rules one out.
@@ -756,10 +761,10 @@ describe("resources and policy outcomes", () => {
     it("passes a denial and a hold, and says what the policy decided instead", () => {
       expect(
         details([
-          { step: "denied", denied: "github.branch_protection.import" },
-          { step: "allowed", denied: "github.repository.import" },
-          { step: "held", denied: "stripe.product.import" },
-          { step: "never called", denied: "stripe.webhook_endpoint.import" },
+          { step: "denied", op: "github.branch_protection.import", decision: "denied" },
+          { step: "allowed", op: "github.repository.import", decision: "denied" },
+          { step: "held", op: "stripe.product.import", decision: "denied" },
+          { step: "never called", op: "stripe.webhook_endpoint.import", decision: "denied" },
         ]),
       ).toEqual([
         undefined,
@@ -769,12 +774,12 @@ describe("resources and policy outcomes", () => {
       ]);
       expect(
         details([
-          { step: "held", held: "stripe.product.import", approver: "finance" },
-          { step: "covered, group by name", held: "ghost.post.publish", approver: "editors" },
-          { step: "other approver", held: "stripe.product.import", approver: "marketing-lead" },
-          { step: "allowed", held: "github.repository.import", approver: "finance" },
-          { step: "denied", held: "github.branch_protection.import", approver: "finance" },
-          { step: "never called", held: "stripe.webhook_endpoint.import", approver: "finance" },
+          { step: "held", op: "stripe.product.import", decision: "held", approver: "finance" },
+          { step: "covered, group by name", op: "ghost.post.publish", decision: "held", approver: "editors" },
+          { step: "other approver", op: "stripe.product.import", decision: "held", approver: "marketing-lead" },
+          { step: "allowed", op: "github.repository.import", decision: "held", approver: "finance" },
+          { step: "denied", op: "github.branch_protection.import", decision: "held", approver: "finance" },
+          { step: "never called", op: "stripe.webhook_endpoint.import", decision: "held", approver: "finance" },
         ]),
       ).toEqual([
         undefined,
