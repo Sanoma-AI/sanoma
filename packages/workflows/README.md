@@ -348,8 +348,6 @@ export default defineConfig({
 
 `fakes` are `defineFake` fakes, one per vendor (`resolveConfig` refuses two for one); each implements its vendor's operations for sandbox runs. `scenarios` must be a `file:` URL (`resolveConfig` refuses anything else); a directory that does not exist has no scenarios. Every `.feature` file under it is read; each must hold at least one scenario, and each scenario's name must be unique across them. Each row of a `Scenario Outline`'s examples is a scenario of its own, named from the outline's title; rows whose names come out the same get their line appended, such as `Launch (line 12)`.
 
-`describeConfig` says which vendors have one: a `VendorEntry`'s `fake` is true when `fakes` holds that vendor's fake.
-
 ```gherkin
 Feature: Announce a launch
 
