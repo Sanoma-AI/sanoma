@@ -8,13 +8,15 @@ export type ScenarioRoles = NonNullable<OpState["scenario"]>;
 /**
  * What the steps about the operations `matches` picks do with them: `seeded` where a `Given`
  * seeds one, `fails` where a `Given` injects a fault into its next call, `expected` where a
- * `Then` expects a call to it, and `forbidden` where one expects none. Empty when no step is about one.
+ * `Then` expects a call to it, `forbidden` where one expects none, and `denied` or `held` where
+ * one expects the policy's decision. Empty when no step is about one.
  */
 export function scenarioRoles(steps: ScenarioEntry["steps"], matches: (op: string) => boolean): ScenarioRoles {
   const roles: ScenarioRoles = {};
-  for (const { op, kind, called, fault } of steps) {
+  for (const { op, kind, called, decision, fault } of steps) {
     if (op === undefined || !matches(op)) continue;
     if (kind === "given") roles[fault ? "fails" : "seeded"] = true;
+    else if (decision) roles[decision] = true;
     else if (called === false) roles.forbidden = true;
     else roles.expected = true;
   }

@@ -218,6 +218,8 @@ function OpNode(props: Props<"op">) {
         {state?.scenario?.fails && <Badge variant="outline">fails</Badge>}
         {state?.scenario?.expected && <Badge variant="outline">expected</Badge>}
         {state?.scenario?.forbidden && <Badge variant="outline">not called</Badge>}
+        {state?.scenario?.denied && <Badge variant="outline">must deny</Badge>}
+        {state?.scenario?.held && <Badge variant="outline">must hold</Badge>}
       </Line>
       {node.ops && (
         <ul className="flex flex-col gap-0.5 border-t pt-1" aria-label="operations it can reach">

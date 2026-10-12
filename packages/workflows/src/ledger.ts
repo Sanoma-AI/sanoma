@@ -85,9 +85,18 @@ export type LedgerRecord = {
   | { type: "sleep.started"; node?: string; until: number }
   /**
    * A sandbox run seeded its fakes from the scenario named: each `Given` operation called
-   * through its fake, with what the fake returned. Follows `run.started`.
+   * through its fake, with what the fake returned, and each `Given` resource (by its type's id
+   * and its import id) put with its fields or removed (`gone`). Follows `run.started`.
    */
-  | { type: "scenario.seeded"; scenario: string; seeds: { op: string; input: unknown; output: unknown }[] }
+  | {
+      type: "scenario.seeded";
+      scenario: string;
+      seeds: (
+        | { op: string; input: unknown; output: unknown }
+        | { resource: string; name: string; fields: Record<string, unknown> }
+        | { resource: string; name: string; gone: true }
+      )[];
+    }
   | { type: "run.finished"; output: unknown }
   /** `error` as for `op.called`. */
   | { type: "run.failed"; error: ErrorInfo }

@@ -9,7 +9,7 @@ Source of `@sanoma/bridge`: the client exported from the package root, the conne
 | [`index.ts`](index.ts)            | The package root: `startBridge`, `lazyBridge`, `defaultBridge`, `readPins`, `BridgeError`, `parseSchema` and the types                                               |
 | [`bridge.ts`](bridge.ts)          | The `Bridge` interface, `ProviderRef`, `ResourceState`, `Diagnostic`, `BridgeError`, and `bridgeClient`, which maps a Connect client's messages and errors onto them |
 | [`connector.ts`](connector.ts)    | `tfConnector`: an OpenTofu connector (resource types, connector, driver) from the generated types; the `./connector` entry                                           |
-| [`tffake.ts`](tffake.ts)          | `tfFake`: a connector's fake, its driver over a `stateBridge`, with `put`, `override` and `remove`                                                                   |
+| [`tffake.ts`](tffake.ts)          | `tfFake`: a connector's fake, its driver over a `stateBridge`, with `put`, `override` and `remove`, kept by `fresh`                                                  |
 | [`configure.ts`](configure.ts)    | `ensureConfigured`: configures a provider once per bridge and config, serialized, and again after it has gone; `forgetConfigured`, for a bridge replaced             |
 | [`lazy.ts`](lazy.ts)              | `lazyBridge`: a `ProviderClient` over a bridge started on first call, replaced after a failure or any `unavailable`; `defaultBridge`, the process's one              |
 | [`replies.ts`](replies.ts)        | `loadReplies` and `stateBridge`: recorded replies as mutable state, and a bridge over it, for connectors' fakes                                                      |

@@ -24,7 +24,7 @@ import {
   resolveConfig,
   SanomaClient,
 } from "../src/index.ts";
-import { companyFakes, nodeIdOf } from "./fixtures/company/fakes.ts";
+import { companyConfig, companyFakes, nodeIdOf } from "./fixtures/company/fakes.ts";
 import company from "./fixtures/company/sanoma.config.ts";
 import { marketingFakes, useApp } from "./harness.ts";
 
@@ -33,7 +33,8 @@ import { marketingFakes, useApp } from "./harness.ts";
 const databaseUrl = testDatabaseUrl("drift");
 const alice = { id: "alice" };
 
-const { github, stripe, drivers, declared, seed } = companyFakes();
+const fakes = companyFakes();
+const { github, stripe, drivers, declared, seed } = fakes;
 
 const policyCalls: PolicyCall[] = [];
 // Refuses Stripe products to "no-stripe", so one resource fails and the run goes on.
@@ -41,21 +42,14 @@ const policy = definePolicy((call) => {
   policyCalls.push(call);
   return call.actor.id === "no-stripe" && call.op.id === "stripe.product.import" ? deny("no Stripe") : allow();
 });
-// No `fakes`: useApp's are the marketing vendors', whose connectors this config replaces.
-const companyConfig = {
-  workflows: [],
-  connectors: company.connectors,
-  file: company.file!,
-  drivers,
-  fakes: [],
-  policy,
-};
+// The company's own fakes replace useApp's, the marketing vendors', whose connectors this config replaces.
+const companyOnFakes = companyConfig([], policy, fakes);
 
 const byId = (report: DriftReport) => Object.fromEntries(report.resources.map((r) => [r.id, r]));
 const opCalls = (records: LedgerRecord[]) => records.filter((r) => r.type === "op.called");
 
 describe("the drift workflow", () => {
-  const app = useApp(databaseUrl, "drift", () => companyConfig);
+  const app = useApp(databaseUrl, "drift", () => companyOnFakes);
 
   beforeEach(() => {
     seed();

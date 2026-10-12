@@ -7,16 +7,21 @@ import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { defineFake } from "../src/fake.ts";
 import {
   allowAll,
   defineConnector,
+  defineResource,
   defineWorkflow,
   type LedgerRecord,
   memoryLedger,
   resolveConfig,
 } from "../src/index.ts";
+import { missingResourceFake, seedResource } from "../src/sandbox.ts";
 import { check, loadScenarios, parseFeature, type Scenario, type Scope } from "../src/scenario.ts";
 import announce from "./fixtures/announce.ts";
+import { companyConfig } from "./fixtures/company/fakes.ts";
+import inspect from "./fixtures/company/workflows/inspect.ts";
 import { marketingFakes } from "./harness.ts";
 
 const scopeOf = (connectors: Parameters<typeof resolveConfig>[0]["connectors"], drivers = marketingFakes().drivers) => {
@@ -46,6 +51,9 @@ const tallyWith = (rows: string) => `Feature: T\n  Scenario: S\n    When tally r
 
 /** A feature with one scenario that runs announce on made-up input. */
 const feature = (name: string) => `Feature: Announce\n  Scenario: ${name}\n    When announce runs\n`;
+
+/** A feature with one scenario that runs drift after these steps. */
+const drifting = (steps: string) => `Feature: A\n  Scenario: S\n${steps}    When drift runs\n`;
 
 /** A scenario with these expectations and nothing else. */
 const expecting = (expectations: Scenario["expect"]): Scenario => ({
@@ -595,5 +603,361 @@ describe("check", () => {
       { step: "denied", ok: false, detail: "the run failed with approval_rejected: no" },
     ]);
     expect(check(outcomes, calls).map((c) => c.detail)).toEqual(Array(4).fill("run not ended"));
+  });
+});
+
+describe("resources and policy outcomes", () => {
+  // The company fixture's connectors, which declare resource types, its fakes and its inspect workflow.
+  const company = resolveConfig({ ...companyConfig([inspect], allowAll), ledger: memoryLedger() });
+  const parseCompany = (text: string) => parseFeature(text, "company.feature", company);
+  const DRIFT = `Feature: Drift
+
+  Scenario: Changed at GitHub
+    Given github.repository "website" has
+      | name     | website              |
+      | has_wiki | true                 |
+      | topics   | ["website", "astro"] |
+    And github.repository "docs" is gone
+    When drift runs
+    Then resources/identity/github.ts#website is drifted in has_wiki
+    And resources/identity/github.ts#docs is gone
+    And resources/billing/stripe.ts#pro is clean
+`;
+  const INSPECT = `Feature: Inspect
+
+  Scenario: Refused and held
+    When inspect runs
+    And "Read a product" is approved by finance
+    Then github.repository.import was denied
+    And stripe.product.import was held for finance
+`;
+
+  it("reads a resource to put or remove, a drift result, and a denial or a hold into a scenario", () => {
+    const [drift] = parseCompany(DRIFT);
+    expect(drift).toMatchObject({
+      workflow: "drift",
+      given: [
+        {
+          step: 'github.repository "website" has',
+          resource: "github.repository",
+          vendor: "github",
+          type: "repository",
+          name: "website",
+          // Text where the field takes it, else JSON, as a table gives an operation's input.
+          fields: { name: "website", has_wiki: true, topics: ["website", "astro"] },
+        },
+        {
+          step: 'github.repository "docs" is gone',
+          resource: "github.repository",
+          vendor: "github",
+          type: "repository",
+          name: "docs",
+          gone: true,
+        },
+      ],
+      expect: [
+        { declared: "resources/identity/github.ts#website", status: "drifted", field: "has_wiki" },
+        { declared: "resources/identity/github.ts#docs", status: "gone" },
+        { declared: "resources/billing/stripe.ts#pro", status: "clean" },
+      ],
+    });
+    // A step about a resource names no operation.
+    expect(drift!.steps.map((s) => s.op)).toEqual(Array(6).fill(undefined));
+
+    const [held] = parseCompany(INSPECT);
+    expect(held).toMatchObject({
+      workflow: "inspect",
+      expect: [
+        { step: "github.repository.import was denied", op: "github.repository.import", decision: "denied" },
+        {
+          step: "stripe.product.import was held for finance",
+          op: "stripe.product.import",
+          decision: "held",
+          approver: "finance",
+        },
+      ],
+    });
+    // A policy outcome is about its operation, and neither expects a call nor rules one out.
+    expect(held!.steps.slice(2)).toEqual([
+      { text: "github.repository.import was denied", kind: "then", op: "github.repository.import", decision: "denied" },
+      {
+        text: "stripe.product.import was held for finance",
+        kind: "then",
+        op: "stripe.product.import",
+        decision: "held",
+      },
+    ]);
+  });
+
+  it("refuses, before anything is copied, a resource seed of a vendor whose fake holds no resources", () => {
+    const [drift] = parseCompany(DRIFT);
+    expect(missingResourceFake(drift!, company.fakes)).toBeUndefined();
+    // A resource type whose fake is a plain `defineFake`, with no `override`, `put` or `remove`.
+    const hook = defineResource({
+      vendor: "acme",
+      type: "hook",
+      title: "Hook",
+      identity: "name",
+      schema: z.object({ name: z.string(), url: z.string().nullish() }),
+      fields: { immutable: [], vendorOwned: [], writeOnly: [] },
+      find: ({ name }) => name,
+    });
+    const acme = defineConnector("acme", { hook }, { title: "Acme", package: "@acme/connector" });
+    const ops = {
+      hook: { import: async () => ({ id: "x", gone: true }), read: async () => ({ id: "x", gone: true }) },
+    };
+    const plain = defineFake(acme, { initial: () => ({}), ops: () => ops });
+    const ping = defineWorkflow({
+      name: "ping",
+      trigger: "manual",
+      input: z.object({}),
+      uses: [acme.hook.import],
+      run: async (ctx) => ctx.acme.hook.import({ id: "deploys" }),
+    });
+    const resolved = resolveConfig({
+      workflows: [ping],
+      connectors: [acme],
+      drivers: [plain.driver],
+      fakes: [plain],
+      policy: allowAll,
+      ledger: memoryLedger(),
+    });
+    const [seeded] = parseFeature(
+      `Feature: Ping\n  Scenario: Seeded\n    Given acme.hook "deploys" has\n      | url | https://example.com |\n    And acme.hook "other" is gone\n    When ping runs\n`,
+      "ping.feature",
+      resolved,
+    );
+    const problem = missingResourceFake(seeded!, resolved.fakes);
+    expect(problem?.code).toBe("invalid_input");
+    expect(problem?.message).toBe(
+      'Scenario "Seeded" seeds acme.hook, but acme\'s fake holds no resources (it is not a tfFake)',
+    );
+    expect(problem?.data).toEqual({ scenario: "Seeded", resources: ["acme.hook"] });
+    // A vendor with no fake at all is refused the same way.
+    expect(missingResourceFake(seeded!, new Map())?.message).toBe(problem?.message);
+  });
+
+  it("seeds a resource on the copy as the step says, and fails the scenario, naming the step, when the fake refuses it", () => {
+    const [drift] = parseCompany(DRIFT);
+    const [has, gone] = drift!.given as Extract<Scenario["given"][number], { resource: string }>[];
+    const done: unknown[] = [];
+    const copy = {
+      override: () => {},
+      put: (...args: unknown[]) => void done.push(["put", ...args]),
+      remove: (...args: unknown[]) => void done.push(["remove", ...args]),
+    };
+    expect(seedResource("S", copy, has!)).toEqual({
+      resource: "github.repository",
+      name: "website",
+      fields: { name: "website", has_wiki: true, topics: ["website", "astro"] },
+    });
+    expect(seedResource("S", copy, gone!)).toEqual({ resource: "github.repository", name: "docs", gone: true });
+    expect(done).toEqual([
+      ["put", "repository", "website", { name: "website", has_wiki: true, topics: ["website", "astro"] }],
+      ["remove", "repository", "docs"],
+    ]);
+    const refusing = {
+      ...copy,
+      put: () => {
+        throw new Error("fake github: repository has no field has_wiki");
+      },
+    };
+    let err: unknown;
+    try {
+      seedResource("S", refusing, has!);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toMatchObject({
+      code: "invalid_input",
+      message:
+        'Scenario "S" cannot seed github.repository "website" ("github.repository "website" has"): fake github: repository has no field has_wiki',
+      data: { scenario: "S", step: 'github.repository "website" has', resource: "github.repository", name: "website" },
+    });
+  });
+
+  it("names an unknown resource type, field or value, and a drift result in a scenario that does not run drift", () => {
+    expect(thrown(drifting('    Given github.gist "x" is gone\n'), company)).toBe(
+      'x.feature:3: no resource type "github.gist"; the config has github.branch_protection, github.repository, github.team_membership, stripe.product, stripe.webhook_endpoint',
+    );
+    expect(thrown(drifting('    Given github.repository "x" has\n      | nope | 1 |\n'), company)).toMatch(
+      /^x\.feature:3: no field "nope" in github\.repository "x"; it has allow_auto_merge, /,
+    );
+    expect(thrown(drifting('    Given github.repository "x" has\n      | has_wiki | yes |\n'), company)).toMatch(
+      /^x\.feature:3: has_wiki in github\.repository "x" cannot be "yes": /,
+    );
+    expect(
+      thrown(
+        `Feature: A\n  Scenario: S\n    When inspect runs\n    Then resources/identity/github.ts#website is clean\n`,
+        company,
+      ),
+    ).toBe(
+      'x.feature:2: "resources/identity/github.ts#website is clean" reads a drift report, so the scenario must run drift, not inspect',
+    );
+  });
+
+  describe("check", () => {
+    const common = { v: 1, app: "a", runId: "r", at: 0, actor: { id: "alice" }, workflow: "inspect" } as const;
+    const decided = (
+      seq: number,
+      op: string,
+      decision: Extract<LedgerRecord, { type: "op.called" }>["decision"],
+    ): LedgerRecord => ({
+      ...common,
+      id: `r:op.called:${seq}`,
+      seq,
+      type: "op.called",
+      op,
+      effect: "read",
+      input: { id: "x" },
+      decision,
+      durationMs: 1,
+    });
+    const requested = (
+      seq: number,
+      request: Partial<Extract<LedgerRecord, { type: "approval.requested" }>>,
+    ): LedgerRecord => ({
+      ...common,
+      id: `r:approval.requested:approval-${seq}`,
+      seq,
+      type: "approval.requested",
+      approval: `approval-${seq}`,
+      title: "Read a product",
+      approver: "finance",
+      requestedBy: "policy",
+      covers: [],
+      ...request,
+    });
+    const records = [
+      decided(1, "github.repository.import", { kind: "allow" }),
+      requested(2, { op: "stripe.product.import", covers: ["stripe.product.import"] }),
+      decided(3, "stripe.product.import", { kind: "approve", approver: "finance" }),
+      decided(4, "github.branch_protection.import", { kind: "deny", reason: "no rules" }),
+      // The workflow's own approval, to a group, covering an operation.
+      requested(5, {
+        title: "Publish",
+        approver: { group: "editors" },
+        requestedBy: "workflow",
+        covers: ["ghost.post.publish"],
+      }),
+    ];
+    const details = (expectations: Scenario["expect"], over = records) =>
+      check(expecting(expectations), over).map((c) => c.detail);
+    const ended = (end: LedgerRecord) => [...records, end];
+
+    it("passes a denial and a hold, and says what the policy decided instead", () => {
+      expect(
+        details([
+          { step: "denied", op: "github.branch_protection.import", decision: "denied" },
+          { step: "allowed", op: "github.repository.import", decision: "denied" },
+          { step: "held", op: "stripe.product.import", decision: "denied" },
+          { step: "never called", op: "stripe.webhook_endpoint.import", decision: "denied" },
+        ]),
+      ).toEqual([
+        undefined,
+        "github.repository.import was allowed, not denied",
+        "stripe.product.import was held for finance, not denied",
+        "no call to stripe.webhook_endpoint.import",
+      ]);
+      expect(
+        details([
+          { step: "held", op: "stripe.product.import", decision: "held", approver: "finance" },
+          { step: "covered, group by name", op: "ghost.post.publish", decision: "held", approver: "editors" },
+          { step: "other approver", op: "stripe.product.import", decision: "held", approver: "marketing-lead" },
+          { step: "allowed", op: "github.repository.import", decision: "held", approver: "finance" },
+          { step: "denied", op: "github.branch_protection.import", decision: "held", approver: "finance" },
+          { step: "never called", op: "stripe.webhook_endpoint.import", decision: "held", approver: "finance" },
+        ]),
+      ).toEqual([
+        undefined,
+        undefined,
+        "stripe.product.import was held for finance, not marketing-lead",
+        "github.repository.import was allowed, not held",
+        "github.branch_protection.import was denied, not held",
+        "no call to stripe.webhook_endpoint.import",
+      ]);
+    });
+
+    it("reads a drift result from the report the run returned, and says how the resource was found instead", () => {
+      const report = {
+        startedAt: 0,
+        finishedAt: 1,
+        problems: [],
+        resources: [
+          {
+            id: "resources/identity/github.ts#website",
+            vendor: "github",
+            type: "repository",
+            name: "website",
+            status: "drifted",
+            fields: [
+              { path: "has_wiki", desired: false, actual: true },
+              { path: "topics", desired: ["a"], actual: ["b"] },
+            ],
+          },
+          {
+            id: "resources/identity/github.ts#docs",
+            vendor: "github",
+            type: "repository",
+            name: "docs",
+            status: "clean",
+            fields: [],
+          },
+          {
+            id: "resources/identity/rules.ts#docsMain",
+            vendor: "github",
+            type: "branch_protection",
+            name: "docs:main",
+            status: "gone",
+            fields: [],
+          },
+          {
+            id: "resources/billing/stripe.ts#pro",
+            vendor: "stripe",
+            type: "product",
+            name: "pro",
+            status: "error",
+            fields: [],
+            error: "denied by policy: no Stripe",
+          },
+        ],
+      };
+      const finished = (output: unknown): LedgerRecord => ({
+        ...common,
+        id: "r:run.finished:9",
+        seq: 9,
+        type: "run.finished",
+        output,
+      });
+      const website = "resources/identity/github.ts#website";
+      const results: Scenario["expect"] = [
+        { step: "drifted", declared: website, status: "drifted", field: "has_wiki" },
+        { step: "other field", declared: website, status: "drifted", field: "name" },
+        { step: "clean", declared: website, status: "clean" },
+        { step: "gone", declared: "resources/identity/github.ts#docs", status: "gone" },
+        { step: "clean", declared: "resources/identity/rules.ts#docsMain", status: "clean" },
+        { step: "unread", declared: "resources/billing/stripe.ts#pro", status: "clean" },
+        { step: "unknown", declared: "resources/x.ts#y", status: "clean" },
+      ];
+      expect(details(results, ended(finished(report)))).toEqual([
+        undefined,
+        `${website} is drifted in has_wiki, topics, not drifted in name`,
+        `${website} is drifted in has_wiki, topics, not clean`,
+        "resources/identity/github.ts#docs is clean, not gone",
+        "resources/identity/rules.ts#docsMain is gone, not clean",
+        "resources/billing/stripe.ts#pro could not be read: denied by policy: no Stripe",
+        "no resource resources/x.ts#y in the report; it has resources/identity/github.ts#website, resources/identity/github.ts#docs, resources/identity/rules.ts#docsMain, resources/billing/stripe.ts#pro",
+      ]);
+      expect(details(results.slice(0, 1), ended(finished({})))).toEqual(["the run's output is not a drift report"]);
+      const failed: LedgerRecord = {
+        ...common,
+        id: "r:run.failed:9",
+        seq: 9,
+        type: "run.failed",
+        error: { name: "Error", message: "no" },
+      };
+      expect(details(results.slice(0, 1), ended(failed))).toEqual(["the run failed: no"]);
+      expect(details(results.slice(0, 1))).toEqual(["run not ended"]);
+    });
   });
 });

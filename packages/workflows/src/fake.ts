@@ -65,6 +65,18 @@ export interface Fake<T, Id extends string = string> {
   fresh(): Fake<T, Id>;
 }
 
+/**
+ * A fake that holds its vendor's objects by resource type (`repository`) and import id, as
+ * `@sanoma/bridge`'s `tfFake` does, with fields in the resource's shape: what a scenario's
+ * resource steps seed on a sandbox run's copy. `put` sets the fields over the object there, or
+ * makes one; `remove` deletes it, and is nothing when there is none.
+ */
+export interface ResourceFake {
+  override(type: string, id: string, fields: Record<string, unknown>): void;
+  put(type: string, id: string, fields: Record<string, unknown>): void;
+  remove(type: string, id: string): void;
+}
+
 type Fault =
   | { kind: "fail"; error: unknown }
   | { kind: "loseReply" }
