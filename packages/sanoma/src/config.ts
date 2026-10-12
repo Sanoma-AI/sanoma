@@ -8,8 +8,6 @@ export class UsageError extends Error {}
 
 export interface LoadedConfig {
   config: SanomaConfig;
-  /** `sanoma.config.ts`, absolute, with no symlink in it (as Node names the module). */
-  file: string;
   /** The config's directory: its `root`, else the file's. Data files are `resources/` in it. */
   root: string;
 }
@@ -37,7 +35,7 @@ export async function loadConfig(cwd = process.cwd()): Promise<LoadedConfig> {
     );
   }
   config.file ??= file;
-  return { config, file, root: config.root ?? dirname(file) };
+  return { config, root: config.root ?? dirname(file) };
 }
 
 const isConfig = (x: unknown): x is SanomaConfig =>

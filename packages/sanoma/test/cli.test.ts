@@ -92,7 +92,7 @@ describe("sanoma check", () => {
 });
 
 describe("sanoma --help and mistakes", () => {
-  it("prints the usage, and exits 2 for an unknown command or a directory without a config", async () => {
+  it("prints the usage, and exits 2 for an unknown command or option, a missing value, or a directory without a config", async () => {
     dir = copyFixture();
     const help = await runCli(dir, ["--help"], env);
     expect(help.code).toBe(0);
@@ -101,6 +101,12 @@ describe("sanoma --help and mistakes", () => {
     const unknown = await runCli(dir, ["nope"], env);
     expect(unknown.code).toBe(2);
     expect(unknown.stderr).toContain('unknown command "nope"');
+    const option = await runCli(dir, ["check", "--nope"], env);
+    expect(option.code).toBe(2);
+    expect(option.stderr).toMatch(/^Unknown option '--nope'/);
+    const value = await runCli(dir, ["ledger", "export", "r1", "--out"], env);
+    expect(value.code).toBe(2);
+    expect(value.stderr).toMatch(/^Option '--out <value>' argument missing/);
     rmSync(join(dir, "sanoma.config.ts"));
     const missing = await runCli(dir, ["env"], env);
     expect(missing.code).toBe(2);

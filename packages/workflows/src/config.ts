@@ -96,8 +96,8 @@ export function defineConfig(config: SanomaConfig): SanomaConfig {
   return { ...config, file: config.file ?? callerFile() };
 }
 
-export function resolveDatabaseUrl(config: { databaseUrl?: string }): string {
-  return config.databaseUrl ?? process.env.SANOMA_DATABASE_URL ?? DEFAULT_DATABASE_URL;
+export function resolveDatabaseUrl(config: { databaseUrl?: string }, env: NodeJS.ProcessEnv = process.env): string {
+  return config.databaseUrl ?? env.SANOMA_DATABASE_URL ?? DEFAULT_DATABASE_URL;
 }
 
 const isStore = (x: unknown): x is LedgerStore =>

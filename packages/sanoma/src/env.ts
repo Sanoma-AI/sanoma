@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { credentialsOf, DEFAULT_DATABASE_URL, type SanomaConfig } from "@sanoma/workflows";
+import { credentialsOf, resolveDatabaseUrl, type SanomaConfig } from "@sanoma/workflows";
 
 const HEADER = `# Copy to .env (ignored by git; \`sanoma\` loads it before reading the config). Never commit values.
 # The first block is what sanoma needs before anything runs. The vendor variables below it can
@@ -18,7 +18,8 @@ const HEADER = `# Copy to .env (ignored by git; \`sanoma\` loads it before readi
 export function renderEnvExample(config: SanomaConfig): string {
   const lines = [
     HEADER,
-    `# Optional. Postgres for the worker and the app; default ${config.databaseUrl ?? DEFAULT_DATABASE_URL}.`,
+    // The default: the config's own, else sanoma's, never this environment's.
+    `# Optional. Postgres for the worker and the app; default ${resolveDatabaseUrl(config, {})}.`,
     "# SANOMA_DATABASE_URL=",
     "# Optional. The app's port; default 3000.",
     "# SANOMA_APP_PORT=",

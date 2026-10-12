@@ -41,14 +41,7 @@ export {
   type ResourceOps,
   type ResourceSpec,
 } from "./resource.ts";
-export {
-  DEFAULT_DATABASE_URL,
-  defineConfig,
-  resolveConfig,
-  resolveDatabaseUrl,
-  type ResolvedConfig,
-  type SanomaConfig,
-} from "./config.ts";
+export { defineConfig, resolveConfig, resolveDatabaseUrl, type ResolvedConfig, type SanomaConfig } from "./config.ts";
 export { type CredentialStatus, credentialsOf } from "./env.ts";
 export {
   DRIFT_WORKFLOW,

@@ -4,14 +4,11 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { errorMessage, resolveConfig, resolveDatabaseUrl, type SanomaConfig } from "@sanoma/workflows";
-import { check } from "./check.ts";
-import { loadConfig, UsageError } from "./config.ts";
-import { devRepo, linkedPackages, startWatchers, supervise } from "./dev.ts";
-import { writeEnvExample } from "./env.ts";
-import { exportLedger } from "./ledger.ts";
-import { ensurePostgres } from "./postgres.ts";
-import { runApp, runWorker, serve, type Stoppable } from "./serve.ts";
+import type { ResolvedConfig, SanomaConfig } from "@sanoma/workflows";
+import { type LoadedConfig, loadConfig, UsageError } from "./config.ts";
+
+// Only Node's modules and ./config.ts are imported here: each command imports what it runs, so
+// `--help`, `env`, `ledger export` and the dev-mode parent load neither the worker nor the app.
 
 const USAGE = `usage: sanoma [command]
 
@@ -35,27 +32,38 @@ const USAGE_EXIT = 2;
 
 const log = (line: string) => console.error(line);
 
+const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
 /** Runs the command line; returns the exit code, or never, for a command that serves until a signal. */
 export async function main(argv: string[]): Promise<number> {
-  const { positionals, values } = parseArgs({
-    args: argv,
-    allowPositionals: true,
-    options: { help: { type: "boolean", short: "h" }, check: { type: "boolean" }, out: { type: "string" } },
-  });
+  let args: ReturnType<typeof parse>;
+  try {
+    args = parse(argv);
+  } catch (err) {
+    throw new UsageError(`${messageOf(err)}\n\n${USAGE.trimEnd()}`);
+  }
+  const { positionals, values } = args;
   if (values.help) {
     console.log(USAGE.trimEnd());
     return 0;
   }
   const [command, ...rest] = positionals;
   switch (command) {
-    case undefined:
-      return runAll();
+    case undefined: {
+      const { devRepo } = await import("./dev.ts");
+      const repo = devRepo(process.cwd());
+      return repo === undefined ? serveCommand() : dev(repo);
+    }
     case "serve":
-      return keep(async (config) => serve(config, { port: port() }), { announce: true });
-    case "worker":
-      return keep(runWorker);
-    case "app":
-      return keep(async (config) => runApp(config, { port: port() }), { announce: true });
+      return serveCommand();
+    case "worker": {
+      const { runWorker } = await import("./serve.ts");
+      return keep(await load(), runWorker);
+    }
+    case "app": {
+      const { runApp } = await import("./serve.ts");
+      return keep(await load(), (config) => runApp(config, { port: port() }));
+    }
     case "check":
       return runCheck();
     case "env":
@@ -67,38 +75,62 @@ export async function main(argv: string[]): Promise<number> {
       return ledgerExport(runId, values.out);
     }
     default:
-      throw new UsageError(`unknown command "${command}"\n\n${USAGE}`);
+      throw new UsageError(`unknown command "${command}"\n\n${USAGE.trimEnd()}`);
   }
 }
 
+const parse = (argv: string[]) =>
+  parseArgs({
+    args: argv,
+    allowPositionals: true,
+    options: { help: { type: "boolean", short: "h" }, check: { type: "boolean" }, out: { type: "string" } },
+  });
+
 const port = () => Number(process.env.SANOMA_APP_PORT ?? 3000);
 
-/** Starts what `start` starts over the loaded config, and stops it on SIGINT or SIGTERM, then exits 0. */
+/** The config, loaded once, and resolved once: its app name, database URL and workflows. */
+interface Loaded extends LoadedConfig {
+  resolved: ResolvedConfig;
+}
+
+async function load(): Promise<Loaded> {
+  const loaded = await loadConfig();
+  const { resolveConfig } = await import("@sanoma/workflows");
+  return { ...loaded, resolved: resolveConfig(loaded.config) };
+}
+
+/**
+ * Starts what `start` starts over the loaded config, prints what runs (and where, when it
+ * listens), and stops it on SIGINT or SIGTERM, then exits 0.
+ */
 async function keep(
-  start: (config: SanomaConfig) => Promise<Stoppable & { url?: string }>,
-  { announce = false } = {},
+  { config, resolved }: Loaded,
+  start: (config: SanomaConfig) => Promise<{ stop(): Promise<void>; url?: string }>,
 ): Promise<never> {
-  const { config } = await loadConfig();
   const started = await start(config);
-  const resolved = resolveConfig(config);
-  if (announce) {
-    console.log(`${resolved.appName} running ${[...resolved.workflows.keys()].join(", ")}`);
-    if (started.url !== undefined) console.log(`${resolved.appName} at ${started.url}; ctrl-c to stop`);
+  const running = `${resolved.appName} running ${[...resolved.workflows.keys()].join(", ")}`;
+  if (started.url === undefined) {
+    console.log(`${running}; ctrl-c to stop`);
   } else {
-    console.log(`${resolved.appName} running ${[...resolved.workflows.keys()].join(", ")}; ctrl-c to stop`);
+    console.log(running);
+    console.log(`${resolved.appName} at ${started.url}; ctrl-c to stop`);
   }
   onSignal(() => started.stop());
   return new Promise(() => {});
 }
 
-/** `sanoma`: Postgres, then the worker and the app, in this process or, in dev mode, in a supervised child. */
-async function runAll(): Promise<never> {
-  const cwd = process.cwd();
-  const { config } = await loadConfig(cwd);
-  await postgres(config);
-  const repo = devRepo(cwd);
-  if (repo === undefined) return keep(async (c) => serve(c, { port: port() }), { announce: true });
+/** `sanoma serve` (and `sanoma` outside dev mode): Postgres, then the worker and the app in this process. */
+async function serveCommand(): Promise<never> {
+  const loaded = await load();
+  await postgres(loaded.resolved);
+  const { serve } = await import("./serve.ts");
+  return keep(loaded, (config) => serve(config, { port: port() }));
+}
 
+/** Dev mode: `sanoma serve` in a child it restarts on a new build, and the linked packages' builds. */
+async function dev(repo: string): Promise<never> {
+  const { linkedPackages, startWatchers, supervise } = await import("./dev.ts");
+  const cwd = process.cwd();
   const packages = linkedPackages(cwd);
   log(`dev mode: ${repo}; building ${packages.map((p) => p.name).join(", ") || "nothing"} as it changes`);
   const watchers = startWatchers(packages, log);
@@ -115,19 +147,20 @@ async function runAll(): Promise<never> {
   return new Promise(() => {});
 }
 
-async function postgres(config: SanomaConfig): Promise<void> {
-  const url = resolveDatabaseUrl(config);
-  const { how, container } = await ensurePostgres(url, { appName: resolveConfig(config).appName, log });
-  if (how === "answered") log(`Postgres answers at ${url.replace(/:[^:@/]*@/, ":***@")}`);
+/** Makes sure Postgres answers at the config's URL, starting it in Docker when it may. */
+async function postgres({ appName, databaseUrl }: ResolvedConfig): Promise<void> {
+  const { ensurePostgres, masked } = await import("./postgres.ts");
+  const { how, container } = await ensurePostgres(databaseUrl, { appName, log });
+  if (how === "answered") log(`Postgres answers at ${masked(databaseUrl)}`);
   else log(`Postgres ${how === "created" ? "created" : "reused"} in Docker: container ${container}`);
 }
 
 async function runCheck(): Promise<number> {
-  const loaded = await loadConfig();
-  const url = resolveDatabaseUrl(loaded.config);
-  await postgres(loaded.config);
-  const databaseUrl = new URL(url);
+  const loaded = await load();
+  await postgres(loaded.resolved);
+  const databaseUrl = new URL(loaded.resolved.databaseUrl);
   databaseUrl.pathname = `${databaseUrl.pathname}_check`;
+  const { check } = await import("./check.ts");
   const { ok, problems } = await check(loaded, { databaseUrl: databaseUrl.toString(), log });
   for (const problem of problems) console.log(problem);
   log(ok ? "ok" : `${problems.length} problem${problems.length === 1 ? "" : "s"}`);
@@ -136,6 +169,7 @@ async function runCheck(): Promise<number> {
 
 async function env(checkOnly: boolean): Promise<number> {
   const { config, root } = await loadConfig();
+  const { writeEnvExample } = await import("./env.ts");
   const { changed } = writeEnvExample(root, config, { check: checkOnly });
   if (!checkOnly) {
     log(changed ? "wrote .env.example" : ".env.example is up to date");
@@ -147,6 +181,7 @@ async function env(checkOnly: boolean): Promise<number> {
 
 async function ledgerExport(runId: string, out: string | undefined): Promise<number> {
   const { config } = await loadConfig();
+  const { exportLedger } = await import("./ledger.ts");
   const text = await exportLedger(config, runId);
   if (out === undefined) process.stdout.write(text);
   else {
@@ -165,7 +200,7 @@ function onSignal(stop: () => Promise<void>): void {
     stop().then(
       () => process.exit(0),
       (err: unknown) => {
-        log(errorMessage(err));
+        log(messageOf(err));
         process.exit(1);
       },
     );
@@ -178,7 +213,7 @@ if (import.meta.main) {
   try {
     process.exitCode = await main(process.argv.slice(2));
   } catch (err) {
-    log(errorMessage(err));
+    log(messageOf(err));
     process.exitCode = err instanceof UsageError ? USAGE_EXIT : 1;
   }
 }

@@ -8,7 +8,7 @@ One command over a company repo: `sanoma` runs its workflows and the app, `sanom
 npm install sanoma @sanoma/connector-ghost
 ```
 
-`sanoma` brings `@sanoma/workflows`, `@sanoma/app`, `zod`, `typescript`, `@types/node` and `oxlint` with it: a repo installs nothing else but its connectors. Node 24 or later; Docker for the Postgres it starts when none answers.
+`sanoma` brings `@sanoma/workflows`, `@sanoma/app`, `zod`, `typescript`, `@types/node` and `oxlint` with it: a repo installs nothing else but its connectors. Node 24.2 or later (the bin uses `import.meta.main`); Docker for the Postgres it starts when none answers.
 
 A repo holds `sanoma.config.ts` at its root, with `workflows/`, `policies/`, optional `resources/` (data files) and `scenarios/` (feature files) beside it, and a `tsconfig.json` that extends the one this package ships:
 
@@ -67,7 +67,7 @@ Run them from the directory that holds `sanoma.config.ts`. Each loads `.env` the
 | `sanoma ledger export <runId> [--out <file>]` | A run's ledger records from the config's store (the Postgres ledger on its database when it names none), as JSON lines (the shape `jsonlLedger` keeps), to stdout or `--out`.                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `sanoma --help`                               | The usage.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
-Exit codes: 2 for a mistake in the call or the repo (no `sanoma.config.ts`, an unknown command), printed as one line; 1 for failed checks and failures while running; 0 otherwise. `SANOMA_APP_PORT` is the app's port (default 3000; 0 for any free port, which the printed address reports). On SIGINT or SIGTERM the app, then the worker, stop, and the process exits 0.
+Exit codes: 2 for a mistake in the call or the repo (no `sanoma.config.ts`, an unknown command or option, a bad argument), printed with the usage where it helps; 1 for failed checks and failures while running; 0 otherwise. `SANOMA_APP_PORT` is the app's port (default 3000; 0 for any free port, which the printed address reports). On SIGINT or SIGTERM the app, then the worker, stop, and the process exits 0.
 
 ## Postgres
 
