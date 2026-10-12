@@ -13,14 +13,15 @@ import {
   Nothing,
   Notice,
   pageTitle,
+  Region,
   SandboxBadge,
-  SectionTitle,
   ToneBadge,
   When,
 } from "#/components/common.tsx";
 import { CheckRow, LedgerRow, show } from "#/components/ledger.tsx";
 import { Workbench } from "#/components/workbench.tsx";
-import { GraphAndSource } from "#/components/workflow.tsx";
+import { GraphAndSource } from "#/components/graph-source.tsx";
+import { RunButton } from "#/components/workflow.tsx";
 import type { GraphNode } from "#/graph/types.ts";
 import { useReducedMotion } from "#/lib/motion.ts";
 import { RUN_TONE } from "#/lib/tone.ts";
@@ -71,81 +72,75 @@ function RunPage() {
     [reducedMotion],
   );
   return (
-    <div className="flex flex-col gap-6">
-      {/* The layout's <h1> is the workflow: the run's own heading is its status. */}
-      <div className="flex flex-wrap items-center gap-2">
-        <ToneBadge tone={RUN_TONE[run.status]}>{run.status}</ToneBadge>
-        {run.sandbox !== undefined && <SandboxBadge name={run.sandbox} />}
-      </div>
-      {error && <Notice variant="destructive">Could not refresh: {error.message}</Notice>}
-      <Workbench
-        graph={<GraphAndSource key={run.runId} workflow={workflow} run={reading} onSelect={select} />}
-        primary={
-          <div className="flex flex-col gap-6">
-            {(checks || checksError) && (
-              <div className="flex flex-col gap-3">
-                <SectionTitle>Checks</SectionTitle>
-                {checksError && (
-                  <Notice variant="destructive">
-                    {/* A step no rule matches lists the known steps, one a line. */}
-                    <span className="whitespace-pre-wrap">
-                      Could not check the run against its scenario: {checksError}
-                    </span>
-                  </Notice>
-                )}
-                {checks && (
-                  <ItemGroup aria-label="Checks">
-                    {checks.map((c, i) => (
-                      <CheckRow key={i} check={c} />
-                    ))}
-                  </ItemGroup>
-                )}
-              </div>
-            )}
-            <div className="flex flex-col gap-3">
-              <SectionTitle>Ledger</SectionTitle>
-              {ledgerError && <Notice variant="destructive">Could not read the ledger: {ledgerError}</Notice>}
-              {ledger.length === 0 && !ledgerError && <Nothing title="Nothing recorded yet" />}
-              {ledger.length > 0 && (
-                <ItemGroup aria-label="Ledger">
-                  {ledger.map((record) => (
-                    <LedgerRow key={record.id} record={record} titles={titles} />
+    <Workbench
+      graph={<GraphAndSource key={run.runId} workflow={workflow} run={reading} onSelect={select} />}
+      primary={
+        <div className="flex flex-col gap-6">
+          {(checks || checksError) && (
+            <Region title="Checks">
+              {checksError && (
+                <Notice variant="destructive">
+                  {/* A step no rule matches lists the known steps, one a line. */}
+                  <span className="whitespace-pre-wrap">
+                    Could not check the run against its scenario: {checksError}
+                  </span>
+                </Notice>
+              )}
+              {checks && (
+                <ItemGroup aria-label="Checks">
+                  {checks.map((c, i) => (
+                    <CheckRow key={i} check={c} />
                   ))}
                 </ItemGroup>
               )}
-            </div>
-          </div>
-        }
-        secondary={
-          <div className="flex flex-col gap-6">
-            <Card size="sm">
-              <CardContent>
-                <Facts>
-                  <Fact label="Started by">{starterName(run)}</Fact>
-                  <Fact label="Started">
-                    <When at={run.createdAt} />
-                  </Fact>
-                  <Fact label="Run id">
-                    <code className="break-all">{run.runId}</code>
-                  </Fact>
-                  {run.error && (
-                    <Fact label="Error">
-                      <span className="text-destructive">{run.error}</span>
-                    </Fact>
-                  )}
-                </Facts>
-              </CardContent>
-            </Card>
-            <div className="flex flex-col gap-3">
-              <SectionTitle>Approvals</SectionTitle>
-              {approvals.length === 0 && <Nothing title="None asked for" />}
-              {approvals.map((approval) => (
-                <ApprovalCard key={approval.id} run={run} approval={approval} />
-              ))}
-            </div>
-          </div>
-        }
-      />
-    </div>
+            </Region>
+          )}
+          <Region title="Ledger">
+            {ledgerError && <Notice variant="destructive">Could not read the ledger: {ledgerError}</Notice>}
+            {ledger.length === 0 && !ledgerError && <Nothing title="Nothing recorded yet" />}
+            {ledger.length > 0 && (
+              <ItemGroup aria-label="Ledger">
+                {ledger.map((record) => (
+                  <LedgerRow key={record.id} record={record} titles={titles} />
+                ))}
+              </ItemGroup>
+            )}
+          </Region>
+        </div>
+      }
+      secondary={
+        <div className="flex flex-col gap-6">
+          <Card size="sm">
+            <CardContent>
+              <Facts>
+                <Fact label="Started by">{starterName(run)}</Fact>
+                <Fact label="Started">
+                  <When at={run.createdAt} />
+                </Fact>
+                <Fact label="Run id">
+                  <code className="break-all">{run.runId}</code>
+                </Fact>
+              </Facts>
+            </CardContent>
+          </Card>
+          <Region title="Approvals">
+            {approvals.length === 0 && <Nothing title="None asked for" />}
+            {approvals.map((approval) => (
+              <ApprovalCard key={approval.id} run={run} approval={approval} />
+            ))}
+          </Region>
+        </div>
+      }
+    >
+      {/* The layout's <h1> is the workflow: the run's own heading is its status. Run opens the
+          workflow's page, where its New run form is: none for a retired workflow. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <ToneBadge tone={RUN_TONE[run.status]}>{run.status}</ToneBadge>
+        {run.sandbox !== undefined && <SandboxBadge name={run.sandbox} />}
+        {found && <RunButton name={run.workflow} className="ml-auto" />}
+      </div>
+      {run.error && <Notice variant="destructive">{run.error}</Notice>}
+      {error && <Notice variant="destructive">Could not refresh: {error.message}</Notice>}
+    </Workbench>
   );
 }

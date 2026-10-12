@@ -1,9 +1,8 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { createFileRoute, notFound, Outlet, useMatch } from "@tanstack/react-router";
+import { createFileRoute, notFound, Outlet } from "@tanstack/react-router";
 import { Badge } from "#/components/ui/badge.tsx";
 import { loadCode, loadGraph, Notice, PageHeader, pageTitle } from "#/components/common.tsx";
 import { RunRail } from "#/components/run-rail.tsx";
-import { RunButton } from "#/components/workflow.tsx";
 import {
   configQuery,
   railQuery,
@@ -63,13 +62,11 @@ async function loadWorkflow(queryClient: QueryClient, name: string) {
 function WorkflowLayout() {
   const { name } = Route.useParams();
   const workflow = useWorkflow(name);
-  // Titled by the workflow: the last crumb, PageHeader's default, is the run on a run's page.
-  // A retired workflow has only its name, and no Run.
-  // Run only on a run's pane: on the workflow's own pane it would link to itself.
-  const onRun = useMatch({ from: "/workflows/$name/runs/$id", shouldThrow: false });
+  // Titled by the workflow (on a run's pane the last crumb, PageHeader's default, is the run), or
+  // only its name when it is retired.
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title={workflow?.title ?? name} action={workflow && onRun && <RunButton name={name} />}>
+      <PageHeader title={workflow?.title ?? name}>
         {workflow && <code className="text-muted-foreground">{name}</code>}
         {workflow?.builtin && <Badge variant="secondary">built-in</Badge>}
       </PageHeader>

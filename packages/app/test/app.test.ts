@@ -785,6 +785,11 @@ describe("the page", () => {
     const run = await page(`/workflows/announce/runs/${started.body.runId}`);
     expect(run.text).toContain("ghost: the site is down");
     expect(run.text).toContain("Not retried: this operation is not safe to repeat. Check Ghost before starting again.");
+    // The run's error is a notice above the graph, and not a fact again below it.
+    const notice = run.html.search(/data-slot="alert-description"[^>]*>[^<]*ghost: the site is down/);
+    expect(notice).toBeGreaterThan(-1);
+    expect(notice).toBeLessThan(run.html.search(/data-slot="card-title"[^>]*>Graph</));
+    expect(run.html).not.toMatch(/<dt[^>]*>Error<\/dt>/);
   });
 
   it("renders the workflows on the server: each one's outline and a link to its page, whose About has its operations and input", async () => {
@@ -802,10 +807,10 @@ describe("the page", () => {
     expect(about.text).toMatch(/default (&quot;|")newsletter(&quot;|")/);
     // Each workflow's outline, drawn in the browser like the run graph: a heading, what it is, a skeleton.
     expect(workflows.text).toMatch(
-      /<h3[^>]*>Outline<\/h3><p[^>]*>Read from the body of run; the functions it calls are not shown, even those defined in it<\/p><div[^>]*><div data-slot="skeleton"[^>]*aria-label="Loading the graph"/,
+      /<h3[^>]*>Outline<\/h3><p[^>]*>Read from the body of run; the functions it calls are not shown, even those defined in it<\/p><div data-slot="card"[^>]*><div[^>]*><div data-slot="skeleton"[^>]*aria-label="Loading the graph"/,
     );
     // Each card's Run opens the workflow's page.
-    expect(workflows.html).toMatch(/<a[^>]*data-slot="button"[^>]*href="\/workflows\/announce"/);
+    expect(linkTag(workflows.html, "Run")).toMatch(/data-slot="button"[^>]*href="\/workflows\/announce"/);
   });
 
   it("lists the connectors, each linking to its page, without their operations", async () => {
@@ -868,16 +873,19 @@ describe("the page", () => {
     expect(found.status).toBe(200);
     expect(found.html).toMatch(/<h1[^>]*>Announce a launch<\/h1>/);
     expect(found.text).toContain("<title>Announce a launch · Sanoma</title>");
-    // One card: its toolbar's heading and Code, then the graph above the source with a handle
+    // One card: its header's title and Code, then the graph above the source with a handle
     // between them, each panel's share set on the server so the page does not shift.
-    expect(found.html).toMatch(/<h2[^>]*>Graph<\/h2>/);
+    expect(found.html).toMatch(/data-slot="card-title"[^>]*>Graph</);
     expect(found.html).toMatch(/<button[^>]*aria-pressed="true"[^>]*>(<svg.*?<\/svg>)?Code<\/button>/);
     expect(found.html).toMatch(/data-slot="resizable-panel-group"/);
     expect(found.html).toMatch(
       /<div[^>]*role="separator"[^>]*data-slot="resizable-handle"|data-slot="resizable-handle"[^>]*role="separator"/,
     );
-    expect(found.html).toMatch(/data-panel[^>]*id="graph"[^>]*style="[^"]*flex-grow:60/);
-    expect(found.html).toMatch(/data-panel[^>]*id="source"[^>]*style="[^"]*flex-grow:40/);
+    expect(found.html).toMatch(/data-panel[^>]*id="graph-source-graph"[^>]*style="[^"]*flex-grow:60/);
+    expect(found.html).toMatch(/data-panel[^>]*id="graph-source-code"[^>]*style="[^"]*flex-grow:40/);
+    // Code is open at first: nothing in the group is hidden.
+    expect(found.html).not.toMatch(/data-panel[^>]*hidden/);
+    expect(found.html).not.toMatch(/data-slot="resizable-handle"[^>]*class="([^"]* )?hidden[ "]/);
     // The graph is drawn in the browser; the source is there as plain text until its view loads.
     expect(found.html).toMatch(/<div data-slot="skeleton"[^>]*aria-label="Loading the graph"/);
     expect(found.html).toMatch(/<pre[^>]*>[^<]*ctx\.ghost\.post\.create\(/);
@@ -900,8 +908,8 @@ describe("the page", () => {
     // Beside it, About: what it may call.
     expect(found.html).toMatch(/<h2[^>]*>About<\/h2>/);
     expect(found.html).toMatch(/<h3[^>]*>Operations it may call<\/h3>/);
-    // The rail's Workflow link marks this pane. The header has no Run here: it would link to this
-    // page. Nothing here goes to the Start page.
+    // The rail's Workflow link marks this pane. No Run here: it would link to this page. Nothing
+    // here goes to the Start page.
     expect(linkTag(found.html, "Workflow")).toContain('aria-current="page"');
     expect(linkTag(found.html, "Run")).toBeUndefined();
     expect(found.html).not.toContain('href="/start?workflow=');
@@ -939,10 +947,10 @@ describe("the page", () => {
     expect(found.html).toMatch(/<h2[^>]*>Ledger<\/h2>/);
     // React Flow draws the graph in the browser only: the server renders its heading and a
     // skeleton, and the workflow's source below it as plain text until its view loads.
-    expect(found.html).toMatch(/<h2[^>]*>Graph<\/h2>/);
+    expect(found.html).toMatch(/data-slot="card-title"[^>]*>Graph</);
     expect(found.html).toMatch(/<div data-slot="skeleton"[^>]*aria-label="Loading the graph"/);
     expect(found.html).toMatch(/<pre[^>]*>[^<]*ctx\.ghost\.post\.create\(/);
-    // The header's Run opens the workflow's page, where its New run form is; the rail's Workflow
+    // The run pane's Run opens the workflow's page, where its New run form is; the rail's Workflow
     // link is not the current page here.
     expect(linkTag(found.html, "Run")).toMatch(/data-slot="button"[^>]*href="\/workflows\/announce"/);
     expect(linkTag(found.html, "Workflow")).not.toContain("aria-current");
@@ -1389,10 +1397,6 @@ describe("an app whose config no longer has a workflow", () => {
     expect(about.html).toContain(`href="/workflows/announce/runs/${runId}"`);
     expect(about.html).not.toContain('id="field-title"');
     expect(linkTag(about.html, "Run")).toBeUndefined();
-    // The New run pane's old URL leads there too.
-    const pane = await page("/workflows/announce/new", retired.url);
-    expect(pane.status).toBe(200);
-    expect(pane.text).toContain("This config has no workflow named <code>announce</code>.");
     // A run of it has no Run either: there is nothing to start.
     expect(linkTag((await page(`/workflows/announce/runs/${runId}`, retired.url)).html, "Run")).toBeUndefined();
   });

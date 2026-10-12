@@ -20,8 +20,6 @@ const FILTER_LABEL: Record<RunFilter, string> = {
 
 /** A link in the rail; `aria-current`, which Link sets on an active link, marks the pane that shows. */
 const RAIL_LINK = "flex flex-col gap-0.5 rounded-md px-2 py-1.5 text-sm hover:bg-muted aria-[current=page]:bg-muted";
-/** The workflow's pane's link: its name in bold while it shows. */
-const PANE_LINK = `${RAIL_LINK} aria-[current=page]:font-medium`;
 
 /** The rail's links keep the filter; All leaves the URL without `?runs=`. */
 const railSearch = (filter: RunFilter) => ({ runs: filter === "all" ? undefined : filter });
@@ -31,7 +29,7 @@ const railSearch = (filter: RunFilter) => ({ runs: filter === "all" ? undefined 
  * itself, so a poll draws the rail again and not the pane beside it.
  */
 export function RunRail({ name }: { name: string }) {
-  // Only `?runs=`: another search param (the workflow pane's `?scenario=`) does not draw the rail again.
+  // Only `?runs=`.
   const filter = useSearch({ from: "/workflows/$name", select: (search) => search.runs }) ?? "all";
   const navigate = useNavigate();
   const { data: runs, error } = useSuspenseQuery(railQuery(name, filter));
@@ -46,13 +44,13 @@ export function RunRail({ name }: { name: string }) {
     >
       <nav className="flex flex-col">
         {/* Active with any `?scenario=` or `?runs=`, not on a run's pane. It leaves `?scenario=`
-            behind on purpose: reading it would draw the rail again on each scenario chosen. */}
+            behind: reading it would draw the rail again on each scenario chosen. */}
         <Link
           to="/workflows/$name"
           params={{ name }}
           search={search}
           activeOptions={{ exact: true, includeSearch: false }}
-          className={PANE_LINK}
+          className={`${RAIL_LINK} aria-[current=page]:font-medium`}
         >
           Workflow
         </Link>

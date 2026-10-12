@@ -2,15 +2,15 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { FlaskConicalIcon, GlobeIcon } from "lucide-react";
 import { useMemo } from "react";
-import { z } from "zod";
 import { Card, CardContent } from "#/components/ui/card.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
-import { Disclosure, Nothing, Notice, Segment, Segmented, SectionTitle } from "#/components/common.tsx";
+import { Disclosure, Nothing, Notice, Region, Segment, Segmented } from "#/components/common.tsx";
 import { ScenarioErrors } from "#/components/scenario.tsx";
 import { Workbench } from "#/components/workbench.tsx";
-import { GraphAndSource, Retired, WorkflowSections } from "#/components/workflow.tsx";
+import { GraphAndSource } from "#/components/graph-source.tsx";
+import { Retired, WorkflowSections } from "#/components/workflow.tsx";
 import { StartForm } from "#/form/start-form.tsx";
-import { configQuery, scenariosFor, scenariosQuery, useWorkflow, vendorsOf } from "#/queries.ts";
+import { configQuery, ScenarioSearch, scenariosFor, scenariosQuery, useWorkflow, vendorsOf } from "#/queries.ts";
 
 /**
  * A workflow's own pane: its graph above its source, a new run of it, live or in the sandbox (its
@@ -19,15 +19,15 @@ import { configQuery, scenariosFor, scenariosQuery, useWorkflow, vendorsOf } fro
  * it.
  */
 export const Route = createFileRoute("/workflows/$name/")({
-  // `?scenario=` is Sandbox mode and the scenario it runs; without it, Live. In the URL, so the
-  // server renders the mode the link asks for. The layout's `?runs=` sits beside it.
-  validateSearch: z.object({ scenario: z.string().optional().catch(undefined) }),
+  // In the URL, so the server renders the mode the link asks for. The layout's `?runs=` sits beside it.
+  validateSearch: ScenarioSearch,
   component: WorkflowPane,
 });
 
 function WorkflowPane() {
   const { name } = Route.useParams();
-  const { scenario: wanted } = Route.useSearch();
+  // Only `?scenario=`: a click on the rail's filter does not draw the pane again.
+  const wanted = Route.useSearch({ select: (search) => search.scenario });
   const navigate = Route.useNavigate();
   const workflow = useWorkflow(name);
   const forWorkflow = useMemo(() => scenariosFor(name), [name]);
@@ -40,109 +40,106 @@ function WorkflowPane() {
   const none = scenarios.length === 0;
 
   return (
-    <div className="flex flex-col gap-6">
-      <ScenarioErrors errors={errors} />
-      <Workbench
-        graph={<GraphAndSource key={name} workflow={workflow} scenario={scenario} />}
-        primary={
-          <div className="flex flex-col gap-3">
-            <SectionTitle>New run</SectionTitle>
-            <Card>
-              <CardContent className="flex flex-col gap-4">
-                <div className="flex flex-wrap items-center gap-3">
-                  {/* Each mode is a URL. A choice replaces the page in the history rather than
+    <Workbench
+      graph={<GraphAndSource key={name} workflow={workflow} scenario={scenario} />}
+      primary={
+        <Region title="New run">
+          <Card>
+            <CardContent className="flex flex-col gap-4">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Each mode is a URL. A choice replaces the page in the history rather than
                       adding one, and keeps `?runs=`. */}
-                  <Segmented label="Mode">
-                    <Segment>
-                      <Link
-                        from={Route.fullPath}
-                        to="."
-                        search={(prev) => ({ ...prev, scenario: undefined })}
-                        activeOptions={{ exact: true }}
-                        replace
-                      >
-                        <GlobeIcon data-icon="inline-start" />
-                        Live vendors
-                      </Link>
-                    </Segment>
-                    <Segment>
-                      {/* Keeps the scenario chosen, so it is the current page whichever that is. */}
-                      <Link
-                        from={Route.fullPath}
-                        to="."
-                        search={(prev) => ({ ...prev, scenario: prev.scenario ?? scenarios[0]?.name })}
-                        disabled={none}
-                        replace
-                      >
-                        <FlaskConicalIcon data-icon="inline-start" />
-                        Sandbox
-                      </Link>
-                    </Segment>
-                  </Segmented>
-                  {none && <p className="text-sm text-muted-foreground">No scenarios for this workflow yet</p>}
-                </div>
-                {sandbox && !none && (
-                  <NativeSelect
-                    aria-label="Scenario"
-                    className="w-full"
-                    value={scenario?.name ?? ""}
-                    onChange={(e) =>
-                      void navigate({ search: (prev) => ({ ...prev, scenario: e.target.value }), replace: true })
-                    }
-                  >
-                    {!scenario && (
-                      <NativeSelectOption value="" disabled>
-                        Choose a scenario
-                      </NativeSelectOption>
-                    )}
-                    {scenarios.map((s) => (
-                      <NativeSelectOption key={s.name} value={s.name}>
-                        {s.name}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                )}
-                {sandbox && !scenario ? (
-                  <Nothing title={`No scenario named “${wanted}”`}>
-                    {!none && "Choose one of this workflow’s scenarios above."}
-                  </Nothing>
-                ) : (
-                  <>
-                    {scenario ? (
-                      <Notice>
-                        Nothing leaves Sanoma: the scenario supplies the input and the fakes answer the calls. Its
-                        approvals wait for people, as a live run’s do.
-                      </Notice>
-                    ) : (
-                      <VendorsNotice name={name} />
-                    )}
-                    {/* Keyed: the form builds its defaults once per mount. */}
-                    <StartForm key={scenario?.name ?? "live"} workflow={workflow} scenario={scenario} />
-                    {scenario && (
-                      <Disclosure label="Scenario">
-                        <pre className="mt-1 overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs">
-                          {scenario.text}
-                        </pre>
-                      </Disclosure>
-                    )}
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        }
-        secondary={
-          <div className="flex flex-col gap-3">
-            <SectionTitle>About</SectionTitle>
-            <Card>
-              <CardContent className="flex flex-col gap-4">
-                <WorkflowSections workflow={workflow} />
-              </CardContent>
-            </Card>
-          </div>
-        }
-      />
-    </div>
+                <Segmented label="Mode">
+                  <Segment>
+                    <Link
+                      from={Route.fullPath}
+                      to="."
+                      search={(prev) => ({ ...prev, scenario: undefined })}
+                      activeOptions={{ exact: true }}
+                      replace
+                    >
+                      <GlobeIcon data-icon="inline-start" />
+                      Live vendors
+                    </Link>
+                  </Segment>
+                  <Segment>
+                    {/* Keeps the scenario chosen, so it is the current page whichever that is. */}
+                    <Link
+                      from={Route.fullPath}
+                      to="."
+                      search={(prev) => ({ ...prev, scenario: prev.scenario ?? scenarios[0]?.name })}
+                      disabled={none}
+                      replace
+                    >
+                      <FlaskConicalIcon data-icon="inline-start" />
+                      Sandbox
+                    </Link>
+                  </Segment>
+                </Segmented>
+                {none && <p className="text-sm text-muted-foreground">No scenarios for this workflow yet</p>}
+              </div>
+              {sandbox && !none && (
+                <NativeSelect
+                  aria-label="Scenario"
+                  className="w-full"
+                  value={scenario?.name ?? ""}
+                  onChange={(e) =>
+                    void navigate({ search: (prev) => ({ ...prev, scenario: e.target.value }), replace: true })
+                  }
+                >
+                  {!scenario && (
+                    <NativeSelectOption value="" disabled>
+                      Choose a scenario
+                    </NativeSelectOption>
+                  )}
+                  {scenarios.map((s) => (
+                    <NativeSelectOption key={s.name} value={s.name}>
+                      {s.name}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              )}
+              {sandbox && !scenario ? (
+                <Nothing title={`No scenario named “${wanted}”`}>
+                  {!none && "Choose one of this workflow’s scenarios above."}
+                </Nothing>
+              ) : (
+                <>
+                  {scenario ? (
+                    <Notice>
+                      Nothing leaves Sanoma: the scenario supplies the input and the fakes answer the calls. Its
+                      approvals wait for people, as a live run’s do.
+                    </Notice>
+                  ) : (
+                    <VendorsNotice name={name} />
+                  )}
+                  {/* Keyed: the form builds its defaults once per mount. */}
+                  <StartForm key={scenario?.name ?? "live"} workflow={workflow} scenario={scenario} />
+                  {scenario && (
+                    <Disclosure label="Scenario">
+                      <pre className="mt-1 overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs">
+                        {scenario.text}
+                      </pre>
+                    </Disclosure>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </Region>
+      }
+      secondary={
+        <Region title="About">
+          <Card>
+            <CardContent className="flex flex-col gap-4">
+              <WorkflowSections workflow={workflow} />
+            </CardContent>
+          </Card>
+        </Region>
+      }
+    >
+      <ScenarioErrors errors={errors} />
+    </Workbench>
   );
 }
 

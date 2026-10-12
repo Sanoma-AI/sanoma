@@ -22,6 +22,7 @@ import {
   Notice,
   PageHeader,
   pageTitle,
+  PanelCard,
   plural,
   SectionTitle,
   ToneBadge,
@@ -385,7 +386,9 @@ function Declaration({ resource: { file, span } }: { resource: DeclaredResource 
       ) : data.source === null ? (
         <Notice variant="destructive">{file} can no longer be read.</Notice>
       ) : (
-        <CodePanel source={data.source} highlight={highlight} className="h-[280px] sm:h-[360px]" />
+        <PanelCard className="h-[280px] sm:h-[360px]">
+          <CodePanel source={data.source} highlight={highlight} />
+        </PanelCard>
       )}
     </section>
   );

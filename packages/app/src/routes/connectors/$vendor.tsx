@@ -15,8 +15,8 @@ import {
   OpItem,
   PageHeader,
   pageTitle,
+  Region,
   Section,
-  SectionTitle,
   VendorLogo,
 } from "../../components/common.tsx";
 import { Credentials } from "../../components/credentials.tsx";
@@ -74,8 +74,7 @@ function ConnectorPage() {
       )}
       <ScenarioErrors errors={scenarios.errors} />
       <Credentials vendor={id} />
-      <section className="flex flex-col gap-3">
-        <SectionTitle>Operations</SectionTitle>
+      <Region title="Operations">
         {ops.length === 0 ? (
           <None />
         ) : (
@@ -92,9 +91,8 @@ function ConnectorPage() {
             </ItemGroup>
           </>
         )}
-      </section>
-      <section className="flex flex-col gap-3">
-        <SectionTitle>Used by</SectionTitle>
+      </Region>
+      <Region title="Used by">
         {workflows.length === 0 ? (
           <None />
         ) : (
@@ -108,7 +106,7 @@ function ConnectorPage() {
             ))}
           </ul>
         )}
-      </section>
+      </Region>
     </div>
   );
 }
