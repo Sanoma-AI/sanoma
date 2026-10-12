@@ -1,19 +1,19 @@
 # Working on @sanoma/testing
 
-This package owns test-worker setup, recorded HTTP replay and scenario tests. Vendor fakes live in their connector packages, at `@sanoma/connector-<vendor>/fake`.
+This package owns test-worker setup, the vitest test app, recorded HTTP replay and scenario tests. Vendor fakes live in their connector packages, at `@sanoma/connector-<vendor>/fake`.
 
 ## Read when needed
 
-- [README](README.md): helper usage, [database isolation](README.md#a-worker-for-a-test), and [replay/recording modes](README.md#replaying-a-vendors-api).
+- [README](README.md): helper usage, [database isolation](README.md#a-worker-for-a-test), [the test app](README.md#a-test-app) (`@sanoma/testing/harness`), and [replay/recording modes](README.md#replaying-a-vendors-api).
 - [Scenarios](README.md#scenarios): `describeScenarios` and `runScenario`, a config's scenarios as vitest tests.
-- [Source map](src/AGENTS.md): worker helpers versus the separate replay entry point.
+- [Source map](src/AGENTS.md): worker helpers at the root versus the `./harness`, `./replay` and `./scenarios` entry points.
 - [Test map](test/AGENTS.md): fake behavior coverage; connector driver tests exercise replay.
 
 ## Maintenance boundaries
 
 - Preserve `startTestWorker`'s database isolation: ignore the config's database URL unless explicitly overridden through test options. Use a unique app name per test file.
 - This package depends on `@sanoma/workflows` only; connectors are devDependencies for its tests, never imported from `src/`.
-- Keep msw and vitest dependencies confined to `./replay` and `./scenarios`, since they are optional peers. Do not pull them into the package root.
+- Keep msw and vitest dependencies confined to `./harness`, `./replay` and `./scenarios`, since they are optional peers. Do not pull them into the package root. `@dbos-inc/dbos-sdk` is a peer for `./harness`'s `raw` client, and so for `./scenarios`, which runs on `./harness`.
 - Replay must fail on unexpected requests and unconsumed exchanges. Recording must scrub credentials and identifying data before fixtures are committed.
 
 ## Checks
