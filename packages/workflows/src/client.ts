@@ -4,14 +4,9 @@ import { DBOSClient, Error as DBOSErrors, type WorkflowStatusString } from "@dbo
 import { Pool } from "pg";
 import { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, messageKeyOf, topicOf } from "./approvals.ts";
-import {
-  type CredentialStatus,
-  credentialsOf,
-  type ResolvedConfig,
-  resolveConfig,
-  type SanomaConfig,
-} from "./config.ts";
+import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { deleteCredential, ensureTable, storeCredential, storedCredentials } from "./credentials.ts";
+import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { type ApprovalState, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
 import { parseOrThrow, SanomaError } from "./errors.ts";

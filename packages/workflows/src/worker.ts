@@ -1,15 +1,10 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { buildCtx, isInfrastructureError } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
-import {
-  type CredentialStatus,
-  credentialsOf,
-  type ResolvedConfig,
-  resolveConfig,
-  type SanomaConfig,
-} from "./config.ts";
+import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { watchCredentials } from "./credentials.ts";
 import type { WorkflowDefinition } from "./define.ts";
+import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { errorInfo, parseOrThrow } from "./errors.ts";
 import { entry, skipped, write, writeFailure } from "./ledger.ts";
 import { setLogLevel, warn } from "./log.ts";

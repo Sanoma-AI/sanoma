@@ -1,7 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { Client, type Pool } from "pg";
-import { credentialsOf } from "./config.ts";
+import { credentialsOf } from "./env.ts";
 import { info, warn } from "./log.ts";
 import type { Driver } from "./op.ts";
 import { errorMessage } from "./shared.ts";

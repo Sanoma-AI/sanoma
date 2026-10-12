@@ -20,7 +20,7 @@ import {
   type SanomaConfig,
   startWorker,
 } from "../src/index.ts";
-import { credentialsOf } from "../src/config.ts";
+import { credentialsOf } from "../src/env.ts";
 import { ensureTable } from "../src/credentials.ts";
 import { describeConfig } from "../src/describe.ts";
 
