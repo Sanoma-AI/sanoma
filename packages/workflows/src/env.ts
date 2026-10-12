@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { Driver, DriverEnv } from "./op.ts";
+import { credentialReady } from "./shared.ts";
 
 // A driver's `env` against an environment: what each declared variable's status is, never its
 // value. The worker, the client, the app and each live call read the declarations through here.
@@ -43,14 +44,28 @@ export function credentialsOf(
     if (!env) continue;
     const list = map.get(vendor) ?? [];
     map.set(vendor, list);
-    for (const [name, schema] of Object.entries(env.shape)) {
-      const status = credentialStatus(name, schema, lookup(name) || undefined);
-      const i = list.findIndex((c) => c.name === name);
+    for (const status of statusesOf(env, lookup)) {
+      const i = list.findIndex((c) => c.name === status.name);
       if (i === -1) list.push(status);
       else list[i] = merged(list[i]!, status);
     }
   }
   return map;
+}
+
+/** One driver's `env`, each variable checked against `lookup`'s value, as `credentialsOf` checks it. */
+export function statusesOf(env: DriverEnv, lookup: (name: string) => string | undefined): CredentialStatus[] {
+  return Object.entries(env.shape).map(([name, schema]) => credentialStatus(name, schema, lookup(name) || undefined));
+}
+
+/**
+ * Why the driver cannot run now: each variable its `env` declares that the environment leaves
+ * missing (and not optional) or invalid, as `<NAME>` or `<NAME> (invalid: <why>)`; none when it can.
+ */
+export function unconfigured(env: DriverEnv): string[] {
+  return statusesOf(env, (name) => process.env[name])
+    .filter((c) => !credentialReady(c))
+    .map((c) => (c.status === "invalid" ? `${c.name} (invalid: ${c.problem})` : c.name));
 }
 
 const SEVERITY: Record<CredentialStatus["status"], number> = { set: 0, missing: 1, invalid: 2 };

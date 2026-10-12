@@ -120,7 +120,7 @@ export async function watchCredentials(databaseUrl: string, drivers: readonly Dr
     }
     const verb = first ? "loaded" : "reloaded";
     for (const [vendor, n] of counts) info(`credentials ${verb} for ${vendor} (${n} variable${n === 1 ? "" : "s"})`);
-    // At start, startWorker refuses an invalid one, naming it.
+    // At start, startWorker warns of an invalid one, naming it.
     if (first) return;
     for (const list of credentialsOf(drivers, (name) =>
       changed.includes(name) ? process.env[name] : undefined,

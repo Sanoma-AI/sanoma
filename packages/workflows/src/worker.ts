@@ -37,8 +37,9 @@ export interface WorkerOptions {
 /**
  * Registers the workflows, connects to Postgres and recovers any runs that were interrupted.
  * When a driver declares variables the environment leaves unset, it first loads their stored
- * values into `process.env` and keeps them current while it runs, then refuses to start while one
- * is missing or invalid.
+ * values into `process.env` and keeps them current while it runs. It starts whether or not they
+ * are all there: it warns, per vendor, of each missing or invalid one, and a live call to that
+ * vendor fails, as the call's own final failure, until they are set.
  */
 export async function startWorker(config: SanomaConfig, options: WorkerOptions = {}): Promise<Worker> {
   // Check everything before touching the state a running worker reads.
@@ -48,6 +49,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     app: resolved.appName,
     ops: resolved.ops,
     drivers: resolved.drivers,
+    envs: resolved.envs,
     fakes: resolved.fakes,
     fakeDrivers: resolved.fakeDrivers,
     ...(resolved.scenarios && { scenarios: resolved.scenarios }),
@@ -78,7 +80,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   const previous = current;
   let launched = false;
   try {
-    refuseUnconfigured(credentialsOf(config.drivers, (name) => process.env[name]));
+    warnUnconfigured(credentialsOf(config.drivers, (name) => process.env[name]));
     for (const name of resolved.workflows.keys()) {
       if (!registered.has(name)) {
         register(name);
@@ -132,11 +134,12 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
 }
 
 /**
- * Refuses a worker whose drivers would fail on their first call: a variable a driver's `env`
- * declares is missing or invalid. One error, naming each vendor and its variables.
+ * Warns, once per vendor whose drivers would fail when called: a variable a driver's `env`
+ * declares is missing or invalid. The worker starts anyway; each such call fails saying the same
+ * (`refuseUnconfigured` in call.ts), until the variables are set on the app's connector page.
  */
-function refuseUnconfigured(credentials: Map<string, CredentialStatus[]>) {
-  const vendors = [...credentials].flatMap(([vendor, list]) => {
+function warnUnconfigured(credentials: Map<string, CredentialStatus[]>) {
+  for (const [vendor, list] of credentials) {
     const items = list
       .filter((c) => !credentialReady(c))
       .map((c) =>
@@ -144,12 +147,11 @@ function refuseUnconfigured(credentials: Map<string, CredentialStatus[]>) {
           ? `${c.name} is invalid (${c.problem})`
           : `${c.name} is missing${c.description ? ` (${c.description})` : ""}`,
       );
-    return items.length ? [`${vendor}: ${items.join(", ")}`] : [];
-  });
-  if (vendors.length) {
-    throw new Error(
-      `The worker cannot start: ${vendors.join("; ")}. Set them on the app's connector pages, or in its environment`,
-    );
+    if (items.length) {
+      warn(
+        `${vendor} is not configured: ${items.join(", ")}; its calls will fail until they are set on the connector page`,
+      );
+    }
   }
 }
 

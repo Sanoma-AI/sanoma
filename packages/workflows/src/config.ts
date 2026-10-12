@@ -4,7 +4,7 @@ import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, type DriftDeclared, driftWorkflow } from "./drift.ts";
 import type { Fake } from "./fake.ts";
 import { type LedgerStore, postgresLedger } from "./ledger.ts";
-import { type Connector, type Driver, type DriverFn, isOp, type Op } from "./op.ts";
+import { type Connector, type Driver, type DriverEnv, type DriverFn, isOp, type Op } from "./op.ts";
 import type { Policy } from "./policy.ts";
 import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
 import { computeVersion } from "./version.ts";
@@ -63,6 +63,8 @@ export interface ResolvedConfig {
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id. */
   drivers: Map<string, DriverFn>;
+  /** The `env` of the driver that implements each operation, by id, for those that declare one: checked when the operation is called. */
+  envs: Map<string, DriverEnv>;
   /** The fake vendors, by vendor id: the templates each sandbox run copies. */
   fakes: Map<string, Fake<any, any>>;
   /** The fakes' functions, by operation id: which operations a sandbox run has a fake for. */
@@ -155,6 +157,10 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     config.root !== undefined ? resolve(config.root) : config.file !== undefined ? dirname(config.file) : undefined;
   const ops = indexConnectors(config.connectors);
   const drivers = indexDrivers(config.drivers, ops);
+  const envs = new Map<string, DriverEnv>();
+  for (const d of config.drivers) {
+    if (d.env) for (const key of Object.keys(d.ops)) envs.set(`${d.vendor}.${key}`, d.env);
+  }
   const fakes = new Map<string, Fake<any, any>>();
   for (const fake of config.fakes ?? []) {
     const { vendor } = fake.driver;
@@ -196,6 +202,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     queueName: `sanoma:${appName}`,
     ops,
     drivers,
+    envs,
     fakes,
     fakeDrivers,
     ...(scenarios && { scenarios }),

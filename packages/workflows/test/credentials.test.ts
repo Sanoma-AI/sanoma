@@ -147,12 +147,9 @@ describe("a driver's env", () => {
     const throwingConfig = { ...config, drivers: [throwing] };
     const credentials = checked(throwingConfig.drivers);
     expect(credentials).toEqual([{ name: URL_VAR, optional: false, status: "invalid", problem: "its check threw" }]);
-    const refusal = await startWorker(throwingConfig).then(
-      () => undefined,
-      (err: Error) => err.message,
-    );
-    expect(refusal).toContain(`${URL_VAR} is invalid (its check threw)`);
-    expect(JSON.stringify([credentials, refusal])).not.toContain(VALUE);
+    const warning = await warnedAtStart(throwingConfig);
+    expect(warning).toContain(`${URL_VAR} is invalid (its check threw)`);
+    expect(JSON.stringify([credentials, warning])).not.toContain(VALUE);
   });
 
   it("merges two drivers' declarations of one variable, keeping the worse status", async () => {
@@ -169,25 +166,37 @@ describe("a driver's env", () => {
       status: "invalid",
       problem: "an API key, key_<digits>",
     });
-    await expect(startWorker(twoDrivers)).rejects.toThrow(`${KEY_VAR} is invalid (an API key, key_<digits>)`);
+    expect(await warnedAtStart(twoDrivers)).toContain(`${KEY_VAR} is invalid (an API key, key_<digits>)`);
   });
 });
 
+/** Starts a worker on `cfg`, stops it, and gives what it warned about acme at start, if anything. */
+async function warnedAtStart(cfg: SanomaConfig): Promise<string | undefined> {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  const worker = await startWorker(cfg);
+  await worker.stop();
+  return warn.mock.calls.flat().find((m) => String(m).includes("acme is not configured")) as string | undefined;
+}
+
 describe("startWorker", () => {
-  it("refuses, before launching, naming the vendor and each variable that is missing or invalid", async () => {
+  it("starts, warning per vendor of the variables missing or invalid, and listens for the missing ones", async () => {
     vi.stubEnv(URL_VAR, undefined);
     vi.stubEnv(KEY_VAR, "key_NOT-LOWER");
     vi.stubEnv(REGION_VAR, undefined);
     const launch = vi.spyOn(DBOS, "launch");
-    const { message, opened, left } = await listeners(() => startWorker(config));
-    expect(message).toBe(
-      `The worker cannot start: acme: ${URL_VAR} is missing (the account's API URL), ${KEY_VAR} is invalid (an API key, key_<letters>). ` +
-        "Set them on the app's connector pages, or in its environment",
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { message, opened, left } = await listeners(async () => {
+      const worker = await startWorker(config);
+      await worker.stop();
+    });
+    expect(message).toBe("started");
+    expect(warn).toHaveBeenCalledWith(
+      `sanoma: acme is not configured: ${URL_VAR} is missing (the account's API URL), ${KEY_VAR} is invalid (an API key, key_<letters>); ` +
+        "its calls will fail until they are set on the connector page",
     );
-    expect(message).not.toContain("NOT-LOWER");
-    expect(launch).not.toHaveBeenCalled();
-    launch.mockRestore();
-    // It looked for stored values of the two it lacks, and stopped listening when it refused.
+    expect(warn.mock.calls.flat().join("\n")).not.toContain("NOT-LOWER");
+    expect(launch).toHaveBeenCalledTimes(1);
+    // It listened for the stored values of the two it lacks while it ran, and stopped with it.
     expect({ opened, left }).toEqual({ opened: 1, left: 0 });
   });
 
@@ -207,13 +216,50 @@ describe("startWorker", () => {
     expect({ opened, left }).toEqual({ opened: 0, left: 0 });
   });
 
-  it("refuses an invalid variable even when it is optional", async () => {
+  it("warns of an invalid variable even when it is optional", async () => {
     vi.stubEnv(URL_VAR, "https://acme.example.test");
     vi.stubEnv(KEY_VAR, KEY);
     vi.stubEnv(REGION_VAR, "mars");
-    await expect(startWorker(config)).rejects.toThrow(
-      `The worker cannot start: acme: ${REGION_VAR} is invalid (Invalid option: expected one of "us"|"eu").`,
+    expect(await warnedAtStart(config)).toBe(
+      `sanoma: acme is not configured: ${REGION_VAR} is invalid (Invalid option: expected one of "us"|"eu"); ` +
+        "its calls will fail until they are set on the connector page",
     );
+  });
+});
+
+describe("a call to a vendor the worker started without", () => {
+  it("fails at the call, naming the variables and the connector page, until they are set", async () => {
+    vi.stubEnv(URL_VAR, undefined);
+    vi.stubEnv(KEY_VAR, "key_NOT-LOWER");
+    vi.stubEnv(REGION_VAR, undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const worker = await startWorker(config);
+    try {
+      const runId = await client.start(getThing, { id: "1" }, { startedBy: { id: "alice" } });
+      const err = (await client.result(runId).catch((e: unknown) => e)) as Error;
+      const message = `acme is not configured: set ${URL_VAR}, ${KEY_VAR} (invalid: an API key, key_<letters>) on the connector page`;
+      expect(err.message).toBe(message);
+      expect(errorCode(err)).toBe("driver_failed");
+      // The call's own failure, final, in the ledger as any driver's would be.
+      const ledger = await client.ledger(runId);
+      expect(ledger.map((r) => r.type)).toEqual(["run.started", "op.called", "run.failed"]);
+      expect(ledger[1]).toMatchObject({
+        op: "acme.thing.get",
+        decision: { kind: "allow" },
+        error: { code: "driver_failed", name: "DriverError", message, retryable: false },
+        attempt: 1,
+      });
+      expect(JSON.stringify(ledger)).not.toContain("NOT-LOWER");
+
+      // Set from the app (the worker loads it) and in the environment: the next run calls the vendor.
+      await client.setCredential(URL_VAR, "https://acme.example.test", { by: "alice" });
+      await vi.waitFor(() => expect(process.env[URL_VAR]).toBe("https://acme.example.test"));
+      vi.stubEnv(KEY_VAR, KEY);
+      const ok = await client.start(getThing, { id: "2" }, { startedBy: { id: "alice" } });
+      expect(await client.result(ok)).toEqual({ id: "2" });
+    } finally {
+      await worker.stop();
+    }
   });
 });
 

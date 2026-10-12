@@ -1,7 +1,7 @@
 import type { ApprovalState, Principal, WorkflowDefinition } from "./define.ts";
 import type { Fake } from "./fake.ts";
 import type { LedgerStore } from "./ledger.ts";
-import type { DriverFn, Op } from "./op.ts";
+import type { DriverEnv, DriverFn, Op } from "./op.ts";
 import type { CallNode } from "./outline.ts";
 import type { Policy } from "./policy.ts";
 
@@ -25,6 +25,12 @@ export interface WorkerState {
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id. */
   drivers: Map<string, DriverFn>;
+  /**
+   * The `env` of each operation's driver, by operation id, for the drivers that declare one. A
+   * live call checks it against the environment first, and fails as not configured when a
+   * variable is missing or invalid: the worker starts without them (see `startWorker`).
+   */
+  envs: Map<string, DriverEnv>;
   /**
    * The config's fake vendors, by vendor id, and their functions by operation id: the templates a
    * sandbox run copies (`Fake.fresh`) when it is seeded. No run calls them.

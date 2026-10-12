@@ -20,6 +20,7 @@ This package owns workflow declarations, durable execution, policy and approval 
 - `src/drift.ts` is held to the workflow lint (a test lints it), so it imports no DBOS and makes no dynamic import: its data-file step is made in `src/config.ts` and passed in. The worker takes every definition, the built-in's too, from the running worker's config by name.
 - Data files are found from the config's `root` (`defineConfig`'s call site, or set), never the working directory. The JSONL ledger's directory is still relative to the working directory: an inconsistency to fix, not a pattern to copy.
 - The default ledger is `postgresLedger` on the config's database, one store per config object (`resolveConfig` memoises it), with its table beside the credentials'; both go through `src/db.ts`.
+- The worker starts without credentials: `startWorker` warns per vendor, and `src/call.ts` refuses a live call whose driver's `env` the environment does not satisfy, inside the driver step, as a final `DriverError`. Keep the check there (not at start, not before the policy), so stored credentials set later take effect on the next call and the refusal is the call's recorded failure.
 
 ## Checks
 
