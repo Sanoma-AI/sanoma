@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
 import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
@@ -6,8 +9,8 @@ import { resend } from "@sanoma/connector-resend";
 import { fakeResend } from "@sanoma/connector-resend/fake";
 import { type TestApp, useTestApp } from "@sanoma/testing/harness";
 import type { Fake, FakeCall, FakeOptions } from "@sanoma/workflows/fake";
-import { beforeEach } from "vitest";
-import { allowAll, type LedgerRecord, type SanomaClient, type SanomaConfig } from "../src/index.ts";
+import { afterAll, beforeEach } from "vitest";
+import { allowAll, jsonlLedger, type LedgerRecord, type SanomaClient, type SanomaConfig } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
 
 export async function waitFor(check: () => Promise<boolean> | boolean, timeoutMs = 15_000) {
@@ -67,7 +70,8 @@ export type App = TestApp & {
 /**
  * `useTestApp` on the announce workflow and the marketing fakes, which `overrides` may replace,
  * for one `describe`, on its own app name in the file's database. The fakes, and the `extra`
- * ones, reset before each test.
+ * ones, reset before each test; the ledger is on disk so it outlives a restart the way it would
+ * across processes.
  */
 export function useApp(
   databaseUrl: string,
@@ -76,6 +80,9 @@ export function useApp(
   { extra }: { extra?: MakeFake[] } = {},
 ): App {
   const vendors = marketingFakes({ extra });
+  const ledgerDir = mkdtempSync(join(tmpdir(), `sanoma-ledger-${appName}-`));
+  // Registered before useTestApp's, so it runs after the worker stops (after hooks run in reverse).
+  afterAll(() => rmSync(ledgerDir, { recursive: true, force: true }));
   const app = useTestApp(
     {
       workflows: [announce],
@@ -84,6 +91,7 @@ export function useApp(
       // The same fakes, which each sandbox run copies.
       fakes: [vendors.ghost, vendors.resend, vendors.bluesky],
       policy: allowAll,
+      ledger: jsonlLedger(ledgerDir),
       appName,
       ...overrides(vendors),
     },
