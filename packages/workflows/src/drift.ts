@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { isRunControlError } from "./call.ts";
 import { defineWorkflow, type WorkflowDefinition } from "./define.ts";
+import { isRunControlError } from "./errors.ts";
 import type { Op } from "./op.ts";
 import { type DriftField, diffDeclared, type Resource } from "./resource.ts";
 import type { DeclaredResource, ResourceProblem } from "./resources.ts";

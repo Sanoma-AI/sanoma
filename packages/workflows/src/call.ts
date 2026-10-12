@@ -12,7 +12,16 @@ import {
   type Use,
   type WorkflowDefinition,
 } from "./define.ts";
-import { errorCode, errorInfo, isFinal, keepCode, parseOrThrow, PolicyDeniedError, SanomaError } from "./errors.ts";
+import {
+  causes,
+  errorCode,
+  errorInfo,
+  isFinal,
+  keepCode,
+  parseOrThrow,
+  PolicyDeniedError,
+  SanomaError,
+} from "./errors.ts";
 import { currentGroup, entry, skipped, write, writeFailure } from "./ledger.ts";
 import { shown } from "./log.ts";
 import { type CallContext, isOp, type Op } from "./op.ts";
@@ -21,25 +30,9 @@ import { DecisionSchema, type PolicyCall, policyOpOf, type RecordedDecision } fr
 import type { Run, WorkerState } from "./run.ts";
 import { approverLabel, errorMessage, fitsOp } from "./shared.ts";
 
-/** The error and the ones it was caused by, a few deep. */
-function causes(err: unknown): Error[] {
-  const out: Error[] = [];
-  for (let e = err; e instanceof Error && out.length < 5; e = e.cause) out.push(e);
-  return out;
-}
-
 /** DBOS took the run from this execution: it cancelled the run, or another process took it over. */
 const takenByDbos = (err: unknown) =>
   causes(err).some((e) => e instanceof DBOSErrors.DBOSWorkflowCancelledError || e instanceof DBOSWorkflowConflictError);
-
-/**
- * True for a failure that ends the run rather than one call: anything DBOS throws (it cancelled
- * the run, another process took it over, the worker is shutting down, the run is not
- * deterministic) and `run_ended` (a call queued after the run's body ended). Looked for in the
- * error and its causes. A workflow that goes on past a failed call, as `drift` does, rethrows these.
- */
-export const isRunControlError = (err: unknown): boolean =>
-  causes(err).some((e) => e instanceof DBOSErrors.DBOSError || errorCode(e) === "run_ended");
 
 /**
  * True for a failure that is not the run's outcome, so the ledger does not record it: DBOS
