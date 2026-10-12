@@ -1,7 +1,6 @@
 import { DBOS, DBOSWorkflowConflictError, Error as DBOSErrors } from "@dbos-inc/dbos-sdk";
 import { awaitApproval, type CheckedApproval } from "./approvals.ts";
 import { offsetOf } from "./ast.ts";
-import { unconfigured } from "./env.ts";
 import {
   AllMembers,
   type ApprovalRequest,
@@ -16,7 +15,7 @@ import {
 import { errorCode, errorInfo, isFinal, keepCode, parseOrThrow, PolicyDeniedError, SanomaError } from "./errors.ts";
 import { currentGroup, entry, skipped, write, writeFailure } from "./ledger.ts";
 import { shown } from "./log.ts";
-import { type CallContext, DriverError, isOp, type Op } from "./op.ts";
+import { type CallContext, isOp, type Op } from "./op.ts";
 import { callAt, callName, type CallNode } from "./outline.ts";
 import { DecisionSchema, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
 import type { Run, WorkerState } from "./run.ts";
@@ -281,22 +280,6 @@ async function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecisio
   return policyVersion === undefined ? decision : { ...decision, policyVersion };
 }
 
-/**
- * Refuses a call to a vendor whose driver cannot run on the environment now: a variable its
- * `env` declares is missing or invalid. The worker started without it (`startWorker` only warns),
- * and the stored credentials load into the environment as they are set, so this is checked at
- * the call, never earlier: the failure is the call's, final, and names what to set and where.
- */
-function refuseUnconfigured(run: Run, op: Op) {
-  const env = run.state.envs.get(op.id);
-  const missing = env ? unconfigured(env) : [];
-  if (missing.length) {
-    throw new DriverError(`${op.vendor} is not configured: set ${missing.join(", ")} on the connector page`, {
-      retryable: false,
-    });
-  }
-}
-
 async function callOp(run: Run, id: string, input: unknown, node: string) {
   // The worker's declaration, never the workflow's: its effect, schemas and retry setting.
   const op = run.state.ops.get(id);
@@ -354,8 +337,8 @@ async function callOp(run: Run, id: string, input: unknown, node: string) {
         const at = Date.now();
         attempt = DBOS.stepStatus?.currentAttempt ?? 1;
         const context: CallContext = { idempotencyKey: `${run.id}:${seq}`, runId: run.id, opId: op.id, attempt };
-        // Inside the step: the refusal is the call's failure, recorded and never retried.
-        if (run.sandbox === undefined) refuseUnconfigured(run, op);
+        // A live driver's `env` is checked here, inside the step, by the guard `indexDrivers` put
+        // on its function: the refusal is the call's failure, recorded and never retried.
         const output = op.output.parse(await fn(parsed, context));
         return { output, at, durationMs: Date.now() - at, attempt };
       },

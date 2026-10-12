@@ -51,7 +51,6 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     app: resolved.appName,
     ops: resolved.ops,
     drivers: resolved.drivers,
-    envs: resolved.envs,
     fakes: resolved.fakes,
     fakeDrivers: resolved.fakeDrivers,
     ...(resolved.scenarios && { scenarios: resolved.scenarios }),
@@ -138,7 +137,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
 /**
  * Warns, once per vendor whose drivers would fail when called: a variable a driver's `env`
  * declares is missing or invalid. The worker starts anyway; each such call fails saying the same
- * (`refuseUnconfigured` in call.ts), until the variables are set on the app's connector page.
+ * (`guarded` in config.ts), until the variables are set on the app's connector page.
  */
 function warnUnconfigured(credentials: Map<string, CredentialStatus[]>) {
   for (const [vendor, list] of credentials) {

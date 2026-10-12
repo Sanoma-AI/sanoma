@@ -2,9 +2,10 @@ import { dirname, resolve } from "node:path";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, type DriftDeclared, driftWorkflow } from "./drift.ts";
+import { unconfigured } from "./env.ts";
 import type { Fake } from "./fake.ts";
 import type { LedgerStore } from "./ledger.ts";
-import { type Connector, type Driver, type DriverEnv, type DriverFn, isOp, type Op } from "./op.ts";
+import { type Connector, type Driver, DriverError, type DriverEnv, type DriverFn, isOp, type Op } from "./op.ts";
 import type { Policy } from "./policy.ts";
 import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
 import { computeVersion } from "./version.ts";
@@ -63,10 +64,8 @@ export interface ResolvedConfig {
   queueName: string;
   /** The operations the connectors declare, by id. */
   ops: Map<string, Op>;
-  /** The drivers' functions, by operation id. */
+  /** The drivers' functions, by operation id, each guarded by its driver's `env` (`indexDrivers`). */
   drivers: Map<string, DriverFn>;
-  /** The `env` of the driver that implements each operation, by id, for those that declare one: checked when the operation is called. */
-  envs: Map<string, DriverEnv>;
   /** The fake vendors, by vendor id: the templates each sandbox run copies. */
   fakes: Map<string, Fake<any, any>>;
   /** The fakes' functions, by operation id: which operations a sandbox run has a fake for. */
@@ -149,10 +148,6 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     config.root !== undefined ? resolve(config.root) : config.file !== undefined ? dirname(config.file) : undefined;
   const ops = indexConnectors(config.connectors);
   const drivers = indexDrivers(config.drivers, ops);
-  const envs = new Map<string, DriverEnv>();
-  for (const d of config.drivers) {
-    if (d.env) for (const key of Object.keys(d.ops)) envs.set(`${d.vendor}.${key}`, d.env);
-  }
   const fakes = new Map<string, Fake<any, any>>();
   for (const fake of config.fakes ?? []) {
     const { vendor } = fake.driver;
@@ -194,7 +189,6 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     queueName: `sanoma:${appName}`,
     ops,
     drivers,
-    envs,
     fakes,
     fakeDrivers,
     ...(scenarios && { scenarios }),
@@ -245,7 +239,11 @@ function indexConnectors(list: Connector<any, any>[]) {
   return map;
 }
 
-/** The drivers' functions by operation id, refusing one no connector declares. */
+/**
+ * The drivers' functions by operation id, refusing one no connector declares. A driver that
+ * declares an `env` has each function guarded by it (`guarded`); a fake declares none, so a
+ * sandbox run's calls are not.
+ */
 export function indexDrivers(list: Driver[], ops: Map<string, Op>) {
   const map = new Map<string, DriverFn>();
   for (const d of list) {
@@ -254,10 +252,31 @@ export function indexDrivers(list: Driver[], ops: Map<string, Op>) {
       if (!ops.has(id)) {
         throw new Error(`Driver "${d.vendor}" implements ${id}, which no connector in \`connectors\` declares`);
       }
-      map.set(id, fn);
+      map.set(id, d.env ? guarded(d.vendor, d.env, fn) : fn);
     }
   }
   return map;
+}
+
+/**
+ * `fn`, refused while the environment leaves a variable `env` declares missing or invalid. The
+ * worker started without it (`startWorker` only warns), and stored credentials load into the
+ * environment as they are set, so the check is made when the function is called, inside the
+ * driver step, and nowhere earlier: not at start, and not before the policy's decision or an
+ * approval hold, so a credential set on the connector page while a call waits for approval is
+ * used when the approver approves. The refusal is the call's own failure, final: recorded as
+ * the call's, and never retried.
+ */
+function guarded(vendor: string, env: DriverEnv, fn: DriverFn): DriverFn {
+  return async (input, call) => {
+    const missing = unconfigured(env);
+    if (missing.length) {
+      throw new DriverError(`${vendor} is not configured: set ${missing.join(", ")} on the connector page`, {
+        retryable: false,
+      });
+    }
+    return fn(input, call);
+  };
 }
 
 /**
