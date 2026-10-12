@@ -97,6 +97,14 @@ export function problemLine(p: { file?: string; line?: number; column?: number; 
   return p.line === undefined ? `${p.file}: ${p.message}` : `${p.file}:${p.line}:${p.column ?? 1}: ${p.message}`;
 }
 
+/**
+ * Whether a host is this machine: `localhost`, `127.x.x.x` or `::1` (bare, or bracketed as a URL's
+ * `hostname` has it). The one rule for what the app listens on and answers to, and for where the
+ * bin may start Postgres.
+ */
+export const isLoopback = (host: string) =>
+  ["localhost", "::1", "[::1]"].includes(host) || /^127\.\d+\.\d+\.\d+$/.test(host);
+
 /** Whether a driver's environment variable lets it run: set, or unset and optional. */
 export const credentialReady = ({ status, optional }: CredentialStatus): boolean =>
   status === "set" || (status === "missing" && optional);

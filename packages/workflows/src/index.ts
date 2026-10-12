@@ -98,6 +98,7 @@ export {
   ENDED_STATUSES,
   errorMessage,
   isEnded,
+  isLoopback,
   mayDecide,
   problemAt,
   problemLine,

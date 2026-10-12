@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
-import { setTimeout as delay } from "node:timers/promises";
-import { promisify } from "node:util";
+import { isLoopback } from "@sanoma/workflows/shared";
 import { Client } from "pg";
 
 export interface EnsuredPostgres {
@@ -13,21 +12,14 @@ export interface EnsuredPostgres {
 export interface EnsurePostgresOptions {
   /** Names the container: `sanoma-<appName>-postgres`. */
   appName: string;
-  /** Receives a line per step. */
+  /** Receives a line per step, and one saying how Postgres was made to answer. */
   log?: (line: string) => void;
-  /** Runs `docker <args>` and resolves its stdout; rejects with `code: "ENOENT"` when Docker is not installed. For tests. */
-  docker?: (args: string[]) => Promise<string>;
-  /** Whether Postgres answers at the URL; throws for a server that answers with an error, such as a refused password. For tests. */
-  probe?: (url: URL) => Promise<boolean>;
-  /** How long one probe waits for a connection. Default 2 seconds. */
-  probeTimeoutMs?: number;
-  /** How long to wait for Postgres in a container to answer. Default 60 seconds. */
-  waitMs?: number;
 }
 
-const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
-
-const runDocker = async (args: string[]): Promise<string> => (await promisify(execFile)("docker", args)).stdout;
+/** How long one probe waits for a connection. */
+const PROBE_TIMEOUT_MS = 2000;
+/** How long Postgres in a container has to answer. */
+const WAIT_MS = 60_000;
 
 /** The URL with its password hidden, for a message. */
 export function masked(databaseUrl: string): string {
@@ -36,23 +28,33 @@ export function masked(databaseUrl: string): string {
   return url.toString();
 }
 
+/** `docker <args>`, its stdout trimmed: the one place the bin runs Docker. */
+const docker = (args: string[]) =>
+  new Promise<string>((resolve, reject) =>
+    execFile("docker", args, (err, stdout) => (err ? reject(err) : resolve(String(stdout).trim()))),
+  );
+
 /**
  * Makes sure Postgres answers at `databaseUrl`, starting it in Docker when nothing does and the
- * host is this machine. It probes the server (`SELECT 1` on the `postgres` database, with the
- * URL's user and password); an answer is enough. Nothing answering at a loopback host means
- * Docker: the container `sanoma-<appName>-postgres` is started when it exists and stopped,
- * created from `postgres:17` on the URL's port, user, password and database when it does not,
- * and left as it is when it runs already; then the probe is repeated until it answers. A
- * container is never removed. Throws when the server answers with an error (a wrong password),
- * when nothing answers at another host, when Docker is not installed, and when the container
- * does not answer within `waitMs`.
+ * host is this machine (`isLoopback`). It probes the server (`SELECT 1` on the `postgres`
+ * database, with the URL's user and password); an answer is enough. Nothing answering at a
+ * loopback host means Docker: the container `sanoma-<appName>-postgres` is started when it
+ * exists and stopped, created from `postgres:17` on the URL's port, user, password and database
+ * when it does not, and left as it is when it runs already; then the probe is repeated until it
+ * answers. A container is never removed. Throws when the server answers with an error (a wrong
+ * password), when nothing answers at another host, when Docker is not installed, and when the
+ * container does not answer within a minute.
  */
-export async function ensurePostgres(databaseUrl: string, options: EnsurePostgresOptions): Promise<EnsuredPostgres> {
-  const { appName, log = () => {}, docker = runDocker, probeTimeoutMs = 2000, waitMs = 60_000 } = options;
-  const probe = options.probe ?? ((url: URL) => answers(url, probeTimeoutMs));
+export async function ensurePostgres(
+  databaseUrl: string,
+  { appName, log = () => {} }: EnsurePostgresOptions,
+): Promise<EnsuredPostgres> {
   const url = new URL(databaseUrl);
-  if (await probe(url)) return { how: "answered" };
-  if (!LOOPBACK.has(url.hostname)) {
+  if (await answers(url, PROBE_TIMEOUT_MS)) {
+    log(`Postgres answers at ${masked(databaseUrl)}`);
+    return { how: "answered" };
+  }
+  if (!isLoopback(url.hostname)) {
     throw new Error(`nothing answers at ${masked(databaseUrl)}; start Postgres or set SANOMA_DATABASE_URL`);
   }
   if (!url.password) {
@@ -60,31 +62,26 @@ export async function ensurePostgres(databaseUrl: string, options: EnsurePostgre
   }
 
   const container = `sanoma-${slug(appName)}-postgres`;
-  const run = async (args: string[]) => {
-    try {
-      return (await docker(args)).trim();
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new Error("docker is not installed; start Postgres and set SANOMA_DATABASE_URL", { cause: err });
-      }
-      throw err;
+  let state: string | undefined;
+  try {
+    state = await docker(["inspect", "-f", "{{.State.Running}}", container]);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error("docker is not installed; start Postgres and set SANOMA_DATABASE_URL", { cause: err });
     }
-  };
-  const state = await run(["inspect", "-f", "{{.State.Running}}", container]).catch((err: unknown) => {
-    if ((err as Error).message.includes("not installed")) throw err;
-    return undefined;
-  });
+    // No such container.
+  }
   let how: EnsuredPostgres["how"];
   if (state === "true") {
     log(`Postgres container ${container} is running; waiting for it to answer`);
     how = "reused";
   } else if (state === "false") {
     log(`starting Postgres container ${container}`);
-    await run(["start", container]);
+    await docker(["start", container]);
     how = "reused";
   } else {
     log(`creating Postgres container ${container} on port ${port(url)} (postgres:17)`);
-    await run([
+    await docker([
       "run",
       "-d",
       "--name",
@@ -102,15 +99,16 @@ export async function ensurePostgres(databaseUrl: string, options: EnsurePostgre
     how = "created";
   }
 
-  const deadline = Date.now() + waitMs;
-  while (!(await probe(url))) {
-    if (Date.now() > deadline) {
+  const deadline = Date.now() + WAIT_MS;
+  while (!(await answers(url, PROBE_TIMEOUT_MS))) {
+    if (Date.now() >= deadline) {
       throw new Error(
-        `Postgres in container ${container} did not answer at ${masked(databaseUrl)} within ${waitMs} ms`,
+        `Postgres in container ${container} did not answer at ${masked(databaseUrl)} within ${WAIT_MS} ms`,
       );
     }
-    await delay(500);
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
+  log(`Postgres ${how} in Docker: container ${container}`);
   return { how, container };
 }
 

@@ -7,9 +7,10 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { errorMessage, problemLine, resolveConfig, SanomaClient, type SanomaConfig } from "@sanoma/workflows";
 import { describeConfig } from "@sanoma/workflows/describe";
+import { isLoopback } from "@sanoma/workflows/shared";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import type { AppContext, ResolveActor } from "./context.ts";
-import { hostName, isLoopback, refuseHost } from "./loopback.ts";
+import { hostName, refuseHost } from "./loopback.ts";
 
 export { ACTOR_HEADER, type ErrorResponse, type InputIssue, type RunDetail, type StartRunResponse } from "./api.ts";
 export type { ResolveActor } from "./context.ts";

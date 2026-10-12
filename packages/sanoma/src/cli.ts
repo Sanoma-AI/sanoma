@@ -124,7 +124,9 @@ async function keep(
 /** `sanoma serve` (and `sanoma` outside dev mode): Postgres, then the worker and the app in this process. */
 async function serveCommand(): Promise<never> {
   const loaded = await load();
-  await postgres(loaded.resolved);
+  const { appName, databaseUrl } = loaded.resolved;
+  const { ensurePostgres } = await import("./postgres.ts");
+  await ensurePostgres(databaseUrl, { appName, log });
   const { serve } = await import("./serve.ts");
   return keep(loaded, (config) => serve(config, { port: port() }));
 }
@@ -152,21 +154,16 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
   return new Promise(() => {});
 }
 
-/** Makes sure Postgres answers at the config's URL, starting it in Docker when it may. */
-async function postgres({ appName, databaseUrl }: ResolvedConfig): Promise<void> {
-  const { ensurePostgres, masked } = await import("./postgres.ts");
-  const { how, container } = await ensurePostgres(databaseUrl, { appName, log });
-  if (how === "answered") log(`Postgres answers at ${masked(databaseUrl)}`);
-  else log(`Postgres ${how === "created" ? "created" : "reused"} in Docker: container ${container}`);
-}
-
+/** `sanoma check`: Postgres made to answer while tsc, oxlint and the config are read; the scenarios on `<database>_check`. */
 async function runCheck(): Promise<number> {
   const loaded = await load();
-  await postgres(loaded.resolved);
-  const databaseUrl = new URL(loaded.resolved.databaseUrl);
-  databaseUrl.pathname = `${databaseUrl.pathname}_check`;
-  const { check } = await import("./check.ts");
-  const { ok, problems } = await check(loaded, { databaseUrl: databaseUrl.toString(), log });
+  const { appName, databaseUrl } = loaded.resolved;
+  const [{ ensurePostgres }, { check }] = await Promise.all([import("./postgres.ts"), import("./check.ts")]);
+  const own = new URL(databaseUrl);
+  own.pathname = `${own.pathname}_check`;
+  // Started here, handed to check at once (which handles its failure), awaited before the scenarios.
+  const ready = ensurePostgres(databaseUrl, { appName, log });
+  const { ok, problems } = await check(loaded, { databaseUrl: own.toString(), ready, log });
   for (const problem of problems) console.log(problem);
   log(ok ? "ok" : `${problems.length} problem${problems.length === 1 ? "" : "s"}`);
   return ok ? 0 : 1;

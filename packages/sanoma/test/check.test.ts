@@ -1,11 +1,14 @@
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { testDatabaseUrl } from "@sanoma/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { check } from "../src/check.ts";
 import { loadConfig } from "../src/config.ts";
 import { copyFixture, ensureBuilt } from "./fixture.ts";
 
-// Without Postgres: `scenarios: false`. The fixture copy loads the packages from their builds.
+// Needs Postgres (`pnpm db:up`) for the scenarios. The fixture copy loads the packages from their builds.
+const databaseUrl = testDatabaseUrl("sanoma-check");
+
 let dir = "";
 beforeAll(() => {
   ensureBuilt();
@@ -16,11 +19,18 @@ afterAll(() => rmSync(dir, { recursive: true, force: true }));
 describe("check", () => {
   it("reports what the lints and describeConfig find, each at its file and position, and nothing for the fixture", async () => {
     const log: string[] = [];
-    expect(await check(await loadConfig(dir), { scenarios: false, log: (l) => log.push(l) })).toEqual({
+    expect(await check(await loadConfig(dir), { databaseUrl, log: (l) => log.push(l) })).toEqual({
       ok: true,
       problems: [],
     });
-    expect(log).toEqual(["tsc", "wrote .oxlintrc.json", "oxlint workflows policies", "config", "scenarios skipped"]);
+    expect(log.slice(0, 5)).toEqual([
+      "tsc",
+      "wrote .oxlintrc.json",
+      "oxlint workflows policies",
+      "config",
+      "scenarios",
+    ]);
+    expect(log).toContain("passed hello/hello.feature › A post goes out");
     expect(readFileSync(join(dir, ".oxlintrc.json"), "utf8")).toBe(
       `{\n  "extends": [\n    "./node_modules/sanoma/oxlint.json"\n  ]\n}\n`,
     );
@@ -36,7 +46,7 @@ describe("check", () => {
       join(dir, "resources/shop.ts"),
       'import { ghost } from "@sanoma/connector-ghost/resources";\nexport const p = ghost.post({ title: "x" });\n',
     );
-    const { ok, problems } = await check(await loadConfig(dir), { scenarios: false, log: () => {} });
+    const { ok, problems } = await check(await loadConfig(dir), { databaseUrl, log: () => {} });
     expect(ok).toBe(false);
     expect(problems).toEqual([
       // tsc: the entry does not exist.
@@ -54,5 +64,5 @@ describe("check", () => {
         /^workflows\/hello\.ts:16:30: import "node:fs" is not allowed in a workflow: import only from `sanoma`/,
       ),
     ]);
-  }, 120_000);
+  }, 180_000);
 });

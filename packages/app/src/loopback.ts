@@ -1,10 +1,6 @@
-// The loopback rule: which addresses count as this machine, for what startApp listens on and
-// for the Host names it then answers to, so the two can never disagree.
-
-const LOOPBACK_NAMES = new Set(["localhost", "127.0.0.1", "::1"]);
-
-/** True for localhost, 127.x.x.x and ::1. */
-export const isLoopback = (host: string) => LOOPBACK_NAMES.has(host) || /^127\.\d+\.\d+\.\d+$/.test(host);
+// The Host names a loopback-only app answers to. Which addresses count as this machine is
+// `isLoopback` in `@sanoma/workflows/shared`, for what startApp listens on and the Host names it
+// then answers to alike, so the two can never disagree.
 
 /** The host name in a Host header (`name`, `name:port`, `[v6]:port`), lowercased. */
 export function hostName(header: string): string {
