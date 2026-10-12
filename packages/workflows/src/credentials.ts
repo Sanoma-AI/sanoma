@@ -1,45 +1,19 @@
 import { setTimeout as sleep } from "node:timers/promises";
-import { DBOS } from "@dbos-inc/dbos-sdk";
-import { Client, type Pool } from "pg";
-import { credentialsOf } from "./config.ts";
+import { Client } from "pg";
+import { credentialsOf } from "./env.ts";
+import { CREDENTIALS_TABLE as TABLE, type Db, prepareDatabase } from "./db.ts";
 import { info, warn } from "./log.ts";
 import type { Driver } from "./op.ts";
 import { errorMessage } from "./shared.ts";
 
 // Where the credentials set from the app live: one table in the config's database, beside DBOS's
-// own. A value is read here only, by the worker to load it into its environment and by the
-// client to check it, and leaves neither. The write (`storeCredential`) and the read
-// (`storedCredentials`) are the only places that touch `value`, so a hosted deployment's
-// encryption goes there.
+// own (made by `prepareDatabase` in db.ts). A value is read here only, by the worker to load it
+// into its environment and by the client to check it, and leaves neither. The write
+// (`storeCredential`) and the read (`storedCredentials`) are the only places that touch `value`,
+// so a hosted deployment's encryption goes there.
 
-const TABLE = "sanoma_credentials";
 /** Where a change is announced, with the variable's name as the payload. */
 const CHANNEL = "sanoma_credentials";
-
-type Db = Pick<Pool | Client, "query">;
-
-/** Postgres's codes for a row type or a table another process made first. */
-const MADE_ALREADY = new Set(["23505", "42P07"]);
-
-/**
- * Creates the config's database and DBOS's tables when they are not there yet, as a worker's
- * launch does (credentials may be set before any worker has run), then the credentials table
- * on the connection `connected` gives. Two processes racing to create it both succeed.
- */
-export async function ensureTable(databaseUrl: string, connected: () => Promise<Db>): Promise<void> {
-  try {
-    await DBOS.migrate(databaseUrl);
-    await (
-      await connected()
-    ).query(
-      `CREATE TABLE IF NOT EXISTS ${TABLE} (name text PRIMARY KEY, value text NOT NULL, ` +
-        "set_by text NOT NULL, set_at timestamptz NOT NULL DEFAULT now())",
-    );
-  } catch (err) {
-    if (MADE_ALREADY.has((err as { code?: string }).code ?? "")) return;
-    throw new Error(`could not prepare the credentials table: ${errorMessage(err)}`, { cause: err });
-  }
-}
 
 /** The stored rows of these names, values included: for loading into an environment or checking, never for showing. */
 export async function storedCredentials(
@@ -123,7 +97,7 @@ export async function watchCredentials(databaseUrl: string, drivers: readonly Dr
     }
     const verb = first ? "loaded" : "reloaded";
     for (const [vendor, n] of counts) info(`credentials ${verb} for ${vendor} (${n} variable${n === 1 ? "" : "s"})`);
-    // At start, startWorker refuses an invalid one, naming it.
+    // At start, startWorker warns of an invalid one, naming it.
     if (first) return;
     for (const list of credentialsOf(drivers, (name) =>
       changed.includes(name) ? process.env[name] : undefined,
@@ -165,8 +139,8 @@ export async function watchCredentials(databaseUrl: string, drivers: readonly Dr
       }
     });
     try {
-      if (first) await ensureTable(databaseUrl, () => conn.connect().then(() => conn));
-      else await conn.connect();
+      if (first) await prepareDatabase(databaseUrl);
+      await conn.connect();
       if (closed) {
         await conn.end();
         return;

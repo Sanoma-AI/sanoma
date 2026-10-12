@@ -40,7 +40,7 @@ A third argument says who the vendor is, so the app can show it: `defineConnecto
 Drivers implement the operations and hold the credentials. A policy is checked before every operation call, and a ledger records what happened.
 
 ```ts
-import { allow, approve, approvedFor, defineConfig, definePolicy, jsonlLedger } from "@sanoma/workflows";
+import { allow, approve, approvedFor, defineConfig, definePolicy } from "@sanoma/workflows";
 
 const policy = definePolicy(
   ({ op, effect, run }) => {
@@ -57,12 +57,11 @@ export default defineConfig({
   connectors: [shop],
   drivers,
   policy,
-  ledger: jsonlLedger(".sanoma/ledger"),
   appName: "acme",
 });
 ```
 
-A config must name its policy and its ledger. `policy: allowAll` allows every operation call, and says so. `ledger: jsonlLedger(dir)` keeps the audit record in files the app and other processes read; `memoryLedger()` keeps it in this process only, for tests. `resolveConfig(config)` checks a config and derives what the runtime uses from it: the app name, database, version and queue (`sanoma:<appName>`, for every run, [sandbox runs](#scenarios-and-sandbox-runs) included), and the operations and drivers by id. It throws, with one message, whatever the worker would refuse: a workflow or driver naming an operation the `connectors` don't declare, a workflow redeclaring an operation with another effect, an operation with no driver, two workflows with one name, no policy, no ledger. `startWorker`, `SanomaClient.connect` and `describeConfig` all call it, so they fail the same way. It adds the built-in [`drift`](#drift) workflow when the connectors declare resource types. The worker takes each operation's effect, schemas and retry setting from `connectors`, never from the workflow.
+A config must name its policy. `policy: allowAll` allows every operation call, and says so. The audit record goes to the ledger, by default `postgresLedger(databaseUrl)` on the config's database (see [Ledger](#ledger)); `ledger: jsonlLedger(dir)` keeps it in files instead, and `memoryLedger()` in this process only, for tests. `resolveConfig(config)` checks a config and derives what the runtime uses from it: the app name, database, version and queue (`sanoma:<appName>`, for every run, [sandbox runs](#scenarios-and-sandbox-runs) included), the operations and drivers by id, and the config's `ledger` when it gives one; it opens nothing. It throws, with one message, whatever the worker would refuse: a workflow or driver naming an operation the `connectors` don't declare, a workflow redeclaring an operation with another effect, an operation with no driver, two workflows with one name, no policy, a `ledger` that is not a store. `startWorker`, `SanomaClient.connect` and `describeConfig` all call it, so they fail the same way. It adds the built-in [`drift`](#drift) workflow when the connectors declare resource types. The worker takes each operation's effect, schemas and retry setting from `connectors`, never from the workflow.
 
 A policy returns `allow()`, `deny(reason)` (the run fails) or `approve(who)` (the run waits for that person, or for anyone in `{ group }`; see [Approvals](#approvals)). `allow(reasons)` and `deny(reason, reasons)` may add a list of reasons for whoever reads the ledger. The policy must decide the same way on every replay: no clock, randomness or network. What it sees is plain data, so a test can build one by hand, with `policyOpOf(op)` for the operation as the runtime passes it:
 
@@ -118,6 +117,16 @@ const run = await client.run(runId); // run.status: "queued" | "running" | "wait
 
 The worker, the client and the app find Postgres at the config's `databaseUrl`, else the `SANOMA_DATABASE_URL` environment variable, else `postgresql://postgres:dbos@localhost:5433/sanoma`, the database `pnpm db:up` starts from this repo's docker compose file. Set one of the first two anywhere but on your own machine.
 
+### Ledger
+
+The ledger is the audit record of a run: who started it, every operation call with the policy's decision, every approval, and how it ended, as `LedgerRecord`s in `seq` order. `client.ledger(runId)` reads it, and the app's run page shows it. Three stores keep it, each a `LedgerStore` (`append`, `read`, and `close` for one that holds a connection), and a config picks one with `ledger`:
+
+- `postgresLedger(databaseUrl)`, the default when `ledger` is not set: one table, `sanoma_ledger`, in the config's database beside DBOS's own, which the worker, the app and other processes then share without sharing a disk. The table is made on first use, and the database with it when it is not there (as a worker's launch makes it), so the app may read before any worker has run. The worker and the client (so the app) each make their own store and close it with themselves (`stop`, `client.close()`); `close()` ends its pool for good. A store the config gives is the config's to close: the runtime never closes it.
+- `jsonlLedger(dir)`: `<dir>/<runId>.jsonl`, one record per line, for a ledger on disk or in a repo.
+- `memoryLedger()`: this process only, for tests.
+
+Every store keeps the first record of an id: a run replayed after a restart writes its records again, with the same ids, and the store skips them (warning when a later one differs). A failed `append` is tried again three times, unless the store says the failure is final (`retryable: false`): a record that is not JSON, a corrupt file.
+
 ### Approvals
 
 An approval comes from the workflow (`ctx.approval(title, { approver, covers?, links?, details? })`) or from the policy holding a call (`approve(approver, { title?, covers? })`). Each is in `run.approvals` with its `status`, so a later policy call can see it.
@@ -162,7 +171,7 @@ When the vendor says no, throw a `DriverError(message, { retryable, status?, ven
 
 A driver reads its credentials from the environment when it is called, and declares them in `defineDriver`'s third argument: `defineDriver(acme, impl, { env: z.object({ ACME_API_KEY: z.string().describe("an API key, from Settings, API keys"), ACME_REGION: z.enum(["us", "eu"]).optional().describe("the region; default us") }) })`. Each key is a variable's name, its `.describe()` the one-line manual, `.optional()` marks one that may be unset. The driver reads the raw environment, so `.default()` and `.transform()` are not applied to what it reads (use `.optional()` and name the default in `.describe()`), and a `.refine()` or `.superRefine()` on the `z.object` is not evaluated, only its fields. Only the declared names are read, an empty value counts as unset, and a value is never kept: each variable is set, missing or invalid, with the schema's reason.
 
-The environment stays the only interface a driver sees, but a value need not come from a file. Locally, set values live in the `sanoma_credentials` table in the config's database (`databaseUrl`), which the runtime creates on first use. Set one from the app's connector page, or with `client.setCredential("GHOST_ADMIN_API_KEY", value, { by: "alice" })`, and delete it with `client.clearCredential(name, { by })`; `client.credentials()` gives each vendor's statuses, each with its `source` (`environment` or `stored`) and, for a stored one, who set it and when. A name no driver declares, or a value its schema refuses, is refused with the reason, never the value. `startWorker` loads the stored values of the declared variables its environment leaves unset into `process.env` and listens for changes, so a value set or cleared is live without a restart: drivers read `process.env` when they are called. A worker whose listener drops reconnects and loads them again. A variable the process environment sets wins over a stored one, always. Then it refuses to start, before launching, while a variable is missing and not optional, or invalid, naming each vendor and its variables: a misconfigured worker fails at start, not in the middle of a run. `startApp` starts anyway, and its connector pages show and set them.
+The environment stays the only interface a driver sees, but a value need not come from a file. Locally, set values live in the `sanoma_credentials` table in the config's database (`databaseUrl`), which the runtime creates on first use. Set one from the app's connector page, or with `client.setCredential("GHOST_ADMIN_API_KEY", value, { by: "alice" })`, and delete it with `client.clearCredential(name, { by })`; `client.credentials()` gives each vendor's statuses, each with its `source` (`environment` or `stored`) and, for a stored one, who set it and when. A name no driver declares, or a value its schema refuses, is refused with the reason, never the value. `startWorker` loads the stored values of the declared variables its environment leaves unset into `process.env` and listens for changes, so a value set or cleared is live without a restart: drivers read `process.env` when they are called. A worker whose listener drops reconnects and loads them again. A variable the process environment sets wins over a stored one, always. The worker starts whether or not every variable is there: for each vendor with a variable missing (and not optional) or invalid, it warns once at start, naming them. A call to that vendor then fails, as the call's own failure: a `DriverError` that is not retried, with the message the worker warned with, `<vendor> is not configured: <NAME> (<description>), <NAME> is invalid: <why>; set it on the connector page` (or `set in the environment`, when an invalid value is there: the environment wins over a stored value), checked against the environment at the moment of the call, so a value set on the connector page (or in `process.env`) takes effect on the next call, with no restart. The call's `op.called` record carries it, and the run fails with it like any other final driver failure. `startApp` starts the same way, and its connector pages show and set them.
 
 The values are plain text in the local database: the same exposure as a `.env` file on the same disk. Keep `.env` (`node --env-file-if-exists=.env`) for the bootstrap values a worker needs before it can read the database: the database URL, the bridge binary, the port. A value never reaches the ledger or the description; see [Secrets](#secrets) for why one must never be an input either.
 
@@ -342,7 +351,6 @@ export default defineConfig({
   fakes: [fakeGhost(), fakeResend(), fakeBluesky()],
   scenarios: new URL("./scenarios/", import.meta.url),
   policy,
-  ledger: jsonlLedger(".sanoma/ledger"),
 });
 ```
 
@@ -417,7 +425,7 @@ To run a config's scenarios as tests, a vitest test each, use `describeScenarios
 - `mayDecide(approval, principal)` and `approverLabel(approver)`: who may decide, and how to name them, the same way the run does. `isEnded(status)` and `ENDED_STATUSES`: the run statuses that read no more decisions; `RUN_STATUSES`: every run status, in the order a run may pass through them.
 - Errors: `errorCode(err)` for the code to branch on, `errorMessage(err)` for the text of anything thrown, `invalidInput(what, issues)` to build an `invalid_input` error from zod issues (`InputIssue` is one issue, without symbols in its path), and the classes `SanomaError`, `PolicyDeniedError`, `RejectedError` and `DriverError`. Read codes with `errorCode`, never `instanceof`.
 - `@sanoma/workflows/shared` exports `mayDecide`, `approverLabel`, `errorMessage`, `isEnded`, `ENDED_STATUSES`, `RUN_STATUSES`, `problemAt` (a data-file problem's `file:line:column`), `credentialReady` (a variable is set, or optional and unset) and the `RunStatus` and `CredentialStatus` types, the resource types' types (`Resource`, `ResourceSpec`, `ResourceFields`, `References`, `FieldReference`, `Declared`, `Declaring`, `DeclaredResource`, `ResourceProblem`) and the drift report's (`DriftReport`, `DriftResult`, `DriftField`, `DriftStatus`), with nothing else: no DBOS or Node imports, so a browser bundle can use them. The main entry exports them too.
-- `LedgerRecord` and `LedgerStore` for the audit record (`LedgerBody` is a record without the fields every record carries, and `LedgerGroup` a record's `ctx.all` tag), `jsonlLedger(dir)` and `memoryLedger()` to keep it, and `RUNTIME_VERSION`, this package's version as the runtime reports it.
+- `LedgerRecord` and `LedgerStore` for the audit record (`LedgerBody` is a record without the fields every record carries, and `LedgerGroup` a record's `ctx.all` tag), `postgresLedger(databaseUrl)` (the default), `jsonlLedger(dir)` and `memoryLedger()` to keep it, and `RUNTIME_VERSION`, this package's version as the runtime reports it.
 
 ### Outline
 

@@ -65,9 +65,10 @@ describe("resendDriver", () => {
     expect(sent.slice(1).map((r) => r.headers.get("idempotency-key"))).toEqual(["run-1:4", "run-1:4"]);
   });
 
-  it("takes the sender from the driver's options when the input has none", async () => {
+  it("takes the sender from RESEND_FROM, read at the call, when the input has none", async () => {
     play("create");
-    await resendDriver({ from }).ops["broadcast.create"]!({ audience, subject: "s", html: "" }, call);
+    vi.stubEnv("RESEND_FROM", from);
+    await create({ audience, subject: "s", html: "" });
     expect(sent[0]!.body).toMatchObject({ from });
   });
 

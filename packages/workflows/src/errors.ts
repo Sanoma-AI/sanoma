@@ -1,3 +1,4 @@
+import { Error as DBOSErrors } from "@dbos-inc/dbos-sdk";
 import type { z } from "zod";
 import type { Principal } from "./define.ts";
 import { errorMessage } from "./shared.ts";
@@ -53,6 +54,22 @@ export function errorCode(e: unknown): ErrorCode | undefined {
  * a property, never `instanceof`: the error may come from another copy of this package.
  */
 export const isFinal = (err: unknown): boolean => (err as { retryable?: unknown } | null)?.retryable === false;
+
+/** The error and the ones it was caused by, a few deep. */
+export function causes(err: unknown): Error[] {
+  const out: Error[] = [];
+  for (let e = err; e instanceof Error && out.length < 5; e = e.cause) out.push(e);
+  return out;
+}
+
+/**
+ * True for a failure that ends the run rather than one call: anything DBOS throws (it cancelled
+ * the run, another process took it over, the worker is shutting down, the run is not
+ * deterministic) and `run_ended` (a call queued after the run's body ended). Looked for in the
+ * error and its causes. A workflow that goes on past a failed call, as `drift` does, rethrows these.
+ */
+export const isRunControlError = (err: unknown): boolean =>
+  causes(err).some((e) => e instanceof DBOSErrors.DBOSError || errorCode(e) === "run_ended");
 
 /** Thrown into the run when the policy denies an operation call. The run fails with it. */
 export class PolicyDeniedError extends SanomaError {

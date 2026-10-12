@@ -8,6 +8,7 @@ export {
 } from "./bridge.ts";
 export { type BridgeLog, startBridge, type StartBridgeOptions } from "./client.ts";
 export { ensureConfigured, type ProviderClient } from "./configure.ts";
+export { defaultBridge, type LazyBridge, lazyBridge, type LazyBridgeOptions } from "./lazy.ts";
 export { readPins } from "./pins.ts";
 export {
   type Attribute,

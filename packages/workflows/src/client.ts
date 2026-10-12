@@ -1,25 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { DBOSClient, Error as DBOSErrors, type WorkflowStatusString } from "@dbos-inc/dbos-sdk";
-import { Pool } from "pg";
+import type { Pool } from "pg";
 import { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, messageKeyOf, topicOf } from "./approvals.ts";
-import {
-  type CredentialStatus,
-  credentialsOf,
-  type ResolvedConfig,
-  resolveConfig,
-  type SanomaConfig,
-} from "./config.ts";
-import { deleteCredential, ensureTable, storeCredential, storedCredentials } from "./credentials.ts";
+import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
+import { deleteCredential, storeCredential, storedCredentials } from "./credentials.ts";
+import { lazyPool, type LazyPool } from "./db.ts";
+import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { type ApprovalState, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
 import { parseOrThrow, SanomaError } from "./errors.ts";
-import type { LedgerRecord } from "./ledger.ts";
+import { type LedgerRecord, type OwnedLedger, ownedLedger } from "./ledger.ts";
 import type { Driver } from "./op.ts";
 import type { RunArgs } from "./run.ts";
-import { warn } from "./log.ts";
-import { errorMessage, isEnded, mayDecide, type RunStatus } from "./shared.ts";
+import { isEnded, mayDecide, type RunStatus } from "./shared.ts";
 
 /**
  * The run status each DBOS status maps to. `waiting` is PENDING with an approval pending, so
@@ -114,20 +109,23 @@ export class SanomaClient {
   private readonly dbos: DBOSClient;
   private readonly config: ResolvedConfig;
   private readonly drivers: readonly Driver[];
-  /** On the config's database, for the credentials table: made on first use. */
-  private pool?: Pool;
-  private table?: Promise<void>;
-  private closed = false;
+  /** The config's own ledger store, or a Postgres one made for this client, which `close` then closes. */
+  private readonly audit: OwnedLedger;
+  /** On the config's database, for the credentials table: opened on first use. */
+  private readonly credentialsPool: LazyPool;
 
   private constructor(dbos: DBOSClient, config: ResolvedConfig, drivers: readonly Driver[]) {
     this.dbos = dbos;
     this.config = config;
     this.drivers = drivers;
+    this.audit = ownedLedger(config);
+    this.credentialsPool = lazyPool(config.databaseUrl, "credentials");
   }
 
   /**
    * Connects to the runtime's Postgres for the config's app. Checks the config first and throws
-   * what the worker would refuse. Reads ledgers from the config's ledger store.
+   * what the worker would refuse. Reads ledgers from the config's ledger store, or from the
+   * Postgres store on its database when it has none.
    */
   static async connect(config: SanomaConfig): Promise<SanomaClient> {
     const resolved = resolveConfig(config);
@@ -204,10 +202,10 @@ export class SanomaClient {
     return handle.workflowID;
   }
 
-  /** The run's audit record, in order, from the config's ledger store. */
+  /** The run's audit record, in order, from the ledger store. */
   async ledger(runId: string): Promise<LedgerRecord[]> {
     await this.mustExist(runId);
-    return this.config.ledger.read(runId);
+    return this.audit.store.read(runId);
   }
 
   /**
@@ -422,8 +420,7 @@ export class SanomaClient {
   }
 
   async close() {
-    this.closed = true;
-    await Promise.all([this.dbos.destroy(), this.pool?.end()]);
+    await Promise.all([this.dbos.destroy(), this.credentialsPool.close(), this.audit.close()]);
   }
 
   /**
@@ -446,22 +443,9 @@ export class SanomaClient {
     });
   }
 
-  /** The pool the credentials are read and written with, its table created once. */
-  private async credentialsDb(): Promise<Pool> {
-    if (this.closed) throw new Error("The client is closed");
-    if (!this.pool) {
-      this.pool = new Pool({ connectionString: this.config.databaseUrl });
-      // An idle connection that drops (Postgres restarted) is replaced on the next query; unheard, it would end the process.
-      this.pool.on("error", (err) => warn(`a credentials connection failed: ${errorMessage(err)}`));
-    }
-    const pool = this.pool;
-    // A failed create is tried again on the next call.
-    this.table ??= ensureTable(this.config.databaseUrl, async () => pool).catch((err: unknown) => {
-      this.table = undefined;
-      throw err;
-    });
-    await this.table;
-    return pool;
+  /** The pool the credentials are read and written with, on the database once it is prepared. */
+  private credentialsDb(): Promise<Pool> {
+    return this.credentialsPool.db();
   }
 
   /** Refuses a run id whose run, as stored, was started with another input, by someone else, or in another sandbox. */

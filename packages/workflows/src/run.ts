@@ -23,7 +23,7 @@ export interface WorkerState {
   app: string;
   /** The operations as the config's connectors declare them, by id. */
   ops: Map<string, Op>;
-  /** The drivers' functions, by operation id. */
+  /** The drivers' functions, by operation id, each guarded by its driver's `env` (`indexDrivers` in config.ts). */
   drivers: Map<string, DriverFn>;
   /**
    * The config's fake vendors, by vendor id, and their functions by operation id: the templates a

@@ -1,22 +1,17 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { buildCtx, isInfrastructureError } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
-import {
-  type CredentialStatus,
-  credentialsOf,
-  type ResolvedConfig,
-  resolveConfig,
-  type SanomaConfig,
-} from "./config.ts";
+import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { watchCredentials } from "./credentials.ts";
 import type { WorkflowDefinition } from "./define.ts";
+import { type CredentialStatus, credentialsOf, unconfigured } from "./env.ts";
 import { errorInfo, parseOrThrow } from "./errors.ts";
-import { entry, skipped, write, writeFailure } from "./ledger.ts";
+import { entry, ownedLedger, skipped, write, writeFailure } from "./ledger.ts";
 import { setLogLevel, warn } from "./log.ts";
 import { lineStartsOf } from "./ast.ts";
 import { callsOf, outlineWithSource } from "./outline.ts";
 import type { Run, RunArgs, WorkerState, WorkflowOutline } from "./run.ts";
-import { credentialReady, errorMessage } from "./shared.ts";
+import { errorMessage } from "./shared.ts";
 
 export interface Worker {
   stop(): Promise<void>;
@@ -42,13 +37,16 @@ export interface WorkerOptions {
 /**
  * Registers the workflows, connects to Postgres and recovers any runs that were interrupted.
  * When a driver declares variables the environment leaves unset, it first loads their stored
- * values into `process.env` and keeps them current while it runs, then refuses to start while one
- * is missing or invalid.
+ * values into `process.env` and keeps them current while it runs. It starts whether or not they
+ * are all there: it warns, per vendor, of each missing or invalid one, and a live call to that
+ * vendor fails, as the call's own final failure, until they are set.
  */
 export async function startWorker(config: SanomaConfig, options: WorkerOptions = {}): Promise<Worker> {
   // Check everything before touching the state a running worker reads.
   const resolved = resolveConfig(config);
   setLogLevel(options.logLevel);
+  // The config's own, or a Postgres store made for this worker, which `stop` then closes.
+  const ledger = ownedLedger(resolved);
   const state: WorkerState = {
     app: resolved.appName,
     ops: resolved.ops,
@@ -57,7 +55,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     fakeDrivers: resolved.fakeDrivers,
     ...(resolved.scenarios && { scenarios: resolved.scenarios }),
     policy: resolved.policy,
-    ledger: resolved.ledger,
+    ledger: ledger.store,
     workflows: resolved.workflows,
     outlines: new Map([...resolved.workflows].map(([name, wf]) => [name, outlineOf(wf)])),
     stopped: false,
@@ -66,11 +64,12 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   const worker: Worker = {
     async stop() {
       state.stopped = true;
-      try {
-        await DBOS.shutdown();
-      } finally {
-        await credentials.close();
+      // Each is closed whatever the one before did; the first failure is what stop throws.
+      let failed: { error: unknown } | undefined;
+      for (const close of [() => DBOS.shutdown(), () => credentials.close(), () => ledger.close()]) {
+        await close().catch((error: unknown) => (failed ??= { error }));
       }
+      if (failed) throw failed.error;
     },
   };
   // Runs recovered during launch start before it returns, so they must already find this
@@ -79,7 +78,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   const previous = current;
   let launched = false;
   try {
-    refuseUnconfigured(credentialsOf(config.drivers, (name) => process.env[name]));
+    warnUnconfigured(credentialsOf(config.drivers, (name) => process.env[name]));
     for (const name of resolved.workflows.keys()) {
       if (!registered.has(name)) {
         register(name);
@@ -133,24 +132,14 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
 }
 
 /**
- * Refuses a worker whose drivers would fail on their first call: a variable a driver's `env`
- * declares is missing or invalid. One error, naming each vendor and its variables.
+ * Warns, once per vendor whose drivers would fail when called: a variable a driver's `env`
+ * declares is missing or invalid. The worker starts anyway; each such call fails with the same
+ * message (`guarded` in config.ts), until the variables are set.
  */
-function refuseUnconfigured(credentials: Map<string, CredentialStatus[]>) {
-  const vendors = [...credentials].flatMap(([vendor, list]) => {
-    const items = list
-      .filter((c) => !credentialReady(c))
-      .map((c) =>
-        c.status === "invalid"
-          ? `${c.name} is invalid (${c.problem})`
-          : `${c.name} is missing${c.description ? ` (${c.description})` : ""}`,
-      );
-    return items.length ? [`${vendor}: ${items.join(", ")}`] : [];
-  });
-  if (vendors.length) {
-    throw new Error(
-      `The worker cannot start: ${vendors.join("; ")}. Set them on the app's connector pages, or in its environment`,
-    );
+function warnUnconfigured(credentials: Map<string, CredentialStatus[]>) {
+  for (const [vendor, list] of credentials) {
+    const why = unconfigured(vendor, list);
+    if (why) warn(why);
   }
 }
 

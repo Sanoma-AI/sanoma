@@ -1,11 +1,11 @@
 import { dirname, resolve } from "node:path";
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import type { z } from "zod";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, type DriftDeclared, driftWorkflow } from "./drift.ts";
+import { statusesOf, unconfigured } from "./env.ts";
 import type { Fake } from "./fake.ts";
 import type { LedgerStore } from "./ledger.ts";
-import { type Connector, type Driver, type DriverEnv, type DriverFn, isOp, type Op } from "./op.ts";
+import { type Connector, type Driver, DriverError, type DriverEnv, type DriverFn, isOp, type Op } from "./op.ts";
 import type { Policy } from "./policy.ts";
 import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
 import { computeVersion } from "./version.ts";
@@ -34,10 +34,13 @@ export interface SanomaConfig {
   /** Checked before every operation call. Required: `allowAll` says that every call is allowed. */
   policy: Policy;
   /**
-   * Where the audit record goes. Required: `jsonlLedger(dir)` keeps it in files that the app
-   * and other processes read; `memoryLedger()` keeps it in this process only, for tests.
+   * Where the audit record goes. Default: `postgresLedger` on the config's database, which the
+   * worker, the app and other processes share; the worker and the client each make their own
+   * and close it with themselves. A store given here is never closed by the runtime.
+   * `jsonlLedger(dir)` keeps it in files instead; `memoryLedger()` keeps it in this process
+   * only, for tests.
    */
-  ledger: LedgerStore;
+  ledger?: LedgerStore;
   /** Scopes workflows, queues and versions in the system database. Defaults to "sanoma". */
   appName?: string;
   /** Postgres for the runtime. Defaults to `SANOMA_DATABASE_URL`, then the local docker compose database. */
@@ -51,29 +54,6 @@ export interface SanomaConfig {
   root?: string;
 }
 
-/** One environment variable a driver declares in `env`, and whether its value lets the driver run: never the value. */
-export interface CredentialStatus {
-  /** The variable's name, such as `GHOST_ADMIN_API_KEY`. */
-  name: string;
-  /** Its one-line manual, from its schema's `.describe()`. */
-  description?: string;
-  /** It may be unset. */
-  optional: boolean;
-  /** `missing` when unset or empty; `invalid` when its schema refuses the value. */
-  status: "set" | "missing" | "invalid";
-  /** Why it is `invalid`: the schema's first issue, never the value. */
-  problem?: string;
-  /**
-   * Where the value is from, when there is one: the process environment, which wins, or the
-   * credentials stored with `SanomaClient.setCredential`. Only `SanomaClient.credentials` says.
-   */
-  source?: "environment" | "stored";
-  /** Who set the stored value (`setCredential`'s `by`). */
-  setBy?: string;
-  /** When the stored value was set, as an ISO 8601 time. */
-  setAt?: string;
-}
-
 /** A config, checked, with everything a worker, client or app derives from it. */
 export interface ResolvedConfig {
   appName: string;
@@ -84,7 +64,7 @@ export interface ResolvedConfig {
   queueName: string;
   /** The operations the connectors declare, by id. */
   ops: Map<string, Op>;
-  /** The drivers' functions, by operation id. */
+  /** The drivers' functions, by operation id, each guarded by its driver's `env` (`indexDrivers`). */
   drivers: Map<string, DriverFn>;
   /** The fake vendors, by vendor id: the templates each sandbox run copies. */
   fakes: Map<string, Fake<any, any>>;
@@ -98,7 +78,8 @@ export interface ResolvedConfig {
    */
   workflows: Map<string, WorkflowDefinition<any, any>>;
   policy: Policy;
-  ledger: LedgerStore;
+  /** The config's `ledger`, when it gives one; the worker and the client otherwise make `postgresLedger` on `databaseUrl` (`ownedLedger`). */
+  ledger?: LedgerStore;
   /**
    * The config's directory, absolute: its `root`, else its `file`'s directory. Its data files
    * are `resources/` in it. Absent when the config has neither, so it has no data files.
@@ -117,10 +98,24 @@ export function resolveDatabaseUrl(config: { databaseUrl?: string }): string {
   return config.databaseUrl ?? process.env.SANOMA_DATABASE_URL ?? DEFAULT_DATABASE_URL;
 }
 
+const isStore = (x: unknown): x is LedgerStore =>
+  typeof (x as LedgerStore | null)?.append === "function" && typeof (x as LedgerStore).read === "function";
+
+/** The config's `ledger`, checked, when it gives one. */
+function ledgerOf(config: SanomaConfig): LedgerStore | undefined {
+  if (config.ledger !== undefined && !isStore(config.ledger)) {
+    throw new Error(
+      "The config's `ledger` must be a ledger store: leave it out for `postgresLedger` on the config's database, " +
+        "or use `jsonlLedger(dir)` to keep records in files, or `memoryLedger()` to keep them in memory, for tests",
+    );
+  }
+  return config.ledger;
+}
+
 /**
  * Checks a config and derives what the runtime needs from it. Throws what `startWorker` would
  * refuse, with the same message, so `describeConfig`, `SanomaClient.connect` and the app fail
- * the same way the worker does.
+ * the same way the worker does. Pure: it opens nothing, and is called per request by the app.
  */
 export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   if (!Array.isArray(config.connectors)) {
@@ -137,12 +132,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   if (typeof config.policy !== "function") {
     throw new Error("The config needs a `policy`; use `allowAll` to allow every operation call");
   }
-  const { ledger } = config;
-  if (typeof ledger?.append !== "function" || typeof ledger.read !== "function") {
-    throw new Error(
-      "The config needs a `ledger`; use `jsonlLedger(dir)` to keep records in files, or `memoryLedger()` to keep them in memory, for tests",
-    );
-  }
+  const ledger = ledgerOf(config);
   if (config.fakes !== undefined && !Array.isArray(config.fakes)) {
     throw new Error("The config's `fakes` must be an array of defineFake fakes");
   }
@@ -204,84 +194,9 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     ...(scenarios && { scenarios }),
     workflows: names,
     policy: config.policy,
-    ledger,
+    ...(ledger !== undefined && { ledger }),
     ...(root !== undefined && { root }),
   };
-}
-
-/**
- * Each driver's `env`, by vendor, in declared order (a vendor whose drivers declare none has no
- * entry), each variable checked against the value `lookup` gives for its name: only the declared
- * names are looked up, an empty value counts as unset, and a value is never kept. A variable two
- * drivers of one vendor declare is checked against each declaration, and the results merged. The
- * one walk of the declarations: the worker, the client and its checks all read them through it.
- */
-export function credentialsOf(
-  drivers: readonly Driver[],
-  lookup: (name: string) => string | undefined,
-): Map<string, CredentialStatus[]> {
-  const map = new Map<string, CredentialStatus[]>();
-  for (const { vendor, env } of drivers) {
-    if (!env) continue;
-    const list = map.get(vendor) ?? [];
-    map.set(vendor, list);
-    for (const [name, schema] of Object.entries(env.shape)) {
-      const status = credentialStatus(name, schema, lookup(name) || undefined);
-      const i = list.findIndex((c) => c.name === name);
-      if (i === -1) list.push(status);
-      else list[i] = merged(list[i]!, status);
-    }
-  }
-  return map;
-}
-
-const SEVERITY: Record<CredentialStatus["status"], number> = { set: 0, missing: 1, invalid: 2 };
-
-/**
- * Two declarations of one variable: the worse status (`invalid`, then `missing`) with its problem,
- * the first description, and optional only when both allow it unset.
- */
-function merged(first: CredentialStatus, next: CredentialStatus): CredentialStatus {
-  const worse = SEVERITY[next.status] > SEVERITY[first.status] ? next : first;
-  const description = first.description ?? next.description;
-  return { ...worse, ...(description !== undefined && { description }), optional: first.optional && next.optional };
-}
-
-function credentialStatus(
-  name: string,
-  schema: DriverEnv["shape"][string],
-  value: string | undefined,
-): CredentialStatus {
-  const description = descriptionOf(schema);
-  const parsed = value === undefined ? undefined : check(schema, value);
-  const problem = parsed?.problem;
-  return {
-    name,
-    ...(description !== undefined && { description }),
-    optional: check(schema, undefined).success,
-    status: !parsed ? "missing" : parsed.success ? "set" : "invalid",
-    ...(problem !== undefined && { problem }),
-  };
-}
-
-/**
- * `schema.safeParse(value)`, with its first issue's message as the problem. A check that throws
- * (zod lets a `.refine()` or `.transform()` throw) fails without its error, which may carry the value.
- */
-function check(schema: z.ZodType, value: string | undefined): { success: boolean; problem?: string } {
-  try {
-    const { success, error } = schema.safeParse(value);
-    return { success, ...(error && { problem: error.issues[0]!.message }) };
-  } catch {
-    return { success: false, problem: "its check threw" };
-  }
-}
-
-/** A schema's `.describe()`, also through `.optional()`, `.default()` and `.prefault()` in any order. */
-function descriptionOf(schema: z.ZodType): string | undefined {
-  let s: z.ZodType | undefined = schema;
-  while (s && !s.description) s = "unwrap" in s ? (s as { unwrap(): z.ZodType }).unwrap() : undefined;
-  return s?.description;
 }
 
 /**
@@ -324,7 +239,11 @@ function indexConnectors(list: Connector<any, any>[]) {
   return map;
 }
 
-/** The drivers' functions by operation id, refusing one no connector declares. */
+/**
+ * The drivers' functions by operation id, refusing one no connector declares. A driver that
+ * declares an `env` has each function guarded by it (`guarded`); a fake declares none, so a
+ * sandbox run's calls are not.
+ */
 export function indexDrivers(list: Driver[], ops: Map<string, Op>) {
   const map = new Map<string, DriverFn>();
   for (const d of list) {
@@ -333,10 +252,30 @@ export function indexDrivers(list: Driver[], ops: Map<string, Op>) {
       if (!ops.has(id)) {
         throw new Error(`Driver "${d.vendor}" implements ${id}, which no connector in \`connectors\` declares`);
       }
-      map.set(id, fn);
+      map.set(id, d.env ? guarded(d.vendor, d.env, fn) : fn);
     }
   }
   return map;
+}
+
+/**
+ * `fn`, refused while the environment leaves a variable `env` declares missing or invalid. The
+ * worker started without it (`startWorker` only warns), and stored credentials load into the
+ * environment as they are set, so the check is made when the function is called, inside the
+ * driver step, and nowhere earlier: not at start, and not before the policy's decision or an
+ * approval hold, so a credential set on the connector page while a call waits for approval is
+ * used when the approver approves. The refusal is the call's own failure, final: recorded as
+ * the call's, and never retried.
+ */
+function guarded(vendor: string, env: DriverEnv, fn: DriverFn): DriverFn {
+  return async (input, call) => {
+    const why = unconfigured(
+      vendor,
+      statusesOf(env, (name) => process.env[name]),
+    );
+    if (why) throw new DriverError(why, { retryable: false });
+    return fn(input, call);
+  };
 }
 
 /**

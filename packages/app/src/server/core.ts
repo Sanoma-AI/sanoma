@@ -125,7 +125,7 @@ export async function runDetail({ client, resolved }: AppContext, runId: string)
   const { approvals } = run;
   let ledger: LedgerRecord[];
   try {
-    ledger = await resolved.ledger.read(runId);
+    ledger = await client.ledger(runId);
   } catch (err) {
     // A store reads a run nothing has recorded as no records, so this is a real failure (a
     // corrupt file, a permission): logged for the operator once, and the page shows the run and
@@ -135,7 +135,8 @@ export async function runDetail({ client, resolved }: AppContext, runId: string)
     return { run, ledger: [], ledgerError, approvals };
   }
   // A run that has started records run.started first. Seeing none, the likeliest cause is an
-  // app reading another ledger than the worker's (a jsonl directory relative to another cwd).
+  // app on another ledger than the worker's (another database, or a jsonl directory relative to
+  // another cwd).
   if (ledger.length === 0 && run.status !== "queued") {
     return { run, ledger, ledgerError: NO_RECORDS, approvals };
   }

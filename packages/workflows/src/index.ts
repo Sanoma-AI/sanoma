@@ -41,13 +41,8 @@ export {
   type ResourceOps,
   type ResourceSpec,
 } from "./resource.ts";
-export {
-  type CredentialStatus,
-  defineConfig,
-  resolveConfig,
-  type ResolvedConfig,
-  type SanomaConfig,
-} from "./config.ts";
+export { defineConfig, resolveConfig, type ResolvedConfig, type SanomaConfig } from "./config.ts";
+export type { CredentialStatus } from "./env.ts";
 export {
   DRIFT_WORKFLOW,
   type DriftDeclared,
@@ -85,6 +80,7 @@ export {
 export {
   jsonlLedger,
   memoryLedger,
+  postgresLedger,
   type LedgerBody,
   type LedgerGroup,
   type LedgerRecord,

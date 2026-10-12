@@ -5,7 +5,7 @@ import { resendDriver } from "@sanoma/connector-resend/driver";
 import { stripeDriver } from "@sanoma/connector-stripe/driver";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { testDatabaseUrl } from "@sanoma/testing";
-import { Client, Pool } from "pg";
+import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -20,8 +20,7 @@ import {
   type SanomaConfig,
   startWorker,
 } from "../src/index.ts";
-import { credentialsOf } from "../src/config.ts";
-import { ensureTable } from "../src/credentials.ts";
+import { credentialsOf } from "../src/env.ts";
 import { describeConfig } from "../src/describe.ts";
 
 // Made-up variables and values: nothing here is a credential.
@@ -147,12 +146,9 @@ describe("a driver's env", () => {
     const throwingConfig = { ...config, drivers: [throwing] };
     const credentials = checked(throwingConfig.drivers);
     expect(credentials).toEqual([{ name: URL_VAR, optional: false, status: "invalid", problem: "its check threw" }]);
-    const refusal = await startWorker(throwingConfig).then(
-      () => undefined,
-      (err: Error) => err.message,
-    );
-    expect(refusal).toContain(`${URL_VAR} is invalid (its check threw)`);
-    expect(JSON.stringify([credentials, refusal])).not.toContain(VALUE);
+    const warning = await warnedAtStart(throwingConfig);
+    expect(warning).toContain(`${URL_VAR} is invalid: its check threw`);
+    expect(JSON.stringify([credentials, warning])).not.toContain(VALUE);
   });
 
   it("merges two drivers' declarations of one variable, keeping the worse status", async () => {
@@ -169,25 +165,37 @@ describe("a driver's env", () => {
       status: "invalid",
       problem: "an API key, key_<digits>",
     });
-    await expect(startWorker(twoDrivers)).rejects.toThrow(`${KEY_VAR} is invalid (an API key, key_<digits>)`);
+    expect(await warnedAtStart(twoDrivers)).toContain(`${KEY_VAR} is invalid: an API key, key_<digits>`);
   });
 });
 
+/** Starts a worker on `cfg`, stops it, and gives what it warned about acme at start, if anything. */
+async function warnedAtStart(cfg: SanomaConfig): Promise<string | undefined> {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  const worker = await startWorker(cfg);
+  await worker.stop();
+  return warn.mock.calls.flat().find((m) => String(m).includes("acme is not configured")) as string | undefined;
+}
+
 describe("startWorker", () => {
-  it("refuses, before launching, naming the vendor and each variable that is missing or invalid", async () => {
+  it("starts, warning per vendor of the variables missing or invalid, and listens for the missing ones", async () => {
     vi.stubEnv(URL_VAR, undefined);
     vi.stubEnv(KEY_VAR, "key_NOT-LOWER");
     vi.stubEnv(REGION_VAR, undefined);
     const launch = vi.spyOn(DBOS, "launch");
-    const { message, opened, left } = await listeners(() => startWorker(config));
-    expect(message).toBe(
-      `The worker cannot start: acme: ${URL_VAR} is missing (the account's API URL), ${KEY_VAR} is invalid (an API key, key_<letters>). ` +
-        "Set them on the app's connector pages, or in its environment",
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { message, opened, left } = await listeners(async () => {
+      const worker = await startWorker(config);
+      await worker.stop();
+    });
+    expect(message).toBe("started");
+    expect(warn).toHaveBeenCalledWith(
+      `sanoma: acme is not configured: ${URL_VAR} (the account's API URL), ${KEY_VAR} is invalid: an API key, key_<letters>; ` +
+        "set in the environment",
     );
-    expect(message).not.toContain("NOT-LOWER");
-    expect(launch).not.toHaveBeenCalled();
-    launch.mockRestore();
-    // It looked for stored values of the two it lacks, and stopped listening when it refused.
+    expect(warn.mock.calls.flat().join("\n")).not.toContain("NOT-LOWER");
+    expect(launch).toHaveBeenCalledTimes(1);
+    // It listened for the stored values of the two it lacks while it ran, and stopped with it.
     expect({ opened, left }).toEqual({ opened: 1, left: 0 });
   });
 
@@ -207,13 +215,59 @@ describe("startWorker", () => {
     expect({ opened, left }).toEqual({ opened: 0, left: 0 });
   });
 
-  it("refuses an invalid variable even when it is optional", async () => {
+  it("warns of an invalid variable even when it is optional", async () => {
     vi.stubEnv(URL_VAR, "https://acme.example.test");
     vi.stubEnv(KEY_VAR, KEY);
     vi.stubEnv(REGION_VAR, "mars");
-    await expect(startWorker(config)).rejects.toThrow(
-      `The worker cannot start: acme: ${REGION_VAR} is invalid (Invalid option: expected one of "us"|"eu").`,
+    expect(await warnedAtStart(config)).toBe(
+      `sanoma: acme is not configured: ${REGION_VAR} is invalid: Invalid option: expected one of "us"|"eu"; ` +
+        "set in the environment",
     );
+  });
+
+  it("points at the connector page when nothing invalid is in the environment", async () => {
+    vi.stubEnv(URL_VAR, undefined);
+    vi.stubEnv(KEY_VAR, undefined);
+    vi.stubEnv(REGION_VAR, undefined);
+    expect(await warnedAtStart(config)).toBe(
+      `sanoma: acme is not configured: ${URL_VAR} (the account's API URL), ${KEY_VAR} (an API key); set it on the connector page`,
+    );
+  });
+});
+
+describe("a call to a vendor the worker started without", () => {
+  it("fails at the call, saying what the worker warned at start, until they are set", async () => {
+    vi.stubEnv(URL_VAR, undefined);
+    vi.stubEnv(KEY_VAR, "key_NOT-LOWER");
+    vi.stubEnv(REGION_VAR, undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const worker = await startWorker(config);
+    try {
+      const runId = await client.start(getThing, { id: "1" }, { startedBy: { id: "alice" } });
+      const err = (await client.result(runId).catch((e: unknown) => e)) as Error;
+      const message = `acme is not configured: ${URL_VAR} (the account's API URL), ${KEY_VAR} is invalid: an API key, key_<letters>; set in the environment`;
+      expect(err.message).toBe(message);
+      expect(errorCode(err)).toBe("driver_failed");
+      // The call's own failure, final, in the ledger as any driver's would be.
+      const ledger = await client.ledger(runId);
+      expect(ledger.map((r) => r.type)).toEqual(["run.started", "op.called", "run.failed"]);
+      expect(ledger[1]).toMatchObject({
+        op: "acme.thing.get",
+        decision: { kind: "allow" },
+        error: { code: "driver_failed", name: "DriverError", message, retryable: false },
+        attempt: 1,
+      });
+      expect(JSON.stringify(ledger)).not.toContain("NOT-LOWER");
+
+      // Set from the app (the worker loads it) and in the environment: the next run calls the vendor.
+      await client.setCredential(URL_VAR, "https://acme.example.test", { by: "alice" });
+      await vi.waitFor(() => expect(process.env[URL_VAR]).toBe("https://acme.example.test"));
+      vi.stubEnv(KEY_VAR, KEY);
+      const ok = await client.start(getThing, { id: "2" }, { startedBy: { id: "alice" } });
+      expect(await client.result(ok)).toEqual({ id: "2" });
+    } finally {
+      await worker.stop();
+    }
   });
 });
 
@@ -243,18 +297,6 @@ const refusal = (p: Promise<unknown>) =>
 const stored = async (from = client) => (await from.credentials()).get("acme");
 
 describe("stored credentials", () => {
-  it("are kept in one table, which two processes may create at once", async () => {
-    const pool = new Pool({ connectionString: databaseUrl });
-    try {
-      await pool.query("DROP TABLE IF EXISTS sanoma_credentials");
-      await Promise.all([ensureTable(databaseUrl, async () => pool), ensureTable(databaseUrl, async () => pool)]);
-      const { rows } = await pool.query("SELECT to_regclass('sanoma_credentials')::text AS t");
-      expect(rows).toEqual([{ t: "sanoma_credentials" }]);
-    } finally {
-      await pool.end();
-    }
-  });
-
   it("are set, replaced and cleared, with who set them and when, never the value", async () => {
     vi.stubEnv(URL_VAR, undefined);
     vi.stubEnv(KEY_VAR, undefined);
@@ -389,14 +431,14 @@ describe("the connectors' drivers", () => {
   const bridge = {} as never;
   it.each([
     ["ghost", ghostDriver(), ["GHOST_ADMIN_URL", "GHOST_ADMIN_API_KEY"], []],
-    ["resend", resendDriver(), ["RESEND_API_KEY"], []],
+    ["resend", resendDriver(), ["RESEND_API_KEY", "RESEND_FROM"], ["RESEND_FROM"]],
     [
       "bluesky",
       blueskyDriver(),
       ["BLUESKY_IDENTIFIER", "BLUESKY_APP_PASSWORD", "BLUESKY_SERVICE"],
       ["BLUESKY_SERVICE"],
     ],
-    ["github", githubDriver({ bridge }), ["GITHUB_TOKEN"], []],
+    ["github", githubDriver({ bridge }), ["GITHUB_TOKEN", "GITHUB_OWNER"], ["GITHUB_OWNER"]],
     ["stripe", stripeDriver({ bridge }), ["STRIPE_API_KEY"], []],
   ])("%s declares exactly its variables, each described, and which are optional", (_, driver, names, optional) => {
     const shape = driver.env!.shape;
