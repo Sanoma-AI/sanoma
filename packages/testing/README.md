@@ -40,6 +40,50 @@ Object.values(email.state.broadcasts).map((b) => b.status); // ["sent"]
 await worker.stop();
 ```
 
+## A test app
+
+`@sanoma/testing/harness` starts a worker and its clients for the tests of a `describe` (or a file), and stops them after (install `vitest` and `@dbos-inc/dbos-sdk` beside it). `useTestApp(config, options?)` takes `startTestWorker`'s arguments and returns a `TestApp`:
+
+| Member        | What it is                                                                                                                                                                           |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `config`      | The config the worker and the clients share: yours, with `ledger` (default `memoryLedger()`) and `databaseUrl` (default `testDatabaseUrl(appName)`) filled in once.                  |
+| `worker`      | The running worker.                                                                                                                                                                  |
+| `client`      | A `SanomaClient` of the worker: start runs, decide approvals, read the ledger.                                                                                                       |
+| `raw`         | A `DBOSClient` of the same app, which sends messages and reads a run's steps without `SanomaClient`'s checks.                                                                        |
+| `stop()`      | Stops the worker, as a process that stopped would.                                                                                                                                   |
+| `restart()`   | Stops the worker (unless `stop` did) and starts another on the same config and ledger, as a restarted process would: the runs it had in progress resume, and their records are kept. |
+| `leftPending` | Push the ids of runs a test leaves unfinished on purpose; they are cancelled after the tests.                                                                                        |
+
+`worker`, `client` and `raw` throw "is not started" outside the tests. Fakes are yours: create them beside the call and reset them in your own `beforeEach`.
+
+```ts
+import { ghost } from "@sanoma/connector-ghost";
+import { fakeGhost } from "@sanoma/connector-ghost/fake";
+import { useTestApp } from "@sanoma/testing/harness";
+import { allowAll } from "@sanoma/workflows";
+import { beforeEach, expect, it } from "vitest";
+import publish from "./workflows/publish.ts";
+
+const blog = fakeGhost();
+const app = useTestApp({
+  workflows: [publish],
+  connectors: [ghost],
+  drivers: [blog.driver],
+  policy: allowAll,
+  appName: "publish-test",
+});
+beforeEach(() => blog.reset());
+
+it("publishes, across a restart", async () => {
+  const runId = await app.client.start(publish, { title: "Launch" }, { startedBy: { id: "alice" } });
+  await app.restart();
+  await app.client.result(runId);
+  expect(Object.values(blog.state.posts).map((p) => p.status)).toEqual(["published"]);
+});
+```
+
+A memory ledger lives in the test process, so it outlives a restart there. To keep the records on disk, pass `ledger: jsonlLedger(dir)` yourself.
+
 ## Fake vendors
 
 Each connector ships its fake at its own `/fake` entry, not in this package: `import { fakeGhost } from "@sanoma/connector-ghost/fake";`. Install the connectors you use; their READMEs ([Ghost](https://www.npmjs.com/package/@sanoma/connector-ghost#testing), [Resend](https://www.npmjs.com/package/@sanoma/connector-resend#testing), [Bluesky](https://www.npmjs.com/package/@sanoma/connector-bluesky#testing), [GitHub](https://www.npmjs.com/package/@sanoma/connector-github#testing), [Stripe](https://www.npmjs.com/package/@sanoma/connector-stripe#testing)) say what each fake holds and adds. Each returns:
@@ -96,7 +140,7 @@ Two variables change what the same tests do:
 
 `@sanoma/testing/scenarios` runs a config's [scenarios](https://www.npmjs.com/package/@sanoma/workflows#scenarios-and-sandbox-runs) as vitest tests (install `vitest` beside it). Each scenario is a sandbox run: the worker calls the config's `fakes`, never a driver.
 
-`describeScenarios(config, options?)` reads the `.feature` files in the config's `scenarios` directory and registers a test for each scenario, in a `describe` per file; it throws, naming the directory, when it finds none. A test starts the scenario's sandbox run, decides its approvals as the scenario says, and fails listing each `Then` step that did not hold, with why. A file that does not load (a step no rule matches, bad JSON, a name used twice) is a failing test named after the file, whose message names the file (and the line, for a step or JSON error). It starts one worker for all its scenarios, before them, with `startTestWorker(config, options)`, and stops it after; `appName` is required, as there. `options.startedBy` starts the runs (default `{ id: "scenarios" }`), and `options.timeoutMs` is how long each may take (`drive`'s, 15 seconds by default); the tests it registers get twice that, so `drive`'s error is the one you see.
+`describeScenarios(config, options?)` reads the `.feature` files in the config's `scenarios` directory and registers a test for each scenario, in a `describe` per file; it throws, naming the directory, when it finds none. A test starts the scenario's sandbox run, decides its approvals as the scenario says, and fails listing each `Then` step that did not hold, with why. A file that does not load (a step no rule matches, bad JSON, a name used twice) is a failing test named after the file, whose message names the file (and the line, for a step or JSON error). It starts one [test app](#a-test-app) for all its scenarios, before them, with `useTestApp(config, options)`, and stops it after; `appName` is required, as for `startTestWorker`. `options.startedBy` starts the runs (default `{ id: "scenarios" }`), and `options.timeoutMs` is how long each may take (`drive`'s, 15 seconds by default); the tests it registers get twice that, so `drive`'s error is the one you see.
 
 ```ts
 // test/scenarios.test.ts
