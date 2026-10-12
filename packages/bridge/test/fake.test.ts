@@ -135,6 +135,13 @@ describe("fakeBridge", () => {
     expect(missingSchema.message).toContain("schemas/hashicorp_random_3.7.2.json");
   });
 
+  it("refuses a live run without the variables it needs, and a replay does not need them", () => {
+    vi.stubEnv("GITHUB_TOKEN", "");
+    expect(fakeBridge({ needs: ["GITHUB_TOKEN"] }).live).toBe(false);
+    vi.stubEnv("SANOMA_LIVE", "1");
+    expect(() => fakeBridge({ needs: ["GITHUB_TOKEN"] })).toThrow("SANOMA_LIVE=1 needs GITHUB_TOKEN");
+  });
+
   it("refuses what the bridge refuses", async () => {
     const bridge = fakeBridge();
     expect((await failure(bridge.import(github, "github_repository", "provider-bridge"))).message).toBe(

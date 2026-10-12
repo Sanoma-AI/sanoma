@@ -42,6 +42,11 @@ export interface FakeBridgeOptions {
   fixtures?: string | URL;
   /** With `SANOMA_LIVE=1`, how to start the real bridge. */
   bridge?: StartBridgeOptions;
+  /**
+   * Live, the variables the run needs (a provider's credentials): it fails at once without them.
+   * Default none, as for `hashicorp/null`.
+   */
+  needs?: string[];
 }
 
 export interface FakeBridge extends Bridge {
@@ -92,11 +97,14 @@ function logCalls(calls: BridgeCall[]): Interceptor {
  * for a schema, `not_found` for an import or read) naming the file to record.
  *
  * `SANOMA_LIVE=1` sends the calls to a real bridge instead (`startBridge(options.bridge)`), and
- * with `SANOMA_RECORD=1` as well, rewrites the fixtures from its replies, scrubbed.
+ * with `SANOMA_RECORD=1` as well, rewrites the fixtures from its replies, scrubbed. A live run
+ * missing a variable in `options.needs` fails here, before the bridge starts.
  */
 export function fakeBridge(options: FakeBridgeOptions = {}): FakeBridge {
   const dir = toPath(options.fixtures ?? testdata);
   const live = process.env.SANOMA_LIVE === "1";
+  const missing = (options.needs ?? []).filter((name) => !process.env[name]);
+  if (live && missing.length) throw new Error(`SANOMA_LIVE=1 needs ${missing.join(", ")}`);
   const calls: BridgeCall[] = [];
   const bridge = live
     ? liveBridge(dir, options.bridge ?? {}, logCalls(calls), process.env.SANOMA_RECORD === "1")
