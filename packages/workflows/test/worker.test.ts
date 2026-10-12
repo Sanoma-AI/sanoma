@@ -106,7 +106,6 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       databaseUrl: "postgresql://unused@localhost:1/unused",
       version: expect.stringMatching(/^acme@[0-9a-f]{64}$/),
       queueName: "sanoma:acme",
-      sandboxQueueName: "sanoma:acme:sandbox",
       policy: allowAll,
       workflows: new Map([["announce", announce]]),
     });
