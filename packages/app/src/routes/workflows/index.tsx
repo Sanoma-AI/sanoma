@@ -76,7 +76,7 @@ export const Route = createFileRoute("/workflows/")({
 function WorkflowsPage() {
   const { view, status } = Route.useSearch();
   return (
-    <div className="flex flex-col gap-6 compact:gap-3">
+    <div className="flex flex-col gap-(--gap-region)">
       <PageHeader />
       <ConfigFacts />
       <ViewToggle />
@@ -155,7 +155,7 @@ function ByWorkflow() {
   const { data: pending } = useSuspenseQuery({ ...waitingRunsQuery(), select: pendingByWorkflow });
   if (config.workflows.length === 0) return <Nothing title="This config has no workflows" />;
   return (
-    <div className="grid gap-4 compact:gap-3 lg:grid-cols-2">
+    <div className="grid gap-(--gap-region) lg:grid-cols-2">
       {config.workflows.map((wf) => (
         <WorkflowCard
           key={wf.name}
@@ -216,7 +216,7 @@ const WorkflowCard = memo(function WorkflowCard({
           <RunButton name={name} variant="outline" size="sm" />
         </CardAction>
       </CardHeader>
-      <CardContent className="flex flex-col gap-4 compact:gap-3">
+      <CardContent className="flex flex-col gap-(--card-spacing)">
         <div className="flex flex-wrap items-center gap-3">
           <RunStrip workflow={name} />
           {waiting > 0 && <ToneBadge tone="waiting">{plural(waiting, "approval")} waiting</ToneBadge>}
@@ -243,7 +243,7 @@ function AllRuns({ status }: { status: RunStatus | undefined }) {
   const navigate = Route.useNavigate();
   const { data: runs, error } = useSuspenseQuery(allRunsQuery(status));
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-(--gap-section)">
       <NativeSelect
         size="sm"
         aria-label="Status"

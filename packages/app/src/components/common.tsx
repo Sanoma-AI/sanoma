@@ -511,7 +511,7 @@ export function SubsectionTitle({ children }: { children: ReactNode }) {
 /** A titled region of a page: its <h2>, and what it holds. */
 export function Region({ title, children }: { title: ReactNode; children: ReactNode }) {
   return (
-    <section className="flex flex-col gap-3 compact:gap-2">
+    <section className="flex flex-col gap-(--gap-section)">
       <SectionTitle>{title}</SectionTitle>
       {children}
     </section>

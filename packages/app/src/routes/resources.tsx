@@ -152,7 +152,7 @@ function Resources({
   const chosen = config.resources.find((r) => r.id === selected);
 
   return (
-    <div className="flex flex-col gap-6 compact:gap-3">
+    <div className="flex flex-col gap-(--gap-region)">
       <PageHeader action={action} />
       {problems.length > 0 && <Problems problems={problems} />}
       {children}

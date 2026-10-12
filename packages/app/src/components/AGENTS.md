@@ -29,6 +29,6 @@ The app's React components: page chrome, shared display pieces, and the graph an
 
 ## Layout conventions
 
-- Spacing scale: `gap-6` between a page's regions, `gap-4` inside a card, `gap-3` inside a section (a titled one is a `Region`), `gap-2` inside an item.
-- Compact (`data-density="compact"` on `#app`) halves the region gaps and tightens the card spacing: the `compact:` variant on the gaps above (`gap-6 compact:gap-3`, `gap-4 compact:gap-3`, `gap-3 compact:gap-2`) and the two unlayered `[data-density=compact] [data-slot=card]` rules in `src/style.css`, which beat Card's own `--card-spacing`. A new region or card list gets its `compact:` gap with its gap.
+- Spacing scale: `gap-(--gap-region)` between a page's regions, `gap-(--card-spacing)` inside a card (Card's own variable), `gap-(--gap-section)` inside a section (a titled one is a `Region`), `gap-2` inside an item.
+- Compact (`data-density="compact"` on `#app`) re-sets the first three once, in `src/style.css`: the two gap tokens on `#app` and Card's `--card-spacing` in two unlayered rules. The `compact:` variant is for shape (the graph box's height and header padding, the rail's one-line rows, the strip's squares, `Facts`' rows), not spacing.
 - Every pane of a workflow's page is a [`Workbench`](workbench.tsx): its notices, the graph card, then the primary and secondary columns (3 : 2), one column while the pane itself is narrower than `@3xl`.

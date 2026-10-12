@@ -147,6 +147,20 @@
 }
 
 /*
+ * The spacing scale's tokens, read as `gap-(--gap-region)` between a page's regions and
+ * `gap-(--gap-section)` inside a section; Compact re-sets them once here. `#app` in both, since
+ * the attribute sits on #app itself and an id outweighs it.
+ */
+#app {
+  --gap-region: --spacing(6);
+  --gap-section: --spacing(3);
+}
+#app[data-density="compact"] {
+  --gap-region: --spacing(3);
+  --gap-section: --spacing(2);
+}
+
+/*
  * Compact's cards: tighter spacing inside every card. Unlayered, so these win over the
  * `[--card-spacing:--spacing(4)]` utility ui/card.tsx sets (utilities are in a layer).
  */
