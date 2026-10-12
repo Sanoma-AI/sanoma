@@ -76,12 +76,12 @@ export const Route = createFileRoute("/workflows/")({
 function WorkflowsPage() {
   const { view, status } = Route.useSearch();
   return (
-    <div className="flex flex-col gap-(--gap-region)">
+    <>
       <PageHeader />
       <ConfigFacts />
       <ViewToggle />
       {view === "runs" ? <AllRuns status={status} /> : <ByWorkflow />}
-    </div>
+    </>
   );
 }
 

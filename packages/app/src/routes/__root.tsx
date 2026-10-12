@@ -56,7 +56,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       queryClient.query({ ...actorQuery(), staleTime: "static" }),
       queryClient.query({ ...configQuery(), staleTime: "static" }),
     ]);
-    return { sidebarOpen: readSidebarOpen(), compact: readCompact() };
+    return readPrefs();
   },
   // The document, around everything the root renders: its page, error or not-found included.
   shellComponent: Document,
@@ -70,18 +70,29 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 const SIDEBAR_COOKIE = "sidebar_state";
 
 /**
- * Whether the sidebar was left open: open unless its cookie says closed. Read on the server
- * only; the browser's answer is undefined. SidebarProvider reads `defaultOpen` once, as it
- * mounts, and in the browser that is hydration, which has the server's answer.
+ * Whether the sidebar was left open (open unless its cookie says closed) and whether the page is
+ * Compact (DensityProvider says why a cookie), from the request's cookies on the server and
+ * `document.cookie` in the browser. Both providers take their value once, as they mount: the first
+ * render is hydration, which has the server's answer; reading it in the browser too keeps a later
+ * remount (an error boundary's retry, say) on the cookie's side for the sidebar and the density alike.
  */
-const readSidebarOpen = createIsomorphicFn().server(() => getCookie(SIDEBAR_COOKIE) !== "false");
+const readPrefs = createIsomorphicFn()
+  .server(() => ({
+    sidebarOpen: getCookie(SIDEBAR_COOKIE) !== "false",
+    compact: getCookie(DENSITY_COOKIE) === "compact",
+  }))
+  .client(() => ({
+    sidebarOpen: cookieValue(SIDEBAR_COOKIE) !== "false",
+    compact: cookieValue(DENSITY_COOKIE) === "compact",
+  }));
 
-/**
- * Whether the page is Compact: its cookie (density.tsx) says so. Read on the server only, as
- * `readSidebarOpen` is: DensityProvider takes it once, as it mounts, and hydration has the
- * server's answer.
- */
-const readCompact = createIsomorphicFn().server(() => getCookie(DENSITY_COOKIE) === "compact");
+/** A cookie's value in the browser, or undefined when it is not set. */
+function cookieValue(name: string) {
+  return document.cookie
+    .split("; ")
+    .find((cookie) => cookie.startsWith(`${name}=`))
+    ?.slice(name.length + 1);
+}
 
 /** Asked once per browser, so loaded only when no name is stored. */
 const WhoAreYou = lazy(() => import("../components/who-are-you.tsx"));
@@ -97,46 +108,30 @@ function Root() {
       {/* Radix's tooltips need one provider: the sidebar's, and any a page shows. */}
       <TooltipProvider>
         <DensityProvider defaultCompact={compact}>
-          <App>
-            <SidebarProvider defaultOpen={sidebarOpen}>
-              <AppSidebar />
-              <SidebarInset>
-                <header className="flex h-12 shrink-0 items-center gap-2 px-4">
-                  <SidebarTrigger className="-ml-1" />
-                  <DensityToggle />
-                  <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
-                  <Crumbs />
-                </header>
-                <div className="mx-auto w-full max-w-6xl p-4 pt-0 sm:px-6">
-                  <Outlet />
-                </div>
-              </SidebarInset>
-            </SidebarProvider>
-            {!actor.fromServer && actor.actor === null && (
-              <Suspense fallback={null}>
-                <WhoAreYou />
-              </Suspense>
-            )}
-            <Toaster />
-          </App>
+          <SidebarProvider defaultOpen={sidebarOpen}>
+            <AppSidebar />
+            <SidebarInset>
+              <header className="flex h-12 shrink-0 items-center gap-2 px-4">
+                <SidebarTrigger className="-ml-1" />
+                <DensityToggle />
+                <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
+                <Crumbs />
+              </header>
+              {/* The page column: a page's regions are its children, the region gap apart. */}
+              <div className="mx-auto flex w-full max-w-6xl flex-col gap-(--gap-region) p-4 pt-0 sm:px-6">
+                <Outlet />
+              </div>
+            </SidebarInset>
+          </SidebarProvider>
+          {!actor.fromServer && actor.actor === null && (
+            <Suspense fallback={null}>
+              <WhoAreYou />
+            </Suspense>
+          )}
+          <Toaster />
         </DensityProvider>
       </TooltipProvider>
     </ActorContext>
-  );
-}
-
-/**
- * The app's box, marked `data-density="compact"` while Compact (and unmarked otherwise), which
- * the `compact:` variant and style.css's card rules key on. Here rather than on <html>: the
- * density is Root's state. Radix portals (menus, dialogs) land in <body>, outside it, and keep
- * the comfortable spacing.
- */
-function App({ children }: { children: ReactNode }) {
-  const { compact } = useDensity();
-  return (
-    <div id="app" data-density={compact ? "compact" : undefined}>
-      {children}
-    </div>
   );
 }
 
@@ -148,7 +143,7 @@ function App({ children }: { children: ReactNode }) {
  */
 function DensityToggle() {
   const { compact, setCompact } = useDensity();
-  const { setOpen, isMobile } = useSidebar();
+  const { open, setOpen, isMobile } = useSidebar();
   return (
     <Tip tip={compact ? "Comfortable" : "Compact"}>
       <Button
@@ -156,7 +151,7 @@ function DensityToggle() {
         size="icon-sm"
         aria-pressed={compact}
         onClick={() => {
-          if (!compact && !isMobile) setOpen(false);
+          if (!compact && !isMobile && open) setOpen(false);
           setCompact(!compact);
         }}
       >

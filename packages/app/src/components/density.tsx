@@ -1,7 +1,6 @@
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
 
-// The page's density: comfortable, or Compact for people who live in the app. Kept in a cookie
-// so the server renders the chosen density (the root's loader reads it), as the sidebar's is.
+// The page's density: comfortable, or Compact for people who live in the app (see DensityProvider).
 
 /** The cookie the density is kept in: `compact` or `comfortable` (and, never set, comfortable). */
 export const DENSITY_COOKIE = "sanoma_density";
@@ -21,23 +20,27 @@ export function useDensity(): Density {
 }
 
 /**
- * Holds the density, starting from `defaultCompact`: the server's reading of the cookie, which
- * hydration gets from the root's loader data. The browser never reads the cookie for its first
- * render, so both render the same page; the setter writes it, as SidebarProvider's does.
+ * Holds the density and renders the app's box, `#app`, marked `data-density="compact"` while
+ * Compact (unmarked otherwise): the `compact:` variant and style.css's spacing tokens key on it,
+ * as SidebarProvider renders its own wrapper. The density lives in a cookie, as the sidebar's
+ * state does, so the server renders the chosen one from the first paint: the root's loader reads
+ * it into `defaultCompact`, which the provider takes once, as it mounts (hydration has the
+ * server's answer, so both render the same page); the setter writes it. On #app rather than
+ * <html>, since the density is the root's state; Radix portals (menus, dialogs) land in <body>,
+ * outside it, and keep the comfortable spacing.
  */
-export function DensityProvider({
-  defaultCompact = false,
-  children,
-}: {
-  /** Undefined in a loader's run in the browser, which comes after the provider has mounted. */
-  defaultCompact?: boolean;
-  children: ReactNode;
-}) {
+export function DensityProvider({ defaultCompact, children }: { defaultCompact: boolean; children: ReactNode }) {
   const [compact, setState] = useState(defaultCompact);
   const setCompact = useCallback((value: boolean) => {
     setState(value);
     document.cookie = `${DENSITY_COOKIE}=${value ? "compact" : "comfortable"}; path=/; max-age=${DENSITY_COOKIE_MAX_AGE}`;
   }, []);
   const density = useMemo(() => ({ compact, setCompact }), [compact, setCompact]);
-  return <DensityContext value={density}>{children}</DensityContext>;
+  return (
+    <DensityContext value={density}>
+      <div id="app" data-density={compact ? "compact" : undefined}>
+        {children}
+      </div>
+    </DensityContext>
+  );
 }

@@ -2,10 +2,11 @@ import type { LedgerRecord, RunSummary } from "@sanoma/workflows";
 import type { WorkflowEntry } from "@sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { CodeIcon } from "lucide-react";
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, Suspense, useCallback, useMemo, useRef, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardAction, CardHeader, CardTitle } from "#/components/ui/card.tsx";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "#/components/ui/resizable.tsx";
+import { Skeleton } from "#/components/ui/skeleton.tsx";
 import type { ScenarioEntry } from "../api.ts";
 import { outlineGraph } from "../graph/outline-graph.ts";
 import { runGraph } from "../graph/run-graph.ts";
@@ -84,8 +85,12 @@ export const GraphAndSource = memo(function GraphAndSource({
   const { compact } = useDensity();
   const [codeOpen, setCodeOpen] = useState(!compact);
   // The source mounts the first time Code opens (so Compact renders no source, nor loads its view,
-  // until asked for it), then stays mounted while hidden.
-  const [codeMounted, setCodeMounted] = useState(codeOpen);
+  // until asked for it), and is only hidden after: `opened` latches, and the one handler sets it.
+  const opened = useRef(codeOpen);
+  const toggleCode = () => {
+    if (!codeOpen) opened.current = true;
+    setCodeOpen(!codeOpen);
+  };
   if (!graph) return noSource;
   return (
     <Card className="gap-0 overflow-hidden py-0">
@@ -94,15 +99,7 @@ export const GraphAndSource = memo(function GraphAndSource({
           Graph
         </CardTitle>
         <CardAction className="self-center">
-          <Button
-            variant="ghost"
-            size="xs"
-            aria-pressed={codeOpen}
-            onClick={() => {
-              setCodeOpen(!codeOpen);
-              setCodeMounted(true);
-            }}
-          >
+          <Button variant="ghost" size="xs" aria-pressed={codeOpen} onClick={toggleCode}>
             <CodeIcon data-icon="inline-start" />
             Code
           </Button>
@@ -115,18 +112,24 @@ export const GraphAndSource = memo(function GraphAndSource({
           <ResizablePanel id="graph-source-graph" minSize="25%">
             <GraphPanel graph={graph} show={run ? "end" : "start"} selected={selected} onSelect={select} />
           </ResizablePanel>
-          {/* Code hides the handle and the source rather than unmounting them, once shown: the group keeps
-              their sizes, the graph's panel grows to fill it, and the code view keeps its scroll.
-              `hidden` on the panel itself (its className styles an inner box). */}
+          {/* Hidden, not unmounted: the group keeps their sizes, the graph's panel grows to fill it,
+              and the code view keeps its scroll. `hidden` on the panel itself (its className styles
+              an inner box). */}
           <ResizableHandle withHandle className={codeOpen ? undefined : "hidden"} />
           <ResizablePanel id="graph-source-code" minSize="20%" hidden={!codeOpen}>
-            {codeMounted &&
-              (noSource ||
-                (file !== undefined ? (
-                  <FileSourcePanel file={file} highlight={highlight} onSelect={selectAt} />
-                ) : (
-                  <SourcePanel source={source} highlight={highlight} onSelect={selectAt} />
-                )))}
+            {/* Its own boundary: when Code first opens under Compact, the source's query may have been
+                collected while nothing read it, and its refetch then replaces only this panel. */}
+            <Suspense
+              fallback={<Skeleton role="status" aria-label="Loading the source" className="size-full rounded-none" />}
+            >
+              {(codeOpen || opened.current) &&
+                (noSource ||
+                  (file !== undefined ? (
+                    <FileSourcePanel file={file} highlight={highlight} onSelect={selectAt} />
+                  ) : (
+                    <SourcePanel source={source} highlight={highlight} onSelect={selectAt} />
+                  )))}
+            </Suspense>
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>

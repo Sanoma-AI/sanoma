@@ -53,7 +53,7 @@ function ConnectorPage() {
   const resourceOps = new Set(resourceTypes.flatMap((r) => r.ops));
   const workflowOps = ops.filter((op) => !resourceOps.has(op.id));
   return (
-    <div className="flex flex-col gap-(--gap-region)">
+    <>
       {/* Decorative: the title beside it names the heading. */}
       <PageHeader icon={<VendorLogo vendor={id} alt="" className="size-7" />}>
         <code className="text-muted-foreground">{id}</code>
@@ -107,7 +107,7 @@ function ConnectorPage() {
           </ul>
         )}
       </Region>
-    </div>
+    </>
   );
 }
 

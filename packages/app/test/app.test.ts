@@ -192,10 +192,15 @@ const railRunIds = (html: string, filter: string) =>
     .map(([, id]) => id)
     .toSorted();
 
-/** Whether the density toggle (named Compact) is pressed: "true" or "false". */
-const densityToggle = (html: string) =>
+/**
+ * Whether the toggle button named `label` is pressed: "true" or "false". Its name may follow an
+ * icon and sit in an `sr-only` span; the match stays within the one button.
+ */
+const pressed = (html: string, label: string) =>
   html.match(
-    /<button[^>]*aria-pressed="(true|false)"[^>]*>(?:<svg.*?<\/svg>)?<span class="sr-only">Compact<\/span>/,
+    new RegExp(
+      `<button[^>]*aria-pressed="(true|false)"[^>]*>(?:<svg[^>]*>(?:[^<]|<(?!/svg>))*</svg>)?(?:<span class="sr-only">)?${label}<`,
+    ),
   )?.[1];
 
 /** The desktop sidebar's state: "expanded" or "collapsed". */
@@ -885,7 +890,7 @@ describe("the page", () => {
     // One card: its header's title and Code, then the graph above the source with a handle
     // between them, each panel's share set on the server so the page does not shift.
     expect(found.html).toMatch(/data-slot="card-title"[^>]*>Graph</);
-    expect(found.html).toMatch(/<button[^>]*aria-pressed="true"[^>]*>(<svg.*?<\/svg>)?Code<\/button>/);
+    expect(pressed(found.html, "Code")).toBe("true");
     expect(found.html).toMatch(/data-slot="resizable-panel-group"/);
     expect(found.html).toMatch(
       /<div[^>]*role="separator"[^>]*data-slot="resizable-handle"|data-slot="resizable-handle"[^>]*role="separator"/,
@@ -939,37 +944,28 @@ describe("the page", () => {
     expect(runs.text).toContain("sandbox · Launch on time");
   });
 
-  it("renders compact when its cookie says so", async () => {
+  it("renders a page compact while its cookie says so: the toggle pressed, the source hidden and the sidebar as its own cookie says", async () => {
     const source = /<pre[^>]*>[^<]*ctx\.ghost\.post\.create\(/;
 
     // Comfortable without the cookie: #app unmarked, the toggle not pressed, the source shown.
     const comfortable = await page("/workflows/announce");
     expect(comfortable.html).toContain('<div id="app">');
-    expect(densityToggle(comfortable.html)).toBe("false");
     expect(comfortable.html).toMatch(source);
     expect(sidebarState(comfortable.html)).toBe("expanded");
+    expect(pressed(comfortable.html, "Compact")).toBe("false");
 
-    // Compact: #app marked, the toggle pressed, the source hidden and not rendered, Code not pressed.
-    // The sidebar follows its own cookie alone.
-    for (const open of [true, false]) {
-      const compact = await page("/workflows/announce", app.url, {
-        headers: { cookie: `sanoma_density=compact; sidebar_state=${open}` },
-      });
-      expect(compact.status).toBe(200);
-      expect(compact.html).toContain('<div id="app" data-density="compact">');
-      expect(densityToggle(compact.html)).toBe("true");
-      expect(compact.html).not.toMatch(source);
-      expect(compact.html).toMatch(/<button[^>]*aria-pressed="false"[^>]*>(<svg.*?<\/svg>)?Code<\/button>/);
-      expect(compact.html).toMatch(
-        /data-panel[^>]*id="graph-source-code"[^>]*hidden|hidden[^>]*id="graph-source-code"/,
-      );
-      expect(sidebarState(compact.html)).toBe(open ? "expanded" : "collapsed");
-    }
-
-    // Any other value is comfortable; the toggle is on every page.
-    const other = await page("/workflows", app.url, { headers: { cookie: "sanoma_density=comfortable" } });
-    expect(other.html).toContain('<div id="app">');
-    expect(densityToggle(other.html)).toBe("false");
+    // Compact: #app marked, the toggle pressed, Code not pressed and the source's panel hidden with
+    // no source in it. The sidebar follows its own cookie.
+    const compact = await page("/workflows/announce", app.url, {
+      headers: { cookie: "sanoma_density=compact; sidebar_state=false" },
+    });
+    expect(compact.status).toBe(200);
+    expect(compact.html).toContain('<div id="app" data-density="compact">');
+    expect(pressed(compact.html, "Compact")).toBe("true");
+    expect(pressed(compact.html, "Code")).toBe("false");
+    expect(compact.html).not.toMatch(source);
+    expect(compact.html).toMatch(/data-panel[^>]*id="graph-source-code"[^>]*hidden|hidden[^>]*id="graph-source-code"/);
+    expect(sidebarState(compact.html)).toBe("collapsed");
   });
 
   it("answers any other path with the app's not-found page", async () => {

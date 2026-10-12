@@ -65,7 +65,7 @@ function WorkflowLayout() {
   // Titled by the workflow (on a run's pane the last crumb, PageHeader's default, is the run), or
   // only its name when it is retired.
   return (
-    <div className="flex flex-col gap-(--gap-region)">
+    <>
       <PageHeader title={workflow?.title ?? name}>
         {workflow && <code className="text-muted-foreground">{name}</code>}
         {workflow?.builtin && <Badge variant="secondary">built-in</Badge>}
@@ -77,6 +77,6 @@ function WorkflowLayout() {
           <Outlet />
         </div>
       </div>
-    </div>
+    </>
   );
 }

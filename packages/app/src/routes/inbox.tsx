@@ -26,7 +26,7 @@ function InboxPage() {
     : 0;
 
   return (
-    <div className="flex flex-col gap-(--gap-region)">
+    <>
       <PageHeader>
         <Badge variant="secondary">{pending.length} waiting</Badge>
         {actor && <ToneBadge tone={mine ? "waiting" : "off"}>{mine} for you</ToneBadge>}
@@ -38,6 +38,6 @@ function InboxPage() {
           <ApprovalCard key={`${run.runId}/${approval.id}`} run={run} approval={approval} showRun />
         ))}
       </div>
-    </div>
+    </>
   );
 }
