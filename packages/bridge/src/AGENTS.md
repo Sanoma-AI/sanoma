@@ -14,7 +14,7 @@ Source of `@sanoma/bridge`: the client exported from the package root, the conne
 | [`replies.ts`](replies.ts)        | `loadReplies` and `stateBridge`: recorded replies as mutable state, and a bridge over it, for connectors' fakes                                                      |
 | [`client.ts`](client.ts)          | `startBridge`: spawns `provider-bridge serve`, waits for the ready line, connects over the unix socket                                                               |
 | [`fake.ts`](fake.ts)              | The `./fake` entry: re-exports `tfFake`, `loadReplies`, `stateBridge`, `fixturesDir` and their types                                                                 |
-| [`fixtures.ts`](fixtures.ts)      | The fixture format and paths, shared by `loadReplies`, the tfschema CLI and the test helpers (`../test/fake-bridge.ts`, `../test/record.ts`)                         |
+| [`fixtures.ts`](fixtures.ts)      | The fixture format, release names and the schema path, shared by `loadReplies`, the tfschema CLI and the test helpers; the reply paths are in `../test/record.ts`    |
 | [`schema.ts`](schema.ts)          | `SchemaDocument` and its types, `parseSchema`                                                                                                                        |
 | [`pins.ts`](pins.ts)              | `readPins`, and the path of `testdata/`                                                                                                                              |
 | [`json.ts`](json.ts)              | `isObject` and `blockOf`, shared by the generator, the state conversions and the test recorder                                                                       |

@@ -4,7 +4,7 @@ import { type DescMessage, type MessageShape, toJson } from "@bufbuild/protobuf"
 import { ConnectError, type Interceptor } from "@connectrpc/connect";
 import { codeToString } from "@connectrpc/connect/protocol-connect";
 import type { ProviderRef } from "../src/bridge.ts";
-import { type Fixture, releaseName, replyDir, schemaFile, stateId } from "../src/fixtures.ts";
+import { type Fixture, releaseName, releaseSlug, schemaFile, stateId } from "../src/fixtures.ts";
 import {
   type ConfigureRequest,
   DiagnosticSchema,
@@ -21,6 +21,19 @@ import {
 } from "../src/gen/bridge/v1/bridge_pb.ts";
 import { blockOf, isObject as isJsonObject, type JsonObject as Json } from "../src/json.ts";
 import { type Block, parseSchema, type SchemaDocument } from "../src/schema.ts";
+
+/** An import ID as a directory name: `repo:main` becomes `repo_main`. */
+const slug = (id: string) => id.replaceAll(/[^A-Za-z0-9._-]+/g, "_");
+
+export const typeDir = (dir: string, ref: ProviderRef, typeName: string) =>
+  join(dir, "replies", releaseSlug(ref), typeName);
+
+export const replyDir = (dir: string, ref: ProviderRef, typeName: string, id: string) =>
+  join(typeDir(dir, ref, typeName), slug(id));
+
+/** How to (re-)record a missing fixture, for error messages. */
+export const recordHint =
+  "record it with SANOMA_LIVE=1 SANOMA_RECORD=1 (packages/bridge/README.md, \"Replaying and recording the bridge in this package's tests\"); the copied GitHub and Stripe fixtures come from provider-bridge's bridge-record";
 
 /** What replaces a secret string in a recorded state. */
 export const SCRUBBED = "<scrubbed>";

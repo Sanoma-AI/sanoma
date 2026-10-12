@@ -12,18 +12,7 @@ import {
 import { codeFromString } from "@connectrpc/connect/protocol-connect";
 import { type Bridge, bridgeClient, type ProviderRef } from "../src/bridge.ts";
 import { startBridge, type StartBridgeOptions } from "../src/client.ts";
-import {
-  type Fixture,
-  isError,
-  recordHint,
-  releaseName,
-  releaseSlug,
-  replyDir,
-  schemaFile,
-  stateId,
-  toPath,
-  typeDir,
-} from "../src/fixtures.ts";
+import { type Fixture, isError, releaseName, releaseSlug, schemaFile, stateId, toPath } from "../src/fixtures.ts";
 import {
   BridgeService,
   DiagnosticSchema,
@@ -33,7 +22,7 @@ import {
 } from "../src/gen/bridge/v1/bridge_pb.ts";
 import { isObject } from "../src/json.ts";
 import { readPins, testdata } from "../src/pins.ts";
-import { recorder } from "./record.ts";
+import { recordHint, recorder, replyDir, typeDir } from "./record.ts";
 import type { BridgeCall } from "../src/replies.ts";
 import { parseSchema, type SchemaDocument } from "../src/schema.ts";
 
