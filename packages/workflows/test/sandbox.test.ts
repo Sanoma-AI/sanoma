@@ -117,14 +117,6 @@ describe("sandbox runs", () => {
         },
       ],
     });
-    // The run's own Ghost: the seeded draft is post_0001, so the run's post is post_0002.
-    const ghostCalls = records.flatMap((r) =>
-      r.type === "op.called" && r.op.startsWith("ghost.") ? [[r.op, r.input, r.output]] : [],
-    );
-    expect(ghostCalls).toMatchObject([
-      ["ghost.post.create", { title: "Acme Pro", status: "draft" }, { id: "post_0002", status: "draft" }],
-      ["ghost.post.publish", { id: "post_0002" }, { id: "post_0002", status: "published" }],
-    ]);
     const sleep = records.find((r) => r.type === "sleep.started") as Extract<LedgerRecord, { type: "sleep.started" }>;
     expect(sleep.until).toBe(Date.parse(launchAt));
     // The one DBOS.sleep is the approval's: DBOS.recv waits with it. The ctx.sleep reads the
@@ -150,6 +142,7 @@ describe("sandbox runs", () => {
       "policy:bluesky.post.create",
       "bluesky.post.create",
     ]);
+    // The run's own Ghost: the seeded draft is post_0001, so the run's post is post_0002.
     expect(check(launch, records)).toEqual(launch.expect.map((e) => ({ step: e.step, ok: true })));
 
     expect((await c().run(runId))?.sandbox).toBe("Launch on time");
@@ -183,27 +176,19 @@ describe("sandbox runs", () => {
   it("runs two sandbox runs of one scenario at once, each on its own fakes, and refuses a scenario that does not exist", async () => {
     const launch = scenario("Launch on time");
     const start = () => c().start(announce, launch.input as never, { startedBy: alice, sandbox: launch.name });
-    const runIds = [await start(), await start()];
+    const runIds = await Promise.all([start(), start()]);
     // Each waits on its own approval: neither is queued behind the other.
     for (const runId of runIds) await waitFor(pending(c, runId));
-    expect((await Promise.all(runIds.map((runId) => c().run(runId)))).map((r) => r?.status)).toEqual([
-      "waiting",
-      "waiting",
-    ]);
 
     const runs = await Promise.all(runIds.map((runId) => drive(c(), runId, launch)));
     expect(runs.map((r) => r.status)).toEqual(["finished", "finished"]);
     for (const runId of runIds) {
       const records = await ledger(runId);
+      // Each seeded its own Ghost: the scenario's `post_0002` is published in both, which a shared
+      // one could not do.
       expect(check(launch, records)).toEqual(launch.expect.map((e) => ({ step: e.step, ok: true })));
-      // Each seeded its own Ghost: neither sees the other's posts.
-      expect(records.find((r) => r.type === "scenario.seeded")).toMatchObject({
-        seeds: [{ op: "ghost.post.create", output: { id: "post_0001" } }],
-      });
-      expect(records.find((r) => r.type === "op.called" && r.op === "ghost.post.create")).toMatchObject({
-        output: { id: "post_0002" },
-      });
     }
+    expect(app.ops()).toEqual([]);
 
     const unknown = await c().start(announce, launch.input as never, { startedBy: alice, sandbox: "Nope" });
     const missing = await failure(c().result(unknown));
