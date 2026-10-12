@@ -1,24 +1,13 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { DBOSClient } from "@dbos-inc/dbos-sdk";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
 import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
 import { fakeGhost } from "@sanoma/connector-ghost/fake";
 import { resend } from "@sanoma/connector-resend";
 import { fakeResend } from "@sanoma/connector-resend/fake";
+import { type TestApp, useTestApp } from "@sanoma/testing/harness";
 import type { Fake, FakeCall, FakeOptions } from "@sanoma/workflows/fake";
-import { afterAll, beforeAll, beforeEach } from "vitest";
-import {
-  allowAll,
-  jsonlLedger,
-  type LedgerRecord,
-  SanomaClient,
-  type SanomaConfig,
-  startWorker,
-  type Worker,
-} from "../src/index.ts";
+import { beforeEach } from "vitest";
+import { allowAll, type LedgerRecord, type SanomaClient, type SanomaConfig } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
 
 export async function waitFor(check: () => Promise<boolean> | boolean, timeoutMs = 15_000) {
@@ -69,32 +58,16 @@ export function marketingFakes({ extra = [] }: { extra?: MakeFake[] } = {}) {
 
 export type Vendors = ReturnType<typeof marketingFakes>;
 
-const defined = <T>(x: T | undefined, what: string): T => {
-  if (x === undefined) throw new Error(`${what} is not started`);
-  return x;
-};
-
-export interface App {
+export type App = TestApp & {
   readonly vendors: Vendors;
-  readonly config: SanomaConfig;
-  readonly worker: Worker;
-  readonly client: SanomaClient;
-  /** Sends messages the way any process with database access could, without SanomaClient's checks. */
-  readonly raw: DBOSClient;
   /** Operation ids the fake vendors were called with, in order. */
   ops(): string[];
-  /** Stops the worker, as a process that stopped would; `restart` starts another. */
-  stop(): Promise<void>;
-  /** Stops the worker (unless `stop` did) and starts another on the same config, as a restarted process would. */
-  restart(): Promise<void>;
-  /** Runs a test leaves unfinished on purpose; cancelled after the describe. */
-  readonly leftPending: string[];
-}
+};
 
 /**
- * Starts a worker and a client for one `describe`, on its own app name in the file's database,
- * and stops them after it. Fake vendors, and the `extra` ones, reset before each test; the
- * ledger is on disk so it outlives a restart the way it would across processes.
+ * `useTestApp` on the announce workflow and the marketing fakes, which `overrides` may replace,
+ * for one `describe`, on its own app name in the file's database. The fakes, and the `extra`
+ * ones, reset before each test.
  */
 export function useApp(
   databaseUrl: string,
@@ -103,66 +76,21 @@ export function useApp(
   { extra }: { extra?: MakeFake[] } = {},
 ): App {
   const vendors = marketingFakes({ extra });
-  const ledgerDir = mkdtempSync(join(tmpdir(), `sanoma-ledger-${appName}-`));
-  let config: SanomaConfig;
-  let worker: Worker | undefined;
-  let client: SanomaClient | undefined;
-  let raw: DBOSClient | undefined;
-  const leftPending: string[] = [];
-
-  beforeAll(async () => {
-    config = {
+  const app = useTestApp(
+    {
       workflows: [announce],
       connectors: [ghost, resend, bluesky],
       drivers: vendors.drivers,
       // The same fakes, which each sandbox run copies.
       fakes: [vendors.ghost, vendors.resend, vendors.bluesky],
       policy: allowAll,
-      ledger: jsonlLedger(ledgerDir),
-      databaseUrl,
       appName,
       ...overrides(vendors),
-    };
-    worker = await startWorker(config);
-    client = await SanomaClient.connect(config);
-    raw = await DBOSClient.create({ systemDatabaseUrl: databaseUrl, applicationName: appName });
-  });
-
-  afterAll(async () => {
-    if (leftPending.length) await raw?.cancelWorkflows(leftPending);
-    await client?.close();
-    await raw?.destroy();
-    await worker?.stop();
-    rmSync(ledgerDir, { recursive: true, force: true });
-  });
-
+    },
+    { databaseUrl },
+  );
   beforeEach(() => vendors.reset());
-
-  return {
-    vendors,
-    get config() {
-      return defined(config, "config");
-    },
-    get worker() {
-      return defined(worker, "worker");
-    },
-    get client() {
-      return defined(client, "client");
-    },
-    get raw() {
-      return defined(raw, "raw client");
-    },
-    ops: () => vendors.calls.map((c) => c.op),
-    async stop() {
-      await defined(worker, "worker").stop();
-      worker = undefined;
-    },
-    async restart() {
-      await worker?.stop();
-      worker = await startWorker(config);
-    },
-    leftPending,
-  };
+  return Object.assign(app, { vendors, ops: () => vendors.calls.map((c) => c.op) });
 }
 
 /** True once the run has `count` approvals and exactly one of them is pending. */
