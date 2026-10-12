@@ -30,6 +30,7 @@ import {
   isPending,
   isSelectable,
 } from "../graph/types.ts";
+import { MAX_VENDORS, wildcardHeader, wildcardRows } from "../graph/wildcard.ts";
 import { useReducedMotion } from "#/lib/motion.ts";
 import { cn } from "#/lib/utils.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
@@ -158,19 +159,46 @@ function EndNode(props: Props<"end">) {
 /** The config's operations by id, read once for the whole graph. */
 const Ops = createContext<Map<string, OpEntry>>(new Map());
 
+/** A vendor's name in a logo's place, for a vendor the config has no logo for. */
+const vendorName = (vendor: string) => <span className="shrink-0 text-muted-foreground">{vendor}</span>;
+
+/**
+ * The operations an op node stands for (its `ops`, else the one its label names) as what the
+ * config says of them: their distinct vendors, and the effect they share, if they share one. The
+ * effect is the config's, as a call still held for its approval has no record yet.
+ */
+function useOpFacts(node: Extract<GraphNode, { kind: "op" }>) {
+  const ops = use(Ops);
+  return useMemo(() => {
+    const reach = (node.ops ?? [node.label]).map((id) => ops.get(id)).filter((op) => op !== undefined);
+    const effects = new Set(reach.map((op) => op.effect));
+    return {
+      vendors: [...new Set(reach.map((op) => op.vendor))],
+      effect: effects.size === 1 ? [...effects][0] : undefined,
+    };
+  }, [node.ops, node.label, ops]);
+}
+
+/**
+ * An operation. One with `ops` (an outline's call with a computed segment) is a stacked list:
+ * what is literal in its id, then a row per operation it can reach (`wildcardRows`).
+ */
 function OpNode(props: Props<"op">) {
   const { node } = props.data;
-  // The effect is the config's: a call still held for its approval has no record yet.
-  const op = use(Ops).get(node.label);
-  const effect = op?.effect;
+  const { vendors, effect } = useOpFacts(node);
   const { state } = node;
   const held = state?.approval && state.decision === undefined ? state.approval : undefined;
   return (
     <Frame {...props}>
       <Line>
         <Dot tone={state?.tone} />
-        {op && <VendorLogo vendor={op.vendor} />}
-        <code className="truncate">{node.label}</code>
+        {vendors.slice(0, MAX_VENDORS).map((vendor) => (
+          <VendorLogo key={vendor} vendor={vendor} fallback={vendorName(vendor)} />
+        ))}
+        {vendors.length > MAX_VENDORS && (
+          <span className="shrink-0 text-muted-foreground">+{vendors.length - MAX_VENDORS}</span>
+        )}
+        <code className="truncate">{node.ops ? wildcardHeader(node.label) : node.label}</code>
       </Line>
       <Line>
         {effect && <Badge className={effectBadge({ effect })}>{effect}</Badge>}
@@ -191,6 +219,22 @@ function OpNode(props: Props<"op">) {
         {state?.scenario?.expected && <Badge variant="outline">expected</Badge>}
         {state?.scenario?.forbidden && <Badge variant="outline">not called</Badge>}
       </Line>
+      {node.ops && (
+        <ul className="flex flex-col gap-0.5 border-t pt-1" aria-label="operations it can reach">
+          {wildcardRows(node.label, node.ops).map((row) =>
+            "note" in row ? (
+              <li key={row.note} className="text-muted-foreground">
+                {row.note}
+              </li>
+            ) : (
+              <li key={row.id} className="flex min-w-0 items-center gap-1.5" title={row.id}>
+                <VendorLogo vendor={row.vendor} fallback={vendorName(row.vendor)} />
+                <code className="truncate">{row.label}</code>
+              </li>
+            ),
+          )}
+        </ul>
+      )}
     </Frame>
   );
 }

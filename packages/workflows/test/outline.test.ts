@@ -128,9 +128,17 @@ describe("outlineWorkflow", () => {
         { kind: "repeat", body: [{ kind: "op", id: "bluesky.post.create" }] },
         { kind: "repeat", body: [{ kind: "sleep" }] },
         { kind: "repeat", body: [{ kind: "op", id: "bluesky.post.create" }] },
-        { kind: "op", id: "*.comments.list" },
+        { kind: "op", id: "*.comments.list", ops: ["forum.comments.list"] },
       ],
     });
+  });
+
+  it("gives a computed id the operations in uses it fits, and a literal one none", () => {
+    const outline = outlineWorkflow(busy);
+    if ("error" in outline) throw new Error(outline.error);
+    const ops = flatten(outline.nodes).filter((node) => node.kind === "op");
+    expect(ops.at(-1)).toMatchObject({ id: "*.comments.list", ops: ["forum.comments.list"] });
+    expect(ops[0]).not.toHaveProperty("ops");
   });
 
   it("keeps the way past a branch's calls: a missing else or default, an arm without calls, && and ??", () => {

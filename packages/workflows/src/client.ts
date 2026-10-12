@@ -102,9 +102,9 @@ export interface StartOptions {
    */
   runId?: string;
   /**
-   * Start a sandbox run, seeded from the config's scenario of this name: it calls the config's
-   * `fakes` instead of the drivers and does not wait on sleeps. Sandbox runs go on their own
-   * queue, one at a time per worker: another waits, queued, until the one before it ends.
+   * Start a sandbox run, seeded from the config's scenario of this name: it calls its own copies
+   * (`fresh()`) of the config's `fakes` instead of the drivers, and does not wait on sleeps.
+   * Sandbox runs go on the app's queue like any run, so several run at once.
    */
   sandbox?: string;
 }
@@ -177,7 +177,7 @@ export class SanomaClient {
     const handle = await this.dbos
       .enqueue(
         {
-          queueName: sandbox === undefined ? this.config.queueName : this.config.sandboxQueueName,
+          queueName: this.config.queueName,
           workflowName: workflow.name,
           workflowID: runId,
           applicationName: this.config.appName,

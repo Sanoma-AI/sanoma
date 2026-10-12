@@ -283,8 +283,8 @@ async function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecisio
 async function callOp(run: Run, id: string, input: unknown, node: string) {
   // The worker's declaration, never the workflow's: its effect, schemas and retry setting.
   const op = run.state.ops.get(id);
-  // A sandbox run calls the fakes, never a vendor.
-  const fn = (run.sandbox === undefined ? run.state.drivers : run.state.fakeDrivers).get(id);
+  // A sandbox run calls its own fakes, never a vendor.
+  const fn = run.sandbox === undefined ? run.state.drivers.get(id) : run.fakeDrivers?.get(id);
   if (!op || !fn) {
     throw new Error(
       run.sandbox === undefined

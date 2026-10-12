@@ -52,7 +52,19 @@ export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS
     for (const step of steps) {
       switch (step.kind) {
         case "op":
-          from = [add({ id: idOf("op", step.key), kind: "op", label: step.id, ...inside, ...own(step) }, from)];
+          from = [
+            add(
+              {
+                id: idOf("op", step.key),
+                kind: "op",
+                label: step.id,
+                ...(step.ops && { ops: step.ops }),
+                ...inside,
+                ...own(step),
+              },
+              from,
+            ),
+          ];
           break;
         case "approval": {
           const label = step.title === undefined ? "approval" : `“${step.title}”`;

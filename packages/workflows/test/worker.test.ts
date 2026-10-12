@@ -95,7 +95,7 @@ describe("startWorker, resolveConfig and describeConfig", () => {
     }
     expect((thrown as Error | undefined)?.message).toMatch(message);
     const same = (thrown as Error).message;
-    await expect(describeConfig(bad)).rejects.toThrow(same);
+    expect(() => describeConfig(bad)).toThrow(same);
     await expect(startWorker(bad)).rejects.toThrow(same);
   });
 
@@ -106,7 +106,6 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       databaseUrl: "postgresql://unused@localhost:1/unused",
       version: expect.stringMatching(/^acme@[0-9a-f]{64}$/),
       queueName: "sanoma:acme",
-      sandboxQueueName: "sanoma:acme:sandbox",
       policy: allowAll,
       workflows: new Map([["announce", announce]]),
     });

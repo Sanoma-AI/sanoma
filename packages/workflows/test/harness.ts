@@ -115,7 +115,7 @@ export function useApp(
       workflows: [announce],
       connectors: [ghost, resend, bluesky],
       drivers: vendors.drivers,
-      // The same fakes, for sandbox runs.
+      // The same fakes, which each sandbox run copies.
       fakes: [vendors.ghost, vendors.resend, vendors.bluesky],
       policy: allowAll,
       ledger: jsonlLedger(ledgerDir),

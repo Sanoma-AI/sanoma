@@ -24,8 +24,9 @@ export interface SanomaConfig {
   connectors: Connector<any, any>[];
   drivers: Driver[];
   /**
-   * Fake vendors (from `defineFake`) that sandbox runs call instead of the drivers. A sandbox
-   * run is started with `{ sandbox: "<scenario name>" }` and seeded from that scenario.
+   * Fake vendors (from `defineFake`) that sandbox runs copy (`fresh()`) and call instead of the
+   * drivers, so these can be the instances `drivers` holds when the config runs on fakes. A
+   * sandbox run is started with `{ sandbox: "<scenario name>" }` and seeded from that scenario.
    */
   fakes?: Fake<any, any>[];
   /** The directory of `.feature` files sandbox runs are seeded from, as a `file:` URL, such as `new URL("./scenarios/", import.meta.url)`. */
@@ -81,15 +82,13 @@ export interface ResolvedConfig {
   version: string;
   /** The DBOS queue runs are started on: `sanoma:<appName>`. */
   queueName: string;
-  /** The DBOS queue sandbox runs are started on, which runs one at a time per worker: `sanoma:<appName>:sandbox`. */
-  sandboxQueueName: string;
   /** The operations the connectors declare, by id. */
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id. */
   drivers: Map<string, DriverFn>;
-  /** The fake vendors sandbox runs call, by vendor id. */
+  /** The fake vendors, by vendor id: the templates each sandbox run copies. */
   fakes: Map<string, Fake<any, any>>;
-  /** The fakes' functions, by operation id: what a sandbox run calls. */
+  /** The fakes' functions, by operation id: which operations a sandbox run has a fake for. */
   fakeDrivers: Map<string, DriverFn>;
   /** The scenarios directory, a `file:` URL. */
   scenarios?: URL;
@@ -198,7 +197,6 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     // The built-in's code and operations are part of the app's version, like the config's own.
     version: computeVersion({ appName: config.appName, workflows: [...names.values()] }),
     queueName: `sanoma:${appName}`,
-    sandboxQueueName: `sanoma:${appName}:sandbox`,
     ops,
     drivers,
     fakes,
@@ -326,7 +324,8 @@ function indexConnectors(list: Connector<any, any>[]) {
   return map;
 }
 
-function indexDrivers(list: Driver[], ops: Map<string, Op>) {
+/** The drivers' functions by operation id, refusing one no connector declares. */
+export function indexDrivers(list: Driver[], ops: Map<string, Op>) {
   const map = new Map<string, DriverFn>();
   for (const d of list) {
     for (const [key, fn] of Object.entries(d.ops)) {
