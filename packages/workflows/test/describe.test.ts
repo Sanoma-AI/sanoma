@@ -119,6 +119,7 @@ describe("describeConfig", () => {
     const { vendors } = describeConfig({ ...base, connectors: [ghost, resend, bluesky, counter], drivers });
     expect(Object.keys(vendors).toSorted()).toEqual(["bluesky", "counter", "ghost", "resend"]);
     expect(vendors.counter).toEqual({ title: "counter", fake: false });
+    expect(describeConfig({ ...base, fakes: [fakeGhost()] }).vendors.ghost?.fake).toBe(true);
     expect(vendors.resend).toMatchObject({
       title: "Resend",
       package: "@sanoma/connector-resend",
