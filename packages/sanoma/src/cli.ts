@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import type { ResolvedConfig, SanomaConfig } from "@sanoma/workflows";
 import { type LoadedConfig, loadConfig, UsageError } from "./config.ts";
+import type { LinkedPackage } from "./dev.ts";
 
 // Only Node's modules and ./config.ts are imported here: each command imports what it runs, so
 // `--help`, `env`, `ledger export` and the dev-mode parent load neither the worker nor the app.
@@ -23,8 +24,8 @@ Runs the repo in the working directory, from its sanoma.config.ts (after its .en
                                       a run's ledger records as JSON lines
 
 SANOMA_DATABASE_URL names Postgres (default postgresql://postgres:dbos@localhost:5433/sanoma); SANOMA_APP_PORT the
-app's port (default 3000; 0 for any free port). With @sanoma/workflows linked from a sanoma checkout, or
-SANOMA_DEV_REPO set, \`sanoma\` also builds the checkout's packages as they change and restarts on a new build.
+app's port (default 3000; 0 for any free port). With sanoma or a @sanoma package linked from a sanoma checkout,
+or SANOMA_DEV_REPO set, \`sanoma\` also runs each linked package's watch build and restarts on a new build.
 `;
 
 /** Exit codes: 2 for how the bin was called or what it found, 1 for failed checks and failures while running. */
@@ -50,9 +51,10 @@ export async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = positionals;
   switch (command) {
     case undefined: {
-      const { devRepo } = await import("./dev.ts");
-      const repo = devRepo(process.cwd());
-      return repo === undefined ? serveCommand() : dev(repo);
+      const { devRepo, linkedPackages } = await import("./dev.ts");
+      const linked = linkedPackages(process.cwd());
+      const repo = devRepo(process.cwd(), linked);
+      return repo === undefined ? serveCommand() : dev(repo, linked);
     }
     case "serve":
       return serveCommand();
@@ -127,16 +129,19 @@ async function serveCommand(): Promise<never> {
   return keep(loaded, (config) => serve(config, { port: port() }));
 }
 
-/** Dev mode: `sanoma serve` in a child it restarts on a new build, and the linked packages' builds. */
-async function dev(repo: string): Promise<never> {
-  const { linkedPackages, startWatchers, supervise } = await import("./dev.ts");
+/**
+ * Dev mode: `sanoma serve` in a child it restarts on a new build, and each linked package's
+ * `watch`. Each runs in a process group of its own, so a terminal's ctrl-c reaches this process
+ * alone, and its `stop` is the one path that ends them.
+ */
+async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<never> {
+  const { startWatchers, supervise } = await import("./dev.ts");
   const cwd = process.cwd();
-  const packages = linkedPackages(cwd);
   log(`dev mode: ${repo}; building ${packages.map((p) => p.name).join(", ") || "nothing"} as it changes`);
   const watchers = startWatchers(packages, log);
   const cli = fileURLToPath(import.meta.url);
   const child = supervise({
-    spawn: () => spawn(process.execPath, [cli, "serve"], { cwd, env: process.env, stdio: "inherit" }),
+    spawn: () => spawn(process.execPath, [cli, "serve"], { cwd, env: process.env, stdio: "inherit", detached: true }),
     watch: packages.map((p) => join(p.dir, "dist")),
     log,
   });

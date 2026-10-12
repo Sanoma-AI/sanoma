@@ -1,43 +1,27 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, type FSWatcher, mkdirSync, readdirSync, realpathSync, watch } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, realpathSync, watch } from "node:fs";
 import { dirname, join, sep } from "node:path";
 import { createInterface } from "node:readline";
 
 /*
- * Dev mode: when the repo's `@sanoma/workflows` resolves into a sanoma checkout (a `pnpm link`,
- * or `SANOMA_DEV_REPO`), `sanoma` builds that checkout's linked packages as they change and
- * restarts itself when one's `dist/` does.
+ * Dev mode: when the repo's `sanoma` or a `@sanoma/*` package resolves into a sanoma checkout (a
+ * `pnpm link`), or `SANOMA_DEV_REPO` is set, `sanoma` runs each linked package's `watch` script
+ * and restarts `sanoma serve` when one's `dist/` changes.
  */
 
 /** Whether a path is inside some `node_modules` directory. */
 const installed = (path: string) => path.split(sep).includes("node_modules");
-
-/**
- * The sanoma checkout the repo's `@sanoma/workflows` is linked from: `SANOMA_DEV_REPO` when
- * set, else the directory two above where `node_modules/@sanoma/workflows` really is (its
- * `packages/workflows`), when that is outside any `node_modules`. Undefined for an installed
- * package, and when there is none.
- */
-export function devRepo(cwd: string): string | undefined {
-  if (process.env.SANOMA_DEV_REPO) return process.env.SANOMA_DEV_REPO;
-  const link = join(cwd, "node_modules", "@sanoma", "workflows");
-  if (!existsSync(link)) return undefined;
-  const real = realpathSync(link);
-  return installed(real) ? undefined : dirname(dirname(real));
-}
 
 export interface LinkedPackage {
   /** The npm name, such as `@sanoma/workflows`. */
   name: string;
   /** Where it really is: its directory in the checkout. */
   dir: string;
-  /** Whether it is built with vite too (`vite.config.ts`), as the app is. */
-  vite: boolean;
 }
 
 /**
- * Every package under the repo's `node_modules/@sanoma/`, and `node_modules/sanoma`, that is
- * linked from outside any `node_modules`: the ones a `pnpm link` points into a checkout.
+ * `node_modules/sanoma` and every package under `node_modules/@sanoma/` whose real path is
+ * outside any `node_modules`: the ones a `pnpm link` points into a checkout.
  */
 export function linkedPackages(cwd: string): LinkedPackage[] {
   const modules = join(cwd, "node_modules");
@@ -50,14 +34,24 @@ export function linkedPackages(cwd: string): LinkedPackage[] {
   for (const [name, path] of candidates) {
     if (!existsSync(path)) continue;
     const dir = realpathSync(path);
-    if (installed(dir)) continue;
-    linked.push({ name, dir, vite: existsSync(join(dir, "vite.config.ts")) });
+    if (!installed(dir)) linked.push({ name, dir });
   }
   return linked;
 }
 
+/**
+ * The sanoma checkout dev mode builds from: `SANOMA_DEV_REPO` when set, else the directory two
+ * above a linked package (its `packages/<name>` or `connectors/<name>`). Undefined outside dev
+ * mode: nothing linked, and the variable unset.
+ */
+export function devRepo(cwd: string, linked: readonly LinkedPackage[] = linkedPackages(cwd)): string | undefined {
+  if (process.env.SANOMA_DEV_REPO) return process.env.SANOMA_DEV_REPO;
+  const [first] = linked;
+  return first && dirname(dirname(first.dir));
+}
+
 export interface SuperviseOptions {
-  /** Starts the child; called again after each restart. */
+  /** Starts the child, in a process group of its own (`detached: true`); called again for each restart. */
   spawn: () => ChildProcess;
   /** Directories to watch, recursively; each is created when missing. */
   watch: string[];
@@ -67,77 +61,102 @@ export interface SuperviseOptions {
 }
 
 /**
- * Runs the child and restarts it when anything under a watched directory changes: after
- * `debounceMs` of quiet, SIGTERM, up to 5 seconds for it to exit, then SIGKILL, then `spawn`
- * again. `stop` stops watching and stops the child the same way.
+ * Runs the child and restarts it when anything under a watched directory changes, after
+ * `debounceMs` of quiet: its group ended (`end`), then `spawn` again. Restarts run one at a time,
+ * in order. A child that exits on its own is reported and started again on the next change.
+ * `stop` stops watching, waits for a restart under way, and ends the child.
  */
 export function supervise({ spawn: start, watch: dirs, debounceMs = 750, log = () => {} }: SuperviseOptions): {
   stop(): Promise<void>;
 } {
-  let child = start();
+  const ending = new WeakSet<ChildProcess>();
+  const run = () => {
+    const child = start();
+    child.once("exit", (code, signal) => {
+      if (!ending.has(child)) log(`serve exited with ${signal ?? `code ${code}`}; waiting for a change to restart`);
+    });
+    return child;
+  };
+  const stopChild = (child: ChildProcess) => {
+    ending.add(child);
+    return end(child);
+  };
+
+  let child = run();
+  let turn = Promise.resolve();
   let timer: NodeJS.Timeout | undefined;
-  let stopping = false;
-  const watchers: FSWatcher[] = [];
-  for (const dir of dirs) {
+  const watchers = dirs.map((dir) => {
     mkdirSync(dir, { recursive: true });
-    watchers.push(watch(dir, { recursive: true }, () => schedule()));
-  }
-  const schedule = () => {
-    if (stopping) return;
-    clearTimeout(timer);
-    timer = setTimeout(restart, debounceMs);
-  };
-  const restart = async () => {
-    if (stopping) return;
-    log("a package's dist changed; restarting");
-    await end(child);
-    if (!stopping) child = start();
-  };
+    return watch(dir, { recursive: true }, () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        turn = turn
+          .then(async () => {
+            log("a package's dist changed; restarting");
+            await stopChild(child);
+            child = run();
+          })
+          .catch((err: unknown) => log(`could not restart: ${(err as Error).message}`));
+      }, debounceMs);
+    });
+  });
   return {
     async stop() {
-      stopping = true;
-      clearTimeout(timer);
       for (const w of watchers) w.close();
-      await end(child);
+      clearTimeout(timer);
+      await turn;
+      await stopChild(child);
     },
   };
 }
 
-/** SIGTERM, up to 5 seconds, then SIGKILL; resolves once the child has exited. */
-function end(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+/**
+ * Ends a child started with `detached: true` and everything in its process group (what a `pnpm`
+ * or `sh` it runs started): SIGTERM to the group, SIGKILL after 5 seconds. Resolves once the
+ * child has exited, at once when it already has or never started.
+ */
+export function end(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return Promise.resolve();
+  const pid = child.pid;
+  const signal = (name: NodeJS.Signals) => {
+    try {
+      process.kill(-pid, name);
+    } catch {
+      // The group is gone already.
+    }
+  };
   return new Promise((resolve) => {
-    const kill = setTimeout(() => child.kill("SIGKILL"), 5000);
-    child.once("exit", () => {
+    const kill = setTimeout(() => signal("SIGKILL"), 5000);
+    const done = () => {
       clearTimeout(kill);
       resolve();
-    });
-    child.kill("SIGTERM");
+    };
+    child.once("exit", done);
+    child.once("error", done);
+    signal("SIGTERM");
   });
 }
 
 /**
- * Starts a build watcher per linked package, in its directory: `tsc -p tsconfig.build.json
- * --watch`, and `vite build --watch` for one built with vite; each line they print goes to `log`
- * under the package's name. `stop` ends them all.
+ * Runs `pnpm run watch` in each linked package, in a process group of its own, each line it
+ * prints going to `log` under the package's name: the package's own script decides how it builds.
+ * `stop` ends them all.
  */
 export function startWatchers(
   packages: readonly LinkedPackage[],
   log: (line: string) => void,
 ): { stop(): Promise<void> } {
-  const children: ChildProcess[] = [];
-  for (const { name, dir, vite } of packages) {
-    const commands = [["tsc", "-p", "tsconfig.build.json", "--watch", "--preserveWatchOutput"]];
-    if (vite) commands.push(["vite", "build", "--watch"]);
-    for (const command of commands) {
-      const child = spawn("pnpm", ["exec", ...command], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
-      const prefix = `[${name}${command[0] === "vite" ? " vite" : ""}]`;
-      for (const stream of [child.stdout, child.stderr]) {
-        createInterface({ input: stream! }).on("line", (line) => line.trim() && log(`${prefix} ${line}`));
-      }
-      child.on("error", (err) => log(`${prefix} could not start: ${err.message}`));
-      children.push(child);
+  const children = packages.map(({ name, dir }) => {
+    const child = spawn("pnpm", ["run", "watch"], {
+      cwd: dir,
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    for (const stream of [child.stdout, child.stderr]) {
+      createInterface({ input: stream }).on("line", (line) => line.trim() && log(`[${name}] ${line}`));
     }
-  }
+    child.on("error", (err) => log(`[${name}] could not start: ${err.message}`));
+    return child;
+  });
   return { stop: async () => void (await Promise.all(children.map(end))) };
 }

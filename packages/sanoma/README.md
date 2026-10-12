@@ -98,7 +98,7 @@ The worker and the app run on `SANOMA_DATABASE_URL` (default `postgresql://postg
 
 ## Dev mode
 
-When the repo's `node_modules/@sanoma/workflows` is a link into a sanoma checkout (`pnpm link`), or `SANOMA_DEV_REPO` names one, `sanoma` runs the worker and the app in a child process and, for every linked package under `node_modules/@sanoma/` and `node_modules/sanoma`, starts that package's build in watch mode in the checkout (`tsc -p tsconfig.build.json --watch`, and `vite build --watch` for the app). A change under any linked package's `dist/` restarts the child, after three quarters of a second of quiet. Ctrl-c stops the child and the watchers.
+When the repo's `node_modules/sanoma` or any `node_modules/@sanoma/*` is a link into a sanoma checkout (`pnpm link`), or `SANOMA_DEV_REPO` names one, `sanoma` runs `sanoma serve` in a child process and, in every linked package's directory, its `pnpm run watch` (each package's own watch build: `tsc --watch`, and `vite build --watch` too for the app). A change under any linked package's `dist/` restarts the child, after three quarters of a second of quiet, one restart at a time; a child that exits on its own is reported and started again on the next change. The child and each watch run in a process group of their own, so a terminal's ctrl-c reaches `sanoma` alone, which then ends each group (SIGTERM, SIGKILL after 5 seconds) and exits.
 
 ## Hosting it yourself
 
