@@ -908,7 +908,7 @@ describe("the page", () => {
     expect(run.text).toContain("sandbox · Launch on time");
     expect(run.html).toMatch(/<h2[^>]*>Checks<\/h2>/);
     expect(run.text).toContain("resend.broadcast.send was called");
-    expect(run.text).toContain("Seeded 1 call from scenario “Launch on time”");
+    expect(run.text).toContain("Seeded 1 from scenario “Launch on time”");
     const runs = await page("/workflows/announce");
     expect(runs.text).toContain("sandbox · Launch on time");
   });

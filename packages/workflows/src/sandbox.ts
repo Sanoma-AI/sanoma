@@ -3,7 +3,7 @@ import { indexDrivers } from "./config.ts";
 import { opIdsOf } from "./define.ts";
 import { SanomaError } from "./errors.ts";
 import type { Fake, ResourceFake } from "./fake.ts";
-import { entry, write } from "./ledger.ts";
+import { entry, type LedgerRecord, write } from "./ledger.ts";
 import type { DriverFn } from "./op.ts";
 import type { Run } from "./run.ts";
 import { type Given, loadScenarios, type Scenario } from "./scenario.ts";
@@ -87,7 +87,7 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
         [...fakes.values()].map((f) => f.driver),
         state.ops,
       );
-      const seeded: { op: string; input: unknown; output: unknown }[] = [];
+      const seeded: Extract<LedgerRecord, { type: "scenario.seeded" }>["seeds"] = [];
       for (const [i, given] of scenario.given.entries()) {
         if ("fault" in given) continue;
         if ("op" in given) {
@@ -98,8 +98,14 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
         }
         // Checked above: the vendor's copy holds resources, as its template does.
         const copy = fakes.get(given.vendor) as Fake<unknown> & ResourceFake;
-        if ("gone" in given) copy.remove(given.type, given.name);
-        else copy.put(given.type, given.name, given.fields);
+        const { resource, type, name: id } = given;
+        if ("gone" in given) {
+          copy.remove(type, id);
+          seeded.push({ resource, name: id, gone: true });
+        } else {
+          copy.put(type, id, given.fields);
+          seeded.push({ resource, name: id, fields: given.fields });
+        }
       }
       for (const given of scenario.given) {
         if ("fault" in given) fakes.get(state.ops.get(given.op)!.vendor)![given.fault](given.op);

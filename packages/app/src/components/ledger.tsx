@@ -168,7 +168,7 @@ export const LedgerRow = memo(function LedgerRow({
       body = (
         <>
           <p>
-            Seeded {plural(record.seeds.length, "call")} from scenario “{record.scenario}”
+            Seeded {record.seeds.length} from scenario “{record.scenario}”
           </p>
           {record.seeds.length > 0 && <Expandable label="Seeds" value={record.seeds} />}
         </>
