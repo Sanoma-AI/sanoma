@@ -94,7 +94,8 @@
                   "approvedFor",
                   "allowAll",
                   "mayDecide",
-                  "errorCode"
+                  "errorCode",
+                  "z"
                 ],
                 "allowTypeImports": true,
                 "message": "A workflow or policy imports only these and types from @sanoma/workflows: the rest (SanomaClient, startWorker, the ledger stores, config helpers) could start runs, approve its own approvals, forge the ledger or read credentials. Ask for approval with `ctx.approval`."
@@ -110,7 +111,8 @@
                   "approvedFor",
                   "allowAll",
                   "mayDecide",
-                  "errorCode"
+                  "errorCode",
+                  "z"
                 ],
                 "allowTypeImports": true,
                 "message": "A workflow or policy imports only these and types from sanoma: the rest (defineConfig, the ledger stores) belongs in sanoma.config.ts, where the drivers and credentials are. Ask for approval with `ctx.approval`."

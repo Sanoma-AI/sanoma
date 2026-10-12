@@ -1,6 +1,6 @@
 # Working on sanoma
 
-This package owns the `sanoma` bin a company repo runs, checks and exports itself with, and the author surface (`defineWorkflow`, `definePolicy`, the decisions, `defineConfig`, types) that repo imports. It is the umbrella: it depends on `@sanoma/workflows`, `@sanoma/app` and `@sanoma/bridge` as dependencies, not peers.
+This package owns the `sanoma` bin a company repo runs, checks and exports itself with, and everything that repo imports besides its connectors (the author surface, `z`, `defineConfig`, the ledger stores, types): the one install. It is the umbrella: it depends on `@sanoma/workflows`, `@sanoma/app` and `@sanoma/bridge` as dependencies, not peers.
 
 ## Read when needed
 
@@ -10,11 +10,12 @@ This package owns the `sanoma` bin a company repo runs, checks and exports itsel
 
 ## Maintenance boundaries
 
-- `src/index.ts` re-exports exactly the names `allowImportNames` in `@sanoma/workflows`'s `oxlint.json` lists, plus `defineConfig` and types. A name added there is added here, and to the `sanoma` entry of that `oxlint.json`, which must list the same names (a test holds it to that).
+- `src/index.ts` re-exports exactly the names `allowImportNames` in `@sanoma/workflows`'s `oxlint.json` lists (`z` from `zod`, the rest from `@sanoma/workflows`), plus what `sanoma.config.ts` needs (`defineConfig`, the ledger stores) and types. A name added there is added here.
+- What a company repo's code imports at run time or for `tsc` is a dependency here, not a peer or a devDependency (`zod`, `@types/node`, `typescript`, `oxlint`): the repo installs `sanoma` and its connectors alone. The fixture holds that promise, with only those two linked.
 - The bin never depends on `@sanoma/testing` at run time; it is a devDependency for the fixture and the tests.
 - `loadConfig` never calls `defineConfig` on what it loads: the config module's own call recorded its `file`, and a second call from here would record this package's.
 - `check` writes its oxlint config into the repo's root for the run (`.oxlintrc.sanoma-check.json`) because oxlint matches the rules' `workflows/**` globs against the config's directory; keep it removed after.
-- `tsconfig.base.json` (shipped as `sanoma/tsconfig.json`) is the compiler configuration a company repo extends: keep it the root `tsconfig.json`'s compiler options without the repo's `paths`, and keep `oxlint.json` the root `.oxlintrc.json`'s rules over `@sanoma/workflows`'s.
+- `tsconfig.base.json` (shipped as `sanoma/tsconfig.json`) is the compiler configuration a company repo extends, and the root `tsconfig.json` extends it too, adding the checkout's `paths`, `typeRoots`, `include` and `exclude`: there is one copy of the compiler options. Keep `oxlint.json` the root `.oxlintrc.json`'s rules over `@sanoma/workflows`'s.
 
 ## Checks
 

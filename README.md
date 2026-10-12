@@ -26,7 +26,7 @@ Status: early. Business processes are written as TypeScript workflows that run o
 | [`.claude/`](.claude/)                                      | Agent skills for Claude Code                                                                 |
 | [`.agents/`](.agents/)                                      | Vendored agent skills                                                                        |
 | [`package.json`](package.json)                              | Root scripts: typecheck, build, lint, format, test, `db:up`, `bridge:download`               |
-| [`tsconfig.json`](tsconfig.json)                            | Root TypeScript config with `@sanoma/*` paths to each package's `src/`                       |
+| [`tsconfig.json`](tsconfig.json)                            | Root TypeScript config: `sanoma`'s shipped options, with `@sanoma/*` paths to each `src/`    |
 | [`vitest.config.ts`](vitest.config.ts)                      | Test config with aliases to the package sources                                              |
 | [`docker-compose.yml`](docker-compose.yml)                  | Postgres for DBOS on port 5433                                                               |
 | [`lefthook.yml`](lefthook.yml)                              | Pre-commit format and lint on staged files                                                   |

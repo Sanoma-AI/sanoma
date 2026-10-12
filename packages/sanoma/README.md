@@ -5,11 +5,10 @@ One command over a company repo: `sanoma` runs its workflows and the app, `sanom
 ## Install
 
 ```sh
-npm install sanoma zod @sanoma/connector-ghost
-npm install -D @types/node
+npm install sanoma @sanoma/connector-ghost
 ```
 
-`sanoma` brings `@sanoma/workflows`, `@sanoma/app`, `typescript` and `oxlint` with it. Node 24 or later; Docker for the Postgres it starts when none answers.
+`sanoma` brings `@sanoma/workflows`, `@sanoma/app`, `zod`, `typescript`, `@types/node` and `oxlint` with it: a repo installs nothing else but its connectors. Node 24 or later; Docker for the Postgres it starts when none answers.
 
 A repo holds `sanoma.config.ts` at its root, with `workflows/`, `policies/`, optional `resources/` (data files) and `scenarios/` (feature files) beside it, and a `tsconfig.json` that extends the one this package ships:
 
@@ -24,8 +23,7 @@ A repo holds `sanoma.config.ts` at its root, with `workflows/`, `policies/`, opt
 // sanoma.config.ts
 import { ghost } from "@sanoma/connector-ghost";
 import { ghostDriver } from "@sanoma/connector-ghost/driver";
-import { jsonlLedger } from "@sanoma/workflows";
-import { defineConfig } from "sanoma";
+import { defineConfig, jsonlLedger } from "sanoma";
 import policy from "./policies/policy.ts";
 import publish from "./workflows/publish.ts";
 
@@ -43,8 +41,7 @@ export default defineConfig({
 ```ts
 // workflows/publish.ts
 import { ghost } from "@sanoma/connector-ghost";
-import { defineWorkflow } from "sanoma";
-import { z } from "zod";
+import { defineWorkflow, z } from "sanoma";
 
 export default defineWorkflow({
   name: "publish",
@@ -55,7 +52,7 @@ export default defineWorkflow({
 });
 ```
 
-A workflow imports from `sanoma` exactly what it may import from `@sanoma/workflows` (`defineWorkflow`, `definePolicy`, `allow`, `deny`, `approve`, `approvedFor`, `allowAll`, `mayDecide`, `errorCode`, and types), and the lint accepts either package. The config file imports the rest it needs (a ledger store, a connector's driver) from `@sanoma/workflows` and the connectors.
+A workflow or policy imports from `sanoma` what the lint lets it (`defineWorkflow`, `definePolicy`, `allow`, `deny`, `approve`, `approvedFor`, `allowAll`, `mayDecide`, `errorCode`, `z`, and types); `zod` itself and `@sanoma/workflows` are accepted too. The config file imports `defineConfig` and a ledger store (`jsonlLedger`, `memoryLedger`, `postgresLedger`) from `sanoma`, and its drivers from the connectors.
 
 ## Commands
 

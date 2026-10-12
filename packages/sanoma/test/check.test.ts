@@ -41,14 +41,14 @@ describe("check", () => {
         /^resources\/shop\.ts:1:23: error TS2307: Cannot find module '@sanoma\/connector-ghost\/resources'/,
       ),
       // oxlint: the unused import, and Date from @sanoma/workflows's rules.
-      expect.stringMatching(/^workflows\/hello\.ts:17:10: Identifier 'readFileSync' is imported but never used/),
+      expect.stringMatching(/^workflows\/hello\.ts:16:10: Identifier 'readFileSync' is imported but never used/),
       expect.stringMatching(
-        /^workflows\/hello\.ts:18:18: Unexpected use of 'Date'\. Workflows are replayed: use `await ctx\.now\(\)`/,
+        /^workflows\/hello\.ts:17:18: Unexpected use of 'Date'\. Workflows are replayed: use `await ctx\.now\(\)`/,
       ),
       // describeConfig: the data file, then the workflow's file.
       "resources/shop.ts:2:1: ghost has no resource type post: its types are ",
       expect.stringMatching(
-        /^workflows\/hello\.ts:17:30: import "node:fs" is not allowed in a workflow: import only from `sanoma`/,
+        /^workflows\/hello\.ts:16:30: import "node:fs" is not allowed in a workflow: import only from `sanoma`/,
       ),
     ]);
   }, 120_000);

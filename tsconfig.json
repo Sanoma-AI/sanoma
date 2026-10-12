@@ -1,18 +1,10 @@
 {
+  // The compiler options are the ones a company repo extends; this adds the checkout's paths.
+  "extends": "./packages/sanoma/tsconfig.base.json",
   "compilerOptions": {
-    "target": "es2024",
-    "lib": ["es2024"],
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "types": ["node"],
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noEmit": true,
-    "allowImportingTsExtensions": true,
-    "rewriteRelativeImportExtensions": false,
-    "verbatimModuleSyntax": true,
-    "erasableSyntaxOnly": true,
-    "skipLibCheck": true,
+    // The packages' build configs extend this from their own directories, where the base's
+    // `${configDir}` type roots hold no `@types/node`: the checkout's root holds it for all.
+    "typeRoots": ["./node_modules/@types"],
     // Inside the repo, @sanoma/* resolves to source so nothing needs building first.
     // Published packages resolve to dist/ through their package.json exports.
     // Keep in sync with resolve.alias in vitest.config.ts.

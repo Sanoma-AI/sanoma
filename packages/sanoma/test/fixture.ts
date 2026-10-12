@@ -37,11 +37,11 @@ export function ensureBuilt(): void {
 }
 
 /**
- * A fresh copy of `fixtures/project` in a temporary directory, with a `node_modules` of symlinks
- * to this checkout's packages (`sanoma`, `@sanoma/workflows`, `@sanoma/connector-ghost`), to
- * `zod`, and to the root's `@types` (for `tsc`): what `npm install` would leave, pointed at the
- * sources' builds. Node resolves each link to its real path, so the config and the bin share one
- * copy of every package.
+ * A fresh copy of `fixtures/project` in a temporary directory, with a `node_modules` of two
+ * symlinks into this checkout, `sanoma` and `@sanoma/connector-ghost`: what a company repo
+ * installs. Everything else (zod, `@types/node`, `@sanoma/workflows`, typescript, oxlint) the
+ * copy reaches through those packages' own `node_modules`, as under pnpm's strict layout. Node
+ * resolves each link to its real path, so the config and the bin share one copy of every package.
  */
 export function copyFixture(): string {
   const dir = mkdtempSync(join(tmpdir(), "sanoma-fixture-"));
@@ -50,10 +50,7 @@ export function copyFixture(): string {
   mkdirSync(join(modules, "@sanoma"), { recursive: true });
   const link = (name: string, target: string) => symlinkSync(realpathSync(join(repo, target)), join(modules, name));
   link("sanoma", "packages/sanoma");
-  link("@sanoma/workflows", "packages/workflows");
   link("@sanoma/connector-ghost", "connectors/ghost");
-  link("zod", "packages/workflows/node_modules/zod");
-  link("@types", "node_modules/@types");
   return dir;
 }
 

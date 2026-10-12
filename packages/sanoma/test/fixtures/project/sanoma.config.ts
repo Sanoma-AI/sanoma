@@ -1,7 +1,6 @@
 import { ghost } from "@sanoma/connector-ghost";
 import { fakeGhost } from "@sanoma/connector-ghost/fake";
-import { memoryLedger } from "@sanoma/workflows";
-import { defineConfig } from "sanoma";
+import { defineConfig, memoryLedger } from "sanoma";
 import policy from "./policies/policy.ts";
 import hello from "./workflows/hello.ts";
 

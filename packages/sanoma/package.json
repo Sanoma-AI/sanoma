@@ -50,15 +50,16 @@
     "@sanoma/app": "workspace:*",
     "@sanoma/bridge": "workspace:*",
     "@sanoma/workflows": "workspace:*",
+    "@types/node": "^26.6.4",
     "oxlint": "^1.87.0",
     "pg": "^8.23.1",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@sanoma/connector-ghost": "workspace:*",
     "@sanoma/testing": "workspace:*",
-    "@types/pg": "^8.23.1",
-    "zod": "^4.6.5"
+    "@types/pg": "^8.23.1"
   },
   "engines": {
     "node": ">=24"

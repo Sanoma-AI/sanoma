@@ -1,6 +1,5 @@
 import { ghost } from "@sanoma/connector-ghost";
-import { defineWorkflow } from "sanoma";
-import { z } from "zod";
+import { defineWorkflow, z } from "sanoma";
 
 export default defineWorkflow({
   name: "hello",

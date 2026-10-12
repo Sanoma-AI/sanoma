@@ -80,7 +80,7 @@ describe("sanoma check", () => {
     appendFileSync(workflow, 'import { readFileSync } from "node:fs";\n');
     const badImport = await runCli(dir, ["check"], env);
     expect(badImport.code).toBe(1);
-    expect(badImport.stdout).toMatch(/^workflows\/hello\.ts:17:\d+: import "node:fs" is not allowed in a workflow/m);
+    expect(badImport.stdout).toMatch(/^workflows\/hello\.ts:16:\d+: import "node:fs" is not allowed in a workflow/m);
     writeFileSync(workflow, source);
 
     const feature = join(dir, "scenarios/hello/hello.feature");
