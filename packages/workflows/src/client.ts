@@ -98,7 +98,7 @@ export interface StartOptions {
   runId?: string;
   /**
    * Start a sandbox run, seeded from the config's scenario of this name: it calls its own copies
-   * (`fresh()`) of the config's `fakes` instead of the drivers, and does not wait on sleeps.
+   * (`fresh()`) of the fakes its connectors attach instead of the drivers, and does not wait on sleeps.
    * Sandbox runs go on the app's queue like any run, so several run at once.
    */
   sandbox?: string;
@@ -133,7 +133,7 @@ export class SanomaClient {
       systemDatabaseUrl: resolved.databaseUrl,
       applicationName: resolved.appName,
     });
-    return new SanomaClient(dbos, resolved, config.drivers);
+    return new SanomaClient(dbos, resolved, resolved.driverList);
   }
 
   /**
@@ -168,7 +168,7 @@ export class SanomaClient {
     const sandbox = parseOrThrow(
       z.string().min(1).optional(),
       options.sandbox,
-      "`sandbox` must be the name of a scenario in the config's `scenarios`",
+      "`sandbox` must be the name of a scenario in the config's `scenarios/`",
     );
     const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }) };
     // An id DBOS has already returns that run, unless it is another workflow's, which DBOS refuses.

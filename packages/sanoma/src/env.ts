@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { credentialsOf, resolveDatabaseUrl, type SanomaConfig } from "@sanoma/workflows";
+import { credentialsOf, resolveConfig, resolveDatabaseUrl, type SanomaConfig } from "@sanoma/workflows";
 
 const HEADER = `# Copy to .env (ignored by git; \`sanoma\` loads it before reading the config). Never commit values.
 # The first block is what sanoma needs before anything runs. The vendor variables below it can
@@ -11,9 +11,9 @@ const HEADER = `# Copy to .env (ignored by git; \`sanoma\` loads it before readi
 
 /**
  * The text of `.env.example` for a config: the header, the variables sanoma reads (commented
- * out, with their defaults), then a block per vendor in the drivers' order with each variable
- * the drivers declare (`credentialsOf`), its description as a comment; an optional one is
- * commented out. The same config gives the same text, so `sanoma env --check` can compare.
+ * out, with their defaults), then a block per vendor in the connectors' order with each variable
+ * its connector's driver declares (`credentialsOf`), its description as a comment; an optional
+ * one is commented out. The same config gives the same text, so `sanoma env --check` can compare.
  */
 export function renderEnvExample(config: SanomaConfig): string {
   const lines = [
@@ -24,7 +24,7 @@ export function renderEnvExample(config: SanomaConfig): string {
     "# Optional. The app's port; default 3000.",
     "# SANOMA_APP_PORT=",
   ];
-  for (const [vendor, variables] of credentialsOf(config.drivers, () => undefined)) {
+  for (const [vendor, variables] of credentialsOf(resolveConfig(config).driverList, () => undefined)) {
     lines.push("");
     for (const { name, description, optional } of variables) {
       const about = description === undefined ? "" : `: ${description}`;

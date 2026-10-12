@@ -1,7 +1,7 @@
 import { DBOSClient } from "@dbos-inc/dbos-sdk";
-import { memoryLedger, SanomaClient, type SanomaConfig, type Worker } from "@sanoma/workflows";
+import { memoryLedger, resolveConfig, SanomaClient, type SanomaConfig, type Worker } from "@sanoma/workflows";
 import { afterAll, beforeAll } from "vitest";
-import { startTestWorker, testDatabaseUrl, type TestWorkerOptions } from "./index.ts";
+import { startTestWorker, testDatabaseUrlOf, type TestWorkerOptions } from "./index.ts";
 
 /** A test worker and its clients, for the tests of one `describe` (or file). */
 export interface TestApp {
@@ -27,12 +27,13 @@ const started = <T>(x: T | undefined, what: string): T => {
  * default `memoryLedger()`, and the database) so the clients read the worker's runs and a
  * restarted worker keeps its ledger.
  */
-export function useTestApp(config: Parameters<typeof startTestWorker>[0], options: TestWorkerOptions = {}): TestApp {
+export function useTestApp(config: SanomaConfig, options: TestWorkerOptions = {}): TestApp {
   const shared = {
     ...config,
     ledger: config.ledger ?? memoryLedger(),
-    databaseUrl: options.databaseUrl ?? testDatabaseUrl(config.appName),
+    databaseUrl: options.databaseUrl ?? testDatabaseUrlOf(config),
   };
+  const { appName } = resolveConfig(shared);
   let worker: Worker | undefined;
   let client: SanomaClient | undefined;
   let raw: DBOSClient | undefined;
@@ -40,7 +41,7 @@ export function useTestApp(config: Parameters<typeof startTestWorker>[0], option
   beforeAll(async () => {
     worker = await startTestWorker(shared, options);
     client = await SanomaClient.connect(shared);
-    raw = await DBOSClient.create({ systemDatabaseUrl: shared.databaseUrl, applicationName: shared.appName });
+    raw = await DBOSClient.create({ systemDatabaseUrl: shared.databaseUrl, applicationName: appName });
   }, 60_000);
 
   afterAll(async () => {

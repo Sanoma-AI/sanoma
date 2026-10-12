@@ -61,7 +61,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     outlines: new Map([...resolved.workflows].map(([name, wf]) => [name, outlineOf(wf)])),
     stopped: false,
   };
-  const credentials = await watchCredentials(resolved.databaseUrl, config.drivers);
+  const credentials = await watchCredentials(resolved.databaseUrl, resolved.driverList);
   const worker: Worker = {
     async stop() {
       state.stopped = true;
@@ -79,7 +79,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   const previous = current;
   let launched = false;
   try {
-    warnUnconfigured(credentialsOf(config.drivers, (name) => process.env[name]));
+    warnUnconfigured(credentialsOf(resolved.driverList, (name) => process.env[name]));
     for (const name of resolved.workflows.keys()) {
       if (!registered.has(name)) {
         register(name);

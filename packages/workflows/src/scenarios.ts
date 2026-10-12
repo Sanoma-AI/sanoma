@@ -14,7 +14,7 @@ import { startWorker } from "./worker.ts";
  */
 
 export interface RunScenarioOptions {
-  /** A client of the worker that runs the scenario, which has the config's `fakes` and `scenarios`. */
+  /** A client of the worker that runs the scenario, whose connectors carry the fakes and whose root has the scenarios. */
   client: SanomaClient;
   /** Who starts the run. Defaults to `{ id: "scenarios" }`. */
   startedBy?: Principal;
@@ -56,13 +56,13 @@ export interface RunScenariosOptions {
 }
 
 /**
- * Runs every scenario in the config's `scenarios` directory, one after another, as sandbox runs
+ * Runs every scenario in `scenarios/` in the config's root, one after another, as sandbox runs
  * on a worker it starts on `databaseUrl` with an in-memory ledger (the config's `ledger` is not
  * written), and stops when done. `passed` names the scenarios whose every check held; `failed`
  * has one entry per step that did not, with `check`'s detail, and one per feature file that
  * could not be read, with why. A scenario whose run cannot be driven to its end (an approval
  * with no decision, a run still going after `timeoutMs`) fails with that error at its `When`
- * step. A config with no `scenarios` directory, or none in it, passes nothing and fails nothing.
+ * step. A config whose root has no `scenarios/`, or none in it, passes nothing and fails nothing.
  */
 export async function runScenarios(
   config: SanomaConfig,

@@ -79,7 +79,7 @@ function ConnectorPage() {
         ) : (
           <>
             {/* A resource type's `read` and `import` read real state: a vendor with only those needs no fake. */}
-            {workflowOps.length > 0 && !vendor.fake && <None>No fake in this config.</None>}
+            {workflowOps.length > 0 && !vendor.fake && <None>Its connector attaches no fake.</None>}
             <ItemGroup>
               {ops.map((op) => (
                 <OpItem key={op.id} id={op.id} op={op}>

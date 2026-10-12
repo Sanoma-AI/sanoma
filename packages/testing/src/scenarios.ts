@@ -1,31 +1,37 @@
 // The tests are named after the feature files and scenarios, and one for a file that does not load fails by throwing.
 /* oxlint-disable vitest/valid-title, vitest/expect-expect */
 import { fileURLToPath } from "node:url";
-import { memoryLedger, type Principal, resolveConfig } from "@sanoma/workflows";
+import { memoryLedger, type Principal, resolveConfig, type SanomaConfig } from "@sanoma/workflows";
 import { loadScenarios } from "@sanoma/workflows/scenario";
 import { runScenario } from "@sanoma/workflows/scenarios";
 import { describe, expect, it } from "vitest";
 import { useTestApp } from "./harness.ts";
-import type { startTestWorker, TestWorkerOptions } from "./index.ts";
+import type { TestWorkerOptions } from "./index.ts";
 
 // One scenario as a sandbox run, from `@sanoma/workflows/scenarios`, where `runScenarios` (what
 // `sanoma check` runs) is built on it too.
 export { runScenario, type RunScenarioOptions } from "@sanoma/workflows/scenarios";
 
 /**
- * Registers a vitest test for each scenario in the config's `scenarios` directory, in a
+ * Registers a vitest test for each scenario in `scenarios/` in the config's root, in a
  * `describe` per feature file, that runs it (`runScenario`) and expects every check to pass; and
  * a failing test for each file that does not load. Starts one test app (`useTestApp`) for the
  * scenarios, before them, and stops it after. `config` and `options` are `startTestWorker`'s;
  * `startedBy` starts the runs, and `timeoutMs` is how long each may take (`drive`'s).
  */
 export function describeScenarios(
-  config: Parameters<typeof startTestWorker>[0],
+  config: SanomaConfig,
   { startedBy, timeoutMs, ...options }: TestWorkerOptions & { startedBy?: Principal; timeoutMs?: number } = {},
 ): void {
   // Only to read the scenarios: the test app resolves the config the worker runs.
   const resolved = resolveConfig({ ...config, ledger: config.ledger ?? memoryLedger() });
-  if (!resolved.scenarios) throw new Error("describeScenarios needs the config's `scenarios` directory");
+  if (!resolved.scenarios) {
+    throw new Error(
+      resolved.root === undefined
+        ? "describeScenarios needs the config's `root`, whose `scenarios/` holds the scenarios"
+        : `describeScenarios found no \`scenarios/\` in ${resolved.root}`,
+    );
+  }
   const { scenarios, errors } = loadScenarios(resolved);
   // A mistyped directory loads nothing, and a test file that registers no tests would pass.
   if (scenarios.length === 0 && errors.length === 0) {

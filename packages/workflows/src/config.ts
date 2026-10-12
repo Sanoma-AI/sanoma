@@ -1,36 +1,42 @@
-import { dirname, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, type DriftDeclared, driftWorkflow } from "./drift.ts";
 import { statusesOf, unconfigured } from "./env.ts";
 import type { Fake } from "./fake.ts";
 import type { LedgerStore } from "./ledger.ts";
-import { type Connector, type Driver, DriverError, type DriverEnv, type DriverFn, isOp, type Op } from "./op.ts";
+import {
+  type Connector,
+  type Driver,
+  DriverError,
+  type DriverEnv,
+  type DriverFn,
+  isOp,
+  type Op,
+  setupOf,
+} from "./op.ts";
 import type { Policy } from "./policy.ts";
 import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
 import { computeVersion } from "./version.ts";
 
 /**
- * What a worker runs, with which drivers, under which policy: the argument to `startWorker`.
- * A project usually keeps it in `sanoma.config.ts` and passes it in; nothing loads that file automatically.
+ * What a worker runs, on which connectors, under which policy: the argument to `startWorker`.
+ * A project usually keeps it in `sanoma.config.ts` and passes it in; nothing loads that file
+ * automatically. The rest is convention: each connector carries its driver and its fake
+ * (`withSetup`), the app's name is its `package.json`'s, and the scenarios and data files are
+ * `scenarios/` and `resources/` in `root`.
  */
 export interface SanomaConfig {
   workflows: WorkflowDefinition<any, any>[];
   /**
-   * The connectors (from `defineConnector`) whose operations the drivers implement. The worker
-   * takes each operation's effect, schemas and retry setting from here, not from the workflow,
-   * and refuses a workflow that declares an operation differently.
+   * The connectors (from `defineConnector`, as their packages export them). The worker takes
+   * each operation's effect, schemas and retry setting from here, not from the workflow, and
+   * refuses a workflow that declares an operation differently. A live run calls the driver its
+   * connector's package attaches; a sandbox run calls its own copy (`fresh()`) of the fake.
    */
   connectors: Connector<any, any>[];
-  drivers: Driver[];
-  /**
-   * Fake vendors (from `defineFake`) that sandbox runs copy (`fresh()`) and call instead of the
-   * drivers, so these can be the instances `drivers` holds when the config runs on fakes. A
-   * sandbox run is started with `{ sandbox: "<scenario name>" }` and seeded from that scenario.
-   */
-  fakes?: Fake<any, any>[];
-  /** The directory of `.feature` files sandbox runs are seeded from, as a `file:` URL, such as `new URL("./scenarios/", import.meta.url)`. */
-  scenarios?: URL;
   /** Checked before every operation call. Required: `allowAll` says that every call is allowed. */
   policy: Policy;
   /**
@@ -41,21 +47,24 @@ export interface SanomaConfig {
    * only, for tests.
    */
   ledger?: LedgerStore;
-  /** Scopes workflows, queues and versions in the system database. Defaults to "sanoma". */
-  appName?: string;
   /** Postgres for the runtime. Defaults to `SANOMA_DATABASE_URL`, then the local docker compose database. */
   databaseUrl?: string;
   /** The file that defined the config, absolute, when known. Set by `defineConfig` from its call site. */
   file?: string;
   /**
-   * The directory the config's conventions are relative to: the data files are `resources/`
-   * in it. Defaults to `file`'s directory; set it where that is not the source's, as in a bundle.
+   * The directory the config's conventions are relative to: its `package.json` (the app's name),
+   * `scenarios/` and `resources/`. Defaults to `file`'s directory; set it where that is not the
+   * source's, as in a bundle.
    */
   root?: string;
 }
 
 /** A config, checked, with everything a worker, client or app derives from it. */
 export interface ResolvedConfig {
+  /**
+   * Scopes workflows, queues and versions in the system database: the `name` of the nearest
+   * `package.json` at or above `root` that has one, else "sanoma".
+   */
   appName: string;
   databaseUrl: string;
   /** The DBOS application version: `<appName>@<DBOS__APPVERSION, or a hash of the workflows>`. */
@@ -66,11 +75,16 @@ export interface ResolvedConfig {
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id, each guarded by its driver's `env` (`indexDrivers`). */
   drivers: Map<string, DriverFn>;
-  /** The fake vendors, by vendor id: the templates each sandbox run copies. */
+  /** The drivers the connectors attach, in `connectors` order: what the credentials are read from (`credentialsOf`). */
+  driverList: readonly Driver[];
+  /**
+   * The fakes the connectors attach, by vendor id: the templates each sandbox run copies. Made
+   * once per config object, so every resolution of one config gives the same instances.
+   */
   fakes: Map<string, Fake<any, any>>;
   /** The fakes' functions, by operation id: which operations a sandbox run has a fake for. */
   fakeDrivers: Map<string, DriverFn>;
-  /** The scenarios directory, a `file:` URL. */
+  /** `scenarios/` in `root`, as a `file:` URL, when that directory exists. */
   scenarios?: URL;
   /** The resource types the connectors declare, by `<vendor>.<type>`: what the drift workflow checks and scenarios seed. */
   types: ReadonlyMap<string, Resource>;
@@ -114,48 +128,52 @@ function ledgerOf(config: SanomaConfig): LedgerStore | undefined {
   return config.ledger;
 }
 
+/** What a config held before its connectors carried their drivers and fakes, and where each went. */
+const REMOVED: Record<string, string> = {
+  drivers: "each connector carries its driver",
+  fakes: "each connector carries its fake",
+  appName: "the app's name is its package.json's",
+  scenarios: "the scenarios are `scenarios/` in the config's root",
+};
+
 /**
- * Checks a config and derives what the runtime needs from it. Throws what `startWorker` would
- * refuse, with the same message, so `describeConfig`, `SanomaClient.connect` and the app fail
- * the same way the worker does. Pure: it opens nothing, and is called per request by the app.
+ * Checks a config and derives what the runtime needs from it: the drivers and fakes from the
+ * connectors' setups (`withSetup`), and from `root`, the app's name (`package.json`) and the
+ * scenarios (`scenarios/`). Throws what `startWorker` would refuse, with the same message, so
+ * `describeConfig`, `SanomaClient.connect` and the app fail the same way the worker does. It
+ * opens nothing, reads no file outside `root` but a `package.json` above it, and is called per
+ * request by the app.
  */
 export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   if (!Array.isArray(config.connectors)) {
-    throw new Error(
-      "The config needs `connectors`: the defineConnector objects whose operations the drivers implement",
-    );
+    throw new Error("The config needs `connectors`: the connectors its workflows call, as their packages export them");
   }
   if (!Array.isArray(config.workflows)) {
     throw new Error("The config needs `workflows`: an array of defineWorkflow definitions");
   }
-  if (!Array.isArray(config.drivers)) {
-    throw new Error("The config needs `drivers`: an array of defineDriver implementations");
-  }
   if (typeof config.policy !== "function") {
     throw new Error("The config needs a `policy`; use `allowAll` to allow every operation call");
   }
-  const ledger = ledgerOf(config);
-  if (config.fakes !== undefined && !Array.isArray(config.fakes)) {
-    throw new Error("The config's `fakes` must be an array of defineFake fakes");
-  }
-  const { scenarios } = config;
-  if (scenarios !== undefined && !(scenarios instanceof URL && scenarios.protocol === "file:")) {
+  // A config still naming fake drivers would otherwise run live: refuse it rather than ignore them.
+  const removed = Object.keys(REMOVED).filter(
+    (key) => (config as object as Record<string, unknown>)[key] !== undefined,
+  );
+  if (removed.length) {
     throw new Error(
-      'The config\'s `scenarios` must be a file: URL to a directory, such as new URL("./scenarios/", import.meta.url)',
+      `The config's ${removed.map((key) => `\`${key}\``).join(", ")} ${removed.length > 1 ? "are" : "is"} no longer read; ` +
+        `leave ${removed.length > 1 ? "them" : "it"} out: ${removed.map((key) => REMOVED[key]).join("; ")}`,
     );
   }
-  const appName = config.appName ?? "sanoma";
+  const ledger = ledgerOf(config);
   // No fallback to the working directory: a config found nowhere has no data files, and says so.
   const root =
     config.root !== undefined ? resolve(config.root) : config.file !== undefined ? dirname(config.file) : undefined;
+  const appName = appNameAt(root);
+  const scenarios = root !== undefined && existsSync(join(root, "scenarios")) ? scenariosAt(root) : undefined;
   const ops = indexConnectors(config.connectors);
-  const drivers = indexDrivers(config.drivers, ops);
-  const fakes = new Map<string, Fake<any, any>>();
-  for (const fake of config.fakes ?? []) {
-    const { vendor } = fake.driver;
-    if (fakes.has(vendor)) throw new Error(`Two fakes in \`fakes\` are for "${vendor}"; keep one per vendor`);
-    fakes.set(vendor, fake);
-  }
+  const driverList = config.connectors.flatMap((c) => setupOf(c)?.driver() ?? []);
+  const drivers = indexDrivers(driverList, ops);
+  const fakes = fakesOf(config);
   const fakeDrivers = indexDrivers(
     [...fakes.values()].map((f) => f.driver),
     ops,
@@ -187,10 +205,11 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     appName,
     databaseUrl: resolveDatabaseUrl(config),
     // The built-in's code and operations are part of the app's version, like the config's own.
-    version: computeVersion({ appName: config.appName, workflows: [...names.values()] }),
+    version: computeVersion({ appName, workflows: [...names.values()] }),
     queueName: `sanoma:${appName}`,
     ops,
     drivers,
+    driverList,
     fakes,
     fakeDrivers,
     ...(scenarios && { scenarios }),
@@ -200,6 +219,65 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     ...(ledger !== undefined && { ledger }),
     ...(root !== undefined && { root }),
   };
+}
+
+/** The fakes the connectors attach, by vendor, made on a config's first resolution and kept for the config object. */
+const fakesByConfig = new WeakMap<SanomaConfig, Map<string, Fake<any, any>>>();
+
+function fakesOf(config: SanomaConfig): Map<string, Fake<any, any>> {
+  const known = fakesByConfig.get(config);
+  if (known) return known;
+  const fakes = new Map<string, Fake<any, any>>();
+  for (const connector of config.connectors) {
+    const fake = setupOf(connector)?.fake();
+    if (fake === undefined) continue;
+    const { vendor } = fake.driver;
+    const seen = fakes.get(vendor);
+    if (seen && seen !== fake) {
+      throw new Error(`Two connectors in \`connectors\` attach a fake for "${vendor}"; keep one per vendor`);
+    }
+    fakes.set(vendor, fake);
+  }
+  fakesByConfig.set(config, fakes);
+  return fakes;
+}
+
+/** `scenarios/` in `root`, as a `file:` URL to the directory (with its trailing slash). */
+const scenariosAt = (root: string) => pathToFileURL(`${join(root, "scenarios")}/`);
+
+/** Each directory's app name, once read: a `package.json` changes with a restart, not per request. */
+const appNames = new Map<string, string>();
+
+/**
+ * The `name` of the nearest `package.json` at or above `root` that has one, kept whole (`@acme/ops`),
+ * else "sanoma", as for a config with no `root`.
+ */
+function appNameAt(root: string | undefined): string {
+  if (root === undefined) return "sanoma";
+  const known = appNames.get(root);
+  if (known !== undefined) return known;
+  let name = "sanoma";
+  for (let dir = root; ;) {
+    const file = join(dir, "package.json");
+    if (existsSync(file)) {
+      let manifest: unknown;
+      try {
+        manifest = JSON.parse(readFileSync(file, "utf8"));
+      } catch (err) {
+        throw new Error(`${file} is not JSON, so it names no app: ${(err as Error).message}`, { cause: err });
+      }
+      const named = (manifest as { name?: unknown } | null)?.name;
+      if (typeof named === "string" && named.trim()) {
+        name = named.trim();
+        break;
+      }
+    }
+    const up = dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  appNames.set(root, name);
+  return name;
 }
 
 /**
@@ -296,7 +374,9 @@ function checkUses(wf: WorkflowDefinition<any, any>, ops: Map<string, Op>, impls
         `${op.id} is declared with effect "${op.effect}"${op.idempotent ? " (idempotent)" : ""}, ` +
           `but its connector says "${known.effect}"${known.idempotent ? " (idempotent)" : ""}`,
       );
-    } else if (!impls.has(op.id)) problems.push(`${op.id} has no driver`);
+    } else if (!impls.has(op.id)) {
+      problems.push(`\`${op.id}\` has no driver: the connector package must attach one`);
+    }
   }
   if (problems.length) throw new Error(`Workflow "${wf.name}": ${problems.join("; ")}`);
 }

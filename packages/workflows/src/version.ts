@@ -48,14 +48,17 @@ function installedDbosVersion(): string {
  * op schemas, drivers or the policy. DBOS's `DBOS__APPVERSION` environment variable names a
  * version instead (a git commit, say), still prefixed with the app name.
  */
-export function computeVersion(config: {
-  appName?: string;
+export function computeVersion({
+  appName,
+  workflows: definitions,
+}: {
+  /** The resolved config's `appName`. */
+  appName: string;
   workflows: readonly WorkflowDefinition<any, any>[];
 }): string {
-  const appName = config.appName ?? "sanoma";
   const named = process.env.DBOS__APPVERSION?.trim();
   if (named) return `${appName}@${named}`;
-  const workflows = config.workflows
+  const workflows = definitions
     .map(
       (wf) =>
         [

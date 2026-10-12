@@ -282,7 +282,7 @@ async function callOp(run: Run, id: string, input: unknown, node: string) {
     throw new Error(
       run.sandbox === undefined
         ? `No connector or driver for ${id} in this worker`
-        : `No connector or fake for ${id} in this worker: add its vendor's fake to the config's \`fakes\``,
+        : `No connector or fake for ${id} in this worker: no fake its connectors attach implements it`,
     );
   }
   const parsed = parseOrThrow(op.input, input, `The input to ${op.id} does not match its schema`, { op: op.id });

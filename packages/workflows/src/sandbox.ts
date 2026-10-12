@@ -105,7 +105,7 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
       if (missing.length) {
         throw new SanomaError(
           "invalid_input",
-          `A sandbox run of ${run.workflow} has no fake for ${missing.join(", ")}: add their vendors' fakes to the config's \`fakes\``,
+          `A sandbox run of ${run.workflow} has no fake for ${missing.join(", ")}: no fake its connectors attach implements ${missing.length > 1 ? "them" : "it"}`,
           { scenario: name, missing },
         );
       }

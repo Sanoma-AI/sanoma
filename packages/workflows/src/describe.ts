@@ -85,7 +85,7 @@ export interface VendorEntry {
   package?: string;
   /** The connector package's `homepage` from its package.json: where its code and README are, as an https URL. */
   homepage?: string;
-  /** Whether the config's `fakes` holds a fake of this vendor, for sandbox runs. */
+  /** Whether the vendor's connector attaches a fake (`withSetup`), for sandbox runs. */
   fake: boolean;
 }
 

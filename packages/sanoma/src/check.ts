@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import type { SanomaConfig } from "@sanoma/workflows";
+import { resolveConfig, type SanomaConfig } from "@sanoma/workflows";
 import { describeConfig } from "@sanoma/workflows/describe";
 import { problemLine } from "@sanoma/workflows/shared";
 import { runScenarios } from "@sanoma/workflows/scenarios";
@@ -48,8 +48,8 @@ export async function check(
   const found = await Promise.all([typecheck(root, log), lint(root, log), configProblems(config, root, log)]);
   const problems = found.flat();
 
-  if (config.scenarios === undefined) {
-    log("no scenarios: the config has no `scenarios` directory");
+  if (resolveConfig(config).scenarios === undefined) {
+    log("no scenarios: the config's root has no `scenarios/` directory");
   } else {
     await ready;
     log("scenarios");

@@ -31,7 +31,7 @@ export async function loadConfig(cwd = process.cwd()): Promise<LoadedConfig> {
   const config = mod.default;
   if (!isConfig(config)) {
     throw new UsageError(
-      `${file} must export a config as its default export: \`export default defineConfig({ workflows, connectors, drivers, policy, ledger })\``,
+      `${file} must export a config as its default export: \`export default defineConfig({ workflows, connectors, policy })\``,
     );
   }
   config.file ??= file;
