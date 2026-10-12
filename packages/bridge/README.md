@@ -79,10 +79,12 @@ export const githubTf = tfConnector({
   missing: (e) => e.code === "not_found" || e.diagnostics.some((d) => d.summary.startsWith("could not find ")),
   info: { title: "GitHub", logo: { svg }, package: "@sanoma/connector-github" },
 });
-githubTf.connector; // for defineConfig and workflows: github.repository.read, github.repository.import
+githubTf.connector; // the operations: github.repository.read, github.repository.import
 githubTf.resources; // the data-file constructors: githubTf.resources.repository({ name: "sanoma" })
 githubTf.driver(bridge, () => ({ token: process.env.GITHUB_TOKEN })); // the driver; the config is read per call
 ```
+
+The package root exports the connector with its driver and fake attached, `withSetup(githubTf.connector, { driver: () => githubDriver(), fake: () => fakeGithub() })` from `@sanoma/workflows`, which is what a config and workflows import.
 
 Each type becomes a resource type (`defineResource`, with the generated schema and fields, its `references` as `fields.references`, and an optional `normalize`), given to `defineConnector` under its name; `info.package` is needed, since data files import the constructors from `<package>/resources`. The driver's `import` asks the provider to find the object (the bridge reads it too); `read` refreshes a state from an earlier call, or imports when it has none, or one without an `id`. Either answers `{ gone: true }` when the provider finds nothing, or fails with an error `missing(e)` accepts (`(e: BridgeError) => boolean`, default `e.code === "not_found"`): how each provider says an object is not there is its own, and GitHub's is a `failed_precondition` whose diagnostic says it "could not find" it. States go out in the resource's shape, secrets dropped (`fromTfState`), and come back in the provider's (`toTfState`). The provider is configured through `ensureConfigured`. The bridge's errors become `DriverError`s with its code as `vendorCode` and the provider's diagnostics in the message, retryable only on `unavailable`.
 

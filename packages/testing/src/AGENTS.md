@@ -4,10 +4,10 @@ Source of `@sanoma/testing`: the test worker helpers exported from the package r
 
 ## Contents
 
-| Path                           | What it is                                                                                                                                 |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`index.ts`](index.ts)         | `testDatabaseUrl` and `startTestWorker`, `ensureBuilt` and `waitFor` (from `build.ts`), and the `Fake` types from `@sanoma/workflows/fake` |
-| [`build.ts`](build.ts)         | `ensureBuilt` (a package's build, when its outputs are stale) and `waitFor` (polling), exported from the root                              |
-| [`harness.ts`](harness.ts)     | `useTestApp`: a worker, a `SanomaClient` and a raw `DBOSClient` for a `describe`, with `restart()` on the same ledger                      |
-| [`replay.ts`](replay.ts)       | `replay(options)`: serves a vendor's recorded exchanges through msw, and records new ones with `SANOMA_RECORD=1`                           |
-| [`scenarios.ts`](scenarios.ts) | `describeScenarios` registers a vitest test per scenario in a config, over `runScenario` from `@sanoma/workflows/scenarios`, re-exported   |
+| Path                           | What it is                                                                                                                                                |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`index.ts`](index.ts)         | `testDatabaseUrl`, `testDatabaseUrlOf`, `testRoot`, `withFake` and `startTestWorker`, `ensureBuilt` and `waitFor` (from `build.ts`), and the `Fake` types |
+| [`build.ts`](build.ts)         | `ensureBuilt` (a package's build, when its outputs are stale) and `waitFor` (polling), exported from the root                                             |
+| [`harness.ts`](harness.ts)     | `useTestApp`: a worker, a `SanomaClient` and a raw `DBOSClient` for a `describe`, with `restart()` on the same ledger                                     |
+| [`replay.ts`](replay.ts)       | `replay(options)`: serves a vendor's recorded exchanges through msw, and records new ones with `SANOMA_RECORD=1`                                          |
+| [`scenarios.ts`](scenarios.ts) | `describeScenarios` registers a vitest test per scenario in a config, over `runScenario` from `@sanoma/workflows/scenarios`, re-exported                  |

@@ -27,13 +27,15 @@ The logo the app shows beside these operations is Bluesky's butterfly from its [
 
 ## Driver
 
-`@sanoma/connector-bluesky/driver` posts with the official [`@atproto/api`](https://www.npmjs.com/package/@atproto/api), whose client is generated from the Lexicon schemas. Pass it to the worker from your config (workflows may not import it):
+`@sanoma/connector-bluesky/driver` posts with the official [`@atproto/api`](https://www.npmjs.com/package/@atproto/api), whose client is generated from the Lexicon schemas. The `bluesky` connector the package root exports carries it, made once per process, and its fake (`withSetup` from `@sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
 
 ```ts
-import { blueskyDriver } from "@sanoma/connector-bluesky/driver";
+import { bluesky } from "@sanoma/connector-bluesky";
 
-const drivers = [blueskyDriver()]; // or blueskyDriver({ timeoutMs: 5_000 }); the default is 10 s per request
+export default defineConfig({ workflows, connectors: [bluesky], policy });
 ```
+
+`./driver` (`blueskyDriver`; `blueskyDriver({ timeoutMs })`, 10 s per request by default) and `./fake` (`fakeBluesky`) are internal entries, for tests.
 
 URLs and @mentions in the text become links (`RichText.detectFacets`); a mention whose handle does not resolve is posted as plain text. The reply's `url` is `https://bsky.app/profile/<handle>/post/<rkey>`.
 
@@ -77,14 +79,18 @@ A recording keeps only the session fields the driver reads, and the account's DI
 
 ## Testing
 
-`@sanoma/connector-bluesky/fake` is an in-memory Bluesky that posts nowhere: pass its driver to the worker, then check `state.posts` and `calls`.
+`@sanoma/connector-bluesky/fake` is an in-memory Bluesky that posts nowhere, the fake the connector carries: sandbox runs call their own copies of it. A test that reads or seeds one attaches it to the connector itself, then checks `state.posts` and `calls`.
 
 ```ts
+import { withSetup } from "@sanoma/workflows";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
 
 const fake = fakeBluesky(); // or fakeBluesky({ file: ".sanoma/bluesky.json" }) to keep the state on disk
-const worker = await startWorker({ connectors: [bluesky], drivers: [fake.driver] /* , ... */ });
+const worker = await startWorker({
+  connectors: [withSetup(bluesky, { driver: () => fake.driver, fake: () => fake })],
+  /* ... */
+});
 
 // ...run a workflow, then:
 fake.state.posts.map((p) => p.text); // ["Hello"]

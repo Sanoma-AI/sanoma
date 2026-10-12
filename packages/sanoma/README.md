@@ -22,21 +22,18 @@ A repo holds `sanoma.config.ts` at its root, with `workflows/`, `policies/`, opt
 ```ts
 // sanoma.config.ts
 import { ghost } from "@sanoma/connector-ghost";
-import { ghostDriver } from "@sanoma/connector-ghost/driver";
-import { defineConfig, jsonlLedger } from "sanoma";
+import { defineConfig } from "sanoma";
 import policy from "./policies/policy.ts";
 import publish from "./workflows/publish.ts";
 
 export default defineConfig({
   workflows: [publish],
   connectors: [ghost],
-  drivers: [ghostDriver],
-  scenarios: new URL("./scenarios/", import.meta.url),
   policy,
-  ledger: jsonlLedger(".sanoma/ledger"),
-  appName: "acme",
 });
 ```
+
+Each connector carries its driver and its fake, so the config names neither. The rest is the repo's layout: the app's name is `package.json`'s `name`, the scenarios are `scenarios/` and the data files `resources/`, beside `sanoma.config.ts`. The ledger is Postgres's, on the config's database; `ledger: jsonlLedger(dir)` keeps it in files instead.
 
 ```ts
 // workflows/publish.ts
@@ -52,7 +49,7 @@ export default defineWorkflow({
 });
 ```
 
-A workflow or policy imports from `sanoma` what the lint lets it (`defineWorkflow`, `definePolicy`, `allow`, `deny`, `approve`, `approvedFor`, `allowAll`, `mayDecide`, `errorCode`, `z`, and types); `zod` itself and `@sanoma/workflows` are accepted too. The config file imports `defineConfig` and a ledger store (`jsonlLedger`, `memoryLedger`, `postgresLedger`) from `sanoma`, and its drivers from the connectors.
+A workflow or policy imports from `sanoma` what the lint lets it (`defineWorkflow`, `definePolicy`, `allow`, `deny`, `approve`, `approvedFor`, `allowAll`, `mayDecide`, `errorCode`, `z`, and types); `zod` itself and `@sanoma/workflows` are accepted too. The config file imports `defineConfig` (and a ledger store, `jsonlLedger`, `memoryLedger` or `postgresLedger`, when it names one) from `sanoma`, and its connectors from their packages.
 
 ## Commands
 
@@ -63,7 +60,7 @@ Run them from the directory that holds `sanoma.config.ts`. Each loads `.env` the
 | `sanoma`                                      | Makes sure Postgres answers (see [Postgres](#postgres)), then starts the worker (promoted, so a local worker takes every queued run) and the app in one process, and prints `<appName> running <workflows>` and `<appName> at http://127.0.0.1:3000; ctrl-c to stop`. In [dev mode](#dev-mode) it runs them in a child it restarts.                                                                                                                                                                                                                                                                  |
 | `sanoma worker`, `sanoma app`                 | One of the two alone, for a deployment that runs them apart. Neither touches Docker.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `sanoma check`                                | `tsc -p tsconfig.json`; oxlint over `workflows/`, `policies/` and `resources/` with the repo's `.oxlintrc.json`, written when missing (see [the lint](#the-lint)); every problem `describeConfig` finds (an import a workflow may not make, what its graph cannot draw, a data file outside the subset: what the worker would refuse); then every scenario against the fakes, on a database of its own (`<database>_check`), each step that did not hold a problem. Prints each problem on a line, `file:line:col: message` or `scenario › step: message`, and exits 1 when there is one. No vitest. |
-| `sanoma env [--check]`                        | Writes `.env.example`: the variables `sanoma` reads, then every variable the drivers declare, by vendor, with its description; optional ones commented out. `--check` writes nothing and exits 1 with "`.env.example` is out of date: run `sanoma env`" when the file differs, for CI.                                                                                                                                                                                                                                                                                                               |
+| `sanoma env [--check]`                        | Writes `.env.example`: the variables `sanoma` reads, then every variable the connectors' drivers declare, by vendor, with its description; optional ones commented out. `--check` writes nothing and exits 1 with "`.env.example` is out of date: run `sanoma env`" when the file differs, for CI.                                                                                                                                                                                                                                                                                                   |
 | `sanoma ledger export <runId> [--out <file>]` | A run's ledger records from the config's store (the Postgres ledger on its database when it names none), as JSON lines (the shape `jsonlLedger` keeps), to stdout or `--out`.                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `sanoma --help`                               | The usage.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
@@ -75,7 +72,7 @@ The worker and the app run on `SANOMA_DATABASE_URL` (default `postgresql://postg
 
 ## `.env.example`
 
-`sanoma env` keeps `.env.example` the manual of the variables: `SANOMA_DATABASE_URL` and `SANOMA_APP_PORT` first, with their defaults, then a block per vendor in the drivers' order, each variable the driver's `env` declares with its `.describe()` text. A required variable is `NAME=`; an optional one is commented out, `# NAME=`, with `Optional.` before its description. The same config gives the same text, which `--check` compares byte for byte. Copy it to `.env` (ignored by git) and fill it in; the vendor variables can also be set on the app's connector pages, where a value from the environment wins over a stored one.
+`sanoma env` keeps `.env.example` the manual of the variables: `SANOMA_DATABASE_URL` and `SANOMA_APP_PORT` first, with their defaults, then a block per vendor in the connectors' order, each variable its driver's `env` declares with its `.describe()` text. A required variable is `NAME=`; an optional one is commented out, `# NAME=`, with `Optional.` before its description. The same config gives the same text, which `--check` compares byte for byte. Copy it to `.env` (ignored by git) and fill it in; the vendor variables can also be set on the app's connector pages, where a value from the environment wins over a stored one.
 
 ## The lint
 

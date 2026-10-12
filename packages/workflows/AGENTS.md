@@ -5,7 +5,8 @@ This package owns workflow declarations, durable execution, policy and approval 
 ## Read when needed
 
 - [README](README.md): public API, [resources](README.md#resources), and examples; [versions](README.md#versions) and [replay safety](README.md#keeping-workflows-replay-safe) for runtime changes.
-- [Scenarios and sandbox runs](README.md#scenarios-and-sandbox-runs): the Gherkin steps, the `fakes` and `scenarios` config, and what a sandbox run does differently.
+- [Usage](README.md#usage): the config (`connectors`, `workflows`, `policy`) and its conventions; each connector carries its driver and fake (`withSetup`).
+- [Scenarios and sandbox runs](README.md#scenarios-and-sandbox-runs): the Gherkin steps, the connectors' fakes and the root's `scenarios/`, and what a sandbox run does differently.
 - [Source map](src/AGENTS.md): locate execution, definitions, analysis, or browser-safe helpers.
 - [Test map](test/AGENTS.md): select coverage and the shared DBOS harness.
 
@@ -20,6 +21,7 @@ This package owns workflow declarations, durable execution, policy and approval 
 - `src/drift.ts` is held to the workflow lint (a test lints it), so it imports no DBOS and makes no dynamic import: its data-file step is made in `src/config.ts` and passed in. The worker takes every definition, the built-in's too, from the running worker's config by name.
 - Data files are found from the config's `root` (`defineConfig`'s call site, or set), never the working directory. The JSONL ledger's directory is still relative to the working directory: an inconsistency to fix, not a pattern to copy.
 - The default ledger is `postgresLedger` on the config's database, with its table beside the credentials'; both go through `src/db.ts`. `resolveConfig` stays pure (the app calls it per request): `startWorker` and `SanomaClient` each make their own store (`ownedLedger` in `src/ledger.ts`) and are the only callers of `close`, which they call only on a store they made; a config's own `ledger` is never closed by the runtime.
+- `resolveConfig` derives everything a config no longer says: the drivers from each connector's setup (`setupOf(c).driver()`, memoised by `withSetup`), the fakes (`setupOf(c).fake()`, made once per config object in a `WeakMap`), the app name from the nearest `package.json` at or above `root`, and `scenarios/` in `root`. A config setting `drivers`, `fakes`, `appName` or `scenarios` is refused. `SETUP`, `withSetup` and `setupOf` stay off the workflow allow-list in `oxlint.json` and off `sanoma`'s author surface.
 - The worker starts without credentials: `startWorker` warns per vendor, and `indexDrivers` in `src/config.ts` guards each function of a driver with an `env` so a call it does not satisfy fails inside the driver step as a final `DriverError`; a fake has no `env`, so sandbox runs are unguarded. Keep the check there (not at start, not before the policy or an approval hold), so stored credentials set later take effect on the next call and the refusal is the call's recorded failure.
 
 ## Checks

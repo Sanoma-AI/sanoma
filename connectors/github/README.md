@@ -41,13 +41,15 @@ Attributes that are computed and not optional (`html_url`, `repo_id`) are vendor
 
 ## Driver
 
-`@sanoma/connector-github/driver` reads through a provider bridge. Workflows never import it; the config that starts the worker does:
+`@sanoma/connector-github/driver` reads through a provider bridge. The `github` connector the package root exports carries it, made once per process, and its fake (`withSetup` from `@sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
 
 ```ts
-import { githubDriver } from "@sanoma/connector-github/driver";
+import { github } from "@sanoma/connector-github";
 
-const drivers = [githubDriver()]; // or githubDriver({ bridge }) to read through a bridge of your own
+export default defineConfig({ workflows, connectors: [github], policy });
 ```
+
+`./driver` (`githubDriver`; `githubDriver({ bridge })` reads through a bridge of your own) and `./fake` (`fakeGithub`) are internal entries, for tests.
 
 Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma/bridge`, started on the first call from `SANOMA_BRIDGE_BIN`; `bridge` is any `ProviderClient` (a `Bridge` from `startBridge()`, or `stateBridge` in tests). It configures the provider on the first call with `{ owner, token }` from the environment, and again when either changes (closing it first: the bridge refuses a second config), when the provider has exited, or when the bridge has forgotten it (`ensureConfigured`). `read` without a state (or with one that has no `id`) imports, which reads the object too. States leave the driver in the resource's shape, with sensitive attributes set to `null`; the provider's private data and state version travel in the opaque `handle`.
 
@@ -71,10 +73,15 @@ The bridge's errors become `DriverError`s whose `vendorCode` is the bridge's cod
 `@sanoma/connector-github/fake` is GitHub as it was when the replies in `@sanoma/bridge`'s `testdata/replies` were recorded (the `Sanoma-AI/sanoma` and `Sanoma-AI/provider-bridge` repositories; `provider-bridge:main` has no branch protection), served through the real driver over a `stateBridge` of them (`tfFake`). It needs no token and reaches nothing.
 
 ```ts
+import { withSetup } from "@sanoma/workflows";
+import { github } from "@sanoma/connector-github";
 import { fakeGithub } from "@sanoma/connector-github/fake";
 
 const fake = fakeGithub();
-const worker = await startWorker({ connectors: [github], drivers: [fake.driver] /* , ... */ });
+const worker = await startWorker({
+  connectors: [withSetup(github, { driver: () => fake.driver, fake: () => fake })],
+  /* ... */
+});
 
 fake.put("repository", "website", { name: "website", has_wiki: false }, { from: "sanoma" }); // a copy of a recorded one
 fake.override("repository", "sanoma", { delete_branch_on_merge: true }); // drift: the next read returns it

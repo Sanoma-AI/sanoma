@@ -4,15 +4,15 @@ Helpers for testing [`@sanoma/workflows`](https://www.npmjs.com/package/@sanoma/
 
 ## Install
 
-```sh
-npm install --save-dev @sanoma/testing
-```
+Private to this repository: its tests import it through the workspace, and it is not published.
 
 ## A worker for a test
 
-`startTestWorker(config, options?)` calls `startWorker` with test defaults: the database `testDatabaseUrl(appName)` and, unless the config has one, a fresh in-memory ledger. `appName` is required and should be unique to the test file, since it names the file's database; two files sharing one would recover each other's runs. A `databaseUrl` in the config is ignored, so a test can spread the project's own config without reaching its real database; pass `options.databaseUrl` to use another one. The other options (`promote`, `logLevel`) go to `startWorker`.
+`startTestWorker(config, options?)` calls `startWorker` with test defaults: the database `testDatabaseUrl(appName)` (`testDatabaseUrlOf(config)`), the app's name being the `name` of its root's `package.json`, and, unless the config has one, a fresh in-memory ledger. Give each test file an app of its own, since its name names the file's database and two files sharing one would recover each other's runs: `root: testRoot("announce-test")` is a directory whose `package.json` names the app, and nothing else. A `databaseUrl` in the config is ignored, so a test can spread the project's own config without reaching its real database; pass `options.databaseUrl` to use another one. The other options (`promote`, `logLevel`) go to `startWorker`.
 
 `testDatabaseUrl(suffix)` is `SANOMA_TEST_DATABASE_URL` (default `postgresql://postgres:dbos@localhost:5433/sanoma_test`) with `_<suffix>` appended to the database name. Give each test file its own suffix, so files don't recover each other's runs. DBOS creates the database if it is missing.
+
+`withFake(connector, fake, driver?)` is the connector set up with that fake instead of the one its package attaches, so live runs call it (through `driver`, by default the fake's own) and sandbox runs copy it: what a test that seeds or reads a fake passes in `connectors`.
 
 `ensureBuilt(pkgDir, outputs, build)` runs `build` (a command and its arguments) in `pkgDir` when one of `outputs` is missing or older than a file under its `src/`, for tests of what a package ships from `dist/`. `waitFor(get, done?, timeoutMs?)` calls `get` every 100 ms until `done` holds for its value (by default, until it is truthy), returns that value, and throws after `timeoutMs` (default 15 seconds) naming the last one.
 
@@ -21,7 +21,7 @@ import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
 import { fakeGhost } from "@sanoma/connector-ghost/fake";
 import { fakeResend } from "@sanoma/connector-resend/fake";
-import { type FakeCall, startTestWorker } from "@sanoma/testing";
+import { type FakeCall, startTestWorker, testRoot, withFake } from "@sanoma/testing";
 import { allowAll } from "@sanoma/workflows";
 import announce from "./workflows/announce.ts";
 
@@ -30,10 +30,9 @@ const blog = fakeGhost({ calls });
 const email = fakeResend({ calls });
 const worker = await startTestWorker({
   workflows: [announce],
-  connectors: [ghost, resend],
-  drivers: [blog.driver, email.driver],
+  connectors: [withFake(ghost, blog), withFake(resend, email)],
   policy: allowAll,
-  appName: "announce-test", // and the database announce-test's tests run on
+  root: testRoot("announce-test"), // the app, and the database announce-test's tests run on
 });
 
 // ...start a run and wait for it to finish, then:
@@ -48,17 +47,18 @@ await worker.stop();
 
 | Member      | What it is                                                                                                                                                                           |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `config`    | The config the worker and the clients share: yours, with `ledger` (default `memoryLedger()`) and `databaseUrl` (default `testDatabaseUrl(appName)`) filled in once.                  |
+| `config`    | The config the worker and the clients share: yours, with `ledger` (default `memoryLedger()`) and `databaseUrl` (default `testDatabaseUrlOf(config)`) filled in once.                 |
 | `client`    | A `SanomaClient` of the worker: start runs, decide approvals, read the ledger.                                                                                                       |
 | `raw`       | A `DBOSClient` of the same app, which sends messages and reads a run's steps without `SanomaClient`'s checks.                                                                        |
 | `stop()`    | Stops the worker, as a process that stopped would.                                                                                                                                   |
 | `restart()` | Stops the worker (unless `stop` did) and starts another on the same config and ledger, as a restarted process would: the runs it had in progress resume, and their records are kept. |
 
-`client` and `raw` throw "is not started" outside the tests. Fakes are yours: create them beside the call and reset them in your own `beforeEach`.
+`client` and `raw` throw "is not started" outside the tests. Fakes a test reads are yours: create them beside the call, pass them with `withFake`, and reset them in your own `beforeEach`.
 
 ```ts
 import { ghost } from "@sanoma/connector-ghost";
 import { fakeGhost } from "@sanoma/connector-ghost/fake";
+import { testRoot, withFake } from "@sanoma/testing";
 import { useTestApp } from "@sanoma/testing/harness";
 import { allowAll } from "@sanoma/workflows";
 import { beforeEach, expect, it } from "vitest";
@@ -67,10 +67,9 @@ import publish from "./workflows/publish.ts";
 const blog = fakeGhost();
 const app = useTestApp({
   workflows: [publish],
-  connectors: [ghost],
-  drivers: [blog.driver],
+  connectors: [withFake(ghost, blog)],
   policy: allowAll,
-  appName: "publish-test",
+  root: testRoot("publish-test"),
 });
 beforeEach(() => blog.reset());
 
@@ -86,11 +85,11 @@ A memory ledger lives in the test process, so it outlives a restart there. To ke
 
 ## Fake vendors
 
-Each connector ships its fake at its own `/fake` entry, not in this package: `import { fakeGhost } from "@sanoma/connector-ghost/fake";`. Install the connectors you use; their READMEs ([Ghost](https://www.npmjs.com/package/@sanoma/connector-ghost#testing), [Resend](https://www.npmjs.com/package/@sanoma/connector-resend#testing), [Bluesky](https://www.npmjs.com/package/@sanoma/connector-bluesky#testing), [GitHub](https://www.npmjs.com/package/@sanoma/connector-github#testing), [Stripe](https://www.npmjs.com/package/@sanoma/connector-stripe#testing)) say what each fake holds and adds. Each returns:
+Each connector carries its fake, and ships it at its own `/fake` entry, not in this package: `import { fakeGhost } from "@sanoma/connector-ghost/fake";`. Install the connectors you use; their READMEs ([Ghost](https://www.npmjs.com/package/@sanoma/connector-ghost#testing), [Resend](https://www.npmjs.com/package/@sanoma/connector-resend#testing), [Bluesky](https://www.npmjs.com/package/@sanoma/connector-bluesky#testing), [GitHub](https://www.npmjs.com/package/@sanoma/connector-github#testing), [Stripe](https://www.npmjs.com/package/@sanoma/connector-stripe#testing)) say what each fake holds and adds. Each returns:
 
 | Member                 | What it does                                                                                   |
 | ---------------------- | ---------------------------------------------------------------------------------------------- |
-| `driver`               | The driver to pass to the worker.                                                              |
+| `driver`               | Its driver: what live runs call when the connector is set up with the fake (`withFake`).       |
 | `state`                | The vendor's state, such as `posts` or `broadcasts`.                                           |
 | `calls`                | Every call received, in order, with its input and idempotency key.                             |
 | `reset()`              | Empties the state, the remembered replies and the pending faults.                              |
@@ -138,9 +137,9 @@ Two variables change what the same tests do:
 
 ## Scenarios
 
-`@sanoma/testing/scenarios` runs a config's [scenarios](https://www.npmjs.com/package/@sanoma/workflows#scenarios-and-sandbox-runs) as vitest tests (install `vitest` and `@dbos-inc/dbos-sdk` beside it). Each scenario is a sandbox run: the worker calls the config's `fakes`, never a driver.
+`@sanoma/testing/scenarios` runs a config's [scenarios](https://www.npmjs.com/package/@sanoma/workflows#scenarios-and-sandbox-runs) as vitest tests (install `vitest` and `@dbos-inc/dbos-sdk` beside it). Each scenario is a sandbox run: the worker calls copies of the fakes the connectors carry, never a driver.
 
-`describeScenarios(config, options?)` reads the `.feature` files in the config's `scenarios` directory and registers a test for each scenario, in a `describe` per file, each over `runScenario` from `@sanoma/workflows/scenarios` (the one implementation; `runScenarios` there, which `sanoma check` runs, needs no vitest); it throws, naming the directory, when it finds none. A test starts the scenario's sandbox run, decides its approvals as the scenario says, and fails listing each `Then` step that did not hold, with why. A file that does not load (a step no rule matches, bad JSON, a name used twice) is a failing test named after the file, whose message names the file (and the line, for a step or JSON error). It starts one [test app](#a-test-app) for all its scenarios, before them, with `useTestApp(config, options)`, and stops it after; `appName` is required, as for `startTestWorker`. `options.startedBy` starts the runs (default `{ id: "scenarios" }`), and `options.timeoutMs` is how long each may take (`drive`'s, 15 seconds by default); the tests it registers get twice that, so `drive`'s error is the one you see.
+`describeScenarios(config, options?)` reads the `.feature` files in `scenarios/` in the config's root and registers a test for each scenario, in a `describe` per file, each over `runScenario` from `@sanoma/workflows/scenarios` (the one implementation; `runScenarios` there, which `sanoma check` runs, needs no vitest); it throws, naming the root or the directory, when the root has no `scenarios/` or it holds no scenarios. A test starts the scenario's sandbox run, decides its approvals as the scenario says, and fails listing each `Then` step that did not hold, with why. A file that does not load (a step no rule matches, bad JSON, a name used twice) is a failing test named after the file, whose message names the file (and the line, for a step or JSON error). It starts one [test app](#a-test-app) for all its scenarios, before them, with `useTestApp(config, options)`, and stops it after; its database is named after the app, as for `startTestWorker`. `options.startedBy` starts the runs (default `{ id: "scenarios" }`), and `options.timeoutMs` is how long each may take (`drive`'s, 15 seconds by default); the tests it registers get twice that, so `drive`'s error is the one you see.
 
 ```ts
 // test/scenarios.test.ts
@@ -148,8 +147,8 @@ import { describeScenarios } from "@sanoma/testing/scenarios";
 import { memoryLedger } from "@sanoma/workflows";
 import config from "../sanoma.config.ts";
 
-// appName names the test database.
-describeScenarios({ ...config, ledger: memoryLedger(), appName: "scenarios-test" });
+// The app's name, from package.json, names the test database.
+describeScenarios({ ...config, ledger: memoryLedger() });
 ```
 
 A company config spread into `describeScenarios` keeps its `ledger`, so pass `ledger: memoryLedger()`, as above, to keep test runs out of the project's ledger.
