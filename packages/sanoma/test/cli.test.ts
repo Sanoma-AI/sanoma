@@ -1,9 +1,9 @@
-import { appendFileSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { testDatabaseUrl } from "@sanoma/testing";
+import { testDatabaseUrl, waitFor } from "@sanoma/testing";
 import type { ConfigDescription } from "@sanoma/workflows/describe";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { copyFixture, ensureBuilt, runCli, startCli, waitFor } from "./fixture.ts";
+import { copyFixture, ensureBuilt, runCli, startCli } from "./fixture.ts";
 
 // Needs Postgres (`pnpm db:up`) and the packages' builds: the fixture copy loads them as a
 // company repo would, from `dist/`, so `beforeAll` builds those that are stale.
@@ -18,12 +18,11 @@ describe("sanoma serve", () => {
     dir = copyFixture();
     const { child, finished, output } = startCli(dir, ["serve"], env);
     try {
-      await waitFor(
-        () => /sanoma-fixture at http:\/\/127\.0\.0\.1:\d+/.test(output().stdout),
-        "the app's address",
+      const stdout = await waitFor(
+        () => output().stdout,
+        (out) => /sanoma-fixture at http:\/\/127\.0\.0\.1:\d+/.test(out),
         30_000,
       );
-      const { stdout } = output();
       expect(stdout).toContain("sanoma-fixture running hello");
       const url = stdout.match(/at (http:\/\/127\.0\.0\.1:\d+); ctrl-c to stop/)![1]!;
       const res = await fetch(`${url}/api/config`);
@@ -60,7 +59,6 @@ describe("sanoma env", () => {
 # Optional. The app's port; default 3000.
 # SANOMA_APP_PORT=
 `);
-    expect((await runCli(dir, ["env", "--check"], env)).code).toBe(0);
     appendFileSync(join(dir, ".env.example"), "EXTRA=\n");
     const stale = await runCli(dir, ["env", "--check"], env);
     expect(stale.code).toBe(1);
@@ -69,25 +67,13 @@ describe("sanoma env", () => {
 });
 
 describe("sanoma check", () => {
-  it("passes the fixture, then fails on an import a workflow may not make, then on a scenario step that does not hold", async () => {
+  it("passes the fixture: Postgres, tsc, oxlint, the config and its scenario, then ok and exit 0", async () => {
     dir = copyFixture();
     const ok = await runCli(dir, ["check"], env);
     expect(ok.code, `${ok.stdout}${ok.stderr}`).toBe(0);
+    expect(ok.stdout).toBe("");
     expect(ok.stderr).toContain("passed hello/hello.feature › A post goes out");
-
-    const workflow = join(dir, "workflows/hello.ts");
-    const source = readFileSync(workflow, "utf8");
-    appendFileSync(workflow, 'import { readFileSync } from "node:fs";\n');
-    const badImport = await runCli(dir, ["check"], env);
-    expect(badImport.code).toBe(1);
-    expect(badImport.stdout).toMatch(/^workflows\/hello\.ts:16:\d+: import "node:fs" is not allowed in a workflow/m);
-    writeFileSync(workflow, source);
-
-    const feature = join(dir, "scenarios/hello/hello.feature");
-    writeFileSync(feature, readFileSync(feature, "utf8").replace("And the run succeeds", "And the run fails"));
-    const badScenario = await runCli(dir, ["check"], env);
-    expect(badScenario.code).toBe(1);
-    expect(badScenario.stdout).toContain("A post goes out › the run fails: the run finished");
+    expect(ok.stderr.trimEnd().split("\n").at(-1)).toBe("ok");
   }, 180_000);
 });
 

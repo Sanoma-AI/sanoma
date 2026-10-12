@@ -1,6 +1,7 @@
 import { memoryLedger, type SanomaConfig, startWorker, type Worker, type WorkerOptions } from "@sanoma/workflows";
 
 export type { Fake, FakeCall, FakeOptions } from "@sanoma/workflows/fake";
+export { ensureBuilt, waitFor } from "./build.ts";
 
 /**
  * The Postgres URL for one test file: `SANOMA_TEST_DATABASE_URL` (default

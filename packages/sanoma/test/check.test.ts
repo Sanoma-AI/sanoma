@@ -65,4 +65,11 @@ describe("check", () => {
       ),
     ]);
   }, 180_000);
+
+  it("reports a scenario step that does not hold", async () => {
+    const feature = join(dir, "scenarios/hello/hello.feature");
+    writeFileSync(feature, readFileSync(feature, "utf8").replace("And the run succeeds", "And the run fails"));
+    const { problems } = await check(await loadConfig(dir), { databaseUrl, log: () => {} });
+    expect(problems).toContain("A post goes out › the run fails: the run finished");
+  }, 180_000);
 });

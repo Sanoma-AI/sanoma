@@ -1,8 +1,9 @@
-import { execFileSync, spawn, type SpawnOptions } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, statSync, symlinkSync } from "node:fs";
+import { spawn, type SpawnOptions } from "node:child_process";
+import { cpSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureBuilt as ensure } from "@sanoma/testing";
 
 /** The repo's root. */
 export const repo = fileURLToPath(new URL("../../../", import.meta.url));
@@ -12,31 +13,18 @@ export const cli = join(repo, "packages/sanoma/src/cli.ts");
 
 /**
  * The packages a fixture copy loads through its `node_modules`, each as a published package would
- * be: by its `exports`, from `dist/`. `ensureBuilt` builds each whose output is missing or older
- * than a file under its `src/`, in dependency order.
+ * be: by its `exports`, from `dist/` (and `sanoma`'s generated `oxlint.json`). `ensureBuilt`
+ * builds each whose outputs are missing or older than its source, in dependency order.
  */
-const BUILT: { dir: string; outputs: string[] }[] = [
-  { dir: "packages/workflows", outputs: ["dist/index.js"] },
-  { dir: "connectors/ghost", outputs: ["dist/index.js"] },
-  { dir: "packages/app", outputs: ["dist/server/server.js"] },
-  { dir: "packages/sanoma", outputs: ["dist/index.js", "dist/oxlint-plugin.js", "oxlint.json"] },
+const BUILT: [dir: string, outputs: string[]][] = [
+  ["packages/workflows", ["dist/index.js"]],
+  ["connectors/ghost", ["dist/index.js"]],
+  ["packages/app", ["dist/server/server.js"]],
+  ["packages/sanoma", ["dist/index.js", "dist/oxlint-plugin.js", "oxlint.json"]],
 ];
 
 export function ensureBuilt(): void {
-  for (const { dir, outputs } of BUILT) {
-    const pkg = join(repo, dir);
-    const src = join(pkg, "src");
-    const stale = outputs.some((output) => {
-      const built = join(pkg, output);
-      return (
-        !existsSync(built) ||
-        readdirSync(src, { recursive: true, encoding: "utf8" }).some(
-          (file) => statSync(join(src, file)).mtimeMs > statSync(built).mtimeMs,
-        )
-      );
-    });
-    if (stale) execFileSync("pnpm", ["run", "build"], { cwd: pkg, stdio: "inherit" });
-  }
+  for (const [dir, outputs] of BUILT) ensure(join(repo, dir), outputs, ["pnpm", "run", "build"]);
 }
 
 /**
@@ -83,13 +71,4 @@ export function startCli(cwd: string, args: string[], env: NodeJS.ProcessEnv) {
     child.on("exit", (code, signal) => resolve({ code, signal, stdout, stderr }));
   });
   return { child, finished, output: () => ({ stdout, stderr }) };
-}
-
-/** Polls `done` every 100 ms until it is true, or throws after `timeoutMs`. */
-export async function waitFor(done: () => boolean, what: string, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!done()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((r) => setTimeout(r, 100));
-  }
 }

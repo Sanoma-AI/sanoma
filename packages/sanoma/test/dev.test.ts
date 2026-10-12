@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { devRepo, end, linkedPackages, supervise } from "../src/dev.ts";
-import { waitFor } from "./fixture.ts";
+import { waitFor } from "@sanoma/testing";
 
 let dir = "";
 const temp = () => (dir = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-dev-"))));
@@ -110,9 +110,9 @@ describe("supervise", () => {
       log: (line) => log.push(line),
     });
     try {
-      await waitFor(() => pids.length === 1, "the first child", 10_000);
+      await waitFor(() => pids.length === 1);
       writeFileSync(join(watched, "index.js"), "");
-      await waitFor(() => pids.length === 2, "the restarted child", 10_000);
+      await waitFor(() => pids.length === 2);
       expect(pids[1]).not.toBe(pids[0]);
       expect(log).toEqual(["a package's dist changed; restarting"]);
       expect(alive(pids[0]!)).toBe(false);
@@ -134,12 +134,12 @@ describe("supervise", () => {
       log: (line) => log.push(line),
     });
     try {
-      await waitFor(() => log.length === 1, "the exit's report", 10_000);
+      await waitFor(() => log.length === 1);
       expect(log).toEqual(["serve exited with code 3; waiting for a change to restart"]);
       await new Promise((r) => setTimeout(r, 300));
       expect(started).toBe(1);
       writeFileSync(join(watched, "index.js"), "");
-      await waitFor(() => pids.length === 2, "the restarted child", 10_000);
+      await waitFor(() => pids.length === 2);
       expect(started).toBe(2);
     } finally {
       await supervised.stop();
@@ -152,9 +152,9 @@ describe("end", () => {
   it("ends the child's whole process group", async () => {
     const pids: number[] = [];
     const c = child(pids, { grandchild: true });
-    await waitFor(() => pids.length === 2, "the child and its grandchild", 10_000);
+    await waitFor(() => pids.length === 2);
     await end(c);
-    await waitFor(() => !alive(pids[1]!), "the grandchild to go", 5_000);
+    await waitFor(() => !alive(pids[1]!));
     expect(alive(pids[0]!)).toBe(false);
   });
 
