@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { childrenOf, type Node, parsed } from "./ast.ts";
-import type { WorkflowDefinition } from "./define.ts";
-import { childLists, errorMessage, flatten } from "./shared.ts";
+import { opIdsOf, type WorkflowDefinition } from "./define.ts";
+import { childLists, errorMessage, fitsOp, flatten } from "./shared.ts";
 
 /**
  * What a workflow's `run` calls through `ctx`, in the order it makes the calls, with the loops,
@@ -29,9 +29,13 @@ export type Span = readonly [start: number, end: number];
  * statement for `try`.
  */
 export type OutlineNode = { path: string; span: Span } &
-  /** `ctx.<vendor>.<resource>.<name>(...)`, a computed segment shown as `*`. */
+  /**
+   * `ctx.<vendor>.<resource>.<name>(...)`, a computed segment shown as `*`. An id with one has
+   * `ops`: the ids in the workflow's `uses` it fits (`fitsOp`), sorted, which is what the call
+   * can reach; an id with every segment literal has none.
+   */
   (
-    | { kind: "op"; id: string }
+    | { kind: "op"; id: string; ops?: string[] }
     /** `ctx.approval(...)`, with its title when the first argument is a string literal. */
     | { kind: "approval"; title?: string }
     | { kind: "sleep" }
@@ -96,7 +100,15 @@ export function outlineWithSource(wf: WorkflowDefinition<any, any>): { outline: 
     });
     return { outline: { error: lines.join("\n") } };
   }
-  return { source, outline: { nodes: withPaths(nodes, ""), file: wf.file } };
+  return { source, outline: { nodes: withOps(withPaths(nodes, ""), opIdsOf(wf)), file: wf.file } };
+}
+
+/** Gives each op node with a computed segment the ids in `uses` it fits, in place. */
+function withOps(nodes: OutlineNode[], uses: readonly string[]): OutlineNode[] {
+  for (const node of flatten(nodes)) {
+    if (node.kind === "op" && node.id.includes("*")) node.ops = uses.filter((id) => fitsOp(node.id, id)).toSorted();
+  }
+  return nodes;
 }
 
 /** CodeMirror counts a line break as one unit, oxc counts `\r\n` as two: spans need `\n` alone. */

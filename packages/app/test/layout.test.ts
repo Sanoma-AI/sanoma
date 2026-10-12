@@ -1,10 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { CLUSTER_HEADER, layout, NODE_SIZE } from "../src/graph/layout.ts";
+import { CLUSTER_HEADER, layout, NODE_SIZE, nodeSize } from "../src/graph/layout.ts";
 import { outlineGraph } from "../src/graph/outline-graph.ts";
+import { LIST_HEADER, MAX_ROWS, ROW_HEIGHT } from "../src/graph/wildcard.ts";
 
 const op = (id: string) => ({ kind: "op", id }) as const;
 
 describe("layout", () => {
+  it("makes an operation with the operations it can reach taller by its rows, and lays its neighbours out around it", () => {
+    const ops = ["a.x.read", "b.y.read", "c.z.read"];
+    const graph = outlineGraph([{ kind: "op", id: "*.*.read", ops }, op("d.w.after")]);
+    const tall = graph.nodes[1]!;
+    expect(nodeSize(tall)).toEqual({
+      width: NODE_SIZE.op.width,
+      height: NODE_SIZE.op.height + LIST_HEADER + 3 * ROW_HEIGHT,
+    });
+    expect(nodeSize(graph.nodes[2]!)).toEqual(NODE_SIZE.op);
+    expect(layout(graph).get(tall.id)!.height).toBe(nodeSize(tall).height);
+    // Past MAX_ROWS the list collapses, so the node stops growing.
+    const many = Array.from({ length: 20 }, (_, i) => `v.r${i}.read`);
+    expect(nodeSize({ id: "x", kind: "op", label: "*.*.read", ops: many }).height).toBe(
+      NODE_SIZE.op.height + LIST_HEADER + MAX_ROWS * ROW_HEIGHT,
+    );
+  });
+
   it("lays a graph out left to right", () => {
     const graph = outlineGraph([op("a.x.one")]);
     const at = layout(graph);

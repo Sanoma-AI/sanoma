@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { getCallSites } from "node:util";
 import { z } from "zod";
-import type { Op } from "./op.ts";
+import { isOp, type Op } from "./op.ts";
 import { approverLabel } from "./shared.ts";
 
 /**
@@ -234,6 +234,9 @@ export interface WorkflowDefinition<U extends readonly Use[] = readonly Use[], S
    */
   readonly file: string;
 }
+
+/** The ids of the operations a workflow `uses`, in the order declared. */
+export const opIdsOf = (wf: Pick<WorkflowDefinition, "uses">): string[] => wf.uses.filter(isOp).map((op) => op.id);
 
 export function defineWorkflow<const U extends readonly Use[], S extends z.ZodType>(
   def: Omit<WorkflowDefinition<U, S>, "kind" | "file">,
