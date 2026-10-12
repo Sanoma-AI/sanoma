@@ -23,7 +23,7 @@ Vitest tests for `@sanoma/workflows`. Files that start runs need Postgres (`pnpm
 | [`harness.ts`](harness.ts)                   | Shared setup: fake vendors, a started worker and client, and wait helpers                                                |
 | [`ledger.test.ts`](ledger.test.ts)           | The in-memory and JSONL ledgers, and how a run writes its records                                                        |
 | [`lint.test.ts`](lint.test.ts)               | `lintWorkflow` (imports, and `run` against its outline), `lintResources` and the shipped `oxlint.json`                   |
-| [`sandbox.test.ts`](sandbox.test.ts)         | Sandbox runs on Postgres: seeding, fakes, skipped sleeps, `drive` and restarts                                           |
+| [`sandbox.test.ts`](sandbox.test.ts)         | Sandbox runs on Postgres: seeding, the ledger, two at once, skipped sleeps, `drive` and restarts                         |
 | [`scenario.test.ts`](scenario.test.ts)       | Feature files to scenarios, their errors, `loadScenarios` and `check`                                                    |
 | [`outline.test.ts`](outline.test.ts)         | `outlineWorkflow`: nodes, paths, spans, errors and `callAt`, from source and built JavaScript                            |
 | [`resource.test.ts`](resource.test.ts)       | `defineResource` and references, `compareDeclared`, `diffDeclared`, resource types in `describeConfig`                   |

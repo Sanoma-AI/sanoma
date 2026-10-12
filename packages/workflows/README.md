@@ -62,7 +62,7 @@ export default defineConfig({
 });
 ```
 
-A config must name its policy and its ledger. `policy: allowAll` allows every operation call, and says so. `ledger: jsonlLedger(dir)` keeps the audit record in files the app and other processes read; `memoryLedger()` keeps it in this process only, for tests. `resolveConfig(config)` checks a config and derives what the runtime uses from it: the app name, database, version and queues (`sanoma:<appName>`, and `sanoma:<appName>:sandbox` for [sandbox runs](#scenarios-and-sandbox-runs)), and the operations and drivers by id. It throws, with one message, whatever the worker would refuse: a workflow or driver naming an operation the `connectors` don't declare, a workflow redeclaring an operation with another effect, an operation with no driver, two workflows with one name, no policy, no ledger. `startWorker`, `SanomaClient.connect` and `describeConfig` all call it, so they fail the same way. It adds the built-in [`drift`](#drift) workflow when the connectors declare resource types. The worker takes each operation's effect, schemas and retry setting from `connectors`, never from the workflow.
+A config must name its policy and its ledger. `policy: allowAll` allows every operation call, and says so. `ledger: jsonlLedger(dir)` keeps the audit record in files the app and other processes read; `memoryLedger()` keeps it in this process only, for tests. `resolveConfig(config)` checks a config and derives what the runtime uses from it: the app name, database, version and queue (`sanoma:<appName>`, for every run, [sandbox runs](#scenarios-and-sandbox-runs) included), and the operations and drivers by id. It throws, with one message, whatever the worker would refuse: a workflow or driver naming an operation the `connectors` don't declare, a workflow redeclaring an operation with another effect, an operation with no driver, two workflows with one name, no policy, no ledger. `startWorker`, `SanomaClient.connect` and `describeConfig` all call it, so they fail the same way. It adds the built-in [`drift`](#drift) workflow when the connectors declare resource types. The worker takes each operation's effect, schemas and retry setting from `connectors`, never from the workflow.
 
 A policy returns `allow()`, `deny(reason)` (the run fails) or `approve(who)` (the run waits for that person, or for anyone in `{ group }`; see [Approvals](#approvals)). `allow(reasons)` and `deny(reason, reasons)` may add a list of reasons for whoever reads the ledger. The policy must decide the same way on every replay: no clock, randomness or network. What it sees is plain data, so a test can build one by hand, with `policyOpOf(op)` for the operation as the runtime passes it:
 
@@ -285,7 +285,7 @@ Every run is stamped with the application version of the worker that runs it, `<
 
 When a worker starts, it warns about unfinished runs it will not pick up, naming them: runs started on another version, and runs queued on another queue. Run the version that started them, or fork each onto the current version with `DBOSClient.forkWorkflow(id, step, { applicationVersion, queueName })` and cancel the original.
 
-Queues used to be one `sanoma` queue for every app and are now `sanoma:<appName>`, so runs queued before the change are never started. On a local database, `pnpm db:down && pnpm db:up` resets it.
+Queues used to be one `sanoma` queue for every app and are now `sanoma:<appName>`, so runs queued before the change are never started. Sandbox runs had their own queue, `sanoma:<appName>:sandbox`, until they went on the app's; the warning names the runs left on it. On a local database, `pnpm db:down && pnpm db:up` resets it.
 
 ## Keeping workflows replay-safe
 
@@ -346,7 +346,7 @@ export default defineConfig({
 });
 ```
 
-`fakes` are `defineFake` fakes, one per vendor (`resolveConfig` refuses two for one); each implements its vendor's operations for sandbox runs. `scenarios` must be a `file:` URL (`resolveConfig` refuses anything else); a directory that does not exist has no scenarios. Every `.feature` file under it is read; each must hold at least one scenario, and each scenario's name must be unique across them. Each row of a `Scenario Outline`'s examples is a scenario of its own, named from the outline's title; rows whose names come out the same get their line appended, such as `Launch (line 12)`.
+`fakes` are `defineFake` fakes, one per vendor (`resolveConfig` refuses two for one); each implements its vendor's operations for sandbox runs. They are templates: each sandbox run calls its own copies (`fresh()`, each with its vendor's initial state), never these, so they can be the very instances the config passes as `drivers` when it runs on fakes, file-backed ones included. `scenarios` must be a `file:` URL (`resolveConfig` refuses anything else); a directory that does not exist has no scenarios. Every `.feature` file under it is read; each must hold at least one scenario, and each scenario's name must be unique across them. Each row of a `Scenario Outline`'s examples is a scenario of its own, named from the outline's title; rows whose names come out the same get their line appended, such as `Launch (line 12)`.
 
 ```gherkin
 Feature: Announce a launch
@@ -396,12 +396,12 @@ Input the scenario leaves out is made up from the schema with [zod-schema-faker]
 
 Start a sandbox run with `client.start(workflow, input, { startedBy, sandbox: "<scenario name>" })`. `sandbox` must be a non-empty string, else `start` throws `invalid_input`; the worker looks the scenario up. The input is the caller's (a scenario's own is `scenario.input`). The worker then:
 
-- parses the input, then seeds the fakes from the scenario, once, in a step named `sandbox:seed`: it reads the scenario, checks it, resets every fake, calls each `Given` operation through its fake, injects the faults, and empties the call log, so the log holds the run's calls only. It records `scenario.seeded` (the scenario, and each seed's operation, input and output) right after `run.started`. A scenario that does not exist or runs another workflow, and a workflow using (or a scenario seeding) an operation with no fake, fail the run with `invalid_input`.
-- calls the fakes, never a driver, under the same policy and approvals as a live run.
+- parses the input, then seeds its own copies of the fakes from the scenario, once, in a step named `sandbox:seed`: it reads the scenario, checks it, makes a `fresh()` copy of every fake for the run, calls each `Given` operation through its copy and injects the faults into the copies. The config's fakes are left as they are. It records `scenario.seeded` (the scenario, and each seed's operation, input and output) right after `run.started`. A scenario that does not exist or runs another workflow, and a workflow using (or a scenario seeding) an operation with no fake, fail the run with `invalid_input`.
+- calls its copies of the fakes, never a driver, under the same policy and approvals as a live run.
 - does not wait on `ctx.sleep`: it still records `sleep.started` with the real `until`, and goes straight on.
-- runs sandbox runs one at a time, since they share the fakes: they go on their own queue, `sanoma:<appName>:sandbox` (`ResolvedConfig.sandboxQueueName`), which runs one at a time per worker, so a second waits, `queued`, until the one before it ends.
+- runs it on the app's queue, as any run: sandbox runs share no fakes, so several run at once, and one waiting on an approval holds up no other.
 
-A sandbox run does not survive a worker restart: the fakes keep their state in the worker's memory, so a run whose seeding DBOS replays from its checkpoint (after a restart, or in a fork) fails with `invalid_input`, "Sandbox run … was interrupted by a worker restart and the fakes' state is gone; start the scenario again", rather than going on against fakes in some other state.
+A sandbox run does not survive a worker restart: its copies of the fakes keep their state in the worker's memory, so a run whose seeding DBOS replays from its checkpoint (after a restart, or in a fork) fails with `invalid_input`, "Sandbox run … was interrupted by a worker restart and the fakes' state is gone; start the scenario again", rather than going on against fakes in some other state.
 
 `RunSummary.sandbox` names the scenario a sandbox run was seeded from (kept in DBOS's `attributes` for the run). Reusing a run id with another `sandbox`, or none, is `invalid_input`, as with another input.
 

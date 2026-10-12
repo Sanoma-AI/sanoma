@@ -24,8 +24,9 @@ export interface SanomaConfig {
   connectors: Connector<any, any>[];
   drivers: Driver[];
   /**
-   * Fake vendors (from `defineFake`) that sandbox runs call instead of the drivers. A sandbox
-   * run is started with `{ sandbox: "<scenario name>" }` and seeded from that scenario.
+   * Fake vendors (from `defineFake`) that sandbox runs copy (`fresh()`) and call instead of the
+   * drivers, so these can be the instances `drivers` holds when the config runs on fakes. A
+   * sandbox run is started with `{ sandbox: "<scenario name>" }` and seeded from that scenario.
    */
   fakes?: Fake<any, any>[];
   /** The directory of `.feature` files sandbox runs are seeded from, as a `file:` URL, such as `new URL("./scenarios/", import.meta.url)`. */
@@ -85,9 +86,9 @@ export interface ResolvedConfig {
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id. */
   drivers: Map<string, DriverFn>;
-  /** The fake vendors sandbox runs call, by vendor id. */
+  /** The fake vendors, by vendor id: the templates each sandbox run copies. */
   fakes: Map<string, Fake<any, any>>;
-  /** The fakes' functions, by operation id: what a sandbox run calls. */
+  /** The fakes' functions, by operation id: which operations a sandbox run has a fake for. */
   fakeDrivers: Map<string, DriverFn>;
   /** The scenarios directory, a `file:` URL. */
   scenarios?: URL;

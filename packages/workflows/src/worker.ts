@@ -171,7 +171,7 @@ function outlineOf(wf: WorkflowDefinition<any, any>): WorkflowOutline {
 /**
  * Warns about unfinished runs this worker will never pick up: started on another version of
  * the app, or queued on another queue (such as the single "sanoma" queue before queues were
- * named per app).
+ * named per app, or the sandbox queue before sandbox runs went on the app's).
  */
 async function warnAboutStrandedRuns({ appName, version, queueName }: ResolvedConfig) {
   const runs = await DBOS.listWorkflows({
