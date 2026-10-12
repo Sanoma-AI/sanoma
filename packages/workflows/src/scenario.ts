@@ -44,6 +44,8 @@ export interface ScenarioStep {
   op?: string;
   /** For a `Then` step about an operation: true when it expects a call, false for `was not called`. */
   called?: boolean;
+  /** For a `Then` step about the policy's decision on an operation: `was denied`, or `was held for`. */
+  decision?: "denied" | "held";
   /** For a `Given` that injects a fault into the operation's next call (`fails once` and the like), rather than seeding it. */
   fault?: true;
 }
@@ -578,6 +580,7 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
       const [{ rule, args }] = matches as [{ rule: Rule; args: readonly Argument[] }];
       let op: string | undefined;
       let called: boolean | undefined;
+      let decision: ScenarioStep["decision"];
       let fault: true | undefined;
       try {
         const values = args.map((a) => a.getValue<unknown>(null));
@@ -595,6 +598,7 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
             scenario.expect.push({ step, ...item });
             if ("op" in item) op = item.op;
             if ("called" in item) ({ called } = item);
+            if ("decision" in item) ({ decision } = item);
             break;
           }
           case "any":
@@ -614,6 +618,7 @@ export function parseFeature(text: string, file: string, scope: Scope): Scenario
         kind,
         ...(op === undefined ? {} : { op }),
         ...(called === undefined ? {} : { called }),
+        ...(decision && { decision }),
         ...(fault && { fault }),
       });
     }

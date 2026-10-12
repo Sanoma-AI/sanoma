@@ -179,6 +179,8 @@ const ROLE_LABELS: Record<keyof ScenarioRoles, string> = {
   fails: "fails",
   expected: "expects",
   forbidden: "must not call",
+  denied: "must deny",
+  held: "must hold",
 };
 
 /** A link off the app, in a new tab, which its icon says. */

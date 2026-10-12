@@ -679,8 +679,13 @@ describe("resources and policy outcomes", () => {
     });
     // A policy outcome is about its operation, and neither expects a call nor rules one out.
     expect(held!.steps.slice(2)).toEqual([
-      { text: "github.repository.import was denied", kind: "then", op: "github.repository.import" },
-      { text: "stripe.product.import was held for finance", kind: "then", op: "stripe.product.import" },
+      { text: "github.repository.import was denied", kind: "then", op: "github.repository.import", decision: "denied" },
+      {
+        text: "stripe.product.import was held for finance",
+        kind: "then",
+        op: "stripe.product.import",
+        decision: "held",
+      },
     ]);
   });
 

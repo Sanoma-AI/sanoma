@@ -150,7 +150,8 @@ export async function runDetail({ client, resolved }: AppContext, runId: string)
       const ended = isEnded(run.status);
       const checks = check(scenario, ledger).map((c, i) => {
         const e = scenario.expect[i]!;
-        return { ...c, settled: ended || (c.ok && "called" in e && e.called) };
+        // Met once: a call made, or a decision recorded, stays made.
+        return { ...c, settled: ended || (c.ok && (("called" in e && e.called) || "decision" in e)) };
       });
       return { run, ledger, approvals, checks };
     }
