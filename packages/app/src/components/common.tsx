@@ -180,7 +180,8 @@ export function OpItem({ id, op, children }: { id: string; op: OpEntry | undefin
   return (
     <Item role="listitem" variant="outline" size="xs">
       <ItemContent>
-        <ItemTitle>
+        {/* Wraps: About's column on a workflow's page may be narrower than its badges. */}
+        <ItemTitle className="flex-wrap">
           <OpName id={id} op={op} />
           {op?.idempotent && (
             <Tip tip="If a call fails, it is tried again; the vendor ignores repeats.">
@@ -416,34 +417,45 @@ function useSeen(ref: RefObject<HTMLElement | null>): boolean {
   return seen;
 }
 
+/** How a LazyPanel sits: `fill` fills its parent (a resizable panel) with no card of its own. */
+type PanelLayout = { className?: string; fill?: boolean };
+
 /**
- * A box 220 px high, 280 px from `sm` (or as `className` says), whose content loads and draws in
- * the browser once the box comes near the screen; until then, and on the server, `fallback`
- * holds its place. (The server never sees the box: `useSeen` flips in an effect, and effects run
- * only in the browser.)
+ * A card 220 px high, 280 px from `sm` (or as `className` says), or with `fill` a bare box filling
+ * its parent, whose content loads and draws in the browser once the box comes near the screen;
+ * until then, and on the server, `fallback` holds its place. (The server never sees the box:
+ * `useSeen` flips in an effect, and effects run only in the browser.)
  */
 function LazyPanel({
   fallback,
   className,
+  fill,
   children,
-}: {
+}: PanelLayout & {
   fallback: ReactNode;
-  className?: string;
   children: ReactNode;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const seen = useSeen(box);
-  return (
+  const content = seen ? <Suspense fallback={fallback}>{children}</Suspense> : fallback;
+  // Not a className on the card: `cn` would keep its `sm:` height, and its ring would double the
+  // ring of the card it sits in.
+  return fill ? (
+    <div ref={box} className="size-full">
+      {content}
+    </div>
+  ) : (
     <Card ref={box} className={cn("h-[220px] gap-0 py-0 sm:h-[280px]", className)}>
-      {seen ? <Suspense fallback={fallback}>{children}</Suspense> : fallback}
+      {content}
     </Card>
   );
 }
 
 /** A graph (a run's, or a workflow's outline) in a LazyPanel, a skeleton of its size holding its place. */
-export const GraphPanel = ({ className, ...props }: GraphProps & { className?: string }) => (
+export const GraphPanel = ({ className, fill, ...props }: GraphProps & PanelLayout) => (
   <LazyPanel
     className={className}
+    fill={fill}
     fallback={<Skeleton role="status" aria-label="Loading the graph" className="size-full rounded-none" />}
   >
     <Graph {...props} />
@@ -461,9 +473,10 @@ const Code = lazy(loadCode);
  * A workflow's source in a LazyPanel, scrolling inside it. On the server, without JavaScript, and
  * until the view loads, the panel holds the source as plain text.
  */
-export const CodePanel = ({ className, ...props }: CodeProps) => (
+export const CodePanel = ({ className, fill, ...props }: CodeProps & PanelLayout) => (
   <LazyPanel
     className={className}
+    fill={fill}
     fallback={<pre className="size-full overflow-auto p-3 font-mono text-xs">{props.source}</pre>}
   >
     <Code {...props} />

@@ -206,7 +206,7 @@ const WorkflowCard = memo(function WorkflowCard({
         <CardAction className="flex gap-2">
           {scenario !== undefined && (
             <Button asChild variant="outline" size="sm">
-              <Link to="/workflows/$name/new" params={{ name }} search={{ scenario }}>
+              <Link to="/workflows/$name" params={{ name }} search={{ scenario }}>
                 <FlaskConicalIcon data-icon="inline-start" />
                 Test
               </Link>

@@ -8,7 +8,7 @@ import { pendingApprovals, starterName } from "../api.ts";
 import { picksFromLatest, RAIL_LIMIT, railQuery, railRuns, RUN_FILTERS, type RunFilter, runLink } from "../queries.ts";
 import { Nothing, SandboxBadge, StatusDot, When } from "./common.tsx";
 
-// The rail on a workflow's page: its panes, and its latest runs, each linking to its own pane.
+// The rail on a workflow's page: the workflow's own pane, and its latest runs, each linking to its own pane.
 
 const FILTER_LABEL: Record<RunFilter, string> = {
   all: "All",
@@ -20,18 +20,18 @@ const FILTER_LABEL: Record<RunFilter, string> = {
 
 /** A link in the rail; `aria-current`, which Link sets on an active link, marks the pane that shows. */
 const RAIL_LINK = "flex flex-col gap-0.5 rounded-md px-2 py-1.5 text-sm hover:bg-muted aria-[current=page]:bg-muted";
-/** A pane's link (About, New run): its name in bold while it shows. */
+/** The workflow's pane's link: its name in bold while it shows. */
 const PANE_LINK = `${RAIL_LINK} aria-[current=page]:font-medium`;
 
 /** The rail's links keep the filter; All leaves the URL without `?runs=`. */
 const railSearch = (filter: RunFilter) => ({ runs: filter === "all" ? undefined : filter });
 
 /**
- * The workflow's panes (About, New run) and its runs, newest first, filtered by `?runs=`. It
- * reads the runs itself, so a poll draws the rail again and not the pane beside it.
+ * The workflow's own pane and its runs, newest first, filtered by `?runs=`. It reads the runs
+ * itself, so a poll draws the rail again and not the pane beside it.
  */
 export function RunRail({ name }: { name: string }) {
-  // Only `?runs=`: another search param (New run's `?scenario=`) does not draw the rail again.
+  // Only `?runs=`: another search param (the workflow pane's `?scenario=`) does not draw the rail again.
   const filter = useSearch({ from: "/workflows/$name", select: (search) => search.runs }) ?? "all";
   const navigate = useNavigate();
   const { data: runs, error } = useSuspenseQuery(railQuery(name, filter));
@@ -45,6 +45,8 @@ export function RunRail({ name }: { name: string }) {
       className="flex flex-[1_1_16rem] flex-col gap-3 rounded-lg border bg-card p-2 text-card-foreground"
     >
       <nav className="flex flex-col">
+        {/* Active with any `?scenario=` or `?runs=`, not on a run's pane. It leaves `?scenario=`
+            behind on purpose: reading it would draw the rail again on each scenario chosen. */}
         <Link
           to="/workflows/$name"
           params={{ name }}
@@ -52,16 +54,7 @@ export function RunRail({ name }: { name: string }) {
           activeOptions={{ exact: true, includeSearch: false }}
           className={PANE_LINK}
         >
-          About
-        </Link>
-        <Link
-          to="/workflows/$name/new"
-          params={{ name }}
-          search={search}
-          activeOptions={{ includeSearch: false }}
-          className={PANE_LINK}
-        >
-          New run
+          Workflow
         </Link>
       </nav>
       <div className="flex items-center justify-between gap-2 px-2">

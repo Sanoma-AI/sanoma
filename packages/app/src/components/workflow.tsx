@@ -2,11 +2,13 @@ import type { LedgerRecord, RunSummary } from "@sanoma/workflows";
 import type { WorkflowEntry } from "@sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { PlayIcon } from "lucide-react";
+import { CodeIcon, PlayIcon } from "lucide-react";
 import { type ComponentProps, memo, useCallback, useMemo, useState } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
+import { Card } from "#/components/ui/card.tsx";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "#/components/ui/resizable.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
 import type { ScenarioEntry } from "../api.ts";
 import { type Field, fieldsOf } from "../form/schema.ts";
@@ -19,16 +21,16 @@ import type { CodeProps } from "./code.tsx";
 import { BUILTIN_ICON, CodePanel, GraphPanel, Json, None, Nothing, Notice, OpItem, Section } from "./common.tsx";
 
 // A workflow's pieces, as the workflows page's cards and a workflow's own page show them, and
-// its graph beside its source, as a workflow's page and a run's show them.
+// its graph above its source in one card, as a workflow's page and a run's show them.
 
-/** Run: opens the workflow's New run pane. A Button otherwise, styled as given. */
+/** Run: opens the workflow's page, where its New run form is. A Button otherwise, styled as given. */
 export function RunButton({
   name,
   ...props
 }: { name: string } & Omit<ComponentProps<typeof Button>, "asChild" | "children">) {
   return (
     <Button asChild {...props}>
-      <Link to="/workflows/$name/new" params={{ name }}>
+      <Link to="/workflows/$name" params={{ name }}>
         <PlayIcon data-icon="inline-start" />
         Run
       </Link>
@@ -125,15 +127,22 @@ function InputFields({ fields }: { fields: Field[] }) {
   );
 }
 
-/** The height of a graph and its source side by side. */
-const PANEL = "h-[360px] sm:h-[420px]";
+/**
+ * The graph's and the source's shares of the card's height, by panel id: on the server too, so
+ * the page does not shift when it hydrates. Never stored: a stored layout would differ from the
+ * server's.
+ */
+const LAYOUT = { graph: 60, source: 40 };
 
 /**
- * A workflow's graph, or a run's (`run`: its ledger and summary, read at `at`), beside the
- * workflow's source. A workflow's graph marks what `scenario`, when given, seeds and expects. A click on a node, or in the code, selects the node: the graph rings it and
- * the code marks the lines it may stand for. `onSelect` is told of each node selected, after.
- * Without an outline (it could not be read, or the config has no such workflow) the code's place
- * says why; with no run either there is nothing to draw, and that says why in place of both.
+ * A workflow's graph, or a run's (`run`: its ledger and summary, read at `at`), above the
+ * workflow's source, in one card: a handle between them shares out its height, and Code hides or
+ * shows the source. (A drag does not fit the graph to its new size again: a follow-up.) A
+ * workflow's graph marks what `scenario`, when given, seeds and expects. A click on a node, or in
+ * the code, selects the node: the graph rings it and the code marks the lines it may stand for.
+ * `onSelect` is told of each node selected, after. Without an outline (it could not be read, or
+ * the config has no such workflow) the code's place says why; with no run either there is
+ * nothing to draw, and that says why in place of both.
  */
 export const GraphAndSource = memo(function GraphAndSource({
   workflow: { name, outline, source },
@@ -176,26 +185,47 @@ export const GraphAndSource = memo(function GraphAndSource({
         : undefined;
   const noSource = unread !== undefined && <Nothing title="No source to show">{unread}</Nothing>;
   const file = outline && workflowFile({ outline });
+  // Code hides the source by unmounting its panel, not collapsing it: no imperative call, so the
+  // server renders either state as the browser does.
+  const [codeOpen, setCodeOpen] = useState(true);
   if (!graph) return noSource;
   return (
-    // Split by its own width, not the screen's: a pane may give it half the page.
-    <div className="@container flex flex-col gap-2">
-      <div className="grid gap-4 @3xl:grid-cols-2">
-        <GraphPanel
-          className={PANEL}
-          graph={graph}
-          show={run ? "end" : "start"}
-          selected={selected}
-          onSelect={select}
-        />
-        {noSource ||
-          (file !== undefined ? (
-            <FileSourcePanel file={file} highlight={highlight} onSelect={selectAt} />
-          ) : (
-            <SourcePanel source={source} highlight={highlight} onSelect={selectAt} />
-          ))}
+    <Card className="gap-0 overflow-hidden py-0">
+      <div className="flex items-center gap-2 border-b px-(--card-spacing) py-2">
+        <h2 className="font-heading text-sm font-medium">Graph</h2>
+        <Button
+          variant="ghost"
+          size="xs"
+          aria-pressed={codeOpen}
+          className="ml-auto"
+          onClick={() => setCodeOpen((open) => !open)}
+        >
+          <CodeIcon data-icon="inline-start" />
+          Code
+        </Button>
       </div>
-    </div>
+      {/* Sized by its box: the group's own inline height (100%) would win over a class. */}
+      <div className="h-[560px]">
+        <ResizablePanelGroup id="graph-source" orientation="vertical" defaultLayout={LAYOUT}>
+          <ResizablePanel id="graph" minSize="25%">
+            <GraphPanel fill graph={graph} show={run ? "end" : "start"} selected={selected} onSelect={select} />
+          </ResizablePanel>
+          {codeOpen && (
+            <>
+              <ResizableHandle withHandle />
+              <ResizablePanel id="source" minSize="20%">
+                {noSource ||
+                  (file !== undefined ? (
+                    <FileSourcePanel file={file} highlight={highlight} onSelect={selectAt} />
+                  ) : (
+                    <SourcePanel source={source} highlight={highlight} onSelect={selectAt} />
+                  ))}
+              </ResizablePanel>
+            </>
+          )}
+        </ResizablePanelGroup>
+      </div>
+    </Card>
   );
 });
 
@@ -209,9 +239,5 @@ function FileSourcePanel({ file, ...props }: { file: string } & SourceProps) {
 
 /** The text the outline's spans index into, or why there is none. */
 function SourcePanel({ source, ...props }: { source: string | null | undefined } & SourceProps) {
-  return source == null ? (
-    <Nothing title="No source to show" />
-  ) : (
-    <CodePanel className={PANEL} source={source} {...props} />
-  );
+  return source == null ? <Nothing title="No source to show" /> : <CodePanel fill source={source} {...props} />;
 }
