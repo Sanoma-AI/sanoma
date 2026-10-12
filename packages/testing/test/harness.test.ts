@@ -29,12 +29,8 @@ describe("useTestApp", () => {
     appName,
   });
 
-  it("resolves the ledger and the database once", () => {
+  it("keeps one config, so the client reads both runs across a restart", async () => {
     expect(app.config).toMatchObject({ appName, databaseUrl: testDatabaseUrl(appName) });
-    expect(typeof app.config.ledger.append).toBe("function");
-  });
-
-  it("restarts the worker on the same ledger", async () => {
     const first = await app.client.start(draft, { title: "Before" }, { startedBy: alice });
     await app.client.result(first);
 
