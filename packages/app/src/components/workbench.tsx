@@ -19,10 +19,10 @@ export function Workbench({
   secondary: ReactNode;
 }) {
   return (
-    <div className="@container/pane flex flex-col gap-6">
+    <div className="@container/pane flex flex-col gap-6 compact:gap-3">
       {children}
       {graph}
-      <div className="grid gap-6 @3xl/pane:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+      <div className="grid gap-6 compact:gap-3 @3xl/pane:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         {primary}
         {secondary}
       </div>

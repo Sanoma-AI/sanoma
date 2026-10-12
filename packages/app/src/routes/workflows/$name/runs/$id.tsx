@@ -75,7 +75,7 @@ function RunPage() {
     <Workbench
       graph={<GraphAndSource key={run.runId} workflow={workflow} run={reading} onSelect={select} />}
       primary={
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-6 compact:gap-3">
           {(checks || checksError) && (
             <Region title="Checks">
               {checksError && (
@@ -109,7 +109,7 @@ function RunPage() {
         </div>
       }
       secondary={
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-6 compact:gap-3">
           <Card size="sm">
             <CardContent>
               <Facts>

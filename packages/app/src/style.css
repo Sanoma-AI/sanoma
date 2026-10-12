@@ -4,6 +4,8 @@
 @import "@fontsource-variable/geist";
 
 @custom-variant dark (&:is(.dark *));
+/* Compact density: `data-density="compact"` on #app (__root.tsx, density.tsx). */
+@custom-variant compact (&:is([data-density=compact] *));
 
 /*
  * The theme: shadcn's neutral tokens, and beside them one pair per operation effect and per tone
@@ -142,6 +144,17 @@
   --code-number: oklch(0.82 0.11 75);
   --code-punctuation: oklch(0.7 0 0);
   --code-highlight: color-mix(in oklch, var(--primary) 12%, transparent);
+}
+
+/*
+ * Compact's cards: tighter spacing inside every card. Unlayered, so these win over the
+ * `[--card-spacing:--spacing(4)]` utility ui/card.tsx sets (utilities are in a layer).
+ */
+[data-density="compact"] [data-slot="card"] {
+  --card-spacing: --spacing(3);
+}
+[data-density="compact"] [data-slot="card"][data-size="sm"] {
+  --card-spacing: --spacing(2);
 }
 
 /*

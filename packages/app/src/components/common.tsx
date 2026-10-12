@@ -511,7 +511,7 @@ export function SubsectionTitle({ children }: { children: ReactNode }) {
 /** A titled region of a page: its <h2>, and what it holds. */
 export function Region({ title, children }: { title: ReactNode; children: ReactNode }) {
   return (
-    <section className="flex flex-col gap-3">
+    <section className="flex flex-col gap-3 compact:gap-2">
       <SectionTitle>{title}</SectionTitle>
       {children}
     </section>
@@ -535,7 +535,7 @@ export function None({ children = "None." }: { children?: ReactNode }) {
 
 /** Label and value pairs, as a description list of `Fact`s: labels in one column, values in the other. */
 export function Facts({ children }: { children: ReactNode }) {
-  return <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5">{children}</dl>;
+  return <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 compact:gap-y-0.5">{children}</dl>;
 }
 
 export function Fact({ label, children }: { label: string; children: ReactNode }) {

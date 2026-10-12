@@ -45,7 +45,7 @@ function WorkflowPane() {
       primary={
         <Region title="New run">
           <Card>
-            <CardContent className="flex flex-col gap-4">
+            <CardContent className="flex flex-col gap-4 compact:gap-3">
               <div className="flex flex-wrap items-center gap-3">
                 {/* Each mode is a URL. A choice replaces the page in the history rather than
                       adding one, and keeps `?runs=`. */}
@@ -131,7 +131,7 @@ function WorkflowPane() {
       secondary={
         <Region title="About">
           <Card>
-            <CardContent className="flex flex-col gap-4">
+            <CardContent className="flex flex-col gap-4 compact:gap-3">
               <WorkflowSections workflow={workflow} />
             </CardContent>
           </Card>

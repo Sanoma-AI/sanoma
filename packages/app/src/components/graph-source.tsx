@@ -14,6 +14,7 @@ import { type GraphNode, nodeAt } from "../graph/types.ts";
 import { sourceQuery, workflowFile } from "../queries.ts";
 import type { CodeProps } from "./code.tsx";
 import { CodePanel, GraphPanel, Nothing } from "./common.tsx";
+import { useDensity } from "./density.tsx";
 
 // A workflow's graph above its source in one card, as a workflow's page and a run's show them. Its
 // own module: the resizable panels it uses stay out of the chunks of pages without it.
@@ -28,7 +29,8 @@ const LAYOUT = { "graph-source-graph": 60, "graph-source-code": 40 };
 /**
  * A workflow's graph, or a run's (`run`: its ledger and summary, read at `at`), above the
  * workflow's source, in one card: a handle between them shares out its height (sized as `LAYOUT`
- * says at first), the graph fits itself to its new size, and Code hides or shows the source. A
+ * says at first), the graph fits itself to its new size, and Code hides or shows the source
+ * (hidden at first when Compact). A
  * workflow's graph marks what `scenario`, when given, seeds and expects. A click on a node, or in
  * the code, selects the node: the graph rings it and the code marks the lines it may stand for.
  * `onSelect` is told of each node selected, after. Without an outline (it could not be read, or
@@ -76,40 +78,55 @@ export const GraphAndSource = memo(function GraphAndSource({
         : undefined;
   const noSource = unread !== undefined && <Nothing title="No source to show">{unread}</Nothing>;
   const file = outline && workflowFile({ outline });
-  // Open at first, on the server and in the browser alike.
-  const [codeOpen, setCodeOpen] = useState(true);
+  // Open at first, but hidden when Compact: the density's cookie decides on the server and in the
+  // browser alike, so both render the same. A later switch of density leaves a card already on
+  // the page as it is.
+  const { compact } = useDensity();
+  const [codeOpen, setCodeOpen] = useState(!compact);
+  // The source mounts the first time Code opens (so Compact renders no source, nor loads its view,
+  // until asked for it), then stays mounted while hidden.
+  const [codeMounted, setCodeMounted] = useState(codeOpen);
   if (!graph) return noSource;
   return (
     <Card className="gap-0 overflow-hidden py-0">
-      <CardHeader className="border-b py-2 [.border-b]:pb-2">
+      <CardHeader className="border-b py-2 compact:py-1 [.border-b]:pb-2 compact:[.border-b]:pb-1">
         <CardTitle role="heading" aria-level={2} className="text-sm">
           Graph
         </CardTitle>
         <CardAction className="self-center">
-          <Button variant="ghost" size="xs" aria-pressed={codeOpen} onClick={() => setCodeOpen((open) => !open)}>
+          <Button
+            variant="ghost"
+            size="xs"
+            aria-pressed={codeOpen}
+            onClick={() => {
+              setCodeOpen(!codeOpen);
+              setCodeMounted(true);
+            }}
+          >
             <CodeIcon data-icon="inline-start" />
             Code
           </Button>
         </CardAction>
       </CardHeader>
       {/* The group fills its box (its inline `height: 100%` would win over a class); the box carries
-          the responsive height. */}
-      <div className="h-[420px] sm:h-[560px]">
+          the responsive height, lower when Compact. */}
+      <div className="h-[420px] sm:h-[560px] compact:h-[360px]">
         <ResizablePanelGroup id="graph-source" orientation="vertical" defaultLayout={LAYOUT}>
           <ResizablePanel id="graph-source-graph" minSize="25%">
             <GraphPanel graph={graph} show={run ? "end" : "start"} selected={selected} onSelect={select} />
           </ResizablePanel>
-          {/* Code hides the handle and the source rather than unmounting them: the group keeps
+          {/* Code hides the handle and the source rather than unmounting them, once shown: the group keeps
               their sizes, the graph's panel grows to fill it, and the code view keeps its scroll.
               `hidden` on the panel itself (its className styles an inner box). */}
           <ResizableHandle withHandle className={codeOpen ? undefined : "hidden"} />
           <ResizablePanel id="graph-source-code" minSize="20%" hidden={!codeOpen}>
-            {noSource ||
-              (file !== undefined ? (
-                <FileSourcePanel file={file} highlight={highlight} onSelect={selectAt} />
-              ) : (
-                <SourcePanel source={source} highlight={highlight} onSelect={selectAt} />
-              ))}
+            {codeMounted &&
+              (noSource ||
+                (file !== undefined ? (
+                  <FileSourcePanel file={file} highlight={highlight} onSelect={selectAt} />
+                ) : (
+                  <SourcePanel source={source} highlight={highlight} onSelect={selectAt} />
+                )))}
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>

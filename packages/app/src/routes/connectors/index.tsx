@@ -19,7 +19,7 @@ function ConnectorsPage() {
   const { data: connectors } = useSuspenseQuery({ ...configQuery(), select: connectorsOf });
   const { data: credentials } = useSuspenseQuery(credentialsQuery());
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 compact:gap-3">
       <PageHeader />
       {connectors.length === 0 ? (
         <Nothing title="This config has no connectors" />

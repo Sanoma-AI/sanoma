@@ -10,7 +10,7 @@ The TanStack Router file routes of the app. Each file is served at the URL its p
 | [`connectors/`](connectors/AGENTS.md) | Pages under `/connectors`: the connector list and one connector                                |
 | [`runs/`](runs/AGENTS.md)             | Redirects from the old `/runs` URLs to their pages under `/workflows`: All runs, or the run    |
 | [`workflows/`](workflows/AGENTS.md)   | Pages under `/workflows`: the home (a card per workflow, or every run) and one workflow's page |
-| [`__root.tsx`](__root.tsx)            | Root route: the HTML shell, navigation, breadcrumbs and actor name prompt around every page    |
+| [`__root.tsx`](__root.tsx)            | Root route: the HTML shell, navigation, breadcrumbs, density and name prompt around every page |
 | [`api.ts`](api.ts)                    | Layout for `/api`: middleware that answers any failure as JSON                                 |
 | [`inbox.tsx`](inbox.tsx)              | `/inbox`: every pending approval, newest first                                                 |
 | [`index.tsx`](index.tsx)              | `/`: redirects to `/workflows`, a card per workflow                                            |
