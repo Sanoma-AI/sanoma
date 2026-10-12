@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { type Bridge, BridgeError, type BridgeLog, readPins, startBridge } from "@sanoma/bridge";
-import { fakeBridge } from "@sanoma/bridge/fake";
+import { fakeBridge } from "./fake-bridge.ts";
 import { buildBridge } from "../scripts/download-bridge.ts";
 
 // SANOMA_LIVE=1 builds provider-bridge from the sibling checkout and runs hashicorp/null (no
