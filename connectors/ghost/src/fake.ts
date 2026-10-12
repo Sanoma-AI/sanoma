@@ -1,6 +1,6 @@
 import { DriverError } from "@sanoma/workflows";
 import { defineFake, type FakeOptions } from "@sanoma/workflows/fake";
-import { ghost } from "./index.ts";
+import { ghost } from "./connector.ts";
 
 export interface FakeGhostPost {
   id: string;

@@ -1,7 +1,7 @@
 import { DriverError, defineDriver, retryableStatus } from "@sanoma/workflows";
 import { SignJWT } from "jose";
 import { z } from "zod";
-import { ghost, Post } from "./index.ts";
+import { ghost, Post } from "./connector.ts";
 
 /*
  * The Ghost Admin API driver: https://docs.ghost.org/admin-api/

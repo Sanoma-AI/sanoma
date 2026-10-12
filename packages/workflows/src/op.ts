@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { Fake } from "./fake.ts";
 
 /**
  * What an operation does to the outside world. It sets the badge a reviewer
@@ -268,6 +269,41 @@ export interface Driver {
   readonly vendor: string;
   readonly ops: Readonly<Record<string, DriverFn>>;
   readonly env?: DriverEnv;
+}
+
+/**
+ * Where a connector keeps its setup (`withSetup`). A symbol, and the property is not enumerable:
+ * `keyof` and `Object.values` over a connector see its resources only, and a copy of a connector
+ * (a spread) has no setup.
+ */
+export const SETUP: unique symbol = Symbol("sanoma.setup");
+
+/**
+ * What a connector package attaches to its connector (`withSetup`), for the config's resolver
+ * to read: the config then names the connector alone, and never a driver or a fake.
+ */
+export interface ConnectorSetup {
+  /** The live driver, which reads its credentials from the environment when called. */
+  driver: () => Driver;
+  /** A fake of the vendor (`defineFake`): the template sandbox runs and scenarios copy (`fresh()`). */
+  fake: () => Fake<any, any>;
+}
+
+/**
+ * The connector with its driver and fake attached, as a connector package exports it:
+ * `export const ghost = withSetup(defineConnector("ghost", {...}), { driver: () => ghostDriver(), fake: () => fakeGhost() })`.
+ * The operations are the same objects, and the type is the connector's. `driver` is called once,
+ * on first use: one driver per process.
+ */
+export function withSetup<C extends Connector<any, any>>(connector: C, setup: ConnectorSetup): C {
+  let driver: Driver | undefined;
+  const attached: ConnectorSetup = Object.freeze({ driver: () => (driver ??= setup.driver()), fake: setup.fake });
+  return Object.defineProperty({ ...connector }, SETUP, { value: attached }) as C;
+}
+
+/** The setup `withSetup` attached to a connector, if any. */
+export function setupOf(connector: Connector<any, any>): ConnectorSetup | undefined {
+  return (connector as { readonly [SETUP]?: ConnectorSetup })[SETUP];
 }
 
 export function isOp(x: unknown): x is Op {

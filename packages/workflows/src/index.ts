@@ -1,6 +1,7 @@
 export {
   type CallContext,
   type Connector,
+  type ConnectorSetup,
   type ConnectorVendor,
   type Driver,
   type DriverEnv,
@@ -13,7 +14,10 @@ export {
   type OpSpec,
   type ResourceGroup,
   retryableStatus,
+  SETUP,
+  setupOf,
   type VendorInfo,
+  withSetup,
 } from "./op.ts";
 export {
   defineWorkflow,

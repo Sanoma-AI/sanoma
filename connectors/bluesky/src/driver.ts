@@ -4,7 +4,7 @@ import { TID } from "@atproto/common-web";
 import { ResponseType } from "@atproto/xrpc";
 import { defineDriver, DriverError, retryableStatus } from "@sanoma/workflows";
 import { z } from "zod";
-import { bluesky } from "./index.ts";
+import { bluesky } from "./connector.ts";
 
 /** The environment variables the driver reads, on every call. */
 const env = z.object({
