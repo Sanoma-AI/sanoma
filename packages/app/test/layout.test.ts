@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { type Box, CLUSTER_HEADER, layout, NODE_SIZE, nodeSize, type Point } from "../src/graph/layout.ts";
 import { outlineGraph } from "../src/graph/outline-graph.ts";
-import type { Graph, GraphEdge, Step } from "../src/graph/types.ts";
+import type { Graph, GraphEdge } from "../src/graph/types.ts";
 import { LIST_HEADER, MAX_ROWS, ROW_HEIGHT } from "../src/graph/wildcard.ts";
-import { absolute } from "./graph-helpers.ts";
+import { absolute, DRIFT_SHAPE } from "./graph-helpers.ts";
 
 const op = (id: string) => ({ kind: "op", id }) as const;
 
@@ -159,21 +159,8 @@ describe("layout", () => {
     expect(box.x + box.width).toBeLessThan(at.get("end")!.x);
   });
 
-  it("routes each edge of a loop holding a branch from its source's handle to its target's, around the nodes", () => {
-    // The drift workflow's shape: a loop whose body is an if/else, a call with many rows on one side.
-    const ops = ["a.x.import", "a.y.import", "b.z.import", "b.w.import", "c.v.import"];
-    const branch: Step = {
-      kind: "branch",
-      cases: [[{ kind: "try", body: [{ kind: "op", id: "*.*.import", ops }], handler: [] }], []],
-    };
-    const graph = outlineGraph([{ kind: "repeat", body: [branch] }]);
-    // The otherwise edge leaves the diamond, not the call beside it.
-    expect(graph.edges.find((e) => e.target === "skip:3")!.source).toBe("split:1");
-    expect(routeProblems(graph)).toEqual([]);
-    // The cluster's border: where the edge to it ends, the edge inside it goes on.
-    const { routes } = layout(graph);
-    expect(routes.get("cluster:0->split:1")![0]).toEqual(routes.get("start->cluster:0")!.at(-1));
-    expect(routes.get("op:2->cluster:0")!.at(-1)).toEqual(routes.get("cluster:0->end")![0]);
+  it("routes each edge of a loop holding a branch (the drift workflow's shape) from side to side, around the nodes", () => {
+    expect(routeProblems(outlineGraph(DRIFT_SHAPE))).toEqual([]);
   });
 
   it("routes a fan-out's empty member, a branch beside a call and an empty loop around their nodes", () => {

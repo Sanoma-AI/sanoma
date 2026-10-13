@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
 import { outlineGraph } from "../src/graph/outline-graph.ts";
 import { type GraphNode, nodeAt, type Step } from "../src/graph/types.ts";
-import { calls, labels, pairs } from "./graph-helpers.ts";
+import { calls, DRIFT_SHAPE, labels, pairs } from "./graph-helpers.ts";
 
 // Hand-built outlines, in the shapes outlineWorkflow returns (packages/workflows/src/outline.ts).
 
@@ -220,18 +220,7 @@ describe("outlineGraph", () => {
   });
 
   it("joins a cluster's border to what it holds: in from its inside left, out to its inside right", () => {
-    // The drift workflow's shape: a loop whose body is an if/else, a call on one side.
-    const { nodes, edges } = outlineGraph([
-      {
-        kind: "repeat",
-        body: [
-          {
-            kind: "branch",
-            cases: [[{ kind: "try", body: [{ kind: "op", id: "*.*.import", ops: ["a.x.import"] }], handler: [] }], []],
-          },
-        ],
-      },
-    ]);
+    const { nodes, edges } = outlineGraph(DRIFT_SHAPE);
     expect(labels(nodes)).toEqual([
       "start start",
       "cluster:0 repeats",
