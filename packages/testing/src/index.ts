@@ -1,11 +1,7 @@
-import { mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import {
   type Connector,
   type Driver,
   memoryLedger,
-  resolveConfig,
   type SanomaConfig,
   startWorker,
   type Worker,
@@ -31,19 +27,6 @@ export function testDatabaseUrl(suffix: string): string {
 }
 
 /**
- * A directory whose `package.json` names the app `name`, for a test config's `root`: the app's
- * name scopes its runs, queues and versions in the database, and names its test database
- * (`startTestWorker`). It holds nothing else, so the config has no scenarios and no data files.
- * The same name gives the same directory, made when missing.
- */
-export function testRoot(name: string): string {
-  const dir = join(tmpdir(), "sanoma-test-roots", name.replace(/[^a-z0-9_.-]/gi, "_"));
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name, private: true, type: "module" })}\n`);
-  return dir;
-}
-
-/**
  * `connector` set up with this fake instead of the one its package attaches, for a test that
  * seeds or reads the fake its runs call: `fake` is what live runs call (through `driver`, by
  * default the fake's own), and sandbox runs too, since its maker gives this very one. For a
@@ -58,31 +41,20 @@ export function withFake<C extends Connector<any, any>>(
   return withSetup(connector, { driver: () => driver, fake: () => fake });
 }
 
-/** `startWorker`'s options, and the database to use instead of the test's own. */
+/** `startWorker`'s options, and the database the test runs on. */
 export interface TestWorkerOptions extends WorkerOptions {
-  /** Defaults to `testDatabaseUrl(<the config's app name>)`. */
-  databaseUrl?: string;
+  /** The test's own database, such as `testDatabaseUrl("announce")`: one per test file, or per `describe` that starts a worker. */
+  databaseUrl: string;
 }
 
 /**
- * Starts a worker for a test. The worker runs on `options.databaseUrl`, else
- * `testDatabaseUrl(<app name>)`, the app name being its `root`'s `package.json`'s (give a test
- * file its own with `testRoot`), never on a `databaseUrl` the config carries: a test that spreads
- * the project's config must not reach its real database. `ledger` defaults to a fresh in-memory
- * ledger. Everything else in `config`, and `options` (`promote`, `logLevel`), go to `startWorker`
- * as given. Stop the worker in `afterAll`.
+ * Starts a worker for a test, on `options.databaseUrl`, never on a `databaseUrl` the config
+ * carries: a test that spreads the project's config must not reach its real database. Tests are
+ * kept apart by database, not by app name, so the app keeps its name (its root's
+ * `package.json`'s). `ledger` defaults to a fresh in-memory ledger. Everything else in `config`,
+ * and the other options (`promote`, `logLevel`), go to `startWorker` as given. Stop the worker
+ * in `afterAll`.
  */
-export function startTestWorker(config: SanomaConfig, options: TestWorkerOptions = {}): Promise<Worker> {
-  const { databaseUrl, ...workerOptions } = options;
-  return startWorker(
-    {
-      ...config,
-      databaseUrl: databaseUrl ?? testDatabaseUrlOf(config),
-      ledger: config.ledger ?? memoryLedger(),
-    },
-    workerOptions,
-  );
+export function startTestWorker(config: SanomaConfig, { databaseUrl, ...options }: TestWorkerOptions): Promise<Worker> {
+  return startWorker({ ...config, databaseUrl, ledger: config.ledger ?? memoryLedger() }, options);
 }
-
-/** `testDatabaseUrl` of the config's app name. */
-export const testDatabaseUrlOf = (config: SanomaConfig): string => testDatabaseUrl(resolveConfig(config).appName);

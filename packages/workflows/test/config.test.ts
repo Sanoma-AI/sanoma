@@ -1,5 +1,3 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { bluesky } from "@sanoma/connector-bluesky";
@@ -8,10 +6,11 @@ import { fakeGhost } from "@sanoma/connector-ghost/fake";
 import { github } from "@sanoma/connector-github";
 import { resend } from "@sanoma/connector-resend";
 import { stripe } from "@sanoma/connector-stripe";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { allowAll, type Connector, memoryLedger, resolveConfig, type SanomaConfig, withSetup } from "../src/index.ts";
 import { setupOf, VENDOR } from "../src/op.ts";
 import announce from "./fixtures/announce.ts";
+import { tree } from "./tree.ts";
 
 // The packages' connectors, as a company's config names them: the setup is theirs.
 const config = (options: Partial<SanomaConfig> = {}): SanomaConfig => ({
@@ -21,20 +20,6 @@ const config = (options: Partial<SanomaConfig> = {}): SanomaConfig => ({
   ledger: memoryLedger(),
   ...options,
 });
-
-const dir = mkdtempSync(join(tmpdir(), "sanoma-config-"));
-afterAll(() => rmSync(dir, { recursive: true, force: true }));
-
-/** A directory under `dir`, made with `files` (relative path to text) in it. */
-function tree(name: string, files: Record<string, string> = {}): string {
-  const root = join(dir, name);
-  mkdirSync(root, { recursive: true });
-  for (const [file, text] of Object.entries(files)) {
-    mkdirSync(join(root, file, ".."), { recursive: true });
-    writeFileSync(join(root, file), text);
-  }
-  return root;
-}
 
 /** A driver maker other than the package's. */
 const driver = () => ({ vendor: "ghost", ops: {} });

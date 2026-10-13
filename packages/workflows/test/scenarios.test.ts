@@ -2,7 +2,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { testDatabaseUrl, testRoot } from "@sanoma/testing";
+import { testDatabaseUrl } from "@sanoma/testing";
 import { afterAll, describe, expect, it } from "vitest";
 import { allowAll, memoryLedger, type SanomaConfig } from "../src/index.ts";
 import { runScenarios } from "../src/scenarios.ts";
@@ -15,7 +15,6 @@ const root = mkdtempSync(join(tmpdir(), "sanoma-scenarios-"));
 const dir = join(root, "scenarios");
 mkdirSync(dir);
 cpSync(fileURLToPath(new URL("./fixtures/scenarios/announce.feature", import.meta.url)), join(dir, "announce.feature"));
-writeFileSync(join(root, "package.json"), JSON.stringify({ name: "workflows-scenarios", type: "module" }));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 const config: SanomaConfig = {
@@ -67,7 +66,7 @@ describe("runScenarios", () => {
   });
 
   it("passes and fails nothing for a config with no scenarios", async () => {
-    await expect(runScenarios({ ...config, root: testRoot("workflows-scenarios") }, { databaseUrl })).resolves.toEqual({
+    await expect(runScenarios({ ...config, root: join(root, "elsewhere") }, { databaseUrl })).resolves.toEqual({
       passed: [],
       failed: [],
     });

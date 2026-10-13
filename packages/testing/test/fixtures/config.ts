@@ -10,8 +10,8 @@ import announce from "../../../workflows/test/fixtures/announce.ts";
 
 /**
  * A company's config, as its scenario tests would spread it: the connectors as their packages
- * export them, whose fakes sandbox runs call, and this directory as its root (its package.json
- * names the app, and its scenarios/ holds the scenarios).
+ * export them, whose fakes sandbox runs call, and this directory as its root (its scenarios/
+ * holds the scenarios).
  */
 export const config = {
   workflows: [announce],

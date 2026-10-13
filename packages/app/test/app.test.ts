@@ -64,11 +64,10 @@ const blog = vendors.ghost;
 const company = companyFakes();
 const companyDir = fileURLToPath(new URL("../../workflows/test/fixtures/company/", import.meta.url));
 /**
- * The app's root: its package.json names the app, its scenarios/ is a copy of the fixtures'
- * feature files (which a test breaks to see the app say so), its resources/ the company's.
+ * The app's root, with no package.json (so the app is "sanoma"): its scenarios/ is a copy of the
+ * fixtures' feature files (which a test breaks to see the app say so), its resources/ the company's.
  */
 const appRoot = mkdtempSync(join(tmpdir(), "sanoma-app-"));
-writeFileSync(join(appRoot, "package.json"), JSON.stringify({ name: "sanoma-app-test", type: "module" }));
 const scenariosDir = join(appRoot, "scenarios");
 cpSync(fileURLToPath(new URL("./fixtures/scenarios/", import.meta.url)), scenariosDir, { recursive: true });
 cpSync(join(companyDir, "resources"), join(appRoot, "resources"), { recursive: true });
@@ -194,8 +193,8 @@ describe("the API", () => {
   it("describes the config: workflows, ops, built-ins, the policy and the version", async () => {
     const { status, body } = await call<ConfigDescription>("/api/config");
     expect(status).toBe(200);
-    expect(body.appName).toBe("sanoma-app-test");
-    expect(body.version).toMatch(/^sanoma-app-test@/);
+    expect(body.appName).toBe("sanoma");
+    expect(body.version).toMatch(/^sanoma@/);
     expect(body.policy).toEqual({ defined: true, version: "test-1" });
     const wf = body.workflows.find((w) => w.name === "announce");
     expect(wf?.ops).toHaveLength(5);
@@ -1214,8 +1213,7 @@ describe("an app configured otherwise", () => {
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), "sanoma-app-ledger-"));
     mkdirSync(join(dir, "resources"));
-    // The same app, on its own root: its data files are these.
-    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "sanoma-app-test", type: "module" }));
+    // The same app ("sanoma", as no package.json names it), on its own root: its data files are these.
     const GH = `import { github } from "@sanoma/connector-github/resources";\n`;
     writeFileSync(join(dir, "resources", "good.ts"), `${GH}export const web = github.repository({ name: "web" });\n`);
     writeFileSync(join(dir, "resources", "bad.ts"), `${GH}export const docs = github.repository({ name: 1 });\n`);

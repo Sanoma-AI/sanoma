@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
-import { testDatabaseUrl } from "@sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
@@ -20,7 +19,6 @@ import announce from "./fixtures/announce.ts";
 import { inSeconds, pending, types, useApp, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`.
-const databaseUrl = testDatabaseUrl("announce");
 const alice = { id: "alice", groups: ["marketing"] };
 
 /** Posts twice at once, under a policy that holds each call for an approval. */
@@ -33,7 +31,7 @@ const twin = defineWorkflow({
 });
 
 describe("announce", () => {
-  const app = useApp(databaseUrl, "announce");
+  const app = useApp("announce");
   const c = () => app.client;
 
   it("drafts, waits for the named approver, sleeps until launch, then publishes", async () => {
@@ -93,7 +91,8 @@ describe("announce", () => {
       "run.finished",
     ]);
     expect(records.map((r) => r.seq)).toEqual(records.map((_, i) => i));
-    for (const r of records) expect(r).toMatchObject({ v: 1, app: "announce", runId, actor: alice });
+    // The app keeps its default name: no package.json names it.
+    for (const r of records) expect(r).toMatchObject({ v: 1, app: "sanoma", runId, actor: alice });
     const decisions = records.flatMap((r) => (r.type === "op.called" ? [r.decision] : []));
     expect(decisions).toEqual(Array.from({ length: 5 }, () => ({ kind: "allow" })));
     expect(records[0]).toMatchObject({ type: "run.started", workflow: "announce", input: { title: "Ledger" } });
@@ -226,7 +225,7 @@ describe("announce under a policy", () => {
         : approve("lead"),
   };
   const policy = definePolicy((call) => byActor[call.actor.id]?.(call) ?? allow());
-  const app = useApp(databaseUrl, "announce-policy", () => ({
+  const app = useApp("announce-policy", () => ({
     workflows: [announce, twin],
     policy,
     ledger: memoryLedger(),
@@ -416,7 +415,7 @@ describe("announce under a policy", () => {
 
 describe("announce with a vendor that replies off-contract", () => {
   let publishes = 0;
-  const app = useApp(databaseUrl, "announce-off-contract", (vendors) => ({
+  const app = useApp("announce-off-contract", (vendors) => ({
     connectors: vendors.connectorsWith({
       ...vendors.ghost.driver,
       ops: {

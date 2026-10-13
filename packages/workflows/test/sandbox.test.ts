@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { testDatabaseUrl, withFake } from "@sanoma/testing";
+import { withFake } from "@sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
@@ -17,7 +17,6 @@ import announce from "./fixtures/announce.ts";
 import { failure, inSeconds, pending, types, useApp, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`.
-const databaseUrl = testDatabaseUrl("sandbox");
 const alice = { id: "alice", groups: ["marketing"] };
 
 /** Two approvals, one after the other. */
@@ -62,7 +61,7 @@ describe("sandbox runs", () => {
       ]),
     ),
   });
-  const app = useApp(databaseUrl, "sandbox", (vendors) => ({
+  const app = useApp("sandbox", (vendors) => ({
     workflows: [announce, review, sample],
     connectors: [
       ...vendors.connectorsWith(...[vendors.ghost, vendors.resend, vendors.bluesky].map((f) => tripwire(f.driver))),

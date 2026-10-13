@@ -2,7 +2,7 @@ import { bluesky } from "@sanoma/connector-bluesky";
 import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
 import { resend } from "@sanoma/connector-resend";
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { testDatabaseUrl, testRoot, withFake } from "@sanoma/testing";
+import { testDatabaseUrl, withFake } from "@sanoma/testing";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -110,12 +110,13 @@ describe("startWorker, resolveConfig and describeConfig", () => {
   });
 
   it("derive the queue, version, policy version and ledger from the config", () => {
-    const resolved = resolveConfig(config({ root: testRoot("acme") }));
+    // Neither a root nor a file: no package.json names the app.
+    const resolved = resolveConfig(config({}));
     expect(resolved).toMatchObject({
-      appName: "acme",
+      appName: "sanoma",
       databaseUrl: "postgresql://unused@localhost:1/unused",
-      version: expect.stringMatching(/^acme@[0-9a-f]{64}$/),
-      queueName: "sanoma:acme",
+      version: expect.stringMatching(/^sanoma@[0-9a-f]{64}$/),
+      queueName: "sanoma:sanoma",
       policy: allowAll,
       workflows: new Map([["announce", announce]]),
     });
@@ -128,15 +129,12 @@ describe("startWorker, resolveConfig and describeConfig", () => {
     ]);
     expect([...resolved.drivers.keys()].toSorted()).toEqual([...resolved.ops.keys()].toSorted());
     expect(resolved.ledger).toBe(ledger);
-    // Neither a root nor a file: no package.json names the app.
-    expect(resolveConfig(config({})).appName).toBe("sanoma");
-    expect(resolveConfig(config({})).queueName).toBe("sanoma:sanoma");
   });
 });
 
 describe("startWorker failing after DBOS has launched", () => {
   it("stops DBOS and throws, so nothing runs in a worker nobody holds and the next start launches afresh", async () => {
-    const ok = config({ root: testRoot("worker-launch"), databaseUrl: testDatabaseUrl("worker") });
+    const ok = config({ databaseUrl: testDatabaseUrl("worker") });
     vi.spyOn(DBOS, "registerQueue").mockRejectedValueOnce(new Error("no queue for you"));
     await expect(startWorker(ok)).rejects.toThrow("no queue for you");
     expect(DBOS.isInitialized()).toBe(false);
@@ -147,7 +145,7 @@ describe("startWorker failing after DBOS has launched", () => {
 });
 
 describe("a worker whose config has no workflow of a name registered earlier in the process", () => {
-  const app = useApp(testDatabaseUrl("worker-by-name"), "worker-by-name", () => ({ workflows: [announce, noop] }));
+  const app = useApp("worker-by-name", () => ({ workflows: [announce, noop] }));
 
   it("refuses its runs, rather than running the earlier worker's definition", async () => {
     await app.stop();

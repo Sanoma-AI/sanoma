@@ -4,7 +4,7 @@ import { githubDriver } from "@sanoma/connector-github/driver";
 import { resendDriver } from "@sanoma/connector-resend/driver";
 import { stripeDriver } from "@sanoma/connector-stripe/driver";
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { testDatabaseUrl, testRoot, withFake } from "@sanoma/testing";
+import { testDatabaseUrl, withFake } from "@sanoma/testing";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -62,7 +62,6 @@ const config: SanomaConfig = {
   connectors: [acmeOn(acmeDriver)],
   policy: allowAll,
   ledger: memoryLedger(),
-  root: testRoot("credentials"),
   databaseUrl,
 };
 /** Sets and clears the stored credentials, as the app does. */

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { testDatabaseUrl, testRoot } from "@sanoma/testing";
+import { testDatabaseUrl } from "@sanoma/testing";
 import { Pool } from "pg";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import {
@@ -168,7 +168,7 @@ describe("postgresLedger", () => {
 
 describe("a config without a ledger", () => {
   it("resolves to none; the worker and the client each make a Postgres store on its database, and share the table", async () => {
-    const config = { ...minimal(databaseUrl), root: testRoot("ledger-default") };
+    const config = minimal(databaseUrl);
     expect(resolveConfig(config).ledger).toBeUndefined();
     expect("ledger" in resolveConfig(config)).toBe(false);
     const worker = await startWorker(config);
@@ -191,7 +191,7 @@ describe("a config without a ledger", () => {
 
   it("never closes a store the config gives", async () => {
     const close = vi.fn<() => Promise<void>>(async () => undefined);
-    const config = { ...minimal(databaseUrl), root: testRoot("ledger-given"), ledger: { ...memoryLedger(), close } };
+    const config = { ...minimal(databaseUrl), ledger: { ...memoryLedger(), close } };
     expect(resolveConfig(config).ledger).toBe(config.ledger);
     const worker = await startWorker(config);
     await worker.stop();

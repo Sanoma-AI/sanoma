@@ -7,7 +7,7 @@ import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
 import { fakeGhost } from "@sanoma/connector-ghost/fake";
 import { resend } from "@sanoma/connector-resend";
 import { fakeResend } from "@sanoma/connector-resend/fake";
-import { testRoot } from "@sanoma/testing";
+import { testDatabaseUrl } from "@sanoma/testing";
 import { type TestApp, useTestApp } from "@sanoma/testing/harness";
 import type { Fake, FakeCall, FakeOptions } from "@sanoma/workflows/fake";
 import { afterAll, beforeEach } from "vitest";
@@ -103,18 +103,17 @@ export type App = TestApp & {
 
 /**
  * `useTestApp` on the announce workflow and the marketing fakes, which `overrides` may replace,
- * for one `describe`, on its own app name (`testRoot`) in the file's database. The fakes, and the
- * `extra` ones, reset before each test; the ledger is on disk so it outlives a restart the way it
- * would across processes.
+ * for one `describe`, on a database of its own, `testDatabaseUrl(name)`: tests are kept apart by
+ * database, and the app keeps its default name. The fakes, and the `extra` ones, reset before
+ * each test; the ledger is on disk so it outlives a restart the way it would across processes.
  */
 export function useApp(
-  databaseUrl: string,
-  appName: string,
+  name: string,
   overrides: (vendors: Vendors) => Partial<SanomaConfig> = () => ({}),
   { extra }: { extra?: readonly Extra[] } = {},
 ): App {
   const vendors = marketingFakes({ extra });
-  const ledgerDir = mkdtempSync(join(tmpdir(), `sanoma-ledger-${appName}-`));
+  const ledgerDir = mkdtempSync(join(tmpdir(), `sanoma-ledger-${name}-`));
   // Registered before useTestApp's, so it runs after the worker stops (after hooks run in reverse).
   afterAll(() => rmSync(ledgerDir, { recursive: true, force: true }));
   const app = useTestApp(
@@ -124,10 +123,9 @@ export function useApp(
       connectors: vendors.connectors,
       policy: allowAll,
       ledger: jsonlLedger(ledgerDir),
-      root: testRoot(appName),
       ...overrides(vendors),
     },
-    { databaseUrl },
+    { databaseUrl: testDatabaseUrl(name) },
   );
   beforeEach(() => vendors.reset());
   // Object.assign keeps the getters; a spread would read them before beforeAll.

@@ -21,7 +21,7 @@ export { runScenario, type RunScenarioOptions } from "@sanoma/workflows/scenario
  */
 export function describeScenarios(
   config: SanomaConfig,
-  { startedBy, timeoutMs, ...options }: TestWorkerOptions & { startedBy?: Principal; timeoutMs?: number } = {},
+  { startedBy, timeoutMs, ...options }: TestWorkerOptions & { startedBy?: Principal; timeoutMs?: number },
 ): void {
   // Only to read the scenarios: the test app resolves the config the worker runs.
   const resolved = resolveConfig({ ...config, ledger: config.ledger ?? memoryLedger() });

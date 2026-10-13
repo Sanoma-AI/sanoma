@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { testDatabaseUrl } from "@sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { firstMatching, runStatus } from "../src/client.ts";
@@ -8,7 +7,6 @@ import announce from "./fixtures/announce.ts";
 import { inSeconds, pending, useApp, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`.
-const databaseUrl = testDatabaseUrl("client");
 const alice = { id: "alice" };
 const lead = { id: "marketing-lead" };
 const input = { title: "Client", body: "<p>x</p>", launchAt: inSeconds(1) };
@@ -85,7 +83,7 @@ const double = defineWorkflow({
 });
 
 // One app for the whole file, its workflows registered alongside announce.
-const app = useApp(databaseUrl, "client", () => ({ workflows: [announce, clock, double] }));
+const app = useApp("client", () => ({ workflows: [announce, clock, double] }));
 const c = () => app.client;
 
 describe("SanomaClient", () => {

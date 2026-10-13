@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { DBOS, DBOSClient } from "@dbos-inc/dbos-sdk";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
-import { startTestWorker, testDatabaseUrl, testRoot } from "@sanoma/testing";
+import { startTestWorker, testDatabaseUrl } from "@sanoma/testing";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -17,6 +17,7 @@ import {
 } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
 import { inSeconds, marketingFakes, waitFor } from "./harness.ts";
+import { appRoot } from "./tree.ts";
 
 const vendors = marketingFakes();
 // Two builds of one workflow. Only the body's source is hashed, not what it closes over.
@@ -49,7 +50,7 @@ const base: SanomaConfig = {
   connectors: vendors.connectors,
   policy: allowAll,
   ledger: memoryLedger(),
-  root: testRoot("acme"),
+  root: appRoot("acme"),
 };
 const versionOf = (config: Partial<SanomaConfig>) => resolveConfig({ ...base, ...config }).version;
 /** DBOS's own override, read when the config is resolved; prefixed with the app name like the hash. */
@@ -69,7 +70,7 @@ describe("the application version", () => {
   it("is a hash of the workflows, prefixed with the app name", () => {
     expect(versionOf({})).toMatch(/^acme@[0-9a-f]{64}$/);
     expect(versionOf({})).toBe(versionOf({}));
-    const other = { root: testRoot("other") };
+    const other = { root: appRoot("other") };
     expect(versionOf(other)).toMatch(/^other@/);
     expect(versionOf(other).slice("other@".length)).not.toBe(versionOf({}).slice("acme@".length));
   });
@@ -122,7 +123,7 @@ describe("workers on one database", () => {
   const databaseUrl = testDatabaseUrl("version");
   const config = (appName: string, extra: Partial<SanomaConfig> = {}): SanomaConfig => ({
     ...base,
-    root: testRoot(appName),
+    root: appRoot(appName),
     databaseUrl,
     ledger: memoryLedger(),
     ...extra,

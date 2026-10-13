@@ -7,7 +7,7 @@ import { resend } from "@sanoma/connector-resend";
 import blueskyPkg from "../../../connectors/bluesky/package.json" with { type: "json" };
 import ghostPkg from "../../../connectors/ghost/package.json" with { type: "json" };
 import resendPkg from "../../../connectors/resend/package.json" with { type: "json" };
-import { testRoot, withFake } from "@sanoma/testing";
+import { withFake } from "@sanoma/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
@@ -181,12 +181,8 @@ describe("describeConfig", () => {
     // No package.json in the directory of this file, which defined the config: the app is "sanoma".
     expect(plain.appName).toBe("sanoma");
     expect(plain.version).toMatch(/^sanoma@[0-9a-f]{64}$/);
-    const gated = defineConfig({ ...base, root: testRoot("acme"), policy: definePolicy(() => allow()) });
-    expect(describeConfig(gated)).toMatchObject({
-      appName: "acme",
-      version: expect.stringMatching(/^acme@/),
-      policy: { defined: true },
-    });
+    const gated = defineConfig({ ...base, policy: definePolicy(() => allow()) });
+    expect(describeConfig(gated).policy).toEqual({ defined: true });
     const versioned = definePolicy(() => allow(), { version: "2026-10-07" });
     expect(versioned.version).toBe("2026-10-07");
     expect(describeConfig({ ...base, policy: versioned }).policy).toEqual({

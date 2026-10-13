@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bluesky } from "@sanoma/connector-bluesky";
-import { testDatabaseUrl, testRoot, withFake } from "@sanoma/testing";
+import { testDatabaseUrl, withFake } from "@sanoma/testing";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { describeConfig } from "../src/describe.ts";
@@ -49,7 +49,7 @@ const byId = (report: DriftReport) => Object.fromEntries(report.resources.map((r
 const opCalls = (records: LedgerRecord[]) => records.filter((r) => r.type === "op.called");
 
 describe("the drift workflow", () => {
-  const app = useApp(databaseUrl, "drift", () => companyOnFakes);
+  const app = useApp("drift", () => companyOnFakes);
 
   beforeEach(() => {
     seed();
@@ -206,7 +206,6 @@ describe("a drift run's record of the data files", () => {
   });
   const root = mkdtempSync(join(tmpdir(), "sanoma-drift-secret-"));
   mkdirSync(join(root, "resources"));
-  writeFileSync(join(root, "package.json"), JSON.stringify({ name: "drift-secret", type: "module" }));
   const secret = "secret-the-run-never-records";
   writeFileSync(
     join(root, "resources", "hooks.ts"),
@@ -214,7 +213,7 @@ describe("a drift run's record of the data files", () => {
       `export const hook = acme.hook({ name: "deploys", url: "https://example.com/hook", token: "${secret}" });\n\n` +
       `export default [hook];\n`,
   );
-  const app = useApp(databaseUrl, "drift-secret", () => ({
+  const app = useApp("drift-secret", () => ({
     workflows: [],
     connectors: [withFake(acme, acmeFake)],
     root,
@@ -251,7 +250,6 @@ describe("SanomaClient's drift", () => {
       connectors: [bluesky],
       policy: allowAll,
       ledger: memoryLedger(),
-      root: testRoot("drift-none"),
       databaseUrl,
     });
     try {
