@@ -47,8 +47,8 @@ import { ZoomSlider } from "./zoom-slider.tsx";
 
 /** A node as React Flow holds it: the graph's node, and whether a click on it selects it. */
 type FlowNode = Node<{ node: GraphNode; selectable: boolean }, GraphNodeKind>;
-/** An edge as React Flow holds it: the route `layout` gives it. */
-type FlowEdge = Edge<{ route: Point[] }, "route">;
+/** An edge as React Flow holds it: the route `layout` gives it, as an SVG path. */
+type FlowEdge = Edge<{ path: string }, "route">;
 /** What a node component reads of its `NodeProps`: its node, of its kind, and whether it is selected. */
 type Props<K extends GraphNodeKind> = {
   data: { node: Extract<GraphNode, { kind: K }>; selectable: boolean };
@@ -336,44 +336,42 @@ const nodeTypes = {
   skip: SkipNode,
 } satisfies { [K in GraphNodeKind]: (props: Props<K>) => ReactNode } as NodeTypes;
 
-/** How round a route's corners are, in px, as React Flow's smoothstep edges'. */
+/** How round a route's corners are, in px: React Flow's smoothstep edges' default borderRadius. */
 const CORNER = 5;
 
+/** The point `d` px from `from` towards `to`, along a run across or down. */
+const towards = (from: Point, to: Point, d: number): Point => ({
+  x: from.x + Math.sign(to.x - from.x) * d,
+  y: from.y + Math.sign(to.y - from.y) * d,
+});
+
+/** A run's length: it goes across or down, not both. */
+const run = (a: Point, b: Point) => Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
+
 /**
- * A route as an SVG path: straight runs, each corner rounded, by at most half of either run it
- * joins.
+ * A route as an SVG path: its runs straight, each corner rounded by CORNER, or by half the shorter
+ * run it joins, as xyflow's smoothstep does (its getBend, which it does not export).
  */
 function pathOf(route: readonly Point[]): string {
-  const [first, ...rest] = route;
-  if (!first) return "";
-  let path = `M ${first.x} ${first.y}`;
-  for (const [i, point] of rest.entries()) {
-    const [before, after] = [route[i]!, rest[i + 1]];
-    if (!after) {
-      path += ` L ${point.x} ${point.y}`;
-      break;
-    }
-    const r = Math.min(
-      CORNER,
-      Math.hypot(point.x - before.x, point.y - before.y) / 2,
-      Math.hypot(after.x - point.x, after.y - point.y) / 2,
-    );
-    const towards = (to: Point, d: number) => {
-      const length = Math.hypot(to.x - point.x, to.y - point.y) || 1;
-      return { x: point.x + ((to.x - point.x) / length) * d, y: point.y + ((to.y - point.y) / length) * d };
-    };
-    const [into, out] = [towards(before, r), towards(after, r)];
+  let path = `M ${route[0]!.x} ${route[0]!.y}`;
+  for (let i = 1; i < route.length - 1; i++) {
+    const [before, point, after] = [route[i - 1]!, route[i]!, route[i + 1]!];
+    const r = Math.min(CORNER, run(before, point) / 2, run(point, after) / 2);
+    const [into, out] = [towards(point, before, r), towards(point, after, r)];
     path += ` L ${into.x} ${into.y} Q ${point.x} ${point.y} ${out.x} ${out.y}`;
   }
-  return path;
+  const last = route.at(-1)!;
+  return `${path} L ${last.x} ${last.y}`;
 }
 
 /**
  * An edge along the route `layout` gave it, rather than one React Flow draws between its
  * handles: a step React Flow puts halfway between them runs behind a wider node beside the target.
+ * Its ends are the layout's, which are React Flow's too: each node is drawn at its layout box's
+ * width and height.
  */
 function RouteEdge({ data, style, interactionWidth }: EdgeProps<FlowEdge>) {
-  return <BaseEdge path={pathOf(data?.route ?? [])} style={style} interactionWidth={interactionWidth} />;
+  return <BaseEdge path={data!.path} style={style} interactionWidth={interactionWidth} />;
 }
 
 const edgeTypes = { route: RouteEdge } satisfies EdgeTypes;
@@ -488,14 +486,14 @@ export default function Graph({ graph, show = "end", selected, onSelect }: Graph
       return {
         ...edge,
         type: "route",
-        data: { route: at.routes.get(edge.id)! },
+        data: { path: pathOf(at.routes.get(edge.id)!) },
         animated: active && !reducedMotion,
         ...(isPending(from) || isPending(to) ? { style: { strokeDasharray: "4 4" } } : {}),
       };
     });
   }, [graph, at, reducedMotion]);
-  // An edge down to its route's points' coordinates.
-  const edges = useStable(drawn, 4);
+  // An edge down to its path.
+  const edges = useStable(drawn, 2);
   const onNodeClick = useCallback(
     (_: unknown, { data }: FlowNode) => {
       if (data.selectable) onSelect?.(data.node);
