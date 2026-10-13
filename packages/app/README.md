@@ -74,4 +74,4 @@ In the repo, `pnpm --filter @sanoma/app build` builds the app (`vite build` into
 
 Status: early (0.x). The API may change between minor versions.
 
-License: Apache-2.0.
+License: FSL-1.1-ALv2.

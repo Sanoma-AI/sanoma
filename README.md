@@ -1,6 +1,6 @@
 # sanoma
 
-Workflow automation like Zapier or n8n, where every workflow is code. The person who runs it works in an app: they start runs, approve what waits on them, and see each workflow as a graph and each run step by step. Behind the app, each workflow is a plain TypeScript file in the company's own repo rather than a graph stored in a vendor's database, so any developer can read it, review a change to it and take it further. It is built for the moment a workflow outgrows the person who built it and has to be handed over. We call the idea Business as Code. This TypeScript monorepo holds the parts anyone can read and run themselves: the runtime, the app and the connectors.
+Workflow automation like Zapier or n8n, where every workflow is code. The person who runs it works in an app: they start runs, approve what waits on them, and see each workflow as a graph and each run step by step. Behind the app, each workflow is a plain TypeScript file in the company's own repo rather than a graph stored in a vendor's database, so any developer can read it, review a change to it and take it further. It is built for the moment a workflow outgrows the person who built it and has to be handed over. We call the idea Business as Code. This TypeScript monorepo is its source-available core: the runtime, the app and the connectors, which anyone can read and self-host.
 
 Status: early. Workflows run on [DBOS](https://dbos.dev) with Postgres: each vendor call is a durable step, approvals and sleeps survive restarts, and a lint keeps workflow code safe to replay. Before every vendor call a policy lets it through, denies it or holds it for an approver, and a ledger records each run: who started it, every call with the policy's decision and the vendor's reply, every approval, and how it ended. Versioning is automatic: each run is stamped with a hash of the workflow code it started on, and only a worker on that version resumes it (`DBOS__APPVERSION` names a version instead; see [Versions](packages/workflows/README.md#versions)). The connectors so far are listed under [Contents](#contents); keeping a company's vendor settings (card limits, time-off policies, access in tools like Mercury, Gusto and Okta) in typed files is where it is headed, not what it does today.
 
@@ -99,7 +99,7 @@ Inside the repo, `@sanoma/*` imports resolve to each package's `src/` (via `path
 
 ## License
 
-[Apache License 2.0](LICENSE).
+[Functional Source License 1.1, Apache 2.0 future license](LICENSE) (FSL-1.1-ALv2). You may use, modify and self-host Sanoma for any purpose except offering it as a competing commercial product or service. Each version becomes available under Apache-2.0 two years after its release.
 
 ## Contributing
 
