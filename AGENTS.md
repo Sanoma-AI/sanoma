@@ -2,6 +2,8 @@
 
 Read this file, then only the package guidance relevant to the task. The [README](README.md) owns product context and [development setup](README.md#develop).
 
+Describe Sanoma the way the [README's opening](README.md#sanoma) does (workflow automation where every workflow is code), and claim only what exists today.
+
 ## Package map
 
 | Working on                                              | Read next                                                              |

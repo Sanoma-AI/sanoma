@@ -1,8 +1,37 @@
 # sanoma
 
-Open core of Sanoma. Business as Code keeps a company's operational configuration (card limits, time-off policies, access, onboarding steps) in typed code and applies it to vendors like Mercury, Gusto and Okta. An agent drafts each change, policies decide who must approve, and a ledger records what happened. This TypeScript monorepo holds the open parts.
+Workflow automation like Zapier or n8n, where every workflow is code. The person who runs it works in an app: they start runs, approve what waits on them, and see each workflow as a graph and each run step by step. Behind the app, each workflow is a plain TypeScript file in the company's own repo rather than a graph stored in a vendor's database, so any developer can read it, review a change to it and take it further. It is built for the moment a workflow outgrows the person who built it and has to be handed over. We call the idea Business as Code. This TypeScript monorepo holds the parts anyone can read and run themselves: the runtime, the app and the connectors.
 
-Status: early. Business processes are written as TypeScript workflows that run on [DBOS](https://dbos.dev): each vendor call is a durable step, approvals and sleeps survive restarts, and a lint keeps workflow code safe to replay. Versioning is automatic: each run is stamped with a hash of the workflow code it started on, and only a worker on that version resumes it (`DBOS__APPVERSION` names a version instead; see [Versions](packages/workflows/README.md#versions)).
+Status: early. Workflows run on [DBOS](https://dbos.dev) with Postgres: each vendor call is a durable step, approvals and sleeps survive restarts, and a lint keeps workflow code safe to replay. Before every vendor call a policy lets it through, denies it or holds it for an approver, and a ledger records each run: who started it, every call with the policy's decision and the vendor's reply, every approval, and how it ended. Versioning is automatic: each run is stamped with a hash of the workflow code it started on, and only a worker on that version resumes it (`DBOS__APPVERSION` names a version instead; see [Versions](packages/workflows/README.md#versions)). The connectors so far are listed under [Contents](#contents); keeping a company's vendor settings (card limits, time-off policies, access in tools like Mercury, Gusto and Okta) in typed files is where it is headed, not what it does today.
+
+## What a workflow looks like
+
+A company repo holds `sanoma.config.ts` with `workflows/` and `policies/` beside it, and the [`sanoma`](packages/sanoma/README.md) bin runs its workflows and the app. A workflow lists the vendor operations it may call, and can call nothing else. This one drafts a blog post, waits for the marketing lead, sleeps until launch, then publishes:
+
+```ts
+// workflows/announce.ts
+import { ghost } from "@sanoma/connector-ghost";
+import { defineWorkflow, z } from "sanoma";
+
+export default defineWorkflow({
+  name: "announce",
+  trigger: "manual",
+  input: z.object({ title: z.string(), body: z.string(), launchAt: z.iso.datetime({ offset: true }) }),
+  uses: [ghost.post.create, ghost.post.publish, "approval", "sleep"],
+  run: async (ctx, { title, body, launchAt }) => {
+    const post = await ctx.ghost.post.create({ title, html: body, status: "draft" });
+    await ctx.approval("Review launch copy", {
+      approver: "marketing-lead",
+      covers: [ghost.post.publish],
+      links: [post.url],
+    });
+    await ctx.sleep({ until: launchAt });
+    return ctx.ghost.post.publish({ id: post.id });
+  },
+});
+```
+
+The app draws this file as a graph before it runs, lists the approval in its Inbox, and shows each run's calls, decisions and replies in its ledger. A developer changes the workflow by changing the file. [`@sanoma/workflows`](packages/workflows/README.md) has the whole API.
 
 ## Contents
 
