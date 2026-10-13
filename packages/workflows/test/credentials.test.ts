@@ -23,7 +23,7 @@ import {
   startWorker,
   withSetup,
 } from "../src/index.ts";
-import { credentialsOf } from "../src/env.ts";
+import { credentialsOf, unconfigured, unconfiguredSummary } from "../src/env.ts";
 import { describeConfig } from "../src/describe.ts";
 
 // Made-up variables and values: nothing here is a credential.
@@ -82,6 +82,8 @@ beforeEach(async () => {
 const checked = (cfg = config) =>
   credentialsOf(resolveConfig(cfg).driversByVendor, (name) => process.env[name]).get("acme");
 const statuses = () => checked()?.map(({ name, status }) => [name, status]);
+/** Why acme cannot run, as a call to it fails, when it cannot. */
+const why = (cfg = config) => unconfigured("acme", checked(cfg) ?? []);
 
 /**
  * Runs `start`, which is to fail, and counts the credentials listeners (the connections that hear
@@ -150,37 +152,33 @@ describe("a driver's env", () => {
     const throwingConfig = { ...config, connectors: [acmeOn(throwing)] };
     const credentials = checked(throwingConfig);
     expect(credentials).toEqual([{ name: URL_VAR, optional: false, status: "invalid", problem: "its check threw" }]);
-    const warning = await warnedAtStart(throwingConfig);
+    const warning = why(throwingConfig);
     expect(warning).toContain(`${URL_VAR} is invalid: its check threw`);
     expect(JSON.stringify([credentials, warning])).not.toContain(VALUE);
   });
 });
 
-/** Starts a worker on `cfg`, stops it, and gives what it warned about acme at start, if anything. */
-async function warnedAtStart(cfg: SanomaConfig): Promise<string | undefined> {
-  const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-  const worker = await startWorker(cfg);
-  await worker.stop();
-  return warn.mock.calls.flat().find((m) => String(m).includes("acme is not configured")) as string | undefined;
-}
-
 describe("startWorker", () => {
-  it("starts, warning per vendor of the variables missing or invalid, and listens for the missing ones", async () => {
+  it("starts, naming in one line the vendors with variables missing or invalid, and listens for the missing ones", async () => {
     vi.stubEnv(URL_VAR, undefined);
     vi.stubEnv(KEY_VAR, "key_NOT-LOWER");
     vi.stubEnv(REGION_VAR, undefined);
     const launch = vi.spyOn(DBOS, "launch");
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, "warn");
+    let unconfiguredAtStart: readonly string[] | undefined;
     const { message, opened, left } = await listeners(async () => {
       const worker = await startWorker(config);
+      unconfiguredAtStart = worker.unconfigured;
       await worker.stop();
     });
     expect(message).toBe("started");
-    expect(warn).toHaveBeenCalledWith(
-      `sanoma: acme is not configured: ${URL_VAR} (the account's API URL), ${KEY_VAR} is invalid: an API key, key_<letters>; ` +
-        "set in the environment",
-    );
-    expect(warn.mock.calls.flat().join("\n")).not.toContain("NOT-LOWER");
+    expect(unconfiguredAtStart).toEqual(["acme"]);
+    // The vendors' names alone: why is the failed call's message, and the connector page's.
+    const printed = warn.mock.calls.flat().map(String);
+    expect(printed.filter((line) => line.includes("not configured"))).toEqual([
+      `sanoma: ${unconfiguredSummary(["acme"], 1)}`,
+    ]);
+    expect(printed.join("\n")).not.toContain("NOT-LOWER");
     expect(launch).toHaveBeenCalledTimes(1);
     // It listened for the stored values of the two it lacks while it ran, and stopped with it.
     expect({ opened, left }).toEqual({ opened: 1, left: 0 });
@@ -201,39 +199,52 @@ describe("startWorker", () => {
     expect(message).toMatch(/^Workflow "credentials-helper" cannot be outlined/);
     expect({ opened, left }).toEqual({ opened: 0, left: 0 });
   });
+});
 
-  it("warns of an invalid variable even when it is optional", async () => {
+describe("why a vendor cannot run", () => {
+  it("names an invalid variable even when it is optional", () => {
     vi.stubEnv(URL_VAR, "https://acme.example.test");
     vi.stubEnv(KEY_VAR, KEY);
     vi.stubEnv(REGION_VAR, "mars");
-    expect(await warnedAtStart(config)).toBe(
-      `sanoma: acme is not configured: ${REGION_VAR} is invalid: Invalid option: expected one of "us"|"eu"; ` +
+    expect(why()).toBe(
+      `acme is not configured: ${REGION_VAR} is invalid: Invalid option: expected one of "us"|"eu"; ` +
         "set in the environment",
     );
   });
 
-  it("points at the connector page when nothing invalid is in the environment", async () => {
+  it("points at the connector page when nothing invalid is in the environment", () => {
     vi.stubEnv(URL_VAR, undefined);
     vi.stubEnv(KEY_VAR, undefined);
     vi.stubEnv(REGION_VAR, undefined);
-    expect(await warnedAtStart(config)).toBe(
-      `sanoma: acme is not configured: ${URL_VAR} (the account's API URL), ${KEY_VAR} (an API key); set it on the connector page`,
+    expect(why()).toBe(
+      `acme is not configured: ${URL_VAR} (the account's API URL), ${KEY_VAR} (an API key); set it on the connector page`,
     );
+  });
+
+  it("is summed up in one line of names for the worker's start, nothing when every vendor can run", () => {
+    expect(unconfiguredSummary(["ghost", "resend"], 5)).toBe(
+      "2 of 5 connectors not configured yet: ghost, resend; set their variables on the connector pages or in the environment",
+    );
+    expect(unconfiguredSummary([], 5)).toBeUndefined();
   });
 });
 
 describe("a call to a vendor the worker started without", () => {
-  it("fails at the call, saying what the worker warned at start, until they are set", async () => {
+  it("fails at the call, saying why, until they are set", async () => {
     vi.stubEnv(URL_VAR, undefined);
     vi.stubEnv(KEY_VAR, "key_NOT-LOWER");
     vi.stubEnv(REGION_VAR, undefined);
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const worker = await startWorker(config);
+    const warn = vi.spyOn(console, "warn");
+    // Quiet: it names no vendor at start, though `unconfigured` still does.
+    const worker = await startWorker(config, { quiet: true });
     try {
       const runId = await client.start(getThing, { id: "1" }, { startedBy: { id: "alice" } });
       const err = (await client.result(runId).catch((e: unknown) => e)) as Error;
       const message = `acme is not configured: ${URL_VAR} (the account's API URL), ${KEY_VAR} is invalid: an API key, key_<letters>; set in the environment`;
       expect(err.message).toBe(message);
+      expect(message).toBe(why());
+      expect(worker.unconfigured).toEqual(["acme"]);
+      expect(warn.mock.calls.flat().join("\n")).not.toContain("not configured");
       expect(errorCode(err)).toBe("driver_failed");
       // The call's own failure, final, in the ledger as any driver's would be.
       const ledger = await client.ledger(runId);

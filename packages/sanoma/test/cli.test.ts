@@ -7,15 +7,17 @@ import { copyFixture, ensureBuilt, runCli, startCli } from "./fixture.ts";
 // Needs Postgres (`pnpm db:up`) and the packages' builds: the fixture copy loads them as a
 // company repo would, from `dist/`, so `beforeAll` builds those that are stale.
 const env = { SANOMA_DATABASE_URL: testDatabaseUrl("sanoma-cli"), SANOMA_APP_PORT: "0" };
+/** Ghost's variables unset: the fixture's one vendor is not configured. */
+const unconfigured = { ...env, GHOST_ADMIN_URL: "", GHOST_ADMIN_API_KEY: "" };
 
 let dir = "";
 beforeAll(ensureBuilt, 600_000);
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("sanoma serve", () => {
-  it("runs the worker and the app, prints where, and stops on SIGINT", async () => {
+  it("runs the worker and the app, prints what is not configured in one line and where, and stops on SIGINT", async () => {
     dir = copyFixture();
-    const { child, finished, output } = startCli(dir, ["serve"], env);
+    const { child, finished, output } = startCli(dir, ["serve"], unconfigured);
     try {
       const stdout = await waitFor(
         () => output().stdout,
@@ -23,6 +25,11 @@ describe("sanoma serve", () => {
         30_000,
       );
       expect(stdout).toContain("sanoma-fixture running hello");
+      const { stderr } = output();
+      // The worker's one line, naming the vendor; nothing per variable, and no pg deprecation
+      // (DBOS's per-connection SET, see DBOS_DATABASE_OPTIONS).
+      expect(stderr).toContain("sanoma: 1 of 1 connectors not configured yet: ghost; set their variables");
+      expect(`${stdout}${stderr}`).not.toMatch(/is not configured|DeprecationWarning/);
       const url = stdout.match(/at (http:\/\/127\.0\.0\.1:\d+); ctrl-c to stop/)![1]!;
       // The app is up: its home lists the config's one workflow, rendered on the server.
       const res = await fetch(`${url}/workflows`);
@@ -77,11 +84,13 @@ GHOST_ADMIN_API_KEY=
 describe("sanoma check", () => {
   it("passes the fixture: Postgres, tsc, oxlint, the config and its scenario, then ok and exit 0", async () => {
     dir = copyFixture();
-    const ok = await runCli(dir, ["check"], env);
+    const ok = await runCli(dir, ["check"], unconfigured);
     expect(ok.code, `${ok.stdout}${ok.stderr}`).toBe(0);
     // The lines check prints, not all of stdout: on a fresh database DBOS logs "Created database …" there.
     expect(ok.stderr).toContain("passed hello/hello.feature › A post goes out");
     expect(ok.stderr.trimEnd().split("\n").at(-1)).toBe("ok");
+    // The scenarios use the fakes alone: no credentials to report, and nothing but check's own lines and DBOS's setup.
+    expect(`${ok.stdout}${ok.stderr}`).not.toMatch(/not configured|DeprecationWarning|Error in step/);
   }, 180_000);
 });
 

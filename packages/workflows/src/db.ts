@@ -1,4 +1,4 @@
-import { DBOS } from "@dbos-inc/dbos-sdk";
+import { DBOS, DBOSClient } from "@dbos-inc/dbos-sdk";
 import { Client, Pool } from "pg";
 import { warn } from "./log.ts";
 import { errorMessage } from "./shared.ts";
@@ -51,6 +51,37 @@ export function openPool(databaseUrl: string, what: string): Pool {
   return pool;
 }
 
+/**
+ * What every DBOS handle on the config's database is given (`DBOS.setConfig`, `dbosClient`): DBOS
+ * is told not to set Postgres's `idle_in_transaction_session_timeout` on each connection of its
+ * pool. It sends that `SET` from the pool's `connect` event without awaiting it (dbos-sdk 5.2.11,
+ * dist/src/system_database.js:691), so the pool hands the connection out while it runs: two
+ * queries at once on one client, which pg deprecates. `prepareDatabase` sets the same 60 s guard
+ * on the database instead. Remove the switch when DBOS awaits its `SET`.
+ */
+export const DBOS_DATABASE_OPTIONS = { systemDatabaseIdleTransactionTimeoutMs: 0 } as const;
+
+/**
+ * A DBOS client of the app `applicationName` on the database at `databaseUrl`, as every client of
+ * the runtime, its tests and `@sanoma/testing` make one (`DBOS_DATABASE_OPTIONS`).
+ */
+export const dbosClient = (databaseUrl: string, applicationName?: string): Promise<DBOSClient> =>
+  DBOSClient.create({
+    systemDatabaseUrl: databaseUrl,
+    ...(applicationName !== undefined && { applicationName }),
+    ...DBOS_DATABASE_OPTIONS,
+  });
+
+/**
+ * The `idle_in_transaction_session_timeout` `prepareDatabase` sets: DBOS's own default
+ * (`DEFAULT_IDLE_TRANSACTION_TIMEOUT_MS`, 60_000, in dbos-sdk 5.2.11 dist/src/system_database.js),
+ * how long a frozen or unreachable client may hold the system database's locks.
+ */
+const IDLE_IN_TRANSACTION_TIMEOUT = "60s";
+
+/** Postgres's code for a statement the role lacks the privilege for. */
+const INSUFFICIENT_PRIVILEGE = "42501";
+
 /** A pool opened on first use, once its database is prepared, and ended by `close`. */
 export interface LazyPool {
   db(): Promise<Pool>;
@@ -94,7 +125,8 @@ const prepared = new Map<string, Promise<void>>();
  * Makes the database at `databaseUrl` ready for the runtime, once per process and URL: the
  * database itself and DBOS's tables when they are not there yet (as a worker's launch makes
  * them; credentials may be set, and a ledger read, before any worker has run), then the
- * credentials and ledger tables. Two processes preparing one database both succeed. A
+ * credentials and ledger tables, and its idle-transaction timeout (`guardIdleTransactions`).
+ * Two processes preparing one database both succeed. A
  * preparation that fails is forgotten, so the next call tries again.
  */
 export function prepareDatabase(databaseUrl: string): Promise<void> {
@@ -120,8 +152,34 @@ async function prepare(databaseUrl: string): Promise<void> {
   await conn.connect();
   try {
     for (const [what, ddl] of TABLES) await createTable(conn, ddl, what);
+    await guardIdleTransactions(conn);
   } finally {
     await conn.end();
+  }
+}
+
+/**
+ * Sets `idle_in_transaction_session_timeout` on the database, for each session that starts after,
+ * as DBOS would per connection (`DBOS_DATABASE_OPTIONS`), unless the server, the role or the
+ * database sets it already. One process at a time (an advisory lock), so two preparing at once
+ * both succeed. A role that may not alter the database leaves it, quietly: its administrator decides.
+ */
+async function guardIdleTransactions(db: Db): Promise<void> {
+  try {
+    await db.query(`DO $$ BEGIN
+      PERFORM pg_advisory_xact_lock(hashtext('sanoma.idle_in_transaction_session_timeout'));
+      IF current_setting('idle_in_transaction_session_timeout') = '0' AND NOT EXISTS (
+        SELECT FROM pg_db_role_setting s JOIN pg_database d ON d.oid = s.setdatabase, unnest(s.setconfig) c
+        WHERE d.datname = current_database() AND s.setrole = 0 AND c LIKE 'idle_in_transaction_session_timeout=%'
+      ) THEN
+        EXECUTE format('ALTER DATABASE %I SET idle_in_transaction_session_timeout = %L', current_database(),
+          '${IDLE_IN_TRANSACTION_TIMEOUT}');
+      END IF;
+    END $$`);
+  } catch (err) {
+    if (pgCode(err) !== INSUFFICIENT_PRIVILEGE) {
+      throw new Error(`could not prepare the database: ${errorMessage(err)}`, { cause: err });
+    }
   }
 }
 

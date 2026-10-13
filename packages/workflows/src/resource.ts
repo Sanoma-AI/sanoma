@@ -65,9 +65,10 @@ export interface ResourceSpec<S extends z.ZodObject = z.ZodObject> {
 
 /**
  * Where a declared resource keeps its brand, its type's `<vendor>.<type>`: a symbol, so a field
- * holding a resource is told from data.
+ * holding a resource is told from data; a registered one (`Symbol.for`), so a copy of this
+ * package reads what another copy declared, as `VENDOR`.
  */
-export const DECLARED: unique symbol = Symbol("sanoma.declared");
+export const DECLARED: unique symbol = Symbol.for("sanoma.declared");
 
 /** A resource a data file declares: `github.repository({ name: "sanoma" })`. */
 export interface Declared<Id extends string = string, T = State> {

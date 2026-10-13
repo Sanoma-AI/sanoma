@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { devRepo, end, linkedPackages, supervise } from "../src/dev.ts";
+import { devRepo, end, linkedPackages, partialLink, supervise } from "../src/dev.ts";
 import { waitFor } from "@sanoma/testing";
 
 let dir = "";
@@ -57,6 +57,25 @@ describe("linkedPackages", () => {
       { name: "sanoma", dir: join(checkout, "packages/sanoma") },
     ]);
     expect(linkedPackages(repoWith({}).repo)).toEqual([]);
+  });
+});
+
+describe("partialLink", () => {
+  it("names the core packages still installed when another is linked, each found as Node finds it", () => {
+    // pnpm's layout: sanoma from its tarball, with @sanoma/app and @sanoma/workflows beside it in
+    // .pnpm, not at the top; @sanoma/workflows linked at the top; @sanoma/bridge installed there.
+    const { repo } = repoWith({ workflows: "linked", bridge: "installed" });
+    const store = join(repo, "node_modules/.pnpm/sanoma@0.1.0/node_modules");
+    for (const name of ["sanoma", "@sanoma/app", "@sanoma/workflows"])
+      mkdirSync(join(store, name), { recursive: true });
+    symlinkSync(join(store, "sanoma"), join(repo, "node_modules/sanoma"));
+    expect(partialLink(repo)).toEqual(["sanoma", "@sanoma/app", "@sanoma/bridge"]);
+
+    // All four linked (the umbrella's own dependencies then resolve inside the checkout): nothing.
+    const all = repoWith({ sanoma: "linked", workflows: "linked", app: "linked", bridge: "linked" });
+    expect(partialLink(all.repo)).toEqual([]);
+    // None linked: nothing either.
+    expect(partialLink(repoWith({ sanoma: "installed", workflows: "installed" }).repo)).toEqual([]);
   });
 });
 

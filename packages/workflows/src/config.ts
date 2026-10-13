@@ -16,6 +16,7 @@ import {
   type DriverFn,
   isOp,
   type Op,
+  checkConnector,
   setupOf,
   VENDOR,
 } from "./op.ts";
@@ -163,6 +164,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   if (!Array.isArray(config.connectors)) {
     throw new Error("The config needs `connectors`: the connectors its workflows call, as their packages export them");
   }
+  for (const connector of config.connectors as unknown[]) checkConnector(connector);
   if (!Array.isArray(config.workflows)) {
     throw new Error("The config needs `workflows`: an array of defineWorkflow definitions");
   }
