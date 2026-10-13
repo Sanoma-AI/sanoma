@@ -1,7 +1,9 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, realpathSync, watch } from "node:fs";
-import { basename, dirname, join, sep } from "node:path";
+import { findPackageJSON } from "node:module";
+import { dirname, join, sep } from "node:path";
 import { createInterface } from "node:readline";
+import { pathToFileURL } from "node:url";
 
 /*
  * Dev mode: when the repo's `sanoma` or a `@sanoma/*` package resolves into a sanoma checkout (a
@@ -51,20 +53,28 @@ const CORE = ["sanoma", "@sanoma/workflows", "@sanoma/app", "@sanoma/bridge"];
  */
 export function partialLink(cwd: string): string[] {
   const sanoma = findPackage("sanoma", cwd);
-  const found = CORE.flatMap((name) => {
-    const dir = findPackage(name, cwd) ?? (sanoma === undefined ? undefined : findPackage(name, sanoma));
-    return dir === undefined ? [] : [{ name, dir }];
-  });
-  if (!found.some(({ dir }) => !installed(dir))) return [];
-  return found.filter(({ dir }) => installed(dir)).map(({ name }) => name);
+  const fromTarballs: string[] = [];
+  let linked = false;
+  for (const name of CORE) {
+    const dir =
+      name === "sanoma"
+        ? sanoma
+        : (findPackage(name, cwd) ?? (sanoma === undefined ? undefined : findPackage(name, sanoma)));
+    if (dir === undefined) continue;
+    if (installed(dir)) fromTarballs.push(name);
+    else linked = true;
+  }
+  return linked ? fromTarballs : [];
 }
 
-/** The real directory of package `name` as Node resolves it from `from`: `node_modules/<name>` in it or an ancestor. */
+/** The real directory of package `name` as Node resolves it from the directory `from`, if it does. */
 function findPackage(name: string, from: string): string | undefined {
-  for (let dir = from; ; dir = dirname(dir)) {
-    const candidate = join(dir, "node_modules", name);
-    if (basename(dir) !== "node_modules" && existsSync(candidate)) return realpathSync(candidate);
-    if (dirname(dir) === dir) return undefined;
+  try {
+    const manifest = findPackageJSON(name, pathToFileURL(join(from, "/")));
+    return manifest === undefined ? undefined : realpathSync(dirname(manifest));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ERR_MODULE_NOT_FOUND") return undefined;
+    throw err;
   }
 }
 

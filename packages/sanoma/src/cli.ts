@@ -136,11 +136,11 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
   const { partialLink, startWatchers, supervise } = await import("./dev.ts");
   const cwd = process.cwd();
   log(`dev mode: ${repo}; building ${packages.map((p) => p.name).join(", ") || "nothing"} as it changes`);
-  const installed = partialLink(cwd);
-  if (installed.length) {
+  const fromTarballs = partialLink(cwd);
+  if (fromTarballs.length) {
     log(
-      `dev mode: ${installed.join(", ")} still ${installed.length === 1 ? "comes from its tarball" : "come from their tarballs"}, ` +
-        "so two copies of a sanoma package run in one process; pnpm link them too to run the checkout alone",
+      `dev mode: ${fromTarballs.join(", ")} still come from their tarballs: ` +
+        "edits to them in the checkout will not show until you pnpm link them too",
     );
   }
   const watchers = startWatchers(packages, log);
