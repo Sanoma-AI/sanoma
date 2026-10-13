@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { parsed } from "./ast.ts";
-import { resolveConfig, type SanomaConfig } from "./config.ts";
+import { rootOf, type SanomaConfig } from "./config.ts";
 import { type DataFile, type DataFileExport, type DataValue, readDataFile, Reference } from "./datafile.ts";
 import { type Connector, VENDOR } from "./op.ts";
 import type { Span } from "./outline.ts";
@@ -57,7 +57,7 @@ export interface DataFiles {
  * `describeConfig` lists the same, with the problems beside them instead.
  */
 export function readResources(config: SanomaConfig): DeclaredResource[] {
-  const { resources, problems } = readDataFiles(resolveConfig(config).root, config.connectors);
+  const { resources, problems } = readDataFiles(rootOf(config), config.connectors);
   if (problems.length) {
     const lines = problems.map((p) => `  ${problemLine(p)}`);
     throw new Error(`The resources' data files have problems:\n${lines.join("\n")}`);

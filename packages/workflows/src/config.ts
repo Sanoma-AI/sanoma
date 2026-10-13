@@ -138,6 +138,19 @@ function ledgerOf(config: SanomaConfig): LedgerStore | undefined {
 }
 
 /**
+ * The config's directory, absolute: its `root`, else its `file`'s directory; undefined when it
+ * has neither. No fallback to the working directory: a config found nowhere has no data files,
+ * and says so. What a read that needs only the root calls, rather than `resolveConfig`.
+ */
+export function rootOf(config: Pick<SanomaConfig, "root" | "file">): string | undefined {
+  return config.root !== undefined
+    ? resolve(config.root)
+    : config.file !== undefined
+      ? dirname(config.file)
+      : undefined;
+}
+
+/**
  * Checks a config and derives what the runtime needs from it: the drivers and fakes from the
  * connectors' setups (`withSetup`), and from `root`, the app's name (`package.json`) and the
  * scenarios (`scenarios/`). Throws what `startWorker` would refuse, with the same message, so
@@ -162,9 +175,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       "The config's `drivers` and `fakes` are gone: each connector carries its driver and its fake; leave them out",
     );
   const ledger = ledgerOf(config);
-  // No fallback to the working directory: a config found nowhere has no data files, and says so.
-  const root =
-    config.root !== undefined ? resolve(config.root) : config.file !== undefined ? dirname(config.file) : undefined;
+  const root = rootOf(config);
   const appName = appNameAt(root);
   const scenarios = scenariosAt(root);
   const ops = indexConnectors(config.connectors);
