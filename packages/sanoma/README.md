@@ -8,7 +8,7 @@ One command over a company repo: `sanoma` runs its workflows and the app, `sanom
 npm install sanoma @sanoma/connector-ghost
 ```
 
-`sanoma` brings `@sanoma/workflows`, `@sanoma/app`, `zod`, `typescript`, `@types/node` and `oxlint` with it: a repo installs nothing else but its connectors. Node 24.2 or later (the bin uses `import.meta.main`); Docker for the Postgres it starts when none answers.
+`sanoma` brings `@sanoma/workflows`, `@sanoma/app`, `zod`, `typescript`, `@types/node` and `oxlint` with it: a repo installs nothing else but its connectors. Node's types reach the repo's `tsc` through `sanoma` itself (its declarations reference them, resolved from where it is installed), under pnpm, npm or a link alike, so a repo lists no `@types/node`. Node 24.2 or later (the bin uses `import.meta.main`); Docker for the Postgres it starts when none answers.
 
 A repo holds `sanoma.config.ts` at its root, with `workflows/`, `policies/`, optional `resources/` (data files) and `scenarios/` (feature files) beside it, and a `tsconfig.json` that extends the one this package ships:
 
