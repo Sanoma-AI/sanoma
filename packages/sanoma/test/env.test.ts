@@ -8,6 +8,7 @@ import {
   defineConnector,
   type Driver,
   memoryLedger,
+  resolveConfig,
   type SanomaConfig,
 } from "@sanoma/workflows";
 import { defineFake } from "@sanoma/workflows/fake";
@@ -38,6 +39,9 @@ const config: SanomaConfig = {
   ledger: memoryLedger(),
 };
 
+/** The config as the bin loads it, in `root`. */
+const loaded = (cfg: SanomaConfig, root = "") => ({ config: cfg, root, resolved: resolveConfig(cfg) });
+
 const expected = `# Copy to .env (ignored by git; \`sanoma\` loads it before reading the config). Never commit values.
 # The first block is what sanoma needs before anything runs. The vendor variables below it can
 # also be set on the app's connector pages (stored in the database and loaded by the worker); a
@@ -60,11 +64,11 @@ MAIL_TOKEN=
 
 describe("renderEnvExample", () => {
   it("lists sanoma's variables, then each vendor's in the connectors' order, optional ones commented out", () => {
-    expect(renderEnvExample(config)).toBe(expected);
+    expect(renderEnvExample(loaded(config))).toBe(expected);
   });
 
   it("names the config's own database URL as the default when it has one", () => {
-    expect(renderEnvExample({ ...config, databaseUrl: "postgresql://me@db.internal/ops" })).toContain(
+    expect(renderEnvExample(loaded({ ...config, databaseUrl: "postgresql://me@db.internal/ops" }))).toContain(
       "default postgresql://me@db.internal/ops.",
     );
   });
@@ -76,13 +80,13 @@ describe("writeEnvExample", () => {
 
   it("writes the file, says when it would change, and leaves it alone with check", () => {
     dir = mkdtempSync(join(tmpdir(), "sanoma-env-"));
-    expect(writeEnvExample(dir, config, { check: true })).toEqual({ changed: true });
-    expect(writeEnvExample(dir, config, { check: false })).toEqual({ changed: true });
+    expect(writeEnvExample(loaded(config, dir), { check: true })).toEqual({ changed: true });
+    expect(writeEnvExample(loaded(config, dir), { check: false })).toEqual({ changed: true });
     expect(readFileSync(join(dir, ".env.example"), "utf8")).toBe(expected);
-    expect(writeEnvExample(dir, config, { check: true })).toEqual({ changed: false });
-    expect(writeEnvExample(dir, config, { check: false })).toEqual({ changed: false });
+    expect(writeEnvExample(loaded(config, dir), { check: true })).toEqual({ changed: false });
+    expect(writeEnvExample(loaded(config, dir), { check: false })).toEqual({ changed: false });
     writeFileSync(join(dir, ".env.example"), "stale\n");
-    expect(writeEnvExample(dir, config, { check: true })).toEqual({ changed: true });
+    expect(writeEnvExample(loaded(config, dir), { check: true })).toEqual({ changed: true });
     expect(readFileSync(join(dir, ".env.example"), "utf8")).toBe("stale\n");
   });
 });

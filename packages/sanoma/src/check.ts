@@ -3,11 +3,11 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { resolveConfig, type SanomaConfig } from "@sanoma/workflows";
+import type { SanomaConfig } from "@sanoma/workflows";
 import { describeConfig } from "@sanoma/workflows/describe";
 import { problemLine } from "@sanoma/workflows/shared";
 import { runScenarios } from "@sanoma/workflows/scenarios";
-import type { LoadedConfig } from "./config.ts";
+import type { Loaded } from "./config.ts";
 
 export interface CheckResult {
   ok: boolean;
@@ -40,7 +40,7 @@ const LINTED = ["workflows", "policies", "resources"];
  * did not hold a problem. `ok` when there are no problems.
  */
 export async function check(
-  { config, root }: LoadedConfig,
+  { config, root, resolved }: Loaded,
   { databaseUrl, ready = Promise.resolve(), log }: CheckOptions,
 ): Promise<CheckResult> {
   // Awaited below when there are scenarios; otherwise its failure is nobody's.
@@ -48,7 +48,7 @@ export async function check(
   const found = await Promise.all([typecheck(root, log), lint(root, log), configProblems(config, root, log)]);
   const problems = found.flat();
 
-  if (resolveConfig(config).scenarios === undefined) {
+  if (resolved.scenarios === undefined) {
     log("no scenarios: the config's root has no `scenarios/` directory");
   } else {
     await ready;

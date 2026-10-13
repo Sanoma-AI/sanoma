@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { credentialsOf, resolveConfig, resolveDatabaseUrl, type SanomaConfig } from "@sanoma/workflows";
+import { credentialsOf, resolveDatabaseUrl } from "@sanoma/workflows";
+import type { Loaded } from "./config.ts";
 
 const HEADER = `# Copy to .env (ignored by git; \`sanoma\` loads it before reading the config). Never commit values.
 # The first block is what sanoma needs before anything runs. The vendor variables below it can
@@ -14,8 +15,9 @@ const HEADER = `# Copy to .env (ignored by git; \`sanoma\` loads it before readi
  * out, with their defaults), then a block per vendor in the connectors' order with each variable
  * its connector's driver declares (`credentialsOf`), its description as a comment; an optional
  * one is commented out. The same config gives the same text, so `sanoma env --check` can compare.
+ * Reads the config as loaded, with its resolution.
  */
-export function renderEnvExample(config: SanomaConfig): string {
+export function renderEnvExample({ config, resolved }: Pick<Loaded, "config" | "resolved">): string {
   const lines = [
     HEADER,
     // The default: the config's own, else sanoma's, never this environment's.
@@ -24,7 +26,7 @@ export function renderEnvExample(config: SanomaConfig): string {
     "# Optional. The app's port; default 3000.",
     "# SANOMA_APP_PORT=",
   ];
-  for (const [vendor, variables] of credentialsOf(resolveConfig(config).driversByVendor, () => undefined)) {
+  for (const [vendor, variables] of credentialsOf(resolved.driversByVendor, () => undefined)) {
     lines.push("");
     for (const { name, description, optional } of variables) {
       const about = description === undefined ? "" : `: ${description}`;
@@ -38,13 +40,9 @@ export function renderEnvExample(config: SanomaConfig): string {
  * Writes `<root>/.env.example` from the config, unless `check`: then it only says whether the
  * file is already what it would write. `changed` is true when the file was written, or would be.
  */
-export function writeEnvExample(
-  root: string,
-  config: SanomaConfig,
-  { check }: { check: boolean },
-): { changed: boolean } {
-  const file = join(root, ".env.example");
-  const text = renderEnvExample(config);
+export function writeEnvExample(loaded: Loaded, { check }: { check: boolean }): { changed: boolean } {
+  const file = join(loaded.root, ".env.example");
+  const text = renderEnvExample(loaded);
   const current = existsSync(file) ? readFileSync(file, "utf8") : undefined;
   const changed = current !== text;
   if (changed && !check) writeFileSync(file, text);

@@ -142,8 +142,9 @@ const REMOVED: Record<string, string> = {
  * connectors' setups (`withSetup`), and from `root`, the app's name (`package.json`) and the
  * scenarios (`scenarios/`). Throws what `startWorker` would refuse, with the same message, so
  * `describeConfig`, `SanomaClient.connect` and the app fail the same way the worker does. It
- * opens nothing, reads no file outside `root` but a `package.json` above it, and is called per
- * request by the app.
+ * opens nothing and reads no file outside `root` but a `package.json` above it. Each entry
+ * point resolves once: the worker and the client when they start, the app at `startApp`, the
+ * `sanoma` bin when it loads the config.
  */
 export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   if (!Array.isArray(config.connectors)) {
@@ -242,17 +243,12 @@ function makersOf<K extends keyof ConnectorSetup>(
 /** `scenarios/` in `root`, as a `file:` URL to the directory (with its trailing slash). */
 const scenariosAt = (root: string) => pathToFileURL(`${join(root, "scenarios")}/`);
 
-/** Each directory's app name, once read: a `package.json` changes with a restart, not per request. */
-const appNames = new Map<string, string>();
-
 /**
  * The `name` of the nearest `package.json` at or above `root` that has one, kept whole (`@acme/ops`),
  * else "sanoma", as for a config with no `root`.
  */
 function appNameAt(root: string | undefined): string {
   if (root === undefined) return "sanoma";
-  const known = appNames.get(root);
-  if (known !== undefined) return known;
   let name = "sanoma";
   for (let dir = root; ;) {
     const file = join(dir, "package.json");
@@ -273,7 +269,6 @@ function appNameAt(root: string | undefined): string {
     if (up === dir) break;
     dir = up;
   }
-  appNames.set(root, name);
   return name;
 }
 
