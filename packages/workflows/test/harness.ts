@@ -14,7 +14,6 @@ import { afterAll, beforeEach } from "vitest";
 import {
   allowAll,
   type Connector,
-  type Driver,
   jsonlLedger,
   type LedgerRecord,
   type SanomaClient,
@@ -63,8 +62,8 @@ export type Extra = readonly [Connector<any, any>, MakeFake];
  * The fakes the announce workflow calls, and the `extra` ones a test adds, all logging into one
  * list so the order across vendors shows. `connectors` are their connectors with each fake's
  * driver swapped in (`withSetup`), so live runs call these very fakes, and each keeps the maker of
- * its package's fake, so each sandbox run calls a fake of its own; `connectorsWith(driver, …)` are
- * the same with each driver given called instead of its vendor's fake.
+ * its package's fake, so each sandbox run calls a fake of its own. A test swaps a driver with
+ * `withSetup(connector, { driver })` over them.
  */
 export function marketingFakes({ extra = [] }: { extra?: readonly Extra[] } = {}) {
   const calls: FakeCall[] = [];
@@ -77,18 +76,12 @@ export function marketingFakes({ extra = [] }: { extra?: readonly Extra[] } = {}
     [bluesky, social],
     ...extra.map(([connector, make]) => [connector, make({ calls })] as const),
   ];
-  const connectorsWith = (...drivers: Driver[]) =>
-    pairs.map(([connector, fake]) => {
-      const driver = drivers.find((d) => d.vendor === fake.driver.vendor) ?? fake.driver;
-      return withSetup(connector, { driver: () => driver });
-    });
   return {
     calls,
     ghost: blog,
     resend: email,
     bluesky: social,
-    connectors: connectorsWith(),
-    connectorsWith,
+    connectors: pairs.map(([connector, fake]) => withSetup(connector, { driver: () => fake.driver })),
     reset: () => pairs.forEach(([, fake]) => fake.reset()),
   };
 }

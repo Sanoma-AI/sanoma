@@ -14,6 +14,7 @@ import {
   errorCode,
   memoryLedger,
   type Policy,
+  withSetup,
 } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
 import { inSeconds, pending, types, useApp, waitFor } from "./harness.ts";
@@ -415,8 +416,9 @@ describe("announce under a policy", () => {
 
 describe("announce with a vendor that replies off-contract", () => {
   let publishes = 0;
-  const app = useApp("announce-off-contract", (vendors) => ({
-    connectors: vendors.connectorsWith({
+  const app = useApp("announce-off-contract", (vendors) => {
+    const [onGhost, ...others] = vendors.connectors;
+    const offContract = {
       ...vendors.ghost.driver,
       ops: {
         ...vendors.ghost.driver.ops,
@@ -425,8 +427,9 @@ describe("announce with a vendor that replies off-contract", () => {
           return { id: 42 };
         },
       },
-    }),
-  }));
+    };
+    return { connectors: [withSetup(onGhost!, { driver: () => offContract }), ...others] };
+  });
   const c = () => app.client;
 
   it("does not retry an idempotent call whose reply fails the output schema", async () => {

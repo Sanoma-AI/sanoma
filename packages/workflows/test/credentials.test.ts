@@ -4,7 +4,7 @@ import { githubDriver } from "@sanoma/connector-github/driver";
 import { resendDriver } from "@sanoma/connector-resend/driver";
 import { stripeDriver } from "@sanoma/connector-stripe/driver";
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { testDatabaseUrl, withFake } from "@sanoma/testing";
+import { testDatabaseUrl } from "@sanoma/testing";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -21,9 +21,9 @@ import {
   SanomaClient,
   type SanomaConfig,
   startWorker,
+  withSetup,
 } from "../src/index.ts";
 import { credentialsOf } from "../src/env.ts";
-import { defineFake } from "../src/fake.ts";
 import { describeConfig } from "../src/describe.ts";
 
 // Made-up variables and values: nothing here is a credential.
@@ -46,9 +46,8 @@ const env = z.object({
 const impl = { thing: { get: async ({ id }: { id: string }) => ({ id }) } };
 const acmeDriver = defineDriver(acme, impl, { env });
 const plain = defineDriver(acme, impl);
-const acmeFake = defineFake(acme, { initial: () => ({}), ops: () => impl });
 /** acme, set up with `driver`. */
-const acmeOn = (driver: Driver) => withFake(acme, acmeFake, driver);
+const acmeOn = (driver: Driver) => withSetup(acme, { driver: () => driver });
 const getThing = defineWorkflow({
   name: "get-thing",
   trigger: "manual",

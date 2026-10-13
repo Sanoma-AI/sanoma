@@ -18,6 +18,7 @@ import {
   type PolicyCall,
   policyOpOf,
   SanomaError,
+  withSetup,
 } from "../src/index.ts";
 import { defineFake } from "../src/fake.ts";
 import announce from "./fixtures/announce.ts";
@@ -300,16 +301,21 @@ describe("a worker stopping while a call fails for good", () => {
   const released = Promise.withResolvers<void>();
   const app = useApp("call-stopping", (vendors) => ({
     workflows: [post],
-    connectors: vendors.connectorsWith({
-      vendor: "bluesky",
-      ops: {
-        "post.create": async () => {
-          entered.resolve();
-          await released.promise;
-          throw new DriverError("bluesky: the post is too long", { retryable: false, status: 400 });
-        },
-      },
-    }),
+    connectors: [
+      ...vendors.connectors.slice(0, 2),
+      withSetup(vendors.connectors[2]!, {
+        driver: () => ({
+          vendor: "bluesky",
+          ops: {
+            "post.create": async () => {
+              entered.resolve();
+              await released.promise;
+              throw new DriverError("bluesky: the post is too long", { retryable: false, status: 400 });
+            },
+          },
+        }),
+      }),
+    ],
   }));
   const c = () => app.client;
 

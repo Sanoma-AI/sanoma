@@ -1,7 +1,6 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { withFake } from "@sanoma/testing";
 import {
   allowAll,
   type Connector,
@@ -10,8 +9,8 @@ import {
   memoryLedger,
   resolveConfig,
   type SanomaConfig,
+  withSetup,
 } from "@sanoma/workflows";
-import { defineFake } from "@sanoma/workflows/fake";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { renderEnvExample, writeEnvExample } from "../src/env.ts";
@@ -26,11 +25,9 @@ const shop: Driver = {
 };
 const mail: Driver = { vendor: "mail", ops: {}, env: z.object({ MAIL_TOKEN: z.string().min(1) }) };
 
-/** A connector of `driver`'s vendor, with no operations, carrying `driver`. */
-const carrying = (driver: Driver): Connector<any, any> => {
-  const connector = defineConnector(driver.vendor, {});
-  return withFake(connector, defineFake(connector, { initial: () => ({}), ops: () => ({}) }), driver);
-};
+/** A connector of `driver`'s vendor, with no operations, carrying `driver` and no fake. */
+const carrying = (driver: Driver): Connector<any, any> =>
+  withSetup(defineConnector(driver.vendor, {}), { driver: () => driver });
 
 const config: SanomaConfig = {
   workflows: [],

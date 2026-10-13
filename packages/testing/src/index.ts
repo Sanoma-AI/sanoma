@@ -1,6 +1,5 @@
 import {
   type Connector,
-  type Driver,
   memoryLedger,
   type SanomaConfig,
   startWorker,
@@ -28,17 +27,13 @@ export function testDatabaseUrl(suffix: string): string {
 
 /**
  * `connector` set up with this fake instead of the one its package attaches, for a test that
- * seeds or reads the fake its runs call: `fake` is what live runs call (through `driver`, by
- * default the fake's own), and sandbox runs too, since its maker gives this very one. For a
- * sandbox run on a fake of its own, swap the driver alone (`withSetup(connector, { driver })`),
- * which keeps the package's maker. The operations are the same.
+ * seeds or reads the fake its runs call: live runs call its driver, and sandbox runs call it too,
+ * since its maker gives this very one. A driver swap alone is `withSetup(connector, { driver })`,
+ * which keeps the package's fake, so each sandbox run has one of its own. The operations are the
+ * same.
  */
-export function withFake<C extends Connector<any, any>>(
-  connector: C,
-  fake: Fake<any, any>,
-  driver: Driver = fake.driver,
-): C {
-  return withSetup(connector, { driver: () => driver, fake: () => fake });
+export function withFake<C extends Connector<any, any>>(connector: C, fake: Fake<any, any>): C {
+  return withSetup(connector, { driver: () => fake.driver, fake: () => fake });
 }
 
 /** `startWorker`'s options, and the database the test runs on. */

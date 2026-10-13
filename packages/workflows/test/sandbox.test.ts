@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { withFake } from "@sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
@@ -10,8 +9,10 @@ import {
   errorCode,
   type LedgerRecord,
   resolveConfig,
+  withSetup,
 } from "../src/index.ts";
 import { defineFake } from "../src/fake.ts";
+import { setupOf } from "../src/op.ts";
 import { check, drive, loadScenarios, type Scenario } from "../src/scenario.ts";
 import announce from "./fixtures/announce.ts";
 import { failure, inSeconds, pending, types, useApp, waitFor } from "./harness.ts";
@@ -64,8 +65,12 @@ describe("sandbox runs", () => {
   const app = useApp("sandbox", (vendors) => ({
     workflows: [announce, review, sample],
     connectors: [
-      ...vendors.connectorsWith(...[vendors.ghost, vendors.resend, vendors.bluesky].map((f) => tripwire(f.driver))),
-      withFake(lab, labFake, tripwire({ vendor: "lab", ops: { "sample.take": async () => ({}) } })),
+      // Each keeps its package's fake, which sandbox runs make their own of.
+      ...vendors.connectors.map((c) => withSetup(c, { driver: () => tripwire(setupOf(c).driver!()) })),
+      withSetup(lab, {
+        driver: () => tripwire({ vendor: "lab", ops: { "sample.take": async () => ({}) } }),
+        fake: () => labFake,
+      }),
     ],
     // Its scenarios are fixtures/scenarios/.
     root: fileURLToPath(new URL("./fixtures/", import.meta.url)),
