@@ -35,6 +35,7 @@ export {
   type Principal,
   type SanomaConfig,
   type SleepRequest,
+  type StepOptions,
   type Use,
   type WorkflowDefinition,
 } from "@sanoma/workflows";

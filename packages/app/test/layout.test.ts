@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CLUSTER_HEADER, layout, NODE_SIZE, nodeSize } from "../src/graph/layout.ts";
+import { CLUSTER_HEADER, layout, NAME_HEIGHT, NODE_SIZE, nodeSize } from "../src/graph/layout.ts";
 import { outlineGraph } from "../src/graph/outline-graph.ts";
 import { LIST_HEADER, MAX_ROWS, ROW_HEIGHT } from "../src/graph/wildcard.ts";
 
@@ -20,6 +20,14 @@ describe("layout", () => {
     const many = Array.from({ length: 20 }, (_, i) => `v.r${i}.read`);
     expect(nodeSize({ id: "x", kind: "op", label: "*.*.read", ops: many }).height).toBe(
       NODE_SIZE.op.height + LIST_HEADER + MAX_ROWS * ROW_HEIGHT,
+    );
+  });
+
+  it("makes an operation with a name taller by the line its id moves to", () => {
+    const named = { id: "x", kind: "op", label: "a.x.read", name: "Read it" } as const;
+    expect(nodeSize(named)).toEqual({ width: NODE_SIZE.op.width, height: NODE_SIZE.op.height + NAME_HEIGHT });
+    expect(nodeSize({ ...named, label: "*.*.read", ops: ["a.x.read"] }).height).toBe(
+      NODE_SIZE.op.height + NAME_HEIGHT + LIST_HEADER + ROW_HEIGHT,
     );
   });
 

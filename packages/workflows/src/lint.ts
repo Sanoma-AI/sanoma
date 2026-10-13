@@ -1,7 +1,7 @@
 import { basename, dirname, join } from "node:path";
 import { byPosition, childrenOf, type LintProblem, type Node, parsed, type SourceFile } from "./ast.ts";
 import { readDataFile } from "./datafile.ts";
-import { outlineBody, workflowLiterals } from "./outline.ts";
+import { constsOf, outlineBody, workflowLiterals } from "./outline.ts";
 import { inside, nearestDir, RELATIVE } from "./paths.ts";
 // From src/ and from dist/ alike, the package's own oxlint.json: the one list of allowed names.
 import oxlint from "../oxlint.json" with { type: "json" };
@@ -66,9 +66,10 @@ const ERROR_CLASSES = new Set(["DriverError", "SanomaError", "PolicyDeniedError"
  * In each workflow's `run` (the literal `defineWorkflow` is called with), it reports what the
  * outline cannot draw, as the worker refuses to start with (`outlineBody`): `ctx` used other
  * than called directly (passed on, aliased, destructured), a function defined in `run` that uses
- * `ctx` where the outline does not read it, `ctx` in a `finally`, and in `run` and the callbacks
- * it reads, a `return` before the end, a `throw` outside a `catch`, a `break` out of a loop and
- * `continue`. Each message names what to write instead.
+ * `ctx` where the outline does not read it, `ctx` in a `finally`, a step name that is no literal
+ * and two calls with one step name, and in `run` and the callbacks it reads, a `return` before
+ * the end, a `throw` outside a `catch`, a `break` out of a loop and `continue`. Each message
+ * names what to write instead.
  *
  * It guards against accidental non-determinism and accidental ways around the policy; it is
  * not a sandbox, and code written to get around it can.
@@ -162,8 +163,9 @@ export function lintWorkflow(input: string | SourceFile, path?: string): LintPro
   visit(program);
   // Each workflow's `run` as the worker reads it when it starts: what the outline cannot draw,
   // the worker refuses to start with. One reading, so the lint and the worker agree.
+  const consts = constsOf(program);
   for (const { run } of workflowLiterals(program))
-    for (const { start, message } of outlineBody(run).problems) problems.push({ ...at(start), message });
+    for (const { start, message } of outlineBody(run, { consts }).problems) problems.push({ ...at(start), message });
   return byPosition(problems);
 }
 

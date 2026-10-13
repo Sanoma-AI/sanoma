@@ -46,15 +46,20 @@ export interface ApprovalStepState extends StepState {
  * to the next.
  */
 export type Step =
-  /** `ops`: for an id with a computed segment, the operations it can reach (the outline's `ops`). */
-  | { kind: "op"; id: string; ops?: string[]; key?: string; span?: Span; state?: OpState }
+  /**
+   * `ops`: for an id with a computed segment, the operations it can reach (the outline's `ops`).
+   * `name`: the step's name, when the call gave one (an outline's) or a run recorded one.
+   */
+  | { kind: "op"; id: string; ops?: string[]; name?: string; key?: string; span?: Span; state?: OpState }
   | { kind: "approval"; title?: string; key?: string; span?: Span; state?: ApprovalStepState }
-  | { kind: "sleep"; key?: string; label?: string; span?: Span; state?: StepState }
+  /** `label`: a run's says until when, after its name; an outline's is its `name`, else "sleep". */
+  | { kind: "sleep"; name?: string; key?: string; label?: string; span?: Span; state?: StepState }
   /** A `ctx.all` member a running run has recorded nothing for yet. */
   | { kind: "pending"; key: string }
   | { kind: "all"; branches: Step[][] }
-  | { kind: "each"; body: Step[] }
-  | { kind: "repeat"; body: Step[] }
+  /** A `ctx.all` over computed members, or a loop, with the label the outline reads from its code (`for each of items`). */
+  | { kind: "each"; name?: string; body: Step[] }
+  | { kind: "repeat"; name?: string; body: Step[] }
   | { kind: "branch"; cases: Step[][] }
   /** A `try`: the `handler` runs when the `body` fails. */
   | { kind: "try"; body: Step[]; handler: Step[] };
@@ -64,7 +69,7 @@ export type CallStep = Extract<Step, { kind: "op" | "approval" | "sleep" }>;
 
 interface Base {
   id: string;
-  /** What the node says: an operation's id, an approval's title in quotes, an outcome. */
+  /** What the node says: an operation's id, an approval's title in quotes, a loop's label, an outcome. */
   label: string;
   /** The `cluster` node it is drawn inside, by id. */
   parent?: string;
@@ -76,12 +81,15 @@ export type GraphNode =
   | (Base & { kind: "start"; state?: StepState })
   /** `pending` until the run has ended; an outline's end is plain. */
   | (Base & { kind: "end"; state?: StepState; pending?: true })
-  /** `ops`: the operations an id with a computed segment can reach, drawn as rows under it. */
-  | (Base & { kind: "op"; ops?: string[]; state?: OpState })
+  /**
+   * `ops`: the operations an id with a computed segment can reach, drawn as rows under it.
+   * `name`: the step's name, when it is not the operation's id, drawn above the id.
+   */
+  | (Base & { kind: "op"; ops?: string[]; name?: string; state?: OpState })
   | (Base & { kind: "approval"; state?: ApprovalStepState })
   | (Base & { kind: "sleep"; state?: StepState })
   | (Base & { kind: "pending" })
-  /** A box around a loop's body or a computed `ctx.all`'s member, which `label` names. */
+  /** A box around a loop's body, a computed `ctx.all`'s member or a `try`'s handler, which `label` names. */
   | (Base & { kind: "cluster" })
   /** Where a branch splits into its cases. */
   | (Base & { kind: "split" })

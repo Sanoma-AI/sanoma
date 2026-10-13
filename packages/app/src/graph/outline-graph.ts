@@ -18,12 +18,13 @@ const own = <S extends CallStep>(step: S): Pick<S, "state"> & { span?: Span } =>
 /**
  * Steps as a graph: a chain from start to end. A `ctx.all` is one lane per member between the
  * node before it and the node after; a branch splits at a diamond into one lane per case. A
- * computed `ctx.all`'s member is a chain in a cluster labelled "for each", a loop's body one in a
- * cluster labelled "repeats". A `try` is its body's chain beside a cluster labelled "on error"
+ * computed `ctx.all`'s member, and a loop's body, is a chain in a cluster labelled with the label
+ * the outline reads from its code ("for each of subscribers", "repeat while more"), or "for each"
+ * and "repeats" without one. A `try` is its body's chain beside a cluster labelled "on error"
  * holding the handler's, both from the node before. An empty member leads straight from the node
  * before to the node after; a branch's empty case, the way past it, is a lane marked "otherwise". A workflow's
  * outline is drawn this way, and a run's ledger once runGraph has made it into steps. A call's
- * node has its step's `span`.
+ * node has its step's `span`, and an operation's its step's name when it is not its id.
  */
 export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS): Graph {
   const nodes: GraphNode[] = [];
@@ -58,6 +59,7 @@ export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS
                 id: idOf("op", step.key),
                 kind: "op",
                 label: step.id,
+                ...(step.name && step.name !== step.id && { name: step.name }),
                 ...(step.ops && { ops: step.ops }),
                 ...inside,
                 ...own(step),
@@ -72,7 +74,7 @@ export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS
           break;
         }
         case "sleep": {
-          const label = step.label ?? "sleep";
+          const label = step.label ?? step.name ?? "sleep";
           from = [add({ id: idOf("sleep", step.key), kind: "sleep", label, ...inside, ...own(step) }, from)];
           break;
         }
@@ -83,10 +85,10 @@ export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS
           if (step.branches.length) from = lanes(step.branches, from);
           break;
         case "each":
-          from = cluster("for each", step.body);
+          from = cluster(step.name ?? "for each", step.body);
           break;
         case "repeat":
-          from = cluster("repeats", step.body);
+          from = cluster(step.name ?? "repeats", step.body);
           break;
         case "try": {
           const after = chain(step.body, from, parent);

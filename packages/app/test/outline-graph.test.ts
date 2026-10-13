@@ -89,6 +89,36 @@ describe("outlineGraph", () => {
     expect(pairs(edges)).toEqual(["start->cluster:0", "op:1->op:2", "cluster:0->cluster:3", "cluster:3->end"]);
   });
 
+  it("labels a loop's cluster, and a computed ctx.all's, as the outline reads it from the code", () => {
+    const { nodes } = outlineGraph([
+      { kind: "repeat", name: "for each of subscribers", body: [op("x.item.get")] },
+      { kind: "each", name: "for each of threads", body: [op("forum.comments.list")] },
+    ]);
+    expect(labels(nodes)).toEqual([
+      "start start",
+      "cluster:0 for each of subscribers",
+      "op:1 x.item.get in cluster:0",
+      "cluster:2 for each of threads",
+      "op:3 forum.comments.list in cluster:2",
+      "end end",
+    ]);
+  });
+
+  it("labels an operation by its id and carries a name that is not its id; a sleep by its name", () => {
+    const { nodes } = outlineGraph([
+      { kind: "op", id: "ghost.post.create", name: "Draft the post" },
+      { kind: "op", id: "ghost.post.publish", name: "ghost.post.publish" },
+      { kind: "sleep", name: "Wait for launch" },
+      { kind: "sleep" },
+    ]);
+    expect(nodes.slice(1, -1)).toEqual([
+      { id: "op:0", kind: "op", label: "ghost.post.create", name: "Draft the post" },
+      { id: "op:1", kind: "op", label: "ghost.post.publish" },
+      { id: "sleep:2", kind: "sleep", label: "Wait for launch" },
+      { id: "sleep:3", kind: "sleep", label: "sleep" },
+    ]);
+  });
+
   it("draws a try as its body beside a cluster labelled on error, both from the node before", () => {
     const { nodes, edges } = outlineGraph([
       op("x.item.get"),

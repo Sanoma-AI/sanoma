@@ -21,11 +21,18 @@ export const NODE_SIZE: Record<GraphNodeKind, { width: number; height: number }>
   skip: { width: 88, height: 28 },
 };
 
-/** A node's box: its kind's, and for an operation with `ops`, taller by the rows it draws. A fresh object: dagre writes into it. */
+/** What an operation's name adds to its node, the line its id moves down to: measured in the browser. */
+export const NAME_HEIGHT = 20;
+
+/**
+ * A node's box: its kind's, and for an operation, taller by a line with a name and by the rows
+ * it draws with `ops`. A fresh object: dagre writes into it.
+ */
 export function nodeSize(node: GraphNode): { width: number; height: number } {
-  if (node.kind !== "op" || !node.ops) return { ...NODE_SIZE[node.kind] };
+  if (node.kind !== "op") return { ...NODE_SIZE[node.kind] };
   const { width, height } = NODE_SIZE.op;
-  return { width, height: height + LIST_HEADER + wildcardRows(node.label, node.ops).length * ROW_HEIGHT };
+  const rows = node.ops ? LIST_HEADER + wildcardRows(node.label, node.ops).length * ROW_HEIGHT : 0;
+  return { width, height: height + (node.name ? NAME_HEIGHT : 0) + rows };
 }
 
 /** The room a `cluster` leaves above what it holds, for its label. */

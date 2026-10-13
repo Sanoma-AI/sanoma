@@ -112,36 +112,54 @@ function refuseIfEnded(run: Run) {
 }
 
 /**
+ * Where a call is, as its records say: its outline node's `path`, and the step's name (the one
+ * the call gave, else its operation's id, `Sleep`, or an approval's title).
+ */
+export interface Placed {
+  node: string;
+  name: string;
+}
+
+/** The name a call's node gives it, if it gives one. */
+const named = (node: CallNode) => ("name" in node ? node.name : undefined);
+
+/**
  * The run's `ctx`: the operations and built-ins its workflow `uses`, and nothing else. Every
  * member that writes a record is placed in the outline where the workflow calls it (`placeCall`)
- * and goes through the run's queue (`serial`); `ctx.now()` only reads the clock, queued, and
- * `ctx.runId` is a value. `ctx.all` alone skips the queue: it makes no DBOS call or record
- * itself, it only calls its members, whose ctx calls are queued. Queued, it would hold the queue
- * until its members settled, and their calls, queued behind it, would never start.
+ * and goes through the run's queue (`serial`), its records carrying the node and the step's
+ * name; `ctx.now()` only reads the clock, queued, and `ctx.runId` is a value. `ctx.all` alone
+ * skips the queue: it makes no DBOS call or record itself, it only calls its members, whose ctx
+ * calls are queued. Queued, it would hold the queue until its members settled, and their calls,
+ * queued behind it, would never start.
  */
 export function buildCtx(wf: WorkflowDefinition<any, any>, run: Run): any {
   const uses = wf.uses as readonly Use[];
   /** A member placed where it is called, then `call`ed with its node. A refusal rejects, as a member's failure always has. */
-  const placed = (what: string, call: (node: string, ...args: any[]) => Promise<unknown>) =>
+  const placed = (what: string, call: (node: CallNode, ...args: any[]) => Promise<unknown>) =>
     async function member(...args: unknown[]) {
-      const at = placeCall(run, member, what);
-      return call(at.path, ...args);
+      return call(placeCall(run, member, what), ...args);
     };
   const members: Record<string, any> = {};
   for (const op of uses.filter(isOp)) {
     const vendor = (members[op.vendor] ??= {});
     const resource = (vendor[op.resource] ??= {});
-    resource[op.name] = placed(op.id, (node, input) => serial(run, () => callOp(run, op.id, input, node)));
+    resource[op.name] = placed(op.id, (node, input) =>
+      serial(run, () => callOp(run, op.id, input, { node: node.path, name: named(node) ?? op.id })),
+    );
   }
   members.runId = run.id;
   members.now = () => serial(run, () => DBOS.now());
   if (uses.includes("approval")) {
     members.approval = placed("approval", (node, title: string, req: ApprovalRequest) =>
-      serial(run, () => awaitApproval(run, title, checkApproval(title, req), node)),
+      serial(run, () => awaitApproval(run, title, checkApproval(title, req), { node: node.path, name: title })),
     );
   }
-  if (uses.includes("sleep")) members.sleep = placed("sleep", (node, req) => serial(run, () => sleep(run, req, node)));
-  if (uses.includes("all")) members.all = placed("all", (node, list) => all(run, list, node));
+  if (uses.includes("sleep")) {
+    members.sleep = placed("sleep", (node, req) =>
+      serial(run, () => sleep(run, req, { node: node.path, name: named(node) ?? "Sleep" })),
+    );
+  }
+  if (uses.includes("all")) members.all = placed("all", (node, list) => all(run, list, node.path));
   return guarded(members, "ctx", wf.name);
 }
 
@@ -273,7 +291,7 @@ async function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecisio
   return policyVersion === undefined ? decision : { ...decision, policyVersion };
 }
 
-async function callOp(run: Run, id: string, input: unknown, node: string) {
+async function callOp(run: Run, id: string, input: unknown, place: Placed) {
   // The worker's declaration, never the workflow's: its effect, schemas and retry setting.
   const op = run.state.ops.get(id);
   // A sandbox run calls its own fakes, never a vendor.
@@ -296,7 +314,7 @@ async function callOp(run: Run, id: string, input: unknown, node: string) {
   // before the step is recorded asks again.
   const decision = await DBOS.runStep(() => decide(run, op, parsed), { name: `policy:${op.id}` });
   const logged = recorded(op, parsed);
-  const call = { type: "op.called", op: op.id, node, effect: op.effect, input: logged, decision } as const;
+  const call = { type: "op.called", op: op.id, ...place, effect: op.effect, input: logged, decision } as const;
 
   if (decision.kind === "deny") {
     const err = new PolicyDeniedError(op.id, decision.reason);
@@ -308,7 +326,11 @@ async function callOp(run: Run, id: string, input: unknown, node: string) {
     // A hold covers the call it held, and any other operations the policy named.
     const covers = [...new Set([op.id, ...(decision.covers ?? [])])];
     try {
-      await awaitApproval(run, title, { approver: decision.approver, covers }, node, { op: op.id, seq, input: logged });
+      await awaitApproval(run, title, { approver: decision.approver, covers }, place, {
+        op: op.id,
+        seq,
+        input: logged,
+      });
     } catch (err) {
       if (errorCode(err) === "approval_rejected") {
         const approval = (err as SanomaError).data.approvalId as string;
@@ -419,7 +441,7 @@ async function all(run: Run, list: unknown, node: string): Promise<unknown[]> {
  * it (`Date.now()`, which adds no DBOS call): a replay may compute another, but the store keeps
  * the first record with the id, so the record says what the first execution waited for.
  */
-async function sleep(run: Run, raw: unknown, node: string) {
+async function sleep(run: Run, raw: unknown, at: Placed) {
   const req = checkSleep(raw);
   const seq = run.seq++;
   let until: number;
@@ -436,7 +458,7 @@ async function sleep(run: Run, raw: unknown, node: string) {
       (req.days ?? 0) * 86_400_000;
     until = Date.now() + ms;
   }
-  await write(run, entry(run, { type: "sleep.started", node, until }, { seq }));
+  await write(run, entry(run, { type: "sleep.started", ...at, until }, { seq }));
   // A time already past waits not at all, and adds no step. A sandbox run never waits.
   if (ms > 0 && run.sandbox === undefined) await DBOS.sleep(ms);
 }

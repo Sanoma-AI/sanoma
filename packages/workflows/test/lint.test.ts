@@ -188,6 +188,7 @@ const workflow = (body: string, params = "ctx, input") => `
   import { ghost } from "@sanoma/connector-ghost";
   import { z } from "zod";
   const helper = (ctx: any) => ctx.ghost.post.create({ title: "h" });
+  const DRAFT = "Draft the post";
   export default defineWorkflow({
     name: "x",
     trigger: "manual",
@@ -201,11 +202,19 @@ const workflow = (body: string, params = "ctx, input") => `
 
 const inRun = (body: string, params?: string) => messages(workflow(body, params), "workflows/x.ts");
 
+/** The problem two calls with one step name are, and the fix it names. */
+const twice = (name: string, fix: string) =>
+  expect.stringMatching(
+    new RegExp(
+      `^two steps of this workflow are named "${name}": a name is one step, so a test or the graph can tell them apart; ${fix}`,
+    ),
+  );
+
 describe("lintWorkflow on run, which the worker holds to the outline", () => {
   it("passes loops, a switch with break, a try with a rethrow, ctx.all over .map, ctx.runId and ctx.now, and a return at the end", () => {
     expect(
       inRun(`
-        for (const t of input.ts) await ctx.ghost.post.create({ title: t });
+        for (const t of input.ts) await ctx.ghost.post.create({ title: t }, { name: DRAFT });
         switch (input.k) {
           case "a":
             await ctx.sleep({ ms: 1 });
@@ -216,11 +225,58 @@ describe("lintWorkflow on run, which the worker holds to the outline", () => {
         } catch (err) {
           if (errorCode(err) === "run_ended") throw err;
         }
-        await ctx.all(input.ts.map((t) => () => ctx.ghost.post.create({ title: t })));
+        await ctx.all(input.ts.map((t) => () => ctx.ghost.post.create({ title: t }, { name: "Draft each" })));
         console.log(ctx.runId, await ctx.now());
         return input.ts.length;
       `),
     ).toEqual([]);
+  });
+
+  it("names a call by its { name }, its operation's id, Sleep, or an approval's title, once each", () => {
+    expect(
+      inRun(`
+        await ctx.ghost.post.create({ title: "a" }, { name: "First" });
+        await ctx.ghost.post.create({ title: "b" }, { name: DRAFT });
+        await ctx.ghost.post.create({ title: "c" });
+        await ctx.sleep({ ms: 1 });
+        await ctx.sleep({ ms: 2 }, { name: "Again" });
+        // A loop's calls are one step each, however often they run; its label is no step's name.
+        for (const t of input.ts) await ctx.sleep({ ms: 3 }, { name: "Pause" });
+        for (const t of input.ts) await ctx.sleep({ ms: 4 }, { name: "Pause again" });
+      `),
+    ).toEqual([]);
+    const nameEach = 'give each call of it a name of its own, `ctx\\.ghost\\.post\\.create\\(…, \\{ name: "…" \\}\\)`$';
+    // The same operation twice, even in two arms of a branch, or reached by a computed id.
+    expect(inRun(`await ctx.ghost.post.create({ title: "a" }); await ctx.ghost.post.create({ title: "b" });`)).toEqual([
+      twice("ghost\\.post\\.create", nameEach),
+    ]);
+    expect(
+      inRun(
+        `if (input.ok) await ctx.ghost.post.create({ title: "a" }); else await ctx.ghost.post.create({ title: "b" });`,
+      ),
+    ).toEqual([twice("ghost\\.post\\.create", nameEach)]);
+    expect(
+      inRun(`await (ctx as any)[input.k].post.create({ title: "a" }); await ctx.ghost.post.create({ title: "b" });`),
+    ).toEqual([twice("ghost\\.post\\.create", nameEach)]);
+    expect(inRun(`await ctx.sleep({ ms: 1 }); await ctx.sleep({ ms: 2 });`)).toEqual([
+      twice("Sleep", "give each sleep a name of its own"),
+    ]);
+    expect(
+      inRun(`await ctx.sleep({ ms: 1 }, { name: "X" }); await ctx.ghost.post.create({ title: "a" }, { name: "X" });`),
+    ).toEqual([twice("X", "rename one$")]);
+    expect(
+      inRun(`await ctx.sleep({ ms: 1 }, { name: "ghost.post.create" }); await ctx.ghost.post.create({ title: "a" });`),
+    ).toEqual([twice("ghost\\.post\\.create", nameEach)]);
+    expect(
+      inRun(`await ctx.approval("Go?", { approver: "a" }); await ctx.approval("Go?", { approver: "b" });`),
+    ).toEqual([twice("Go\\?", "give each approval a title of its own$")]);
+    // A name the outline cannot read.
+    const unread = expect.stringMatching(/^a step's name must be a string literal, or a top-level const holding one/);
+    expect(inRun(`await ctx.sleep({ ms: 1 }, { name: input.k });`)).toEqual([unread]);
+    expect(inRun("await ctx.sleep({ ms: 1 }, { name: `at ${input.k}` });")).toEqual([unread]);
+    expect(inRun(`const opts = { name: "x" }; await ctx.sleep({ ms: 1 }, opts);`)).toEqual([unread]);
+    expect(inRun(`await ctx.ghost.post.create({ title: "a" }, { name: "a", other: 1 } as never);`)).toEqual([unread]);
+    expect(inRun(`await ctx.ghost.post.create({ title: "a" }, { name: "" });`)).toEqual([unread]);
   });
 
   it("checks only the literal defineWorkflow is called with: another object with a name and a run is not a workflow", () => {
@@ -311,7 +367,9 @@ describe("lintWorkflow on run, which the worker holds to the outline", () => {
       ),
     ).toEqual([expect.stringMatching(/^`break` out of a loop, or to a label, is not allowed in a workflow/)]);
     expect(
-      inRun(`work: { await ctx.sleep({ ms: 1 }); if (input.skip) break work; await ctx.sleep({ ms: 2 }); }`),
+      inRun(
+        `work: { await ctx.sleep({ ms: 1 }); if (input.skip) break work; await ctx.sleep({ ms: 2 }, { name: "Two" }); }`,
+      ),
     ).toEqual([expect.stringMatching(/^`break` out of a loop, or to a label, is not allowed in a workflow/)]);
     // A finally keeps to the same rules.
     expect(inRun(`try { await ctx.sleep({ ms: 1 }); } finally { return "done"; }`)).toEqual([

@@ -70,6 +70,17 @@ describe("annotateGraph", () => {
     expect(marks(graph.nodes).every((n) => n.endsWith(" -"))).toBe(true);
   });
 
+  it("marks a named call by its operation, keeping its name", () => {
+    const named = outlineGraph([{ kind: "op", id: "ghost.post.create", name: "Draft the post" }]);
+    expect(annotateGraph(named, { steps }).nodes[1]).toEqual({
+      id: "op:0",
+      kind: "op",
+      label: "ghost.post.create",
+      name: "Draft the post",
+      state: { scenario: { seeded: true, expected: true } },
+    });
+  });
+
   it("returns the graph as it is for a scenario that names no operation", () => {
     expect(annotateGraph(graph, { steps: [{ text: "announce runs", kind: "when" }] })).toBe(graph);
   });

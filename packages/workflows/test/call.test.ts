@@ -262,7 +262,7 @@ const repost = defineWorkflow({
     try {
       created = await ctx.bluesky.post.create({ text: "once" });
     } catch {
-      created = await ctx.bluesky.post.create({ text: "again" });
+      created = await ctx.bluesky.post.create({ text: "again" }, { name: "Post again" });
     }
     return created;
   },
@@ -599,9 +599,9 @@ describe("ctx.all", () => {
     uses: [bluesky.post.create, ghost.post.publish, "all"],
     run: async (ctx) =>
       ctx.all([
-        () => ctx.bluesky.post.create({ text: "first" }),
+        () => ctx.bluesky.post.create({ text: "first" }, { name: "Post first" }),
         () => ctx.ghost.post.publish({ id: "post_missing" }),
-        () => ctx.bluesky.post.create({ text: "never" }),
+        () => ctx.bluesky.post.create({ text: "never" }, { name: "Post never" }),
       ]),
   });
 
@@ -627,17 +627,17 @@ describe("ctx.all", () => {
     uses: [bluesky.post.create, "all"],
     run: async (ctx, { shape }) => {
       const group = ctx.all([
-        () => ctx.bluesky.post.create({ text: "one" }),
-        () => ctx.bluesky.post.create({ text: "two" }),
+        () => ctx.bluesky.post.create({ text: "one" }, { name: "Post one" }),
+        () => ctx.bluesky.post.create({ text: "two" }, { name: "Post two" }),
       ]);
       let out: unknown;
       if (shape === "outside") {
         // Made while the first member runs, but not in it.
-        await ctx.bluesky.post.create({ text: "outside" });
+        await ctx.bluesky.post.create({ text: "outside" }, { name: "Post outside" });
         out = (await group).length;
       } else {
         out = await ctx
-          .all([() => ctx.bluesky.post.create({ text: "three" })])
+          .all([() => ctx.bluesky.post.create({ text: "three" }, { name: "Post three" })])
           .catch((err: Error) => `${errorCode(err)}: ${err.message}`);
         await group;
       }
@@ -710,6 +710,8 @@ describe("ctx.all", () => {
       { ...group, index: 1 },
       undefined,
     ]);
+    // An approval is named by its title.
+    expect(records[1]).toMatchObject({ name: "Post it?", node: "0.0.0" });
   });
 
   it("stops at the first member that fails, with its error, and never runs the members after it", async () => {

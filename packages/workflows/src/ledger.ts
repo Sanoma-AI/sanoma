@@ -43,6 +43,11 @@ export type LedgerRecord = {
        * code. Absent in records written before the worker placed calls (ledgers from 0.1).
        */
       node?: string;
+      /**
+       * The step's name: the one the call gave (`{ name }`), or the operation's id. Absent in
+       * records written before steps had names.
+       */
+      name?: string;
       effect: Effect;
       input: unknown;
       /** The policy's decision, with its `reasons` and the policy's `policyVersion` when there are any. */
@@ -64,6 +69,8 @@ export type LedgerRecord = {
       approval: string;
       /** The outline node of the `ctx.approval` call, or of the held operation's call for a policy request; as for `op.called`. */
       node?: string;
+      /** The step's name: the title for a `ctx.approval`, the held call's name for a policy request; as for `op.called`. */
+      name?: string;
       title: string;
       approver: Approver;
       requestedBy: "workflow" | "policy";
@@ -82,7 +89,13 @@ export type LedgerRecord = {
    * for a duration the time the sleep started plus the duration, as the runtime saw it. Written
    * for a time already past too, which waits not at all.
    */
-  | { type: "sleep.started"; node?: string; until: number }
+  | {
+      type: "sleep.started";
+      node?: string;
+      /** The step's name: the one the call gave (`{ name }`), or `Sleep`; as for `op.called`. */
+      name?: string;
+      until: number;
+    }
   /**
    * A sandbox run seeded its fakes from the scenario named: each `Given` operation called
    * through its fake, with what the fake returned, and each `Given` resource (by its type's id

@@ -145,6 +145,17 @@ export const AllMembers = z.array(
   { error: "needs a list of functions: ctx.all([() => …, () => …])" },
 );
 
+/**
+ * What a step is called, beside its operation: `ctx.ghost.post.create(input, { name: "Draft" })`,
+ * `ctx.sleep({ days: 1 }, { name: "Wait a day" })`. A string literal, or a top-level `const` of
+ * the workflow's file holding one, so the outline reads it. Without one, a call is named by its
+ * operation's id, a sleep `Sleep`; an approval by its title. Names are unique in a workflow, so a
+ * workflow that calls one operation twice names the calls.
+ */
+export interface StepOptions {
+  name?: string;
+}
+
 type OpsOf<U extends readonly Use[]> = Extract<U[number], Op>;
 
 type CtxOps<O extends Op> = {
@@ -154,7 +165,7 @@ type CtxOps<O extends Op> = {
         O,
         { vendor: V; resource: R; name: N }
       > extends Op<any, any, any, infer I, infer Out>
-        ? (input: I) => Promise<Out>
+        ? (input: I, options?: StepOptions) => Promise<Out>
         : never;
     };
   };
@@ -167,7 +178,7 @@ interface ApprovalCtx {
 
 interface SleepCtx {
   /** Waits, durably, until a time or for a duration. Survives worker restarts. */
-  sleep(request: SleepRequest): Promise<void>;
+  sleep(request: SleepRequest, options?: StepOptions): Promise<void>;
 }
 
 interface AllCtx {

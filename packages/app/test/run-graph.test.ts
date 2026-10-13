@@ -192,6 +192,26 @@ describe("runGraph", () => {
     expect(runGraph(records, run("cancelled"), NOW).nodes.some((n) => n.kind === "pending")).toBe(false);
   });
 
+  it("carries a call's step name when it is not the operation's id, and puts a sleep's before when it ends", () => {
+    const { nodes } = runGraph(
+      ledger(
+        started,
+        called("ghost.post.create", { name: "Draft the post" }),
+        called("ghost.post.publish", { name: "ghost.post.publish" }),
+        slept(NOW - 1, { name: "Wait for launch" }),
+        slept(NOW - 1, { name: "Sleep" }),
+      ),
+      run("running"),
+      NOW,
+    );
+    expect(nodes.slice(1, -1).map((n) => [n.label, n.kind === "op" ? n.name : undefined])).toEqual([
+      ["ghost.post.create", "Draft the post"],
+      ["ghost.post.publish", undefined],
+      ["Wait for launch, until 2026-10-09 07:59 UTC", undefined],
+      ["until 2026-10-09 07:59 UTC", undefined],
+    ]);
+  });
+
   it("draws a sleep, waiting while it is the run's last record and its time has not come", () => {
     const until = NOW + 60_000;
     const sleeping = ledger(started, { type: "sleep.started", until });
@@ -319,6 +339,7 @@ describe("runGraph", () => {
       },
       {
         kind: "repeat",
+        name: "for each of messages",
         path: "2",
         span: [60, 120],
         body: [

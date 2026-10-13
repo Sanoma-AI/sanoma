@@ -100,9 +100,13 @@ function Handles({ inbound = true, outbound = true }: { inbound?: boolean; outbo
 
 /**
  * What a node is called, for its title and assistive tech: its label, but for a run's sleep,
- * whose label says only until when and whose clock says "sleep".
+ * whose label says only until when and whose clock says "sleep", and an operation with a name,
+ * which says both.
  */
-const nameOf = (node: GraphNode) => (node.kind === "sleep" && node.state ? `sleep ${node.label}` : node.label);
+const nameOf = (node: GraphNode) => {
+  if (node.kind === "sleep" && node.state) return `sleep ${node.label}`;
+  return node.kind === "op" && node.name ? `${node.name}: ${node.label}` : node.label;
+};
 
 /** One node's box, in its tone when a run gives it one, ringed when selected, with its handles. */
 function Frame({
@@ -180,8 +184,9 @@ function useOpFacts(node: Extract<GraphNode, { kind: "op" }>) {
 }
 
 /**
- * An operation. One with `ops` (an outline's call with a computed segment) is a stacked list:
- * what is literal in its id, then a row per operation it can reach (`wildcardRows`).
+ * An operation. One with a name says it first, its id on the line below. One with `ops` (an
+ * outline's call with a computed segment) is a stacked list: what is literal in its id, then a
+ * row per operation it can reach (`wildcardRows`).
  */
 function OpNode(props: Props<"op">) {
   const { node } = props.data;
@@ -198,8 +203,17 @@ function OpNode(props: Props<"op">) {
         {vendors.length > MAX_VENDORS && (
           <span className="shrink-0 text-muted-foreground">+{vendors.length - MAX_VENDORS}</span>
         )}
-        <code className="truncate">{node.ops ? wildcardHeader(node.label) : node.label}</code>
+        {node.name ? (
+          <span className="truncate font-medium">{node.name}</span>
+        ) : (
+          <code className="truncate">{node.ops ? wildcardHeader(node.label) : node.label}</code>
+        )}
       </Line>
+      {node.name && (
+        <Line>
+          <code className="truncate text-muted-foreground">{node.ops ? wildcardHeader(node.label) : node.label}</code>
+        </Line>
+      )}
       <Line>
         {effect && <Badge className={effectBadge({ effect })}>{effect}</Badge>}
         {held ? (

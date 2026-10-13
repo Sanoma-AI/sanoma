@@ -27,6 +27,7 @@ export {
   type Builtin,
   type Ctx,
   type SleepRequest,
+  type StepOptions,
   type Use,
   type WorkflowDefinition,
 } from "./define.ts";
