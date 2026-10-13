@@ -90,4 +90,4 @@ fake.remove("repository", "sanoma"); // the next read and import say it is gone
 
 `put` and `override` take fields in the resource's shape, as a read returns them (a block of one is an object). `remove` answers an import as the provider does: a branch protection rule with the provider's `failed_precondition` diagnostic, anything else `not_found`. It has the faults every fake has (`failNext`, `loseReply`, `rateLimit`, `hold`, `reset`, `update`); see [Fakes for tests](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#fakes-for-tests). Import it from `@sanoma/connector-github/fake`.
 
-License: Apache-2.0.
+License: FSL-1.1-ALv2.

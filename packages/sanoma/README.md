@@ -103,4 +103,4 @@ Linking some of `sanoma`, `@sanoma/workflows`, `@sanoma/app` and `@sanoma/bridge
 
 `sanoma worker` and `sanoma app` are the deployment's two processes. A host that composes its own process keeps `startWorker` from `@sanoma/workflows` and `startApp` from `@sanoma/app`, which the bin runs.
 
-Status: early (0.x). License: Apache-2.0.
+Status: early (0.x). License: FSL-1.1-ALv2.

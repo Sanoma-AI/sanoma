@@ -185,4 +185,4 @@ Scenario: A repository GitHub no longer has
 
 `runScenario(scenario, { client, startedBy?, timeoutMs? })`, re-exported from `@sanoma/workflows/scenarios`, runs one scenario against a worker you started, with a `SanomaClient` of it, and returns `{ runId, run, ledger, checks }`: the run's id, its summary, its ledger records and `check(scenario, ledger)`. `timeoutMs` goes to `drive`. Load the scenarios with `loadScenarios(resolveConfig(config))` from `@sanoma/workflows/scenario`.
 
-Status: early (0.x). License: Apache-2.0.
+Status: early (0.x). License: FSL-1.1-ALv2.
