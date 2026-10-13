@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { type Box, CLUSTER_HEADER, layout, NODE_SIZE, nodeSize, type Point } from "../src/graph/layout.ts";
 import { outlineGraph } from "../src/graph/outline-graph.ts";
-import type { Graph, Step } from "../src/graph/types.ts";
+import type { Graph, GraphEdge, Step } from "../src/graph/types.ts";
 import { LIST_HEADER, MAX_ROWS, ROW_HEIGHT } from "../src/graph/wildcard.ts";
 import { absolute } from "./graph-helpers.ts";
 
 const op = (id: string) => ({ kind: "op", id }) as const;
 
 const text = ({ x, y }: Point) => `(${x}, ${y})`;
+const same = (a: Point, b: Point) => a.x === b.x && a.y === b.y;
 
 /** True when the segment from `a` to `b` runs through the inside of `box`, not along or outside its border. */
 function crosses(a: Point, b: Point, box: Box): boolean {
@@ -17,46 +18,78 @@ function crosses(a: Point, b: Point, box: Box): boolean {
 }
 
 /**
- * What is wrong with each edge's route, as text: none when it starts on its source's box (the
- * right side's middle, or the left side's for a cluster's inside), ends on its target's (the left
- * side's middle, or the right side's for a cluster's inside), and runs in straight lines across
- * and down through no other node's box.
+ * What is wrong with each edge's route, as text. None when it starts on its source's right side
+ * and ends on its target's left side (a cluster's left side, from its inside, for an edge from
+ * the cluster to a node it holds or across it; its right side for one back to it), at the middle
+ * of a node's side and below a cluster's label; runs in straight lines across and down through no
+ * other node's box; and, at a cluster's side, goes on where the line on the other side of it
+ * ends, with no step at the border.
  */
 function routeProblems(graph: Graph): string[] {
   const { boxes, routes } = layout(graph);
   const at = absolute(graph.nodes, boxes);
-  const parentOf = new Map(graph.nodes.map((n) => [n.id, n.parent]));
+  const nodeOf = new Map(graph.nodes.map((n) => [n.id, n]));
   const around = (id: string): string[] => {
-    const parent = parentOf.get(id);
+    const parent = nodeOf.get(id)!.parent;
     return parent === undefined ? [id] : [id, ...around(parent)];
   };
-  return graph.edges.flatMap((edge) => {
+  /** True when `point` is on the `side` of `id`'s box: a node's middle, or a cluster's below its label. */
+  const on = (point: Point, id: string, side: "left" | "right") => {
+    const box = at.get(id)!;
+    if (point.x !== (side === "left" ? box.x : box.x + box.width)) return false;
+    return nodeOf.get(id)!.kind === "cluster"
+      ? point.y > box.y + CLUSTER_HEADER && point.y < box.y + box.height
+      : point.y === box.y + box.height / 2;
+  };
+  // Each cluster's sides, as the edges inside and outside it meet them.
+  const inside = (edge: GraphEdge, cluster: string) =>
+    edge.source === edge.target || nodeOf.get(cluster === edge.source ? edge.target : edge.source)!.parent === cluster;
+  const problems = graph.edges.flatMap((edge) => {
     const route = routes.get(edge.id);
     if (!route) return [`${edge.id} has no route`];
-    const [from, to] = [at.get(edge.source)!, at.get(edge.target)!];
-    // From a cluster to what it holds, or across it, from its inside left; back to it, to its inside right.
-    const across = edge.source === edge.target;
-    const start = {
-      x: across || parentOf.get(edge.target) === edge.source ? from.x : from.x + from.width,
-      y: from.y + from.height / 2,
-    };
-    const end = {
-      x: across || parentOf.get(edge.source) === edge.target ? to.x + to.width : to.x,
-      y: to.y + to.height / 2,
-    };
-    const problems: string[] = [];
-    if (text(route[0]!) !== text(start)) problems.push(`${edge.id} starts at ${text(route[0]!)}, not ${text(start)}`);
-    if (text(route.at(-1)!) !== text(end)) problems.push(`${edge.id} ends at ${text(route.at(-1)!)}, not ${text(end)}`);
+    const [start, end] = [route[0]!, route.at(-1)!];
+    const found: string[] = [];
+    if (!on(start, edge.source, inside(edge, edge.source) ? "left" : "right")) {
+      found.push(`${edge.id} starts at ${text(start)}, off its source's side`);
+    }
+    if (!on(end, edge.target, inside(edge, edge.target) ? "right" : "left")) {
+      found.push(`${edge.id} ends at ${text(end)}, off its target's side`);
+    }
     const own = new Set([...around(edge.source), ...around(edge.target)]);
     for (const [i, a] of route.slice(0, -1).entries()) {
       const b = route[i + 1]!;
-      if (a.x !== b.x && a.y !== b.y) problems.push(`${edge.id} runs aslant from ${text(a)} to ${text(b)}`);
+      if (a.x !== b.x && a.y !== b.y) found.push(`${edge.id} runs aslant from ${text(a)} to ${text(b)}`);
       for (const node of graph.nodes) {
-        if (!own.has(node.id) && crosses(a, b, at.get(node.id)!)) problems.push(`${edge.id} runs behind ${node.id}`);
+        if (!own.has(node.id) && crosses(a, b, at.get(node.id)!)) found.push(`${edge.id} runs behind ${node.id}`);
       }
     }
-    return problems;
+    return found;
   });
+  for (const cluster of graph.nodes.filter((n) => n.kind === "cluster")) {
+    const ends = (id: string, side: "start" | "end") =>
+      graph.edges
+        .filter((e) => (side === "start" ? e.source : e.target) === id)
+        .map((e) => ({
+          id: e.id,
+          point: side === "start" ? routes.get(e.id)![0]! : routes.get(e.id)!.at(-1)!,
+          inner: inside(e, id),
+        }));
+    const [arrive, leave] = [ends(cluster.id, "end"), ends(cluster.id, "start")];
+    // Left: the lines into it, and the lines on inside it. Right: the lines back to it, and out of it.
+    const pairs = [
+      [arrive.filter((e) => !e.inner), leave.filter((e) => e.inner)],
+      [arrive.filter((e) => e.inner), leave.filter((e) => !e.inner)],
+    ] as const;
+    for (const [into, onwards] of pairs) {
+      for (const a of into) {
+        for (const b of onwards) {
+          if (!same(a.point, b.point))
+            problems.push(`${a.id} ends at ${text(a.point)}, but ${b.id} starts at ${text(b.point)}`);
+        }
+      }
+    }
+  }
+  return problems;
 }
 
 describe("layout", () => {
@@ -152,5 +185,37 @@ describe("layout", () => {
       op("d.x.after"),
     ]);
     expect(routeProblems(graph)).toEqual([]);
+  });
+
+  it("runs straight through a loop holding one operation, from start to end", () => {
+    const graph = outlineGraph([{ kind: "repeat", body: [op("x.item.get")] }]);
+    const { routes } = layout(graph);
+    expect(routeProblems(graph)).toEqual([]);
+    // Into the loop, on inside it to the call, back to its right side and out: one height throughout.
+    for (const id of ["start->cluster:0", "cluster:0->op:1", "op:1->cluster:0", "cluster:0->end"]) {
+      const route = routes.get(id)!;
+      expect(route, id).toHaveLength(2);
+      expect(route[0]!.y, id).toBe(routes.get("start->cluster:0")![0]!.y);
+    }
+  });
+
+  it("runs an empty loop's way across it below its label", () => {
+    const graph = outlineGraph([{ kind: "repeat", body: [] }]);
+    const { boxes, routes } = layout(graph);
+    const box = boxes.get("cluster:0")!;
+    const route = routes.get("cluster:0->cluster:0")!;
+    expect(route).toEqual([
+      { x: box.x, y: route[0]!.y },
+      { x: box.x + box.width, y: route[0]!.y },
+    ]);
+    expect(route[0]!.y).toBeGreaterThan(box.y + CLUSTER_HEADER);
+    expect(route[0]!.y).toBeLessThan(box.y + box.height);
+    expect(routeProblems(graph)).toEqual([]);
+  });
+
+  it("refuses an edge between nodes in different boxes, naming it", () => {
+    const graph = outlineGraph([{ kind: "repeat", body: [op("x.item.get")] }, op("x.item.done")]);
+    graph.edges.push({ id: "op:1->op:2", source: "op:1", target: "op:2" });
+    expect(() => layout(graph)).toThrow("layout: edge op:1->op:2 joins neither");
   });
 });
