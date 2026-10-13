@@ -12,7 +12,7 @@ Private to this repository: its tests import it through the workspace, and it is
 
 `testDatabaseUrl(suffix)` is `SANOMA_TEST_DATABASE_URL` (default `postgresql://postgres:dbos@localhost:5433/sanoma_test`) with `_<suffix>` appended to the database name. Give each test file its own suffix, so files don't recover each other's runs. DBOS creates the database if it is missing.
 
-`withFake(connector, fake, driver?)` is the connector set up with that fake instead of the one its package attaches, so live runs call it (through `driver`, by default the fake's own) and sandbox runs copy it: what a test that seeds or reads a fake passes in `connectors`.
+`withFake(connector, fake, driver?)` is the connector set up with that fake instead of the one its package attaches, so live runs call it (through `driver`, by default the fake's own), and sandbox runs too, since its maker gives this very one: what a test that seeds or reads a fake passes in `connectors`. Swapping the driver alone, `withSetup(connector, { driver: () => fake.driver })`, keeps the package's maker, so each sandbox run has a fake of its own.
 
 `ensureBuilt(pkgDir, outputs, build)` runs `build` (a command and its arguments) in `pkgDir` when one of `outputs` is missing or older than a file under its `src/`, for tests of what a package ships from `dist/`. `waitFor(get, done?, timeoutMs?)` calls `get` every 100 ms until `done` holds for its value (by default, until it is truthy), returns that value, and throws after `timeoutMs` (default 15 seconds) naming the last one.
 
@@ -185,7 +185,7 @@ Scenario: A repository GitHub no longer has
   And resources/identity/github.ts#website is clean
 ```
 
-`Given <resource> "<name>" has` and `is gone` change the run's own copy of the vendor's fake before it starts (a GitHub repository by its name, a Stripe object by its id: the resource's import id), for fakes that hold objects, as the GitHub and Stripe ones do; a failed `Then` says what the run did instead (`github.repository.import was allowed, not denied`, `resources/identity/github.ts#docs is gone, not clean`).
+`Given <resource> "<name>" has` and `is gone` change the run's own fake of the vendor before it starts (a GitHub repository by its name, a Stripe object by its id: the resource's import id), for fakes that hold objects, as the GitHub and Stripe ones do; a failed `Then` says what the run did instead (`github.repository.import was allowed, not denied`, `resources/identity/github.ts#docs is gone, not clean`).
 
 `runScenario(scenario, { client, startedBy?, timeoutMs? })`, re-exported from `@sanoma/workflows/scenarios`, runs one scenario against a worker you started, with a `SanomaClient` of it, and returns `{ runId, run, ledger, checks }`: the run's id, its summary, its ledger records and `check(scenario, ledger)`. `timeoutMs` goes to `drive`. Load the scenarios with `loadScenarios(resolveConfig(config))` from `@sanoma/workflows/scenario`.
 

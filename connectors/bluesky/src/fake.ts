@@ -15,7 +15,6 @@ export interface FakeBlueskyState extends Record<string, unknown> {
 
 /**
  * An in-memory Bluesky for tests: posts live in `state.posts`, in the order posted.
- * Pass `{ file }` to keep the state on disk.
  */
 export function fakeBluesky(options: FakeOptions = {}) {
   return defineFake(

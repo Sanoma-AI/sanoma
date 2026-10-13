@@ -26,7 +26,7 @@ const out = (p: FakeGhostPost) => ({
 
 /**
  * An in-memory Ghost for tests: posts live in `state.posts`, and their URLs are on
- * `blog.example.test`. Pass `{ file }` to keep the state on disk.
+ * `blog.example.test`.
  */
 export function fakeGhost(options: FakeOptions = {}) {
   return defineFake(

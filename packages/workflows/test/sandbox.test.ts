@@ -94,7 +94,7 @@ describe("sandbox runs", () => {
     expect(run).toMatchObject({ status: "finished", sandbox: "Launch on time" });
     expect(Date.now() - started).toBeLessThan(15_000);
     expect(live).toEqual([]);
-    // The worker's fakes are templates: the run seeded and called its own copies.
+    // The drivers' fakes are untouched: the run seeded and called fakes of its own.
     expect(app.ops()).toEqual([]);
 
     const records = await ledger(runId);

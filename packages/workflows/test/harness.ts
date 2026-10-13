@@ -7,7 +7,7 @@ import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
 import { fakeGhost } from "@sanoma/connector-ghost/fake";
 import { resend } from "@sanoma/connector-resend";
 import { fakeResend } from "@sanoma/connector-resend/fake";
-import { testRoot, withFake } from "@sanoma/testing";
+import { testRoot } from "@sanoma/testing";
 import { type TestApp, useTestApp } from "@sanoma/testing/harness";
 import type { Fake, FakeCall, FakeOptions } from "@sanoma/workflows/fake";
 import { afterAll, beforeEach } from "vitest";
@@ -19,7 +19,9 @@ import {
   type LedgerRecord,
   type SanomaClient,
   type SanomaConfig,
+  withSetup,
 } from "../src/index.ts";
+import { VENDOR } from "../src/op.ts";
 import announce from "./fixtures/announce.ts";
 
 export async function waitFor(check: () => Promise<boolean> | boolean, timeoutMs = 15_000) {
@@ -45,6 +47,12 @@ export const failure = (p: Promise<unknown>) =>
     (e: unknown) => e,
   );
 
+/** The connector with nothing attached: no driver, and no fake. */
+export const withoutSetup = <C extends Connector<any, any>>(connector: C): C => ({
+  ...connector,
+  [VENDOR]: { ...connector[VENDOR], setup: {} },
+});
+
 /** A fake vendor's maker, such as `fakeGhost`. */
 type MakeFake = (options: FakeOptions) => Fake<any, any>;
 
@@ -53,9 +61,10 @@ export type Extra = readonly [Connector<any, any>, MakeFake];
 
 /**
  * The fakes the announce workflow calls, and the `extra` ones a test adds, all logging into one
- * list so the order across vendors shows. `connectors` are their connectors set up with them
- * (`withFake`), so live runs call these very fakes; `connectorsWith(driver, …)` are the same with
- * each driver given called instead of its vendor's fake.
+ * list so the order across vendors shows. `connectors` are their connectors with each fake's
+ * driver swapped in (`withSetup`), so live runs call these very fakes, and each keeps the maker of
+ * its package's fake, so each sandbox run calls a fake of its own; `connectorsWith(driver, …)` are
+ * the same with each driver given called instead of its vendor's fake.
  */
 export function marketingFakes({ extra = [] }: { extra?: readonly Extra[] } = {}) {
   const calls: FakeCall[] = [];
@@ -69,9 +78,10 @@ export function marketingFakes({ extra = [] }: { extra?: readonly Extra[] } = {}
     ...extra.map(([connector, make]) => [connector, make({ calls })] as const),
   ];
   const connectorsWith = (...drivers: Driver[]) =>
-    pairs.map(([connector, fake]) =>
-      withFake(connector, fake, drivers.find((d) => d.vendor === fake.driver.vendor) ?? fake.driver),
-    );
+    pairs.map(([connector, fake]) => {
+      const driver = drivers.find((d) => d.vendor === fake.driver.vendor) ?? fake.driver;
+      return withSetup(connector, { driver: () => driver });
+    });
   return {
     calls,
     ghost: blog,
@@ -110,7 +120,7 @@ export function useApp(
   const app = useTestApp(
     {
       workflows: [announce],
-      // On the fakes, which each sandbox run also copies.
+      // Live runs on these fakes; each sandbox run on its own, from the packages' makers.
       connectors: vendors.connectors,
       policy: allowAll,
       ledger: jsonlLedger(ledgerDir),

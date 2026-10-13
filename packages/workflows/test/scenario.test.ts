@@ -7,7 +7,7 @@ import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { defineFake } from "../src/fake.ts";
+import { defineFake, type Fake } from "../src/fake.ts";
 import {
   allowAll,
   defineConnector,
@@ -603,6 +603,10 @@ describe("check", () => {
   });
 });
 
+/** One fake of each vendor, from its maker, as a sandbox run makes them. */
+const made = (fakes: ReadonlyMap<string, () => Fake<any, any>>) =>
+  new Map([...fakes].map(([vendor, make]) => [vendor, make()]));
+
 describe("resources and policy outcomes", () => {
   // The company fixture's connectors, which declare resource types, its fakes and its inspect workflow.
   const company = resolveConfig({ ...companyConfig([inspect], allowAll), ledger: memoryLedger() });
@@ -686,9 +690,9 @@ describe("resources and policy outcomes", () => {
     ]);
   });
 
-  it("refuses, before anything is copied, a resource seed of a vendor whose fake holds no resources", () => {
+  it("refuses a resource seed of a vendor whose fake holds no resources", () => {
     const [drift] = parseCompany(DRIFT);
-    expect(missingResourceFake(drift!, company.fakes)).toBeUndefined();
+    expect(missingResourceFake(drift!, made(company.fakes))).toBeUndefined();
     // A resource type whose fake is a plain `defineFake`, with no `override`, `put` or `remove`.
     const hook = defineResource({
       vendor: "acme",
@@ -722,7 +726,7 @@ describe("resources and policy outcomes", () => {
       "ping.feature",
       resolved,
     );
-    const problem = missingResourceFake(seeded!, resolved.fakes);
+    const problem = missingResourceFake(seeded!, made(resolved.fakes));
     expect(problem?.code).toBe("invalid_input");
     expect(problem?.message).toBe(
       'Scenario "Seeded" seeds acme.hook, but acme\'s fake holds no resources (it is not a tfFake)',

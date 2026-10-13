@@ -37,7 +37,7 @@ A webhook endpoint's `secret` is sensitive (Stripe returns it only when the endp
 
 ## Driver
 
-`@sanoma/connector-stripe/driver` reads through a provider bridge. The `stripe` connector the package root exports carries it, made once per process, and its fake (`withSetup` from `@sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
+`@sanoma/connector-stripe/driver` reads through a provider bridge. The `stripe` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `@sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
 
 ```ts
 import { stripe } from "@sanoma/connector-stripe";

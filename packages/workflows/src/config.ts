@@ -9,6 +9,7 @@ import type { Fake } from "./fake.ts";
 import type { LedgerStore } from "./ledger.ts";
 import {
   type Connector,
+  type ConnectorSetup,
   type Driver,
   DriverError,
   type DriverEnv,
@@ -16,6 +17,7 @@ import {
   isOp,
   type Op,
   setupOf,
+  VENDOR,
 } from "./op.ts";
 import type { Policy } from "./policy.ts";
 import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
@@ -34,7 +36,8 @@ export interface SanomaConfig {
    * The connectors (from `defineConnector`, as their packages export them). The worker takes
    * each operation's effect, schemas and retry setting from here, not from the workflow, and
    * refuses a workflow that declares an operation differently. A live run calls the driver its
-   * connector's package attaches; a sandbox run calls its own copy (`fresh()`) of the fake.
+   * connector's package attaches; a sandbox run calls a fake of its own, which the connector's
+   * package attaches the maker of.
    */
   connectors: Connector<any, any>[];
   /** Checked before every operation call. Required: `allowAll` says that every call is allowed. */
@@ -75,15 +78,13 @@ export interface ResolvedConfig {
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id, each guarded by its driver's `env` (`indexDrivers`). */
   drivers: Map<string, DriverFn>;
-  /** The drivers the connectors attach, in `connectors` order: what the credentials are read from (`credentialsOf`). */
-  driverList: readonly Driver[];
   /**
-   * The fakes the connectors attach, by vendor id: the templates each sandbox run copies. Made
-   * once per config object, so every resolution of one config gives the same instances.
+   * The driver each vendor's connector attaches, made once for this resolution, by vendor id in
+   * `connectors` order: what `drivers` indexes and the credentials are read from (`credentialsOf`).
    */
-  fakes: Map<string, Fake<any, any>>;
-  /** The fakes' functions, by operation id: which operations a sandbox run has a fake for. */
-  fakeDrivers: Map<string, DriverFn>;
+  driversByVendor: Map<string, Driver>;
+  /** The makers of the fakes the connectors attach, by vendor id in `connectors` order: each sandbox run makes its own. */
+  fakes: Map<string, () => Fake<any, any>>;
   /** `scenarios/` in `root`, as a `file:` URL, when that directory exists. */
   scenarios?: URL;
   /** The resource types the connectors declare, by `<vendor>.<type>`: what the drift workflow checks and scenarios seed. */
@@ -171,13 +172,9 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const appName = appNameAt(root);
   const scenarios = root !== undefined && existsSync(join(root, "scenarios")) ? scenariosAt(root) : undefined;
   const ops = indexConnectors(config.connectors);
-  const driverList = config.connectors.flatMap((c) => setupOf(c).driver?.() ?? []);
-  const drivers = indexDrivers(driverList, ops);
-  const fakes = fakesOf(config);
-  const fakeDrivers = indexDrivers(
-    [...fakes.values()].map((f) => f.driver),
-    ops,
-  );
+  const driversByVendor = new Map([...makersOf(config.connectors, "driver")].map(([vendor, make]) => [vendor, make()]));
+  const drivers = indexDrivers([...driversByVendor.values()], ops);
+  const fakes = makersOf(config.connectors, "fake");
   const names = new Map<string, WorkflowDefinition<any, any>>();
   for (const wf of config.workflows) {
     if (wf.name === DRIFT_WORKFLOW) {
@@ -209,9 +206,8 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     queueName: `sanoma:${appName}`,
     ops,
     drivers,
-    driverList,
+    driversByVendor,
     fakes,
-    fakeDrivers,
     ...(scenarios && { scenarios }),
     types,
     workflows: names,
@@ -221,25 +217,26 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   };
 }
 
-/** The fakes the connectors attach, by vendor, made on a config's first resolution and kept for the config object. */
-const fakesByConfig = new WeakMap<SanomaConfig, Map<string, Fake<any, any>>>();
-
-function fakesOf(config: SanomaConfig): Map<string, Fake<any, any>> {
-  const known = fakesByConfig.get(config);
-  if (known) return known;
-  const fakes = new Map<string, Fake<any, any>>();
-  for (const connector of config.connectors) {
-    const fake = setupOf(connector).fake?.();
-    if (fake === undefined) continue;
-    const { vendor } = fake.driver;
-    const seen = fakes.get(vendor);
-    if (seen && seen !== fake) {
-      throw new Error(`Two connectors in \`connectors\` attach a fake for "${vendor}"; keep one per vendor`);
+/**
+ * What the connectors' setups attach under `key` (`withSetup`), by vendor id in `connectors`
+ * order. One vendor's connectors may name one maker, as copies of one connector do, never two.
+ */
+function makersOf<K extends keyof ConnectorSetup>(
+  connectors: readonly Connector<any, any>[],
+  key: K,
+): Map<string, NonNullable<ConnectorSetup[K]>> {
+  const makers = new Map<string, NonNullable<ConnectorSetup[K]>>();
+  for (const connector of connectors) {
+    const make = setupOf(connector)[key];
+    if (make === undefined) continue;
+    const vendor = connector[VENDOR].id;
+    const seen = makers.get(vendor);
+    if (seen && seen !== make) {
+      throw new Error(`Two connectors in \`connectors\` attach a ${key} for "${vendor}"; keep one per vendor`);
     }
-    fakes.set(vendor, fake);
+    makers.set(vendor, make);
   }
-  fakesByConfig.set(config, fakes);
-  return fakes;
+  return makers;
 }
 
 /** `scenarios/` in `root`, as a `file:` URL to the directory (with its trailing slash). */

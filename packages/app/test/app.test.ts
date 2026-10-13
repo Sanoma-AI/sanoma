@@ -4,12 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { bluesky } from "@sanoma/connector-bluesky";
-import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
-import { ghost } from "@sanoma/connector-ghost";
-import { fakeGhost } from "@sanoma/connector-ghost/fake";
 import { resend } from "@sanoma/connector-resend";
-import { fakeResend } from "@sanoma/connector-resend/fake";
-import { ensureBuilt, testDatabaseUrl, waitFor, withFake } from "@sanoma/testing";
+import { ensureBuilt, testDatabaseUrl, waitFor } from "@sanoma/testing";
 import {
   allow,
   approve,
@@ -25,11 +21,13 @@ import {
   type RunSummary,
   startWorker,
   type Worker,
+  withSetup,
 } from "@sanoma/workflows";
 import { type ConfigDescription, describeConfig, outlineWorkflow } from "@sanoma/workflows/describe";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
 import { companyFakes } from "../../workflows/test/fixtures/company/fakes.ts";
+import { marketingFakes } from "../../workflows/test/harness.ts";
 import { z } from "zod";
 import { type App, type ErrorResponse, type RunDetail, startApp } from "../src/index.ts";
 import { ApiError, type CredentialsResponse, type ScenariosResponse, type StartRunResponse } from "../src/api.ts";
@@ -59,7 +57,9 @@ const policy = definePolicy(
   { version: "test-1" },
 );
 
-const blog = fakeGhost();
+// The marketing vendors: live runs call these fakes.
+const vendors = marketingFakes();
+const blog = vendors.ghost;
 // The workflows' company fixture: its data files, and GitHub and Stripe holding them as declared.
 const company = companyFakes();
 const companyDir = fileURLToPath(new URL("../../workflows/test/fixtures/company/", import.meta.url));
@@ -77,16 +77,10 @@ const featureFile = join(scenariosDir, "announce.feature");
 const chat = defineConnector("chat", {
   message: { send: { effect: "send", input: z.object({ text: z.string() }), output: z.object({}) } },
 });
-// Live runs call these fakes; sandbox runs their own copies, seeded from the scenarios.
+// Live runs call these fakes; each sandbox run fakes of its own, seeded from the scenarios.
 const config = defineConfig({
   workflows: [announce],
-  connectors: [
-    withFake(ghost, blog),
-    withFake(resend, fakeResend()),
-    withFake(bluesky, fakeBluesky()),
-    ...company.connectors,
-    chat,
-  ],
+  connectors: [...vendors.connectors, ...company.connectors, chat],
   policy,
   ledger: memoryLedger(),
   databaseUrl: testDatabaseUrl("app"),
@@ -1425,7 +1419,10 @@ describe("an app whose drivers declare environment variables", () => {
     vi.stubEnv(URL_VAR, SITE);
     vi.stubEnv(KEY_VAR, undefined);
     // The ghost driver (the first connector's), with an env: startApp does not refuse what startWorker would.
-    const connectors = [withFake(ghost, blog, { ...blog.driver, env }), ...config.connectors.slice(1)];
+    const connectors = [
+      withSetup(config.connectors[0]!, { driver: () => ({ ...blog.driver, env }) }),
+      ...config.connectors.slice(1),
+    ];
     declaring = await startApp({ ...config, connectors }, { port: 0 });
     // The table outlives a run of the tests.
     await change("DELETE", { name: KEY_VAR });

@@ -53,8 +53,6 @@ export interface TfFake<V extends string, T extends Record<string, z.ZodObject>>
    * Nothing when there is no such object.
    */
   remove(type: keyof T & string, id: string): void;
-  /** A new fake of the same connector and replies, in memory with no file, keeping `override`, `put` and `remove`. */
-  fresh(): TfFake<V, T>;
 }
 
 /** A driver's flat operations (`repository.read`) grouped by resource again, as `defineFake` takes them. */
@@ -71,8 +69,8 @@ function grouped(driver: Driver) {
  * A fake vendor for an OpenTofu connector: its real driver over a `stateBridge` of the replies
  * recorded from the provider, so nothing reaches the vendor and no credentials are read. It has
  * the faults every fake has (`failNext`, `loseReply`, `rateLimit`, `hold`, `reset`, `update`),
- * and `put`, `override` and `remove` to simulate drift. With `file`, another process's fake on
- * the same file sees the changes; `fresh()` copies (as a sandbox run does) hold resources too.
+ * and `put`, `override` and `remove` to simulate drift. Each call makes one of its own, with
+ * the recorded replies, as each sandbox run does.
  */
 export function tfFake<V extends string, T extends Record<string, z.ZodObject>>(
   tf: TfConnector<V, T>,
@@ -143,6 +141,5 @@ export function tfFake<V extends string, T extends Record<string, z.ZodObject>>(
         else delete state.objects[at];
       });
     },
-    fresh: () => tfFake(tf, { fixtures, missingReply }),
   });
 }

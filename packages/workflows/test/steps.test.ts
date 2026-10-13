@@ -13,8 +13,8 @@ import inspect from "./fixtures/company/workflows/inspect.ts";
 const databaseUrl = testDatabaseUrl("steps");
 const alice = { id: "alice" };
 
-// The connectors' fakes are the templates each sandbox run copies, and the drivers. Unseeded:
-// each fake holds what its replies were recorded with.
+// The drivers are these fakes'; each sandbox run makes its own from the packages' makers.
+// Unseeded: each fake holds what its replies were recorded with.
 const fakes = companyFakes();
 const { github, stripe } = fakes;
 const config = { ...companyConfig([inspect], policy, fakes), ledger: memoryLedger() };
@@ -61,7 +61,7 @@ describe("the company's scenarios", () => {
     expect(check(s, await run(s))).toEqual(passes(s));
   });
 
-  it("seeds a resource on the run's copy of the fake, records it, and leaves the config's fake as it was", async () => {
+  it("seeds a resource on the run's own fake, records it, and leaves the drivers' fakes as they were", async () => {
     const recorded = github.state.objects["github_repository/sanoma"];
     const edited = await run(scenario("A repository as someone edited it at GitHub"));
     expect(record(edited, "scenario.seeded").seeds).toEqual([
@@ -78,7 +78,7 @@ describe("the company's scenarios", () => {
     expect(record(gone, "op.called", "github.repository.import").output).toEqual({ id: "sanoma", gone: true });
     expect(gone.at(-1)).toMatchObject({ type: "run.finished", output: { repository: null, product: null } });
     expect(github.state.objects["github_repository/sanoma"]).toEqual(recorded);
-    // Nothing reached the templates: each run called its own copies.
+    // Nothing reached the drivers' fakes: each run called its own.
     expect(github.calls).toEqual([]);
     expect(stripe.calls).toEqual([]);
   });

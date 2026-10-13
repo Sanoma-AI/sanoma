@@ -4,15 +4,15 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
+import { fakeGhost } from "@sanoma/connector-ghost/fake";
 import { github } from "@sanoma/connector-github";
 import { resend } from "@sanoma/connector-resend";
 import { stripe } from "@sanoma/connector-stripe";
 import { testRoot } from "@sanoma/testing";
 import { afterAll, describe, expect, it } from "vitest";
 import { allowAll, type Connector, memoryLedger, resolveConfig, type SanomaConfig, withSetup } from "../src/index.ts";
-import { setupOf } from "../src/op.ts";
+import { setupOf, VENDOR } from "../src/op.ts";
 import announce from "./fixtures/announce.ts";
-import { marketingFakes } from "./harness.ts";
 
 // The packages' connectors, as a company's config names them: the setup is theirs.
 const config = (options: Partial<SanomaConfig> = {}): SanomaConfig => ({
@@ -72,27 +72,32 @@ describe("each connector package's root", () => {
 });
 
 describe("resolveConfig on the connectors' setups", () => {
-  it("takes the drivers and the fakes from the connectors", () => {
+  it("makes each vendor's driver once, and keeps the makers of the fakes, in the connectors' order", () => {
     const resolved = resolveConfig(config());
-    expect(resolved.driverList.map((d) => d.vendor)).toEqual(["ghost", "resend", "bluesky"]);
+    expect([...resolved.driversByVendor.keys()]).toEqual(["ghost", "resend", "bluesky"]);
     expect([...resolved.drivers.keys()].toSorted()).toEqual([...resolved.ops.keys()].toSorted());
-    expect([...resolved.fakes.keys()]).toEqual(["ghost", "resend", "bluesky"]);
-    expect([...resolved.fakeDrivers.keys()].toSorted()).toEqual([...resolved.ops.keys()].toSorted());
+    expect([...resolved.fakes]).toEqual([ghost, resend, bluesky].map((c) => [c[VENDOR].id, setupOf(c).fake]));
+    // Another resolution makes its own drivers.
+    expect(resolveConfig(config()).driversByVendor.get("ghost")).not.toBe(resolved.driversByVendor.get("ghost"));
   });
 
-  it("makes the fakes once per config object: every resolution of it gives the same, another config its own", () => {
-    const one = config();
-    const fake = resolveConfig(one).fakes.get("ghost");
-    expect(resolveConfig(one).fakes.get("ghost")).toBe(fake);
-    const other = resolveConfig({ ...one }).fakes.get("ghost");
-    expect(other).not.toBe(fake);
+  it("takes one maker for copies of one connector, and refuses two for one vendor", () => {
+    expect([
+      ...resolveConfig(config({ connectors: [ghost, { ...ghost }, resend, bluesky] })).driversByVendor.keys(),
+    ]).toEqual(["ghost", "resend", "bluesky"]);
+    expect(() => resolveConfig(config({ connectors: [ghost, withSetup(ghost, { driver })] }))).toThrow(
+      'Two connectors in `connectors` attach a driver for "ghost"; keep one per vendor',
+    );
+    expect(() => resolveConfig(config({ connectors: [ghost, withSetup(ghost, { fake: () => fakeGhost() })] }))).toThrow(
+      'Two connectors in `connectors` attach a fake for "ghost"; keep one per vendor',
+    );
   });
 
-  it("indexes the fakes' functions apart from the drivers', for sandbox runs", () => {
-    const vendors = marketingFakes();
-    const resolved = resolveConfig(config({ connectors: vendors.connectors }));
-    expect(resolved.fakes.get("ghost")).toBe(vendors.ghost);
-    expect(resolved.fakeDrivers.get("ghost.post.create")).toBe(vendors.ghost.driver.ops["post.create"]);
+  it("refuses a workflow using an operation whose connector attaches no driver", () => {
+    const bare = { ...ghost, [VENDOR]: { ...ghost[VENDOR], setup: { fake: fakeGhost } } };
+    expect(() => resolveConfig(config({ connectors: [bare, resend, bluesky] }))).toThrow(
+      "`ghost.post.create` has no driver: the connector package must attach one",
+    );
   });
 });
 

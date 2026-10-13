@@ -46,7 +46,9 @@ export function testRoot(name: string): string {
 /**
  * `connector` set up with this fake instead of the one its package attaches, for a test that
  * seeds or reads the fake its runs call: `fake` is what live runs call (through `driver`, by
- * default the fake's own) and the template sandbox runs copy. The operations are the same.
+ * default the fake's own), and sandbox runs too, since its maker gives this very one. For a
+ * sandbox run on a fake of its own, swap the driver alone (`withSetup(connector, { driver })`),
+ * which keeps the package's maker. The operations are the same.
  */
 export function withFake<C extends Connector<any, any>>(
   connector: C,

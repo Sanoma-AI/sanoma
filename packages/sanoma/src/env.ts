@@ -24,7 +24,7 @@ export function renderEnvExample(config: SanomaConfig): string {
     "# Optional. The app's port; default 3000.",
     "# SANOMA_APP_PORT=",
   ];
-  for (const [vendor, variables] of credentialsOf(resolveConfig(config).driverList, () => undefined)) {
+  for (const [vendor, variables] of credentialsOf(resolveConfig(config).driversByVendor, () => undefined)) {
     lines.push("");
     for (const { name, description, optional } of variables) {
       const about = description === undefined ? "" : `: ${description}`;

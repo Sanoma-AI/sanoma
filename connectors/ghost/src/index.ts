@@ -7,7 +7,7 @@ export { Post } from "./connector.ts";
 
 /**
  * Ghost Admin API posts: `post.create` and `post.publish`. It carries its live driver
- * (`ghostDriver`), which reads its credentials when called, and its fake (`fakeGhost`), which
- * sandbox runs and scenarios copy.
+ * (`ghostDriver`), which reads its credentials when called, and its fake (`fakeGhost`), of which
+ * each sandbox run makes its own.
  */
 export const ghost = withSetup(ghostOps, { driver: ghostDriver, fake: fakeGhost });

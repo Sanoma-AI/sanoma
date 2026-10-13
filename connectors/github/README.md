@@ -41,7 +41,7 @@ Attributes that are computed and not optional (`html_url`, `repo_id`) are vendor
 
 ## Driver
 
-`@sanoma/connector-github/driver` reads through a provider bridge. The `github` connector the package root exports carries it, made once per process, and its fake (`withSetup` from `@sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
+`@sanoma/connector-github/driver` reads through a provider bridge. The `github` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `@sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
 
 ```ts
 import { github } from "@sanoma/connector-github";

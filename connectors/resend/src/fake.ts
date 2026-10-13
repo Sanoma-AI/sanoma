@@ -18,7 +18,7 @@ export interface FakeResendState extends Record<string, unknown> {
 
 /**
  * An in-memory Resend for tests: broadcasts live in `state.broadcasts`, and nothing is
- * emailed. Pass `{ file }` to keep the state on disk.
+ * emailed.
  */
 export function fakeResend(options: FakeOptions = {}) {
   return defineFake(

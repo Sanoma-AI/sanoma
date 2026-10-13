@@ -81,7 +81,8 @@ beforeEach(async () => {
   for (const name of [URL_VAR, KEY_VAR, REGION_VAR]) await client.clearCredential(name, { by: "tester" });
 });
 /** acme's statuses as the worker checks them, against `process.env`. */
-const checked = (cfg = config) => credentialsOf(resolveConfig(cfg).driverList, (name) => process.env[name]).get("acme");
+const checked = (cfg = config) =>
+  credentialsOf(resolveConfig(cfg).driversByVendor, (name) => process.env[name]).get("acme");
 const statuses = () => checked()?.map(({ name, status }) => [name, status]);
 
 /**
@@ -154,23 +155,6 @@ describe("a driver's env", () => {
     const warning = await warnedAtStart(throwingConfig);
     expect(warning).toContain(`${URL_VAR} is invalid: its check threw`);
     expect(JSON.stringify([credentials, warning])).not.toContain(VALUE);
-  });
-
-  it("merges two drivers' declarations of one variable, keeping the worse status", async () => {
-    vi.stubEnv(URL_VAR, "https://acme.example.test");
-    vi.stubEnv(KEY_VAR, KEY);
-    const stricter = defineDriver(acme, impl, {
-      env: z.object({ [KEY_VAR]: z.string().regex(/^key_[0-9]+$/, "an API key, key_<digits>") }),
-    });
-    const twoDrivers = { ...config, connectors: [acmeOn(acmeDriver), acmeOn(stricter)] };
-    expect(checked(twoDrivers)?.[1]).toEqual({
-      name: KEY_VAR,
-      description: "an API key",
-      optional: false,
-      status: "invalid",
-      problem: "an API key, key_<digits>",
-    });
-    expect(await warnedAtStart(twoDrivers)).toContain(`${KEY_VAR} is invalid: an API key, key_<digits>`);
   });
 });
 

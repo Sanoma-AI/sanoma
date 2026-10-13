@@ -31,7 +31,7 @@ The logo the app shows beside these operations is Ghost's glyph from [simple-ico
 
 ## Driver
 
-`@sanoma/connector-ghost/driver` calls the [Ghost Admin API](https://docs.ghost.org/admin-api/). The `ghost` connector the package root exports carries it, made once per process, and its fake (`withSetup` from `@sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
+`@sanoma/connector-ghost/driver` calls the [Ghost Admin API](https://docs.ghost.org/admin-api/). The `ghost` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `@sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
 
 ```ts
 import { ghost } from "@sanoma/connector-ghost";
@@ -79,14 +79,14 @@ A recording keeps only the fields the driver reads (no authors or emails), puts 
 
 ## Testing
 
-`@sanoma/connector-ghost/fake` is an in-memory Ghost, the fake the connector carries: sandbox runs call their own copies of it. A test that reads or seeds one attaches it to the connector itself, then checks `state.posts` and `calls`.
+`@sanoma/connector-ghost/fake` is an in-memory Ghost, the fake the connector carries: each sandbox run makes one of its own. A test that reads or seeds one attaches it to the connector itself, then checks `state.posts` and `calls`.
 
 ```ts
 import { withSetup } from "@sanoma/workflows";
 import { ghost } from "@sanoma/connector-ghost";
 import { fakeGhost } from "@sanoma/connector-ghost/fake";
 
-const fake = fakeGhost(); // or fakeGhost({ file: ".sanoma/ghost.json" }) to keep the state on disk
+const fake = fakeGhost();
 const worker = await startWorker({
   connectors: [withSetup(ghost, { driver: () => fake.driver, fake: () => fake })],
   /* ... */

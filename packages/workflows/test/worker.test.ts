@@ -13,11 +13,12 @@ import {
   resolveConfig,
   type SanomaConfig,
   startWorker,
+  withSetup,
 } from "../src/index.ts";
 import { describeConfig } from "../src/describe.ts";
 import announce from "./fixtures/announce.ts";
 import { noop } from "./fixtures/minimal.ts";
-import { marketingFakes, useApp } from "./harness.ts";
+import { marketingFakes, useApp, withoutSetup } from "./harness.ts";
 
 // These configs are refused before the worker connects, so no database is needed.
 const vendors = marketingFakes();
@@ -30,7 +31,7 @@ const config = (options: Partial<SanomaConfig>): SanomaConfig => ({
   databaseUrl: "postgresql://unused@localhost:1/unused",
   ...options,
 });
-const [onGhost, onResend] = vendors.connectors;
+const [onGhost, onResend, onBluesky] = vendors.connectors;
 
 const forged = defineConnector("ghost", {
   post: { publish: { effect: "read", idempotent: true, input: z.any(), output: z.any() } },
@@ -60,8 +61,8 @@ const refused: [string, Partial<SanomaConfig>, RegExp][] = [
     /^Workflow "announce": bluesky\.post\.create is not declared by any connector/,
   ],
   [
-    "a workflow using an operation whose connector carries no driver (a copy carries no setup)",
-    { connectors: [onGhost!, onResend!, { ...bluesky }] },
+    "a workflow using an operation whose connector carries no driver",
+    { connectors: [onGhost!, onResend!, withoutSetup(bluesky)] },
     /`bluesky\.post\.create` has no driver: the connector package must attach one$/,
   ],
   [
@@ -78,7 +79,7 @@ const refused: [string, Partial<SanomaConfig>, RegExp][] = [
   ["no connectors", { connectors: undefined as never }, /^The config needs `connectors`/],
   [
     "two fakes for one vendor",
-    { connectors: [...vendors.connectors, withFake(bluesky, fakeBluesky())] },
+    { connectors: [...vendors.connectors, withSetup(onBluesky!, { fake: () => fakeBluesky() })] },
     /^Two connectors in `connectors` attach a fake for "bluesky"; keep one per vendor$/,
   ],
   [

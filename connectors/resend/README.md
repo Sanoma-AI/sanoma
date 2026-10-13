@@ -31,7 +31,7 @@ The logo the app shows beside these operations is Resend's lettermark from its [
 
 ## Driver
 
-`@sanoma/connector-resend/driver` calls Resend. The `resend` connector the package root exports carries it, made once per process, and its fake (`withSetup` from `@sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
+`@sanoma/connector-resend/driver` calls Resend. The `resend` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `@sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
 
 ```ts
 import { resend } from "@sanoma/connector-resend";
@@ -80,14 +80,14 @@ A recording loses ids, addresses, the sender's domain and keys. The error cases,
 
 ## Testing
 
-`@sanoma/connector-resend/fake` is an in-memory Resend that emails nobody, the fake the connector carries: sandbox runs call their own copies of it. A test that reads or seeds one attaches it to the connector itself, then checks `state.broadcasts` and `calls`.
+`@sanoma/connector-resend/fake` is an in-memory Resend that emails nobody, the fake the connector carries: each sandbox run makes one of its own. A test that reads or seeds one attaches it to the connector itself, then checks `state.broadcasts` and `calls`.
 
 ```ts
 import { withSetup } from "@sanoma/workflows";
 import { resend } from "@sanoma/connector-resend";
 import { fakeResend } from "@sanoma/connector-resend/fake";
 
-const fake = fakeResend(); // or fakeResend({ file: ".sanoma/resend.json" }) to keep the state on disk
+const fake = fakeResend();
 const worker = await startWorker({
   connectors: [withSetup(resend, { driver: () => fake.driver, fake: () => fake })],
   /* ... */

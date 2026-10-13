@@ -29,27 +29,18 @@ export interface CredentialStatus {
 }
 
 /**
- * Each driver's `env`, by vendor, in declared order (a vendor whose drivers declare none has no
- * entry), each variable checked against the value `lookup` gives for its name: only the declared
- * names are looked up, an empty value counts as unset, and a value is never kept. A variable two
- * drivers of one vendor declare is checked against each declaration, and the results merged. The
- * one walk of the declarations: the worker, the client and its checks all read them through it.
+ * Each vendor's driver's `env` (a resolved config's `driversByVendor`), by vendor in the map's
+ * order (a vendor whose driver declares none has no entry), each variable in declared order and
+ * checked against the value `lookup` gives for its name: only the declared names are looked up,
+ * an empty value counts as unset, and a value is never kept. The one walk of the declarations:
+ * the worker, the client and its checks all read them through it.
  */
 export function credentialsOf(
-  drivers: readonly Driver[],
+  drivers: ReadonlyMap<string, Driver>,
   lookup: (name: string) => string | undefined,
 ): Map<string, CredentialStatus[]> {
   const map = new Map<string, CredentialStatus[]>();
-  for (const { vendor, env } of drivers) {
-    if (!env) continue;
-    const list = map.get(vendor) ?? [];
-    map.set(vendor, list);
-    for (const status of statusesOf(env, lookup)) {
-      const i = list.findIndex((c) => c.name === status.name);
-      if (i === -1) list.push(status);
-      else list[i] = merged(list[i]!, status);
-    }
-  }
+  for (const [vendor, { env }] of drivers) if (env) map.set(vendor, statusesOf(env, lookup));
   return map;
 }
 
@@ -77,18 +68,6 @@ export function unconfigured(vendor: string, statuses: readonly CredentialStatus
   const inEnvironment = unready.some((c) => c.status === "invalid" && process.env[c.name]);
   const hint = inEnvironment ? "set in the environment" : "set it on the connector page";
   return `${vendor} is not configured: ${problems.join(", ")}; ${hint}`;
-}
-
-const SEVERITY: Record<CredentialStatus["status"], number> = { set: 0, missing: 1, invalid: 2 };
-
-/**
- * Two declarations of one variable: the worse status (`invalid`, then `missing`) with its problem,
- * the first description, and optional only when both allow it unset.
- */
-function merged(first: CredentialStatus, next: CredentialStatus): CredentialStatus {
-  const worse = SEVERITY[next.status] > SEVERITY[first.status] ? next : first;
-  const description = first.description ?? next.description;
-  return { ...worse, ...(description !== undefined && { description }), optional: first.optional && next.optional };
 }
 
 function credentialStatus(

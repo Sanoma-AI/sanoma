@@ -26,7 +26,7 @@ import {
 import { defineFake } from "../src/fake.ts";
 import { companyConfig, companyFakes, nodeIdOf } from "./fixtures/company/fakes.ts";
 import company from "./fixtures/company/sanoma.config.ts";
-import { useApp } from "./harness.ts";
+import { useApp, withoutSetup } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. The company fixture's data files, checked against the GitHub
 // and Stripe fakes, which hold an object for each declared resource as the vendor would.
@@ -266,8 +266,8 @@ describe("SanomaClient's drift", () => {
 
 describe("the built-in drift workflow in a config", () => {
   const config = { ...company, connectors: fakes.connectors };
-  // A copy of a connector carries no setup: the company's connectors without drivers.
-  const bare = { ...company, connectors: company.connectors.map((c) => ({ ...c })) };
+  // The company's connectors with nothing attached: no drivers.
+  const bare = { ...company, connectors: company.connectors.map(withoutSetup) };
 
   it("is added when the connectors declare resource types, using each type's import that has a driver", () => {
     expect([...resolveConfig(config).workflows.keys()]).toEqual([DRIFT_WORKFLOW]);
