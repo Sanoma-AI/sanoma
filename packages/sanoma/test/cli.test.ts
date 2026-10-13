@@ -26,7 +26,7 @@ describe("sanoma serve", () => {
       );
       expect(stdout).toContain("sanoma-fixture running hello");
       expect(stdout).toContain("not configured yet: ghost (set them on the connector pages or in .env)\n");
-      // Nothing per variable, and no pg deprecation (DBOS's per-connection SET, see systemDatabaseUrl).
+      // Nothing per variable, and no pg deprecation (DBOS's per-connection SET, see DBOS_DATABASE_OPTIONS).
       expect(`${stdout}${output().stderr}`).not.toMatch(/is not configured|DeprecationWarning/);
       const url = stdout.match(/at (http:\/\/127\.0\.0\.1:\d+); ctrl-c to stop/)![1]!;
       // The app is up: its home lists the config's one workflow, rendered on the server.

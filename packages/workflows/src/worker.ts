@@ -3,7 +3,7 @@ import { buildCtx, isInfrastructureError } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { watchCredentials } from "./credentials.ts";
-import { systemDatabaseUrl } from "./db.ts";
+import { DBOS_DATABASE_OPTIONS, prepareDatabase } from "./db.ts";
 import type { WorkflowDefinition } from "./define.ts";
 import { type CredentialStatus, credentialsOf, unconfigured } from "./env.ts";
 import { errorInfo, parseOrThrow } from "./errors.ts";
@@ -93,9 +93,13 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       }
     }
     current = state;
+    // Before DBOS's pool connects, so its connections start with the database's idle-transaction
+    // timeout (`DBOS_DATABASE_OPTIONS`); once per process and database.
+    await prepareDatabase(resolved.databaseUrl);
     DBOS.setConfig({
       name: resolved.appName,
-      systemDatabaseUrl: systemDatabaseUrl(resolved.databaseUrl),
+      systemDatabaseUrl: resolved.databaseUrl,
+      ...DBOS_DATABASE_OPTIONS,
       logLevel: options.logLevel ?? "warn",
       logger: dbosLogger,
       applicationVersion: resolved.version,
