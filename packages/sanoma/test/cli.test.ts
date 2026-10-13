@@ -76,7 +76,7 @@ describe("sanoma check", () => {
     dir = copyFixture();
     const ok = await runCli(dir, ["check"], env);
     expect(ok.code, `${ok.stdout}${ok.stderr}`).toBe(0);
-    expect(ok.stdout).toBe("");
+    // The lines check prints, not all of stdout: on a fresh database DBOS logs "Created database …" there.
     expect(ok.stderr).toContain("passed hello/hello.feature › A post goes out");
     expect(ok.stderr.trimEnd().split("\n").at(-1)).toBe("ok");
   }, 180_000);
