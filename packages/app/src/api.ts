@@ -11,16 +11,17 @@ import type { Check, Scenario } from "@sanoma/workflows/scenario";
 import { RUN_STATUSES } from "@sanoma/workflows/shared";
 import { z } from "zod";
 
-export type { InputIssue } from "@sanoma/workflows";
-
 /**
- * The shapes the app's HTTP API and server functions send and receive. The page imports this
- * file too, so the server and the browser agree on them. Only types come from
+ * The shapes the app's server functions take and return. The page imports this file too, so
+ * the server and the browser agree on them. Only types come from
  * `@sanoma/workflows`, so the browser bundle never loads the runtime; values the page shares
  * with the runtime come from `@sanoma/workflows/shared`.
  */
 
-/** Who is asking. There is no login: the page asks once and sends the name with every change. */
+/**
+ * Who is asking. There is no login: the page asks once and sends the name in this header with
+ * every server function call, which the default `resolveActor` reads.
+ */
 export const ACTOR_HEADER = "x-sanoma-actor";
 
 /**
@@ -49,32 +50,32 @@ const StartScenarioRequest = z.strictObject(
 );
 
 /**
- * `POST /api/runs`: a workflow and its input, or a scenario's name, which starts a sandbox run
- * of the scenario's workflow with its input. The app never decides a sandbox run's approvals:
+ * What `startRunFn` takes: a workflow and its input, or a scenario's name, which starts a sandbox
+ * run of the scenario's workflow with its input. The app never decides a sandbox run's approvals:
  * people do, as in a live run.
  */
 export type StartRunRequest = z.infer<typeof StartWorkflowRequest> | z.infer<typeof StartScenarioRequest>;
 
 /**
  * The schema a start request is read with, picked before parsing so each refusal names its own
- * field: the scenario's for a body with a `scenario` key (which refuses a `workflow` or `input`
- * beside it), else the workflow's.
+ * field: the scenario's for an argument with a `scenario` key (which refuses a `workflow` or
+ * `input` beside it), else the workflow's.
  */
 export const startRunSchema = (body: unknown) =>
   typeof body === "object" && body !== null && "scenario" in body ? StartScenarioRequest : StartWorkflowRequest;
 
-/** `POST /api/runs` answers 201 with the run's id and its workflow (for a scenario, the scenario's): its page's address. */
+/** A started run's id and its workflow (for a scenario, the scenario's): its page's address. */
 export interface StartRunResponse {
   runId: string;
   workflow: string;
 }
 
 /**
- * `POST /api/runs/:id/approvals/:approvalId`. The response is the approval's `ApprovalState`:
- * 200 once the run has read the decision (`status` is `approved` or `rejected`), or 202 with
- * `status` still `pending` when the run did not read it within a few seconds, typically because
- * no worker is running. A 202 decision stays queued, and the run reads it when it next runs.
- * A run that has finished, failed or been cancelled takes no decision: 409 `run_ended`.
+ * A decision on an approval, as the page's dialog sends it. `decideFn` answers with the
+ * approval's `ApprovalState`: `approved` or `rejected` once the run has read the decision, or
+ * still `pending` when the run did not read it within a few seconds, typically because no worker
+ * is running. A pending decision stays queued, and the run reads it when it next runs. A run that
+ * has finished, failed or been cancelled takes no decision: 409 `run_ended`.
  */
 export const DecideRequest = z.object({
   decision: z.enum(["approve", "reject"]),
@@ -89,7 +90,7 @@ export type DecideCall = z.infer<typeof DecideCall>;
 /** How many runs one read lists. */
 export const RUNS_LIMIT = { default: 50, max: 500 } as const;
 
-/** `GET /api/runs?limit=&status=&workflow=`: the latest runs, or the latest with that status, of that workflow. */
+/** What `getRuns` takes: the latest runs, or the latest with that status, of that workflow. */
 export const RunsQuery = z.object({
   limit: z.coerce.number().int().min(1).max(RUNS_LIMIT.max).default(RUNS_LIMIT.default),
   status: z.enum(RUN_STATUSES).optional(),
@@ -97,7 +98,7 @@ export const RunsQuery = z.object({
 });
 export type RunsQuery = z.input<typeof RunsQuery>;
 
-/** `GET /api/runs/:id` */
+/** One run as `getRun` reads it: the run, its ledger, its approvals and a sandbox run's checks. */
 export interface RunDetail {
   run: RunSummary;
   /** The run's ledger records in `seq` order. */
@@ -136,31 +137,31 @@ export interface RunCheck extends Check {
  */
 export type ScenarioEntry = Pick<Scenario, "name" | "workflow" | "file" | "text" | "steps" | "input">;
 
-/** `GET /api/scenarios`: every scenario, and why each feature file that could not be read could not. */
+/** Every scenario, and why each feature file that could not be read could not. */
 export interface ScenariosResponse {
   scenarios: ScenarioEntry[];
   errors: { file: string; message: string }[];
 }
 
 /**
- * `GET /api/credentials`: each vendor's declared variables and their statuses now, by vendor id
+ * Each vendor's declared variables and their statuses now, by vendor id
  * (`SanomaClient.credentials`): where each value is from and, for a stored one, who set it and
  * when. Never a value.
  */
 export type CredentialsResponse = Record<string, CredentialStatus[]>;
 
-/** `PUT /api/credentials`: stores the value of a declared variable, as the actor. 204; the value is never sent back. */
+/** What `setCredentialFn` takes: a declared variable and its value, stored as the actor. The value is never sent back. */
 export const SetCredentialRequest = z.object({
   name: z.string().min(1, "Name a variable"),
   value: z.string().min(1, "Enter a value").max(16_384),
 });
 export type SetCredentialRequest = z.infer<typeof SetCredentialRequest>;
 
-/** `DELETE /api/credentials`: deletes the stored value of a declared variable. 204. */
+/** What `clearCredentialFn` takes: a declared variable, whose stored value it deletes. */
 export const ClearCredentialRequest = z.object({ name: z.string().min(1, "Name a variable") });
 export type ClearCredentialRequest = z.infer<typeof ClearCredentialRequest>;
 
-/** Every error response, and the `body` of the error a server function throws. */
+/** The `body` of the error a server function fails with. */
 export interface ErrorResponse {
   error: string;
   /** The runtime's code, when the error has one. Branch on this, never on `error`. */
@@ -172,8 +173,8 @@ export interface ErrorResponse {
 }
 
 /**
- * An error with the HTTP status and body the API answers with. Every server function fails
- * with one, and the page receives it as one (start.ts registers how it travels).
+ * An error with the HTTP status and body a server function answers with. Every server function
+ * fails with one, and the page receives it as one (start.ts registers how it travels).
  */
 export class ApiError extends Error {
   readonly status: number;
@@ -187,7 +188,7 @@ export class ApiError extends Error {
   }
 }
 
-/** The API error body an error carries, when it is an `ApiError`. */
+/** The error body an error carries, when it is an `ApiError`. */
 export const errorBodyOf = (err: unknown): ErrorResponse | undefined =>
   err instanceof ApiError ? err.body : undefined;
 

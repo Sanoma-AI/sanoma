@@ -12,7 +12,7 @@ import { NodeRequest, sendNodeResponse } from "srvx/node";
 import type { AppContext, ResolveActor } from "./context.ts";
 import { hostName, refuseHost } from "./loopback.ts";
 
-export { ACTOR_HEADER, type ErrorResponse, type InputIssue, type RunDetail, type StartRunResponse } from "./api.ts";
+export { ACTOR_HEADER } from "./api.ts";
 export type { ResolveActor } from "./context.ts";
 
 export interface AppOptions {
@@ -43,11 +43,11 @@ interface ServerEntry {
 }
 
 /**
- * Serves the web UI and JSON API over a config: its runs, their ledgers and approvals, and a
- * form to start each workflow. Reads the same config the worker runs, through Postgres and the
+ * Serves the web UI over a config: its runs, their ledgers and approvals, and a form to start
+ * each workflow. Reads the same config the worker runs, through Postgres and the
  * config's ledger store; it runs no workflows itself. Refuses, at once, a config the worker
  * would refuse; missing credentials refuse nothing, and the connector pages show and set them;
- * data files with problems it warns about and leaves out (`/api/config` lists them).
+ * data files with problems it warns about and leaves out (the Resources page lists them).
  */
 export async function startApp(config: SanomaConfig, options: AppOptions = {}): Promise<App> {
   const resolved = resolveConfig(config);
@@ -102,7 +102,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     // When the app listens on this machine only, a page elsewhere could still reach it by
     // pointing its own host name at 127.0.0.1 (DNS rebinding). Its requests then carry that
     // name in Host, so anything not addressed to a loopback name is refused: here, where every
-    // request passes (pages, API, server functions and static files alike).
+    // request passes (pages, server functions and static files alike).
     if (loopbackOnly && !isLoopback(hostName(req.headers.host ?? ""))) {
       return sendNodeResponse(res, refuseHost(req.headers.host ?? ""));
     }
@@ -235,10 +235,10 @@ async function staticFiles(clientDir: string): Promise<Map<string, StaticFile>> 
   return files;
 }
 
-/** The built file a request names, if any. The API and server functions are never files. */
+/** The built file a request names, if any. Server functions are never files. */
 function staticFile(files: Map<string, StaticFile>, req: IncomingMessage): StaticFile | undefined {
   const url = req.url ?? "/";
-  if ((req.method !== "GET" && req.method !== "HEAD") || url.startsWith("/api/") || url.startsWith("/_serverFn/")) {
+  if ((req.method !== "GET" && req.method !== "HEAD") || url.startsWith("/_serverFn/")) {
     return undefined;
   }
   const query = url.indexOf("?");

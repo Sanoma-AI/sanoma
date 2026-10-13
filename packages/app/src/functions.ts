@@ -24,11 +24,10 @@ import {
 } from "./server/core.ts";
 import { withPrincipal } from "./middleware.ts";
 
-// The page's reads and changes, as server functions. Most do what an /api route does, with the
-// same schemas; the routes stay the stable surface for scripts. getSource and getDriftReport have
-// no route: only the page shows a file's text, and a script reads a drift run's report from its
-// run. Failures, the actor header and the actor itself are handled
-// once for all of them, in start.ts.
+// The page's reads and changes, as server functions: the app's only HTTP surface. Each parses its
+// argument and calls the server core (server/core.ts). Failures, the actor header and the actor
+// itself are handled once for all of them, in start.ts. Scripts reach the same runs through
+// `SanomaClient` from @sanoma/workflows, not through these.
 //
 // Runs carry `unknown` inputs and outputs, which Start's type check can't prove serializable.
 // They are JSON (they come out of Postgres and the ledger as JSON), so that check is off for
@@ -36,7 +35,7 @@ import { withPrincipal } from "./middleware.ts";
 const READ = { method: "GET", strict: { output: false } } as const;
 const CHANGE = { method: "POST", strict: { output: false } } as const;
 
-/** A validator that refuses an argument the way the API routes do: a 400 with zod's issues. */
+/** A validator that refuses an argument a schema refuses: a 400 `invalid_input` with zod's issues. */
 const validate =
   <T extends z.ZodType>(schema: T) =>
   (data: z.input<T>): z.output<T> =>

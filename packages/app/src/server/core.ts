@@ -7,6 +7,7 @@ import {
   type DriftReport,
   errorCode,
   errorMessage,
+  type InputIssue,
   invalidInput,
   isEnded,
   type LedgerRecord,
@@ -24,7 +25,6 @@ import {
   type CredentialsResponse,
   type DecideCall,
   type ErrorResponse,
-  type InputIssue,
   type RunDetail,
   type ScenariosResponse,
   type SetCredentialRequest,
@@ -32,9 +32,10 @@ import {
   type StartRunResponse,
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
+import { actorFromHeader } from "../default-actor.ts";
 
-// What the API routes and the server functions both do. Server-only: each takes the app
-// context that startApp passes with every request. Every expected failure is an ApiError.
+// What the server functions do. Server-only: each takes the app context that startApp passes
+// with every request. Every expected failure is an ApiError.
 
 /** A request's context once start.ts's `actor` middleware has run: the app, and who is asking. */
 export interface ActorContext {
@@ -43,7 +44,23 @@ export interface ActorContext {
 }
 
 /**
- * Who is making a change (resolved at most once per request, see start.ts), or a 400 when
+ * Says who is asking, when asked: start.ts's `actor` middleware gives each request this as
+ * `context.actor`, and the resolver (the deployment's, or the header's by default) runs at most
+ * once per request, so a read that needs no actor never calls it. A resolver that throws (its
+ * session store is down, say) fails that call, inside the handler, so the error middleware
+ * answers it as a logged 500.
+ */
+export function actorOf(app: AppContext, request: Request): ActorContext["actor"] {
+  const resolve = app.resolveActor ?? actorFromHeader;
+  let who: Promise<Principal | undefined> | undefined;
+  return () =>
+    (who ??= (async () => resolve(request))().catch((err: unknown) => {
+      throw new Error(`Could not tell who you are: ${errorMessage(err)}`, { cause: err });
+    }));
+}
+
+/**
+ * Who is making a change (resolved at most once per request, see `actorOf`), or a 400 when
  * nobody is named. Only the default resolver reads the header, so only then does the answer
  * name it.
  */
@@ -64,7 +81,7 @@ export function parse<T extends z.ZodType>(schema: T, value: unknown, what: stri
 }
 
 /**
- * The description as the page and `GET /api/config` get it: without the source of a workflow
+ * The description as the page gets it (`getConfig`): without the source of a workflow
  * read from its file, which is a whole file: `fileSource` serves it, one file at a time. A
  * workflow read from `run`'s own text keeps it.
  */
@@ -285,31 +302,3 @@ export function toApiError(err: unknown, where: string): ApiError {
 
 /** True for the router's not-found and redirects: answers, not failures, which go through as thrown. */
 export const isRouterAnswer = (err: unknown): boolean => isNotFound(err) || isRedirect(err);
-
-/** A JSON response for any error. */
-export function errorResponse(err: unknown, where: string): Response {
-  const api = toApiError(err, where);
-  return json(api.body, api.status);
-}
-
-export const json = (body: unknown, status = 200) =>
-  Response.json(body, { status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } });
-
-/**
- * The request's JSON body, or a 400. The content type must say JSON: a browser cannot send that
- * from a plain form or a simple cross-site request without a preflight, so with a cookie-based
- * `resolveActor` this is what keeps the API from being driven by another site.
- */
-export async function readJson(request: Request): Promise<unknown> {
-  const type = request.headers.get("content-type") ?? "";
-  if (!/^application\/json\b/i.test(type)) {
-    throw new ApiError(415, { error: "Send JSON with content-type: application/json", code: "invalid_input" });
-  }
-  const text = await request.text();
-  if (!text.trim()) throw new ApiError(400, { error: "The body is empty; send JSON", code: "invalid_input" });
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    throw new ApiError(400, { error: "The body is not JSON", code: "invalid_input" });
-  }
-}

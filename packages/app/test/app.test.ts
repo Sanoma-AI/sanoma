@@ -10,7 +10,6 @@ import {
   allow,
   approve,
   approvedFor,
-  type ApprovalState,
   defineConfig,
   defineConnector,
   definePolicy,
@@ -18,20 +17,49 @@ import {
   DriverError,
   jsonlLedger,
   memoryLedger,
-  type RunSummary,
+  type Principal,
+  resolveConfig,
+  SanomaClient,
+  type SanomaConfig,
   startWorker,
   type Worker,
   withSetup,
 } from "@sanoma/workflows";
-import { type ConfigDescription, describeConfig, outlineWorkflow } from "@sanoma/workflows/describe";
+import { describeConfig, outlineWorkflow } from "@sanoma/workflows/describe";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
 import { companyFakes } from "../../workflows/test/fixtures/company/fakes.ts";
 import { marketingFakes } from "../../workflows/test/harness.ts";
 import { z } from "zod";
-import { type App, type ErrorResponse, type RunDetail, startApp } from "../src/index.ts";
-import { ApiError, type CredentialsResponse, type ScenariosResponse, type StartRunResponse } from "../src/api.ts";
-import { asApiError, fileSource, parse, scenarios, withoutSources } from "../src/server/core.ts";
+import { type App, startApp } from "../src/index.ts";
+import {
+  ACTOR_HEADER,
+  ApiError,
+  ClearCredentialRequest,
+  DecideCall,
+  type ErrorResponse,
+  RunsQuery,
+  SetCredentialRequest,
+  startRunSchema,
+} from "../src/api.ts";
+import type { AppContext, ResolveActor } from "../src/context.ts";
+import {
+  type ActorContext,
+  actorOf,
+  asApiError,
+  clearCredential,
+  credentials,
+  decide,
+  fileSource,
+  parse,
+  requireActor,
+  runDetail,
+  scenarios,
+  setCredential,
+  startRun,
+  toApiError,
+  withoutSources,
+} from "../src/server/core.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it when
 // dist/server/server.js is missing or older than a file under src/.
@@ -88,53 +116,104 @@ const config = defineConfig({
 
 let worker: Worker;
 let app: App;
-/** The run the API tests start, which the page tests then look for. */
+/** The app's context, as the server functions get it. */
+let ctx: AppContext;
+/** The run the server function tests start, which the page tests then look for. */
 let runId: string;
 /** The sandbox run the scenario tests start, which the page tests then render. */
 let sandboxId: string;
 const SCENARIO = "Launch on time";
 
+/** The clients `contextOf` connects, closed after the file's tests. */
+const clients: SanomaClient[] = [];
+
+/**
+ * The context startApp builds for a config and hands every request, on a client of its own: the
+ * server functions call the server core with it.
+ */
+async function contextOf(cfg: SanomaConfig, resolveActor?: ResolveActor): Promise<AppContext> {
+  const client = await SanomaClient.connect(cfg);
+  clients.push(client);
+  return { resolved: resolveConfig(cfg), description: describeConfig(cfg), client, resolveActor };
+}
+
 beforeAll(async () => {
   ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
   worker = await startWorker(config);
   app = await startApp(config, { port: 0 });
+  ctx = await contextOf(config);
 });
 
 afterAll(async () => {
   await app?.close();
+  await Promise.all(clients.map((client) => client.close()));
   await worker?.stop();
   rmSync(appRoot, { recursive: true, force: true });
 });
 
-interface CallInit {
-  method?: string;
-  /** Sent as JSON, unless `contentType` is given: then sent as it is, the way another client might. */
-  body?: unknown;
-  contentType?: string;
+/** Who is asking: the `x-sanoma-actor` header the page sends, or other headers, to an app's context. */
+interface As {
   actor?: string;
   headers?: Record<string, string>;
-  /** The app to ask; the file's own by default. */
-  base?: string;
+  /** The file's own by default. */
+  app?: AppContext;
 }
 
-async function call<T = ErrorResponse>(path: string, init: CallInit = {}) {
-  const json = init.contentType === undefined && init.body !== undefined;
-  const headers: Record<string, string> = { ...init.headers };
-  const contentType = json ? "application/json" : init.contentType;
-  if (contentType !== undefined) headers["content-type"] = contentType;
-  if (init.actor !== undefined) headers["x-sanoma-actor"] = init.actor;
-  const res = await fetch(new URL(path, init.base ?? app.url), {
-    method: init.method ?? "GET",
-    headers,
-    body: json ? JSON.stringify(init.body) : (init.body as string | undefined),
-  });
-  return { status: res.status, body: (await res.json()) as T };
+/** What start.ts's `actor` middleware gives a server function for a request with these headers. */
+function asking({ actor, headers, app: context = ctx }: As = {}): ActorContext {
+  const all = actor === undefined ? { ...headers } : { ...headers, [ACTOR_HEADER]: actor };
+  return { app: context, actor: actorOf(context, new Request("http://127.0.0.1/", { headers: all })) };
 }
 
-const detail = async (id: string) => (await call<RunDetail>(`/api/runs/${id}`)).body;
+/**
+ * A server function's answer: its result, which Start sends with 200, or the status and body of
+ * the ApiError it fails with, as start.ts's `apiErrors` middleware makes it (logging a 500).
+ */
+async function answer<T>(work: () => Promise<T>): Promise<{ status: number; body: T & Partial<ErrorResponse> }> {
+  try {
+    return { status: 200, body: (await work()) as T & Partial<ErrorResponse> };
+  } catch (err) {
+    const api = toApiError(err, "a server function");
+    return { status: api.status, body: api.body as T & Partial<ErrorResponse> };
+  }
+}
 
-/** `POST /api/runs` with this body, as tester. */
-const postRun = (body: unknown) => call("/api/runs", { method: "POST", actor: "tester", body });
+/**
+ * A change as its server function makes it (see functions.ts): who is asking, refused when
+ * nobody is named (`withPrincipal`), then the argument read as its validator reads it, then the
+ * server core's call.
+ */
+const change =
+  <D, T>(read: (data: unknown) => D, call: (app: AppContext, actor: Principal, data: D) => Promise<T>) =>
+  (data: unknown, as: As = {}) =>
+    answer(async () => {
+      const request = asking(as);
+      const actor = await requireActor(request);
+      return call(request.app, actor, read(data));
+    });
+
+/** A server function's validator: the argument, or a 400 with zod's issues. */
+const argument =
+  <S extends z.ZodType>(schema: S) =>
+  (data: unknown) =>
+    parse(schema, data, "The request");
+
+/** `startRunFn`: a workflow and its input, or a scenario. */
+const startAs = change((data) => parse(startRunSchema(data), data, "The request"), startRun);
+/** `decideFn`: `{ runId, approvalId, decision, note? }`. */
+const decideAs = change(argument(DecideCall), decide);
+/** `setCredentialFn` and `clearCredentialFn`. */
+const setAs = change(argument(SetCredentialRequest), setCredential);
+const clearAs = change(argument(ClearCredentialRequest), clearCredential);
+
+/** `getRuns`: the latest runs, by the query. */
+const runsOf = (query: Record<string, unknown> = {}) => answer(() => ctx.client.runs(argument(RunsQuery)(query)));
+
+/** `getRun`: one run, its ledger, its approvals and a sandbox run's checks. */
+const detail = (id: string, context = ctx) => runDetail(context, id);
+
+/** `startRunFn` with this argument, as tester. */
+const postRun = (data: unknown) => startAs(data, { actor: "tester" });
 
 /** A page as the server renders it, and its text without the comments React puts between text parts. */
 async function page(path: string, base = app.url, init?: RequestInit) {
@@ -189,10 +268,9 @@ const input = (title: string) => ({
   launchAt: new Date(Date.now() - 60_000).toISOString(),
 });
 
-describe("the API", () => {
-  it("describes the config: workflows, ops, built-ins, the policy and the version", async () => {
-    const { status, body } = await call<ConfigDescription>("/api/config");
-    expect(status).toBe(200);
+describe("the server functions", () => {
+  it("describe the config: workflows, ops, built-ins, the policy and the version, without the workflows' sources", async () => {
+    const body = withoutSources(ctx.description);
     expect(body.appName).toBe("sanoma");
     expect(body.version).toMatch(/^sanoma@/);
     expect(body.policy).toEqual({ defined: true, version: "test-1" });
@@ -204,10 +282,11 @@ describe("the API", () => {
     expect(wf?.outline).toEqual(outlineWorkflow(announce));
     expect(wf?.outline).toMatchObject({ file: expect.stringMatching(/announce\.ts$/) });
     expect(body.workflows.every((w) => !("source" in w))).toBe(true);
-    // Nor is its code anywhere else in the description.
+    // Nor is its code anywhere else in the description, or in the page that carries it.
     const line = "ctx.ghost.post.create({ title, html: body";
     expect(readFileSync(announce.file!, "utf8")).toContain(line);
     expect(JSON.stringify(body)).not.toContain(line);
+    expect((await page("/workflows")).html).not.toContain(line);
     expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.effect).toBe("send");
     // Whether each vendor's connector attaches a fake: Ghost's and GitHub's do, chat's does not.
     expect(body.vendors).toMatchObject({ ghost: { fake: true }, github: { fake: true }, chat: { fake: false } });
@@ -219,12 +298,12 @@ describe("the API", () => {
     expect(body.workflows.find((w) => w.name === "drift")).toMatchObject({ builtin: true });
   });
 
-  it("refuses a run without an actor, for an unknown workflow, or with input the schema refuses", async () => {
-    const anonymous = await call("/api/runs", { method: "POST", body: { workflow: "announce", input: input("x") } });
+  it("refuse a run without an actor, for an unknown workflow, or with input the schema refuses", async () => {
+    const anonymous = await startAs({ workflow: "announce", input: input("x") });
     expect(anonymous.status).toBe(400);
     expect(anonymous.body).toMatchObject({ code: "invalid_input", error: expect.stringMatching(/x-sanoma-actor/) });
 
-    const unknown = await call("/api/runs", { method: "POST", actor: "alice", body: { workflow: "nope", input: {} } });
+    const unknown = await startAs({ workflow: "nope", input: {} }, { actor: "alice" });
     expect(unknown.status).toBe(404);
     expect(unknown.body).toMatchObject({
       code: "invalid_input",
@@ -232,54 +311,27 @@ describe("the API", () => {
     });
 
     const { title: _, ...untitled } = input("x");
-    const invalid = await call("/api/runs", {
-      method: "POST",
-      actor: "alice",
-      body: { workflow: "announce", input: untitled },
-    });
+    const invalid = await startAs({ workflow: "announce", input: untitled }, { actor: "alice" });
     expect(invalid.status).toBe(400);
     expect(invalid.body.code).toBe("invalid_input");
     expect(invalid.body.issues).toEqual([expect.objectContaining({ path: ["title"], message: expect.any(String) })]);
 
-    const notJson = await fetch(new URL("/api/runs", app.url), {
-      method: "POST",
-      headers: { "x-sanoma-actor": "alice", "content-type": "application/json" },
-      body: "{",
-    });
-    expect(notJson.status).toBe(400);
-    expect(await call("/api/runs?limit=0").then((r) => r.status)).toBe(400);
-    const badStatus = await call("/api/runs?status=asleep");
+    expect((await runsOf({ limit: 0 })).status).toBe(400);
+    const badStatus = await runsOf({ status: "asleep" });
     expect(badStatus.status).toBe(400);
     expect(badStatus.body.issues).toEqual([expect.objectContaining({ path: ["status"] })]);
   });
 
-  it("takes only a JSON body, on both routes that change something", async () => {
-    for (const path of ["/api/runs", "/api/runs/does-not-exist/approvals/approval-1"]) {
-      const asLead = { method: "POST", actor: "marketing-lead" };
-      const form = await call(path, {
-        ...asLead,
-        contentType: "application/x-www-form-urlencoded",
-        body: "decision=approve",
-      });
-      expect(form.status, path).toBe(415);
-      expect(form.body.code, path).toBe("invalid_input");
-      const empty = await call(path, { ...asLead, contentType: "application/json" });
-      expect(empty.status, path).toBe(400);
-      expect(empty.body).toMatchObject({ code: "invalid_input", error: expect.stringMatching(/empty/) });
-    }
-  });
-
-  it("starts a run as the actor, holds it for the approver, refuses anyone else, then finishes", async () => {
-    const started = await call<StartRunResponse>("/api/runs", {
-      method: "POST",
-      actor: encodeURIComponent("Ålice"),
-      body: { workflow: "announce", input: input("From the app") },
-    });
-    expect(started.status).toBe(201);
+  it("start a run as the actor, hold it for the approver, refuse anyone else, then finish", async () => {
+    const started = await startAs(
+      { workflow: "announce", input: input("From the app") },
+      { actor: encodeURIComponent("Ålice") },
+    );
+    expect(started.status).toBe(200);
     expect(started.body).toEqual({ runId: expect.any(String), workflow: "announce" });
     runId = started.body.runId;
 
-    const runs = await call<RunSummary[]>("/api/runs?limit=50");
+    const runs = await runsOf({ limit: 50 });
     expect(runs.body.find((r) => r.runId === runId)).toMatchObject({
       workflow: "announce",
       startedBy: { id: "Ålice" },
@@ -292,29 +344,25 @@ describe("the API", () => {
     const approval = held.approvals[0]!;
     expect(approval).toMatchObject({ id: "approval-1", approver: "marketing-lead", status: "pending" });
     expect(held.run.status).toBe("waiting");
-    const waiting = await call<RunSummary[]>("/api/runs?status=waiting");
+    const waiting = await runsOf({ status: "waiting" });
     expect(waiting.status).toBe(200);
     expect(waiting.body.map((r) => r.runId)).toContain(runId);
     expect(waiting.body.every((r) => r.status === "waiting")).toBe(true);
-    const decide = `/api/runs/${runId}/approvals/${approval.id}`;
+    const call = { runId, approvalId: approval.id };
 
-    const anonymous = await call(decide, { method: "POST", body: { decision: "approve" } });
+    const anonymous = await decideAs({ ...call, decision: "approve" });
     expect(anonymous.status).toBe(400);
     expect(anonymous.body.code).toBe("invalid_input");
-    const wrong = await call(decide, { method: "POST", actor: "someone-else", body: { decision: "approve" } });
+    const wrong = await decideAs({ ...call, decision: "approve" }, { actor: "someone-else" });
     expect(wrong.status).toBe(403);
     expect(wrong.body).toMatchObject({ code: "not_approver", approver: "marketing-lead" });
     expect((await detail(runId)).approvals[0]?.status).toBe("pending");
 
-    const right = await call<ApprovalState>(decide, {
-      method: "POST",
-      actor: "marketing-lead",
-      body: { decision: "approve", note: "ship it" },
-    });
+    const right = await decideAs({ ...call, decision: "approve", note: "ship it" }, { actor: "marketing-lead" });
     expect(right.status).toBe(200);
     expect(right.body).toMatchObject({ id: "approval-1", status: "approved", decidedBy: "marketing-lead" });
 
-    const again = await call(decide, { method: "POST", actor: "marketing-lead", body: { decision: "reject" } });
+    const again = await decideAs({ ...call, decision: "reject" }, { actor: "marketing-lead" });
     expect(again.status).toBe(409);
     expect(again.body.code).toBe("already_decided");
 
@@ -322,7 +370,7 @@ describe("the API", () => {
       () => detail(runId),
       (d) => d.run.status === "finished",
     );
-    const stillWaiting = await call<RunSummary[]>("/api/runs?status=waiting");
+    const stillWaiting = await runsOf({ status: "waiting" });
     expect(stillWaiting.body.map((r) => r.runId)).not.toContain(runId);
     const ledger = finished.ledger;
     expect(ledger.map((r) => r.type)).toEqual([
@@ -349,12 +397,8 @@ describe("the API", () => {
     ]);
   });
 
-  it("answers 202 with the approval still pending when no worker reads the decision", async () => {
-    const started = await call<{ runId: string }>("/api/runs", {
-      method: "POST",
-      actor: "alice",
-      body: { workflow: "announce", input: input("Nobody home") },
-    });
+  it("answer with the approval still pending when no worker reads the decision", async () => {
+    const started = await startAs({ workflow: "announce", input: input("Nobody home") }, { actor: "alice" });
     const id = started.body.runId;
     await waitFor(
       () => detail(id),
@@ -362,37 +406,33 @@ describe("the API", () => {
     );
     await worker.stop();
     try {
-      const sent = await call<ApprovalState>(`/api/runs/${id}/approvals/approval-1`, {
-        method: "POST",
-        actor: "marketing-lead",
-        body: { decision: "approve" },
-      });
-      expect(sent.status).toBe(202);
+      const sent = await decideAs(
+        { runId: id, approvalId: "approval-1", decision: "approve" },
+        { actor: "marketing-lead" },
+      );
+      expect(sent.status).toBe(200);
       expect(sent.body).toMatchObject({ id: "approval-1", status: "pending" });
     } finally {
       worker = await startWorker(config);
     }
   });
 
-  it("says when a run or an approval does not exist, by code", async () => {
-    const run = await call("/api/runs/does-not-exist");
+  it("say when a run or an approval does not exist, by code", async () => {
+    const run = await answer(() => detail("does-not-exist"));
     expect(run.status).toBe(404);
     expect(run.body).toMatchObject({ code: "run_not_found", error: expect.stringMatching(/does-not-exist/) });
-    const approval = await call("/api/runs/does-not-exist/approvals/approval-1", {
-      method: "POST",
-      actor: "marketing-lead",
-      body: { decision: "approve" },
-    });
+    const approval = await decideAs(
+      { runId: "does-not-exist", approvalId: "approval-1", decision: "approve" },
+      { actor: "marketing-lead" },
+    );
     expect(approval.status).toBe(404);
     expect(approval.body.code).toBe("run_not_found");
-    expect((await call("/api/nothing-here")).status).toBe(404);
   });
 });
 
 describe("scenarios and sandbox runs", () => {
-  it("lists the scenarios in the config's feature files, with their steps", async () => {
-    const { status, body } = await call<ScenariosResponse>("/api/scenarios");
-    expect(status).toBe(200);
+  it("lists the scenarios in the config's feature files, with their steps", () => {
+    const body = scenarios(ctx);
     expect(body.errors).toEqual([]);
     expect(body.scenarios.map((s) => s.name)).toEqual([SCENARIO, "Publish retried", "Copy rejected"]);
     const launch = body.scenarios[0]!;
@@ -437,7 +477,7 @@ describe("scenarios and sandbox runs", () => {
   });
 
   it("refuses a scenario the config does not have, naming those it has", async () => {
-    const { status, body } = await call("/api/runs", { method: "POST", actor: "tester", body: { scenario: "nope" } });
+    const { status, body } = await postRun({ scenario: "nope" });
     expect(status).toBe(404);
     expect(body).toMatchObject({ code: "invalid_input", issues: [expect.objectContaining({ path: ["scenario"] })] });
     expect(body.error).toBe(
@@ -446,12 +486,8 @@ describe("scenarios and sandbox runs", () => {
   });
 
   it("starts a sandbox run whose approval waits for a person, then checks it against the scenario", async () => {
-    const started = await call<StartRunResponse>("/api/runs", {
-      method: "POST",
-      actor: "tester",
-      body: { scenario: SCENARIO },
-    });
-    expect(started.status).toBe(201);
+    const started = await postRun({ scenario: SCENARIO });
+    expect(started.status).toBe(200);
     // The scenario's workflow, which the request did not name: the run's page is under it.
     expect(started.body.workflow).toBe("announce");
     sandboxId = started.body.runId;
@@ -477,11 +513,10 @@ describe("scenarios and sandbox runs", () => {
       settled: false,
     });
 
-    const decided = await call<ApprovalState>(`/api/runs/${sandboxId}/approvals/${held.approvals[0]!.id}`, {
-      method: "POST",
-      actor: "marketing-lead",
-      body: { decision: "approve" },
-    });
+    const decided = await decideAs(
+      { runId: sandboxId, approvalId: held.approvals[0]!.id, decision: "approve" },
+      { actor: "marketing-lead" },
+    );
     expect(decided.body.status).toBe("approved");
     const done = await waitFor(
       () => detail(sandboxId),
@@ -492,12 +527,8 @@ describe("scenarios and sandbox runs", () => {
   });
 
   it("settles a check once its answer cannot change, and fails those not met when the run ends", async () => {
-    const started = await call<{ runId: string }>("/api/runs", {
-      method: "POST",
-      actor: "tester",
-      body: { scenario: "Copy rejected" },
-    });
-    expect(started.status).toBe(201);
+    const started = await postRun({ scenario: "Copy rejected" });
+    expect(started.status).toBe(200);
     const id = started.body.runId;
     const held = await waitFor(
       () => detail(id),
@@ -511,11 +542,10 @@ describe("scenarios and sandbox runs", () => {
     ]);
     expect((await page(`/workflows/announce/runs/${id}`)).text).toMatch(/>not yet</);
 
-    const decided = await call<ApprovalState>(`/api/runs/${id}/approvals/${held.approvals[0]!.id}`, {
-      method: "POST",
-      actor: "marketing-lead",
-      body: { decision: "reject" },
-    });
+    const decided = await decideAs(
+      { runId: id, approvalId: held.approvals[0]!.id, decision: "reject" },
+      { actor: "marketing-lead" },
+    );
     expect(decided.body.status).toBe("rejected");
     const failed = await waitFor(
       () => detail(id),
@@ -674,18 +704,10 @@ describe("the page", () => {
   });
 
   it("renders a run the policy held: its card in the inbox while held, then the hold, the notes and the records", async () => {
-    const started = await call<{ runId: string }>("/api/runs", {
-      method: "POST",
-      actor: "held",
-      body: { workflow: "announce", input: input("Held by the policy") },
-    });
+    const started = await startAs({ workflow: "announce", input: input("Held by the policy") }, { actor: "held" });
     const id = started.body.runId;
     const approveAs = (approvalId: string, note: string) =>
-      call<ApprovalState>(`/api/runs/${id}/approvals/${approvalId}`, {
-        method: "POST",
-        actor: "marketing-lead",
-        body: { decision: "approve", note },
-      });
+      decideAs({ runId: id, approvalId, decision: "approve", note }, { actor: "marketing-lead" });
     await waitFor(
       () => detail(id),
       (d) => d.approvals.some((a) => a.status === "pending"),
@@ -705,7 +727,7 @@ describe("the page", () => {
 
     const decided = await approveAs(hold.id, "   ");
     expect(decided.body).toMatchObject({ status: "approved" });
-    expect(decided.body).not.toHaveProperty("note");
+    expect(decided.body.note).toBeUndefined();
     const done = await waitFor(
       () => detail(id),
       (d) => d.run.status === "finished",
@@ -731,11 +753,7 @@ describe("the page", () => {
 
   it("says a failed call that is not safe to repeat was not retried, and where to look", async () => {
     blog.failNext("ghost.post.create", new DriverError("ghost: the site is down", { retryable: false, status: 503 }));
-    const started = await call<{ runId: string }>("/api/runs", {
-      method: "POST",
-      actor: "alice",
-      body: { workflow: "announce", input: input("Fails at once") },
-    });
+    const started = await startAs({ workflow: "announce", input: input("Fails at once") }, { actor: "alice" });
     await waitFor(
       () => detail(started.body.runId),
       (d) => d.run.status === "failed",
@@ -751,7 +769,7 @@ describe("the page", () => {
   });
 
   it("renders the workflows on the server: each one's outline and a link to its page, whose About has its operations and input", async () => {
-    const version = (await call<ConfigDescription>("/api/config")).body.version;
+    const { version } = ctx.description;
     const workflows = await page("/workflows");
     expect(workflows.status).toBe(200);
     expect(workflows.text).toContain(`<code>${version}</code>`);
@@ -908,6 +926,14 @@ describe("the page", () => {
     expect(await res.text()).toContain('<div id="app">');
   });
 
+  it("answers a path under /api like any other unknown path", async () => {
+    for (const path of ["/api/config", "/api/runs?status=waiting"]) {
+      const res = await page(path);
+      expect(res.status, path).toBe(404);
+      expect(res.html, path).toContain('<div id="app">');
+    }
+  });
+
   it("renders a run under its workflow's heading, marked in the rail, and answers a run that does not exist with not-found", async () => {
     const found = await page(`/workflows/announce/runs/${runId}`);
     expect(found.status).toBe(200);
@@ -934,7 +960,7 @@ describe("the page", () => {
   });
 
   it("filters the rail by ?runs=, asking the server for a status, and keeps the filter on the rail's links", async () => {
-    const { body: runs } = await call<RunSummary[]>("/api/runs?workflow=announce&limit=50");
+    const { body: runs } = await runsOf({ workflow: "announce", limit: 50 });
     const sandbox = runs.filter((r) => r.sandbox !== undefined).map((r) => r.runId);
     expect(sandbox).toContain(sandboxId);
     const filtered = await page("/workflows/announce?runs=sandbox");
@@ -950,7 +976,7 @@ describe("the page", () => {
 
     // Failed is the server's to pick (`status=failed`), not a pick from the latest 50, so an
     // older failed run is not lost behind them.
-    const { body: failed } = await call<RunSummary[]>("/api/runs?workflow=announce&status=failed&limit=50");
+    const { body: failed } = await runsOf({ workflow: "announce", status: "failed", limit: 50 });
     expect(failed).not.toEqual([]);
     const failedPage = await page("/workflows/announce?runs=failed");
     expect(failedPage.status).toBe(200);
@@ -983,12 +1009,11 @@ describe("the page", () => {
   });
 
   it("refuses requests addressed to a name other than this machine's", async () => {
-    expect(await rawStatus(app.url, "/api/config", { host: "attacker.example:80" })).toBe(403);
+    expect(await rawStatus(app.url, "/workflows", { host: "attacker.example:80" })).toBe(403);
   });
   // wave 2 B: New run
   it("renders a workflow's page in Sandbox mode: the scenario's input read-only, and the scenario", async () => {
-    const { body } = await call<ScenariosResponse>("/api/scenarios");
-    const launch = body.scenarios.find((s) => s.name === SCENARIO)!;
+    const launch = scenarios(ctx).scenarios.find((s) => s.name === SCENARIO)!;
     // Only the fields its When sets: the rest are made up.
     expect(launch.input).toMatchObject({ title: "Acme Pro", launchAt: "2030-01-01T09:00:00Z" });
     const { title } = launch.input as { title: string };
@@ -1039,12 +1064,8 @@ describe("resources and drift", () => {
     company.stripe.override("product", "prod_SanomaFixturePro", { name: "Sanoma Professional" });
     company.github.remove("branch_protection", "docs:main");
     // Started as any workflow is, with its input: nothing.
-    const started = await call<{ runId: string }>("/api/runs", {
-      method: "POST",
-      actor: "alice",
-      body: { workflow: "drift", input: {} },
-    });
-    if (started.status !== 201) throw new Error(`POST /api/runs answered ${started.status}`);
+    const started = await startAs({ workflow: "drift", input: {} }, { actor: "alice" });
+    if (started.status !== 200) throw new Error(`startRunFn answered ${started.status}: ${started.body.error}`);
     driftRun = started.body.runId;
     const done = await waitFor(
       () => detail(driftRun),
@@ -1055,22 +1076,18 @@ describe("resources and drift", () => {
   });
 
   it("lists drift runs by workflow, started as the actor", async () => {
-    const { body } = await call<RunSummary[]>("/api/runs?workflow=drift&limit=1");
+    const { body } = await runsOf({ workflow: "drift", limit: 1 });
     expect(body).toMatchObject([
       { runId: driftRun, workflow: "drift", status: "finished", startedBy: { id: "alice" } },
     ]);
-    expect((await call<RunSummary[]>("/api/runs?workflow=nope")).body).toEqual([]);
+    expect((await runsOf({ workflow: "nope" })).body).toEqual([]);
   });
 
   it("refuses a drift run given any input: it reads the data files itself", async () => {
-    const forged = await call("/api/runs", {
-      method: "POST",
-      actor: "alice",
-      body: {
-        workflow: "drift",
-        input: { resources: [{ id: "x#y", vendor: "github", type: "repository", name: "x" }] },
-      },
-    });
+    const forged = await startAs(
+      { workflow: "drift", input: { resources: [{ id: "x#y", vendor: "github", type: "repository", name: "x" }] } },
+      { actor: "alice" },
+    );
     expect(forged.status).toBe(400);
     expect(forged.body.code).toBe("invalid_input");
   });
@@ -1159,8 +1176,8 @@ describe("resources and drift", () => {
     expect(workflows.html).not.toContain('aria-label="Last 12 runs"');
   });
 
-  it("lists every run under All runs, linking each to its page, sandbox runs badged, and filters them by ?status= as the API does", async () => {
-    const { body: finished } = await call<RunSummary[]>("/api/runs?status=finished");
+  it("lists every run under All runs, linking each to its page, sandbox runs badged, and filters them by ?status= as getRuns does", async () => {
+    const { body: finished } = await runsOf({ status: "finished" });
     expect(finished.length).toBeGreaterThan(0);
     // Each page's text, and the runs its table links to, by its search.
     const pages: Record<string, string> = {};
@@ -1187,16 +1204,12 @@ describe("resources and drift", () => {
   });
 
   it("pills a workflow's card with the approvals its runs wait on", async () => {
-    const started = await call<{ runId: string }>("/api/runs", {
-      method: "POST",
-      actor: "tester",
-      body: { workflow: "announce", input: input("Pill") },
-    });
+    const started = await postRun({ workflow: "announce", input: input("Pill") });
     await waitFor(
       () => detail(started.body.runId),
       (d) => d.run.status === "waiting",
     );
-    const { body: waiting } = await call<RunSummary[]>("/api/runs?status=waiting&workflow=announce");
+    const { body: waiting } = await runsOf({ status: "waiting", workflow: "announce" });
     const pending = waiting.reduce((n, run) => n + run.approvals.filter((a) => a.status === "pending").length, 0);
     expect(pending).toBeGreaterThan(0);
     const workflows = await page("/workflows");
@@ -1206,9 +1219,18 @@ describe("resources and drift", () => {
   });
 });
 
+/** Says who is asking from a test header, the way a hosted deployment reads its login. */
+const hostedActor: ResolveActor = (request) => {
+  const who = request.headers.get("x-test-user");
+  if (who === "boom") throw new Error("the session store is down");
+  return who ? { id: who, groups: ["marketing"] } : undefined;
+};
+
 describe("an app configured otherwise", () => {
   let dir: string;
   let other: App;
+  /** The other app's context, as its server functions get it. */
+  let otherCtx: AppContext;
   const warned: string[] = [];
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), "sanoma-app-ledger-"));
@@ -1217,21 +1239,12 @@ describe("an app configured otherwise", () => {
     const GH = `import { github } from "@sanoma/connector-github/resources";\n`;
     writeFileSync(join(dir, "resources", "good.ts"), `${GH}export const web = github.repository({ name: "web" });\n`);
     writeFileSync(join(dir, "resources", "bad.ts"), `${GH}export const docs = github.repository({ name: 1 });\n`);
+    // A directory nothing has written to yet: the worker keeps its records in memory.
+    const otherConfig = { ...config, ledger: jsonlLedger(join(dir, "ledger")), root: dir };
     const warn = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => void warned.push(args.join(" ")));
-    other = await startApp(
-      // A directory nothing has written to yet: the worker keeps its records in memory.
-      { ...config, ledger: jsonlLedger(join(dir, "ledger")), root: dir },
-      {
-        host: "0.0.0.0",
-        // Says who is asking from a test header, the way a hosted deployment reads its login.
-        resolveActor: (request) => {
-          const who = request.headers.get("x-test-user");
-          if (who === "boom") throw new Error("the session store is down");
-          return who ? { id: who, groups: ["marketing"] } : undefined;
-        },
-      },
-    );
+    other = await startApp(otherConfig, { host: "0.0.0.0", resolveActor: hostedActor });
     warn.mockRestore();
+    otherCtx = await contextOf(otherConfig, hostedActor);
   });
   afterAll(async () => {
     await other?.close();
@@ -1242,7 +1255,7 @@ describe("an app configured otherwise", () => {
     expect(warned).toEqual([
       expect.stringMatching(/^sanoma app: the config's files have problems.*\n {2}resources\/bad\.ts:2:1: /s),
     ]);
-    const { body } = await call<ConfigDescription>("/api/config", { base: other.url });
+    const body = withoutSources(otherCtx.description);
     expect(body.resources.map((r) => r.id)).toEqual(["resources/good.ts#web"]);
     expect(body.problems).toEqual([
       {
@@ -1263,20 +1276,18 @@ describe("an app configured otherwise", () => {
   });
 
   const post = (user?: string) =>
-    call<ErrorResponse & { runId?: string }>("/api/runs", {
-      method: "POST",
-      base: other.url,
-      headers: user ? { "x-test-user": user } : {},
-      body: { workflow: "announce", input: input("Hosted") },
-    });
-  const read = () => call<RunDetail>(`/api/runs/${runId}`, { base: other.url });
+    startAs(
+      { workflow: "announce", input: input("Hosted") },
+      { app: otherCtx, headers: user ? { "x-test-user": user } : {} },
+    );
+  const read = () => detail(runId, otherCtx);
 
   describe("with its own resolveActor", () => {
     it("starts runs as the principal it resolves, groups included", async () => {
       const started = await post("sso-user");
-      expect(started.status).toBe(201);
+      expect(started.status).toBe(200);
       const run = await waitFor(
-        () => detail(started.body.runId!),
+        () => detail(started.body.runId),
         (d) => d.run.startedBy !== undefined,
       );
       expect(run.run.startedBy).toEqual({ id: "sso-user", groups: ["marketing"] });
@@ -1307,7 +1318,7 @@ describe("an app configured otherwise", () => {
       expect(failed.body.error).toBe("Something went wrong");
       expect(logged.mock.calls).toEqual([
         [
-          expect.stringContaining("POST /api/runs failed"),
+          expect.stringContaining("a server function failed"),
           expect.objectContaining({ message: "Could not tell who you are: the session store is down" }),
         ],
       ]);
@@ -1317,14 +1328,13 @@ describe("an app configured otherwise", () => {
   describe("on every interface", () => {
     it("answers a request addressed to any name, since it was asked to listen beyond this machine", async () => {
       const base = `http://127.0.0.1:${new URL(other.url).port}`;
-      expect(await rawStatus(base, "/api/config", { host: "sanoma.example:80" })).toBe(200);
+      expect(await rawStatus(base, "/workflows", { host: "sanoma.example:80" })).toBe(200);
     });
   });
 
   describe("reading a jsonl ledger", () => {
     it("says a run that has started has no records there: the app reads another ledger than the worker", async () => {
-      const { status, body } = await read();
-      expect(status).toBe(200);
+      const body = await read();
       expect(body.ledger).toEqual([]);
       expect(body.ledgerError).toBe(
         "No records for a run that has started; is the app reading the same ledger as the worker?",
@@ -1341,9 +1351,8 @@ describe("an app configured otherwise", () => {
       const result = await read();
       // Read again, as the page's poll does: logged once for the run and the failure.
       await read();
-      expect(result.status).toBe(200);
-      expect(result.body.ledger).toEqual([]);
-      expect(result.body.ledgerError).toMatch(/corrupt ledger line/);
+      expect(result.ledger).toEqual([]);
+      expect(result.ledgerError).toMatch(/corrupt ledger line/);
       expect(logged).toHaveBeenCalledOnce();
       expect(String(logged.mock.calls[0]?.[0])).toContain(`could not read the ledger of run ${runId}`);
     });
@@ -1405,14 +1414,13 @@ describe("an app whose drivers declare environment variables", () => {
       .describe("a made-up key"),
   });
   let declaring: App;
-  /** A credentials request to the declaring app, as tester. */
-  const change = (method: "PUT" | "DELETE", body: unknown) =>
-    fetch(new URL("/api/credentials", declaring.url), {
-      method,
-      headers: { "content-type": "application/json", "x-sanoma-actor": "tester" },
-      body: JSON.stringify(body),
-    });
-  const statuses = async () => (await call<CredentialsResponse>("/api/credentials", { base: declaring.url })).body;
+  /** The declaring app's context, as its server functions get it. */
+  let declaringCtx: AppContext;
+  /** `setCredentialFn` and `clearCredentialFn` on the declaring app, as tester. */
+  const set = (data: unknown) => setAs(data, { actor: "tester", app: declaringCtx });
+  const clear = (data: unknown) => clearAs(data, { actor: "tester", app: declaringCtx });
+  /** `getCredentials` on the declaring app. */
+  const statuses = () => credentials(declaringCtx);
   beforeAll(async () => {
     vi.stubEnv(URL_VAR, SITE);
     vi.stubEnv(KEY_VAR, undefined);
@@ -1422,9 +1430,10 @@ describe("an app whose drivers declare environment variables", () => {
       ...config.connectors.slice(1),
     ];
     declaring = await startApp({ ...config, connectors }, { port: 0 });
+    declaringCtx = await contextOf({ ...config, connectors });
     // The table outlives a run of the tests.
-    await change("DELETE", { name: KEY_VAR });
-    await change("DELETE", { name: URL_VAR });
+    await clear({ name: KEY_VAR });
+    await clear({ name: URL_VAR });
   });
   afterAll(async () => {
     vi.unstubAllEnvs();
@@ -1452,46 +1461,51 @@ describe("an app whose drivers declare environment variables", () => {
     expect((await page("/connectors/resend", declaring.url)).html).not.toMatch(/>Credentials</);
   });
 
-  it("carries the statuses in /api/credentials, not /api/config, never a value", async () => {
-    const { body } = await call<ConfigDescription>("/api/config", { base: declaring.url });
+  it("carries the statuses in getCredentials, not the config's description, never a value", async () => {
+    const body = withoutSources(declaringCtx.description);
     expect(body.vendors.ghost).not.toHaveProperty("credentials");
-    const credentials = await statuses();
-    expect(Object.keys(credentials)).toEqual(["ghost"]);
-    expect(credentials.ghost).toEqual([
+    const found = await statuses();
+    expect(Object.keys(found)).toEqual(["ghost"]);
+    expect(found.ghost).toEqual([
       { name: URL_VAR, description: "the made-up site's URL", optional: false, status: "set", source: "environment" },
       { name: KEY_VAR, description: "a made-up key", optional: false, status: "missing" },
     ]);
-    expect(JSON.stringify([body, credentials])).not.toContain(SITE);
+    expect(JSON.stringify([body, found])).not.toContain(SITE);
   });
 
   it("refuses a value the variable's schema refuses, a name no driver declares, and an anonymous change, without the value", async () => {
     const VALUE = "key_NOT-LOWER";
-    const invalid = await change("PUT", { name: KEY_VAR, value: VALUE });
+    const invalid = await set({ name: KEY_VAR, value: VALUE });
     expect(invalid.status).toBe(400);
-    expect(await invalid.text()).not.toContain(VALUE);
+    expect(invalid.body).toMatchObject({
+      code: "invalid_input",
+      issues: [expect.objectContaining({ path: ["value"] })],
+    });
+    expect(JSON.stringify(invalid.body)).not.toContain(VALUE);
 
-    const undeclared = await change("PUT", { name: "SANOMA_TEST_UNDECLARED", value: KEY });
+    const undeclared = await set({ name: "SANOMA_TEST_UNDECLARED", value: KEY });
     expect(undeclared.status).toBe(400);
-    expect(await undeclared.text()).not.toContain(KEY);
-    const empty = await change("PUT", { name: KEY_VAR, value: "" });
-    expect(((await empty.json()) as ErrorResponse).issues?.[0]).toMatchObject({
+    expect(undeclared.body).toMatchObject({
+      code: "invalid_input",
+      issues: [expect.objectContaining({ path: ["name"] })],
+    });
+    expect(JSON.stringify(undeclared.body)).not.toContain(KEY);
+    const empty = await set({ name: KEY_VAR, value: "" });
+    expect(empty.body.issues?.[0]).toMatchObject({
       path: ["value"],
       message: "Enter a value",
     });
 
-    const anonymous = await fetch(new URL("/api/credentials", declaring.url), {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: KEY_VAR, value: KEY }),
-    });
+    const anonymous = await setAs({ name: KEY_VAR, value: KEY }, { app: declaringCtx });
     expect(anonymous.status).toBe(400);
     expect((await statuses()).ghost?.[1]?.status).toBe("missing");
   });
 
   it("stores a value as the actor, says who set it on the page, then clears it", async () => {
-    const set = await change("PUT", { name: KEY_VAR, value: KEY });
-    expect(set.status).toBe(204);
-    expect(await set.text()).toBe("");
+    const stored = await set({ name: KEY_VAR, value: KEY });
+    expect(stored.status).toBe(200);
+    // Nothing comes back: never the value.
+    expect(stored.body).toBeUndefined();
     const [, key] = (await statuses()).ghost!;
     expect(key).toMatchObject({ name: KEY_VAR, status: "set", source: "stored", setBy: "tester" });
 
@@ -1501,7 +1515,7 @@ describe("an app whose drivers declare environment variables", () => {
     expect((await page("/connectors", declaring.url)).text).toContain("· configured");
     for (const html of [blogPage.html, JSON.stringify(await statuses())]) expect(html).not.toContain(KEY);
 
-    expect((await change("DELETE", { name: KEY_VAR })).status).toBe(204);
+    expect((await clear({ name: KEY_VAR })).status).toBe(200);
     expect((await statuses()).ghost?.[1]).toEqual({
       name: KEY_VAR,
       description: "a made-up key",

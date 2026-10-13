@@ -1,5 +1,5 @@
 {
-  // The library entry only: startApp and the API's shapes. `vite build` builds the app itself
+  // The library entry only: startApp and its types. `vite build` builds the app itself
   // into dist/client and dist/server.
   "extends": "../../tsconfig.json",
   "compilerOptions": {
