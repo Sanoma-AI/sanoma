@@ -18,7 +18,8 @@ const alice = { id: "alice" };
 const fakes = companyFakes();
 const { github, stripe } = fakes;
 const config = { ...companyConfig([inspect], policy, fakes), ledger: memoryLedger() };
-const loaded = loadScenarios(resolveConfig(config));
+const scope = resolveConfig(config);
+const loaded = await loadScenarios(scope);
 const scenario = (name: string): Scenario => loaded.scenarios.find((s) => s.name === name)!;
 const passes = (s: Scenario) => s.expect.map((e) => ({ step: e.step, ok: true }));
 const record = <T extends LedgerRecord["type"]>(records: LedgerRecord[], type: T, op?: string) =>
@@ -58,7 +59,7 @@ describe("the company's scenarios", () => {
   });
 
   it.each(loaded.scenarios.map((s) => [s.name, s] as const))("%s", async (_, s) => {
-    expect(check(s, await run(s))).toEqual(passes(s));
+    expect(await check(scope, s, await run(s))).toEqual(passes(s));
   });
 
   it("seeds a resource on the run's own fake, records it, and leaves the drivers' fakes as they were", async () => {

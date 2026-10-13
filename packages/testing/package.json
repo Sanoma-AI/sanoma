@@ -31,6 +31,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./features": {
+      "types": "./dist/features.d.ts",
+      "default": "./dist/features.js"
+    },
     "./harness": {
       "types": "./dist/harness.d.ts",
       "default": "./dist/harness.js"
@@ -77,6 +81,6 @@
     }
   },
   "engines": {
-    "node": ">=24"
+    "node": "24 || >=26"
   }
 }

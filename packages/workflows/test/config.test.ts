@@ -7,7 +7,15 @@ import { github } from "@sanoma/connector-github";
 import { resend } from "@sanoma/connector-resend";
 import { stripe } from "@sanoma/connector-stripe";
 import { describe, expect, it } from "vitest";
-import { allowAll, type Connector, memoryLedger, resolveConfig, type SanomaConfig, withSetup } from "../src/index.ts";
+import {
+  allowAll,
+  type Connector,
+  defineSteps,
+  memoryLedger,
+  resolveConfig,
+  type SanomaConfig,
+  withSetup,
+} from "../src/index.ts";
 import { setupOf, VENDOR } from "../src/op.ts";
 import announce from "./fixtures/announce.ts";
 import { tree } from "./tree.ts";
@@ -47,9 +55,9 @@ describe("each connector package's root", () => {
     expect(copy.post.create).toBe(ghost.post.create);
   });
 
-  it("takes another driver over the one it carries, and keeps its fake", () => {
+  it("takes another driver over the one it carries, and keeps its fake and its steps", () => {
     const swapped = withSetup(ghost, { driver });
-    expect(setupOf(swapped)).toEqual({ driver, fake: setupOf(ghost).fake });
+    expect(setupOf(swapped)).toEqual({ driver, fake: setupOf(ghost).fake, steps: setupOf(ghost).steps });
     expect(setupOf(ghost).driver).not.toBe(driver);
     expect(swapped.post.create).toBe(ghost.post.create);
   });
@@ -61,6 +69,11 @@ describe("resolveConfig on the connectors' setups", () => {
     expect([...resolved.driversByVendor.keys()]).toEqual(["ghost", "resend", "bluesky"]);
     expect([...resolved.drivers.keys()].toSorted()).toEqual([...resolved.ops.keys()].toSorted());
     expect([...resolved.fakes]).toEqual([ghost, resend, bluesky].map((c) => [c[VENDOR].id, setupOf(c).fake]));
+    // Their steps for scenarios, once each, then the config's own.
+    expect(resolved.steps).toEqual([ghost, resend, bluesky].map((c) => setupOf(c).steps));
+    const own = defineSteps("acme", () => {});
+    const connectors = [ghost, { ...ghost }, resend, bluesky];
+    expect(resolveConfig(config({ connectors, steps: [own] })).steps).toEqual([...resolved.steps, own]);
     // Another resolution makes its own drivers.
     expect(resolveConfig(config()).driversByVendor.get("ghost")).not.toBe(resolved.driversByVendor.get("ghost"));
   });

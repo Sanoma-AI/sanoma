@@ -39,7 +39,7 @@ Connectors live here under `connectors/`; one moves to its own repo only when so
 
 ## Develop
 
-Needs Node 24 or later, pnpm, and Docker for the workflow tests.
+Needs Node 24, or 26 and later (Cucumber, which runs the scenarios, does not support 25), pnpm, and Docker for the workflow tests.
 
 ```sh
 pnpm install

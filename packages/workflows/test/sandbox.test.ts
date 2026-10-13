@@ -77,16 +77,18 @@ describe("sandbox runs", () => {
   }));
   const c = () => app.client;
 
-  const scenario = (name: string): Scenario => {
-    const loaded = loadScenarios(resolveConfig(app.config));
+  const scope = () => resolveConfig(app.config);
+  const scenario = async (name: string): Promise<Scenario> => {
+    const loaded = await loadScenarios(scope());
     expect(loaded.errors).toEqual([]);
     return loaded.scenarios.find((s) => s.name === name)!;
   };
+  const checked = async (s: Scenario, records: LedgerRecord[]) => check(scope(), s, records);
   const steps = async (runId: string) => ((await app.raw.listWorkflowSteps(runId)) ?? []).map((s) => s.name);
   const ledger = (runId: string) => c().ledger(runId);
 
   it("seeds the fakes, calls them and no driver, and skips the sleep but records it", async () => {
-    const launch = scenario("Launch on time");
+    const launch = await scenario("Launch on time");
     const launchAt = inSeconds(86_400);
     const started = Date.now();
     const runId = await c().start(announce, { ...(launch.input as object), launchAt } as never, {
@@ -152,7 +154,7 @@ describe("sandbox runs", () => {
       "bluesky.post.create",
     ]);
     // The run's own Ghost: the seeded draft is post_0001, so the run's post is post_0002.
-    expect(check(launch, records)).toEqual(launch.expect.map((e) => ({ step: e.step, ok: true })));
+    expect(await checked(launch, records)).toEqual(launch.expect.map((e) => ({ step: e.step, ok: true })));
 
     expect((await c().run(runId))?.sandbox).toBe("Launch on time");
     const listed = (await c().runs()).find((r) => r.runId === runId);
@@ -160,7 +162,7 @@ describe("sandbox runs", () => {
   });
 
   it("retries an idempotent operation the scenario fails once, and finishes", async () => {
-    const retried = scenario("Publish retried");
+    const retried = await scenario("Publish retried");
     const runId = await c().start(announce, retried.input as never, { startedBy: alice, sandbox: retried.name });
     expect(await drive(c(), runId, retried)).toMatchObject({ status: "finished" });
     const records = await ledger(runId);
@@ -168,13 +170,13 @@ describe("sandbox runs", () => {
     expect(records.filter((r) => r.type === "op.called" && r.op === "ghost.post.publish")).toMatchObject([
       { attempt: 2, output: { id: "post_0001", status: "published" } },
     ]);
-    expect(check(retried, records).every((r) => r.ok)).toBe(true);
+    expect((await checked(retried, records)).every((r) => r.ok)).toBe(true);
   });
 
   it("decides each approval by its title first, then in order", async () => {
     for (const name of ["Decided by title", "Decided in order"]) {
       const runId = await c().start(review, {}, { startedBy: alice, sandbox: name });
-      expect(await drive(c(), runId, scenario(name))).toMatchObject({ status: "finished" });
+      expect(await drive(c(), runId, await scenario(name))).toMatchObject({ status: "finished" });
       expect((await c().approvals(runId)).map((a) => [a.title, a.status, a.decidedBy])).toEqual([
         ["Legal review", "approved", "legal"],
         ["Final check", "approved", "boss"],
@@ -183,7 +185,7 @@ describe("sandbox runs", () => {
   });
 
   it("runs two sandbox runs of one scenario at once, each on its own fakes, and refuses a scenario that does not exist", async () => {
-    const launch = scenario("Launch on time");
+    const launch = await scenario("Launch on time");
     const start = () => c().start(announce, launch.input as never, { startedBy: alice, sandbox: launch.name });
     const runIds = await Promise.all([start(), start()]);
     // Each waits on its own approval: neither is queued behind the other.
@@ -195,7 +197,7 @@ describe("sandbox runs", () => {
       const records = await ledger(runId);
       // Each seeded its own Ghost: the scenario's `post_0002` is published in both, which a shared
       // one could not do.
-      expect(check(launch, records)).toEqual(launch.expect.map((e) => ({ step: e.step, ok: true })));
+      expect(await checked(launch, records)).toEqual(launch.expect.map((e) => ({ step: e.step, ok: true })));
     }
     expect(app.ops()).toEqual([]);
 
@@ -227,7 +229,7 @@ describe("sandbox runs", () => {
   });
 
   it("fails a sandbox run whose worker restarts, since the fakes' state is gone", async () => {
-    const launch = scenario("Launch on time");
+    const launch = await scenario("Launch on time");
     const runId = await c().start(announce, launch.input as never, { startedBy: alice, sandbox: launch.name });
     await waitFor(pending(c, runId));
 
@@ -259,7 +261,7 @@ describe("sandbox runs", () => {
   });
 
   it("refuses to reuse a run id for a start in another sandbox, or none", async () => {
-    const launch = scenario("Launch on time");
+    const launch = await scenario("Launch on time");
     const runId = randomUUID();
     await c().start(announce, launch.input as never, { runId, startedBy: alice, sandbox: launch.name });
     const err = await failure(c().start(announce, launch.input as never, { runId, startedBy: alice }));
@@ -269,7 +271,7 @@ describe("sandbox runs", () => {
   });
 
   it("never takes a decision naming an approval still to come for the one pending", async () => {
-    const second = scenario("Decided for the second only");
+    const second = await scenario("Decided for the second only");
     expect(second.approvals).toEqual(["Legal review", "Final check"]);
     const runId = await c().start(review, {}, { startedBy: alice, sandbox: second.name });
     await expect(drive(c(), runId, second)).rejects.toThrow(
@@ -282,7 +284,7 @@ describe("sandbox runs", () => {
   });
 
   it("throws for an approval the scenario has no decision left for", async () => {
-    const short = scenario("Missing a decision");
+    const short = await scenario("Missing a decision");
     const runId = await c().start(review, {}, { startedBy: alice, sandbox: short.name });
     await expect(drive(c(), runId, short)).rejects.toThrow(
       'Scenario "Missing a decision" has no decision for "Final check" (approval-2)',

@@ -11,7 +11,10 @@ export default defineConfig({
         find: /^@sanoma\/workflows\/(describe|fake|plugin|shared|scenario|scenarios)$/,
         replacement: src("./packages/workflows/src/$1.ts"),
       },
-      { find: /^@sanoma\/testing\/(harness|replay|scenarios)$/, replacement: src("./packages/testing/src/$1.ts") },
+      {
+        find: /^@sanoma\/testing\/(features|harness|replay|scenarios)$/,
+        replacement: src("./packages/testing/src/$1.ts"),
+      },
       { find: /^@sanoma\/bridge\/(connector|fake|tfschema)$/, replacement: src("./packages/bridge/src/$1.ts") },
       { find: /^@sanoma\/(workflows|testing|app|bridge)$/, replacement: src("./packages/$1/src/index.ts") },
       {

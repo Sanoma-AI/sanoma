@@ -174,16 +174,17 @@ export async function runDetail({ client, resolved }: AppContext, runId: string)
   }
   const seeded = ledger.find((r) => r.type === "scenario.seeded");
   if (!seeded) return { run, ledger, approvals };
-  // Checked against the feature file as it reads now, which the agent may have changed since.
+  // Checked against the feature file as it reads now, which the agent may have changed since:
+  // Cucumber runs the scenario's Then steps against the ledger.
   try {
-    const loaded = loadScenarios(resolved);
+    const loaded = await loadScenarios(resolved);
     const scenario = loaded.scenarios.find((s) => s.name === seeded.scenario);
     if (scenario) {
       const ended = isEnded(run.status);
-      const checks = check(scenario, ledger).map((c, i) => {
+      const checks = (await check(resolved, scenario, ledger)).map((c, i) => {
         const e = scenario.expect[i]!;
         // Met once: a call made, or a decision recorded, stays made.
-        return { ...c, settled: ended || (c.ok && (("called" in e && e.called) || "decision" in e)) };
+        return { ...c, settled: ended || (c.ok && (("called" in e && e.called === true) || "decision" in e)) };
       });
       return { run, ledger, approvals, checks };
     }
@@ -201,9 +202,9 @@ export async function runDetail({ client, resolved }: AppContext, runId: string)
  * Every scenario in the config's feature files, as the page lists them, as they read now. When
  * they cannot be read at all, none, with why as the one error, so the page says so and stays up.
  */
-export function scenarios({ resolved }: Pick<AppContext, "resolved">): ScenariosResponse {
+export async function scenarios({ resolved }: Pick<AppContext, "resolved">): Promise<ScenariosResponse> {
   try {
-    const loaded = loadScenarios(resolved);
+    const loaded = await loadScenarios(resolved);
     return {
       scenarios: loaded.scenarios.map(({ name, workflow, file, text, steps, input }) => ({
         name,
@@ -238,7 +239,7 @@ export async function startRun(
   body: StartRunRequest,
 ): Promise<StartRunResponse> {
   if ("scenario" in body) {
-    const { scenarios: all, errors } = loadScenarios(resolved);
+    const { scenarios: all, errors } = await loadScenarios(resolved);
     const scenario = all.find((s) => s.name === body.scenario);
     const workflow = scenario && resolved.workflows.get(scenario.workflow);
     if (!scenario || !workflow) {

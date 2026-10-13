@@ -433,8 +433,8 @@ describe("the server functions", () => {
 });
 
 describe("scenarios and sandbox runs", () => {
-  it("lists the scenarios in the config's feature files, with their steps", () => {
-    const body = scenarios(ctx);
+  it("lists the scenarios in the config's feature files, with their steps", async () => {
+    const body = await scenarios(ctx);
     expect(body.errors).toEqual([]);
     expect(body.scenarios.map((s) => s.name)).toEqual([SCENARIO, "Publish retried", "Copy rejected"]);
     const launch = body.scenarios[0]!;
@@ -505,12 +505,19 @@ describe("scenarios and sandbox runs", () => {
         expect.objectContaining({ op: "ghost.post.create", input: expect.objectContaining({ title: "Old news" }) }),
       ],
     });
-    // A call it expects has been made, so that check is settled; the outcome is not yet.
+    // A call it expects has been made, so that check is settled; the next has not been made yet,
+    // so the steps after it are not checked.
     expect(held.checks).toContainEqual({ step: 'a post titled "Acme Pro" is created', ok: true, settled: true });
+    expect(held.checks).toContainEqual({
+      step: 'post "post_0002" is published',
+      ok: false,
+      detail: 'no call to ghost.post.publish with {"id":"post_0002"}',
+      settled: false,
+    });
     expect(held.checks).toContainEqual({
       step: "the run succeeds",
       ok: false,
-      detail: "run not ended",
+      detail: "not checked (an earlier step failed)",
       settled: false,
     });
 
@@ -538,7 +545,13 @@ describe("scenarios and sandbox runs", () => {
     expect(held.checks).toEqual([
       { step: "ghost.post.publish was not called", ok: true, settled: false },
       expect.objectContaining({ step: "resend.broadcast.send was called", ok: false, settled: false }),
-      { step: 'the run fails with "approval_rejected"', ok: false, detail: "run not ended", settled: false },
+      // A step after one that failed is not checked.
+      {
+        step: 'the run fails with "approval_rejected"',
+        ok: false,
+        detail: "not checked (an earlier step failed)",
+        settled: false,
+      },
     ]);
     expect((await page(`/workflows/announce/runs/${id}`)).text).toMatch(/>not yet</);
 
@@ -554,7 +567,12 @@ describe("scenarios and sandbox runs", () => {
     expect(failed.checks).toEqual([
       { step: "ghost.post.publish was not called", ok: true, settled: true },
       expect.objectContaining({ step: "resend.broadcast.send was called", ok: false, settled: true }),
-      { step: 'the run fails with "approval_rejected"', ok: true, settled: true },
+      {
+        step: 'the run fails with "approval_rejected"',
+        ok: false,
+        detail: "not checked (an earlier step failed)",
+        settled: true,
+      },
     ]);
   });
 });
@@ -596,14 +614,14 @@ describe("scenarios that no longer load", () => {
     expect((await detail(sandboxId)).checks).toEqual(before.checks);
   });
 
-  it("lists no scenarios, with why, when they cannot be read at all", () => {
+  it("lists no scenarios, with why, when they cannot be read at all", async () => {
     const resolved = {
       scenarios: pathToFileURL(`${scenariosDir}/`),
       get ops(): never {
         throw new Error("the ops are gone");
       },
     };
-    expect(scenarios({ resolved } as never)).toEqual({
+    expect(await scenarios({ resolved } as never)).toEqual({
       scenarios: [],
       errors: [{ file: "", message: "the ops are gone" }],
     });
@@ -1013,7 +1031,7 @@ describe("the page", () => {
   });
   // wave 2 B: New run
   it("renders a workflow's page in Sandbox mode: the scenario's input read-only, and the scenario", async () => {
-    const launch = scenarios(ctx).scenarios.find((s) => s.name === SCENARIO)!;
+    const launch = (await scenarios(ctx)).scenarios.find((s) => s.name === SCENARIO)!;
     // Only the fields its When sets: the rest are made up.
     expect(launch.input).toMatchObject({ title: "Acme Pro", launchAt: "2030-01-01T09:00:00Z" });
     const { title } = launch.input as { title: string };

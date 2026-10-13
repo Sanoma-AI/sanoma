@@ -17,6 +17,7 @@
       "@sanoma/workflows/scenarios": ["./packages/workflows/src/scenarios.ts"],
       "@sanoma/workflows/shared": ["./packages/workflows/src/shared.ts"],
       "@sanoma/testing": ["./packages/testing/src/index.ts"],
+      "@sanoma/testing/features": ["./packages/testing/src/features.ts"],
       "@sanoma/testing/harness": ["./packages/testing/src/harness.ts"],
       "@sanoma/testing/replay": ["./packages/testing/src/replay.ts"],
       "@sanoma/testing/scenarios": ["./packages/testing/src/scenarios.ts"],

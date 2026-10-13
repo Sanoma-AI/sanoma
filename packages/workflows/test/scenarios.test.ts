@@ -10,11 +10,14 @@ import announce from "./fixtures/announce.ts";
 import { marketingFakes } from "./harness.ts";
 
 // Needs Postgres (`pnpm db:up`). A root of its own, with the announce scenarios in its
-// scenarios/ (the fixtures' review and sample features are for workflows defined in other tests).
+// scenarios/, compose.feature's in the connectors' own steps among them (the fixtures' review and
+// sample features are for workflows defined in other tests).
 const root = mkdtempSync(join(tmpdir(), "sanoma-scenarios-"));
 const dir = join(root, "scenarios");
 mkdirSync(dir);
-cpSync(fileURLToPath(new URL("./fixtures/scenarios/announce.feature", import.meta.url)), join(dir, "announce.feature"));
+for (const file of ["announce.feature", "compose.feature"]) {
+  cpSync(fileURLToPath(new URL(`./fixtures/scenarios/${file}`, import.meta.url)), join(dir, file));
+}
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 const config: SanomaConfig = {
@@ -30,8 +33,15 @@ describe("runScenarios", () => {
   it("runs every scenario of the config as a sandbox run and names those that passed", async () => {
     const log: string[] = [];
     const result = await runScenarios(config, { databaseUrl, log: (l) => log.push(l) });
-    expect(result).toEqual({ passed: ["Launch on time", "Publish retried"], failed: [] });
-    expect(log).toEqual(["passed announce.feature › Launch on time", "passed announce.feature › Publish retried"]);
+    expect(result).toEqual({
+      passed: ["Launch on time", "Publish retried", "The newsletter fails to send"],
+      failed: [],
+    });
+    expect(log).toEqual([
+      "passed announce.feature › Launch on time",
+      "passed announce.feature › Publish retried",
+      "passed compose.feature › The newsletter fails to send",
+    ]);
   });
 
   it("reports each step that did not hold, with the scenario, and each file that did not load", async () => {
@@ -50,7 +60,7 @@ describe("runScenarios", () => {
     );
     try {
       const { passed, failed } = await runScenarios(config, { databaseUrl });
-      expect(passed).toEqual(["Publish retried"]);
+      expect(passed).toEqual(["Publish retried", "The newsletter fails to send"]);
       expect(failed).toEqual([
         {
           scenario: "broken.feature",
