@@ -1,7 +1,9 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, realpathSync, watch } from "node:fs";
+import { findPackageJSON } from "node:module";
 import { dirname, join, sep } from "node:path";
 import { createInterface } from "node:readline";
+import { pathToFileURL } from "node:url";
 
 /*
  * Dev mode: when the repo's `sanoma` or a `@sanoma/*` package resolves into a sanoma checkout (a
@@ -37,6 +39,43 @@ export function linkedPackages(cwd: string): LinkedPackage[] {
     if (!installed(dir)) linked.push({ name, dir });
   }
   return linked;
+}
+
+/** The packages a `sanoma` process loads besides the connectors. */
+const CORE = ["sanoma", "@sanoma/workflows", "@sanoma/app", "@sanoma/bridge"];
+
+/**
+ * Of `sanoma`, `@sanoma/workflows`, `@sanoma/app` and `@sanoma/bridge`, those installed (from a
+ * tarball or a registry) while another of them resolves into a checkout: a partial link, under
+ * which two copies of a package run in one process. Empty when none is linked, or all are. Each
+ * is found as Node finds it, from the repo's root, else from where `sanoma` really is (where pnpm
+ * puts sanoma's own dependencies, `@sanoma/app` among them).
+ */
+export function partialLink(cwd: string): string[] {
+  const sanoma = findPackage("sanoma", cwd);
+  const fromTarballs: string[] = [];
+  let linked = false;
+  for (const name of CORE) {
+    const dir =
+      name === "sanoma"
+        ? sanoma
+        : (findPackage(name, cwd) ?? (sanoma === undefined ? undefined : findPackage(name, sanoma)));
+    if (dir === undefined) continue;
+    if (installed(dir)) fromTarballs.push(name);
+    else linked = true;
+  }
+  return linked ? fromTarballs : [];
+}
+
+/** The real directory of package `name` as Node resolves it from the directory `from`, if it does. */
+function findPackage(name: string, from: string): string | undefined {
+  try {
+    const manifest = findPackageJSON(name, pathToFileURL(join(from, "/")));
+    return manifest === undefined ? undefined : realpathSync(dirname(manifest));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ERR_MODULE_NOT_FOUND") return undefined;
+    throw err;
+  }
 }
 
 /**

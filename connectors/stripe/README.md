@@ -76,4 +76,4 @@ fake.override("product", "prod_SanomaTest0001", { name: "Renamed" }); // drift: 
 
 It has `put`, `remove` and the faults every fake has, like `fakeGithub`. Import it from `@sanoma/connector-stripe/fake`.
 
-License: Apache-2.0.
+License: FSL-1.1-ALv2.

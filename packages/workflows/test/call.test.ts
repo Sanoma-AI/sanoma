@@ -205,9 +205,14 @@ describe("a call that fails", () => {
 
   it("retries an idempotent call the driver says may succeed, and records the try that did", async () => {
     app.vendors.ghost.failNext("ghost.post.publish", new DriverError("ghost: 503", { retryable: true, status: 503 }));
+    const warn = vi.spyOn(console, "warn");
     const runId = await c().start(publish, { title: "Flaky" }, { startedBy: alice });
 
     expect(await c().result(runId)).toMatchObject({ status: "published" });
+    // A live run's failed try is DBOS's to print, as ever (a sandbox run's is not: scenarios.test.ts).
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/^Error in step being automatically retried\. Attempt 1 of \d+\. DriverError: ghost: 503/),
+    );
     expect(app.ops()).toEqual(["ghost.post.create", "ghost.post.publish", "ghost.post.publish"]);
     const call = (await c().ledger(runId)).at(-2);
     expect(call).toMatchObject({ op: "ghost.post.publish", attempt: 2, output: { status: "published" } });

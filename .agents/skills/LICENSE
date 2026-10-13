@@ -1,7 +1,7 @@
 The skills in this directory (shadcn/ and migrate-radix-to-base/) are copied from
 shadcn/ui, https://github.com/shadcn/ui/tree/main/skills, as recorded in
 skills-lock.json at the repository root. They are not covered by this repository's
-Apache-2.0 license; they are under shadcn/ui's MIT license, reproduced below.
+license; they are under shadcn/ui's MIT license, reproduced below.
 
 MIT License
 

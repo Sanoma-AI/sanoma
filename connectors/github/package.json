@@ -11,7 +11,7 @@
   ],
   "homepage": "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/github#readme",
   "bugs": "https://github.com/Sanoma-AI/sanoma/issues",
-  "license": "Apache-2.0",
+  "license": "FSL-1.1-ALv2",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Sanoma-AI/sanoma.git",

@@ -1,5 +1,12 @@
-import { DBOSClient } from "@dbos-inc/dbos-sdk";
-import { memoryLedger, resolveConfig, SanomaClient, type SanomaConfig, type Worker } from "@sanoma/workflows";
+import type { DBOSClient } from "@dbos-inc/dbos-sdk";
+import {
+  dbosClient,
+  memoryLedger,
+  resolveConfig,
+  SanomaClient,
+  type SanomaConfig,
+  type Worker,
+} from "@sanoma/workflows";
 import { afterAll, beforeAll } from "vitest";
 import { startTestWorker, type TestWorkerOptions } from "./index.ts";
 
@@ -38,7 +45,7 @@ export function useTestApp(config: SanomaConfig, options: TestWorkerOptions): Te
   beforeAll(async () => {
     worker = await startTestWorker(shared, options);
     client = await SanomaClient.connect(shared);
-    raw = await DBOSClient.create({ systemDatabaseUrl: shared.databaseUrl, applicationName: appName });
+    raw = await dbosClient(shared.databaseUrl, appName);
   }, 60_000);
 
   afterAll(async () => {

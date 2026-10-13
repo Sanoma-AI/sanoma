@@ -20,22 +20,25 @@ const own = <S extends CallStep>(step: S): Pick<S, "state"> & { span?: Span } =>
  * Steps as a graph: a chain from start to end. A `ctx.all` is one lane per member between the
  * node before it and the node after; a branch splits at a diamond into one lane per case. A
  * computed `ctx.all`'s member, and a loop's body, is a chain in a cluster labelled with the label
- * the outline reads from its code ("for each of subscribers", "repeat while more"). A `try` is its body's chain beside a cluster labelled "on error"
- * holding the handler's, both from the node before. An empty member leads straight from the node
- * before to the node after; a branch's empty case, the way past it, is a lane marked "otherwise". A workflow's
- * outline is drawn this way, and a run's ledger once runGraph has made it into steps. A call's
- * node has its step's `span`, and an operation's or a sleep's its step's name when it is not the
- * default (the operation's id, `DEFAULT_SLEEP_NAME`).
+ * the outline reads from its code ("for each of subscribers", "repeat while more"), each joined
+ * from the cluster (its inside left) and back to it (its inside right). A `try` is its body's
+ * chain beside a cluster labelled "on error" holding the handler's, both from the node before. An
+ * empty member leads straight from the node before to the node after; a branch's empty case, the
+ * way past it, is a lane marked "otherwise". A workflow's outline is drawn this way, and a run's
+ * ledger once runGraph has made it into steps. A call's node has its step's `span`, and an
+ * operation's or a sleep's its step's name when it is not the default (the operation's id,
+ * `DEFAULT_SLEEP_NAME`).
  */
 export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS): Graph {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   let count = 0;
 
+  const join = (source: string, target: string) => edges.push({ id: `${source}->${target}`, source, target });
   /** Adds the node, drawn from each of `from`, and returns its id. */
   const add = (node: GraphNode, from: readonly string[]): string => {
     nodes.push(node);
-    for (const source of from) edges.push({ id: `${source}->${node.id}`, source, target: node.id });
+    for (const source of from) join(source, node.id);
     return node.id;
   };
   const idOf = (kind: string, key: string | undefined) => key ?? `${kind}:${count++}`;
@@ -46,9 +49,11 @@ export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS
     const lanes = (lists: readonly (readonly Step[])[], start: readonly string[]) => [
       ...new Set(lists.flatMap((lane) => chain(lane, start, parent))),
     ];
+    // Its body runs from the box back to the box, so an edge to the box goes on inside it, and
+    // one from it starts where the body ends. An empty body is one edge from the box to itself.
     const cluster = (label: string, body: readonly Step[]) => {
       const id = add({ id: idOf("cluster", undefined), kind: "cluster", label, ...inside }, from);
-      chain(body, [], id);
+      for (const tail of chain(body, [id], id)) join(tail, id);
       return [id];
     };
     for (const step of steps) {

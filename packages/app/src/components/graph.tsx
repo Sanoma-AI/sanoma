@@ -5,7 +5,10 @@ import "@xyflow/react/dist/style.css";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   Background,
+  BaseEdge,
   type Edge,
+  type EdgeProps,
+  type EdgeTypes,
   getNodesBounds,
   Handle,
   type Node,
@@ -22,7 +25,7 @@ import type { OpEntry } from "@sanoma/workflows/describe";
 import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { approverLabel } from "@sanoma/workflows/shared";
-import { layout } from "../graph/layout.ts";
+import { layout, type Point } from "../graph/layout.ts";
 import {
   type Graph as GraphData,
   type GraphNode,
@@ -44,6 +47,8 @@ import { ZoomSlider } from "./zoom-slider.tsx";
 
 /** A node as React Flow holds it: the graph's node, and whether a click on it selects it. */
 type FlowNode = Node<{ node: GraphNode; selectable: boolean }, GraphNodeKind>;
+/** An edge as React Flow holds it: the route `layout` gives it, as an SVG path. */
+type FlowEdge = Edge<{ path: string }, "route">;
 /** What a node component reads of its `NodeProps`: its node, of its kind, and whether it is selected. */
 type Props<K extends GraphNodeKind> = {
   data: { node: Extract<GraphNode, { kind: K }>; selectable: boolean };
@@ -358,6 +363,46 @@ const nodeTypes = {
   skip: SkipNode,
 } satisfies { [K in GraphNodeKind]: (props: Props<K>) => ReactNode } as NodeTypes;
 
+/** How round a route's corners are, in px: React Flow's smoothstep edges' default borderRadius. */
+const CORNER = 5;
+
+/** The point `d` px from `from` towards `to`, along a run across or down. */
+const towards = (from: Point, to: Point, d: number): Point => ({
+  x: from.x + Math.sign(to.x - from.x) * d,
+  y: from.y + Math.sign(to.y - from.y) * d,
+});
+
+/** A run's length: it goes across or down, not both. */
+const run = (a: Point, b: Point) => Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
+
+/**
+ * A route as an SVG path: its runs straight, each corner rounded by CORNER, or by half the shorter
+ * run it joins, as xyflow's smoothstep does (its getBend, which it does not export).
+ */
+function pathOf(route: readonly Point[]): string {
+  let path = `M ${route[0]!.x} ${route[0]!.y}`;
+  for (let i = 1; i < route.length - 1; i++) {
+    const [before, point, after] = [route[i - 1]!, route[i]!, route[i + 1]!];
+    const r = Math.min(CORNER, run(before, point) / 2, run(point, after) / 2);
+    const [into, out] = [towards(point, before, r), towards(point, after, r)];
+    path += ` L ${into.x} ${into.y} Q ${point.x} ${point.y} ${out.x} ${out.y}`;
+  }
+  const last = route.at(-1)!;
+  return `${path} L ${last.x} ${last.y}`;
+}
+
+/**
+ * An edge along the route `layout` gave it, rather than one React Flow draws between its
+ * handles: a step React Flow puts halfway between them runs behind a wider node beside the target.
+ * Its ends are the layout's, which are React Flow's too: each node is drawn at its layout box's
+ * width and height.
+ */
+function RouteEdge({ data, style, interactionWidth }: EdgeProps<FlowEdge>) {
+  return <BaseEdge path={data!.path} style={style} interactionWidth={interactionWidth} />;
+}
+
+const edgeTypes = { route: RouteEdge } satisfies EdgeTypes;
+
 /** Fits the view again when nodes come or go, as the run's page polls. */
 function FitOnChange({ nodes, show, onFitted }: { nodes: FlowNode[]; show: "start" | "end"; onFitted: () => void }) {
   const { fitView, setViewport } = useReactFlow();
@@ -433,11 +478,11 @@ export default function Graph({ graph, show = "end", selected, onSelect }: Graph
   // Hidden until the first fit, so the graph does not show unfitted for a frame.
   const [fitted, setFitted] = useState(false);
   const clickable = onSelect !== undefined;
+  const at = useMemo(() => layout(graph), [graph]);
   const laidOut = useMemo(() => {
-    const at = layout(graph);
     // A cluster comes before the nodes inside it, as React Flow needs.
     return graph.nodes.map((node) => {
-      const { x, y, ...size } = at.get(node.id)!;
+      const { x, y, ...size } = at.boxes.get(node.id)!;
       return {
         id: node.id,
         type: node.kind,
@@ -450,7 +495,7 @@ export default function Graph({ graph, show = "end", selected, onSelect }: Graph
         connectable: false,
       } as FlowNode;
     });
-  }, [graph, clickable]);
+  }, [graph, at, clickable]);
   // A node down to its state's fields; the approval on it is the query's, kept when unchanged.
   const stable = useStable(laidOut, 4);
   // React Flow's own flag rings the selected node: only the nodes it moves from and to change.
@@ -458,7 +503,7 @@ export default function Graph({ graph, show = "end", selected, onSelect }: Graph
     () => stable.map((node) => (node.id === selected ? { ...node, selected: true } : node)),
     [stable, selected],
   );
-  const drawn = useMemo<Edge[]>(() => {
+  const drawn = useMemo<FlowEdge[]>(() => {
     const byId = new Map(graph.nodes.map((node) => [node.id, node]));
     return graph.edges.map((edge) => {
       const from = byId.get(edge.source)!;
@@ -467,12 +512,14 @@ export default function Graph({ graph, show = "end", selected, onSelect }: Graph
       const active = "state" in to && to.state?.tone === "active";
       return {
         ...edge,
-        type: "smoothstep",
+        type: "route",
+        data: { path: pathOf(at.routes.get(edge.id)!) },
         animated: active && !reducedMotion,
         ...(isPending(from) || isPending(to) ? { style: { strokeDasharray: "4 4" } } : {}),
       };
     });
-  }, [graph, reducedMotion]);
+  }, [graph, at, reducedMotion]);
+  // An edge down to its path.
   const edges = useStable(drawn, 2);
   const onNodeClick = useCallback(
     (_: unknown, { data }: FlowNode) => {
@@ -488,6 +535,7 @@ export default function Graph({ graph, show = "end", selected, onSelect }: Graph
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           className={fitted ? undefined : "invisible"}
           onNodeClick={onNodeClick}
           minZoom={0.25}

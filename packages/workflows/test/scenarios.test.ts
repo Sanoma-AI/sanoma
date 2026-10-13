@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { testDatabaseUrl } from "@sanoma/testing";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import { allowAll, memoryLedger, type SanomaConfig } from "../src/index.ts";
 import { runScenarios } from "../src/scenarios.ts";
 import announce from "./fixtures/announce.ts";
@@ -27,11 +27,37 @@ const config: SanomaConfig = {
 const databaseUrl = testDatabaseUrl("workflows_scenarios");
 
 describe("runScenarios", () => {
-  it("runs every scenario of the config as a sandbox run and names those that passed", async () => {
+  it("runs every scenario of the config as a sandbox run, names those that passed, and prints nothing of their failures", async () => {
+    writeFileSync(
+      join(dir, "rejected.feature"),
+      [
+        "Feature: Rejected",
+        "  Scenario: A rejected review publishes nothing",
+        "    When announce runs with",
+        "      | title    | Nope                 |",
+        "      | launchAt | 2030-01-01T09:00:00Z |",
+        '    And "Review launch copy" is rejected by marketing-lead',
+        "    Then ghost.post.publish was not called",
+        '    And the run fails with "approval_rejected"',
+        "",
+      ].join("\n"),
+    );
+    onTestFinished(() => rmSync(join(dir, "rejected.feature")));
+    const printed = [vi.spyOn(console, "warn"), vi.spyOn(console, "error"), vi.spyOn(console, "log")];
     const log: string[] = [];
     const result = await runScenarios(config, { databaseUrl, log: (l) => log.push(l) });
-    expect(result).toEqual({ passed: ["Launch on time", "Publish retried"], failed: [] });
-    expect(log).toEqual(["passed announce.feature › Launch on time", "passed announce.feature › Publish retried"]);
+    expect(result).toEqual({
+      passed: ["Launch on time", "Publish retried", "A rejected review publishes nothing"],
+      failed: [],
+    });
+    expect(log).toEqual([
+      "passed announce.feature › Launch on time",
+      "passed announce.feature › Publish retried",
+      "passed rejected.feature › A rejected review publishes nothing",
+    ]);
+    // "Publish retried" fails a try on purpose, and the rejected run fails as it should.
+    const lines = printed.flatMap((spy) => spy.mock.calls.flat().map(String));
+    expect(lines.filter((l) => /error in step|rejected|DriverError|Error:/i.test(l))).toEqual([]);
   });
 
   it("reports each step that did not hold, with the scenario, and each file that did not load", async () => {

@@ -56,3 +56,18 @@ describe("lazyPool", () => {
     await first.close();
   });
 });
+
+describe("prepareDatabase", () => {
+  it("sets the database's idle-transaction timeout, which DBOS is told not to set per connection", async () => {
+    await prepareDatabase(databaseUrl);
+    // A session that starts after: the pool's connections so far may predate it.
+    const conn = new Pool({ connectionString: databaseUrl, max: 1 });
+    try {
+      expect((await conn.query("SHOW idle_in_transaction_session_timeout")).rows).toEqual([
+        { idle_in_transaction_session_timeout: "1min" },
+      ]);
+    } finally {
+      await conn.end();
+    }
+  });
+});

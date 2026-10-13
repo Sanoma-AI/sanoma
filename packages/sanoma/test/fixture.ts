@@ -1,7 +1,7 @@
 import { spawn, type SpawnOptions } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureBuilt as ensure } from "@sanoma/testing";
 
@@ -28,21 +28,34 @@ export function ensureBuilt(): void {
 }
 
 /**
- * A fresh copy of `fixtures/project` in a temporary directory, with a `node_modules` of two
- * symlinks into this checkout, `sanoma` and `@sanoma/connector-ghost`: what a company repo
- * installs. Everything else (zod, `@types/node`, `@sanoma/workflows`, typescript, oxlint) the
- * copy reaches through those packages' own `node_modules`, as under pnpm's strict layout. Node
- * resolves each link to its real path, so the config and the bin share one copy of every package.
+ * A fresh copy of `fixtures/project`, with what a company repo installs: `sanoma` as pnpm lays out
+ * its tarball (its published files in `.pnpm/sanoma/node_modules/sanoma`, its dependencies linked
+ * beside it, not under it) and `@sanoma/connector-ghost`, both reaching this checkout's builds.
  */
 export function copyFixture(): string {
   const dir = mkdtempSync(join(tmpdir(), "sanoma-fixture-"));
   cpSync(fileURLToPath(new URL("./fixtures/project/", import.meta.url)), dir, { recursive: true });
   const modules = join(dir, "node_modules");
-  mkdirSync(join(modules, "@sanoma"), { recursive: true });
-  const link = (name: string, target: string) => symlinkSync(realpathSync(join(repo, target)), join(modules, name));
-  link("sanoma", "packages/sanoma");
-  link("@sanoma/connector-ghost", "connectors/ghost");
+  link(join(repo, "connectors/ghost"), join(modules, "@sanoma/connector-ghost"));
+
+  const sanoma = join(repo, "packages/sanoma");
+  const manifest = JSON.parse(readFileSync(join(sanoma, "package.json"), "utf8")) as {
+    files: string[];
+    dependencies: Record<string, string>;
+  };
+  const store = join(modules, ".pnpm/sanoma/node_modules");
+  for (const file of ["package.json", ...manifest.files]) {
+    cpSync(join(sanoma, file), join(store, "sanoma", file), { recursive: true });
+  }
+  for (const name of Object.keys(manifest.dependencies)) link(join(sanoma, "node_modules", name), join(store, name));
+  symlinkSync(join(store, "sanoma"), join(modules, "sanoma"));
   return dir;
+}
+
+/** A symlink at `at` to `target`'s real path, its directory made first. */
+function link(target: string, at: string): void {
+  mkdirSync(dirname(at), { recursive: true });
+  symlinkSync(realpathSync(target), at);
 }
 
 export interface Finished {
