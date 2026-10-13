@@ -69,13 +69,16 @@ describe("a connector made by another copy of the package", () => {
     expect(resolved.ops.has("ghost.post.publish")).toBe(true);
   });
 
-  it("is refused, saying so, when an older copy made it with an unregistered symbol", () => {
+  it("is refused, saying so, when another build made it in another shape", () => {
+    const build = "install the sanoma packages and connectors from one build";
+    const later = { ...ghost, [VENDOR]: { ...ghost[VENDOR], format: 2 } } as unknown as Connector<any, any>;
+    expect(() => resolveConfig(config({ connectors: [later] }))).toThrow(
+      `The "ghost" connector was made by another build of @sanoma/workflows: ${build}`,
+    );
+    // An older build's, its record under an unregistered symbol, is not a connector here at all.
     const older = { [Symbol("sanoma.vendor")]: { id: "ghost" } } as unknown as Connector<any, any>;
     expect(() => resolveConfig(config({ connectors: [older] }))).toThrow(
-      'The "ghost" connector was made by an older copy of @sanoma/workflows, which this one cannot read',
-    );
-    expect(() => resolveConfig(config({ connectors: [{} as Connector<any, any>] }))).toThrow(
-      "`connectors` holds something that is not a connector",
+      `\`connectors\` holds something that is not a connector: list what the connector packages export (or one from an older build: ${build})`,
     );
   });
 });

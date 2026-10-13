@@ -100,10 +100,19 @@ export type Connector<V extends string, S extends Specs> = {
 } & { readonly [VENDOR]: ConnectorVendor<V> };
 
 /**
+ * The shape of a connector's `[VENDOR]` record. A process may load two builds of this package,
+ * and `resolveConfig` reads only a record of its own shape (`checkConnector`): change it with
+ * the record, so a build refuses a connector another build made in another shape.
+ */
+export const CONNECTOR_FORMAT = 1;
+
+/**
  * A connector's vendor: its id, who it is (`defineConnector`'s third argument, for a UI), its
  * resource types, and the driver and fake its package attaches (`withSetup`).
  */
 export interface ConnectorVendor<V extends string = string> {
+  /** The record's shape (`CONNECTOR_FORMAT`). */
+  readonly format: typeof CONNECTOR_FORMAT;
   readonly id: V;
   readonly info?: VendorInfo;
   /** The resource types among its groups, in the order given. */
@@ -205,6 +214,7 @@ export function defineConnector<const V extends string, const S extends Specs>(
     );
   }
   const owner: ConnectorVendor<V> = Object.freeze({
+    format: CONNECTOR_FORMAT,
     id: vendor,
     info: vendorInfo,
     resources: Object.freeze(resources),
@@ -310,20 +320,18 @@ export function withSetup<C extends Connector<any, any>>(connector: C, setup: Pa
 
 /**
  * Throws unless `value` is a connector this package can read: one `defineConnector` made, in this
- * copy of the package or another of this version. One an older copy made (its `VENDOR` an
- * unregistered `Symbol("sanoma.vendor")`) is named as such, rather than failing on a missing setup.
+ * copy of the package or another of the same `CONNECTOR_FORMAT`. One an older build made (its
+ * `VENDOR` an unregistered symbol, or its record without a format) is refused as such.
  */
 export function checkConnector(value: unknown): asserts value is Connector<any, any> {
-  if (typeof value === "object" && value !== null && VENDOR in value) return;
-  const records = typeof value === "object" && value !== null ? (value as Record<symbol, unknown>) : {};
-  const older = Object.getOwnPropertySymbols(records).find((s) => s.description === "sanoma.vendor");
-  if (older === undefined) {
-    throw new Error("`connectors` holds something that is not a connector: list what the connector packages export");
-  }
-  const id = (records[older] as { id?: unknown } | undefined)?.id;
+  const record =
+    typeof value === "object" && value !== null ? (value as Partial<Connector<any, any>>)[VENDOR] : undefined;
+  if (record?.format === CONNECTOR_FORMAT) return;
+  const build = "install the sanoma packages and connectors from one build";
   throw new Error(
-    `The "${String(id)}" connector was made by an older copy of @sanoma/workflows, which this one cannot read: ` +
-      "install the sanoma packages and the connectors from one build",
+    record === undefined
+      ? `\`connectors\` holds something that is not a connector: list what the connector packages export (or one from an older build: ${build})`
+      : `The "${String(record.id)}" connector was made by another build of @sanoma/workflows: ${build}`,
   );
 }
 
