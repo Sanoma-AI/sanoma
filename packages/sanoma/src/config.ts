@@ -1,7 +1,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { SanomaConfig } from "@sanoma/workflows";
+import type { ResolvedConfig, SanomaConfig } from "@sanoma/workflows";
 
 /** A mistake in how the bin was called or in what it found: its message is printed alone, and the exit code is 2. */
 export class UsageError extends Error {}
@@ -10,6 +10,11 @@ export interface LoadedConfig {
   config: SanomaConfig;
   /** The config's directory: its `root`, else the file's. Data files are `resources/` in it. */
   root: string;
+}
+
+/** The config, loaded once, and resolved once (`resolveConfig`): what the commands that read it take. */
+export interface Loaded extends LoadedConfig {
+  resolved: ResolvedConfig;
 }
 
 /**
@@ -31,7 +36,7 @@ export async function loadConfig(cwd = process.cwd()): Promise<LoadedConfig> {
   const config = mod.default;
   if (!isConfig(config)) {
     throw new UsageError(
-      `${file} must export a config as its default export: \`export default defineConfig({ workflows, connectors, drivers, policy, ledger })\``,
+      `${file} must export a config as its default export: \`export default defineConfig({ workflows, connectors, policy })\``,
     );
   }
   config.file ??= file;

@@ -31,13 +31,15 @@ The logo the app shows beside these operations is Resend's lettermark from its [
 
 ## Driver
 
-`@sanoma/connector-resend/driver` calls Resend. Workflows never import it; the config that starts the worker does:
+`@sanoma/connector-resend/driver` calls Resend. The `resend` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `@sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
 
 ```ts
-import { resendDriver } from "@sanoma/connector-resend/driver";
+import { resend } from "@sanoma/connector-resend";
 
-const drivers = [resendDriver()]; // { timeoutMs } to change the 15 s request timeout
+export default defineConfig({ workflows, connectors: [resend], policy });
 ```
+
+`./driver` (`resendDriver`; `resendDriver({ timeoutMs })`, 15 s by default) and `./fake` (`fakeResend`) are internal entries, for tests.
 
 `audience` is Resend's `segment_id` (Resend renamed audiences to segments). `from` comes from the input, else `RESEND_FROM` in the environment; Resend requires one. `send` returns `status: "queued"` when it sends: Resend replies with the id only and sends in the background.
 
@@ -78,14 +80,18 @@ A recording loses ids, addresses, the sender's domain and keys. The error cases,
 
 ## Testing
 
-`@sanoma/connector-resend/fake` is an in-memory Resend that emails nobody: pass its driver to the worker, then check `state.broadcasts` and `calls`.
+`@sanoma/connector-resend/fake` is an in-memory Resend that emails nobody, the fake the connector carries: each sandbox run makes one of its own. A test that reads or seeds one attaches it to the connector itself, then checks `state.broadcasts` and `calls`.
 
 ```ts
+import { withSetup } from "@sanoma/workflows";
 import { resend } from "@sanoma/connector-resend";
 import { fakeResend } from "@sanoma/connector-resend/fake";
 
-const fake = fakeResend(); // or fakeResend({ file: ".sanoma/resend.json" }) to keep the state on disk
-const worker = await startWorker({ connectors: [resend], drivers: [fake.driver] /* , ... */ });
+const fake = fakeResend();
+const worker = await startWorker({
+  connectors: [withSetup(resend, { driver: () => fake.driver, fake: () => fake })],
+  /* ... */
+});
 
 // ...run a workflow, then:
 Object.values(fake.state.broadcasts).map((b) => b.status); // ["sent"]

@@ -1,6 +1,6 @@
 import { DriverError } from "@sanoma/workflows";
 import { defineFake, type FakeOptions } from "@sanoma/workflows/fake";
-import { ghost } from "./index.ts";
+import { ghostOps } from "./connector.ts";
 
 export interface FakeGhostPost {
   id: string;
@@ -26,11 +26,11 @@ const out = (p: FakeGhostPost) => ({
 
 /**
  * An in-memory Ghost for tests: posts live in `state.posts`, and their URLs are on
- * `blog.example.test`. Pass `{ file }` to keep the state on disk.
+ * `blog.example.test`.
  */
 export function fakeGhost(options: FakeOptions = {}) {
   return defineFake(
-    ghost,
+    ghostOps,
     {
       initial: (): FakeGhostState => ({ seq: 0, posts: {} }),
       ops: (state) => ({

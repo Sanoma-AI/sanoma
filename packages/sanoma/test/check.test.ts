@@ -1,15 +1,21 @@
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { testDatabaseUrl } from "@sanoma/testing";
+import { resolveConfig } from "@sanoma/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { check } from "../src/check.ts";
-import { loadConfig } from "../src/config.ts";
+import { type Loaded, loadConfig } from "../src/config.ts";
 import { copyFixture, ensureBuilt } from "./fixture.ts";
 
 // Needs Postgres (`pnpm db:up`) for the scenarios. The fixture copy loads the packages from their builds.
 const databaseUrl = testDatabaseUrl("sanoma-check");
 
 let dir = "";
+/** The fixture copy's config, loaded and resolved, as the bin does. */
+const load = async (): Promise<Loaded> => {
+  const loaded = await loadConfig(dir);
+  return { ...loaded, resolved: resolveConfig(loaded.config) };
+};
 beforeAll(() => {
   ensureBuilt();
   dir = copyFixture();
@@ -19,7 +25,7 @@ afterAll(() => rmSync(dir, { recursive: true, force: true }));
 describe("check", () => {
   it("reports what the lints and describeConfig find, each at its file and position, and nothing for the fixture", async () => {
     const log: string[] = [];
-    expect(await check(await loadConfig(dir), { databaseUrl, log: (l) => log.push(l) })).toEqual({
+    expect(await check(await load(), { databaseUrl, log: (l) => log.push(l) })).toEqual({
       ok: true,
       problems: [],
     });
@@ -46,7 +52,7 @@ describe("check", () => {
       join(dir, "resources/shop.ts"),
       'import { ghost } from "@sanoma/connector-ghost/resources";\nexport const p = ghost.post({ title: "x" });\n',
     );
-    const { ok, problems } = await check(await loadConfig(dir), { databaseUrl, log: () => {} });
+    const { ok, problems } = await check(await load(), { databaseUrl, log: () => {} });
     expect(ok).toBe(false);
     expect(problems).toEqual([
       // tsc: the entry does not exist.
@@ -69,7 +75,7 @@ describe("check", () => {
   it("reports a scenario step that does not hold", async () => {
     const feature = join(dir, "scenarios/hello/hello.feature");
     writeFileSync(feature, readFileSync(feature, "utf8").replace("And the run succeeds", "And the run fails"));
-    const { problems } = await check(await loadConfig(dir), { databaseUrl, log: () => {} });
+    const { problems } = await check(await load(), { databaseUrl, log: () => {} });
     expect(problems).toContain("A post goes out › the run fails: the run finished");
   }, 180_000);
 });

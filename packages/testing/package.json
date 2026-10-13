@@ -1,6 +1,7 @@
 {
   "name": "@sanoma/testing",
   "version": "0.1.0",
+  "private": true,
   "description": "Test workers, vendor replay and scenario tests for Sanoma workflows, without vendor accounts",
   "keywords": [
     "fakes",
@@ -42,9 +43,6 @@
       "types": "./dist/scenarios.d.ts",
       "default": "./dist/scenarios.js"
     }
-  },
-  "publishConfig": {
-    "access": "public"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

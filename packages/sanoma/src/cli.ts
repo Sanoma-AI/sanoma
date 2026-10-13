@@ -4,8 +4,8 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import type { ResolvedConfig, SanomaConfig } from "@sanoma/workflows";
-import { type LoadedConfig, loadConfig, UsageError } from "./config.ts";
+import type { SanomaConfig } from "@sanoma/workflows";
+import { type Loaded, loadConfig, UsageError } from "./config.ts";
 import type { LinkedPackage } from "./dev.ts";
 
 // Only Node's modules and ./config.ts are imported here: each command imports what it runs, so
@@ -90,11 +90,6 @@ const parse = (argv: string[]) =>
 
 const port = () => Number(process.env.SANOMA_APP_PORT ?? 3000);
 
-/** The config, loaded once, and resolved once: its app name, database URL and workflows. */
-interface Loaded extends LoadedConfig {
-  resolved: ResolvedConfig;
-}
-
 async function load(): Promise<Loaded> {
   const loaded = await loadConfig();
   const { resolveConfig } = await import("@sanoma/workflows");
@@ -170,9 +165,9 @@ async function runCheck(): Promise<number> {
 }
 
 async function env(checkOnly: boolean): Promise<number> {
-  const { config, root } = await loadConfig();
+  const loaded = await load();
   const { writeEnvExample } = await import("./env.ts");
-  const { changed } = writeEnvExample(root, config, { check: checkOnly });
+  const { changed } = writeEnvExample(loaded, { check: checkOnly });
   if (!checkOnly) {
     log(changed ? "wrote .env.example" : ".env.example is up to date");
     return 0;

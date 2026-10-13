@@ -1,5 +1,5 @@
 Feature: Take a sample
-  The lab has a driver but no fake, so a sandbox run cannot run it.
+  The lab has a driver, and a fake that implements none of its operations, so a sandbox run cannot run it.
 
   Scenario: Sampled
     When sample runs

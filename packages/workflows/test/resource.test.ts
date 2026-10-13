@@ -1,6 +1,8 @@
+import { withFake } from "@sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { describeConfig } from "../src/describe.ts";
+import { defineFake } from "../src/fake.ts";
 import {
   allowAll,
   compareDeclared,
@@ -309,14 +311,20 @@ describe("describeConfig with resources", () => {
   it("lists the resource types once, top level, and refers to their state from their operations", () => {
     const config = defineConfig({
       workflows: [],
-      connectors: [acme, defineConnector("plain", {})],
-      drivers: [
-        defineDriver(acme, {
-          repo: {
-            import: async ({ id }) => ({ id, gone: false, state: { name: id } }),
-            read: async ({ id }) => ({ id, gone: true }),
-          },
-        }),
+      connectors: [
+        withFake(
+          acme,
+          defineFake(acme, {
+            initial: () => ({}),
+            ops: () => ({
+              repo: {
+                import: async ({ id }) => ({ id, gone: false, state: { name: id } }),
+                read: async ({ id }) => ({ id, gone: true }),
+              },
+            }),
+          }),
+        ),
+        defineConnector("plain", {}),
       ],
       policy: allowAll,
       ledger: memoryLedger(),

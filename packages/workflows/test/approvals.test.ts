@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { bluesky } from "@sanoma/connector-bluesky";
-import { testDatabaseUrl } from "@sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { messageKeyOf, topicOf } from "../src/approvals.ts";
@@ -21,7 +20,6 @@ import announce from "./fixtures/announce.ts";
 import { inSeconds, pending, useApp, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`.
-const databaseUrl = testDatabaseUrl("approvals");
 const alice = { id: "alice" };
 const lead = { id: "marketing-lead" };
 const input = (title: string) => ({ title, body: "<p>x</p>", launchAt: inSeconds(-1) });
@@ -115,7 +113,7 @@ describe("mayDecide", () => {
 });
 
 describe("approvals a workflow asks for", () => {
-  const app = useApp(databaseUrl, "approvals", () => ({ workflows: [announce, odd] }));
+  const app = useApp("approvals", () => ({ workflows: [announce, odd] }));
   const c = () => app.client;
 
   it("fails the run with invalid_input, asking nobody, when the request names no approver or covers no operations", async () => {
@@ -304,7 +302,7 @@ describe("approvals a policy asks for", () => {
       approvedFor(run.approvals, op.id, { group: "marketing" }) ? allow() : approve({ group: "marketing" }),
   };
   const policy = definePolicy((call) => byActor[call.actor.id]?.(call) ?? allow());
-  const app = useApp(databaseUrl, "approvals-policy", () => ({ workflows: [announce, shout, launder], policy }));
+  const app = useApp("approvals-policy", () => ({ workflows: [announce, shout, launder], policy }));
   const c = () => app.client;
 
   it("covers only the held operation by default, so a later publish of another one is held again", async () => {

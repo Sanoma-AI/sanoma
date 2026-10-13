@@ -1,7 +1,7 @@
 import { DriverError, defineDriver, retryableStatus } from "@sanoma/workflows";
 import { SignJWT } from "jose";
 import { z } from "zod";
-import { ghost, Post } from "./index.ts";
+import { ghostOps, Post } from "./connector.ts";
 
 /*
  * The Ghost Admin API driver: https://docs.ghost.org/admin-api/
@@ -144,7 +144,7 @@ function connect(timeoutMs: number) {
 export function ghostDriver(options: GhostDriverOptions = {}) {
   const timeoutMs = options.timeoutMs ?? 10_000;
   return defineDriver(
-    ghost,
+    ghostOps,
     {
       post: {
         create: async ({ title, html, status }) => {

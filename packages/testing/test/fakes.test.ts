@@ -1,7 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { type CallContext, DriverError } from "@sanoma/workflows";
 import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
 import { fakeGhost } from "@sanoma/connector-ghost/fake";
@@ -18,10 +15,6 @@ const call = (idempotencyKey: string, attempt = 1): CallContext => ({
   attempt,
 });
 const draft = { title: "Hello world", html: "<p>Hi</p>", status: "draft" as const };
-const dir = mkdtempSync(join(tmpdir(), "sanoma-fakes-"));
-const vendorFile = (vendor: string) => join(dir, `vendors.${vendor}.json`);
-
-afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("fakes", () => {
   it("keep the fields the connector declares", async () => {
@@ -110,32 +103,13 @@ describe("fakes", () => {
     expect(bluesky.state.posts).toHaveLength(1);
   });
 
-  it("keep state and replies in a file, across instances", async () => {
-    const file = join(dir, "ghost.json");
-    const one = fakeGhost({ file });
-    const post = (await one.driver.ops["post.create"]!(draft, call("r:0"))) as { id: string };
-    await one.driver.ops["post.publish"]!({ id: post.id }, call("r:1"));
-
-    const two = fakeGhost({ file });
-    expect(two.state.posts[post.id]).toMatchObject({ title: "Hello world", status: "published" });
-    expect(await two.driver.ops["post.create"]!(draft, call("r:0"))).toEqual(post);
-    expect(Object.keys(two.state.posts)).toHaveLength(1);
-    // Each instance sees the other's writes.
-    await two.driver.ops["post.create"]!({ ...draft, title: "Second" }, call("r:2"));
-    expect(Object.keys(one.state.posts)).toHaveLength(2);
-
-    two.reset();
-    expect(one.state.posts).toEqual({});
-  });
-
-  it("update the state as someone at the vendor would, in the file another instance reads", async () => {
-    const file = join(dir, "ghost-update.json");
-    const one = fakeGhost({ file });
-    const post = (await one.driver.ops["post.create"]!(draft, call("r:0"))) as { id: string };
-    fakeGhost({ file }).update((state) => {
+  it("update the state as someone at the vendor would", async () => {
+    const ghost = fakeGhost();
+    const post = (await ghost.driver.ops["post.create"]!(draft, call("r:0"))) as { id: string };
+    ghost.update((state) => {
       state.posts[post.id]!.title = "Edited at Ghost";
     });
-    expect(one.state.posts[post.id]?.title).toBe("Edited at Ghost");
+    expect(ghost.state.posts[post.id]?.title).toBe("Edited at Ghost");
   });
 
   it("log into one shared list, and reset drops only their own calls", async () => {
@@ -150,28 +124,28 @@ describe("fakes", () => {
     expect(calls.map((c) => c.op)).toEqual(["bluesky.post.create"]);
   });
 
-  it("compose: three vendors on one log, each keeping its own file", async () => {
+  it("compose: three vendors on one log, each keeping its own state", async () => {
     const calls: FakeCall[] = [];
-    const ghost = fakeGhost({ calls, file: vendorFile("ghost") });
-    const resend = fakeResend({ calls, file: vendorFile("resend") });
-    const bluesky = fakeBluesky({ calls, file: vendorFile("bluesky") });
+    const ghost = fakeGhost({ calls });
+    const resend = fakeResend({ calls });
+    const bluesky = fakeBluesky({ calls });
     await ghost.driver.ops["post.create"]!(draft, call("r:0"));
     await resend.driver.ops["broadcast.create"]!({ audience: "news", subject: "Hi", html: "" }, call("r:1"));
     await bluesky.driver.ops["post.create"]!({ text: "x" }, call("r:2"));
     expect(calls.map((c) => c.op)).toEqual(["ghost.post.create", "resend.broadcast.create", "bluesky.post.create"]);
-    expect(Object.values(fakeGhost({ file: vendorFile("ghost") }).state.posts)).toHaveLength(1);
-    expect(Object.values(fakeResend({ file: vendorFile("resend") }).state.broadcasts)).toHaveLength(1);
+    expect(Object.values(ghost.state.posts)).toHaveLength(1);
+    expect(Object.values(resend.state.broadcasts)).toHaveLength(1);
     expect(bluesky.state.posts.map((p) => p.text)).toEqual(["x"]);
     for (const fake of [ghost, resend, bluesky]) fake.reset();
     expect(calls).toEqual([]);
-    expect(fakeBluesky({ file: vendorFile("bluesky") }).state.posts).toEqual([]);
+    expect(bluesky.state.posts).toEqual([]);
   });
 
-  it("resource fakes: an override reaches a fake on the same file, and drift shows on the next read", async () => {
-    const github = fakeGithub({ file: vendorFile("github") });
+  it("resource fakes: an override shows on the next read", async () => {
+    const github = fakeGithub();
     const imported = await github.driver.ops["repository.import"]!({ id: "sanoma" }, call("r:0"));
-    // Another process's fake, on the same file: a test that drifts the vendor while a worker reads it.
-    fakeGithub({ file: vendorFile("github") }).override("repository", "sanoma", { has_wiki: false });
+    // A test that drifts the vendor while a worker reads it.
+    github.override("repository", "sanoma", { has_wiki: false });
     const read = (await github.driver.ops["repository.read"]!(imported, call("r:1"))) as {
       state: { has_wiki: boolean };
     };

@@ -1,5 +1,3 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
 import {
   type Connector,
   defineDriver,
@@ -27,11 +25,6 @@ export interface FakeCall {
 }
 
 export interface FakeOptions {
-  /**
-   * Keep the state, and the reply given for each idempotency key, in this JSON file, so they
-   * survive a restart and another process can read them. The call log stays in memory.
-   */
-  file?: string;
   /** Log calls into this array instead of the fake's own, so several fakes share one ordered log. */
   calls?: FakeCall[];
 }
@@ -39,14 +32,11 @@ export interface FakeOptions {
 /** An in-memory vendor for tests, with faults a test can inject into its next calls. */
 export interface Fake<T, Id extends string = string> {
   driver: Driver;
-  /** The vendor's state, re-read from the file first when there is one. */
+  /** The vendor's state. */
   readonly state: T;
   /** Empties the state, the remembered replies and the pending faults, and drops this fake's calls from the log. */
   reset(): void;
-  /**
-   * Changes the vendor's state as someone at the vendor would: re-reads it from the file first,
-   * applies `change`, and saves it, so the next call (in any process) sees it.
-   */
+  /** Changes the vendor's state as someone at the vendor would, so the next call sees it. */
   update(change: (state: T) => void): void;
   /** Every call received, in order, including failed ones and repeats of an idempotency key. */
   calls: FakeCall[];
@@ -58,17 +48,12 @@ export interface Fake<T, Id extends string = string> {
   rateLimit(opId: Id): void;
   /** The next call to `opId` waits, before it takes effect, until the returned function is called. */
   hold(opId: Id): () => void;
-  /**
-   * A new fake of the same connector and definition, in memory with no file, its own call log and
-   * no faults. What it is called with leaves this one untouched.
-   */
-  fresh(): Fake<T, Id>;
 }
 
 /**
  * A fake that holds its vendor's objects by resource type (`repository`) and import id, as
  * `@sanoma/bridge`'s `tfFake` does, with fields in the resource's shape: what a scenario's
- * resource steps seed on a sandbox run's copy. `put` sets the fields over the object there, or
+ * resource steps seed on a sandbox run's own fake. `put` sets the fields over the object there, or
  * makes one; `remove` deletes it, and is nothing when there is none.
  */
 export interface ResourceFake {
@@ -94,7 +79,6 @@ export function defineFake<V extends string, S extends Specs, T extends Record<s
   definition: { initial: () => T; ops: (state: T) => DriverImpl<S> },
   options: FakeOptions = {},
 ): Fake<T, OpIdOf<V, S>> {
-  const { file } = options;
   const state = definition.initial();
   let replies: Record<string, unknown> = {};
   // Replaced in place, so the object `ops` closes over stays the live state.
@@ -102,18 +86,6 @@ export function defineFake<V extends string, S extends Specs, T extends Record<s
     for (const key of Object.keys(state)) delete state[key];
     Object.assign(state, next);
   };
-  const refresh = () => {
-    if (!file || !existsSync(file)) return;
-    const saved = JSON.parse(readFileSync(file, "utf8")) as { state: T; replies: Record<string, unknown> };
-    replace(saved.state);
-    replies = saved.replies;
-  };
-  const save = () => {
-    if (!file) return;
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, JSON.stringify({ state, replies }, null, 2));
-  };
-  refresh();
 
   const inner = defineDriver(connector, definition.ops(state));
   const { vendor } = inner;
@@ -142,16 +114,9 @@ export function defineFake<V extends string, S extends Specs, T extends Record<s
         });
       }
       if (fault?.kind === "hold") await fault.released;
-      // With a file, another process may have changed the state while this call waited.
-      refresh();
       if (Object.hasOwn(replies, idempotencyKey)) return structuredClone(replies[idempotencyKey]);
-      let output: unknown;
-      try {
-        output = await fn(input, call);
-        replies[idempotencyKey] = output;
-      } finally {
-        save();
-      }
+      const output = await fn(input, call);
+      replies[idempotencyKey] = output;
       if (fault?.kind === "loseReply") {
         throw new DriverError(`fake ${vendor}: the reply to ${opId} was lost`, { retryable: true });
       }
@@ -161,21 +126,15 @@ export function defineFake<V extends string, S extends Specs, T extends Record<s
 
   return {
     driver: { vendor, ops },
-    get state() {
-      refresh();
-      return state;
-    },
+    state,
     update(change) {
-      refresh();
       change(state);
-      save();
     },
     reset() {
       replace(definition.initial());
       replies = {};
       faults.clear();
       for (let i = calls.length - 1; i >= 0; i--) if (calls[i]?.op.startsWith(`${vendor}.`)) calls.splice(i, 1);
-      save();
     },
     calls,
     failNext(opId, err) {
@@ -193,6 +152,5 @@ export function defineFake<V extends string, S extends Specs, T extends Record<s
       inject(opId, { kind: "hold", released: new Promise<void>((resolve) => (release = resolve)) });
       return release;
     },
-    fresh: () => defineFake(connector, definition, {}),
   };
 }

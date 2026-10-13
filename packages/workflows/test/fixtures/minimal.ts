@@ -10,11 +10,10 @@ export const noop = defineWorkflow({
   run: async () => 1,
 });
 
-/** The smallest config a worker starts on: `noop`, a connector with no operations, no drivers, every call allowed. */
+/** The smallest config a worker starts on: `noop`, a connector with no operations and no setup, every call allowed. */
 export const minimal = (databaseUrl: string): SanomaConfig => ({
   workflows: [noop],
   connectors: [defineConnector("none", {})],
-  drivers: [],
   policy: allowAll,
   databaseUrl,
 });

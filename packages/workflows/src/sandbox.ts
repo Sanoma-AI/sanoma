@@ -20,9 +20,8 @@ const holdsResources = (fake: Fake<unknown>): fake is Fake<unknown> & ResourceFa
 
 /**
  * The error a sandbox run of the scenario fails with when it seeds a resource of a vendor whose
- * fake (one of `fakes`, by vendor) holds none, or that has no fake; undefined when every vendor
- * it seeds a resource of has a `ResourceFake`. Pure: the check `seedSandbox` makes before it
- * copies anything.
+ * fake (one of `fakes`, by vendor) holds none, or whose connector attaches no fake; undefined
+ * when every vendor it seeds a resource of has a `ResourceFake`. Pure.
  */
 export function missingResourceFake(
   scenario: Pick<Scenario, "name" | "given">,
@@ -36,15 +35,21 @@ export function missingResourceFake(
   if (plain.length === 0) return undefined;
   const resources = [...new Set(plain.map((g) => g.resource))];
   const vendors = [...new Set(plain.map((g) => g.vendor))];
+  const why = vendors.map((v) =>
+    fakes.has(v) ? `${v}'s fake holds no resources (it is not a tfFake)` : `${v}'s connector attaches no fake`,
+  );
   return new SanomaError(
     "invalid_input",
-    `Scenario "${scenario.name}" seeds ${resources.join(", ")}, but ${vendors.join(", ")}'s fake holds no resources (it is not a tfFake)`,
-    { scenario: scenario.name, resources },
+    `Scenario "${scenario.name}" seeds ${resources.join(", ")}, but ${why.join("; ")}`,
+    {
+      scenario: scenario.name,
+      resources,
+    },
   );
 }
 
 /**
- * Seeds one resource into the run's copy of its vendor's fake: put with its fields, or removed.
+ * Seeds one resource into the run's own fake of its vendor: put with its fields, or removed.
  * A seed the fake refuses (a field the provider's shape lacks, say) fails the scenario, naming
  * the step, as the other seed-time refusals do.
  */
@@ -73,13 +78,14 @@ export function seedResource(
 
 /**
  * Seeds a sandbox run of the scenario `name`, from the worker, in one step: reads the scenario,
- * checks that it runs this workflow, that every operation the workflow uses or the scenario
- * seeds has a fake and that every resource it seeds has a fake holding resources, makes its own
- * copies of the worker's fakes (`Fake.fresh`), calls each `Given` operation through them, puts
- * or removes each `Given` resource in them, injects the faults into them, then puts their
- * functions on the run. The run then calls those copies only, so sandbox runs never share
- * state. The step's checkpoint never stands in for the copies: a run whose seeding is replayed
- * from it has none, and fails, since a sandbox run does not survive a worker restart.
+ * checks that it runs this workflow, makes the run's own fakes (each vendor's maker, called once
+ * for the run), checks that every operation the workflow uses or the scenario seeds has one and
+ * that every resource it seeds has a fake holding resources, calls each `Given` operation
+ * through them, puts or removes each `Given` resource in them, injects the faults into them,
+ * then puts their functions on the run. The run then calls those only, so sandbox runs share no
+ * state when the makers make a new fake each. The step's checkpoint never stands in for them: a
+ * run whose seeding is replayed from it has none, and fails, since a sandbox run does not
+ * survive a worker restart.
  */
 export async function seedSandbox(run: Run, name: string): Promise<void> {
   const { state } = run;
@@ -99,23 +105,23 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
           workflow: scenario.workflow,
         });
       }
-      const uses = opIdsOf(state.workflows.get(run.workflow)!);
-      const seeding = scenario.given.flatMap((g) => ("op" in g ? [g.op] : []));
-      const missing = [...new Set([...uses, ...seeding])].filter((id) => !state.fakeDrivers.has(id));
-      if (missing.length) {
-        throw new SanomaError(
-          "invalid_input",
-          `A sandbox run of ${run.workflow} has no fake for ${missing.join(", ")}: add their vendors' fakes to the config's \`fakes\``,
-          { scenario: name, missing },
-        );
-      }
-      const plain = missingResourceFake(scenario, state.fakes);
-      if (plain) throw plain;
-      const fakes = new Map([...state.fakes].map(([vendor, f]) => [vendor, f.fresh()]));
+      const fakes = new Map([...state.fakes].map(([vendor, make]) => [vendor, make()]));
       const drivers = indexDrivers(
         [...fakes.values()].map((f) => f.driver),
         state.ops,
       );
+      const uses = opIdsOf(state.workflows.get(run.workflow)!);
+      const seeding = scenario.given.flatMap((g) => ("op" in g ? [g.op] : []));
+      const missing = [...new Set([...uses, ...seeding])].filter((id) => !drivers.has(id));
+      if (missing.length) {
+        throw new SanomaError(
+          "invalid_input",
+          `A sandbox run of ${run.workflow} has no fake for ${missing.join(", ")}: no fake its connectors attach implements ${missing.length > 1 ? "them" : "it"}`,
+          { scenario: name, missing },
+        );
+      }
+      const plain = missingResourceFake(scenario, fakes);
+      if (plain) throw plain;
       const seeded: Extract<LedgerRecord, { type: "scenario.seeded" }>["seeds"] = [];
       for (const [i, given] of scenario.given.entries()) {
         if ("fault" in given) continue;
@@ -125,7 +131,7 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
           seeded.push({ op: given.op, input: given.input, output });
           continue;
         }
-        // Checked above: the vendor's copy holds resources, as its template does.
+        // Checked above: the vendor's fake holds resources.
         seeded.push(seedResource(name, fakes.get(given.vendor) as Fake<unknown> & ResourceFake, given));
       }
       for (const given of scenario.given) {

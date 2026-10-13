@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { DBOS, DBOSClient } from "@dbos-inc/dbos-sdk";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
-import { resend } from "@sanoma/connector-resend";
 import { startTestWorker, testDatabaseUrl } from "@sanoma/testing";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -18,6 +17,7 @@ import {
 } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
 import { inSeconds, marketingFakes, waitFor } from "./harness.ts";
+import { appRoot } from "./tree.ts";
 
 const vendors = marketingFakes();
 // Two builds of one workflow. Only the body's source is hashed, not what it closes over.
@@ -47,11 +47,10 @@ const quick = defineWorkflow({
 
 const base: SanomaConfig = {
   workflows: [announce],
-  connectors: [ghost, resend, bluesky],
-  drivers: vendors.drivers,
+  connectors: vendors.connectors,
   policy: allowAll,
   ledger: memoryLedger(),
-  appName: "acme",
+  root: appRoot("acme"),
 };
 const versionOf = (config: Partial<SanomaConfig>) => resolveConfig({ ...base, ...config }).version;
 /** DBOS's own override, read when the config is resolved; prefixed with the app name like the hash. */
@@ -71,8 +70,9 @@ describe("the application version", () => {
   it("is a hash of the workflows, prefixed with the app name", () => {
     expect(versionOf({})).toMatch(/^acme@[0-9a-f]{64}$/);
     expect(versionOf({})).toBe(versionOf({}));
-    expect(versionOf({ appName: "other" })).toMatch(/^other@/);
-    expect(versionOf({ appName: "other" }).slice("other@".length)).not.toBe(versionOf({}).slice("acme@".length));
+    const other = { root: appRoot("other") };
+    expect(versionOf(other)).toMatch(/^other@/);
+    expect(versionOf(other).slice("other@".length)).not.toBe(versionOf({}).slice("acme@".length));
   });
 
   it("changes when a workflow's body changes, and not when a driver or the policy does", () => {
@@ -86,8 +86,7 @@ describe("the application version", () => {
     });
     expect(versionOf({ workflows: [loudlyAgain] })).toBe(loud);
 
-    const drivers = marketingFakes().drivers.map((d) => ({ ...d, ops: { ...d.ops } }));
-    expect(versionOf({ drivers })).toBe(versionOf({}));
+    expect(versionOf({ connectors: marketingFakes().connectors })).toBe(versionOf({}));
     expect(versionOf({ policy: () => ({ kind: "deny", reason: "no" }) })).toBe(versionOf({}));
     expect(versionOf({ workflows: [] })).not.toBe(versionOf({}));
   });
@@ -124,7 +123,7 @@ describe("workers on one database", () => {
   const databaseUrl = testDatabaseUrl("version");
   const config = (appName: string, extra: Partial<SanomaConfig> = {}): SanomaConfig => ({
     ...base,
-    appName,
+    root: appRoot(appName),
     databaseUrl,
     ledger: memoryLedger(),
     ...extra,
@@ -168,7 +167,6 @@ describe("workers on one database", () => {
     // startTestWorker runs on the database it is given, never the one the config names.
     const cfg = {
       ...config(appName, { workflows: [quick] }),
-      appName,
       databaseUrl: "postgresql://nobody@127.0.0.1:1/not-this-one",
     };
     const client = await SanomaClient.connect({ ...cfg, databaseUrl });

@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { defineConnector, defineDriver, defineWorkflow, type SanomaClient } from "../src/index.ts";
+import { ghost } from "@sanoma/connector-ghost";
+import {
+  allowAll,
+  defineConnector,
+  defineDriver,
+  defineWorkflow,
+  type Op,
+  type SanomaClient,
+  type SanomaConfig,
+  withSetup,
+} from "../src/index.ts";
 
 // These assertions are checked by `pnpm typecheck`; the runtime test only keeps vitest happy.
 const shop = defineConnector("shop", {
@@ -105,6 +115,40 @@ export const startsTyped = (client: SanomaClient) => [
   client.start(wf, { id: 1 }, { startedBy: { id: "alice" } }),
   // @ts-expect-error the input is the schema's input: `id` is required
   client.start(wf, {}, { startedBy: { id: "alice" } }),
+];
+
+// `ghost`, as its package exports it (`withSetup`), keeps each operation's type.
+export const draft = defineWorkflow({
+  name: "draft-typed",
+  trigger: "manual",
+  input: z.object({ title: z.string() }),
+  uses: [ghost.post.create],
+  run: async (ctx, { title }) => {
+    const post = await ctx.ghost.post.create({ title, html: "<p>x</p>" });
+    const slug: string = post.slug;
+    // @ts-expect-error input is checked against the operation's schema
+    await ctx.ghost.post.create({ title: 1, html: "" });
+    return slug;
+  },
+});
+export const createId: "ghost.post.create" = ghost.post.create.id;
+// withSetup gives back the connector's own type, and adds no group of operations.
+const attached = withSetup(shop, { driver: () => ({ vendor: "shop", ops: {} }) });
+export const sameShop: typeof shop = attached;
+export const orderGet: Op<"shop", "order", "get", { id: string }, { total: number }> = attached.order.get;
+// @ts-expect-error the setup is on the vendor record, never a group
+export const noGroup = attached.setup;
+
+// The keys a config no longer has are typed `never`, each with a deprecation saying where it went.
+export const stale: SanomaConfig[] = [
+  // @ts-expect-error each connector carries its driver
+  { workflows: [], connectors: [], policy: allowAll, drivers: [] },
+  // @ts-expect-error each connector carries the maker of its fake
+  { workflows: [], connectors: [], policy: allowAll, fakes: [] },
+  // @ts-expect-error the app's name is <root>/package.json's
+  { workflows: [], connectors: [], policy: allowAll, appName: "acme" },
+  // @ts-expect-error the scenarios are <root>/scenarios/
+  { workflows: [], connectors: [], policy: allowAll, scenarios: new URL("file:///srv/acme/scenarios/") },
 ];
 
 describe("types", () => {

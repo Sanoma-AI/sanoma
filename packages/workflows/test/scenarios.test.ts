@@ -1,41 +1,28 @@
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { bluesky } from "@sanoma/connector-bluesky";
-import { ghost } from "@sanoma/connector-ghost";
-import { resend } from "@sanoma/connector-resend";
+import { fileURLToPath } from "node:url";
 import { testDatabaseUrl } from "@sanoma/testing";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { allowAll, memoryLedger, type SanomaConfig } from "../src/index.ts";
 import { runScenarios } from "../src/scenarios.ts";
 import announce from "./fixtures/announce.ts";
 import { marketingFakes } from "./harness.ts";
 
-// Needs Postgres (`pnpm db:up`). The announce scenarios, in a directory of their own (the
-// fixtures' review and sample features are for workflows defined in other tests).
-let dir = "";
-beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), "sanoma-scenarios-"));
-  cpSync(
-    fileURLToPath(new URL("./fixtures/scenarios/announce.feature", import.meta.url)),
-    join(dir, "announce.feature"),
-  );
-});
-afterAll(() => rmSync(dir, { recursive: true, force: true }));
+// Needs Postgres (`pnpm db:up`). A root of its own, with the announce scenarios in its
+// scenarios/ (the fixtures' review and sample features are for workflows defined in other tests).
+const root = mkdtempSync(join(tmpdir(), "sanoma-scenarios-"));
+const dir = join(root, "scenarios");
+mkdirSync(dir);
+cpSync(fileURLToPath(new URL("./fixtures/scenarios/announce.feature", import.meta.url)), join(dir, "announce.feature"));
+afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-const vendors = marketingFakes();
 const config: SanomaConfig = {
   workflows: [announce],
-  connectors: [ghost, resend, bluesky],
-  drivers: vendors.drivers,
-  fakes: [vendors.ghost, vendors.resend, vendors.bluesky],
-  get scenarios() {
-    return pathToFileURL(`${dir}/`);
-  },
+  connectors: marketingFakes().connectors,
   policy: allowAll,
   ledger: memoryLedger(),
-  appName: "workflows-scenarios",
+  root,
 };
 const databaseUrl = testDatabaseUrl("workflows_scenarios");
 
@@ -79,7 +66,7 @@ describe("runScenarios", () => {
   });
 
   it("passes and fails nothing for a config with no scenarios", async () => {
-    await expect(runScenarios({ ...config, scenarios: undefined }, { databaseUrl })).resolves.toEqual({
+    await expect(runScenarios({ ...config, root: join(root, "elsewhere") }, { databaseUrl })).resolves.toEqual({
       passed: [],
       failed: [],
     });

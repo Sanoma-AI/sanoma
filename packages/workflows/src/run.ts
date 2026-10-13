@@ -26,12 +26,8 @@ export interface WorkerState {
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id, each guarded by its driver's `env` (`indexDrivers` in config.ts). */
   drivers: Map<string, DriverFn>;
-  /**
-   * The config's fake vendors, by vendor id, and their functions by operation id: the templates a
-   * sandbox run copies (`Fake.fresh`) when it is seeded. No run calls them.
-   */
-  fakes: Map<string, Fake<any, any>>;
-  fakeDrivers: Map<string, DriverFn>;
+  /** The makers of the config's fake vendors, by vendor id: a sandbox run makes its own of each when it is seeded. */
+  fakes: Map<string, () => Fake<any, any>>;
   /** Where sandbox runs' scenarios are, and the resource types their steps may name. */
   scenarios?: URL;
   types: ReadonlyMap<string, Resource>;

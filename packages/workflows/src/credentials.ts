@@ -65,7 +65,10 @@ const RETRY_MAX_MS = 30_000;
  * warns of a reloaded value its schema refuses. A listener that drops reconnects, waiting longer
  * after each failure, up to 30 s, until it is closed. With no such variable, it connects to nothing.
  */
-export async function watchCredentials(databaseUrl: string, drivers: readonly Driver[]): Promise<CredentialsWatch> {
+export async function watchCredentials(
+  databaseUrl: string,
+  drivers: ReadonlyMap<string, Driver>,
+): Promise<CredentialsWatch> {
   const vendors = new Map<string, string>();
   for (const [vendor, list] of credentialsOf(drivers, () => undefined)) {
     for (const { name } of list) if (!process.env[name] && !vendors.has(name)) vendors.set(name, vendor);

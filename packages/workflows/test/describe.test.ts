@@ -7,9 +7,7 @@ import { resend } from "@sanoma/connector-resend";
 import blueskyPkg from "../../../connectors/bluesky/package.json" with { type: "json" };
 import ghostPkg from "../../../connectors/ghost/package.json" with { type: "json" };
 import resendPkg from "../../../connectors/resend/package.json" with { type: "json" };
-import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
-import { fakeGhost } from "@sanoma/connector-ghost/fake";
-import { fakeResend } from "@sanoma/connector-resend/fake";
+import { withFake } from "@sanoma/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
@@ -22,15 +20,15 @@ import {
   memoryLedger,
 } from "../src/index.ts";
 import { describeConfig, outlineWorkflow } from "../src/describe.ts";
+import { defineFake } from "../src/fake.ts";
 import { VENDOR } from "../src/op.ts";
 import { problemLine } from "../src/shared.ts";
 import announce from "./fixtures/announce.ts";
-import { marketingFakes } from "./harness.ts";
 
+// On the connectors as their packages export them, with their own drivers and fakes.
 const base = defineConfig({
   workflows: [announce],
   connectors: [ghost, resend, bluesky],
-  drivers: marketingFakes().drivers,
   policy: allowAll,
   ledger: memoryLedger(),
 });
@@ -107,8 +105,7 @@ describe("describeConfig", () => {
         },
       },
     });
-    const drivers = [{ vendor: "counter", ops: { "tally.add": async () => ({ total: 1 }) } }];
-    const { ops } = describeConfig({ ...base, workflows: [], connectors: [counter], drivers });
+    const { ops } = describeConfig({ ...base, workflows: [], connectors: [counter] });
     const [add] = ops;
     // A default makes an input field optional to send, and an output field always there.
     expect(add?.input).not.toHaveProperty("required");
@@ -119,11 +116,11 @@ describe("describeConfig", () => {
     const counter = defineConnector("counter", {
       tally: { add: { effect: "write", input: z.object({}), output: z.object({}) } },
     });
-    const drivers = [...base.drivers, { vendor: "counter", ops: { "tally.add": async () => ({}) } }];
-    const { vendors } = describeConfig({ ...base, connectors: [ghost, resend, bluesky, counter], drivers });
+    const { vendors } = describeConfig({ ...base, connectors: [ghost, resend, bluesky, counter] });
     expect(Object.keys(vendors).toSorted()).toEqual(["bluesky", "counter", "ghost", "resend"]);
+    // counter's connector attaches no fake; the packages' connectors do.
     expect(vendors.counter).toEqual({ title: "counter", fake: false });
-    expect(describeConfig({ ...base, fakes: [fakeGhost()] }).vendors.ghost?.fake).toBe(true);
+    expect(vendors.ghost?.fake).toBe(true);
     expect(vendors.resend).toMatchObject({
       title: "Resend",
       package: "@sanoma/connector-resend",
@@ -181,14 +178,11 @@ describe("describeConfig", () => {
   it("says whether a policy other than allowAll is configured, and its version, and names the app and version", () => {
     const plain = describeConfig(base);
     expect(plain.policy).toEqual({ defined: false });
+    // No package.json in the directory of this file, which defined the config: the app is "sanoma".
     expect(plain.appName).toBe("sanoma");
     expect(plain.version).toMatch(/^sanoma@[0-9a-f]{64}$/);
-    const gated = defineConfig({ ...base, appName: "acme", policy: definePolicy(() => allow()) });
-    expect(describeConfig(gated)).toMatchObject({
-      appName: "acme",
-      version: expect.stringMatching(/^acme@/),
-      policy: { defined: true },
-    });
+    const gated = defineConfig({ ...base, policy: definePolicy(() => allow()) });
+    expect(describeConfig(gated).policy).toEqual({ defined: true });
     const versioned = definePolicy(() => allow(), { version: "2026-10-07" });
     expect(versioned.version).toBe("2026-10-07");
     expect(describeConfig({ ...base, policy: versioned }).policy).toEqual({
@@ -199,7 +193,7 @@ describe("describeConfig", () => {
   });
 
   it("is plain JSON: it round-trips through JSON.stringify unchanged", () => {
-    for (const config of [base, { ...base, fakes: [fakeGhost(), fakeResend(), fakeBluesky()] }]) {
+    for (const config of [base, { ...base, workflows: [], connectors: [defineConnector("bare", {})] }]) {
       const c = describeConfig(config);
       expect(JSON.parse(JSON.stringify(c))).toEqual(c);
     }
@@ -216,11 +210,11 @@ describe("describeConfig", () => {
       uses: [odd.thing.get],
       run: async () => {},
     });
-    const drivers = [{ vendor: "odd", ops: { "thing.get": async () => new Map() } }];
+    const fake = defineFake(odd, { initial: () => ({}), ops: () => ({ thing: { get: async () => new Map() } }) });
     // `unrepresentable: "any"` keeps custom types as {}; only a schema that throws is reported.
     expect(() =>
       describeConfig(
-        defineConfig({ workflows: [wf], connectors: [odd], drivers, policy: allowAll, ledger: memoryLedger() }),
+        defineConfig({ workflows: [wf], connectors: [withFake(odd, fake)], policy: allowAll, ledger: memoryLedger() }),
       ),
     ).not.toThrow();
   });
@@ -229,8 +223,7 @@ describe("describeConfig", () => {
     // zod refuses two schemas with one id in a single conversion, whatever `unrepresentable` says.
     const twice = z.object({ a: z.string().meta({ id: "twice" }), b: z.number().meta({ id: "twice" }) });
     const clash = defineConnector("clash", { thing: { get: { effect: "read", input: z.object({}), output: twice } } });
-    const drivers = [{ vendor: "clash", ops: { "thing.get": async () => ({ a: "", b: 0 }) } }];
-    expect(() => describeConfig({ ...base, workflows: [], connectors: [clash], drivers })).toThrow(
+    expect(() => describeConfig({ ...base, workflows: [], connectors: [clash] })).toThrow(
       /^Cannot describe clash\.thing\.get output as JSON Schema: Duplicate schema id "twice"/,
     );
   });

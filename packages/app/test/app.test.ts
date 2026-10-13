@@ -4,13 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { bluesky } from "@sanoma/connector-bluesky";
-import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
-import { ghost } from "@sanoma/connector-ghost";
-import { fakeGhost } from "@sanoma/connector-ghost/fake";
-import { github } from "@sanoma/connector-github";
 import { resend } from "@sanoma/connector-resend";
-import { fakeResend } from "@sanoma/connector-resend/fake";
-import { stripe } from "@sanoma/connector-stripe";
 import { ensureBuilt, testDatabaseUrl, waitFor } from "@sanoma/testing";
 import {
   allow,
@@ -27,11 +21,13 @@ import {
   type RunSummary,
   startWorker,
   type Worker,
+  withSetup,
 } from "@sanoma/workflows";
 import { type ConfigDescription, describeConfig, outlineWorkflow } from "@sanoma/workflows/describe";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
 import { companyFakes } from "../../workflows/test/fixtures/company/fakes.ts";
+import { marketingFakes } from "../../workflows/test/harness.ts";
 import { z } from "zod";
 import { type App, type ErrorResponse, type RunDetail, startApp } from "../src/index.ts";
 import { ApiError, type CredentialsResponse, type ScenariosResponse, type StartRunResponse } from "../src/api.ts";
@@ -61,31 +57,33 @@ const policy = definePolicy(
   { version: "test-1" },
 );
 
-/** A copy of the fixtures' feature files, which a test breaks to see the app say so. */
-const scenariosDir = mkdtempSync(join(tmpdir(), "sanoma-app-scenarios-"));
-cpSync(fileURLToPath(new URL("./fixtures/scenarios/", import.meta.url)), scenariosDir, { recursive: true });
-const featureFile = join(scenariosDir, "announce.feature");
-
-const blog = fakeGhost();
+// The marketing vendors: live runs call these fakes.
+const vendors = marketingFakes();
+const blog = vendors.ghost;
 // The workflows' company fixture: its data files, and GitHub and Stripe holding them as declared.
 const company = companyFakes();
 const companyDir = fileURLToPath(new URL("../../workflows/test/fixtures/company/", import.meta.url));
-/** A vendor with a workflow operation and no fake in `fakes`, so its connector page says so. */
+/**
+ * The app's root, with no package.json (so the app is "sanoma"): its scenarios/ is a copy of the
+ * fixtures' feature files (which a test breaks to see the app say so), its resources/ the company's.
+ */
+const appRoot = mkdtempSync(join(tmpdir(), "sanoma-app-"));
+const scenariosDir = join(appRoot, "scenarios");
+cpSync(fileURLToPath(new URL("./fixtures/scenarios/", import.meta.url)), scenariosDir, { recursive: true });
+cpSync(join(companyDir, "resources"), join(appRoot, "resources"), { recursive: true });
+const featureFile = join(scenariosDir, "announce.feature");
+/** A vendor with a workflow operation and no setup, so no fake: its connector page says so. */
 const chat = defineConnector("chat", {
   message: { send: { effect: "send", input: z.object({ text: z.string() }), output: z.object({}) } },
 });
+// Live runs call these fakes; each sandbox run fakes of its own, seeded from the scenarios.
 const config = defineConfig({
   workflows: [announce],
-  connectors: [ghost, resend, bluesky, github, stripe, chat],
-  drivers: [blog.driver, fakeResend().driver, fakeBluesky().driver, ...company.drivers],
-  // Sandbox runs call these, seeded from the scenarios, never the drivers above.
-  fakes: [fakeGhost(), fakeResend(), fakeBluesky()],
-  scenarios: pathToFileURL(`${scenariosDir}/`),
+  connectors: [...vendors.connectors, ...company.connectors, chat],
   policy,
   ledger: memoryLedger(),
-  appName: "sanoma-app-test",
   databaseUrl: testDatabaseUrl("app"),
-  root: companyDir,
+  root: appRoot,
 });
 
 let worker: Worker;
@@ -105,7 +103,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await app?.close();
   await worker?.stop();
-  rmSync(scenariosDir, { recursive: true, force: true });
+  rmSync(appRoot, { recursive: true, force: true });
 });
 
 interface CallInit {
@@ -195,8 +193,8 @@ describe("the API", () => {
   it("describes the config: workflows, ops, built-ins, the policy and the version", async () => {
     const { status, body } = await call<ConfigDescription>("/api/config");
     expect(status).toBe(200);
-    expect(body.appName).toBe("sanoma-app-test");
-    expect(body.version).toMatch(/^sanoma-app-test@/);
+    expect(body.appName).toBe("sanoma");
+    expect(body.version).toMatch(/^sanoma@/);
     expect(body.policy).toEqual({ defined: true, version: "test-1" });
     const wf = body.workflows.find((w) => w.name === "announce");
     expect(wf?.ops).toHaveLength(5);
@@ -211,8 +209,8 @@ describe("the API", () => {
     expect(readFileSync(announce.file!, "utf8")).toContain(line);
     expect(JSON.stringify(body)).not.toContain(line);
     expect(body.ops.find((o) => o.id === "resend.broadcast.send")?.effect).toBe("send");
-    // Whether each vendor has a fake in `fakes`: Ghost does, GitHub does not.
-    expect(body.vendors).toMatchObject({ ghost: { fake: true }, github: { fake: false } });
+    // Whether each vendor's connector attaches a fake: Ghost's and GitHub's do, chat's does not.
+    expect(body.vendors).toMatchObject({ ghost: { fake: true }, github: { fake: true }, chat: { fake: false } });
     expect(body.vendors.resend).toMatchObject({ title: "Resend", logo: { src: expect.stringMatching(/^data:/) } });
     // The data files under the config's root, without problems, passed through as they are.
     expect(body.resources.map((r) => r.id)).toEqual(company.declared.map((r) => r.id));
@@ -795,7 +793,7 @@ describe("the page", () => {
     expect(blogPage.html).toContain('href="https://www.npmjs.com/package/@sanoma/connector-ghost"');
     expect(blogPage.html).toContain("<code>ghost.post.create</code>");
     expect(blogPage.text).toContain("<code>Given a post titled {title} exists</code>");
-    expect(blogPage.text).not.toContain("No fake in this config.");
+    expect(blogPage.text).not.toContain("Its connector attaches no fake.");
     // The scenario that names the operation, linking to its workflow's page in Sandbox mode with it chosen.
     expect(blogPage.html).toContain('href="/workflows/announce?scenario=Launch+on+time"');
     // What each scenario does with an operation: create is seeded and expected; publish fails
@@ -806,12 +804,12 @@ describe("the page", () => {
     // A vendor with resource operations only has nothing to fake: no notice that it has no fake.
     // Its resource types are named.
     const githubPage = await page("/connectors/github");
-    expect(githubPage.text).not.toContain("No fake in this config.");
+    expect(githubPage.text).not.toContain("Its connector attaches no fake.");
     expect(githubPage.html).toMatch(/Resources: <\/span>Branch protection rule, Repository, Team membership</);
 
-    // One with workflow operations and no fake in `fakes` says so, once.
+    // One with workflow operations whose connector attaches no fake says so, once.
     const chatPage = await page("/connectors/chat");
-    expect(chatPage.text.match(/No fake in this config\./g)).toHaveLength(1);
+    expect(chatPage.text.match(/Its connector attaches no fake\./g)).toHaveLength(1);
 
     const missing = await page("/connectors/nope");
     expect(missing.status).toBe(404);
@@ -1215,6 +1213,7 @@ describe("an app configured otherwise", () => {
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), "sanoma-app-ledger-"));
     mkdirSync(join(dir, "resources"));
+    // The same app ("sanoma", as no package.json names it), on its own root: its data files are these.
     const GH = `import { github } from "@sanoma/connector-github/resources";\n`;
     writeFileSync(join(dir, "resources", "good.ts"), `${GH}export const web = github.repository({ name: "web" });\n`);
     writeFileSync(join(dir, "resources", "bad.ts"), `${GH}export const docs = github.repository({ name: 1 });\n`);
@@ -1417,9 +1416,12 @@ describe("an app whose drivers declare environment variables", () => {
   beforeAll(async () => {
     vi.stubEnv(URL_VAR, SITE);
     vi.stubEnv(KEY_VAR, undefined);
-    // The ghost driver, with an env: startApp does not refuse what startWorker would.
-    const drivers = config.drivers.map((d) => (d.vendor === "ghost" ? { ...d, env } : d));
-    declaring = await startApp({ ...config, drivers }, { port: 0 });
+    // The ghost driver (the first connector's), with an env: startApp does not refuse what startWorker would.
+    const connectors = [
+      withSetup(config.connectors[0]!, { driver: () => ({ ...blog.driver, env }) }),
+      ...config.connectors.slice(1),
+    ];
+    declaring = await startApp({ ...config, connectors }, { port: 0 });
     // The table outlives a run of the tests.
     await change("DELETE", { name: KEY_VAR });
     await change("DELETE", { name: URL_VAR });

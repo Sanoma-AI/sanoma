@@ -31,13 +31,15 @@ The logo the app shows beside these operations is Ghost's glyph from [simple-ico
 
 ## Driver
 
-`@sanoma/connector-ghost/driver` calls the [Ghost Admin API](https://docs.ghost.org/admin-api/). Pass it to the worker from your config (workflows never import it; the lint refuses that):
+`@sanoma/connector-ghost/driver` calls the [Ghost Admin API](https://docs.ghost.org/admin-api/). The `ghost` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `@sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
 
 ```ts
-import { ghostDriver } from "@sanoma/connector-ghost/driver";
+import { ghost } from "@sanoma/connector-ghost";
 
-export default defineConfig({ connectors: [ghost], drivers: [ghostDriver()] /* , ... */ });
+export default defineConfig({ workflows, connectors: [ghost], policy });
 ```
+
+`./driver` (`ghostDriver`; `ghostDriver({ timeoutMs })`) and `./fake` (`fakeGhost`) are internal entries, for tests.
 
 - `post.create` posts the HTML with `?source=html`, which Ghost converts to its editor format (lossy; see [Creating a post](https://docs.ghost.org/admin-api/posts/creating-a-post)). A draft's `url` is its preview link; it becomes the public URL when published.
 - `post.publish` reads the post, then saves it with `status: "published"` and the `updated_at` it read, which Ghost requires to refuse a save over someone else's. If someone saved the post in between (`UPDATE_COLLISION`), it reads the post again and tries once more. Publishing sends no newsletter email: Ghost emails a post only when a `newsletter` is named.
@@ -77,14 +79,18 @@ A recording keeps only the fields the driver reads (no authors or emails), puts 
 
 ## Testing
 
-`@sanoma/connector-ghost/fake` is an in-memory Ghost: pass its driver to the worker, then check `state.posts` and `calls`.
+`@sanoma/connector-ghost/fake` is an in-memory Ghost, the fake the connector carries: each sandbox run makes one of its own. A test that reads or seeds one attaches it to the connector itself, then checks `state.posts` and `calls`.
 
 ```ts
+import { withSetup } from "@sanoma/workflows";
 import { ghost } from "@sanoma/connector-ghost";
 import { fakeGhost } from "@sanoma/connector-ghost/fake";
 
-const fake = fakeGhost(); // or fakeGhost({ file: ".sanoma/ghost.json" }) to keep the state on disk
-const worker = await startWorker({ connectors: [ghost], drivers: [fake.driver] /* , ... */ });
+const fake = fakeGhost();
+const worker = await startWorker({
+  connectors: [withSetup(ghost, { driver: () => fake.driver, fake: () => fake })],
+  /* ... */
+});
 
 // ...run a workflow, then:
 Object.values(fake.state.posts).map((p) => p.status); // ["published"]

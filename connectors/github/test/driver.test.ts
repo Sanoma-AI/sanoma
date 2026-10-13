@@ -191,20 +191,19 @@ describe("fakeGithub", () => {
     expect(bare).toMatchObject({ gone: false, state: { id: "fresh-start", description: "New", full_name: null } });
   });
 
-  it("gives a fresh copy that holds resources of its own, as a sandbox run's does", async () => {
-    const fake = fakeGithub();
-    const copy = fake.fresh();
+  it("makes a fake that holds resources of its own each time, as each sandbox run's does", async () => {
+    const [fake, copy] = [fakeGithub(), fakeGithub()];
     copy.remove("repository", "sanoma");
     copy.put("repository", "docs", { description: "Docs" });
     expect(await call(copy.driver, "repository.import", { id: "sanoma" })).toEqual({ id: "sanoma", gone: true });
     expect(await call(copy.driver, "repository.import", { id: "docs" })).toMatchObject({
       state: { description: "Docs" },
     });
-    // The original has what was recorded, and none of the copy's calls.
+    // The other has what was recorded, and none of this one's calls.
     expect(await call(fake.driver, "repository.import", { id: "sanoma" })).toMatchObject({ gone: false });
     expect(await call(fake.driver, "repository.import", { id: "docs" })).toEqual({ id: "docs", gone: true });
     expect(fake.calls).toHaveLength(2);
-    // `missingReply` carried over: a rule removed through the copy answers an import as the provider does.
+    // `missingReply` is the package's: a rule removed answers an import as the provider does.
     copy.put("branch_protection", "sanoma:main", { repository_id: "R_sanoma", pattern: "main" });
     copy.remove("branch_protection", "sanoma:main");
     expect(copy.state.objects["github_branch_protection/sanoma:main"]).toMatchObject({

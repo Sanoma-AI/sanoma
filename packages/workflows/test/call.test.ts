@@ -1,14 +1,12 @@
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
-import { resend } from "@sanoma/connector-resend";
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { testDatabaseUrl } from "@sanoma/testing";
+import { withFake } from "@sanoma/testing";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   allow,
   defineConnector,
-  defineDriver,
   definePolicy,
   defineWorkflow,
   deny,
@@ -20,13 +18,14 @@ import {
   type PolicyCall,
   policyOpOf,
   SanomaError,
+  withSetup,
 } from "../src/index.ts";
+import { defineFake } from "../src/fake.ts";
 import announce from "./fixtures/announce.ts";
 import fanout, { fakeStats, stats } from "./fixtures/fanout.ts";
 import { failure, inSeconds, pending, types, useApp, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`.
-const databaseUrl = testDatabaseUrl("call");
 const alice = { id: "alice" };
 const groups = (records: LedgerRecord[]) => records.map((r) => r.group);
 
@@ -94,8 +93,11 @@ const tags = defineConnector("tags", {
     },
   },
 });
-const notesDriver = defineDriver(notes, { note: { update: async ({ id }) => ({ id }) } });
-const tagsDriver = defineDriver(tags, { tag: { add: async ({ id }) => ({ id }) } });
+const notesFake = defineFake(notes, {
+  initial: () => ({}),
+  ops: () => ({ note: { update: async ({ id }) => ({ id }) } }),
+});
+const tagsFake = defineFake(tags, { initial: () => ({}), ops: () => ({ tag: { add: async ({ id }) => ({ id }) } }) });
 const tag = defineWorkflow({
   name: "tag",
   trigger: "manual",
@@ -112,7 +114,7 @@ const edit = defineWorkflow({
 });
 
 describe("a call that fails", () => {
-  const app = useApp(databaseUrl, "call-driver", () => ({ workflows: [post, publish, sloppy] }));
+  const app = useApp("call-driver", () => ({ workflows: [post, publish, sloppy] }));
   const c = () => app.client;
 
   it("fails the run with invalid_input, naming the operation, when the input fails its schema", async () => {
@@ -276,7 +278,7 @@ describe("a call the ledger cannot record", () => {
       await kept.append(record);
     },
   };
-  const app = useApp(databaseUrl, "call-unrecorded", () => ({ workflows: [post, repost], ledger: full }));
+  const app = useApp("call-unrecorded", () => ({ workflows: [post, repost], ledger: full }));
   const c = () => app.client;
 
   it("fails the run saying the call succeeded unrecorded, and makes no further call", async () => {
@@ -297,21 +299,22 @@ describe("a worker stopping while a call fails for good", () => {
   // bluesky.post.create waits until released, then the vendor refuses it for good.
   const entered = Promise.withResolvers<void>();
   const released = Promise.withResolvers<void>();
-  const app = useApp(databaseUrl, "call-stopping", (vendors) => ({
+  const app = useApp("call-stopping", (vendors) => ({
     workflows: [post],
-    drivers: [
-      vendors.ghost.driver,
-      vendors.resend.driver,
-      {
-        vendor: "bluesky",
-        ops: {
-          "post.create": async () => {
-            entered.resolve();
-            await released.promise;
-            throw new DriverError("bluesky: the post is too long", { retryable: false, status: 400 });
+    connectors: [
+      ...vendors.connectors.slice(0, 2),
+      withSetup(vendors.connectors[2]!, {
+        driver: () => ({
+          vendor: "bluesky",
+          ops: {
+            "post.create": async () => {
+              entered.resolve();
+              await released.promise;
+              throw new DriverError("bluesky: the post is too long", { retryable: false, status: 400 });
+            },
           },
-        },
-      },
+        }),
+      }),
     ],
   }));
   const c = () => app.client;
@@ -343,7 +346,7 @@ describe("a worker stopping while a call fails for good", () => {
 });
 
 describe("a worker restarted mid-run", () => {
-  const app = useApp(databaseUrl, "call-restart", () => ({ workflows: [announce, post] }));
+  const app = useApp("call-restart", () => ({ workflows: [announce, post] }));
   const c = () => app.client;
 
   it("does not repeat a call the stopped worker was making: the recovered call reuses its idempotency key", async () => {
@@ -399,7 +402,7 @@ describe("a worker restarted mid-run", () => {
 });
 
 describe("ctx.sleep", () => {
-  const app = useApp(databaseUrl, "call-sleep", () => ({ workflows: [nap] }));
+  const app = useApp("call-sleep", () => ({ workflows: [nap] }));
   const c = () => app.client;
   const steps = async (runId: string) => ((await app.raw.listWorkflowSteps(runId)) ?? []).map((s) => s.name);
 
@@ -488,10 +491,9 @@ describe("the call a policy sees", () => {
     },
     { version: "notes-1" },
   );
-  const app = useApp(databaseUrl, "call-policy", (vendors) => ({
+  const app = useApp("call-policy", (vendors) => ({
     workflows: [edit, post, tag],
-    connectors: [ghost, resend, bluesky, notes, tags],
-    drivers: [...vendors.drivers, notesDriver, tagsDriver],
+    connectors: [...vendors.connectors, withFake(notes, notesFake), withFake(tags, tagsFake)],
     policy,
     ledger: memoryLedger(),
   }));
@@ -643,16 +645,9 @@ describe("ctx.all", () => {
     },
   });
 
-  const app = useApp(
-    databaseUrl,
-    "call-all",
-    (vendors) => ({
-      workflows: [fanout, signed, broken, odd, loose],
-      connectors: [ghost, resend, bluesky, stats],
-      drivers: vendors.drivers,
-    }),
-    { extra: [fakeStats] },
-  );
+  const app = useApp("call-all", () => ({ workflows: [fanout, signed, broken, odd, loose] }), {
+    extra: [[stats, fakeStats]],
+  });
   const c = () => app.client;
   const posted = () => app.vendors.bluesky.state.posts.map((p) => p.text);
 
@@ -855,7 +850,7 @@ describe("a call queued behind a refused one", () => {
     run: async (ctx, { id }) => Promise.all([ctx.ghost.post.publish({ id }), kept(ctx.sleep({ ms: 50 }))]),
   });
   const policy = definePolicy(({ op }) => (op.id === "ghost.post.publish" ? deny("not today") : allow()));
-  const app = useApp(databaseUrl, "call-ended", () => ({ workflows: [both, asking, napping], policy }));
+  const app = useApp("call-ended", () => ({ workflows: [both, asking, napping], policy }));
   const c = () => app.client;
   const steps = async (runId: string) => ((await app.raw.listWorkflowSteps(runId)) ?? []).map((s) => s.name);
 
@@ -914,7 +909,7 @@ describe("a ledger store that fails for a while", () => {
       await store.append(record);
     },
   };
-  const app = useApp(databaseUrl, "call-ledger", () => ({ workflows: [publish], ledger: flaky }));
+  const app = useApp("call-ledger", () => ({ workflows: [publish], ledger: flaky }));
   const c = () => app.client;
 
   it("does not fail the run, and keeps one record per id", async () => {

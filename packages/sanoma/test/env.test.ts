@@ -1,7 +1,16 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { allowAll, type Driver, memoryLedger, type SanomaConfig } from "@sanoma/workflows";
+import {
+  allowAll,
+  type Connector,
+  defineConnector,
+  type Driver,
+  memoryLedger,
+  resolveConfig,
+  type SanomaConfig,
+  withSetup,
+} from "@sanoma/workflows";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { renderEnvExample, writeEnvExample } from "../src/env.ts";
@@ -16,13 +25,19 @@ const shop: Driver = {
 };
 const mail: Driver = { vendor: "mail", ops: {}, env: z.object({ MAIL_TOKEN: z.string().min(1) }) };
 
+/** A connector of `driver`'s vendor, with no operations, carrying `driver` and no fake. */
+const carrying = (driver: Driver): Connector<any, any> =>
+  withSetup(defineConnector(driver.vendor, {}), { driver: () => driver });
+
 const config: SanomaConfig = {
   workflows: [],
-  connectors: [],
-  drivers: [shop, mail],
+  connectors: [carrying(shop), carrying(mail)],
   policy: allowAll,
   ledger: memoryLedger(),
 };
+
+/** The config as the bin loads it, in `root`. */
+const loaded = (cfg: SanomaConfig, root = "") => ({ config: cfg, root, resolved: resolveConfig(cfg) });
 
 const expected = `# Copy to .env (ignored by git; \`sanoma\` loads it before reading the config). Never commit values.
 # The first block is what sanoma needs before anything runs. The vendor variables below it can
@@ -45,12 +60,12 @@ MAIL_TOKEN=
 `;
 
 describe("renderEnvExample", () => {
-  it("lists sanoma's variables, then each vendor's in the drivers' order, optional ones commented out", () => {
-    expect(renderEnvExample(config)).toBe(expected);
+  it("lists sanoma's variables, then each vendor's in the connectors' order, optional ones commented out", () => {
+    expect(renderEnvExample(loaded(config))).toBe(expected);
   });
 
   it("names the config's own database URL as the default when it has one", () => {
-    expect(renderEnvExample({ ...config, databaseUrl: "postgresql://me@db.internal/ops" })).toContain(
+    expect(renderEnvExample(loaded({ ...config, databaseUrl: "postgresql://me@db.internal/ops" }))).toContain(
       "default postgresql://me@db.internal/ops.",
     );
   });
@@ -62,13 +77,13 @@ describe("writeEnvExample", () => {
 
   it("writes the file, says when it would change, and leaves it alone with check", () => {
     dir = mkdtempSync(join(tmpdir(), "sanoma-env-"));
-    expect(writeEnvExample(dir, config, { check: true })).toEqual({ changed: true });
-    expect(writeEnvExample(dir, config, { check: false })).toEqual({ changed: true });
+    expect(writeEnvExample(loaded(config, dir), { check: true })).toEqual({ changed: true });
+    expect(writeEnvExample(loaded(config, dir), { check: false })).toEqual({ changed: true });
     expect(readFileSync(join(dir, ".env.example"), "utf8")).toBe(expected);
-    expect(writeEnvExample(dir, config, { check: true })).toEqual({ changed: false });
-    expect(writeEnvExample(dir, config, { check: false })).toEqual({ changed: false });
+    expect(writeEnvExample(loaded(config, dir), { check: true })).toEqual({ changed: false });
+    expect(writeEnvExample(loaded(config, dir), { check: false })).toEqual({ changed: false });
     writeFileSync(join(dir, ".env.example"), "stale\n");
-    expect(writeEnvExample(dir, config, { check: true })).toEqual({ changed: true });
+    expect(writeEnvExample(loaded(config, dir), { check: true })).toEqual({ changed: true });
     expect(readFileSync(join(dir, ".env.example"), "utf8")).toBe("stale\n");
   });
 });

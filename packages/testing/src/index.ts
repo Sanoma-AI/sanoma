@@ -1,4 +1,13 @@
-import { memoryLedger, type SanomaConfig, startWorker, type Worker, type WorkerOptions } from "@sanoma/workflows";
+import {
+  type Connector,
+  memoryLedger,
+  type SanomaConfig,
+  startWorker,
+  type Worker,
+  type WorkerOptions,
+  withSetup,
+} from "@sanoma/workflows";
+import type { Fake } from "@sanoma/workflows/fake";
 
 export type { Fake, FakeCall, FakeOptions } from "@sanoma/workflows/fake";
 export { ensureBuilt, waitFor } from "./build.ts";
@@ -16,30 +25,31 @@ export function testDatabaseUrl(suffix: string): string {
   return url.toString();
 }
 
-/** `startWorker`'s options, and the database to use instead of the test file's own. */
+/**
+ * `connector` set up with this fake instead of the one its package attaches, for a test that
+ * seeds or reads the fake its runs call: live runs call its driver, and sandbox runs call it too,
+ * since its maker gives this very one. A driver swap alone is `withSetup(connector, { driver })`,
+ * which keeps the package's fake, so each sandbox run has one of its own. The operations are the
+ * same.
+ */
+export function withFake<C extends Connector<any, any>>(connector: C, fake: Fake<any, any>): C {
+  return withSetup(connector, { driver: () => fake.driver, fake: () => fake });
+}
+
+/** `startWorker`'s options, and the database the test runs on. */
 export interface TestWorkerOptions extends WorkerOptions {
-  /** Defaults to `testDatabaseUrl(appName)`. */
-  databaseUrl?: string;
+  /** The test's own database, such as `testDatabaseUrl("announce")`: one per test file, or per `describe` that starts a worker. */
+  databaseUrl: string;
 }
 
 /**
- * Starts a worker for a test. `appName` is required and names the file's database. The worker
- * runs on `options.databaseUrl`, else `testDatabaseUrl(appName)`, never on a `databaseUrl` the
- * config carries: a test that spreads the project's config must not reach its real database.
- * `ledger` defaults to a fresh in-memory ledger. Everything else in `config`, and `options`
- * (`promote`, `logLevel`), go to `startWorker` as given. Stop the worker in `afterAll`.
+ * Starts a worker for a test, on `options.databaseUrl`, never on a `databaseUrl` the config
+ * carries: a test that spreads the project's config must not reach its real database. Tests are
+ * kept apart by database, not by app name, so the app keeps its name (its root's
+ * `package.json`'s). `ledger` defaults to a fresh in-memory ledger. Everything else in `config`,
+ * and the other options (`promote`, `logLevel`), go to `startWorker` as given. Stop the worker
+ * in `afterAll`.
  */
-export function startTestWorker(
-  config: Omit<SanomaConfig, "ledger" | "appName"> & { ledger?: SanomaConfig["ledger"]; appName: string },
-  options: TestWorkerOptions = {},
-): Promise<Worker> {
-  const { databaseUrl, ...workerOptions } = options;
-  return startWorker(
-    {
-      ...config,
-      databaseUrl: databaseUrl ?? testDatabaseUrl(config.appName),
-      ledger: config.ledger ?? memoryLedger(),
-    },
-    workerOptions,
-  );
+export function startTestWorker(config: SanomaConfig, { databaseUrl, ...options }: TestWorkerOptions): Promise<Worker> {
+  return startWorker({ ...config, databaseUrl, ledger: config.ledger ?? memoryLedger() }, options);
 }

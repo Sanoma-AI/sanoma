@@ -14,11 +14,14 @@ import {
   defineDriver,
   defineWorkflow,
   type Ctx,
+  type Driver,
   errorCode,
   memoryLedger,
+  resolveConfig,
   SanomaClient,
   type SanomaConfig,
   startWorker,
+  withSetup,
 } from "../src/index.ts";
 import { credentialsOf } from "../src/env.ts";
 import { describeConfig } from "../src/describe.ts";
@@ -43,6 +46,8 @@ const env = z.object({
 const impl = { thing: { get: async ({ id }: { id: string }) => ({ id }) } };
 const acmeDriver = defineDriver(acme, impl, { env });
 const plain = defineDriver(acme, impl);
+/** acme, set up with `driver`. */
+const acmeOn = (driver: Driver) => withSetup(acme, { driver: () => driver });
 const getThing = defineWorkflow({
   name: "get-thing",
   trigger: "manual",
@@ -53,11 +58,9 @@ const getThing = defineWorkflow({
 const databaseUrl = testDatabaseUrl("credentials");
 const config: SanomaConfig = {
   workflows: [getThing],
-  connectors: [acme],
-  drivers: [acmeDriver],
+  connectors: [acmeOn(acmeDriver)],
   policy: allowAll,
   ledger: memoryLedger(),
-  appName: "credentials",
   databaseUrl,
 };
 /** Sets and clears the stored credentials, as the app does. */
@@ -76,7 +79,8 @@ beforeEach(async () => {
   for (const name of [URL_VAR, KEY_VAR, REGION_VAR]) await client.clearCredential(name, { by: "tester" });
 });
 /** acme's statuses as the worker checks them, against `process.env`. */
-const checked = (drivers = config.drivers) => credentialsOf(drivers, (name) => process.env[name]).get("acme");
+const checked = (cfg = config) =>
+  credentialsOf(resolveConfig(cfg).driversByVendor, (name) => process.env[name]).get("acme");
 const statuses = () => checked()?.map(({ name, status }) => [name, status]);
 
 /**
@@ -143,29 +147,12 @@ describe("a driver's env", () => {
     const throwing = defineDriver(acme, impl, {
       env: z.object({ [URL_VAR]: z.string().refine((v) => new URL(v).protocol === "https:") }),
     });
-    const throwingConfig = { ...config, drivers: [throwing] };
-    const credentials = checked(throwingConfig.drivers);
+    const throwingConfig = { ...config, connectors: [acmeOn(throwing)] };
+    const credentials = checked(throwingConfig);
     expect(credentials).toEqual([{ name: URL_VAR, optional: false, status: "invalid", problem: "its check threw" }]);
     const warning = await warnedAtStart(throwingConfig);
     expect(warning).toContain(`${URL_VAR} is invalid: its check threw`);
     expect(JSON.stringify([credentials, warning])).not.toContain(VALUE);
-  });
-
-  it("merges two drivers' declarations of one variable, keeping the worse status", async () => {
-    vi.stubEnv(URL_VAR, "https://acme.example.test");
-    vi.stubEnv(KEY_VAR, KEY);
-    const stricter = defineDriver(acme, impl, {
-      env: z.object({ [KEY_VAR]: z.string().regex(/^key_[0-9]+$/, "an API key, key_<digits>") }),
-    });
-    const twoDrivers = { ...config, drivers: [acmeDriver, stricter] };
-    expect(checked(twoDrivers.drivers)?.[1]).toEqual({
-      name: KEY_VAR,
-      description: "an API key",
-      optional: false,
-      status: "invalid",
-      problem: "an API key, key_<digits>",
-    });
-    expect(await warnedAtStart(twoDrivers)).toContain(`${KEY_VAR} is invalid: an API key, key_<digits>`);
   });
 });
 

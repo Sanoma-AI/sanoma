@@ -97,8 +97,8 @@ export interface StartOptions {
    */
   runId?: string;
   /**
-   * Start a sandbox run, seeded from the config's scenario of this name: it calls its own copies
-   * (`fresh()`) of the config's `fakes` instead of the drivers, and does not wait on sleeps.
+   * Start a sandbox run, seeded from the config's scenario of this name: it calls its own fakes,
+   * made for it by its connectors' makers, instead of the drivers, and does not wait on sleeps.
    * Sandbox runs go on the app's queue like any run, so several run at once.
    */
   sandbox?: string;
@@ -108,13 +108,13 @@ export interface StartOptions {
 export class SanomaClient {
   private readonly dbos: DBOSClient;
   private readonly config: ResolvedConfig;
-  private readonly drivers: readonly Driver[];
+  private readonly drivers: ReadonlyMap<string, Driver>;
   /** The config's own ledger store, or a Postgres one made for this client, which `close` then closes. */
   private readonly audit: OwnedLedger;
   /** On the config's database, for the credentials table: opened on first use. */
   private readonly credentialsPool: LazyPool;
 
-  private constructor(dbos: DBOSClient, config: ResolvedConfig, drivers: readonly Driver[]) {
+  private constructor(dbos: DBOSClient, config: ResolvedConfig, drivers: ReadonlyMap<string, Driver>) {
     this.dbos = dbos;
     this.config = config;
     this.drivers = drivers;
@@ -133,7 +133,7 @@ export class SanomaClient {
       systemDatabaseUrl: resolved.databaseUrl,
       applicationName: resolved.appName,
     });
-    return new SanomaClient(dbos, resolved, config.drivers);
+    return new SanomaClient(dbos, resolved, resolved.driversByVendor);
   }
 
   /**
@@ -168,7 +168,7 @@ export class SanomaClient {
     const sandbox = parseOrThrow(
       z.string().min(1).optional(),
       options.sandbox,
-      "`sandbox` must be the name of a scenario in the config's `scenarios`",
+      "`sandbox` must be the name of a scenario in the config's `scenarios/`",
     );
     const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }) };
     // An id DBOS has already returns that run, unless it is another workflow's, which DBOS refuses.

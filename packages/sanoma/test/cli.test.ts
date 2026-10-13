@@ -46,7 +46,7 @@ describe("sanoma env", () => {
     dir = copyFixture();
     const wrote = await runCli(dir, ["env"], env);
     expect(wrote.code, wrote.stderr).toBe(0);
-    // The fixture's one driver is the fake's, which declares no variables: the first block alone.
+    // The first block, then the variables of the fixture's one connector's driver, Ghost's.
     expect(readFileSync(join(dir, ".env.example"), "utf8"))
       .toBe(`# Copy to .env (ignored by git; \`sanoma\` loads it before reading the config). Never commit values.
 # The first block is what sanoma needs before anything runs. The vendor variables below it can
@@ -58,6 +58,11 @@ describe("sanoma env", () => {
 # SANOMA_DATABASE_URL=
 # Optional. The app's port; default 3000.
 # SANOMA_APP_PORT=
+
+# ghost: the site's admin URL, such as https://example.ghost.io
+GHOST_ADMIN_URL=
+# ghost: a custom integration's Admin API key, <id>:<secret>
+GHOST_ADMIN_API_KEY=
 `);
     appendFileSync(join(dir, ".env.example"), "EXTRA=\n");
     const stale = await runCli(dir, ["env", "--check"], env);
@@ -71,7 +76,7 @@ describe("sanoma check", () => {
     dir = copyFixture();
     const ok = await runCli(dir, ["check"], env);
     expect(ok.code, `${ok.stdout}${ok.stderr}`).toBe(0);
-    expect(ok.stdout).toBe("");
+    // The lines check prints, not all of stdout: on a fresh database DBOS logs "Created database …" there.
     expect(ok.stderr).toContain("passed hello/hello.feature › A post goes out");
     expect(ok.stderr.trimEnd().split("\n").at(-1)).toBe("ok");
   }, 180_000);

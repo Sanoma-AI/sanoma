@@ -34,7 +34,6 @@ const acme = defineConnector("acme", { widget }, { package: "@acme/sanoma-connec
 const base = {
   workflows: [],
   connectors: [github, stripe, acme],
-  drivers: [],
   policy: allowAll,
   ledger: memoryLedger(),
 } satisfies SanomaConfig;

@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { Fake } from "./fake.ts";
 
 /**
  * What an operation does to the outside world. It sets the badge a reviewer
@@ -95,12 +96,17 @@ export type Connector<V extends string, S extends Specs> = {
   };
 } & { readonly [VENDOR]: ConnectorVendor<V> };
 
-/** A connector's vendor: its id, who it is (`defineConnector`'s third argument, for a UI) and its resource types. */
+/**
+ * A connector's vendor: its id, who it is (`defineConnector`'s third argument, for a UI), its
+ * resource types, and the driver and fake its package attaches (`withSetup`).
+ */
 export interface ConnectorVendor<V extends string = string> {
   readonly id: V;
   readonly info?: VendorInfo;
   /** The resource types among its groups, in the order given. */
   readonly resources: readonly ResourceGroup[];
+  /** What `withSetup` attached: how the config's resolver makes its driver and its fake. */
+  readonly setup?: ConnectorSetup;
 }
 
 /**
@@ -269,6 +275,38 @@ export interface Driver {
   readonly ops: Readonly<Record<string, DriverFn>>;
   readonly env?: DriverEnv;
 }
+
+/**
+ * What a connector package attaches to its connector (`withSetup`), for the config's resolver
+ * to call: the config then names the connector alone, and never a driver or a fake. Either may
+ * be missing: a workflow using an operation of a connector with no driver is refused, and a
+ * connector with no fake has none for sandbox runs.
+ */
+export interface ConnectorSetup {
+  /** Makes the live driver, which reads its credentials from the environment when called: once per resolved config. */
+  driver?: () => Driver;
+  /** Makes a fake of the vendor (`defineFake`): once per sandbox run, its own. */
+  fake?: () => Fake<any, any>;
+}
+
+/**
+ * The connector with `setup` laid over what it already carries, as a connector package exports
+ * it: `export const ghost = withSetup(ghostOps, { driver: ghostDriver, fake: fakeGhost })`. A
+ * config that needs a driver made otherwise (another bridge, other options) swaps that one and
+ * keeps the fake: `withSetup(github, { driver: () => githubDriver({ bridge }) })`. The operations
+ * are the same objects, and the type is the connector's. The setup is kept on the connector's
+ * vendor record (`[VENDOR]`), so a spread copy of the connector keeps it.
+ */
+export function withSetup<C extends Connector<any, any>>(connector: C, setup: Partial<ConnectorSetup>): C {
+  const owner = connector[VENDOR];
+  return {
+    ...connector,
+    [VENDOR]: Object.freeze({ ...owner, setup: Object.freeze({ ...owner.setup, ...setup }) }),
+  };
+}
+
+/** What `withSetup` attached to a connector: nothing when it attached nothing. */
+export const setupOf = (connector: Connector<any, any>): ConnectorSetup => connector[VENDOR].setup ?? {};
 
 export function isOp(x: unknown): x is Op {
   return typeof x === "object" && x !== null && (x as Op).kind === "op";

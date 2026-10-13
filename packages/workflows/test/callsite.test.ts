@@ -1,6 +1,4 @@
 import { bluesky } from "@sanoma/connector-bluesky";
-import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
-import { testDatabaseUrl } from "@sanoma/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { outlineWorkflow } from "../src/describe.ts";
@@ -16,7 +14,6 @@ import {
 import { failure, useApp } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`.
-const databaseUrl = testDatabaseUrl("callsite");
 const alice = { id: "alice" };
 
 type Posting = Ctx<readonly [typeof bluesky.post.create]>;
@@ -97,7 +94,7 @@ const nodes = (records: LedgerRecord[]) =>
   );
 
 describe("where a ctx call is made", () => {
-  const app = useApp(databaseUrl, "callsite", () => ({ workflows: [loop, fan, tried, sneaky] }));
+  const app = useApp("callsite", () => ({ workflows: [loop, fan, tried, sneaky] }));
   const c = () => app.client;
 
   it("records each call's outline node, the same node for every pass of a loop", async () => {
@@ -155,11 +152,9 @@ describe("a workflow the outline cannot draw", () => {
     const config = {
       workflows: [helper],
       connectors: [bluesky],
-      drivers: [fakeBluesky().driver],
       policy: allowAll,
       ledger: memoryLedger(),
       databaseUrl: "postgresql://unused@localhost:1/unused",
-      appName: "callsite-refused",
     };
     await expect(startWorker(config)).rejects.toThrow(
       /^Workflow "helper" cannot be outlined, so its runs could not be held to its code: .*\/callsite\.test\.ts:\d+:\d+: ctx is only called, directly/,

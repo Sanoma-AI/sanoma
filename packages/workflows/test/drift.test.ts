@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bluesky } from "@sanoma/connector-bluesky";
-import { testDatabaseUrl } from "@sanoma/testing";
+import { testDatabaseUrl, withFake } from "@sanoma/testing";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { describeConfig } from "../src/describe.ts";
@@ -10,7 +10,6 @@ import {
   allow,
   allowAll,
   defineConnector,
-  defineDriver,
   definePolicy,
   defineResource,
   defineWorkflow,
@@ -24,9 +23,10 @@ import {
   resolveConfig,
   SanomaClient,
 } from "../src/index.ts";
+import { defineFake } from "../src/fake.ts";
 import { companyConfig, companyFakes, nodeIdOf } from "./fixtures/company/fakes.ts";
 import company from "./fixtures/company/sanoma.config.ts";
-import { marketingFakes, useApp } from "./harness.ts";
+import { useApp, withoutSetup } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. The company fixture's data files, checked against the GitHub
 // and Stripe fakes, which hold an object for each declared resource as the vendor would.
@@ -34,7 +34,7 @@ const databaseUrl = testDatabaseUrl("drift");
 const alice = { id: "alice" };
 
 const fakes = companyFakes();
-const { github, stripe, drivers, declared, seed } = fakes;
+const { github, stripe, declared, seed } = fakes;
 
 const policyCalls: PolicyCall[] = [];
 // Refuses Stripe products to "no-stripe", so one resource fails and the run goes on.
@@ -49,7 +49,7 @@ const byId = (report: DriftReport) => Object.fromEntries(report.resources.map((r
 const opCalls = (records: LedgerRecord[]) => records.filter((r) => r.type === "op.called");
 
 describe("the drift workflow", () => {
-  const app = useApp(databaseUrl, "drift", () => companyOnFakes);
+  const app = useApp("drift", () => companyOnFakes);
 
   beforeEach(() => {
     seed();
@@ -194,11 +194,15 @@ describe("a drift run's record of the data files", () => {
     find: ({ name }) => name,
   });
   const acme = defineConnector("acme", { hook }, { title: "Acme", package: "@acme/connector" });
-  const acmeDriver = defineDriver(acme, {
-    hook: {
-      import: async ({ id }) => ({ id, gone: false, state: { name: id, url: "https://example.com/moved" } }),
-      read: async ({ id }) => ({ id, gone: true }),
-    },
+  // Its fake, which live runs call: the hook moved.
+  const acmeFake = defineFake(acme, {
+    initial: () => ({}),
+    ops: () => ({
+      hook: {
+        import: async ({ id }) => ({ id, gone: false, state: { name: id, url: "https://example.com/moved" } }),
+        read: async ({ id }) => ({ id, gone: true }),
+      },
+    }),
   });
   const root = mkdtempSync(join(tmpdir(), "sanoma-drift-secret-"));
   mkdirSync(join(root, "resources"));
@@ -209,11 +213,9 @@ describe("a drift run's record of the data files", () => {
       `export const hook = acme.hook({ name: "deploys", url: "https://example.com/hook", token: "${secret}" });\n\n` +
       `export default [hook];\n`,
   );
-  const app = useApp(databaseUrl, "drift-secret", () => ({
+  const app = useApp("drift-secret", () => ({
     workflows: [],
-    connectors: [acme],
-    drivers: [acmeDriver],
-    fakes: [],
+    connectors: [withFake(acme, acmeFake)],
     root,
   }));
   afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -246,10 +248,8 @@ describe("SanomaClient's drift", () => {
     const marketing = await SanomaClient.connect({
       workflows: [],
       connectors: [bluesky],
-      drivers: marketingFakes().drivers.filter((d) => d.vendor === "bluesky"),
       policy: allowAll,
       ledger: memoryLedger(),
-      appName: "drift-none",
       databaseUrl,
     });
     try {
@@ -263,7 +263,9 @@ describe("SanomaClient's drift", () => {
 });
 
 describe("the built-in drift workflow in a config", () => {
-  const config = { ...company, drivers };
+  const config = { ...company, connectors: fakes.connectors };
+  // The company's connectors with nothing attached: no drivers.
+  const bare = { ...company, connectors: company.connectors.map(withoutSetup) };
 
   it("is added when the connectors declare resource types, using each type's import that has a driver", () => {
     expect([...resolveConfig(config).workflows.keys()]).toEqual([DRIFT_WORKFLOW]);
@@ -279,11 +281,11 @@ describe("the built-in drift workflow in a config", () => {
     expect(entry?.input).toMatchObject({ type: "object", additionalProperties: false });
     expect(entry?.outline).toMatchObject({ file: expect.stringMatching(/src\/drift\.ts$/) });
     // Without drivers it is there all the same, and uses nothing: each resource reports the missing driver.
-    expect(describeConfig(company).workflows).toMatchObject([{ name: "drift", builtin: true, ops: [] }]);
+    expect(describeConfig(bare).workflows).toMatchObject([{ name: "drift", builtin: true, ops: [] }]);
   });
 
   it("is not added when no connector declares a resource type, and the config's own workflows are not built-in", () => {
-    const marketing = { ...company, connectors: [bluesky], drivers: [] };
+    const marketing = { ...company, connectors: [bluesky] };
     expect(resolveConfig(marketing).workflows.size).toBe(0);
     const own = defineWorkflow({ name: "own", trigger: "manual", input: z.object({}), uses: [], run: async () => 1 });
     expect(
@@ -303,6 +305,6 @@ describe("the built-in drift workflow in a config", () => {
   });
 
   it("changes the app's version with the operations it uses", () => {
-    expect(resolveConfig(config).version).not.toBe(resolveConfig(company).version);
+    expect(resolveConfig(config).version).not.toBe(resolveConfig(bare).version);
   });
 });

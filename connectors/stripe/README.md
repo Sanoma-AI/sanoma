@@ -37,13 +37,15 @@ A webhook endpoint's `secret` is sensitive (Stripe returns it only when the endp
 
 ## Driver
 
-`@sanoma/connector-stripe/driver` reads through a provider bridge. Workflows never import it; the config that starts the worker does:
+`@sanoma/connector-stripe/driver` reads through a provider bridge. The `stripe` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `@sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
 
 ```ts
-import { stripeDriver } from "@sanoma/connector-stripe/driver";
+import { stripe } from "@sanoma/connector-stripe";
 
-const drivers = [stripeDriver()]; // or stripeDriver({ bridge }) to read through a bridge of your own
+export default defineConfig({ workflows, connectors: [stripe], policy });
 ```
+
+`./driver` (`stripeDriver`; `stripeDriver({ bridge })` reads through a bridge of your own) and `./fake` (`fakeStripe`) are internal entries, for tests.
 
 Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma/bridge`, started on the first call from `SANOMA_BRIDGE_BIN`. It configures the provider on the first call with `{ api_key }`, and again when the key changes, when the provider has exited, or when the bridge has forgotten it. `read` without a state imports, which reads the object too.
 

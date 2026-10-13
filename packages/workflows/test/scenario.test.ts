@@ -7,7 +7,7 @@ import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { defineFake } from "../src/fake.ts";
+import { defineFake, type Fake } from "../src/fake.ts";
 import {
   allowAll,
   defineConnector,
@@ -22,13 +22,13 @@ import { check, loadScenarios, parseFeature, type Scenario, type Scope } from ".
 import announce from "./fixtures/announce.ts";
 import { companyConfig } from "./fixtures/company/fakes.ts";
 import inspect from "./fixtures/company/workflows/inspect.ts";
-import { marketingFakes } from "./harness.ts";
+import { withFake } from "@sanoma/testing";
 
-const scopeOf = (connectors: Parameters<typeof resolveConfig>[0]["connectors"], drivers = marketingFakes().drivers) => {
+// The packages' connectors carry their drivers: announce's operations have one.
+const scopeOf = (connectors: Parameters<typeof resolveConfig>[0]["connectors"]) => {
   const resolved = resolveConfig({
     workflows: [announce],
     connectors,
-    drivers,
     policy: allowAll,
     ledger: memoryLedger(),
   });
@@ -316,10 +316,9 @@ describe("parseFeature", () => {
         },
       },
     });
-    const drivers = [...marketingFakes().drivers, { vendor: "flaky", ops: { "thing.poke": async () => ({}) } }];
     const message = thrown(
       `Feature: A\n  Scenario: S\n    Given ghost.post.publish fails once\n    When announce runs\n`,
-      scopeOf([ghost, resend, bluesky, flaky], drivers),
+      scopeOf([ghost, resend, bluesky, flaky]),
     );
     expect(message).toBe(
       'x.feature:3: "ghost.post.publish fails once" is ambiguous: it matches "{op} fails once" and "{id} fails once"',
@@ -395,11 +394,10 @@ describe("parseFeature", () => {
           },
         },
       });
-      const drivers = [...marketingFakes().drivers, { vendor: "runs", ops: { "run.start": async () => ({}) } }];
       const [scenario] = parseFeature(
         `Feature: A\n  Scenario: S\n    Given a run of "refund all" with 3 tries exists\n    When announce runs\n`,
         "x.feature",
-        scopeOf([ghost, resend, bluesky, runs], drivers),
+        scopeOf([ghost, resend, bluesky, runs]),
       );
       expect(scenario?.given).toEqual([
         {
@@ -422,8 +420,7 @@ describe("parseFeature", () => {
         },
       },
     });
-    const drivers = [...marketingFakes().drivers, { vendor: "odd", ops: { "thing.poke": async () => ({}) } }];
-    expect(() => parseFeature("Feature: A\n", "x.feature", scopeOf([ghost, resend, bluesky, odd], drivers))).toThrow(
+    expect(() => parseFeature("Feature: A\n", "x.feature", scopeOf([ghost, resend, bluesky, odd]))).toThrow(
       'odd.thing.poke: its given phrase "{nope} poked" names {nope}, which is not a field of its input',
     );
   });
@@ -606,6 +603,10 @@ describe("check", () => {
   });
 });
 
+/** One fake of each vendor, from its maker, as a sandbox run makes them. */
+const made = (fakes: ReadonlyMap<string, () => Fake<any, any>>) =>
+  new Map([...fakes].map(([vendor, make]) => [vendor, make()]));
+
 describe("resources and policy outcomes", () => {
   // The company fixture's connectors, which declare resource types, its fakes and its inspect workflow.
   const company = resolveConfig({ ...companyConfig([inspect], allowAll), ledger: memoryLedger() });
@@ -689,9 +690,9 @@ describe("resources and policy outcomes", () => {
     ]);
   });
 
-  it("refuses, before anything is copied, a resource seed of a vendor whose fake holds no resources", () => {
+  it("refuses a resource seed of a vendor whose fake holds no resources", () => {
     const [drift] = parseCompany(DRIFT);
-    expect(missingResourceFake(drift!, company.fakes)).toBeUndefined();
+    expect(missingResourceFake(drift!, made(company.fakes))).toBeUndefined();
     // A resource type whose fake is a plain `defineFake`, with no `override`, `put` or `remove`.
     const hook = defineResource({
       vendor: "acme",
@@ -716,9 +717,7 @@ describe("resources and policy outcomes", () => {
     });
     const resolved = resolveConfig({
       workflows: [ping],
-      connectors: [acme],
-      drivers: [plain.driver],
-      fakes: [plain],
+      connectors: [withFake(acme, plain)],
       policy: allowAll,
       ledger: memoryLedger(),
     });
@@ -727,14 +726,16 @@ describe("resources and policy outcomes", () => {
       "ping.feature",
       resolved,
     );
-    const problem = missingResourceFake(seeded!, resolved.fakes);
+    const problem = missingResourceFake(seeded!, made(resolved.fakes));
     expect(problem?.code).toBe("invalid_input");
     expect(problem?.message).toBe(
       'Scenario "Seeded" seeds acme.hook, but acme\'s fake holds no resources (it is not a tfFake)',
     );
     expect(problem?.data).toEqual({ scenario: "Seeded", resources: ["acme.hook"] });
-    // A vendor with no fake at all is refused the same way.
-    expect(missingResourceFake(seeded!, new Map())?.message).toBe(problem?.message);
+    // A vendor whose connector attaches no fake is refused, saying so.
+    expect(missingResourceFake(seeded!, new Map())?.message).toBe(
+      'Scenario "Seeded" seeds acme.hook, but acme\'s connector attaches no fake',
+    );
   });
 
   it("seeds a resource on the copy as the step says, and fails the scenario, naming the step, when the fake refuses it", () => {
