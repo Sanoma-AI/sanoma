@@ -23,9 +23,14 @@ describe("layout", () => {
     );
   });
 
-  it("makes an operation with a name taller by the line its id moves to", () => {
+  it("makes an operation or a sleep with a name taller by the line its id or clock moves to", () => {
     const named = { id: "x", kind: "op", label: "a.x.read", name: "Read it" } as const;
     expect(nodeSize(named)).toEqual({ width: NODE_SIZE.op.width, height: NODE_SIZE.op.height + NAME_HEIGHT });
+    expect(nodeSize({ id: "s", kind: "sleep", label: "sleep", name: "Wait" })).toEqual({
+      width: NODE_SIZE.sleep.width,
+      height: NODE_SIZE.sleep.height + NAME_HEIGHT,
+    });
+    expect(nodeSize({ id: "s", kind: "sleep", label: "sleep" })).toEqual(NODE_SIZE.sleep);
     expect(nodeSize({ ...named, label: "*.*.read", ops: ["a.x.read"] }).height).toBe(
       NODE_SIZE.op.height + NAME_HEIGHT + LIST_HEADER + ROW_HEIGHT,
     );
@@ -60,6 +65,7 @@ describe("layout", () => {
     const graph = outlineGraph([
       {
         kind: "repeat",
+        label: "repeat while more",
         body: [op("x.batch.open"), { kind: "all", branches: [[op("a.post.create")], [op("b.post.create")]] }],
       },
     ]);

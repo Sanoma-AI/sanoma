@@ -62,7 +62,7 @@ const fan = defineWorkflow({
   run: async (ctx, { texts }) => {
     const [a, b] = await ctx.all([
       () => ctx.bluesky.post.create({ text: texts[0]! }, { name: "Post the first" }),
-      () => ctx.bluesky.post.create({ text: texts[1]! }, { name: "Post the second" }),
+      () => ctx.bluesky.post.create({ text: texts[1]! }),
     ]);
     const rest = await ctx.all(texts.map((text) => () => ctx.bluesky.post.create({ text: `${text}!` })));
     return [a.uri, b.uri, rest.length];
@@ -109,7 +109,7 @@ describe("where a ctx call is made", () => {
     const outline = outlineWorkflow(loop);
     expect(outline).toMatchObject({
       nodes: [
-        { kind: "repeat", path: "0", name: "for each of texts", body: [{ kind: "op", path: "0.0.0" }] },
+        { kind: "repeat", path: "0", label: "for each of texts", body: [{ kind: "op", path: "0.0.0" }] },
         { kind: "sleep", path: "1", name: "Settle" },
       ],
     });
@@ -120,7 +120,7 @@ describe("where a ctx call is made", () => {
     expect(await c().result(runId)).toEqual([expect.any(String), expect.any(String), 2]);
     expect(nodes(await c().ledger(runId))).toEqual([
       "Post the first: bluesky.post.create @0.0.0 in 0[0]",
-      "Post the second: bluesky.post.create @0.1.0 in 0[1]",
+      "bluesky.post.create: bluesky.post.create @0.1.0 in 0[1]",
       "bluesky.post.create: bluesky.post.create @1.0.0 in 1[0]",
       "bluesky.post.create: bluesky.post.create @1.0.0 in 1[1]",
     ]);

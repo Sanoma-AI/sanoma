@@ -163,9 +163,9 @@ export function lintWorkflow(input: string | SourceFile, path?: string): LintPro
   visit(program);
   // Each workflow's `run` as the worker reads it when it starts: what the outline cannot draw,
   // the worker refuses to start with. One reading, so the lint and the worker agree.
-  const consts = constsOf(program);
+  const outlined = { consts: constsOf(program), source: typeof input === "string" ? input : input.source };
   for (const { run } of workflowLiterals(program))
-    for (const { start, message } of outlineBody(run, { consts }).problems) problems.push({ ...at(start), message });
+    for (const { start, message } of outlineBody(run, outlined).problems) problems.push({ ...at(start), message });
   return byPosition(problems);
 }
 

@@ -21,14 +21,17 @@ export const NODE_SIZE: Record<GraphNodeKind, { width: number; height: number }>
   skip: { width: 88, height: 28 },
 };
 
-/** What an operation's name adds to its node, the line its id moves down to: measured in the browser. */
+/** What a step's name adds to an operation's or a sleep's node, the line above its id or clock: measured in the browser. */
 export const NAME_HEIGHT = 20;
 
 /**
- * A node's box: its kind's, and for an operation, taller by a line with a name and by the rows
- * it draws with `ops`. A fresh object: dagre writes into it.
+ * A node's box: its kind's, taller by a line for an operation or a sleep with a name, and for an
+ * operation by the rows it draws with `ops`. A fresh object: dagre writes into it.
  */
 export function nodeSize(node: GraphNode): { width: number; height: number } {
+  if (node.kind === "sleep" && node.name) {
+    return { width: NODE_SIZE.sleep.width, height: NODE_SIZE.sleep.height + NAME_HEIGHT };
+  }
   if (node.kind !== "op") return { ...NODE_SIZE[node.kind] };
   const { width, height } = NODE_SIZE.op;
   const rows = node.ops ? LIST_HEADER + wildcardRows(node.label, node.ops).length * ROW_HEIGHT : 0;

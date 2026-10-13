@@ -128,8 +128,8 @@ export function runGraph(
           {
             kind: "sleep",
             key: `sleep:${record.seq}`,
-            // A name of its own before when it ends; `Sleep`, the default, says no more than the clock.
-            label: `${record.name && record.name !== "Sleep" ? `${record.name}, ` : ""}until ${utcText(record.until)}`,
+            label: `until ${utcText(record.until)}`,
+            ...(record.name !== undefined && { name: record.name }),
             state: { tone: asleep ? "waiting" : "ok", recordId: record.id },
           },
           record.node,

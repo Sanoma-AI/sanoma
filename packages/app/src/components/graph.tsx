@@ -104,7 +104,10 @@ function Handles({ inbound = true, outbound = true }: { inbound?: boolean; outbo
  * which says both.
  */
 const nameOf = (node: GraphNode) => {
-  if (node.kind === "sleep" && node.state) return `sleep ${node.label}`;
+  if (node.kind === "sleep") {
+    const clock = node.state ? `sleep ${node.label}` : node.label;
+    return node.name ? `${node.name}: ${clock}` : clock;
+  }
   return node.kind === "op" && node.name ? `${node.name}: ${node.label}` : node.label;
 };
 
@@ -275,16 +278,25 @@ function ApprovalNode(props: Props<"approval">) {
   );
 }
 
-/** A sleep, and in a run when it ends (UTC, as the ledger shows it). */
+/**
+ * A sleep, and in a run when it ends (UTC, as the ledger shows it). One with a name says it
+ * first, as an operation does, the clock and its time on the line below.
+ */
 function SleepNode(props: Props<"sleep">) {
   const { node } = props.data;
+  const clock = (
+    <>
+      <BUILTIN_ICON.sleep className="size-4 shrink-0" />
+      <span className={cn("truncate", node.name && "text-muted-foreground")}>{node.label}</span>
+    </>
+  );
   return (
     <Frame {...props}>
       <Line>
         <Dot tone={node.state?.tone} />
-        <BUILTIN_ICON.sleep className="size-4 shrink-0" />
-        <span className="truncate">{node.label}</span>
+        {node.name ? <span className="truncate font-medium">{node.name}</span> : clock}
       </Line>
+      {node.name && <Line>{clock}</Line>}
     </Frame>
   );
 }
@@ -304,8 +316,9 @@ function ClusterNode({ data: { node } }: Props<"cluster">) {
   return (
     <div className="size-full rounded-lg border border-dashed border-muted-foreground/40" title={node.label}>
       <Handles />
-      <Badge variant="outline" className="m-1.5 bg-card">
-        {node.label}
+      {/* Inside the box however long the label: the title above has it whole. */}
+      <Badge variant="outline" className="m-1.5 max-w-[calc(100%-12px)] bg-card">
+        <span className="min-w-0 truncate">{node.label}</span>
       </Badge>
     </div>
   );

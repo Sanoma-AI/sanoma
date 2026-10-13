@@ -112,15 +112,16 @@ function refuseIfEnded(run: Run) {
 }
 
 /**
- * Where a call is, as its records say: its outline node's `path`, and the step's name (the one
- * the call gave, else its operation's id, `Sleep`, or an approval's title).
+ * Where a call is, as its records say: its outline node's `path`, and the step's name, as the
+ * outline resolved it (`OutlineNode`'s `name`), or for a call the outline could not name, the
+ * operation a computed id called, or an approval's title that is no literal.
  */
 export interface Placed {
   node: string;
   name: string;
 }
 
-/** The name a call's node gives it, if it gives one. */
+/** The step's name the outline gives a call's node: none for a computed op without one, or an approval's title that is no literal. */
 const named = (node: CallNode) => ("name" in node ? node.name : undefined);
 
 /**
@@ -151,12 +152,15 @@ export function buildCtx(wf: WorkflowDefinition<any, any>, run: Run): any {
   members.now = () => serial(run, () => DBOS.now());
   if (uses.includes("approval")) {
     members.approval = placed("approval", (node, title: string, req: ApprovalRequest) =>
-      serial(run, () => awaitApproval(run, title, checkApproval(title, req), { node: node.path, name: title })),
+      serial(run, () =>
+        awaitApproval(run, title, checkApproval(title, req), { node: node.path, name: named(node) ?? title }),
+      ),
     );
   }
   if (uses.includes("sleep")) {
     members.sleep = placed("sleep", (node, req) =>
-      serial(run, () => sleep(run, req, { node: node.path, name: named(node) ?? "Sleep" })),
+      // The outline names every sleep.
+      serial(run, () => sleep(run, req, { node: node.path, name: named(node)! })),
     );
   }
   if (uses.includes("all")) members.all = placed("all", (node, list) => all(run, list, node.path));

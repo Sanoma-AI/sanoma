@@ -1,6 +1,6 @@
 import { childrenOf, type Node, readSource, type SourceFile } from "./ast.ts";
 import { opIdsOf, type WorkflowDefinition } from "./define.ts";
-import { childLists, fitsOp, flatten } from "./shared.ts";
+import { childLists, DEFAULT_SLEEP_NAME, fitsOp, flatten } from "./shared.ts";
 
 /**
  * What a workflow's `run` calls through `ctx`, in the order it makes the calls, with the loops,
@@ -27,11 +27,14 @@ export type Span = readonly [start: number, end: number];
  * `repeat`, the whole `if` / `else if` chain, `switch`, `?:` or `&&` for `branch`, and the `try`
  * statement for `try`.
  *
- * A call's step name is what a test and the graph call it: `name` where the call gives one
- * (`{ name: "…" }`, on `op` and `sleep`), else its operation's id, or `Sleep`; an approval's is
- * its `title`. No two calls share one. A loop's `name` (`repeat`, and `each`) is a label read
- * from its code, "for each of subscribers" for `for (const s of subscribers)` or
- * `subscribers.map(…)`, "repeat while queue.length" for a `while`: no step's name, so not unique.
+ * A call's `name` is its step's name, what a test and the graph call it: the one the call gives
+ * (`{ name: "…" }`, on `op` and `sleep`), else its operation's id, or `Sleep`
+ * (`DEFAULT_SLEEP_NAME`); an approval's is its `title`. A computed call without a name of its
+ * own has none here: the operation it calls, known only in a run, names it. A name given, and an
+ * approval's title, is one step's only; an unnamed call's may be several's. A loop's `label`
+ * (`repeat`, and `each`) is read from its code, "for each of subscribers" for
+ * `for (const s of subscribers)` or `subscribers.map(…)`, "repeat while queue.length" for a
+ * `while`: no step's name.
  */
 export type OutlineNode = { path: string; span: Span } &
   /**
@@ -39,22 +42,25 @@ export type OutlineNode = { path: string; span: Span } &
    * `ops`: the ids in the workflow's `uses` it fits (`fitsOp`), sorted, which is what the call
    * can reach; an id with every segment literal has none.
    */
-  /** `name`: the one the call gives (`ctx.x.y.z(input, { name: "…" })`), when it gives one. */
+  /** `name`: the one the call gives (`ctx.x.y.z(input, { name: "…" })`), else the id when no segment is computed. */
   (
     | { kind: "op"; id: string; ops?: string[]; name?: string }
-    /** `ctx.approval(...)`, with its title when the first argument is a string literal: the approval's name. */
-    | { kind: "approval"; title?: string }
-    /** `name`: the one the call gives (`ctx.sleep(request, { name: "…" })`), when it gives one. */
-    | { kind: "sleep"; name?: string }
+    /**
+     * `ctx.approval(...)`, with its title, and the title as its `name`, when the first argument is
+     * a string literal or a top-level `const` holding one.
+     */
+    | { kind: "approval"; title?: string; name?: string }
+    /** `name`: the one the call gives (`ctx.sleep(request, { name: "…" })`), else `DEFAULT_SLEEP_NAME`. */
+    | { kind: "sleep"; name: string }
     /** `ctx.all([...])` over an array literal: one branch per element. */
     | { kind: "all"; branches: OutlineNode[][] }
     /** `ctx.all(items.map(cb))`: what the callback's member does, labelled from the code (`for each of items`). */
-    | { kind: "each"; name: string; body: OutlineNode[] }
+    | { kind: "each"; label: string; body: OutlineNode[] }
     /**
      * A loop, or a `.map` / `.forEach` / `.reduce` callback, whose body makes ctx calls, labelled
      * from the code: `for each of items`, `for each key of record`, `repeat while cond`, `repeat`.
      */
-    | { kind: "repeat"; name: string; body: OutlineNode[] }
+    | { kind: "repeat"; label: string; body: OutlineNode[] }
     /**
      * `if`, `switch`, `?:`, `&&`, `||` or `??`: one case per arm that makes ctx calls, and one empty
      * case for the way past them when there is one (an arm without calls, an `if` without `else`,
@@ -207,9 +213,14 @@ const CONTINUE =
   "`continue` is not allowed in a workflow: the graph repeats the whole body; use if/else around the rest of it";
 const NAME =
   'a step\'s name must be a string literal, or a top-level const holding one, so the outline can read it: `{ name: "…" }`';
-/** Two calls with one name, and how to tell them apart. */
+const DEFAULT_LIKE = (name: string) =>
+  `"${name}" is what a call without a name is called (an operation's id, or "${DEFAULT_SLEEP_NAME}"), so a test ` +
+  'could not tell this step from those: name it in words, such as `{ name: "Draft the post" }`';
+/** Two steps given one name, and how to tell them apart. */
 const TWICE = (name: string, fix: string) =>
-  `two steps of this workflow are named "${name}": a name is one step, so a test or the graph can tell them apart; ${fix}`;
+  `two steps of this workflow are named "${name}": a name given is one step's, so a test or the graph can tell them apart; ${fix}`;
+/** A name given that reads as an operation's id: what an unnamed call is called. */
+const OP_ID = /^[\w-]+(\.[\w-]+){2}$/;
 
 /** Where a function's body starts: its own statement rules, nothing of the caller's. */
 const bodyOf = (fn: Node): Where => ({ fn, inCatch: false });
@@ -229,9 +240,9 @@ const READS = new Set(["now", "runId"]);
 /**
  * The nodes of `fn`'s body (`run`'s, or a callback's the outline reads), each with an empty `path`
  * for `withPaths` to fill, and the problems: what the body does that the graph could not show.
- * A call's `{ name }` is a string literal or one of `consts` (`constsOf` the file), and no two
- * calls share a step name (`twiceNamed`). A loop's label quotes its code from `source`, the
- * file's text; without it, a loop is labelled "for each" or "repeat".
+ * A call's `{ name }`, and an approval's title, is a string literal or one of `consts`
+ * (`constsOf` the file); a name given is not an operation's id or `Sleep`, and no two steps are
+ * given one name (`twiceNamed`). A loop's label quotes its code from `source`, the file's text.
  * `ctx` is `fn`'s first parameter, taken by one name (destructured is a problem; none, and the
  * body makes no calls). `ctx` is only called, directly, as an operation or a built-in, or read
  * for `ctx.runId`; a function defined inside that uses `ctx` is read only where the outline
@@ -242,7 +253,7 @@ const READS = new Set(["now", "runId"]);
  */
 export function outlineBody(
   fn: Node,
-  { consts = new Map(), source }: { consts?: ReadonlyMap<string, string>; source?: string } = {},
+  { consts, source }: { consts: ReadonlyMap<string, string>; source: string },
 ): { nodes: OutlineNode[]; problems: OutlineProblem[] } {
   const problems: OutlineProblem[] = [];
   const problem = (node: Node, message: string): OutlineNode[] => {
@@ -354,51 +365,41 @@ export function outlineBody(
     return [{ kind: "branch", path, cases, span: span(node) }];
   };
 
-  const repeat = (node: Node, parts: Node[], at: Where, name: string): OutlineNode[] => {
+  const repeat = (node: Node, parts: Node[], at: Where, label: string): OutlineNode[] => {
     const inside = parts.flatMap((part) => walk(part, { ...at, breakable: "loop" }));
-    return inside.length ? [{ kind: "repeat", path, name, body: inside, span: span(node) }] : [];
+    return inside.length ? [{ kind: "repeat", path, label, body: inside, span: span(node) }] : [];
   };
 
-  /** Code as a label quotes it: on one line, cut at `LABEL_TEXT`; none without the source. */
-  const quoted = (node: Node): string | undefined => {
+  /** Code as a label quotes it: on one line, cut at `LABEL_TEXT`. */
+  const quoted = (node: Node): string => {
     // A chain broken over lines (`items\n  .filter(…)`) joined again, then the rest on one line.
     const text = source
-      ?.slice(node.start, node.end)
+      .slice(node.start, node.end)
       .replaceAll(/\s*\n\s*(?=\.)/g, "")
       .replaceAll(/\s+/g, " ")
       .trim();
-    if (!text) return undefined;
     return text.length > LABEL_TEXT ? `${text.slice(0, LABEL_TEXT - 1).trimEnd()}…` : text;
   };
-  /** A loop over `items`: "for each of items" (`how`), or "for each" when its code cannot be quoted. */
-  const of = (how: string, items: Node): string => {
-    const text = quoted(items);
-    return text === undefined ? "for each" : `${how} ${text}`;
-  };
-  /** A loop while `test` holds: "repeat while test", or "repeat" without a test or the code. */
-  const whileOf = (test: Node | null): string => {
-    const text = test ? quoted(test) : undefined;
-    return text === undefined ? "repeat" : `repeat while ${text}`;
-  };
-  /** `items.map(cb)` and the like, labelled by `items`; any other call taking a callback, "for each". */
-  const iterated = (callee: Node): string =>
-    callee?.type === "MemberExpression" && !callee.computed && ITERATING.has(callee.property.name)
-      ? of("for each of", callee.object)
-      : "for each";
+  /** A loop over `items`: "for each of items", `how` saying how. */
+  const of = (how: string, items: Node): string => `${how} ${quoted(items)}`;
+  /** A loop while `test` holds: "repeat while test", or "repeat" without a test. */
+  const whileOf = (test: Node | null): string => (test ? `repeat while ${quoted(test)}` : "repeat");
 
-  /** A step's name as the call gives it, in `{ name: "…" }` after the call's input. */
-  const nameIn = (options: Node | undefined): { name?: string } => {
-    if (options === undefined) return {};
+  /**
+   * A step's name as the call gives it, in `{ name: "…" }` after the call's input: a string
+   * literal or a top-level const, not an operation's id or `Sleep`, which unnamed calls are called.
+   */
+  const nameIn = (options: Node | undefined): string | undefined => {
+    if (options === undefined) return undefined;
     const literal = unwrap(options);
     const property =
       literal?.type === "ObjectExpression" && literal.properties.length === 1 ? literal.properties[0] : undefined;
     const key = property?.type === "Property" && !property.computed ? (property.key.name ?? property.key.value) : "";
     const name = key === "name" ? literalOf(property.value, consts) : undefined;
-    if (name === undefined || !/\S/.test(name)) {
-      problem(options, NAME);
-      return {};
-    }
-    return { name };
+    if (name === undefined || !/\S/.test(name)) problem(options, NAME);
+    else if (name === DEFAULT_SLEEP_NAME || OP_ID.test(name)) problem(options, DEFAULT_LIKE(name));
+    else return name;
+    return undefined;
   };
 
   // The arguments are evaluated before the call is made, so their calls come first.
@@ -411,17 +412,26 @@ export function outlineBody(
         case "all":
           return all(node, at);
         case "approval": {
-          const title = stringValue(args[0]);
+          const title = args[0] === undefined ? undefined : literalOf(args[0], consts);
           return [
             ...walk(args, at),
-            { kind: "approval", path, span: span(node), ...(title === undefined ? {} : { title }) },
+            { kind: "approval", path, span: span(node), ...(title === undefined ? {} : { title, name: title }) },
           ];
         }
         case "sleep":
-          return [...walk(args, at), { kind: "sleep", path, span: span(node), ...nameIn(args[1]) }];
+          return [
+            ...walk(args, at),
+            { kind: "sleep", path, span: span(node), name: nameIn(args[1]) ?? DEFAULT_SLEEP_NAME },
+          ];
         default:
-          if (members.length === 3)
-            return [...walk(args, at), { kind: "op", path, id, span: span(node), ...nameIn(args[1]) }];
+          if (members.length === 3) {
+            // A computed id's own name is the operation it calls, known only in a run.
+            const name = nameIn(args[1]) ?? (id.includes("*") ? undefined : id);
+            return [
+              ...walk(args, at),
+              { kind: "op", path, id, span: span(node), ...(name === undefined ? {} : { name }) },
+            ];
+          }
           return READS.has(id) ? walk(args, at) : [...walk(args, at), ...problem(node, CTX_CALL(id))];
       }
     }
@@ -429,11 +439,10 @@ export function outlineBody(
     const [callback, ...rest] = args;
     if (callee?.type === "MemberExpression" && !callee.computed && ITERATING.has(callee.property.name)) {
       if (FUNCTIONS.has(callback?.type) && usesCtx(callback)) {
-        const name = iterated(callee);
         return [
           ...walk(callee.object, at),
           ...walk(rest, at),
-          ...repeat(node, [callback.body], bodyOf(callback), name),
+          ...repeat(node, [callback.body], bodyOf(callback), of("for each of", callee.object)),
         ];
       }
     }
@@ -452,12 +461,15 @@ export function outlineBody(
     const callback =
       arg?.type === "CallExpression" ? arg.arguments.find((a: Node) => FUNCTIONS.has(a?.type)) : undefined;
     if (!callback) return [...walk(arg, at), ...problem(node, ALL_MEMBERS)];
+    // `items.map(cb)` and the like, labelled by `items`; any other call taking a callback, by itself.
+    const made = unwrap(arg.callee);
+    const iterates = made?.type === "MemberExpression" && !made.computed && ITERATING.has(made.property.name);
     return [
       ...walk(arg.callee, at),
       {
         kind: "each",
         path,
-        name: iterated(unwrap(arg.callee)),
+        label: iterates ? of("for each of", made.object) : `for each of ${quoted(arg)}`,
         body: member(callback.body, bodyOf(callback)),
         span: whole,
       },
@@ -477,54 +489,28 @@ export function outlineBody(
 }
 
 /**
- * Each call after the first whose step name another call has: two calls of one operation, or
- * two sleeps, without a name, or a name given twice. An operation call's own name is its id,
- * which for a computed one (`*.post.create`) is any id it fits: it shares a name with each it
- * fits. A loop's label is no step's name.
+ * Each step after the first given a name another was given: an explicit `{ name }`, or an
+ * approval's title. An unnamed call's name (its operation's id, or `Sleep`) may be several
+ * calls': the same operation in two arms of an `if`, a retry in a `catch`.
  */
 function twiceNamed(nodes: readonly OutlineNode[]): OutlineProblem[] {
-  const seen: Named[] = [];
+  const seen = new Set<string>();
   const problems: OutlineProblem[] = [];
   for (const node of flatten(nodes)) {
-    let named: (Named & { fix: string }) | undefined;
-    if (node.kind === "op") {
-      named = node.name
-        ? { name: node.name, computed: false, fix: "rename one" }
-        : {
-            name: node.id,
-            computed: node.id.includes("*"),
-            fix: `give each call of it a name of its own, \`ctx.${node.id}(…, { name: "…" })\``,
-          };
-    } else if (node.kind === "sleep") {
-      named = node.name
-        ? { name: node.name, computed: false, fix: "rename one" }
-        : { name: "Sleep", computed: false, fix: 'give each sleep a name of its own, `ctx.sleep(…, { name: "…" })`' };
-    } else if (node.kind === "approval" && node.title !== undefined) {
-      named = { name: node.title, computed: false, fix: "give each approval a title of its own" };
+    let given: { name: string; fix: string } | undefined;
+    if (node.kind === "approval" && node.name !== undefined) {
+      given = { name: node.name, fix: "give each approval a title of its own" };
+    } else if (
+      (node.kind === "op" && node.name !== node.id) ||
+      (node.kind === "sleep" && node.name !== DEFAULT_SLEEP_NAME)
+    ) {
+      given = node.name === undefined ? undefined : { name: node.name, fix: "rename one" };
     }
-    if (!named) continue;
-    if (seen.some((other) => sameName(named, other))) {
-      problems.push({ start: node.span[0], message: TWICE(named.name, named.fix) });
-    }
-    seen.push(named);
+    if (!given) continue;
+    if (seen.has(given.name)) problems.push({ start: node.span[0], message: TWICE(given.name, given.fix) });
+    seen.add(given.name);
   }
   return problems;
-}
-
-/** A step's name, and whether it is a computed operation id, whose `*` stands for any segment. */
-interface Named {
-  name: string;
-  computed: boolean;
-}
-
-/** True when the two names may be one: equal, or a computed op id's `*` standing for the other's segment. */
-function sameName(a: Named, b: Named): boolean {
-  if (!a.computed && !b.computed) return a.name === b.name;
-  const x = a.name.split(".");
-  const y = b.name.split(".");
-  return (
-    x.length === y.length && x.every((s, i) => s === y[i] || (a.computed && s === "*") || (b.computed && y[i] === "*"))
-  );
 }
 
 const CALLS = new Set<OutlineNode["kind"]>(["op", "approval", "sleep", "all", "each"]);

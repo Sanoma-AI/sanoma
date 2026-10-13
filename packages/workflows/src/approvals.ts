@@ -4,6 +4,7 @@ import { type ApprovalRequest, type ApprovalResult, type ApprovalState, notAppro
 import { RejectedError } from "./errors.ts";
 import { entry, write } from "./ledger.ts";
 import { warn } from "./log.ts";
+import type { Placed } from "./call.ts";
 import type { Run } from "./run.ts";
 import { approverLabel, mayDecide } from "./shared.ts";
 
@@ -65,7 +66,7 @@ export async function awaitApproval(
   run: Run,
   title: string,
   req: CheckedApproval,
-  place: { node: string; name: string },
+  place: Placed,
   held?: HeldCall,
 ): Promise<ApprovalResult> {
   const { covers } = req;

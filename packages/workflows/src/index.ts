@@ -98,6 +98,7 @@ export { SanomaClient, type RunsFilter, type RunSummary, type StartOptions } fro
 export {
   approverLabel,
   credentialReady,
+  DEFAULT_SLEEP_NAME,
   ENDED_STATUSES,
   errorMessage,
   isEnded,

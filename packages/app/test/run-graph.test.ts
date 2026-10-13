@@ -1,5 +1,6 @@
 import type { ApprovalState, LedgerBody, LedgerGroup, LedgerRecord, RunStatus, RunSummary } from "@sanoma/workflows";
 import type { OutlineNode } from "@sanoma/workflows/describe";
+import { DEFAULT_SLEEP_NAME } from "@sanoma/workflows/shared";
 import { describe, expect, it } from "vitest";
 import { runGraph } from "../src/graph/run-graph.ts";
 import { pairs, spans, summary } from "./graph-helpers.ts";
@@ -192,22 +193,24 @@ describe("runGraph", () => {
     expect(runGraph(records, run("cancelled"), NOW).nodes.some((n) => n.kind === "pending")).toBe(false);
   });
 
-  it("carries a call's step name when it is not the operation's id, and puts a sleep's before when it ends", () => {
+  it("carries a call's or a sleep's step name when it is not the default, and keeps a sleep's time", () => {
     const { nodes } = runGraph(
       ledger(
         started,
         called("ghost.post.create", { name: "Draft the post" }),
         called("ghost.post.publish", { name: "ghost.post.publish" }),
         slept(NOW - 1, { name: "Wait for launch" }),
-        slept(NOW - 1, { name: "Sleep" }),
+        slept(NOW - 1, { name: DEFAULT_SLEEP_NAME }),
       ),
       run("running"),
       NOW,
     );
-    expect(nodes.slice(1, -1).map((n) => [n.label, n.kind === "op" ? n.name : undefined])).toEqual([
+    expect(
+      nodes.slice(1, -1).map((n) => [n.label, n.kind === "op" || n.kind === "sleep" ? n.name : undefined]),
+    ).toEqual([
       ["ghost.post.create", "Draft the post"],
       ["ghost.post.publish", undefined],
-      ["Wait for launch, until 2026-10-09 07:59 UTC", undefined],
+      ["until 2026-10-09 07:59 UTC", "Wait for launch"],
       ["until 2026-10-09 07:59 UTC", undefined],
     ]);
   });
@@ -339,12 +342,12 @@ describe("runGraph", () => {
       },
       {
         kind: "repeat",
-        name: "for each of messages",
+        label: "for each of messages",
         path: "2",
         span: [60, 120],
         body: [
           { kind: "approval", path: "2.0.0", title: "Send it?", span: [70, 80] },
-          { kind: "sleep", path: "2.0.1", span: [100, 110] },
+          { kind: "sleep", path: "2.0.1", name: DEFAULT_SLEEP_NAME, span: [100, 110] },
         ],
       },
       {

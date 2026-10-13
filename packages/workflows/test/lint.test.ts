@@ -202,11 +202,15 @@ const workflow = (body: string, params = "ctx, input") => `
 
 const inRun = (body: string, params?: string) => messages(workflow(body, params), "workflows/x.ts");
 
-/** The problem two calls with one step name are, and the fix it names. */
+/** The problem a name given that unnamed calls are called is. */
+const defaultLike = (name: string) =>
+  expect.stringMatching(new RegExp(`^"${name}" is what a call without a name is called .*name it in words`));
+
+/** The problem two steps given one name are, and the fix it names. */
 const twice = (name: string, fix: string) =>
   expect.stringMatching(
     new RegExp(
-      `^two steps of this workflow are named "${name}": a name is one step, so a test or the graph can tell them apart; ${fix}`,
+      `^two steps of this workflow are named "${name}": a name given is one step's, so a test or the graph can tell them apart; ${fix}$`,
     ),
   );
 
@@ -214,7 +218,7 @@ describe("lintWorkflow on run, which the worker holds to the outline", () => {
   it("passes loops, a switch with break, a try with a rethrow, ctx.all over .map, ctx.runId and ctx.now, and a return at the end", () => {
     expect(
       inRun(`
-        for (const t of input.ts) await ctx.ghost.post.create({ title: t }, { name: DRAFT });
+        for (const t of input.ts) await ctx.ghost.post.create({ title: t });
         switch (input.k) {
           case "a":
             await ctx.sleep({ ms: 1 });
@@ -225,51 +229,47 @@ describe("lintWorkflow on run, which the worker holds to the outline", () => {
         } catch (err) {
           if (errorCode(err) === "run_ended") throw err;
         }
-        await ctx.all(input.ts.map((t) => () => ctx.ghost.post.create({ title: t }, { name: "Draft each" })));
+        await ctx.all(input.ts.map((t) => () => ctx.ghost.post.create({ title: t })));
         console.log(ctx.runId, await ctx.now());
         return input.ts.length;
       `),
     ).toEqual([]);
   });
 
-  it("names a call by its { name }, its operation's id, Sleep, or an approval's title, once each", () => {
+  it("lets unnamed calls share their default name, and holds a name given, or an approval's title, to one step", () => {
+    // Defaults may repeat: one operation in two arms, a retry in a catch, two sleeps.
     expect(
       inRun(`
-        await ctx.ghost.post.create({ title: "a" }, { name: "First" });
-        await ctx.ghost.post.create({ title: "b" }, { name: DRAFT });
-        await ctx.ghost.post.create({ title: "c" });
+        if (input.ok) await ctx.ghost.post.create({ title: "a" });
+        else await ctx.ghost.post.create({ title: "b" });
+        try {
+          await ctx.ghost.post.create({ title: "c" });
+        } catch {
+          await ctx.ghost.post.create({ title: "c" });
+        }
+        await (ctx as any)[input.k].post.create({ title: "d" });
         await ctx.sleep({ ms: 1 });
-        await ctx.sleep({ ms: 2 }, { name: "Again" });
-        // A loop's calls are one step each, however often they run; its label is no step's name.
-        for (const t of input.ts) await ctx.sleep({ ms: 3 }, { name: "Pause" });
-        for (const t of input.ts) await ctx.sleep({ ms: 4 }, { name: "Pause again" });
+        await ctx.sleep({ ms: 2 });
+        await ctx.ghost.post.create({ title: "e" }, { name: "First" });
+        await ctx.ghost.post.create({ title: "f" }, { name: DRAFT });
+        await ctx.sleep({ ms: 3 }, { name: "Again" });
       `),
     ).toEqual([]);
-    const nameEach = 'give each call of it a name of its own, `ctx\\.ghost\\.post\\.create\\(…, \\{ name: "…" \\}\\)`$';
-    // The same operation twice, even in two arms of a branch, or reached by a computed id.
-    expect(inRun(`await ctx.ghost.post.create({ title: "a" }); await ctx.ghost.post.create({ title: "b" });`)).toEqual([
-      twice("ghost\\.post\\.create", nameEach),
-    ]);
-    expect(
-      inRun(
-        `if (input.ok) await ctx.ghost.post.create({ title: "a" }); else await ctx.ghost.post.create({ title: "b" });`,
-      ),
-    ).toEqual([twice("ghost\\.post\\.create", nameEach)]);
-    expect(
-      inRun(`await (ctx as any)[input.k].post.create({ title: "a" }); await ctx.ghost.post.create({ title: "b" });`),
-    ).toEqual([twice("ghost\\.post\\.create", nameEach)]);
-    expect(inRun(`await ctx.sleep({ ms: 1 }); await ctx.sleep({ ms: 2 });`)).toEqual([
-      twice("Sleep", "give each sleep a name of its own"),
-    ]);
     expect(
       inRun(`await ctx.sleep({ ms: 1 }, { name: "X" }); await ctx.ghost.post.create({ title: "a" }, { name: "X" });`),
-    ).toEqual([twice("X", "rename one$")]);
-    expect(
-      inRun(`await ctx.sleep({ ms: 1 }, { name: "ghost.post.create" }); await ctx.ghost.post.create({ title: "a" });`),
-    ).toEqual([twice("ghost\\.post\\.create", nameEach)]);
+    ).toEqual([twice("X", "rename one")]);
     expect(
       inRun(`await ctx.approval("Go?", { approver: "a" }); await ctx.approval("Go?", { approver: "b" });`),
-    ).toEqual([twice("Go\\?", "give each approval a title of its own$")]);
+    ).toEqual([twice("Go\\?", "give each approval a title of its own")]);
+    // An approval's title is a name given, as a { name } is.
+    expect(inRun(`await ctx.approval("Go?", { approver: "a" }); await ctx.sleep({ ms: 1 }, { name: "Go?" });`)).toEqual(
+      [twice("Go\\?", "rename one")],
+    );
+    // A name given may not be what unnamed calls are called: an operation's id, or Sleep.
+    expect(inRun(`await ctx.sleep({ ms: 1 }, { name: "ghost.post.create" });`)).toEqual([
+      defaultLike("ghost\\.post\\.create"),
+    ]);
+    expect(inRun(`await ctx.ghost.post.create({ title: "a" }, { name: "Sleep" });`)).toEqual([defaultLike("Sleep")]);
     // A name the outline cannot read.
     const unread = expect.stringMatching(/^a step's name must be a string literal, or a top-level const holding one/);
     expect(inRun(`await ctx.sleep({ ms: 1 }, { name: input.k });`)).toEqual([unread]);
@@ -367,9 +367,7 @@ describe("lintWorkflow on run, which the worker holds to the outline", () => {
       ),
     ).toEqual([expect.stringMatching(/^`break` out of a loop, or to a label, is not allowed in a workflow/)]);
     expect(
-      inRun(
-        `work: { await ctx.sleep({ ms: 1 }); if (input.skip) break work; await ctx.sleep({ ms: 2 }, { name: "Two" }); }`,
-      ),
+      inRun(`work: { await ctx.sleep({ ms: 1 }); if (input.skip) break work; await ctx.sleep({ ms: 2 }); }`),
     ).toEqual([expect.stringMatching(/^`break` out of a loop, or to a label, is not allowed in a workflow/)]);
     // A finally keeps to the same rules.
     expect(inRun(`try { await ctx.sleep({ ms: 1 }); } finally { return "done"; }`)).toEqual([

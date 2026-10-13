@@ -262,7 +262,7 @@ const repost = defineWorkflow({
     try {
       created = await ctx.bluesky.post.create({ text: "once" });
     } catch {
-      created = await ctx.bluesky.post.create({ text: "again" }, { name: "Post again" });
+      created = await ctx.bluesky.post.create({ text: "again" });
     }
     return created;
   },
@@ -599,9 +599,9 @@ describe("ctx.all", () => {
     uses: [bluesky.post.create, ghost.post.publish, "all"],
     run: async (ctx) =>
       ctx.all([
-        () => ctx.bluesky.post.create({ text: "first" }, { name: "Post first" }),
+        () => ctx.bluesky.post.create({ text: "first" }),
         () => ctx.ghost.post.publish({ id: "post_missing" }),
-        () => ctx.bluesky.post.create({ text: "never" }, { name: "Post never" }),
+        () => ctx.bluesky.post.create({ text: "never" }),
       ]),
   });
 
@@ -627,17 +627,17 @@ describe("ctx.all", () => {
     uses: [bluesky.post.create, "all"],
     run: async (ctx, { shape }) => {
       const group = ctx.all([
-        () => ctx.bluesky.post.create({ text: "one" }, { name: "Post one" }),
-        () => ctx.bluesky.post.create({ text: "two" }, { name: "Post two" }),
+        () => ctx.bluesky.post.create({ text: "one" }),
+        () => ctx.bluesky.post.create({ text: "two" }),
       ]);
       let out: unknown;
       if (shape === "outside") {
         // Made while the first member runs, but not in it.
-        await ctx.bluesky.post.create({ text: "outside" }, { name: "Post outside" });
+        await ctx.bluesky.post.create({ text: "outside" });
         out = (await group).length;
       } else {
         out = await ctx
-          .all([() => ctx.bluesky.post.create({ text: "three" }, { name: "Post three" })])
+          .all([() => ctx.bluesky.post.create({ text: "three" })])
           .catch((err: Error) => `${errorCode(err)}: ${err.message}`);
         await group;
       }
