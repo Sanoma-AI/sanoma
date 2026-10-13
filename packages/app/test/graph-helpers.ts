@@ -3,12 +3,8 @@ import type { GraphEdge, GraphNode } from "../src/graph/types.ts";
 
 // What the graph tests compare a graph by.
 
-/** Each edge as `source->target`, a handle other than a node's own in brackets after its node. */
-export const pairs = (edges: readonly GraphEdge[]) =>
-  edges.map(
-    (e) =>
-      `${e.source}${e.sourceHandle ? `[${e.sourceHandle}]` : ""}->${e.target}${e.targetHandle ? `[${e.targetHandle}]` : ""}`,
-  );
+/** Each edge as `source->target`. */
+export const pairs = (edges: readonly GraphEdge[]) => edges.map((e) => `${e.source}->${e.target}`);
 
 /** Each node's box with its clusters' corners added in: where it is on the page, not in its cluster. */
 export function absolute(nodes: readonly GraphNode[], boxes: ReadonlyMap<string, Box>): Map<string, Box> {

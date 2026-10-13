@@ -30,7 +30,6 @@ import {
   type Graph as GraphData,
   type GraphNode,
   type GraphNodeKind,
-  INNER,
   isPending,
   isSelectable,
 } from "../graph/types.ts";
@@ -291,18 +290,11 @@ function PendingNode(props: Props<"pending">) {
   );
 }
 
-/**
- * A box around the nodes it holds (a loop's body, a computed `ctx.all`'s member), named by a badge.
- * Besides its own handles, two on its inside (`INNER`): the edge to its first nodes leaves its
- * left side, and the edges from its last nodes reach its right side.
- */
+/** A box around the nodes it holds (a loop's body, a computed `ctx.all`'s member), named by a badge. */
 function ClusterNode({ data: { node } }: Props<"cluster">) {
   return (
     <div className="size-full rounded-lg border border-dashed border-muted-foreground/40" title={node.label}>
-      {/* Its own handles first: React Flow joins an edge that names none to the first of its type. */}
       <Handles />
-      <Handle id={INNER} type="source" position={Position.Left} isConnectable={false} className="invisible" />
-      <Handle id={INNER} type="target" position={Position.Right} isConnectable={false} className="invisible" />
       <Badge variant="outline" className="m-1.5 bg-card">
         {node.label}
       </Badge>

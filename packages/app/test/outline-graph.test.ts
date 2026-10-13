@@ -88,11 +88,11 @@ describe("outlineGraph", () => {
     ]);
     expect(pairs(edges)).toEqual([
       "start->cluster:0",
-      "cluster:0[inner]->op:1",
+      "cluster:0->op:1",
       "op:1->op:2",
-      "op:2->cluster:0[inner]",
+      "op:2->cluster:0",
       "cluster:0->cluster:3",
-      "cluster:3[inner]->cluster:3[inner]",
+      "cluster:3->cluster:3",
       "cluster:3->end",
     ]);
   });
@@ -117,9 +117,9 @@ describe("outlineGraph", () => {
       "start->op:0",
       "op:0->op:1",
       "op:0->cluster:2",
-      "cluster:2[inner]->op:3",
+      "cluster:2->op:3",
       "op:3->sleep:4",
-      "sleep:4->cluster:2[inner]",
+      "sleep:4->cluster:2",
       "op:1->op:5",
       "cluster:2->op:5",
       "op:5->end",
@@ -141,9 +141,9 @@ describe("outlineGraph", () => {
     ]);
     expect(pairs(edges)).toEqual([
       "start->cluster:0",
-      "cluster:0[inner]->op:1",
+      "cluster:0->op:1",
       "op:1->sleep:2",
-      "sleep:2->cluster:0[inner]",
+      "sleep:2->cluster:0",
       "cluster:0->op:3",
       "op:3->end",
     ]);
@@ -210,11 +210,11 @@ describe("outlineGraph", () => {
     ]);
     expect(pairs(edges)).toEqual([
       "start->cluster:0",
-      "cluster:0[inner]->op:1",
+      "cluster:0->op:1",
       "op:1->op:2",
       "op:1->op:3",
-      "op:2->cluster:0[inner]",
-      "op:3->cluster:0[inner]",
+      "op:2->cluster:0",
+      "op:3->cluster:0",
       "cluster:0->end",
     ]);
   });
@@ -243,18 +243,18 @@ describe("outlineGraph", () => {
     // Both ways leave the diamond; each edge joins two nodes in one box, or a box and what it holds.
     expect(pairs(edges)).toEqual([
       "start->cluster:0",
-      "cluster:0[inner]->split:1",
+      "cluster:0->split:1",
       "split:1->op:2",
       "split:1->skip:3",
-      "op:2->cluster:0[inner]",
-      "skip:3->cluster:0[inner]",
+      "op:2->cluster:0",
+      "skip:3->cluster:0",
       "cluster:0->end",
     ]);
   });
 
   it("draws an empty cluster's way through it as one edge across its inside", () => {
     const { edges } = outlineGraph([{ kind: "repeat", body: [] }]);
-    expect(pairs(edges)).toEqual(["start->cluster:0", "cluster:0[inner]->cluster:0[inner]", "cluster:0->end"]);
+    expect(pairs(edges)).toEqual(["start->cluster:0", "cluster:0->cluster:0", "cluster:0->end"]);
   });
 
   it("gives each call's node its place in the workflow's file, as outlineWorkflow reads it", () => {

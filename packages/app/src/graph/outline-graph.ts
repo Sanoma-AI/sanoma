@@ -1,13 +1,5 @@
 import type { Span } from "@sanoma/workflows/describe";
-import {
-  type CallStep,
-  type Graph,
-  type GraphEdge,
-  type GraphNode,
-  INNER,
-  type Step,
-  type StepState,
-} from "./types.ts";
+import type { CallStep, Graph, GraphEdge, GraphNode, Step, StepState } from "./types.ts";
 
 /** A graph's two ends: an outline's are plain; a run's say how it started and how it ended. */
 export interface Ends {
@@ -27,8 +19,8 @@ const own = <S extends CallStep>(step: S): Pick<S, "state"> & { span?: Span } =>
  * Steps as a graph: a chain from start to end. A `ctx.all` is one lane per member between the
  * node before it and the node after; a branch splits at a diamond into one lane per case. A
  * computed `ctx.all`'s member is a chain in a cluster labelled "for each", a loop's body one in a
- * cluster labelled "repeats", each drawn from the cluster's inside left to its inside right
- * (`INNER`). A `try` is its body's chain beside a cluster labelled "on error" holding the
+ * cluster labelled "repeats", each joined from the cluster (its inside left) and back to it (its
+ * inside right). A `try` is its body's chain beside a cluster labelled "on error" holding the
  * handler's, both from the node before. An empty member leads straight from the node before to
  * the node after; a branch's empty case, the way past it, is a lane marked "otherwise". A
  * workflow's outline is drawn this way, and a run's ledger once runGraph has made it into steps.
@@ -39,15 +31,11 @@ export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS
   const edges: GraphEdge[] = [];
   let count = 0;
 
-  /** Adds an edge; one from the cluster holding its target leaves from the cluster's inside. */
-  const join = (source: string, target: GraphNode, handles: Pick<GraphEdge, "sourceHandle" | "targetHandle"> = {}) => {
-    const inner: Pick<GraphEdge, "sourceHandle"> = source === target.parent ? { sourceHandle: INNER } : {};
-    edges.push({ id: `${source}->${target.id}`, source, target: target.id, ...inner, ...handles });
-  };
+  const join = (source: string, target: string) => edges.push({ id: `${source}->${target}`, source, target });
   /** Adds the node, drawn from each of `from`, and returns its id. */
   const add = (node: GraphNode, from: readonly string[]): string => {
     nodes.push(node);
-    for (const source of from) join(source, node);
+    for (const source of from) join(source, node.id);
     return node.id;
   };
   const idOf = (kind: string, key: string | undefined) => key ?? `${kind}:${count++}`;
@@ -58,16 +46,12 @@ export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS
     const lanes = (lists: readonly (readonly Step[])[], start: readonly string[]) => [
       ...new Set(lists.flatMap((lane) => chain(lane, start, parent))),
     ];
-    // Its body runs from the box's inside left to its inside right, so an edge to the box goes on
-    // inside it, and one from it starts where the body ends.
+    // Its body runs from the box back to the box, so an edge to the box goes on inside it, and
+    // one from it starts where the body ends. An empty body is one edge from the box to itself.
     const cluster = (label: string, body: readonly Step[]) => {
-      const box: GraphNode = { id: idOf("cluster", undefined), kind: "cluster", label, ...inside };
-      add(box, from);
-      // An empty body is one edge across the inside: the box holds no node, so it says so itself.
-      for (const tail of chain(body, [box.id], box.id)) {
-        join(tail, box, { targetHandle: INNER, ...(tail === box.id && { sourceHandle: INNER }) });
-      }
-      return [box.id];
+      const id = add({ id: idOf("cluster", undefined), kind: "cluster", label, ...inside }, from);
+      for (const tail of chain(body, [id], id)) join(tail, id);
+      return [id];
     };
     for (const step of steps) {
       switch (step.kind) {

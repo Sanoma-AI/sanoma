@@ -60,11 +60,31 @@ export interface Layout {
 const ENTER = "\0enter";
 const EXIT = "\0exit";
 
-/** An edge's two nodes in dagre's graph: a cluster's inside as its side's point. */
-const ends = (edge: GraphEdge): [string, string] => [
-  edge.sourceHandle ? ENTER : edge.source,
-  edge.targetHandle ? EXIT : edge.target,
-];
+/** An edge as dagre lays it out: the box it is drawn in, and its two ends in that box's graph. */
+interface Link {
+  edge: GraphEdge;
+  box: string | undefined;
+  v: string;
+  w: string;
+}
+
+/**
+ * Where an edge is drawn, from its nodes' `parent`: an edge from a cluster to a node it holds runs
+ * in the cluster from its inside left (`ENTER`), one from a node it holds to the cluster to its
+ * inside right (`EXIT`), and one from the cluster to itself (an empty body) across its inside.
+ * Any other edge joins two nodes in one box. Throws, naming the edge, for one that does not.
+ */
+function link(edge: GraphEdge, nodeOf: ReadonlyMap<string, GraphNode>): Link {
+  const { id, source, target } = edge;
+  const [from, to] = [nodeOf.get(source), nodeOf.get(target)];
+  if (from && to) {
+    if (from === to && from.kind === "cluster") return { edge, box: source, v: ENTER, w: EXIT };
+    if (to.parent === source) return { edge, box: source, v: ENTER, w: target };
+    if (from.parent === target) return { edge, box: target, v: source, w: EXIT };
+    if (from !== to && from.parent === to.parent) return { edge, box: from.parent, v: source, w: target };
+  }
+  throw new Error(`layout: edge ${id} joins neither two nodes in one box nor a cluster and a node it holds`);
+}
 
 /**
  * Lays the graph out left to right in run order. Lanes share ranks and stack top to bottom in the
@@ -81,10 +101,10 @@ const ends = (edge: GraphEdge): [string, string] => [
  */
 export function layout({ nodes, edges }: Graph): Layout {
   const children = Map.groupBy(nodes, (node) => node.parent);
-  const parentOf = new Map(nodes.map((node) => [node.id, node.parent]));
-  // An edge joins two nodes in one box, or a cluster's inside and a node in it.
-  const links = Map.groupBy(edges, (edge) =>
-    edge.sourceHandle ? edge.source : edge.targetHandle ? edge.target : parentOf.get(edge.source),
+  const nodeOf = new Map(nodes.map((node) => [node.id, node]));
+  const links = Map.groupBy(
+    edges.map((edge) => link(edge, nodeOf)),
+    (each) => each.box,
   );
   const boxes = new Map<string, Box>();
   // Each edge's route in its box, and the box it is in.
@@ -102,7 +122,7 @@ export function layout({ nodes, edges }: Graph): Layout {
     }
     const own = links.get(parent) ?? [];
     if (inside) for (const side of [ENTER, EXIT]) g.setNode(side, { width: 0, height: 0 });
-    for (const edge of own) g.setEdge(...ends(edge));
+    for (const { v, w } of own) g.setEdge(v, w);
     // dagre's crossing reduction would reorder lanes that never cross, last member on top: the
     // order the nodes were added in is already free of crossings, and reads in member order.
     dagreLayout(g, { disableOptimalOrderHeuristic: true });
@@ -116,10 +136,9 @@ export function layout({ nodes, edges }: Graph): Layout {
     const { width = 0, height = 0 } = g.graph();
     const least = inside ? NODE_SIZE.cluster : { width: 0, height: 0 };
     const size = { width: Math.max(width, least.width), height: Math.max(height + top, least.height) };
-    for (const edge of own) {
-      const from = edge.sourceHandle ? { x: 0, y: size.height / 2 } : side(boxes.get(edge.source)!, "right");
-      const to = edge.targetHandle ? { x: size.width, y: size.height / 2 } : side(boxes.get(edge.target)!, "left");
-      const [v, w] = ends(edge);
+    for (const { edge, v, w } of own) {
+      const from = v === ENTER ? { x: 0, y: size.height / 2 } : side(boxes.get(v)!, "right");
+      const to = w === EXIT ? { x: size.width, y: size.height / 2 } : side(boxes.get(w)!, "left");
       // Between dagre's ends (the boxes' sides it cut), its points on each rank the edge crosses.
       const ranks = (g.edge(v, w).points as Point[]).slice(1, -1).map(({ x, y }) => ({ x, y: y + top }));
       local.set(edge.id, { route: steps(from, ranks, to), parent });

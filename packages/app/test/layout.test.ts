@@ -34,8 +34,16 @@ function routeProblems(graph: Graph): string[] {
     const route = routes.get(edge.id);
     if (!route) return [`${edge.id} has no route`];
     const [from, to] = [at.get(edge.source)!, at.get(edge.target)!];
-    const start = { x: edge.sourceHandle ? from.x : from.x + from.width, y: from.y + from.height / 2 };
-    const end = { x: edge.targetHandle ? to.x + to.width : to.x, y: to.y + to.height / 2 };
+    // From a cluster to what it holds, or across it, from its inside left; back to it, to its inside right.
+    const across = edge.source === edge.target;
+    const start = {
+      x: across || parentOf.get(edge.target) === edge.source ? from.x : from.x + from.width,
+      y: from.y + from.height / 2,
+    };
+    const end = {
+      x: across || parentOf.get(edge.source) === edge.target ? to.x + to.width : to.x,
+      y: to.y + to.height / 2,
+    };
     const problems: string[] = [];
     if (text(route[0]!) !== text(start)) problems.push(`${edge.id} starts at ${text(route[0]!)}, not ${text(start)}`);
     if (text(route.at(-1)!) !== text(end)) problems.push(`${edge.id} ends at ${text(route.at(-1)!)}, not ${text(end)}`);
