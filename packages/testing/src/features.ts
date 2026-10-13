@@ -7,9 +7,6 @@ import { featureScenarios, type FeatureTarget, testFeature } from "@sanoma/workf
 import { describe, it } from "vitest";
 import { live, replay, type ReplayOptions } from "./replay.ts";
 
-/** Tags a scenario that runs on the fake only: no recording of the vendor's replies holds it. */
-export const FAKE_ONLY = "@fake-only";
-
 export interface DescribeFeaturesOptions {
   /** The connector's feature files' directory: `new URL("../features/", import.meta.url)`. */
   features: URL;
@@ -21,8 +18,11 @@ export interface DescribeFeaturesOptions {
   replay: ReplayOptions;
 }
 
+/** Tags a scenario that runs on the fake only: no recording of the vendor's replies holds it. */
+const FAKE_ONLY = "@fake-only";
+
 /** The fixture a scenario replays: its name in lower case, each run of other characters than letters and digits a `-`. */
-export const fixtureOf = (name: string) =>
+const fixtureOf = (name: string) =>
   name
     .toLowerCase()
     .replaceAll(/[^a-z0-9]+/g, "-")
@@ -30,13 +30,15 @@ export const fixtureOf = (name: string) =>
 
 /**
  * Registers the connector's own feature files as vitest tests: a `describe` per target, `fake`
- * and `replay`, and in each a test per scenario that runs it with Cucumber (`testFeature`), its
+ * and `driver`, and in each a test per scenario that runs it with Cucumber (`testFeature`), its
  * `When` steps calling the target's operations directly. The fake is a new one of the
- * connector's per scenario; replay is the connector's driver over the scenario's recorded
- * replies (`replay`), skipped for a scenario tagged `@fake-only` and when `SANOMA_LIVE=1`. Steps
- * are the connector's (`withSetup`'s `steps`) and the generic ones.
+ * connector's per scenario. The driver is the connector's, over the scenario's recorded replies
+ * (`replay`), or with `SANOMA_LIVE=1` against the vendor, where `SANOMA_RECORD=1` records the
+ * replies as the scenario's fixture; a scenario tagged `@fake-only` runs on the fake alone.
+ * Steps are the connector's (`withSetup`'s `steps`) and the generic ones. Await it: it lists the
+ * scenarios first.
  */
-export function describeFeatures(
+export async function describeFeatures(
   connector: Connector<any, any>,
   { features, replay: options }: DescribeFeaturesOptions,
 ) {
@@ -46,43 +48,36 @@ export function describeFeatures(
   const scope = resolve();
   const vendor = scope.ops.values().next().value?.vendor;
   if (vendor === undefined) throw new Error("describeFeatures needs a connector with operations");
-  const scenarios = featureScenarios(features);
+  const scenarios = await featureScenarios(scope, features);
   if (scenarios.length === 0) throw new Error(`describeFeatures found no scenarios in ${fileURLToPath(features)}`);
-
-  /** Runs the scenario on the target, and throws its first failure. */
-  async function run(file: string, line: number, target: () => FeatureTarget) {
-    const failure = await testFeature(scope, fileURLToPath(new URL(file, features)), line, target());
-    if (failure) throw new Error(failure.message);
-  }
+  const run = (file: string, line: number, target: FeatureTarget) =>
+    testFeature(scope, fileURLToPath(new URL(file, features)), line, target);
 
   describe("fake", () => {
     for (const { file, line, name } of scenarios) {
-      it(`${file} › ${name}`, () =>
-        run(file, line, () => {
-          const fake = scope.fakes.get(vendor)?.();
-          if (!fake) throw new Error(`${vendor}'s connector attaches no fake`);
-          return { driver: fake.driver, fake };
-        }));
+      it(`${file} › ${name}`, () => {
+        const fake = scope.fakes.get(vendor)?.();
+        if (!fake) throw new Error(`${vendor}'s connector attaches no fake`);
+        return run(file, line, { driver: fake.driver, fake });
+      });
     }
   });
 
-  describe.skipIf(live)("replay", () => {
+  describe("driver", () => {
     const { play } = replay(options);
     for (const { file, line, name, tags } of scenarios) {
       const fixture = fixtureOf(name);
       it.skipIf(tags.includes(FAKE_ONLY))(`${file} › ${name}`, () => {
-        if (!existsSync(new URL(`${fixture}.json`, options.fixtures))) {
+        if (!live && !existsSync(new URL(`${fixture}.json`, options.fixtures))) {
           throw new Error(
-            `${file}:${line}: no recording ${fixture}.json for "${name}" in ${fileURLToPath(options.fixtures)}; record one, or tag the scenario ${FAKE_ONLY}`,
+            `${file}:${line}: no recording ${fixture}.json for "${name}" in ${fileURLToPath(options.fixtures)}; record one with SANOMA_LIVE=1 SANOMA_RECORD=1, or tag the scenario ${FAKE_ONLY}`,
           );
         }
         play(fixture);
-        return run(file, line, () => {
-          // A driver of its own, as each run's would be: one that keeps a session starts without one.
-          const driver = resolve().driversByVendor.get(vendor);
-          if (!driver) throw new Error(`${vendor}'s connector attaches no driver`);
-          return { driver };
-        });
+        // A driver of its own, as each run's would be: one that keeps a session starts without one.
+        const driver = resolve().driversByVendor.get(vendor);
+        if (!driver) throw new Error(`${vendor}'s connector attaches no driver`);
+        return run(file, line, { driver });
       });
     }
   });

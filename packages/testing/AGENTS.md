@@ -6,7 +6,7 @@ This private package (the monorepo's tests only; not published) owns test-worker
 
 - [README](README.md): helper usage, [database isolation](README.md#a-worker-for-a-test), [the test app](README.md#a-test-app) (`@sanoma/testing/harness`), and [replay/recording modes](README.md#replaying-a-vendors-api).
 - [Scenarios](README.md#scenarios): `describeScenarios` and `runScenario`, a config's scenarios as vitest tests.
-- [A connector's own features](README.md#a-connectors-own-features): `describeFeatures`, a connector's feature files on its fake and on replay.
+- [A connector's own features](README.md#a-connectors-own-features): `describeFeatures`, a connector's feature files on its fake and on its driver.
 - [Source map](src/AGENTS.md): worker helpers at the root versus the `./harness`, `./replay` and `./scenarios` entry points.
 - [Test map](test/AGENTS.md): fake behavior coverage; connector driver tests exercise replay.
 

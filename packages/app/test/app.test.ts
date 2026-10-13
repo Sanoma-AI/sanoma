@@ -505,19 +505,12 @@ describe("scenarios and sandbox runs", () => {
         expect.objectContaining({ op: "ghost.post.create", input: expect.objectContaining({ title: "Old news" }) }),
       ],
     });
-    // A call it expects has been made, so that check is settled; the next has not been made yet,
-    // so the steps after it are not checked.
+    // A call it expects has been made, so that check is settled; the outcome is not yet.
     expect(held.checks).toContainEqual({ step: 'a post titled "Acme Pro" is created', ok: true, settled: true });
-    expect(held.checks).toContainEqual({
-      step: 'post "post_0002" is published',
-      ok: false,
-      detail: 'no call to ghost.post.publish with {"id":"post_0002"}',
-      settled: false,
-    });
     expect(held.checks).toContainEqual({
       step: "the run succeeds",
       ok: false,
-      detail: "not checked (an earlier step failed)",
+      detail: "run not ended",
       settled: false,
     });
 
@@ -545,13 +538,7 @@ describe("scenarios and sandbox runs", () => {
     expect(held.checks).toEqual([
       { step: "ghost.post.publish was not called", ok: true, settled: false },
       expect.objectContaining({ step: "resend.broadcast.send was called", ok: false, settled: false }),
-      // A step after one that failed is not checked.
-      {
-        step: 'the run fails with "approval_rejected"',
-        ok: false,
-        detail: "not checked (an earlier step failed)",
-        settled: false,
-      },
+      { step: 'the run fails with "approval_rejected"', ok: false, detail: "run not ended", settled: false },
     ]);
     expect((await page(`/workflows/announce/runs/${id}`)).text).toMatch(/>not yet</);
 
@@ -567,12 +554,7 @@ describe("scenarios and sandbox runs", () => {
     expect(failed.checks).toEqual([
       { step: "ghost.post.publish was not called", ok: true, settled: true },
       expect.objectContaining({ step: "resend.broadcast.send was called", ok: false, settled: true }),
-      {
-        step: 'the run fails with "approval_rejected"',
-        ok: false,
-        detail: "not checked (an earlier step failed)",
-        settled: true,
-      },
+      { step: 'the run fails with "approval_rejected"', ok: true, settled: true },
     ]);
   });
 });

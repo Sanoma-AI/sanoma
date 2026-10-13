@@ -112,16 +112,5 @@ export {
 // each workflow's outline too, to hold its runs to it.
 export { defineDriver, type DriverImpl, type OpIdOf } from "./op.ts";
 // Steps for Gherkin tests, as data; Cucumber runs them from `@sanoma/workflows/scenario`.
-export {
-  type CallRecord,
-  defineSteps,
-  type Expect,
-  type Fault,
-  type OpRef,
-  type RunView,
-  type Seed,
-  type StepArgument,
-  type StepDefinition,
-  type Steps,
-} from "./steps.ts";
+export { defineSteps, type Expect, type RunView, type Seed, type Steps } from "./steps.ts";
 // defineFake lives at `@sanoma/workflows/fake`: test tooling, not runtime.

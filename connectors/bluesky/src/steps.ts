@@ -10,7 +10,7 @@ export const blueskySteps = defineSteps("bluesky", ({ given, then }) => {
     op: create,
     called: true,
     check: (run) => {
-      const posts = run.calls(create).map((c) => (c.input as { text: string }).text);
+      const posts = run.calls(create).map((c) => c.input.text);
       if (posts.some((p) => p.includes(text))) return undefined;
       return posts.length
         ? `no Bluesky post has "${text}"; the posts were ${JSON.stringify(posts)}`

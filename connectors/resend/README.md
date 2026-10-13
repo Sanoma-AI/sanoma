@@ -86,7 +86,7 @@ The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/
 | ------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | Given   | `a Resend broadcast {string}`           | Seeds a draft broadcast with that subject through `resend.broadcast.create`, named `broadcast` (`$broadcast.id`) |
 | Given   | `Resend fails to send once`             | The next `resend.broadcast.send` fails (`failNext`)                                                              |
-| Then    | `the Resend broadcast {string} is sent` | The broadcast with that subject, created by the run, was sent                                                    |
+| Then    | `the Resend broadcast {string} is sent` | The broadcast with that subject, seeded or created by the run, was sent                                          |
 
 `features/broadcast.feature` creates and sends a broadcast, with these steps and the generic ones for an operation's own test, on the fake and on Resend's recorded replies (`create-and-send.json`): `test/features.test.ts` runs them with [`describeFeatures`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#a-connectors-own-features). A scenario tagged `@fake-only` has no recording. The package ships `features/`.
 

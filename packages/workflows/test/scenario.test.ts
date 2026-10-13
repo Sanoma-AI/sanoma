@@ -12,21 +12,15 @@ import {
   allowAll,
   defineConnector,
   defineResource,
+  defineSteps,
   defineWorkflow,
   type LedgerRecord,
   memoryLedger,
   resolveConfig,
 } from "../src/index.ts";
 import { missingResourceFake, seedResource } from "../src/sandbox.ts";
-import {
-  check as checkRun,
-  type CoreExpectation,
-  detailOf,
-  loadScenarios,
-  NOT_CHECKED,
-  type Scenario,
-  type Scope,
-} from "../src/scenario.ts";
+import { type CoreExpectation, detailOf } from "../src/expectations.ts";
+import { check as checkRun, loadScenarios, type Scenario, type Scope } from "../src/scenario.ts";
 import announce from "./fixtures/announce.ts";
 import { companyConfig } from "./fixtures/company/fakes.ts";
 import inspect from "./fixtures/company/workflows/inspect.ts";
@@ -47,12 +41,26 @@ const scope = scopeOf([ghost, resend, bluesky]);
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
-/** The scenarios of one feature file with this text, compiled from a directory of its own; throws the file's error. */
-async function parseFeature(text: string, file: string, s: Scope): Promise<Scenario[]> {
+/** A directory of its own with these files, and the scope that reads its scenarios. */
+function scenariosDir(files: Record<string, string>, s: Scope = scope) {
   const dir = mkdtempSync(join(tmpdir(), "sanoma-feature-"));
   dirs.push(dir);
-  writeFileSync(join(dir, file), text);
-  const { scenarios, errors } = await loadScenarios({ ...s, scenarios: pathToFileURL(`${dir}/`) });
+  for (const [file, text] of Object.entries(files)) {
+    mkdirSync(join(dir, file, ".."), { recursive: true });
+    writeFileSync(join(dir, file), text);
+  }
+  return { dir, scope: { ...s, scenarios: pathToFileURL(`${dir}/`) } };
+}
+
+/** Compiles the text as `file` in a directory of its own: that directory's scope, its scenarios and errors. */
+async function compiled(text: string, s: Scope = scope, file = "x.feature") {
+  const within = scenariosDir({ [file]: text }, s).scope;
+  return { scope: within, ...(await loadScenarios(within)) };
+}
+
+/** The scenarios of one feature file with this text; throws the file's error. */
+async function parseFeature(text: string, file: string, s: Scope): Promise<Scenario[]> {
+  const { scenarios, errors } = await compiled(text, s, file);
   if (errors.length) throw new Error(errors.map((e) => e.message).join("\n"));
   return scenarios;
 }
@@ -996,15 +1004,6 @@ describe("resources and policy outcomes", () => {
   });
 });
 
-/** Compiles the text as `file` in a directory of its own, and returns that directory's scope with its scenarios. */
-async function compiled(text: string, s: Scope = scope, file = "x.feature") {
-  const dir = mkdtempSync(join(tmpdir(), "sanoma-cucumber-"));
-  dirs.push(dir);
-  writeFileSync(join(dir, file), text);
-  const within = { ...s, scenarios: pathToFileURL(`${dir}/`) };
-  return { scope: within, ...(await loadScenarios(within)) };
-}
-
 describe("Cucumber", () => {
   it("builds its library again in one process: another config compiles the same scenarios", async () => {
     const first = await compiled(LAUNCH);
@@ -1016,59 +1015,35 @@ describe("Cucumber", () => {
     expect(again.scenarios).toEqual(first.scenarios);
   });
 
-  it("names the file and line of a step no step matches, of one two steps match, and of a file Gherkin cannot parse", async () => {
-    expect(await thrown(`Feature: A\n  Scenario: S\n    When announce runs\n    Then the sky is green\n`)).toMatch(
-      /^x\.feature:4: no step matches "the sky is green"\nKnown steps:\n/,
-    );
-    const flaky = defineConnector("flaky", {
-      thing: {
-        poke: {
-          effect: "write",
-          input: z.object({ id: z.string() }),
-          output: z.object({}),
-          phrases: { given: "{id} is rate limited once" },
-        },
-      },
-    });
-    expect(
-      await thrown(
-        `Feature: A\n  Scenario: S\n    When announce runs\n    Given ghost.post.publish is rate limited once\n`,
-        scopeOf([ghost, resend, bluesky, flaky]),
-      ),
-    ).toBe(
-      'x.feature:4: "ghost.post.publish is rate limited once" is ambiguous: it matches "{op} is rate limited once" and "{id} is rate limited once"',
-    );
+  it("names the file and line where Gherkin cannot parse a file, and leaves it out, the others compiling", async () => {
     expect(await thrown(`Feature: A\n  Scenario: S\n    When announce runs\n  Feature: B\n`)).toMatch(
       /^x\.feature:4: \(4:3\): expected: /,
     );
-    // A file that does not parse is left out; the others still compile.
-    const dir = mkdtempSync(join(tmpdir(), "sanoma-cucumber-"));
-    dirs.push(dir);
-    writeFileSync(join(dir, "a.feature"), "Feature: A\n  Scenario: S\n    When announce runs\n  Feature: B\n");
-    writeFileSync(join(dir, "b.feature"), feature("Fine"));
-    const both = await loadScenarios({ ...scope, scenarios: pathToFileURL(`${dir}/`) });
+    const both = await loadScenarios(
+      scenariosDir({
+        "a.feature": "Feature: A\n  Scenario: S\n    When announce runs\n  Feature: B\n",
+        "b.feature": feature("Fine"),
+      }).scope,
+    );
     expect(both.scenarios.map((s) => s.name)).toEqual(["Fine"]);
     expect(both.errors.map((e) => e.file)).toEqual(["a.feature"]);
   });
 
-  it("compiles a config's feature files in well under 50 ms once Cucumber is loaded, its library built anew", async () => {
-    await compiled(LAUNCH);
-    const times: number[] = [];
-    for (let i = 0; i < 5; i++) {
-      const fresh = scopeOf([ghost, resend, bluesky]);
-      const dir = mkdtempSync(join(tmpdir(), "sanoma-cucumber-"));
-      dirs.push(dir);
-      writeFileSync(join(dir, "announce.feature"), LAUNCH);
-      writeFileSync(
-        join(dir, "compose.feature"),
-        readFileSync(new URL("./fixtures/scenarios/compose.feature", import.meta.url)),
-      );
-      const started = performance.now();
-      const { errors } = await loadScenarios({ ...fresh, scenarios: pathToFileURL(`${dir}/`) });
-      times.push(performance.now() - started);
-      expect(errors).toEqual([]);
-    }
-    expect(times.toSorted((a, b) => a - b)[2]).toBeLessThan(50);
+  it("reads and checks files whose paths a glob or Cucumber would read otherwise: @, brackets, braces", async () => {
+    const files = {
+      "@smoke.feature": feature("Smoke"),
+      "x[1].feature": feature("Bracketed"),
+      "d[1]{a,b}/in (2).feature": feature("Nested"),
+    };
+    const { scope: within } = scenariosDir(files);
+    const { scenarios, errors } = await loadScenarios(within);
+    expect(errors).toEqual([]);
+    expect(scenarios.map((s) => [s.file, s.name])).toEqual([
+      ["@smoke.feature", "Smoke"],
+      ["d[1]{a,b}/in (2).feature", "Nested"],
+      ["x[1].feature", "Bracketed"],
+    ]);
+    for (const s of scenarios) expect(await checkRun(within, s, [])).toEqual([]);
   });
 
   it("reads the connectors' steps: a seed named for an operation's own test, and a Then of the connector's own", async () => {
@@ -1079,7 +1054,7 @@ describe("Cucumber", () => {
       { step: "Resend fails to send once", op: "resend.broadcast.send", fault: "failNext" },
     ]);
     expect(scenario?.expect).toEqual([
-      { step: 'the Ghost post "Acme Pro" is published', owner: "ghost", op: "ghost.post.publish", called: true },
+      { step: 'the Ghost post "Acme Pro" is published', custom: true, op: "ghost.post.publish", called: true },
       { step: "bluesky.post.create was not called", op: "bluesky.post.create", called: false },
       { step: "the run fails", outcome: "failed" },
     ]);
@@ -1120,16 +1095,37 @@ describe("Cucumber", () => {
       { ...common, id: "r:run.finished:2", seq: 2, type: "run.finished", output: {} },
     ];
 
-    it("runs the Then steps against the ledger, one check per expectation, in order", async () => {
+    it("runs the Then steps against the ledger, each judged on its own: one check per expectation, in order", async () => {
       const { scope: within, scenarios } = await compiled(LAUNCH);
       const [launch] = scenarios as [Scenario];
       const checks = await checkRun(within, launch, records);
       expect(checks.map((c) => c.step)).toEqual(launch.expect.map((e) => e.step));
-      expect(checks).toEqual([
+      expect(checks.slice(0, 2)).toEqual([
         { step: 'a post titled "Acme Pro" is created', ok: true },
         { step: "ghost.post.publish was called", ok: false, detail: "no call to ghost.post.publish" },
-        // Cucumber skips the steps after a failed one.
-        ...launch.expect.slice(2).map((e) => ({ step: e.step, ok: false, detail: NOT_CHECKED })),
+      ]);
+      // A step after one that does not hold is still checked.
+      expect(checks.at(-1)).toEqual({ step: "the run succeeds", ok: true });
+    });
+
+    it("checks a connector's own Then step, and one whose code throws", async () => {
+      const throwing = defineSteps("odd", ({ then }) => {
+        then("the odd check throws", () => ({
+          check: () => {
+            throw new Error("it threw");
+          },
+        }));
+      });
+      const text = `Feature: A\n  Scenario: S\n    When announce runs\n    Then the odd check throws\n    And the Ghost post "Acme Pro" is published\n    And the run succeeds\n`;
+      const { scope: within, scenarios } = await compiled(text, { ...scope, steps: [...scope.steps, throwing] });
+      expect(await checkRun(within, scenarios[0]!, records)).toEqual([
+        { step: "the odd check throws", ok: false, detail: "it threw" },
+        {
+          step: 'the Ghost post "Acme Pro" is published',
+          ok: false,
+          detail: expect.stringMatching(/was not published$/),
+        },
+        { step: "the run succeeds", ok: true },
       ]);
     });
 

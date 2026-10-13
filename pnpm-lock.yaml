@@ -323,12 +323,12 @@ importers:
       '@cucumber/cucumber-expressions':
         specifier: ^20.1.0
         version: 20.1.0
-      '@cucumber/gherkin':
-        specifier: ^42.0.1
-        version: 42.0.1
       '@cucumber/messages':
         specifier: ^34.2.1
         version: 34.2.1
+      '@cucumber/query':
+        specifier: 16.1.1
+        version: 16.1.1(@cucumber/messages@34.2.1)
       '@dbos-inc/dbos-sdk':
         specifier: ^5.2.11
         version: 5.2.11

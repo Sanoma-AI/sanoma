@@ -7,11 +7,8 @@ import type { Op } from "./op.ts";
  * Cucumber, Gherkin and faker, so a connector's package can import it on its main entry.
  */
 
-/** A fault a fake injects into its next call to an operation. */
-export type Fault = "failNext" | "rateLimit" | "loseReply";
-
-/** An operation, or its id. */
-export type OpRef = Op | string;
+/** Any operation, whatever its input and output. */
+type AnyOp<I = any, O = any> = Op<string, string, string, I, O>;
 
 /**
  * What a `Given` step sets up before the run: a call through an operation of the run's fake,
@@ -19,19 +16,26 @@ export type OpRef = Op | string;
  * call. `as` names a call's output, so a later step's table of an operation's own test can use
  * its fields: `$draft.id`.
  */
-export type Seed = { op: OpRef; input: Record<string, unknown>; as?: string } | { op: OpRef; fault: Fault };
+export type Seed =
+  | { op: AnyOp; input: Record<string, unknown>; as?: string }
+  | { op: AnyOp; fault: "failNext" | "rateLimit" | "loseReply" };
 
-/** A call in a run: an `op.called` record. */
-export type CallRecord = Extract<LedgerRecord, { type: "op.called" }>;
+/** A call through an operation: what it was given, and what it returned. */
+export interface Call<I, O> {
+  input: I;
+  output: O;
+}
 
 /** A run as a `Then` step reads it. */
 export interface RunView {
   /** Every record of the run, in order. */
   readonly records: readonly LedgerRecord[];
-  /** The calls the run made to the operation, in order: those without an `error`. */
-  calls(op: OpRef): CallRecord[];
-  /** What the scenario's `Given` steps seeded through the operation, with what each call returned. */
-  seeded(op: OpRef): { input: unknown; output: unknown }[];
+  /** The calls the run made through the operation, in order: those that did not fail. */
+  calls<I, O>(op: AnyOp<I, O>): Call<I, O>[];
+  /** The calls the scenario's `Given` steps made through the operation, to seed the run's fake. */
+  seeded<I, O>(op: AnyOp<I, O>): Call<I, O>[];
+  /** The seeded calls, then the run's own: everything made through the operation. */
+  made<I, O>(op: AnyOp<I, O>): Call<I, O>[];
 }
 
 /**
@@ -40,24 +44,15 @@ export interface RunView {
  * graph: the operation, and whether it expects a call to it (true) or rules one out (false).
  */
 export interface Expect {
-  op?: OpRef;
+  op?: AnyOp;
   called?: boolean;
   check(run: RunView): string | undefined | void;
 }
 
-/**
- * A step's function gets the values of its expression's parameters, in order, then the step's
- * doc string or table when it has one: `{ docString }`, or `{ table }`, the table's rows of cells.
- */
-export interface StepArgument {
-  docString?: string;
-  table?: string[][];
-}
-
-/** One step definition: a Cucumber expression, and what the step says. */
+/** One step definition: a Cucumber expression, and what the step says, from its parameters' values. */
 export type StepDefinition =
-  | { kind: "given"; expression: string; fn: (...args: any[]) => Seed | Seed[] }
-  | { kind: "then"; expression: string; fn: (...args: any[]) => Expect };
+  | { kind: "given"; expression: string; fn: (...values: any[]) => Seed }
+  | { kind: "then"; expression: string; fn: (...values: any[]) => Expect };
 
 /** A connector's or a company's steps: `owner` (the vendor, say) heads them in a list of known steps. */
 export interface Steps {
@@ -68,8 +63,8 @@ export interface Steps {
 /**
  * Declares steps for Gherkin tests, as data the config's scenarios and a connector's own feature
  * files can use: `given` steps say what to seed (`Seed`), `then` steps what to expect
- * (`Expect`). A step's function must be pure: compiling a scenario calls it, and so does the app,
- * whenever a feature file changes.
+ * (`Expect`). A step's function gets its expression's values, in order, and must be pure:
+ * compiling a scenario calls it, and so does the app, whenever a feature file changes.
  *
  * ```ts
  * export const ghostSteps = defineSteps("ghost", ({ given }) => {
@@ -80,8 +75,8 @@ export interface Steps {
 export function defineSteps(
   owner: string,
   define: (steps: {
-    given(expression: string, fn: (...args: any[]) => Seed | Seed[]): void;
-    then(expression: string, fn: (...args: any[]) => Expect): void;
+    given(expression: string, fn: (...values: any[]) => Seed): void;
+    then(expression: string, fn: (...values: any[]) => Expect): void;
   }) => void,
 ): Steps {
   const steps: StepDefinition[] = [];
@@ -93,6 +88,3 @@ export function defineSteps(
   });
   return Object.freeze({ owner, steps: Object.freeze(steps) });
 }
-
-/** The id of an operation given as itself or by id. */
-export const opId = (op: OpRef): string => (typeof op === "string" ? op : op.id);

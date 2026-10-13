@@ -6,7 +6,7 @@ const { create, send } = resendOps.broadcast;
 /**
  * Resend's steps for Gherkin tests: a draft broadcast before the run (named `broadcast`, so an
  * operation's own test can use `$broadcast.id`), Resend failing the next send, and a broadcast
- * the run sent, found by its subject among those it created.
+ * the run sent, found by its subject among those seeded and created.
  */
 export const resendSteps = defineSteps("resend", ({ given, then }) => {
   given("a Resend broadcast {string}", (subject: string) => ({
@@ -20,11 +20,11 @@ export const resendSteps = defineSteps("resend", ({ given, then }) => {
     called: true,
     check: (run) => {
       const ids = run
-        .calls(create)
-        .filter((c) => (c.input as { subject: string }).subject === subject)
-        .map((c) => (c.output as { id: string }).id);
+        .made(create)
+        .filter((c) => c.input.subject === subject)
+        .map((c) => c.output.id);
       if (ids.length === 0) return `no Resend broadcast "${subject}" was created`;
-      if (run.calls(send).some((c) => ids.includes((c.input as { id: string }).id))) return undefined;
+      if (run.calls(send).some((c) => ids.includes(c.input.id))) return undefined;
       return `the Resend broadcast "${subject}" (${ids.join(", ")}) was not sent`;
     },
   }));

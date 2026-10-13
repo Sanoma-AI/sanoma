@@ -8,6 +8,7 @@ Feature: Resend broadcasts
       | id | $broadcast.id |
     Then it returns
       | status | queued |
+    And the Resend broadcast "Launch" is sent
 
   @fake-only
   Scenario: Send a broadcast that is not there

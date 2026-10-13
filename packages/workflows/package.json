@@ -71,8 +71,8 @@
   "dependencies": {
     "@cucumber/cucumber": "13.3.0",
     "@cucumber/cucumber-expressions": "^20.1.0",
-    "@cucumber/gherkin": "^42.0.1",
     "@cucumber/messages": "^34.2.1",
+    "@cucumber/query": "16.1.1",
     "@dbos-inc/dbos-sdk": "^5.2.11",
     "@faker-js/faker": "^10.6.0",
     "oxc-parser": "^0.153.0",

@@ -14,11 +14,12 @@ export const ghostSteps = defineSteps("ghost", ({ given, then }) => {
     op: publish,
     called: true,
     check: (run) => {
-      const ids = [...run.seeded(create), ...run.calls(create)]
-        .filter((c) => (c.input as { title: string }).title === title)
-        .map((c) => (c.output as { id: string }).id);
+      const ids = run
+        .made(create)
+        .filter((c) => c.input.title === title)
+        .map((c) => c.output.id);
       if (ids.length === 0) return `no Ghost post titled "${title}" was drafted`;
-      if (run.calls(publish).some((c) => ids.includes((c.input as { id: string }).id))) return undefined;
+      if (run.calls(publish).some((c) => ids.includes(c.input.id))) return undefined;
       return `the Ghost post "${title}" (${ids.join(", ")}) was not published`;
     },
   }));
