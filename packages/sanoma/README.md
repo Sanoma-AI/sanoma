@@ -101,4 +101,4 @@ When the repo's `node_modules/sanoma` or any `node_modules/@sanoma/*` is a link 
 
 `sanoma worker` and `sanoma app` are the deployment's two processes. A host that composes its own process keeps `startWorker` from `@sanoma/workflows` and `startApp` from `@sanoma/app`, which the bin runs.
 
-Status: early (0.x). License: Apache-2.0.
+Status: early (0.x). License: FSL-1.1-ALv2.

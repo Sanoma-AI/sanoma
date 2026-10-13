@@ -442,4 +442,4 @@ Status: early (0.x). The API may change between minor versions.
 
 TODO: redact fields a schema marks `.meta({ sensitive: true })` from the ledger, the approvals event and DBOS's step records, so a secret passed by mistake is not kept.
 
-License: Apache-2.0.
+License: FSL-1.1-ALv2.
