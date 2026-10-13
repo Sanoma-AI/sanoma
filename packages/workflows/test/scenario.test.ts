@@ -728,8 +728,10 @@ describe("resources and policy outcomes", () => {
       'Scenario "Seeded" seeds acme.hook, but acme\'s fake holds no resources (it is not a tfFake)',
     );
     expect(problem?.data).toEqual({ scenario: "Seeded", resources: ["acme.hook"] });
-    // A vendor with no fake at all is refused the same way.
-    expect(missingResourceFake(seeded!, new Map())?.message).toBe(problem?.message);
+    // A vendor whose connector attaches no fake is refused, saying so.
+    expect(missingResourceFake(seeded!, new Map())?.message).toBe(
+      'Scenario "Seeded" seeds acme.hook, but acme\'s connector attaches no fake',
+    );
   });
 
   it("seeds a resource on the copy as the step says, and fails the scenario, naming the step, when the fake refuses it", () => {

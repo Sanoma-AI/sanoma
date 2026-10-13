@@ -9,4 +9,4 @@ import { fakeGithub } from "./fake.ts";
  * live driver (`githubDriver`, on the default bridge) and its fake (`fakeGithub`), which sandbox
  * runs and scenarios copy.
  */
-export const github = withSetup(githubTf.connector, { driver: () => githubDriver(), fake: () => fakeGithub() });
+export const github = withSetup(githubTf.connector, { driver: githubDriver, fake: fakeGithub });

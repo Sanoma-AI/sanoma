@@ -1,5 +1,5 @@
 import { withSetup } from "@sanoma/workflows";
-import { ghost as declared } from "./connector.ts";
+import { ghostOps } from "./connector.ts";
 import { ghostDriver } from "./driver.ts";
 import { fakeGhost } from "./fake.ts";
 
@@ -10,4 +10,4 @@ export { Post } from "./connector.ts";
  * (`ghostDriver`), which reads its credentials when called, and its fake (`fakeGhost`), which
  * sandbox runs and scenarios copy.
  */
-export const ghost = withSetup(declared, { driver: () => ghostDriver(), fake: () => fakeGhost() });
+export const ghost = withSetup(ghostOps, { driver: ghostDriver, fake: fakeGhost });

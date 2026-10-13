@@ -4,7 +4,7 @@ import { TID } from "@atproto/common-web";
 import { ResponseType } from "@atproto/xrpc";
 import { defineDriver, DriverError, retryableStatus } from "@sanoma/workflows";
 import { z } from "zod";
-import { bluesky } from "./connector.ts";
+import { blueskyOps } from "./connector.ts";
 
 /** The environment variables the driver reads, on every call. */
 const env = z.object({
@@ -54,7 +54,7 @@ export function blueskyDriver(options: BlueskyDriverOptions = {}) {
   }
 
   return defineDriver(
-    bluesky,
+    blueskyOps,
     {
       post: {
         create: async ({ text }, call) => {

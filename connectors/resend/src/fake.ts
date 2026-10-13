@@ -1,6 +1,6 @@
 import { DriverError } from "@sanoma/workflows";
 import { defineFake, type FakeOptions } from "@sanoma/workflows/fake";
-import { resend } from "./connector.ts";
+import { resendOps } from "./connector.ts";
 
 export interface FakeResendBroadcast {
   id: string;
@@ -22,7 +22,7 @@ export interface FakeResendState extends Record<string, unknown> {
  */
 export function fakeResend(options: FakeOptions = {}) {
   return defineFake(
-    resend,
+    resendOps,
     {
       initial: (): FakeResendState => ({ seq: 0, broadcasts: {} }),
       ops: (state) => ({

@@ -9,4 +9,4 @@ import { fakeStripe } from "./fake.ts";
  * driver (`stripeDriver`, on the default bridge) and its fake (`fakeStripe`), which sandbox runs
  * and scenarios copy.
  */
-export const stripe = withSetup(stripeTf.connector, { driver: () => stripeDriver(), fake: () => fakeStripe() });
+export const stripe = withSetup(stripeTf.connector, { driver: stripeDriver, fake: fakeStripe });

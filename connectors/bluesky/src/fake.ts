@@ -1,5 +1,5 @@
 import { defineFake, type FakeOptions } from "@sanoma/workflows/fake";
-import { bluesky } from "./connector.ts";
+import { blueskyOps } from "./connector.ts";
 
 export interface FakeBlueskyPost {
   uri: string;
@@ -19,7 +19,7 @@ export interface FakeBlueskyState extends Record<string, unknown> {
  */
 export function fakeBluesky(options: FakeOptions = {}) {
   return defineFake(
-    bluesky,
+    blueskyOps,
     {
       initial: (): FakeBlueskyState => ({ seq: 0, posts: [] }),
       ops: (state) => ({

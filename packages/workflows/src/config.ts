@@ -171,7 +171,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const appName = appNameAt(root);
   const scenarios = root !== undefined && existsSync(join(root, "scenarios")) ? scenariosAt(root) : undefined;
   const ops = indexConnectors(config.connectors);
-  const driverList = config.connectors.flatMap((c) => setupOf(c)?.driver() ?? []);
+  const driverList = config.connectors.flatMap((c) => setupOf(c).driver?.() ?? []);
   const drivers = indexDrivers(driverList, ops);
   const fakes = fakesOf(config);
   const fakeDrivers = indexDrivers(
@@ -229,7 +229,7 @@ function fakesOf(config: SanomaConfig): Map<string, Fake<any, any>> {
   if (known) return known;
   const fakes = new Map<string, Fake<any, any>>();
   for (const connector of config.connectors) {
-    const fake = setupOf(connector)?.fake();
+    const fake = setupOf(connector).fake?.();
     if (fake === undefined) continue;
     const { vendor } = fake.driver;
     const seen = fakes.get(vendor);

@@ -20,9 +20,8 @@ const holdsResources = (fake: Fake<unknown>): fake is Fake<unknown> & ResourceFa
 
 /**
  * The error a sandbox run of the scenario fails with when it seeds a resource of a vendor whose
- * fake (one of `fakes`, by vendor) holds none, or that has no fake; undefined when every vendor
- * it seeds a resource of has a `ResourceFake`. Pure: the check `seedSandbox` makes before it
- * copies anything.
+ * fake (one of `fakes`, by vendor) holds none, or whose connector attaches no fake; undefined
+ * when every vendor it seeds a resource of has a `ResourceFake`. Pure.
  */
 export function missingResourceFake(
   scenario: Pick<Scenario, "name" | "given">,
@@ -36,10 +35,16 @@ export function missingResourceFake(
   if (plain.length === 0) return undefined;
   const resources = [...new Set(plain.map((g) => g.resource))];
   const vendors = [...new Set(plain.map((g) => g.vendor))];
+  const why = vendors.map((v) =>
+    fakes.has(v) ? `${v}'s fake holds no resources (it is not a tfFake)` : `${v}'s connector attaches no fake`,
+  );
   return new SanomaError(
     "invalid_input",
-    `Scenario "${scenario.name}" seeds ${resources.join(", ")}, but ${vendors.join(", ")}'s fake holds no resources (it is not a tfFake)`,
-    { scenario: scenario.name, resources },
+    `Scenario "${scenario.name}" seeds ${resources.join(", ")}, but ${why.join("; ")}`,
+    {
+      scenario: scenario.name,
+      resources,
+    },
   );
 }
 

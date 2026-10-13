@@ -14,8 +14,6 @@ export {
   type OpSpec,
   type ResourceGroup,
   retryableStatus,
-  SETUP,
-  setupOf,
   type VendorInfo,
   withSetup,
 } from "./op.ts";

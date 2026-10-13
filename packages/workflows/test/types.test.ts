@@ -124,10 +124,10 @@ export const draft = defineWorkflow({
 });
 export const createId: "ghost.post.create" = ghost.post.create.id;
 // withSetup gives back the connector's own type, and adds no group of operations.
-const attached = withSetup(shop, { driver: () => ({ vendor: "shop", ops: {} }), fake: () => undefined as never });
+const attached = withSetup(shop, { driver: () => ({ vendor: "shop", ops: {} }) });
 export const sameShop: typeof shop = attached;
 export const orderGet: Op<"shop", "order", "get", { id: string }, { total: number }> = attached.order.get;
-// @ts-expect-error the setup is under a symbol, never a group
+// @ts-expect-error the setup is on the vendor record, never a group
 export const noGroup = attached.setup;
 
 describe("types", () => {

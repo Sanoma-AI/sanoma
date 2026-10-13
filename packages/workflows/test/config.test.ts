@@ -9,15 +9,8 @@ import { resend } from "@sanoma/connector-resend";
 import { stripe } from "@sanoma/connector-stripe";
 import { testRoot } from "@sanoma/testing";
 import { afterAll, describe, expect, it } from "vitest";
-import {
-  allowAll,
-  type Connector,
-  memoryLedger,
-  resolveConfig,
-  type SanomaConfig,
-  SETUP,
-  setupOf,
-} from "../src/index.ts";
+import { allowAll, type Connector, memoryLedger, resolveConfig, type SanomaConfig, withSetup } from "../src/index.ts";
+import { setupOf } from "../src/op.ts";
 import announce from "./fixtures/announce.ts";
 import { marketingFakes } from "./harness.ts";
 
@@ -44,6 +37,9 @@ function tree(name: string, files: Record<string, string> = {}): string {
   return root;
 }
 
+/** A driver maker other than the package's. */
+const driver = () => ({ vendor: "ghost", ops: {} });
+
 describe("each connector package's root", () => {
   it.each([
     ["ghost", ghost],
@@ -51,30 +47,34 @@ describe("each connector package's root", () => {
     ["bluesky", bluesky],
     ["github", github],
     ["stripe", stripe],
-  ] as [string, Connector<any, any>][])("%s carries its driver, made once, and a fresh fake each time", (vendor, c) => {
-    const setup = setupOf(c)!;
-    const driver = setup.driver();
-    expect(driver.vendor).toBe(vendor);
-    expect(setup.driver()).toBe(driver);
-    const [one, two] = [setup.fake(), setup.fake()];
+  ] as [string, Connector<any, any>][])("%s carries the makers of its driver and of its fake", (vendor, c) => {
+    const setup = setupOf(c);
+    expect(setup.driver!().vendor).toBe(vendor);
+    const [one, two] = [setup.fake!(), setup.fake!()];
     expect(one.driver.vendor).toBe(vendor);
     expect(two).not.toBe(one);
-    // Not enumerable: keys and values see the connector's resources only, and a spread drops it.
-    expect(Reflect.ownKeys(c)).toContain(SETUP);
-    expect(Object.getOwnPropertyDescriptor(c, SETUP)?.enumerable).toBe(false);
+    // On its vendor record: keys and values see the connector's resources only.
+    expect(Object.keys(c)).not.toContain("setup");
   });
 
-  it("is lost on a copy, which declares the same operations", () => {
+  it("is kept on a copy, which declares the same operations", () => {
     const copy = { ...ghost };
-    expect(setupOf(copy)).toBeUndefined();
+    expect(setupOf(copy)).toBe(setupOf(ghost));
     expect(copy.post.create).toBe(ghost.post.create);
+  });
+
+  it("takes another driver over the one it carries, and keeps its fake", () => {
+    const swapped = withSetup(ghost, { driver });
+    expect(setupOf(swapped)).toEqual({ driver, fake: setupOf(ghost).fake });
+    expect(setupOf(ghost).driver).not.toBe(driver);
+    expect(swapped.post.create).toBe(ghost.post.create);
   });
 });
 
 describe("resolveConfig on the connectors' setups", () => {
   it("takes the drivers and the fakes from the connectors", () => {
     const resolved = resolveConfig(config());
-    expect(resolved.driverList).toEqual([ghost, resend, bluesky].map((c) => setupOf(c)!.driver()));
+    expect(resolved.driverList.map((d) => d.vendor)).toEqual(["ghost", "resend", "bluesky"]);
     expect([...resolved.drivers.keys()].toSorted()).toEqual([...resolved.ops.keys()].toSorted());
     expect([...resolved.fakes.keys()]).toEqual(["ghost", "resend", "bluesky"]);
     expect([...resolved.fakeDrivers.keys()].toSorted()).toEqual([...resolved.ops.keys()].toSorted());
@@ -86,8 +86,6 @@ describe("resolveConfig on the connectors' setups", () => {
     expect(resolveConfig(one).fakes.get("ghost")).toBe(fake);
     const other = resolveConfig({ ...one }).fakes.get("ghost");
     expect(other).not.toBe(fake);
-    // The drivers are one per process, whatever the config.
-    expect(resolveConfig({ ...one }).driverList).toEqual(resolveConfig(one).driverList);
   });
 
   it("indexes the fakes' functions apart from the drivers', for sandbox runs", () => {

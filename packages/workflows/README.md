@@ -44,12 +44,12 @@ A [driver](#drivers) implements the operations and holds the credentials, and a 
 ```ts
 // The connector package's root, such as @acme/connector-shop.
 export const shop = withSetup(defineConnector("shop", specs, info), {
-  driver: () => shopDriver(), // called once, on first use: one driver per process
-  fake: () => fakeShop(), // the template each sandbox run copies
+  driver: shopDriver, // made once per resolved config
+  fake: fakeShop, // made once per sandbox run: each has its own
 });
 ```
 
-`setupOf(connector)` reads what was attached; `withSetup`, `setupOf` and `SETUP` (the symbol it is kept under, not enumerable, so a spread copy of a connector carries none) are for connector packages and the runtime, not for workflows, which the lint does not let import them. A connector without a setup declares its operations and implements none: a workflow using one is refused.
+`withSetup` lays what it is given over what the connector already carries, and keeps it on the connector's vendor record, so a spread copy of the connector keeps it too. A config that needs a driver made otherwise (another bridge, other options) swaps the driver and keeps the fake: `withSetup(github, { driver: () => githubDriver({ bridge }) })`. It is for connector packages and configs, not for workflows, which the lint does not let import it. Both are optional: a connector without a driver declares its operations and implements none, so a workflow using one is refused; a connector without a fake has none for sandbox runs, which the app's connector page says.
 
 A policy is checked before every operation call, and a ledger records what happened.
 

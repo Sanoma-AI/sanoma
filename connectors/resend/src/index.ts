@@ -1,5 +1,5 @@
 import { withSetup } from "@sanoma/workflows";
-import { resend as declared } from "./connector.ts";
+import { resendOps } from "./connector.ts";
 import { resendDriver } from "./driver.ts";
 import { fakeResend } from "./fake.ts";
 
@@ -8,4 +8,4 @@ import { fakeResend } from "./fake.ts";
  * (`resendDriver`), which reads its credentials when called, and its fake (`fakeResend`), which
  * sandbox runs and scenarios copy.
  */
-export const resend = withSetup(declared, { driver: () => resendDriver(), fake: () => fakeResend() });
+export const resend = withSetup(resendOps, { driver: resendDriver, fake: fakeResend });
