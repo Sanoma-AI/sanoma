@@ -93,6 +93,12 @@ export type GraphNodeKind = GraphNode["kind"];
 /** True for a node a page can select: one with a place in the source, or a ledger record. */
 export const isSelectable = (node: GraphNode): boolean => !!node.span || ("state" in node && !!node.state?.recordId);
 
+/**
+ * An edge between two nodes in one box (the page, or a `cluster`), or between a cluster and what
+ * it holds: one from the cluster to a node in it leaves its inside left, one from a node in it to
+ * the cluster reaches its inside right, and one from the cluster to itself crosses its empty
+ * inside. layout tells these apart by the nodes' `parent`.
+ */
 export interface GraphEdge {
   id: string;
   source: string;
