@@ -5,7 +5,10 @@ import "@xyflow/react/dist/style.css";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   Background,
+  BaseEdge,
   type Edge,
+  type EdgeProps,
+  type EdgeTypes,
   getNodesBounds,
   Handle,
   type Node,
@@ -22,11 +25,12 @@ import type { OpEntry } from "@sanoma/workflows/describe";
 import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { approverLabel } from "@sanoma/workflows/shared";
-import { layout } from "../graph/layout.ts";
+import { layout, type Point } from "../graph/layout.ts";
 import {
   type Graph as GraphData,
   type GraphNode,
   type GraphNodeKind,
+  INNER,
   isPending,
   isSelectable,
 } from "../graph/types.ts";
@@ -44,6 +48,8 @@ import { ZoomSlider } from "./zoom-slider.tsx";
 
 /** A node as React Flow holds it: the graph's node, and whether a click on it selects it. */
 type FlowNode = Node<{ node: GraphNode; selectable: boolean }, GraphNodeKind>;
+/** An edge as React Flow holds it: the route `layout` gives it. */
+type FlowEdge = Edge<{ route: Point[] }, "route">;
 /** What a node component reads of its `NodeProps`: its node, of its kind, and whether it is selected. */
 type Props<K extends GraphNodeKind> = {
   data: { node: Extract<GraphNode, { kind: K }>; selectable: boolean };
@@ -285,11 +291,18 @@ function PendingNode(props: Props<"pending">) {
   );
 }
 
-/** A box around the nodes it holds (a loop's body, a computed `ctx.all`'s member), named by a badge. */
+/**
+ * A box around the nodes it holds (a loop's body, a computed `ctx.all`'s member), named by a badge.
+ * Besides its own handles, two on its inside (`INNER`): the edge to its first nodes leaves its
+ * left side, and the edges from its last nodes reach its right side.
+ */
 function ClusterNode({ data: { node } }: Props<"cluster">) {
   return (
     <div className="size-full rounded-lg border border-dashed border-muted-foreground/40" title={node.label}>
+      {/* Its own handles first: React Flow joins an edge that names none to the first of its type. */}
       <Handles />
+      <Handle id={INNER} type="source" position={Position.Left} isConnectable={false} className="invisible" />
+      <Handle id={INNER} type="target" position={Position.Right} isConnectable={false} className="invisible" />
       <Badge variant="outline" className="m-1.5 bg-card">
         {node.label}
       </Badge>
@@ -330,6 +343,48 @@ const nodeTypes = {
   split: SplitNode,
   skip: SkipNode,
 } satisfies { [K in GraphNodeKind]: (props: Props<K>) => ReactNode } as NodeTypes;
+
+/** How round a route's corners are, in px, as React Flow's smoothstep edges'. */
+const CORNER = 5;
+
+/**
+ * A route as an SVG path: straight runs, each corner rounded, by at most half of either run it
+ * joins.
+ */
+function pathOf(route: readonly Point[]): string {
+  const [first, ...rest] = route;
+  if (!first) return "";
+  let path = `M ${first.x} ${first.y}`;
+  for (const [i, point] of rest.entries()) {
+    const [before, after] = [route[i]!, rest[i + 1]];
+    if (!after) {
+      path += ` L ${point.x} ${point.y}`;
+      break;
+    }
+    const r = Math.min(
+      CORNER,
+      Math.hypot(point.x - before.x, point.y - before.y) / 2,
+      Math.hypot(after.x - point.x, after.y - point.y) / 2,
+    );
+    const towards = (to: Point, d: number) => {
+      const length = Math.hypot(to.x - point.x, to.y - point.y) || 1;
+      return { x: point.x + ((to.x - point.x) / length) * d, y: point.y + ((to.y - point.y) / length) * d };
+    };
+    const [into, out] = [towards(before, r), towards(after, r)];
+    path += ` L ${into.x} ${into.y} Q ${point.x} ${point.y} ${out.x} ${out.y}`;
+  }
+  return path;
+}
+
+/**
+ * An edge along the route `layout` gave it, rather than one React Flow draws between its
+ * handles: a step React Flow puts halfway between them runs behind a wider node beside the target.
+ */
+function RouteEdge({ data, style, interactionWidth }: EdgeProps<FlowEdge>) {
+  return <BaseEdge path={pathOf(data?.route ?? [])} style={style} interactionWidth={interactionWidth} />;
+}
+
+const edgeTypes = { route: RouteEdge } satisfies EdgeTypes;
 
 /** Fits the view again when nodes come or go, as the run's page polls. */
 function FitOnChange({ nodes, show, onFitted }: { nodes: FlowNode[]; show: "start" | "end"; onFitted: () => void }) {
@@ -406,11 +461,11 @@ export default function Graph({ graph, show = "end", selected, onSelect }: Graph
   // Hidden until the first fit, so the graph does not show unfitted for a frame.
   const [fitted, setFitted] = useState(false);
   const clickable = onSelect !== undefined;
+  const at = useMemo(() => layout(graph), [graph]);
   const laidOut = useMemo(() => {
-    const at = layout(graph);
     // A cluster comes before the nodes inside it, as React Flow needs.
     return graph.nodes.map((node) => {
-      const { x, y, ...size } = at.get(node.id)!;
+      const { x, y, ...size } = at.boxes.get(node.id)!;
       return {
         id: node.id,
         type: node.kind,
@@ -423,7 +478,7 @@ export default function Graph({ graph, show = "end", selected, onSelect }: Graph
         connectable: false,
       } as FlowNode;
     });
-  }, [graph, clickable]);
+  }, [graph, at, clickable]);
   // A node down to its state's fields; the approval on it is the query's, kept when unchanged.
   const stable = useStable(laidOut, 4);
   // React Flow's own flag rings the selected node: only the nodes it moves from and to change.
@@ -431,7 +486,7 @@ export default function Graph({ graph, show = "end", selected, onSelect }: Graph
     () => stable.map((node) => (node.id === selected ? { ...node, selected: true } : node)),
     [stable, selected],
   );
-  const drawn = useMemo<Edge[]>(() => {
+  const drawn = useMemo<FlowEdge[]>(() => {
     const byId = new Map(graph.nodes.map((node) => [node.id, node]));
     return graph.edges.map((edge) => {
       const from = byId.get(edge.source)!;
@@ -440,13 +495,15 @@ export default function Graph({ graph, show = "end", selected, onSelect }: Graph
       const active = "state" in to && to.state?.tone === "active";
       return {
         ...edge,
-        type: "smoothstep",
+        type: "route",
+        data: { route: at.routes.get(edge.id)! },
         animated: active && !reducedMotion,
         ...(isPending(from) || isPending(to) ? { style: { strokeDasharray: "4 4" } } : {}),
       };
     });
-  }, [graph, reducedMotion]);
-  const edges = useStable(drawn, 2);
+  }, [graph, at, reducedMotion]);
+  // An edge down to its route's points' coordinates.
+  const edges = useStable(drawn, 4);
   const onNodeClick = useCallback(
     (_: unknown, { data }: FlowNode) => {
       if (data.selectable) onSelect?.(data.node);
@@ -461,6 +518,7 @@ export default function Graph({ graph, show = "end", selected, onSelect }: Graph
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           className={fitted ? undefined : "invisible"}
           onNodeClick={onNodeClick}
           minZoom={0.25}

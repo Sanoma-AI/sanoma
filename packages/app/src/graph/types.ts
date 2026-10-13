@@ -93,10 +93,21 @@ export type GraphNodeKind = GraphNode["kind"];
 /** True for a node a page can select: one with a place in the source, or a ledger record. */
 export const isSelectable = (node: GraphNode): boolean => !!node.span || ("state" in node && !!node.state?.recordId);
 
+/**
+ * The handle on a `cluster`'s inside: an edge from the cluster to a node it holds leaves from its
+ * inside left, and one from a node it holds to the cluster arrives at its inside right, so the
+ * edges into and out of the box go on inside it.
+ */
+export const INNER = "inner";
+
 export interface GraphEdge {
   id: string;
   source: string;
   target: string;
+  /** `INNER` when the source is the cluster holding the target. */
+  sourceHandle?: typeof INNER;
+  /** `INNER` when the target is the cluster holding the source. */
+  targetHandle?: typeof INNER;
 }
 
 export interface Graph {

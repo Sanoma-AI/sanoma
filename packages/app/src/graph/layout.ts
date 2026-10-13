@@ -1,5 +1,5 @@
 import { Graph as Dagre, layout as dagreLayout } from "@dagrejs/dagre";
-import type { Graph, GraphNode, GraphNodeKind } from "./types.ts";
+import type { Graph, GraphEdge, GraphNode, GraphNodeKind } from "./types.ts";
 import { LIST_HEADER, ROW_HEIGHT, wildcardRows } from "./wildcard.ts";
 
 /**
@@ -39,19 +39,56 @@ export interface Box {
   height: number;
 }
 
+export interface Point {
+  x: number;
+  y: number;
+}
+
 /**
- * Where each node goes, left to right in run order, by id, as React Flow places nodes. Lanes
- * share ranks and stack top to bottom in the order they were added: a `ctx.all`'s in member
- * order, a branch's in case order. A `cluster` is laid out first on its own, from the nodes
- * inside it, and then placed as one box (dagre cannot route edges to a box that holds nodes, and
- * React Flow wants a cluster's nodes relative to it anyway).
+ * Where a graph's nodes and edges go: each node's `Box` by id, as React Flow places nodes, and
+ * each edge's route by id, the corners of a line in straight runs across and down, on the page
+ * (a cluster's corner added in). A route starts at the middle of its source's right side (of a
+ * cluster's left side, from its inside) and ends at the middle of its target's left side (of a
+ * cluster's right side, from its inside).
  */
-export function layout({ nodes, edges }: Graph): Map<string, Box> {
+export interface Layout {
+  boxes: Map<string, Box>;
+  routes: Map<string, Point[]>;
+}
+
+// A cluster's inside left and right, as two points dagre places with what the cluster holds.
+const ENTER = "\0enter";
+const EXIT = "\0exit";
+
+/** An edge's two nodes in dagre's graph: a cluster's inside as its side's point. */
+const ends = (edge: GraphEdge): [string, string] => [
+  edge.sourceHandle ? ENTER : edge.source,
+  edge.targetHandle ? EXIT : edge.target,
+];
+
+/**
+ * Lays the graph out left to right in run order. Lanes share ranks and stack top to bottom in the
+ * order they were added: a `ctx.all`'s in member order, a branch's in case order. A `cluster` is
+ * laid out first on its own, from the nodes inside it, and then placed as one box (dagre cannot
+ * route edges to a box that holds nodes, and React Flow wants a cluster's nodes relative to it
+ * anyway); its inside edges run from and to two points of no size at its sides.
+ *
+ * Each edge follows dagre's route: dagre puts a rank for edges between each two ranks of nodes,
+ * and a point of each edge's on every rank it crosses. The line turns down only on an edge rank,
+ * where no node is, and runs across at its source's, then each node rank's point's, then its
+ * target's height. A step drawn halfway from source to target instead runs behind a wider node
+ * of the target's rank.
+ */
+export function layout({ nodes, edges }: Graph): Layout {
   const children = Map.groupBy(nodes, (node) => node.parent);
   const parentOf = new Map(nodes.map((node) => [node.id, node.parent]));
-  // An edge joins two nodes in one box (the builder draws none across a cluster's edge).
-  const links = Map.groupBy(edges, (edge) => parentOf.get(edge.source));
+  // An edge joins two nodes in one box, or a cluster's inside and a node in it.
+  const links = Map.groupBy(edges, (edge) =>
+    edge.sourceHandle ? edge.source : edge.targetHandle ? edge.target : parentOf.get(edge.source),
+  );
   const boxes = new Map<string, Box>();
+  // Each edge's route in its box, and the box it is in.
+  const local = new Map<string, { route: Point[]; parent: string | undefined }>();
 
   const place = (parent?: string) => {
     const inside = parent !== undefined;
@@ -61,9 +98,11 @@ export function layout({ nodes, edges }: Graph): Map<string, Box> {
     g.setDefaultEdgeLabel(() => ({}));
     const members = children.get(parent) ?? [];
     for (const node of members) {
-      g.setNode(node.id, children.has(node.id) ? place(node.id) : nodeSize(node));
+      g.setNode(node.id, node.kind === "cluster" ? place(node.id) : nodeSize(node));
     }
-    for (const edge of links.get(parent) ?? []) g.setEdge(edge.source, edge.target);
+    const own = links.get(parent) ?? [];
+    if (inside) for (const side of [ENTER, EXIT]) g.setNode(side, { width: 0, height: 0 });
+    for (const edge of own) g.setEdge(...ends(edge));
     // dagre's crossing reduction would reorder lanes that never cross, last member on top: the
     // order the nodes were added in is already free of crossings, and reads in member order.
     dagreLayout(g, { disableOptimalOrderHeuristic: true });
@@ -73,9 +112,69 @@ export function layout({ nodes, edges }: Graph): Map<string, Box> {
       const { x, y, width, height } = g.node(node.id) as Box;
       boxes.set(node.id, { x: x - width / 2, y: y - height / 2 + top, width, height });
     }
+    // An empty cluster still has room for its label.
     const { width = 0, height = 0 } = g.graph();
-    return { width, height: height + top };
+    const least = inside ? NODE_SIZE.cluster : { width: 0, height: 0 };
+    const size = { width: Math.max(width, least.width), height: Math.max(height + top, least.height) };
+    for (const edge of own) {
+      const from = edge.sourceHandle ? { x: 0, y: size.height / 2 } : side(boxes.get(edge.source)!, "right");
+      const to = edge.targetHandle ? { x: size.width, y: size.height / 2 } : side(boxes.get(edge.target)!, "left");
+      const [v, w] = ends(edge);
+      // Between dagre's ends (the boxes' sides it cut), its points on each rank the edge crosses.
+      const ranks = (g.edge(v, w).points as Point[]).slice(1, -1).map(({ x, y }) => ({ x, y: y + top }));
+      local.set(edge.id, { route: steps(from, ranks, to), parent });
+    }
+    return size;
   };
   place();
-  return boxes;
+
+  // Each cluster's corner on the page: a cluster comes before the nodes inside it.
+  const corner = new Map<string | undefined, Point>([[undefined, { x: 0, y: 0 }]]);
+  for (const node of nodes) {
+    if (node.kind !== "cluster") continue;
+    const { x, y } = boxes.get(node.id)!;
+    const at = corner.get(node.parent)!;
+    corner.set(node.id, { x: x + at.x, y: y + at.y });
+  }
+  const routes = new Map<string, Point[]>();
+  for (const [id, { route, parent }] of local) {
+    const at = corner.get(parent)!;
+    routes.set(
+      id,
+      route.map(({ x, y }) => ({ x: x + at.x, y: y + at.y })),
+    );
+  }
+  return { boxes, routes };
+}
+
+/** The middle of a box's left or right side. */
+const side = (box: Box, which: "left" | "right"): Point => ({
+  x: which === "left" ? box.x : box.x + box.width,
+  y: box.y + box.height / 2,
+});
+
+/**
+ * A line from `from` to `to` through dagre's points on the ranks between (`ranks`: an edge
+ * rank's, then a node rank's, and so on, ending on an edge rank): down at each edge rank's point,
+ * across at `from`'s height, each node rank's point's, then `to`'s. Only its corners.
+ */
+function steps(from: Point, ranks: readonly Point[], to: Point): Point[] {
+  const downs = ranks.filter((_, i) => i % 2 === 0).map((point) => point.x);
+  const levels = ranks.filter((_, i) => i % 2 === 1).map((point) => point.y);
+  // dagre always gives an edge rank between two ranks of nodes; halfway if it does not.
+  if (!downs.length) downs.push((from.x + to.x) / 2);
+  const line = [from];
+  let y = from.y;
+  for (const [i, x] of downs.entries()) {
+    const next = levels[i] ?? to.y;
+    line.push({ x, y }, { x, y: next });
+    y = next;
+  }
+  line.push(to);
+  // Only the corners: no point where the line goes on straight.
+  return line.filter((point, i) => {
+    const [before, after] = [line[i - 1], line[i + 1]];
+    if (!before || !after) return true;
+    return !((before.x === point.x && point.x === after.x) || (before.y === point.y && point.y === after.y));
+  });
 }

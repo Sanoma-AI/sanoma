@@ -86,7 +86,15 @@ describe("outlineGraph", () => {
       "cluster:3 for each",
       "end end",
     ]);
-    expect(pairs(edges)).toEqual(["start->cluster:0", "op:1->op:2", "cluster:0->cluster:3", "cluster:3->end"]);
+    expect(pairs(edges)).toEqual([
+      "start->cluster:0",
+      "cluster:0[inner]->op:1",
+      "op:1->op:2",
+      "op:2->cluster:0[inner]",
+      "cluster:0->cluster:3",
+      "cluster:3[inner]->cluster:3[inner]",
+      "cluster:3->end",
+    ]);
   });
 
   it("draws a try as its body beside a cluster labelled on error, both from the node before", () => {
@@ -109,7 +117,9 @@ describe("outlineGraph", () => {
       "start->op:0",
       "op:0->op:1",
       "op:0->cluster:2",
+      "cluster:2[inner]->op:3",
       "op:3->sleep:4",
+      "sleep:4->cluster:2[inner]",
       "op:1->op:5",
       "cluster:2->op:5",
       "op:5->end",
@@ -129,7 +139,14 @@ describe("outlineGraph", () => {
       "op:3 x.item.done",
       "end end",
     ]);
-    expect(pairs(edges)).toEqual(["start->cluster:0", "op:1->sleep:2", "cluster:0->op:3", "op:3->end"]);
+    expect(pairs(edges)).toEqual([
+      "start->cluster:0",
+      "cluster:0[inner]->op:1",
+      "op:1->sleep:2",
+      "sleep:2->cluster:0[inner]",
+      "cluster:0->op:3",
+      "op:3->end",
+    ]);
   });
 
   it("draws a branch as a split into one lane per case, joined after it", () => {
@@ -191,7 +208,53 @@ describe("outlineGraph", () => {
       "op:3 b.post.create in cluster:0",
       "end end",
     ]);
-    expect(pairs(edges)).toEqual(["start->cluster:0", "op:1->op:2", "op:1->op:3", "cluster:0->end"]);
+    expect(pairs(edges)).toEqual([
+      "start->cluster:0",
+      "cluster:0[inner]->op:1",
+      "op:1->op:2",
+      "op:1->op:3",
+      "op:2->cluster:0[inner]",
+      "op:3->cluster:0[inner]",
+      "cluster:0->end",
+    ]);
+  });
+
+  it("joins a cluster's border to what it holds: in from its inside left, out to its inside right", () => {
+    // The drift workflow's shape: a loop whose body is an if/else, a call on one side.
+    const { nodes, edges } = outlineGraph([
+      {
+        kind: "repeat",
+        body: [
+          {
+            kind: "branch",
+            cases: [[{ kind: "try", body: [{ kind: "op", id: "*.*.import", ops: ["a.x.import"] }], handler: [] }], []],
+          },
+        ],
+      },
+    ]);
+    expect(labels(nodes)).toEqual([
+      "start start",
+      "cluster:0 repeats",
+      "split:1 branch in cluster:0",
+      "op:2 *.*.import in cluster:0",
+      "skip:3 otherwise in cluster:0",
+      "end end",
+    ]);
+    // Both ways leave the diamond; each edge joins two nodes in one box, or a box and what it holds.
+    expect(pairs(edges)).toEqual([
+      "start->cluster:0",
+      "cluster:0[inner]->split:1",
+      "split:1->op:2",
+      "split:1->skip:3",
+      "op:2->cluster:0[inner]",
+      "skip:3->cluster:0[inner]",
+      "cluster:0->end",
+    ]);
+  });
+
+  it("draws an empty cluster's way through it as one edge across its inside", () => {
+    const { edges } = outlineGraph([{ kind: "repeat", body: [] }]);
+    expect(pairs(edges)).toEqual(["start->cluster:0", "cluster:0[inner]->cluster:0[inner]", "cluster:0->end"]);
   });
 
   it("gives each call's node its place in the workflow's file, as outlineWorkflow reads it", () => {
