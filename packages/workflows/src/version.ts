@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { jsonSchemaOf, opIdsOf, type WorkflowDefinition } from "./define.ts";
+import { upFrom } from "./paths.ts";
 
 /** This package's version. A unit test keeps it equal to package.json. */
 export const RUNTIME_VERSION = "0.1.0";
@@ -19,19 +20,18 @@ let dbosVersion: string | undefined;
 
 /** The installed DBOS SDK's version, read from its package.json (which its exports don't expose). */
 function installedDbosVersion(): string {
-  if (dbosVersion) return dbosVersion;
-  let dir = dirname(createRequire(import.meta.url).resolve("@dbos-inc/dbos-sdk"));
-  for (;;) {
+  dbosVersion ??= upFrom(dirname(createRequire(import.meta.url).resolve("@dbos-inc/dbos-sdk")), (dir) => {
+    let pkg: { name?: string; version?: string };
     try {
-      const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { name?: string; version?: string };
-      if (pkg.name === "@dbos-inc/dbos-sdk" && pkg.version) return (dbosVersion = pkg.version);
+      pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as typeof pkg;
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw err;
     }
-    const up = dirname(dir);
-    if (up === dir) throw new Error("Cannot find the package.json of @dbos-inc/dbos-sdk");
-    dir = up;
-  }
+    return pkg.name === "@dbos-inc/dbos-sdk" && pkg.version ? pkg.version : undefined;
+  });
+  if (!dbosVersion) throw new Error("Cannot find the package.json of @dbos-inc/dbos-sdk");
+  return dbosVersion;
 }
 
 /**
