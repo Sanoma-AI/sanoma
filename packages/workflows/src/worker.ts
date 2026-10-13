@@ -5,7 +5,7 @@ import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.
 import { watchCredentials } from "./credentials.ts";
 import { DBOS_DATABASE_OPTIONS, prepareDatabase } from "./db.ts";
 import type { WorkflowDefinition } from "./define.ts";
-import { type CredentialStatus, credentialsOf, unconfigured } from "./env.ts";
+import { credentialsOf, unconfigured, unconfiguredSummary } from "./env.ts";
 import { errorInfo, parseOrThrow } from "./errors.ts";
 import { entry, ownedLedger, skipped, write, writeFailure } from "./ledger.ts";
 import { dbosLogger, quietIfSandbox, setLogLevel, warn } from "./log.ts";
@@ -16,11 +16,11 @@ import { errorMessage } from "./shared.ts";
 
 export interface Worker {
   /**
-   * Each vendor whose drivers could not run when the worker started, in the config's order, with
-   * why: the message a live call to it fails with until its variables are set (`unconfigured` in
-   * env.ts). The worker prints none of it; its caller says what it needs to (`sanoma` one line).
+   * The vendors whose drivers could not run when the worker started, in the config's order: a
+   * live call to one fails, saying why (`unconfigured` in env.ts), until its variables are set.
+   * The worker names them in one line at start, unless started `quiet`.
    */
-  readonly unconfigured: ReadonlyMap<string, string>;
+  readonly unconfigured: readonly string[];
   stop(): Promise<void>;
 }
 
@@ -31,7 +31,13 @@ let current: WorkerState | undefined;
 const registered = new Set<string>();
 
 export interface WorkerOptions {
+  /** The least severe level of the runtime's and DBOS's messages to show, for the whole process: `warn` by default. */
   logLevel?: string;
+  /**
+   * Start without naming the vendors not configured yet (`unconfigured` still does): for a worker
+   * whose runs use the fakes alone, as `runScenarios`'s.
+   */
+  quiet?: boolean;
   /**
    * Make this worker's version the app's latest, so runs queued without a version come here.
    * A brand-new version becomes the latest on its own; set this only when deliberately starting
@@ -45,8 +51,8 @@ export interface WorkerOptions {
  * Registers the workflows, connects to Postgres and recovers any runs that were interrupted.
  * When a driver declares variables the environment leaves unset, it first loads their stored
  * values into `process.env` and keeps them current while it runs. It starts whether or not they
- * are all there: `unconfigured` says which vendors lack one, and why, and a live call to such a
- * vendor fails, as the call's own final failure, until they are set.
+ * are all there: it prints one line naming the vendors that lack one (`unconfigured`), and a live
+ * call to such a vendor fails, saying why, as the call's own final failure, until they are set.
  */
 export async function startWorker(config: SanomaConfig, options: WorkerOptions = {}): Promise<Worker> {
   // Check everything before touching the state a running worker reads.
@@ -69,7 +75,9 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   };
   const credentials = await watchCredentials(resolved.databaseUrl, resolved.driversByVendor);
   const worker: Worker = {
-    unconfigured: unconfiguredOf(credentialsOf(resolved.driversByVendor, (name) => process.env[name])),
+    unconfigured: [...credentialsOf(resolved.driversByVendor, (name) => process.env[name])]
+      .filter(([vendor, statuses]) => unconfigured(vendor, statuses))
+      .map(([vendor]) => vendor),
     async stop() {
       state.stopped = true;
       // Each is closed whatever the one before did; the first failure is what stop throws.
@@ -100,8 +108,9 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       name: resolved.appName,
       systemDatabaseUrl: resolved.databaseUrl,
       ...DBOS_DATABASE_OPTIONS,
-      logLevel: options.logLevel ?? "warn",
-      logger: dbosLogger,
+      // A logger of our own replaces DBOS's OTLP log export, so only while DBOS exports none (it
+      // does on DBOS Cloud); its level is then the threshold `setLogLevel` set, DBOS's own `logLevel` unread.
+      ...(process.env.DBOS__CLOUD === "true" ? { logLevel: options.logLevel ?? "warn" } : { logger: dbosLogger }),
       applicationVersion: resolved.version,
     });
     await DBOS.launch();
@@ -120,6 +129,8 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     }
     await DBOS.registerQueue(resolved.queueName);
     await warnAboutStrandedRuns(resolved);
+    const summary = unconfiguredSummary(worker.unconfigured, resolved.driversByVendor.size);
+    if (summary && !options.quiet) warn(summary);
   } catch (err) {
     // Once DBOS is launched, the caller gets no worker to stop: stop it here, so no run goes on
     // in a worker nobody holds, and the next startWorker launches afresh.
@@ -141,20 +152,6 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     throw err;
   }
   return worker;
-}
-
-/**
- * Each vendor whose drivers would fail when called, with why: a variable a driver's `env`
- * declares is missing or invalid. The worker starts anyway; each such call fails with the same
- * message (`guarded` in config.ts), until the variables are set.
- */
-function unconfiguredOf(credentials: Map<string, CredentialStatus[]>): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const [vendor, list] of credentials) {
-    const why = unconfigured(vendor, list);
-    if (why) map.set(vendor, why);
-  }
-  return map;
 }
 
 /**

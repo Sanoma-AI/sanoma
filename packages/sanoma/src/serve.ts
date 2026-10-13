@@ -10,15 +10,10 @@ export interface Served extends Stoppable {
   url: string;
 }
 
-export interface Working extends Stoppable {
-  /** The vendors whose drivers could not run when the worker started, in the config's order (`Worker.unconfigured`). */
-  unconfigured: string[];
-}
-
 /** Starts the worker, promoted: a local worker is always the version to take queued runs, even one seen before. */
-export async function runWorker(config: SanomaConfig): Promise<Working> {
+export async function runWorker(config: SanomaConfig): Promise<Stoppable> {
   const worker = await startWorker(config, { promote: true });
-  return { unconfigured: [...worker.unconfigured.keys()], stop: () => worker.stop() };
+  return { stop: () => worker.stop() };
 }
 
 /** Starts the app on `port` (0 for any free port); `url` says where. */
@@ -28,7 +23,7 @@ export async function runApp(config: SanomaConfig, { port }: { port: number }): 
 }
 
 /** The worker first, then the app, in this process; `stop` stops the app, then the worker. */
-export async function serve(config: SanomaConfig, { port }: { port: number }): Promise<Served & Working> {
+export async function serve(config: SanomaConfig, { port }: { port: number }): Promise<Served> {
   const worker = await runWorker(config);
   let app: Served;
   try {
@@ -39,7 +34,6 @@ export async function serve(config: SanomaConfig, { port }: { port: number }): P
   }
   return {
     url: app.url,
-    unconfigured: worker.unconfigured,
     async stop() {
       try {
         await app.stop();

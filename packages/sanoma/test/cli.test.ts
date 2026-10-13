@@ -7,6 +7,8 @@ import { copyFixture, ensureBuilt, runCli, startCli } from "./fixture.ts";
 // Needs Postgres (`pnpm db:up`) and the packages' builds: the fixture copy loads them as a
 // company repo would, from `dist/`, so `beforeAll` builds those that are stale.
 const env = { SANOMA_DATABASE_URL: testDatabaseUrl("sanoma-cli"), SANOMA_APP_PORT: "0" };
+/** Ghost's variables unset: the fixture's one vendor is not configured. */
+const unconfigured = { ...env, GHOST_ADMIN_URL: "", GHOST_ADMIN_API_KEY: "" };
 
 let dir = "";
 beforeAll(ensureBuilt, 600_000);
@@ -15,9 +17,7 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 describe("sanoma serve", () => {
   it("runs the worker and the app, prints what is not configured in one line and where, and stops on SIGINT", async () => {
     dir = copyFixture();
-    // Ghost's variables unset: the one vendor the fixture's worker starts without.
-    const unset = { GHOST_ADMIN_URL: "", GHOST_ADMIN_API_KEY: "" };
-    const { child, finished, output } = startCli(dir, ["serve"], { ...env, ...unset });
+    const { child, finished, output } = startCli(dir, ["serve"], unconfigured);
     try {
       const stdout = await waitFor(
         () => output().stdout,
@@ -25,9 +25,11 @@ describe("sanoma serve", () => {
         30_000,
       );
       expect(stdout).toContain("sanoma-fixture running hello");
-      expect(stdout).toContain("not configured yet: ghost (set them on the connector pages or in .env)\n");
-      // Nothing per variable, and no pg deprecation (DBOS's per-connection SET, see DBOS_DATABASE_OPTIONS).
-      expect(`${stdout}${output().stderr}`).not.toMatch(/is not configured|DeprecationWarning/);
+      const { stderr } = output();
+      // The worker's one line, naming the vendor; nothing per variable, and no pg deprecation
+      // (DBOS's per-connection SET, see DBOS_DATABASE_OPTIONS).
+      expect(stderr).toContain("sanoma: 1 of 1 connectors not configured yet: ghost; set their variables");
+      expect(`${stdout}${stderr}`).not.toMatch(/is not configured|DeprecationWarning/);
       const url = stdout.match(/at (http:\/\/127\.0\.0\.1:\d+); ctrl-c to stop/)![1]!;
       // The app is up: its home lists the config's one workflow, rendered on the server.
       const res = await fetch(`${url}/workflows`);
@@ -82,7 +84,7 @@ GHOST_ADMIN_API_KEY=
 describe("sanoma check", () => {
   it("passes the fixture: Postgres, tsc, oxlint, the config and its scenario, then ok and exit 0", async () => {
     dir = copyFixture();
-    const ok = await runCli(dir, ["check"], env);
+    const ok = await runCli(dir, ["check"], unconfigured);
     expect(ok.code, `${ok.stdout}${ok.stderr}`).toBe(0);
     // The lines check prints, not all of stdout: on a fresh database DBOS logs "Created database …" there.
     expect(ok.stderr).toContain("passed hello/hello.feature › A post goes out");

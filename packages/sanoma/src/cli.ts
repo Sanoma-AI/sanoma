@@ -97,24 +97,20 @@ async function load(): Promise<Loaded> {
 }
 
 /**
- * Starts what `start` starts over the loaded config, prints what runs, the vendors not configured
- * yet in one line when there are any (a call to one fails, saying what it lacks, until it is set),
- * and where it listens, when it does; stops it on SIGINT or SIGTERM, then exits 0.
+ * Starts what `start` starts over the loaded config, prints what runs (and where, when it
+ * listens), and stops it on SIGINT or SIGTERM, then exits 0. The worker names the vendors not
+ * configured yet itself, in one line.
  */
 async function keep(
   { config, resolved }: Loaded,
-  start: (config: SanomaConfig) => Promise<{ stop(): Promise<void>; url?: string; unconfigured?: string[] }>,
+  start: (config: SanomaConfig) => Promise<{ stop(): Promise<void>; url?: string }>,
 ): Promise<never> {
   const started = await start(config);
   const running = `${resolved.appName} running ${[...resolved.workflows.keys()].join(", ")}`;
-  const unconfigured = started.unconfigured ?? [];
-  const status = `not configured yet: ${unconfigured.join(", ")} (set them on the connector pages or in .env)`;
   if (started.url === undefined) {
     console.log(`${running}; ctrl-c to stop`);
-    if (unconfigured.length) console.log(status);
   } else {
     console.log(running);
-    if (unconfigured.length) console.log(status);
     console.log(`${resolved.appName} at ${started.url}; ctrl-c to stop`);
   }
   onSignal(() => started.stop());
