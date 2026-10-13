@@ -89,7 +89,7 @@ Each connector carries its fake, and ships it at its own `/fake` entry, not in t
 | `state`                | The vendor's state, such as `posts` or `broadcasts`.                                           |
 | `calls`                | Every call received, in order, with its input and idempotency key.                             |
 | `reset()`              | Empties the state, the remembered replies and the pending faults.                              |
-| `update(change)`       | Changes the state as someone at the vendor would, in the file too, for the next call to see.   |
+| `update(change)`       | Changes the state as someone at the vendor would, for the next call to see.                    |
 | `failNext(opId, err?)` | The next call to `opId` throws `err` (default: a retryable `DriverError`) and changes nothing. |
 | `loseReply(opId)`      | The next call to `opId` takes effect, then throws once, as if the reply was lost.              |
 | `rateLimit(opId)`      | The next call to `opId` throws a retryable `DriverError` with status 429 and changes nothing.  |
@@ -97,7 +97,7 @@ Each connector carries its fake, and ships it at its own `/fake` entry, not in t
 
 A call that repeats an earlier call's idempotency key gets the earlier reply and changes nothing, so a test can check that a retried or replayed call has one effect.
 
-Options: `{ file }` keeps the state and the replies in a JSON file, so they survive a worker restart and another process can read them. `{ calls }` logs into the array you pass, so several fakes share one ordered log.
+Options: `{ calls }` logs into the array you pass, so several fakes share one ordered log.
 
 To write a fake for another connector, use `defineFake(connector, { initial, ops })` from `@sanoma/workflows/fake`. `ops` gets the state and implements every operation, typed by the connector.
 
