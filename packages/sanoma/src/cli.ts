@@ -137,9 +137,16 @@ async function serveCommand(): Promise<never> {
  * alone, and its `stop` is the one path that ends them.
  */
 async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<never> {
-  const { startWatchers, supervise } = await import("./dev.ts");
+  const { partialLink, startWatchers, supervise } = await import("./dev.ts");
   const cwd = process.cwd();
   log(`dev mode: ${repo}; building ${packages.map((p) => p.name).join(", ") || "nothing"} as it changes`);
+  const installed = partialLink(cwd);
+  if (installed.length) {
+    log(
+      `dev mode: ${installed.join(", ")} still ${installed.length === 1 ? "comes from its tarball" : "come from their tarballs"}, ` +
+        "so two copies of a sanoma package run in one process; pnpm link them too to run the checkout alone",
+    );
+  }
   const watchers = startWatchers(packages, log);
   const cli = fileURLToPath(import.meta.url);
   const child = supervise({

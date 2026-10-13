@@ -97,6 +97,8 @@ The worker and the app run on `SANOMA_DATABASE_URL` (default `postgresql://postg
 
 When the repo's `node_modules/sanoma` or any `node_modules/@sanoma/*` is a link into a sanoma checkout (`pnpm link`), or `SANOMA_DEV_REPO` names one, `sanoma` runs `sanoma serve` in a child process and, in every linked package's directory, its `pnpm run watch` (each package's own watch build: `tsc --watch`, and `vite build --watch` too for the app). A change under any linked package's `dist/` restarts the child, after three quarters of a second of quiet, one restart at a time; a child that exits on its own is reported and started again on the next change. The child and each watch run in a process group of their own, so a terminal's ctrl-c reaches `sanoma` alone, which then ends each group (SIGTERM, SIGKILL after 5 seconds) and exits.
 
+Linking some of `sanoma`, `@sanoma/workflows`, `@sanoma/app` and `@sanoma/bridge` and not the others works, with two copies of a package in one process (the linked one, and the one an installed package depends on), and `sanoma` says which still come from their tarballs before it starts the child: `dev mode: sanoma, @sanoma/app, @sanoma/bridge still come from their tarballs, …`. Link all four to run the checkout alone.
+
 ## Hosting it yourself
 
 `sanoma worker` and `sanoma app` are the deployment's two processes. A host that composes its own process keeps `startWorker` from `@sanoma/workflows` and `startApp` from `@sanoma/app`, which the bin runs.

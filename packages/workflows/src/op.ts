@@ -58,9 +58,10 @@ export interface Op<V extends string = string, R extends string = string, N exte
 
 /**
  * Where a resource type keeps its brand. A symbol, so `defineConnector` tells a resource type
- * (`defineResource`) from a group of operations.
+ * (`defineResource`) from a group of operations; a registered one (`Symbol.for`), so a copy of
+ * this package reads what another copy made, as `VENDOR`.
  */
-export const RESOURCE: unique symbol = Symbol("sanoma.resource");
+export const RESOURCE: unique symbol = Symbol.for("sanoma.resource");
 
 /** What `defineConnector` reads of a resource type; `defineResource` makes them. */
 export interface ResourceGroup {
@@ -80,9 +81,11 @@ type OutputOf<T> = T extends OpSpec<any, infer O> ? O : never;
 
 /**
  * Where a connector keeps its vendor. A symbol, so it names no resource: `Object.values` and
- * `keyof` over a connector see its resources only.
+ * `keyof` over a connector see its resources only. A registered one (`Symbol.for`): a process
+ * may load two copies of this package (a connector's peer linked into a sanoma checkout, the
+ * app's from its tarball), and each must read the connectors the other made.
  */
-export const VENDOR: unique symbol = Symbol("sanoma.vendor");
+export const VENDOR: unique symbol = Symbol.for("sanoma.vendor");
 
 export type Connector<V extends string, S extends Specs> = {
   readonly [R in keyof S & string]: {
@@ -303,6 +306,25 @@ export function withSetup<C extends Connector<any, any>>(connector: C, setup: Pa
     ...connector,
     [VENDOR]: Object.freeze({ ...owner, setup: Object.freeze({ ...owner.setup, ...setup }) }),
   };
+}
+
+/**
+ * Throws unless `value` is a connector this package can read: one `defineConnector` made, in this
+ * copy of the package or another of this version. One an older copy made (its `VENDOR` an
+ * unregistered `Symbol("sanoma.vendor")`) is named as such, rather than failing on a missing setup.
+ */
+export function checkConnector(value: unknown): asserts value is Connector<any, any> {
+  if (typeof value === "object" && value !== null && VENDOR in value) return;
+  const records = typeof value === "object" && value !== null ? (value as Record<symbol, unknown>) : {};
+  const older = Object.getOwnPropertySymbols(records).find((s) => s.description === "sanoma.vendor");
+  if (older === undefined) {
+    throw new Error("`connectors` holds something that is not a connector: list what the connector packages export");
+  }
+  const id = (records[older] as { id?: unknown } | undefined)?.id;
+  throw new Error(
+    `The "${String(id)}" connector was made by an older copy of @sanoma/workflows, which this one cannot read: ` +
+      "install the sanoma packages and the connectors from one build",
+  );
 }
 
 /** What `withSetup` attached to a connector: nothing when it attached nothing. */

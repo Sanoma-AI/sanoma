@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, realpathSync, watch } from "node:fs";
-import { dirname, join, sep } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import { createInterface } from "node:readline";
 
 /*
@@ -37,6 +37,35 @@ export function linkedPackages(cwd: string): LinkedPackage[] {
     if (!installed(dir)) linked.push({ name, dir });
   }
   return linked;
+}
+
+/** The packages a `sanoma` process loads besides the connectors. */
+const CORE = ["sanoma", "@sanoma/workflows", "@sanoma/app", "@sanoma/bridge"];
+
+/**
+ * Of `sanoma`, `@sanoma/workflows`, `@sanoma/app` and `@sanoma/bridge`, those installed (from a
+ * tarball or a registry) while another of them resolves into a checkout: a partial link, under
+ * which two copies of a package run in one process. Empty when none is linked, or all are. Each
+ * is found as Node finds it, from the repo's root, else from where `sanoma` really is (where pnpm
+ * puts sanoma's own dependencies, `@sanoma/app` among them).
+ */
+export function partialLink(cwd: string): string[] {
+  const sanoma = findPackage("sanoma", cwd);
+  const found = CORE.flatMap((name) => {
+    const dir = findPackage(name, cwd) ?? (sanoma === undefined ? undefined : findPackage(name, sanoma));
+    return dir === undefined ? [] : [{ name, dir }];
+  });
+  if (!found.some(({ dir }) => !installed(dir))) return [];
+  return found.filter(({ dir }) => installed(dir)).map(({ name }) => name);
+}
+
+/** The real directory of package `name` as Node resolves it from `from`: `node_modules/<name>` in it or an ancestor. */
+function findPackage(name: string, from: string): string | undefined {
+  for (let dir = from; ; dir = dirname(dir)) {
+    const candidate = join(dir, "node_modules", name);
+    if (basename(dir) !== "node_modules" && existsSync(candidate)) return realpathSync(candidate);
+    if (dirname(dir) === dir) return undefined;
+  }
 }
 
 /**

@@ -6,7 +6,7 @@ import { fakeGhost } from "@sanoma/connector-ghost/fake";
 import { github } from "@sanoma/connector-github";
 import { resend } from "@sanoma/connector-resend";
 import { stripe } from "@sanoma/connector-stripe";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { allowAll, type Connector, memoryLedger, resolveConfig, type SanomaConfig, withSetup } from "../src/index.ts";
 import { setupOf, VENDOR } from "../src/op.ts";
 import announce from "./fixtures/announce.ts";
@@ -52,6 +52,31 @@ describe("each connector package's root", () => {
     expect(setupOf(swapped)).toEqual({ driver, fake: setupOf(ghost).fake });
     expect(setupOf(ghost).driver).not.toBe(driver);
     expect(swapped.post.create).toBe(ghost.post.create);
+  });
+});
+
+describe("a connector made by another copy of the package", () => {
+  // Two copies load in one process when a connector's peer resolves into a sanoma checkout and
+  // the app's comes from its tarball (a partial `pnpm link`).
+  it("is read by a second instance of the module: its driver and its fake", async () => {
+    vi.resetModules();
+    const other = await import("../src/index.ts");
+    expect(other.resolveConfig).not.toBe(resolveConfig);
+    // The connectors were made by this file's instance; the other reads them.
+    const resolved = other.resolveConfig(config());
+    expect(resolved.driversByVendor.get("ghost")?.vendor).toBe("ghost");
+    expect(resolved.fakes.get("ghost")!().driver.vendor).toBe("ghost");
+    expect(resolved.ops.has("ghost.post.publish")).toBe(true);
+  });
+
+  it("is refused, saying so, when an older copy made it with an unregistered symbol", () => {
+    const older = { [Symbol("sanoma.vendor")]: { id: "ghost" } } as unknown as Connector<any, any>;
+    expect(() => resolveConfig(config({ connectors: [older] }))).toThrow(
+      'The "ghost" connector was made by an older copy of @sanoma/workflows, which this one cannot read',
+    );
+    expect(() => resolveConfig(config({ connectors: [{} as Connector<any, any>] }))).toThrow(
+      "`connectors` holds something that is not a connector",
+    );
   });
 });
 
