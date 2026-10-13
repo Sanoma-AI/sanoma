@@ -7,6 +7,7 @@ import {
   type DriftReport,
   errorCode,
   errorMessage,
+  type InputIssue,
   invalidInput,
   isEnded,
   type LedgerRecord,
@@ -15,7 +16,7 @@ import {
 } from "@sanoma/workflows";
 import type { ConfigDescription } from "@sanoma/workflows/describe";
 import { check, loadScenarios } from "@sanoma/workflows/scenario";
-import { isNotFound, isRedirect } from "@tanstack/react-router";
+import { isNotFound, isRedirect, notFound } from "@tanstack/react-router";
 import type { z } from "zod";
 import {
   ACTOR_HEADER,
@@ -24,17 +25,19 @@ import {
   type CredentialsResponse,
   type DecideCall,
   type ErrorResponse,
-  type InputIssue,
   type RunDetail,
+  type RunsQuery,
   type ScenariosResponse,
   type SetCredentialRequest,
   type StartRunRequest,
   type StartRunResponse,
+  startRunSchema,
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
+import { actorFromHeader } from "../default-actor.ts";
 
-// What the API routes and the server functions both do. Server-only: each takes the app
-// context that startApp passes with every request. Every expected failure is an ApiError.
+// What the server functions do. Server-only: each takes the app context that startApp passes
+// with every request. Every expected failure is an ApiError.
 
 /** A request's context once start.ts's `actor` middleware has run: the app, and who is asking. */
 export interface ActorContext {
@@ -43,7 +46,23 @@ export interface ActorContext {
 }
 
 /**
- * Who is making a change (resolved at most once per request, see start.ts), or a 400 when
+ * Says who is asking, when asked: start.ts's `actor` middleware gives each request this as
+ * `context.actor`, and the resolver (the deployment's, or the header's by default) runs at most
+ * once per request, so a read that needs no actor never calls it. A resolver that throws (its
+ * session store is down, say) fails that call, inside the handler, so the error middleware
+ * answers it as a logged 500.
+ */
+export function actorOf(app: AppContext, request: Request): ActorContext["actor"] {
+  const resolve = app.resolveActor ?? actorFromHeader;
+  let who: Promise<Principal | undefined> | undefined;
+  return () =>
+    (who ??= (async () => resolve(request))().catch((err: unknown) => {
+      throw new Error(`Could not tell who you are: ${errorMessage(err)}`, { cause: err });
+    }));
+}
+
+/**
+ * Who is making a change (resolved at most once per request, see `actorOf`), or a 400 when
  * nobody is named. Only the default resolver reads the header, so only then does the answer
  * name it.
  */
@@ -63,8 +82,21 @@ export function parse<T extends z.ZodType>(schema: T, value: unknown, what: stri
   throw asApiError(invalidInput(what, parsed.error.issues));
 }
 
+/** A server function's validator for a schema: the argument it parses, or a 400 `invalid_input` with zod's issues. */
+export const validate =
+  <T extends z.ZodType>(schema: T) =>
+  (data: z.input<T>): z.output<T> =>
+    parse(schema, data, "The request");
+
 /**
- * The description as the page and `GET /api/config` get it: without the source of a workflow
+ * `startRunFn`'s validator: a workflow and its input, or a scenario's name, each refused at its
+ * own field (`startRunSchema`).
+ */
+export const readStartRun = (data: StartRunRequest): StartRunRequest =>
+  parse(startRunSchema(data), data, "The request");
+
+/**
+ * The description as the page gets it (`getConfig`): without the source of a workflow
  * read from its file, which is a whole file: `fileSource` serves it, one file at a time. A
  * workflow read from `run`'s own text keeps it.
  */
@@ -223,6 +255,9 @@ export async function startRun(
   return { runId: await client.start(workflow, body.input, { startedBy: actor }), workflow: body.workflow };
 }
 
+/** The latest runs, or the latest with a status, of a workflow (`getRuns`). */
+export const listRuns = ({ client }: AppContext, query: z.output<typeof RunsQuery>) => client.runs(query);
+
 /** The report of a drift run once it ends (`SanomaClient.driftReport`). */
 export const driftReport = ({ client }: AppContext, runId: string): Promise<DriftReport> => client.driftReport(runId);
 
@@ -284,32 +319,16 @@ export function toApiError(err: unknown, where: string): ApiError {
 }
 
 /** True for the router's not-found and redirects: answers, not failures, which go through as thrown. */
-export const isRouterAnswer = (err: unknown): boolean => isNotFound(err) || isRedirect(err);
-
-/** A JSON response for any error. */
-export function errorResponse(err: unknown, where: string): Response {
-  const api = toApiError(err, where);
-  return json(api.body, api.status);
-}
-
-export const json = (body: unknown, status = 200) =>
-  Response.json(body, { status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+const isRouterAnswer = (err: unknown): boolean => isNotFound(err) || isRedirect(err);
 
 /**
- * The request's JSON body, or a 400. The content type must say JSON: a browser cannot send that
- * from a plain form or a simple cross-site request without a preflight, so with a cookie-based
- * `resolveActor` this is what keeps the API from being driven by another site.
+ * What a server function fails with when it throws `err` (start.ts's `apiErrors` throws it, with
+ * an ApiError's status): the router's not-found and redirects as they are; a read (`GET`) that
+ * finds nothing as the router's not-found, so the page shows its not-found view; anything else
+ * as an ApiError, a 500 logged (`toApiError`).
  */
-export async function readJson(request: Request): Promise<unknown> {
-  const type = request.headers.get("content-type") ?? "";
-  if (!/^application\/json\b/i.test(type)) {
-    throw new ApiError(415, { error: "Send JSON with content-type: application/json", code: "invalid_input" });
-  }
-  const text = await request.text();
-  if (!text.trim()) throw new ApiError(400, { error: "The body is empty; send JSON", code: "invalid_input" });
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    throw new ApiError(400, { error: "The body is not JSON", code: "invalid_input" });
-  }
+export function serverFnFailure(err: unknown, method: string): unknown {
+  if (isRouterAnswer(err)) return err;
+  const api = toApiError(err, "a server function");
+  return api.status === 404 && method === "GET" ? notFound() : api;
 }

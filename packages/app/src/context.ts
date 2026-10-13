@@ -12,7 +12,7 @@ export type ResolveActor = (request: Request) => Principal | undefined | Promise
 export interface AppContext {
   resolved: ResolvedConfig;
   /**
-   * `describeConfig(config)`, made once: what `GET /api/config` and the page read, less the
+   * `describeConfig(config)`, made once: what the page reads (`getConfig`), less the
    * workflows' sources (`withoutSources`), which `getSource` serves one at a time.
    */
   description: ConfigDescription;

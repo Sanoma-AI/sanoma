@@ -11,7 +11,7 @@ Status: early. Business processes are written as TypeScript workflows that run o
 | [`packages/`](packages/AGENTS.md)                           | Core workspace packages                                                                      |
 | [`sanoma`](packages/sanoma/README.md)                       | The bin a company repo runs, checks and exports itself with; what its workflows import       |
 | [`@sanoma/workflows`](packages/workflows/README.md)         | Define connectors and workflows, run them durably on DBOS, and lint them                     |
-| [`@sanoma/app`](packages/app/README.md)                     | Web UI and JSON API over a config, started with `startApp(config)`                           |
+| [`@sanoma/app`](packages/app/README.md)                     | Web UI over a config, started with `startApp(config)`                                        |
 | [`@sanoma/testing`](packages/testing/README.md)             | `startTestWorker`, `testDatabaseUrl`, a vitest test app, vendor replay, and scenario testing |
 | [`@sanoma/bridge`](packages/bridge/README.md)               | OpenTofu providers: the provider-bridge client, its fake, the resource generator             |
 | [`connectors/`](connectors/AGENTS.md)                       | Vendor connectors, one workspace package each                                                |

@@ -1,17 +1,17 @@
 # Working on @sanoma/app
 
-This package owns the local web UI and HTTP API over a Sanoma config.
+This package owns the local web UI over a Sanoma config. Its server functions are its only HTTP surface; scripts use `SanomaClient` from `@sanoma/workflows`.
 
 ## Read when needed
 
-- [README](README.md): startup, [actor and authentication behavior](README.md#no-authentication), and [HTTP API](README.md#http-api).
-- [Scenarios](README.md#screens): a workflow page's Sandbox mode, the Connector page's scenarios, a sandbox run's Checks, and `/api/scenarios` in the [HTTP API](README.md#http-api).
+- [README](README.md): startup and [actor and authentication behavior](README.md#no-authentication).
+- [Scenarios](README.md#screens): a workflow page's Sandbox mode, the Connector page's scenarios, and a sandbox run's Checks.
 - [Source map](src/AGENTS.md): routes, server functions, components, form schema, and graph code; follow the relevant child map.
-- [Test map](test/AGENTS.md): API, graph, schema, and loopback coverage.
+- [Test map](test/AGENTS.md): server function, page, graph, schema, and loopback coverage.
 
 ## Maintenance boundaries
 
-- Keep server-only config, credentials, and runtime code out of browser modules. API routes and server functions share their behavior through `src/server/core.ts`.
+- Keep server-only config, credentials, and runtime code out of browser modules. Server functions (`src/functions.ts`) parse their argument and call `src/server/core.ts`, where their behavior lives and where the tests call it.
 - Browser modules import values from `@sanoma/workflows` only through `/shared`, and types from the rest; `@sanoma/workflows/scenario` values (`loadScenarios`, `check`) only in `src/server/core.ts`.
 - Preserve the loopback Host check and actor requirements on mutations. The default typed actor name is not authentication; keep the README accurate when this boundary changes.
 - Serve a file's text only for a file the config description names, a workflow's or a data file (`fileSource` in `src/server/core.ts`); never read a path a request makes up. A drift check is an ordinary run (`{ workflow: "drift", input: {} }`) that reads the data files itself; the page's declared list is the description's, read once at boot, joined with the last report's rows.

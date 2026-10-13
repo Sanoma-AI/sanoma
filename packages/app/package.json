@@ -1,7 +1,7 @@
 {
   "name": "@sanoma/app",
   "version": "0.1.0",
-  "description": "A web UI and JSON API over a Sanoma config: runs, approvals, the ledger and a start form",
+  "description": "A web UI over a Sanoma config: runs, approvals, the ledger and a start form",
   "keywords": [
     "approvals",
     "audit",

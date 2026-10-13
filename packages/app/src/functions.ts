@@ -1,46 +1,33 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import {
-  type ActorInfo,
-  ClearCredentialRequest,
-  DecideCall,
-  RunsQuery,
-  SetCredentialRequest,
-  type StartRunRequest,
-  startRunSchema,
-} from "./api.ts";
+import { type ActorInfo, ClearCredentialRequest, DecideCall, RunsQuery, SetCredentialRequest } from "./api.ts";
 import {
   clearCredential,
   credentials,
   decide,
   driftReport,
   fileSource,
-  parse,
+  listRuns,
+  readStartRun,
   runDetail,
   scenarios,
   setCredential,
   startRun,
+  validate,
   withoutSources,
 } from "./server/core.ts";
 import { withPrincipal } from "./middleware.ts";
 
-// The page's reads and changes, as server functions. Most do what an /api route does, with the
-// same schemas; the routes stay the stable surface for scripts. getSource and getDriftReport have
-// no route: only the page shows a file's text, and a script reads a drift run's report from its
-// run. Failures, the actor header and the actor itself are handled
-// once for all of them, in start.ts.
+// The page's reads and changes, as server functions: the app's only HTTP surface. Each parses its
+// argument and calls the server core (server/core.ts). Failures, the actor header and the actor
+// itself are handled once for all of them, in start.ts. Scripts reach the same runs through
+// `SanomaClient` from @sanoma/workflows, not through these.
 //
 // Runs carry `unknown` inputs and outputs, which Start's type check can't prove serializable.
 // They are JSON (they come out of Postgres and the ledger as JSON), so that check is off for
 // the outputs: `strict: { output: false }`.
 const READ = { method: "GET", strict: { output: false } } as const;
 const CHANGE = { method: "POST", strict: { output: false } } as const;
-
-/** A validator that refuses an argument the way the API routes do: a 400 with zod's issues. */
-const validate =
-  <T extends z.ZodType>(schema: T) =>
-  (data: z.input<T>): z.output<T> =>
-    parse(schema, data, "The request");
 
 export const getConfig = createServerFn(READ).handler(({ context }) => withoutSources(context.app.description));
 
@@ -68,7 +55,7 @@ export const getScenarios = createServerFn(READ).handler(({ context }) => scenar
 
 export const getRuns = createServerFn(READ)
   .validator(validate(RunsQuery))
-  .handler(({ data, context }) => context.app.client.runs(data));
+  .handler(({ data, context }) => listRuns(context.app, data));
 
 /** The run, or the router's not-found when there is none. */
 export const getRun = createServerFn(READ)
@@ -77,7 +64,7 @@ export const getRun = createServerFn(READ)
 
 export const startRunFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
-  .validator((data: StartRunRequest) => parse(startRunSchema(data), data, "The request"))
+  .validator(readStartRun)
   .handler(({ data, context }) => startRun(context.app, context.principal, data));
 
 export const decideFn = createServerFn(CHANGE)

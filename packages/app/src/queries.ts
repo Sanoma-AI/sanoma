@@ -172,7 +172,7 @@ export const runsQuery = (query: RunsQuery = {}) =>
     refetchInterval: POLL_MS,
   });
 
-/** The runs waiting on an approval: every one, up to the API's largest page. Under RUNS_KEY, so a decision refreshes it. */
+/** The runs waiting on an approval: every one, up to `getRuns`'s largest page. Under RUNS_KEY, so a decision refreshes it. */
 export const waitingRunsQuery = () =>
   queryOptions({
     queryKey: [...RUNS_KEY, "waiting"],

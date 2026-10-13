@@ -1,7 +1,6 @@
 import { appendFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { testDatabaseUrl, waitFor } from "@sanoma/testing";
-import type { ConfigDescription } from "@sanoma/workflows/describe";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { copyFixture, ensureBuilt, runCli, startCli } from "./fixture.ts";
 
@@ -25,11 +24,15 @@ describe("sanoma serve", () => {
       );
       expect(stdout).toContain("sanoma-fixture running hello");
       const url = stdout.match(/at (http:\/\/127\.0\.0\.1:\d+); ctrl-c to stop/)![1]!;
-      const res = await fetch(`${url}/api/config`);
+      // The app is up: its home lists the config's one workflow, rendered on the server.
+      const res = await fetch(`${url}/workflows`);
       expect(res.status).toBe(200);
-      const config = (await res.json()) as ConfigDescription;
-      expect(config.workflows.map((w) => w.name)).toEqual(["hello"]);
-      expect(config.problems).toEqual([]);
+      const html = await res.text();
+      expect(
+        [...html.matchAll(/aria-level="2"[^>]*><a[^>]*href="\/workflows\/([^"?]+)"/g)].map(([, name]) => name),
+      ).toEqual(["hello"]);
+      // On a config without problems: startApp warns about any it finds in the files before it listens.
+      expect(output().stderr).not.toContain("the config's files have problems");
     } finally {
       child.kill("SIGINT");
     }
