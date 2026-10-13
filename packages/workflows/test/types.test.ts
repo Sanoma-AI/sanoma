@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { ghost } from "@sanoma/connector-ghost";
-import { defineConnector, defineDriver, defineWorkflow, type Op, type SanomaClient, withSetup } from "../src/index.ts";
+import {
+  allowAll,
+  defineConnector,
+  defineDriver,
+  defineWorkflow,
+  type Op,
+  type SanomaClient,
+  type SanomaConfig,
+  withSetup,
+} from "../src/index.ts";
 
 // These assertions are checked by `pnpm typecheck`; the runtime test only keeps vitest happy.
 const shop = defineConnector("shop", {
@@ -129,6 +138,18 @@ export const sameShop: typeof shop = attached;
 export const orderGet: Op<"shop", "order", "get", { id: string }, { total: number }> = attached.order.get;
 // @ts-expect-error the setup is on the vendor record, never a group
 export const noGroup = attached.setup;
+
+// The keys a config no longer has are typed `never`, each with a deprecation saying where it went.
+export const stale: SanomaConfig[] = [
+  // @ts-expect-error each connector carries its driver
+  { workflows: [], connectors: [], policy: allowAll, drivers: [] },
+  // @ts-expect-error each connector carries the maker of its fake
+  { workflows: [], connectors: [], policy: allowAll, fakes: [] },
+  // @ts-expect-error the app's name is <root>/package.json's
+  { workflows: [], connectors: [], policy: allowAll, appName: "acme" },
+  // @ts-expect-error the scenarios are <root>/scenarios/
+  { workflows: [], connectors: [], policy: allowAll, scenarios: new URL("file:///srv/acme/scenarios/") },
+];
 
 describe("types", () => {
   it("keys a driver's operations by resource and name", () => {

@@ -83,15 +83,11 @@ const refused: [string, Partial<SanomaConfig>, RegExp][] = [
     /^Two connectors in `connectors` attach a fake for "bluesky"; keep one per vendor$/,
   ],
   [
-    "`drivers`, which a connector now carries",
+    "`drivers` or `fakes`, which an untyped config might still name (fake drivers it would otherwise run live)",
     { drivers: [] } as never,
-    /^The config's `drivers` is no longer read; leave it out: each connector carries its driver$/,
+    /^The config's `drivers` and `fakes` are gone: each connector carries its driver and its fake; leave them out$/,
   ],
-  [
-    "`fakes`, `appName` and `scenarios`, which the connectors and the root now give",
-    { fakes: [], appName: "acme", scenarios: new URL("file:///srv/acme/scenarios/") } as never,
-    /^The config's `fakes`, `appName`, `scenarios` are no longer read; leave them out: each connector carries its fake; the app's name is its package\.json's; the scenarios are `scenarios\/` in the config's root$/,
-  ],
+  ["`fakes`, alone", { fakes: [] } as never, /^The config's `drivers` and `fakes` are gone/],
 ];
 
 describe("startWorker, resolveConfig and describeConfig", () => {

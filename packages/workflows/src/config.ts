@@ -60,6 +60,14 @@ export interface SanomaConfig {
    * source's, as in a bundle.
    */
   root?: string;
+  /** @deprecated Gone: each connector carries its driver (`withSetup`, from its package). Leave it out. */
+  drivers?: never;
+  /** @deprecated Gone: each connector carries the maker of its fake (`withSetup`, from its package). Leave it out. */
+  fakes?: never;
+  /** @deprecated Gone: the app's name is the `name` in `<root>/package.json`, else "sanoma". Leave it out. */
+  appName?: never;
+  /** @deprecated Gone: the scenarios are `<root>/scenarios/`. Leave it out. */
+  scenarios?: never;
 }
 
 /** A config, checked, with everything a worker, client or app derives from it. */
@@ -129,14 +137,6 @@ function ledgerOf(config: SanomaConfig): LedgerStore | undefined {
   return config.ledger;
 }
 
-/** What a config held before its connectors carried their drivers and fakes, and where each went. */
-const REMOVED: Record<string, string> = {
-  drivers: "each connector carries its driver",
-  fakes: "each connector carries its fake",
-  appName: "the app's name is its package.json's",
-  scenarios: "the scenarios are `scenarios/` in the config's root",
-};
-
 /**
  * Checks a config and derives what the runtime needs from it: the drivers and fakes from the
  * connectors' setups (`withSetup`), and from `root`, the app's name (`package.json`) and the
@@ -156,16 +156,11 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   if (typeof config.policy !== "function") {
     throw new Error("The config needs a `policy`; use `allowAll` to allow every operation call");
   }
-  // A config still naming fake drivers would otherwise run live: refuse it rather than ignore them.
-  const removed = Object.keys(REMOVED).filter(
-    (key) => (config as object as Record<string, unknown>)[key] !== undefined,
-  );
-  if (removed.length) {
+  // An untyped config naming fake drivers would otherwise run live. Delete once sanoma-ops has migrated.
+  if (config.drivers !== undefined || config.fakes !== undefined)
     throw new Error(
-      `The config's ${removed.map((key) => `\`${key}\``).join(", ")} ${removed.length > 1 ? "are" : "is"} no longer read; ` +
-        `leave ${removed.length > 1 ? "them" : "it"} out: ${removed.map((key) => REMOVED[key]).join("; ")}`,
+      "The config's `drivers` and `fakes` are gone: each connector carries its driver and its fake; leave them out",
     );
-  }
   const ledger = ledgerOf(config);
   // No fallback to the working directory: a config found nowhere has no data files, and says so.
   const root =
