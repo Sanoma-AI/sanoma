@@ -8,7 +8,6 @@ import { fakeGhost } from "@sanoma/connector-ghost/fake";
 import { github } from "@sanoma/connector-github";
 import { resend } from "@sanoma/connector-resend";
 import { stripe } from "@sanoma/connector-stripe";
-import { testRoot } from "@sanoma/testing";
 import { afterAll, describe, expect, it } from "vitest";
 import { allowAll, type Connector, memoryLedger, resolveConfig, type SanomaConfig, withSetup } from "../src/index.ts";
 import { setupOf, VENDOR } from "../src/op.ts";
@@ -102,28 +101,31 @@ describe("resolveConfig on the connectors' setups", () => {
 });
 
 describe("resolveConfig's conventions", () => {
-  it("finds the scenarios in scenarios/ in the root, when there is one", () => {
+  it("finds the scenarios in scenarios/ in the root, when it is a directory", () => {
     const root = tree("with-scenarios", { "scenarios/a.feature": "Feature: A\n" });
     expect(resolveConfig(config({ root })).scenarios).toEqual(pathToFileURL(`${join(root, "scenarios")}/`));
     expect(resolveConfig(config({ root: tree("without-scenarios") })).scenarios).toBeUndefined();
+    expect(resolveConfig(config({ root: tree("scenarios-file", { scenarios: "" }) })).scenarios).toBeUndefined();
     expect(resolveConfig(config()).scenarios).toBeUndefined();
   });
 
-  it("names the app from the nearest package.json at or above the root that has a name, kept whole", () => {
+  it("names the app from the root's own package.json, kept whole", () => {
     const named = tree("named", { "package.json": JSON.stringify({ name: "@acme/ops" }) });
     expect(resolveConfig(config({ root: named })).appName).toBe("@acme/ops");
     expect(resolveConfig(config({ root: named })).queueName).toBe("sanoma:@acme/ops");
-    // A nested directory, and one whose package.json names nothing, take the name above.
-    const nested = tree("named/workspace/deep", { "../package.json": JSON.stringify({ private: true }) });
-    expect(resolveConfig(config({ root: nested })).appName).toBe("@acme/ops");
+    expect(resolveConfig(config({ root: named })).version).toMatch(/^@acme\/ops@[0-9a-f]{64}$/);
     // Its file's directory when it has no root.
     expect(resolveConfig(config({ file: join(named, "sanoma.config.ts") })).appName).toBe("@acme/ops");
-    expect(resolveConfig(config({ root: testRoot("acme") })).version).toMatch(/^acme@[0-9a-f]{64}$/);
   });
 
-  it("names the app sanoma when no package.json names it, or the config has no root", () => {
-    // Nothing above the temporary directory is a package.
+  it("names the app sanoma when the root's package.json names none, never taking a name from above", () => {
     expect(resolveConfig(config({ root: tree("nameless", { "package.json": "{}" }) })).appName).toBe("sanoma");
+    // A directory below a named one, with no package.json or one naming nothing: the parent's name does not leak in.
+    expect(resolveConfig(config({ root: tree("named-parent/child") })).appName).toBe("sanoma");
+    tree("named-parent", { "package.json": JSON.stringify({ name: "parent" }) });
+    expect(resolveConfig(config({ root: tree("named-parent/child") })).appName).toBe("sanoma");
+    const unnamed = tree("named-parent/unnamed", { "package.json": JSON.stringify({ private: true }) });
+    expect(resolveConfig(config({ root: unnamed })).appName).toBe("sanoma");
     expect(resolveConfig(config()).appName).toBe("sanoma");
   });
 

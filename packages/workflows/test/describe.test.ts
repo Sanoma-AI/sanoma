@@ -178,9 +178,9 @@ describe("describeConfig", () => {
   it("says whether a policy other than allowAll is configured, and its version, and names the app and version", () => {
     const plain = describeConfig(base);
     expect(plain.policy).toEqual({ defined: false });
-    // The nearest package.json above this file, which defined the config, names the app.
-    expect(plain.appName).toBe("@sanoma/workflows");
-    expect(plain.version).toMatch(/^@sanoma\/workflows@[0-9a-f]{64}$/);
+    // No package.json in the directory of this file, which defined the config: the app is "sanoma".
+    expect(plain.appName).toBe("sanoma");
+    expect(plain.version).toMatch(/^sanoma@[0-9a-f]{64}$/);
     const gated = defineConfig({ ...base, root: testRoot("acme"), policy: definePolicy(() => allow()) });
     expect(describeConfig(gated)).toMatchObject({
       appName: "acme",

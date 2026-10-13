@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { DBOS } from "@dbos-inc/dbos-sdk";
@@ -65,8 +65,8 @@ export interface SanomaConfig {
 /** A config, checked, with everything a worker, client or app derives from it. */
 export interface ResolvedConfig {
   /**
-   * Scopes workflows, queues and versions in the system database: the `name` of the nearest
-   * `package.json` at or above `root` that has one, else "sanoma".
+   * Scopes workflows, queues and versions in the system database: the `name` of
+   * `<root>/package.json` when it names one, else "sanoma".
    */
   appName: string;
   databaseUrl: string;
@@ -142,7 +142,7 @@ const REMOVED: Record<string, string> = {
  * connectors' setups (`withSetup`), and from `root`, the app's name (`package.json`) and the
  * scenarios (`scenarios/`). Throws what `startWorker` would refuse, with the same message, so
  * `describeConfig`, `SanomaClient.connect` and the app fail the same way the worker does. It
- * opens nothing and reads no file outside `root` but a `package.json` above it. Each entry
+ * opens nothing and reads no file outside `root`. Each entry
  * point resolves once: the worker and the client when they start, the app at `startApp`, the
  * `sanoma` bin when it loads the config.
  */
@@ -171,7 +171,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const root =
     config.root !== undefined ? resolve(config.root) : config.file !== undefined ? dirname(config.file) : undefined;
   const appName = appNameAt(root);
-  const scenarios = root !== undefined && existsSync(join(root, "scenarios")) ? scenariosAt(root) : undefined;
+  const scenarios = scenariosAt(root);
   const ops = indexConnectors(config.connectors);
   const driversByVendor = new Map([...makersOf(config.connectors, "driver")].map(([vendor, make]) => [vendor, make()]));
   const drivers = indexDrivers([...driversByVendor.values()], ops);
@@ -240,36 +240,29 @@ function makersOf<K extends keyof ConnectorSetup>(
   return makers;
 }
 
-/** `scenarios/` in `root`, as a `file:` URL to the directory (with its trailing slash). */
-const scenariosAt = (root: string) => pathToFileURL(`${join(root, "scenarios")}/`);
-
 /**
- * The `name` of the nearest `package.json` at or above `root` that has one, kept whole (`@acme/ops`),
- * else "sanoma", as for a config with no `root`.
+ * The `name` of `<root>/package.json`, kept whole (`@acme/ops`), when that file exists and names
+ * one; else "sanoma", as for a config with no `root`. Never a `package.json` above the root: a
+ * parent project's name must not become the app's. A file that is not JSON is refused, naming it.
  */
 function appNameAt(root: string | undefined): string {
-  if (root === undefined) return "sanoma";
-  let name = "sanoma";
-  for (let dir = root; ;) {
-    const file = join(dir, "package.json");
-    if (existsSync(file)) {
-      let manifest: unknown;
-      try {
-        manifest = JSON.parse(readFileSync(file, "utf8"));
-      } catch (err) {
-        throw new Error(`${file} is not JSON, so it names no app: ${(err as Error).message}`, { cause: err });
-      }
-      const named = (manifest as { name?: unknown } | null)?.name;
-      if (typeof named === "string" && named.trim()) {
-        name = named.trim();
-        break;
-      }
-    }
-    const up = dirname(dir);
-    if (up === dir) break;
-    dir = up;
+  const file = root === undefined ? undefined : join(root, "package.json");
+  if (file === undefined || !existsSync(file)) return "sanoma";
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(readFileSync(file, "utf8"));
+  } catch (err) {
+    throw new Error(`${file} is not JSON, so it names no app: ${(err as Error).message}`, { cause: err });
   }
-  return name;
+  const named = (manifest as { name?: unknown } | null)?.name;
+  return typeof named === "string" && named.trim() ? named.trim() : "sanoma";
+}
+
+/** `<root>/scenarios/`, as a `file:` URL to the directory (with its trailing slash), when it is a directory. */
+function scenariosAt(root: string | undefined): URL | undefined {
+  const dir = root === undefined ? undefined : join(root, "scenarios");
+  if (dir === undefined || !statSync(dir, { throwIfNoEntry: false })?.isDirectory()) return undefined;
+  return pathToFileURL(`${dir}/`);
 }
 
 /**
