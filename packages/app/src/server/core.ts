@@ -16,7 +16,7 @@ import {
 } from "@sanoma/workflows";
 import type { ConfigDescription } from "@sanoma/workflows/describe";
 import { check, loadScenarios } from "@sanoma/workflows/scenario";
-import { isNotFound, isRedirect } from "@tanstack/react-router";
+import { isNotFound, isRedirect, notFound } from "@tanstack/react-router";
 import type { z } from "zod";
 import {
   ACTOR_HEADER,
@@ -26,10 +26,12 @@ import {
   type DecideCall,
   type ErrorResponse,
   type RunDetail,
+  type RunsQuery,
   type ScenariosResponse,
   type SetCredentialRequest,
   type StartRunRequest,
   type StartRunResponse,
+  startRunSchema,
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { actorFromHeader } from "../default-actor.ts";
@@ -79,6 +81,19 @@ export function parse<T extends z.ZodType>(schema: T, value: unknown, what: stri
   if (parsed.success) return parsed.data;
   throw asApiError(invalidInput(what, parsed.error.issues));
 }
+
+/** A server function's validator for a schema: the argument it parses, or a 400 `invalid_input` with zod's issues. */
+export const validate =
+  <T extends z.ZodType>(schema: T) =>
+  (data: z.input<T>): z.output<T> =>
+    parse(schema, data, "The request");
+
+/**
+ * `startRunFn`'s validator: a workflow and its input, or a scenario's name, each refused at its
+ * own field (`startRunSchema`).
+ */
+export const readStartRun = (data: StartRunRequest): StartRunRequest =>
+  parse(startRunSchema(data), data, "The request");
 
 /**
  * The description as the page gets it (`getConfig`): without the source of a workflow
@@ -240,6 +255,9 @@ export async function startRun(
   return { runId: await client.start(workflow, body.input, { startedBy: actor }), workflow: body.workflow };
 }
 
+/** The latest runs, or the latest with a status, of a workflow (`getRuns`). */
+export const listRuns = ({ client }: AppContext, query: z.output<typeof RunsQuery>) => client.runs(query);
+
 /** The report of a drift run once it ends (`SanomaClient.driftReport`). */
 export const driftReport = ({ client }: AppContext, runId: string): Promise<DriftReport> => client.driftReport(runId);
 
@@ -301,4 +319,16 @@ export function toApiError(err: unknown, where: string): ApiError {
 }
 
 /** True for the router's not-found and redirects: answers, not failures, which go through as thrown. */
-export const isRouterAnswer = (err: unknown): boolean => isNotFound(err) || isRedirect(err);
+const isRouterAnswer = (err: unknown): boolean => isNotFound(err) || isRedirect(err);
+
+/**
+ * What a server function fails with when it throws `err` (start.ts's `apiErrors` throws it, with
+ * an ApiError's status): the router's not-found and redirects as they are; a read (`GET`) that
+ * finds nothing as the router's not-found, so the page shows its not-found view; anything else
+ * as an ApiError, a 500 logged (`toApiError`).
+ */
+export function serverFnFailure(err: unknown, method: string): unknown {
+  if (isRouterAnswer(err)) return err;
+  const api = toApiError(err, "a server function");
+  return api.status === 404 && method === "GET" ? notFound() : api;
+}

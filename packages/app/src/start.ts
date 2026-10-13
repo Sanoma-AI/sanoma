@@ -1,10 +1,10 @@
-import { createSerializationAdapter, notFound } from "@tanstack/react-router";
+import { createSerializationAdapter } from "@tanstack/react-router";
 import { createCsrfMiddleware, createMiddleware, createStart } from "@tanstack/react-start";
 import { setResponseStatus } from "@tanstack/react-start/server";
 import { loadActor } from "./actor.ts";
 import { ACTOR_HEADER, ApiError } from "./api.ts";
 import type { AppContext } from "./context.ts";
-import { actorOf, isRouterAnswer, toApiError } from "./server/core.ts";
+import { actorOf, serverFnFailure } from "./server/core.ts";
 
 declare module "@tanstack/react-router" {
   interface Register {
@@ -38,19 +38,18 @@ const apiErrorTransport = createSerializationAdapter({
 
 /**
  * Every server function fails with an ApiError and its status, which the page reads with
- * `errorBodyOf`. A read that finds nothing is the router's not-found instead, so the page
- * shows its not-found view. Start logs "Server Fn Error!" only for what fails outside the
- * function's middleware (it would log a 4xx there too; accepted), so 500s are logged here.
+ * `errorBodyOf`, or with the router's not-found for a read that finds nothing, so the page shows
+ * its not-found view (`serverFnFailure`). Start logs "Server Fn Error!" only for what fails
+ * outside the function's middleware (it would log a 4xx there too; accepted), so 500s are logged
+ * there.
  */
 const apiErrors = createMiddleware({ type: "function" }).server(async ({ next, method }) => {
   try {
     return await next();
   } catch (err) {
-    if (isRouterAnswer(err)) throw err;
-    const api = toApiError(err, "a server function");
-    if (api.status === 404 && method === "GET") throw notFound();
-    setResponseStatus(api.status);
-    throw api;
+    const failure = serverFnFailure(err, method);
+    if (failure instanceof ApiError) setResponseStatus(failure.status);
+    throw failure;
   }
 });
 

@@ -26,6 +26,7 @@ import {
   withSetup,
 } from "@sanoma/workflows";
 import { describeConfig, outlineWorkflow } from "@sanoma/workflows/describe";
+import { isNotFound } from "@tanstack/react-router";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
 import { companyFakes } from "../../workflows/test/fixtures/company/fakes.ts";
@@ -40,7 +41,6 @@ import {
   type ErrorResponse,
   RunsQuery,
   SetCredentialRequest,
-  startRunSchema,
 } from "../src/api.ts";
 import type { AppContext, ResolveActor } from "../src/context.ts";
 import {
@@ -51,13 +51,16 @@ import {
   credentials,
   decide,
   fileSource,
+  listRuns,
   parse,
+  readStartRun,
   requireActor,
   runDetail,
   scenarios,
+  serverFnFailure,
   setCredential,
   startRun,
-  toApiError,
+  validate,
   withoutSources,
 } from "../src/server/core.ts";
 
@@ -166,48 +169,47 @@ function asking({ actor, headers, app: context = ctx }: As = {}): ActorContext {
 }
 
 /**
- * A server function's answer: its result, which Start sends with 200, or the status and body of
- * the ApiError it fails with, as start.ts's `apiErrors` middleware makes it (logging a 500).
+ * A server function's answer as the page receives it: its result, or, with `status`, the
+ * ApiError it fails with (`serverFnFailure`, which start.ts's `apiErrors` middleware throws). The
+ * router's not-found, a read's answer for nothing found, is thrown.
  */
-async function answer<T>(work: () => Promise<T>): Promise<{ status: number; body: T & Partial<ErrorResponse> }> {
+async function answer<T>(
+  method: "GET" | "POST",
+  work: () => Promise<T>,
+): Promise<{ status?: number; body: T & Partial<ErrorResponse> }> {
   try {
-    return { status: 200, body: (await work()) as T & Partial<ErrorResponse> };
+    return { body: (await work()) as T & Partial<ErrorResponse> };
   } catch (err) {
-    const api = toApiError(err, "a server function");
-    return { status: api.status, body: api.body as T & Partial<ErrorResponse> };
+    const failure = serverFnFailure(err, method);
+    if (!(failure instanceof ApiError)) throw failure;
+    return { status: failure.status, body: failure.body as T & Partial<ErrorResponse> };
   }
 }
 
 /**
- * A change as its server function makes it (see functions.ts): who is asking, refused when
- * nobody is named (`withPrincipal`), then the argument read as its validator reads it, then the
- * server core's call.
+ * A change as its server function makes it (see functions.ts): `withPrincipal`'s `requireActor`,
+ * then the function's validator, then its handler's server core call.
  */
 const change =
-  <D, T>(read: (data: unknown) => D, call: (app: AppContext, actor: Principal, data: D) => Promise<T>) =>
+  <I, D, T>(read: (data: I) => D, call: (app: AppContext, actor: Principal, data: D) => Promise<T>) =>
   (data: unknown, as: As = {}) =>
-    answer(async () => {
+    answer("POST", async () => {
       const request = asking(as);
       const actor = await requireActor(request);
-      return call(request.app, actor, read(data));
+      return call(request.app, actor, read(data as I));
     });
 
-/** A server function's validator: the argument, or a 400 with zod's issues. */
-const argument =
-  <S extends z.ZodType>(schema: S) =>
-  (data: unknown) =>
-    parse(schema, data, "The request");
-
 /** `startRunFn`: a workflow and its input, or a scenario. */
-const startAs = change((data) => parse(startRunSchema(data), data, "The request"), startRun);
+const startAs = change(readStartRun, startRun);
 /** `decideFn`: `{ runId, approvalId, decision, note? }`. */
-const decideAs = change(argument(DecideCall), decide);
+const decideAs = change(validate(DecideCall), decide);
 /** `setCredentialFn` and `clearCredentialFn`. */
-const setAs = change(argument(SetCredentialRequest), setCredential);
-const clearAs = change(argument(ClearCredentialRequest), clearCredential);
+const setAs = change(validate(SetCredentialRequest), setCredential);
+const clearAs = change(validate(ClearCredentialRequest), clearCredential);
 
 /** `getRuns`: the latest runs, by the query. */
-const runsOf = (query: Record<string, unknown> = {}) => answer(() => ctx.client.runs(argument(RunsQuery)(query)));
+const runsOf = (query: Record<string, unknown> = {}) =>
+  answer("GET", async () => listRuns(ctx, validate(RunsQuery)(query as RunsQuery)));
 
 /** `getRun`: one run, its ledger, its approvals and a sandbox run's checks. */
 const detail = (id: string, context = ctx) => runDetail(context, id);
@@ -327,8 +329,7 @@ describe("the server functions", () => {
       { workflow: "announce", input: input("From the app") },
       { actor: encodeURIComponent("Ålice") },
     );
-    expect(started.status).toBe(200);
-    expect(started.body).toEqual({ runId: expect.any(String), workflow: "announce" });
+    expect(started).toEqual({ body: { runId: expect.any(String), workflow: "announce" } });
     runId = started.body.runId;
 
     const runs = await runsOf({ limit: 50 });
@@ -345,7 +346,6 @@ describe("the server functions", () => {
     expect(approval).toMatchObject({ id: "approval-1", approver: "marketing-lead", status: "pending" });
     expect(held.run.status).toBe("waiting");
     const waiting = await runsOf({ status: "waiting" });
-    expect(waiting.status).toBe(200);
     expect(waiting.body.map((r) => r.runId)).toContain(runId);
     expect(waiting.body.every((r) => r.status === "waiting")).toBe(true);
     const call = { runId, approvalId: approval.id };
@@ -359,7 +359,6 @@ describe("the server functions", () => {
     expect((await detail(runId)).approvals[0]?.status).toBe("pending");
 
     const right = await decideAs({ ...call, decision: "approve", note: "ship it" }, { actor: "marketing-lead" });
-    expect(right.status).toBe(200);
     expect(right.body).toMatchObject({ id: "approval-1", status: "approved", decidedBy: "marketing-lead" });
 
     const again = await decideAs({ ...call, decision: "reject" }, { actor: "marketing-lead" });
@@ -410,17 +409,20 @@ describe("the server functions", () => {
         { runId: id, approvalId: "approval-1", decision: "approve" },
         { actor: "marketing-lead" },
       );
-      expect(sent.status).toBe(200);
+      expect(sent.status).toBeUndefined();
       expect(sent.body).toMatchObject({ id: "approval-1", status: "pending" });
     } finally {
       worker = await startWorker(config);
     }
   });
 
-  it("say when a run or an approval does not exist, by code", async () => {
-    const run = await answer(() => detail("does-not-exist"));
-    expect(run.status).toBe(404);
-    expect(run.body).toMatchObject({ code: "run_not_found", error: expect.stringMatching(/does-not-exist/) });
+  it("say when a run or an approval does not exist, by code, and answer a read of one with the router's not-found", async () => {
+    await expect(detail("does-not-exist")).rejects.toMatchObject({
+      status: 404,
+      body: { code: "run_not_found", error: expect.stringMatching(/does-not-exist/) },
+    });
+    // getRun, a read, finds nothing: the page shows its not-found view.
+    await expect(answer("GET", () => detail("does-not-exist"))).rejects.toSatisfy(isNotFound);
     const approval = await decideAs(
       { runId: "does-not-exist", approvalId: "approval-1", decision: "approve" },
       { actor: "marketing-lead" },
@@ -487,7 +489,6 @@ describe("scenarios and sandbox runs", () => {
 
   it("starts a sandbox run whose approval waits for a person, then checks it against the scenario", async () => {
     const started = await postRun({ scenario: SCENARIO });
-    expect(started.status).toBe(200);
     // The scenario's workflow, which the request did not name: the run's page is under it.
     expect(started.body.workflow).toBe("announce");
     sandboxId = started.body.runId;
@@ -528,7 +529,6 @@ describe("scenarios and sandbox runs", () => {
 
   it("settles a check once its answer cannot change, and fails those not met when the run ends", async () => {
     const started = await postRun({ scenario: "Copy rejected" });
-    expect(started.status).toBe(200);
     const id = started.body.runId;
     const held = await waitFor(
       () => detail(id),
@@ -1065,7 +1065,7 @@ describe("resources and drift", () => {
     company.github.remove("branch_protection", "docs:main");
     // Started as any workflow is, with its input: nothing.
     const started = await startAs({ workflow: "drift", input: {} }, { actor: "alice" });
-    if (started.status !== 200) throw new Error(`startRunFn answered ${started.status}: ${started.body.error}`);
+    if (started.status) throw new Error(`startRunFn failed with ${started.status}: ${started.body.error}`);
     driftRun = started.body.runId;
     const done = await waitFor(
       () => detail(driftRun),
@@ -1285,7 +1285,7 @@ describe("an app configured otherwise", () => {
   describe("with its own resolveActor", () => {
     it("starts runs as the principal it resolves, groups included", async () => {
       const started = await post("sso-user");
-      expect(started.status).toBe(200);
+      expect(started.status).toBeUndefined();
       const run = await waitFor(
         () => detail(started.body.runId),
         (d) => d.run.startedBy !== undefined,
@@ -1502,10 +1502,8 @@ describe("an app whose drivers declare environment variables", () => {
   });
 
   it("stores a value as the actor, says who set it on the page, then clears it", async () => {
-    const stored = await set({ name: KEY_VAR, value: KEY });
-    expect(stored.status).toBe(200);
-    // Nothing comes back: never the value.
-    expect(stored.body).toBeUndefined();
+    // It succeeds, and nothing comes back: never the value.
+    expect(await set({ name: KEY_VAR, value: KEY })).toEqual({ body: undefined });
     const [, key] = (await statuses()).ghost!;
     expect(key).toMatchObject({ name: KEY_VAR, status: "set", source: "stored", setBy: "tester" });
 
@@ -1515,7 +1513,7 @@ describe("an app whose drivers declare environment variables", () => {
     expect((await page("/connectors", declaring.url)).text).toContain("· configured");
     for (const html of [blogPage.html, JSON.stringify(await statuses())]) expect(html).not.toContain(KEY);
 
-    expect((await clear({ name: KEY_VAR })).status).toBe(200);
+    expect(await clear({ name: KEY_VAR })).toEqual({ body: undefined });
     expect((await statuses()).ghost?.[1]).toEqual({
       name: KEY_VAR,
       description: "a made-up key",

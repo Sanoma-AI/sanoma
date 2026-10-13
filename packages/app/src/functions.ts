@@ -1,25 +1,19 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import {
-  type ActorInfo,
-  ClearCredentialRequest,
-  DecideCall,
-  RunsQuery,
-  SetCredentialRequest,
-  type StartRunRequest,
-  startRunSchema,
-} from "./api.ts";
+import { type ActorInfo, ClearCredentialRequest, DecideCall, RunsQuery, SetCredentialRequest } from "./api.ts";
 import {
   clearCredential,
   credentials,
   decide,
   driftReport,
   fileSource,
-  parse,
+  listRuns,
+  readStartRun,
   runDetail,
   scenarios,
   setCredential,
   startRun,
+  validate,
   withoutSources,
 } from "./server/core.ts";
 import { withPrincipal } from "./middleware.ts";
@@ -34,12 +28,6 @@ import { withPrincipal } from "./middleware.ts";
 // the outputs: `strict: { output: false }`.
 const READ = { method: "GET", strict: { output: false } } as const;
 const CHANGE = { method: "POST", strict: { output: false } } as const;
-
-/** A validator that refuses an argument a schema refuses: a 400 `invalid_input` with zod's issues. */
-const validate =
-  <T extends z.ZodType>(schema: T) =>
-  (data: z.input<T>): z.output<T> =>
-    parse(schema, data, "The request");
 
 export const getConfig = createServerFn(READ).handler(({ context }) => withoutSources(context.app.description));
 
@@ -67,7 +55,7 @@ export const getScenarios = createServerFn(READ).handler(({ context }) => scenar
 
 export const getRuns = createServerFn(READ)
   .validator(validate(RunsQuery))
-  .handler(({ data, context }) => context.app.client.runs(data));
+  .handler(({ data, context }) => listRuns(context.app, data));
 
 /** The run, or the router's not-found when there is none. */
 export const getRun = createServerFn(READ)
@@ -76,7 +64,7 @@ export const getRun = createServerFn(READ)
 
 export const startRunFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
-  .validator((data: StartRunRequest) => parse(startRunSchema(data), data, "The request"))
+  .validator(readStartRun)
   .handler(({ data, context }) => startRun(context.app, context.principal, data));
 
 export const decideFn = createServerFn(CHANGE)
