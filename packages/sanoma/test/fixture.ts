@@ -1,5 +1,5 @@
 import { spawn, type SpawnOptions } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,14 +28,9 @@ export function ensureBuilt(): void {
 }
 
 /**
- * A fresh copy of `fixtures/project` in a temporary directory, with a `node_modules` holding only
- * `sanoma` and `@sanoma/connector-ghost`: what a company repo installs. `sanoma` is laid out as
- * pnpm installs a tarball: its published files copied into `node_modules/.pnpm/sanoma/node_modules/sanoma`,
- * each of its dependencies a symlink beside it (not under it), and `node_modules/sanoma` a
- * symlink to the copy. Everything else (zod, `@types/node`, `@sanoma/workflows`, typescript,
- * oxlint) the copy reaches only from where `sanoma` is, as under pnpm's strict layout. The
- * dependencies and the connector link into this checkout, and Node resolves each link to its
- * real path, so the config and the bin share one copy of every package.
+ * A fresh copy of `fixtures/project`, with what a company repo installs: `sanoma` as pnpm lays out
+ * its tarball (its published files in `.pnpm/sanoma/node_modules/sanoma`, its dependencies linked
+ * beside it, not under it) and `@sanoma/connector-ghost`, both reaching this checkout's builds.
  */
 export function copyFixture(): string {
   const dir = mkdtempSync(join(tmpdir(), "sanoma-fixture-"));
@@ -50,7 +45,7 @@ export function copyFixture(): string {
   };
   const store = join(modules, ".pnpm/sanoma/node_modules");
   for (const file of ["package.json", ...manifest.files]) {
-    if (existsSync(join(sanoma, file))) cpSync(join(sanoma, file), join(store, "sanoma", file), { recursive: true });
+    cpSync(join(sanoma, file), join(store, "sanoma", file), { recursive: true });
   }
   for (const name of Object.keys(manifest.dependencies)) link(join(sanoma, "node_modules", name), join(store, name));
   symlinkSync(join(store, "sanoma"), join(modules, "sanoma"));
