@@ -98,7 +98,8 @@ async function load(): Promise<Loaded> {
 
 /**
  * Starts what `start` starts over the loaded config, prints what runs (and where, when it
- * listens), and stops it on SIGINT or SIGTERM, then exits 0.
+ * listens), and stops it on SIGINT or SIGTERM, then exits 0. The worker names the vendors not
+ * configured yet itself, in one line.
  */
 async function keep(
   { config, resolved }: Loaded,
@@ -132,9 +133,16 @@ async function serveCommand(): Promise<never> {
  * alone, and its `stop` is the one path that ends them.
  */
 async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<never> {
-  const { startWatchers, supervise } = await import("./dev.ts");
+  const { partialLink, startWatchers, supervise } = await import("./dev.ts");
   const cwd = process.cwd();
   log(`dev mode: ${repo}; building ${packages.map((p) => p.name).join(", ") || "nothing"} as it changes`);
+  const fromTarballs = partialLink(cwd);
+  if (fromTarballs.length) {
+    log(
+      `dev mode: ${fromTarballs.join(", ")} still come from their tarballs: ` +
+        "edits to them in the checkout will not show until you pnpm link them too",
+    );
+  }
   const watchers = startWatchers(packages, log);
   const cli = fileURLToPath(import.meta.url);
   const child = supervise({

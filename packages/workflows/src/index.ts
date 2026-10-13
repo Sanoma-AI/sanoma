@@ -93,6 +93,8 @@ export { RUNTIME_VERSION } from "./version.ts";
 export type { RunArgs } from "./run.ts";
 export { startWorker, type Worker, type WorkerOptions } from "./worker.ts";
 export { SanomaClient, type RunsFilter, type RunSummary, type StartOptions } from "./client.ts";
+// A raw DBOS client on the runtime's database, for tests and tools that read DBOS directly.
+export { dbosClient } from "./db.ts";
 // Also at `@sanoma/workflows/shared`, which a browser bundle can import.
 export {
   approverLabel,

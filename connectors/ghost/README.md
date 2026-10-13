@@ -119,4 +119,4 @@ A repeated idempotency key gets the first reply and changes nothing, as a real v
 
 [`@sanoma/testing`](https://www.npmjs.com/package/@sanoma/testing) has `startTestWorker` and `testDatabaseUrl` to run a test's worker with the fake on a database of its own.
 
-License: Apache-2.0.
+License: FSL-1.1-ALv2.

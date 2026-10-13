@@ -59,9 +59,10 @@ export interface Op<V extends string = string, R extends string = string, N exte
 
 /**
  * Where a resource type keeps its brand. A symbol, so `defineConnector` tells a resource type
- * (`defineResource`) from a group of operations.
+ * (`defineResource`) from a group of operations; a registered one (`Symbol.for`), so a copy of
+ * this package reads what another copy made, as `VENDOR`.
  */
-export const RESOURCE: unique symbol = Symbol("sanoma.resource");
+export const RESOURCE: unique symbol = Symbol.for("sanoma.resource");
 
 /** What `defineConnector` reads of a resource type; `defineResource` makes them. */
 export interface ResourceGroup {
@@ -81,9 +82,11 @@ type OutputOf<T> = T extends OpSpec<any, infer O> ? O : never;
 
 /**
  * Where a connector keeps its vendor. A symbol, so it names no resource: `Object.values` and
- * `keyof` over a connector see its resources only.
+ * `keyof` over a connector see its resources only. A registered one (`Symbol.for`): a process
+ * may load two copies of this package (a connector's peer linked into a sanoma checkout, the
+ * app's from its tarball), and each must read the connectors the other made.
  */
-export const VENDOR: unique symbol = Symbol("sanoma.vendor");
+export const VENDOR: unique symbol = Symbol.for("sanoma.vendor");
 
 export type Connector<V extends string, S extends Specs> = {
   readonly [R in keyof S & string]: {
@@ -98,10 +101,19 @@ export type Connector<V extends string, S extends Specs> = {
 } & { readonly [VENDOR]: ConnectorVendor<V> };
 
 /**
+ * The shape of a connector's `[VENDOR]` record. A process may load two builds of this package,
+ * and `resolveConfig` reads only a record of its own shape (`checkConnector`): change it with
+ * the record, so a build refuses a connector another build made in another shape.
+ */
+export const CONNECTOR_FORMAT = 1;
+
+/**
  * A connector's vendor: its id, who it is (`defineConnector`'s third argument, for a UI), its
  * resource types, and the driver and fake its package attaches (`withSetup`).
  */
 export interface ConnectorVendor<V extends string = string> {
+  /** The record's shape (`CONNECTOR_FORMAT`). */
+  readonly format: typeof CONNECTOR_FORMAT;
   readonly id: V;
   readonly info?: VendorInfo;
   /** The resource types among its groups, in the order given. */
@@ -203,6 +215,7 @@ export function defineConnector<const V extends string, const S extends Specs>(
     );
   }
   const owner: ConnectorVendor<V> = Object.freeze({
+    format: CONNECTOR_FORMAT,
     id: vendor,
     info: vendorInfo,
     resources: Object.freeze(resources),
@@ -306,6 +319,23 @@ export function withSetup<C extends Connector<any, any>>(connector: C, setup: Pa
     ...connector,
     [VENDOR]: Object.freeze({ ...owner, setup: Object.freeze({ ...owner.setup, ...setup }) }),
   };
+}
+
+/**
+ * Throws unless `value` is a connector this package can read: one `defineConnector` made, in this
+ * copy of the package or another of the same `CONNECTOR_FORMAT`. One an older build made (its
+ * `VENDOR` an unregistered symbol, or its record without a format) is refused as such.
+ */
+export function checkConnector(value: unknown): asserts value is Connector<any, any> {
+  const record =
+    typeof value === "object" && value !== null ? (value as Partial<Connector<any, any>>)[VENDOR] : undefined;
+  if (record?.format === CONNECTOR_FORMAT) return;
+  const build = "install the sanoma packages and connectors from one build";
+  throw new Error(
+    record === undefined
+      ? `\`connectors\` holds something that is not a connector: list what the connector packages export (or one from an older build: ${build})`
+      : `The "${String(record.id)}" connector was made by another build of @sanoma/workflows: ${build}`,
+  );
 }
 
 /** What `withSetup` attached to a connector: nothing when it attached nothing. */

@@ -6,7 +6,7 @@ import { fakeGhost } from "@sanoma/connector-ghost/fake";
 import { github } from "@sanoma/connector-github";
 import { resend } from "@sanoma/connector-resend";
 import { stripe } from "@sanoma/connector-stripe";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   allowAll,
   type Connector,
@@ -60,6 +60,34 @@ describe("each connector package's root", () => {
     expect(setupOf(swapped)).toEqual({ driver, fake: setupOf(ghost).fake, steps: setupOf(ghost).steps });
     expect(setupOf(ghost).driver).not.toBe(driver);
     expect(swapped.post.create).toBe(ghost.post.create);
+  });
+});
+
+describe("a connector made by another copy of the package", () => {
+  // Two copies load in one process when a connector's peer resolves into a sanoma checkout and
+  // the app's comes from its tarball (a partial `pnpm link`).
+  it("is read by a second instance of the module: its driver and its fake", async () => {
+    vi.resetModules();
+    const other = await import("../src/index.ts");
+    expect(other.resolveConfig).not.toBe(resolveConfig);
+    // The connectors were made by this file's instance; the other reads them.
+    const resolved = other.resolveConfig(config());
+    expect(resolved.driversByVendor.get("ghost")?.vendor).toBe("ghost");
+    expect(resolved.fakes.get("ghost")!().driver.vendor).toBe("ghost");
+    expect(resolved.ops.has("ghost.post.publish")).toBe(true);
+  });
+
+  it("is refused, saying so, when another build made it in another shape", () => {
+    const build = "install the sanoma packages and connectors from one build";
+    const later = { ...ghost, [VENDOR]: { ...ghost[VENDOR], format: 2 } } as unknown as Connector<any, any>;
+    expect(() => resolveConfig(config({ connectors: [later] }))).toThrow(
+      `The "ghost" connector was made by another build of @sanoma/workflows: ${build}`,
+    );
+    // An older build's, its record under an unregistered symbol, is not a connector here at all.
+    const older = { [Symbol("sanoma.vendor")]: { id: "ghost" } } as unknown as Connector<any, any>;
+    expect(() => resolveConfig(config({ connectors: [older] }))).toThrow(
+      `\`connectors\` holds something that is not a connector: list what the connector packages export (or one from an older build: ${build})`,
+    );
   });
 });
 

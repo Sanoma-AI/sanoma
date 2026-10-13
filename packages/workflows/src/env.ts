@@ -50,9 +50,10 @@ export function statusesOf(env: DriverEnv, lookup: (name: string) => string | un
 }
 
 /**
- * Why the vendor's drivers cannot run on `statuses`, as the worker warns at start and a call
- * fails: `<vendor> is not configured: <problems>; <hint>`, a missing variable (not optional) as
- * `NAME (description)`, an invalid one as `NAME is invalid: <why>`, never a value. The hint says
+ * Why the vendor's drivers cannot run on `statuses`, as a call to one fails (`startWorker` names
+ * the vendor alone, `unconfiguredSummary`): `<vendor> is not configured: <problems>; <hint>`, a
+ * missing variable (not optional) as `NAME (description)`, an invalid one as `NAME is invalid:
+ * <why>`, never a value. The hint says
  * where to set them: in the environment when an invalid value is there (the environment wins
  * over a stored value, so the connector page cannot replace it), else on the connector page.
  * Undefined when the drivers can run.
@@ -68,6 +69,19 @@ export function unconfigured(vendor: string, statuses: readonly CredentialStatus
   const inEnvironment = unready.some((c) => c.status === "invalid" && process.env[c.name]);
   const hint = inEnvironment ? "set in the environment" : "set it on the connector page";
   return `${vendor} is not configured: ${problems.join(", ")}; ${hint}`;
+}
+
+/**
+ * The one line `startWorker` prints for the vendors whose drivers cannot run yet (`vendors`, those
+ * `unconfigured` has a message for) among the config's `total`: their names alone, since a call
+ * to one fails with its own message, and its connector page says the same. Undefined for none.
+ */
+export function unconfiguredSummary(vendors: readonly string[], total: number): string | undefined {
+  if (!vendors.length) return undefined;
+  return (
+    `${vendors.length} of ${total} connectors not configured yet: ${vendors.join(", ")}; ` +
+    "set their variables on the connector pages or in the environment"
+  );
 }
 
 function credentialStatus(

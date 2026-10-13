@@ -203,4 +203,4 @@ import { replayOptions } from "./replay.ts";
 await describeFeatures(ghost, { features: new URL("../features/", import.meta.url), replay: replayOptions });
 ```
 
-Status: early (0.x). License: Apache-2.0.
+Status: early (0.x). License: FSL-1.1-ALv2.

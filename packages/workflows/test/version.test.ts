@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { DBOS, DBOSClient } from "@dbos-inc/dbos-sdk";
+import { DBOS } from "@dbos-inc/dbos-sdk";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
 import { startTestWorker, testDatabaseUrl } from "@sanoma/testing";
@@ -7,6 +7,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   allowAll,
+  dbosClient,
   defineWorkflow,
   memoryLedger,
   resolveConfig,
@@ -132,7 +133,7 @@ describe("workers on one database", () => {
 
   afterAll(async () => {
     if (!leftPending.length) return;
-    const raw = await DBOSClient.create({ systemDatabaseUrl: databaseUrl });
+    const raw = await dbosClient(databaseUrl);
     await raw.cancelWorkflows(leftPending);
     await raw.destroy();
   });
@@ -215,7 +216,7 @@ describe("workers on one database", () => {
     const before = config(appName);
     let worker = await startWorker(before);
     const client = await SanomaClient.connect(before);
-    const raw = await DBOSClient.create({ systemDatabaseUrl: databaseUrl, applicationName: appName });
+    const raw = await dbosClient(databaseUrl, appName);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const sleeping = await client.start(
