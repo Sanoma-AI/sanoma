@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { testDatabaseUrl } from "@sanoma/testing";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { allowAll, memoryLedger, type SanomaConfig } from "../src/index.ts";
 import { runScenarios } from "../src/scenarios.ts";
 import announce from "./fixtures/announce.ts";
@@ -62,6 +62,37 @@ describe("runScenarios", () => {
     } finally {
       writeFileSync(feature, text);
       rmSync(join(dir, "broken.feature"));
+    }
+  });
+
+  it("prints nothing of a sandbox run's failed tries, or of the failure a scenario expects", async () => {
+    writeFileSync(
+      join(dir, "rejected.feature"),
+      [
+        "Feature: Rejected",
+        "  Scenario: A rejected review publishes nothing",
+        "    When announce runs with",
+        "      | title    | Nope                 |",
+        "      | launchAt | 2030-01-01T09:00:00Z |",
+        '    And "Review launch copy" is rejected by marketing-lead',
+        "    Then ghost.post.publish was not called",
+        '    And the run fails with "approval_rejected"',
+        "",
+      ].join("\n"),
+    );
+    const printed = [vi.spyOn(console, "warn"), vi.spyOn(console, "error"), vi.spyOn(console, "log")];
+    try {
+      const result = await runScenarios(config, { databaseUrl });
+      expect(result).toEqual({
+        passed: ["Launch on time", "Publish retried", "A rejected review publishes nothing"],
+        failed: [],
+      });
+      // "Publish retried" fails a try on purpose, and the rejected run fails as it should.
+      const lines = printed.flatMap((spy) => spy.mock.calls.flat().map(String));
+      expect(lines.filter((l) => /error in step|rejected|DriverError|Error:/i.test(l))).toEqual([]);
+    } finally {
+      for (const spy of printed) spy.mockRestore();
+      rmSync(join(dir, "rejected.feature"));
     }
   });
 

@@ -6,7 +6,7 @@ import { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, messageKeyOf, topicOf } from "./approvals.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { deleteCredential, storeCredential, storedCredentials } from "./credentials.ts";
-import { lazyPool, type LazyPool } from "./db.ts";
+import { lazyPool, type LazyPool, systemDatabaseUrl } from "./db.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { type ApprovalState, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
@@ -130,7 +130,7 @@ export class SanomaClient {
   static async connect(config: SanomaConfig): Promise<SanomaClient> {
     const resolved = resolveConfig(config);
     const dbos = await DBOSClient.create({
-      systemDatabaseUrl: resolved.databaseUrl,
+      systemDatabaseUrl: systemDatabaseUrl(resolved.databaseUrl),
       applicationName: resolved.appName,
     });
     return new SanomaClient(dbos, resolved, resolved.driversByVendor);

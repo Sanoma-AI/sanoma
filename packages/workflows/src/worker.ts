@@ -3,17 +3,24 @@ import { buildCtx, isInfrastructureError } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { watchCredentials } from "./credentials.ts";
+import { systemDatabaseUrl } from "./db.ts";
 import type { WorkflowDefinition } from "./define.ts";
 import { type CredentialStatus, credentialsOf, unconfigured } from "./env.ts";
 import { errorInfo, parseOrThrow } from "./errors.ts";
 import { entry, ownedLedger, skipped, write, writeFailure } from "./ledger.ts";
-import { setLogLevel, warn } from "./log.ts";
+import { dbosLogger, quietIfSandbox, setLogLevel, warn } from "./log.ts";
 import { lineStartsOf, readSource } from "./ast.ts";
 import { callsOf, outlineWithSource } from "./outline.ts";
 import type { Run, RunArgs, WorkerState, WorkflowOutline } from "./run.ts";
 import { errorMessage } from "./shared.ts";
 
 export interface Worker {
+  /**
+   * Each vendor whose drivers could not run when the worker started, in the config's order, with
+   * why: the message a live call to it fails with until its variables are set (`unconfigured` in
+   * env.ts). The worker prints none of it; its caller says what it needs to (`sanoma` one line).
+   */
+  readonly unconfigured: ReadonlyMap<string, string>;
   stop(): Promise<void>;
 }
 
@@ -38,7 +45,7 @@ export interface WorkerOptions {
  * Registers the workflows, connects to Postgres and recovers any runs that were interrupted.
  * When a driver declares variables the environment leaves unset, it first loads their stored
  * values into `process.env` and keeps them current while it runs. It starts whether or not they
- * are all there: it warns, per vendor, of each missing or invalid one, and a live call to that
+ * are all there: `unconfigured` says which vendors lack one, and why, and a live call to such a
  * vendor fails, as the call's own final failure, until they are set.
  */
 export async function startWorker(config: SanomaConfig, options: WorkerOptions = {}): Promise<Worker> {
@@ -62,6 +69,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   };
   const credentials = await watchCredentials(resolved.databaseUrl, resolved.driversByVendor);
   const worker: Worker = {
+    unconfigured: unconfiguredOf(credentialsOf(resolved.driversByVendor, (name) => process.env[name])),
     async stop() {
       state.stopped = true;
       // Each is closed whatever the one before did; the first failure is what stop throws.
@@ -78,7 +86,6 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   const previous = current;
   let launched = false;
   try {
-    warnUnconfigured(credentialsOf(resolved.driversByVendor, (name) => process.env[name]));
     for (const name of resolved.workflows.keys()) {
       if (!registered.has(name)) {
         register(name);
@@ -88,8 +95,9 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     current = state;
     DBOS.setConfig({
       name: resolved.appName,
-      systemDatabaseUrl: resolved.databaseUrl,
+      systemDatabaseUrl: systemDatabaseUrl(resolved.databaseUrl),
       logLevel: options.logLevel ?? "warn",
+      logger: dbosLogger,
       applicationVersion: resolved.version,
     });
     await DBOS.launch();
@@ -132,15 +140,17 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
 }
 
 /**
- * Warns, once per vendor whose drivers would fail when called: a variable a driver's `env`
+ * Each vendor whose drivers would fail when called, with why: a variable a driver's `env`
  * declares is missing or invalid. The worker starts anyway; each such call fails with the same
  * message (`guarded` in config.ts), until the variables are set.
  */
-function warnUnconfigured(credentials: Map<string, CredentialStatus[]>) {
+function unconfiguredOf(credentials: Map<string, CredentialStatus[]>): Map<string, string> {
+  const map = new Map<string, string>();
   for (const [vendor, list] of credentials) {
     const why = unconfigured(vendor, list);
-    if (why) warn(why);
+    if (why) map.set(vendor, why);
   }
+  return map;
 }
 
 /**
@@ -187,54 +197,55 @@ async function warnAboutStrandedRuns({ appName, version, queueName }: ResolvedCo
 
 /** Registers the name with DBOS: its runs take the definition of that name from the running worker. */
 function register(name: string) {
-  DBOS.registerWorkflow(
-    async ({ input, startedBy, sandbox }: RunArgs) => {
-      const state = current;
-      // A stopped worker's state stays current while DBOS shuts down.
-      if (!state || state.stopped) throw new Error(`Run of "${name}" started with no worker running`);
-      const wf = state.workflows.get(name);
-      const outline = state.outlines.get(name);
-      // Registered by an earlier worker in this process, whose config had it; this one's has not.
-      if (!wf || !outline)
-        throw new Error(`Run of "${name}" refused: this worker's config has no workflow of that name`);
-      const run: Run = {
-        id: DBOS.workflowID!,
-        workflow: wf.name,
-        actor: startedBy,
-        ...(sandbox === undefined ? {} : { sandbox }),
-        approvals: [],
-        seq: 0,
-        tail: Promise.resolve(),
-        inAll: false,
-        ended: false,
-        outline,
-        state,
-      };
-      await write(run, entry(run, { type: "run.started", input }));
-      let output: unknown;
-      try {
-        try {
-          // The one parse of the input: the client checked it, but sent it as given.
-          const parsed = parseOrThrow(wf.input, input, `The input does not match ${wf.name}'s schema`);
-          if (sandbox !== undefined) {
-            // Imported here, so a live worker never loads the Gherkin parser or faker.
-            const { seedSandbox } = await import("./sandbox.ts");
-            await seedSandbox(run, sandbox);
-          }
-          output = await wf.run(buildCtx(wf, run), parsed);
-        } finally {
-          // Before the outcome is written: a call still queued must find the run ended.
-          run.ended = true;
-        }
-      } catch (err) {
-        const record = entry(run, { type: "run.failed", error: errorInfo(err) });
-        if (isInfrastructureError(err, state)) skipped(record, `the run was interrupted (${errorMessage(err)})`);
-        else await writeFailure(run, record, err);
-        throw err;
+  DBOS.registerWorkflow((args: RunArgs) => quietIfSandbox(args.sandbox !== undefined, () => runWorkflow(name, args)), {
+    name,
+  });
+}
+
+/** One run of the workflow registered as `name`, on the state of the worker running when it starts. */
+async function runWorkflow(name: string, { input, startedBy, sandbox }: RunArgs): Promise<unknown> {
+  const state = current;
+  // A stopped worker's state stays current while DBOS shuts down.
+  if (!state || state.stopped) throw new Error(`Run of "${name}" started with no worker running`);
+  const wf = state.workflows.get(name);
+  const outline = state.outlines.get(name);
+  // Registered by an earlier worker in this process, whose config had it; this one's has not.
+  if (!wf || !outline) throw new Error(`Run of "${name}" refused: this worker's config has no workflow of that name`);
+  const run: Run = {
+    id: DBOS.workflowID!,
+    workflow: wf.name,
+    actor: startedBy,
+    ...(sandbox === undefined ? {} : { sandbox }),
+    approvals: [],
+    seq: 0,
+    tail: Promise.resolve(),
+    inAll: false,
+    ended: false,
+    outline,
+    state,
+  };
+  await write(run, entry(run, { type: "run.started", input }));
+  let output: unknown;
+  try {
+    try {
+      // The one parse of the input: the client checked it, but sent it as given.
+      const parsed = parseOrThrow(wf.input, input, `The input does not match ${wf.name}'s schema`);
+      if (sandbox !== undefined) {
+        // Imported here, so a live worker never loads the Gherkin parser or faker.
+        const { seedSandbox } = await import("./sandbox.ts");
+        await seedSandbox(run, sandbox);
       }
-      await write(run, entry(run, { type: "run.finished", output }));
-      return output;
-    },
-    { name },
-  );
+      output = await wf.run(buildCtx(wf, run), parsed);
+    } finally {
+      // Before the outcome is written: a call still queued must find the run ended.
+      run.ended = true;
+    }
+  } catch (err) {
+    const record = entry(run, { type: "run.failed", error: errorInfo(err) });
+    if (isInfrastructureError(err, state)) skipped(record, `the run was interrupted (${errorMessage(err)})`);
+    else await writeFailure(run, record, err);
+    throw err;
+  }
+  await write(run, entry(run, { type: "run.finished", output }));
+  return output;
 }

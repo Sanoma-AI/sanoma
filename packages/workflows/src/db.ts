@@ -51,6 +51,21 @@ export function openPool(databaseUrl: string, what: string): Pool {
   return pool;
 }
 
+/**
+ * `databaseUrl` as DBOS's system database URL: with Postgres's `idle_in_transaction_session_timeout`
+ * set when each connection starts (libpq's `options`), at DBOS's own default of 60 s. Otherwise
+ * DBOS sets it with a query on each new connection of its pool, which the pool hands out before
+ * that query ends: two queries at once on one client, which pg deprecates. A URL whose `options`
+ * set it already is returned as it is.
+ */
+export function systemDatabaseUrl(databaseUrl: string): string {
+  const url = new URL(databaseUrl);
+  const options = url.searchParams.get("options") ?? "";
+  if (options.includes("idle_in_transaction_session_timeout")) return databaseUrl;
+  url.searchParams.set("options", `${options} -c idle_in_transaction_session_timeout=60000`.trim());
+  return url.toString();
+}
+
 /** A pool opened on first use, once its database is prepared, and ended by `close`. */
 export interface LazyPool {
   db(): Promise<Pool>;
