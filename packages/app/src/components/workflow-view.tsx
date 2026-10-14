@@ -31,9 +31,9 @@ type Tab = "code" | "ledger";
  * - `children` (the pane's notices), then for a run waiting on someone a banner naming who and
  *   for what, which selects the approval's node, or a failed run's error;
  * - the graph card beside the inspector, 20rem wide, or above it while the pane is narrower than
- *   `@3xl` (by the pane's own width: on a 1024 px screen, with the sidebar open, the rail sits
- *   above a pane about 720 px wide). The graph card sets the row's height; the inspector scrolls
- *   inside it;
+ *   `@3xl` (by the pane's own width: with the sidebar's bar and panel open, a 1280 px screen
+ *   leaves the pane about 890 px, a 1024 px one about 630). The graph card sets the row's height;
+ *   the inspector scrolls inside it;
  * - Code and, for a run, Ledger tabs under them.
  *
  * A click on a node, in the code, or a ledger row's "Show in graph" selects the node: the graph

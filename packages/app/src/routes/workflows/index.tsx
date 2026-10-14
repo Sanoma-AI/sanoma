@@ -1,62 +1,65 @@
-import type { RunStatus } from "@sanoma/workflows";
-import { RUN_STATUSES } from "@sanoma/workflows/shared";
+import type { RunStatus, RunSummary } from "@sanoma/workflows";
 import type { WorkflowEntry } from "@sanoma/workflows/describe";
+import { RUN_STATUSES } from "@sanoma/workflows/shared";
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { FlaskConicalIcon, XIcon } from "lucide-react";
-import { memo, useMemo } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { XIcon } from "lucide-react";
+import { memo } from "react";
 import { z } from "zod";
 import { Badge } from "#/components/ui/badge.tsx";
-import { Card, CardAction, CardContent, CardDescription, CardHeader } from "#/components/ui/card.tsx";
+import { Card, CardContent } from "#/components/ui/card.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
-import { RUNS_LIMIT, type ScenariosResponse } from "../../api.ts";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
+import { RUN_TONE } from "#/lib/tone.ts";
+import { RUNS_LIMIT } from "../../api.ts";
 import {
   ButtonLink,
-  CardHeading,
   Fact,
   Facts,
-  GraphPanel,
-  loadGraph,
   Nothing,
   Notice,
   PageHeader,
-  PanelCard,
   plural,
-  Section,
   Segment,
   Segmented,
+  StatusDot,
   ToneBadge,
   VendorLogo,
+  When,
 } from "../../components/common.tsx";
-import { RunStrip } from "../../components/run-strip.tsx";
+import { NewWorkflowButton } from "../../components/new-workflow.tsx";
 import { RunsTable } from "../../components/runs-table.tsx";
-import { RunButton } from "../../components/workflow.tsx";
-import { outlineGraph } from "../../graph/outline-graph.ts";
 import {
   type CalledVendor,
   configQuery,
+  lastRunByWorkflow,
   pendingByWorkflow,
   POLL_MS,
+  recentRunsQuery,
   runsQuery,
   runsRefetchInterval,
-  scenariosQuery,
   vendorsByWorkflow,
   waitingRunsQuery,
 } from "../../queries.ts";
 
+/** The overview's filters (`?filter=`): every workflow, those waiting on an approval, those whose last run failed, the built-in. */
+const WORKFLOW_FILTERS = ["all", "waiting", "failed", "builtin"] as const;
+type WorkflowFilter = (typeof WORKFLOW_FILTERS)[number];
+
 /**
  * `?view=runs` shows every run as a table, `?status=` and `?workflow=` (a workflow's name, as its
- * rail links here) filtering it; anything else, a card per workflow.
+ * panel links here) filtering it; anything else, a row per workflow, `?filter=` picking them.
  */
 const HomeSearch = z.object({
   view: z.literal("runs").optional().catch(undefined),
   status: z.enum(RUN_STATUSES).optional().catch(undefined),
   workflow: z.string().optional().catch(undefined),
+  filter: z.enum(WORKFLOW_FILTERS).optional().catch(undefined),
 });
 
 /**
  * The All runs table's runs: the latest of every workflow or of one, or the latest with a status.
- * Polled as the rail is.
+ * Polled as a workflow's panel's runs are.
  */
 const allRunsQuery = (status: RunStatus | undefined, workflow: string | undefined) =>
   queryOptions({
@@ -67,31 +70,46 @@ const allRunsQuery = (status: RunStatus | undefined, workflow: string | undefine
 export const Route = createFileRoute("/workflows/")({
   validateSearch: HomeSearch,
   loaderDeps: ({ search: { view, status, workflow } }) => ({ view, status, workflow }),
-  // The root route loads the config.
+  // The root route loads the config. The waiting runs and the latest runs are the overview's
+  // and the Workflows panel's (the root loader has started the waiting runs: this waits for them).
   loader: async ({ context: { queryClient }, deps }) => {
-    if (deps.view === "runs") {
-      await queryClient.query({ ...allRunsQuery(deps.status, deps.workflow), staleTime: "static" });
-      return;
-    }
-    if (!import.meta.env.SSR) void loadGraph();
-    // The cards' Test links and waiting pills; their runs load in the browser (RunStrip), rather
-    // than one read per card here. The root loader has started the waiting runs: this waits for them.
     await Promise.all([
-      queryClient.query({ ...scenariosQuery(), staleTime: "static" }),
       queryClient.query({ ...waitingRunsQuery(), staleTime: "static" }),
+      queryClient.query({ ...recentRunsQuery(), staleTime: "static" }),
+      deps.view === "runs" && queryClient.query({ ...allRunsQuery(deps.status, deps.workflow), staleTime: "static" }),
     ]);
   },
   component: WorkflowsPage,
 });
 
 function WorkflowsPage() {
-  const { view, status, workflow } = Route.useSearch();
+  const { view, status, workflow, filter } = Route.useSearch();
+  const { data: config } = useSuspenseQuery(configQuery());
+  const runs = view === "runs";
   return (
     <>
-      <PageHeader />
+      <PageHeader
+        action={
+          <div className="flex gap-2">
+            <ButtonLink variant="outline" size="sm">
+              {runs ? (
+                <Link to="/workflows">All workflows</Link>
+              ) : (
+                <Link to="/workflows" search={{ view: "runs" }}>
+                  All runs
+                </Link>
+              )}
+            </ButtonLink>
+            <NewWorkflowButton />
+          </div>
+        }
+      >
+        <span className="text-muted-foreground">
+          {plural(config.workflows.length, "workflow")} in {config.appName}
+        </span>
+      </PageHeader>
       <ConfigFacts />
-      <ViewToggle />
-      {view === "runs" ? <AllRuns status={status} workflow={workflow} /> : <ByWorkflow />}
+      {runs ? <AllRuns status={status} workflow={workflow} /> : <Overview filter={filter ?? "all"} />}
     </>
   );
 }
@@ -102,7 +120,6 @@ function ConfigFacts() {
     <Card size="sm">
       <CardContent>
         <Facts>
-          <Fact label="App">{config.appName}</Fact>
           <Fact label="Version">
             <code>{config.version}</code>
           </Fact>
@@ -129,123 +146,140 @@ function ConfigFacts() {
   );
 }
 
-/** By workflow or All runs: two links, so each view has its own URL. */
-function ViewToggle() {
-  return (
-    <Segmented label="View">
-      <Segment>
-        {/* Exact: else it would match every search, `?view=runs` too. */}
-        <Link to="/workflows" activeOptions={{ exact: true }}>
-          By workflow
-        </Link>
-      </Segment>
-      <Segment>
-        <Link to="/workflows" search={{ view: "runs" }}>
-          All runs
-        </Link>
-      </Segment>
-    </Segmented>
-  );
-}
-
-/** Each workflow's first scenario, by workflow: what its card's Test opens. For `select`. */
-const firstScenarios = ({ scenarios }: ScenariosResponse) => {
-  const first: Record<string, string> = Object.create(null);
-  for (const s of scenarios) first[s.workflow] ??= s.name;
-  return first;
+const FILTER_LABEL: Record<WorkflowFilter, string> = {
+  all: "All",
+  waiting: "Waiting on you",
+  failed: "Failed last run",
+  builtin: "Built-in",
 };
 
 /**
- * A card per workflow. It reads what the cards show, each query in one pass, and hands each card
- * its share: a poll that changed one card's count draws that card alone.
+ * Every workflow as a row: its title, how it starts, the vendors it calls, its last run (among the
+ * latest runs) and how many approvals its runs wait on. The chips above pick them (`?filter=`),
+ * each with how many it holds. It reads each query in one pass and hands each row its share: a
+ * poll that changed one row's run draws that row alone.
  */
-function ByWorkflow() {
-  const { data: config } = useSuspenseQuery(configQuery());
+function Overview({ filter }: { filter: WorkflowFilter }) {
+  const { data: workflows } = useSuspenseQuery({ ...configQuery(), select: (config) => config.workflows });
   const { data: vendors } = useSuspenseQuery({ ...configQuery(), select: vendorsByWorkflow });
-  const { data: tests } = useSuspenseQuery({ ...scenariosQuery(), select: firstScenarios });
   const { data: pending } = useSuspenseQuery({ ...waitingRunsQuery(), select: pendingByWorkflow });
-  if (config.workflows.length === 0) return <Nothing title="This config has no workflows" />;
+  const { data: last } = useSuspenseQuery({ ...recentRunsQuery(), select: lastRunByWorkflow });
+  const picks: Record<WorkflowFilter, (wf: WorkflowEntry) => boolean> = {
+    all: () => true,
+    waiting: (wf) => !!pending.byWorkflow[wf.name],
+    failed: (wf) => last[wf.name]?.status === "failed",
+    builtin: (wf) => !!wf.builtin,
+  };
+  if (workflows.length === 0) return <Nothing title="This config has no workflows" />;
+  const shown = workflows.filter(picks[filter]);
   return (
-    <div className="grid gap-(--gap-region) lg:grid-cols-2">
-      {config.workflows.map((wf) => (
-        <WorkflowCard
-          key={wf.name}
-          workflow={wf}
-          vendors={vendors[wf.name] ?? NO_VENDORS}
-          scenario={tests[wf.name]}
-          waiting={pending.byWorkflow[wf.name] ?? 0}
-        />
-      ))}
+    <div className="flex flex-col gap-(--gap-section)">
+      <Segmented label="Show">
+        {WORKFLOW_FILTERS.map((f) => (
+          <Segment key={f}>
+            {/* All leaves the URL without `?filter=`; Link marks the one that matches. */}
+            <Link to="/workflows" search={{ filter: f === "all" ? undefined : f }} activeOptions={{ exact: true }}>
+              {FILTER_LABEL[f]} · {workflows.filter(picks[f]).length}
+            </Link>
+          </Segment>
+        ))}
+      </Segmented>
+      {shown.length === 0 ? (
+        <Nothing title="No workflow matches" />
+      ) : (
+        <div className="rounded-lg border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Workflow</TableHead>
+                <TableHead>Starts</TableHead>
+                <TableHead>Uses</TableHead>
+                <TableHead>Last run</TableHead>
+                <TableHead className="text-right">Waiting</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {shown.map((wf) => (
+                <WorkflowRow
+                  key={wf.name}
+                  workflow={wf}
+                  vendors={vendors[wf.name] ?? NO_VENDORS}
+                  last={last[wf.name]}
+                  waiting={pending.byWorkflow[wf.name] ?? 0}
+                />
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground">Last run: from the latest {RUNS_LIMIT.default} runs</p>
     </div>
   );
 }
 
 const NO_VENDORS: CalledVendor[] = [];
 
-/** A workflow at a glance: the vendors it calls, its latest runs, what waits on people, and its outline. */
-const WorkflowCard = memo(function WorkflowCard({
+/** How a workflow starts. Every one starts by hand for now. */
+const STARTS: Record<WorkflowEntry["trigger"], string> = { manual: "By hand" };
+
+/** A workflow's row: the whole row opens its page; its title is the link, for the keyboard and a new tab. */
+const WorkflowRow = memo(function WorkflowRow({
   workflow,
   vendors,
-  scenario,
+  last,
   waiting,
 }: {
   workflow: WorkflowEntry;
   vendors: CalledVendor[];
-  /** The scenario Test opens: the workflow's first; none, no Test. */
-  scenario: string | undefined;
+  /** Its latest run among the latest runs; none, none there. */
+  last: RunSummary | undefined;
   waiting: number;
 }) {
-  const { name, outline } = workflow;
-  const graph = useMemo(() => ("nodes" in outline ? outlineGraph(outline.nodes) : undefined), [outline]);
+  const { name } = workflow;
+  const navigate = useNavigate();
   return (
-    <Card>
-      <CardHeader>
-        <CardHeading>
-          <Link to="/workflows/$name" params={{ name }} className="hover:underline">
+    <TableRow className="cursor-pointer" onClick={() => void navigate({ to: "/workflows/$name", params: { name } })}>
+      <TableCell className="font-medium">
+        <div className="flex flex-wrap items-center gap-2">
+          <Link to="/workflows/$name" params={{ name }} onClick={(e) => e.stopPropagation()}>
             {workflow.title ?? name}
           </Link>
-        </CardHeading>
-        <CardDescription className="flex flex-wrap items-center gap-2">
-          <code>{name}</code>
+          <code className="text-xs font-normal text-muted-foreground">{name}</code>
           {workflow.builtin && <Badge variant="secondary">built-in</Badge>}
+        </div>
+      </TableCell>
+      <TableCell className="text-muted-foreground">{STARTS[workflow.trigger]}</TableCell>
+      <TableCell>
+        <div className="flex flex-wrap gap-1">
           {vendors.map((vendor) => (
             <Badge key={vendor.id} variant="outline">
               <VendorLogo vendor={vendor.id} alt="" className="size-3" />
               {vendor.title}
             </Badge>
           ))}
-        </CardDescription>
-        <CardAction className="flex gap-2">
-          {scenario !== undefined && (
-            <ButtonLink variant="outline" size="sm">
-              <Link to="/workflows/$name" params={{ name }} search={{ new: true, scenario }}>
-                <FlaskConicalIcon data-icon="inline-start" />
-                Test
-              </Link>
-            </ButtonLink>
-          )}
-          <RunButton name={name} variant="outline" size="sm" />
-        </CardAction>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-(--card-spacing)">
-        <div className="flex flex-wrap items-center gap-3">
-          <RunStrip workflow={name} />
-          {waiting > 0 && <ToneBadge tone="waiting">{plural(waiting, "approval")} waiting</ToneBadge>}
         </div>
-        <Section title="Outline">
-          <p className="text-muted-foreground">
-            {"error" in outline
-              ? outline.error
-              : "Read from the body of run; the functions it calls are not shown, even those defined in it"}
-          </p>
-          {graph && (
-            <PanelCard>
-              <GraphPanel graph={graph} show="start" />
-            </PanelCard>
-          )}
-        </Section>
-      </CardContent>
-    </Card>
+      </TableCell>
+      <TableCell>
+        {last ? (
+          <span className="flex items-center gap-2">
+            <StatusDot tone={RUN_TONE[last.status]} />
+            {last.status}
+            <span className="text-muted-foreground">
+              · <When at={last.createdAt} />
+            </span>
+          </span>
+        ) : (
+          <span className="text-muted-foreground">-</span>
+        )}
+      </TableCell>
+      <TableCell className="text-right">
+        {waiting > 0 ? (
+          <ToneBadge tone="waiting">{plural(waiting, "approval")}</ToneBadge>
+        ) : (
+          <span className="text-muted-foreground">0</span>
+        )}
+      </TableCell>
+    </TableRow>
   );
 });
 
@@ -276,7 +310,7 @@ function AllRuns({ status, workflow }: { status: RunStatus | undefined; workflow
             </NativeSelectOption>
           ))}
         </NativeSelect>
-        {/* The workflow's filter, as its rail's link set it; its button removes it. */}
+        {/* The workflow's filter, as its panel's link set it; its button removes it. */}
         {workflow !== undefined && (
           <Badge variant="outline" className="h-7 gap-1 pr-0.5">
             Workflow: <code>{workflow}</code>

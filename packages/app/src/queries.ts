@@ -186,7 +186,10 @@ export const pendingOf = (runs: RunSummary[]) =>
     .flatMap((run) => pendingApprovals(run).map((approval) => ({ run, approval })))
     .toSorted((a, b) => b.approval.requestedAt - a.approval.requestedAt);
 
-/** The latest runs, whatever their status: the Inbox's Decided reads their approvals. Under RUNS_KEY, so a decision refreshes it. */
+/**
+ * The latest runs, whatever their status: the Inbox's Decided reads their approvals, and the
+ * workflows' panel and overview each workflow's last run. Under RUNS_KEY, so a decision refreshes it.
+ */
 export const recentRunsQuery = () =>
   queryOptions({ ...runsQuery({ limit: RUNS_LIMIT.default }), refetchInterval: 5_000 });
 
@@ -231,7 +234,7 @@ export const pendingByWorkflow = (runs: RunSummary[]) => {
   return { total, byWorkflow };
 };
 
-/** What a workflow page's rail may show (`?runs=`), the first (all) by default. */
+/** What a workflow's panel may show (`?runs=`), the first (all) by default. */
 export const RUN_FILTERS = ["all", "live", "sandbox", "waiting", "failed"] as const;
 export type RunFilter = (typeof RUN_FILTERS)[number];
 
@@ -248,7 +251,7 @@ const FILTERS: Record<RunFilter, { status?: RunStatus; match?: (run: RunSummary)
 };
 
 /**
- * A workflow page's search, on either pane: `?runs=`, the rail's filter (any other value reads as
+ * A workflow page's search, on either pane: `?runs=`, its panel's filter (any other value reads as
  * all); `?new`, the New run panel in the inspector (the page's links write `?new=true`, and a bare
  * `?new` typed by hand opens it too); and `?scenario=`, Sandbox mode and the scenario it runs
  * (without it, Live), which also marks the workflow's graph.
@@ -262,10 +265,10 @@ export const WorkflowSearch = z.object({
   scenario: z.string().optional().catch(undefined),
 });
 
-/** How many runs the rail lists: the latest. */
+/** How many runs a workflow's panel lists: the latest. */
 export const RAIL_LIMIT = RUNS_LIMIT.default;
 
-/** The rail's runs for a filter: the workflow's latest, with the filter's status. */
+/** A workflow's panel's runs for a filter: the workflow's latest, with the filter's status. */
 export const railQuery = (name: string, filter: RunFilter = "all") =>
   queryOptions({
     ...runsQuery({ workflow: name, limit: RAIL_LIMIT, status: FILTERS[filter].status }),
@@ -279,6 +282,16 @@ export const picksFromLatest = (filter: RunFilter) => FILTERS[filter].match !== 
 export const railRuns = (filter: RunFilter, runs: RunSummary[]) => {
   const { match } = FILTERS[filter];
   return match ? runs.filter(match) : runs;
+};
+
+/**
+ * Each workflow's latest run among these runs (newest first, as `getRuns` lists them), by name:
+ * for `select`. A workflow with none among them has no entry.
+ */
+export const lastRunByWorkflow = (runs: RunSummary[]) => {
+  const last: Record<string, RunSummary> = Object.create(null);
+  for (const run of runs) last[run.workflow] ??= run;
+  return last;
 };
 
 /** A run's page, under its workflow's: for `<Link>`, `navigate` and `redirect`. */

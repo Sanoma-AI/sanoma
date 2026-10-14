@@ -15,7 +15,7 @@ import { Disclosure, Nothing, Notice, Segment, Segmented } from "./common.tsx";
  */
 export function NewRun({ workflow }: { workflow: WorkflowEntry }) {
   const { name } = workflow;
-  // Only `?scenario=`: a click on the rail's filter does not draw the form again.
+  // Only `?scenario=`: a click on the panel's runs filter does not draw the form again.
   const wanted = useSearch({ from: "/workflows/$name", select: (search) => search.scenario });
   const navigate = useNavigate();
   const forWorkflow = useMemo(() => scenariosFor(name), [name]);

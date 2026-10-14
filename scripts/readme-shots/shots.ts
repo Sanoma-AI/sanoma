@@ -122,14 +122,15 @@ try {
 
   const captured = join(work, "assets");
   mkdirSync(captured);
+  // With the sidebar's panel open: the workflow's runs beside its page.
   await still(browser, base, "/workflows/announce", join(captured, "workflow.png"), {
-    sidebar: false,
+    sidebar: true,
     select: "ghost.post.publish",
     fullPage: true,
   });
   await still(browser, base, "/inbox", join(captured, "inbox.png"), { sidebar: true, height: 720 });
   await still(browser, base, runPath, join(captured, "run.png"), {
-    sidebar: false,
+    sidebar: true,
     select: "Review launch copy",
     tab: "Ledger",
     fullPage: true,

@@ -35,7 +35,8 @@ describe("sanoma serve", () => {
       const res = await fetch(`${url}/workflows`);
       expect(res.status).toBe(200);
       const html = await res.text();
-      expect([...html.matchAll(/<h2><a[^>]*href="\/workflows\/([^"?]+)"/g)].map(([, name]) => name)).toEqual(["hello"]);
+      const rows = html.matchAll(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/([^"?]+)"/g);
+      expect([...rows].map(([, name]) => name)).toEqual(["hello"]);
       // On a config without problems: startApp warns about any it finds in the files before it listens.
       expect(output().stderr).not.toContain("the config's files have problems");
     } finally {

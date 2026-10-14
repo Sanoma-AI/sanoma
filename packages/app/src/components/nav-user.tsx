@@ -1,5 +1,4 @@
 import {
-  ChevronsUpDownIcon,
   type LucideIcon,
   Maximize2Icon,
   Minimize2Icon,
@@ -15,6 +14,7 @@ import { Avatar, AvatarFallback } from "#/components/ui/avatar.tsx";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
@@ -23,15 +23,15 @@ import {
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu.tsx";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "#/components/ui/sidebar.tsx";
-import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { useActor } from "../actor.ts";
 import { useDensity } from "./density.tsx";
 
 /**
- * Who you are, the theme and the density, in the sidebar's footer. The menu renders only once
- * opened, in the browser, so the stored theme never reaches the server's markup. Switching to
- * Compact folds the sidebar to its icons once (not on a phone, where it is a sheet); switching
- * back leaves the sidebar as it is.
+ * Who you are, the theme and the density, at the foot of the sidebar's section bar: your initials,
+ * your name and where it comes from read out to assistive tech and shown atop the menu. The menu
+ * renders only once opened, in the browser, so the stored theme never reaches the server's markup.
+ * Switching to Compact folds the sidebar's panel once (not on a phone, where it is a sheet);
+ * switching back leaves the sidebar as it is.
  */
 export function NavUser() {
   const { isMobile, open, setOpen } = useSidebar();
@@ -47,6 +47,7 @@ export function NavUser() {
   // when there is no name.
   const status =
     error ?? (actor ? (fromServer ? "Signed in by the deployment" : "Name kept in this browser") : undefined);
+  const name = actor ?? (fromServer ? "Not signed in" : "Who are you?");
   return (
     <SidebarMenu>
       <SidebarMenuItem>
@@ -55,7 +56,7 @@ export function NavUser() {
             render={
               <SidebarMenuButton
                 size="lg"
-                className="data-popup-open:bg-sidebar-accent data-popup-open:text-sidebar-accent-foreground"
+                className="mx-auto size-10! justify-center p-0! group-data-[collapsible=icon]:size-10! data-popup-open:bg-sidebar-accent data-popup-open:text-sidebar-accent-foreground"
               />
             }
           >
@@ -64,18 +65,20 @@ export function NavUser() {
                 {actor ? actor.slice(0, 2).toUpperCase() : <UserIcon />}
               </AvatarFallback>
             </Avatar>
-            <div className="grid flex-1 text-left text-sm leading-tight">
-              {/* The name in this browser is read after hydration: until then, a placeholder. */}
-              {actor === undefined && !fromServer ? (
-                <Skeleton className="h-4 w-24" />
-              ) : (
-                <span className="truncate font-medium">{actor ?? (fromServer ? "Not signed in" : "Who are you?")}</span>
-              )}
-              {status && <span className={cn("truncate text-xs", error && "text-destructive")}>{status}</span>}
+            <div className="sr-only">
+              {/* The name in this browser is read after hydration: until then, none. */}
+              {(actor !== undefined || fromServer) && <span>{name}</span>}
+              {status && <span>{status}</span>}
             </div>
-            <ChevronsUpDownIcon className="ml-auto size-4" />
           </DropdownMenuTrigger>
           <DropdownMenuContent className="min-w-56" side={isMobile ? "bottom" : "right"} align="end" sideOffset={4}>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="flex flex-col gap-0.5">
+                <span className="text-sm text-foreground">{name}</span>
+                {status && <span className={cn("font-normal", error && "text-destructive")}>{status}</span>}
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
             {!fromServer && (
               <>
                 <DropdownMenuItem onClick={() => setActor(null)}>
