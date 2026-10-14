@@ -226,9 +226,9 @@ export function OpItem({ id, op, children }: { id: string; op: OpEntry | undefin
  * shadcn's docs put `role="listitem"` on the Item, but on an `asChild` link that role would replace
  * the link's: a listitem holds the link instead, so it stays a link. Its content and title may
  * shrink (min-w-0, max-w-full), so a long title in a narrow list is cut where a caller's `truncate`
- * span says, rather than widening the list.
+ * span says, rather than widening the list; its focus ring is drawn inside, where a scrolling list
+ * does not clip it.
  */
-// The shrinking said above, and a focus ring drawn inside, which a scrolling list would clip outside.
 const LINK_ITEM = "focus-visible:ring-inset [&_[data-slot=item-content]]:min-w-0 [&_[data-slot=item-title]]:max-w-full";
 
 export function LinkItem({
@@ -251,7 +251,7 @@ export const CURRENT_LINK = "aria-[current=page]:bg-muted";
 /**
  * A list of panes beside the one open, as a card: `title`, with `description` under it and
  * `action` beside it, over `children`, each a `LinkItem`; `empty` instead when there are none. It
- * scrolls past 18rem, or 70vh from `lg`, where it sits beside the pane rather than above it.
+ * scrolls past `height`.
  */
 export function PaneList({
   title,
@@ -265,7 +265,7 @@ export function PaneList({
   description?: ReactNode;
   action?: ReactNode;
   empty?: ReactNode;
-  /** The list's most height before it scrolls: 70vh, beside a pane, unless the caller says. */
+  /** The list's most height before it scrolls, as classes that replace the default: 70vh, beside a pane. */
   height?: string;
   children?: ReactNode;
 }) {
