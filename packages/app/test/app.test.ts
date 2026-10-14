@@ -230,10 +230,6 @@ const railRunIds = (html: string, filter: string) =>
     .map(([, id]) => id)
     .toSorted();
 
-/** Whether the button labelled `label` says it has its sidebar open (`aria-expanded`), as text. */
-const expanded = (html: string, label: string) =>
-  html.match(new RegExp(`<button[^>]*aria-expanded="(true|false)"[^>]*>(?:(?!</button>).)*?${label}<`))?.[1];
-
 /** The desktop sidebar's state: "expanded" or "collapsed". */
 const sidebarState = (html: string) => html.match(/data-state="(expanded|collapsed)"[^>]*data-slot="sidebar"/)?.[1];
 
@@ -986,12 +982,13 @@ describe("the page", () => {
     expect(runs.text).toContain("sandbox · Launch on time");
   });
 
-  it("renders a page compact while its cookie says so: the graph lower and the sidebar as its own cookie says, its toggle in the sidebar", async () => {
-    // Comfortable without the cookie: #app unmarked. The sidebar's toggle is in the sidebar.
+  it("renders a page compact while its cookie says so: the graph lower and the sidebar as its own cookie says, folded from its rail", async () => {
+    // Comfortable without the cookie: #app unmarked. The sidebar folds from its rail, no button.
     const comfortable = await page("/workflows/announce");
     expect(comfortable.html).toContain('<div id="app">');
     expect(sidebarState(comfortable.html)).toBe("expanded");
-    expect(expanded(comfortable.html, "Collapse sidebar")).toBe("true");
+    expect(comfortable.html).toContain('aria-label="Toggle Sidebar"');
+    expect(comfortable.html).not.toContain("Collapse sidebar");
 
     // Compact: #app marked (the `compact:` variant lowers the graph's box). The sidebar follows
     // its own cookie.
@@ -1004,7 +1001,6 @@ describe("the page", () => {
       /class="[^"]*compact:h-\[440px\][^"]*"><div class="size-full"><div data-slot="skeleton"[^>]*aria-label="Loading the graph"/,
     );
     expect(sidebarState(compact.html)).toBe("collapsed");
-    expect(expanded(compact.html, "Expand sidebar")).toBe("false");
   });
 
   it("folds the rail while its cookie says so: the toggle, the Workflow icon and each run as a dot", async () => {
