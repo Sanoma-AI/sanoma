@@ -186,6 +186,35 @@ export const pendingOf = (runs: RunSummary[]) =>
     .flatMap((run) => pendingApprovals(run).map((approval) => ({ run, approval })))
     .toSorted((a, b) => b.approval.requestedAt - a.approval.requestedAt);
 
+/** The latest runs, whatever their status: the Inbox's Decided reads their approvals. Under RUNS_KEY, so a decision refreshes it. */
+export const recentRunsQuery = () =>
+  queryOptions({ ...runsQuery({ limit: RUNS_LIMIT.default }), refetchInterval: 5_000 });
+
+/** The approvals decided across the runs, each with its run, latest decision first: for `select`. */
+export const decidedOf = (runs: RunSummary[]) =>
+  runs
+    .flatMap((run) => run.approvals.filter((a) => a.status !== "pending").map((approval) => ({ run, approval })))
+    .toSorted(
+      (a, b) => (b.approval.decidedAt ?? b.approval.requestedAt) - (a.approval.decidedAt ?? a.approval.requestedAt),
+    );
+
+/** What the Inbox lists (`?show=`): the pending approvals you may decide, all of them, or the decided. */
+export const INBOX_FILTERS = ["mine", "waiting", "decided"] as const;
+export type InboxFilter = (typeof INBOX_FILTERS)[number];
+
+/**
+ * The Inbox's search: `?show=`, its filter, and `?approval=<runId>/<approvalId>`, the approval it
+ * opens. Any other filter reads as none.
+ */
+export const InboxSearch = z.object({
+  show: z.enum(INBOX_FILTERS).optional().catch(undefined),
+  approval: z.string().min(1).optional().catch(undefined),
+});
+
+/** An approval's `?approval=`: its run's id and its own. */
+export const approvalKey = ({ run, approval }: { run: Pick<RunSummary, "runId">; approval: { id: string } }) =>
+  `${run.runId}/${approval.id}`;
+
 /**
  * How many approvals are pending, as `pendingOf` lists them: in all, and by workflow. For
  * `select`: a plain object, so a poll that changed nothing keeps it.
