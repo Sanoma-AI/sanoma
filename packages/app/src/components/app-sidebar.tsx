@@ -1,7 +1,7 @@
 import type { WorkflowEntry } from "@sanoma/workflows/describe";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { ClientOnly, Link, linkOptions } from "@tanstack/react-router";
-import { BoxesIcon, InboxIcon, PlugIcon, ShieldCheckIcon, WorkflowIcon } from "lucide-react";
+import { BoxesIcon, InboxIcon, PanelLeftIcon, PlugIcon, ShieldCheckIcon, WorkflowIcon } from "lucide-react";
 import { NavUser } from "#/components/nav-user.tsx";
 import {
   Sidebar,
@@ -88,10 +88,30 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
+        <SidebarMenu>
+          <FoldButton />
+        </SidebarMenu>
         <NavUser />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
+  );
+}
+
+/**
+ * Folds the sidebar to its icons, or opens it again (as Ctrl+B or ⌘B does, and its rail); on a
+ * phone, where the sidebar is a sheet, it closes the sheet.
+ */
+function FoldButton() {
+  const { state, isMobile, toggleSidebar } = useSidebar();
+  const label = isMobile || state === "expanded" ? "Collapse sidebar" : "Expand sidebar";
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton tooltip={label} onClick={toggleSidebar}>
+        <PanelLeftIcon />
+        <span>{label}</span>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
   );
 }
 

@@ -896,28 +896,30 @@ describe("the page", () => {
     expect(runs.text).toContain("sandbox · Launch on time");
   });
 
-  it("renders a page compact while its cookie says so: the toggle pressed, the source hidden and the sidebar as its own cookie says", async () => {
+  it("renders a page compact while its cookie says so: the source hidden and the sidebar as its own cookie says, its toggle in the sidebar", async () => {
     const source = /<pre[^>]*>[^<]*ctx\.ghost\.post\.create\(/;
 
-    // Comfortable without the cookie: #app unmarked, the toggle not pressed, the source shown.
+    // Comfortable without the cookie: #app unmarked, the source shown. The sidebar's toggle is in
+    // the sidebar, and there is no density toggle for now.
     const comfortable = await page("/workflows/announce");
     expect(comfortable.html).toContain('<div id="app">');
     expect(comfortable.html).toMatch(source);
     expect(sidebarState(comfortable.html)).toBe("expanded");
-    expect(pressed(comfortable.html, "Compact")).toBe("false");
+    expect(comfortable.text).toContain("Collapse sidebar");
+    expect(pressed(comfortable.html, "Compact")).toBeUndefined();
 
-    // Compact: #app marked, the toggle pressed, Code not pressed and the source's panel hidden with
+    // Compact: #app marked, Code not pressed and the source's panel hidden with
     // no source in it. The sidebar follows its own cookie.
     const compact = await page("/workflows/announce", app.url, {
       headers: { cookie: "sanoma_density=compact; sidebar_state=false" },
     });
     expect(compact.status).toBe(200);
     expect(compact.html).toContain('<div id="app" data-density="compact">');
-    expect(pressed(compact.html, "Compact")).toBe("true");
     expect(pressed(compact.html, "Code")).toBe("false");
     expect(compact.html).not.toMatch(source);
     expect(compact.html).toMatch(/data-panel[^>]*id="graph-source-code"[^>]*hidden|hidden[^>]*id="graph-source-code"/);
     expect(sidebarState(compact.html)).toBe("collapsed");
+    expect(compact.text).toContain("Expand sidebar");
   });
 
   it("answers any other path with the app's not-found page", async () => {
