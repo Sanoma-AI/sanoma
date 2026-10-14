@@ -252,6 +252,26 @@ function linkTag(html: string, label: string) {
   return html.slice(start, html.indexOf(">", start) + 1);
 }
 
+/** The Inbox's rows, in order, each its link's search: `approval`, and `show` when it keeps one. */
+const inboxRows = (html: string) =>
+  [...html.matchAll(/<a [^>]*href="\/inbox\?([^"]*approval=[^"]*)"[^>]*>/g)].map(([tag, search]) => {
+    const params = new URLSearchParams(search!.replaceAll("&amp;", "&"));
+    return { approval: params.get("approval"), show: params.get("show"), current: tag.includes('aria-current="page"') };
+  });
+
+/** The approval open beside the Inbox's list: the row marked current. */
+const currentRow = (html: string) => inboxRows(html).find((row) => row.current)?.approval;
+
+/** Whether the link whose text, after any icon, matches `label` is marked current. */
+const currentLink = (html: string, label: string) =>
+  html
+    .replaceAll("<!-- -->", "")
+    .match(new RegExp(`(<a [^>]*>)${label}</a>`))?.[1]
+    ?.includes('aria-current="page"');
+
+/** The open approval's title: its section's name. */
+const openTitle = (html: string) => html.match(/<section aria-label="([^"]+)"/)?.[1];
+
 /** A request's status, sent as written: no normalising of the path, and any Host header. */
 function rawStatus(base: string, path: string, headers?: Record<string, string>) {
   const { hostname, port } = new URL(base);
@@ -724,6 +744,12 @@ describe("the page", () => {
     const inbox = await page("/inbox");
     expect(inbox.status).toBe(200);
     expect(inbox.text).toContain(HOLD_TITLE);
+    // `?approval=` opens the hold, the sentence above it saying what it lets through.
+    const open = await page(`/inbox?approval=${id}/${hold.id}`);
+    expect(openTitle(open.html)).toBe(HOLD_TITLE);
+    expect(open.text).toContain(
+      `held&#x27;s run</a> of <a href="/workflows/announce">Announce a launch</a> wants to publish a post in Ghost, send a broadcast in Resend, and create a post in Bluesky.`,
+    );
 
     const decided = await approveAs(hold.id, "   ");
     expect(decided.body).toMatchObject({ status: "approved" });
@@ -749,6 +775,62 @@ describe("the page", () => {
     );
     expect(run.text).toContain("Started by held");
     expect(run.text).toMatch(/>finished<\/span>/);
+
+    // Decided lists it from the latest runs, and opens it with no controls.
+    const decidedPage = await page(`/inbox?show=decided&approval=${id}/${hold.id}`);
+    expect(currentLink(decidedPage.html, "Decided")).toBe(true);
+    expect(openTitle(decidedPage.html)).toBe(HOLD_TITLE);
+    expect(decidedPage.text).toContain("wanted to publish a post in Ghost");
+    expect(decidedPage.text).toContain("approved by marketing-lead");
+    expect(decidedPage.text).not.toContain(">Approve<");
+  });
+
+  it("lists the pending approvals beside the one open, newest first, each row opening its own", async () => {
+    const ids: string[] = [];
+    for (const title of ["Inbox first", "Inbox second"]) {
+      const started = await postRun({ workflow: "announce", input: input(title) });
+      await waitFor(
+        () => detail(started.body.runId),
+        (d) => d.run.status === "waiting",
+      );
+      ids.push(started.body.runId);
+    }
+    const [first, second] = ids.map((id) => `${id}/approval-1`);
+
+    // The server knows no name: every pending approval, the newest open and marked in the list.
+    const inbox = await page("/inbox");
+    expect(inbox.status).toBe(200);
+    const rows = inboxRows(inbox.html).map((row) => row.approval);
+    expect(rows.indexOf(second!)).toBeGreaterThanOrEqual(0);
+    expect(rows.indexOf(second!)).toBeLessThan(rows.indexOf(first!));
+    expect(currentRow(inbox.html)).toBe(rows[0]);
+    expect(inbox.text).toContain("tester&#x27;s run</a> of");
+    expect(inbox.text).toContain("is waiting on this decision.");
+    expect(inbox.text).toMatch(/Announce a launch · from tester/);
+    expect(inbox.html).toContain(">Approve<");
+
+    // `?approval=` opens that one; each row keeps the filter.
+    const opened = await page(`/inbox?show=waiting&approval=${first}`);
+    expect(currentRow(opened.html)).toBe(first);
+    expect(opened.html).toContain(`href="/workflows/announce/runs/${ids[0]}"`);
+    expect(inboxRows(opened.html)).toEqual(
+      rows.map((approval) => ({ approval, show: "waiting", current: approval === first })),
+    );
+
+    // One no longer pending, or never, opens the first instead.
+    expect(currentRow((await page("/inbox?approval=nothing/approval-1")).html)).toBe(rows[0]);
+  });
+
+  it("links For you, All waiting and Decided, each its own URL, and says when nothing waits for you", async () => {
+    const inbox = await page("/inbox?approval=x");
+    for (const show of ["mine", "waiting", "decided"]) expect(inbox.html).toContain(`href="/inbox?show=${show}"`);
+    // Without a name, All waiting is what shows, and it says how many.
+    expect(currentLink(inbox.html, "All waiting · \\d+")).toBe(true);
+    expect(currentLink(inbox.html, "For you")).toBe(false);
+    const mine = await page("/inbox?show=mine");
+    expect(currentLink(mine.html, "For you")).toBe(true);
+    expect(mine.text).toContain("Nothing is waiting for you");
+    expect(mine.text).toMatch(/\d+ approvals? waiting on others, under All waiting\./);
   });
 
   it("says a failed call that is not safe to repeat was not retried, and where to look", async () => {
@@ -1281,6 +1363,9 @@ describe("an app configured otherwise", () => {
       { app: otherCtx, headers: user ? { "x-test-user": user } : {} },
     );
   const read = () => detail(runId, otherCtx);
+  /** The Inbox as the deployment's user `user` sees it. */
+  const inboxAs = async (user: string) =>
+    (await fetch(new URL("/inbox", other.url), { headers: { "x-test-user": user } })).text();
 
   describe("with its own resolveActor", () => {
     it("starts runs as the principal it resolves, groups included", async () => {
@@ -1309,6 +1394,16 @@ describe("an app configured otherwise", () => {
       expect(html).toMatch(/>sso-user<\/span><span[^>]*>Signed in by the deployment<\/span>/);
       expect(html).not.toContain("Who are you?");
       expect(html).not.toContain("Name kept in this browser");
+    });
+
+    it("opens the Inbox on For you: the approvals the principal it resolves may decide", async () => {
+      // The earlier tests leave announce's runs waiting on marketing-lead.
+      const lead = await inboxAs("marketing-lead");
+      expect(currentLink(lead, "For you · [1-9]\\d*")).toBe(true);
+      expect(inboxRows(lead).length).toBeGreaterThan(0);
+      const someoneElse = await inboxAs("sso-user");
+      expect(currentLink(someoneElse, "For you · 0")).toBe(true);
+      expect(someoneElse).toContain("Nothing is waiting for you");
     });
 
     it("answers a resolver that throws with a 500, and logs why", async () => {
