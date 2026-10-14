@@ -16,11 +16,12 @@ import {
 } from "#/components/ui/dialog.tsx";
 import { Field, FieldDescription, FieldError, FieldLabel } from "#/components/ui/field.tsx";
 import { Input } from "#/components/ui/input.tsx";
+import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup } from "#/components/ui/item.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { errorBodyOf } from "../api.ts";
 import { clearCredentialFn, setCredentialFn } from "../functions.ts";
 import { credentialsFor, credentialsQuery } from "../queries.ts";
-import { Region, ToneBadge, When } from "./common.tsx";
+import { ItemHeading, Region, ToneBadge, When } from "./common.tsx";
 
 // A connector's credentials as its page shows them: each variable's manual and status, and the
 // controls that set and clear a stored value. A value goes to the server and is never read back.
@@ -31,11 +32,11 @@ export function Credentials({ vendor }: { vendor: string }) {
   if (!credentials) return null;
   return (
     <Region title="Credentials">
-      <ul className="flex flex-col gap-1.5">
+      <ItemGroup>
         {credentials.map((c) => (
           <CredentialRow key={c.name} credential={c} />
         ))}
-      </ul>
+      </ItemGroup>
     </Region>
   );
 }
@@ -57,42 +58,55 @@ function CredentialRow({ credential: c }: { credential: CredentialStatus }) {
     },
     onError: (err) => toast.error(errorMessage(err).trim() || `Could not clear ${c.name}, and no reason was given`),
   });
+  // Under the name: its manual, then who set a stored value and when.
+  const setBy = c.source === "stored" && c.setBy && c.setAt && (
+    <>
+      set by {c.setBy} · <When at={Date.parse(c.setAt)} />
+    </>
+  );
   return (
-    <li className="flex flex-wrap items-center gap-1.5">
-      <code>{c.name}</code>
-      <ToneBadge tone={!credentialReady(c) ? "bad" : c.status === "set" ? "ok" : "off"}>
-        {c.status === "invalid" ? `invalid: ${c.problem}` : c.status}
-      </ToneBadge>
-      {c.source === "stored" && c.setBy && c.setAt && (
-        <span className="text-muted-foreground">
-          · by {c.setBy} · <When at={Date.parse(c.setAt)} />
-        </span>
-      )}
-      {c.optional && <Badge variant="outline">optional</Badge>}
-      {c.description && <span className="text-muted-foreground">{c.description}</span>}
-      {c.source === "environment" ? (
-        <span className="text-muted-foreground">set in the environment</span>
-      ) : (
-        <>
-          <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
-            {c.status === "set" ? "Replace" : "Set"}
-          </Button>
-          {c.source === "stored" && (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              disabled={clearing.isPending}
-              onClick={() => clearing.mutate()}
-            >
-              {clearing.isPending && <Spinner data-icon="inline-start" />}
-              Clear
+    <Item role="listitem" variant="outline" size="xs">
+      <ItemContent>
+        <ItemHeading>
+          <code>{c.name}</code>
+          <ToneBadge tone={!credentialReady(c) ? "bad" : c.status === "set" ? "ok" : "off"}>
+            {c.status === "invalid" ? `invalid: ${c.problem}` : c.status}
+          </ToneBadge>
+          {c.optional && <Badge variant="outline">optional</Badge>}
+        </ItemHeading>
+        {(setBy || c.description) && (
+          <ItemDescription>
+            {c.description}
+            {c.description && setBy && " · "}
+            {setBy}
+          </ItemDescription>
+        )}
+      </ItemContent>
+      <ItemActions>
+        {c.source === "environment" ? (
+          <ItemDescription>set in the environment</ItemDescription>
+        ) : (
+          <>
+            <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
+              {c.status === "set" ? "Replace" : "Set"}
             </Button>
-          )}
-          <SetDialog credential={c} open={open} onClose={() => setOpen(false)} />
-        </>
-      )}
-    </li>
+            {c.source === "stored" && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={clearing.isPending}
+                onClick={() => clearing.mutate()}
+              >
+                {clearing.isPending && <Spinner data-icon="inline-start" />}
+                Clear
+              </Button>
+            )}
+            <SetDialog credential={c} open={open} onClose={() => setOpen(false)} />
+          </>
+        )}
+      </ItemActions>
+    </Item>
   );
 }
 

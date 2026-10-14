@@ -1677,7 +1677,7 @@ describe("an app whose drivers declare environment variables", () => {
     expect(key).toMatchObject({ name: KEY_VAR, status: "set", source: "stored", setBy: "tester" });
 
     const blogPage = await page("/connectors/ghost", declaring.url);
-    expect(blogPage.text).toMatch(new RegExp(`<code>${KEY_VAR}</code>.*?>set<.*?· by tester · <time`));
+    expect(blogPage.text).toMatch(new RegExp(`<code>${KEY_VAR}</code>.*?>set<.*?set by tester · <time`));
     expect(blogPage.text.match(/>(Set|Replace|Clear)<\/button>/g)).toEqual([">Replace</button>", ">Clear</button>"]);
     expect((await page("/connectors", declaring.url)).text).toContain("· configured");
     for (const html of [blogPage.html, JSON.stringify(await statuses())]) expect(html).not.toContain(KEY);
