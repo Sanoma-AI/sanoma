@@ -228,7 +228,8 @@ export function OpItem({ id, op, children }: { id: string; op: OpEntry | undefin
  * shrink (min-w-0, max-w-full), so a long title in a narrow list is cut where a caller's `truncate`
  * span says, rather than widening the list.
  */
-const LINK_ITEM_SHRINK = "[&_[data-slot=item-content]]:min-w-0 [&_[data-slot=item-title]]:max-w-full";
+// The shrinking said above, and a focus ring drawn inside, which a scrolling list would clip outside.
+const LINK_ITEM = "focus-visible:ring-inset [&_[data-slot=item-content]]:min-w-0 [&_[data-slot=item-title]]:max-w-full";
 
 export function LinkItem({
   children,
@@ -237,7 +238,7 @@ export function LinkItem({
 }: Omit<ComponentProps<typeof Item>, "asChild" | "children"> & { children: ReactElement }) {
   return (
     <div role="listitem">
-      <Item asChild className={cn(CURRENT_LINK, LINK_ITEM_SHRINK, className)} {...props}>
+      <Item asChild className={cn(CURRENT_LINK, LINK_ITEM, className)} {...props}>
         {children}
       </Item>
     </div>
@@ -257,12 +258,15 @@ export function PaneList({
   description,
   action,
   empty,
+  height = "max-h-[70vh]",
   children,
 }: {
   title: ReactNode;
   description?: ReactNode;
   action?: ReactNode;
   empty?: ReactNode;
+  /** The list's most height before it scrolls: 70vh, beside a pane, unless the caller says. */
+  height?: string;
   children?: ReactNode;
 }) {
   return (
@@ -278,7 +282,7 @@ export function PaneList({
       <CardContent className="[&>[data-slot=empty]]:border-0">
         {/* Not a ScrollArea: its viewport scrolls only in a box of a set height, and this list is
             as tall as its items, up to its max. */}
-        {empty ?? <ItemGroup className="max-h-72 overflow-y-auto lg:max-h-[70vh]">{children}</ItemGroup>}
+        {empty ?? <ItemGroup className={cn("overflow-y-auto", height)}>{children}</ItemGroup>}
       </CardContent>
     </Card>
   );

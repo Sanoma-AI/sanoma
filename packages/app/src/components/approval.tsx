@@ -145,9 +145,9 @@ export function ApprovalDetails({
           {approval.links.map((href) => (
             <LinkItem key={href} variant="outline" size="xs">
               <a href={href} target="_blank" rel="noreferrer" title={href}>
-                <ItemContent className="min-w-0">
+                <ItemContent>
                   {/* ItemTitle fits its content (w-fit): a long address is cut to the item instead. */}
-                  <ItemTitle className="block max-w-full truncate">{href}</ItemTitle>
+                  <ItemTitle className="block truncate">{href}</ItemTitle>
                 </ItemContent>
                 <ItemActions>
                   <ExternalLinkIcon className="size-4" />

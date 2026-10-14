@@ -158,7 +158,8 @@ function Split({
   return (
     <div className="grid grid-cols-1 items-start gap-(--gap-region) lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
       <nav aria-label="Approvals">
-        <PaneList title="Approvals" description={description}>
+        {/* Above the open approval below lg, so a shorter list there. */}
+        <PaneList title="Approvals" description={description} height="max-h-72 lg:max-h-[70vh]">
           {entries.map((entry) => {
             const key = approvalKey(entry);
             return (
@@ -210,7 +211,8 @@ const InboxRow = memo(function InboxRow({
             <StatusDot tone={APPROVAL_TONE[approval.status]} />
             <span className="truncate">{approval.title}</span>
           </ItemTitle>
-          <ItemDescription>
+          {/* One line, as the title, so the rows keep one height. */}
+          <ItemDescription className="line-clamp-1">
             {approval.status !== "pending" && `${approval.status} · `}
             {workflow} · from {starterName(run)}
           </ItemDescription>

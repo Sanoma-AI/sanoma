@@ -68,9 +68,9 @@ function CredentialRow({ credential: c }: { credential: CredentialStatus }) {
           </ToneBadge>
           {c.optional && <Badge variant="outline">optional</Badge>}
         </ItemHeading>
-        {/* Under the name: its manual, then where its value comes from: the environment, or who
-            stored it and when. */}
-        {c.description && <ItemDescription>{c.description}</ItemDescription>}
+        {/* Under the name: its manual, in full, then where its value comes from: the environment,
+            or who stored it and when. */}
+        {c.description && <ItemDescription className="line-clamp-none">{c.description}</ItemDescription>}
         {c.source === "environment" && <ItemDescription>set in the environment</ItemDescription>}
         {c.source === "stored" && c.setBy && c.setAt && (
           <ItemDescription>
