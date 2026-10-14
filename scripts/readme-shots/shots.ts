@@ -71,6 +71,7 @@ let keepLog = false;
 let databaseUrl: URL;
 let chrome: Promise<Browser> | undefined;
 let server: ChildProcess | undefined;
+let ffmpeg: ChildProcess | undefined;
 let database = false;
 let interrupted: (typeof SIGNALS)[number] | undefined;
 let cleaning: Promise<void> | undefined;
@@ -174,6 +175,7 @@ function cleanup(): Promise<void> {
             () => {},
           ),
       ],
+      ["stop ffmpeg", () => ffmpeg && stop(ffmpeg)],
       ["stop the server", () => server && stop(server)],
       ["drop the database", () => database && dropDatabase()],
       [`remove ${work}`, () => rmSync(work, { recursive: true, force: true })],
@@ -343,12 +345,15 @@ function hasFfmpeg(): boolean {
   }
 }
 
-/** The frames at their durations (ffmpeg's concat list), one palette for the whole GIF, looping. */
-/** Runs ffmpeg without blocking the event loop, so a signal's handler runs while it works. */
+/**
+ * The frames at their durations (ffmpeg's concat list), one palette for the whole GIF, looping.
+ * ffmpeg runs without blocking the event loop, so a signal's handler runs while it works, and
+ * the cleanup stops it.
+ */
 async function makeGif(frames: string, out: string): Promise<void> {
   const filter =
     "split[a][b];[a]palettegen=max_colors=128:stats_mode=full[p];[b][p]paletteuse=dither=none:diff_mode=rectangle";
-  const ffmpeg = spawn(
+  ffmpeg = spawn(
     "ffmpeg",
     ["-v", "error", "-y", "-f", "concat", "-i", "frames.txt", "-vf", filter, "-loop", "0", out],
     { cwd: frames, stdio: "inherit" },
