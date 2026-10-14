@@ -135,9 +135,7 @@ export function RunRail({ name }: { name: string }) {
         }
         empty={
           shown.length === 0 ? (
-            // Already inside the list's card: no border of its own.
             <Nothing
-              className="border-0"
               title={
                 filter === "all"
                   ? "No runs yet"
@@ -198,11 +196,10 @@ const RunLink = memo(function RunLink({ run, filter }: { run: RunSummary; filter
   return (
     <LinkItem size="xs">
       <Link {...runLink(run)} search={railSearch(filter)} activeOptions={{ includeSearch: false }}>
-        {/* A long approval title would widen the rail past its 14rem: the title may shrink
-            (min-w-0, max-w-full) and what it waits on is cut. A sandbox run's scenario, as long,
-            is a description of its own, which wraps. */}
-        <ItemContent className="min-w-0">
-          <ItemTitle className="max-w-full">
+        {/* A long approval title would widen the rail past its 14rem: what the run waits on is
+            cut. A sandbox run's scenario, as long, is a description of its own, which wraps. */}
+        <ItemContent>
+          <ItemTitle>
             <StatusDot tone={RUN_TONE[run.status]} />
             <span className="shrink-0">{run.status}</span>
             {waitingOn !== undefined && <span className="truncate text-muted-foreground">{waitingOn}</span>}

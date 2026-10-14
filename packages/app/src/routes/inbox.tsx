@@ -205,9 +205,8 @@ const InboxRow = memo(function InboxRow({
   return (
     <LinkItem size="xs">
       <Link to="/inbox" search={{ show, approval: id }} aria-current={current ? "page" : undefined}>
-        {/* As the rail's runs: the content may shrink (min-w-0, max-w-full) and a long title is cut. */}
-        <ItemContent className="min-w-0">
-          <ItemTitle className="max-w-full">
+        <ItemContent>
+          <ItemTitle>
             <StatusDot tone={APPROVAL_TONE[approval.status]} />
             <span className="truncate">{approval.title}</span>
           </ItemTitle>

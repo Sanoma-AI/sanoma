@@ -224,8 +224,12 @@ export function OpItem({ id, op, children }: { id: string; op: OpEntry | undefin
  * drawn as an Item with `props`, and marked (`CURRENT_LINK`) while it is the page open. A link to
  * another page ends with `<ItemActions><ChevronRightIcon /></ItemActions>` inside the link.
  * shadcn's docs put `role="listitem"` on the Item, but on an `asChild` link that role would replace
- * the link's: a listitem holds the link instead, so it stays a link.
+ * the link's: a listitem holds the link instead, so it stays a link. Its content and title may
+ * shrink (min-w-0, max-w-full), so a long title in a narrow list is cut where a caller's `truncate`
+ * span says, rather than widening the list.
  */
+const LINK_ITEM_SHRINK = "[&_[data-slot=item-content]]:min-w-0 [&_[data-slot=item-title]]:max-w-full";
+
 export function LinkItem({
   children,
   className,
@@ -233,7 +237,7 @@ export function LinkItem({
 }: Omit<ComponentProps<typeof Item>, "asChild" | "children"> & { children: ReactElement }) {
   return (
     <div role="listitem">
-      <Item asChild className={cn(CURRENT_LINK, className)} {...props}>
+      <Item asChild className={cn(CURRENT_LINK, LINK_ITEM_SHRINK, className)} {...props}>
         {children}
       </Item>
     </div>
@@ -270,7 +274,8 @@ export function PaneList({
         {description && <CardDescription>{description}</CardDescription>}
         {action && <CardAction>{action}</CardAction>}
       </CardHeader>
-      <CardContent>
+      {/* An empty state (`Nothing`) is already inside this card: no border of its own. */}
+      <CardContent className="[&>[data-slot=empty]]:border-0">
         {/* Not a ScrollArea: its viewport scrolls only in a box of a set height, and this list is
             as tall as its items, up to its max. */}
         {empty ?? <ItemGroup className="max-h-72 overflow-y-auto lg:max-h-[70vh]">{children}</ItemGroup>}
@@ -386,9 +391,9 @@ export function When({ at }: { at: number }) {
 }
 
 /** An item's time, at the end of its row, level with its title. */
-export function ItemTime({ at, className }: { at: number; className?: string }) {
+export function ItemTime({ at }: { at: number }) {
   return (
-    <ItemContent className={cn("self-start", className)}>
+    <ItemContent className="self-start">
       <ItemDescription className="text-xs">
         <When at={at} />
       </ItemDescription>
@@ -469,19 +474,9 @@ export function Notice({
 }
 
 /** An empty state: nothing to show yet, and what would fill it. */
-export function Nothing({
-  title,
-  children,
-  action,
-  className,
-}: {
-  title: string;
-  children?: ReactNode;
-  action?: ReactNode;
-  className?: string;
-}) {
+export function Nothing({ title, children, action }: { title: string; children?: ReactNode; action?: ReactNode }) {
   return (
-    <Empty className={cn("border", className)}>
+    <Empty className="border">
       <EmptyHeader>
         <EmptyTitle>{title}</EmptyTitle>
         {children && <EmptyDescription>{children}</EmptyDescription>}
