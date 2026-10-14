@@ -13,6 +13,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { once } from "node:events";
 import { createRequire } from "node:module";
 import { constants, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -133,15 +134,15 @@ try {
     fullPage: true,
   });
   say("stills taken; making demo.gif");
-  makeGif(frames, join(captured, "demo.gif"));
-  // ffmpeg blocks the event loop: let a signal that came meanwhile run before the assets change.
-  await new Promise(setImmediate);
+  await makeGif(frames, join(captured, "demo.gif"));
   stopIfInterrupted();
   replaceAssets(captured, ["demo.gif", "workflow.png", "inbox.png", "run.png"]);
   say("wrote .github/assets: demo.gif, workflow.png, inbox.png, run.png");
 } catch (err) {
-  // A signal's handler runs on the event loop: let one that came during a blocking call (ffmpeg,
-  // a build) run before telling a failure from an interruption.
+  // A signal's handler runs on the event loop: let one that came during a blocking call (a build)
+  // run before telling a failure from an interruption. One setImmediate can fire in the same turn,
+  // before the loop polls for the signal; the second comes after that poll.
+  await new Promise(setImmediate);
   await new Promise(setImmediate);
   if (!interrupted) {
     keepLog = existsSync(serverLog);
@@ -343,13 +344,17 @@ function hasFfmpeg(): boolean {
 }
 
 /** The frames at their durations (ffmpeg's concat list), one palette for the whole GIF, looping. */
-function makeGif(frames: string, out: string): void {
+/** Runs ffmpeg without blocking the event loop, so a signal's handler runs while it works. */
+async function makeGif(frames: string, out: string): Promise<void> {
   const filter =
     "split[a][b];[a]palettegen=max_colors=128:stats_mode=full[p];[b][p]paletteuse=dither=none:diff_mode=rectangle";
-  execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "concat", "-i", "frames.txt", "-vf", filter, "-loop", "0", out], {
-    cwd: frames,
-    stdio: "inherit",
-  });
+  const ffmpeg = spawn(
+    "ffmpeg",
+    ["-v", "error", "-y", "-f", "concat", "-i", "frames.txt", "-vf", filter, "-loop", "0", out],
+    { cwd: frames, stdio: "inherit" },
+  );
+  const [code, signal] = (await once(ffmpeg, "close")) as [number | null, NodeJS.Signals | null];
+  if (code !== 0) throw new Error(`readme:shots: ffmpeg failed (${signal ?? `exit ${code}`})`);
 }
 
 function fail(message: string): never {
