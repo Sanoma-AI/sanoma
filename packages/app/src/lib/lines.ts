@@ -15,3 +15,17 @@ export function highlightedLines(doc: Text, spans: Iterable<Span>): number[] {
   }
   return [...lines].toSorted((a, b) => a - b);
 }
+
+/**
+ * The first and last line numbers (from 1) a [start, end) range touches in `text`, as
+ * `highlightedLines` counts them: for "Lines 3–5" beside a node, where the source is plain text.
+ */
+export function spanLines(text: string, [start, end]: Span): [number, number] {
+  // The line an offset is on: one more than the newlines before it.
+  const lineAt = (offset: number) => {
+    let line = 1;
+    for (let at = text.indexOf("\n"); at !== -1 && at < offset; at = text.indexOf("\n", at + 1)) line++;
+    return line;
+  };
+  return [lineAt(Math.min(start, text.length)), lineAt(Math.min(Math.max(start, end - 1), text.length))];
+}

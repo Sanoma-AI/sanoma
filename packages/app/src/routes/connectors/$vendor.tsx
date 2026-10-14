@@ -148,7 +148,7 @@ function OpDetails({ op, scenarios }: { op: OpEntry; scenarios: ScenarioEntry[] 
                   <Link
                     to="/workflows/$name"
                     params={{ name: s.workflow }}
-                    search={{ scenario: s.name }}
+                    search={{ new: true, scenario: s.name }}
                     className="hover:underline"
                   >
                     {s.name}

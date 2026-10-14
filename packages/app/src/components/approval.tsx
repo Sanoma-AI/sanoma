@@ -48,32 +48,24 @@ import {
 
 type Decision = DecideRequest["decision"];
 
+/** The run an approval belongs to: an approval left pending by a run that ended gets no controls. */
+type ApprovalRun = Pick<RunSummary, "runId" | "status" | "workflow" | "startedBy">;
+
 /**
- * An approval: what it is for, who may decide, and the controls to decide while it is pending
- * and its run can still read a decision.
+ * An approval as a card: its title and status, what it is for and who may decide
+ * (`ApprovalDetails`), and the controls to decide (`ApprovalDecision`) while it is pending. Inside
+ * another card (the inspector), compose those two under a heading instead.
  */
 export function ApprovalCard({
   run,
   approval,
   showRun = false,
 }: {
-  /** The run it belongs to: an approval left pending by a run that ended gets no controls. */
-  run: Pick<RunSummary, "runId" | "status" | "workflow" | "startedBy">;
+  run: ApprovalRun;
   approval: ApprovalState;
   /** For an approval shown away from its run: the run is named under the title, and linked. */
   showRun?: boolean;
 }) {
-  // The decision stays put while the dialog animates closed, so its verb and colour do not flip.
-  const [decision, setDecision] = useState<Decision>("approve");
-  const [deciding, setDeciding] = useState(false);
-  const decide = (chosen: Decision) => {
-    setDecision(chosen);
-    setDeciding(true);
-  };
-  // A decision the run has not read yet (no worker running, say) stays queued: until the run's
-  // status changes, the card says so and takes no second, different decision.
-  const [queued, setQueued] = useState<{ decision: Decision; status: RunStatus }>();
-  const waiting = queued?.status === run.status ? queued.decision : undefined;
   return (
     <Card>
       <CardHeader>
@@ -88,114 +80,154 @@ export function ApprovalCard({
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        <Facts>
-          <Fact label="Approver">{approverLabel(approval.approver)}</Fact>
-          <Fact label="Lets through">
-            <Covers covers={approval.covers} />
-          </Fact>
-          <Fact label="Asked by">
-            <RequestedBy requestedBy={approval.requestedBy} op={approval.op} />
-          </Fact>
-          <Fact label="Asked">
-            <When at={approval.requestedAt} />
-          </Fact>
-          {showRun && (
-            <Fact label="Run">
-              <Link {...runLink(run)}>
-                <code>{run.runId}</code>
-              </Link>
-            </Fact>
-          )}
-          {approval.decidedBy && (
-            <Fact label="Decided">
-              {approval.status} by {approval.decidedBy}
-              {approval.decidedAt ? (
-                <>
-                  , <When at={approval.decidedAt} />
-                </>
-              ) : null}
-              {approval.note ? <DecisionNote note={approval.note} /> : null}
-            </Fact>
-          )}
-        </Facts>
-        {approval.details && <p>{approval.details}</p>}
-        {/* A list of links: each Item is the <a> itself, which cannot also be a listitem, so the
-            list is a <ul> rather than an ItemGroup. */}
-        {approval.links?.length ? (
-          <ul className="flex flex-col gap-2">
-            {approval.links.map((href) => (
-              <li key={href}>
-                <Item asChild variant="outline" size="xs">
-                  <a href={href} target="_blank" rel="noreferrer" title={href}>
-                    <ItemContent className="min-w-0">
-                      {/* ItemTitle fits its content (w-fit): a long address is cut to the item instead. */}
-                      <ItemTitle className="block max-w-full truncate">{href}</ItemTitle>
-                    </ItemContent>
-                    <ItemActions>
-                      <ExternalLinkIcon className="size-4" />
-                    </ItemActions>
-                  </a>
-                </Item>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        {approval.requestedBy === "policy" && approval.input !== undefined && (
-          <Expandable label="The held call's input" value={approval.input} />
-        )}
-        {approval.refused.length > 0 && (
-          <Disclosure label={`${plural(approval.refused.length, "message")} ignored`}>
-            <ItemGroup>
-              {approval.refused.map((r, i) => (
-                <Item key={`${r.at}-${i}`} role="listitem" variant="muted" size="xs">
-                  <ItemContent>
-                    <ItemTitle>{r.by ?? "someone"}</ItemTitle>
-                    <ItemDescription>{r.reason}</ItemDescription>
-                  </ItemContent>
-                  <ItemActions className="text-xs text-muted-foreground">
-                    <When at={r.at} />
-                  </ItemActions>
-                </Item>
-              ))}
-            </ItemGroup>
-          </Disclosure>
-        )}
+        <ApprovalDetails run={run} approval={approval} showRun={showRun} />
       </CardContent>
-      {approval.status === "pending" &&
-        (isEnded(run.status) ? (
-          <CardFooter>
-            <p className="text-sm text-muted-foreground">The run has {run.status}, so this can no longer be decided.</p>
-          </CardFooter>
-        ) : (
-          <>
-            <CardFooter className="flex-wrap gap-2">
-              <Button disabled={waiting !== undefined} onClick={() => decide("approve")}>
-                <CheckIcon data-icon="inline-start" />
-                Approve
-              </Button>
-              <Button variant="destructive" disabled={waiting !== undefined} onClick={() => decide("reject")}>
-                <XIcon data-icon="inline-start" />
-                Reject
-              </Button>
-              {waiting && (
-                <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Spinner className="shrink-0" />
-                  Your {waiting === "approve" ? "approval" : "rejection"} is queued: the run has not read it yet. Is a
-                  worker running?
-                </p>
-              )}
-            </CardFooter>
-            <DecideDialog
-              runId={run.runId}
-              approval={approval}
-              open={deciding}
-              decision={decision}
-              onClose={() => setDeciding(false)}
-              onQueued={(chosen) => setQueued({ decision: chosen, status: run.status })}
-            />
-          </>
-        ))}
+      {approval.status === "pending" && (
+        <CardFooter className="flex-wrap gap-2">
+          <ApprovalDecision run={run} approval={approval} />
+        </CardFooter>
+      )}
     </Card>
+  );
+}
+
+/**
+ * What an approval is for and who may decide, as siblings for a flex column: its facts, its
+ * details, its links, the held call's input and the messages it ignored.
+ */
+export function ApprovalDetails({
+  run,
+  approval,
+  showRun = false,
+}: {
+  run: ApprovalRun;
+  approval: ApprovalState;
+  /** The run is a fact too, linked. */
+  showRun?: boolean;
+}) {
+  return (
+    <>
+      <Facts>
+        <Fact label="Approver">{approverLabel(approval.approver)}</Fact>
+        <Fact label="Lets through">
+          <Covers covers={approval.covers} />
+        </Fact>
+        <Fact label="Asked by">
+          <RequestedBy requestedBy={approval.requestedBy} op={approval.op} />
+        </Fact>
+        <Fact label="Asked">
+          <When at={approval.requestedAt} />
+        </Fact>
+        {showRun && (
+          <Fact label="Run">
+            <Link {...runLink(run)}>
+              <code>{run.runId}</code>
+            </Link>
+          </Fact>
+        )}
+        {approval.decidedBy && (
+          <Fact label="Decided">
+            {approval.status} by {approval.decidedBy}
+            {approval.decidedAt ? (
+              <>
+                , <When at={approval.decidedAt} />
+              </>
+            ) : null}
+            {approval.note ? <DecisionNote note={approval.note} /> : null}
+          </Fact>
+        )}
+      </Facts>
+      {approval.details && <p>{approval.details}</p>}
+      {/* A list of links: each Item is the <a> itself, which cannot also be a listitem, so the
+          list is a <ul> rather than an ItemGroup. */}
+      {approval.links?.length ? (
+        <ul className="flex flex-col gap-2">
+          {approval.links.map((href) => (
+            <li key={href}>
+              <Item asChild variant="outline" size="xs">
+                <a href={href} target="_blank" rel="noreferrer" title={href}>
+                  <ItemContent className="min-w-0">
+                    {/* ItemTitle fits its content (w-fit): a long address is cut to the item instead. */}
+                    <ItemTitle className="block max-w-full truncate">{href}</ItemTitle>
+                  </ItemContent>
+                  <ItemActions>
+                    <ExternalLinkIcon className="size-4" />
+                  </ItemActions>
+                </a>
+              </Item>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {approval.requestedBy === "policy" && approval.input !== undefined && (
+        <Expandable label="The held call's input" value={approval.input} />
+      )}
+      {approval.refused.length > 0 && (
+        <Disclosure label={`${plural(approval.refused.length, "message")} ignored`}>
+          <ItemGroup>
+            {approval.refused.map((r, i) => (
+              <Item key={`${r.at}-${i}`} role="listitem" variant="muted" size="xs">
+                <ItemContent>
+                  <ItemTitle>{r.by ?? "someone"}</ItemTitle>
+                  <ItemDescription>{r.reason}</ItemDescription>
+                </ItemContent>
+                <ItemActions className="text-xs text-muted-foreground">
+                  <When at={r.at} />
+                </ItemActions>
+              </Item>
+            ))}
+          </ItemGroup>
+        </Disclosure>
+      )}
+    </>
+  );
+}
+
+/**
+ * A pending approval's Approve and Reject, each opening its dialog, as siblings for a wrapping
+ * row; or, once its run has ended, why it can no longer be decided.
+ */
+export function ApprovalDecision({ run, approval }: { run: ApprovalRun; approval: ApprovalState }) {
+  // The decision stays put while the dialog animates closed, so its verb and colour do not flip.
+  const [decision, setDecision] = useState<Decision>("approve");
+  const [deciding, setDeciding] = useState(false);
+  const decide = (chosen: Decision) => {
+    setDecision(chosen);
+    setDeciding(true);
+  };
+  // A decision the run has not read yet (no worker running, say) stays queued: until the run's
+  // status changes, the controls say so and take no second, different decision.
+  const [queued, setQueued] = useState<{ decision: Decision; status: RunStatus }>();
+  const waiting = queued?.status === run.status ? queued.decision : undefined;
+  if (isEnded(run.status)) {
+    return <p className="text-sm text-muted-foreground">The run has {run.status}, so this can no longer be decided.</p>;
+  }
+  return (
+    <>
+      <Button disabled={waiting !== undefined} onClick={() => decide("approve")}>
+        <CheckIcon data-icon="inline-start" />
+        Approve
+      </Button>
+      <Button variant="destructive" disabled={waiting !== undefined} onClick={() => decide("reject")}>
+        <XIcon data-icon="inline-start" />
+        Reject
+      </Button>
+      {waiting && (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Spinner className="shrink-0" />
+          Your {waiting === "approve" ? "approval" : "rejection"} is queued: the run has not read it yet. Is a worker
+          running?
+        </p>
+      )}
+      <DecideDialog
+        runId={run.runId}
+        approval={approval}
+        open={deciding}
+        decision={decision}
+        onClose={() => setDeciding(false)}
+        onQueued={(chosen) => setQueued({ decision: chosen, status: run.status })}
+      />
+    </>
   );
 }
 

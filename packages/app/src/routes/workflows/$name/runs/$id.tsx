@@ -1,29 +1,8 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { useCallback, useMemo } from "react";
-import { Card, CardContent } from "#/components/ui/card.tsx";
-import { ItemGroup } from "#/components/ui/item.tsx";
-import { starterName } from "#/api.ts";
-import { ApprovalCard } from "#/components/approval.tsx";
-import {
-  Fact,
-  Facts,
-  loadCode,
-  loadGraph,
-  Nothing,
-  Notice,
-  pageTitle,
-  Region,
-  SandboxBadge,
-  ToneBadge,
-  When,
-} from "#/components/common.tsx";
-import { CheckRow, LedgerRow, show } from "#/components/ledger.tsx";
-import { Workbench } from "#/components/workbench.tsx";
-import { GraphAndSource } from "#/components/graph-source.tsx";
-import { RunButton } from "#/components/workflow.tsx";
-import type { GraphNode } from "#/graph/types.ts";
-import { useReducedMotion } from "#/lib/motion.ts";
+import { useMemo } from "react";
+import { loadCode, loadGraph, Notice, pageTitle, SandboxBadge, ToneBadge } from "#/components/common.tsx";
+import { WorkflowView } from "#/components/workflow-view.tsx";
 import { RUN_TONE } from "#/lib/tone.ts";
 import { runLink, runQuery, useWorkflow } from "#/queries.ts";
 
@@ -52,95 +31,23 @@ export const Route = createFileRoute("/workflows/$name/runs/$id")({
 function RunPage() {
   const { id } = Route.useParams();
   const { data, error, dataUpdatedAt } = useSuspenseQuery(runQuery(id));
-  const { run, ledger, ledgerError, approvals, checks, checksError } = data;
-  // Only its name when the workflow is retired (the config no longer has it): the graph says so.
-  const found = useWorkflow(run.workflow);
-  const workflow = useMemo(() => found ?? { name: run.workflow }, [found, run.workflow]);
+  const { run, ledger } = data;
+  // None when the workflow is retired (the config no longer has it): the view draws the run alone.
+  const workflow = useWorkflow(run.workflow);
   // The graph reads the clock only for whether the run's last record, a sleep, is over: the
   // sleep's end once it has come, else any time before it. So a poll that changed nothing keeps
   // the same reading, and the graph is not built again.
   const last = ledger.at(-1);
   const at = last?.type === "sleep.started" && last.until <= dataUpdatedAt ? last.until : 0;
-  const reading = useMemo(() => ({ ledger, run, at }), [ledger, run, at]);
-  const titles = useMemo(() => new Map(approvals.map((a) => [a.id, a.title])), [approvals]);
-  const reducedMotion = useReducedMotion();
-  const select = useCallback(
-    (node: GraphNode) => {
-      const recordId = "state" in node ? node.state?.recordId : undefined;
-      if (recordId) show(recordId, reducedMotion);
-    },
-    [reducedMotion],
-  );
+  const reading = useMemo(() => ({ ...data, at }), [data, at]);
   return (
-    <Workbench
-      graph={<GraphAndSource key={run.runId} workflow={workflow} run={reading} onSelect={select} />}
-      primary={
-        <div className="flex flex-col gap-(--gap-region)">
-          {(checks || checksError) && (
-            <Region title="Checks">
-              {checksError && (
-                <Notice variant="destructive">
-                  {/* A step no rule matches lists the known steps, one a line. */}
-                  <span className="whitespace-pre-wrap">
-                    Could not check the run against its scenario: {checksError}
-                  </span>
-                </Notice>
-              )}
-              {checks && (
-                <ItemGroup aria-label="Checks">
-                  {checks.map((c, i) => (
-                    <CheckRow key={i} check={c} />
-                  ))}
-                </ItemGroup>
-              )}
-            </Region>
-          )}
-          <Region title="Ledger">
-            {ledgerError && <Notice variant="destructive">Could not read the ledger: {ledgerError}</Notice>}
-            {ledger.length === 0 && !ledgerError && <Nothing title="Nothing recorded yet" />}
-            {ledger.length > 0 && (
-              <ItemGroup aria-label="Ledger">
-                {ledger.map((record) => (
-                  <LedgerRow key={record.id} record={record} titles={titles} />
-                ))}
-              </ItemGroup>
-            )}
-          </Region>
-        </div>
-      }
-      secondary={
-        <div className="flex flex-col gap-(--gap-region)">
-          <Card size="sm">
-            <CardContent>
-              <Facts>
-                <Fact label="Started by">{starterName(run)}</Fact>
-                <Fact label="Started">
-                  <When at={run.createdAt} />
-                </Fact>
-                <Fact label="Run id">
-                  <code className="break-all">{run.runId}</code>
-                </Fact>
-              </Facts>
-            </CardContent>
-          </Card>
-          <Region title="Approvals">
-            {approvals.length === 0 && <Nothing title="None asked for" />}
-            {approvals.map((approval) => (
-              <ApprovalCard key={approval.id} run={run} approval={approval} />
-            ))}
-          </Region>
-        </div>
-      }
-    >
-      {/* The layout's <h1> is the workflow: the run's own heading is its status. Run opens the
-          workflow's page, where its New run form is: none for a retired workflow. */}
+    <WorkflowView key={run.runId} name={run.workflow} workflow={workflow} run={reading}>
+      {/* The layout's <h1> is the workflow: the run's own heading is its status. */}
       <div className="flex flex-wrap items-center gap-2">
         <ToneBadge tone={RUN_TONE[run.status]}>{run.status}</ToneBadge>
         {run.sandbox !== undefined && <SandboxBadge name={run.sandbox} />}
-        {found && <RunButton name={run.workflow} className="ml-auto" />}
       </div>
-      {run.error && <Notice variant="destructive">{run.error}</Notice>}
       {error && <Notice variant="destructive">Could not refresh: {error.message}</Notice>}
-    </Workbench>
+    </WorkflowView>
   );
 }
