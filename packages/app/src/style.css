@@ -163,23 +163,14 @@
 /*
  * Compact's page: Tailwind's spacing unit itself at three quarters, which every padding, margin,
  * gap and height utility is a multiple of, so the page beside the sidebar tightens at once (its
- * controls and their icons too; the text keeps its size). The sidebar keeps the full unit, since
- * its widths are fixed (16rem, 3rem folded), as do menus, dialogs and tooltips, outside #app. The
- * gap tokens above are worked out on #app, in the full unit.
+ * controls and their icons too; the text keeps its size). Everything outside the inset keeps the
+ * full unit: the sidebar (fixed widths, 16rem, 3rem folded) and the portalled menus, dialogs and
+ * tooltips. The gap tokens above are worked out on #app, in the full unit, and cut further on
+ * purpose: the layout's air is where Compact saves most. Cards tighten with the unit alone, and a
+ * `compact:` value is in the page's unit too.
  */
 [data-density="compact"] [data-slot="sidebar-inset"] {
   --spacing: 0.1875rem;
-}
-
-/*
- * Compact's cards: tighter spacing inside every card. Unlayered, so these win over the
- * `[--card-spacing:--spacing(4)]` utility ui/card.tsx sets (utilities are in a layer).
- */
-[data-density="compact"] [data-slot="card"] {
-  --card-spacing: --spacing(3);
-}
-[data-density="compact"] [data-slot="card"][data-size="sm"] {
-  --card-spacing: --spacing(2);
 }
 
 /*
