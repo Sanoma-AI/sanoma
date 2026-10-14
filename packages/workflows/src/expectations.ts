@@ -28,39 +28,48 @@ export function contains(actual: unknown, expected: unknown): boolean {
 }
 
 /**
- * The records of the runs of the step named `name`: its calls made (an `op.called` without an
- * `error`), its sleeps, and the approvals the workflow asked for by that title. A policy's hold
- * carries the held call's name, and is that call's, not a run of its own.
+ * The records of the step named `name` that are not calls: its sleeps, and the approvals the
+ * workflow asked for by that title. A policy's hold carries the held call's name, and is that
+ * call's, not a run of its own.
  */
-const runsOf = (records: readonly LedgerRecord[], name: string) =>
-  records.filter((r) =>
-    r.type === "op.called"
-      ? r.name === name && !r.error
-      : (r.type === "sleep.started" || (r.type === "approval.requested" && r.requestedBy === "workflow")) &&
-        r.name === name,
+const waitsOf = (records: readonly LedgerRecord[], name: string) =>
+  records.filter(
+    (r) =>
+      (r.type === "sleep.started" || (r.type === "approval.requested" && r.requestedBy === "workflow")) &&
+      r.name === name,
   );
+
+/**
+ * Why a call expected (`what`) is missing: that, the calls made among `tries` (with their
+ * inputs), and the ones attempted, failed (denied, rejected, or failed at the vendor for good).
+ */
+function missing(what: string, tries: CallRecord[]): string {
+  const made = tries.filter((r) => !r.error);
+  const tried = tries.flatMap(({ error }) => (error ? [`${error.code ?? error.name}: ${error.message}`] : []));
+  return [
+    what,
+    ...(made.length ? [`its calls had ${inputs(made)}`] : []),
+    ...(tried.length ? [`attempted: ${tried.join(", ")}`] : []),
+  ].join("; ");
+}
 
 /** `once`, `twice`, `3 times`. */
 const times = (n: number) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
 
 /** Why an expectation about a named step does not hold against a run's records, or undefined when it does. */
 function namedDetail(e: Extract<CoreExpectation, { name: string }>, records: readonly LedgerRecord[]) {
-  const runs = runsOf(records, e.name);
+  const tries = records.filter(isCall).filter((r) => r.name === e.name);
+  const calls = tries.filter((r) => !r.error);
+  const runs = calls.length + waitsOf(records, e.name).length;
   const step = `step "${e.name}"`;
-  if ("times" in e)
-    return runs.length === e.times ? undefined : `${step} ran ${times(runs.length)}, not ${times(e.times)}`;
-  const calls = runs.filter(isCall);
-  const matching = e.input === undefined ? runs : calls.filter((r) => contains(r.input, e.input));
-  if (matching.length > 0 === e.called) return undefined;
-  if (!e.called) return calls.length ? `${step} was called with ${inputs(calls)}` : `${step} ran ${times(runs.length)}`;
-  const tried = records.flatMap((r) =>
-    isCall(r) && r.name === e.name && r.error ? [`${r.error.code ?? r.error.name}: ${r.error.message}`] : [],
-  );
-  return [
+  if ("times" in e) return runs === e.times ? undefined : `${step} ran ${times(runs)}, not ${times(e.times)}`;
+  const matched = e.input === undefined ? runs : calls.filter((r) => contains(r.input, e.input)).length;
+  if (matched > 0 === e.called) return undefined;
+  if (!e.called) return calls.length ? `${step} was called with ${inputs(calls)}` : `${step} ran ${times(runs)}`;
+  return missing(
     e.input === undefined ? `${step} was not called` : `${step} was not called with ${JSON.stringify(e.input)}`,
-    ...(calls.length ? [`its calls had ${inputs(calls)}`] : []),
-    ...(tried.length ? [`attempted: ${tried.join(", ")}`] : []),
-  ].join("; ");
+    tries,
+  );
 }
 
 /** The inputs of the calls, as JSON, for a detail. */
@@ -114,7 +123,7 @@ function driftDetail(
  * for` an approver when an approval for that approver holds it: one the policy asked for on its
  * call, or one that `covers` it. A drift expectation reads the report a finished drift run
  * returned. A step named in the workflow's outline is read by the `name` its records carry
- * (`runsOf`); a record written before steps had names has none.
+ * (its calls made, and `waitsOf`); a record written before steps had names has none.
  */
 export function detailOf(e: CoreExpectation, records: readonly LedgerRecord[]): string | undefined {
   if ("name" in e) return namedDetail(e, records);
@@ -141,13 +150,7 @@ export function detailOf(e: CoreExpectation, records: readonly LedgerRecord[]): 
     const matching = made.filter((r) => e.input === undefined || contains(r.input, e.input));
     if (matching.length > 0 === e.called) return undefined;
     if (!e.called) return `${e.op} was called with ${inputs(matching)}`;
-    const what = e.input === undefined ? e.op : `${e.op} with ${JSON.stringify(e.input)}`;
-    const tried = tries.flatMap(({ error }) => (error ? [`${error.code ?? error.name}: ${error.message}`] : []));
-    return [
-      `no call to ${what}`,
-      ...(made.length ? [`its calls had ${inputs(made)}`] : []),
-      ...(tried.length ? [`attempted: ${tried.join(", ")}`] : []),
-    ].join("; ");
+    return missing(`no call to ${e.input === undefined ? e.op : `${e.op} with ${JSON.stringify(e.input)}`}`, tries);
   }
   // The rest read how the run ended.
   if (!end) return "run not ended";

@@ -230,6 +230,10 @@ const railRunIds = (html: string, filter: string) =>
     .map(([, id]) => id)
     .toSorted();
 
+/** Whether the button labelled `label` says it has its sidebar open (`aria-expanded`), as text. */
+const expanded = (html: string, label: string) =>
+  html.match(new RegExp(`<button[^>]*aria-expanded="(true|false)"[^>]*>(?:(?!</button>).)*?${label}<`))?.[1];
+
 /**
  * Whether the toggle button named `label` is pressed: "true" or "false". Its name may follow an
  * icon and sit in an `sr-only` span; the match stays within the one button.
@@ -905,8 +909,7 @@ describe("the page", () => {
     expect(comfortable.html).toContain('<div id="app">');
     expect(comfortable.html).toMatch(source);
     expect(sidebarState(comfortable.html)).toBe("expanded");
-    expect(comfortable.text).toContain("Collapse sidebar");
-    expect(pressed(comfortable.html, "Compact")).toBeUndefined();
+    expect(expanded(comfortable.html, "Collapse sidebar")).toBe("true");
 
     // Compact: #app marked, Code not pressed and the source's panel hidden with
     // no source in it. The sidebar follows its own cookie.
@@ -919,7 +922,7 @@ describe("the page", () => {
     expect(compact.html).not.toMatch(source);
     expect(compact.html).toMatch(/data-panel[^>]*id="graph-source-code"[^>]*hidden|hidden[^>]*id="graph-source-code"/);
     expect(sidebarState(compact.html)).toBe("collapsed");
-    expect(compact.text).toContain("Expand sidebar");
+    expect(expanded(compact.html, "Expand sidebar")).toBe("false");
   });
 
   it("answers any other path with the app's not-found page", async () => {

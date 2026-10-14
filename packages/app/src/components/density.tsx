@@ -12,7 +12,7 @@ type Density = { compact: boolean; setCompact: (compact: boolean) => void };
 
 const DensityContext = createContext<Density | null>(null);
 
-/** The density, and the setter that changes it and remembers it in the cookie. */
+/** The density, and the setter that changes it and remembers it in the cookie (no button calls it for now). */
 export function useDensity(): Density {
   const density = useContext(DensityContext);
   if (!density) throw new Error("useDensity must be used within a DensityProvider.");

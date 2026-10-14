@@ -111,11 +111,10 @@ function Root() {
             <SidebarInset>
               <header className="flex h-12 shrink-0 items-center gap-2 px-4">
                 {/* On a phone the sidebar is a sheet: this opens it. Elsewhere its own toggle folds it. */}
-                <SidebarTrigger className="-ml-1 md:hidden" />
-                <Separator
-                  orientation="vertical"
-                  className="mr-2 data-vertical:h-4 data-vertical:self-auto md:hidden"
-                />
+                <div className="contents md:hidden">
+                  <SidebarTrigger className="-ml-1" />
+                  <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
+                </div>
                 <Crumbs />
               </header>
               {/* The page column: a page's regions are its children, the region gap apart. */}

@@ -103,11 +103,12 @@ export function AppSidebar() {
  * phone, where the sidebar is a sheet, it closes the sheet.
  */
 function FoldButton() {
-  const { state, isMobile, toggleSidebar } = useSidebar();
-  const label = isMobile || state === "expanded" ? "Collapse sidebar" : "Expand sidebar";
+  const { open, openMobile, isMobile, toggleSidebar } = useSidebar();
+  const expanded = isMobile ? openMobile : open;
+  const label = isMobile || expanded ? "Collapse sidebar" : "Expand sidebar";
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton tooltip={label} onClick={toggleSidebar}>
+      <SidebarMenuButton tooltip={label} aria-expanded={expanded} onClick={toggleSidebar}>
         <PanelLeftIcon />
         <span>{label}</span>
       </SidebarMenuButton>
