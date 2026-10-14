@@ -4,9 +4,9 @@ Workflow automation like Zapier or n8n, where every workflow is code. The person
 
 Status: early. Workflows run on [DBOS](https://dbos.dev) with Postgres: each vendor call is a durable step, approvals and sleeps survive restarts, and a lint keeps workflow code safe to replay. Before every vendor call a policy lets it through, denies it or holds it for an approver, and a ledger records each run: who started it, every call with the policy's decision and the vendor's reply, every approval, and how it ended. Versioning is automatic: each run is stamped with a hash of the workflow code it started on, and only a worker on that version resumes it (`DBOS__APPVERSION` names a version instead; see [Versions](packages/workflows/README.md#versions)). The connectors so far are listed under [Contents](#contents); keeping a company's vendor settings (card limits, time-off policies, access in tools like Mercury, Gusto and Okta) in typed files is where it is headed, not what it does today.
 
-![The app: starting a run of announce from its page, approving its launch copy in the Inbox, then the run's graph and ledger as it finishes](.github/assets/demo.gif)
+![The app: starting a run of announce, approving its launch copy in the Inbox, then the run finishing](.github/assets/demo.gif)
 
-A run of the workflow below: started from its page, approved in the Inbox, then its graph and ledger as it sleeps until launch and publishes. Ghost is answered here by the connector's in-memory fake.
+A run of the workflow below, which waits for approval, sleeps until launch and then publishes. Ghost is answered here by the connector's in-memory fake.
 
 ## What a workflow looks like
 
@@ -37,17 +37,17 @@ export default defineWorkflow({
 
 The app draws this file as a graph before it runs, lists the approval in its Inbox, and shows each run's calls, decisions and replies in its ledger. A developer changes the workflow by changing the file. [`@sanoma/workflows`](packages/workflows/README.md) has the whole API.
 
-![The announce workflow's page: its graph beside the inspector showing ghost.post.publish, above the source of workflows/announce.ts with that call's line marked](.github/assets/workflow.png)
+![The announce workflow's page: its graph, the ghost.post.publish step selected, and the source of workflows/announce.ts](.github/assets/workflow.png)
 
-The workflow's page: the graph drawn from the file, the selected step in the inspector, and the file itself with the step's line marked.
+The workflow's page: the graph is drawn from the file, and picking a step finds its line in the code.
 
-![The Inbox: two "Review launch copy" approvals waiting for marketing-lead, the newest open beside the list](.github/assets/inbox.png)
+![The Inbox with "Review launch copy" approvals waiting for marketing-lead](.github/assets/inbox.png)
 
-The Inbox: the approvals waiting for you, beside the open one, with the draft's link and what approving lets through.
+The Inbox: the approvals waiting for you, with the draft's link and what approving lets through.
 
-![A finished run of announce: its graph coloured step by step, the approval and its note in the inspector, above the ledger with each call, the sleep and Ghost's reply](.github/assets/run.png)
+![A finished run of announce: its graph, the approval and its note, and its ledger with Ghost's reply](.github/assets/run.png)
 
-A finished run: the graph coloured as each step went, the approval and its note in the inspector, and the ledger with each call, the policy's decision and the vendor's reply.
+A finished run and its ledger: each call with the policy's decision and the vendor's reply, and the approval with its note.
 
 ## Contents
 
