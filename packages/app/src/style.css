@@ -156,6 +156,12 @@
   --gap-section: --spacing(3);
 }
 #app[data-density="compact"] {
+  /*
+   * Compact: Tailwind's spacing unit itself, which every padding, margin, gap and height utility
+   * (and the tokens here) is a multiple of, so the whole page tightens at once. Menus, dialogs and
+   * tooltips render outside #app and keep the full unit.
+   */
+  --spacing: 0.1875rem;
   --gap-region: --spacing(3);
   --gap-section: --spacing(2);
 }
