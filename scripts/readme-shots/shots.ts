@@ -134,6 +134,9 @@ try {
   });
   say("stills taken; making demo.gif");
   makeGif(frames, join(captured, "demo.gif"));
+  // ffmpeg blocks the event loop: let a signal that came meanwhile run before the assets change.
+  await new Promise(setImmediate);
+  stopIfInterrupted();
   replaceAssets(captured, ["demo.gif", "workflow.png", "inbox.png", "run.png"]);
   say("wrote .github/assets: demo.gif, workflow.png, inbox.png, run.png");
 } catch (err) {
