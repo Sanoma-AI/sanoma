@@ -7,3 +7,4 @@ GitHub configuration for the repo. Contributing guide, code of conduct and secur
 | Path                                | What it is               |
 | ----------------------------------- | ------------------------ |
 | [`workflows/`](workflows/AGENTS.md) | GitHub Actions workflows |
+| [`assets/`](assets/)                | Images the README shows  |
