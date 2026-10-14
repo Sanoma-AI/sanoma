@@ -22,6 +22,7 @@ import {
 } from "./op.ts";
 import type { Policy } from "./policy.ts";
 import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
+import type { Steps } from "./steps.ts";
 import { computeVersion } from "./version.ts";
 
 /**
@@ -69,6 +70,8 @@ export interface SanomaConfig {
   appName?: never;
   /** @deprecated Gone: the scenarios are `<root>/scenarios/`. Leave it out. */
   scenarios?: never;
+  /** The company's own steps for its scenarios (`defineSteps`), besides those its connectors ship. */
+  steps?: Steps[];
 }
 
 /** A config, checked, with everything a worker, client or app derives from it. */
@@ -98,6 +101,8 @@ export interface ResolvedConfig {
   scenarios?: URL;
   /** The resource types the connectors declare, by `<vendor>.<type>`: what the drift workflow checks and scenarios seed. */
   types: ReadonlyMap<string, Resource>;
+  /** The steps scenarios can use besides the generic ones: each connector's (`withSetup`), once each, then the config's own. */
+  steps: readonly Steps[];
   /**
    * By name; each checked against `ops` and `drivers`. The config's, and the built-in `drift`
    * (`DRIFT_WORKFLOW`) when its connectors declare resource types.
@@ -219,6 +224,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     fakes,
     ...(scenarios && { scenarios }),
     types,
+    steps: [...new Set([...config.connectors.flatMap((c) => setupOf(c).steps ?? []), ...(config.steps ?? [])])],
     workflows: names,
     policy: config.policy,
     ...(ledger !== undefined && { ledger }),

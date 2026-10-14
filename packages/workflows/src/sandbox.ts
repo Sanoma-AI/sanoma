@@ -93,7 +93,7 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
   const { seeds } = await DBOS.runStep(
     async () => {
       // Read in the step, so a recovered run never reads a feature file edited or renamed since.
-      const { scenarios, errors } = loadScenarios(state);
+      const { scenarios, errors } = await loadScenarios(state);
       const scenario = scenarios.find((s) => s.name === name);
       if (!scenario) {
         const why = errors.length ? `; these files did not load: ${errors.map((e) => e.message).join("; ")}` : "";

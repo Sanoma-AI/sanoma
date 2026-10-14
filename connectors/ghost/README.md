@@ -77,6 +77,17 @@ SANOMA_LIVE=1 GHOST_ADMIN_URL=https://example.ghost.io GHOST_ADMIN_API_KEY=<id>:
 
 A recording keeps only the fields the driver reads (no authors or emails), puts every URL on `https://blog.example.test`, and renumbers ids. The error cases only replay; `update-collision.json` was taken by hand from a local Ghost, since a test cannot make Ghost collide on cue.
 
+## Steps and features
+
+The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#steps-a-connector-ships) (`ghostSteps`, attached with `withSetup`), which a company's scenario can use beside the generic steps and other connectors' ones:
+
+| Keyword | Step                                   | What it does                                                                                      |
+| ------- | -------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Given   | `a Ghost draft titled {string}`        | Seeds a draft through `ghost.post.create`, named `draft` (`$draft.id` in an operation's own test) |
+| Then    | `the Ghost post {string} is published` | The post with that title, seeded or created by the run, was published                             |
+
+`features/post.feature` creates and publishes posts, with these steps and the generic ones for an operation's own test, on the fake and on Ghost's recorded replies (`create.json`, `publish-draft.json` and `publish-again.json`): `test/features.test.ts` runs them with [`describeFeatures`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#a-connectors-own-features). A scenario tagged `@fake-only` has no recording. The package ships `features/`.
+
 ## Testing
 
 `@sanoma/connector-ghost/fake` is an in-memory Ghost, the fake the connector carries: each sandbox run makes one of its own. A test that reads or seeds one attaches it to the connector itself, then checks `state.posts` and `calls`.

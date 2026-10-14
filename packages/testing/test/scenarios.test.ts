@@ -16,7 +16,7 @@ import { config } from "./fixtures/config.ts";
 const databaseUrl = testDatabaseUrl("testing_scenarios");
 
 // What a company repo's test/scenarios.test.ts holds: a test per scenario in fixtures/scenarios/.
-describeScenarios(config, { databaseUrl });
+await describeScenarios(config, { databaseUrl });
 
 describe("runScenario", () => {
   // The worker is describeScenarios'; this client shares its database and ledger.
@@ -26,11 +26,12 @@ describe("runScenario", () => {
     client = await SanomaClient.connect(shared);
   });
   afterAll(() => client?.close());
-  const scenario = (name: string) => loadScenarios(resolveConfig(shared)).scenarios.find((s) => s.name === name)!;
+  const scope = resolveConfig(shared);
+  const scenario = async (name: string) => (await loadScenarios(scope)).scenarios.find((s) => s.name === name)!;
 
   it("runs the scenario in a sandbox and returns its run id, run, ledger and checks", async () => {
-    const launch = scenario("Launch on time");
-    const { runId, run, ledger, checks } = await runScenario(launch, { client });
+    const launch = await scenario("Launch on time");
+    const { runId, run, ledger, checks } = await runScenario(launch, { client, scope });
     expect(run).toMatchObject({ runId, status: "finished", sandbox: "Launch on time", startedBy: { id: "scenarios" } });
     expect(ledger.map((r) => r.type)).toContain("scenario.seeded");
     expect(ledger.every((r) => r.runId === runId)).toBe(true);
@@ -39,10 +40,10 @@ describe("runScenario", () => {
 });
 
 describe("describeScenarios", () => {
-  it("throws, naming the root, when it has no scenarios/", () => {
+  it("throws, naming the root, when it has no scenarios/", async () => {
     const root = mkdtempSync(join(tmpdir(), "sanoma-testing-none-"));
     try {
-      expect(() => describeScenarios({ ...config, root }, { databaseUrl })).toThrow(
+      await expect(describeScenarios({ ...config, root }, { databaseUrl })).rejects.toThrow(
         `describeScenarios found no \`scenarios/\` in ${root}`,
       );
     } finally {
@@ -50,11 +51,11 @@ describe("describeScenarios", () => {
     }
   });
 
-  it("throws, naming the directory, when its scenarios/ holds no feature files", () => {
+  it("throws, naming the directory, when its scenarios/ holds no feature files", async () => {
     const root = mkdtempSync(join(tmpdir(), "sanoma-testing-empty-"));
     mkdirSync(join(root, "scenarios"));
     try {
-      expect(() => describeScenarios({ ...config, root }, { databaseUrl })).toThrow(
+      await expect(describeScenarios({ ...config, root }, { databaseUrl })).rejects.toThrow(
         `describeScenarios found no scenarios in ${join(root, "scenarios")}/`,
       );
     } finally {

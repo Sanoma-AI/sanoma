@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { bluesky } from "@sanoma/connector-bluesky";
 import { ghost } from "@sanoma/connector-ghost";
 import { resend } from "@sanoma/connector-resend";
@@ -12,13 +12,15 @@ import {
   allowAll,
   defineConnector,
   defineResource,
+  defineSteps,
   defineWorkflow,
   type LedgerRecord,
   memoryLedger,
   resolveConfig,
 } from "../src/index.ts";
 import { missingResourceFake, seedResource } from "../src/sandbox.ts";
-import { check, loadScenarios, parseFeature, type Scenario, type Scope } from "../src/scenario.ts";
+import { type CoreExpectation, detailOf } from "../src/expectations.ts";
+import { check as checkRun, loadScenarios, type Scenario, type Scope } from "../src/scenario.ts";
 import announce from "./fixtures/announce.ts";
 import { companyConfig } from "./fixtures/company/fakes.ts";
 import inspect from "./fixtures/company/workflows/inspect.ts";
@@ -35,16 +37,50 @@ const scopeOf = (connectors: Parameters<typeof resolveConfig>[0]["connectors"]) 
   return resolved satisfies Scope;
 };
 const scope = scopeOf([ghost, resend, bluesky]);
+
+const dirs: string[] = [];
+afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+
+/** A directory of its own with these files, and the scope that reads its scenarios. */
+function scenariosDir(files: Record<string, string>, s: Scope = scope) {
+  const dir = mkdtempSync(join(tmpdir(), "sanoma-feature-"));
+  dirs.push(dir);
+  for (const [file, text] of Object.entries(files)) {
+    mkdirSync(join(dir, file, ".."), { recursive: true });
+    writeFileSync(join(dir, file), text);
+  }
+  return { dir, scope: { ...s, scenarios: pathToFileURL(`${dir}/`) } };
+}
+
+/** Compiles the text as `file` in a directory of its own: that directory's scope, its scenarios and errors. */
+async function compiled(text: string, s: Scope = scope, file = "x.feature") {
+  const within = scenariosDir({ [file]: text }, s).scope;
+  return { scope: within, ...(await loadScenarios(within)) };
+}
+
+/** The scenarios of one feature file with this text; throws the file's error. */
+async function parseFeature(text: string, file: string, s: Scope): Promise<Scenario[]> {
+  const { scenarios, errors } = await compiled(text, s, file);
+  if (errors.length) throw new Error(errors.map((e) => e.message).join("\n"));
+  return scenarios;
+}
 const parse = (text: string, file = "announce.feature") => parseFeature(text, file, scope);
-/** What parsing throws, as its message. */
-const thrown = (text: string, s: Scope = scope) => {
+/** What compiling throws, as its message. */
+const thrown = async (text: string, s: Scope = scope) => {
   try {
-    parseFeature(text, "x.feature", s);
+    await parseFeature(text, "x.feature", s);
   } catch (err) {
     return (err as Error).message;
   }
   throw new Error("expected parseFeature to throw");
 };
+
+/** Each expectation of the scenario checked against the records, as its `Then` step checks it. */
+const check = (s: Scenario, records: readonly LedgerRecord[]) =>
+  s.expect.map((e) => {
+    const detail = detailOf(e as CoreExpectation, records);
+    return detail === undefined ? { step: e.step, ok: true } : { step: e.step, ok: false, detail };
+  });
 
 /** A feature with one scenario that runs tally with these table rows. */
 const tallyWith = (rows: string) => `Feature: T\n  Scenario: S\n    When tally runs with\n${rows}`;
@@ -59,6 +95,7 @@ const drifting = (steps: string) => `Feature: A\n  Scenario: S\n${steps}    When
 const expecting = (expectations: Scenario["expect"]): Scenario => ({
   name: "S",
   file: "s.feature",
+  line: 1,
   workflow: "announce",
   text: "",
   steps: [],
@@ -91,8 +128,8 @@ const LAUNCH = `Feature: Announce
 `;
 
 describe("parseFeature", () => {
-  it("gives each scenario its own lines of the file as its text, tables and examples included", () => {
-    const [tabled, second, outline] = parse(`Feature: Announce
+  it("gives each scenario its own lines of the file as its text, tables and examples included", async () => {
+    const [tabled, second, outline] = await parse(`Feature: Announce
   Some words about it.
 
   Scenario: Tabled
@@ -123,8 +160,8 @@ describe("parseFeature", () => {
     });
   });
 
-  it("reads the generic steps and the connectors' phrases into a scenario", () => {
-    const [scenario, ...rest] = parse(LAUNCH);
+  it("reads the generic steps and the connectors' phrases into a scenario", async () => {
+    const [scenario, ...rest] = await parse(LAUNCH);
     expect(rest).toEqual([]);
     expect(scenario).toMatchObject({
       name: "Launch on time",
@@ -189,8 +226,8 @@ describe("parseFeature", () => {
     expect(scenario!.steps[0]).not.toHaveProperty("fault");
   });
 
-  it("reads a workflow's input from a two-column table", () => {
-    const [scenario] = parse(`Feature: Announce
+  it("reads a workflow's input from a two-column table", async () => {
+    const [scenario] = await parse(`Feature: Announce
   Scenario: Table
     When announce runs with
       | title    | Table launch         |
@@ -213,18 +250,18 @@ describe("parseFeature", () => {
     ]);
   });
 
-  it("makes up the same complete input for one scenario name, every time", () => {
-    const [once] = parse(feature("Made up"));
-    const [again] = parse(feature("Made up"));
-    const [other] = parse(feature("Made up too"));
+  it("makes up the same complete input for one scenario name, every time", async () => {
+    const [once] = await parse(feature("Made up"));
+    const [again] = await parse(feature("Made up"));
+    const [other] = await parse(feature("Made up too"));
     expect(once?.input).toEqual(again?.input);
     expect(once?.input).not.toEqual(other?.input);
     expect(announce.input.safeParse(once?.input).success).toBe(true);
     expect(Object.keys(once?.input as object).toSorted()).toEqual(["audience", "body", "launchAt", "title"]);
   });
 
-  it("makes one scenario per row of a Scenario Outline's examples", () => {
-    const scenarios = parse(`Feature: Announce
+  it("makes one scenario per row of a Scenario Outline's examples", async () => {
+    const scenarios = await parse(`Feature: Announce
   Scenario Outline: Launch <title>
     When announce runs with
       """
@@ -243,8 +280,8 @@ describe("parseFeature", () => {
     ]);
   });
 
-  it("tells apart the rows of a Scenario Outline whose names are the same by their line", () => {
-    const scenarios = parse(`Feature: Announce
+  it("tells apart the rows of a Scenario Outline whose names are the same by their line", async () => {
+    const scenarios = await parse(`Feature: Announce
   Scenario Outline: Launch
     When announce runs with
       | title | <title> |
@@ -257,8 +294,8 @@ describe("parseFeature", () => {
     expect(scenarios.map((s) => s.name)).toEqual(["Launch (line 8)", "Launch (line 9)"]);
   });
 
-  it("reads a seed and an expected call from a two-column table, as from a doc string", () => {
-    const [scenario] = parse(`Feature: Announce
+  it("reads a seed and an expected call from a two-column table, as from a doc string", async () => {
+    const [scenario] = await parse(`Feature: Announce
   Scenario: Tables
     Given ghost.post.create was called with
       | title | Old news |
@@ -277,12 +314,12 @@ describe("parseFeature", () => {
     ]);
   });
 
-  it("refuses a feature file with no scenarios", () => {
-    expect(thrown("Feature: Empty\n")).toBe('x.feature: no scenarios; add one with "Scenario: <name>"');
+  it("refuses a feature file with no scenarios", async () => {
+    expect(await thrown("Feature: Empty\n")).toBe('x.feature: no scenarios; add one with "Scenario: <name>"');
   });
 
-  it("names the file and line of a step nothing matches, and lists the steps it knows, phrases under their operation", () => {
-    const message = thrown(`Feature: Announce
+  it("names the file and line of a step nothing matches, and lists the steps it knows, phrases under their operation", async () => {
+    const message = await thrown(`Feature: Announce
   Scenario: Moon
     When announce runs
     Then the moon is out
@@ -296,16 +333,18 @@ describe("parseFeature", () => {
     expect(message).toContain("  bluesky.post.create:\n    Then {text} is posted to Bluesky");
   });
 
-  it("names an unknown operation or workflow, and the ones the config has", () => {
-    expect(thrown(`Feature: A\n  Scenario: S\n    Given ghost.post.burn fails once\n    When announce runs\n`)).toMatch(
+  it("names an unknown operation or workflow, and the ones the config has", async () => {
+    expect(
+      await thrown(`Feature: A\n  Scenario: S\n    Given ghost.post.burn fails once\n    When announce runs\n`),
+    ).toMatch(
       /^x\.feature:3: no operation "ghost\.post\.burn"; the config has bluesky\.post\.create, ghost\.post\.create, /,
     );
-    expect(thrown(`Feature: A\n  Scenario: S\n    When refund runs\n`)).toBe(
+    expect(await thrown(`Feature: A\n  Scenario: S\n    When refund runs\n`)).toBe(
       'x.feature:3: no workflow "refund"; the config has announce',
     );
   });
 
-  it("refuses a step two rules match", () => {
+  it("refuses a step two rules match", async () => {
     const flaky = defineConnector("flaky", {
       thing: {
         poke: {
@@ -316,7 +355,7 @@ describe("parseFeature", () => {
         },
       },
     });
-    const message = thrown(
+    const message = await thrown(
       `Feature: A\n  Scenario: S\n    Given ghost.post.publish fails once\n    When announce runs\n`,
       scopeOf([ghost, resend, bluesky, flaky]),
     );
@@ -336,8 +375,8 @@ describe("parseFeature", () => {
     });
     const tallyScope = { ...scope, workflows: new Map([["tally", tally]]) };
 
-    it("takes a cell as text when its field takes text, else as JSON", () => {
-      const [scenario] = parseFeature(
+    it("takes a cell as text when its field takes text, else as JSON", async () => {
+      const [scenario] = await parseFeature(
         tallyWith(`      | title | 123 |\n      | count | 5 |\n      | loud | true |\n      | tags | ["a", "b"] |\n`),
         "x.feature",
         tallyScope,
@@ -345,21 +384,21 @@ describe("parseFeature", () => {
       expect(scenario?.input).toEqual({ title: "123", count: 5, loud: true, tags: ["a", "b"] });
     });
 
-    it("refuses a value its field does not take, naming the field", () => {
-      expect(thrown(tallyWith(`      | loud | yes |\n`), tallyScope)).toMatch(
+    it("refuses a value its field does not take, naming the field", async () => {
+      expect(await thrown(tallyWith(`      | loud | yes |\n`), tallyScope)).toMatch(
         /^x\.feature:3: loud in tally's input cannot be "yes": /,
       );
-      expect(thrown(tallyWith(`      | count | many |\n`), tallyScope)).toMatch(
+      expect(await thrown(tallyWith(`      | count | many |\n`), tallyScope)).toMatch(
         /^x\.feature:3: count in tally's input cannot be "many": /,
       );
     });
 
-    it("refuses a field the input does not have, in a table and in a doc string, naming those it has", () => {
-      expect(thrown(tallyWith(`      | titel | Launch |\n`), tallyScope)).toBe(
+    it("refuses a field the input does not have, in a table and in a doc string, naming those it has", async () => {
+      expect(await thrown(tallyWith(`      | titel | Launch |\n`), tallyScope)).toBe(
         'x.feature:3: no field "titel" in tally\'s input; it has title, count, loud, tags',
       );
       expect(
-        thrown(`Feature: A
+        await thrown(`Feature: A
   Scenario: S
     When announce runs
     Then ghost.post.create was called with
@@ -370,9 +409,9 @@ describe("parseFeature", () => {
       ).toBe('x.feature:4: no field "titel" in ghost.post.create\'s input; it has title, html, status');
     });
 
-    it("checks each field of a doc string against its schema", () => {
+    it("checks each field of a doc string against its schema", async () => {
       expect(
-        thrown(`Feature: A
+        await thrown(`Feature: A
   Scenario: S
     Given ghost.post.create was called with
       """
@@ -383,7 +422,7 @@ describe("parseFeature", () => {
       ).toMatch(/^x\.feature:3: title in ghost\.post\.create's input cannot be 7: /);
     });
 
-    it("reads a phrase's field as its own type, even one named like a built-in type", () => {
+    it("reads a phrase's field as its own type, even one named like a built-in type", async () => {
       const runs = defineConnector("runs", {
         run: {
           start: {
@@ -394,7 +433,7 @@ describe("parseFeature", () => {
           },
         },
       });
-      const [scenario] = parseFeature(
+      const [scenario] = await parseFeature(
         `Feature: A\n  Scenario: S\n    Given a run of "refund all" with 3 tries exists\n    When announce runs\n`,
         "x.feature",
         scopeOf([ghost, resend, bluesky, runs]),
@@ -409,7 +448,7 @@ describe("parseFeature", () => {
     });
   });
 
-  it("refuses a phrase naming a field its operation's input does not have", () => {
+  it("refuses a phrase naming a field its operation's input does not have", async () => {
     const odd = defineConnector("odd", {
       thing: {
         poke: {
@@ -420,20 +459,22 @@ describe("parseFeature", () => {
         },
       },
     });
-    expect(() => parseFeature("Feature: A\n", "x.feature", scopeOf([ghost, resend, bluesky, odd]))).toThrow(
+    await expect(parseFeature("Feature: A\n", "x.feature", scopeOf([ghost, resend, bluesky, odd]))).rejects.toThrow(
       'odd.thing.poke: its given phrase "{nope} poked" names {nope}, which is not a field of its input',
     );
   });
 
-  it("refuses a scenario with no When, a second When, and a doc string that is not JSON", () => {
-    expect(thrown(`Feature: A\n  Scenario: Idle\n    Then the run succeeds\n`)).toMatch(
+  it("refuses a scenario with no When, a second When, and a doc string that is not JSON", async () => {
+    expect(await thrown(`Feature: A\n  Scenario: Idle\n    Then the run succeeds\n`)).toMatch(
       /^x\.feature:2: scenario "Idle" has no When/,
     );
-    expect(thrown(`Feature: A\n  Scenario: Twice\n    When announce runs\n    And announce runs\n`)).toBe(
+    expect(await thrown(`Feature: A\n  Scenario: Twice\n    When announce runs\n    And announce runs\n`)).toBe(
       "x.feature:4: a second When: a scenario runs its workflow once",
     );
     expect(
-      thrown(`Feature: A\n  Scenario: Bad\n    When announce runs with\n      """\n      { title: 1 }\n      """\n`),
+      await thrown(
+        `Feature: A\n  Scenario: Bad\n    When announce runs with\n      """\n      { title: 1 }\n      """\n`,
+      ),
     ).toMatch(/^x\.feature:3: the doc string after "announce runs with" is not JSON: /);
   });
 });
@@ -442,11 +483,11 @@ describe("loadScenarios", () => {
   const dir = mkdtempSync(join(tmpdir(), "sanoma-scenarios-"));
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-  it("loads every feature file, and refuses a name used twice across files", () => {
+  it("loads every feature file, and refuses a name used twice across files", async () => {
     writeFileSync(join(dir, "a.feature"), feature("Same"));
     writeFileSync(join(dir, "b.feature"), `${feature("Same")}\n  Scenario: Other\n    When announce runs\n`);
     writeFileSync(join(dir, "c.feature"), "Feature: A\n  Scenario: Broken\n    Then nothing\n");
-    const { scenarios, errors } = loadScenarios({ ...scope, scenarios: pathToFileURL(`${dir}/`) });
+    const { scenarios, errors } = await loadScenarios({ ...scope, scenarios: pathToFileURL(`${dir}/`) });
     expect(scenarios.map((s) => [s.file, s.name])).toEqual([
       ["a.feature", "Same"],
       ["b.feature", "Other"],
@@ -457,30 +498,30 @@ describe("loadScenarios", () => {
     ]);
   });
 
-  it("parses the files again only once one has changed", () => {
+  it("compiles the files again only once one has changed", async () => {
     const sub = join(dir, "cached");
     mkdirSync(sub);
     writeFileSync(join(sub, "a.feature"), feature("First"));
     const cachedScope = { ...scope, scenarios: pathToFileURL(`${sub}/`) };
-    const first = loadScenarios(cachedScope);
-    expect(loadScenarios(cachedScope)).toBe(first);
+    const first = await loadScenarios(cachedScope);
+    expect(await loadScenarios(cachedScope)).toBe(first);
 
     // Written again, longer, so the stamp changes even where the clock is coarse.
     writeFileSync(join(sub, "a.feature"), feature("First, renamed"));
-    const second = loadScenarios(cachedScope);
+    const second = await loadScenarios(cachedScope);
     expect(second).not.toBe(first);
     expect(second.scenarios.map((s) => s.name)).toEqual(["First, renamed"]);
 
     writeFileSync(join(sub, "b.feature"), feature("Second"));
-    expect(loadScenarios(cachedScope).scenarios.map((s) => s.name)).toEqual(["First, renamed", "Second"]);
+    expect((await loadScenarios(cachedScope)).scenarios.map((s) => s.name)).toEqual(["First, renamed", "Second"]);
   });
 
-  it("finds no scenarios, and no errors, without a directory", () => {
-    expect(loadScenarios({ ...scope, scenarios: pathToFileURL(join(dir, "missing/")) })).toEqual({
+  it("finds no scenarios, and no errors, without a directory", async () => {
+    expect(await loadScenarios({ ...scope, scenarios: pathToFileURL(join(dir, "missing/")) })).toEqual({
       scenarios: [],
       errors: [],
     });
-    expect(loadScenarios(scope)).toEqual({ scenarios: [], errors: [] });
+    expect(await loadScenarios(scope)).toEqual({ scenarios: [], errors: [] });
   });
 });
 
@@ -512,7 +553,7 @@ describe("check", () => {
     error: { code: "approval_rejected", name: "RejectedError", message: "no" },
   };
 
-  it("matches an operation's input as a subset, at every depth", () => {
+  it("matches an operation's input as a subset, at every depth", async () => {
     const checks = check(
       expecting([
         { step: "title", op: "ghost.post.create", input: { title: "Acme Pro", meta: { tags: ["a"] } }, called: true },
@@ -534,7 +575,7 @@ describe("check", () => {
     ]);
   });
 
-  it("passes `was not called` only when there is no call", () => {
+  it("passes `was not called` only when there is no call", async () => {
     const checks = check(
       expecting([
         { step: "publish", op: "ghost.post.publish", called: false },
@@ -553,7 +594,7 @@ describe("check", () => {
     ]);
   });
 
-  it("counts a call that failed (denied, rejected, or failed at the vendor) as attempted, not made", () => {
+  it("counts a call that failed (denied, rejected, or failed at the vendor) as attempted, not made", async () => {
     const records = [
       attempted(1, "ghost.post.publish", { code: "policy_denied", name: "PolicyDeniedError", message: "not today" }),
       attempted(2, "resend.broadcast.send", {
@@ -585,7 +626,7 @@ describe("check", () => {
     ]);
   });
 
-  it("reads the outcome from the run's last record: finished, failed with a code, or not ended", () => {
+  it("reads the outcome from the run's last record: finished, failed with a code, or not ended", async () => {
     const outcomes = expecting([
       { step: "succeeds", outcome: "finished" },
       { step: "fails", outcome: "failed" },
@@ -633,8 +674,8 @@ describe("resources and policy outcomes", () => {
     And stripe.product.import was held for finance
 `;
 
-  it("reads a resource to put or remove, a drift result, and a denial or a hold into a scenario", () => {
-    const [drift] = parseCompany(DRIFT);
+  it("reads a resource to put or remove, a drift result, and a denial or a hold into a scenario", async () => {
+    const [drift] = await parseCompany(DRIFT);
     expect(drift).toMatchObject({
       workflow: "drift",
       given: [
@@ -665,7 +706,7 @@ describe("resources and policy outcomes", () => {
     // A step about a resource names no operation.
     expect(drift!.steps.map((s) => s.op)).toEqual(Array(6).fill(undefined));
 
-    const [held] = parseCompany(INSPECT);
+    const [held] = await parseCompany(INSPECT);
     expect(held).toMatchObject({
       workflow: "inspect",
       expect: [
@@ -690,8 +731,8 @@ describe("resources and policy outcomes", () => {
     ]);
   });
 
-  it("refuses a resource seed of a vendor whose fake holds no resources", () => {
-    const [drift] = parseCompany(DRIFT);
+  it("refuses a resource seed of a vendor whose fake holds no resources", async () => {
+    const [drift] = await parseCompany(DRIFT);
     expect(missingResourceFake(drift!, made(company.fakes))).toBeUndefined();
     // A resource type whose fake is a plain `defineFake`, with no `override`, `put` or `remove`.
     const hook = defineResource({
@@ -721,7 +762,7 @@ describe("resources and policy outcomes", () => {
       policy: allowAll,
       ledger: memoryLedger(),
     });
-    const [seeded] = parseFeature(
+    const [seeded] = await parseFeature(
       `Feature: Ping\n  Scenario: Seeded\n    Given acme.hook "deploys" has\n      | url | https://example.com |\n    And acme.hook "other" is gone\n    When ping runs\n`,
       "ping.feature",
       resolved,
@@ -738,8 +779,8 @@ describe("resources and policy outcomes", () => {
     );
   });
 
-  it("seeds a resource on the copy as the step says, and fails the scenario, naming the step, when the fake refuses it", () => {
-    const [drift] = parseCompany(DRIFT);
+  it("seeds a resource on the copy as the step says, and fails the scenario, naming the step, when the fake refuses it", async () => {
+    const [drift] = await parseCompany(DRIFT);
     const [has, gone] = drift!.given as Extract<Scenario["given"][number], { resource: string }>[];
     const done: unknown[] = [];
     const copy = {
@@ -777,18 +818,18 @@ describe("resources and policy outcomes", () => {
     });
   });
 
-  it("names an unknown resource type, field or value, and a drift result in a scenario that does not run drift", () => {
-    expect(thrown(drifting('    Given github.gist "x" is gone\n'), company)).toBe(
+  it("names an unknown resource type, field or value, and a drift result in a scenario that does not run drift", async () => {
+    expect(await thrown(drifting('    Given github.gist "x" is gone\n'), company)).toBe(
       'x.feature:3: no resource type "github.gist"; the config has github.branch_protection, github.repository, github.team_membership, stripe.product, stripe.webhook_endpoint',
     );
-    expect(thrown(drifting('    Given github.repository "x" has\n      | nope | 1 |\n'), company)).toMatch(
+    expect(await thrown(drifting('    Given github.repository "x" has\n      | nope | 1 |\n'), company)).toMatch(
       /^x\.feature:3: no field "nope" in github\.repository "x"; it has allow_auto_merge, /,
     );
-    expect(thrown(drifting('    Given github.repository "x" has\n      | has_wiki | yes |\n'), company)).toMatch(
+    expect(await thrown(drifting('    Given github.repository "x" has\n      | has_wiki | yes |\n'), company)).toMatch(
       /^x\.feature:3: has_wiki in github\.repository "x" cannot be "yes": /,
     );
     expect(
-      thrown(
+      await thrown(
         `Feature: A\n  Scenario: S\n    When inspect runs\n    Then resources/identity/github.ts#website is clean\n`,
         company,
       ),
@@ -846,7 +887,7 @@ describe("resources and policy outcomes", () => {
       check(expecting(expectations), over).map((c) => c.detail);
     const ended = (end: LedgerRecord) => [...records, end];
 
-    it("passes a denial and a hold, and says what the policy decided instead", () => {
+    it("passes a denial and a hold, and says what the policy decided instead", async () => {
       expect(
         details([
           { step: "denied", op: "github.branch_protection.import", decision: "denied" },
@@ -879,7 +920,7 @@ describe("resources and policy outcomes", () => {
       ]);
     });
 
-    it("reads a drift result from the report the run returned, and says how the resource was found instead", () => {
+    it("reads a drift result from the report the run returned, and says how the resource was found instead", async () => {
       const report = {
         startedAt: 0,
         finishedAt: 1,
@@ -959,6 +1000,178 @@ describe("resources and policy outcomes", () => {
       };
       expect(details(results.slice(0, 1), ended(failed))).toEqual(["the run failed: no"]);
       expect(details(results.slice(0, 1))).toEqual(["run not ended"]);
+    });
+  });
+});
+
+describe("Cucumber", () => {
+  it("builds its library again in one process: another config compiles the same scenarios", async () => {
+    const first = await compiled(LAUNCH);
+    // A config resolved again has its own operations, so its library is built anew.
+    const again = await compiled(LAUNCH, scopeOf([ghost, resend, bluesky]));
+    expect(again.scope.ops).not.toBe(first.scope.ops);
+    expect(first.errors).toEqual([]);
+    expect(first.scenarios).toHaveLength(1);
+    expect(again.scenarios).toEqual(first.scenarios);
+  });
+
+  it("names the file and line where Gherkin cannot parse a file, and leaves it out, the others compiling", async () => {
+    expect(await thrown(`Feature: A\n  Scenario: S\n    When announce runs\n  Feature: B\n`)).toMatch(
+      /^x\.feature:4: \(4:3\): expected: /,
+    );
+    const both = await loadScenarios(
+      scenariosDir({
+        "a.feature": "Feature: A\n  Scenario: S\n    When announce runs\n  Feature: B\n",
+        "b.feature": feature("Fine"),
+      }).scope,
+    );
+    expect(both.scenarios.map((s) => s.name)).toEqual(["Fine"]);
+    expect(both.errors.map((e) => e.file)).toEqual(["a.feature"]);
+  });
+
+  it("reads and checks files whose paths a glob or Cucumber would read otherwise: @, brackets, braces", async () => {
+    const files = {
+      "@smoke.feature": feature("Smoke"),
+      "x[1].feature": feature("Bracketed"),
+      "d[1]{a,b}/in (2).feature": feature("Nested"),
+    };
+    const { scope: within } = scenariosDir(files);
+    const { scenarios, errors } = await loadScenarios(within);
+    expect(errors).toEqual([]);
+    expect(scenarios.map((s) => [s.file, s.name])).toEqual([
+      ["@smoke.feature", "Smoke"],
+      ["d[1]{a,b}/in (2).feature", "Nested"],
+      ["x[1].feature", "Bracketed"],
+    ]);
+    for (const s of scenarios) expect(await checkRun(within, s, [])).toEqual([]);
+  });
+
+  it("reads the connectors' steps: a seed named for an operation's own test, and a Then of the connector's own", async () => {
+    const text = readFileSync(new URL("./fixtures/scenarios/compose.feature", import.meta.url), "utf8");
+    const [scenario] = await parse(text, "compose.feature");
+    expect(scenario?.given).toMatchObject([
+      { step: 'a Ghost draft titled "Old news"', op: "ghost.post.create", input: { title: "Old news" }, as: "draft" },
+      { step: "Resend fails to send once", op: "resend.broadcast.send", fault: "failNext" },
+    ]);
+    expect(scenario?.expect).toEqual([
+      { step: 'the Ghost post "Acme Pro" is published', custom: true, op: "ghost.post.publish", called: true },
+      { step: "bluesky.post.create was not called", op: "bluesky.post.create", called: false },
+      { step: "the run fails", outcome: "failed" },
+    ]);
+    expect(scenario?.steps.map((s) => [s.kind, s.op, s.called, s.fault])).toEqual([
+      ["given", "ghost.post.create", undefined, undefined],
+      ["given", "resend.broadcast.send", undefined, true],
+      ["when", undefined, undefined, undefined],
+      ["when", undefined, undefined, undefined],
+      ["then", "ghost.post.publish", true, undefined],
+      ["then", "bluesky.post.create", false, undefined],
+      ["then", undefined, undefined, undefined],
+    ]);
+  });
+
+  it("refuses an operation's own test step in a scenario of a workflow", async () => {
+    expect(
+      await thrown(`Feature: A\n  Scenario: S\n    When ghost.post.publish is called with\n      | id | p |\n`),
+    ).toBe(
+      "x.feature:3: \"ghost.post.publish is called with\" calls ghost.post.publish directly: a step for an operation's own test, in its connector's features",
+    );
+  });
+
+  describe("checking a run", () => {
+    const common = { v: 1, app: "a", runId: "r", at: 0, actor: { id: "alice" }, workflow: "announce" } as const;
+    const records: LedgerRecord[] = [
+      {
+        ...common,
+        id: "r:op.called:1",
+        seq: 1,
+        type: "op.called",
+        op: "ghost.post.create",
+        effect: "write",
+        input: { title: "Acme Pro", html: "x", status: "draft" },
+        output: { id: "post_0002" },
+        decision: { kind: "allow" },
+        durationMs: 1,
+      },
+      { ...common, id: "r:run.finished:2", seq: 2, type: "run.finished", output: {} },
+    ];
+
+    it("runs the Then steps against the ledger, each judged on its own: one check per expectation, in order", async () => {
+      const { scope: within, scenarios } = await compiled(LAUNCH);
+      const [launch] = scenarios as [Scenario];
+      const checks = await checkRun(within, launch, records);
+      expect(checks.map((c) => c.step)).toEqual(launch.expect.map((e) => e.step));
+      expect(checks.slice(0, 2)).toEqual([
+        { step: 'a post titled "Acme Pro" is created', ok: true },
+        { step: "ghost.post.publish was called", ok: false, detail: "no call to ghost.post.publish" },
+      ]);
+      // A step after one that does not hold is still checked.
+      expect(checks.at(-1)).toEqual({ step: "the run succeeds", ok: true });
+    });
+
+    it("checks a connector's own Then step, and one whose code throws", async () => {
+      const throwing = defineSteps("odd", ({ then }) => {
+        then("the odd check throws", () => ({
+          check: () => {
+            throw new Error("it threw");
+          },
+        }));
+      });
+      const text = `Feature: A\n  Scenario: S\n    When announce runs\n    Then the odd check throws\n    And the Ghost post "Acme Pro" is published\n    And the run succeeds\n`;
+      const { scope: within, scenarios } = await compiled(text, { ...scope, steps: [...scope.steps, throwing] });
+      expect(await checkRun(within, scenarios[0]!, records)).toEqual([
+        { step: "the odd check throws", ok: false, detail: "it threw" },
+        {
+          step: 'the Ghost post "Acme Pro" is published',
+          ok: false,
+          detail: expect.stringMatching(/was not published$/),
+        },
+        { step: "the run succeeds", ok: true },
+      ]);
+    });
+
+    it("checks one row of a Scenario Outline, and tells a Given from a Then that reads the same", async () => {
+      const text = `Feature: A
+  Scenario Outline: Launch
+    Given ghost.post.create was called with
+      | title | Acme Pro |
+    When announce runs
+    Then ghost.post.create was called with
+      | title | <title> |
+
+    Examples:
+      | title    |
+      | Other    |
+      | Acme Pro |
+`;
+      const { scope: within, scenarios } = await compiled(text);
+      expect(scenarios.map((s) => [s.name, s.line])).toEqual([
+        ["Launch (line 11)", 11],
+        ["Launch (line 12)", 12],
+      ]);
+      const [other, acme] = scenarios as [Scenario, Scenario];
+      expect(await checkRun(within, other, records)).toEqual([
+        {
+          step: "ghost.post.create was called with",
+          ok: false,
+          detail: expect.stringMatching(/^no call to ghost\.post\.create with \{"title":"Other"\}/),
+        },
+      ]);
+      expect(await checkRun(within, acme, records)).toEqual([{ step: "ghost.post.create was called with", ok: true }]);
+    });
+
+    it("passes a scenario whose every Then holds, and reads the feature file as it is now", async () => {
+      const text = `Feature: A\n  Scenario: S\n    When announce runs\n    Then a post titled "Acme Pro" is created\n    And the run succeeds\n`;
+      const { scope: within, scenarios } = await compiled(text);
+      const [s] = scenarios as [Scenario];
+      expect(await checkRun(within, s, records)).toEqual([
+        { step: 'a post titled "Acme Pro" is created', ok: true },
+        { step: "the run succeeds", ok: true },
+      ]);
+      // The step is gone from the file: the scenario must be loaded again.
+      writeFileSync(join(fileURLToPath(within.scenarios), "x.feature"), text.replace("    And the run succeeds\n", ""));
+      await expect(checkRun(within, s, records)).rejects.toThrow(
+        'x.feature:2: scenario "S" no longer has the expectations it was read with',
+      );
     });
   });
 });

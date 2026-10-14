@@ -77,6 +77,17 @@ SANOMA_LIVE=1 BLUESKY_IDENTIFIER=you.bsky.social BLUESKY_APP_PASSWORD=xxxx-xxxx-
 
 A recording keeps only the session fields the driver reads, and the account's DID, handle, email, tokens, PDS and `BLUESKY_SERVICE` hosts, CIDs and record keys are replaced with placeholders. The error cases only replay.
 
+## Steps and features
+
+The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#steps-a-connector-ships) (`blueskySteps`, attached with `withSetup`), which a company's scenario can use beside the generic steps and other connectors' ones:
+
+| Keyword | Step                               | What it does                                      |
+| ------- | ---------------------------------- | ------------------------------------------------- |
+| Given   | `Bluesky fails to post once`       | The next `bluesky.post.create` fails (`failNext`) |
+| Then    | `Bluesky has a post with {string}` | A post the run made has that text in it           |
+
+`features/post.feature` posts once and twice, with these steps and the generic ones for an operation's own test, on the fake and on Bluesky's recorded replies (`post.json` and `two-posts.json`): `test/features.test.ts` runs them with [`describeFeatures`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#a-connectors-own-features). A scenario tagged `@fake-only` has no recording. The package ships `features/`.
+
 ## Testing
 
 `@sanoma/connector-bluesky/fake` is an in-memory Bluesky that posts nowhere, the fake the connector carries: each sandbox run makes one of its own. A test that reads or seeds one attaches it to the connector itself, then checks `state.posts` and `calls`.
