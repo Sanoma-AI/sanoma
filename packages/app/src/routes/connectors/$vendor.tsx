@@ -1,14 +1,15 @@
 import type { OpEntry } from "@sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
+import { ExternalLinkIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
-import { Item, ItemActions, ItemContent, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
+import { ItemContent, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import type { ScenarioEntry } from "../../api.ts";
 import {
   Expandable,
+  LinkItem,
   None,
   Notice,
   OpItem,
@@ -94,21 +95,15 @@ function ConnectorPage() {
         {workflows.length === 0 ? (
           <None />
         ) : (
-          // Each Item is the link itself, which a listitem role would hide: a listitem holds each.
           <ItemGroup>
             {workflows.map((wf) => (
-              <div key={wf.name} role="listitem">
-                <Item asChild variant="outline" size="xs">
-                  <Link to="/workflows/$name" params={{ name: wf.name }}>
-                    <ItemContent>
-                      <ItemTitle>{wf.title ?? wf.name}</ItemTitle>
-                    </ItemContent>
-                    <ItemActions>
-                      <ChevronRightIcon className="size-4" />
-                    </ItemActions>
-                  </Link>
-                </Item>
-              </div>
+              <LinkItem key={wf.name} variant="outline" size="xs" chevron>
+                <Link to="/workflows/$name" params={{ name: wf.name }}>
+                  <ItemContent>
+                    <ItemTitle>{wf.title ?? wf.name}</ItemTitle>
+                  </ItemContent>
+                </Link>
+              </LinkItem>
             ))}
           </ItemGroup>
         )}

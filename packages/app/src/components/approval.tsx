@@ -39,6 +39,7 @@ import {
   Expandable,
   Fact,
   Facts,
+  LinkItem,
   Notice,
   OpName,
   plural,
@@ -138,24 +139,20 @@ export function ApprovalDetails({
         )}
       </Facts>
       {approval.details && <p>{approval.details}</p>}
-      {/* A list of links: each Item is the <a> itself, which a listitem role would hide, so a
-          listitem holds each. */}
       {approval.links?.length ? (
         <ItemGroup>
           {approval.links.map((href) => (
-            <div key={href} role="listitem">
-              <Item asChild variant="outline" size="xs">
-                <a href={href} target="_blank" rel="noreferrer" title={href}>
-                  <ItemContent className="min-w-0">
-                    {/* ItemTitle fits its content (w-fit): a long address is cut to the item instead. */}
-                    <ItemTitle className="block max-w-full truncate">{href}</ItemTitle>
-                  </ItemContent>
-                  <ItemActions>
-                    <ExternalLinkIcon className="size-4" />
-                  </ItemActions>
-                </a>
-              </Item>
-            </div>
+            <LinkItem key={href} variant="outline" size="xs">
+              <a href={href} target="_blank" rel="noreferrer" title={href}>
+                <ItemContent className="min-w-0">
+                  {/* ItemTitle fits its content (w-fit): a long address is cut to the item instead. */}
+                  <ItemTitle className="block max-w-full truncate">{href}</ItemTitle>
+                </ItemContent>
+                <ItemActions>
+                  <ExternalLinkIcon className="size-4" />
+                </ItemActions>
+              </a>
+            </LinkItem>
           ))}
         </ItemGroup>
       ) : null}

@@ -1,17 +1,8 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { type CredentialStatus, credentialReady } from "@sanoma/workflows/shared";
-import { ChevronRightIcon } from "lucide-react";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "#/components/ui/item.tsx";
-import { Nothing, PageHeader, plural, VendorLogo } from "../../components/common.tsx";
+import { ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from "#/components/ui/item.tsx";
+import { LinkItem, Nothing, PageHeader, plural, VendorLogo } from "../../components/common.tsx";
 import { configQuery, connectorsOf, credentialsQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/connectors/")({
@@ -32,32 +23,26 @@ function ConnectorsPage() {
       {connectors.length === 0 ? (
         <Nothing title="This config has no connectors" />
       ) : (
-        // Each Item is the link itself, which a listitem role would hide: a listitem holds each.
         <ItemGroup>
           {connectors.map(({ id, vendor, ops, workflows }) => (
-            <div key={id} role="listitem">
-              <Item asChild variant="outline">
-                <Link to="/connectors/$vendor" params={{ vendor: id }}>
-                  <ItemMedia>
-                    {/* Decorative: the title beside it names the link. */}
-                    <VendorLogo vendor={id} alt="" className="size-6" />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle>
-                      {vendor.title}
-                      <code className="font-normal text-muted-foreground">{id}</code>
-                    </ItemTitle>
-                    <ItemDescription>
-                      {plural(ops.length, "operation")} · used by {plural(workflows.length, "workflow")}
-                      {credentials[id] && ` · ${configured(credentials[id])}`}
-                    </ItemDescription>
-                  </ItemContent>
-                  <ItemActions>
-                    <ChevronRightIcon className="size-4" />
-                  </ItemActions>
-                </Link>
-              </Item>
-            </div>
+            <LinkItem key={id} variant="outline" chevron>
+              <Link to="/connectors/$vendor" params={{ vendor: id }}>
+                <ItemMedia>
+                  {/* Decorative: the title beside it names the link. */}
+                  <VendorLogo vendor={id} alt="" className="size-6" />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>
+                    {vendor.title}
+                    <code className="font-normal text-muted-foreground">{id}</code>
+                  </ItemTitle>
+                  <ItemDescription>
+                    {plural(ops.length, "operation")} · used by {plural(workflows.length, "workflow")}
+                    {credentials[id] && ` · ${configured(credentials[id])}`}
+                  </ItemDescription>
+                </ItemContent>
+              </Link>
+            </LinkItem>
           ))}
         </ItemGroup>
       )}

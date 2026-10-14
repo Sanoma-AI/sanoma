@@ -4,15 +4,13 @@ import { Link, useLoaderData, useNavigate, useSearch } from "@tanstack/react-rou
 import { PanelLeftCloseIcon, PanelLeftOpenIcon, WorkflowIcon } from "lucide-react";
 import { memo, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
-import { Card, CardContent } from "#/components/ui/card.tsx";
-import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
+import { ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { RAIL_COOKIE } from "#/lib/rail.ts";
 import { RUN_TONE } from "#/lib/tone.ts";
-import { cn } from "#/lib/utils.ts";
 import { pendingApprovals, starterName } from "../api.ts";
 import { picksFromLatest, RAIL_LIMIT, railQuery, railRuns, RUN_FILTERS, type RunFilter, runLink } from "../queries.ts";
-import { Nothing, SandboxBadge, StatusDot, Tip, When } from "./common.tsx";
+import { CURRENT_LINK, LinkItem, Nothing, Notice, PaneList, StatusDot, Tip, When } from "./common.tsx";
 
 // The rail on a workflow's page: the workflow's own pane, and its latest runs, each linking to its own pane.
 
@@ -27,12 +25,8 @@ const FILTER_LABEL: Record<RunFilter, string> = {
   failed: "Failed",
 };
 
-/** The rail's link that shows: `aria-current`, which Link sets on an active link, marks its pane. */
-const CURRENT = "aria-[current=page]:bg-muted";
-
 /** An icon link in the folded rail. */
-const RAIL_ICON =
-  "flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted aria-[current=page]:bg-muted";
+const RAIL_ICON = `flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted ${CURRENT_LINK}`;
 
 /** The rail's links keep the filter and drop the rest (`?new`, `?scenario=`); All leaves the URL without `?runs=`. */
 const railSearch = (filter: RunFilter) => ({ runs: filter === "all" ? undefined : filter });
@@ -104,46 +98,50 @@ export function RunRail({ name }: { name: string }) {
       </aside>
     );
   }
+  // Unfolded, the runs are a PaneList, as the inbox's approvals are; folded, only their dots.
   return (
-    <aside aria-label="Runs of this workflow" className="flex-[1_1_14rem]">
-      <Card size="sm">
-        <CardContent className="flex flex-col gap-3">
-          <nav className="flex items-center gap-1">
-            <Item asChild size="xs" className={CURRENT}>
-              <Link {...workflowLink}>
-                <ItemContent>
-                  <ItemTitle>Workflow</ItemTitle>
-                </ItemContent>
-              </Link>
-            </Item>
-            {toggle}
-          </nav>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-muted-foreground">Runs</span>
-            <NativeSelect
-              size="sm"
-              aria-label="Show runs"
-              value={filter}
-              // Another filter replaces the page in the history rather than adding one; All leaves
-              // the URL without `?runs=`.
-              onChange={(e) => {
-                const chosen = e.target.value as RunFilter;
-                void navigate({
-                  to: ".",
-                  search: (prev) => ({ ...prev, runs: chosen === "all" ? undefined : chosen }),
-                  replace: true,
-                });
-              }}
-            >
-              {RUN_FILTERS.map((f) => (
-                <NativeSelectOption key={f} value={f}>
-                  {FILTER_LABEL[f]}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </div>
-          {error && <p className="text-xs text-destructive">Could not refresh: {error.message}</p>}
-          {shown.length === 0 ? (
+    <aside aria-label="Runs of this workflow" className="flex min-w-0 flex-[1_1_14rem] flex-col gap-2">
+      <nav className="flex items-center gap-1">
+        <ItemGroup>
+          <LinkItem variant="outline" size="xs" className={CURRENT_LINK}>
+            <Link {...workflowLink}>
+              <ItemContent>
+                <ItemTitle>Workflow</ItemTitle>
+              </ItemContent>
+            </Link>
+          </LinkItem>
+        </ItemGroup>
+        {toggle}
+      </nav>
+      {error && <Notice variant="destructive">Could not refresh the runs: {error.message}</Notice>}
+      <PaneList
+        title="Runs"
+        description={runs.length === RAIL_LIMIT && `${fromLatest ? "From" : "Showing"} the latest ${RAIL_LIMIT}`}
+        action={
+          <NativeSelect
+            size="sm"
+            aria-label="Show runs"
+            value={filter}
+            // Another filter replaces the page in the history rather than adding one; All leaves
+            // the URL without `?runs=`.
+            onChange={(e) => {
+              const chosen = e.target.value as RunFilter;
+              void navigate({
+                to: ".",
+                search: (prev) => ({ ...prev, runs: chosen === "all" ? undefined : chosen }),
+                replace: true,
+              });
+            }}
+          >
+            {RUN_FILTERS.map((f) => (
+              <NativeSelectOption key={f} value={f}>
+                {FILTER_LABEL[f]}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        }
+        empty={
+          shown.length === 0 ? (
             <Nothing
               title={
                 filter === "all"
@@ -153,28 +151,16 @@ export function RunRail({ name }: { name: string }) {
                     : "No runs match"
               }
             />
-          ) : (
-            // Each Item is the link itself, which a listitem role would hide: a listitem holds each.
-            // Not a ScrollArea: its viewport scrolls only in a box of a set height, and this list is
-            // as tall as its runs, up to 70vh.
-            <ItemGroup className="max-h-[70vh] overflow-y-auto compact:gap-0.5">
-              {shown.map((run) => (
-                <div key={run.runId} role="listitem">
-                  <RunLink run={run} filter={filter} />
-                </div>
-              ))}
-            </ItemGroup>
-          )}
-          {runs.length === RAIL_LIMIT && (
-            <p className="text-xs text-muted-foreground">
-              {fromLatest ? "From" : "Showing"} the latest {RAIL_LIMIT}
-            </p>
-          )}
-          <Link {...allRuns} className="text-xs text-muted-foreground hover:text-foreground hover:underline">
-            All runs of this workflow →
-          </Link>
-        </CardContent>
-      </Card>
+          ) : undefined
+        }
+      >
+        {shown.map((run) => (
+          <RunLink key={run.runId} run={run} filter={filter} />
+        ))}
+      </PaneList>
+      <Link {...allRuns} className="px-2 text-xs text-muted-foreground hover:text-foreground hover:underline">
+        All runs of this workflow →
+      </Link>
     </aside>
   );
 }
@@ -209,28 +195,29 @@ const RunDot = memo(function RunDot({ run, filter }: { run: RunSummary; filter: 
 });
 
 /**
- * A run in the rail: its status (and what it waits on), its sandbox, who started it and when.
- * Memoised: a poll keeps an unchanged run's object, so only the runs that changed draw again.
+ * A run in the rail: its status (and what it waits on), then its sandbox, and who started it and
+ * when. Memoised: a poll keeps an unchanged run's object, so only the runs that changed draw again.
  */
 const RunLink = memo(function RunLink({ run, filter }: { run: RunSummary; filter: RunFilter }) {
   const waitingOn = run.status === "waiting" ? pendingApprovals(run)[0]?.title : undefined;
   return (
-    // Compact keeps one line: status · when.
-    <Item asChild size="xs" className={cn(CURRENT, "compact:py-1")}>
+    <LinkItem size="xs" className={CURRENT_LINK}>
       <Link {...runLink(run)} search={railSearch(filter)} activeOptions={{ includeSearch: false }}>
-        <ItemContent className="min-w-0 compact:flex-row compact:items-center compact:gap-2">
+        {/* A long approval title would widen the rail past its 14rem: the title may shrink
+            (min-w-0, max-w-full) and what it waits on is cut. A sandbox run's scenario, as long,
+            is a description of its own, which wraps. */}
+        <ItemContent className="min-w-0">
           <ItemTitle className="max-w-full">
             <StatusDot tone={RUN_TONE[run.status]} />
             <span className="shrink-0">{run.status}</span>
             {waitingOn !== undefined && <span className="truncate text-muted-foreground">{waitingOn}</span>}
-            {run.sandbox !== undefined && <SandboxBadge name={run.sandbox} />}
           </ItemTitle>
-          <ItemDescription className="truncate">
-            <span className="compact:hidden">{starterName(run)} · </span>
-            <When at={run.createdAt} />
+          {run.sandbox !== undefined && <ItemDescription>sandbox · {run.sandbox}</ItemDescription>}
+          <ItemDescription>
+            {starterName(run)} · <When at={run.createdAt} />
           </ItemDescription>
         </ItemContent>
       </Link>
-    </Item>
+    </LinkItem>
   );
 });

@@ -28,12 +28,13 @@ import { Alert, AlertDescription } from "#/components/ui/alert.tsx";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { ButtonGroup } from "#/components/ui/button-group.tsx";
-import { Card } from "#/components/ui/card.tsx";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
-import { Item, ItemContent, ItemDescription, ItemTitle } from "#/components/ui/item.tsx";
+import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
+import { Slot } from "radix-ui";
 import { utcText } from "#/lib/time.ts";
 import { cn } from "#/lib/utils.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone, TONE_FILL } from "#/lib/tone.ts";
@@ -220,6 +221,79 @@ export function OpItem({ id, op, children }: { id: string; op: OpEntry | undefin
 }
 
 /**
+ * A link as a list item, inside an `ItemGroup`: `children` is the link (a `<Link>` or an `<a>`),
+ * drawn as an Item with `props`, and `chevron` ends it with a chevron, for a link to another page.
+ * shadcn's docs put `role="listitem"` on the Item, but on an `asChild` link that role would replace
+ * the link's: a listitem holds the link instead, so it stays a link.
+ */
+export function LinkItem({
+  children,
+  chevron,
+  ...props
+}: Omit<ComponentProps<typeof Item>, "asChild" | "children"> & { children: ReactElement; chevron?: boolean }) {
+  return (
+    <div role="listitem">
+      <Item asChild {...props}>
+        {chevron ? (
+          <Slot.Slottable child={children}>
+            {(content) => (
+              <>
+                {content}
+                <ItemActions>
+                  <ChevronRightIcon className="size-4" />
+                </ItemActions>
+              </>
+            )}
+          </Slot.Slottable>
+        ) : (
+          children
+        )}
+      </Item>
+    </div>
+  );
+}
+
+/** A link while its URL shows: `aria-current="page"`, which Link sets on an active link (or a list sets on the open one). */
+export const CURRENT_LINK = "aria-[current=page]:bg-muted";
+
+/**
+ * A list of panes beside the one open, as a card: `title`, with `description` under it and
+ * `action` beside it, over `children`, each a `LinkItem` marked with `CURRENT_LINK`; `empty`
+ * instead when there are none. It scrolls past 18rem, or 70vh from `lg`, where it sits beside
+ * the pane rather than above it.
+ */
+export function PaneList({
+  title,
+  description,
+  action,
+  empty,
+  children,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  action?: ReactNode;
+  empty?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle role="heading" aria-level={2}>
+          {title}
+        </CardTitle>
+        {description && <CardDescription>{description}</CardDescription>}
+        {action && <CardAction>{action}</CardAction>}
+      </CardHeader>
+      <CardContent>
+        {/* Not a ScrollArea: its viewport scrolls only in a box of a set height, and this list is
+            as tall as its items, up to its max. */}
+        {empty ?? <ItemGroup className="max-h-72 overflow-y-auto lg:max-h-[70vh]">{children}</ItemGroup>}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
  * Each built-in as a thing, where an operation shows its vendor's logo: an approval, a person who
  * decides; a sleep, a clock; `ctx.all`, calls that run in parallel.
  */
@@ -231,7 +305,7 @@ export const BUILTIN_ICON = {
 
 /** A tone as a dot, where a badge would be too much. */
 export function StatusDot({ tone }: { tone: Tone }) {
-  return <span aria-hidden className={cn("size-2.5 rounded-full", TONE_FILL[tone])} />;
+  return <span aria-hidden className={cn("size-2.5 shrink-0 rounded-full", TONE_FILL[tone])} />;
 }
 
 export function ApprovalStatusBadge({ status }: { status: ApprovalState["status"] }) {
@@ -352,9 +426,8 @@ export function Disclosure({ label, children }: { label: ReactNode; children: Re
   );
 }
 
-/** A segment while its URL shows (Link marks it `aria-current="page"`), or while Link's `disabled` leaves it no href. */
-const SEGMENT =
-  "aria-[current=page]:bg-muted aria-[current=page]:font-semibold aria-disabled:pointer-events-none aria-disabled:opacity-50";
+/** A segment while its URL shows, or while Link's `disabled` leaves it no href. */
+const SEGMENT = `${CURRENT_LINK} aria-[current=page]:font-semibold aria-disabled:pointer-events-none aria-disabled:opacity-50`;
 
 /**
  * A choice between URLs, as one control: `children` are `Segment`s. Links rather than buttons, so

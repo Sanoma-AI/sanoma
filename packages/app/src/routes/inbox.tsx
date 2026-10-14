@@ -3,14 +3,18 @@ import type { ConfigDescription, OpEntry } from "@sanoma/workflows/describe";
 import { mayDecide } from "@sanoma/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { ItemContent, ItemDescription, ItemTitle } from "#/components/ui/item.tsx";
 import { APPROVAL_TONE } from "#/lib/tone.ts";
 import { useActor } from "../actor.ts";
 import { RUNS_LIMIT, starterName } from "../api.ts";
 import { ApprovalCard } from "../components/approval.tsx";
 import {
+  CURRENT_LINK,
+  LinkItem,
   Nothing,
   Notice,
   PageHeader,
+  PaneList,
   pageTitle,
   plural,
   Segment,
@@ -99,7 +103,7 @@ function Decided({ wanted }: { wanted: string | undefined }) {
           entries={decided}
           show="decided"
           open={find(decided, wanted) ?? decided[0]!}
-          footer={`From the latest ${RUNS_LIMIT.default} runs`}
+          description={`From the latest ${RUNS_LIMIT.default} runs`}
         />
       )}
     </>
@@ -131,10 +135,6 @@ function Filters({ filter, mine, waiting }: { filter: InboxFilter; mine: number 
   );
 }
 
-/** A row of the list; `aria-current` marks the approval open beside it. */
-const ROW =
-  "flex flex-col gap-0.5 rounded-md px-2 py-1.5 text-sm hover:bg-muted aria-[current=page]:bg-muted compact:py-1";
-
 /** Each workflow's title (its name when it has none), by name: for `select`. */
 const workflowTitles = (config: ConfigDescription) =>
   Object.fromEntries(config.workflows.map((wf) => [wf.name, wf.title ?? wf.name]));
@@ -144,48 +144,48 @@ function Split({
   entries,
   show,
   open,
-  footer,
+  description,
 }: {
   entries: Entry[];
   /** The URL's `?show=`, which the rows keep. */
   show: InboxFilter | undefined;
   open: Entry;
-  footer?: string;
+  /** Under the list's title: where its approvals come from. */
+  description?: string;
 }) {
   const { data: titles } = useSuspenseQuery({ ...configQuery(), select: workflowTitles });
   const openKey = approvalKey(open);
   return (
     <div className="grid grid-cols-1 items-start gap-(--gap-region) lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
-      <nav aria-label="Approvals" className="flex flex-col gap-2 rounded-lg border bg-card p-2 text-card-foreground">
-        <ul className="flex max-h-72 flex-col overflow-y-auto lg:max-h-[70vh]">
+      <nav aria-label="Approvals">
+        <PaneList title="Approvals" description={description}>
           {entries.map((entry) => {
             const { run, approval } = entry;
             const key = approvalKey(entry);
+            // `aria-current` marks the approval open beside the list.
             return (
-              <li key={key}>
-                <Link
-                  to="/inbox"
-                  search={{ show, approval: key }}
-                  aria-current={key === openKey ? "page" : undefined}
-                  className={ROW}
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <StatusDot tone={APPROVAL_TONE[approval.status]} />
-                    <span className="truncate font-medium">{approval.title}</span>
-                    <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+              <LinkItem key={key} size="xs" className={CURRENT_LINK}>
+                <Link to="/inbox" search={{ show, approval: key }} aria-current={key === openKey ? "page" : undefined}>
+                  <ItemContent>
+                    <ItemTitle>
+                      <StatusDot tone={APPROVAL_TONE[approval.status]} />
+                      {approval.title}
+                    </ItemTitle>
+                    <ItemDescription>
+                      {approval.status !== "pending" && `${approval.status} · `}
+                      {titles[run.workflow] ?? run.workflow} · from {starterName(run)}
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemContent>
+                    <ItemDescription>
                       <When at={approval.decidedAt ?? approval.requestedAt} />
-                    </span>
-                  </span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {approval.status !== "pending" && `${approval.status} · `}
-                    {titles[run.workflow] ?? run.workflow} · from {starterName(run)}
-                  </span>
+                    </ItemDescription>
+                  </ItemContent>
                 </Link>
-              </li>
+              </LinkItem>
             );
           })}
-        </ul>
-        {footer && <p className="px-2 text-xs text-muted-foreground">{footer}</p>}
+        </PaneList>
       </nav>
       <section aria-label={open.approval.title} className="flex min-w-0 flex-col gap-(--gap-section)">
         <Asks {...open} workflow={titles[open.run.workflow] ?? open.run.workflow} />
