@@ -64,7 +64,7 @@ const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 const exitCodeOf = (signal: (typeof SIGNALS)[number]) => 128 + constants.signals[signal];
 
 // What one run holds, each released by `cleanup`: the work directory, the server's log beside it
-// (kept after a failure), Chrome, the server and its database.
+// (kept after a failure), Chrome, ffmpeg, the server and its database.
 const work = mkdtempSync(join(tmpdir(), "readme-shots-"));
 const serverLog = `${work}.log`;
 let keepLog = false;
@@ -135,6 +135,7 @@ try {
     fullPage: true,
   });
   say("stills taken; making demo.gif");
+  stopIfInterrupted();
   await makeGif(frames, join(captured, "demo.gif"));
   stopIfInterrupted();
   replaceAssets(captured, ["demo.gif", "workflow.png", "inbox.png", "run.png"]);
@@ -160,8 +161,8 @@ function stopIfInterrupted(): void {
 }
 
 /**
- * Closes Chrome (once launched, if it is launching), stops the server, drops the database and
- * removes the work directory and, unless a failure keeps it, the server's log: each whatever the
+ * Closes Chrome (once launched, if it is launching), stops ffmpeg and the server, drops the
+ * database and removes the work directory (after ffmpeg, which reads from it) and, unless a failure keeps it, the server's log: each whatever the
  * others do, and once, for `finally` and a signal alike.
  */
 function cleanup(): Promise<void> {
