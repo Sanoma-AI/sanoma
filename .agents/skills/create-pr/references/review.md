@@ -1,14 +1,12 @@
 # Pre-PR review
 
-Review the complete change against the PR's current base branch, including documentation and configuration changes.
+Review the complete diff against the current PR base, including docs and configuration.
 
-- **Claude:** run `/simplify`, apply relevant changes, then run `/review` on the resulting diff.
-- **Codex:** use the installed `$review-agent` skill (normally `~/.codex/skills/.system/review-agent/SKILL.md`). Read its instructions and perform its read-only review of the base-branch diff; keep fixes outside the review pass.
+- **Claude:** run `/simplify`, apply relevant changes, then `/review`.
+- **Codex:** read and follow `$review-agent` (normally `~/.codex/skills/.system/review-agent/SKILL.md`) in a read-only pass; fix findings outside that pass.
 
-If a required skill is unavailable, report the missing skill and stop before creating or merging the PR; do not label a substitute check as that skill's review.
+If a required skill is unavailable, report it and stop before PR creation or merge.
 
-Resolve actionable findings, run the relevant checks, commit the final changes, and review that commit. Repeat after any subsequent commit, including conflict resolutions. A PR-body edit alone does not require another review.
+Resolve findings, run relevant checks, commit, and review the final commit. Repeat when the head or base changes, including conflict resolutions; body-only edits need no new review.
 
-Record evidence in the PR template's Review section: agent environment, skills actually run, full reviewed head SHA, base SHA used for comparison, result, and how findings were resolved. Never mark a skill as run without performing it.
-
-Before merging, verify that the evidence covers the current head and current base. If either changed, or evidence is missing or unverifiable, run this procedure and update the PR evidence before merging. This skill review is separate from any GitHub approval required by branch rules.
+In the PR's Review section, record environment, skills actually run, full head/base SHAs, result, and findings resolved. Before merging, verify this evidence; rerun missing, stale, or unverifiable reviews. Skill review does not replace required GitHub approval.

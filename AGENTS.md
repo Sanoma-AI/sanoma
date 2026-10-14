@@ -22,7 +22,7 @@ Source and test directory maps live below each package. Open them when navigatin
 - Use Node 24, or 26 and later (Cucumber does not support 25), and the pnpm version in [package.json](package.json). Run commands from the repository root unless noted.
 - Workspace imports resolve to source in [tsconfig.json](tsconfig.json) and [vitest.config.ts](vitest.config.ts). Keep both mappings aligned when changing package entry points; published exports resolve to `dist/`.
 - Run the affected package's tests and relevant root checks from [README.md](README.md#develop). [CI](.github/workflows/ci.yml) defines the full check sequence.
-- For a new task, use [start-task](.agents/skills/start-task/SKILL.md). For a PR, use [create-pr](.agents/skills/create-pr/SKILL.md). For a merge, use [merge-pr](.agents/skills/merge-pr/SKILL.md). Those skills own issue, worktree, and PR procedures. Sign off commits as described in [Contributing](README.md#contributing).
+- Before implementation or investigation, use [start-task](.agents/skills/start-task/SKILL.md). For a PR, use [create-pr](.agents/skills/create-pr/SKILL.md). For a merge, use [merge-pr](.agents/skills/merge-pr/SKILL.md). Those skills own issue, worktree, and PR procedures. Sign off commits as described in [Contributing](README.md#contributing).
 
 ## Documentation boundaries
 

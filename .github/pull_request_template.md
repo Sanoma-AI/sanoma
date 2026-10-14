@@ -12,7 +12,7 @@ Closes #<issue-number>
 
 ## Before
 
-<!-- Replace this example with a small diagram of the previous behavior or workflow. -->
+<!-- Replace the diagram. For visible changes, also upload/embed a before screenshot when feasible. -->
 
 ```mermaid
 flowchart LR
@@ -21,7 +21,7 @@ flowchart LR
 
 ## After
 
-<!-- Replace this example with a comparable diagram of the new behavior or workflow. -->
+<!-- Replace the diagram. Add a matching after screenshot when feasible; otherwise briefly note why screenshots are unavailable or not applicable. -->
 
 ```mermaid
 flowchart LR

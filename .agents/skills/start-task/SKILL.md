@@ -1,10 +1,10 @@
 ---
 name: start-task
-description: Start a new implementation task in this repository with a linked GitHub issue and a dedicated Git worktree.
+description: Start implementation or investigation from current main, using an issue and worktree for changes.
 ---
 
 # Start a task
 
-1. Reuse the GitHub issue for this task. If none exists, use the [create-issue skill](../create-issue/SKILL.md) first.
-2. Fetch the latest default branch from `origin`. Create a branch named `task/<issue-number>-<short-slug>` and a dedicated worktree from that remote branch, using the available worktree tool or `git worktree add`. Preserve existing work; reuse this task's worktree when resuming it.
-3. Report the issue URL and worktree path, then begin the requested work inside that worktree.
+1. Before implementation or investigation, fetch `origin/main` and fast-forward the shared `main` checkout with `git pull --ff-only origin main`. Preserve local work: never stash or reset; if the checkout cannot fast-forward safely, investigate from a separate worktree at `origin/main`.
+2. For implementation, reuse the task's issue or use [create-issue](../create-issue/SKILL.md). Create a worktree under `.claude/worktrees/<name>` with branch `task/<issue-number>-<short-slug>` from `origin/main`; make changes there, never in the shared main checkout. Read-only investigation needs no issue or task branch.
+3. When resuming a task, fetch main and inspect upstream changes; reuse its worktree and integrate relevant updates before continuing. Report the issue and worktree when created.
