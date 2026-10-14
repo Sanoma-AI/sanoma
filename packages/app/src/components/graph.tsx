@@ -20,6 +20,7 @@ import { cva } from "class-variance-authority";
 import type { OpEntry } from "@sanoma/workflows/describe";
 import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
+import { Separator } from "#/components/ui/separator.tsx";
 import { approverLabel } from "@sanoma/workflows/shared";
 import { layout, type Point } from "../graph/layout.ts";
 import {
@@ -34,6 +35,7 @@ import { useReducedMotion } from "#/lib/motion.ts";
 import { cn } from "#/lib/utils.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import { configQuery, opsById } from "../queries.ts";
+import { BaseNode } from "./base-node.tsx";
 import { ApprovalStatusBadge, BUILTIN_ICON, effectBadge, StatusDot, ToneBadge, VendorLogo } from "./common.tsx";
 import { ZoomSlider } from "./zoom-slider.tsx";
 
@@ -69,8 +71,10 @@ const PRO_OPTIONS = { hideAttribution: true };
 /** Below this zoom the badges cannot be read: fit one end of the graph instead of all of it. */
 const READABLE_ZOOM = 0.8;
 
+// BaseNode's look with the graph's: its card, at the layout's size, rounder, without its hover
+// ring (a click selects only some nodes, and those turn muted under the pointer instead).
 const frame = cva(
-  "flex size-full flex-col justify-center gap-1 rounded-lg border bg-card px-2.5 text-xs text-card-foreground shadow-xs transition-colors",
+  "flex size-full flex-col justify-center gap-1 rounded-lg px-2.5 text-xs shadow-xs transition-colors hover:ring-0",
   {
     variants: {
       tone: {
@@ -84,7 +88,8 @@ const frame = cva(
       pending: { true: "border-dashed bg-transparent text-muted-foreground" },
       // A click selects it.
       clickable: { true: "cursor-pointer hover:bg-muted" },
-      selected: { true: "ring-2 ring-ring" },
+      // Ringed, under the pointer too; BaseNode adds its shadow and border for React Flow's flag.
+      selected: { true: "ring-2 ring-ring hover:ring-2" },
     },
   },
 );
@@ -112,7 +117,10 @@ const nameOf = (node: GraphNode) => {
   return node.kind === "op" && node.name ? `${node.name}: ${node.label}` : node.label;
 };
 
-/** One node's box, in its tone when a run gives it one, ringed when selected, with its handles. */
+/**
+ * One node's box, React Flow UI's BaseNode: in its tone when a run gives it one, ringed when
+ * selected, with its handles.
+ */
 function Frame({
   data: { node, selectable },
   selected,
@@ -122,14 +130,16 @@ function Frame({
 }: Props<GraphNodeKind> & { inbound?: boolean; outbound?: boolean; children: ReactNode }) {
   const state = "state" in node ? node.state : undefined;
   return (
-    <div
+    <BaseNode
       // Through cn, so a pending node's colours replace the base ones rather than sit beside them.
       className={cn(frame({ tone: state?.tone ?? "off", pending: isPending(node), clickable: selectable, selected }))}
       title={nameOf(node)}
+      // React Flow's node around it takes focus, named: not this box as well.
+      tabIndex={undefined}
     >
       <Handles inbound={inbound} outbound={outbound} />
       {children}
-    </div>
+    </BaseNode>
   );
 }
 
@@ -239,8 +249,9 @@ function OpNode(props: Props<"op">) {
         {state?.scenario?.denied && <Badge variant="outline">must deny</Badge>}
         {state?.scenario?.held && <Badge variant="outline">must hold</Badge>}
       </Line>
+      {node.ops && <Separator />}
       {node.ops && (
-        <ul className="flex flex-col gap-0.5 border-t pt-1" aria-label="operations it can reach">
+        <ul className="flex flex-col gap-0.5" aria-label="operations it can reach">
           {wildcardRows(node.label, node.ops).map((row) =>
             "note" in row ? (
               <li key={row.note} className="text-muted-foreground">
