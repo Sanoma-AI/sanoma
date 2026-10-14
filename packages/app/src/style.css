@@ -1,10 +1,6 @@
-/*
- * React Flow's stylesheet in Tailwind's base layer, before Tailwind, as React Flow's Tailwind
- * example does: a utility on a node, an edge or a panel wins over React Flow's defaults. Its
- * base.css, not its style.css: every node here is a custom one drawn with utilities, the handles
- * are invisible, and the zoom slider is the app's own, so the default theme's node, handle and
- * controls looks would only be overridden. base.css keeps what React Flow needs to work.
- */
+@layer theme, base, components, utilities;
+/* React Flow's base.css (what it needs to work, no default theme) in the base layer, so any
+   utility on a node, edge or panel wins over it. */
 @import "@xyflow/react/dist/base.css" layer(base);
 @import "tailwindcss";
 @import "tw-animate-css";
@@ -180,19 +176,11 @@
   --spacing: 0.1875rem;
 }
 
-/*
- * React Flow (the run graph and the outlines) reads its colours from --xy-* variables, its
- * documented way to theme it; these point the ones its base.css reads for what the graphs draw
- * (the background, its dots, the edges) at the theme's tokens, so the graphs follow light and
- * dark with the rest of the page. In the base layer with React Flow's own rules: its defaults
- * are `--xy-*-default`, so nothing there competes with these.
- */
-@layer base {
-  .react-flow {
-    --xy-background-color: var(--background);
-    --xy-background-pattern-color: var(--border);
-    --xy-edge-stroke: var(--muted-foreground);
-  }
+/* React Flow's colours (the background, its dots, the edges) from the theme's tokens. */
+.react-flow {
+  --xy-background-color: var(--background);
+  --xy-background-pattern-color: var(--border);
+  --xy-edge-stroke: var(--muted-foreground);
 }
 
 @theme inline {

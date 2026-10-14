@@ -45,12 +45,11 @@ import { ZoomSlider } from "./zoom-slider.tsx";
 
 /** A node as React Flow holds it: the graph's node, and whether a click on it selects it. */
 type FlowNode = Node<{ node: GraphNode; selectable: boolean }, GraphNodeKind>;
-/** An edge as React Flow holds it: the route `layout` gives it, as an SVG path. */
-type FlowEdge = Edge<{ path: string }, "route">;
-/** What a node component reads of its `NodeProps`: its node, of its kind, and whether it is selected. */
+/** An edge as React Flow holds it: the route `layout` gives it, as an SVG path, and whether it is dashed. */
+type FlowEdge = Edge<{ path: string; dashed: boolean }, "route">;
+/** What a node component reads of its `NodeProps`: its node, of its kind. */
 type Props<K extends GraphNodeKind> = {
   data: { node: Extract<GraphNode, { kind: K }>; selectable: boolean };
-  selected: boolean;
 };
 
 /**
@@ -71,28 +70,21 @@ const PRO_OPTIONS = { hideAttribution: true };
 /** Below this zoom the badges cannot be read: fit one end of the graph instead of all of it. */
 const READABLE_ZOOM = 0.8;
 
-// BaseNode's look with the graph's: its card, at the layout's size, rounder, without its hover
-// ring (a click selects only some nodes, and those turn muted under the pointer instead).
-const frame = cva(
-  "flex size-full flex-col justify-center gap-1 rounded-lg px-2.5 text-xs shadow-xs transition-colors hover:ring-0",
-  {
-    variants: {
-      tone: {
-        ok: "border-tone-ok-foreground/40",
-        bad: "border-tone-bad-foreground/70",
-        waiting: "border-tone-waiting-foreground/70",
-        active: "border-tone-active-foreground/70",
-        idle: "border-tone-idle-foreground/50",
-        off: "border-border",
-      } satisfies Record<Tone, string>,
-      pending: { true: "border-dashed bg-transparent text-muted-foreground" },
-      // A click selects it.
-      clickable: { true: "cursor-pointer hover:bg-muted" },
-      // Ringed, under the pointer too; BaseNode adds its shadow and border for React Flow's flag.
-      selected: { true: "ring-2 ring-ring hover:ring-2" },
-    },
+const frame = cva("flex size-full flex-col justify-center gap-1 px-2.5 text-xs shadow-xs transition-colors", {
+  variants: {
+    tone: {
+      ok: "border-tone-ok-foreground/40",
+      bad: "border-tone-bad-foreground/70",
+      waiting: "border-tone-waiting-foreground/70",
+      active: "border-tone-active-foreground/70",
+      idle: "border-tone-idle-foreground/50",
+      off: "border-border",
+    } satisfies Record<Tone, string>,
+    pending: { true: "border-dashed bg-transparent text-muted-foreground" },
+    // A click selects it.
+    clickable: { true: "cursor-pointer hover:bg-muted" },
   },
-);
+});
 
 /** Where edges meet a node: hidden, since nothing connects by hand here. */
 function Handles({ inbound = true, outbound = true }: { inbound?: boolean; outbound?: boolean }) {
@@ -117,13 +109,9 @@ const nameOf = (node: GraphNode) => {
   return node.kind === "op" && node.name ? `${node.name}: ${node.label}` : node.label;
 };
 
-/**
- * One node's box, React Flow UI's BaseNode: in its tone when a run gives it one, ringed when
- * selected, with its handles.
- */
+/** One node's box (BaseNode, ringed when selected), in its tone when a run gives it one, with its handles. */
 function Frame({
   data: { node, selectable },
-  selected,
   inbound,
   outbound,
   children,
@@ -131,11 +119,8 @@ function Frame({
   const state = "state" in node ? node.state : undefined;
   return (
     <BaseNode
-      // Through cn, so a pending node's colours replace the base ones rather than sit beside them.
-      className={cn(frame({ tone: state?.tone ?? "off", pending: isPending(node), clickable: selectable, selected }))}
+      className={frame({ tone: state?.tone ?? "off", pending: isPending(node), clickable: selectable })}
       title={nameOf(node)}
-      // React Flow's node around it takes focus, named: not this box as well.
-      tabIndex={undefined}
     >
       <Handles inbound={inbound} outbound={outbound} />
       {children}
@@ -249,22 +234,24 @@ function OpNode(props: Props<"op">) {
         {state?.scenario?.denied && <Badge variant="outline">must deny</Badge>}
         {state?.scenario?.held && <Badge variant="outline">must hold</Badge>}
       </Line>
-      {node.ops && <Separator />}
       {node.ops && (
-        <ul className="flex flex-col gap-0.5" aria-label="operations it can reach">
-          {wildcardRows(node.label, node.ops).map((row) =>
-            "note" in row ? (
-              <li key={row.note} className="text-muted-foreground">
-                {row.note}
-              </li>
-            ) : (
-              <li key={row.id} className="flex min-w-0 items-center gap-1.5" title={row.id}>
-                <VendorLogo vendor={row.vendor} fallback={vendorName(row.vendor)} />
-                <code className="truncate">{row.label}</code>
-              </li>
-            ),
-          )}
-        </ul>
+        <>
+          <Separator />
+          <ul className="flex flex-col gap-0.5" aria-label="operations it can reach">
+            {wildcardRows(node.label, node.ops).map((row) =>
+              "note" in row ? (
+                <li key={row.note} className="text-muted-foreground">
+                  {row.note}
+                </li>
+              ) : (
+                <li key={row.id} className="flex min-w-0 items-center gap-1.5" title={row.id}>
+                  <VendorLogo vendor={row.vendor} fallback={vendorName(row.vendor)} />
+                  <code className="truncate">{row.label}</code>
+                </li>
+              ),
+            )}
+          </ul>
+        </>
       )}
     </Frame>
   );
@@ -404,17 +391,11 @@ function pathOf(route: readonly Point[]): string {
  * Its ends are the layout's, which are React Flow's too: each node is drawn at its layout box's
  * width and height.
  */
-function RouteEdge({ data, style, interactionWidth }: EdgeProps<FlowEdge>) {
-  return <BaseEdge path={data!.path} style={style} interactionWidth={interactionWidth} />;
+function RouteEdge({ data }: EdgeProps<FlowEdge>) {
+  return <BaseEdge path={data!.path} className={data!.dashed ? "[stroke-dasharray:4_4]" : undefined} />;
 }
 
 const edgeTypes = { route: RouteEdge } satisfies EdgeTypes;
-
-/**
- * An edge into or out of what the run has not reached: its path dashed. The class is the edge's,
- * on the group around its path; raw, so Tailwind reads `\_` as an underscore, not a space.
- */
-const DASHED = String.raw`[&_.react-flow\_\_edge-path]:[stroke-dasharray:4_4]`;
 
 /** Fits the view again when nodes come or go, as the run's page polls. */
 function FitOnChange({ nodes, show, onFitted }: { nodes: FlowNode[]; show: "start" | "end"; onFitted: () => void }) {
@@ -526,13 +507,12 @@ export default function Graph({ graph, show = "end", selected, onSelect }: Graph
       return {
         ...edge,
         type: "route",
-        data: { path: pathOf(at.routes.get(edge.id)!) },
+        data: { path: pathOf(at.routes.get(edge.id)!), dashed: isPending(from) || isPending(to) },
         animated: active && !reducedMotion,
-        ...(isPending(from) || isPending(to) ? { className: DASHED } : {}),
       };
     });
   }, [graph, at, reducedMotion]);
-  // An edge down to its path.
+  // An edge down to its path and dash.
   const edges = useStable(drawn, 2);
   const onNodeClick = useCallback(
     (_: unknown, { data }: FlowNode) => {
