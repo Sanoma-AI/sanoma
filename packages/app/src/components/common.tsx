@@ -349,18 +349,19 @@ export function Tip({
 
 /**
  * An icon button with a tooltip: ghost and icon-sized unless props say otherwise, named `label`
- * (its `aria-label`; `tip` unless given) and showing `tip`, which describes it only when the name
- * does not already say it.
+ * (its `aria-label`; `tip` unless given) and showing `tip`, which describes it unless the name
+ * already says it (`describe` overrides).
  */
 export function TipButton({
   tip,
   label = tip,
+  describe = !label.toLowerCase().includes(tip.toLowerCase()),
   variant = "ghost",
   size = "icon",
   ...props
-}: { tip: string; label?: string } & Omit<ComponentProps<typeof Button>, "aria-label">) {
+}: { tip: string; label?: string; describe?: boolean } & Omit<ComponentProps<typeof Button>, "aria-label">) {
   return (
-    <Tip tip={tip} describe={!label.toLowerCase().includes(tip.toLowerCase())}>
+    <Tip tip={tip} describe={describe}>
       <Button variant={variant} size={size} aria-label={label} {...props} />
     </Tip>
   );

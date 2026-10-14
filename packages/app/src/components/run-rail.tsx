@@ -171,6 +171,8 @@ const RunDot = memo(function RunDot({ run, filter }: { run: RunSummary; filter: 
           <When at={run.createdAt} />
         </>
       }
+      // The name says all but the time: no hidden copy of a ticking clock per dot.
+      describe={false}
     >
       <Link
         {...runLink(run)}
@@ -181,6 +183,8 @@ const RunDot = memo(function RunDot({ run, filter }: { run: RunSummary; filter: 
         <StatusDot tone={RUN_TONE[run.status]} />
         <span className="sr-only">
           {run.status} run by {starterName(run)}
+          {waitingOn !== undefined && `, waiting on “${waitingOn}”`}
+          {run.sandbox !== undefined && `, in sandbox ${run.sandbox}`}
         </span>
       </Link>
     </Tip>
