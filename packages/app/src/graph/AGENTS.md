@@ -15,5 +15,5 @@ Builds the workflow and run graphs and lays them out. No React here; `components
 
 ## Maintenance boundaries
 
-- Stay on dagre: #75 tried elkjs and rejected it (a much larger graph chunk, async and slower layout, EPL/GPL code); the measurements are in #95.
-- `steps()` in `layout.ts` relies on dagre's undocumented edge ranks (its comment says how); on a dagre bump, run the layout tests.
+- Stay on dagre: [#75](https://github.com/Sanoma-AI/sanoma/issues/75) tried elkjs and rejected it (a much larger graph chunk, async and slower layout, EPL/GPL code); the measurements are in [#95](https://github.com/Sanoma-AI/sanoma/pull/95).
+- `steps()` in `layout.ts` relies on dagre's undocumented edge ranks. If it throws, or `routeProblems` in `test/layout.test.ts` fails, after a dagre bump, dagre changed how it ranks edges; its comment says what it expects.
