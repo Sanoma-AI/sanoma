@@ -6,6 +6,7 @@ import { LIST_HEADER, MAX_ROWS, ROW_HEIGHT } from "../src/graph/wildcard.ts";
 import { absolute, DRIFT_SHAPE } from "./graph-helpers.ts";
 
 const op = (id: string) => ({ kind: "op", id }) as const;
+const loop = (...body: Step[]): Step => ({ kind: "repeat", label: "repeat", body });
 
 const text = ({ x, y }: Point) => `(${x}, ${y})`;
 const same = (a: Point, b: Point) => a.x === b.x && a.y === b.y;
@@ -182,45 +183,35 @@ describe("layout", () => {
       op("a.x.before"),
       { kind: "all", branches: [[op("b.x.one"), op("b.x.two")], [op("b.x.three")], []] },
       { kind: "branch", cases: [[op("c.x.one")], []] },
-      { kind: "repeat", label: "repeat", body: [] },
+      loop(),
       op("d.x.after"),
     ]);
     expect(routeProblems(graph)).toEqual([]);
   });
 
-  it("routes a wide fan-out, a branch in a loop, a try in a loop and nested loops around their nodes", () => {
-    const shapes: Step[][] = [
-      [
+  it.each([
+    {
+      name: "a four-lane fan-out with an empty lane, into a call",
+      steps: [
         op("a.x.before"),
         { kind: "all", branches: [[op("b.x.1")], [op("b.x.2"), op("b.x.3")], [], [op("b.x.4")]] },
         op("c.x.after"),
       ],
-      [
-        {
-          kind: "repeat",
-          label: "repeat",
-          body: [{ kind: "branch", cases: [[op("c.x.1")], [op("c.x.2")], [op("c.x.3")], []] }],
-        },
-      ],
-      [
-        {
-          kind: "repeat",
-          label: "repeat",
-          body: [{ kind: "try", body: [op("t.x.body")], handler: [op("t.x.handler")] }, op("t.x.after")],
-        },
-      ],
-      [
-        {
-          kind: "repeat",
-          label: "repeat",
-          body: [
-            op("n.x.a"),
-            { kind: "repeat", label: "repeat", body: [{ kind: "all", branches: [[op("n.x.b")], [op("n.x.c")]] }] },
-          ],
-        },
-      ],
-    ];
-    for (const [i, shape] of shapes.entries()) expect(routeProblems(outlineGraph(shape)), `shape ${i}`).toEqual([]);
+    },
+    {
+      name: "a four-way branch in a loop",
+      steps: [loop({ kind: "branch", cases: [[op("c.x.1")], [op("c.x.2")], [op("c.x.3")], []] })],
+    },
+    {
+      name: "a try with a handler, then a call, in a loop",
+      steps: [loop({ kind: "try", body: [op("t.x.body")], handler: [op("t.x.handler")] }, op("t.x.after"))],
+    },
+    {
+      name: "a call, then a loop holding a fan-out, in a loop",
+      steps: [loop(op("n.x.a"), loop({ kind: "all", branches: [[op("n.x.b")], [op("n.x.c")]] }))],
+    },
+  ] satisfies { name: string; steps: Step[] }[])("routes $name around its nodes", ({ steps }) => {
+    expect(routeProblems(outlineGraph(steps))).toEqual([]);
   });
 
   it("runs straight through a loop holding one operation, from start to end", () => {
@@ -236,7 +227,7 @@ describe("layout", () => {
   });
 
   it("runs an empty loop's way across it below its label", () => {
-    const graph = outlineGraph([{ kind: "repeat", label: "repeat", body: [] }]);
+    const graph = outlineGraph([loop()]);
     const { boxes, routes } = layout(graph);
     const box = boxes.get("cluster:0")!;
     const route = routes.get("cluster:0->cluster:0")!;
