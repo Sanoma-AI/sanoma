@@ -45,9 +45,9 @@ The workflow's page: the graph is drawn from the file, and picking a step finds 
 
 The Inbox as marketing-lead: the approvals waiting for them, with the draft's link and what approving lets through.
 
-![A finished run of announce: its graph, the approval and its note, and its ledger with Ghost's reply](.github/assets/run.png)
+![A finished run of announce: its graph, the approval and its note, and its ledger](.github/assets/run.png)
 
-A finished run: the graph shows how each step went, and the ledger records each call with the policy's decision, the approval with its note, and Ghost's reply to the publish.
+A finished run: the graph shows how each step went, and the ledger records each call with the policy's decision and the approval with its note.
 
 ## Contents
 
