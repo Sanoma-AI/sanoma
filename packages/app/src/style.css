@@ -1,7 +1,3 @@
-@layer theme, base, components, utilities;
-/* React Flow's base.css (what it needs to work, no default theme) in the base layer, so any
-   utility on a node, edge or panel wins over it. */
-@import "@xyflow/react/dist/base.css" layer(base);
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";

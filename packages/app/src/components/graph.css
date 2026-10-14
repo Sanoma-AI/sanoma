@@ -1,0 +1,4 @@
+/* React Flow's base.css (what it needs to work, no default theme) in Tailwind's base layer, so any
+   utility on a node, edge or panel wins over it. graph.tsx imports it; style.css's Tailwind
+   has already put the layers in order. */
+@import "@xyflow/react/dist/base.css" layer(base);
