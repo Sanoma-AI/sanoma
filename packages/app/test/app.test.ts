@@ -51,6 +51,7 @@ import {
   credentials,
   decide,
   fileSource,
+  lastRuns,
   listRuns,
   parse,
   readStartRun,
@@ -1228,6 +1229,14 @@ describe("resources and drift", () => {
     expect((await runsOf({ workflow: "nope" })).body).toEqual([]);
   });
 
+  it("reads each workflow's latest run, by name", async () => {
+    const last = await lastRuns(ctx);
+    expect(Object.keys(last).toSorted()).toEqual(["announce", "drift"]);
+    const { body: announced } = await runsOf({ workflow: "announce", limit: 1 });
+    expect(last.announce?.runId).toBe(announced[0]?.runId);
+    expect(last.drift?.runId).toBe(driftRun);
+  });
+
   it("refuses a drift run given any input: it reads the data files itself", async () => {
     const forged = await startAs(
       { workflow: "drift", input: { resources: [{ id: "x#y", vendor: "github", type: "repository", name: "x" }] } },
@@ -1323,29 +1332,30 @@ describe("resources and drift", () => {
     expect(linkTag(builtin.text, "Built-in · 1")).toContain('aria-current="page"');
   });
 
-  it("lists the workflows in the Workflows panel: those waiting first with their counts, then the rest, and See all", async () => {
-    const started = await postRun({ workflow: "announce", input: input("Panel") });
-    await waitFor(
-      () => detail(started.body.runId),
-      (d) => d.run.status === "waiting",
-    );
+  it("lists the workflows in the Workflows panel by their last run, and See all; with no panel, the bar alone, peeking", async () => {
     const { text, html } = await page("/workflows");
     expect(html).toMatch(/<input[^>]*aria-label="Find a workflow"/);
-    const waiting = text.indexOf(">Waiting on you</h3>");
-    const recent = text.indexOf(">Recent</h3>");
-    expect(waiting).toBeGreaterThan(0);
-    expect(recent).toBeGreaterThan(waiting);
-    // Announce waits on someone; drift does not, so it is under Recent.
-    expect(text.slice(waiting, recent)).toMatch(
-      /href="\/workflows\/announce"[\s\S]*>\d+<span class="sr-only"> waiting<\/span>/,
-    );
-    expect(text.slice(recent)).toContain('href="/workflows/drift"');
+    // No name on the server under the default resolver: nothing is waiting on you.
+    expect(text).not.toContain(">Waiting on you</h3>");
+    // Both under Recent, the one run last first.
+    const recent = text.slice(text.indexOf(">Recent</h3>"));
+    const last = await lastRuns(ctx);
+    const [first, second] = ["announce", "drift"]
+      .toSorted((a, b) => last[b]!.createdAt - last[a]!.createdAt)
+      .map((name) => recent.indexOf(`href="/workflows/${name}"`));
+    expect(first).toBeGreaterThan(0);
+    expect(second).toBeGreaterThan(first!);
     expect(text).toMatch(/<a[^>]*href="\/workflows"[^>]*><span>See all 2 workflows<\/span>/);
-    // No panel for Resources: the bar alone.
-    const resources = await page("/resources");
-    expect(resources.html).toContain("--sidebar-width:4.5rem");
+    expect(html).toContain("--sidebar-width:calc(var(--sidebar-bar-width) + var(--sidebar-panel-width))");
+    expect(html).toContain('data-slot="sidebar-rail"');
+    // No panel for Resources: the bar alone, open or not, and no rail to fold it; Inbox and
+    // Workflows peek their panels from it.
+    const resources = await page("/resources", app.url, { headers: { cookie: "sidebar_state=true" } });
+    expect(resources.html).toContain("--sidebar-width:var(--sidebar-bar-width)");
     expect(resources.html).not.toContain('aria-label="Find a workflow"');
-    expect(html).toContain("--sidebar-width:calc(4.5rem + 17rem)");
+    expect(resources.html).not.toContain('data-slot="sidebar-rail"');
+    for (const to of ["/inbox", "/workflows"])
+      expect(section(resources.html, to), to).toContain('aria-haspopup="dialog"');
   });
 
   it("lists every run under All runs, linking each to its page, sandbox runs badged, and filters them by ?status= as getRuns does", async () => {
@@ -1401,6 +1411,7 @@ describe("resources and drift", () => {
     const pending = waiting.reduce((n, run) => n + run.approvals.filter((a) => a.status === "pending").length, 0);
     expect(pending).toBeGreaterThan(0);
     const workflows = await page("/workflows");
+    // Every approval waiting, on anyone: no name on the server, so none for you.
     expect(workflows.text).toContain(`>${pending} approval${pending === 1 ? "" : "s"}</span>`);
     // Drift asks no one.
     expect(workflows.text.match(/>\d+ approvals?<\/span>/g)).toHaveLength(1);
@@ -1472,6 +1483,9 @@ describe("an app configured otherwise", () => {
   /** The Inbox as the deployment's user `user` sees it. */
   const inboxAs = async (user: string) =>
     (await fetch(new URL("/inbox", other.url), { headers: { "x-test-user": user } })).text();
+  /** The Workflows page as the deployment's user `user` sees it. */
+  const workflowsAs = async (user: string) =>
+    (await fetch(new URL("/workflows", other.url), { headers: { "x-test-user": user } })).text();
 
   describe("with its own resolveActor", () => {
     it("starts runs as the principal it resolves, groups included", async () => {
@@ -1510,6 +1524,18 @@ describe("an app configured otherwise", () => {
       const someoneElse = await inboxAs("sso-user");
       expect(currentLink(someoneElse, "For you · 0")).toBe(true);
       expect(someoneElse).toContain("Nothing is waiting for you");
+    });
+
+    it("puts the workflows waiting on the principal first in the Workflows panel, with their counts, and in the overview", async () => {
+      const lead = (await workflowsAs("marketing-lead")).replaceAll("<!-- -->", "");
+      const waiting = lead.slice(lead.indexOf(">Waiting on you</h3>"), lead.indexOf(">Recent</h3>"));
+      expect(waiting).toMatch(/href="\/workflows\/announce"[\s\S]*>\d+<span class="sr-only"> waiting on you<\/span>/);
+      expect(lead).toMatch(/>Waiting on you · 1<\/a>/);
+      expect(lead).toMatch(/>\d+ approvals?, \d+ for you<\/span>/);
+      // Nothing waits on sso-user.
+      const someoneElse = (await workflowsAs("sso-user")).replaceAll("<!-- -->", "");
+      expect(someoneElse).not.toContain(">Waiting on you</h3>");
+      expect(someoneElse).toMatch(/>Waiting on you · 0<\/a>/);
     });
 
     it("answers a resolver that throws with a 500, and logs why", async () => {

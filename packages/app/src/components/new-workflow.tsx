@@ -1,6 +1,5 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { PlusIcon } from "lucide-react";
-import type { ComponentProps } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import {
   Dialog,
@@ -50,10 +49,10 @@ export function NewWorkflowDialog() {
   );
 }
 
-/** New workflow as a button, `size` sm by default. */
-export function NewWorkflowButton(props: Omit<ComponentProps<typeof Button>, "children">) {
+/** New workflow as a small button. */
+export function NewWorkflowButton() {
   return (
-    <DialogTrigger handle={handle} render={<Button size="sm" {...props} />}>
+    <DialogTrigger handle={handle} render={<Button size="sm" />}>
       <PlusIcon data-icon="inline-start" />
       New workflow
     </DialogTrigger>

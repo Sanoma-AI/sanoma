@@ -19,6 +19,7 @@ import {
   getConfig,
   getCredentials,
   getDriftReport,
+  getLastRuns,
   getRun,
   getRuns,
   getScenarios,
@@ -100,6 +101,10 @@ export const connectorNamed = (id: string) => (config: ConfigDescription) =>
 export const workflowNamed = (name: string) => (config: ConfigDescription) =>
   config.workflows.find((wf) => wf.name === name);
 
+/** Each workflow's title (its name when it has none), by name: for `select`. */
+export const workflowTitles = (config: ConfigDescription) =>
+  Object.fromEntries(config.workflows.map((wf) => [wf.name, wf.title ?? wf.name]));
+
 /**
  * The config's workflow of this name, for a page under its own. The root route has loaded the
  * config. None for a retired workflow: one the config no longer has, whose runs remain.
@@ -158,11 +163,12 @@ export const actorQuery = () =>
 export const RUNS_KEY = ["runs"] as const;
 
 /**
- * How often a list of runs refreshes, for `refetchInterval`: every `fast` ms while one of them
- * can still change, else every 30 s. Starting a run or deciding refreshes it at once.
+ * How often runs refresh, a list or by workflow, for `refetchInterval`: every `fast` ms while one
+ * of them can still change, else every 30 s. Starting a run or deciding refreshes them at once.
  */
-export const runsRefetchInterval = (fast: number) => (query: { state: { data?: RunSummary[] | undefined } }) =>
-  query.state.data?.some((run) => !isEnded(run.status)) ? fast : 30_000;
+export const runsRefetchInterval =
+  (fast: number) => (query: { state: { data?: RunSummary[] | Record<string, RunSummary> | undefined } }) =>
+    Object.values(query.state.data ?? {}).some((run) => !isEnded(run.status)) ? fast : 30_000;
 
 /** The latest runs, or the latest of a workflow or with a status (`RunsQuery`). */
 export const runsQuery = (query: RunsQuery = {}) =>
@@ -172,12 +178,16 @@ export const runsQuery = (query: RunsQuery = {}) =>
     refetchInterval: POLL_MS,
   });
 
-/** The runs waiting on an approval: every one, up to `getRuns`'s largest page. Under RUNS_KEY, so a decision refreshes it. */
+/**
+ * The runs waiting on an approval: every one, up to `getRuns`'s largest page. Under RUNS_KEY, so
+ * a decision refreshes it; fresh as long as its poll, so a peek opening does not read it again.
+ */
 export const waitingRunsQuery = () =>
   queryOptions({
     queryKey: [...RUNS_KEY, "waiting"],
     queryFn: () => getRuns({ data: { status: "waiting", limit: RUNS_LIMIT.max } }),
     refetchInterval: 5_000,
+    staleTime: 5_000,
   });
 
 /** The approvals still pending across the runs, each with its run, newest first: for `select`. */
@@ -187,11 +197,27 @@ export const pendingOf = (runs: RunSummary[]) =>
     .toSorted((a, b) => b.approval.requestedAt - a.approval.requestedAt);
 
 /**
- * The latest runs, whatever their status: the Inbox's Decided reads their approvals, and the
- * workflows' panel and overview each workflow's last run. Under RUNS_KEY, so a decision refreshes it.
+ * The latest runs, whatever their status, whose approvals the Inbox's Decided reads. Under
+ * RUNS_KEY, so a decision refreshes it; fresh as long as its fast poll, as `waitingRunsQuery`.
  */
 export const recentRunsQuery = () =>
-  queryOptions({ ...runsQuery({ limit: RUNS_LIMIT.default }), refetchInterval: 5_000 });
+  queryOptions({
+    ...runsQuery({ limit: RUNS_LIMIT.default }),
+    refetchInterval: runsRefetchInterval(5_000),
+    staleTime: 5_000,
+  });
+
+/**
+ * Each workflow's latest run, by name (none for a workflow never run): the Workflows overview's
+ * Last run and its panel's order. Under RUNS_KEY, and fresh as long as its fast poll.
+ */
+export const lastRunsQuery = () =>
+  queryOptions({
+    queryKey: [...RUNS_KEY, "last"],
+    queryFn: () => getLastRuns(),
+    refetchInterval: runsRefetchInterval(5_000),
+    staleTime: 5_000,
+  });
 
 /** The approvals decided across the runs, each with its run, latest decision first: for `select`. */
 export const decidedOf = (runs: RunSummary[]) =>
@@ -202,7 +228,7 @@ export const decidedOf = (runs: RunSummary[]) =>
     );
 
 /** What the Inbox lists (`?show=`): the pending approvals you may decide, all of them, or the decided. */
-export const INBOX_FILTERS = ["mine", "waiting", "decided"] as const;
+const INBOX_FILTERS = ["mine", "waiting", "decided"] as const;
 export type InboxFilter = (typeof INBOX_FILTERS)[number];
 
 /**
@@ -266,32 +292,22 @@ export const WorkflowSearch = z.object({
 });
 
 /** How many runs a workflow's panel lists: the latest. */
-export const RAIL_LIMIT = RUNS_LIMIT.default;
+export const WORKFLOW_RUNS_LIMIT = RUNS_LIMIT.default;
 
 /** A workflow's panel's runs for a filter: the workflow's latest, with the filter's status. */
-export const railQuery = (name: string, filter: RunFilter = "all") =>
+export const workflowRunsQuery = (name: string, filter: RunFilter = "all") =>
   queryOptions({
-    ...runsQuery({ workflow: name, limit: RAIL_LIMIT, status: FILTERS[filter].status }),
+    ...runsQuery({ workflow: name, limit: WORKFLOW_RUNS_LIMIT, status: FILTERS[filter].status }),
     refetchInterval: runsRefetchInterval(POLL_MS),
   });
 
 /** True when the filter picks from the latest runs (`match`), so older runs it would keep go unseen. */
 export const picksFromLatest = (filter: RunFilter) => FILTERS[filter].match !== undefined;
 
-/** Of the runs `railQuery` read, those the filter keeps: all of them, unless it picks by `match`. */
-export const railRuns = (filter: RunFilter, runs: RunSummary[]) => {
+/** Of the runs `workflowRunsQuery` read, those the filter keeps: all of them, unless it picks by `match`. */
+export const workflowRuns = (filter: RunFilter, runs: RunSummary[]) => {
   const { match } = FILTERS[filter];
   return match ? runs.filter(match) : runs;
-};
-
-/**
- * Each workflow's latest run among these runs (newest first, as `getRuns` lists them), by name:
- * for `select`. A workflow with none among them has no entry.
- */
-export const lastRunByWorkflow = (runs: RunSummary[]) => {
-  const last: Record<string, RunSummary> = Object.create(null);
-  for (const run of runs) last[run.workflow] ??= run;
-  return last;
 };
 
 /** A run's page, under its workflow's: for `<Link>`, `navigate` and `redirect`. */

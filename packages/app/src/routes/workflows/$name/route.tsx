@@ -5,7 +5,7 @@ import { Badge } from "#/components/ui/badge.tsx";
 import { ButtonLink, loadCode, loadGraph, Notice, PageHeader, pageTitle } from "#/components/common.tsx";
 import {
   configQuery,
-  railQuery,
+  workflowRunsQuery,
   scenariosQuery,
   sourceQuery,
   useWorkflow,
@@ -35,7 +35,7 @@ export const Route = createFileRoute("/workflows/$name")({
     // The panel's runs and the scenarios do not need the config: they load beside it.
     const [workflow] = await Promise.all([
       loadWorkflow(queryClient, params.name),
-      queryClient.query({ ...railQuery(params.name, deps.runs), staleTime: "static" }),
+      queryClient.query({ ...workflowRunsQuery(params.name, deps.runs), staleTime: "static" }),
       queryClient.query({ ...scenariosQuery(), staleTime: "static" }),
     ]);
     return { crumb: workflow?.title ?? params.name };
@@ -54,7 +54,7 @@ async function loadWorkflow(queryClient: QueryClient, name: string) {
   const config = await queryClient.query({ ...configQuery(), staleTime: "static" });
   const workflow = workflowNamed(name)(config);
   if (!workflow) {
-    const runs = await queryClient.query({ ...railQuery(name), staleTime: "static" });
+    const runs = await queryClient.query({ ...workflowRunsQuery(name), staleTime: "static" });
     if (runs.length === 0) throw notFound();
     return undefined;
   }

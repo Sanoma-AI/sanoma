@@ -161,10 +161,19 @@
 }
 
 /*
+ * The sidebar's widths (app-sidebar.tsx): its section bar, and the panel beside it, docked or
+ * peeking over the page. On :root, since the peek is portalled out of the sidebar.
+ */
+:root {
+  --sidebar-bar-width: 4.5rem;
+  --sidebar-panel-width: 17rem;
+}
+
+/*
  * Compact's page: Tailwind's spacing unit itself at three quarters, which every padding, margin,
  * gap and height utility is a multiple of, so the page beside the sidebar tightens at once (its
  * controls and their icons too; the text keeps its size). Everything outside the inset keeps the
- * full unit: the sidebar (fixed widths, 16rem, 3rem folded) and the portalled menus, dialogs and
+ * full unit: the sidebar (its bar and panel, of fixed widths) and the portalled menus, dialogs and
  * tooltips. The gap tokens above are worked out on #app, in the full unit, and cut further on
  * purpose: the layout's air is where Compact saves most.
  */

@@ -2,7 +2,7 @@ import type { RunStatus, RunSummary } from "@sanoma/workflows";
 import type { WorkflowEntry } from "@sanoma/workflows/describe";
 import { RUN_STATUSES } from "@sanoma/workflows/shared";
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { XIcon } from "lucide-react";
 import { memo } from "react";
 import { z } from "zod";
@@ -10,6 +10,7 @@ import { Badge } from "#/components/ui/badge.tsx";
 import { Card, CardContent } from "#/components/ui/card.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
+import { countByWorkflow, usePending } from "#/lib/inbox.ts";
 import { RUN_TONE } from "#/lib/tone.ts";
 import { RUNS_LIMIT } from "../../api.ts";
 import {
@@ -22,27 +23,25 @@ import {
   plural,
   Segment,
   Segmented,
-  StatusDot,
   ToneBadge,
   VendorLogo,
   When,
 } from "../../components/common.tsx";
 import { NewWorkflowButton } from "../../components/new-workflow.tsx";
-import { RunsTable } from "../../components/runs-table.tsx";
+import { LinkRow, RunsTable } from "../../components/runs-table.tsx";
 import {
   type CalledVendor,
   configQuery,
-  lastRunByWorkflow,
+  lastRunsQuery,
   pendingByWorkflow,
   POLL_MS,
-  recentRunsQuery,
   runsQuery,
   runsRefetchInterval,
   vendorsByWorkflow,
   waitingRunsQuery,
 } from "../../queries.ts";
 
-/** The overview's filters (`?filter=`): every workflow, those waiting on an approval, those whose last run failed, the built-in. */
+/** The overview's filters (`?filter=`): every workflow, those waiting on you, those whose last run failed, the built-in. */
 const WORKFLOW_FILTERS = ["all", "waiting", "failed", "builtin"] as const;
 type WorkflowFilter = (typeof WORKFLOW_FILTERS)[number];
 
@@ -70,14 +69,20 @@ const allRunsQuery = (status: RunStatus | undefined, workflow: string | undefine
 export const Route = createFileRoute("/workflows/")({
   validateSearch: HomeSearch,
   loaderDeps: ({ search: { view, status, workflow } }) => ({ view, status, workflow }),
-  // The root route loads the config. The waiting runs and the latest runs are the overview's
-  // and the Workflows panel's (the root loader has started the waiting runs: this waits for them).
+  // The root route loads the config. The waiting runs and each workflow's last run are the
+  // overview's and the Workflows panel's (the root loader has started the waiting runs: this waits
+  // for them). All runs waits for its own runs only, and starts the panel's.
   loader: async ({ context: { queryClient }, deps }) => {
-    await Promise.all([
+    const panel = [
       queryClient.query({ ...waitingRunsQuery(), staleTime: "static" }),
-      queryClient.query({ ...recentRunsQuery(), staleTime: "static" }),
-      deps.view === "runs" && queryClient.query({ ...allRunsQuery(deps.status, deps.workflow), staleTime: "static" }),
-    ]);
+      queryClient.query({ ...lastRunsQuery(), staleTime: "static" }),
+    ];
+    if (deps.view === "runs") {
+      for (const read of panel) void read.catch(() => {});
+      await queryClient.query({ ...allRunsQuery(deps.status, deps.workflow), staleTime: "static" });
+    } else {
+      await Promise.all(panel);
+    }
   },
   component: WorkflowsPage,
 });
@@ -154,8 +159,8 @@ const FILTER_LABEL: Record<WorkflowFilter, string> = {
 };
 
 /**
- * Every workflow as a row: its title, how it starts, the vendors it calls, its last run (among the
- * latest runs) and how many approvals its runs wait on. The chips above pick them (`?filter=`),
+ * Every workflow as a row: its title, how it starts, the vendors it calls, its last run and how
+ * many approvals its runs wait on (yours among them). The chips above pick them (`?filter=`),
  * each with how many it holds. It reads each query in one pass and hands each row its share: a
  * poll that changed one row's run draws that row alone.
  */
@@ -163,10 +168,11 @@ function Overview({ filter }: { filter: WorkflowFilter }) {
   const { data: workflows } = useSuspenseQuery({ ...configQuery(), select: (config) => config.workflows });
   const { data: vendors } = useSuspenseQuery({ ...configQuery(), select: vendorsByWorkflow });
   const { data: pending } = useSuspenseQuery({ ...waitingRunsQuery(), select: pendingByWorkflow });
-  const { data: last } = useSuspenseQuery({ ...recentRunsQuery(), select: lastRunByWorkflow });
+  const yours = countByWorkflow(usePending().mine);
+  const { data: last } = useSuspenseQuery(lastRunsQuery());
   const picks: Record<WorkflowFilter, (wf: WorkflowEntry) => boolean> = {
     all: () => true,
-    waiting: (wf) => !!pending.byWorkflow[wf.name],
+    waiting: (wf) => !!yours[wf.name],
     failed: (wf) => last[wf.name]?.status === "failed",
     builtin: (wf) => !!wf.builtin,
   };
@@ -174,16 +180,19 @@ function Overview({ filter }: { filter: WorkflowFilter }) {
   const shown = workflows.filter(picks[filter]);
   return (
     <div className="flex flex-col gap-(--gap-section)">
-      <Segmented label="Show">
-        {WORKFLOW_FILTERS.map((f) => (
-          <Segment key={f}>
-            {/* All leaves the URL without `?filter=`; Link marks the one that matches. */}
-            <Link to="/workflows" search={{ filter: f === "all" ? undefined : f }} activeOptions={{ exact: true }}>
-              {FILTER_LABEL[f]} · {workflows.filter(picks[f]).length}
-            </Link>
-          </Segment>
-        ))}
-      </Segmented>
+      {/* Scrolled sideways rather than widening the page, on a phone. */}
+      <div className="overflow-x-auto">
+        <Segmented label="Show">
+          {WORKFLOW_FILTERS.map((f) => (
+            <Segment key={f}>
+              {/* All leaves the URL without `?filter=`; Link marks the one that matches. */}
+              <Link to="/workflows" search={{ filter: f === "all" ? undefined : f }} activeOptions={{ exact: true }}>
+                {FILTER_LABEL[f]} · {workflows.filter(picks[f]).length}
+              </Link>
+            </Segment>
+          ))}
+        </Segmented>
+      </div>
       {shown.length === 0 ? (
         <Nothing title="No workflow matches" />
       ) : (
@@ -206,13 +215,13 @@ function Overview({ filter }: { filter: WorkflowFilter }) {
                   vendors={vendors[wf.name] ?? NO_VENDORS}
                   last={last[wf.name]}
                   waiting={pending.byWorkflow[wf.name] ?? 0}
+                  yours={yours[wf.name] ?? 0}
                 />
               ))}
             </TableBody>
           </Table>
         </div>
       )}
-      <p className="text-xs text-muted-foreground">Last run: from the latest {RUNS_LIMIT.default} runs</p>
     </div>
   );
 }
@@ -222,23 +231,24 @@ const NO_VENDORS: CalledVendor[] = [];
 /** How a workflow starts. Every one starts by hand for now. */
 const STARTS: Record<WorkflowEntry["trigger"], string> = { manual: "By hand" };
 
-/** A workflow's row: the whole row opens its page; its title is the link, for the keyboard and a new tab. */
+/** A workflow's row, opening its page: `waiting` approvals its runs wait on, `yours` of them for you. */
 const WorkflowRow = memo(function WorkflowRow({
   workflow,
   vendors,
   last,
   waiting,
+  yours,
 }: {
   workflow: WorkflowEntry;
   vendors: CalledVendor[];
-  /** Its latest run among the latest runs; none, none there. */
+  /** Its latest run; none for a workflow never run. */
   last: RunSummary | undefined;
   waiting: number;
+  yours: number;
 }) {
   const { name } = workflow;
-  const navigate = useNavigate();
   return (
-    <TableRow className="cursor-pointer" onClick={() => void navigate({ to: "/workflows/$name", params: { name } })}>
+    <LinkRow link={{ to: "/workflows/$name", params: { name } }}>
       <TableCell className="font-medium">
         <div className="flex flex-wrap items-center gap-2">
           <Link to="/workflows/$name" params={{ name }} onClick={(e) => e.stopPropagation()}>
@@ -262,10 +272,9 @@ const WorkflowRow = memo(function WorkflowRow({
       <TableCell>
         {last ? (
           <span className="flex items-center gap-2">
-            <StatusDot tone={RUN_TONE[last.status]} />
-            {last.status}
+            <ToneBadge tone={RUN_TONE[last.status]}>{last.status}</ToneBadge>
             <span className="text-muted-foreground">
-              · <When at={last.createdAt} />
+              <When at={last.createdAt} />
             </span>
           </span>
         ) : (
@@ -274,12 +283,16 @@ const WorkflowRow = memo(function WorkflowRow({
       </TableCell>
       <TableCell className="text-right">
         {waiting > 0 ? (
-          <ToneBadge tone="waiting">{plural(waiting, "approval")}</ToneBadge>
+          // Every approval waiting, on anyone; how many are yours beside it.
+          <ToneBadge tone="waiting">
+            {plural(waiting, "approval")}
+            {yours > 0 && `, ${yours} for you`}
+          </ToneBadge>
         ) : (
-          <span className="text-muted-foreground">0</span>
+          <span className="text-muted-foreground">-</span>
         )}
       </TableCell>
-    </TableRow>
+    </LinkRow>
   );
 });
 

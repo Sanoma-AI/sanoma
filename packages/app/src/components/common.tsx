@@ -42,6 +42,7 @@ import { APPROVAL_TONE, DECISION_TONE, type Tone, TONE_FILL } from "#/lib/tone.t
 import type { OpEntry } from "@sanoma/workflows/describe";
 import { approverLabel } from "@sanoma/workflows/shared";
 import { configQuery } from "../queries.ts";
+import type { PanelSection } from "./app-sidebar.tsx";
 import type { CodeProps } from "./code.tsx";
 import type { GraphProps } from "./graph.tsx";
 
@@ -53,6 +54,8 @@ declare module "@tanstack/react-router" {
     crumb?: string;
     /** The page takes the page column's full width, not the reading width the root caps others at. */
     wide?: true;
+    /** The sidebar's section the page is under, whose panel shows beside the bar (`usePanel`). */
+    section?: PanelSection;
   }
 }
 
@@ -95,7 +98,7 @@ export function ledgerTone(record: LedgerRecord): Tone {
 }
 
 /** Badge colours by tone, over Badge's default variant. */
-const toneBadge = cva("", {
+export const toneBadge = cva("", {
   variants: {
     tone: {
       ok: "bg-tone-ok text-tone-ok-foreground",

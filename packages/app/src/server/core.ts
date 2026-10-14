@@ -12,6 +12,7 @@ import {
   isEnded,
   type LedgerRecord,
   Principal,
+  type RunSummary,
   type SanomaError,
 } from "@sanoma/workflows";
 import type { ConfigDescription } from "@sanoma/workflows/describe";
@@ -258,6 +259,15 @@ export async function startRun(
 
 /** The latest runs, or the latest with a status, of a workflow (`getRuns`). */
 export const listRuns = ({ client }: AppContext, query: z.output<typeof RunsQuery>) => client.runs(query);
+
+/**
+ * Each workflow's latest run, by name (`getLastRuns`): one read of each workflow's newest, all at
+ * once. A workflow never run has none.
+ */
+export async function lastRuns({ client, description }: AppContext): Promise<Record<string, RunSummary>> {
+  const latest = await Promise.all(description.workflows.map((wf) => client.runs({ workflow: wf.name, limit: 1 })));
+  return Object.fromEntries(latest.flatMap(([run]) => (run ? [[run.workflow, run]] : [])));
+}
 
 /** The report of a drift run once it ends (`SanomaClient.driftReport`). */
 export const driftReport = ({ client }: AppContext, runId: string): Promise<DriftReport> => client.driftReport(runId);

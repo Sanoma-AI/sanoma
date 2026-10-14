@@ -1,52 +1,53 @@
-import { useLocation, useMatch } from "@tanstack/react-router";
-import { PanelLeftCloseIcon, PinIcon } from "lucide-react";
-import { createContext, type ReactNode, use } from "react";
-import { SidebarHeader, useSidebar } from "#/components/ui/sidebar.tsx";
+import { useMatch, useMatches } from "@tanstack/react-router";
+import { ArrowRightIcon, PanelLeftCloseIcon, PinIcon } from "lucide-react";
+import type { ReactElement, ReactNode } from "react";
+import {
+  SidebarFooter,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  useSidebar,
+} from "#/components/ui/sidebar.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
-import { TipButton } from "../common.tsx";
+import type { Tone } from "#/lib/tone.ts";
+import type { PanelSection } from "../app-sidebar.tsx";
+import { StatusDot, TipButton, When } from "../common.tsx";
 
 // What the sidebar's panel lists, and the pieces every panel shares.
 
 /** A section's panel: the Inbox's approvals, the workflows, or one workflow's runs (drilled in). */
-export type Panel = { kind: "inbox" } | { kind: "workflows" } | { kind: "workflow"; name: string };
+export type Panel = { kind: PanelSection } | { kind: "workflow"; name: string };
 
-/** The sections that have a panel. Resources and Connectors have none, until they have something to list. */
-export type PanelSection = "inbox" | "workflows";
+/** The section the page is under: its deepest route's `staticData.section`, if any route names one. */
+const sectionOfMatches = (matches: { staticData: { section?: PanelSection } }[]) =>
+  matches.findLast((match) => match.staticData.section)?.staticData.section;
+
+/** Whether the page's section has a panel. */
+export const useHasPanel = () => useMatches({ select: (matches) => sectionOfMatches(matches) !== undefined });
 
 /**
- * The panel the URL picks: the Inbox's under /inbox, the workflows' under /workflows, drilled into
- * one workflow on its page (either pane); none elsewhere.
+ * The panel the page's section has (its route's `staticData.section`), drilled into a workflow on
+ * its page (either pane); none for a section without one.
  */
 export function usePanel(): Panel | undefined {
+  const section = useMatches({ select: sectionOfMatches });
   const name = useMatch({ from: "/workflows/$name", shouldThrow: false, select: (match) => match.params.name });
-  const pathname = useLocation({ select: (location) => location.pathname });
-  if (name !== undefined) return { kind: "workflow", name };
-  if (pathname === "/workflows" || pathname.startsWith("/workflows/")) return { kind: "workflows" };
-  if (pathname === "/inbox") return { kind: "inbox" };
-  return undefined;
+  if (section === "workflows" && name !== undefined) return { kind: "workflow", name };
+  return section && { kind: section };
 }
 
 /** The section a panel belongs to: the bar item it peeks from. */
-export const sectionOf = (panel: Panel): PanelSection => (panel.kind === "inbox" ? "inbox" : "workflows");
+export const sectionOf = (panel: Panel): PanelSection => (panel.kind === "workflow" ? "workflows" : panel.kind);
 
-/**
- * Where a panel shows: `docked` beside the bar, `peek` over the page while the sidebar is folded,
- * or `sheet` on a phone. `close` closes the peek or the sheet, as a link in the panel is followed.
- */
-type PanelPlace = { place: "docked" | "peek" | "sheet"; close: () => void };
-
-const PanelContext = createContext<PanelPlace>({ place: "docked", close: () => {} });
-
-export function PanelProvider({ value, children }: { value: PanelPlace; children: ReactNode }) {
-  return <PanelContext value={value}>{children}</PanelContext>;
-}
-
-/** Where this panel shows, and how a link in it closes the peek or the sheet it is in. */
-export const usePanelPlace = () => use(PanelContext);
+/** A link lit while it is the page open (Link sets `aria-current` too): for `activeProps`. */
+export const ACTIVE = { "data-active": true } as const;
 
 /**
  * A panel's header: its title (an `<h2>`, or `title` as given), `actions` beside it, and the button
- * that folds the docked panel to the bar, or pins the peek open. Under them, `children`.
+ * that folds the docked panel to the bar, or pins the peek open (on a page with a panel to dock).
+ * Under them, `children`. The panel is docked while the sidebar is open on a page with a panel,
+ * in a sheet on a phone, and peeking otherwise.
  */
 export function PanelHeader({
   title,
@@ -57,8 +58,9 @@ export function PanelHeader({
   actions?: ReactNode;
   children?: ReactNode;
 }) {
-  const { setOpen } = useSidebar();
-  const { place, close } = usePanelPlace();
+  const { isMobile, open, setOpen } = useSidebar();
+  const hasPanel = useHasPanel();
+  const place = isMobile ? "sheet" : open && hasPanel ? "docked" : "peek";
   return (
     <SidebarHeader className="gap-3 p-3">
       <div className="flex min-h-8 items-center gap-1">
@@ -69,15 +71,9 @@ export function PanelHeader({
             <PanelLeftCloseIcon />
           </TipButton>
         )}
-        {place === "peek" && (
-          <TipButton
-            tip="Pin the panel"
-            size="icon-sm"
-            onClick={() => {
-              setOpen(true);
-              close();
-            }}
-          >
+        {/* Opening the sidebar docks the page's panel, which closes the peek. */}
+        {place === "peek" && hasPanel && (
+          <TipButton tip="Pin the panel" size="icon-sm" onClick={() => setOpen(true)}>
             <PinIcon />
           </TipButton>
         )}
@@ -85,6 +81,70 @@ export function PanelHeader({
       {children}
     </SidebarHeader>
   );
+}
+
+/**
+ * A row of a panel's list, a link (`link`): a dot in its `tone`, its `title`, when it happened at
+ * the end, and under them its `lines`, each cut to one line so the rows keep the panel's width.
+ * `isActive` marks it when the link itself cannot tell (Link's `activeProps` can).
+ */
+export function PanelRow({
+  link,
+  tone,
+  title,
+  at,
+  lines,
+  isActive,
+}: {
+  link: ReactElement;
+  tone: Tone;
+  title: ReactNode;
+  at: number;
+  lines: ReactNode[];
+  isActive?: boolean;
+}) {
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton isActive={isActive} className="h-auto flex-col items-stretch gap-0.5 py-1.5" render={link}>
+        <span className="flex min-w-0 items-center gap-2">
+          <StatusDot tone={tone} />
+          {title}
+          <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+            <When at={at} />
+          </span>
+        </span>
+        {lines.map(
+          (line, i) =>
+            line && (
+              <span key={i} className="truncate pl-4.5 text-xs text-muted-foreground">
+                {line}
+              </span>
+            ),
+        )}
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
+/** A panel's foot: one link, `link`, to the whole of what it lists. */
+export function PanelFooterLink({ link, children }: { link: ReactElement; children: ReactNode }) {
+  return (
+    <SidebarFooter className="border-t">
+      <SidebarMenu>
+        <SidebarMenuItem>
+          <SidebarMenuButton render={link} className="text-muted-foreground">
+            <span>{children}</span>
+            <ArrowRightIcon className="ml-auto" />
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      </SidebarMenu>
+    </SidebarFooter>
+  );
+}
+
+/** What a panel's list says when it lists nothing. */
+export function PanelEmpty({ children }: { children: ReactNode }) {
+  return <p className="px-2 text-sm text-muted-foreground">{children}</p>;
 }
 
 /**

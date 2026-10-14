@@ -22,7 +22,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu.tsx";
-import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "#/components/ui/sidebar.tsx";
+import { useSidebar } from "#/components/ui/sidebar.tsx";
 import { useActor } from "../actor.ts";
 import { useDensity } from "./density.tsx";
 
@@ -49,57 +49,46 @@ export function NavUser() {
     error ?? (actor ? (fromServer ? "Signed in by the deployment" : "Name kept in this browser") : undefined);
   const name = actor ?? (fromServer ? "Not signed in" : "Who are you?");
   return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <SidebarMenuButton
-                size="lg"
-                className="mx-auto size-10! justify-center p-0! group-data-[collapsible=icon]:size-10! data-popup-open:bg-sidebar-accent data-popup-open:text-sidebar-accent-foreground"
-              />
-            }
-          >
-            <Avatar className="size-8 rounded-lg">
-              <AvatarFallback className="rounded-lg">
-                {actor ? actor.slice(0, 2).toUpperCase() : <UserIcon />}
-              </AvatarFallback>
-            </Avatar>
-            <div className="sr-only">
-              {/* The name in this browser is read after hydration: until then, none. */}
-              {(actor !== undefined || fromServer) && <span>{name}</span>}
-              {status && <span>{status}</span>}
-            </div>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent className="min-w-56" side={isMobile ? "bottom" : "right"} align="end" sideOffset={4}>
-            <DropdownMenuGroup>
-              <DropdownMenuLabel className="flex flex-col gap-0.5">
-                <span className="text-sm text-foreground">{name}</span>
-                {status && <span className={cn("font-normal", error && "text-destructive")}>{status}</span>}
-              </DropdownMenuLabel>
-            </DropdownMenuGroup>
+    <DropdownMenu>
+      <DropdownMenuTrigger className="flex size-10 items-center justify-center rounded-md outline-hidden transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring data-popup-open:bg-sidebar-accent">
+        <Avatar className="size-8 rounded-lg">
+          <AvatarFallback className="rounded-lg">
+            {actor ? actor.slice(0, 2).toUpperCase() : <UserIcon />}
+          </AvatarFallback>
+        </Avatar>
+        <span className="sr-only">
+          {/* The name in this browser is read after hydration: until then, none. */}
+          {(actor !== undefined || fromServer) && <span>{name}</span>}
+          {status && <span>{status}</span>}
+        </span>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="min-w-56" side={isMobile ? "bottom" : "right"} align="end" sideOffset={4}>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="flex flex-col gap-0.5">
+            <span className="text-sm text-foreground">{name}</span>
+            {status && <span className={cn("font-normal", error && "text-destructive")}>{status}</span>}
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        {!fromServer && (
+          <>
+            <DropdownMenuItem onClick={() => setActor(null)}>
+              <UserPenIcon />
+              Change name
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
-            {!fromServer && (
-              <>
-                <DropdownMenuItem onClick={() => setActor(null)}>
-                  <UserPenIcon />
-                  Change name
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-              </>
-            )}
-            <Choices label="Theme" value={theme ?? "system"} onValueChange={setTheme} choices={THEMES} />
-            <DropdownMenuSeparator />
-            <Choices
-              label="Density"
-              value={compact ? "compact" : "comfortable"}
-              onValueChange={setDensity}
-              choices={DENSITIES}
-            />
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </SidebarMenuItem>
-    </SidebarMenu>
+          </>
+        )}
+        <Choices label="Theme" value={theme ?? "system"} onValueChange={setTheme} choices={THEMES} />
+        <DropdownMenuSeparator />
+        <Choices
+          label="Density"
+          value={compact ? "compact" : "comfortable"}
+          onValueChange={setDensity}
+          choices={DENSITIES}
+        />
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

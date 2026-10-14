@@ -4,7 +4,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { RUNS_LIMIT } from "../api.ts";
 import { ApprovalCard } from "../components/approval.tsx";
 import { Nothing, Notice, PageHeader, pageTitle, plural } from "../components/common.tsx";
-import { type Entry, useDecided, useInbox, workflowTitles } from "../components/panels/inbox-panel.tsx";
+import { type Entry, useDecided, useInbox } from "../lib/inbox.ts";
 import {
   approvalKey,
   configQuery,
@@ -13,6 +13,7 @@ import {
   recentRunsQuery,
   runLink,
   waitingRunsQuery,
+  workflowTitles,
 } from "../queries.ts";
 
 export const Route = createFileRoute("/inbox")({
@@ -24,7 +25,7 @@ export const Route = createFileRoute("/inbox")({
       deps.decided && queryClient.query({ ...recentRunsQuery(), staleTime: "static" }),
     ]);
   },
-  staticData: { crumb: "Inbox" },
+  staticData: { crumb: "Inbox", section: "inbox" },
   head: ({ match }) => pageTitle(match.staticData.crumb),
   component: InboxPage,
 });
@@ -32,15 +33,14 @@ export const Route = createFileRoute("/inbox")({
 /**
  * The approval open: the one `?approval=` names, else the first for you, else the first that
  * `?show=` lists (`useInbox`), or on Decided the one named, else the latest. Its panel lists them
- * all beside the page, the open one marked.
+ * all beside the page, the open one marked, and says when they could not be refreshed.
  */
 function InboxPage() {
   const { show, approval: wanted } = Route.useSearch();
-  const { pending, filter, open, error } = useInbox(show, wanted);
+  const { pending, filter, open } = useInbox(show, wanted);
   return (
     <>
       <PageHeader />
-      {error && <Notice variant="destructive">Could not refresh approvals: {error.message}</Notice>}
       {filter === "decided" ? (
         <Decided wanted={wanted} />
       ) : open ? (
