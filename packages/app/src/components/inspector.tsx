@@ -3,17 +3,18 @@ import type { Span, WorkflowEntry } from "@sanoma/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { XIcon } from "lucide-react";
-import { type ReactNode, Suspense, useMemo } from "react";
+import { Children, Fragment, isValidElement, type ReactNode, Suspense } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
 import { ItemGroup } from "#/components/ui/item.tsx";
+import { Separator } from "#/components/ui/separator.tsx";
 import { starterName } from "../api.ts";
 import type { GraphNode, GraphNodeKind } from "../graph/types.ts";
 import { spanLines } from "../lib/lines.ts";
 import { recordsFor } from "../lib/records.ts";
 import { configQuery, opsById, sourceQuery } from "../queries.ts";
-import { ApprovalCard } from "./approval.tsx";
-import { Fact, Facts, None, OpName, Section, Tip, VendorLogo, When } from "./common.tsx";
+import { ApprovalDecision, ApprovalDetails } from "./approval.tsx";
+import { ApprovalStatusBadge, Fact, Facts, None, OpName, Section, Tip, VendorLogo, When } from "./common.tsx";
 import { LedgerRow } from "./ledger.tsx";
 import { NewRun } from "./new-run.tsx";
 import { WorkflowSections } from "./workflow.tsx";
@@ -28,6 +29,9 @@ const KIND_TITLE: Partial<Record<GraphNodeKind, string>> = {
   approval: "Approval",
   sleep: "Sleep",
 };
+
+/** The source the nodes' spans index into, for their line numbers: its file's name, or the text itself. */
+export type SourceText = { file: string } | { source: string | null | undefined };
 
 /** A run, as the inspector shows it and its nodes' records. */
 export interface InspectedRun {
@@ -59,8 +63,7 @@ export function Inspector({
   run: InspectedRun | undefined;
   newRun: boolean;
   node: GraphNode | undefined;
-  /** The source the nodes' spans index into, for their line numbers: its file's name, or the text itself. */
-  text: { file: string } | { source: string | null | undefined };
+  text: SourceText;
   /** Unselects the node. */
   onClose: () => void;
   /** Shows the node's lines: opens the Code tab. */
@@ -85,11 +88,12 @@ export function Inspector({
     );
   }
   if (node) {
+    const approval = run && "state" in node && node.state && "approval" in node.state ? node.state.approval : undefined;
+    const records = run ? recordsFor(node, run.ledger) : [];
     return (
       <Panel
         title={KIND_TITLE[node.kind] ?? node.kind}
-        // An operation's id is in its facts; a start's label is only its kind.
-        description={node.kind === "op" || node.label === node.kind ? undefined : node.label}
+        description={describe(node)}
         action={
           <Tip tip="Show the overview">
             <Button variant="ghost" size="icon-sm" onClick={onClose}>
@@ -99,8 +103,9 @@ export function Inspector({
           </Tip>
         }
       >
-        <NodeFacts node={node} text={text} onLines={onLines} />
-        {run && <NodeRecords node={node} run={run} />}
+        {(node.kind === "op" || node.span) && <NodeFacts node={node} text={text} onLines={onLines} />}
+        {run && approval?.status === "pending" && <InspectedApproval run={run.run} approval={approval} />}
+        {run && records.length > 0 && <NodeRecords records={records} titles={run.titles} />}
       </Panel>
     );
   }
@@ -117,12 +122,13 @@ export function Inspector({
             <code className="break-all">{summary.runId}</code>
           </Fact>
         </Facts>
-        <Section title="Approvals">
-          {approvals.length === 0 && <None>None asked for.</None>}
-          {approvals.map((approval) => (
-            <ApprovalCard key={approval.id} run={summary} approval={approval} />
-          ))}
-        </Section>
+        {approvals.length === 0 ? (
+          <Section title="Approvals">
+            <None>None asked for.</None>
+          </Section>
+        ) : (
+          approvals.map((approval) => <InspectedApproval key={approval.id} run={summary} approval={approval} />)
+        )}
       </Panel>
     );
   }
@@ -134,7 +140,10 @@ export function Inspector({
   );
 }
 
-/** The inspector's card: its title, a description under it, an action at its end, and what it holds, scrolling. */
+/**
+ * The inspector's card: its title, a description under it, an action at its end, and its
+ * sections, a separator between each two, scrolling.
+ */
 function Panel({
   title,
   description,
@@ -156,26 +165,26 @@ function Panel({
         {action && <CardAction className="self-center">{action}</CardAction>}
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col gap-(--card-spacing) overflow-y-auto py-(--card-spacing)">
-        {children}
+        {/* Keyed as toArray keys them: an approval's section keeps its state as the list grows. */}
+        {Children.toArray(children).map((section, i) => (
+          <Fragment key={isValidElement(section) ? section.key : i}>
+            {i > 0 && <Separator />}
+            {section}
+          </Fragment>
+        ))}
       </CardContent>
     </Card>
   );
 }
 
-/** What the node is: its operation (vendor, effect and what it does), and where it is in the source. */
-function NodeFacts({
-  node,
-  text,
-  onLines,
-}: {
-  node: GraphNode;
-  text: { file: string } | { source: string | null | undefined };
-  onLines: () => void;
-}) {
+/**
+ * What the node is, for an operation or a node with a span: its operation (vendor, effect and
+ * what it does), and where it is in the source.
+ */
+function NodeFacts({ node, text, onLines }: { node: GraphNode; text: SourceText; onLines: () => void }) {
   const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
   const { data: vendors } = useSuspenseQuery({ ...configQuery(), select: (config) => config.vendors });
   const op = node.kind === "op" ? ops.get(node.label) : undefined;
-  if (node.kind !== "op" && !node.span) return null;
   return (
     <Facts>
       {node.kind === "op" && (
@@ -218,15 +227,7 @@ function NodeFacts({
 }
 
 /** "Lines a–b" of the node's span, which opens the Code tab, where they are marked. */
-function Lines({
-  span,
-  text,
-  onClick,
-}: {
-  span: Span;
-  text: { file: string } | { source: string | null | undefined };
-  onClick: () => void;
-}) {
+function Lines({ span, text, onClick }: { span: Span; text: SourceText; onClick: () => void }) {
   if ("file" in text) return <FileLines file={text.file} span={span} onClick={onClick} />;
   return text.source == null ? null : <LinesButton lines={spanLines(text.source, span)} onClick={onClick} />;
 }
@@ -244,25 +245,50 @@ function LinesButton({ lines: [first, last], onClick }: { lines: [number, number
   );
 }
 
-/**
- * A run node's ledger records, and the approval it waits on (an approval's own, or the policy's
- * on a held call), decided here.
- */
-function NodeRecords({ node, run }: { node: GraphNode; run: InspectedRun }) {
-  const records = useMemo(() => recordsFor(node, run.ledger), [node, run.ledger]);
-  const approval = "state" in node && node.state && "approval" in node.state ? node.state.approval : undefined;
+/** A run node's ledger records. */
+function NodeRecords({ records, titles }: { records: LedgerRecord[]; titles: Map<string, string> }) {
   return (
-    <>
-      {approval?.status === "pending" && <ApprovalCard run={run.run} approval={approval} />}
-      {records.length > 0 && (
-        <Section title="Ledger">
-          <ItemGroup aria-label="Its ledger records">
-            {records.map((record) => (
-              <LedgerRow key={record.id} record={record} titles={run.titles} anchor={false} />
-            ))}
-          </ItemGroup>
-        </Section>
-      )}
-    </>
+    <Section title="Ledger">
+      <ItemGroup aria-label="Its ledger records">
+        {records.map((record) => (
+          <LedgerRow key={record.id} record={record} titles={titles} anchor={false} />
+        ))}
+      </ItemGroup>
+    </Section>
   );
+}
+
+/**
+ * An approval in the inspector, which is a card already: its title and status, what it is, and
+ * Approve and Reject while it is pending, with no card of its own.
+ */
+function InspectedApproval({ run, approval }: { run: RunSummary; approval: ApprovalState }) {
+  return (
+    <Section
+      title={
+        <span className="flex items-center justify-between gap-2">
+          {approval.title}
+          <ApprovalStatusBadge status={approval.status} />
+        </span>
+      }
+    >
+      <ApprovalDetails run={run} approval={approval} />
+      {approval.status === "pending" && (
+        <div className="flex flex-wrap items-center gap-2">
+          <ApprovalDecision run={run} approval={approval} />
+        </div>
+      )}
+    </Section>
+  );
+}
+
+/**
+ * What the inspector says under a node's kind: its step's name (an operation's or a sleep's,
+ * when the call gives one), and what the node says, unless that is only its kind or an
+ * operation's id, which its facts show.
+ */
+function describe(node: GraphNode): string | undefined {
+  const name = node.kind === "op" || node.kind === "sleep" ? node.name : undefined;
+  const label = node.kind === "op" || node.label === node.kind ? undefined : node.label;
+  return [name, label].filter(Boolean).join(" · ") || undefined;
 }

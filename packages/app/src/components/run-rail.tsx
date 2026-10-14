@@ -5,15 +5,13 @@ import { PanelLeftCloseIcon, PanelLeftOpenIcon, WorkflowIcon } from "lucide-reac
 import { memo, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
+import { RAIL_COOKIE } from "#/lib/rail.ts";
 import { RUN_TONE } from "#/lib/tone.ts";
 import { pendingApprovals, starterName } from "../api.ts";
 import { picksFromLatest, RAIL_LIMIT, railQuery, railRuns, RUN_FILTERS, type RunFilter, runLink } from "../queries.ts";
 import { Nothing, SandboxBadge, StatusDot, Tip, When } from "./common.tsx";
 
 // The rail on a workflow's page: the workflow's own pane, and its latest runs, each linking to its own pane.
-
-/** The cookie the rail's fold is kept in: `collapsed` or `open` (and, never set, open). */
-export const RAIL_COOKIE = "sanoma_rail";
 
 /** A year, in seconds. */
 const RAIL_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
@@ -29,6 +27,10 @@ const FILTER_LABEL: Record<RunFilter, string> = {
 /** A link in the rail; `aria-current`, which Link sets on an active link, marks the pane that shows. */
 const RAIL_LINK =
   "flex flex-col gap-0.5 rounded-md px-2 py-1.5 text-sm hover:bg-muted aria-[current=page]:bg-muted compact:flex-row compact:items-center compact:gap-2 compact:py-1";
+
+/** An icon link in the folded rail. */
+const RAIL_ICON =
+  "flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted aria-[current=page]:bg-muted";
 
 /** The rail's links keep the filter and drop the rest (`?new`, `?scenario=`); All leaves the URL without `?runs=`. */
 const railSearch = (filter: RunFilter) => ({ runs: filter === "all" ? undefined : filter });
@@ -103,7 +105,7 @@ export function RunRail({ name }: { name: string }) {
   return (
     <aside
       aria-label="Runs of this workflow"
-      className="flex flex-[1_1_16rem] flex-col gap-3 rounded-lg border bg-card p-2 text-card-foreground"
+      className="flex flex-[1_1_14rem] flex-col gap-3 rounded-lg border bg-card p-2 text-card-foreground"
     >
       <nav className="flex items-center gap-1">
         <Link {...workflowLink} className={`${RAIL_LINK} flex-1 aria-[current=page]:font-medium`}>
@@ -166,10 +168,6 @@ export function RunRail({ name }: { name: string }) {
     </aside>
   );
 }
-
-/** An icon link in the folded rail. */
-const RAIL_ICON =
-  "flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted aria-[current=page]:bg-muted";
 
 /** A run in the folded rail: its status's dot, with what the open rail says of it as its tooltip. */
 const RunDot = memo(function RunDot({ run, filter }: { run: RunSummary; filter: RunFilter }) {

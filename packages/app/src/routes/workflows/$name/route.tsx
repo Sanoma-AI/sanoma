@@ -22,6 +22,8 @@ import {
  * query client.
  */
 export const Route = createFileRoute("/workflows/$name")({
+  // The rail, the graph and the inspector side by side: the graph gets what the screen has left.
+  staticData: { wide: true },
   // On either pane: `?runs=` filters the rail, `?new` opens New run in the inspector, and
   // `?scenario=` is its Sandbox mode. The rail's own links carry `?runs=` (and drop the others);
   // a middleware retaining it would put it on the sidebar's links to other workflows too.

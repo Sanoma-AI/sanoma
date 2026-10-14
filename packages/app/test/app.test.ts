@@ -923,6 +923,9 @@ describe("the page", () => {
     expect(found.status).toBe(200);
     expect(found.html).toMatch(/<h1[^>]*>Announce a launch<\/h1>/);
     expect(found.text).toContain("<title>Announce a launch · Sanoma</title>");
+    // The page takes the column's full width (`staticData.wide`); other pages keep the reading width.
+    expect(found.html).toContain('data-wide="true"');
+    expect((await page("/inbox")).html).not.toContain("data-wide=");
     // The graph's card, drawn in the browser: its title and a skeleton.
     expect(found.html).toMatch(/data-slot="card-title"[^>]*>Graph</);
     expect(found.html).toMatch(/<div data-slot="skeleton"[^>]*aria-label="Loading the graph"/);
@@ -1091,6 +1094,9 @@ describe("the page", () => {
     );
     const waiting = await page(`/workflows/announce/runs/${started.body.runId}`);
     expect(waiting.text).toMatch(/Waiting on marketing-lead for “[^”]+”<button[^>]*>Show approval<\/button>/);
+    // The inspector, a card, sets out the approval with Approve and Reject, not in a card of its own.
+    expect(waiting.html).toMatch(/<button[^>]*>(<svg.*?<\/svg>)?Approve<\/button>/);
+    expect(waiting.html).not.toContain('data-slot="card-footer"');
     const missing = await page("/workflows/announce/runs/does-not-exist");
     expect(missing.status).toBe(404);
     expect(missing.text).toContain("No run does-not-exist");
@@ -1108,6 +1114,12 @@ describe("the page", () => {
     // The filter is the rail's: the sidebar's link to another workflow does not carry it.
     expect(filtered.html).toContain('href="/workflows/drift"');
     expect(filtered.html).not.toContain('href="/workflows/drift?runs=sandbox"');
+    // The rail's links keep only the filter: `?new` and `?scenario=` stay with the pane that shows,
+    // and the sidebar's link to this workflow carries none of them.
+    const opened = await page("/workflows/announce?runs=sandbox&new&scenario=Launch+on+time");
+    expect(linkTag(opened.html, "Workflow")).toContain('href="/workflows/announce?runs=sandbox"');
+    expect(opened.html).toContain(`href="/workflows/announce/runs/${sandboxId}?runs=sandbox"`);
+    expect(opened.html).toContain('href="/workflows/announce"');
     // Sandbox is a pick from the latest runs, so none there is all it can say.
     expect((await page("/workflows/drift?runs=sandbox")).text).toContain("No sandbox runs among the latest 50");
 

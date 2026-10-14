@@ -1,7 +1,7 @@
 import type { WorkflowEntry } from "@sanoma/workflows/describe";
 import { approverLabel } from "@sanoma/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { useSearch } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { type ReactNode, Suspense, useCallback, useMemo, useRef, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardHeader, CardTitle } from "#/components/ui/card.tsx";
@@ -18,7 +18,7 @@ import { nodesByRecord } from "../lib/records.ts";
 import { sourceQuery, workflowFile } from "../queries.ts";
 import type { CodeProps } from "./code.tsx";
 import { CodePanel, GraphPanel, Nothing, Notice, Region } from "./common.tsx";
-import { type InspectedRun, Inspector } from "./inspector.tsx";
+import { type InspectedRun, Inspector, type SourceText } from "./inspector.tsx";
 import { CheckRow, LedgerRow, show } from "./ledger.tsx";
 
 // One view for a workflow and its runs: the graph beside an inspector, then Code and Ledger tabs.
@@ -30,9 +30,10 @@ type Tab = "code" | "ledger";
  * shows it, inside the pane's container (`@container/pane`):
  * - `children` (the pane's notices), then for a run waiting on someone a banner naming who and
  *   for what, which selects the approval's node, or a failed run's error;
- * - the graph card beside the inspector, 22rem wide, or above it while the pane is narrower than
- *   `@3xl` (by the pane's own width: beside the sidebar and the rail a pane is about 480 px wide on
- *   a 1024 px screen). The graph card sets the row's height; the inspector scrolls inside it;
+ * - the graph card beside the inspector, 20rem wide, or above it while the pane is narrower than
+ *   `@3xl` (by the pane's own width: on a 1024 px screen, with the sidebar open, the rail sits
+ *   above a pane about 720 px wide). The graph card sets the row's height; the inspector scrolls
+ *   inside it;
  * - Code and, for a run, Ledger tabs under them.
  *
  * A click on a node, in the code, or a ledger row's "Show in graph" selects the node: the graph
@@ -79,24 +80,35 @@ export function WorkflowView({
   // By id, so a poll's new graph cannot leave an old node selected.
   const [selected, setSelected] = useState<string>();
   const node = graph?.nodes.find((n) => n.id === selected);
+  const navigate = useNavigate();
+  // A node picked while New run is open takes its place in the inspector: `?new` goes, in place.
+  const pick = useCallback(
+    (id: string | undefined) => {
+      setSelected(id);
+      if (id !== undefined && newRun) {
+        void navigate({ to: ".", search: (prev) => ({ ...prev, new: undefined }), replace: true });
+      }
+    },
+    [newRun, navigate],
+  );
   const reducedMotion = useReducedMotion();
   const select = useCallback(
     (picked: GraphNode | undefined) => {
-      setSelected(picked?.id);
+      pick(picked?.id);
       const recordId = picked && "state" in picked ? picked.state?.recordId : undefined;
       if (recordId && tab === "ledger") show(recordId, reducedMotion);
     },
-    [tab, reducedMotion],
+    [pick, tab, reducedMotion],
   );
   const selectAt = useCallback((offset: number) => select(graph && nodeAt(graph.nodes, offset)), [graph, select]);
   // From the ledger: the graph comes into view with its node ringed, and the ledger stays put.
   const graphCard = useRef<HTMLDivElement>(null);
   const showInGraph = useCallback(
     (recordId: string) => {
-      setSelected(nodeOf?.get(recordId));
+      pick(nodeOf?.get(recordId));
       graphCard.current?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "nearest" });
     },
-    [nodeOf, reducedMotion],
+    [pick, nodeOf, reducedMotion],
   );
   const highlight = useMemo(() => node?.span && [node.span], [node]);
 
@@ -109,7 +121,7 @@ export function WorkflowView({
   const noSource = unread !== undefined && <Nothing title="No source to show">{unread}</Nothing>;
   if (!graph) return noSource;
   const file = outline && workflowFile({ outline });
-  const text = file !== undefined ? { file } : { source: workflow?.source };
+  const text: SourceText = file !== undefined ? { file } : { source: workflow?.source };
   const waiting = summary?.status === "waiting" ? pendingApprovals(summary)[0] : undefined;
   const waitingNode =
     waiting &&
@@ -131,7 +143,7 @@ export function WorkflowView({
         </Notice>
       )}
       {summary?.error && <Notice variant="destructive">{summary.error}</Notice>}
-      <div className="grid gap-(--gap-region) @3xl/pane:grid-cols-[minmax(0,1fr)_22rem]">
+      <div className="grid gap-(--gap-region) @3xl/pane:grid-cols-[minmax(0,1fr)_20rem]">
         <Card ref={graphCard} className="scroll-mt-4 gap-0 overflow-hidden py-0">
           <CardHeader className="border-b py-2 compact:py-1 [.border-b]:pb-2 compact:[.border-b]:pb-1">
             <CardTitle role="heading" aria-level={2} className="text-sm">

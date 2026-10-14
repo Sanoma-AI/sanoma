@@ -1,5 +1,5 @@
 import { type QueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createRootRouteWithContext, HeadContent, Link, Outlet, Scripts } from "@tanstack/react-router";
+import { createRootRouteWithContext, HeadContent, Link, Outlet, Scripts, useMatches } from "@tanstack/react-router";
 import { createIsomorphicFn } from "@tanstack/react-start";
 import { getCookie } from "@tanstack/react-start/server";
 import { Maximize2Icon, Minimize2Icon } from "lucide-react";
@@ -7,7 +7,6 @@ import { ThemeProvider } from "next-themes";
 import { Fragment, lazy, type ReactNode, Suspense } from "react";
 import { AppSidebar } from "#/components/app-sidebar.tsx";
 import { DENSITY_COOKIE, DensityProvider, useDensity } from "#/components/density.tsx";
-import { RAIL_COOKIE } from "#/components/run-rail.tsx";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -21,6 +20,7 @@ import { Separator } from "#/components/ui/separator.tsx";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "#/components/ui/sidebar.tsx";
 import { Toaster } from "#/components/ui/sonner.tsx";
 import { TooltipProvider } from "#/components/ui/tooltip.tsx";
+import { RAIL_COOKIE } from "#/lib/rail.ts";
 import { ActorContext, useActorState } from "../actor.ts";
 import { Tip, useCrumbs } from "../components/common.tsx";
 import { actorQuery, configQuery, waitingRunsQuery } from "../queries.ts";
@@ -107,6 +107,8 @@ function Root() {
   // Only these fields: the root's loader data is new on every navigation, a field is not.
   const sidebarOpen = Route.useLoaderData({ select: (data) => data.sidebarOpen });
   const compact = Route.useLoaderData({ select: (data) => data.compact });
+  // A page that asks for it (a workflow's, for its graph) takes the full width.
+  const wide = useMatches({ select: (matches) => matches.some((match) => match.staticData.wide) });
   return (
     <ActorContext value={actor}>
       {/* Radix's tooltips need one provider: the sidebar's, and any a page shows. */}
@@ -122,7 +124,10 @@ function Root() {
                 <Crumbs />
               </header>
               {/* The page column: a page's regions are its children, the region gap apart. */}
-              <div className="mx-auto flex w-full max-w-6xl flex-col gap-(--gap-region) p-4 pt-0 sm:px-6">
+              <div
+                data-wide={wide || undefined}
+                className="mx-auto flex w-full max-w-6xl flex-col gap-(--gap-region) p-4 pt-0 data-wide:max-w-none sm:px-6"
+              >
                 <Outlet />
               </div>
             </SidebarInset>
