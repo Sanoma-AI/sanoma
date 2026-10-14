@@ -193,7 +193,7 @@ export const recentRunsQuery = () =>
 /** The approvals decided across the runs, each with its run, latest decision first: for `select`. */
 export const decidedOf = (runs: RunSummary[]) =>
   runs
-    .flatMap((run) => run.approvals.flatMap((approval) => (approval.status === "pending" ? [] : [{ run, approval }])))
+    .flatMap((run) => run.approvals.filter((a) => a.status !== "pending").map((approval) => ({ run, approval })))
     .toSorted(
       (a, b) => (b.approval.decidedAt ?? b.approval.requestedAt) - (a.approval.decidedAt ?? a.approval.requestedAt),
     );

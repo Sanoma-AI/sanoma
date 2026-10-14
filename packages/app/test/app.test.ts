@@ -782,6 +782,8 @@ describe("the page", () => {
     expect(openTitle(decidedPage.html)).toBe(HOLD_TITLE);
     expect(decidedPage.text).toContain("wanted to publish a post in Ghost");
     expect(decidedPage.text).toContain("approved by marketing-lead");
+    // Its row says how it was decided, not only by colour.
+    expect(decidedPage.text).toContain("approved · Announce a launch · from held");
     expect(decidedPage.text).not.toContain(">Approve<");
   });
 

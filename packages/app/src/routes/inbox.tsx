@@ -22,6 +22,7 @@ import {
   approvalKey,
   configQuery,
   decidedOf,
+  INBOX_FILTERS,
   type InboxFilter,
   InboxSearch,
   opsById,
@@ -29,7 +30,6 @@ import {
   recentRunsQuery,
   runLink,
   waitingRunsQuery,
-  workflowNamed,
 } from "../queries.ts";
 
 export const Route = createFileRoute("/inbox")({
@@ -119,7 +119,7 @@ function Filters({ filter, mine, waiting }: { filter: InboxFilter; mine: number 
   const counts: Record<InboxFilter, number | undefined> = { mine, waiting, decided: undefined };
   return (
     <Segmented label="Show">
-      {(Object.keys(FILTER_LABEL) as InboxFilter[]).map((f) => (
+      {INBOX_FILTERS.map((f) => (
         <Segment key={f}>
           <Link to="/inbox" search={{ show: f }} aria-current={f === filter ? "page" : undefined}>
             {FILTER_LABEL[f]}
@@ -177,6 +177,7 @@ function Split({
                     </span>
                   </span>
                   <span className="truncate text-xs text-muted-foreground">
+                    {approval.status !== "pending" && `${approval.status} · `}
                     {titles[run.workflow] ?? run.workflow} · from {starterName(run)}
                   </span>
                 </Link>
@@ -187,7 +188,7 @@ function Split({
         {footer && <p className="px-2 text-xs text-muted-foreground">{footer}</p>}
       </nav>
       <section aria-label={open.approval.title} className="flex min-w-0 flex-col gap-(--gap-section)">
-        <Asks {...open} />
+        <Asks {...open} workflow={titles[open.run.workflow] ?? open.run.workflow} />
         <ApprovalCard key={openKey} run={open.run} approval={open.approval} showRun />
       </section>
     </div>
@@ -196,15 +197,18 @@ function Split({
 
 const AND = new Intl.ListFormat("en", { type: "conjunction" });
 
-/** An operation as something to do: "publish a post in Ghost". Its id when the config no longer has it. */
+/**
+ * An operation as something to do: "publish a post in Ghost". Its id when the config no longer
+ * has it. "an" before a, e, i or o only: a resource starting with u is more often "a user".
+ */
 function doing(id: string, op: OpEntry | undefined, config: ConfigDescription) {
   if (!op) return `call ${id}`;
   const resource = op.resource.replaceAll("_", " ");
-  return `${op.name} ${/^[aeiou]/i.test(resource) ? "an" : "a"} ${resource} in ${config.vendors[op.vendor]?.title ?? op.vendor}`;
+  return `${op.name} ${/^[aeio]/i.test(resource) ? "an" : "a"} ${resource} in ${config.vendors[op.vendor]?.title ?? op.vendor}`;
 }
 
-/** The approval in a sentence: whose run of which workflow wants to do what. */
-function Asks({ run, approval }: Entry) {
+/** The approval in a sentence: whose run of which workflow (its title) wants to do what. */
+function Asks({ run, approval, workflow }: Entry & { workflow: string }) {
   const { data: config } = useSuspenseQuery(configQuery());
   const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
   const pending = approval.status === "pending";
@@ -216,7 +220,7 @@ function Asks({ run, approval }: Entry) {
     <p className="text-muted-foreground">
       <Link {...runLink(run)}>{run.startedBy ? `${run.startedBy.id}'s run` : "A run"}</Link> of{" "}
       <Link to="/workflows/$name" params={{ name: run.workflow }}>
-        {workflowNamed(run.workflow)(config)?.title ?? run.workflow}
+        {workflow}
       </Link>{" "}
       {what}.
     </p>
