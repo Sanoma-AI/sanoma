@@ -4,9 +4,9 @@ Workflow automation like Zapier or n8n, where every workflow is code. The person
 
 Status: early. Workflows run on [DBOS](https://dbos.dev) with Postgres: each vendor call is a durable step, approvals and sleeps survive restarts, and a lint keeps workflow code safe to replay. Before every vendor call a policy lets it through, denies it or holds it for an approver, and a ledger records each run: who started it, every call with the policy's decision and the vendor's reply, every approval, and how it ended. Versioning is automatic: each run is stamped with a hash of the workflow code it started on, and only a worker on that version resumes it (`DBOS__APPVERSION` names a version instead; see [Versions](packages/workflows/README.md#versions)). The connectors so far are listed under [Contents](#contents); keeping a company's vendor settings (card limits, time-off policies, access in tools like Mercury, Gusto and Okta) in typed files is where it is headed, not what it does today.
 
-![The app: starting a run of announce, approving its launch copy in the Inbox, then the run finishing](.github/assets/demo.gif)
+![The app: dana starts a run of announce, marketing-lead approves its launch copy in the Inbox, then the run finishes](.github/assets/demo.gif)
 
-A run of the workflow below, which waits for approval, sleeps until launch and then publishes. Ghost is answered here by the connector's in-memory fake, standing in for the live vendor, which is why the form still says it calls Ghost for real.
+A run of the workflow below: dana starts it, marketing-lead approves the copy, and it sleeps until a launch time a minute away, then publishes. For the recording the live Ghost connector is swapped for its in-memory fake, so the form shows the live setting.
 
 ## What a workflow looks like
 
@@ -37,7 +37,7 @@ export default defineWorkflow({
 
 The app draws this file as a graph before it runs, lists the approval in its Inbox, and shows each run's calls, decisions and replies in its ledger. A developer changes the workflow by changing the file. [`@sanoma/workflows`](packages/workflows/README.md) has the whole API.
 
-![The announce workflow's page: its graph, the ghost.post.publish step selected, and the source of workflows/announce.ts](.github/assets/workflow.png)
+![The announce workflow's page: its graph, the ghost.post.publish step selected with its details beside it, and the source of workflows/announce.ts](.github/assets/workflow.png)
 
 The workflow's page: the graph is drawn from the file, and picking a step finds its line in the code.
 
@@ -47,7 +47,7 @@ The Inbox as marketing-lead: the approvals waiting for them, with the draft's li
 
 ![A finished run of announce: its graph, the approval and its note, and its ledger with Ghost's reply](.github/assets/run.png)
 
-A finished run and its ledger: each call with the policy's decision and the vendor's reply, and the approval with its note.
+A finished run: the graph shows how each step went, and the ledger records each call with the policy's decision, the approval with its note, and Ghost's reply to the publish.
 
 ## Contents
 
