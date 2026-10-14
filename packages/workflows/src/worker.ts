@@ -67,6 +67,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     fakes: resolved.fakes,
     ...(resolved.scenarios && { scenarios: resolved.scenarios }),
     types: resolved.types,
+    steps: resolved.steps,
     policy: resolved.policy,
     ledger: ledger.store,
     workflows: resolved.workflows,

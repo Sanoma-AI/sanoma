@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { Fake } from "./fake.ts";
+import type { Steps } from "./steps.ts";
 
 /**
  * What an operation does to the outside world. It sets the badge a reviewer
@@ -291,7 +292,7 @@ export interface Driver {
 
 /**
  * What a connector package attaches to its connector (`withSetup`), for the config's resolver
- * to call: the config then names the connector alone, and never a driver or a fake. Either may
+ * to call: the config then names the connector alone, and never a driver, a fake or steps. Any may
  * be missing: a workflow using an operation of a connector with no driver is refused, and a
  * connector with no fake has none for sandbox runs.
  */
@@ -300,11 +301,13 @@ export interface ConnectorSetup {
   driver?: () => Driver;
   /** Makes a fake of the vendor (`defineFake`): once per sandbox run, its own. */
   fake?: () => Fake<any, any>;
+  /** The connector's steps for Gherkin tests (`defineSteps`): a config's scenarios and the connector's own features can use them. */
+  steps?: Steps;
 }
 
 /**
  * The connector with `setup` laid over what it already carries, as a connector package exports
- * it: `export const ghost = withSetup(ghostOps, { driver: ghostDriver, fake: fakeGhost })`. A
+ * it: `export const ghost = withSetup(ghostOps, { driver: ghostDriver, fake: fakeGhost, steps: ghostSteps })`. A
  * config that needs a driver made otherwise (another bridge, other options) swaps that one and
  * keeps the fake: `withSetup(github, { driver: () => githubDriver({ bridge }) })`. The operations
  * are the same objects, and the type is the connector's. The setup is kept on the connector's

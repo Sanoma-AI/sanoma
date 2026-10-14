@@ -5,6 +5,7 @@ import type { DriverFn, Op } from "./op.ts";
 import type { CallNode } from "./outline.ts";
 import type { Policy } from "./policy.ts";
 import type { Resource } from "./resource.ts";
+import type { Steps } from "./steps.ts";
 
 /** What the DBOS workflow receives: the workflow's input, who started the run, and for a sandbox run its scenario. */
 export interface RunArgs {
@@ -28,9 +29,10 @@ export interface WorkerState {
   drivers: Map<string, DriverFn>;
   /** The makers of the config's fake vendors, by vendor id: a sandbox run makes its own of each when it is seeded. */
   fakes: Map<string, () => Fake<any, any>>;
-  /** Where sandbox runs' scenarios are, and the resource types their steps may name. */
+  /** Where sandbox runs' scenarios are, the resource types their steps may name, and the steps the connectors ship. */
   scenarios?: URL;
   types: ReadonlyMap<string, Resource>;
+  steps: readonly Steps[];
   /** Its `version`, when it has one, is recorded with each of its decisions. */
   policy: Policy;
   ledger: LedgerStore;

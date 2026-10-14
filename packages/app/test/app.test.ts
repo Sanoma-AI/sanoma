@@ -433,8 +433,8 @@ describe("the server functions", () => {
 });
 
 describe("scenarios and sandbox runs", () => {
-  it("lists the scenarios in the config's feature files, with their steps", () => {
-    const body = scenarios(ctx);
+  it("lists the scenarios in the config's feature files, with their steps", async () => {
+    const body = await scenarios(ctx);
     expect(body.errors).toEqual([]);
     expect(body.scenarios.map((s) => s.name)).toEqual([SCENARIO, "Publish retried", "Copy rejected"]);
     const launch = body.scenarios[0]!;
@@ -596,14 +596,14 @@ describe("scenarios that no longer load", () => {
     expect((await detail(sandboxId)).checks).toEqual(before.checks);
   });
 
-  it("lists no scenarios, with why, when they cannot be read at all", () => {
+  it("lists no scenarios, with why, when they cannot be read at all", async () => {
     const resolved = {
       scenarios: pathToFileURL(`${scenariosDir}/`),
       get ops(): never {
         throw new Error("the ops are gone");
       },
     };
-    expect(scenarios({ resolved } as never)).toEqual({
+    expect(await scenarios({ resolved } as never)).toEqual({
       scenarios: [],
       errors: [{ file: "", message: "the ops are gone" }],
     });
@@ -1013,7 +1013,7 @@ describe("the page", () => {
   });
   // wave 2 B: New run
   it("renders a workflow's page in Sandbox mode: the scenario's input read-only, and the scenario", async () => {
-    const launch = scenarios(ctx).scenarios.find((s) => s.name === SCENARIO)!;
+    const launch = (await scenarios(ctx)).scenarios.find((s) => s.name === SCENARIO)!;
     // Only the fields its When sets: the rest are made up.
     expect(launch.input).toMatchObject({ title: "Acme Pro", launchAt: "2030-01-01T09:00:00Z" });
     const { title } = launch.input as { title: string };

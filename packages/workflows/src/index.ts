@@ -113,4 +113,6 @@ export {
 // `@sanoma/workflows/describe`: what a UI renders from, apart from what runs. The worker reads
 // each workflow's outline too, to hold its runs to it.
 export { defineDriver, type DriverImpl, type OpIdOf } from "./op.ts";
+// Steps for Gherkin tests, as data; Cucumber runs them from `@sanoma/workflows/scenario`.
+export { defineSteps, type Expect, type RunView, type Seed, type Steps } from "./steps.ts";
 // defineFake lives at `@sanoma/workflows/fake`: test tooling, not runtime.

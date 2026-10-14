@@ -1,39 +1,49 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
+import type { ISupportCodeLibrary } from "@cucumber/cucumber/api";
+import { ParameterTypeRegistry } from "@cucumber/cucumber-expressions";
 import {
-  type Argument,
-  CucumberExpression,
-  ParameterType,
-  ParameterTypeRegistry,
-} from "@cucumber/cucumber-expressions";
-import { AstBuilder, compile, GherkinClassicTokenMatcher, Parser } from "@cucumber/gherkin";
-import {
-  type GherkinDocument,
-  IdGenerator,
+  type Pickle,
   type PickleStep,
   PickleStepType,
+  type Scenario as GherkinScenario,
   type Step as GherkinStep,
 } from "@cucumber/messages";
 import type { z } from "zod";
 import type { RunSummary, SanomaClient } from "./client.ts";
 import type { ResolvedConfig } from "./config.ts";
-import type { Approver } from "./define.ts";
-import type { DriftReport, DriftResult } from "./drift.ts";
-import { SanomaError } from "./errors.ts";
+import {
+  buildLibrary,
+  lineOf,
+  type ParameterTypeSpec,
+  type Report,
+  runFeatures,
+  type SanomaWorld,
+  type StepResult,
+  stepResults,
+  StepStatus,
+} from "./cucumber.ts";
+import { errorInfo, SanomaError } from "./errors.ts";
+import { type CallRecord, contains, type CoreExpectation, detailOf, isCall } from "./expectations.ts";
+import type { Fake } from "./fake.ts";
 import { fill, isBug, seedFrom, shapeOf } from "./fill.ts";
 import type { LedgerRecord } from "./ledger.ts";
+import type { Driver, Op } from "./op.ts";
 import { type OutlineNode, outlineWorkflow } from "./outline.ts";
-import type { RecordedDecision } from "./policy.ts";
-import { approverLabel, DRIFT_WORKFLOW, errorMessage, isEnded } from "./shared.ts";
+import { DRIFT_WORKFLOW, errorMessage, isEnded } from "./shared.ts";
+import type { Call, RunView, Seed } from "./steps.ts";
 
 /*
  * Scenarios, at `@sanoma/workflows/scenario`: Gherkin feature files that say what a sandbox run
  * starts from (seeded fake vendors, injected faults), how its approvals are decided, and what it
- * should do. Server-side only, and kept off the main entry so a live worker never loads the
- * Gherkin parser or faker; the worker imports it (through `sandbox.ts`) only for a sandbox run.
+ * should do. Cucumber runs them (`cucumber.ts`), in two ways: compiling a feature file into
+ * scenarios, where the steps only record what they say, and checking a run's ledger against one,
+ * where only its `Then` steps run, each judged on its own. A connector's own feature files run a third
+ * way, calling its operations directly (`testFeature`). Server-side only, and kept off the main
+ * entry so a live worker never loads Cucumber or faker; the worker imports it (through
+ * `sandbox.ts`) only for a sandbox run.
  */
 
 /** One step of a scenario, as written, for a list and for marking the graph node it is about. */
@@ -51,14 +61,14 @@ export interface ScenarioStep {
 }
 
 /**
- * A fake's state to seed through one of its operations, a fault to inject into its next call, or
- * an object a vendor's fake holds: `resource` is its type's id (`github.repository`, its `vendor`
- * and `type`) and `name` its import id, with `fields` to set on it (put, when the vendor has
- * none) or `gone` to remove it.
+ * A fake's state to seed through one of its operations (`as` names what the call returns, for
+ * an operation's own test), a fault to inject into its next call, or an object a vendor's fake
+ * holds: `resource` is its type's id (`github.repository`, its `vendor` and `type`) and `name`
+ * its import id, with `fields` to set on it (put, when the vendor has none) or `gone` to remove it.
  */
 export type Given =
-  | { step: string; op: string; input: unknown }
-  | { step: string; op: string; fault: "failNext" | "rateLimit" | "loseReply" }
+  | { step: string; op: string; input: unknown; as?: string }
+  | { step: string; op: string; fault: Fault }
   | { step: string; resource: string; vendor: string; type: string; name: string; fields: Record<string, unknown> }
   | { step: string; resource: string; vendor: string; type: string; name: string; gone: true };
 
@@ -75,6 +85,8 @@ export interface Decision {
  * What the run should do: call an operation (with at least this input) or not, have the policy
  * deny one (`denied`) or hold one for an approver (`held`), end a certain way, or, for a drift
  * run, report the resource `declared` (`<file>#<export>`) clean, gone, or drifted in a field.
+ * A step whose own code checks the run (a connector's or the company's, or an operation's own
+ * test's) is `custom`, with what it is about.
  */
 export type Expectation =
   | { step: string; op: string; input?: unknown; called: boolean }
@@ -82,12 +94,15 @@ export type Expectation =
   | { step: string; op: string; decision: "held"; approver: string }
   | { step: string; outcome: "finished" | "failed"; code?: string }
   | { step: string; declared: string; status: "clean" | "gone" }
-  | { step: string; declared: string; status: "drifted"; field: string };
+  | { step: string; declared: string; status: "drifted"; field: string }
+  | { step: string; custom: true; op?: string; called?: boolean };
 
 export interface Scenario {
   name: string;
   /** The feature file, relative to the scenarios directory. */
   file: string;
+  /** Its line in the file: its keyword's, or for an outline's row, the row's. */
+  line: number;
   workflow: string;
   /**
    * The scenario's own lines of its feature file, for display: from its keyword line to the end
@@ -116,30 +131,44 @@ export interface Check {
   detail?: string;
 }
 
-/** What steps can name: the config's operations, workflows and resource types by id, and where the feature files are. */
-export type Scope = Pick<ResolvedConfig, "ops" | "workflows" | "scenarios" | "types">;
+/**
+ * What steps can name: the config's operations, workflows and resource types by id, the steps
+ * its connectors (and the company) ship, and where the feature files are.
+ */
+export type Scope = Pick<ResolvedConfig, "ops" | "workflows" | "scenarios" | "types" | "steps">;
 
 type Kind = ScenarioStep["kind"];
+type Fault = Extract<Seed, { fault: unknown }>["fault"];
 type Unstepped<T> = T extends unknown ? Omit<T, "step"> : never;
+
+/** What a `When` says: which workflow runs, on what; or, in an operation's own test, a call to make. */
+type When = { workflow: string; input: unknown } | { call: string; input: Record<string, unknown> };
+
+/** What a `Then` says: its expectation, and how to check it against a run. */
+interface Then {
+  expect: Unstepped<Expectation>;
+  verify(run: RunView): string | undefined;
+}
 
 /** What a step of each kind reads into; `any` is a decision, which a step of any keyword may make. */
 interface Items {
-  given: Unstepped<Given>;
-  when: { workflow: string; input: unknown };
-  then: Unstepped<Expectation>;
+  given: Unstepped<Given>[];
+  when: When;
+  then: Then;
   any: Unstepped<Decision>;
 }
 
 type Rule = {
   [K in keyof Items]: {
     kind: K;
-    /** The Cucumber expression, as listed in errors. */
+    /** The step as listed in errors: its Cucumber expression, or an operation's phrase as written. */
     source: string;
+    /** The Cucumber expression it is registered with, when that is not its source. */
+    expression?: string;
     /** What else the step takes, as listed in errors. */
     takes?: string;
-    /** For an operation's phrase: its id, which errors list it under. */
-    phrase?: string;
-    expression: CucumberExpression;
+    /** Whose step it is, which errors list it under: an operation's id for its phrase, or a step library's owner. */
+    group?: string;
     /** What the step says, from the expression's values and the step's doc string or table. */
     read(values: unknown[], pickle: PickleStep): Items[K];
   };
@@ -231,26 +260,64 @@ const TAKES_OBJECT = "a JSON doc string or a two-column table";
 /** What a field belongs to, in errors: an operation's or a workflow's input. */
 const inputOf = (name: unknown) => `${name as string}'s input`;
 
-const rulesByScope = new WeakMap<Scope, Rule[]>();
+/** A step's verdict: passed when there is no `detail`. */
+const verdict = (step: string, detail?: string): Check =>
+  detail === undefined ? { step, ok: true } : { step, ok: false, detail };
+
+/** The rules and the parameter types for one scope, and the Cucumber library built from them. */
+interface Built {
+  scope: Scope;
+  /** The rules by the expression they are registered with. */
+  byExpression: Map<string, Rule[]>;
+  library: ISupportCodeLibrary;
+  /** Every step the scope knows, for an error. */
+  known: string;
+}
+
+const expressionOf = (rule: Rule) => rule.expression ?? rule.source;
+
+/** By the scope's operations, which every scope of one resolved config shares. */
+const builtByOps = new WeakMap<object, Built>();
 
 /**
- * The steps a feature file may use, with one parameter type registry per scope: the generic
- * steps, and each operation's `phrases`. Throws for a phrase naming a field its operation's
+ * The steps a feature file may use in a scope, and the Cucumber library that runs them: the
+ * generic steps, the steps of an operation's own tests, each step library's steps, and each
+ * operation's `phrases`, compiled into steps. Throws for a phrase naming a field its operation's
  * input does not have.
  */
-function rulesOf(scope: Scope): Rule[] {
-  const cached = rulesByScope.get(scope);
-  if (cached) return cached;
+function builtFor(scope: Scope): Built {
+  const cached = builtByOps.get(scope.ops);
+  if (
+    cached &&
+    cached.scope.workflows === scope.workflows &&
+    cached.scope.types === scope.types &&
+    cached.scope.steps === scope.steps
+  ) {
+    return cached;
+  }
+  const { rules, parameterTypes } = rulesOf(scope);
+  const byExpression = Map.groupBy(rules, expressionOf);
+  const library = buildLibrary(parameterTypes, byExpression.keys());
+  const built: Built = { scope, byExpression, library, known: knownSteps(rules) };
+  builtByOps.set(scope.ops, built);
+  return built;
+}
+
+/** A `Then` step of the generic steps: its expectation, checked against the run's records. */
+const expecting = (expect: CoreExpectation): Then => ({ expect, verify: (run) => detailOf(expect, run.records) });
+
+/** The rules a scope has, and the parameter types their expressions use. */
+function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSpec[] } {
   const { types } = scope;
-  const registry = new ParameterTypeRegistry();
-  registry.defineParameterType(new ParameterType("op", /\S+/, null, known("operation", scope.ops), false));
-  registry.defineParameterType(new ParameterType("workflow", /\S+/, null, known("workflow", scope.workflows), false));
-  registry.defineParameterType(new ParameterType("who", /\S+/, null, (s: string) => s, false));
-  registry.defineParameterType(new ParameterType("resource", /\S+/, null, known("resource type", types), false));
-  // A declared resource, as a drift report names it: `<file>#<export>`.
-  registry.defineParameterType(new ParameterType("declared", /[^\s#]+#\S+/, null, (s: string) => s, false));
-  registry.defineParameterType(new ParameterType("field", /\S+/, null, (s: string) => s, false));
-  const expression = (source: string) => new CucumberExpression(source, registry);
+  const parameterTypes: ParameterTypeSpec[] = [
+    { name: "op", regexp: /\S+/, transformer: known("operation", scope.ops) },
+    { name: "workflow", regexp: /\S+/, transformer: known("workflow", scope.workflows) },
+    { name: "who", regexp: /\S+/, transformer: (s) => s },
+    { name: "resource", regexp: /\S+/, transformer: known("resource type", types) },
+    // A declared resource, as a drift report names it: `<file>#<export>`.
+    { name: "declared", regexp: /[^\s#]+#\S+/, transformer: (s) => s },
+    { name: "field", regexp: /\S+/, transformer: (s) => s },
+  ];
   const opOf = (id: unknown) => scope.ops.get(id as string)!;
   const workflowOf = (name: unknown) => scope.workflows.get(name as string)!;
   /** A resource step's object: its type's id, vendor and type, and its import id. */
@@ -258,45 +325,44 @@ function rulesOf(scope: Scope): Rule[] {
     const { vendor, type } = types.get(id as string)!;
     return { resource: id as string, vendor, type, name: name as string };
   };
-
   const rules: Rule[] = [
     {
       kind: "given",
       source: "{op} was called with",
       takes: TAKES_OBJECT,
-      expression: expression("{op} was called with"),
-      read: ([op], pickle) => ({
-        op: op as string,
-        input: fill(opOf(op).input, fieldsFrom(pickle, opOf(op).input, inputOf(op))),
-      }),
+      read: ([op], pickle) => [
+        { op: op as string, input: fill(opOf(op).input, fieldsFrom(pickle, opOf(op).input, inputOf(op))) },
+      ],
     },
     ...Object.entries(FAULTS).map(([words, fault]): Rule => ({
       kind: "given",
       source: `{op} ${words}`,
-      expression: expression(`{op} ${words}`),
-      read: ([op]) => ({ op: op as string, fault }),
+      read: ([op]) => [{ op: op as string, fault }],
     })),
     {
       kind: "given",
       source: "{resource} {string} has",
       takes: TAKES_OBJECT,
-      expression: expression("{resource} {string} has"),
-      read: ([resource, name], pickle) => ({
-        ...object(resource, name),
-        fields: fieldsFrom(pickle, types.get(resource as string)!.schema, `${resource as string} "${name as string}"`),
-      }),
+      read: ([resource, name], pickle) => [
+        {
+          ...object(resource, name),
+          fields: fieldsFrom(
+            pickle,
+            types.get(resource as string)!.schema,
+            `${resource as string} "${name as string}"`,
+          ),
+        },
+      ],
     },
     {
       kind: "given",
       source: "{resource} {string} is gone",
-      expression: expression("{resource} {string} is gone"),
-      read: ([resource, name]) => ({ ...object(resource, name), gone: true }),
+      read: ([resource, name]) => [{ ...object(resource, name), gone: true }],
     },
     {
       kind: "when",
       source: "{workflow} runs with",
       takes: TAKES_OBJECT,
-      expression: expression("{workflow} runs with"),
       read: ([name], pickle) => {
         const { input } = workflowOf(name);
         return { workflow: name as string, input: fill(input, fieldsFrom(pickle, input, inputOf(name))) };
@@ -305,8 +371,17 @@ function rulesOf(scope: Scope): Rule[] {
     {
       kind: "when",
       source: "{workflow} runs",
-      expression: expression("{workflow} runs"),
       read: ([name]) => ({ workflow: name as string, input: fill(workflowOf(name).input, {}) }),
+    },
+    // An operation's own test: a call made to its driver, or its fake, directly.
+    {
+      kind: "when",
+      source: "{op} is called with",
+      takes: TAKES_OBJECT,
+      read: ([op], pickle) => ({
+        call: op as string,
+        input: fill(opOf(op).input, fieldsFrom(pickle, opOf(op).input, inputOf(op))) as Record<string, unknown>,
+      }),
     },
     ...(["approve", "reject"] as const).flatMap((decision) => {
       const verb = decision === "approve" ? "approved" : "rejected";
@@ -314,7 +389,6 @@ function rulesOf(scope: Scope): Rule[] {
         (source): Rule => ({
           kind: "any",
           source,
-          expression: expression(source),
           read: ([approval, by, note]) => ({
             approval: approval as string,
             decision,
@@ -328,69 +402,130 @@ function rulesOf(scope: Scope): Rule[] {
       kind: "then",
       source: "{op} was called with",
       takes: TAKES_OBJECT,
-      expression: expression("{op} was called with"),
-      read: ([op], pickle) => ({
-        op: op as string,
-        input: fieldsFrom(pickle, opOf(op).input, inputOf(op)),
-        called: true,
-      }),
+      read: ([op], pickle) =>
+        expecting({ op: op as string, input: fieldsFrom(pickle, opOf(op).input, inputOf(op)), called: true }),
     },
     ...[true, false].map((called): Rule => ({
       kind: "then",
       source: `{op} was ${called ? "" : "not "}called`,
-      expression: expression(`{op} was ${called ? "" : "not "}called`),
-      read: ([op]) => ({ op: op as string, called }),
+      read: ([op]) => expecting({ op: op as string, called }),
     })),
     {
       kind: "then",
       source: "{op} was denied",
-      expression: expression("{op} was denied"),
-      read: ([op]) => ({ op: op as string, decision: "denied" }),
+      read: ([op]) => expecting({ op: op as string, decision: "denied" }),
     },
     {
       kind: "then",
       source: "{op} was held for {who}",
-      expression: expression("{op} was held for {who}"),
-      read: ([op, who]) => ({ op: op as string, decision: "held", approver: who as string }),
+      read: ([op, who]) => expecting({ op: op as string, decision: "held", approver: who as string }),
     },
     {
       kind: "then",
       source: "{declared} is drifted in {field}",
-      expression: expression("{declared} is drifted in {field}"),
-      read: ([declared, field]) => ({ declared: declared as string, status: "drifted", field: field as string }),
+      read: ([declared, field]) =>
+        expecting({ declared: declared as string, status: "drifted", field: field as string }),
     },
     ...(["clean", "gone"] as const).map((status): Rule => ({
       kind: "then",
       source: `{declared} is ${status}`,
-      expression: expression(`{declared} is ${status}`),
-      read: ([declared]) => ({ declared: declared as string, status }),
+      read: ([declared]) => expecting({ declared: declared as string, status }),
     })),
-    {
-      kind: "then",
-      source: "the run succeeds",
-      expression: expression("the run succeeds"),
-      read: () => ({ outcome: "finished" }),
-    },
-    {
-      kind: "then",
-      source: "the run fails",
-      expression: expression("the run fails"),
-      read: () => ({ outcome: "failed" }),
-    },
+    { kind: "then", source: "the run succeeds", read: () => expecting({ outcome: "finished" }) },
+    { kind: "then", source: "the run fails", read: () => expecting({ outcome: "failed" }) },
     {
       kind: "then",
       source: "the run fails with {string}",
-      expression: expression("the run fails with {string}"),
-      read: ([code]) => ({ outcome: "failed", code: code as string }),
+      read: ([code]) => expecting({ outcome: "failed", code: code as string }),
+    },
+    // The result of the last call: what an operation's own test checks.
+    {
+      kind: "then",
+      source: "it returns",
+      takes: "a JSON doc string or a two-column table, of fields of its output",
+      read: (_, pickle) => ({
+        expect: { custom: true },
+        verify: ({ records }) => {
+          const last = lastCall(records);
+          if (typeof last === "string") return last;
+          if (last.error) return `it failed: ${last.error.code ?? last.error.name}: ${last.error.message}`;
+          const expected = fieldsFrom(pickle, opOf(last.op).output, `${last.op}'s output`);
+          return contains(last.output, expected) ? undefined : `it returned ${JSON.stringify(last.output)}`;
+        },
+      }),
+    },
+    {
+      kind: "then",
+      source: "it fails with status {int}",
+      read: ([status]) => ({
+        expect: { custom: true },
+        verify: ({ records }) => {
+          const last = lastCall(records);
+          if (typeof last === "string") return last;
+          if (!last.error) return `it returned ${JSON.stringify(last.output)}`;
+          if (last.error.status === status) return undefined;
+          return `it failed with ${last.error.status === undefined ? "no status" : `status ${last.error.status}`}: ${last.error.message}`;
+        },
+      }),
     },
   ];
+
+  // Each step library's steps, after the generic ones.
+  /** An operation a step library's step names: one of the config's. */
+  const opNamed = (op: Op) => known("operation", scope.ops)(op.id);
+  for (const { owner, steps } of scope.steps) {
+    for (const def of steps) {
+      const base = { source: def.expression, group: owner };
+      if (def.kind === "given") {
+        rules.push({
+          ...base,
+          kind: "given",
+          read: (values) => {
+            const seed = def.fn(...values);
+            const op = opNamed(seed.op);
+            if ("fault" in seed) return [{ op, fault: seed.fault }];
+            let input: unknown;
+            try {
+              input = fill(opOf(op).input, seed.input);
+            } catch (err) {
+              if (isBug(err)) throw err;
+              throw new Error(`${inputOf(op)} cannot be ${JSON.stringify(seed.input)}: ${errorMessage(err)}`, {
+                cause: err,
+              });
+            }
+            return [{ op, input, ...(seed.as === undefined ? {} : { as: seed.as }) }];
+          },
+        });
+        continue;
+      }
+      rules.push({
+        ...base,
+        kind: "then",
+        read: (values) => {
+          const expected = def.fn(...values);
+          return {
+            expect: {
+              custom: true,
+              ...(expected.op === undefined ? {} : { op: opNamed(expected.op) }),
+              ...(expected.called === undefined ? {} : { called: expected.called }),
+            },
+            verify: (run) => {
+              const detail = expected.check(run);
+              return typeof detail === "string" ? detail : undefined;
+            },
+          };
+        },
+      });
+    }
+  }
 
   // Each operation's phrases, last. A field `{title}` becomes the parameter type `{field_title}`,
   // so a field named like another type (`op`, `string`, `int`) never takes that type's pattern.
   // It matches what `{string}` does, or one word, and unquotes the same way.
-  const string = registry.lookupByTypeName("string")!;
+  const string = new ParameterTypeRegistry().lookupByTypeName("string")!;
   const word = /([^\s"']\S*)/;
   const field = (groups: string[]) => groups.at(-1) ?? string.transform(null, groups.slice(0, -1));
+  const fieldTypes = new Set<string>();
   for (const op of scope.ops.values()) {
     // A phrase's key, and the keyword of the steps it adds.
     for (const [key, kind] of [
@@ -410,64 +545,52 @@ function rulesOf(scope: Scope): Rule[] {
         }
       });
       for (const name of fields) {
-        if (registry.lookupByTypeName(`field_${name}`)) continue;
-        registry.defineParameterType(
-          new ParameterType(`field_${name}`, [...string.regexpStrings, word], null, (...g) => field(g), false),
-        );
+        if (fieldTypes.has(name)) continue;
+        fieldTypes.add(name);
+        parameterTypes.push({
+          name: `field_${name}`,
+          regexp: [...string.regexpStrings, word.source],
+          transformer: (...g) => field(g),
+        });
       }
       const given = (values: unknown[]) =>
         Object.fromEntries(
           fields.map((name, i) => [name, valueFor(schemas[i]!, values[i] as string, `${name} in ${inputOf(op.id)}`)]),
         );
-      const compiled = template.replaceAll(/\{([^}]*)\}/g, "{field_$1}");
-      const common = { source: template, phrase: op.id, expression: expression(compiled) };
+      const common = { source: template, group: op.id, expression: template.replaceAll(/\{([^}]*)\}/g, "{field_$1}") };
       rules.push(
         kind === "given"
-          ? { ...common, kind, read: (values) => ({ op: op.id, input: fill(op.input, given(values)) }) }
-          : { ...common, kind, read: (values) => ({ op: op.id, input: given(values), called: true }) },
+          ? { ...common, kind, read: (values) => [{ op: op.id, input: fill(op.input, given(values)) }] }
+          : { ...common, kind, read: (values) => expecting({ op: op.id, input: given(values), called: true }) },
       );
     }
   }
-  rulesByScope.set(scope, rules);
-  return rules;
+  return { rules, parameterTypes };
 }
 
-/** Every step the scope knows, for an error: the generic ones by keyword, then each operation's phrases under its id. */
+/** The last call of a run, or why there is none to check. */
+function lastCall(records: readonly LedgerRecord[]): CallRecord | string {
+  return records.findLast(isCall) ?? "no call was made";
+}
+
+/** Every step the scope knows, for an error: the generic ones by keyword, then each operation's phrases and each step library's steps under its name. */
 function knownSteps(rules: Rule[]): string {
   const keyword = (kind: Rule["kind"]) => (kind === "any" ? "Given/When/Then" : kind[0]!.toUpperCase() + kind.slice(1));
   const line = (r: Rule) => `${keyword(r.kind)} ${r.source}${r.takes ? ` (and ${r.takes})` : ""}`;
-  const { generic = [], ...phrases } = Object.groupBy(rules, (r) => r.phrase ?? "generic");
+  const { generic = [], ...groups } = Object.groupBy(rules, (r) => r.group ?? "generic");
   return [
     "Known steps:",
     ...generic.map((r) => `  ${line(r)}`),
-    ...Object.entries(phrases).flatMap(([op, list]) => [`  ${op}:`, ...(list ?? []).map((r) => `    ${line(r)}`)]),
+    ...Object.entries(groups).flatMap(([group, list]) => [`  ${group}:`, ...(list ?? []).map((r) => `    ${line(r)}`)]),
   ].join("\n");
 }
 
-/** The line of every scenario, step and examples row in the document, by AST node id. */
-function linesOf(doc: GherkinDocument): Map<string, number> {
-  const lines = new Map<string, number>();
-  const steps = (list: readonly { id: string; location: { line: number } }[]) =>
-    list.forEach((s) => lines.set(s.id, s.location.line));
-  for (const child of doc.feature?.children ?? []) {
-    for (const c of child.rule ? child.rule.children : [child]) {
-      if (c.background) steps(c.background.steps);
-      if (c.scenario) {
-        lines.set(c.scenario.id, c.scenario.location.line);
-        steps(c.scenario.steps);
-        for (const ex of c.scenario.examples) steps(ex.tableBody);
-      }
-    }
-  }
-  return lines;
-}
-
 /**
- * Each scenario's own lines of the file, by AST node id: from its keyword line to the end of its
- * last step (the closing delimiter of a doc string, the last row of a table) or of its examples'
+ * A scenario's own lines of its file's `text`: from its keyword line to the end of its last
+ * step (the closing delimiter of a doc string, the last row of a table) or of its examples'
  * last row, each line less the keyword line's indent.
  */
-function textsOf(doc: GherkinDocument, text: string): Map<string, string> {
+function textOf(scenario: GherkinScenario, text: string): string {
   const lines = text.split(/\r?\n/);
   const endOf = (step: GherkinStep): number => {
     if (step.dataTable) return step.dataTable.rows.at(-1)?.location.line ?? step.location.line;
@@ -477,21 +600,16 @@ function textsOf(doc: GherkinDocument, text: string): Map<string, string> {
     const close = lines.findIndex((l, i) => i >= location.line && l.trim() === delimiter);
     return close === -1 ? location.line : close + 1;
   };
-  const texts = new Map<string, string>();
-  for (const child of doc.feature?.children ?? []) {
-    for (const { scenario } of child.rule ? child.rule.children : [child]) {
-      if (!scenario) continue;
-      const { line, column = 1 } = scenario.location;
-      const end = Math.max(
-        line,
-        ...scenario.steps.map(endOf),
-        ...scenario.examples.map((ex) => (ex.tableBody.at(-1) ?? ex.tableHeader ?? ex).location.line),
-      );
-      const own = lines.slice(line - 1, end).map((l) => l.slice(Math.min(column - 1, l.length - l.trimStart().length)));
-      texts.set(scenario.id, own.join("\n"));
-    }
-  }
-  return texts;
+  const { line, column = 1 } = scenario.location;
+  const end = Math.max(
+    line,
+    ...scenario.steps.map(endOf),
+    ...scenario.examples.map((ex) => (ex.tableBody.at(-1) ?? ex.tableHeader ?? ex).location.line),
+  );
+  return lines
+    .slice(line - 1, end)
+    .map((l) => l.slice(Math.min(column - 1, l.length - l.trimStart().length)))
+    .join("\n");
 }
 
 const approvalsByWorkflow = new WeakMap<object, string[]>();
@@ -516,127 +634,317 @@ function approvalsOf(wf: Parameters<typeof outlineWorkflow>[0]): string[] {
   return found;
 }
 
+const namesByReport = new WeakMap<Report, Map<string, string>>();
+
 /**
- * The scenarios in a feature file: one per Gherkin pickle (each row of a `Scenario Outline`'s
- * examples is one; rows whose names would be the same get their line appended, such as
- * `Launch (line 12)`). Throws, naming `file:line`, for a file with no scenarios, a step no rule
- * or more than one matches, an unknown operation or workflow, a missing or second `When`, bad
- * JSON, or two scenarios with one name.
+ * The name of each pickle of a run, by its id: its own, or for an outline's rows whose names
+ * would be the same, its own with its row's line (`Launch (line 12)`).
  */
-export function parseFeature(text: string, file: string, scope: Scope): Scenario[] {
-  const rules = rulesOf(scope);
-  const newId = IdGenerator.incrementing();
-  let doc: GherkinDocument;
-  try {
-    doc = new Parser(new AstBuilder(newId), new GherkinClassicTokenMatcher()).parse(text);
-  } catch (err) {
-    if (isBug(err)) throw err;
-    throw new Error(`${file}: ${errorMessage(err)}`, { cause: err });
-  }
-  const lines = linesOf(doc);
-  const texts = textsOf(doc, text);
-  const pickles = compile(doc, file, newId);
-  if (pickles.length === 0) throw new Error(`${file}: no scenarios; add one with "Scenario: <name>"`);
-  // An outline's rows are named from its title; rows that share a name are told apart by their line.
-  const counts = Map.groupBy(pickles, (p) => p.name);
-  const scenarios: Scenario[] = [];
-  for (const pickle of pickles) {
-    const where = (line?: number) => `${file}:${line ?? pickle.location?.line ?? 1}`;
-    const row = pickle.astNodeIds[1];
-    const name =
-      row !== undefined && counts.get(pickle.name)!.length > 1
-        ? `${pickle.name} (line ${lines.get(row)})`
-        : pickle.name;
-    if (scenarios.some((s) => s.name === name)) {
-      throw new Error(`${where()}: a second scenario named "${name}"; give each its own name`);
+function namesOf(report: Report): Map<string, string> {
+  const cached = namesByReport.get(report);
+  if (cached) return cached;
+  const names = new Map<string, string>();
+  namesByReport.set(report, names);
+  for (const inFile of Map.groupBy(report.query.findAllPickles(), (p) => p.uri).values()) {
+    const counts = Map.groupBy(inFile, (p) => p.name);
+    for (const pickle of inFile) {
+      const shared = pickle.astNodeIds.length > 1 && counts.get(pickle.name)!.length > 1;
+      names.set(pickle.id, shared ? `${pickle.name} (line ${lineOf(report, pickle)})` : pickle.name);
     }
-    const scenario: Omit<Scenario, "workflow" | "approvals"> & { workflow?: string } = {
-      name,
-      file,
-      text: texts.get(pickle.astNodeIds[0]!) ?? "",
-      steps: [],
-      given: [],
-      input: undefined,
-      decisions: [],
-      expect: [],
-    };
-    seedFrom(name);
-    for (const ps of pickle.steps) {
-      const line = lines.get(ps.astNodeIds[0]!);
-      const kind = ps.type && KINDS[ps.type];
-      if (!kind) throw new Error(`${where(line)}: "${ps.text}" needs a Given, When or Then before it`);
-      const matches = rules.flatMap((rule) => {
-        if (rule.kind !== kind && rule.kind !== "any") return [];
-        const args = rule.expression.match(ps.text);
-        return args ? [{ rule, args }] : [];
-      });
-      if (matches.length === 0) {
-        throw new Error(`${where(line)}: no step matches "${ps.text}"\n${knownSteps(rules)}`);
-      }
-      if (matches.length > 1) {
-        const which = matches.map((m) => `"${m.rule.source}"`).join(" and ");
-        throw new Error(`${where(line)}: "${ps.text}" is ambiguous: it matches ${which}`);
-      }
-      const [{ rule, args }] = matches as [{ rule: Rule; args: readonly Argument[] }];
-      let op: string | undefined;
-      let called: boolean | undefined;
-      let decision: ScenarioStep["decision"];
-      let fault: true | undefined;
-      try {
-        const values = args.map((a) => a.getValue<unknown>(null));
-        const step = ps.text;
+  }
+  return names;
+}
+
+/** What one scenario's steps said, as compiling it records them. */
+type Spec = Omit<Scenario, "workflow" | "approvals" | "file" | "line" | "text"> & { workflow?: string };
+
+/** The run's records, as a `Then` step reads them. */
+function viewOf(records: readonly LedgerRecord[]): RunView {
+  type AnyOp<I, O> = Op<string, string, string, I, O>;
+  // What the ledger holds a call took and returned is of its operation's types.
+  const calls = <I, O>(op: AnyOp<I, O>) =>
+    records
+      .filter((r): r is CallRecord => isCall(r) && r.op === op.id && !r.error)
+      .map(({ input, output }) => ({ input, output }) as Call<I, O>);
+  const seeded = <I, O>(op: AnyOp<I, O>) =>
+    records.flatMap((r) =>
+      r.type === "scenario.seeded"
+        ? r.seeds.flatMap((s) =>
+            "op" in s && s.op === op.id ? [{ input: s.input, output: s.output } as Call<I, O>] : [],
+          )
+        : [],
+    );
+  return { records, calls, seeded, made: (op) => [...seeded(op), ...calls(op)] };
+}
+
+/** Where an operation's own test makes its calls: an operation's driver, live, replayed or a fake's, and the fake. */
+export interface FeatureTarget {
+  driver: Driver;
+  /** The fake whose driver it is: a scenario's faults need one. */
+  fake?: Fake<any, any>;
+}
+
+/** Why no step, or two, match a step's text. */
+const noMatch = (built: Built, text: string) => `no step matches "${text}"\n${built.known}`;
+const ambiguous = (text: string, sources: string[]) =>
+  `"${text}" is ambiguous: it matches ${[...new Set(sources)].map((s) => `"${s}"`).join(" and ")}`;
+
+/**
+ * The rule a step's keyword picks among those registered with the expression it matched:
+ * Cucumber matches the text alone, so one expression can be both a `Given` and a `Then`.
+ */
+function ruleFor(built: Built, expression: string, pickle: PickleStep): Rule {
+  const kind = pickle.type && KINDS[pickle.type];
+  if (!kind) throw new Error(`"${pickle.text}" needs a Given, When or Then before it`);
+  const rules = built.byExpression.get(expression)!.filter((r) => r.kind === kind || r.kind === "any");
+  if (rules.length === 0) throw new Error(noMatch(built, pickle.text));
+  if (rules.length > 1)
+    throw new Error(
+      ambiguous(
+        pickle.text,
+        rules.map((r) => r.source),
+      ),
+    );
+  return rules[0]!;
+}
+
+/** Each scenario of a run, before its first step: one name always makes up the same values. */
+function seedNames(report: Report, pickle: Pickle): string {
+  const name = namesOf(report).get(pickle.id) ?? pickle.name;
+  seedFrom(name);
+  return name;
+}
+
+/** A World for compiling: each step records what it says into its scenario's spec, in `specs`. */
+function compileWorld(built: Built, specs: Map<string, Spec>) {
+  return (report: Report): SanomaWorld => {
+    let spec: Spec;
+    return {
+      begin(pickle) {
+        spec = { name: seedNames(report, pickle), steps: [], given: [], input: undefined, decisions: [], expect: [] };
+        specs.set(pickle.id, spec);
+      },
+      step(expression, args, pickle) {
+        const rule = ruleFor(built, expression, pickle);
+        const { text } = pickle;
+        const step: ScenarioStep = { text, kind: KINDS[pickle.type!]! };
         switch (rule.kind) {
           case "given": {
-            const item = rule.read(values, ps);
-            scenario.given.push({ step, ...item });
-            if ("op" in item) op = item.op;
-            if ("fault" in item) fault = true;
+            const items = rule.read(args, pickle);
+            spec.given.push(...items.map((item) => ({ step: text, ...item }) as Given));
+            const [first] = items;
+            if (first && "op" in first) step.op = first.op;
+            if (items.some((i) => "fault" in i)) step.fault = true;
             break;
           }
           case "then": {
-            const item = rule.read(values, ps);
-            scenario.expect.push({ step, ...item });
-            if ("op" in item) op = item.op;
-            if ("called" in item) ({ called } = item);
-            if ("decision" in item) ({ decision } = item);
+            const { expect } = rule.read(args, pickle);
+            spec.expect.push({ step: text, ...expect } as Expectation);
+            if ("op" in expect && expect.op !== undefined) step.op = expect.op;
+            if ("called" in expect && expect.called !== undefined) step.called = expect.called;
+            if ("decision" in expect) step.decision = expect.decision;
             break;
           }
           case "any":
-            scenario.decisions.push({ step, ...rule.read(values, ps) });
+            spec.decisions.push({ step: text, ...rule.read(args, pickle) });
             break;
           case "when": {
-            if (scenario.workflow !== undefined) throw new Error("a second When: a scenario runs its workflow once");
-            Object.assign(scenario, rule.read(values, ps));
+            if (spec.workflow !== undefined) throw new Error("a second When: a scenario runs its workflow once");
+            const item = rule.read(args, pickle);
+            if ("call" in item) {
+              throw new Error(
+                `"${text}" calls ${item.call} directly: a step for an operation's own test, in its connector's features`,
+              );
+            }
+            Object.assign(spec, item);
           }
         }
+        spec.steps.push(step);
+      },
+    };
+  };
+}
+
+/**
+ * A World for checking a run: each `Then` step judges the run on its own, and records its
+ * verdict (why it does not hold, or undefined) in `verdicts`, by its pickle step's id, rather
+ * than failing, so every `Then` runs. The other steps do nothing.
+ */
+function checkWorld(built: Built, view: RunView, verdicts: Map<string, string | undefined>) {
+  return (report: Report): SanomaWorld => ({
+    begin(pickle) {
+      seedNames(report, pickle);
+    },
+    step(expression, args, pickle) {
+      const rule = ruleFor(built, expression, pickle);
+      if (rule.kind !== "then") return;
+      const { verify } = rule.read(args, pickle);
+      let detail: string | undefined;
+      try {
+        detail = verify(view);
       } catch (err) {
         if (isBug(err)) throw err;
-        throw new Error(`${where(line)}: ${errorMessage(err)}`, { cause: err });
+        detail = errorMessage(err);
       }
-      scenario.steps.push({
-        text: ps.text,
-        kind,
-        ...(op === undefined ? {} : { op }),
-        ...(called === undefined ? {} : { called }),
-        ...(decision && { decision }),
-        ...(fault && { fault }),
-      });
+      verdicts.set(pickle.id, detail);
+    },
+  });
+}
+
+/**
+ * A World for an operation's own test: `Given` steps seed through the target, `When` steps call
+ * its operations directly (no worker, no policy), and `Then` steps fail when they do not hold.
+ */
+function testWorld(built: Built, { driver, fake }: FeatureTarget) {
+  return (report: Report): SanomaWorld => {
+    // What the steps named (`as`), and the calls made, as a run's ledger would hold them.
+    const values = new Map<string, unknown>();
+    const records: LedgerRecord[] = [];
+    let runId = "";
+    /** A record of the test, as a run's ledger would hold it. */
+    const record = (body: Record<string, unknown>) => {
+      const seq = records.length;
+      const at = Date.now();
+      const common = { v: 1, app: "test", runId, seq, at, actor: { id: "test" }, workflow: "" };
+      records.push({ ...common, id: `${runId}:${body.type as string}:${seq}`, ...body } as LedgerRecord);
+    };
+    /** Calls an operation on the target, as the runtime would: the input parsed by its schema. */
+    const call = (id: string, given: unknown) => {
+      const op = built.scope.ops.get(id)!;
+      const input = op.input.parse(resolve(given, values));
+      const fn = driver.ops[`${op.resource}.${op.name}`];
+      if (!fn) throw new Error(`the driver under test does not implement ${id}`);
+      const context = { idempotencyKey: `${runId}:${records.length}`, runId, opId: id, attempt: 1 };
+      return { op, input, output: () => fn(input, context) };
+    };
+    return {
+      begin(pickle) {
+        runId = pickle.id;
+        seedNames(report, pickle);
+      },
+      async step(expression, args, pickle) {
+        const rule = ruleFor(built, expression, pickle);
+        const { text } = pickle;
+        switch (rule.kind) {
+          case "given": {
+            const seeds: { op: string; input: unknown; output: unknown }[] = [];
+            for (const item of rule.read(args, pickle)) {
+              if ("resource" in item) throw new Error(`"${text}" seeds a resource: a step for a sandbox run`);
+              if ("fault" in item) {
+                if (!fake) throw new Error(`"${text}" injects a fault, which only a fake can`);
+                fake[item.fault](item.op);
+                continue;
+              }
+              const made = call(item.op, item.input);
+              const output = await made.output();
+              if (item.as !== undefined) values.set(item.as, output);
+              seeds.push({ op: item.op, input: made.input, output });
+            }
+            if (seeds.length) record({ type: "scenario.seeded", scenario: "", seeds });
+            return;
+          }
+          case "when": {
+            const item = rule.read(args, pickle);
+            if ("workflow" in item) {
+              throw new Error(
+                `"${text}" runs a workflow: a step for a scenario in scenarios/, not an operation's own test`,
+              );
+            }
+            const made = call(item.call, item.input);
+            const started = Date.now();
+            const result = await made.output().then(
+              (output) => ({ output }),
+              (err: unknown) => {
+                if (isBug(err)) throw err;
+                return { error: errorInfo(err) };
+              },
+            );
+            const { op, input } = made;
+            const durationMs = Date.now() - started;
+            record({
+              type: "op.called",
+              op: op.id,
+              effect: op.effect,
+              input,
+              decision: { kind: "allow" },
+              durationMs,
+              ...result,
+            });
+            return;
+          }
+          case "any":
+            throw new Error(
+              `"${text}" decides an approval: a step for a scenario in scenarios/, not an operation's own test`,
+            );
+          case "then": {
+            const detail = rule.read(args, pickle).verify(viewOf(records));
+            if (detail !== undefined) throw new Error(detail);
+          }
+        }
+      },
+    };
+  };
+}
+
+/**
+ * The value with each string `$name` or `$name.field.field` replaced by what `values` holds
+ * under that name (an output a `Given` named with `as`), at any depth.
+ */
+function resolve(value: unknown, values: ReadonlyMap<string, unknown>): unknown {
+  if (typeof value === "string") {
+    const ref = /^\$([A-Za-z_][\w-]*)((?:\.[\w-]+)*)$/.exec(value);
+    if (!ref) return value;
+    const [, name, path] = ref as unknown as [string, string, string];
+    if (!values.has(name)) {
+      const named = values.size ? `; the steps named ${[...values.keys()].join(", ")}` : "";
+      throw new Error(`no value named "${name}" for ${value}${named}`);
     }
-    const { workflow } = scenario;
-    if (workflow === undefined) {
-      throw new Error(
-        `${where()}: scenario "${name}" has no When: say which workflow runs, such as "When <workflow> runs with"`,
-      );
-    }
-    const drift = scenario.expect.find((e) => "declared" in e);
-    if (drift && workflow !== DRIFT_WORKFLOW) {
-      throw new Error(
-        `${where()}: "${drift.step}" reads a drift report, so the scenario must run ${DRIFT_WORKFLOW}, not ${workflow}`,
-      );
-    }
-    scenarios.push({ ...scenario, workflow, approvals: approvalsOf(scope.workflows.get(workflow)!) });
+    return path
+      .split(".")
+      .slice(1)
+      .reduce<unknown>((v, key) => (v as Record<string, unknown> | undefined)?.[key], values.get(name));
   }
-  return scenarios;
+  if (Array.isArray(value)) return value.map((v) => resolve(v, values));
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, resolve(v, values)]));
+  }
+  return value;
+}
+
+/** A step's `file:line`. */
+const whereOf = (report: Report, file: string, step: PickleStep) =>
+  `${file}:${report.query.findStepBy(step)?.location.line ?? 1}`;
+
+/**
+ * Why a step that did not pass did not, at `where`: the error it failed with, no step matching
+ * it (with the steps there are), or more than one; undefined for a step that passed or did not run.
+ */
+function stepError(built: Built, result: StepResult | undefined, step: PickleStep, where: string) {
+  if (!result) return undefined;
+  switch (result.status) {
+    case StepStatus.PASSED:
+    case StepStatus.SKIPPED:
+      return undefined;
+    case StepStatus.UNDEFINED:
+      return step.type && KINDS[step.type]
+        ? `${where}: ${noMatch(built, step.text)}`
+        : `${where}: "${step.text}" needs a Given, When or Then before it`;
+    case StepStatus.AMBIGUOUS:
+      return `${where}: ${ambiguous(
+        step.text,
+        result.matches.flatMap((e) => built.byExpression.get(e)!.map((r) => r.source)),
+      )}`;
+    default:
+      return `${where}: ${result.message ?? `the step ended ${result.status}`}`;
+  }
+}
+
+/** The `.feature` files under `dir`, relative to it, with `/` between directories, in order. */
+function featureFiles(dir: string): string[] {
+  return readdirSync(dir, { recursive: true, encoding: "utf8" })
+    .filter((f) => f.endsWith(".feature"))
+    .map((f) => f.replaceAll("\\", "/"))
+    .toSorted();
 }
 
 /** What `loadScenarios` returns. */
@@ -645,28 +953,137 @@ export interface LoadedScenarios {
   errors: { file: string; message: string }[];
 }
 
+/** A parse error, as a file's error: `file:line: message`. */
+const parseErrorOf = ({ uri, line, message }: Report["parseErrors"][number]) =>
+  `${uri}${line === undefined ? "" : `:${line}`}: ${message}`;
+
+/**
+ * Compiles the feature files `files` (relative to `dir`) into scenarios: Cucumber runs each,
+ * and its steps record what they say. A file with an error has none of its scenarios: the
+ * first error in it (a step that fails or matches no step or two, a scenario with no `When`,
+ * a name used twice, a file Gherkin cannot parse, no scenarios at all) is its error.
+ */
+async function compile(scope: Scope, dir: string, files: string[]): Promise<LoadedScenarios> {
+  const built = builtFor(scope);
+  const errors = new Map<string, string>();
+  const specs = new Map<string, Spec>();
+  let report: Report | undefined;
+  let left = files;
+  // A file Gherkin cannot parse stops the whole run: it is left out, and the rest run again.
+  while (left.length) {
+    report = await runFeatures(built.library, compileWorld(built, specs), { cwd: dir, files: left, isBug });
+    if (report.parseErrors.length === 0) break;
+    for (const error of report.parseErrors) {
+      if (!errors.has(error.uri)) errors.set(error.uri, parseErrorOf(error));
+    }
+    const rest = left.filter((f) => !errors.has(f));
+    // An error of no file left: give it to every file, rather than run them again forever.
+    if (rest.length === left.length) {
+      for (const f of left) errors.set(f, report.parseErrors.map(parseErrorOf).join("; "));
+    }
+    left = rest.length === left.length ? [] : rest;
+    report = undefined;
+  }
+  const scenarios: Scenario[] = [];
+  if (report) {
+    const { query } = report;
+    const names = namesOf(report);
+    const results = stepResults(report);
+    const pickles = Map.groupBy(query.findAllPickles(), (p) => p.uri);
+    for (const file of files) {
+      if (errors.has(file)) continue;
+      const inFile: Scenario[] = [];
+      try {
+        const list = pickles.get(file) ?? [];
+        if (list.length === 0) throw new Error(`${file}: no scenarios; add one with "Scenario: <name>"`);
+        for (const pickle of list) {
+          const line = lineOf(report, pickle);
+          const scenario = query.findLineageBy(pickle)!.scenario!;
+          const where = `${file}:${scenario.location.line}`;
+          for (const step of pickle.steps) {
+            const error = stepError(built, results.get(step.id), step, whereOf(report, file, step));
+            if (error) throw new Error(error);
+          }
+          const { workflow, ...spec } = specs.get(pickle.id)!;
+          const name = names.get(pickle.id)!;
+          if (inFile.some((s) => s.name === name)) {
+            throw new Error(`${where}: a second scenario named "${name}"; give each its own name`);
+          }
+          if (workflow === undefined) {
+            throw new Error(
+              `${where}: scenario "${name}" has no When: say which workflow runs, such as "When <workflow> runs with"`,
+            );
+          }
+          const drift = spec.expect.find((e) => "declared" in e);
+          if (drift && workflow !== DRIFT_WORKFLOW) {
+            throw new Error(
+              `${where}: "${drift.step}" reads a drift report, so the scenario must run ${DRIFT_WORKFLOW}, not ${workflow}`,
+            );
+          }
+          inFile.push({
+            ...spec,
+            name,
+            file,
+            line,
+            workflow,
+            text: textOf(scenario, report.texts.get(file) ?? ""),
+            approvals: approvalsOf(scope.workflows.get(workflow)!),
+          });
+        }
+      } catch (err) {
+        if (isBug(err)) throw err;
+        errors.set(file, errorMessage(err));
+        continue;
+      }
+      scenarios.push(...inFile);
+    }
+  }
+  // Each file's error, in the files' order, and the scenarios of the rest, one name each across files.
+  const loaded: LoadedScenarios = { scenarios: [], errors: [] };
+  const seen = new Map<string, string>();
+  for (const file of files) {
+    const error = errors.get(file);
+    if (error !== undefined) {
+      loaded.errors.push({ file, message: error });
+      continue;
+    }
+    for (const s of scenarios.filter((x) => x.file === file)) {
+      const other = seen.get(s.name);
+      if (other !== undefined) {
+        loaded.errors.push({
+          file,
+          message: `${file}: scenario "${s.name}" is also in ${other}; give each its own name`,
+        });
+        continue;
+      }
+      seen.set(s.name, file);
+      loaded.scenarios.push(s);
+    }
+  }
+  return loaded;
+}
+
 /**
  * Each scope's scenarios as last read, with the stamp of the files they were read from. By
  * scope, since what a file means depends on its operations and workflows.
  */
-const loadedByScope = new WeakMap<Scope, { stamp: string; loaded: LoadedScenarios }>();
+const loadedByScope = new WeakMap<Scope, { stamp: string; loaded: Promise<LoadedScenarios> }>();
 
 /**
  * Every scenario in the `.feature` files under `scenarios` (a `file:` URL to a directory),
- * with an error for each file that does not parse and each name used twice. No directory,
- * or none given, is no scenarios. Throws when an operation's phrase names a field it lacks.
- * The files are parsed again only once one is added, removed or written (its name, `mtimeMs`
- * or size changes): until then each call returns the same object, which callers must not change.
+ * compiled by Cucumber, with an error for each file that does not compile and each name used
+ * twice. No directory, or none given, is no scenarios. Rejects when an operation's phrase names
+ * a field it lacks. The files are compiled again only once one is added, removed or written
+ * (its name, `mtimeMs` or size changes): until then each call returns the same object, which
+ * callers must not change.
  */
-export function loadScenarios(scope: Scope): LoadedScenarios {
+export async function loadScenarios(scope: Scope): Promise<LoadedScenarios> {
   if (!scope.scenarios) return { scenarios: [], errors: [] };
   const dir = fileURLToPath(scope.scenarios);
   if (!existsSync(dir)) return { scenarios: [], errors: [] };
-  rulesOf(scope);
-  const files = readdirSync(dir, { recursive: true, encoding: "utf8" })
-    .filter((f) => f.endsWith(".feature"))
-    .map((f) => f.replaceAll("\\", "/"))
-    .toSorted();
+  // Built first, so a phrase naming a field its input lacks rejects even with no feature files.
+  builtFor(scope);
+  const files = featureFiles(dir);
   const stamp = JSON.stringify([
     dir,
     files.map((file) => {
@@ -676,147 +1093,107 @@ export function loadScenarios(scope: Scope): LoadedScenarios {
   ]);
   const cached = loadedByScope.get(scope);
   if (cached?.stamp === stamp) return cached.loaded;
-  const scenarios: Scenario[] = [];
-  const errors: { file: string; message: string }[] = [];
-  const seen = new Map<string, string>();
-  for (const file of files) {
-    let parsed: Scenario[];
-    try {
-      parsed = parseFeature(readFileSync(join(dir, file), "utf8"), file, scope);
-    } catch (err) {
-      if (isBug(err)) throw err;
-      errors.push({ file, message: errorMessage(err) });
-      continue;
-    }
-    for (const s of parsed) {
-      const other = seen.get(s.name);
-      if (other !== undefined) {
-        errors.push({ file, message: `${file}: scenario "${s.name}" is also in ${other}; give each its own name` });
-        continue;
-      }
-      seen.set(s.name, file);
-      scenarios.push(s);
-    }
-  }
-  const loaded = { scenarios, errors };
+  const loaded = files.length ? compile(scope, dir, files) : Promise.resolve({ scenarios: [], errors: [] });
   loadedByScope.set(scope, { stamp, loaded });
+  // A compile that throws (a bug) is not kept: the next call tries again.
+  loaded.catch(() => {
+    if (loadedByScope.get(scope)?.loaded === loaded) loadedByScope.delete(scope);
+  });
   return loaded;
 }
 
-/** True when `actual` has every key `expected` has, with an equal value, at every depth. */
-function contains(actual: unknown, expected: unknown): boolean {
-  if (typeof expected !== "object" || expected === null || Array.isArray(expected)) {
-    return isDeepStrictEqual(actual, expected);
-  }
-  if (typeof actual !== "object" || actual === null || Array.isArray(actual)) return false;
-  return Object.entries(expected).every(([k, v]) => contains((actual as Record<string, unknown>)[k], v));
-}
-
-type Call = Extract<LedgerRecord, { type: "op.called" }>;
-type Request = Extract<LedgerRecord, { type: "approval.requested" }>;
-const isCall = (r: LedgerRecord): r is Call => r.type === "op.called";
-const isRequest = (r: LedgerRecord): r is Request => r.type === "approval.requested";
-
-/** A policy's decision as words: `allowed`, `denied`, `held for finance`. */
-const words = (d: RecordedDecision) =>
-  d.kind === "allow" ? "allowed" : d.kind === "deny" ? "denied" : `held for ${approverLabel(d.approver)}`;
-
-/** What the policy decided for the calls, each decision once: `allowed and held for finance`. */
-const decisions = (calls: Call[]) => [...new Set(calls.map((r) => words(r.decision)))].join(" and ");
-
-/** True when `who` names the approver: a person by id, or a group by its name. */
-const isApprover = (approver: Approver, who: string) =>
-  typeof approver === "string" ? approver === who : approver.group === who;
-
-/** How a drift report found a resource, as words: `clean`, `gone`, `drifted in has_wiki, topics`. */
-const found = (r: DriftResult) =>
-  r.status === "drifted" ? `drifted in ${r.fields.map((f) => f.path).join(", ")}` : r.status;
-
-/** A check of `step`: passed when there is no `detail`. */
-const verdict = (step: string, detail?: string): Check =>
-  detail === undefined ? { step, ok: true } : { step, ok: false, detail };
-
 /**
- * Why a drift expectation fails against the report a finished drift run returned as its
- * output, or undefined when the report found the resource as expected.
+ * Checks a run's ledger records against the scenario, as its feature file reads now: Cucumber
+ * runs the scenario's `Then` steps, each judging the run on its own, and the rest of its steps
+ * do nothing. One check per expectation (`scenario.expect`), in order, a step that does not hold
+ * with why as its `detail`. Rejects when the scenario no longer compiles as it did (a step the
+ * file no longer matches, say): load the scenarios again first, as the app does.
  */
-function driftDetail(
-  e: Extract<Expectation, { declared: string }>,
-  end: Extract<LedgerRecord, { type: "run.finished" }>,
-): string | undefined {
-  const report = end.output as Partial<DriftReport> | null | undefined;
-  if (!Array.isArray(report?.resources)) return "the run's output is not a drift report";
-  const resource = report.resources.find((r) => r.id === e.declared);
-  if (!resource) {
-    return `no resource ${e.declared} in the report; it has ${report.resources.map((r) => r.id).join(", ") || "none"}`;
-  }
-  if (resource.status === "error") return `${e.declared} could not be read: ${resource.error}`;
-  const ok =
-    resource.status === e.status && (e.status !== "drifted" || resource.fields.some((f) => f.path === e.field));
-  if (ok) return undefined;
-  return `${e.declared} is ${found(resource)}, not ${e.status === "drifted" ? `drifted in ${e.field}` : e.status}`;
-}
-
-/**
- * Checks each of the scenario's expectations against a run's ledger records. Pure. A call is an
- * `op.called` record without an `error`; one with an error (a policy denial, a rejected
- * approval, a vendor's final failure) was attempted, not made. An operation `was denied` when
- * the policy's decision on some call to it is `deny`, and `was held for` an approver when an
- * approval for that approver holds it: one the policy asked for on its call, or one that
- * `covers` it. A drift expectation reads the report a finished drift run returned.
- */
-export function check(scenario: Scenario, records: readonly LedgerRecord[]): Check[] {
-  const end = records.find((r) => r.type === "run.finished" || r.type === "run.failed");
-  const calls = records.filter(isCall);
-  const requests = records.filter(isRequest);
-  const callsTo = (op: string) => calls.filter((r) => r.op === op);
-  return scenario.expect.map((e): Check => {
-    if ("decision" in e) {
-      const tries = callsTo(e.op);
-      if (e.decision === "denied") {
-        if (tries.some((r) => r.decision.kind === "deny")) return verdict(e.step);
-        return verdict(e.step, tries.length ? `${e.op} was ${decisions(tries)}, not denied` : `no call to ${e.op}`);
-      }
-      const holds = requests.filter((r) => r.op === e.op || r.covers.includes(e.op));
-      if (holds.some((r) => isApprover(r.approver, e.approver))) return verdict(e.step);
-      return verdict(
-        e.step,
-        holds.length
-          ? `${e.op} was held for ${[...new Set(holds.map((r) => approverLabel(r.approver)))].join(" and ")}, not ${e.approver}`
-          : tries.length
-            ? `${e.op} was ${decisions(tries)}, not held`
-            : `no call to ${e.op}`,
-      );
-    }
-    if ("called" in e) {
-      const tries = callsTo(e.op);
-      const made = tries.filter((r) => !r.error);
-      const matching = made.filter((r) => e.input === undefined || contains(r.input, e.input));
-      if (matching.length > 0 === e.called) return verdict(e.step);
-      const inputs = (list: Call[]) => list.map((r) => JSON.stringify(r.input)).join(", ");
-      if (!e.called) return verdict(e.step, `${e.op} was called with ${inputs(matching)}`);
-      const what = e.input === undefined ? e.op : `${e.op} with ${JSON.stringify(e.input)}`;
-      const tried = tries.flatMap(({ error }) => (error ? [`${error.code ?? error.name}: ${error.message}`] : []));
-      return verdict(
-        e.step,
-        [
-          `no call to ${what}`,
-          ...(made.length ? [`its calls had ${inputs(made)}`] : []),
-          ...(tried.length ? [`attempted: ${tried.join(", ")}`] : []),
-        ].join("; "),
-      );
-    }
-    // The rest read how the run ended.
-    if (!end) return verdict(e.step, "run not ended");
-    if ("outcome" in e && e.outcome === "failed") {
-      if (end.type !== "run.failed") return verdict(e.step, "the run finished");
-      if (e.code === undefined || end.error.code === e.code) return verdict(e.step);
-      return verdict(e.step, `the run failed with ${end.error.code ?? "no code"}: ${end.error.message}`);
-    }
-    // A finished run: what `the run succeeds` expects, and what a drift expectation reads its report from.
-    if (end.type === "run.failed") return verdict(e.step, `the run failed: ${end.error.message}`);
-    return verdict(e.step, "declared" in e ? driftDetail(e, end) : undefined);
+export async function check(scope: Scope, scenario: Scenario, records: readonly LedgerRecord[]): Promise<Check[]> {
+  if (!scope.scenarios) throw new Error(`No scenarios directory to check scenario "${scenario.name}" from`);
+  const built = builtFor(scope);
+  const { file, line, name } = scenario;
+  const verdicts = new Map<string, string | undefined>();
+  const report = await runFeatures(built.library, checkWorld(built, viewOf(records), verdicts), {
+    cwd: fileURLToPath(scope.scenarios),
+    files: [file],
+    line,
+    isBug,
   });
+  const where = `${file}:${line}`;
+  if (report.parseErrors.length) throw new Error(`${where}: ${report.parseErrors.map((e) => e.message).join("; ")}`);
+  const names = namesOf(report);
+  const pickle = report.query
+    .findAllPickles()
+    .find((p) => p.uri === file && lineOf(report, p) === line && names.get(p.id) === name);
+  if (!pickle) throw new Error(`${where}: no scenario "${name}" there now`);
+  const results = stepResults(report);
+  const checks: Check[] = [];
+  for (const step of pickle.steps) {
+    const expectation = scenario.expect[checks.length];
+    // Only a `Then` step expects: a `Given` can read the same as one (`{op} was called with`).
+    if (expectation?.step === step.text && KINDS[step.type!] === "then" && verdicts.has(step.id)) {
+      checks.push(verdict(step.text, verdicts.get(step.id)));
+      continue;
+    }
+    const error = stepError(built, results.get(step.id), step, whereOf(report, file, step));
+    if (error) throw new Error(error);
+  }
+  if (checks.length !== scenario.expect.length) {
+    throw new Error(`${where}: scenario "${name}" no longer has the expectations it was read with`);
+  }
+  return checks;
+}
+
+/**
+ * The scenarios of the `.feature` files under `dir` (a `file:` URL to a directory), in order,
+ * named as `loadScenarios` names them, from a dry run: what a test runner lists before it runs
+ * each (`testFeature`). Rejects, naming the file, for one Gherkin cannot parse.
+ */
+export async function featureScenarios(
+  scope: Scope,
+  dir: URL,
+): Promise<{ file: string; line: number; name: string; tags: string[] }[]> {
+  const cwd = fileURLToPath(dir);
+  const report = await runFeatures(builtFor(scope).library, () => ({ begin() {}, step() {} }), {
+    cwd,
+    files: featureFiles(cwd),
+    dryRun: true,
+    isBug,
+  });
+  if (report.parseErrors.length) throw new Error(report.parseErrors.map(parseErrorOf).join("\n"));
+  const names = namesOf(report);
+  return report.query.findAllPickles().map((pickle) => ({
+    file: pickle.uri,
+    line: lineOf(report, pickle),
+    name: names.get(pickle.id)!,
+    tags: pickle.tags.map((t) => t.name),
+  }));
+}
+
+/**
+ * Runs the scenario at `line` of the feature file `file` (absolute) as an operation's own test,
+ * on the target: its `Given` steps seed through it, its `When` steps call its operations directly
+ * (no worker, no policy), and its `Then` steps check those calls. Rejects with its first step
+ * that did not pass, at `file:line`.
+ */
+export async function testFeature(scope: Scope, file: string, line: number, target: FeatureTarget): Promise<void> {
+  const built = builtFor(scope);
+  const name = basename(file);
+  const report = await runFeatures(built.library, testWorld(built, target), {
+    cwd: dirname(file),
+    files: [name],
+    line,
+    isBug,
+  });
+  if (report.parseErrors.length) throw new Error(report.parseErrors.map(parseErrorOf).join("\n"));
+  const results = stepResults(report);
+  for (const pickle of report.query.findAllPickles()) {
+    for (const step of pickle.steps) {
+      const error = stepError(built, results.get(step.id), step, whereOf(report, name, step));
+      if (error) throw new Error(error);
+    }
+  }
 }
 
 /**

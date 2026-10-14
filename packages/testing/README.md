@@ -135,7 +135,7 @@ Two variables change what the same tests do:
 
 `@sanoma/testing/scenarios` runs a config's [scenarios](https://www.npmjs.com/package/@sanoma/workflows#scenarios-and-sandbox-runs) as vitest tests (install `vitest` and `@dbos-inc/dbos-sdk` beside it). Each scenario is a sandbox run: the worker calls fakes of its own, made by the makers the connectors carry, never a driver.
 
-`describeScenarios(config, options)` reads the `.feature` files in `scenarios/` in the config's root and registers a test for each scenario, in a `describe` per file, each over `runScenario` from `@sanoma/workflows/scenarios` (the one implementation; `runScenarios` there, which `sanoma check` runs, needs no vitest); it throws, naming the root or the directory, when the root has no `scenarios/` or it holds no scenarios. A test starts the scenario's sandbox run, decides its approvals as the scenario says, and fails listing each `Then` step that did not hold, with why. A file that does not load (a step no rule matches, bad JSON, a name used twice) is a failing test named after the file, whose message names the file (and the line, for a step or JSON error). It starts one [test app](#a-test-app) for all its scenarios, before them, with `useTestApp(config, options)`, and stops it after, on `options.databaseUrl`, as for `startTestWorker`. `options.startedBy` starts the runs (default `{ id: "scenarios" }`), and `options.timeoutMs` is how long each may take (`drive`'s, 15 seconds by default); the tests it registers get twice that, so `drive`'s error is the one you see.
+`describeScenarios(config, options)` compiles the `.feature` files in `scenarios/` in the config's root with Cucumber, so a test file awaits it at its top level, and registers a test for each scenario, in a `describe` per file, each over `runScenario` from `@sanoma/workflows/scenarios` (the one implementation; `runScenarios` there, which `sanoma check` runs, needs no vitest); it throws, naming the root or the directory, when the root has no `scenarios/` or it holds no scenarios. A test starts the scenario's sandbox run, decides its approvals as the scenario says, and fails listing each `Then` step that did not hold, with why (each judged on its own). A file that does not load (a step no rule matches, bad JSON, a name used twice) is a failing test named after the file, whose message names the file (and the line, for a step or JSON error). It starts one [test app](#a-test-app) for all its scenarios, before them, with `useTestApp(config, options)`, and stops it after, on `options.databaseUrl`, as for `startTestWorker`. `options.startedBy` starts the runs (default `{ id: "scenarios" }`), and `options.timeoutMs` is how long each may take (`drive`'s, 15 seconds by default); the tests it registers get twice that, so `drive`'s error is the one you see.
 
 ```ts
 // test/scenarios.test.ts
@@ -144,7 +144,7 @@ import { describeScenarios } from "@sanoma/testing/scenarios";
 import { memoryLedger } from "@sanoma/workflows";
 import config from "../sanoma.config.ts";
 
-describeScenarios({ ...config, ledger: memoryLedger() }, { databaseUrl: testDatabaseUrl("scenarios") });
+await describeScenarios({ ...config, ledger: memoryLedger() }, { databaseUrl: testDatabaseUrl("scenarios") });
 ```
 
 A company config spread into `describeScenarios` keeps its `ledger`, so pass `ledger: memoryLedger()`, as above, to keep test runs out of the project's ledger.
@@ -183,6 +183,24 @@ Scenario: A repository GitHub no longer has
 
 `Given <resource> "<name>" has` and `is gone` change the run's own fake of the vendor before it starts (a GitHub repository by its name, a Stripe object by its id: the resource's import id), for fakes that hold objects, as the GitHub and Stripe ones do; a failed `Then` says what the run did instead (`github.repository.import was allowed, not denied`, `resources/identity/github.ts#docs is gone, not clean`).
 
-`runScenario(scenario, { client, startedBy?, timeoutMs? })`, re-exported from `@sanoma/workflows/scenarios`, runs one scenario against a worker you started, with a `SanomaClient` of it, and returns `{ runId, run, ledger, checks }`: the run's id, its summary, its ledger records and `check(scenario, ledger)`. `timeoutMs` goes to `drive`. Load the scenarios with `loadScenarios(resolveConfig(config))` from `@sanoma/workflows/scenario`.
+`runScenario(scenario, { client, scope, startedBy?, timeoutMs? })`, re-exported from `@sanoma/workflows/scenarios`, runs one scenario against a worker you started, with a `SanomaClient` of it, and returns `{ runId, run, ledger, checks }`: the run's id, its summary, its ledger records and `check(scope, scenario, ledger)`. `timeoutMs` goes to `drive`. Load the scenarios with `await loadScenarios(scope)` from `@sanoma/workflows/scenario`, `scope` being `resolveConfig(config)`.
+
+## A connector's own features
+
+`@sanoma/testing/features` runs a connector's own feature files, which test its operations with its [steps](https://www.npmjs.com/package/@sanoma/workflows#steps-a-connector-ships) and the generic ones (`{op} is called with`, `it returns`, `it fails with status {int}`), as vitest tests. `describeFeatures(connector, { features, replay })` registers a `describe` per target and a test per scenario in each, in Cucumber, its `When` steps calling the operation directly (no worker, no policy):
+
+- `fake`: a new fake of the connector's for each scenario.
+- `driver`: the connector's driver over its vendor's recorded replies, with `replay`'s options (the driver tests' own, so both replay alike). Each scenario plays the fixture named after it, its name in lower case with each run of other characters a `-` (`Publish draft` plays `publish-draft.json`); one with no recording is tagged `@fake-only`, and runs on the fake alone. A missing fixture fails the test, saying so. With `SANOMA_LIVE=1` the driver calls the vendor, as the driver tests do, and with `SANOMA_RECORD=1` too, each scenario's replies are saved as its fixture; what a live scenario creates stays on the account.
+
+A scenario's checks must hold on both targets, whose ids differ: name what a `Given` returned (`as`) and use its fields in a later table (`| id | $draft.id |`), and check fields both return (`it returns` then `| status | published |`), not ids.
+
+```ts
+// connectors/ghost/test/features.test.ts
+import { describeFeatures } from "@sanoma/testing/features";
+import { ghost } from "../src/index.ts";
+import { replayOptions } from "./replay.ts";
+
+await describeFeatures(ghost, { features: new URL("../features/", import.meta.url), replay: replayOptions });
+```
 
 Status: early (0.x). License: FSL-1.1-ALv2.

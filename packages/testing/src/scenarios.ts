@@ -17,12 +17,14 @@ export { runScenario, type RunScenarioOptions } from "@sanoma/workflows/scenario
  * `describe` per feature file, that runs it (`runScenario`) and expects every check to pass; and
  * a failing test for each file that does not load. Starts one test app (`useTestApp`) for the
  * scenarios, before them, and stops it after. `config` and `options` are `startTestWorker`'s;
- * `startedBy` starts the runs, and `timeoutMs` is how long each may take (`drive`'s).
+ * `startedBy` starts the runs, and `timeoutMs` is how long each may take (`drive`'s). Cucumber
+ * compiles the feature files first, so the test file awaits it at its top level:
+ * `await describeScenarios(config, { databaseUrl })`.
  */
-export function describeScenarios(
+export async function describeScenarios(
   config: SanomaConfig,
   { startedBy, timeoutMs, ...options }: TestWorkerOptions & { startedBy?: Principal; timeoutMs?: number },
-): void {
+): Promise<void> {
   // Only to read the scenarios: the test app resolves the config the worker runs.
   const resolved = resolveConfig({ ...config, ledger: config.ledger ?? memoryLedger() });
   if (!resolved.scenarios) {
@@ -32,7 +34,7 @@ export function describeScenarios(
         : `describeScenarios found no \`scenarios/\` in ${resolved.root}`,
     );
   }
-  const { scenarios, errors } = loadScenarios(resolved);
+  const { scenarios, errors } = await loadScenarios(resolved);
   // A mistyped directory loads nothing, and a test file that registers no tests would pass.
   if (scenarios.length === 0 && errors.length === 0) {
     throw new Error(`describeScenarios found no scenarios in ${fileURLToPath(resolved.scenarios)}`);
@@ -55,7 +57,12 @@ export function describeScenarios(
         it(
           scenario.name,
           async () => {
-            const { checks } = await runScenario(scenario, { client: app.client, startedBy, timeoutMs });
+            const { checks } = await runScenario(scenario, {
+              client: app.client,
+              scope: resolved,
+              startedBy,
+              timeoutMs,
+            });
             const failed = checks.filter((c) => !c.ok);
             const lines = failed.map((c) => `  ${c.step}: ${c.detail}`);
             expect(failed, [`${file}: "${scenario.name}" failed:`, ...lines].join("\n")).toEqual([]);

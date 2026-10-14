@@ -78,6 +78,18 @@ SANOMA_LIVE=1 RESEND_API_KEY=re_... RESEND_TEST_AUDIENCE=<segment id> RESEND_TES
 
 A recording loses ids, addresses, the sender's domain and keys. The error cases, and the broadcasts that are no longer drafts, only replay.
 
+## Steps and features
+
+The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#steps-a-connector-ships) (`resendSteps`, attached with `withSetup`), which a company's scenario can use beside the generic steps and other connectors' ones:
+
+| Keyword | Step                                    | What it does                                                                                                     |
+| ------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Given   | `a Resend broadcast {string}`           | Seeds a draft broadcast with that subject through `resend.broadcast.create`, named `broadcast` (`$broadcast.id`) |
+| Given   | `Resend fails to send once`             | The next `resend.broadcast.send` fails (`failNext`)                                                              |
+| Then    | `the Resend broadcast {string} is sent` | The broadcast with that subject, seeded or created by the run, was sent                                          |
+
+`features/broadcast.feature` creates and sends a broadcast, with these steps and the generic ones for an operation's own test, on the fake and on Resend's recorded replies (`create-and-send.json`): `test/features.test.ts` runs them with [`describeFeatures`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#a-connectors-own-features). A scenario tagged `@fake-only` has no recording. The package ships `features/`.
+
 ## Testing
 
 `@sanoma/connector-resend/fake` is an in-memory Resend that emails nobody, the fake the connector carries: each sandbox run makes one of its own. A test that reads or seeds one attaches it to the connector itself, then checks `state.broadcasts` and `calls`.
