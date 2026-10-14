@@ -28,10 +28,10 @@ import { Alert, AlertDescription } from "#/components/ui/alert.tsx";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { ButtonGroup } from "#/components/ui/button-group.tsx";
-import { Card } from "#/components/ui/card.tsx";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
-import { Item, ItemContent, ItemDescription, ItemTitle } from "#/components/ui/item.tsx";
+import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
 import { utcText } from "#/lib/time.ts";
@@ -220,6 +220,75 @@ export function OpItem({ id, op, children }: { id: string; op: OpEntry | undefin
 }
 
 /**
+ * A link as a list item, inside an `ItemGroup`: `children` is the link (a `<Link>` or an `<a>`),
+ * drawn as an Item with `props`, and marked (`CURRENT_LINK`) while it is the page open. A link to
+ * another page ends with `<ItemActions><ChevronRightIcon /></ItemActions>` inside the link.
+ * shadcn's docs put `role="listitem"` on the Item, but on an `asChild` link that role would replace
+ * the link's: a listitem holds the link instead, so it stays a link. Its content and title may
+ * shrink (min-w-0, max-w-full), so a long title in a narrow list is cut where a caller's `truncate`
+ * span says, rather than widening the list; its focus ring is drawn inside, where a scrolling list
+ * does not clip it.
+ */
+const LINK_ITEM = "focus-visible:ring-inset [&_[data-slot=item-content]]:min-w-0 [&_[data-slot=item-title]]:max-w-full";
+
+export function LinkItem({
+  children,
+  className,
+  ...props
+}: Omit<ComponentProps<typeof Item>, "asChild" | "children"> & { children: ReactElement }) {
+  return (
+    <div role="listitem">
+      <Item asChild className={cn(CURRENT_LINK, LINK_ITEM, className)} {...props}>
+        {children}
+      </Item>
+    </div>
+  );
+}
+
+/** A link while its URL shows: `aria-current="page"`, which Link sets on an active link (or a list sets on the open one). */
+export const CURRENT_LINK = "aria-[current=page]:bg-muted";
+
+/**
+ * A list of panes beside the one open, as a card: `title`, with `description` under it and
+ * `action` beside it, over `children`, each a `LinkItem`; `empty` instead when there are none. It
+ * scrolls past `height`.
+ */
+export function PaneList({
+  title,
+  description,
+  action,
+  empty,
+  height = "max-h-[70vh]",
+  children,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  action?: ReactNode;
+  empty?: ReactNode;
+  /** The list's most height before it scrolls, as classes that replace the default: 70vh, beside a pane. */
+  height?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle role="heading" aria-level={2}>
+          {title}
+        </CardTitle>
+        {description && <CardDescription>{description}</CardDescription>}
+        {action && <CardAction>{action}</CardAction>}
+      </CardHeader>
+      {/* An empty state (`Nothing`) is already inside this card: no border of its own. */}
+      <CardContent className="[&>[data-slot=empty]]:border-0">
+        {/* Not a ScrollArea: its viewport scrolls only in a box of a set height, and this list is
+            as tall as its items, up to its max. */}
+        {empty ?? <ItemGroup className={cn("overflow-y-auto", height)}>{children}</ItemGroup>}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
  * Each built-in as a thing, where an operation shows its vendor's logo: an approval, a person who
  * decides; a sleep, a clock; `ctx.all`, calls that run in parallel.
  */
@@ -231,7 +300,7 @@ export const BUILTIN_ICON = {
 
 /** A tone as a dot, where a badge would be too much. */
 export function StatusDot({ tone }: { tone: Tone }) {
-  return <span aria-hidden className={cn("size-2.5 rounded-full", TONE_FILL[tone])} />;
+  return <span aria-hidden className={cn("size-2.5 shrink-0 rounded-full", TONE_FILL[tone])} />;
 }
 
 export function ApprovalStatusBadge({ status }: { status: ApprovalState["status"] }) {
@@ -325,6 +394,17 @@ export function When({ at }: { at: number }) {
   );
 }
 
+/** An item's time, at the end of its row, level with its title. */
+export function ItemTime({ at }: { at: number }) {
+  return (
+    <ItemContent className="self-start">
+      <ItemDescription className="text-xs">
+        <When at={at} />
+      </ItemDescription>
+    </ItemContent>
+  );
+}
+
 export function Json({ value }: { value: unknown }) {
   const text = useMemo(() => JSON.stringify(value, null, 2) ?? "undefined", [value]);
   return (
@@ -352,9 +432,8 @@ export function Disclosure({ label, children }: { label: ReactNode; children: Re
   );
 }
 
-/** A segment while its URL shows (Link marks it `aria-current="page"`), or while Link's `disabled` leaves it no href. */
-const SEGMENT =
-  "aria-[current=page]:bg-muted aria-[current=page]:font-semibold aria-disabled:pointer-events-none aria-disabled:opacity-50";
+/** A segment while its URL shows, or while Link's `disabled` leaves it no href. */
+const SEGMENT = `${CURRENT_LINK} aria-[current=page]:font-semibold aria-disabled:pointer-events-none aria-disabled:opacity-50`;
 
 /**
  * A choice between URLs, as one control: `children` are `Segment`s. Links rather than buttons, so

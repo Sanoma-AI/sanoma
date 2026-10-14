@@ -4,12 +4,13 @@ import { Link, useLoaderData, useNavigate, useSearch } from "@tanstack/react-rou
 import { PanelLeftCloseIcon, PanelLeftOpenIcon, WorkflowIcon } from "lucide-react";
 import { memo, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
+import { Item, ItemContent, ItemDescription, ItemTitle } from "#/components/ui/item.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { RAIL_COOKIE } from "#/lib/rail.ts";
 import { RUN_TONE } from "#/lib/tone.ts";
 import { pendingApprovals, starterName } from "../api.ts";
 import { picksFromLatest, RAIL_LIMIT, railQuery, railRuns, RUN_FILTERS, type RunFilter, runLink } from "../queries.ts";
-import { Nothing, SandboxBadge, StatusDot, Tip, When } from "./common.tsx";
+import { CURRENT_LINK, LinkItem, Nothing, Notice, PaneList, StatusDot, Tip, When } from "./common.tsx";
 
 // The rail on a workflow's page: the workflow's own pane, and its latest runs, each linking to its own pane.
 
@@ -24,13 +25,8 @@ const FILTER_LABEL: Record<RunFilter, string> = {
   failed: "Failed",
 };
 
-/** A link in the rail; `aria-current`, which Link sets on an active link, marks the pane that shows. */
-const RAIL_LINK =
-  "flex flex-col gap-0.5 rounded-md px-2 py-1.5 text-sm hover:bg-muted aria-[current=page]:bg-muted compact:flex-row compact:items-center compact:gap-2 compact:py-1";
-
 /** An icon link in the folded rail. */
-const RAIL_ICON =
-  "flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted aria-[current=page]:bg-muted";
+const RAIL_ICON = `flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted ${CURRENT_LINK}`;
 
 /** The rail's links keep the filter and drop the rest (`?new`, `?scenario=`); All leaves the URL without `?runs=`. */
 const railSearch = (filter: RunFilter) => ({ runs: filter === "all" ? undefined : filter });
@@ -102,66 +98,59 @@ export function RunRail({ name }: { name: string }) {
       </aside>
     );
   }
+  // Unfolded, the runs are a PaneList, as the inbox's approvals are; folded, only their dots.
   return (
-    <aside
-      aria-label="Runs of this workflow"
-      className="flex flex-[1_1_14rem] flex-col gap-3 rounded-lg border bg-card p-2 text-card-foreground"
-    >
+    <aside aria-label="Runs of this workflow" className="flex min-w-0 flex-[1_1_14rem] flex-col gap-2">
       <nav className="flex items-center gap-1">
-        <Link {...workflowLink} className={`${RAIL_LINK} flex-1 aria-[current=page]:font-medium`}>
-          Workflow
-        </Link>
+        <Item asChild variant="outline" size="xs" className={CURRENT_LINK}>
+          <Link {...workflowLink}>
+            <ItemContent>
+              <ItemTitle>Workflow</ItemTitle>
+            </ItemContent>
+          </Link>
+        </Item>
         {toggle}
       </nav>
-      <div className="flex items-center justify-between gap-2 px-2">
-        <span className="text-xs font-medium text-muted-foreground">Runs</span>
-        <NativeSelect
-          size="sm"
-          aria-label="Show runs"
-          value={filter}
-          // Another filter replaces the page in the history rather than adding one; All leaves
-          // the URL without `?runs=`.
-          onChange={(e) => {
-            const chosen = e.target.value as RunFilter;
-            void navigate({
-              to: ".",
-              search: (prev) => ({ ...prev, runs: chosen === "all" ? undefined : chosen }),
-              replace: true,
-            });
-          }}
-        >
-          {RUN_FILTERS.map((f) => (
-            <NativeSelectOption key={f} value={f}>
-              {FILTER_LABEL[f]}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      </div>
-      {error && <p className="px-2 text-xs text-destructive">Could not refresh: {error.message}</p>}
-      {shown.length === 0 ? (
-        <Nothing
-          title={
-            filter === "all"
-              ? "No runs yet"
-              : fromLatest
-                ? `No ${filter} runs among the latest ${RAIL_LIMIT}`
-                : "No runs match"
-          }
-        />
-      ) : (
-        <ul className="flex max-h-[70vh] flex-col overflow-y-auto">
-          {shown.map((run) => (
-            <li key={run.runId}>
-              <RunLink run={run} filter={filter} />
-            </li>
-          ))}
-        </ul>
-      )}
-      {runs.length === RAIL_LIMIT && (
-        <p className="px-2 text-xs text-muted-foreground">
-          {fromLatest ? "From" : "Showing"} the latest {RAIL_LIMIT}
-        </p>
-      )}
+      {error && <Notice variant="destructive">Could not refresh the runs: {error.message}</Notice>}
+      <PaneList
+        title="Runs"
+        description={runs.length === RAIL_LIMIT && `${fromLatest ? "From" : "Showing"} the latest ${RAIL_LIMIT}`}
+        action={
+          <NativeSelect
+            size="sm"
+            aria-label="Show runs"
+            value={filter}
+            // Another filter replaces the page in the history rather than adding one.
+            onChange={(e) => {
+              const chosen = e.target.value as RunFilter;
+              void navigate({ to: ".", search: (prev) => ({ ...prev, ...railSearch(chosen) }), replace: true });
+            }}
+          >
+            {RUN_FILTERS.map((f) => (
+              <NativeSelectOption key={f} value={f}>
+                {FILTER_LABEL[f]}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        }
+        empty={
+          shown.length === 0 ? (
+            <Nothing
+              title={
+                filter === "all"
+                  ? "No runs yet"
+                  : fromLatest
+                    ? `No ${filter} runs among the latest ${RAIL_LIMIT}`
+                    : "No runs match"
+              }
+            />
+          ) : undefined
+        }
+      >
+        {shown.map((run) => (
+          <RunLink key={run.runId} run={run} filter={filter} />
+        ))}
+      </PaneList>
       <Link {...allRuns} className="px-2 text-xs text-muted-foreground hover:text-foreground hover:underline">
         All runs of this workflow →
       </Link>
@@ -199,24 +188,28 @@ const RunDot = memo(function RunDot({ run, filter }: { run: RunSummary; filter: 
 });
 
 /**
- * A run in the rail: its status (and what it waits on), its sandbox, who started it and when.
- * Memoised: a poll keeps an unchanged run's object, so only the runs that changed draw again.
+ * A run in the rail: its status (and what it waits on), then its sandbox, and who started it and
+ * when. Memoised: a poll keeps an unchanged run's object, so only the runs that changed draw again.
  */
 const RunLink = memo(function RunLink({ run, filter }: { run: RunSummary; filter: RunFilter }) {
   const waitingOn = run.status === "waiting" ? pendingApprovals(run)[0]?.title : undefined;
   return (
-    <Link {...runLink(run)} search={railSearch(filter)} activeOptions={{ includeSearch: false }} className={RAIL_LINK}>
-      <span className="flex min-w-0 items-center gap-2">
-        <StatusDot tone={RUN_TONE[run.status]} />
-        <span className="shrink-0">{run.status}</span>
-        {waitingOn !== undefined && <span className="truncate text-muted-foreground">{waitingOn}</span>}
-        {run.sandbox !== undefined && <SandboxBadge name={run.sandbox} />}
-      </span>
-      <span className="truncate text-xs text-muted-foreground">
-        {/* Compact keeps one line: status · when. */}
-        <span className="compact:hidden">{starterName(run)} · </span>
-        <When at={run.createdAt} />
-      </span>
-    </Link>
+    <LinkItem size="xs">
+      <Link {...runLink(run)} search={railSearch(filter)} activeOptions={{ includeSearch: false }}>
+        {/* A long approval title would widen the rail past its 14rem: what the run waits on is
+            cut. A sandbox run's scenario, as long, is a description of its own, which wraps. */}
+        <ItemContent>
+          <ItemTitle>
+            <StatusDot tone={RUN_TONE[run.status]} />
+            <span className="shrink-0">{run.status}</span>
+            {waitingOn !== undefined && <span className="truncate text-muted-foreground">{waitingOn}</span>}
+          </ItemTitle>
+          {run.sandbox !== undefined && <ItemDescription>sandbox · {run.sandbox}</ItemDescription>}
+          <ItemDescription>
+            {starterName(run)} · <When at={run.createdAt} />
+          </ItemDescription>
+        </ItemContent>
+      </Link>
+    </LinkItem>
   );
 });

@@ -39,6 +39,8 @@ import {
   Expandable,
   Fact,
   Facts,
+  ItemTime,
+  LinkItem,
   Notice,
   OpName,
   plural,
@@ -138,26 +140,22 @@ export function ApprovalDetails({
         )}
       </Facts>
       {approval.details && <p>{approval.details}</p>}
-      {/* A list of links: each Item is the <a> itself, which cannot also be a listitem, so the
-          list is a <ul> rather than an ItemGroup. */}
       {approval.links?.length ? (
-        <ul className="flex flex-col gap-2">
+        <ItemGroup>
           {approval.links.map((href) => (
-            <li key={href}>
-              <Item asChild variant="outline" size="xs">
-                <a href={href} target="_blank" rel="noreferrer" title={href}>
-                  <ItemContent className="min-w-0">
-                    {/* ItemTitle fits its content (w-fit): a long address is cut to the item instead. */}
-                    <ItemTitle className="block max-w-full truncate">{href}</ItemTitle>
-                  </ItemContent>
-                  <ItemActions>
-                    <ExternalLinkIcon className="size-4" />
-                  </ItemActions>
-                </a>
-              </Item>
-            </li>
+            <LinkItem key={href} variant="outline" size="xs">
+              <a href={href} target="_blank" rel="noreferrer" title={href}>
+                <ItemContent>
+                  {/* ItemTitle fits its content (w-fit): a long address is cut to the item instead. */}
+                  <ItemTitle className="block truncate">{href}</ItemTitle>
+                </ItemContent>
+                <ItemActions>
+                  <ExternalLinkIcon className="size-4" />
+                </ItemActions>
+              </a>
+            </LinkItem>
           ))}
-        </ul>
+        </ItemGroup>
       ) : null}
       {approval.requestedBy === "policy" && approval.input !== undefined && (
         <Expandable label="The held call's input" value={approval.input} />
@@ -171,9 +169,7 @@ export function ApprovalDetails({
                   <ItemTitle>{r.by ?? "someone"}</ItemTitle>
                   <ItemDescription>{r.reason}</ItemDescription>
                 </ItemContent>
-                <ItemActions className="text-xs text-muted-foreground">
-                  <When at={r.at} />
-                </ItemActions>
+                <ItemTime at={r.at} />
               </Item>
             ))}
           </ItemGroup>
