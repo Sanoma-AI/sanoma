@@ -987,7 +987,7 @@ describe("the page", () => {
     const comfortable = await page("/workflows/announce");
     expect(comfortable.html).toContain('<div id="app">');
     expect(sidebarState(comfortable.html)).toBe("expanded");
-    expect(comfortable.html).toContain('aria-label="Toggle Sidebar"');
+    expect(comfortable.html).toContain('data-slot="sidebar-rail"');
     expect(comfortable.html).not.toContain("Collapse sidebar");
 
     // Compact: #app marked (the `compact:` variant lowers the graph's box). The sidebar follows
