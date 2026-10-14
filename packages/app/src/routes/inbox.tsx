@@ -3,7 +3,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { RUNS_LIMIT } from "../api.ts";
 import { ApprovalCard } from "../components/approval.tsx";
-import { Nothing, Notice, PageHeader, pageTitle, plural } from "../components/common.tsx";
+import { ButtonLink, Nothing, Notice, PageHeader, pageTitle, plural } from "../components/common.tsx";
 import { type Entry, useDecided, useInbox } from "../lib/inbox.ts";
 import {
   approvalKey,
@@ -33,22 +33,32 @@ export const Route = createFileRoute("/inbox")({
 /**
  * The approval open: the one `?approval=` names, else the first for you, else the first that
  * `?show=` lists (`useInbox`), or on Decided the one named, else the latest. Its panel lists them
- * all beside the page, the open one marked, and says when they could not be refreshed.
+ * all beside the page, the open one marked.
  */
 function InboxPage() {
   const { show, approval: wanted } = Route.useSearch();
-  const { pending, filter, open } = useInbox(show, wanted);
+  const { pending, filter, open, error } = useInbox(show, wanted);
   return (
     <>
       <PageHeader />
+      {error && <Notice variant="destructive">Could not refresh approvals: {error.message}</Notice>}
       {filter === "decided" ? (
         <Decided wanted={wanted} />
       ) : open ? (
         <Opened entry={open} />
       ) : (
-        <Nothing title={pending.length === 0 ? "Nothing is waiting for a decision" : "Nothing is waiting for you"}>
-          {pending.length > 0 && `${plural(pending.length, "approval")} waiting on others, under Everyone.`}
-        </Nothing>
+        <Nothing
+          title={pending.length === 0 ? "Nothing is waiting for a decision" : "Nothing is waiting for you"}
+          action={
+            pending.length > 0 && (
+              <ButtonLink variant="outline" size="sm">
+                <Link to="/inbox" search={{ show: "waiting" }}>
+                  Show the {plural(pending.length, "approval")} waiting on others
+                </Link>
+              </ButtonLink>
+            )
+          }
+        />
       )}
     </>
   );

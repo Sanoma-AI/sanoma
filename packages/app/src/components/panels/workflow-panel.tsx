@@ -26,7 +26,6 @@ import {
   workflowRuns,
   workflowRunsQuery,
 } from "../../queries.ts";
-import { Notice } from "../common.tsx";
 import { ACTIVE, PanelEmpty, PanelFooterLink, PanelHeader, PanelRow } from "./panel.tsx";
 
 // The panel inside a workflow: back to the workflows, the workflow's own pane, and its latest runs.
@@ -52,7 +51,8 @@ export function WorkflowPanel({ name }: { name: string }) {
   // Only `?runs=`, which the workflow's page validates.
   const filter = useSearch({ strict: false, select: (search) => search.runs }) ?? "all";
   const navigate = useNavigate();
-  const { data: runs, error } = useSuspenseQuery(workflowRunsQuery(name, filter));
+  // A failed refresh is the page's to say (`RunsError`): the panel shows only on its page.
+  const { data: runs } = useSuspenseQuery(workflowRunsQuery(name, filter));
   const shown = workflowRuns(filter, runs);
   const search = runsSearch(filter);
   // Live and sandbox are picked from the latest runs: what they show is only of those.
@@ -60,6 +60,7 @@ export function WorkflowPanel({ name }: { name: string }) {
   return (
     <>
       <PanelHeader
+        section="workflows"
         title={
           <Link
             to="/workflows"
@@ -120,7 +121,6 @@ export function WorkflowPanel({ name }: { name: string }) {
             </NativeSelect>
           </div>
           <SidebarGroupContent className="flex flex-col gap-2">
-            {error && <Notice variant="destructive">Could not refresh the runs: {error.message}</Notice>}
             {runs.length === WORKFLOW_RUNS_LIMIT && (
               <p className="px-2 text-xs text-muted-foreground">
                 {fromLatest ? "From" : "Showing"} the latest {WORKFLOW_RUNS_LIMIT}

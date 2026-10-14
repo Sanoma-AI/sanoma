@@ -18,7 +18,7 @@ import {
   useSidebar,
 } from "#/components/ui/sidebar.tsx";
 import { cn } from "#/lib/utils.ts";
-import { configQuery, pendingByWorkflow, waitingRunsQuery } from "../queries.ts";
+import { configQuery, OVERVIEW, pendingOf, waitingRunsQuery } from "../queries.ts";
 import { toneBadge } from "./common.tsx";
 import { InboxPanel } from "./panels/inbox-panel.tsx";
 import { ACTIVE, type Panel, PanelSkeleton, sectionOf, useHasPanel, usePanel } from "./panels/panel.tsx";
@@ -148,14 +148,13 @@ function SectionBar({
   const { data: pending } = useQuery({
     ...waitingRunsQuery(),
     refetchInterval: 30_000,
-    select: (runs) => pendingByWorkflow(runs).total,
+    select: (runs) => pendingOf(runs).length,
   });
   return (
     <Sidebar ref={ref} collapsible="none" className="w-(--sidebar-width-icon) shrink-0 border-r">
       <SidebarHeader className="items-center py-3">
         <Link
-          to="/workflows"
-          activeOptions={{ exact: true, includeSearch: false }}
+          {...OVERVIEW}
           className="flex size-9 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring"
         >
           <ShieldCheckIcon className="size-5" />
@@ -257,7 +256,7 @@ function SectionLink({
  * section's: a workflow's, inside one) over the page beside the bar, as tall as the window. A
  * click on its trigger follows the link rather than toggling it, and a link followed in it closes
  * it. Esc closes it and puts the keyboard's focus back on its section in the bar; Pin, in its
- * header, docks the page's panel.
+ * header, docks the page's panel, when it is the page's section's.
  */
 function Peek({
   handle,
@@ -306,8 +305,11 @@ function Peek({
                 <Suspense fallback={<PanelSkeleton />}>
                   <PanelView panel={current && sectionOf(current) === payload ? current : { kind: payload }} />
                 </Suspense>
+                {/* Pin docks the page's own panel: only that section's peek has it. */}
                 <p className="border-t px-4 py-2 text-xs text-muted-foreground">
-                  {current ? "Esc closes; Pin keeps it open" : "Esc closes"}
+                  {current && sectionOf(current) === payload
+                    ? "Esc closes; Pin keeps it open"
+                    : `Esc closes; click ${LABEL[payload]} to go there`}
                 </p>
               </PopoverPrimitive.Popup>
             </PopoverPrimitive.Positioner>

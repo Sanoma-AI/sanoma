@@ -23,15 +23,18 @@ export type Panel = { kind: PanelSection } | { kind: "workflow"; name: string };
 const sectionOfMatches = (matches: { staticData: { section?: PanelSection } }[]) =>
   matches.findLast((match) => match.staticData.section)?.staticData.section;
 
+/** The page's section, if it has a panel. */
+export const usePageSection = () => useMatches({ select: sectionOfMatches });
+
 /** Whether the page's section has a panel. */
-export const useHasPanel = () => useMatches({ select: (matches) => sectionOfMatches(matches) !== undefined });
+export const useHasPanel = () => usePageSection() !== undefined;
 
 /**
  * The panel the page's section has (its route's `staticData.section`), drilled into a workflow on
  * its page (either pane); none for a section without one.
  */
 export function usePanel(): Panel | undefined {
-  const section = useMatches({ select: sectionOfMatches });
+  const section = usePageSection();
   const name = useMatch({ from: "/workflows/$name", shouldThrow: false, select: (match) => match.params.name });
   if (section === "workflows" && name !== undefined) return { kind: "workflow", name };
   return section && { kind: section };
@@ -45,22 +48,24 @@ export const ACTIVE = { "data-active": true } as const;
 
 /**
  * A panel's header: its title (an `<h2>`, or `title` as given), `actions` beside it, and the button
- * that folds the docked panel to the bar, or pins the peek open (on a page with a panel to dock).
- * Under them, `children`. The panel is docked while the sidebar is open on a page with a panel,
- * in a sheet on a phone, and peeking otherwise.
+ * that folds the docked panel to the bar, or pins the peek open when it is the panel of the page's
+ * own section (`section`), the one pinning docks. Under them, `children`. The panel is docked
+ * while the sidebar is open on a page with a panel, in a sheet on a phone, and peeking otherwise.
  */
 export function PanelHeader({
+  section,
   title,
   actions,
   children,
 }: {
+  section: PanelSection;
   title: ReactNode;
   actions?: ReactNode;
   children?: ReactNode;
 }) {
   const { isMobile, open, setOpen } = useSidebar();
-  const hasPanel = useHasPanel();
-  const place = isMobile ? "sheet" : open && hasPanel ? "docked" : "peek";
+  const pageSection = usePageSection();
+  const place = isMobile ? "sheet" : open && pageSection !== undefined ? "docked" : "peek";
   return (
     <SidebarHeader className="gap-3 p-3">
       <div className="flex min-h-8 items-center gap-1">
@@ -72,7 +77,7 @@ export function PanelHeader({
           </TipButton>
         )}
         {/* Opening the sidebar docks the page's panel, which closes the peek. */}
-        {place === "peek" && hasPanel && (
+        {place === "peek" && section === pageSection && (
           <TipButton tip="Pin the panel" size="icon-sm" onClick={() => setOpen(true)}>
             <PinIcon />
           </TipButton>

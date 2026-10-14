@@ -17,7 +17,7 @@ import {
 } from "#/components/ui/sidebar.tsx";
 import { countByWorkflow, usePending } from "#/lib/inbox.ts";
 import { RUN_TONE } from "#/lib/tone.ts";
-import { configQuery, lastRunsQuery } from "../../queries.ts";
+import { configQuery, lastRunsQuery, OVERVIEW } from "../../queries.ts";
 import { StatusDot, toneBadge } from "../common.tsx";
 import { NewWorkflowIconButton } from "../new-workflow.tsx";
 import { PanelEmpty, PanelFooterLink, PanelHeader } from "./panel.tsx";
@@ -47,7 +47,7 @@ export function WorkflowsPanel() {
     .toSorted((a, b) => (last[b.name]?.createdAt ?? 0) - (last[a.name]?.createdAt ?? 0));
   return (
     <>
-      <PanelHeader title="Workflows" actions={<NewWorkflowIconButton />}>
+      <PanelHeader section="workflows" title="Workflows" actions={<NewWorkflowIconButton />}>
         <div className="relative">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <SidebarInput
@@ -91,7 +91,7 @@ export function WorkflowsPanel() {
           </SidebarGroup>
         )}
       </SidebarContent>
-      <PanelFooterLink link={<Link to="/workflows" activeOptions={{ exact: true, includeSearch: false }} />}>
+      <PanelFooterLink link={<Link {...OVERVIEW} />}>
         See all {workflows.length} workflow{workflows.length === 1 ? "" : "s"}
       </PanelFooterLink>
     </>

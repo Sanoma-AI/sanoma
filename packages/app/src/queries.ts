@@ -163,12 +163,11 @@ export const actorQuery = () =>
 export const RUNS_KEY = ["runs"] as const;
 
 /**
- * How often runs refresh, a list or by workflow, for `refetchInterval`: every `fast` ms while one
- * of them can still change, else every 30 s. Starting a run or deciding refreshes them at once.
+ * How often a list of runs refreshes, for `refetchInterval`: every `fast` ms while one of them
+ * can still change, else every 30 s. Starting a run or deciding refreshes it at once.
  */
-export const runsRefetchInterval =
-  (fast: number) => (query: { state: { data?: RunSummary[] | Record<string, RunSummary> | undefined } }) =>
-    Object.values(query.state.data ?? {}).some((run) => !isEnded(run.status)) ? fast : 30_000;
+export const runsRefetchInterval = (fast: number) => (query: { state: { data?: RunSummary[] | undefined } }) =>
+  query.state.data?.some((run) => !isEnded(run.status)) ? fast : 30_000;
 
 /** The latest runs, or the latest of a workflow or with a status (`RunsQuery`). */
 export const runsQuery = (query: RunsQuery = {}) =>
@@ -198,7 +197,9 @@ export const pendingOf = (runs: RunSummary[]) =>
 
 /**
  * The latest runs, whatever their status, whose approvals the Inbox's Decided reads. Under
- * RUNS_KEY, so a decision refreshes it; fresh as long as its fast poll, as `waitingRunsQuery`.
+ * RUNS_KEY, so a decision refreshes it. Polled as `runsRefetchInterval` says (every 5 s while a
+ * run can still change, else every 30 s), and fresh for 5 s, so a peek opening reads it at most
+ * once in that time.
  */
 export const recentRunsQuery = () =>
   queryOptions({
@@ -209,13 +210,18 @@ export const recentRunsQuery = () =>
 
 /**
  * Each workflow's latest run, by name (none for a workflow never run): the Workflows overview's
- * Last run and its panel's order. Under RUNS_KEY, and fresh as long as its fast poll.
+ * Last run and its panel's order. One read per workflow, so polled every 5 s only while a last
+ * run is queued or running, else every 30 s: one waiting on a person changes when someone
+ * decides, which refreshes it at once from this tab. Under RUNS_KEY, and fresh for 5 s.
  */
 export const lastRunsQuery = () =>
   queryOptions({
     queryKey: [...RUNS_KEY, "last"],
     queryFn: () => getLastRuns(),
-    refetchInterval: runsRefetchInterval(5_000),
+    refetchInterval: (query) =>
+      Object.values(query.state.data ?? {}).some((run) => run.status === "queued" || run.status === "running")
+        ? 5_000
+        : 30_000,
     staleTime: 5_000,
   });
 
@@ -243,22 +249,6 @@ export const InboxSearch = z.object({
 /** An approval's `?approval=`: its run's id and its own. */
 export const approvalKey = ({ run, approval }: { run: Pick<RunSummary, "runId">; approval: { id: string } }) =>
   `${run.runId}/${approval.id}`;
-
-/**
- * How many approvals are pending, as `pendingOf` lists them: in all, and by workflow. For
- * `select`: a plain object, so a poll that changed nothing keeps it.
- */
-export const pendingByWorkflow = (runs: RunSummary[]) => {
-  let total = 0;
-  const byWorkflow: Record<string, number> = Object.create(null);
-  for (const run of runs) {
-    const count = pendingApprovals(run).length;
-    if (count === 0) continue;
-    total += count;
-    byWorkflow[run.workflow] = (byWorkflow[run.workflow] ?? 0) + count;
-  }
-  return { total, byWorkflow };
-};
 
 /** What a workflow's panel may show (`?runs=`), the first (all) by default. */
 export const RUN_FILTERS = ["all", "live", "sandbox", "waiting", "failed"] as const;
@@ -309,6 +299,12 @@ export const workflowRuns = (filter: RunFilter, runs: RunSummary[]) => {
   const { match } = FILTERS[filter];
   return match ? runs.filter(match) : runs;
 };
+
+/**
+ * The Workflows overview, all of it, for `<Link>`: lit there alone, not on All runs (`?view=runs`,
+ * the same route) nor on a filter of it (`?filter=`, which the link would drop).
+ */
+export const OVERVIEW = linkOptions({ to: "/workflows", search: {}, activeOptions: { exact: true } });
 
 /** A run's page, under its workflow's: for `<Link>`, `navigate` and `redirect`. */
 export const runLink = (run: Pick<RunSummary, "runId" | "workflow">) =>

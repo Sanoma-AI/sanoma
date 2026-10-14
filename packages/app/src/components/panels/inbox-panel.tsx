@@ -1,5 +1,5 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { ClientOnly, Link, useSearch } from "@tanstack/react-router";
+import { ClientOnly, Link, useMatch, useSearch } from "@tanstack/react-router";
 import { memo, Suspense } from "react";
 import {
   SidebarContent,
@@ -19,20 +19,22 @@ import { ACTIVE, PanelEmpty, PanelFooterLink, PanelHeader, PanelRow } from "./pa
 
 /**
  * For you and Everyone, each with how many it lists, as links (`?show=`), then the approvals the
- * one shown lists, the one open marked, and those decided today; or, on Decided, the approvals
- * decided in the latest runs. All decided, at the foot, opens Decided. A filter drops
- * `?approval=`, so its own first opens.
+ * one shown lists, the one the Inbox page opens marked, and those decided today; or, on Decided,
+ * the approvals decided in the latest runs. All decided, at the foot, opens Decided. A filter
+ * drops `?approval=`, so its own first opens. Peeking from another page, it marks none, and says
+ * itself when the approvals could not be refreshed (on the Inbox, the page says so).
  */
 export function InboxPanel() {
+  const onInbox = useMatch({ from: "/inbox", shouldThrow: false, select: () => true }) ?? false;
   // The Inbox's search; none on another page, where this panel peeks.
   const show = useSearch({ strict: false, select: (search) => search.show });
   const wanted = useSearch({ strict: false, select: (search) => search.approval });
   const { actor, pending, mine, filter, shown, open, error } = useInbox(show, wanted);
   const { data: titles } = useSuspenseQuery({ ...configQuery(), select: workflowTitles });
-  const openKey = open && approvalKey(open);
+  const openKey = onInbox && open ? approvalKey(open) : undefined;
   return (
     <>
-      <PanelHeader title="Inbox">
+      <PanelHeader section="inbox" title="Inbox">
         <Segmented label="Show">
           {(["mine", "waiting"] as const).map((f) => (
             <Segment key={f}>
@@ -44,13 +46,13 @@ export function InboxPanel() {
         </Segmented>
       </PanelHeader>
       <SidebarContent>
-        {error && (
+        {error && !onInbox && (
           <div className="px-2">
             <Notice variant="destructive">Could not refresh approvals: {error.message}</Notice>
           </div>
         )}
         {filter === "decided" ? (
-          <Decided titles={titles} wanted={wanted} />
+          <Decided titles={titles} wanted={wanted} mark={onInbox} />
         ) : (
           <>
             <Approvals
@@ -77,15 +79,23 @@ export function InboxPanel() {
   );
 }
 
-/** On Decided: the approvals decided in the latest runs, the one open marked. */
-function Decided({ titles, wanted }: { titles: Record<string, string>; wanted: string | undefined }) {
+/** On Decided: the approvals decided in the latest runs, the one open marked (`mark`, on the Inbox). */
+function Decided({
+  titles,
+  wanted,
+  mark,
+}: {
+  titles: Record<string, string>;
+  wanted: string | undefined;
+  mark: boolean;
+}) {
   const { decided, open } = useDecided(wanted);
   return (
     <Approvals
       label={`Decided in the latest ${RUNS_LIMIT.default} runs`}
       entries={decided}
       show="decided"
-      openKey={open && approvalKey(open)}
+      openKey={mark && open ? approvalKey(open) : undefined}
       titles={titles}
       empty={`No decisions in the latest ${RUNS_LIMIT.default} runs`}
     />

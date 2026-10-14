@@ -33,7 +33,6 @@ import {
   type CalledVendor,
   configQuery,
   lastRunsQuery,
-  pendingByWorkflow,
   POLL_MS,
   runsQuery,
   runsRefetchInterval,
@@ -167,8 +166,9 @@ const FILTER_LABEL: Record<WorkflowFilter, string> = {
 function Overview({ filter }: { filter: WorkflowFilter }) {
   const { data: workflows } = useSuspenseQuery({ ...configQuery(), select: (config) => config.workflows });
   const { data: vendors } = useSuspenseQuery({ ...configQuery(), select: vendorsByWorkflow });
-  const { data: pending } = useSuspenseQuery({ ...waitingRunsQuery(), select: pendingByWorkflow });
-  const yours = countByWorkflow(usePending().mine);
+  const { pending, mine } = usePending();
+  const waiting = countByWorkflow(pending);
+  const yours = countByWorkflow(mine);
   const { data: last } = useSuspenseQuery(lastRunsQuery());
   const picks: Record<WorkflowFilter, (wf: WorkflowEntry) => boolean> = {
     all: () => true,
@@ -214,7 +214,7 @@ function Overview({ filter }: { filter: WorkflowFilter }) {
                   workflow={wf}
                   vendors={vendors[wf.name] ?? NO_VENDORS}
                   last={last[wf.name]}
-                  waiting={pending.byWorkflow[wf.name] ?? 0}
+                  waiting={waiting[wf.name] ?? 0}
                   yours={yours[wf.name] ?? 0}
                 />
               ))}

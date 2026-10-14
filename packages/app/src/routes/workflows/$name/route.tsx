@@ -1,10 +1,12 @@
 import type { QueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound, Outlet } from "@tanstack/react-router";
 import { PlayIcon } from "lucide-react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { ButtonLink, loadCode, loadGraph, Notice, PageHeader, pageTitle } from "#/components/common.tsx";
 import {
   configQuery,
+  type RunFilter,
   workflowRunsQuery,
   scenariosQuery,
   sourceQuery,
@@ -65,6 +67,7 @@ async function loadWorkflow(queryClient: QueryClient, name: string) {
 
 function WorkflowLayout() {
   const { name } = Route.useParams();
+  const { runs } = Route.useSearch();
   const workflow = useWorkflow(name);
   // Titled by the workflow (on a run's pane the last crumb, PageHeader's default, is the run), or
   // only its name when it is retired. New run opens in the inspector of the pane that shows: none
@@ -87,7 +90,17 @@ function WorkflowLayout() {
         {workflow && <code className="text-muted-foreground">{name}</code>}
         {workflow?.builtin && <Badge variant="secondary">built-in</Badge>}
       </PageHeader>
+      <RunsError name={name} filter={runs} />
       <Outlet />
     </>
   );
+}
+
+/**
+ * Why the panel's runs could not be refreshed, on the page, which shows with the panel folded or
+ * on a phone too. It reads only the query's error, so a poll that brings runs draws nothing here.
+ */
+function RunsError({ name, filter }: { name: string; filter: RunFilter | undefined }) {
+  const { error } = useQuery(workflowRunsQuery(name, filter));
+  return error && <Notice variant="destructive">Could not refresh the runs: {error.message}</Notice>;
 }

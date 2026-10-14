@@ -39,6 +39,7 @@ import {
   ClearCredentialRequest,
   DecideCall,
   type ErrorResponse,
+  RUNS_LIMIT,
   RunsQuery,
   SetCredentialRequest,
 } from "../src/api.ts";
@@ -827,7 +828,10 @@ describe("the page", () => {
     const mine = await page("/inbox?show=mine");
     expect(currentLink(mine.html, "For you")).toBe(true);
     expect(mine.text).toContain("Nothing is waiting for you");
-    expect(mine.text).toMatch(/\d+ approvals? waiting on others, under Everyone\./);
+    // A link to them, which works with the panel folded too.
+    expect(mine.text).toMatch(
+      /<a[^>]*href="\/inbox\?show=waiting"[^>]*>Show the \d+ approvals? waiting on others<\/a>/,
+    );
   });
 
   it("says a failed call that is not safe to repeat was not retried, and where to look", async () => {
@@ -1299,6 +1303,16 @@ describe("resources and drift", () => {
     expect(overview.html).toMatch(/<button[^>]*aria-haspopup="dialog"[^>]*>(<svg.*?<\/svg>)?New workflow<\/button>/);
     const runs = await page("/workflows?view=runs&status=failed");
     expect(linkTag(runs.html, "All workflows")).toContain('href="/workflows"');
+    // The panel's See all, and the brand, are lit on the whole overview alone: not on All runs.
+    const seeAll = /<a[^>]*href="\/workflows"[^>]*><span>See all/;
+    expect(overview.html.match(seeAll)?.[0]).toContain('aria-current="page"');
+    expect(runs.html.match(seeAll)?.[0]).not.toContain("aria-current");
+    expect(runs.html).not.toMatch(
+      /<a[^>]*href="\/workflows"[^>]*aria-current="page"[^>]*><svg[^>]*lucide-shield-check/,
+    );
+    expect(overview.html).toMatch(
+      /<a[^>]*href="\/workflows"[^>]*aria-current="page"[^>]*><svg[^>]*lucide-shield-check/,
+    );
     expect(runs.html).toContain('aria-label="Status"');
   });
 
@@ -1407,7 +1421,7 @@ describe("resources and drift", () => {
       () => detail(started.body.runId),
       (d) => d.run.status === "waiting",
     );
-    const { body: waiting } = await runsOf({ status: "waiting", workflow: "announce" });
+    const { body: waiting } = await runsOf({ status: "waiting", workflow: "announce", limit: RUNS_LIMIT.max });
     const pending = waiting.reduce((n, run) => n + run.approvals.filter((a) => a.status === "pending").length, 0);
     expect(pending).toBeGreaterThan(0);
     const workflows = await page("/workflows");
