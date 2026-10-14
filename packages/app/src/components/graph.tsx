@@ -1,7 +1,6 @@
-// React Flow's stylesheet, once, in this chunk: only the pages with a graph load it. style.css
-// maps its --xy-* colours to the theme.
+// React Flow's base styles, in this chunk: only the pages with a graph load them.
 // oxlint-disable-next-line import/no-unassigned-import
-import "@xyflow/react/dist/style.css";
+import "./graph.css";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   Background,
@@ -24,6 +23,7 @@ import { cva } from "class-variance-authority";
 import type { OpEntry } from "@sanoma/workflows/describe";
 import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
+import { Separator } from "#/components/ui/separator.tsx";
 import { approverLabel } from "@sanoma/workflows/shared";
 import { layout, type Point } from "../graph/layout.ts";
 import {
@@ -38,6 +38,7 @@ import { useReducedMotion } from "#/lib/motion.ts";
 import { cn } from "#/lib/utils.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import { configQuery, opsById } from "../queries.ts";
+import { BaseNode } from "./base-node.tsx";
 import { ApprovalStatusBadge, BUILTIN_ICON, effectBadge, StatusDot, ToneBadge, VendorLogo } from "./common.tsx";
 import { ZoomSlider } from "./zoom-slider.tsx";
 
@@ -47,8 +48,8 @@ import { ZoomSlider } from "./zoom-slider.tsx";
 
 /** A node as React Flow holds it: the graph's node, and whether a click on it selects it. */
 type FlowNode = Node<{ node: GraphNode; selectable: boolean }, GraphNodeKind>;
-/** An edge as React Flow holds it: the route `layout` gives it, as an SVG path. */
-type FlowEdge = Edge<{ path: string }, "route">;
+/** An edge as React Flow holds it: the route `layout` gives it, as an SVG path, and whether it is dashed. */
+type FlowEdge = Edge<{ path: string; dashed: boolean }, "route">;
 /** What a node component reads of its `NodeProps`: its node, of its kind, and whether it is selected. */
 type Props<K extends GraphNodeKind> = {
   data: { node: Extract<GraphNode, { kind: K }>; selectable: boolean };
@@ -73,25 +74,22 @@ const PRO_OPTIONS = { hideAttribution: true };
 /** Below this zoom the badges cannot be read: fit one end of the graph instead of all of it. */
 const READABLE_ZOOM = 0.8;
 
-const frame = cva(
-  "flex size-full flex-col justify-center gap-1 rounded-lg border bg-card px-2.5 text-xs text-card-foreground shadow-xs transition-colors",
-  {
-    variants: {
-      tone: {
-        ok: "border-tone-ok-foreground/40",
-        bad: "border-tone-bad-foreground/70",
-        waiting: "border-tone-waiting-foreground/70",
-        active: "border-tone-active-foreground/70",
-        idle: "border-tone-idle-foreground/50",
-        off: "border-border",
-      } satisfies Record<Tone, string>,
-      pending: { true: "border-dashed bg-transparent text-muted-foreground" },
-      // A click selects it.
-      clickable: { true: "cursor-pointer hover:bg-muted" },
-      selected: { true: "ring-2 ring-ring" },
-    },
+const frame = cva("flex size-full flex-col justify-center gap-1 px-2.5 text-xs shadow-xs transition-colors", {
+  variants: {
+    tone: {
+      ok: "border-tone-ok-foreground/40",
+      bad: "border-tone-bad-foreground/70",
+      waiting: "border-tone-waiting-foreground/70",
+      active: "border-tone-active-foreground/70",
+      idle: "border-tone-idle-foreground/50",
+      off: "border-border",
+    } satisfies Record<Tone, string>,
+    pending: { true: "border-dashed bg-transparent text-muted-foreground" },
+    // A click selects it.
+    clickable: { true: "cursor-pointer hover:bg-muted" },
+    selected: { true: "ring-2 ring-ring" },
   },
-);
+});
 
 /** Where edges meet a node: hidden, since nothing connects by hand here. */
 function Handles({ inbound = true, outbound = true }: { inbound?: boolean; outbound?: boolean }) {
@@ -116,7 +114,7 @@ const nameOf = (node: GraphNode) => {
   return node.kind === "op" && node.name ? `${node.name}: ${node.label}` : node.label;
 };
 
-/** One node's box, in its tone when a run gives it one, ringed when selected, with its handles. */
+/** One node's box (BaseNode), in its tone when a run gives it one, ringed when selected, with its handles. */
 function Frame({
   data: { node, selectable },
   selected,
@@ -126,14 +124,13 @@ function Frame({
 }: Props<GraphNodeKind> & { inbound?: boolean; outbound?: boolean; children: ReactNode }) {
   const state = "state" in node ? node.state : undefined;
   return (
-    <div
-      // Through cn, so a pending node's colours replace the base ones rather than sit beside them.
-      className={cn(frame({ tone: state?.tone ?? "off", pending: isPending(node), clickable: selectable, selected }))}
+    <BaseNode
+      className={frame({ tone: state?.tone ?? "off", pending: isPending(node), clickable: selectable, selected })}
       title={nameOf(node)}
     >
       <Handles inbound={inbound} outbound={outbound} />
       {children}
-    </div>
+    </BaseNode>
   );
 }
 
@@ -244,20 +241,23 @@ function OpNode(props: Props<"op">) {
         {state?.scenario?.held && <Badge variant="outline">must hold</Badge>}
       </Line>
       {node.ops && (
-        <ul className="flex flex-col gap-0.5 border-t pt-1" aria-label="operations it can reach">
-          {wildcardRows(node.label, node.ops).map((row) =>
-            "note" in row ? (
-              <li key={row.note} className="text-muted-foreground">
-                {row.note}
-              </li>
-            ) : (
-              <li key={row.id} className="flex min-w-0 items-center gap-1.5" title={row.id}>
-                <VendorLogo vendor={row.vendor} fallback={vendorName(row.vendor)} />
-                <code className="truncate">{row.label}</code>
-              </li>
-            ),
-          )}
-        </ul>
+        <>
+          <Separator />
+          <ul className="flex flex-col gap-0.5" aria-label="operations it can reach">
+            {wildcardRows(node.label, node.ops).map((row) =>
+              "note" in row ? (
+                <li key={row.note} className="text-muted-foreground">
+                  {row.note}
+                </li>
+              ) : (
+                <li key={row.id} className="flex min-w-0 items-center gap-1.5" title={row.id}>
+                  <VendorLogo vendor={row.vendor} fallback={vendorName(row.vendor)} />
+                  <code className="truncate">{row.label}</code>
+                </li>
+              ),
+            )}
+          </ul>
+        </>
       )}
     </Frame>
   );
@@ -397,8 +397,8 @@ function pathOf(route: readonly Point[]): string {
  * Its ends are the layout's, which are React Flow's too: each node is drawn at its layout box's
  * width and height.
  */
-function RouteEdge({ data, style, interactionWidth }: EdgeProps<FlowEdge>) {
-  return <BaseEdge path={data!.path} style={style} interactionWidth={interactionWidth} />;
+function RouteEdge({ data }: EdgeProps<FlowEdge>) {
+  return <BaseEdge path={data!.path} className={data!.dashed ? "[stroke-dasharray:4_4]" : undefined} />;
 }
 
 const edgeTypes = { route: RouteEdge } satisfies EdgeTypes;
@@ -513,13 +513,12 @@ export default function Graph({ graph, show = "end", selected, onSelect }: Graph
       return {
         ...edge,
         type: "route",
-        data: { path: pathOf(at.routes.get(edge.id)!) },
+        data: { path: pathOf(at.routes.get(edge.id)!), dashed: isPending(from) || isPending(to) },
         animated: active && !reducedMotion,
-        ...(isPending(from) || isPending(to) ? { style: { strokeDasharray: "4 4" } } : {}),
       };
     });
   }, [graph, at, reducedMotion]);
-  // An edge down to its path.
+  // An edge down to its path and dash.
   const edges = useStable(drawn, 2);
   const onNodeClick = useCallback(
     (_: unknown, { data }: FlowNode) => {

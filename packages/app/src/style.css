@@ -172,23 +172,6 @@
   --spacing: 0.1875rem;
 }
 
-/*
- * React Flow (the run graph and the outlines) reads its colours from --xy-* variables; these
- * point them at the theme's tokens, so the graphs follow light and dark with the rest of the page.
- */
-.react-flow {
-  --xy-background-color: var(--background);
-  --xy-background-pattern-color: var(--border);
-  --xy-node-color: var(--card-foreground);
-  --xy-node-background-color: var(--card);
-  --xy-node-border: 1px solid var(--border);
-  --xy-edge-stroke: var(--muted-foreground);
-  --xy-edge-stroke-selected: var(--foreground);
-  --xy-handle-background-color: var(--muted-foreground);
-  --xy-handle-border-color: var(--card);
-  --xy-attribution-background-color: color-mix(in oklch, var(--background) 70%, transparent);
-}
-
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: "Geist Variable", sans-serif;

@@ -1,11 +1,22 @@
 import { type FitViewOptions, Panel, type PanelProps, useReactFlow, useStore } from "@xyflow/react";
 import { MaximizeIcon, MinusIcon, PlusIcon } from "lucide-react";
 import { Slider as SliderPrimitive } from "radix-ui";
+import type { ComponentProps } from "react";
 import { Button } from "#/components/ui/button.tsx";
+import { Tip } from "./common.tsx";
+
+/** A ghost icon button named `label`, with its name as its tooltip. */
+function ZoomButton({ label, ...props }: { label: string } & ComponentProps<typeof Button>) {
+  return (
+    <Tip tip={label}>
+      <Button variant="ghost" size="icon" aria-label={label} {...props} />
+    </Tip>
+  );
+}
 
 /**
- * React Flow's zoom controls, from the shadcn registry's zoom slider, horizontal only: zoom out,
- * a slider, zoom in, the zoom as a percentage (a click goes to 100%), and fit.
+ * Adapted from React Flow UI's ZoomSlider, horizontal only: zoom out, a slider, zoom in, the zoom
+ * as a percentage (a click goes to 100%), and fit.
  */
 export function ZoomSlider({
   fitViewOptions,
@@ -25,10 +36,12 @@ export function ZoomSlider({
 
   return (
     <Panel className="flex gap-1 rounded-md border bg-card p-1 text-card-foreground" {...props}>
-      <Button variant="ghost" size="icon" aria-label="Zoom out" onClick={() => zoomOut({ duration })}>
+      <ZoomButton label="Zoom out" onClick={() => zoomOut({ duration })}>
         <MinusIcon />
-      </Button>
-      {/* ui/slider.tsx's markup and classes, which give its thumb no name: this one is "Zoom". */}
+      </ZoomButton>
+      {/* ui/slider.tsx's markup and classes, not its Slider: that passes its props to Radix's
+          root, and Radix names a lone thumb only by its own aria-label, so its thumb would have
+          no name. This one is "Zoom". */}
       <SliderPrimitive.Root
         className="relative flex w-[100px] touch-none items-center select-none"
         value={[zoom]}
@@ -45,25 +58,20 @@ export function ZoomSlider({
           className="relative block size-3 shrink-0 rounded-full border border-ring bg-white ring-ring/50 transition-[color,box-shadow] select-none after:absolute after:-inset-2 hover:ring-3 focus-visible:ring-3 focus-visible:outline-hidden active:ring-3 disabled:pointer-events-none disabled:opacity-50"
         />
       </SliderPrimitive.Root>
-      <Button variant="ghost" size="icon" aria-label="Zoom in" onClick={() => zoomIn({ duration })}>
+      <ZoomButton label="Zoom in" onClick={() => zoomIn({ duration })}>
         <PlusIcon />
-      </Button>
-      <Button
-        variant="ghost"
+      </ZoomButton>
+      <ZoomButton
+        label="Zoom to 100%"
+        size="default"
         className="w-14 tabular-nums"
-        aria-label="Zoom to 100%"
         onClick={() => zoomTo(1, { duration })}
       >
         {(100 * zoom).toFixed(0)}%
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        aria-label="Fit the graph"
-        onClick={() => fitView({ ...fitViewOptions, duration })}
-      >
+      </ZoomButton>
+      <ZoomButton label="Fit the graph" onClick={() => fitView({ ...fitViewOptions, duration })}>
         <MaximizeIcon />
-      </Button>
+      </ZoomButton>
     </Panel>
   );
 }
