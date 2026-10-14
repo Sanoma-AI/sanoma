@@ -7,6 +7,7 @@ import {
   decide,
   driftReport,
   fileSource,
+  lastRuns,
   listRuns,
   readStartRun,
   runDetail,
@@ -56,6 +57,9 @@ export const getScenarios = createServerFn(READ).handler(({ context }) => scenar
 export const getRuns = createServerFn(READ)
   .validator(validate(RunsQuery))
   .handler(({ data, context }) => listRuns(context.app, data));
+
+/** Each workflow's latest run, by name. */
+export const getLastRuns = createServerFn(READ).handler(({ context }) => lastRuns(context.app));
 
 /** The run, or the router's not-found when there is none. */
 export const getRun = createServerFn(READ)

@@ -19,6 +19,7 @@ import {
   getConfig,
   getCredentials,
   getDriftReport,
+  getLastRuns,
   getRun,
   getRuns,
   getScenarios,
@@ -100,6 +101,10 @@ export const connectorNamed = (id: string) => (config: ConfigDescription) =>
 export const workflowNamed = (name: string) => (config: ConfigDescription) =>
   config.workflows.find((wf) => wf.name === name);
 
+/** Each workflow's title (its name when it has none), by name: for `select`. */
+export const workflowTitles = (config: ConfigDescription) =>
+  Object.fromEntries(config.workflows.map((wf) => [wf.name, wf.title ?? wf.name]));
+
 /**
  * The config's workflow of this name, for a page under its own. The root route has loaded the
  * config. None for a retired workflow: one the config no longer has, whose runs remain.
@@ -172,12 +177,16 @@ export const runsQuery = (query: RunsQuery = {}) =>
     refetchInterval: POLL_MS,
   });
 
-/** The runs waiting on an approval: every one, up to `getRuns`'s largest page. Under RUNS_KEY, so a decision refreshes it. */
+/**
+ * The runs waiting on an approval: every one, up to `getRuns`'s largest page. Under RUNS_KEY, so
+ * a decision refreshes it; fresh as long as its poll, so a peek opening does not read it again.
+ */
 export const waitingRunsQuery = () =>
   queryOptions({
     queryKey: [...RUNS_KEY, "waiting"],
     queryFn: () => getRuns({ data: { status: "waiting", limit: RUNS_LIMIT.max } }),
     refetchInterval: 5_000,
+    staleTime: 5_000,
   });
 
 /** The approvals still pending across the runs, each with its run, newest first: for `select`. */
@@ -186,9 +195,35 @@ export const pendingOf = (runs: RunSummary[]) =>
     .flatMap((run) => pendingApprovals(run).map((approval) => ({ run, approval })))
     .toSorted((a, b) => b.approval.requestedAt - a.approval.requestedAt);
 
-/** The latest runs, whatever their status: the Inbox's Decided reads their approvals. Under RUNS_KEY, so a decision refreshes it. */
+/**
+ * The latest runs, whatever their status, whose approvals the Inbox's Decided reads. Under
+ * RUNS_KEY, so a decision refreshes it. Polled as `runsRefetchInterval` says (every 5 s while a
+ * run can still change, else every 30 s), and fresh for 5 s, so a peek opening reads it at most
+ * once in that time.
+ */
 export const recentRunsQuery = () =>
-  queryOptions({ ...runsQuery({ limit: RUNS_LIMIT.default }), refetchInterval: 5_000 });
+  queryOptions({
+    ...runsQuery({ limit: RUNS_LIMIT.default }),
+    refetchInterval: runsRefetchInterval(5_000),
+    staleTime: 5_000,
+  });
+
+/**
+ * Each workflow's latest run, by name (none for a workflow never run): the Workflows overview's
+ * Last run and its panel's order. One read per workflow, so polled every 5 s only while a last
+ * run is queued or running, else every 30 s: one waiting on a person changes when someone
+ * decides, which refreshes it at once from this tab. Under RUNS_KEY, and fresh for 5 s.
+ */
+export const lastRunsQuery = () =>
+  queryOptions({
+    queryKey: [...RUNS_KEY, "last"],
+    queryFn: () => getLastRuns(),
+    refetchInterval: (query) =>
+      Object.values(query.state.data ?? {}).some((run) => run.status === "queued" || run.status === "running")
+        ? 5_000
+        : 30_000,
+    staleTime: 5_000,
+  });
 
 /** The approvals decided across the runs, each with its run, latest decision first: for `select`. */
 export const decidedOf = (runs: RunSummary[]) =>
@@ -199,7 +234,7 @@ export const decidedOf = (runs: RunSummary[]) =>
     );
 
 /** What the Inbox lists (`?show=`): the pending approvals you may decide, all of them, or the decided. */
-export const INBOX_FILTERS = ["mine", "waiting", "decided"] as const;
+const INBOX_FILTERS = ["mine", "waiting", "decided"] as const;
 export type InboxFilter = (typeof INBOX_FILTERS)[number];
 
 /**
@@ -215,23 +250,7 @@ export const InboxSearch = z.object({
 export const approvalKey = ({ run, approval }: { run: Pick<RunSummary, "runId">; approval: { id: string } }) =>
   `${run.runId}/${approval.id}`;
 
-/**
- * How many approvals are pending, as `pendingOf` lists them: in all, and by workflow. For
- * `select`: a plain object, so a poll that changed nothing keeps it.
- */
-export const pendingByWorkflow = (runs: RunSummary[]) => {
-  let total = 0;
-  const byWorkflow: Record<string, number> = Object.create(null);
-  for (const run of runs) {
-    const count = pendingApprovals(run).length;
-    if (count === 0) continue;
-    total += count;
-    byWorkflow[run.workflow] = (byWorkflow[run.workflow] ?? 0) + count;
-  }
-  return { total, byWorkflow };
-};
-
-/** What a workflow page's rail may show (`?runs=`), the first (all) by default. */
+/** What a workflow's panel may show (`?runs=`), the first (all) by default. */
 export const RUN_FILTERS = ["all", "live", "sandbox", "waiting", "failed"] as const;
 export type RunFilter = (typeof RUN_FILTERS)[number];
 
@@ -248,7 +267,7 @@ const FILTERS: Record<RunFilter, { status?: RunStatus; match?: (run: RunSummary)
 };
 
 /**
- * A workflow page's search, on either pane: `?runs=`, the rail's filter (any other value reads as
+ * A workflow page's search, on either pane: `?runs=`, its panel's filter (any other value reads as
  * all); `?new`, the New run panel in the inspector (the page's links write `?new=true`, and a bare
  * `?new` typed by hand opens it too); and `?scenario=`, Sandbox mode and the scenario it runs
  * (without it, Live), which also marks the workflow's graph.
@@ -262,24 +281,30 @@ export const WorkflowSearch = z.object({
   scenario: z.string().optional().catch(undefined),
 });
 
-/** How many runs the rail lists: the latest. */
-export const RAIL_LIMIT = RUNS_LIMIT.default;
+/** How many runs a workflow's panel lists: the latest. */
+export const WORKFLOW_RUNS_LIMIT = RUNS_LIMIT.default;
 
-/** The rail's runs for a filter: the workflow's latest, with the filter's status. */
-export const railQuery = (name: string, filter: RunFilter = "all") =>
+/** A workflow's panel's runs for a filter: the workflow's latest, with the filter's status. */
+export const workflowRunsQuery = (name: string, filter: RunFilter = "all") =>
   queryOptions({
-    ...runsQuery({ workflow: name, limit: RAIL_LIMIT, status: FILTERS[filter].status }),
+    ...runsQuery({ workflow: name, limit: WORKFLOW_RUNS_LIMIT, status: FILTERS[filter].status }),
     refetchInterval: runsRefetchInterval(POLL_MS),
   });
 
 /** True when the filter picks from the latest runs (`match`), so older runs it would keep go unseen. */
 export const picksFromLatest = (filter: RunFilter) => FILTERS[filter].match !== undefined;
 
-/** Of the runs `railQuery` read, those the filter keeps: all of them, unless it picks by `match`. */
-export const railRuns = (filter: RunFilter, runs: RunSummary[]) => {
+/** Of the runs `workflowRunsQuery` read, those the filter keeps: all of them, unless it picks by `match`. */
+export const workflowRuns = (filter: RunFilter, runs: RunSummary[]) => {
   const { match } = FILTERS[filter];
   return match ? runs.filter(match) : runs;
 };
+
+/**
+ * The Workflows overview, all of it, for `<Link>`: lit there alone, not on All runs (`?view=runs`,
+ * the same route) nor on a filter of it (`?filter=`, which the link would drop).
+ */
+export const OVERVIEW = linkOptions({ to: "/workflows", search: {}, activeOptions: { exact: true } });
 
 /** A run's page, under its workflow's: for `<Link>`, `navigate` and `redirect`. */
 export const runLink = (run: Pick<RunSummary, "runId" | "workflow">) =>

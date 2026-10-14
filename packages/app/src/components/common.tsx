@@ -30,10 +30,10 @@ import { Alert, AlertDescription } from "#/components/ui/alert.tsx";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button, buttonVariants } from "#/components/ui/button.tsx";
 import { ButtonGroup } from "#/components/ui/button-group.tsx";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
+import { Card, CardTitle } from "#/components/ui/card.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
-import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
+import { Item, ItemContent, ItemDescription, ItemTitle } from "#/components/ui/item.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
 import { utcText } from "#/lib/time.ts";
@@ -42,6 +42,7 @@ import { APPROVAL_TONE, DECISION_TONE, type Tone, TONE_FILL } from "#/lib/tone.t
 import type { OpEntry } from "@sanoma/workflows/describe";
 import { approverLabel } from "@sanoma/workflows/shared";
 import { configQuery } from "../queries.ts";
+import type { PanelSection } from "./app-sidebar.tsx";
 import type { CodeProps } from "./code.tsx";
 import type { GraphProps } from "./graph.tsx";
 
@@ -53,6 +54,8 @@ declare module "@tanstack/react-router" {
     crumb?: string;
     /** The page takes the page column's full width, not the reading width the root caps others at. */
     wide?: true;
+    /** The sidebar's section the page is under, whose panel shows beside the bar (`usePanel`). */
+    section?: PanelSection;
   }
 }
 
@@ -95,7 +98,7 @@ export function ledgerTone(record: LedgerRecord): Tone {
 }
 
 /** Badge colours by tone, over Badge's default variant. */
-const toneBadge = cva("", {
+export const toneBadge = cva("", {
   variants: {
     tone: {
       ok: "bg-tone-ok text-tone-ok-foreground",
@@ -246,7 +249,7 @@ export function LinkItem({
 }
 
 /** A link while its URL shows: `aria-current="page"`, which Link sets on an active link (or a list sets on the open one). */
-export const CURRENT_LINK = "aria-[current=page]:bg-muted";
+const CURRENT_LINK = "aria-[current=page]:bg-muted";
 
 /**
  * A card's title as a heading: an `<h2>` in CardTitle, whose type it inherits (Tailwind's preflight
@@ -257,44 +260,6 @@ export function CardHeading({ className, children }: { className?: string; child
     <CardTitle className={className}>
       <h2>{children}</h2>
     </CardTitle>
-  );
-}
-
-/**
- * A list of panes beside the one open, as a card: `title`, with `description` under it and
- * `action` beside it, over `children`, each a `LinkItem`; `empty` instead when there are none. It
- * scrolls past `height`.
- */
-export function PaneList({
-  title,
-  description,
-  action,
-  empty,
-  height = "max-h-[70vh]",
-  children,
-}: {
-  title: ReactNode;
-  description?: ReactNode;
-  action?: ReactNode;
-  empty?: ReactNode;
-  /** The list's most height before it scrolls, as classes that replace the default: 70vh, beside a pane. */
-  height?: string;
-  children?: ReactNode;
-}) {
-  return (
-    <Card size="sm">
-      <CardHeader>
-        <CardHeading>{title}</CardHeading>
-        {description && <CardDescription>{description}</CardDescription>}
-        {action && <CardAction>{action}</CardAction>}
-      </CardHeader>
-      {/* An empty state (`Nothing`) is already inside this card: no border of its own. */}
-      <CardContent className="[&>[data-slot=empty]]:border-0">
-        {/* Not a ScrollArea: its viewport scrolls only in a box of a set height, and this list is
-            as tall as its items, up to its max. */}
-        {empty ?? <ItemGroup className={cn("overflow-y-auto", height)}>{children}</ItemGroup>}
-      </CardContent>
-    </Card>
   );
 }
 

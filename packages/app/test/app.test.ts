@@ -39,6 +39,7 @@ import {
   ClearCredentialRequest,
   DecideCall,
   type ErrorResponse,
+  RUNS_LIMIT,
   RunsQuery,
   SetCredentialRequest,
 } from "../src/api.ts";
@@ -51,6 +52,7 @@ import {
   credentials,
   decide,
   fileSource,
+  lastRuns,
   listRuns,
   parse,
   readStartRun,
@@ -224,18 +226,22 @@ async function page(path: string, base = app.url, init?: RequestInit) {
   return { status: res.status, html, text: html.replaceAll("<!-- -->", "") };
 }
 
-/** The runs announce's rail links to, sorted, with `?runs=<filter>` kept on each link. */
-const railRunIds = (html: string, filter: string) =>
+/** The runs announce's panel links to, sorted, with `?runs=<filter>` kept on each link. */
+const panelRunIds = (html: string, filter: string) =>
   [...html.matchAll(new RegExp(`href="/workflows/announce/runs/([^"?]+)\\?runs=${filter}"`, "g"))]
     .map(([, id]) => id)
     .toSorted();
 
+/** The opening tag of a section's link in the bar: the one to `to` whose label follows. */
+const section = (html: string, to: string) =>
+  html.match(new RegExp(`<a [^>]*href="${to}"[^>]*>(?=(?:(?!</a>)[\\s\\S])*<span>[A-Z])`))?.[0];
+
 /** The desktop sidebar's state: "expanded" or "collapsed". */
 const sidebarState = (html: string) => html.match(/data-state="(expanded|collapsed)"[^>]*data-slot="sidebar"/)?.[1];
 
-/** The opening tag of the link whose text, after any icon, is `label`, or an Item link's title. */
+/** The opening tag of the link whose text, after any icon, is `label`, or an Item's or a sidebar menu button's title. */
 function linkTag(html: string, label: string) {
-  const at = html.search(new RegExp(`>${label}(?:</div>)*</a>`));
+  const at = html.search(new RegExp(`>${label}(?:</(?:div|span)>)*</a>`));
   if (at < 0) return undefined;
   const start = html.lastIndexOf("<a ", at);
   return html.slice(start, html.indexOf(">", start) + 1);
@@ -767,7 +773,8 @@ describe("the page", () => {
 
     // Decided lists it from the latest runs, and opens it with no controls.
     const decidedPage = await page(`/inbox?show=decided&approval=${id}/${hold.id}`);
-    expect(currentLink(decidedPage.html, "Decided")).toBe(true);
+    // All decided, at the foot of the Inbox's panel, is marked.
+    expect(decidedPage.html).toMatch(/<a (?=[^>]*href="\/inbox\?show=decided")[^>]*aria-current="page"/);
     expect(openTitle(decidedPage.html)).toBe(HOLD_TITLE);
     expect(decidedPage.text).toContain("wanted to publish a post in Ghost");
     expect(decidedPage.text).toContain("approved by marketing-lead");
@@ -812,16 +819,19 @@ describe("the page", () => {
     expect(currentRow((await page("/inbox?approval=nothing/approval-1")).html)).toBe(rows[0]);
   });
 
-  it("links For you, All waiting and Decided, each its own URL, and says when nothing waits for you", async () => {
+  it("links For you, Everyone and All decided in the Inbox's panel, each its own URL, and says when nothing waits for you", async () => {
     const inbox = await page("/inbox?approval=x");
     for (const show of ["mine", "waiting", "decided"]) expect(inbox.html).toContain(`href="/inbox?show=${show}"`);
-    // Without a name, All waiting is what shows, and it says how many.
-    expect(currentLink(inbox.html, "All waiting · \\d+")).toBe(true);
+    // Without a name, Everyone is what shows, and it says how many.
+    expect(currentLink(inbox.html, "Everyone · \\d+")).toBe(true);
     expect(currentLink(inbox.html, "For you")).toBe(false);
     const mine = await page("/inbox?show=mine");
     expect(currentLink(mine.html, "For you")).toBe(true);
     expect(mine.text).toContain("Nothing is waiting for you");
-    expect(mine.text).toMatch(/\d+ approvals? waiting on others, under All waiting\./);
+    // A link to them, which works with the panel folded too.
+    expect(mine.text).toMatch(
+      /<a[^>]*href="\/inbox\?show=waiting"[^>]*>Show the \d+ approvals? waiting on others<\/a>/,
+    );
   });
 
   it("says a failed call that is not safe to repeat was not retried, and where to look", async () => {
@@ -841,12 +851,12 @@ describe("the page", () => {
     expect(run.html).not.toMatch(/<dt[^>]*>Error<\/dt>/);
   });
 
-  it("renders the workflows on the server: each one's outline and a link to its page, whose About has its operations and input", async () => {
+  it("renders the workflows on the server: a row for each linking to its page, whose About has its operations and input", async () => {
     const { version } = ctx.description;
     const workflows = await page("/workflows");
     expect(workflows.status).toBe(200);
     expect(workflows.text).toContain(`<code>${version}</code>`);
-    // What it may call and its input are About's, not the card's.
+    // What it may call and its input are About's, not the overview's.
     expect(workflows.text).not.toMatch(/>safe to retry<\/span>/);
     const about = await page("/workflows/announce");
     expect(about.text).toMatch(/>safe to retry<\/span>/);
@@ -854,12 +864,11 @@ describe("the page", () => {
       expect(about.html).toMatch(new RegExp(`<img src="data:image/svg\\+xml,[^"]+" alt="${title}"`));
     }
     expect(about.text).toMatch(/default (&quot;|")newsletter(&quot;|")/);
-    // Each workflow's outline, drawn in the browser like the run graph: a heading, what it is, a skeleton.
-    expect(workflows.text).toMatch(
-      /<h3[^>]*>Outline<\/h3><p[^>]*>Read from the body of run; the functions it calls are not shown, even those defined in it<\/p><div data-slot="card"[^>]*><div[^>]*><div data-slot="skeleton"[^>]*aria-label="Loading the graph"/,
+    // Each workflow's row links to its page; its outline is on that page.
+    expect(workflows.html).toMatch(
+      /<tr[^>]*><td[^>]*><div[^>]*><a[^>]*href="\/workflows\/announce"[^>]*>Announce a launch<\/a>/,
     );
-    // Each card's Run opens the workflow's page with its New run panel.
-    expect(linkTag(workflows.html, "Run")).toMatch(/data-slot="button"[^>]*href="\/workflows\/announce\?new=true"/);
+    expect(workflows.html).not.toContain('aria-label="Loading the graph"');
   });
 
   it("lists the connectors, each linking to its page, without their operations", async () => {
@@ -933,11 +942,15 @@ describe("the page", () => {
     expect(found.html).not.toContain('id="field-title"');
     expect(linkTag(found.html, "Run")).toBeUndefined();
     expect(found.html).not.toContain('href="/start?workflow=');
-    // The rail's Workflow link marks this pane; the rail ends with all of the workflow's runs.
+    // The panel drills into the workflow: back to the workflows, its Workflow link marking this
+    // pane, its runs, and all of the workflow's runs at its foot. The page has no rail.
+    expect(found.html).toMatch(/<a [^>]*href="\/workflows"[^>]*>(<svg.*?<\/svg>)?Workflows<\/a>/);
     expect(linkTag(found.html, "Workflow")).toContain('aria-current="page"');
-    expect(linkTag(found.html, "All runs of this workflow →")).toContain(
-      'href="/workflows?view=runs&amp;workflow=announce"',
+    expect(found.html).toContain('aria-label="Runs"');
+    expect(found.html).toMatch(
+      /<a [^>]*href="\/workflows\?view=runs&amp;workflow=announce"[^>]*><span>All runs<\/span>/,
     );
+    expect(found.html).not.toContain("Runs of this workflow");
 
     // ?new: the New run panel in the inspector, live: Live vendors and Sandbox, and the vendors
     // it calls for real; its Close drops ?new. A bare ?new, typed by hand, opens it too.
@@ -982,13 +995,13 @@ describe("the page", () => {
     expect(runs.text).toContain("sandbox · Launch on time");
   });
 
-  it("renders a page compact while its cookie says so: the graph lower and the sidebar as its own cookie says, folded from its rail", async () => {
-    // Comfortable without the cookie: #app unmarked. The sidebar folds from its rail, no button.
+  it("renders a page compact while its cookie says so: the graph lower and the sidebar as its own cookie says, folded from its panel's button", async () => {
+    // Comfortable without the cookie: #app unmarked. The panel folds from its button or the rail.
     const comfortable = await page("/workflows/announce");
     expect(comfortable.html).toContain('<div id="app">');
     expect(sidebarState(comfortable.html)).toBe("expanded");
     expect(comfortable.html).toContain('data-slot="sidebar-rail"');
-    expect(comfortable.html).not.toContain("Collapse sidebar");
+    expect(comfortable.html).toMatch(/<button[^>]*aria-label="Collapse the panel"/);
 
     // Compact: #app marked (the `compact:` variant lowers the graph's box). The sidebar follows
     // its own cookie.
@@ -1003,25 +1016,25 @@ describe("the page", () => {
     expect(sidebarState(compact.html)).toBe("collapsed");
   });
 
-  it("folds the rail while its cookie says so: the toggle, the Workflow icon and each run as a dot", async () => {
-    const open = await page("/workflows/announce");
-    expect(open.html).toMatch(/<aside[^>]*aria-label="Runs of this workflow"[^>]*>/);
-    expect(open.html).not.toMatch(/<aside[^>]*aria-label="Runs of this workflow"[^>]*data-collapsed/);
-    expect(open.html).toMatch(/<button(?=[^>]*aria-expanded="true")[^>]*aria-label="Runs rail"/);
-
+  it("folds the panel while the sidebar's cookie says so: the bar alone, its sections peeking their panels", async () => {
     const folded = await page(`/workflows/announce/runs/${runId}`, app.url, {
-      headers: { cookie: "sanoma_rail=collapsed" },
+      headers: { cookie: "sidebar_state=false" },
     });
     expect(folded.status).toBe(200);
-    expect(folded.html).toMatch(/<aside[^>]*aria-label="Runs of this workflow"[^>]*data-collapsed=""/);
-    expect(folded.html).toMatch(/<button(?=[^>]*aria-expanded="false")[^>]*aria-label="Runs rail"/);
-    // No menu nor rows: the Workflow link is an icon, each run a dot, the run shown marked.
+    expect(sidebarState(folded.html)).toBe("collapsed");
+    // No panel: neither its runs nor its header; the bar's sections remain, the current one marked.
     expect(folded.html).not.toContain('aria-label="Show runs"');
-    expect(folded.html).not.toContain("All runs of this workflow");
-    expect(folded.html).toMatch(/<a[^>]*href="\/workflows\/announce"[^>]*>(?:(?!<\/a>)[\s\S])*Workflow<\/span><\/a>/);
-    const dot = folded.html.match(new RegExp(`<a[^>]*href="/workflows/announce/runs/${runId}"[^>]*>`))?.[0];
-    expect(dot).toContain('aria-current="page"');
-    expect(railRunIds(folded.html, "x")).toEqual([]);
+    expect(folded.html).not.toContain('aria-label="Collapse the panel"');
+    expect(panelRunIds(folded.html, "x")).toEqual([]);
+    // Inbox and Workflows peek their panels: links still (no button role), with a popup.
+    for (const to of ["/inbox", "/workflows"]) {
+      const tag = section(folded.html, to);
+      expect(tag, to).toContain('aria-haspopup="dialog"');
+      expect(tag, to).not.toContain('role="button"');
+    }
+    expect(section(folded.html, "/workflows")).toContain('aria-current="page"');
+    // Resources has no panel to peek.
+    expect(section(folded.html, "/resources")).not.toContain("aria-haspopup");
   });
 
   it("answers any other path with the app's not-found page", async () => {
@@ -1038,12 +1051,12 @@ describe("the page", () => {
     }
   });
 
-  it("renders a run under its workflow's heading, marked in the rail, and answers a run that does not exist with not-found", async () => {
+  it("renders a run under its workflow's heading, marked in the panel, and answers a run that does not exist with not-found", async () => {
     const found = await page(`/workflows/announce/runs/${runId}`);
     expect(found.status).toBe(200);
     expect(found.html).toMatch(/<h1[^>]*>Announce a launch<\/h1>/);
     expect(found.text).toContain(`<title>${runId} · Sanoma</title>`);
-    expect(found.html).toContain('aria-label="Runs of this workflow"');
+    expect(found.html).toContain('aria-label="Runs"');
     const link = found.html.match(new RegExp(`<a[^>]*href="/workflows/announce/runs/${runId}"[^>]*>`))?.[0];
     expect(link).toContain('aria-current="page"');
     // React Flow draws the graph in the browser only: the server renders its heading and a
@@ -1061,7 +1074,7 @@ describe("the page", () => {
     // The inspector, with nothing selected: the run's facts and its approvals.
     expect(found.html).toMatch(/<h2>Run</);
     expect(found.html).toMatch(/<dt[^>]*>Run id<\/dt><dd[^>]*><code[^>]*>/);
-    // The header's New run opens the panel on this pane; no Run. The rail's Workflow link is not
+    // The header's New run opens the panel on this pane; no Run. The panel's Workflow link is not
     // the current page here.
     expect(linkTag(found.html, "New run")).toMatch(
       new RegExp(`data-slot="button"[^>]*href="/workflows/announce/runs/${runId}\\?new=true"`),
@@ -1091,24 +1104,23 @@ describe("the page", () => {
     expect(missing.text).toContain("No run does-not-exist");
   });
 
-  it("filters the rail by ?runs=, asking the server for a status, and keeps the filter on the rail's links", async () => {
+  it("filters the panel's runs by ?runs=, asking the server for a status, and keeps the filter on the panel's links", async () => {
     const { body: runs } = await runsOf({ workflow: "announce", limit: 50 });
     const sandbox = runs.filter((r) => r.sandbox !== undefined).map((r) => r.runId);
     expect(sandbox).toContain(sandboxId);
     const filtered = await page("/workflows/announce?runs=sandbox");
     expect(filtered.status).toBe(200);
-    expect(railRunIds(filtered.html, "sandbox")).toEqual(sandbox.toSorted());
+    expect(panelRunIds(filtered.html, "sandbox")).toEqual(sandbox.toSorted());
     expect(filtered.html).not.toContain(`href="/workflows/announce/runs/${runId}`);
     expect(filtered.html).toContain('href="/workflows/announce?runs=sandbox"');
-    // The filter is the rail's: the sidebar's link to another workflow does not carry it.
-    expect(filtered.html).toContain('href="/workflows/drift"');
-    expect(filtered.html).not.toContain('href="/workflows/drift?runs=sandbox"');
-    // The rail's links keep only the filter: `?new` and `?scenario=` stay with the pane that shows,
-    // and the sidebar's link to this workflow carries none of them.
+    // The filter is the panel's: the section bar's links and ← Workflows do not carry it.
+    expect(filtered.html).toContain('href="/workflows"');
+    expect(filtered.html).not.toContain('href="/workflows?runs=');
+    expect(filtered.html).not.toContain('href="/inbox?runs=');
+    // The panel's links keep only the filter: `?new` and `?scenario=` stay with the pane that shows.
     const opened = await page("/workflows/announce?runs=sandbox&new&scenario=Launch+on+time");
     expect(linkTag(opened.html, "Workflow")).toContain('href="/workflows/announce?runs=sandbox"');
     expect(opened.html).toContain(`href="/workflows/announce/runs/${sandboxId}?runs=sandbox"`);
-    expect(opened.html).toContain('href="/workflows/announce"');
     // Sandbox is a pick from the latest runs, so none there is all it can say.
     expect((await page("/workflows/drift?runs=sandbox")).text).toContain("No sandbox runs among the latest 50");
 
@@ -1118,8 +1130,8 @@ describe("the page", () => {
     expect(failed).not.toEqual([]);
     const failedPage = await page("/workflows/announce?runs=failed");
     expect(failedPage.status).toBe(200);
-    expect(railRunIds(failedPage.html, "failed")).toEqual(failed.map((r) => r.runId).toSorted());
-    // The rail's query as the server hands it to the browser: its hash, keys sorted.
+    expect(panelRunIds(failedPage.html, "failed")).toEqual(failed.map((r) => r.runId).toSorted());
+    // The panel's query as the server hands it to the browser: its hash, keys sorted.
     expect(failedPage.html).toContain(String.raw`\"limit\":50,\"status\":\"failed\",\"workflow\":\"announce\"`);
   });
 
@@ -1221,6 +1233,14 @@ describe("resources and drift", () => {
     expect((await runsOf({ workflow: "nope" })).body).toEqual([]);
   });
 
+  it("reads each workflow's latest run, by name", async () => {
+    const last = await lastRuns(ctx);
+    expect(Object.keys(last).toSorted()).toEqual(["announce", "drift"]);
+    const { body: announced } = await runsOf({ workflow: "announce", limit: 1 });
+    expect(last.announce?.runId).toBe(announced[0]?.runId);
+    expect(last.drift?.runId).toBe(driftRun);
+  });
+
   it("refuses a drift run given any input: it reads the data files itself", async () => {
     const forged = await startAs(
       { workflow: "drift", input: { resources: [{ id: "x#y", vendor: "github", type: "repository", name: "x" }] } },
@@ -1269,48 +1289,87 @@ describe("resources and drift", () => {
     expect(chosen.text).toMatch(/<h2[^>]*><code>resources\/identity\/github\.ts<\/code><\/h2>/);
   });
 
-  it("lists the built-in drift workflow like any other, labelled built-in, with its Run, and starts it from its page", async () => {
+  it("lists the built-in drift workflow like any other, labelled built-in, and starts it from its page", async () => {
     const workflows = await page("/workflows");
     expect(workflows.text).toContain(">built-in<");
-    expect(workflows.text).toMatch(/<a[^>]*data-slot="button"[^>]*href="\/workflows\/drift\?new=true"/);
+    expect(workflows.text).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/drift"/);
     const start = await page("/workflows/drift?new=true");
     expect(start.status).toBe(200);
     expect(start.text).toContain(">Start run<");
   });
-  // wave 2 C: Home
-  it("toggles the home between a card per workflow and every run, each view its own link", async () => {
-    // Each page marks its own view; the other view's link is plain.
-    for (const [path, shown, other] of [
-      ["/workflows", "By workflow", "All runs"],
-      ["/workflows?view=runs&status=failed", "All runs", "By workflow"],
-    ] as const) {
-      const { html } = await page(path);
-      const group = html.match(
-        /<div role="group" data-slot="button-group"[^>]*aria-label="View"[^>]*>(.*?)<\/div>/,
-      )?.[1];
-      expect(group, path).toMatch(/<a[^>]*href="\/workflows"[^>]*>By workflow<\/a>/);
-      expect(group, path).toMatch(/<a[^>]*href="\/workflows\?view=runs"[^>]*>All runs<\/a>/);
-      expect(group, path).toMatch(new RegExp(`aria-current="page"[^>]*>${shown}</a>`));
-      expect(group, path).not.toMatch(new RegExp(`aria-current="page"[^>]*>${other}</a>`));
-    }
+  it("heads the overview with All runs and New workflow, and All runs with All workflows, each view its own link", async () => {
+    const overview = await page("/workflows");
+    expect(linkTag(overview.html, "All runs")).toContain('href="/workflows?view=runs"');
+    expect(overview.html).toMatch(/<button[^>]*aria-haspopup="dialog"[^>]*>(<svg.*?<\/svg>)?New workflow<\/button>/);
+    const runs = await page("/workflows?view=runs&status=failed");
+    expect(linkTag(runs.html, "All workflows")).toContain('href="/workflows"');
+    // The panel's See all, and the brand, are lit on the whole overview alone: not on All runs.
+    const seeAll = /<a[^>]*href="\/workflows"[^>]*><span>See all/;
+    expect(overview.html.match(seeAll)?.[0]).toContain('aria-current="page"');
+    expect(runs.html.match(seeAll)?.[0]).not.toContain("aria-current");
+    expect(runs.html).not.toMatch(
+      /<a[^>]*href="\/workflows"[^>]*aria-current="page"[^>]*><svg[^>]*lucide-shield-check/,
+    );
+    expect(overview.html).toMatch(
+      /<a[^>]*href="\/workflows"[^>]*aria-current="page"[^>]*><svg[^>]*lucide-shield-check/,
+    );
+    expect(runs.html).toContain('aria-label="Status"');
   });
 
-  it("renders each workflow's card: the vendors it calls, its Test and Run, and its strip in the browser", async () => {
+  it("lists every workflow in a table: how it starts, the vendors it calls, its last run and what waits, with a chip per filter", async () => {
     const workflows = await page("/workflows");
-    // Each card's heading links to its page; the sidebar's links come before them.
-    const at = (name: string) => workflows.text.search(new RegExp(`<h2><a[^>]*href="/workflows/${name}"`));
-    expect(at("announce")).toBeGreaterThan(0);
-    expect(at("drift")).toBeGreaterThan(at("announce"));
-    const card = workflows.text.slice(at("announce"), at("drift"));
-    for (const title of ["Ghost", "Resend", "Bluesky"]) expect(card).toMatch(new RegExp(`/>${title}</span>`));
-    // Announce has scenarios, so a Test; drift has none.
-    expect(card).toMatch(/href="\/workflows\/announce\?new=true&amp;scenario=Launch\+on\+time"[^>]*>.*?Test<\/a>/);
-    expect(workflows.text.slice(at("drift"))).not.toContain("Test</a>");
-    // The strips read their runs in the browser: the server sends one skeleton per card.
-    expect(
-      workflows.html.match(/<div data-slot="skeleton"[^>]*role="status"[^>]*aria-label="Loading the runs"/g),
-    ).toHaveLength(2);
-    expect(workflows.html).not.toContain('aria-label="Last 12 runs"');
+    const row = (name: string) =>
+      workflows.text.match(
+        new RegExp(`<tr[^>]*><td[^>]*><div[^>]*><a[^>]*href="/workflows/${name}"(?:(?!</tr>)[\\s\\S])*</tr>`),
+      )?.[0];
+    const announceRow = row("announce");
+    expect(announceRow).toContain(">By hand<");
+    for (const title of ["Ghost", "Resend", "Bluesky"]) expect(announceRow).toMatch(new RegExp(`/>${title}</span>`));
+    // The tests before leave announce with runs, so it has a last run.
+    expect(announceRow).toMatch(/>(finished|failed|waiting|running|sleeping)/);
+    // Each filter is a link (All without `?filter=`), with how many it holds, the one shown marked.
+    const chips = workflows.text.match(
+      /<div role="group" data-slot="button-group"[^>]*aria-label="Show"[^>]*>(.*?)<\/div>/,
+    )?.[1];
+    expect(chips).toMatch(/<a[^>]*href="\/workflows"[^>]*aria-current="page"[^>]*>All · 2<\/a>/);
+    for (const [filter, label] of [
+      ["waiting", "Waiting on you"],
+      ["failed", "Failed last run"],
+      ["builtin", "Built-in · 1"],
+    ] as const) {
+      expect(chips).toMatch(new RegExp(`<a[^>]*href="/workflows\\?filter=${filter}"[^>]*>${label}`));
+    }
+    // ?filter=builtin keeps drift alone.
+    const builtin = await page("/workflows?filter=builtin");
+    expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/drift"/);
+    expect(builtin.html).not.toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/announce"/);
+    expect(linkTag(builtin.text, "Built-in · 1")).toContain('aria-current="page"');
+  });
+
+  it("lists the workflows in the Workflows panel by their last run, and See all; with no panel, the bar alone, peeking", async () => {
+    const { text, html } = await page("/workflows");
+    expect(html).toMatch(/<input[^>]*aria-label="Find a workflow"/);
+    // No name on the server under the default resolver: nothing is waiting on you.
+    expect(text).not.toContain(">Waiting on you</h3>");
+    // Both under Recent, the one run last first.
+    const recent = text.slice(text.indexOf(">Recent</h3>"));
+    const last = await lastRuns(ctx);
+    const [first, second] = ["announce", "drift"]
+      .toSorted((a, b) => last[b]!.createdAt - last[a]!.createdAt)
+      .map((name) => recent.indexOf(`href="/workflows/${name}"`));
+    expect(first).toBeGreaterThan(0);
+    expect(second).toBeGreaterThan(first!);
+    expect(text).toMatch(/<a[^>]*href="\/workflows"[^>]*><span>See all 2 workflows<\/span>/);
+    expect(html).toContain("--sidebar-width:calc(var(--sidebar-bar-width) + var(--sidebar-panel-width))");
+    expect(html).toContain('data-slot="sidebar-rail"');
+    // No panel for Resources: the bar alone, open or not, and no rail to fold it; Inbox and
+    // Workflows peek their panels from it.
+    const resources = await page("/resources", app.url, { headers: { cookie: "sidebar_state=true" } });
+    expect(resources.html).toContain("--sidebar-width:var(--sidebar-bar-width)");
+    expect(resources.html).not.toContain('aria-label="Find a workflow"');
+    expect(resources.html).not.toContain('data-slot="sidebar-rail"');
+    for (const to of ["/inbox", "/workflows"])
+      expect(section(resources.html, to), to).toContain('aria-haspopup="dialog"');
   });
 
   it("lists every run under All runs, linking each to its page, sandbox runs badged, and filters them by ?status= as getRuns does", async () => {
@@ -1340,7 +1399,7 @@ describe("resources and drift", () => {
     expect((await page("/workflows?view=runs&status=cancelled")).text).toContain("No runs with that status");
   });
 
-  it("filters All runs by ?workflow=, as a workflow's rail links there, and shows the filter with its removal", async () => {
+  it("filters All runs by ?workflow=, as a workflow's panel links there, and shows the filter with its removal", async () => {
     const { body: announced } = await runsOf({ workflow: "announce" });
     const shown = await page("/workflows?view=runs&workflow=announce");
     expect(shown.status).toBe(200);
@@ -1356,19 +1415,20 @@ describe("resources and drift", () => {
     expect((await page("/workflows?view=runs&workflow=nope")).text).toContain("No runs of that workflow");
   });
 
-  it("pills a workflow's card with the approvals its runs wait on", async () => {
+  it("counts in each workflow's row the approvals its runs wait on", async () => {
     const started = await postRun({ workflow: "announce", input: input("Pill") });
     await waitFor(
       () => detail(started.body.runId),
       (d) => d.run.status === "waiting",
     );
-    const { body: waiting } = await runsOf({ status: "waiting", workflow: "announce" });
+    const { body: waiting } = await runsOf({ status: "waiting", workflow: "announce", limit: RUNS_LIMIT.max });
     const pending = waiting.reduce((n, run) => n + run.approvals.filter((a) => a.status === "pending").length, 0);
     expect(pending).toBeGreaterThan(0);
     const workflows = await page("/workflows");
-    expect(workflows.text).toContain(`>${pending} approval${pending === 1 ? "" : "s"} waiting<`);
+    // Every approval waiting, on anyone: no name on the server, so none for you.
+    expect(workflows.text).toContain(`>${pending} approval${pending === 1 ? "" : "s"}</span>`);
     // Drift asks no one.
-    expect(workflows.text.match(/>\d+ approvals? waiting</g)).toHaveLength(1);
+    expect(workflows.text.match(/>\d+ approvals?<\/span>/g)).toHaveLength(1);
   });
 });
 
@@ -1437,6 +1497,9 @@ describe("an app configured otherwise", () => {
   /** The Inbox as the deployment's user `user` sees it. */
   const inboxAs = async (user: string) =>
     (await fetch(new URL("/inbox", other.url), { headers: { "x-test-user": user } })).text();
+  /** The Workflows page as the deployment's user `user` sees it. */
+  const workflowsAs = async (user: string) =>
+    (await fetch(new URL("/workflows", other.url), { headers: { "x-test-user": user } })).text();
 
   describe("with its own resolveActor", () => {
     it("starts runs as the principal it resolves, groups included", async () => {
@@ -1475,6 +1538,18 @@ describe("an app configured otherwise", () => {
       const someoneElse = await inboxAs("sso-user");
       expect(currentLink(someoneElse, "For you · 0")).toBe(true);
       expect(someoneElse).toContain("Nothing is waiting for you");
+    });
+
+    it("puts the workflows waiting on the principal first in the Workflows panel, with their counts, and in the overview", async () => {
+      const lead = (await workflowsAs("marketing-lead")).replaceAll("<!-- -->", "");
+      const waiting = lead.slice(lead.indexOf(">Waiting on you</h3>"), lead.indexOf(">Recent</h3>"));
+      expect(waiting).toMatch(/href="\/workflows\/announce"[\s\S]*>\d+<span class="sr-only"> waiting on you<\/span>/);
+      expect(lead).toMatch(/>Waiting on you · 1<\/a>/);
+      expect(lead).toMatch(/>\d+ approvals?, \d+ for you<\/span>/);
+      // Nothing waits on sso-user.
+      const someoneElse = (await workflowsAs("sso-user")).replaceAll("<!-- -->", "");
+      expect(someoneElse).not.toContain(">Waiting on you</h3>");
+      expect(someoneElse).toMatch(/>Waiting on you · 0<\/a>/);
     });
 
     it("answers a resolver that throws with a 500, and logs why", async () => {
@@ -1540,7 +1615,7 @@ describe("an app whose config no longer has a workflow", () => {
     expect(about.status).toBe(200);
     expect(about.html).toMatch(/<h1[^>]*>announce<\/h1>/);
     expect(about.text).toContain(
-      "This config has no workflow named <code>announce</code>. Its past runs are in the rail.",
+      "This config has no workflow named <code>announce</code>. Its past runs are in the panel.",
     );
     expect(about.html).toContain(`href="/workflows/announce/runs/${runId}"`);
     expect((await page("/workflows/announce?new", retired.url)).html).not.toContain('id="field-title"');

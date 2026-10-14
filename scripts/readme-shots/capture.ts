@@ -3,7 +3,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Browser, type ElementHandle, launch, type Page } from "puppeteer-core";
-import { RAIL_COOKIE } from "../../packages/app/src/lib/rail.ts";
 
 /**
  * The installed Google Chrome, or the binary `CHROME_PATH` names, in US English (where Chrome
@@ -32,7 +31,7 @@ export async function launchChrome(): Promise<Browser> {
 
 interface Scene {
   actor: string;
-  /** The sidebar open, or folded to its icons. */
+  /** The sidebar's panel open, or folded to its section bar. */
   sidebar: boolean;
   width: number;
   height: number;
@@ -40,15 +39,12 @@ interface Scene {
 }
 
 /**
- * A page in a context of its own, with the actor, sidebar and viewport of `scene`, the workflow's
- * rail of runs folded to its dots, and the light theme (the app follows the system's by default).
+ * A page in a context of its own, with the actor, sidebar and viewport of `scene`, and the light
+ * theme (the app follows the system's by default).
  */
 async function open(browser: Browser, base: string, scene: Scene): Promise<Page> {
   const context = await browser.createBrowserContext();
-  await context.setCookie(
-    { name: "sidebar_state", value: String(scene.sidebar), domain: new URL(base).hostname },
-    { name: RAIL_COOKIE, value: "collapsed", domain: new URL(base).hostname },
-  );
+  await context.setCookie({ name: "sidebar_state", value: String(scene.sidebar), domain: new URL(base).hostname });
   const page = await context.newPage();
   await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
   // The app keeps the actor in localStorage; set only once, so a scene can switch it.
@@ -232,9 +228,8 @@ export async function recordDemo(browser: Browser, base: string, dir: string): P
   await wait(1500);
   await shot(1.6);
   // 6. Back to the run: sleeping until the launch, then finished, then its ledger.
-  const workflows = (await page.$$('a[href="/workflows"]')).at(-1);
-  if (!workflows) throw new Error("readme:shots: no link to /workflows");
-  await moveTo(workflows);
+  // The section bar's Workflows (the brand links there too).
+  await moveTo(await need(page, 'nav[aria-label="Sections"] a[href="/workflows"]'));
   await press();
   await page.goto(base + runPath, { waitUntil: "networkidle0" });
   await wait(1800);
@@ -276,7 +271,7 @@ export interface Still {
   select?: string;
 }
 
-/** A 2x still of `path` as marketing-lead, with the rail of runs folded to its dots. */
+/** A 2x still of `path` as marketing-lead. */
 export async function still(browser: Browser, base: string, path: string, out: string, options: Still): Promise<void> {
   let height = options.height ?? 900;
   const page = await open(browser, base, {

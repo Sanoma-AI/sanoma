@@ -17,7 +17,7 @@ export const Route = createFileRoute("/workflows/$name/")({
 
 function WorkflowPane() {
   const { name } = Route.useParams();
-  // Only `?scenario=`: a click on the rail's filter does not draw the pane again.
+  // Only `?scenario=`: a click on the panel's runs filter does not draw the pane again.
   const wanted = Route.useSearch({ select: (search) => search.scenario });
   const workflow = useWorkflow(name);
   const forWorkflow = useMemo(() => scenariosFor(name), [name]);
