@@ -6,7 +6,7 @@ Status: early. Workflows run on [DBOS](https://dbos.dev) with Postgres: each ven
 
 ![The app: starting a run of announce, approving its launch copy in the Inbox, then the run finishing](.github/assets/demo.gif)
 
-A run of the workflow below, which waits for approval, sleeps until launch and then publishes. Ghost is answered here by the connector's in-memory fake.
+A run of the workflow below, which waits for approval, sleeps until launch and then publishes. Ghost is answered here by the connector's in-memory fake, standing in for the live vendor, which is why the form still says it calls Ghost for real.
 
 ## What a workflow looks like
 
@@ -43,7 +43,7 @@ The workflow's page: the graph is drawn from the file, and picking a step finds 
 
 ![The Inbox with "Review launch copy" approvals waiting for marketing-lead](.github/assets/inbox.png)
 
-The Inbox: the approvals waiting for you, with the draft's link and what approving lets through.
+The Inbox as marketing-lead: the approvals waiting for them, with the draft's link and what approving lets through.
 
 ![A finished run of announce: its graph, the approval and its note, and its ledger with Ghost's reply](.github/assets/run.png)
 
