@@ -49,6 +49,8 @@ declare module "@tanstack/react-router" {
   interface StaticDataRouteOption {
     /** The page's name: its breadcrumb, its <h1> (PageHeader) and its <title> (pageTitle). */
     crumb?: string;
+    /** The page takes the page column's full width, not the reading width the root caps others at. */
+    wide?: true;
   }
 }
 
@@ -440,7 +442,7 @@ function useSeen(ref: RefObject<HTMLElement | null>): boolean {
  * A box filling its parent, whose content loads and draws in the browser once the box comes near
  * the screen; until then, and on the server, `fallback` holds its place. (The server never sees
  * the box: `useSeen` flips in an effect, and effects run only in the browser.) Bare: a caller that
- * wants a card puts it in a `PanelCard`, or sizes its parent (a resizable panel).
+ * wants a card puts it in a `PanelCard`, or sizes its parent.
  */
 function LazyPanel({ fallback, children }: { fallback: ReactNode; children: ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
@@ -530,7 +532,7 @@ export function Region({ title, children }: { title: ReactNode; children: ReactN
 }
 
 /** A card's section: its heading, and what it holds. */
-export function Section({ title, children }: { title: string; children: ReactNode }) {
+export function Section({ title, children }: { title: ReactNode; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-2">
       <SubsectionTitle>{title}</SubsectionTitle>

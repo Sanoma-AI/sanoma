@@ -39,3 +39,7 @@ flowchart LR
 ## Validation
 
 <!-- List checks actually performed and their results, or explain what was not tested and why. -->
+
+## Review
+
+<!-- Follow .agents/skills/create-pr/references/review.md. Record environment, skills actually run, full reviewed head and base SHAs, result, and resolution of findings. -->

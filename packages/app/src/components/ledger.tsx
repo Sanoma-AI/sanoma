@@ -2,7 +2,9 @@ import type { ErrorInfo, LedgerRecord } from "@sanoma/workflows";
 import type { ConfigDescription, OpEntry } from "@sanoma/workflows/describe";
 import { approverLabel } from "@sanoma/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
+import { LocateIcon } from "lucide-react";
 import { memo, type ReactNode } from "react";
+import { Button } from "#/components/ui/button.tsx";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "#/components/ui/item.tsx";
 import { utcText } from "#/lib/time.ts";
 import type { RunCheck } from "../api.ts";
@@ -16,6 +18,7 @@ import {
   plural,
   RequestedBy,
   StatusDot,
+  Tip,
   When,
 } from "./common.tsx";
 
@@ -95,13 +98,22 @@ function retries(attempt: number, op: OpEntry | undefined, vendors: ConfigDescri
 /** A ledger record's item on the page, by the record's id: where a click on the graph leads. */
 const ledgerItemId = (recordId: string) => `ledger-${recordId}`;
 
-/** One ledger record: what happened, when, and its details. Drawn again only when they change. */
+/**
+ * One ledger record: what happened, when, and its details. Drawn again only when they change.
+ * `onShow`, when given, is a "Show in graph" button, called with the record's id. The ledger's
+ * own rows are `anchor`s, the ones `show` scrolls to; a copy elsewhere on the page (the
+ * inspector's) is not, so the page has one element of each id.
+ */
 export const LedgerRow = memo(function LedgerRow({
   record,
   titles,
+  onShow,
+  anchor = true,
 }: {
   record: LedgerRecord;
   titles: Map<string, string>;
+  onShow?: ((recordId: string) => void) | undefined;
+  anchor?: boolean;
 }) {
   const title = (approval: string) => titles.get(approval) ?? approval;
   const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
@@ -197,7 +209,7 @@ export const LedgerRow = memo(function LedgerRow({
       role="listitem"
       variant="outline"
       size="sm"
-      id={ledgerItemId(record.id)}
+      id={anchor ? ledgerItemId(record.id) : undefined}
       // `show` sets data-highlighted.
       className="scroll-mt-24 data-highlighted:bg-muted data-highlighted:ring-2 data-highlighted:ring-ring"
     >
@@ -210,6 +222,14 @@ export const LedgerRow = memo(function LedgerRow({
       </ItemContent>
       <ItemActions className="self-start text-xs text-muted-foreground">
         <When at={record.at} />
+        {onShow && (
+          <Tip tip="Show in graph">
+            <Button variant="ghost" size="icon-xs" onClick={() => onShow(record.id)}>
+              <LocateIcon />
+              <span className="sr-only">Show in graph</span>
+            </Button>
+          </Tip>
+        )}
       </ItemActions>
     </Item>
   );

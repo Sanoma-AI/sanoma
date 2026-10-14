@@ -1,5 +1,5 @@
 import { type QueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createRootRouteWithContext, HeadContent, Link, Outlet, Scripts } from "@tanstack/react-router";
+import { createRootRouteWithContext, HeadContent, Link, Outlet, Scripts, useMatches } from "@tanstack/react-router";
 import { createIsomorphicFn } from "@tanstack/react-start";
 import { getCookie } from "@tanstack/react-start/server";
 import { ThemeProvider } from "next-themes";
@@ -18,6 +18,7 @@ import { Separator } from "#/components/ui/separator.tsx";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "#/components/ui/sidebar.tsx";
 import { Toaster } from "#/components/ui/sonner.tsx";
 import { TooltipProvider } from "#/components/ui/tooltip.tsx";
+import { RAIL_COOKIE } from "#/lib/rail.ts";
 import { ActorContext, useActorState } from "../actor.ts";
 import { useCrumbs } from "../components/common.tsx";
 import { actorQuery, configQuery, waitingRunsQuery } from "../queries.ts";
@@ -44,8 +45,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   // Who the server says is asking, in the first render: a deployment's login shows at once.
   // And the config, which every page reads and which cannot change while the app runs.
   // Both stay in the query client, where the page reads them: a loader returns only what no
-  // query holds (here, whether the sidebar was left open and the density), since the page carries
-  // loader data too.
+  // query holds (here, whether the sidebar was left open, the density, and whether a workflow
+  // page's rail was left folded), since the page carries loader data too.
   loader: async ({ context: { queryClient } }) => {
     // The inbox badge's count, started here and not awaited: it streams in with the page, and a
     // slow or failed read never holds the page up (the badge shows nothing until it comes).
@@ -68,20 +69,23 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 const SIDEBAR_COOKIE = "sidebar_state";
 
 /**
- * Whether the sidebar was left open (open unless its cookie says closed) and whether the page is
- * Compact (DensityProvider says why a cookie), from the request's cookies on the server and
- * `document.cookie` in the browser. Both providers take their value once, as they mount: the first
- * render is hydration, which has the server's answer; reading it in the browser too keeps a later
- * remount (an error boundary's retry, say) on the cookie's side for the sidebar and the density alike.
+ * Whether the sidebar was left open (open unless its cookie says closed), whether the page is
+ * Compact (DensityProvider says why a cookie) and whether a workflow page's rail was left folded
+ * (RunRail), from the request's cookies on the server and `document.cookie` in the browser. Each
+ * takes its value once, as it mounts: the first render is hydration, which has the server's
+ * answer; reading it in the browser too keeps a later remount (an error boundary's retry, or the
+ * next workflow page, say) on the cookie's side for all three.
  */
 const readPrefs = createIsomorphicFn()
   .server(() => ({
     sidebarOpen: getCookie(SIDEBAR_COOKIE) !== "false",
     compact: getCookie(DENSITY_COOKIE) === "compact",
+    railCollapsed: getCookie(RAIL_COOKIE) === "collapsed",
   }))
   .client(() => ({
     sidebarOpen: cookieValue(SIDEBAR_COOKIE) !== "false",
     compact: cookieValue(DENSITY_COOKIE) === "compact",
+    railCollapsed: cookieValue(RAIL_COOKIE) === "collapsed",
   }));
 
 /** A cookie's value in the browser, or undefined when it is not set. */
@@ -101,6 +105,8 @@ function Root() {
   // Only these fields: the root's loader data is new on every navigation, a field is not.
   const sidebarOpen = Route.useLoaderData({ select: (data) => data.sidebarOpen });
   const compact = Route.useLoaderData({ select: (data) => data.compact });
+  // A page that asks for it (a workflow's, for its graph) takes the full width.
+  const wide = useMatches({ select: (matches) => matches.some((match) => match.staticData.wide) });
   return (
     <ActorContext value={actor}>
       {/* Radix's tooltips need one provider: the sidebar's, and any a page shows. */}
@@ -118,7 +124,10 @@ function Root() {
                 <Crumbs />
               </header>
               {/* The page column: a page's regions are its children, the region gap apart. */}
-              <div className="mx-auto flex w-full max-w-6xl flex-col gap-(--gap-region) p-4 pt-0 sm:px-6">
+              <div
+                data-wide={wide || undefined}
+                className="mx-auto flex w-full max-w-6xl flex-col gap-(--gap-region) p-4 pt-0 data-wide:max-w-none sm:px-6"
+              >
                 <Outlet />
               </div>
             </SidebarInset>

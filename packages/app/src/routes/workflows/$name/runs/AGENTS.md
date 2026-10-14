@@ -4,6 +4,6 @@ The runs of one workflow, each a pane of its workflow's page.
 
 ## Contents
 
-| Path                   | What it is                                                                                                                                                                                                                                                           |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`$id.tsx`](%24id.tsx) | `/workflows/:name/runs/:id`: one run: its status and Run (a live workflow's), a failed run's error, the graph card, then checks and ledger beside its facts and approvals; a run of another workflow redirects to its own (in `beforeLoad`, before the layout loads) |
+| Path                   | What it is                                                                                                                                                                                                                                             |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [`$id.tsx`](%24id.tsx) | `/workflows/:name/runs/:id`: one run: its status, then the run's `WorkflowView` (its banner, graph, inspector, Code and Ledger with a sandbox run's checks); a run of another workflow redirects to its own (in `beforeLoad`, before the layout loads) |

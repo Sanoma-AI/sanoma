@@ -211,7 +211,9 @@ export function layout({ nodes, edges }: Graph): Layout {
  * labels it doubles each edge's minlen and halves ranksep (makeSpaceForEdgeLabels), so a rank of
  * edges lies between each two ranks of nodes, and an edge has a point on each rank it crosses: an
  * edge rank's, then a node rank's, and so on, ending on an edge rank's, an odd number. Any other
- * number throws, naming the edge, rather than draw a line that slants into its target.
+ * number throws, naming the edge, rather than draw a line that slants into its target. That
+ * also catches a dagre that stops doubling: every layout has an edge between neighbouring ranks,
+ * which would then have no points.
  */
 function steps(id: string, from: Point, ranks: readonly Point[], to: Point): Point[] {
   if (ranks.length % 2 === 0) {
