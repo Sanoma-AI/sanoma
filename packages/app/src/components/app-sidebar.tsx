@@ -47,16 +47,14 @@ export function AppSidebar() {
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild>
-              <Link to="/workflows" onClick={close}>
-                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                  <ShieldCheckIcon />
-                </div>
-                <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">Sanoma</span>
-                  <span className="truncate text-xs">{config.appName}</span>
-                </div>
-              </Link>
+            <SidebarMenuButton size="lg" render={<Link to="/workflows" onClick={close} />}>
+              <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+                <ShieldCheckIcon />
+              </div>
+              <div className="grid flex-1 text-left text-sm leading-tight">
+                <span className="truncate font-medium">Sanoma</span>
+                <span className="truncate text-xs">{config.appName}</span>
+              </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -66,11 +64,9 @@ export function AppSidebar() {
           <SidebarMenu>
             {PAGES.map(({ label, icon: Icon, ...link }) => (
               <SidebarMenuItem key={link.to}>
-                <SidebarMenuButton asChild tooltip={label}>
-                  <Link {...link} activeProps={ACTIVE} onClick={close}>
-                    <Icon />
-                    <span>{label}</span>
-                  </Link>
+                <SidebarMenuButton tooltip={label} render={<Link {...link} activeProps={ACTIVE} onClick={close} />}>
+                  <Icon />
+                  <span>{label}</span>
                 </SidebarMenuButton>
                 {/* After hydration only: the root loader starts this query without waiting for it,
                     so the server may render before it answers and the browser after. */}
@@ -111,18 +107,16 @@ function WorkflowLinks({
     <SidebarMenuSub>
       {workflows.map((wf) => (
         <SidebarMenuSubItem key={wf.name}>
-          <SidebarMenuSubButton asChild>
-            <Link to="/workflows/$name" params={{ name: wf.name }} activeProps={ACTIVE} onClick={onClick}>
-              <span className="truncate">{wf.title ?? wf.name}</span>
-              {/* Not SidebarMenuBadge: its offset is set for a menu button, not a sub-item's. */}
-              <ClientOnly>
-                {!!pending?.[wf.name] && (
-                  <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
-                    {pending[wf.name]}
-                  </span>
-                )}
-              </ClientOnly>
-            </Link>
+          <SidebarMenuSubButton
+            render={<Link to="/workflows/$name" params={{ name: wf.name }} activeProps={ACTIVE} onClick={onClick} />}
+          >
+            <span className="truncate">{wf.title ?? wf.name}</span>
+            {/* Not SidebarMenuBadge: its offset is set for a menu button, not a sub-item's. */}
+            <ClientOnly>
+              {!!pending?.[wf.name] && (
+                <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">{pending[wf.name]}</span>
+              )}
+            </ClientOnly>
           </SidebarMenuSubButton>
         </SidebarMenuSubItem>
       ))}

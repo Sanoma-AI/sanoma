@@ -26,7 +26,7 @@ export function useDensity(): Density {
  * state does, so the server renders the chosen one from the first paint: the root's loader reads
  * it into `defaultCompact`, which the provider takes once, as it mounts (hydration has the
  * server's answer, so both render the same page); the setter writes it. On #app rather than
- * <html>, since the density is the root's state; Radix portals (menus, dialogs) land in <body>,
+ * <html>, since the density is the root's state; Base UI's portals (menus, dialogs) land in <body>,
  * outside it, and keep the comfortable spacing.
  */
 export function DensityProvider({ defaultCompact, children }: { defaultCompact: boolean; children: ReactNode }) {

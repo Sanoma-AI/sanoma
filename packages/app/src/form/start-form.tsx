@@ -182,8 +182,8 @@ function FieldView({ form, field, path }: { form: StartFormApi; field: SchemaFie
                     <FieldContent>
                       <FieldView form={form} field={{ ...item, label }} path={[...path, i]} />
                     </FieldContent>
-                    {/* The button's name says it already: hidden from the tooltip's description, so it is not read twice. */}
-                    <Tip tip={<span aria-hidden>{remove}</span>}>
+                    {/* Named by its aria-label; Base UI's tooltip adds no description to read twice. */}
+                    <Tip tip={remove}>
                       <Button
                         type="button"
                         variant="ghost"

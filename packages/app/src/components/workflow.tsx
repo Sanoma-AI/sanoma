@@ -4,27 +4,23 @@ import { Link } from "@tanstack/react-router";
 import { PlayIcon } from "lucide-react";
 import { type ComponentProps, memo, useMemo } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
-import { Button } from "#/components/ui/button.tsx";
 import { Item, ItemContent, ItemDescription, ItemGroup } from "#/components/ui/item.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
 import { type Field, fieldsOf } from "../form/schema.ts";
 import { configQuery, opsById } from "../queries.ts";
-import { BUILTIN_ICON, ItemHeading, Json, None, Notice, OpItem, Section } from "./common.tsx";
+import { BUILTIN_ICON, ButtonLink, ItemHeading, Json, None, Notice, OpItem, Section } from "./common.tsx";
 
 // A workflow's pieces, as the workflows page's cards and a workflow's own page show them.
 
-/** Run: opens the workflow's page with its New run panel (`?new`). A Button otherwise, styled as given. */
-export function RunButton({
-  name,
-  ...props
-}: { name: string } & Omit<ComponentProps<typeof Button>, "asChild" | "children">) {
+/** Run: opens the workflow's page with its New run panel (`?new`). A ButtonLink otherwise, styled as given. */
+export function RunButton({ name, ...props }: { name: string } & Omit<ComponentProps<typeof ButtonLink>, "children">) {
   return (
-    <Button asChild {...props}>
+    <ButtonLink {...props}>
       <Link to="/workflows/$name" params={{ name }} search={{ new: true }}>
         <PlayIcon data-icon="inline-start" />
         Run
       </Link>
-    </Button>
+    </ButtonLink>
   );
 }
 

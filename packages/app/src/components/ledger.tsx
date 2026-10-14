@@ -4,7 +4,6 @@ import { approverLabel } from "@sanoma/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { LocateIcon } from "lucide-react";
 import { memo, type ReactNode } from "react";
-import { Button } from "#/components/ui/button.tsx";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "#/components/ui/item.tsx";
 import { utcText } from "#/lib/time.ts";
 import type { RunCheck } from "../api.ts";
@@ -19,7 +18,7 @@ import {
   plural,
   RequestedBy,
   StatusDot,
-  Tip,
+  TipButton,
 } from "./common.tsx";
 
 // A run's ledger and checks, one row each, as the run page lists them, and the jump from a graph
@@ -223,12 +222,9 @@ export const LedgerRow = memo(function LedgerRow({
       <ItemTime at={record.at} />
       {onShow && (
         <ItemActions className="self-start">
-          <Tip tip="Show in graph">
-            <Button variant="ghost" size="icon-xs" onClick={() => onShow(record.id)}>
-              <LocateIcon />
-              <span className="sr-only">Show in graph</span>
-            </Button>
-          </Tip>
+          <TipButton tip="Show in graph" size="icon-xs" onClick={() => onShow(record.id)}>
+            <LocateIcon />
+          </TipButton>
         </ItemActions>
       )}
     </Item>

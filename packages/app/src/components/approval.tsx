@@ -339,10 +339,8 @@ function DecideDialog({
             {noteError && <FieldError>{noteError}</FieldError>}
           </Field>
           <DialogFooter>
-            <DialogClose asChild>
-              <Button type="button" variant="outline" disabled={mutation.isPending}>
-                Cancel
-              </Button>
+            <DialogClose render={<Button type="button" variant="outline" disabled={mutation.isPending} />}>
+              Cancel
             </DialogClose>
             <Button
               type="submit"

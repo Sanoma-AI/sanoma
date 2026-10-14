@@ -14,6 +14,7 @@ import { Avatar, AvatarFallback } from "#/components/ui/avatar.tsx";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
@@ -50,63 +51,67 @@ export function NavUser() {
     <SidebarMenu>
       <SidebarMenuItem>
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <SidebarMenuButton
-              size="lg"
-              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-            >
-              <Avatar className="size-8 rounded-lg">
-                <AvatarFallback className="rounded-lg">
-                  {actor ? actor.slice(0, 2).toUpperCase() : <UserIcon />}
-                </AvatarFallback>
-              </Avatar>
-              <div className="grid flex-1 text-left text-sm leading-tight">
-                {/* The name in this browser is read after hydration: until then, a placeholder. */}
-                {actor === undefined && !fromServer ? (
-                  <Skeleton className="h-4 w-24" />
-                ) : (
-                  <span className="truncate font-medium">
-                    {actor ?? (fromServer ? "Not signed in" : "Who are you?")}
-                  </span>
-                )}
-                {status && <span className={cn("truncate text-xs", error && "text-destructive")}>{status}</span>}
-              </div>
-              <ChevronsUpDownIcon className="ml-auto size-4" />
-            </SidebarMenuButton>
+          <DropdownMenuTrigger
+            render={
+              <SidebarMenuButton
+                size="lg"
+                className="data-popup-open:bg-sidebar-accent data-popup-open:text-sidebar-accent-foreground"
+              />
+            }
+          >
+            <Avatar className="size-8 rounded-lg">
+              <AvatarFallback className="rounded-lg">
+                {actor ? actor.slice(0, 2).toUpperCase() : <UserIcon />}
+              </AvatarFallback>
+            </Avatar>
+            <div className="grid flex-1 text-left text-sm leading-tight">
+              {/* The name in this browser is read after hydration: until then, a placeholder. */}
+              {actor === undefined && !fromServer ? (
+                <Skeleton className="h-4 w-24" />
+              ) : (
+                <span className="truncate font-medium">{actor ?? (fromServer ? "Not signed in" : "Who are you?")}</span>
+              )}
+              {status && <span className={cn("truncate text-xs", error && "text-destructive")}>{status}</span>}
+            </div>
+            <ChevronsUpDownIcon className="ml-auto size-4" />
           </DropdownMenuTrigger>
           <DropdownMenuContent className="min-w-56" side={isMobile ? "bottom" : "right"} align="end" sideOffset={4}>
             {!fromServer && (
               <>
-                <DropdownMenuItem onSelect={() => setActor(null)}>
-                  <UserPenIcon />
-                  Change name
-                </DropdownMenuItem>
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onClick={() => setActor(null)}>
+                    <UserPenIcon />
+                    Change name
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
                 <DropdownMenuSeparator />
               </>
             )}
-            <DropdownMenuLabel>Theme</DropdownMenuLabel>
+            {/* Each label inside its radio group, which Base UI requires and which names the group; a
+                choice closes the menu (`closeOnClick`; Base UI keeps it open otherwise). */}
             <DropdownMenuRadioGroup value={theme ?? "system"} onValueChange={setTheme}>
-              <DropdownMenuRadioItem value="light">
+              <DropdownMenuLabel>Theme</DropdownMenuLabel>
+              <DropdownMenuRadioItem closeOnClick value="light">
                 <SunIcon />
                 Light
               </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="dark">
+              <DropdownMenuRadioItem closeOnClick value="dark">
                 <MoonIcon />
                 Dark
               </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="system">
+              <DropdownMenuRadioItem closeOnClick value="system">
                 <MonitorIcon />
                 System
               </DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel>Density</DropdownMenuLabel>
             <DropdownMenuRadioGroup value={compact ? "compact" : "comfortable"} onValueChange={setDensity}>
-              <DropdownMenuRadioItem value="comfortable">
+              <DropdownMenuLabel>Density</DropdownMenuLabel>
+              <DropdownMenuRadioItem closeOnClick value="comfortable">
                 <Maximize2Icon />
                 Comfortable
               </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="compact">
+              <DropdownMenuRadioItem closeOnClick value="compact">
                 <Minimize2Icon />
                 Compact
               </DropdownMenuRadioItem>

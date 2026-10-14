@@ -4,10 +4,10 @@ import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
-import { Button } from "#/components/ui/button.tsx";
 import { ItemActions, ItemContent, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import type { ScenarioEntry } from "../../api.ts";
 import {
+  ButtonLink,
   Expandable,
   LinkItem,
   None,
@@ -192,11 +192,11 @@ const ROLE_LABELS: Record<keyof ScenarioRoles, string> = {
 /** A link off the app, in a new tab, which its icon says. */
 function ExternalLink({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <Button asChild variant="link" size="sm">
+    <ButtonLink variant="link" size="sm">
       <a href={href} target="_blank" rel="noreferrer">
         {children}
         <ExternalLinkIcon data-icon="inline-end" />
       </a>
-    </Button>
+    </ButtonLink>
   );
 }

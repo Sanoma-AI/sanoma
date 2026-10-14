@@ -4,7 +4,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { type ReactNode, Suspense, useCallback, useMemo, useRef, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
-import { Card, CardHeader, CardTitle } from "#/components/ui/card.tsx";
+import { Card, CardHeader } from "#/components/ui/card.tsx";
 import { ItemGroup } from "#/components/ui/item.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs.tsx";
@@ -17,7 +17,7 @@ import { useReducedMotion } from "../lib/motion.ts";
 import { nodesByRecord } from "../lib/records.ts";
 import { sourceQuery, workflowFile } from "../queries.ts";
 import type { CodeProps } from "./code.tsx";
-import { CodePanel, GraphPanel, Nothing, Notice, Region } from "./common.tsx";
+import { CardHeading, CodePanel, GraphPanel, Nothing, Notice, Region } from "./common.tsx";
 import { type InspectedRun, Inspector, type SourceText } from "./inspector.tsx";
 import { CheckRow, LedgerRow, show } from "./ledger.tsx";
 
@@ -146,9 +146,7 @@ export function WorkflowView({
       <div className="grid gap-(--gap-region) @3xl/pane:grid-cols-[minmax(0,1fr)_20rem]">
         <Card ref={graphCard} className="scroll-mt-4 gap-0 overflow-hidden py-0">
           <CardHeader className="border-b py-2 compact:py-1 [.border-b]:pb-2 compact:[.border-b]:pb-1">
-            <CardTitle role="heading" aria-level={2} className="text-sm">
-              Graph
-            </CardTitle>
+            <CardHeading className="text-sm">Graph</CardHeading>
           </CardHeader>
           {/* The row's height: lower on a phone, and when Compact. */}
           <div className="h-[420px] sm:h-[560px] compact:h-[440px]">

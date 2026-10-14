@@ -2,8 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound, Outlet } from "@tanstack/react-router";
 import { PlayIcon } from "lucide-react";
 import { Badge } from "#/components/ui/badge.tsx";
-import { Button } from "#/components/ui/button.tsx";
-import { loadCode, loadGraph, Notice, PageHeader, pageTitle } from "#/components/common.tsx";
+import { ButtonLink, loadCode, loadGraph, Notice, PageHeader, pageTitle } from "#/components/common.tsx";
 import { RunRail } from "#/components/run-rail.tsx";
 import {
   configQuery,
@@ -77,12 +76,12 @@ function WorkflowLayout() {
         title={workflow?.title ?? name}
         action={
           workflow && (
-            <Button asChild size="sm">
+            <ButtonLink size="sm">
               <Link to="." search={(prev) => ({ ...prev, new: true })}>
                 <PlayIcon data-icon="inline-start" />
                 New run
               </Link>
-            </Button>
+            </ButtonLink>
           )
         }
       >

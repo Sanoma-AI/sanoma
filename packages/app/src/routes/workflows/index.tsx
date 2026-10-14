@@ -7,11 +7,12 @@ import { FlaskConicalIcon, XIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 import { z } from "zod";
 import { Badge } from "#/components/ui/badge.tsx";
-import { Button } from "#/components/ui/button.tsx";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
+import { Card, CardAction, CardContent, CardDescription, CardHeader } from "#/components/ui/card.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { RUNS_LIMIT, type ScenariosResponse } from "../../api.ts";
 import {
+  ButtonLink,
+  CardHeading,
   Fact,
   Facts,
   GraphPanel,
@@ -199,11 +200,11 @@ const WorkflowCard = memo(function WorkflowCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle role="heading" aria-level={2}>
+        <CardHeading>
           <Link to="/workflows/$name" params={{ name }} className="hover:underline">
             {workflow.title ?? name}
           </Link>
-        </CardTitle>
+        </CardHeading>
         <CardDescription className="flex flex-wrap items-center gap-2">
           <code>{name}</code>
           {workflow.builtin && <Badge variant="secondary">built-in</Badge>}
@@ -216,12 +217,12 @@ const WorkflowCard = memo(function WorkflowCard({
         </CardDescription>
         <CardAction className="flex gap-2">
           {scenario !== undefined && (
-            <Button asChild variant="outline" size="sm">
+            <ButtonLink variant="outline" size="sm">
               <Link to="/workflows/$name" params={{ name }} search={{ new: true, scenario }}>
                 <FlaskConicalIcon data-icon="inline-start" />
                 Test
               </Link>
-            </Button>
+            </ButtonLink>
           )}
           <RunButton name={name} variant="outline" size="sm" />
         </CardAction>
@@ -279,12 +280,12 @@ function AllRuns({ status, workflow }: { status: RunStatus | undefined; workflow
         {workflow !== undefined && (
           <Badge variant="outline" className="h-7 gap-1 pr-0.5">
             Workflow: <code>{workflow}</code>
-            <Button asChild variant="ghost" size="icon-xs" className="size-5">
+            <ButtonLink variant="ghost" size="icon-xs" className="size-5">
               <Link to="." search={(prev) => ({ ...prev, workflow: undefined })} replace>
                 <XIcon />
                 <span className="sr-only">Any workflow</span>
               </Link>
-            </Button>
+            </ButtonLink>
           </Badge>
         )}
       </div>
