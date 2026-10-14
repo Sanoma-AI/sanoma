@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { type Box, CLUSTER_HEADER, layout, NAME_HEIGHT, NODE_SIZE, nodeSize, type Point } from "../src/graph/layout.ts";
 import { outlineGraph } from "../src/graph/outline-graph.ts";
-import type { Graph, GraphEdge, Step } from "../src/graph/types.ts";
+import type { Graph, GraphEdge } from "../src/graph/types.ts";
 import { LIST_HEADER, MAX_ROWS, ROW_HEIGHT } from "../src/graph/wildcard.ts";
 import { absolute, DRIFT_SHAPE } from "./graph-helpers.ts";
 
@@ -180,7 +180,7 @@ describe("layout", () => {
   it("routes a fan-out's empty member, a branch beside a call and an empty loop around their nodes", () => {
     const graph = outlineGraph([
       op("a.x.before"),
-      { kind: "all", branches: [[op("b.x.one"), op("b.x.two")], [op("b.x.three")], []] },
+      { kind: "all", branches: [[op("b.x.one"), op("b.x.two")], [op("b.x.three")], [], [op("b.x.four")]] },
       { kind: "branch", cases: [[op("c.x.one")], []] },
       { kind: "repeat", label: "repeat", body: [] },
       op("d.x.after"),
@@ -188,28 +188,30 @@ describe("layout", () => {
     expect(routeProblems(graph)).toEqual([]);
   });
 
-  it("routes a wide fan-out, a branch in a loop, a try in a loop and nested loops around their nodes", () => {
-    const shapes: Step[][] = [
-      [
-        op("a.x.before"),
-        { kind: "all", branches: [[op("b.x.1")], [op("b.x.2"), op("b.x.3")], [], [op("b.x.4")]] },
-        op("c.x.after"),
-      ],
-      [
+  it.each([
+    {
+      name: "a four-way branch in a loop",
+      steps: [
         {
           kind: "repeat",
           label: "repeat",
           body: [{ kind: "branch", cases: [[op("c.x.1")], [op("c.x.2")], [op("c.x.3")], []] }],
         },
       ],
-      [
+    },
+    {
+      name: "a try with a handler, then a call, in a loop",
+      steps: [
         {
           kind: "repeat",
           label: "repeat",
           body: [{ kind: "try", body: [op("t.x.body")], handler: [op("t.x.handler")] }, op("t.x.after")],
         },
       ],
-      [
+    },
+    {
+      name: "a loop holding a fan-out in a loop",
+      steps: [
         {
           kind: "repeat",
           label: "repeat",
@@ -219,9 +221,13 @@ describe("layout", () => {
           ],
         },
       ],
-    ];
-    for (const [i, shape] of shapes.entries()) expect(routeProblems(outlineGraph(shape)), `shape ${i}`).toEqual([]);
-  });
+    },
+  ] satisfies { name: string; steps: Parameters<typeof outlineGraph>[0] }[])(
+    "routes $name around its nodes",
+    ({ steps }) => {
+      expect(routeProblems(outlineGraph(steps))).toEqual([]);
+    },
+  );
 
   it("runs straight through a loop holding one operation, from start to end", () => {
     const graph = outlineGraph([{ kind: "repeat", label: "for each of items", body: [op("x.item.get")] }]);
