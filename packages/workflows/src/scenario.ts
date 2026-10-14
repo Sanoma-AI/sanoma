@@ -32,7 +32,7 @@ import { fill, isBug, seedFrom, shapeOf } from "./fill.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { Driver, Op } from "./op.ts";
 import { type OutlineNode, outlineWorkflow } from "./outline.ts";
-import { DRIFT_WORKFLOW, errorMessage, flatten, isEnded } from "./shared.ts";
+import { DRIFT_WORKFLOW, errorMessage, fitsOp, flatten, isEnded } from "./shared.ts";
 import type { Call, RunView, Seed } from "./steps.ts";
 
 /*
@@ -52,7 +52,12 @@ export interface ScenarioStep {
   kind: "given" | "when" | "then";
   /** The operation the step is about, when it names one. */
   op?: string;
-  /** For a `Then` step about an operation: true when it expects a call, false for `was not called`. */
+  /** For a `Then` step about a step by its name (`step "Draft the post" was called`): that name. */
+  name?: string;
+  /**
+   * For a `Then` step about an operation, or a step by its name: true when it expects a call (or
+   * a run), false for `was not called` (or `ran 0 times`).
+   */
   called?: boolean;
   /** For a `Then` step about the policy's decision on an operation: `was denied`, or `was held for`. */
   decision?: "denied" | "held";
@@ -433,39 +438,31 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
       takes: TAKES_OBJECT,
       read: ([name], pickle, workflow) => {
         const node = stepNamed(scope, workflow, name as string);
+        const step = `step "${name as string}"`;
         if (node.kind !== "op") {
-          throw new Error(
-            `step "${name as string}" is ${node.kind === "sleep" ? "a sleep" : "an approval"}, which takes no input`,
-          );
+          throw new Error(`${step} is ${node.kind === "sleep" ? "a sleep" : "an approval"}, which takes no input`);
         }
-        const op = scope.ops.get(node.id);
-        if (!op)
-          throw new Error(
-            `step "${name as string}" calls ${node.id}, whose input cannot be read: name its operation in full`,
-          );
-        return expecting({
-          name: name as string,
-          op: op.id,
-          input: fieldsFrom(pickle, op.input, inputOf(op.id)),
-          called: true,
-        });
+        // An unnamed call with a computed segment is named by the operation it calls.
+        const op = scope.ops.get(node.id) ?? (node.name === undefined ? scope.ops.get(name as string) : undefined);
+        if (!op) throw new Error(`${step} calls ${node.id}, whose input cannot be read: name its operation in full`);
+        return expecting({ name: name as string, input: fieldsFrom(pickle, op.input, inputOf(op.id)), called: true });
       },
     },
     ...[true, false].map((called): Rule => ({
       kind: "then",
       source: `step {string} was ${called ? "" : "not "}called`,
-      read: ([name], _, workflow) =>
-        expecting({ name: name as string, ...opAt(stepNamed(scope, workflow, name as string)), called }),
+      read: ([name], _, workflow) => {
+        stepNamed(scope, workflow, name as string);
+        return expecting({ name: name as string, called });
+      },
     })),
     {
       kind: "then",
       source: "step {string} ran {int} time(s)",
-      read: ([name, times], _, workflow) =>
-        expecting({
-          name: name as string,
-          ...opAt(stepNamed(scope, workflow, name as string)),
-          times: times as number,
-        }),
+      read: ([name, times], _, workflow) => {
+        stepNamed(scope, workflow, name as string);
+        return expecting({ name: name as string, times: times as number });
+      },
     },
     {
       kind: "then",
@@ -674,23 +671,24 @@ type StepNode = Extract<OutlineNode, { kind: "op" | "approval" | "sleep" }>;
 
 const isStep = (n: OutlineNode): n is StepNode => n.kind === "op" || n.kind === "approval" || n.kind === "sleep";
 
-/** What a step-name expectation says about the step's operation, when it calls one by a full id. */
-const opAt = (node: StepNode) => (node.kind === "op" && !node.id.includes("*") ? { op: node.id } : {});
-
 /**
  * The one step of the workflow's outline named `name` (an operation's call or a sleep by the
- * name it gives or its default, an approval by its title). Throws before the `When` names the
- * workflow, when no step has the name, and when several share it: a name a call defaults to
- * (its operation's id) can be several calls'.
+ * name it gives or its default, an approval by its title). Throws outside a scenario's workflow
+ * (before its `When`, or in an operation's own test), when no step has the name, and when several
+ * may: a name a call defaults to (its operation's id) can be several calls', and an unnamed call
+ * with a computed segment is named in a run by the operation it calls, which may be this one.
  */
 function stepNamed(scope: Scope, workflow: string | undefined, name: string): StepNode {
   if (workflow === undefined) {
-    throw new Error(`step "${name}" is a workflow's: put the When that runs the workflow before it`);
+    throw new Error(`step "${name}" names a step of a workflow: it goes after the When that runs one, in scenarios/`);
   }
   const nodes = nodesOf(scope.workflows.get(workflow)!);
   if (!nodes) throw new Error(`${workflow}'s code cannot be outlined, so its steps have no names`);
   const steps = flatten(nodes).filter(isStep);
-  const named = steps.filter((n) => n.name === name);
+  const named = steps.filter(
+    (n) =>
+      n.name === name || (n.kind === "op" && n.name === undefined && (n.ops?.includes(name) ?? fitsOp(n.id, name))),
+  );
   if (named.length === 1) return named[0]!;
   if (named.length > 1) {
     throw new Error(
@@ -700,8 +698,6 @@ function stepNamed(scope: Scope, workflow: string | undefined, name: string): St
   const names = [...new Set(steps.flatMap((n) => (n.name === undefined ? [] : [`"${n.name}"`])))];
   throw new Error(`no step of ${workflow} is named "${name}"; its steps are ${names.join(", ") || "none"}`);
 }
-
-const approvalsByWorkflow = new WeakMap<object, string[]>();
 
 /** The titles of the approvals in an outline, at any depth, where they are string literals. */
 const titles = (nodes: OutlineNode[]): string[] =>
@@ -713,14 +709,7 @@ const titles = (nodes: OutlineNode[]): string[] =>
   });
 
 /** The literal titles of the approvals a workflow's code asks for, from its outline. */
-function approvalsOf(wf: Parameters<typeof outlineWorkflow>[0]): string[] {
-  let found = approvalsByWorkflow.get(wf);
-  if (!found) {
-    found = [...new Set(titles(nodesOf(wf) ?? []))];
-    approvalsByWorkflow.set(wf, found);
-  }
-  return found;
-}
+const approvalsOf = (wf: Parameters<typeof outlineWorkflow>[0]) => [...new Set(titles(nodesOf(wf) ?? []))];
 
 const namesByReport = new WeakMap<Report, Map<string, string>>();
 
@@ -829,7 +818,9 @@ function compileWorld(built: Built, specs: Map<string, Spec>) {
             const { expect } = rule.read(args, pickle, spec.workflow);
             spec.expect.push({ step: text, ...expect } as Expectation);
             if ("op" in expect && expect.op !== undefined) step.op = expect.op;
+            if ("name" in expect) step.name = expect.name;
             if ("called" in expect && expect.called !== undefined) step.called = expect.called;
+            if ("times" in expect) step.called = expect.times > 0;
             if ("decision" in expect) step.decision = expect.decision;
             break;
           }

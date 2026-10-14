@@ -1026,7 +1026,26 @@ describe("steps by name", () => {
       return {};
     },
   });
-  const within = resolveConfig({ workflows: [named], connectors: [ghost], policy: allowAll, ledger: memoryLedger() });
+  /** Publishes by a computed segment, which a run names by the operation it calls, by the default name, and by a name. */
+  const computed = defineWorkflow({
+    name: "computed",
+    title: "Publish two ways",
+    trigger: "manual",
+    input: z.object({ action: z.enum(["publish"]) }),
+    uses: [ghost.post.publish],
+    run: async (ctx, { action }) => {
+      await ctx.ghost.post[action]({ id: "a" });
+      await ctx.ghost.post.publish({ id: "b" });
+      await ctx.ghost.post.publish({ id: "c" }, { name: "Publish c" });
+      return {};
+    },
+  });
+  const within = resolveConfig({
+    workflows: [named, computed],
+    connectors: [ghost],
+    policy: allowAll,
+    ledger: memoryLedger(),
+  });
   const failing = async (text: string) => (await compiled(text, within)).errors.map((e) => e.message).join("\n");
 
   const common = { v: 1, app: "a", runId: "r", at: 0, actor: { id: "alice" }, workflow: "named" } as const;
@@ -1089,17 +1108,22 @@ describe("steps by name", () => {
       {
         step: 'step "Draft the post" was called with',
         name: "Draft the post",
-        op: "ghost.post.create",
         input: { title: "One" },
         called: true,
       },
-      { step: 'step "Draft the post" ran 2 times', name: "Draft the post", op: "ghost.post.create", times: 2 },
+      { step: 'step "Draft the post" ran 2 times', name: "Draft the post", times: 2 },
       { step: 'step "Let it settle" was not called', name: "Let it settle", called: false },
       { step: 'step "Go ahead" ran 1 time', name: "Go ahead", times: 1 },
     ]);
-    expect(scenarios[0]!.steps.find((s) => s.text.startsWith('step "Draft'))).toMatchObject({
-      op: "ghost.post.create",
-    });
+    // For marking the graph: the step it is about by name, and whether it expects a run.
+    expect(scenarios[0]!.steps.filter((s) => s.kind === "then").map(({ name, called }) => ({ name, called }))).toEqual([
+      { name: "Draft the post", called: true },
+      { name: "Draft the post", called: true },
+      { name: "Let it settle", called: false },
+      { name: "Go ahead", called: true },
+    ]);
+    const zero = await compiled(runNamed('    Then step "Go ahead" ran 0 times\n'), within);
+    expect(zero.scenarios[0]!.steps.at(-1)).toMatchObject({ name: "Go ahead", called: false });
   });
 
   it("refuses a name no step has, one several steps share, input for a sleep, and a step name before the When", async () => {
@@ -1114,7 +1138,14 @@ describe("steps by name", () => {
     );
     expect(
       await failing('Feature: N\n  Scenario: S\n    Then step "Go ahead" was called\n    When named runs\n'),
-    ).toMatch(/step "Go ahead" is a workflow's: put the When that runs the workflow before it/);
+    ).toMatch(/step "Go ahead" names a step of a workflow: it goes after the When that runs one, in scenarios\//);
+    // An unnamed call with a computed segment may be the operation's own default name.
+    const publish =
+      'Feature: C\n  Scenario: S\n    When computed runs\n    Then step "ghost.post.publish" was called\n';
+    expect(await failing(publish)).toMatch(/2 steps of computed are named "ghost\.post\.publish"/);
+    expect(
+      await failing('Feature: C\n  Scenario: S\n    When computed runs\n    Then step "Publish c" ran 1 time\n'),
+    ).toBe("");
   });
 
   it("counts the runs a step's records carry its name for: calls made, not failed ones or a policy's hold", () => {

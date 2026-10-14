@@ -117,10 +117,10 @@ function driftDetail(
  * (`runsOf`); a record written before steps had names has none.
  */
 export function detailOf(e: CoreExpectation, records: readonly LedgerRecord[]): string | undefined {
+  if ("name" in e) return namedDetail(e, records);
   const end = records.find((r) => r.type === "run.finished" || r.type === "run.failed");
   const calls = records.filter(isCall);
   const callsTo = (op: string) => calls.filter((r) => r.op === op);
-  if ("name" in e) return namedDetail(e, records);
   if ("decision" in e) {
     const tries = callsTo(e.op);
     if (e.decision === "denied") {

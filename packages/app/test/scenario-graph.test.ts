@@ -81,6 +81,25 @@ describe("annotateGraph", () => {
     });
   });
 
+  it("marks a step named in a Then by its name, or an unnamed call by its operation's id, and no other call of the operation", () => {
+    const named = outlineGraph([
+      { kind: "op", id: "ghost.post.create", name: "Draft the post" },
+      { kind: "op", id: "ghost.post.create", name: "Archive a copy" },
+      op("ghost.post.publish"),
+    ]);
+    const byName: ScenarioEntry["steps"] = [
+      { text: 'step "Draft the post" was not called', kind: "then", name: "Draft the post", called: false },
+      { text: 'step "ghost.post.publish" ran 2 times', kind: "then", name: "ghost.post.publish", called: true },
+    ];
+    expect(marks(annotateGraph(named, { steps: byName }).nodes)).toEqual([
+      "start -",
+      "op:0 forbidden",
+      "op:1 -",
+      "op:2 expected",
+      "end -",
+    ]);
+  });
+
   it("returns the graph as it is for a scenario that names no operation", () => {
     expect(annotateGraph(graph, { steps: [{ text: "announce runs", kind: "when" }] })).toBe(graph);
   });

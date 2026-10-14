@@ -142,7 +142,7 @@ function OpDetails({ op, scenarios }: { op: OpEntry; scenarios: ScenarioEntry[] 
         ) : (
           <ul className="flex flex-col gap-1">
             {scenarios.map((s) => {
-              const roles = scenarioRoles(s.steps, (id) => id === op.id);
+              const roles = scenarioRoles(s.steps, (step) => step.op === op.id);
               return (
                 <li key={s.name} className="flex flex-wrap items-center gap-1.5">
                   <Link
