@@ -100,13 +100,13 @@ export function AppSidebar() {
 
 /**
  * Folds the sidebar to its icons, or opens it again (as Ctrl+B or ⌘B does, and its rail); on a
- * phone, where the sidebar is a sheet, it closes the sheet.
+ * phone, where the sidebar is a sheet and the button shows only inside it, open, it closes the
+ * sheet.
  */
 function FoldButton() {
   const { open, openMobile, isMobile, toggleSidebar } = useSidebar();
   const expanded = isMobile ? openMobile : open;
-  // On a phone it shows only inside the open sheet.
-  const label = expanded ? "Collapse sidebar" : "Expand sidebar";
+  const label = isMobile ? "Close sidebar" : expanded ? "Collapse sidebar" : "Expand sidebar";
   return (
     <SidebarMenuItem>
       <SidebarMenuButton tooltip={label} aria-expanded={expanded} onClick={toggleSidebar}>

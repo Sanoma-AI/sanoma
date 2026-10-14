@@ -166,8 +166,7 @@
  * controls and their icons too; the text keeps its size). Everything outside the inset keeps the
  * full unit: the sidebar (fixed widths, 16rem, 3rem folded) and the portalled menus, dialogs and
  * tooltips. The gap tokens above are worked out on #app, in the full unit, and cut further on
- * purpose: the layout's air is where Compact saves most. Cards tighten with the unit alone, and a
- * `compact:` value is in the page's unit too.
+ * purpose: the layout's air is where Compact saves most.
  */
 [data-density="compact"] [data-slot="sidebar-inset"] {
   --spacing: 0.1875rem;
