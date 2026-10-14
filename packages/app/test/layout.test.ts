@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { type Box, CLUSTER_HEADER, layout, NAME_HEIGHT, NODE_SIZE, nodeSize, type Point } from "../src/graph/layout.ts";
 import { outlineGraph } from "../src/graph/outline-graph.ts";
-import type { Graph, GraphEdge } from "../src/graph/types.ts";
+import type { Graph, GraphEdge, Step } from "../src/graph/types.ts";
 import { LIST_HEADER, MAX_ROWS, ROW_HEIGHT } from "../src/graph/wildcard.ts";
 import { absolute, DRIFT_SHAPE } from "./graph-helpers.ts";
 
@@ -186,6 +186,41 @@ describe("layout", () => {
       op("d.x.after"),
     ]);
     expect(routeProblems(graph)).toEqual([]);
+  });
+
+  it("routes a wide fan-out, a branch in a loop, a try in a loop and nested loops around their nodes", () => {
+    const shapes: Step[][] = [
+      [
+        op("a.x.before"),
+        { kind: "all", branches: [[op("b.x.1")], [op("b.x.2"), op("b.x.3")], [], [op("b.x.4")]] },
+        op("c.x.after"),
+      ],
+      [
+        {
+          kind: "repeat",
+          label: "repeat",
+          body: [{ kind: "branch", cases: [[op("c.x.1")], [op("c.x.2")], [op("c.x.3")], []] }],
+        },
+      ],
+      [
+        {
+          kind: "repeat",
+          label: "repeat",
+          body: [{ kind: "try", body: [op("t.x.body")], handler: [op("t.x.handler")] }, op("t.x.after")],
+        },
+      ],
+      [
+        {
+          kind: "repeat",
+          label: "repeat",
+          body: [
+            op("n.x.a"),
+            { kind: "repeat", label: "repeat", body: [{ kind: "all", branches: [[op("n.x.b")], [op("n.x.c")]] }] },
+          ],
+        },
+      ],
+    ];
+    for (const [i, shape] of shapes.entries()) expect(routeProblems(outlineGraph(shape)), `shape ${i}`).toEqual([]);
   });
 
   it("runs straight through a loop holding one operation, from start to end", () => {
