@@ -1,0 +1,10 @@
+{
+  // The root's options and paths, plus the DOM's types: the capture runs code in the page through
+  // puppeteer, and the root's lib (es2024 and Node's types) has no DOM. `pnpm typecheck` runs this.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["es2024", "dom", "dom.iterable"]
+  },
+  "include": ["."],
+  "exclude": []
+}

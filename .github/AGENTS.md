@@ -4,7 +4,7 @@ GitHub configuration for the repo. Contributing guide, code of conduct and secur
 
 ## Contents
 
-| Path                                | What it is               |
-| ----------------------------------- | ------------------------ |
-| [`workflows/`](workflows/AGENTS.md) | GitHub Actions workflows |
-| [`assets/`](assets/)                | Images the README shows  |
+| Path                                | What it is                                                                                         |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------- |
+| [`workflows/`](workflows/AGENTS.md) | GitHub Actions workflows                                                                           |
+| [`assets/`](assets/)                | Images the README shows; [`pnpm readme:shots`](../scripts/readme-shots/README.md) retakes them all |
