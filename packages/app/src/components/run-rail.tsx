@@ -3,14 +3,13 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useLoaderData, useNavigate, useSearch } from "@tanstack/react-router";
 import { PanelLeftCloseIcon, PanelLeftOpenIcon, WorkflowIcon } from "lucide-react";
 import { memo, useState } from "react";
-import { Button } from "#/components/ui/button.tsx";
 import { Item, ItemContent, ItemDescription, ItemTitle } from "#/components/ui/item.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { RAIL_COOKIE } from "#/lib/rail.ts";
 import { RUN_TONE } from "#/lib/tone.ts";
 import { pendingApprovals, starterName } from "../api.ts";
 import { picksFromLatest, RAIL_LIMIT, railQuery, railRuns, RUN_FILTERS, type RunFilter, runLink } from "../queries.ts";
-import { CURRENT_LINK, LinkItem, Nothing, Notice, PaneList, StatusDot, Tip, When } from "./common.tsx";
+import { CURRENT_LINK, LinkItem, Nothing, Notice, PaneList, StatusDot, Tip, TipButton, When } from "./common.tsx";
 
 // The rail on a workflow's page: the workflow's own pane, and its latest runs, each linking to its own pane.
 
@@ -55,12 +54,15 @@ export function RunRail({ name }: { name: string }) {
   const fromLatest = picksFromLatest(filter);
   // One name in both states; `aria-expanded` says which, and the tooltip what a click does.
   const toggle = (
-    <Tip tip={collapsed ? "Unfold the rail" : "Fold the rail"}>
-      <Button variant="ghost" size="icon-sm" aria-expanded={!collapsed} onClick={() => setCollapsed(!collapsed)}>
-        {collapsed ? <PanelLeftOpenIcon /> : <PanelLeftCloseIcon />}
-        <span className="sr-only">Runs rail</span>
-      </Button>
-    </Tip>
+    <TipButton
+      tip={collapsed ? "Unfold the rail" : "Fold the rail"}
+      label="Runs rail"
+      size="icon-sm"
+      aria-expanded={!collapsed}
+      onClick={() => setCollapsed(!collapsed)}
+    >
+      {collapsed ? <PanelLeftOpenIcon /> : <PanelLeftCloseIcon />}
+    </TipButton>
   );
   // Active with any `?scenario=` or `?runs=`, not on a run's pane. It leaves `?scenario=` behind:
   // reading it would draw the rail again on each scenario chosen.
@@ -80,7 +82,7 @@ export function RunRail({ name }: { name: string }) {
         className="flex flex-none flex-col items-center gap-2 rounded-lg border bg-card p-1.5 text-card-foreground"
       >
         {toggle}
-        <Tip tip="Workflow">
+        <Tip tip="Workflow" describe={false}>
           <Link {...workflowLink} className={`${RAIL_ICON} aria-[current=page]:text-foreground`}>
             <WorkflowIcon className="size-4" />
             <span className="sr-only">Workflow</span>
@@ -102,12 +104,10 @@ export function RunRail({ name }: { name: string }) {
   return (
     <aside aria-label="Runs of this workflow" className="flex min-w-0 flex-[1_1_14rem] flex-col gap-2">
       <nav className="flex items-center gap-1">
-        <Item asChild variant="outline" size="xs" className={CURRENT_LINK}>
-          <Link {...workflowLink}>
-            <ItemContent>
-              <ItemTitle>Workflow</ItemTitle>
-            </ItemContent>
-          </Link>
+        <Item render={<Link {...workflowLink} />} variant="outline" size="xs" className={CURRENT_LINK}>
+          <ItemContent>
+            <ItemTitle>Workflow</ItemTitle>
+          </ItemContent>
         </Item>
         {toggle}
       </nav>
@@ -171,6 +171,8 @@ const RunDot = memo(function RunDot({ run, filter }: { run: RunSummary; filter: 
           <When at={run.createdAt} />
         </>
       }
+      // The name says all but the time: no hidden copy of a ticking clock per dot.
+      describe={false}
     >
       <Link
         {...runLink(run)}
@@ -181,6 +183,8 @@ const RunDot = memo(function RunDot({ run, filter }: { run: RunSummary; filter: 
         <StatusDot tone={RUN_TONE[run.status]} />
         <span className="sr-only">
           {run.status} run by {starterName(run)}
+          {waitingOn !== undefined && `, waiting on “${waitingOn}”`}
+          {run.sandbox !== undefined && `, in sandbox ${run.sandbox}`}
         </span>
       </Link>
     </Tip>

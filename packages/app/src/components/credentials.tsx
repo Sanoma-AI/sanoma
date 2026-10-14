@@ -183,10 +183,8 @@ function SetDialog({
             {error && <FieldError>{error}</FieldError>}
           </Field>
           <DialogFooter>
-            <DialogClose asChild>
-              <Button type="button" variant="outline" disabled={mutation.isPending}>
-                Cancel
-              </Button>
+            <DialogClose render={<Button type="button" variant="outline" disabled={mutation.isPending} />}>
+              Cancel
             </DialogClose>
             <Button type="submit" disabled={mutation.isPending}>
               {mutation.isPending && <Spinner data-icon="inline-start" />}

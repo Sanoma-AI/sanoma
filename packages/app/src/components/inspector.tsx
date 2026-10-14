@@ -5,7 +5,7 @@ import { Link } from "@tanstack/react-router";
 import { XIcon } from "lucide-react";
 import { Children, Fragment, isValidElement, type ReactNode, Suspense } from "react";
 import { Button } from "#/components/ui/button.tsx";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
+import { Card, CardAction, CardContent, CardDescription, CardHeader } from "#/components/ui/card.tsx";
 import { ItemGroup } from "#/components/ui/item.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
 import { starterName } from "../api.ts";
@@ -14,7 +14,19 @@ import { spanLines } from "../lib/lines.ts";
 import { recordsFor } from "../lib/records.ts";
 import { configQuery, opsById, sourceQuery } from "../queries.ts";
 import { ApprovalDecision, ApprovalDetails } from "./approval.tsx";
-import { ApprovalStatusBadge, Fact, Facts, None, OpName, Section, Tip, VendorLogo, When } from "./common.tsx";
+import {
+  ApprovalStatusBadge,
+  ButtonLink,
+  CardHeading,
+  Fact,
+  Facts,
+  None,
+  OpName,
+  Section,
+  TipButton,
+  VendorLogo,
+  When,
+} from "./common.tsx";
 import { LedgerRow } from "./ledger.tsx";
 import { NewRun } from "./new-run.tsx";
 import { WorkflowSections } from "./workflow.tsx";
@@ -75,12 +87,12 @@ export function Inspector({
         title="New run"
         action={
           // Drops `?new` and keeps the rest: the mode chosen stays for the next time.
-          <Button asChild variant="ghost" size="icon-sm">
+          <ButtonLink variant="ghost" size="icon-sm">
             <Link to="." search={(prev) => ({ ...prev, new: undefined })}>
               <XIcon />
               <span className="sr-only">Close</span>
             </Link>
-          </Button>
+          </ButtonLink>
         }
       >
         <NewRun workflow={workflow} />
@@ -95,12 +107,9 @@ export function Inspector({
         title={KIND_TITLE[node.kind] ?? node.kind}
         description={describe(node)}
         action={
-          <Tip tip="Show the overview">
-            <Button variant="ghost" size="icon-sm" onClick={onClose}>
-              <XIcon />
-              <span className="sr-only">Close</span>
-            </Button>
-          </Tip>
+          <TipButton tip="Show the overview" label="Close" size="icon-sm" onClick={onClose}>
+            <XIcon />
+          </TipButton>
         }
       >
         {(node.kind === "op" || node.span) && <NodeFacts node={node} text={text} onLines={onLines} />}
@@ -158,9 +167,7 @@ function Panel({
   return (
     <Card aria-label="Inspector" role="region" className="h-full gap-0 py-0">
       <CardHeader className="border-b py-2 compact:py-1 [.border-b]:pb-2 compact:[.border-b]:pb-1">
-        <CardTitle role="heading" aria-level={2} className="self-center text-sm">
-          {title}
-        </CardTitle>
+        <CardHeading className="self-center text-sm">{title}</CardHeading>
         {description && <CardDescription className="wrap-anywhere">{description}</CardDescription>}
         {action && <CardAction className="self-center">{action}</CardAction>}
       </CardHeader>

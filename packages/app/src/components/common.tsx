@@ -1,7 +1,8 @@
+import { useRender } from "@base-ui/react/use-render";
 import type { ApprovalState, Builtin, Effect, LedgerRecord, RecordedDecision } from "@sanoma/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useMatches } from "@tanstack/react-router";
-import { cva } from "class-variance-authority";
+import { cva, type VariantProps } from "class-variance-authority";
 import {
   ChevronRightIcon,
   CircleAlertIcon,
@@ -19,6 +20,7 @@ import {
   type RefObject,
   Suspense,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -26,7 +28,7 @@ import {
 } from "react";
 import { Alert, AlertDescription } from "#/components/ui/alert.tsx";
 import { Badge } from "#/components/ui/badge.tsx";
-import { Button } from "#/components/ui/button.tsx";
+import { Button, buttonVariants } from "#/components/ui/button.tsx";
 import { ButtonGroup } from "#/components/ui/button-group.tsx";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
@@ -223,8 +225,8 @@ export function OpItem({ id, op, children }: { id: string; op: OpEntry | undefin
  * A link as a list item, inside an `ItemGroup`: `children` is the link (a `<Link>` or an `<a>`),
  * drawn as an Item with `props`, and marked (`CURRENT_LINK`) while it is the page open. A link to
  * another page ends with `<ItemActions><ChevronRightIcon /></ItemActions>` inside the link.
- * shadcn's docs put `role="listitem"` on the Item, but on an `asChild` link that role would replace
- * the link's: a listitem holds the link instead, so it stays a link. Its content and title may
+ * shadcn's docs put `role="listitem"` on the Item, but on the link it renders that role would
+ * replace the link's: a listitem holds the link instead, so it stays a link. Its content and title may
  * shrink (min-w-0, max-w-full), so a long title in a narrow list is cut where a caller's `truncate`
  * span says, rather than widening the list; its focus ring is drawn inside, where a scrolling list
  * does not clip it.
@@ -235,18 +237,28 @@ export function LinkItem({
   children,
   className,
   ...props
-}: Omit<ComponentProps<typeof Item>, "asChild" | "children"> & { children: ReactElement }) {
+}: Omit<ComponentProps<typeof Item>, "render" | "children"> & { children: ReactElement }) {
   return (
     <div role="listitem">
-      <Item asChild className={cn(CURRENT_LINK, LINK_ITEM, className)} {...props}>
-        {children}
-      </Item>
+      <Item render={children} className={cn(CURRENT_LINK, LINK_ITEM, className)} {...props} />
     </div>
   );
 }
 
 /** A link while its URL shows: `aria-current="page"`, which Link sets on an active link (or a list sets on the open one). */
 export const CURRENT_LINK = "aria-[current=page]:bg-muted";
+
+/**
+ * A card's title as a heading: an `<h2>` in CardTitle, whose type it inherits (Tailwind's preflight
+ * leaves a heading's size and weight to its parent). CardTitle is a `<div>` with no `render`.
+ */
+export function CardHeading({ className, children }: { className?: string; children: ReactNode }) {
+  return (
+    <CardTitle className={className}>
+      <h2>{children}</h2>
+    </CardTitle>
+  );
+}
 
 /**
  * A list of panes beside the one open, as a card: `title`, with `description` under it and
@@ -272,9 +284,7 @@ export function PaneList({
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle role="heading" aria-level={2}>
-          {title}
-        </CardTitle>
+        <CardHeading>{title}</CardHeading>
         {description && <CardDescription>{description}</CardDescription>}
         {action && <CardAction>{action}</CardAction>}
       </CardHeader>
@@ -311,13 +321,49 @@ export function ApprovalStatusBadge({ status }: { status: ApprovalState["status"
  * A tooltip on a control. Only on what takes focus (a button, a link, or a badge given
  * `tabIndex={0}` because its tooltip says something it does not), so a keyboard reaches it too.
  * Passive detail on many items, such as a time's exact value, is a native `title` instead.
+ * Base UI's tooltip describes nothing, so the tip is also the trigger's `aria-describedby`
+ * through a hidden copy; `describe={false}` when the trigger's name already says it.
  */
-export function Tip({ tip, children }: { tip: ReactNode; children: ReactElement }) {
+export function Tip({
+  tip,
+  describe = true,
+  children,
+}: {
+  tip: ReactNode;
+  describe?: boolean;
+  children: ReactElement;
+}) {
+  const id = useId();
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipTrigger render={children} aria-describedby={describe ? id : undefined} />
+      {describe && (
+        <span id={id} hidden>
+          {tip}
+        </span>
+      )}
       <TooltipContent>{tip}</TooltipContent>
     </Tooltip>
+  );
+}
+
+/**
+ * An icon button with a tooltip: ghost and icon-sized unless props say otherwise, named `label`
+ * (its `aria-label`; `tip` unless given) and showing `tip`, which describes it unless the name
+ * already says it (`describe` overrides).
+ */
+export function TipButton({
+  tip,
+  label = tip,
+  describe = !label.toLowerCase().includes(tip.toLowerCase()),
+  variant = "ghost",
+  size = "icon",
+  ...props
+}: { tip: string; label?: string; describe?: boolean } & Omit<ComponentProps<typeof Button>, "aria-label">) {
+  return (
+    <Tip tip={tip} describe={describe}>
+      <Button variant={variant} size={size} aria-label={label} {...props} />
+    </Tip>
   );
 }
 
@@ -418,14 +464,12 @@ export function Json({ value }: { value: unknown }) {
 export function Disclosure({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
     <Collapsible className="group/disclosure">
-      <CollapsibleTrigger asChild>
-        <Button variant="ghost" size="xs" className="-ml-2 text-muted-foreground">
-          <ChevronRightIcon
-            data-icon="inline-start"
-            className="transition-transform group-data-open/disclosure:rotate-90"
-          />
-          {label}
-        </Button>
+      <CollapsibleTrigger render={<Button variant="ghost" size="xs" className="-ml-2 text-muted-foreground" />}>
+        <ChevronRightIcon
+          data-icon="inline-start"
+          className="transition-transform group-data-open/disclosure:rotate-90"
+        />
+        {label}
       </CollapsibleTrigger>
       <CollapsibleContent>{children}</CollapsibleContent>
     </Collapsible>
@@ -446,10 +490,27 @@ export function Segmented({ label, children }: { label: string; children: ReactN
 /** One choice of a `Segmented`: its `<Link>`, as a small outline button. */
 export function Segment({ children }: { children: ReactElement }) {
   return (
-    <Button asChild variant="outline" size="sm" className={SEGMENT}>
+    <ButtonLink variant="outline" size="sm" className={SEGMENT}>
       {children}
-    </Button>
+    </ButtonLink>
   );
+}
+
+/**
+ * A link drawn as a Button: `children` is the `<Link>` or `<a>`, given Button's classes and slot.
+ * Not Button with `render`: Base UI's Button makes what it renders `role="button"`, and this is
+ * still a link.
+ */
+export function ButtonLink({
+  variant,
+  size,
+  className,
+  children,
+}: VariantProps<typeof buttonVariants> & { className?: string; children: ReactElement }) {
+  return useRender({
+    render: children,
+    props: { "data-slot": "button", className: cn(buttonVariants({ variant, size }), className) },
+  });
 }
 
 /** JSON behind a disclosure, for inputs and outputs that are usually too long to show inline. */

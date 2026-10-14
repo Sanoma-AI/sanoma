@@ -123,6 +123,8 @@ function Frame({
   children,
 }: Props<GraphNodeKind> & { inbound?: boolean; outbound?: boolean; children: ReactNode }) {
   const state = "state" in node ? node.state : undefined;
+  // A pending node's bg-transparent and text-muted-foreground beat BaseNode's bg-card and
+  // text-card-foreground only because BaseNode merges its className with `cn`.
   return (
     <BaseNode
       className={frame({ tone: state?.tone ?? "off", pending: isPending(node), clickable: selectable, selected })}

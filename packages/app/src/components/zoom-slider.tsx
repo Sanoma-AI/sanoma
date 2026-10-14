@@ -1,18 +1,8 @@
 import { type FitViewOptions, Panel, type PanelProps, useReactFlow, useStore } from "@xyflow/react";
 import { MaximizeIcon, MinusIcon, PlusIcon } from "lucide-react";
-import { Slider as SliderPrimitive } from "radix-ui";
-import type { ComponentProps } from "react";
-import { Button } from "#/components/ui/button.tsx";
-import { Tip } from "./common.tsx";
-
-/** A ghost icon button named `label`, with its name as its tooltip. */
-function ZoomButton({ label, ...props }: { label: string } & ComponentProps<typeof Button>) {
-  return (
-    <Tip tip={label}>
-      <Button variant="ghost" size="icon" aria-label={label} {...props} />
-    </Tip>
-  );
-}
+import { useId } from "react";
+import { Slider } from "#/components/ui/slider.tsx";
+import { TipButton } from "./common.tsx";
 
 /**
  * Adapted from React Flow UI's ZoomSlider, horizontal only: zoom out, a slider, zoom in, the zoom
@@ -33,45 +23,45 @@ export function ZoomSlider({
   const minZoom = useStore((state) => state.minZoom);
   const maxZoom = useStore((state) => state.maxZoom);
   const { zoomTo, zoomIn, zoomOut, fitView } = useReactFlow();
+  const percent = `${(100 * zoom).toFixed(0)}%`;
+  const zoomLabel = useId();
 
   return (
     <Panel className="flex gap-1 rounded-md border bg-card p-1 text-card-foreground" {...props}>
-      <ZoomButton label="Zoom out" onClick={() => zoomOut({ duration })}>
+      <TipButton tip="Zoom out" onClick={() => zoomOut({ duration })}>
         <MinusIcon />
-      </ZoomButton>
-      {/* ui/slider.tsx's markup and classes, not its Slider: that passes its props to Radix's
-          root, and Radix names a lone thumb only by its own aria-label, so its thumb would have
-          no name. This one is "Zoom". */}
-      <SliderPrimitive.Root
-        className="relative flex w-[100px] touch-none items-center select-none"
-        value={[zoom]}
-        min={minZoom}
-        max={maxZoom}
-        step={0.01}
-        onValueChange={([value]) => value !== undefined && zoomTo(value)}
-      >
-        <SliderPrimitive.Track className="relative h-1 w-full grow overflow-hidden rounded-full bg-muted">
-          <SliderPrimitive.Range className="absolute h-full bg-primary select-none" />
-        </SliderPrimitive.Track>
-        <SliderPrimitive.Thumb
-          aria-label="Zoom"
-          className="relative block size-3 shrink-0 rounded-full border border-ring bg-white ring-ring/50 transition-[color,box-shadow] select-none after:absolute after:-inset-2 hover:ring-3 focus-visible:ring-3 focus-visible:outline-hidden active:ring-3 disabled:pointer-events-none disabled:opacity-50"
+      </TipButton>
+      {/* The Slider's thumb takes its name from the root's aria-labelledby, a hidden label. */}
+      <div className="flex w-[100px] items-center">
+        <span id={zoomLabel} hidden>
+          Zoom
+        </span>
+        <Slider
+          value={[zoom]}
+          min={minZoom}
+          max={maxZoom}
+          step={0.01}
+          onValueChange={(value) => zoomTo(Array.isArray(value) ? value[0]! : value)}
+          aria-labelledby={zoomLabel}
         />
-      </SliderPrimitive.Root>
-      <ZoomButton label="Zoom in" onClick={() => zoomIn({ duration })}>
+      </div>
+      <TipButton tip="Zoom in" onClick={() => zoomIn({ duration })}>
         <PlusIcon />
-      </ZoomButton>
-      <ZoomButton
-        label="Zoom to 100%"
+      </TipButton>
+      {/* Named by what it shows, then what it does. A minimum width, not a fixed one: Compact's
+          smaller unit would leave "150%" too little room. */}
+      <TipButton
+        tip="Zoom to 100%"
+        label={`${percent}, zoom to 100%`}
         size="default"
-        className="w-14 tabular-nums"
+        className="min-w-14 tabular-nums"
         onClick={() => zoomTo(1, { duration })}
       >
-        {(100 * zoom).toFixed(0)}%
-      </ZoomButton>
-      <ZoomButton label="Fit the graph" onClick={() => fitView({ ...fitViewOptions, duration })}>
+        {percent}
+      </TipButton>
+      <TipButton tip="Fit the graph" onClick={() => fitView({ ...fitViewOptions, duration })}>
         <MaximizeIcon />
-      </ZoomButton>
+      </TipButton>
     </Panel>
   );
 }

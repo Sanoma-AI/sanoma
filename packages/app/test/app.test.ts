@@ -837,7 +837,7 @@ describe("the page", () => {
     // The run's error is a notice above the graph, and not a fact again below it.
     const notice = run.html.search(/data-slot="alert-description"[^>]*>[^<]*ghost: the site is down/);
     expect(notice).toBeGreaterThan(-1);
-    expect(notice).toBeLessThan(run.html.search(/data-slot="card-title"[^>]*>Graph</));
+    expect(notice).toBeLessThan(run.html.search(/data-slot="card-title"[^>]*><h2>Graph</));
     expect(run.html).not.toMatch(/<dt[^>]*>Error<\/dt>/);
   });
 
@@ -916,11 +916,11 @@ describe("the page", () => {
     expect(found.html).toContain('data-wide="true"');
     expect((await page("/inbox")).html).not.toContain("data-wide=");
     // The graph's card, drawn in the browser: its title and a skeleton.
-    expect(found.html).toMatch(/data-slot="card-title"[^>]*>Graph</);
+    expect(found.html).toMatch(/data-slot="card-title"[^>]*><h2>Graph</);
     expect(found.html).toMatch(/<div data-slot="skeleton"[^>]*aria-label="Loading the graph"/);
     // Beside it, the inspector, with nothing selected: About, what it may call.
     expect(found.html).toMatch(/aria-label="Inspector"/);
-    expect(found.html).toMatch(/role="heading" aria-level="2"[^>]*>About</);
+    expect(found.html).toMatch(/<h2>About</);
     expect(found.html).toMatch(/<h3[^>]*>Operations it may call<\/h3>/);
     // Under them, the Code tab, open: the source as plain text until its view loads. No Ledger
     // tab: the workflow's pane has no run.
@@ -944,11 +944,11 @@ describe("the page", () => {
     for (const path of ["/workflows/announce?new=true", "/workflows/announce?new"]) {
       const panel = await page(path);
       expect(panel.status, path).toBe(200);
-      expect(panel.html, path).toMatch(/role="heading" aria-level="2"[^>]*>New run</);
+      expect(panel.html, path).toMatch(/<h2>New run</);
       expect(panel.html, path).toContain('id="field-title"');
     }
     const panel = await page("/workflows/announce?new");
-    expect(panel.html).not.toMatch(/role="heading" aria-level="2"[^>]*>About</);
+    expect(panel.html).not.toMatch(/<h2>About</);
     expect(panel.html).not.toMatch(/<fieldset[^>]*disabled/);
     expect(panel.html).toMatch(
       /<a[^>]*href="\/workflows\/announce"[^>]*><svg[^>]*>(?:(?!<\/a>)[\s\S])*Close<\/span><\/a>/,
@@ -1007,14 +1007,14 @@ describe("the page", () => {
     const open = await page("/workflows/announce");
     expect(open.html).toMatch(/<aside[^>]*aria-label="Runs of this workflow"[^>]*>/);
     expect(open.html).not.toMatch(/<aside[^>]*aria-label="Runs of this workflow"[^>]*data-collapsed/);
-    expect(open.html).toMatch(/<button[^>]*aria-expanded="true"[^>]*>(?:(?!<\/button>)[\s\S])*Runs rail</);
+    expect(open.html).toMatch(/<button(?=[^>]*aria-expanded="true")[^>]*aria-label="Runs rail"/);
 
     const folded = await page(`/workflows/announce/runs/${runId}`, app.url, {
       headers: { cookie: "sanoma_rail=collapsed" },
     });
     expect(folded.status).toBe(200);
     expect(folded.html).toMatch(/<aside[^>]*aria-label="Runs of this workflow"[^>]*data-collapsed=""/);
-    expect(folded.html).toMatch(/<button[^>]*aria-expanded="false"[^>]*>(?:(?!<\/button>)[\s\S])*Runs rail</);
+    expect(folded.html).toMatch(/<button(?=[^>]*aria-expanded="false")[^>]*aria-label="Runs rail"/);
     // No menu nor rows: the Workflow link is an icon, each run a dot, the run shown marked.
     expect(folded.html).not.toContain('aria-label="Show runs"');
     expect(folded.html).not.toContain("All runs of this workflow");
@@ -1049,17 +1049,17 @@ describe("the page", () => {
     // React Flow draws the graph in the browser only: the server renders its heading and a
     // skeleton. Under it the Ledger tab is open, each row it has a node for with Show in graph;
     // the source waits behind Code.
-    expect(found.html).toMatch(/data-slot="card-title"[^>]*>Graph</);
+    expect(found.html).toMatch(/data-slot="card-title"[^>]*><h2>Graph</);
     expect(found.html).toMatch(/<div data-slot="skeleton"[^>]*aria-label="Loading the graph"/);
     expect(found.html).toMatch(/role="tab"[^>]*aria-selected="true"[^>]*>Ledger</);
     expect(found.html).toMatch(/role="tab"[^>]*aria-selected="false"[^>]*>Code</);
     expect(found.html).toContain('aria-label="Ledger"');
-    expect(found.html).toMatch(/<span class="sr-only">Show in graph<\/span>/);
+    expect(found.html).toMatch(/<button[^>]*aria-label="Show in graph"/);
     expect(found.html).not.toMatch(/<pre[^>]*>[^<]*ctx\.ghost\.post\.create\(/);
     // A finished run has no banner.
     expect(found.text).not.toContain("Waiting on");
     // The inspector, with nothing selected: the run's facts and its approvals.
-    expect(found.html).toMatch(/role="heading" aria-level="2"[^>]*>Run</);
+    expect(found.html).toMatch(/<h2>Run</);
     expect(found.html).toMatch(/<dt[^>]*>Run id<\/dt><dd[^>]*><code[^>]*>/);
     // The header's New run opens the panel on this pane; no Run. The rail's Workflow link is not
     // the current page here.
@@ -1073,7 +1073,7 @@ describe("the page", () => {
     // ?new on a run's pane: the New run panel in place of the run's facts.
     const panel = await page(`/workflows/announce/runs/${runId}?new`);
     expect(panel.html).toContain('id="field-title"');
-    expect(panel.html).not.toMatch(/role="heading" aria-level="2"[^>]*>Run</);
+    expect(panel.html).not.toMatch(/<h2>Run</);
 
     // A run waiting on its approval: the banner says on whom and for what, with a button to its node.
     const started = await postRun({ workflow: "announce", input: input("Banner") });
@@ -1298,8 +1298,7 @@ describe("resources and drift", () => {
   it("renders each workflow's card: the vendors it calls, its Test and Run, and its strip in the browser", async () => {
     const workflows = await page("/workflows");
     // Each card's heading links to its page; the sidebar's links come before them.
-    const at = (name: string) =>
-      workflows.text.search(new RegExp(`aria-level="2"[^>]*><a[^>]*href="/workflows/${name}"`));
+    const at = (name: string) => workflows.text.search(new RegExp(`<h2><a[^>]*href="/workflows/${name}"`));
     expect(at("announce")).toBeGreaterThan(0);
     expect(at("drift")).toBeGreaterThan(at("announce"));
     const card = workflows.text.slice(at("announce"), at("drift"));
@@ -1554,7 +1553,7 @@ describe("an app whose config no longer has a workflow", () => {
     const run = await page(`/workflows/announce/runs/${runId}`, retired.url);
     expect(run.status).toBe(200);
     // Its graph, from the ledger alone, and its ledger; the Code tab says why it has no source.
-    expect(run.html).toMatch(/data-slot="card-title"[^>]*>Graph</);
+    expect(run.html).toMatch(/data-slot="card-title"[^>]*><h2>Graph</);
     expect(run.html).toMatch(/role="tab"[^>]*>Ledger</);
     expect(run.html).toContain('aria-label="Ledger"');
     const old = await fetch(new URL(`/runs/${runId}`, retired.url), { redirect: "manual" });

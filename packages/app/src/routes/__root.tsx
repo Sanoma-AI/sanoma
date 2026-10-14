@@ -109,7 +109,7 @@ function Root() {
   const wide = useMatches({ select: (matches) => matches.some((match) => match.staticData.wide) });
   return (
     <ActorContext value={actor}>
-      {/* Radix's tooltips need one provider: the sidebar's, and any a page shows. */}
+      {/* One provider for every tooltip: the sidebar's, and any a page shows. */}
       <TooltipProvider>
         <DensityProvider defaultCompact={compact}>
           <SidebarProvider defaultOpen={sidebarOpen}>
@@ -179,9 +179,7 @@ function Crumbs() {
           i < crumbs.length - 1 ? (
             <Fragment key={id}>
               <BreadcrumbItem>
-                <BreadcrumbLink asChild>
-                  <Link to={pathname}>{label}</Link>
-                </BreadcrumbLink>
+                <BreadcrumbLink render={<Link to={pathname} />}>{label}</BreadcrumbLink>
               </BreadcrumbItem>
               <BreadcrumbSeparator />
             </Fragment>

@@ -20,13 +20,10 @@ export default function WhoAreYou() {
   const { setActor } = useActor();
   const [name, setName] = useState("");
   return (
-    // No way out but a name: every change needs one.
+    // No way out but a name: every change needs one. Open, with no onOpenChange, so neither
+    // Escape nor a press outside closes it.
     <Dialog open>
-      <DialogContent
-        showCloseButton={false}
-        onEscapeKeyDown={(e) => e.preventDefault()}
-        onInteractOutside={(e) => e.preventDefault()}
-      >
+      <DialogContent showCloseButton={false}>
         <form
           className="flex flex-col gap-4"
           onSubmit={(e) => {
