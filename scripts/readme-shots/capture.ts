@@ -1,43 +1,49 @@
 // The browser half of `pnpm readme:shots`: the demo's storyboard, the seeded runs and the stills,
 // each scene in a fresh browser context of a local Chrome, light theme.
-import { existsSync, mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Browser, type ElementHandle, launch, type Page } from "puppeteer-core";
+import { RAIL_COOKIE } from "../../packages/app/src/lib/rail.ts";
 
-const MAC_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-
+/** The installed Google Chrome, or the binary `CHROME_PATH` names. */
 export async function launchChrome(): Promise<Browser> {
-  const executablePath = process.env.CHROME_PATH ?? MAC_CHROME;
-  if (!existsSync(executablePath)) {
-    throw new Error(`readme:shots: no Chrome at ${executablePath}; set CHROME_PATH to a Chrome or Chromium binary`);
+  try {
+    return await launch({ channel: "chrome", executablePath: process.env.CHROME_PATH, headless: true });
+  } catch (err) {
+    throw new Error(
+      `readme:shots: could not start ${process.env.CHROME_PATH ?? "Google Chrome"}; install Chrome or set CHROME_PATH to a Chrome or Chromium binary`,
+      { cause: err },
+    );
   }
-  return launch({ executablePath, headless: true });
 }
 
 interface Scene {
   actor: string;
   /** The sidebar open, or folded to its icons. */
   sidebar: boolean;
-  /** The workflow's rail of runs, open or folded to its dots. */
-  rail: "open" | "collapsed";
   width: number;
   height: number;
   scale: number;
 }
 
-/** A page in a context of its own, with the actor, cookies and viewport of `scene`. */
+/** dana at 1200×800 with the sidebar folded: the demo's scene, and the seeding's. */
+const DANA: Scene = { actor: "dana", sidebar: false, width: 1200, height: 800, scale: 1 };
+
+/**
+ * A page in a context of its own, with the actor, sidebar and viewport of `scene`, the workflow's
+ * rail of runs folded to its dots, and the light theme (the app follows the system's by default).
+ */
 async function open(browser: Browser, base: string, scene: Scene): Promise<Page> {
   const context = await browser.createBrowserContext();
   await context.setCookie(
     { name: "sidebar_state", value: String(scene.sidebar), domain: new URL(base).hostname },
-    { name: "sanoma_rail", value: scene.rail, domain: new URL(base).hostname },
+    { name: RAIL_COOKIE, value: "collapsed", domain: new URL(base).hostname },
   );
   const page = await context.newPage();
   await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
   // The app keeps the actor in localStorage; set only once, so a scene can switch it.
   await page.evaluateOnNewDocument((actor) => {
     if (!localStorage.getItem("sanoma.actor")) localStorage.setItem("sanoma.actor", actor);
-    localStorage.setItem("sanoma.theme", "light");
   }, scene.actor);
   await page.setViewport({ width: scene.width, height: scene.height, deviceScaleFactor: scene.scale });
   page.on("pageerror", (err) => console.warn(`readme:shots: page error on ${page.url()}: ${String(err)}`));
@@ -85,18 +91,12 @@ async function typeDateTime(page: Page, when: Date, each: () => Promise<void> = 
  * demo.gif's storyboard, at 1200×800: dana starts a run of announce from New run with a launch time
  * about a minute away, marketing-lead approves it in the Inbox with a note, and the run sleeps until
  * the launch, then finishes. Each frame is a screenshot shown for its own duration; a drawn cursor
- * moves to what is clicked. Returns the run's path and the frames as ffmpeg's concat list.
+ * moves to what is clicked. Writes the frames and their list for ffmpeg's concat demuxer
+ * (`frames.txt`) to `dir`, and returns the run's path.
  */
-export async function recordDemo(browser: Browser, base: string, dir: string) {
+export async function recordDemo(browser: Browser, base: string, dir: string): Promise<string> {
   mkdirSync(dir, { recursive: true });
-  const page = await open(browser, base, {
-    actor: "dana",
-    sidebar: false,
-    rail: "collapsed",
-    width: 1200,
-    height: 800,
-    scale: 1,
-  });
+  const page = await open(browser, base, DANA);
   await page.evaluateOnNewDocument(() => {
     addEventListener("DOMContentLoaded", () => {
       const cursor = document.createElement("div");
@@ -117,8 +117,8 @@ export async function recordDemo(browser: Browser, base: string, dir: string) {
   };
   const transform = (value: string) =>
     page.$eval("#fake-cursor", (c, to) => ((c as HTMLElement).style.transform = to), value);
-  /** Glides the cursor to `el`'s centre plus (dx, dy), in three frames. */
-  const moveTo = async (el: ElementHandle, dx = 0, dy = 0) => {
+  /** Glides the cursor to `el`'s centre plus (dx, dy), in three frames; returns that point. */
+  const moveTo = async (el: ElementHandle, dx = 0, dy = 0): Promise<[x: number, y: number]> => {
     const box = await el.boundingBox();
     if (!box) throw new Error("readme:shots: moving to an element that is not shown");
     const x = Math.round(box.x + box.width / 2 + dx);
@@ -137,6 +137,7 @@ export async function recordDemo(browser: Browser, base: string, dir: string) {
       await shot(0.13);
     }
     await wait(100);
+    return [x, y];
   };
   const press = async () => {
     await transform("scale(.85)");
@@ -144,10 +145,9 @@ export async function recordDemo(browser: Browser, base: string, dir: string) {
     await transform("");
   };
   const click = async (el: ElementHandle, dx = 0, dy = 0) => {
-    await moveTo(el, dx, dy);
+    const [x, y] = await moveTo(el, dx, dy);
     await press();
-    const box = (await el.boundingBox())!;
-    await el.click({ offset: { x: box.width / 2 + dx, y: box.height / 2 + dy } });
+    await page.mouse.click(x, y);
   };
   const typeIn = async (selector: string, text: string, step: number) => {
     await page.focus(selector);
@@ -227,25 +227,19 @@ export async function recordDemo(browser: Browser, base: string, dir: string) {
   // The concat demuxer takes the last frame's duration only when that frame is listed again.
   const list =
     frames.map(([file, seconds]) => `file '${file}'\nduration ${seconds}\n`).join("") + `file '${frames.at(-1)![0]}'\n`;
-  return { runPath, list };
+  writeFileSync(join(dir, "frames.txt"), list);
+  return runPath;
 }
 
 /** Two more runs of announce from dana, waiting on marketing-lead, for the Inbox still. */
 export async function seedPendingRuns(browser: Browser, base: string): Promise<void> {
-  const page = await open(browser, base, {
-    actor: "dana",
-    sidebar: false,
-    rail: "collapsed",
-    width: 1200,
-    height: 800,
-    scale: 1,
-  });
+  const page = await open(browser, base, DANA);
   for (const [title, body, launchAt] of [
     ["Summer sale", "<p>Everything is 20% off until Sunday.</p>", new Date(2027, 5, 1, 9)],
     ["Pricing update", "<p>New plans for teams, from next month.</p>", new Date(2027, 5, 15, 10)],
   ] as const) {
     await page.goto(`${base}/workflows/announce?new`, { waitUntil: "networkidle0" });
-    await wait(800);
+    await page.waitForSelector("#field-title");
     await page.type("#field-title", title);
     await page.type("#field-body", body);
     const field = await need(page, "#field-launchAt");
@@ -276,14 +270,13 @@ export async function still(browser: Browser, base: string, path: string, out: s
   const page = await open(browser, base, {
     actor: "marketing-lead",
     sidebar: options.sidebar,
-    rail: "collapsed",
     width: 1440,
     height,
     scale: 2,
   });
   await page.goto(base + path, { waitUntil: "networkidle0" });
-  await wait(1500);
-  if (options.tab) await (await byText(page, '[role="tab"]', options.tab)).click();
+  if (options.select) await page.waitForSelector(".react-flow__node");
+  if (options.tab) await (await page.waitForSelector(`[role="tab"]::-p-text(${JSON.stringify(options.tab)})`))!.click();
   // Grown before the graph is fitted: a resize fits it again, to one end. (A fullPage screenshot
   // resizes too, after the fit.)
   while (options.fullPage) {
@@ -294,11 +287,10 @@ export async function still(browser: Browser, base: string, path: string, out: s
     await wait(500);
   }
   if (options.select) {
+    // Fitting animates for 300 ms.
     await page.click('[aria-label="Fit the graph"]');
     await wait(800);
-    const nodes = await page.$$(".react-flow__node");
-    const texts = await Promise.all(nodes.map((node) => node.evaluate((e) => e.textContent ?? "")));
-    const node = nodes[texts.findIndex((text) => text.includes(options.select!))];
+    const node = await page.$(`.react-flow__node::-p-text(${JSON.stringify(options.select)})`);
     if (!node) throw new Error(`readme:shots: no graph node reading "${options.select}" on ${path}`);
     await node.click();
     await wait(800);

@@ -10,12 +10,12 @@
 4. Makes the GIF with ffmpeg and writes all four to `.github/assets/`.
 5. Stops the server, drops the database and removes the temporary directory, also when a step fails.
 
-It takes about a minute and a half, most of it the run's sleep until its launch minute ([`capture.ts`](capture.ts) has the storyboard; [`shots.ts`](shots.ts) the rest).
+It takes one and a half to two minutes, most of it the run's sleep until its launch minute (30 to 90 s away) ([`capture.ts`](capture.ts) has the storyboard; [`shots.ts`](shots.ts) the rest).
 
 ## Needs
 
 - Postgres on 5433: `pnpm db:up`.
-- Google Chrome, or Chromium: `CHROME_PATH` names its binary (default `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`).
+- Google Chrome, found where its installer puts it; or `CHROME_PATH` naming a Chrome or Chromium binary.
 - `ffmpeg` on `PATH`.
 
-`SANOMA_PREVIEW_DATABASE_URL` names the database it creates and drops (default `postgresql://postgres:dbos@localhost:5433/sanoma_preview_readme_shots`): never point it at one you keep.
+The database it creates and drops is named as a test's is: `SANOMA_TEST_DATABASE_URL` (default `postgresql://postgres:dbos@localhost:5433/sanoma_test`) with `_readme_shots` appended. Set that per worktree, as for the tests, so two runs at once never share one.
