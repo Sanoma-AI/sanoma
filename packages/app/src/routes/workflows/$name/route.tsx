@@ -1,6 +1,8 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { createFileRoute, notFound, Outlet } from "@tanstack/react-router";
+import { createFileRoute, Link, notFound, Outlet } from "@tanstack/react-router";
+import { PlayIcon } from "lucide-react";
 import { Badge } from "#/components/ui/badge.tsx";
+import { Button } from "#/components/ui/button.tsx";
 import { loadCode, loadGraph, Notice, PageHeader, pageTitle } from "#/components/common.tsx";
 import { RunRail } from "#/components/run-rail.tsx";
 import {
@@ -16,11 +18,13 @@ import {
 
 /**
  * One workflow's page: its header, the rail of its runs, and the pane the URL picks (the
- * workflow's own, or one run's). The panes read what this loader puts in the query client.
+ * workflow's own, or one run's), each a WorkflowView. The panes read what this loader puts in the
+ * query client.
  */
 export const Route = createFileRoute("/workflows/$name")({
-  // `?runs=` filters the rail. The rail's own links carry it; a middleware retaining it would
-  // put it on the sidebar's links to other workflows too.
+  // On either pane: `?runs=` filters the rail, `?new` opens New run in the inspector, and
+  // `?scenario=` is its Sandbox mode. The rail's own links carry `?runs=` (and drop the others);
+  // a middleware retaining it would put it on the sidebar's links to other workflows too.
   validateSearch: WorkflowSearch,
   loaderDeps: ({ search }) => ({ runs: search.runs }),
   loader: async ({ context: { queryClient }, params, deps }) => {
@@ -63,14 +67,28 @@ function WorkflowLayout() {
   const { name } = Route.useParams();
   const workflow = useWorkflow(name);
   // Titled by the workflow (on a run's pane the last crumb, PageHeader's default, is the run), or
-  // only its name when it is retired.
+  // only its name when it is retired. New run opens in the inspector of the pane that shows: none
+  // for a retired workflow, which has nothing to start.
   return (
     <>
-      <PageHeader title={workflow?.title ?? name}>
+      <PageHeader
+        title={workflow?.title ?? name}
+        action={
+          workflow && (
+            <Button asChild size="sm">
+              <Link to="." search={(prev) => ({ ...prev, new: true })}>
+                <PlayIcon data-icon="inline-start" />
+                New run
+              </Link>
+            </Button>
+          )
+        }
+      >
         {workflow && <code className="text-muted-foreground">{name}</code>}
         {workflow?.builtin && <Badge variant="secondary">built-in</Badge>}
       </PageHeader>
-      {/* The rail beside the pane, or above it once the pane would be narrower than 560px. */}
+      {/* The rail beside the pane, or above it once the pane would be narrower than 560px. Folded, the
+          rail is a narrow column. */}
       <div className="flex flex-wrap items-start gap-(--gap-region)">
         <RunRail name={name} />
         <div className="min-w-0 flex-[999_1_560px]">

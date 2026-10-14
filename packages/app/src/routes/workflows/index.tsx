@@ -3,7 +3,7 @@ import { RUN_STATUSES } from "@sanoma/workflows/shared";
 import type { WorkflowEntry } from "@sanoma/workflows/describe";
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { FlaskConicalIcon } from "lucide-react";
+import { FlaskConicalIcon, XIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 import { z } from "zod";
 import { Badge } from "#/components/ui/badge.tsx";
@@ -43,23 +43,33 @@ import {
   waitingRunsQuery,
 } from "../../queries.ts";
 
-/** `?view=runs` shows every run as a table, `?status=` filtering it; anything else, a card per workflow. */
+/**
+ * `?view=runs` shows every run as a table, `?status=` and `?workflow=` (a workflow's name, as its
+ * rail links here) filtering it; anything else, a card per workflow.
+ */
 const HomeSearch = z.object({
   view: z.literal("runs").optional().catch(undefined),
   status: z.enum(RUN_STATUSES).optional().catch(undefined),
+  workflow: z.string().optional().catch(undefined),
 });
 
-/** The All runs table's runs: the latest of every workflow, or the latest with a status. Polled as the rail is. */
-const allRunsQuery = (status: RunStatus | undefined) =>
-  queryOptions({ ...runsQuery({ status, limit: RUNS_LIMIT.default }), refetchInterval: runsRefetchInterval(POLL_MS) });
+/**
+ * The All runs table's runs: the latest of every workflow or of one, or the latest with a status.
+ * Polled as the rail is.
+ */
+const allRunsQuery = (status: RunStatus | undefined, workflow: string | undefined) =>
+  queryOptions({
+    ...runsQuery({ status, workflow, limit: RUNS_LIMIT.default }),
+    refetchInterval: runsRefetchInterval(POLL_MS),
+  });
 
 export const Route = createFileRoute("/workflows/")({
   validateSearch: HomeSearch,
-  loaderDeps: ({ search: { view, status } }) => ({ view, status }),
+  loaderDeps: ({ search: { view, status, workflow } }) => ({ view, status, workflow }),
   // The root route loads the config.
   loader: async ({ context: { queryClient }, deps }) => {
     if (deps.view === "runs") {
-      await queryClient.query({ ...allRunsQuery(deps.status), staleTime: "static" });
+      await queryClient.query({ ...allRunsQuery(deps.status, deps.workflow), staleTime: "static" });
       return;
     }
     if (!import.meta.env.SSR) void loadGraph();
@@ -74,13 +84,13 @@ export const Route = createFileRoute("/workflows/")({
 });
 
 function WorkflowsPage() {
-  const { view, status } = Route.useSearch();
+  const { view, status, workflow } = Route.useSearch();
   return (
     <>
       <PageHeader />
       <ConfigFacts />
       <ViewToggle />
-      {view === "runs" ? <AllRuns status={status} /> : <ByWorkflow />}
+      {view === "runs" ? <AllRuns status={status} workflow={workflow} /> : <ByWorkflow />}
     </>
   );
 }
@@ -207,7 +217,7 @@ const WorkflowCard = memo(function WorkflowCard({
         <CardAction className="flex gap-2">
           {scenario !== undefined && (
             <Button asChild variant="outline" size="sm">
-              <Link to="/workflows/$name" params={{ name }} search={{ scenario }}>
+              <Link to="/workflows/$name" params={{ name }} search={{ new: true, scenario }}>
                 <FlaskConicalIcon data-icon="inline-start" />
                 Test
               </Link>
@@ -238,35 +248,53 @@ const WorkflowCard = memo(function WorkflowCard({
   );
 });
 
-/** Every workflow's latest runs as a table, filtered by `?status=`. */
-function AllRuns({ status }: { status: RunStatus | undefined }) {
+/** Every workflow's latest runs as a table, filtered by `?status=` and `?workflow=`. */
+function AllRuns({ status, workflow }: { status: RunStatus | undefined; workflow: string | undefined }) {
   const navigate = Route.useNavigate();
-  const { data: runs, error } = useSuspenseQuery(allRunsQuery(status));
+  const { data: runs, error } = useSuspenseQuery(allRunsQuery(status, workflow));
   return (
     <div className="flex flex-col gap-(--gap-section)">
-      <NativeSelect
-        size="sm"
-        aria-label="Status"
-        value={status ?? ""}
-        // Another status replaces the page in the history rather than adding one; Any status
-        // leaves the URL without `?status=`.
-        onChange={(e) =>
-          void navigate({
-            search: (prev) => ({ ...prev, status: HomeSearch.shape.status.parse(e.target.value) }),
-            replace: true,
-          })
-        }
-      >
-        <NativeSelectOption value="">Any status</NativeSelectOption>
-        {RUN_STATUSES.map((s) => (
-          <NativeSelectOption key={s} value={s}>
-            {s}
-          </NativeSelectOption>
-        ))}
-      </NativeSelect>
+      <div className="flex flex-wrap items-center gap-2">
+        <NativeSelect
+          size="sm"
+          aria-label="Status"
+          value={status ?? ""}
+          // Another status replaces the page in the history rather than adding one; Any status
+          // leaves the URL without `?status=`.
+          onChange={(e) =>
+            void navigate({
+              search: (prev) => ({ ...prev, status: HomeSearch.shape.status.parse(e.target.value) }),
+              replace: true,
+            })
+          }
+        >
+          <NativeSelectOption value="">Any status</NativeSelectOption>
+          {RUN_STATUSES.map((s) => (
+            <NativeSelectOption key={s} value={s}>
+              {s}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        {/* The workflow's filter, as its rail's link set it; its button removes it. */}
+        {workflow !== undefined && (
+          <Badge variant="outline" className="h-7 gap-1 pr-0.5">
+            Workflow: <code>{workflow}</code>
+            <Button asChild variant="ghost" size="icon-xs" className="size-5">
+              <Link to="." search={(prev) => ({ ...prev, workflow: undefined })} replace>
+                <XIcon />
+                <span className="sr-only">Any workflow</span>
+              </Link>
+            </Button>
+          </Badge>
+        )}
+      </div>
       {error && <Notice variant="destructive">Could not refresh runs: {error.message}</Notice>}
       {runs.length === 0 ? (
-        <Nothing title={status ? "No runs with that status" : "No runs yet"} />
+        <Nothing
+          title={
+            status ? "No runs with that status" : workflow !== undefined ? "No runs of that workflow" : "No runs yet"
+          }
+        />
       ) : (
         <RunsTable runs={runs} />
       )}

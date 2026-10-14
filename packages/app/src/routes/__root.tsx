@@ -7,6 +7,7 @@ import { ThemeProvider } from "next-themes";
 import { Fragment, lazy, type ReactNode, Suspense } from "react";
 import { AppSidebar } from "#/components/app-sidebar.tsx";
 import { DENSITY_COOKIE, DensityProvider, useDensity } from "#/components/density.tsx";
+import { RAIL_COOKIE } from "#/components/run-rail.tsx";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -46,8 +47,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   // Who the server says is asking, in the first render: a deployment's login shows at once.
   // And the config, which every page reads and which cannot change while the app runs.
   // Both stay in the query client, where the page reads them: a loader returns only what no
-  // query holds (here, whether the sidebar was left open and the density), since the page carries
-  // loader data too.
+  // query holds (here, whether the sidebar was left open, the density, and whether a workflow
+  // page's rail was left folded), since the page carries loader data too.
   loader: async ({ context: { queryClient } }) => {
     // The inbox badge's count, started here and not awaited: it streams in with the page, and a
     // slow or failed read never holds the page up (the badge shows nothing until it comes).
@@ -70,20 +71,23 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 const SIDEBAR_COOKIE = "sidebar_state";
 
 /**
- * Whether the sidebar was left open (open unless its cookie says closed) and whether the page is
- * Compact (DensityProvider says why a cookie), from the request's cookies on the server and
- * `document.cookie` in the browser. Both providers take their value once, as they mount: the first
- * render is hydration, which has the server's answer; reading it in the browser too keeps a later
- * remount (an error boundary's retry, say) on the cookie's side for the sidebar and the density alike.
+ * Whether the sidebar was left open (open unless its cookie says closed), whether the page is
+ * Compact (DensityProvider says why a cookie) and whether a workflow page's rail was left folded
+ * (RunRail), from the request's cookies on the server and `document.cookie` in the browser. Each
+ * takes its value once, as it mounts: the first render is hydration, which has the server's
+ * answer; reading it in the browser too keeps a later remount (an error boundary's retry, or the
+ * next workflow page, say) on the cookie's side for all three.
  */
 const readPrefs = createIsomorphicFn()
   .server(() => ({
     sidebarOpen: getCookie(SIDEBAR_COOKIE) !== "false",
     compact: getCookie(DENSITY_COOKIE) === "compact",
+    railCollapsed: getCookie(RAIL_COOKIE) === "collapsed",
   }))
   .client(() => ({
     sidebarOpen: cookieValue(SIDEBAR_COOKIE) !== "false",
     compact: cookieValue(DENSITY_COOKIE) === "compact",
+    railCollapsed: cookieValue(RAIL_COOKIE) === "collapsed",
   }));
 
 /** A cookie's value in the browser, or undefined when it is not set. */

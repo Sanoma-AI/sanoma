@@ -440,7 +440,7 @@ function useSeen(ref: RefObject<HTMLElement | null>): boolean {
  * A box filling its parent, whose content loads and draws in the browser once the box comes near
  * the screen; until then, and on the server, `fallback` holds its place. (The server never sees
  * the box: `useSeen` flips in an effect, and effects run only in the browser.) Bare: a caller that
- * wants a card puts it in a `PanelCard`, or sizes its parent (a resizable panel).
+ * wants a card puts it in a `PanelCard`, or sizes its parent.
  */
 function LazyPanel({ fallback, children }: { fallback: ReactNode; children: ReactNode }) {
   const box = useRef<HTMLDivElement>(null);

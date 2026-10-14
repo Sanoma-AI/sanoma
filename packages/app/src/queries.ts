@@ -247,11 +247,20 @@ const FILTERS: Record<RunFilter, { status?: RunStatus; match?: (run: RunSummary)
   failed: { status: "failed" },
 };
 
-/** A workflow page's search: `?runs=`, the rail's filter. Any other value reads as all. */
-export const WorkflowSearch = z.object({ runs: z.enum(RUN_FILTERS).optional().catch(undefined) });
-
-/** The Workflow pane's search: `?scenario=`, Sandbox mode and the scenario it runs; without it, Live. */
-export const ScenarioSearch = z.object({ scenario: z.string().optional().catch(undefined) });
+/**
+ * A workflow page's search, on either pane: `?runs=`, the rail's filter (any other value reads as
+ * all); `?new`, the New run panel in the inspector (the page's links write `?new=true`, and a bare
+ * `?new` typed by hand opens it too); and `?scenario=`, Sandbox mode and the scenario it runs
+ * (without it, Live), which also marks the workflow's graph.
+ */
+export const WorkflowSearch = z.object({
+  runs: z.enum(RUN_FILTERS).optional().catch(undefined),
+  new: z
+    .union([z.literal(true), z.literal("").transform(() => true as const)])
+    .optional()
+    .catch(undefined),
+  scenario: z.string().optional().catch(undefined),
+});
 
 /** How many runs the rail lists: the latest. */
 export const RAIL_LIMIT = RUNS_LIMIT.default;

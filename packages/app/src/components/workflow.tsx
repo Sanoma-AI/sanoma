@@ -13,14 +13,14 @@ import { BUILTIN_ICON, ItemHeading, Json, None, Notice, OpItem, Section } from "
 
 // A workflow's pieces, as the workflows page's cards and a workflow's own page show them.
 
-/** Run: opens the workflow's page, where its New run form is. A Button otherwise, styled as given. */
+/** Run: opens the workflow's page with its New run panel (`?new`). A Button otherwise, styled as given. */
 export function RunButton({
   name,
   ...props
 }: { name: string } & Omit<ComponentProps<typeof Button>, "asChild" | "children">) {
   return (
     <Button asChild {...props}>
-      <Link to="/workflows/$name" params={{ name }}>
+      <Link to="/workflows/$name" params={{ name }} search={{ new: true }}>
         <PlayIcon data-icon="inline-start" />
         Run
       </Link>
