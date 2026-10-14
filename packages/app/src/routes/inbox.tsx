@@ -3,13 +3,14 @@ import type { ConfigDescription, OpEntry } from "@sanoma/workflows/describe";
 import { mayDecide } from "@sanoma/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { memo } from "react";
 import { ItemContent, ItemDescription, ItemTitle } from "#/components/ui/item.tsx";
 import { APPROVAL_TONE } from "#/lib/tone.ts";
 import { useActor } from "../actor.ts";
 import { RUNS_LIMIT, starterName } from "../api.ts";
 import { ApprovalCard } from "../components/approval.tsx";
 import {
-  CURRENT_LINK,
+  ItemTime,
   LinkItem,
   Nothing,
   Notice,
@@ -20,7 +21,6 @@ import {
   Segment,
   Segmented,
   StatusDot,
-  When,
 } from "../components/common.tsx";
 import {
   approvalKey,
@@ -160,29 +160,15 @@ function Split({
       <nav aria-label="Approvals">
         <PaneList title="Approvals" description={description}>
           {entries.map((entry) => {
-            const { run, approval } = entry;
             const key = approvalKey(entry);
-            // `aria-current` marks the approval open beside the list.
             return (
-              <LinkItem key={key} size="xs" className={CURRENT_LINK}>
-                <Link to="/inbox" search={{ show, approval: key }} aria-current={key === openKey ? "page" : undefined}>
-                  <ItemContent>
-                    <ItemTitle>
-                      <StatusDot tone={APPROVAL_TONE[approval.status]} />
-                      {approval.title}
-                    </ItemTitle>
-                    <ItemDescription>
-                      {approval.status !== "pending" && `${approval.status} · `}
-                      {titles[run.workflow] ?? run.workflow} · from {starterName(run)}
-                    </ItemDescription>
-                  </ItemContent>
-                  <ItemContent>
-                    <ItemDescription>
-                      <When at={approval.decidedAt ?? approval.requestedAt} />
-                    </ItemDescription>
-                  </ItemContent>
-                </Link>
-              </LinkItem>
+              <InboxRow
+                key={key}
+                entry={entry}
+                show={show}
+                workflow={titles[entry.run.workflow] ?? entry.run.workflow}
+                current={key === openKey}
+              />
             );
           })}
         </PaneList>
@@ -194,6 +180,42 @@ function Split({
     </div>
   );
 }
+
+/**
+ * An approval in the list: its status and title, its workflow (by title) and who started the run,
+ * and when it was asked or decided. `current` marks the one open beside the list. Memoised: the
+ * query shares an unchanged entry's object across a poll, so only the rows that changed draw again.
+ */
+const InboxRow = memo(function InboxRow({
+  entry,
+  show,
+  workflow,
+  current,
+}: {
+  entry: Entry;
+  show: InboxFilter | undefined;
+  workflow: string;
+  current: boolean;
+}) {
+  const { run, approval } = entry;
+  return (
+    <LinkItem size="xs">
+      <Link to="/inbox" search={{ show, approval: approvalKey(entry) }} aria-current={current ? "page" : undefined}>
+        <ItemContent>
+          <ItemTitle>
+            <StatusDot tone={APPROVAL_TONE[approval.status]} />
+            {approval.title}
+          </ItemTitle>
+          <ItemDescription>
+            {approval.status !== "pending" && `${approval.status} · `}
+            {workflow} · from {starterName(run)}
+          </ItemDescription>
+        </ItemContent>
+        <ItemTime at={approval.decidedAt ?? approval.requestedAt} />
+      </Link>
+    </LinkItem>
+  );
+});
 
 const AND = new Intl.ListFormat("en", { type: "conjunction" });
 

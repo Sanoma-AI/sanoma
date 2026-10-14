@@ -31,10 +31,9 @@ import { ButtonGroup } from "#/components/ui/button-group.tsx";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
-import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
+import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
-import { Slot } from "radix-ui";
 import { utcText } from "#/lib/time.ts";
 import { cn } from "#/lib/utils.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone, TONE_FILL } from "#/lib/tone.ts";
@@ -222,32 +221,20 @@ export function OpItem({ id, op, children }: { id: string; op: OpEntry | undefin
 
 /**
  * A link as a list item, inside an `ItemGroup`: `children` is the link (a `<Link>` or an `<a>`),
- * drawn as an Item with `props`, and `chevron` ends it with a chevron, for a link to another page.
+ * drawn as an Item with `props`, and marked (`CURRENT_LINK`) while it is the page open. A link to
+ * another page ends with `<ItemActions><ChevronRightIcon /></ItemActions>` inside the link.
  * shadcn's docs put `role="listitem"` on the Item, but on an `asChild` link that role would replace
  * the link's: a listitem holds the link instead, so it stays a link.
  */
 export function LinkItem({
   children,
-  chevron,
+  className,
   ...props
-}: Omit<ComponentProps<typeof Item>, "asChild" | "children"> & { children: ReactElement; chevron?: boolean }) {
+}: Omit<ComponentProps<typeof Item>, "asChild" | "children"> & { children: ReactElement }) {
   return (
     <div role="listitem">
-      <Item asChild {...props}>
-        {chevron ? (
-          <Slot.Slottable child={children}>
-            {(content) => (
-              <>
-                {content}
-                <ItemActions>
-                  <ChevronRightIcon className="size-4" />
-                </ItemActions>
-              </>
-            )}
-          </Slot.Slottable>
-        ) : (
-          children
-        )}
+      <Item asChild className={cn(CURRENT_LINK, className)} {...props}>
+        {children}
       </Item>
     </div>
   );
@@ -258,9 +245,8 @@ export const CURRENT_LINK = "aria-[current=page]:bg-muted";
 
 /**
  * A list of panes beside the one open, as a card: `title`, with `description` under it and
- * `action` beside it, over `children`, each a `LinkItem` marked with `CURRENT_LINK`; `empty`
- * instead when there are none. It scrolls past 18rem, or 70vh from `lg`, where it sits beside
- * the pane rather than above it.
+ * `action` beside it, over `children`, each a `LinkItem`; `empty` instead when there are none. It
+ * scrolls past 18rem, or 70vh from `lg`, where it sits beside the pane rather than above it.
  */
 export function PaneList({
   title,
@@ -396,6 +382,17 @@ export function When({ at }: { at: number }) {
     <time dateTime={new Date(at).toISOString()} title={utc}>
       {clock === undefined ? utc : ago(at, clock)}
     </time>
+  );
+}
+
+/** An item's time, at the end of its row, level with its title. */
+export function ItemTime({ at, className }: { at: number; className?: string }) {
+  return (
+    <ItemContent className={cn("self-start", className)}>
+      <ItemDescription>
+        <When at={at} />
+      </ItemDescription>
+    </ItemContent>
   );
 }
 

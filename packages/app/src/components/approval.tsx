@@ -39,6 +39,7 @@ import {
   Expandable,
   Fact,
   Facts,
+  ItemTime,
   LinkItem,
   Notice,
   OpName,
@@ -168,11 +169,7 @@ export function ApprovalDetails({
                   <ItemTitle>{r.by ?? "someone"}</ItemTitle>
                   <ItemDescription>{r.reason}</ItemDescription>
                 </ItemContent>
-                <ItemContent>
-                  <ItemDescription>
-                    <When at={r.at} />
-                  </ItemDescription>
-                </ItemContent>
+                <ItemTime at={r.at} />
               </Item>
             ))}
           </ItemGroup>

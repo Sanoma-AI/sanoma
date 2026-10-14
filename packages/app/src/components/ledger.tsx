@@ -13,13 +13,13 @@ import {
   DecisionBadge,
   DecisionNote,
   Expandable,
+  ItemTime,
   ledgerTone,
   OpName,
   plural,
   RequestedBy,
   StatusDot,
   Tip,
-  When,
 } from "./common.tsx";
 
 // A run's ledger and checks, one row each, as the run page lists them, and the jump from a graph
@@ -220,11 +220,7 @@ export const LedgerRow = memo(function LedgerRow({
         </ItemTitle>
         <div className="flex flex-col gap-1">{body}</div>
       </ItemContent>
-      <ItemContent className="self-start">
-        <ItemDescription>
-          <When at={record.at} />
-        </ItemDescription>
-      </ItemContent>
+      <ItemTime at={record.at} />
       {onShow && (
         <ItemActions className="self-start">
           <Tip tip="Show in graph">

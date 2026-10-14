@@ -4,7 +4,7 @@ import { Link, useLoaderData, useNavigate, useSearch } from "@tanstack/react-rou
 import { PanelLeftCloseIcon, PanelLeftOpenIcon, WorkflowIcon } from "lucide-react";
 import { memo, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
-import { ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
+import { Item, ItemContent, ItemDescription, ItemTitle } from "#/components/ui/item.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { RAIL_COOKIE } from "#/lib/rail.ts";
 import { RUN_TONE } from "#/lib/tone.ts";
@@ -102,15 +102,13 @@ export function RunRail({ name }: { name: string }) {
   return (
     <aside aria-label="Runs of this workflow" className="flex min-w-0 flex-[1_1_14rem] flex-col gap-2">
       <nav className="flex items-center gap-1">
-        <ItemGroup>
-          <LinkItem variant="outline" size="xs" className={CURRENT_LINK}>
-            <Link {...workflowLink}>
-              <ItemContent>
-                <ItemTitle>Workflow</ItemTitle>
-              </ItemContent>
-            </Link>
-          </LinkItem>
-        </ItemGroup>
+        <Item asChild variant="outline" size="xs" className={CURRENT_LINK}>
+          <Link {...workflowLink}>
+            <ItemContent>
+              <ItemTitle>Workflow</ItemTitle>
+            </ItemContent>
+          </Link>
+        </Item>
         {toggle}
       </nav>
       {error && <Notice variant="destructive">Could not refresh the runs: {error.message}</Notice>}
@@ -122,15 +120,10 @@ export function RunRail({ name }: { name: string }) {
             size="sm"
             aria-label="Show runs"
             value={filter}
-            // Another filter replaces the page in the history rather than adding one; All leaves
-            // the URL without `?runs=`.
+            // Another filter replaces the page in the history rather than adding one.
             onChange={(e) => {
               const chosen = e.target.value as RunFilter;
-              void navigate({
-                to: ".",
-                search: (prev) => ({ ...prev, runs: chosen === "all" ? undefined : chosen }),
-                replace: true,
-              });
+              void navigate({ to: ".", search: (prev) => ({ ...prev, ...railSearch(chosen) }), replace: true });
             }}
           >
             {RUN_FILTERS.map((f) => (
@@ -201,7 +194,7 @@ const RunDot = memo(function RunDot({ run, filter }: { run: RunSummary; filter: 
 const RunLink = memo(function RunLink({ run, filter }: { run: RunSummary; filter: RunFilter }) {
   const waitingOn = run.status === "waiting" ? pendingApprovals(run)[0]?.title : undefined;
   return (
-    <LinkItem size="xs" className={CURRENT_LINK}>
+    <LinkItem size="xs">
       <Link {...runLink(run)} search={railSearch(filter)} activeOptions={{ includeSearch: false }}>
         {/* A long approval title would widen the rail past its 14rem: the title may shrink
             (min-w-0, max-w-full) and what it waits on is cut. A sandbox run's scenario, as long,
