@@ -6,7 +6,7 @@ Status: early. Workflows run on [DBOS](https://dbos.dev) with Postgres: each ven
 
 ![The app: dana starts a run of announce, marketing-lead approves its launch copy in the Inbox, then the run finishes](.github/assets/demo.gif)
 
-A run of the workflow below: dana starts it, marketing-lead approves the copy, and it sleeps until a launch time a minute away, then publishes. For the recording the live Ghost connector is swapped for its in-memory fake, so the form shows the live setting.
+A run of the workflow below: dana starts it, marketing-lead approves the copy, and it sleeps until a launch time a minute away, then publishes. For the recording Ghost is answered by its in-memory fake, though the form still shows Live vendors and "Calls Ghost for real".
 
 ## What a workflow looks like
 
