@@ -7,18 +7,20 @@
     "db:up": "docker compose up -d --wait",
     "db:down": "docker compose down",
     "bridge:download": "pnpm --filter @sanoma/bridge run bridge:download",
-    "typecheck": "tsc -p tsconfig.json && pnpm --filter @sanoma/app run typecheck:ui",
+    "typecheck": "tsc -p tsconfig.json && tsc -p scripts/readme-shots/tsconfig.json && pnpm --filter @sanoma/app run typecheck:ui",
     "build": "pnpm --filter @sanoma/workflows run build && pnpm -r --filter \"./packages/*\" --filter \"./connectors/*\" --filter \"!@sanoma/workflows\" run build",
     "lint": "oxlint --deny-warnings",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
-    "test": "vitest run"
+    "test": "vitest run",
+    "readme:shots": "node scripts/readme-shots/shots.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",
     "lefthook": "^2.1.17",
     "oxfmt": "^0.72.0",
     "oxlint": "^1.87.0",
+    "puppeteer-core": "^25.13.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.3"
   },
