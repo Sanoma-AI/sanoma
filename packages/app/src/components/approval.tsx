@@ -138,12 +138,12 @@ export function ApprovalDetails({
         )}
       </Facts>
       {approval.details && <p>{approval.details}</p>}
-      {/* A list of links: each Item is the <a> itself, which cannot also be a listitem, so the
-          list is a <ul> rather than an ItemGroup. */}
+      {/* A list of links: each Item is the <a> itself, which a listitem role would hide, so a
+          listitem holds each. */}
       {approval.links?.length ? (
-        <ul className="flex flex-col gap-2">
+        <ItemGroup>
           {approval.links.map((href) => (
-            <li key={href}>
+            <div key={href} role="listitem">
               <Item asChild variant="outline" size="xs">
                 <a href={href} target="_blank" rel="noreferrer" title={href}>
                   <ItemContent className="min-w-0">
@@ -155,9 +155,9 @@ export function ApprovalDetails({
                   </ItemActions>
                 </a>
               </Item>
-            </li>
+            </div>
           ))}
-        </ul>
+        </ItemGroup>
       ) : null}
       {approval.requestedBy === "policy" && approval.input !== undefined && (
         <Expandable label="The held call's input" value={approval.input} />
@@ -171,9 +171,11 @@ export function ApprovalDetails({
                   <ItemTitle>{r.by ?? "someone"}</ItemTitle>
                   <ItemDescription>{r.reason}</ItemDescription>
                 </ItemContent>
-                <ItemActions className="text-xs text-muted-foreground">
-                  <When at={r.at} />
-                </ItemActions>
+                <ItemContent>
+                  <ItemDescription>
+                    <When at={r.at} />
+                  </ItemDescription>
+                </ItemContent>
               </Item>
             ))}
           </ItemGroup>

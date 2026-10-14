@@ -2,7 +2,15 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { type CredentialStatus, credentialReady } from "@sanoma/workflows/shared";
 import { ChevronRightIcon } from "lucide-react";
-import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "#/components/ui/item.tsx";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "#/components/ui/item.tsx";
 import { Nothing, PageHeader, plural, VendorLogo } from "../../components/common.tsx";
 import { configQuery, connectorsOf, credentialsQuery } from "../../queries.ts";
 
@@ -24,10 +32,10 @@ function ConnectorsPage() {
       {connectors.length === 0 ? (
         <Nothing title="This config has no connectors" />
       ) : (
-        // Each Item is the link itself, which cannot also be a listitem: a <ul>, not an ItemGroup.
-        <ul className="flex flex-col gap-2">
+        // Each Item is the link itself, which a listitem role would hide: a listitem holds each.
+        <ItemGroup>
           {connectors.map(({ id, vendor, ops, workflows }) => (
-            <li key={id}>
+            <div key={id} role="listitem">
               <Item asChild variant="outline">
                 <Link to="/connectors/$vendor" params={{ vendor: id }}>
                   <ItemMedia>
@@ -49,9 +57,9 @@ function ConnectorsPage() {
                   </ItemActions>
                 </Link>
               </Item>
-            </li>
+            </div>
           ))}
-        </ul>
+        </ItemGroup>
       )}
     </>
   );

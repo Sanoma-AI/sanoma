@@ -233,9 +233,9 @@ const railRunIds = (html: string, filter: string) =>
 /** The desktop sidebar's state: "expanded" or "collapsed". */
 const sidebarState = (html: string) => html.match(/data-state="(expanded|collapsed)"[^>]*data-slot="sidebar"/)?.[1];
 
-/** The opening tag of the link whose text, after any icon, is `label`. */
+/** The opening tag of the link whose text, after any icon, is `label`, or an Item link's title. */
 function linkTag(html: string, label: string) {
-  const at = html.search(new RegExp(`>${label}</a>`));
+  const at = html.search(new RegExp(`>${label}(?:</div>)*</a>`));
   if (at < 0) return undefined;
   const start = html.lastIndexOf("<a ", at);
   return html.slice(start, html.indexOf(">", start) + 1);
