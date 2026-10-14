@@ -172,13 +172,6 @@
   --spacing: 0.1875rem;
 }
 
-/* React Flow's colours (the background, its dots, the edges) from the theme's tokens. */
-.react-flow {
-  --xy-background-color: var(--background);
-  --xy-background-pattern-color: var(--border);
-  --xy-edge-stroke: var(--muted-foreground);
-}
-
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: "Geist Variable", sans-serif;

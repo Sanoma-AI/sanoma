@@ -48,8 +48,8 @@ import { ZoomSlider } from "./zoom-slider.tsx";
 
 /** A node as React Flow holds it: the graph's node, and whether a click on it selects it. */
 type FlowNode = Node<{ node: GraphNode; selectable: boolean }, GraphNodeKind>;
-/** An edge as React Flow holds it, with the route `layout` gives it as an SVG path. */
-type FlowEdge = Edge<{ path: string }, "route">;
+/** An edge as React Flow holds it: the route `layout` gives it, as an SVG path, and whether it is dashed. */
+type FlowEdge = Edge<{ path: string; dashed: boolean }, "route">;
 /** What a node component reads of its `NodeProps`: its node, of its kind, and whether it is selected. */
 type Props<K extends GraphNodeKind> = {
   data: { node: Extract<GraphNode, { kind: K }>; selectable: boolean };
@@ -121,20 +121,11 @@ function Frame({
   inbound,
   outbound,
   children,
-}: Props<GraphNodeKind> & {
-  inbound?: boolean;
-  outbound?: boolean;
-  children: ReactNode;
-}) {
+}: Props<GraphNodeKind> & { inbound?: boolean; outbound?: boolean; children: ReactNode }) {
   const state = "state" in node ? node.state : undefined;
   return (
     <BaseNode
-      className={frame({
-        tone: state?.tone ?? "off",
-        pending: isPending(node),
-        clickable: selectable,
-        selected,
-      })}
+      className={frame({ tone: state?.tone ?? "off", pending: isPending(node), clickable: selectable, selected })}
       title={nameOf(node)}
     >
       <Handles inbound={inbound} outbound={outbound} />
@@ -370,9 +361,7 @@ const nodeTypes = {
   cluster: ClusterNode,
   split: SplitNode,
   skip: SkipNode,
-} satisfies {
-  [K in GraphNodeKind]: (props: Props<K>) => ReactNode;
-} as NodeTypes;
+} satisfies { [K in GraphNodeKind]: (props: Props<K>) => ReactNode } as NodeTypes;
 
 /** How round a route's corners are, in px: React Flow's smoothstep edges' default borderRadius. */
 const CORNER = 5;
@@ -409,7 +398,7 @@ function pathOf(route: readonly Point[]): string {
  * width and height.
  */
 function RouteEdge({ data }: EdgeProps<FlowEdge>) {
-  return <BaseEdge path={data!.path} />;
+  return <BaseEdge path={data!.path} className={data!.dashed ? "[stroke-dasharray:4_4]" : undefined} />;
 }
 
 const edgeTypes = { route: RouteEdge } satisfies EdgeTypes;
@@ -424,10 +413,7 @@ function FitOnChange({ nodes, show, onFitted }: { nodes: FlowNode[]; show: "star
     if (!width || !height || !count) return;
     // A cluster's nodes are placed relative to it, and inside it.
     const bounds = getNodesBounds(nodes.filter((n) => n.parentId === undefined));
-    const room = {
-      width: width - 2 * PAD.x,
-      height: height - PAD.top - PAD.bottom,
-    };
+    const room = { width: width - 2 * PAD.x, height: height - PAD.top - PAD.bottom };
     // All of the graph when it fits at a readable zoom. Else one end (a run's latest steps, an
     // outline's first) at that zoom, or less if its lanes are taller than the room; panning
     // shows the rest.
@@ -527,9 +513,7 @@ export default function Graph({ graph, show = "end", selected, onSelect }: Graph
       return {
         ...edge,
         type: "route",
-        data: { path: pathOf(at.routes.get(edge.id)!) },
-        // On the edge's <g>, for its path: a utility, so it wins over React Flow's animated dash.
-        className: isPending(from) || isPending(to) ? "[&_path]:[stroke-dasharray:4_4]" : undefined,
+        data: { path: pathOf(at.routes.get(edge.id)!), dashed: isPending(from) || isPending(to) },
         animated: active && !reducedMotion,
       };
     });
