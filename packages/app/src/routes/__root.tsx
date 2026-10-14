@@ -116,7 +116,7 @@ function Root() {
             <AppSidebar />
             <SidebarInset>
               <header className="flex h-12 shrink-0 items-center gap-2 px-4">
-                {/* On a phone the sidebar is a sheet: this opens it. Elsewhere its own toggle folds it. */}
+                {/* On a phone the sidebar is a sheet: this opens it. Elsewhere its rail or Ctrl+B folds it. */}
                 <div className="contents md:hidden">
                   <SidebarTrigger className="-ml-1" />
                   <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
