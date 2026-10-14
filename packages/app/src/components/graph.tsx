@@ -50,9 +50,10 @@ import { ZoomSlider } from "./zoom-slider.tsx";
 type FlowNode = Node<{ node: GraphNode; selectable: boolean }, GraphNodeKind>;
 /** An edge as React Flow holds it, with the route `layout` gives it as an SVG path. */
 type FlowEdge = Edge<{ path: string }, "route">;
-/** What a node component reads of its `NodeProps`: its node, of its kind. */
+/** What a node component reads of its `NodeProps`: its node, of its kind, and whether it is selected. */
 type Props<K extends GraphNodeKind> = {
   data: { node: Extract<GraphNode, { kind: K }>; selectable: boolean };
+  selected: boolean;
 };
 
 /**
@@ -86,6 +87,7 @@ const frame = cva("flex size-full flex-col justify-center gap-1 px-2.5 text-xs s
     pending: { true: "border-dashed bg-transparent text-muted-foreground" },
     // A click selects it.
     clickable: { true: "cursor-pointer hover:bg-muted" },
+    selected: { true: "ring-2 ring-ring" },
   },
 });
 
@@ -112,9 +114,10 @@ const nameOf = (node: GraphNode) => {
   return node.kind === "op" && node.name ? `${node.name}: ${node.label}` : node.label;
 };
 
-/** One node's box (BaseNode, ringed when selected), in its tone when a run gives it one, with its handles. */
+/** One node's box (BaseNode), in its tone when a run gives it one, ringed when selected, with its handles. */
 function Frame({
   data: { node, selectable },
+  selected,
   inbound,
   outbound,
   children,
@@ -130,6 +133,7 @@ function Frame({
         tone: state?.tone ?? "off",
         pending: isPending(node),
         clickable: selectable,
+        selected,
       })}
       title={nameOf(node)}
     >
@@ -524,8 +528,8 @@ export default function Graph({ graph, show = "end", selected, onSelect }: Graph
         ...edge,
         type: "route",
         data: { path: pathOf(at.routes.get(edge.id)!) },
-        // On the edge's <g>; its path inherits the dash.
-        className: isPending(from) || isPending(to) ? "[stroke-dasharray:4_4]" : undefined,
+        // On the edge's <g>, for its path: a utility, so it wins over React Flow's animated dash.
+        className: isPending(from) || isPending(to) ? "[&_path]:[stroke-dasharray:4_4]" : undefined,
         animated: active && !reducedMotion,
       };
     });
