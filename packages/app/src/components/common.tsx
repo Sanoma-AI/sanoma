@@ -389,7 +389,7 @@ export function When({ at }: { at: number }) {
 export function ItemTime({ at, className }: { at: number; className?: string }) {
   return (
     <ItemContent className={cn("self-start", className)}>
-      <ItemDescription>
+      <ItemDescription className="text-xs">
         <When at={at} />
       </ItemDescription>
     </ItemContent>
@@ -469,9 +469,19 @@ export function Notice({
 }
 
 /** An empty state: nothing to show yet, and what would fill it. */
-export function Nothing({ title, children, action }: { title: string; children?: ReactNode; action?: ReactNode }) {
+export function Nothing({
+  title,
+  children,
+  action,
+  className,
+}: {
+  title: string;
+  children?: ReactNode;
+  action?: ReactNode;
+  className?: string;
+}) {
   return (
-    <Empty className="border">
+    <Empty className={cn("border", className)}>
       <EmptyHeader>
         <EmptyTitle>{title}</EmptyTitle>
         {children && <EmptyDescription>{children}</EmptyDescription>}

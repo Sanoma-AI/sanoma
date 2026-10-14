@@ -135,7 +135,9 @@ export function RunRail({ name }: { name: string }) {
         }
         empty={
           shown.length === 0 ? (
+            // Already inside the list's card: no border of its own.
             <Nothing
+              className="border-0"
               title={
                 filter === "all"
                   ? "No runs yet"

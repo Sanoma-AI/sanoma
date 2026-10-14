@@ -164,6 +164,7 @@ function Split({
             return (
               <InboxRow
                 key={key}
+                id={key}
                 entry={entry}
                 show={show}
                 workflow={titles[entry.run.workflow] ?? entry.run.workflow}
@@ -187,11 +188,14 @@ function Split({
  * query shares an unchanged entry's object across a poll, so only the rows that changed draw again.
  */
 const InboxRow = memo(function InboxRow({
+  id,
   entry,
   show,
   workflow,
   current,
 }: {
+  /** Its `approvalKey`, as the list already has it. */
+  id: string;
   entry: Entry;
   show: InboxFilter | undefined;
   workflow: string;
@@ -200,11 +204,12 @@ const InboxRow = memo(function InboxRow({
   const { run, approval } = entry;
   return (
     <LinkItem size="xs">
-      <Link to="/inbox" search={{ show, approval: approvalKey(entry) }} aria-current={current ? "page" : undefined}>
-        <ItemContent>
-          <ItemTitle>
+      <Link to="/inbox" search={{ show, approval: id }} aria-current={current ? "page" : undefined}>
+        {/* As the rail's runs: the content may shrink (min-w-0, max-w-full) and a long title is cut. */}
+        <ItemContent className="min-w-0">
+          <ItemTitle className="max-w-full">
             <StatusDot tone={APPROVAL_TONE[approval.status]} />
-            {approval.title}
+            <span className="truncate">{approval.title}</span>
           </ItemTitle>
           <ItemDescription>
             {approval.status !== "pending" && `${approval.status} · `}
