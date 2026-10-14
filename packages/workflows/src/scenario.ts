@@ -88,17 +88,16 @@ export interface Decision {
 
 /**
  * What the run should do: call an operation (with at least this input) or not, run the step
- * `name`d in the workflow's outline (`op` is its operation, when it calls one) or not, or a
- * number of `times`, have the policy deny an operation (`denied`) or hold one for an approver
- * (`held`), end a certain way, or, for a drift run, report the resource `declared`
- * (`<file>#<export>`) clean, gone, or drifted in a field.
+ * `name`d in the workflow's outline or not, or a number of `times`, have the policy deny an
+ * operation (`denied`) or hold one for an approver (`held`), end a certain way, or, for a drift
+ * run, report the resource `declared` (`<file>#<export>`) clean, gone, or drifted in a field.
  * A step whose own code checks the run (a connector's or the company's, or an operation's own
  * test's) is `custom`, with what it is about.
  */
 export type Expectation =
   | { step: string; op: string; input?: unknown; called: boolean }
-  | { step: string; name: string; op?: string; input?: unknown; called: boolean }
-  | { step: string; name: string; op?: string; times: number }
+  | { step: string; name: string; input?: unknown; called: boolean }
+  | { step: string; name: string; times: number }
   | { step: string; op: string; decision: "denied" }
   | { step: string; op: string; decision: "held"; approver: string }
   | { step: string; outcome: "finished" | "failed"; code?: string }

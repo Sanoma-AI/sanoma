@@ -1,4 +1,13 @@
-import { ChevronsUpDownIcon, MonitorIcon, MoonIcon, SunIcon, UserIcon, UserPenIcon } from "lucide-react";
+import {
+  ChevronsUpDownIcon,
+  Maximize2Icon,
+  Minimize2Icon,
+  MonitorIcon,
+  MoonIcon,
+  SunIcon,
+  UserIcon,
+  UserPenIcon,
+} from "lucide-react";
 import { useTheme } from "next-themes";
 import { cn } from "#/lib/utils.ts";
 import { Avatar, AvatarFallback } from "#/components/ui/avatar.tsx";
@@ -15,15 +24,24 @@ import {
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "#/components/ui/sidebar.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { useActor } from "../actor.ts";
+import { useDensity } from "./density.tsx";
 
 /**
- * Who you are and the theme, in the sidebar's footer. The menu renders only once opened, in the
- * browser, so the stored theme never reaches the server's markup.
+ * Who you are, the theme and the density, in the sidebar's footer. The menu renders only once
+ * opened, in the browser, so the stored theme never reaches the server's markup. Switching to
+ * Compact folds the sidebar to its icons once (not on a phone, where it is a sheet); switching
+ * back leaves the sidebar as it is.
  */
 export function NavUser() {
-  const { isMobile } = useSidebar();
+  const { isMobile, open, setOpen } = useSidebar();
   const { actor, fromServer, error, setActor } = useActor();
   const { theme, setTheme } = useTheme();
+  const { compact, setCompact } = useDensity();
+  const setDensity = (value: string) => {
+    const next = value === "compact";
+    if (next && !compact && !isMobile && open) setOpen(false);
+    setCompact(next);
+  };
   // Under the name: why the deployment could not say, or where the name comes from; nothing
   // when there is no name.
   const status =
@@ -56,7 +74,7 @@ export function NavUser() {
               <ChevronsUpDownIcon className="ml-auto size-4" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
-          <DropdownMenuContent side={isMobile ? "bottom" : "right"} align="end" sideOffset={4}>
+          <DropdownMenuContent className="min-w-56" side={isMobile ? "bottom" : "right"} align="end" sideOffset={4}>
             {!fromServer && (
               <>
                 <DropdownMenuItem onSelect={() => setActor(null)}>
@@ -79,6 +97,18 @@ export function NavUser() {
               <DropdownMenuRadioItem value="system">
                 <MonitorIcon />
                 System
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>Density</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={compact ? "compact" : "comfortable"} onValueChange={setDensity}>
+              <DropdownMenuRadioItem value="comfortable">
+                <Maximize2Icon />
+                Comfortable
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="compact">
+                <Minimize2Icon />
+                Compact
               </DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>

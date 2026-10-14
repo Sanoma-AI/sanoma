@@ -2,11 +2,10 @@ import { type QueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createRootRouteWithContext, HeadContent, Link, Outlet, Scripts, useMatches } from "@tanstack/react-router";
 import { createIsomorphicFn } from "@tanstack/react-start";
 import { getCookie } from "@tanstack/react-start/server";
-import { Maximize2Icon, Minimize2Icon } from "lucide-react";
 import { ThemeProvider } from "next-themes";
 import { Fragment, lazy, type ReactNode, Suspense } from "react";
 import { AppSidebar } from "#/components/app-sidebar.tsx";
-import { DENSITY_COOKIE, DensityProvider, useDensity } from "#/components/density.tsx";
+import { DENSITY_COOKIE, DensityProvider } from "#/components/density.tsx";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -15,14 +14,13 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "#/components/ui/breadcrumb.tsx";
-import { Button } from "#/components/ui/button.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
-import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "#/components/ui/sidebar.tsx";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "#/components/ui/sidebar.tsx";
 import { Toaster } from "#/components/ui/sonner.tsx";
 import { TooltipProvider } from "#/components/ui/tooltip.tsx";
 import { RAIL_COOKIE } from "#/lib/rail.ts";
 import { ActorContext, useActorState } from "../actor.ts";
-import { Tip, useCrumbs } from "../components/common.tsx";
+import { useCrumbs } from "../components/common.tsx";
 import { actorQuery, configQuery, waitingRunsQuery } from "../queries.ts";
 // lucide's shield-check, the sidebar's brand icon.
 import favicon from "../favicon.svg?url";
@@ -118,9 +116,11 @@ function Root() {
             <AppSidebar />
             <SidebarInset>
               <header className="flex h-12 shrink-0 items-center gap-2 px-4">
-                <SidebarTrigger className="-ml-1" />
-                <DensityToggle />
-                <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
+                {/* On a phone the sidebar is a sheet: this opens it. Elsewhere its own toggle folds it. */}
+                <div className="contents md:hidden">
+                  <SidebarTrigger className="-ml-1" />
+                  <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
+                </div>
                 <Crumbs />
               </header>
               {/* The page column: a page's regions are its children, the region gap apart. */}
@@ -141,33 +141,6 @@ function Root() {
         </DensityProvider>
       </TooltipProvider>
     </ActorContext>
-  );
-}
-
-/**
- * Compact, a toggle beside the sidebar's: its name stays "Compact" and `aria-pressed` says
- * whether it is on, while its tooltip names what a click switches to. Switching to Compact folds
- * the sidebar to its icons once (not on a phone, where it is a sheet); switching back leaves the
- * sidebar as it is.
- */
-function DensityToggle() {
-  const { compact, setCompact } = useDensity();
-  const { open, setOpen, isMobile } = useSidebar();
-  return (
-    <Tip tip={compact ? "Comfortable" : "Compact"}>
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        aria-pressed={compact}
-        onClick={() => {
-          if (!compact && !isMobile && open) setOpen(false);
-          setCompact(!compact);
-        }}
-      >
-        {compact ? <Maximize2Icon /> : <Minimize2Icon />}
-        <span className="sr-only">Compact</span>
-      </Button>
-    </Tip>
   );
 }
 

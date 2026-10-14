@@ -230,16 +230,9 @@ const railRunIds = (html: string, filter: string) =>
     .map(([, id]) => id)
     .toSorted();
 
-/**
- * Whether the toggle button named `label` is pressed: "true" or "false". Its name may follow an
- * icon and sit in an `sr-only` span; the match stays within the one button.
- */
-const pressed = (html: string, label: string) =>
-  html.match(
-    new RegExp(
-      `<button[^>]*aria-pressed="(true|false)"[^>]*>(?:<svg[^>]*>(?:[^<]|<(?!/svg>))*</svg>)?(?:<span class="sr-only">)?${label}<`,
-    ),
-  )?.[1];
+/** Whether the button labelled `label` says it has its sidebar open (`aria-expanded`), as text. */
+const expanded = (html: string, label: string) =>
+  html.match(new RegExp(`<button[^>]*aria-expanded="(true|false)"[^>]*>(?:(?!</button>).)*?${label}<`))?.[1];
 
 /** The desktop sidebar's state: "expanded" or "collapsed". */
 const sidebarState = (html: string) => html.match(/data-state="(expanded|collapsed)"[^>]*data-slot="sidebar"/)?.[1];
@@ -993,25 +986,25 @@ describe("the page", () => {
     expect(runs.text).toContain("sandbox · Launch on time");
   });
 
-  it("renders a page compact while its cookie says so: the toggle pressed, the graph lower and the sidebar as its own cookie says", async () => {
-    // Comfortable without the cookie: #app unmarked, the toggle not pressed.
+  it("renders a page compact while its cookie says so: the graph lower and the sidebar as its own cookie says, its toggle in the sidebar", async () => {
+    // Comfortable without the cookie: #app unmarked. The sidebar's toggle is in the sidebar.
     const comfortable = await page("/workflows/announce");
     expect(comfortable.html).toContain('<div id="app">');
     expect(sidebarState(comfortable.html)).toBe("expanded");
-    expect(pressed(comfortable.html, "Compact")).toBe("false");
+    expect(expanded(comfortable.html, "Collapse sidebar")).toBe("true");
 
-    // Compact: #app marked (the `compact:` variant lowers the graph's box), the toggle pressed.
-    // The sidebar follows its own cookie.
+    // Compact: #app marked (the `compact:` variant lowers the graph's box). The sidebar follows
+    // its own cookie.
     const compact = await page("/workflows/announce", app.url, {
       headers: { cookie: "sanoma_density=compact; sidebar_state=false" },
     });
     expect(compact.status).toBe(200);
     expect(compact.html).toContain('<div id="app" data-density="compact">');
-    expect(pressed(compact.html, "Compact")).toBe("true");
     expect(compact.html).toMatch(
       /class="[^"]*compact:h-\[440px\][^"]*"><div class="size-full"><div data-slot="skeleton"[^>]*aria-label="Loading the graph"/,
     );
     expect(sidebarState(compact.html)).toBe("collapsed");
+    expect(expanded(compact.html, "Expand sidebar")).toBe("false");
   });
 
   it("folds the rail while its cookie says so: the toggle, the Workflow icon and each run as a dot", async () => {

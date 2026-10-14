@@ -21,7 +21,7 @@ export function useDensity(): Density {
 
 /**
  * Holds the density and renders the app's box, `#app`, marked `data-density="compact"` while
- * Compact (unmarked otherwise): the `compact:` variant and style.css's spacing tokens key on it,
+ * Compact (unmarked otherwise): the `compact:` variant and style.css's spacing unit and tokens key on it,
  * as SidebarProvider renders its own wrapper. The density lives in a cookie, as the sidebar's
  * state does, so the server renders the chosen one from the first paint: the root's loader reads
  * it into `defaultCompact`, which the provider takes once, as it mounts (hydration has the
