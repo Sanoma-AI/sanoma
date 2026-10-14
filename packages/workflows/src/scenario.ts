@@ -32,7 +32,7 @@ import { fill, isBug, seedFrom, shapeOf } from "./fill.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { Driver, Op } from "./op.ts";
 import { type OutlineNode, outlineWorkflow } from "./outline.ts";
-import { DRIFT_WORKFLOW, errorMessage, isEnded } from "./shared.ts";
+import { DRIFT_WORKFLOW, errorMessage, fitsOp, flatten, isEnded } from "./shared.ts";
 import type { Call, RunView, Seed } from "./steps.ts";
 
 /*
@@ -52,7 +52,12 @@ export interface ScenarioStep {
   kind: "given" | "when" | "then";
   /** The operation the step is about, when it names one. */
   op?: string;
-  /** For a `Then` step about an operation: true when it expects a call, false for `was not called`. */
+  /** For a `Then` step about a step by its name (`step "Draft the post" was called`): that name. */
+  name?: string;
+  /**
+   * For a `Then` step about an operation, or a step by its name: true when it expects a call (or
+   * a run), false for `was not called` (or `ran 0 times`).
+   */
   called?: boolean;
   /** For a `Then` step about the policy's decision on an operation: `was denied`, or `was held for`. */
   decision?: "denied" | "held";
@@ -82,14 +87,18 @@ export interface Decision {
 }
 
 /**
- * What the run should do: call an operation (with at least this input) or not, have the policy
- * deny one (`denied`) or hold one for an approver (`held`), end a certain way, or, for a drift
- * run, report the resource `declared` (`<file>#<export>`) clean, gone, or drifted in a field.
+ * What the run should do: call an operation (with at least this input) or not, run the step
+ * `name`d in the workflow's outline (`op` is its operation, when it calls one) or not, or a
+ * number of `times`, have the policy deny an operation (`denied`) or hold one for an approver
+ * (`held`), end a certain way, or, for a drift run, report the resource `declared`
+ * (`<file>#<export>`) clean, gone, or drifted in a field.
  * A step whose own code checks the run (a connector's or the company's, or an operation's own
  * test's) is `custom`, with what it is about.
  */
 export type Expectation =
   | { step: string; op: string; input?: unknown; called: boolean }
+  | { step: string; name: string; op?: string; input?: unknown; called: boolean }
+  | { step: string; name: string; op?: string; times: number }
   | { step: string; op: string; decision: "denied" }
   | { step: string; op: string; decision: "held"; approver: string }
   | { step: string; outcome: "finished" | "failed"; code?: string }
@@ -169,8 +178,11 @@ type Rule = {
     takes?: string;
     /** Whose step it is, which errors list it under: an operation's id for its phrase, or a step library's owner. */
     group?: string;
-    /** What the step says, from the expression's values and the step's doc string or table. */
-    read(values: unknown[], pickle: PickleStep): Items[K];
+    /**
+     * What the step says, from the expression's values and the step's doc string or table;
+     * `workflow` is the scenario's, once its `When` has named it.
+     */
+    read(values: unknown[], pickle: PickleStep, workflow?: string): Items[K];
   };
 }[keyof Items];
 
@@ -422,6 +434,38 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
     },
     {
       kind: "then",
+      source: "step {string} was called with",
+      takes: TAKES_OBJECT,
+      read: ([name], pickle, workflow) => {
+        const node = stepNamed(scope, workflow, name as string);
+        const step = `step "${name as string}"`;
+        if (node.kind !== "op") {
+          throw new Error(`${step} is ${node.kind === "sleep" ? "a sleep" : "an approval"}, which takes no input`);
+        }
+        // An unnamed call with a computed segment is named by the operation it calls.
+        const op = scope.ops.get(node.id) ?? (node.name === undefined ? scope.ops.get(name as string) : undefined);
+        if (!op) throw new Error(`${step} calls ${node.id}, whose input cannot be read: name its operation in full`);
+        return expecting({ name: name as string, input: fieldsFrom(pickle, op.input, inputOf(op.id)), called: true });
+      },
+    },
+    ...[true, false].map((called): Rule => ({
+      kind: "then",
+      source: `step {string} was ${called ? "" : "not "}called`,
+      read: ([name], _, workflow) => {
+        stepNamed(scope, workflow, name as string);
+        return expecting({ name: name as string, called });
+      },
+    })),
+    {
+      kind: "then",
+      source: "step {string} ran {int} time(s)",
+      read: ([name, times], _, workflow) => {
+        stepNamed(scope, workflow, name as string);
+        return expecting({ name: name as string, times: times as number });
+      },
+    },
+    {
+      kind: "then",
       source: "{declared} is drifted in {field}",
       read: ([declared, field]) =>
         expecting({ declared: declared as string, status: "drifted", field: field as string }),
@@ -612,7 +656,48 @@ function textOf(scenario: GherkinScenario, text: string): string {
     .join("\n");
 }
 
-const approvalsByWorkflow = new WeakMap<object, string[]>();
+const nodesByWorkflow = new WeakMap<object, OutlineNode[] | undefined>();
+
+/** A workflow's outline, read once: its nodes, or undefined when its code cannot be outlined. */
+function nodesOf(wf: Parameters<typeof outlineWorkflow>[0]): OutlineNode[] | undefined {
+  if (!nodesByWorkflow.has(wf)) {
+    const outline = outlineWorkflow(wf);
+    nodesByWorkflow.set(wf, "nodes" in outline ? outline.nodes : undefined);
+  }
+  return nodesByWorkflow.get(wf);
+}
+
+type StepNode = Extract<OutlineNode, { kind: "op" | "approval" | "sleep" }>;
+
+const isStep = (n: OutlineNode): n is StepNode => n.kind === "op" || n.kind === "approval" || n.kind === "sleep";
+
+/**
+ * The one step of the workflow's outline named `name` (an operation's call or a sleep by the
+ * name it gives or its default, an approval by its title). Throws outside a scenario's workflow
+ * (before its `When`, or in an operation's own test), when no step has the name, and when several
+ * may: a name a call defaults to (its operation's id) can be several calls', and an unnamed call
+ * with a computed segment is named in a run by the operation it calls, which may be this one.
+ */
+function stepNamed(scope: Scope, workflow: string | undefined, name: string): StepNode {
+  if (workflow === undefined) {
+    throw new Error(`step "${name}" names a step of a workflow: it goes after the When that runs one, in scenarios/`);
+  }
+  const nodes = nodesOf(scope.workflows.get(workflow)!);
+  if (!nodes) throw new Error(`${workflow}'s code cannot be outlined, so its steps have no names`);
+  const steps = flatten(nodes).filter(isStep);
+  const named = steps.filter(
+    (n) =>
+      n.name === name || (n.kind === "op" && n.name === undefined && (n.ops?.includes(name) ?? fitsOp(n.id, name))),
+  );
+  if (named.length === 1) return named[0]!;
+  if (named.length > 1) {
+    throw new Error(
+      `${named.length} steps of ${workflow} are named "${name}": give the one to check a name of its own, such as \`{ name: "Publish the post" }\``,
+    );
+  }
+  const names = [...new Set(steps.flatMap((n) => (n.name === undefined ? [] : [`"${n.name}"`])))];
+  throw new Error(`no step of ${workflow} is named "${name}"; its steps are ${names.join(", ") || "none"}`);
+}
 
 /** The titles of the approvals in an outline, at any depth, where they are string literals. */
 const titles = (nodes: OutlineNode[]): string[] =>
@@ -624,15 +709,7 @@ const titles = (nodes: OutlineNode[]): string[] =>
   });
 
 /** The literal titles of the approvals a workflow's code asks for, from its outline. */
-function approvalsOf(wf: Parameters<typeof outlineWorkflow>[0]): string[] {
-  let found = approvalsByWorkflow.get(wf);
-  if (!found) {
-    const outline = outlineWorkflow(wf);
-    found = "nodes" in outline ? [...new Set(titles(outline.nodes))] : [];
-    approvalsByWorkflow.set(wf, found);
-  }
-  return found;
-}
+const approvalsOf = (wf: Parameters<typeof outlineWorkflow>[0]) => [...new Set(titles(nodesOf(wf) ?? []))];
 
 const namesByReport = new WeakMap<Report, Map<string, string>>();
 
@@ -738,10 +815,12 @@ function compileWorld(built: Built, specs: Map<string, Spec>) {
             break;
           }
           case "then": {
-            const { expect } = rule.read(args, pickle);
+            const { expect } = rule.read(args, pickle, spec.workflow);
             spec.expect.push({ step: text, ...expect } as Expectation);
             if ("op" in expect && expect.op !== undefined) step.op = expect.op;
+            if ("name" in expect) step.name = expect.name;
             if ("called" in expect && expect.called !== undefined) step.called = expect.called;
+            if ("times" in expect) step.called = expect.times > 0;
             if ("decision" in expect) step.decision = expect.decision;
             break;
           }
@@ -770,7 +849,7 @@ function compileWorld(built: Built, specs: Map<string, Spec>) {
  * verdict (why it does not hold, or undefined) in `verdicts`, by its pickle step's id, rather
  * than failing, so every `Then` runs. The other steps do nothing.
  */
-function checkWorld(built: Built, view: RunView, verdicts: Map<string, string | undefined>) {
+function checkWorld(built: Built, workflow: string, view: RunView, verdicts: Map<string, string | undefined>) {
   return (report: Report): SanomaWorld => ({
     begin(pickle) {
       seedNames(report, pickle);
@@ -778,7 +857,7 @@ function checkWorld(built: Built, view: RunView, verdicts: Map<string, string | 
     step(expression, args, pickle) {
       const rule = ruleFor(built, expression, pickle);
       if (rule.kind !== "then") return;
-      const { verify } = rule.read(args, pickle);
+      const { verify } = rule.read(args, pickle, workflow);
       let detail: string | undefined;
       try {
         detail = verify(view);
@@ -1114,7 +1193,7 @@ export async function check(scope: Scope, scenario: Scenario, records: readonly 
   const built = builtFor(scope);
   const { file, line, name } = scenario;
   const verdicts = new Map<string, string | undefined>();
-  const report = await runFeatures(built.library, checkWorld(built, viewOf(records), verdicts), {
+  const report = await runFeatures(built.library, checkWorld(built, scenario.workflow, viewOf(records), verdicts), {
     cwd: fileURLToPath(scope.scenarios),
     files: [file],
     line,

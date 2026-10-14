@@ -1004,6 +1004,199 @@ describe("resources and policy outcomes", () => {
   });
 });
 
+/** A feature with one scenario that runs named, then these steps. */
+const runNamed = (steps: string) => `Feature: N\n  Scenario: S\n    When named runs\n${steps}`;
+
+describe("steps by name", () => {
+  /** Drafts a post per title under one name, publishes two by the default name, and waits under a name. */
+  const named = defineWorkflow({
+    name: "named",
+    title: "Post by name",
+    trigger: "manual",
+    input: z.object({ titles: z.array(z.string()) }),
+    uses: [ghost.post.create, ghost.post.publish, "approval", "sleep"],
+    run: async (ctx, { titles }) => {
+      for (const title of titles) {
+        await ctx.ghost.post.create({ title, html: title, status: "draft" }, { name: "Draft the post" });
+      }
+      await ctx.approval("Go ahead", { approver: "marketing-lead" });
+      await ctx.ghost.post.publish({ id: "a" });
+      await ctx.ghost.post.publish({ id: "b" });
+      await ctx.sleep({ seconds: 1 }, { name: "Let it settle" });
+      return {};
+    },
+  });
+  /** Publishes by a computed segment, which a run names by the operation it calls, by the default name, and by a name. */
+  const computed = defineWorkflow({
+    name: "computed",
+    title: "Publish two ways",
+    trigger: "manual",
+    input: z.object({ action: z.enum(["publish"]) }),
+    uses: [ghost.post.publish],
+    run: async (ctx, { action }) => {
+      await ctx.ghost.post[action]({ id: "a" });
+      await ctx.ghost.post.publish({ id: "b" });
+      await ctx.ghost.post.publish({ id: "c" }, { name: "Publish c" });
+      return {};
+    },
+  });
+  const within = resolveConfig({
+    workflows: [named, computed],
+    connectors: [ghost],
+    policy: allowAll,
+    ledger: memoryLedger(),
+  });
+  const failing = async (text: string) => (await compiled(text, within)).errors.map((e) => e.message).join("\n");
+
+  const common = { v: 1, app: "a", runId: "r", at: 0, actor: { id: "alice" }, workflow: "named" } as const;
+  const draft = (seq: number, title: string, error?: { code: string; name: string; message: string }) =>
+    ({
+      ...common,
+      id: `r:op.called:${seq}`,
+      seq,
+      type: "op.called",
+      op: "ghost.post.create",
+      name: "Draft the post",
+      effect: "write",
+      input: { title, html: title, status: "draft" },
+      decision: { kind: "allow" },
+      durationMs: 1,
+      ...(error ? { error } : {}),
+    }) as LedgerRecord;
+  /** A policy's hold on a draft: it carries the held call's name, and is not a run of its own. */
+  const hold: LedgerRecord = {
+    ...common,
+    id: "r:approval.requested:4",
+    seq: 4,
+    type: "approval.requested",
+    approval: "ap1",
+    name: "Draft the post",
+    title: "Draft?",
+    approver: "marketing-lead",
+    requestedBy: "policy",
+    covers: ["ghost.post.create"],
+    op: "ghost.post.create",
+  };
+  const records = [
+    draft(1, "One"),
+    draft(2, "Two"),
+    draft(3, "Three", { code: "driver_failed", name: "DriverError", message: "down" }),
+    hold,
+    {
+      ...common,
+      id: "r:approval.requested:5",
+      seq: 5,
+      type: "approval.requested",
+      approval: "ap2",
+      name: "Go ahead",
+      title: "Go ahead",
+      approver: "marketing-lead",
+      requestedBy: "workflow",
+      covers: [],
+    },
+  ] as LedgerRecord[];
+
+  it("reads a step's name into an expectation, with its operation when it calls one", async () => {
+    const { scenarios, errors } = await compiled(
+      runNamed(
+        '    Then step "Draft the post" was called with\n      | title | One |\n    And step "Draft the post" ran 2 times\n    And step "Let it settle" was not called\n    And step "Go ahead" ran 1 time\n',
+      ),
+      within,
+    );
+    expect(errors).toEqual([]);
+    expect(scenarios[0]!.expect).toEqual([
+      {
+        step: 'step "Draft the post" was called with',
+        name: "Draft the post",
+        input: { title: "One" },
+        called: true,
+      },
+      { step: 'step "Draft the post" ran 2 times', name: "Draft the post", times: 2 },
+      { step: 'step "Let it settle" was not called', name: "Let it settle", called: false },
+      { step: 'step "Go ahead" ran 1 time', name: "Go ahead", times: 1 },
+    ]);
+    // For marking the graph: the step it is about by name, and whether it expects a run.
+    expect(scenarios[0]!.steps.filter((s) => s.kind === "then").map(({ name, called }) => ({ name, called }))).toEqual([
+      { name: "Draft the post", called: true },
+      { name: "Draft the post", called: true },
+      { name: "Let it settle", called: false },
+      { name: "Go ahead", called: true },
+    ]);
+    const zero = await compiled(runNamed('    Then step "Go ahead" ran 0 times\n'), within);
+    expect(zero.scenarios[0]!.steps.at(-1)).toMatchObject({ name: "Go ahead", called: false });
+  });
+
+  it("refuses a name no step has, one several steps share, input for a sleep, and a step name before the When", async () => {
+    expect(await failing(runNamed('    Then step "Publish" was called\n'))).toMatch(
+      /no step of named is named "Publish"; its steps are "Draft the post", "Go ahead", "ghost\.post\.publish", "Let it settle"/,
+    );
+    expect(await failing(runNamed('    Then step "ghost.post.publish" was called\n'))).toMatch(
+      /2 steps of named are named "ghost\.post\.publish": give the one to check a name of its own/,
+    );
+    expect(await failing(runNamed('    Then step "Let it settle" was called with\n      | id | a |\n'))).toMatch(
+      /step "Let it settle" is a sleep, which takes no input/,
+    );
+    expect(
+      await failing('Feature: N\n  Scenario: S\n    Then step "Go ahead" was called\n    When named runs\n'),
+    ).toMatch(/step "Go ahead" names a step of a workflow: it goes after the When that runs one, in scenarios\//);
+    // An unnamed call with a computed segment may be the operation's own default name.
+    const publish =
+      'Feature: C\n  Scenario: S\n    When computed runs\n    Then step "ghost.post.publish" was called\n';
+    expect(await failing(publish)).toMatch(/2 steps of computed are named "ghost\.post\.publish"/);
+    expect(
+      await failing('Feature: C\n  Scenario: S\n    When computed runs\n    Then step "Publish c" ran 1 time\n'),
+    ).toBe("");
+  });
+
+  it("counts the runs a step's records carry its name for: calls made, not failed ones or a policy's hold", () => {
+    expect(
+      check(
+        {
+          ...expecting([
+            { step: "two", name: "Draft the post", times: 2 },
+            { step: "three", name: "Draft the post", times: 3 },
+            { step: "with", name: "Draft the post", input: { title: "Two" }, called: true },
+            { step: "failed", name: "Draft the post", input: { title: "Three" }, called: true },
+            { step: "settle", name: "Let it settle", called: false },
+            { step: "drafted", name: "Draft the post", called: false },
+            { step: "asked", name: "Go ahead", times: 1 },
+          ]),
+          workflow: "named",
+        },
+        records,
+      ),
+    ).toEqual([
+      { step: "two", ok: true },
+      { step: "three", ok: false, detail: 'step "Draft the post" ran twice, not 3 times' },
+      { step: "with", ok: true },
+      {
+        step: "failed",
+        ok: false,
+        detail: expect.stringMatching(
+          /^step "Draft the post" was not called with \{"title":"Three"\}; its calls had .*; attempted: driver_failed: down$/,
+        ),
+      },
+      { step: "settle", ok: true },
+      { step: "drafted", ok: false, detail: expect.stringMatching(/^step "Draft the post" was called with /) },
+      { step: "asked", ok: true },
+    ]);
+  });
+
+  it("checks a run's named steps through Cucumber", async () => {
+    const { scope: s, scenarios } = await compiled(
+      runNamed(
+        '    Then step "Draft the post" ran 2 times\n    And step "Go ahead" was called\n    And step "Let it settle" was called\n',
+      ),
+      within,
+    );
+    expect(await checkRun(s, scenarios[0]!, records)).toEqual([
+      { step: 'step "Draft the post" ran 2 times', ok: true },
+      { step: 'step "Go ahead" was called', ok: true },
+      { step: 'step "Let it settle" was called', ok: false, detail: 'step "Let it settle" was not called' },
+    ]);
+  });
+});
+
 describe("Cucumber", () => {
   it("builds its library again in one process: another config compiles the same scenarios", async () => {
     const first = await compiled(LAUNCH);

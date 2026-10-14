@@ -43,6 +43,11 @@ const unread = (wf: Omit<WorkflowDefinition, "run"> & { run: (...args: never[]) 
   return outline.error;
 };
 
+/** A step's name in a top-level const, which the outline reads as it reads a literal. */
+const LIST_B = "List b";
+/** An approval's title, its step name, in a top-level const too. */
+const SHOUT = "Shout it?";
+
 const busy = defineWorkflow({
   name: "busy",
   trigger: "manual",
@@ -50,10 +55,10 @@ const busy = defineWorkflow({
   uses: [forum.comments.list, bluesky.post.create, "all", "approval", "sleep"],
   run: async (ctx, { threads, vendor, loud }) => {
     const [first] = await ctx.all([
-      () => ctx.forum.comments.list({ thread: "a" }),
+      () => ctx.forum.comments.list({ thread: "a" }, { name: "List a" }),
       async () => {
         await ctx.sleep({ minutes: 1 });
-        return ctx.forum.comments.list({ thread: "b" });
+        return ctx.forum.comments.list({ thread: "b" }, { name: LIST_B });
       },
     ]);
     const counts = await ctx.all(threads.map((thread) => () => ctx.forum.comments.list({ thread })));
@@ -63,7 +68,7 @@ const busy = defineWorkflow({
     for (const thread of threads) {
       await ctx.bluesky.post.create({ text: thread });
     }
-    for (let i = 0; i < threads.length; i++) await ctx.sleep({ ms: i });
+    for (let i = 0; i < threads.length; i++) await ctx.sleep({ ms: i }, { name: "Pause" });
     threads.map((thread) => ctx.bluesky.post.create({ text: thread }));
     const replies = threads.map((thread) => thread.length);
     await (ctx as any)[vendor].comments.list({ thread: "x" });
@@ -109,28 +114,91 @@ describe("outlineWorkflow", () => {
     });
   });
 
-  it("nests fan-outs, branches and loops, and stars computed segments", () => {
-    expect(outlineWorkflow(busy)).toMatchObject({
+  it("nests fan-outs, branches and loops, names steps, labels loops, and stars computed segments", () => {
+    const outline = outlineWorkflow(busy);
+    expect(outline).toMatchObject({
       nodes: [
         {
           kind: "all",
           branches: [
-            [{ kind: "op", id: "forum.comments.list" }],
-            [{ kind: "sleep" }, { kind: "op", id: "forum.comments.list" }],
+            [{ kind: "op", id: "forum.comments.list", name: "List a" }],
+            [
+              { kind: "sleep", name: "Sleep" },
+              { kind: "op", id: "forum.comments.list", name: "List b" },
+            ],
           ],
         },
-        { kind: "each", body: [{ kind: "op", id: "forum.comments.list" }] },
+        {
+          kind: "each",
+          label: "for each of threads",
+          body: [{ kind: "op", id: "forum.comments.list", name: "forum.comments.list" }],
+        },
         {
           kind: "branch",
           // The final else logs and makes no call: the empty case.
-          cases: [[{ kind: "approval", title: "Shout?" }], [{ kind: "op", id: "bluesky.post.create" }], []],
+          cases: [
+            [{ kind: "approval", title: "Shout?", name: "Shout?" }],
+            [{ kind: "op", id: "bluesky.post.create", name: "bluesky.post.create" }],
+            [],
+          ],
         },
-        { kind: "repeat", body: [{ kind: "op", id: "bluesky.post.create" }] },
-        { kind: "repeat", body: [{ kind: "sleep" }] },
-        { kind: "repeat", body: [{ kind: "op", id: "bluesky.post.create" }] },
+        // An unnamed call's name is its operation's id, which several calls may share.
+        { kind: "repeat", label: "for each of threads", body: [{ kind: "op", name: "bluesky.post.create" }] },
+        { kind: "repeat", label: "repeat while i < threads.length", body: [{ kind: "sleep", name: "Pause" }] },
+        { kind: "repeat", label: "for each of threads", body: [{ kind: "op", name: "bluesky.post.create" }] },
         { kind: "op", id: "*.comments.list", ops: ["forum.comments.list"] },
       ],
     });
+    // A computed call without a name of its own has none: the operation it calls names it in a run.
+    if ("error" in outline) throw new Error(outline.error);
+    expect(outline.nodes.at(-1)).not.toHaveProperty("name");
+  });
+
+  it("labels a loop from its code: what it goes over, or while what holds, on one line and cut short", () => {
+    const loops = defineWorkflow({
+      name: "loops",
+      trigger: "manual",
+      input: z.object({ subscribers: z.array(z.string()), byId: z.record(z.string(), z.string()), more: z.boolean() }),
+      uses: ["sleep", "all"],
+      run: async (ctx, input) => {
+        for (const s of input.subscribers) await ctx.sleep({ ms: s.length }, { name: "One" });
+        for (const id in input.byId) await ctx.sleep({ ms: id.length }, { name: "Two" });
+        while (input.more) await ctx.sleep({ ms: 1 }, { name: "Three" });
+        do await ctx.sleep({ ms: 1 }, { name: "Four" });
+        while (input.more);
+        input.subscribers.forEach((s) => ctx.sleep({ ms: s.length }, { name: "Six" }));
+        await ctx.all(
+          input.subscribers
+            .filter((s) => s.length > 0 && s !== "a very long subscriber name that goes on")
+            .map((s) => () => ctx.sleep({ ms: s.length }, { name: "Seven" })),
+        );
+        // Last, as nothing after it is reached.
+        for (;;) await ctx.sleep({ ms: 1 }, { name: "Five" });
+      },
+    });
+    const outline = outlineWorkflow(loops);
+    if ("error" in outline) throw new Error(outline.error);
+    expect(outline.nodes.map((n) => [n.kind, "label" in n ? n.label : undefined])).toEqual([
+      ["repeat", "for each of input.subscribers"],
+      ["repeat", "for each key of input.byId"],
+      ["repeat", "repeat while input.more"],
+      ["repeat", "repeat while input.more"],
+      ["repeat", "for each of input.subscribers"],
+      // The items' code on one line, cut at 40 characters.
+      ["each", "for each of input.subscribers.filter((s) => s.lengt…"],
+      ["repeat", "repeat"],
+    ]);
+  });
+
+  it("reads an approval's title, its step name, from a top-level const too", () => {
+    const titled = defineWorkflow({
+      name: "titled",
+      trigger: "manual",
+      input: z.object({}),
+      uses: ["approval"],
+      run: async (ctx) => ctx.approval(SHOUT, { approver: "lead" }),
+    });
+    expect(outlineWorkflow(titled)).toMatchObject({ nodes: [{ kind: "approval", title: SHOUT, name: SHOUT }] });
   });
 
   it("gives a computed id the operations in uses it fits, and a literal one none", () => {
@@ -311,7 +379,7 @@ describe("callAt", () => {
     const all = source.indexOf("ctx.all([");
     expect(callAt(nodes, all)).toMatchObject({ kind: "all", path: "0" });
     expect(callAt(nodes, all + "ctx.".length)).toMatchObject({ kind: "all", path: "0" });
-    expect(callAt(nodes, source.indexOf('comments.list({ thread: "a" })') + "comments.".length)).toMatchObject({
+    expect(callAt(nodes, source.indexOf('comments.list({ thread: "a" }') + "comments.".length)).toMatchObject({
       kind: "op",
       path: "0.0.0",
     });
@@ -371,7 +439,7 @@ describe("outlineWorkflow, spans", () => {
       ["each", "ctx.all(threads.map((thread) => () => ctx.forum.comments.list({ thread })))"],
       ["branch", expect.stringMatching(/^if \(loud\) [\s\S]*else console\.log\("nothing to say"\);$/)],
       ["repeat", expect.stringMatching(/^for \(const thread of threads\) \{[\s\S]*\}$/)],
-      ["repeat", "for (let i = 0; i < threads.length; i++) await ctx.sleep({ ms: i });"],
+      ["repeat", 'for (let i = 0; i < threads.length; i++) await ctx.sleep({ ms: i }, { name: "Pause" });'],
       ["repeat", "threads.map((thread) => ctx.bluesky.post.create({ text: thread }))"],
       ["op", '(ctx as any)[vendor].comments.list({ thread: "x" })'],
     ]);
@@ -465,7 +533,7 @@ console.log(JSON.stringify(outlineWorkflow(built)));
       const outline = JSON.parse(out.stdout);
       expect(outline).toMatchObject({
         nodes: [
-          { kind: "each", body: [{ kind: "op", id: "forum.comments.list" }] },
+          { kind: "each", label: "for each of ids", body: [{ kind: "op", id: "forum.comments.list" }] },
           { kind: "branch", cases: [[{ kind: "sleep" }], []] },
         ],
       });

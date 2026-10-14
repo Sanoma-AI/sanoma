@@ -9,10 +9,13 @@ import type { CallStep, Graph, Step } from "./types.ts";
 type OpStep = Extract<Step, { kind: "op" }>;
 type AllStep = Extract<Step, { kind: "all" }>;
 
+/** A step's name as a node shows it: only when it is not what the node says anyway (the op's id). */
+const nameOf = (name: string | undefined, id: string) => (name === undefined || name === id ? {} : { name });
+
 /**
  * A run's graph, built from its ledger (`records`, in `seq` order) and its approvals as the run
  * tells them (`run.approvals`): where it started, each operation call, sleep and approval the
- * workflow asked for, and how it ended. The records of one `ctx.all` (one `group.id`) are its
+ * workflow asked for (an operation's with its step name, when it is not the id), and how it ended. The records of one `ctx.all` (one `group.id`) are its
  * lanes, one per member (`group.index`); while the run is in the group, the members it has
  * recorded nothing for yet are pending lanes. `now` is when the ledger was read, which a sleep's
  * end is compared with. Given the workflow's `outline`, each call's node has the `span` of the
@@ -69,6 +72,7 @@ export function runGraph(
         const step: OpStep = {
           kind: "op",
           id: record.op,
+          ...nameOf(record.name, record.op),
           key: `op:${record.seq}`,
           state: {
             tone: failed ? "bad" : "ok",
@@ -95,6 +99,7 @@ export function runGraph(
             const step: OpStep = {
               kind: "op",
               id: record.op,
+              ...nameOf(record.name, record.op),
               key: `op:${record.opSeq}`,
               state: { tone: heldTone(status, ended), recordId: record.id, ...(approval && { approval }) },
             };
@@ -124,6 +129,7 @@ export function runGraph(
             kind: "sleep",
             key: `sleep:${record.seq}`,
             label: `until ${utcText(record.until)}`,
+            ...(record.name !== undefined && { name: record.name }),
             state: { tone: asleep ? "waiting" : "ok", recordId: record.id },
           },
           record.node,

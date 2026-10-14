@@ -29,7 +29,7 @@ const loop = defineWorkflow({
   uses: [bluesky.post.create, "sleep"],
   run: async (ctx, { texts }) => {
     for (const text of texts) await ctx.bluesky.post.create({ text });
-    await ctx.sleep({ ms: 1 });
+    await ctx.sleep({ ms: 1 }, { name: "Settle" });
     return texts.length;
   },
 });
@@ -61,7 +61,7 @@ const fan = defineWorkflow({
   uses: [bluesky.post.create, "all"],
   run: async (ctx, { texts }) => {
     const [a, b] = await ctx.all([
-      () => ctx.bluesky.post.create({ text: texts[0]! }),
+      () => ctx.bluesky.post.create({ text: texts[0]! }, { name: "Post the first" }),
       () => ctx.bluesky.post.create({ text: texts[1]! }),
     ]);
     const rest = await ctx.all(texts.map((text) => () => ctx.bluesky.post.create({ text: `${text}!` })));
@@ -84,11 +84,12 @@ const tried = defineWorkflow({
   },
 });
 
+/** Each call's record as `name: op @node`, and ` in node[index]` inside a `ctx.all`. */
 const nodes = (records: LedgerRecord[]) =>
   records.flatMap((r) =>
     r.type === "op.called" || r.type === "sleep.started" || r.type === "approval.requested"
       ? [
-          `${r.type === "op.called" ? r.op : r.type} @${r.node}${r.group ? ` in ${r.group.node}[${r.group.index}]` : ""}`,
+          `${r.name}: ${r.type === "op.called" ? r.op : r.type} @${r.node}${r.group ? ` in ${r.group.node}[${r.group.index}]` : ""}`,
         ]
       : [],
   );
@@ -97,19 +98,19 @@ describe("where a ctx call is made", () => {
   const app = useApp("callsite", () => ({ workflows: [loop, fan, tried, sneaky] }));
   const c = () => app.client;
 
-  it("records each call's outline node, the same node for every pass of a loop", async () => {
+  it("records each call's outline node and step name, the same for every pass of a loop", async () => {
     const runId = await c().start(loop, { texts: ["a", "b"] }, { startedBy: alice });
     expect(await c().result(runId)).toBe(2);
     expect(nodes(await c().ledger(runId))).toEqual([
-      "bluesky.post.create @0.0.0",
-      "bluesky.post.create @0.0.0",
-      "sleep.started @1",
+      "bluesky.post.create: bluesky.post.create @0.0.0",
+      "bluesky.post.create: bluesky.post.create @0.0.0",
+      "Settle: sleep.started @1",
     ]);
     const outline = outlineWorkflow(loop);
     expect(outline).toMatchObject({
       nodes: [
-        { kind: "repeat", path: "0", body: [{ kind: "op", path: "0.0.0" }] },
-        { kind: "sleep", path: "1" },
+        { kind: "repeat", path: "0", label: "for each of texts", body: [{ kind: "op", path: "0.0.0" }] },
+        { kind: "sleep", path: "1", name: "Settle" },
       ],
     });
   });
@@ -118,17 +119,17 @@ describe("where a ctx call is made", () => {
     const runId = await c().start(fan, { texts: ["a", "b"] }, { startedBy: alice });
     expect(await c().result(runId)).toEqual([expect.any(String), expect.any(String), 2]);
     expect(nodes(await c().ledger(runId))).toEqual([
-      "bluesky.post.create @0.0.0 in 0[0]",
-      "bluesky.post.create @0.1.0 in 0[1]",
-      "bluesky.post.create @1.0.0 in 1[0]",
-      "bluesky.post.create @1.0.0 in 1[1]",
+      "Post the first: bluesky.post.create @0.0.0 in 0[0]",
+      "bluesky.post.create: bluesky.post.create @0.1.0 in 0[1]",
+      "bluesky.post.create: bluesky.post.create @1.0.0 in 1[0]",
+      "bluesky.post.create: bluesky.post.create @1.0.0 in 1[1]",
     ]);
   });
 
   it("records a call in a try block at its node", async () => {
     const runId = await c().start(tried, { text: "a" }, { startedBy: alice });
     expect(await c().result(runId)).toBe("done");
-    expect(nodes(await c().ledger(runId))).toEqual(["bluesky.post.create @0.0.0"]);
+    expect(nodes(await c().ledger(runId))).toEqual(["bluesky.post.create: bluesky.post.create @0.0.0"]);
   });
 
   it("refuses a call the outline could not see coming, failing the run with call_not_in_outline", async () => {

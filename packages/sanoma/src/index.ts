@@ -43,6 +43,7 @@ export {
   type Seed,
   type SanomaConfig,
   type SleepRequest,
+  type StepOptions,
   type Steps,
   type Use,
   type WorkflowDefinition,

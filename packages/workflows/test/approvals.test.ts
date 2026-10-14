@@ -395,11 +395,11 @@ describe("approvals a policy asks for", () => {
       status: "pending",
     });
     expect(app.ops()).toEqual([]);
-    expect(ofType(await c().ledger(runId), "approval.requested")[0]).toMatchObject({
-      approver: "intern",
-      requestedBy: "workflow",
-      covers: ["bluesky.post.create"],
-    });
+    // Each request names its step: the workflow's approval by its title, the policy's hold by the held call's name.
+    expect(ofType(await c().ledger(runId), "approval.requested")).toMatchObject([
+      { approver: "intern", requestedBy: "workflow", covers: ["bluesky.post.create"], name: "Looks fine", node: "0" },
+      { approver: "marketing-lead", requestedBy: "policy", name: "bluesky.post.create", node: "1" },
+    ]);
 
     await c().decide(runId, { decision: "approve", by: lead });
     await c().result(runId);

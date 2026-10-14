@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Box, CLUSTER_HEADER, layout, NODE_SIZE, nodeSize, type Point } from "../src/graph/layout.ts";
+import { type Box, CLUSTER_HEADER, layout, NAME_HEIGHT, NODE_SIZE, nodeSize, type Point } from "../src/graph/layout.ts";
 import { outlineGraph } from "../src/graph/outline-graph.ts";
 import type { Graph, GraphEdge } from "../src/graph/types.ts";
 import { LIST_HEADER, MAX_ROWS, ROW_HEIGHT } from "../src/graph/wildcard.ts";
@@ -110,6 +110,19 @@ describe("layout", () => {
     );
   });
 
+  it("makes an operation or a sleep with a name taller by the line its id or clock moves to", () => {
+    const named = { id: "x", kind: "op", label: "a.x.read", name: "Read it" } as const;
+    expect(nodeSize(named)).toEqual({ width: NODE_SIZE.op.width, height: NODE_SIZE.op.height + NAME_HEIGHT });
+    expect(nodeSize({ id: "s", kind: "sleep", label: "sleep", name: "Wait" })).toEqual({
+      width: NODE_SIZE.sleep.width,
+      height: NODE_SIZE.sleep.height + NAME_HEIGHT,
+    });
+    expect(nodeSize({ id: "s", kind: "sleep", label: "sleep" })).toEqual(NODE_SIZE.sleep);
+    expect(nodeSize({ ...named, label: "*.*.read", ops: ["a.x.read"] }).height).toBe(
+      NODE_SIZE.op.height + NAME_HEIGHT + LIST_HEADER + ROW_HEIGHT,
+    );
+  });
+
   it("lays a graph out left to right", () => {
     const graph = outlineGraph([op("a.x.one")]);
     const at = layout(graph).boxes;
@@ -139,6 +152,7 @@ describe("layout", () => {
     const graph = outlineGraph([
       {
         kind: "repeat",
+        label: "repeat while more",
         body: [op("x.batch.open"), { kind: "all", branches: [[op("a.post.create")], [op("b.post.create")]] }],
       },
     ]);
@@ -168,14 +182,14 @@ describe("layout", () => {
       op("a.x.before"),
       { kind: "all", branches: [[op("b.x.one"), op("b.x.two")], [op("b.x.three")], []] },
       { kind: "branch", cases: [[op("c.x.one")], []] },
-      { kind: "repeat", body: [] },
+      { kind: "repeat", label: "repeat", body: [] },
       op("d.x.after"),
     ]);
     expect(routeProblems(graph)).toEqual([]);
   });
 
   it("runs straight through a loop holding one operation, from start to end", () => {
-    const graph = outlineGraph([{ kind: "repeat", body: [op("x.item.get")] }]);
+    const graph = outlineGraph([{ kind: "repeat", label: "for each of items", body: [op("x.item.get")] }]);
     const { routes } = layout(graph);
     expect(routeProblems(graph)).toEqual([]);
     // Into the loop, on inside it to the call, back to its right side and out: one height throughout.
@@ -187,7 +201,7 @@ describe("layout", () => {
   });
 
   it("runs an empty loop's way across it below its label", () => {
-    const graph = outlineGraph([{ kind: "repeat", body: [] }]);
+    const graph = outlineGraph([{ kind: "repeat", label: "repeat", body: [] }]);
     const { boxes, routes } = layout(graph);
     const box = boxes.get("cluster:0")!;
     const route = routes.get("cluster:0->cluster:0")!;
@@ -201,7 +215,10 @@ describe("layout", () => {
   });
 
   it("refuses an edge between nodes in different boxes, naming it", () => {
-    const graph = outlineGraph([{ kind: "repeat", body: [op("x.item.get")] }, op("x.item.done")]);
+    const graph = outlineGraph([
+      { kind: "repeat", label: "for each of items", body: [op("x.item.get")] },
+      op("x.item.done"),
+    ]);
     graph.edges.push({ id: "op:1->op:2", source: "op:1", target: "op:2" });
     expect(() => layout(graph)).toThrow("layout: edge op:1->op:2 joins neither");
   });

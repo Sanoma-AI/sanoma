@@ -10,6 +10,7 @@ import type { GraphEdge, GraphNode, Step } from "../src/graph/types.ts";
 export const DRIFT_SHAPE: Step[] = [
   {
     kind: "repeat",
+    label: "for each of resources",
     body: [
       {
         kind: "branch",

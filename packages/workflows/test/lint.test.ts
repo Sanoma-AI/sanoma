@@ -188,6 +188,7 @@ const workflow = (body: string, params = "ctx, input") => `
   import { ghost } from "@sanoma/connector-ghost";
   import { z } from "zod";
   const helper = (ctx: any) => ctx.ghost.post.create({ title: "h" });
+  const DRAFT = "Draft the post";
   export default defineWorkflow({
     name: "x",
     trigger: "manual",
@@ -200,6 +201,18 @@ const workflow = (body: string, params = "ctx, input") => `
 `;
 
 const inRun = (body: string, params?: string) => messages(workflow(body, params), "workflows/x.ts");
+
+/** The problem a name given that unnamed calls are called is. */
+const defaultLike = (name: string) =>
+  expect.stringMatching(new RegExp(`^"${name}" is what a call without a name is called .*name it in words`));
+
+/** The problem two steps given one name are, and the fix it names. */
+const twice = (name: string, fix: string) =>
+  expect.stringMatching(
+    new RegExp(
+      `^two steps of this workflow are named "${name}": a name given is one step's, so a test or the graph can tell them apart; ${fix}$`,
+    ),
+  );
 
 describe("lintWorkflow on run, which the worker holds to the outline", () => {
   it("passes loops, a switch with break, a try with a rethrow, ctx.all over .map, ctx.runId and ctx.now, and a return at the end", () => {
@@ -221,6 +234,49 @@ describe("lintWorkflow on run, which the worker holds to the outline", () => {
         return input.ts.length;
       `),
     ).toEqual([]);
+  });
+
+  it("lets unnamed calls share their default name, and holds a name given, or an approval's title, to one step", () => {
+    // Defaults may repeat: one operation in two arms, a retry in a catch, two sleeps.
+    expect(
+      inRun(`
+        if (input.ok) await ctx.ghost.post.create({ title: "a" });
+        else await ctx.ghost.post.create({ title: "b" });
+        try {
+          await ctx.ghost.post.create({ title: "c" });
+        } catch {
+          await ctx.ghost.post.create({ title: "c" });
+        }
+        await (ctx as any)[input.k].post.create({ title: "d" });
+        await ctx.sleep({ ms: 1 });
+        await ctx.sleep({ ms: 2 });
+        await ctx.ghost.post.create({ title: "e" }, { name: "First" });
+        await ctx.ghost.post.create({ title: "f" }, { name: DRAFT });
+        await ctx.sleep({ ms: 3 }, { name: "Again" });
+      `),
+    ).toEqual([]);
+    expect(
+      inRun(`await ctx.sleep({ ms: 1 }, { name: "X" }); await ctx.ghost.post.create({ title: "a" }, { name: "X" });`),
+    ).toEqual([twice("X", "rename one")]);
+    expect(
+      inRun(`await ctx.approval("Go?", { approver: "a" }); await ctx.approval("Go?", { approver: "b" });`),
+    ).toEqual([twice("Go\\?", "give each approval a title of its own")]);
+    // An approval's title is a name given, as a { name } is.
+    expect(inRun(`await ctx.approval("Go?", { approver: "a" }); await ctx.sleep({ ms: 1 }, { name: "Go?" });`)).toEqual(
+      [twice("Go\\?", "rename one")],
+    );
+    // A name given may not be what unnamed calls are called: an operation's id, or Sleep.
+    expect(inRun(`await ctx.sleep({ ms: 1 }, { name: "ghost.post.create" });`)).toEqual([
+      defaultLike("ghost\\.post\\.create"),
+    ]);
+    expect(inRun(`await ctx.ghost.post.create({ title: "a" }, { name: "Sleep" });`)).toEqual([defaultLike("Sleep")]);
+    // A name the outline cannot read.
+    const unread = expect.stringMatching(/^a step's name must be a string literal, or a top-level const holding one/);
+    expect(inRun(`await ctx.sleep({ ms: 1 }, { name: input.k });`)).toEqual([unread]);
+    expect(inRun("await ctx.sleep({ ms: 1 }, { name: `at ${input.k}` });")).toEqual([unread]);
+    expect(inRun(`const opts = { name: "x" }; await ctx.sleep({ ms: 1 }, opts);`)).toEqual([unread]);
+    expect(inRun(`await ctx.ghost.post.create({ title: "a" }, { name: "a", other: 1 } as never);`)).toEqual([unread]);
+    expect(inRun(`await ctx.ghost.post.create({ title: "a" }, { name: "" });`)).toEqual([unread]);
   });
 
   it("checks only the literal defineWorkflow is called with: another object with a name and a run is not a workflow", () => {

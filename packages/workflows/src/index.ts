@@ -27,6 +27,7 @@ export {
   type Builtin,
   type Ctx,
   type SleepRequest,
+  type StepOptions,
   type Use,
   type WorkflowDefinition,
 } from "./define.ts";
@@ -99,6 +100,7 @@ export { dbosClient } from "./db.ts";
 export {
   approverLabel,
   credentialReady,
+  DEFAULT_SLEEP_NAME,
   ENDED_STATUSES,
   errorMessage,
   isEnded,

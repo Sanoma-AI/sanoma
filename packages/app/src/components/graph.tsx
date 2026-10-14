@@ -105,9 +105,16 @@ function Handles({ inbound = true, outbound = true }: { inbound?: boolean; outbo
 
 /**
  * What a node is called, for its title and assistive tech: its label, but for a run's sleep,
- * whose label says only until when and whose clock says "sleep".
+ * whose label says only until when and whose clock says "sleep", and an operation with a name,
+ * which says both.
  */
-const nameOf = (node: GraphNode) => (node.kind === "sleep" && node.state ? `sleep ${node.label}` : node.label);
+const nameOf = (node: GraphNode) => {
+  if (node.kind === "sleep") {
+    const clock = node.state ? `sleep ${node.label}` : node.label;
+    return node.name ? `${node.name}: ${clock}` : clock;
+  }
+  return node.kind === "op" && node.name ? `${node.name}: ${node.label}` : node.label;
+};
 
 /** One node's box, in its tone when a run gives it one, ringed when selected, with its handles. */
 function Frame({
@@ -185,8 +192,9 @@ function useOpFacts(node: Extract<GraphNode, { kind: "op" }>) {
 }
 
 /**
- * An operation. One with `ops` (an outline's call with a computed segment) is a stacked list:
- * what is literal in its id, then a row per operation it can reach (`wildcardRows`).
+ * An operation. One with a name says it first, its id on the line below. One with `ops` (an
+ * outline's call with a computed segment) is a stacked list: what is literal in its id, then a
+ * row per operation it can reach (`wildcardRows`).
  */
 function OpNode(props: Props<"op">) {
   const { node } = props.data;
@@ -203,8 +211,17 @@ function OpNode(props: Props<"op">) {
         {vendors.length > MAX_VENDORS && (
           <span className="shrink-0 text-muted-foreground">+{vendors.length - MAX_VENDORS}</span>
         )}
-        <code className="truncate">{node.ops ? wildcardHeader(node.label) : node.label}</code>
+        {node.name ? (
+          <span className="truncate font-medium">{node.name}</span>
+        ) : (
+          <code className="truncate">{node.ops ? wildcardHeader(node.label) : node.label}</code>
+        )}
       </Line>
+      {node.name && (
+        <Line>
+          <code className="truncate text-muted-foreground">{node.ops ? wildcardHeader(node.label) : node.label}</code>
+        </Line>
+      )}
       <Line>
         {effect && <Badge className={effectBadge({ effect })}>{effect}</Badge>}
         {held ? (
@@ -266,16 +283,25 @@ function ApprovalNode(props: Props<"approval">) {
   );
 }
 
-/** A sleep, and in a run when it ends (UTC, as the ledger shows it). */
+/**
+ * A sleep, and in a run when it ends (UTC, as the ledger shows it). One with a name says it
+ * first, as an operation does, the clock and its time on the line below.
+ */
 function SleepNode(props: Props<"sleep">) {
   const { node } = props.data;
+  const clock = (
+    <>
+      <BUILTIN_ICON.sleep className="size-4 shrink-0" />
+      <span className={cn("truncate", node.name && "text-muted-foreground")}>{node.label}</span>
+    </>
+  );
   return (
     <Frame {...props}>
       <Line>
         <Dot tone={node.state?.tone} />
-        <BUILTIN_ICON.sleep className="size-4 shrink-0" />
-        <span className="truncate">{node.label}</span>
+        {node.name ? <span className="truncate font-medium">{node.name}</span> : clock}
       </Line>
+      {node.name && <Line>{clock}</Line>}
     </Frame>
   );
 }
@@ -295,8 +321,9 @@ function ClusterNode({ data: { node } }: Props<"cluster">) {
   return (
     <div className="size-full rounded-lg border border-dashed border-muted-foreground/40" title={node.label}>
       <Handles />
-      <Badge variant="outline" className="m-1.5 bg-card">
-        {node.label}
+      {/* Inside the box however long the label: the title above has it whole. */}
+      <Badge variant="outline" className="m-1.5 max-w-[calc(100%-12px)] bg-card">
+        <span className="min-w-0 truncate">{node.label}</span>
       </Badge>
     </div>
   );

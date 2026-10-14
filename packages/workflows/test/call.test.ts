@@ -715,6 +715,8 @@ describe("ctx.all", () => {
       { ...group, index: 1 },
       undefined,
     ]);
+    // An approval is named by its title.
+    expect(records[1]).toMatchObject({ name: "Post it?", node: "0.0.0" });
   });
 
   it("stops at the first member that fails, with its error, and never runs the members after it", async () => {

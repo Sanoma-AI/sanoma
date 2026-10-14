@@ -1,4 +1,5 @@
 import type { Span } from "@sanoma/workflows/describe";
+import { DEFAULT_SLEEP_NAME } from "@sanoma/workflows/shared";
 import type { CallStep, Graph, GraphEdge, GraphNode, Step, StepState } from "./types.ts";
 
 /** A graph's two ends: an outline's are plain; a run's say how it started and how it ended. */
@@ -18,13 +19,15 @@ const own = <S extends CallStep>(step: S): Pick<S, "state"> & { span?: Span } =>
 /**
  * Steps as a graph: a chain from start to end. A `ctx.all` is one lane per member between the
  * node before it and the node after; a branch splits at a diamond into one lane per case. A
- * computed `ctx.all`'s member is a chain in a cluster labelled "for each", a loop's body one in a
- * cluster labelled "repeats", each joined from the cluster (its inside left) and back to it (its
- * inside right). A `try` is its body's chain beside a cluster labelled "on error" holding the
- * handler's, both from the node before. An empty member leads straight from the node before to
- * the node after; a branch's empty case, the way past it, is a lane marked "otherwise". A
- * workflow's outline is drawn this way, and a run's ledger once runGraph has made it into steps.
- * A call's node has its step's `span`.
+ * computed `ctx.all`'s member, and a loop's body, is a chain in a cluster labelled with the label
+ * the outline reads from its code ("for each of subscribers", "repeat while more"), each joined
+ * from the cluster (its inside left) and back to it (its inside right). A `try` is its body's
+ * chain beside a cluster labelled "on error" holding the handler's, both from the node before. An
+ * empty member leads straight from the node before to the node after; a branch's empty case, the
+ * way past it, is a lane marked "otherwise". A workflow's outline is drawn this way, and a run's
+ * ledger once runGraph has made it into steps. A call's node has its step's `span`, and an
+ * operation's or a sleep's its step's name when it is not the default (the operation's id,
+ * `DEFAULT_SLEEP_NAME`).
  */
 export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS): Graph {
   const nodes: GraphNode[] = [];
@@ -62,6 +65,7 @@ export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS
                 id: idOf("op", step.key),
                 kind: "op",
                 label: step.id,
+                ...(step.name && step.name !== step.id && { name: step.name }),
                 ...(step.ops && { ops: step.ops }),
                 ...inside,
                 ...own(step),
@@ -77,7 +81,8 @@ export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS
         }
         case "sleep": {
           const label = step.label ?? "sleep";
-          from = [add({ id: idOf("sleep", step.key), kind: "sleep", label, ...inside, ...own(step) }, from)];
+          const name = step.name && step.name !== DEFAULT_SLEEP_NAME ? { name: step.name } : {};
+          from = [add({ id: idOf("sleep", step.key), kind: "sleep", label, ...name, ...inside, ...own(step) }, from)];
           break;
         }
         case "pending":
@@ -87,10 +92,8 @@ export function outlineGraph(outline: readonly Step[], ends: Ends = OUTLINE_ENDS
           if (step.branches.length) from = lanes(step.branches, from);
           break;
         case "each":
-          from = cluster("for each", step.body);
-          break;
         case "repeat":
-          from = cluster("repeats", step.body);
+          from = cluster(step.label, step.body);
           break;
         case "try": {
           const after = chain(step.body, from, parent);

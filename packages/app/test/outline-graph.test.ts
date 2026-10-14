@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { outlineWorkflow } from "@sanoma/workflows/describe";
 import { describe, expect, it } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
+import { DEFAULT_SLEEP_NAME } from "@sanoma/workflows/shared";
 import { outlineGraph } from "../src/graph/outline-graph.ts";
 import { type GraphNode, nodeAt, type Step } from "../src/graph/types.ts";
 import { calls, DRIFT_SHAPE, labels, pairs } from "./graph-helpers.ts";
@@ -73,17 +74,17 @@ describe("outlineGraph", () => {
     ]);
   });
 
-  it("draws a ctx.all over computed members as its one member in a cluster labelled for each", () => {
+  it("draws a ctx.all over computed members as its one member in a cluster with its label", () => {
     const { nodes, edges } = outlineGraph([
-      { kind: "each", body: [op("forum.comments.list"), op("forum.comments.hide")] },
-      { kind: "each", body: [] },
+      { kind: "each", label: "for each of threads", body: [op("forum.comments.list"), op("forum.comments.hide")] },
+      { kind: "each", label: "for each of none", body: [] },
     ]);
     expect(labels(nodes)).toEqual([
       "start start",
-      "cluster:0 for each",
+      "cluster:0 for each of threads",
       "op:1 forum.comments.list in cluster:0",
       "op:2 forum.comments.hide in cluster:0",
-      "cluster:3 for each",
+      "cluster:3 for each of none",
       "end end",
     ]);
     expect(pairs(edges)).toEqual([
@@ -94,6 +95,23 @@ describe("outlineGraph", () => {
       "cluster:0->cluster:3",
       "cluster:3->cluster:3",
       "cluster:3->end",
+    ]);
+  });
+
+  it("labels an operation and a sleep by what they are, and carries a step name that is not the default", () => {
+    const { nodes } = outlineGraph([
+      { kind: "op", id: "ghost.post.create", name: "Draft the post" },
+      { kind: "op", id: "ghost.post.publish", name: "ghost.post.publish" },
+      { kind: "sleep", name: "Wait for launch" },
+      { kind: "sleep", name: DEFAULT_SLEEP_NAME },
+      { kind: "sleep" },
+    ]);
+    expect(nodes.slice(1, -1)).toEqual([
+      { id: "op:0", kind: "op", label: "ghost.post.create", name: "Draft the post" },
+      { id: "op:1", kind: "op", label: "ghost.post.publish" },
+      { id: "sleep:2", kind: "sleep", label: "sleep", name: "Wait for launch" },
+      { id: "sleep:3", kind: "sleep", label: "sleep" },
+      { id: "sleep:4", kind: "sleep", label: "sleep" },
     ]);
   });
 
@@ -126,14 +144,14 @@ describe("outlineGraph", () => {
     ]);
   });
 
-  it("draws a loop's body as a chain in a cluster labelled repeats", () => {
+  it("draws a loop's body as a chain in a cluster with its label", () => {
     const { nodes, edges } = outlineGraph([
-      { kind: "repeat", body: [op("x.item.get"), { kind: "sleep" }] },
+      { kind: "repeat", label: "for each of subscribers", body: [op("x.item.get"), { kind: "sleep" }] },
       op("x.item.done"),
     ]);
     expect(labels(nodes)).toEqual([
       "start start",
-      "cluster:0 repeats",
+      "cluster:0 for each of subscribers",
       "op:1 x.item.get in cluster:0",
       "sleep:2 sleep in cluster:0",
       "op:3 x.item.done",
@@ -197,12 +215,13 @@ describe("outlineGraph", () => {
     const { nodes, edges } = outlineGraph([
       {
         kind: "repeat",
+        label: "repeat while more",
         body: [op("x.batch.open"), { kind: "all", branches: [[op("a.post.create")], [op("b.post.create")]] }],
       },
     ]);
     expect(labels(nodes)).toEqual([
       "start start",
-      "cluster:0 repeats",
+      "cluster:0 repeat while more",
       "op:1 x.batch.open in cluster:0",
       "op:2 a.post.create in cluster:0",
       "op:3 b.post.create in cluster:0",
@@ -223,7 +242,7 @@ describe("outlineGraph", () => {
     const { nodes, edges } = outlineGraph(DRIFT_SHAPE);
     expect(labels(nodes)).toEqual([
       "start start",
-      "cluster:0 repeats",
+      "cluster:0 for each of resources",
       "split:1 branch in cluster:0",
       "op:2 *.*.import in cluster:0",
       "skip:3 otherwise in cluster:0",
@@ -242,7 +261,7 @@ describe("outlineGraph", () => {
   });
 
   it("draws an empty cluster's way through it as one edge across its inside", () => {
-    const { edges } = outlineGraph([{ kind: "repeat", body: [] }]);
+    const { edges } = outlineGraph([{ kind: "repeat", label: "repeat", body: [] }]);
     expect(pairs(edges)).toEqual(["start->cluster:0", "cluster:0->cluster:0", "cluster:0->end"]);
   });
 

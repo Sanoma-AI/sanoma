@@ -4,6 +4,7 @@ import { type ApprovalRequest, type ApprovalResult, type ApprovalState, notAppro
 import { RejectedError } from "./errors.ts";
 import { entry, write } from "./ledger.ts";
 import { warn } from "./log.ts";
+import type { Placed } from "./call.ts";
 import type { Run } from "./run.ts";
 import { approverLabel, mayDecide } from "./shared.ts";
 
@@ -59,13 +60,13 @@ export interface HeldCall {
 /**
  * Waits, durably, for a decision from someone who may make it. Throws `RejectedError` on a
  * rejection. Without `held`, the workflow asked (`ctx.approval`); with it, the policy did, and
- * `node` is the held call's outline node.
+ * `place` is the held call's outline node and name.
  */
 export async function awaitApproval(
   run: Run,
   title: string,
   req: CheckedApproval,
-  node: string,
+  place: Placed,
   held?: HeldCall,
 ): Promise<ApprovalResult> {
   const { covers } = req;
@@ -93,7 +94,7 @@ export async function awaitApproval(
       {
         type: "approval.requested",
         approval: state.id,
-        node,
+        ...place,
         title,
         approver: state.approver,
         requestedBy: state.requestedBy,
