@@ -105,7 +105,8 @@ export function AppSidebar() {
 function FoldButton() {
   const { open, openMobile, isMobile, toggleSidebar } = useSidebar();
   const expanded = isMobile ? openMobile : open;
-  const label = isMobile || expanded ? "Collapse sidebar" : "Expand sidebar";
+  // On a phone it shows only inside the open sheet.
+  const label = expanded ? "Collapse sidebar" : "Expand sidebar";
   return (
     <SidebarMenuItem>
       <SidebarMenuButton tooltip={label} aria-expanded={expanded} onClick={toggleSidebar}>
