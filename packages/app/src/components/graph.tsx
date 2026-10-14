@@ -1,7 +1,3 @@
-// React Flow's stylesheet, once, in this chunk: only the pages with a graph load it. style.css
-// maps its --xy-* colours to the theme.
-// oxlint-disable-next-line import/no-unassigned-import
-import "@xyflow/react/dist/style.css";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   Background,
@@ -403,6 +399,12 @@ function RouteEdge({ data, style, interactionWidth }: EdgeProps<FlowEdge>) {
 
 const edgeTypes = { route: RouteEdge } satisfies EdgeTypes;
 
+/**
+ * An edge into or out of what the run has not reached: its path dashed. The class is the edge's,
+ * on the group around its path; raw, so Tailwind reads `\_` as an underscore, not a space.
+ */
+const DASHED = String.raw`[&_.react-flow\_\_edge-path]:[stroke-dasharray:4_4]`;
+
 /** Fits the view again when nodes come or go, as the run's page polls. */
 function FitOnChange({ nodes, show, onFitted }: { nodes: FlowNode[]; show: "start" | "end"; onFitted: () => void }) {
   const { fitView, setViewport } = useReactFlow();
@@ -515,7 +517,7 @@ export default function Graph({ graph, show = "end", selected, onSelect }: Graph
         type: "route",
         data: { path: pathOf(at.routes.get(edge.id)!) },
         animated: active && !reducedMotion,
-        ...(isPending(from) || isPending(to) ? { style: { strokeDasharray: "4 4" } } : {}),
+        ...(isPending(from) || isPending(to) ? { className: DASHED } : {}),
       };
     });
   }, [graph, at, reducedMotion]);
