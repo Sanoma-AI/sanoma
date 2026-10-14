@@ -7,7 +7,7 @@
 export const MAX_ROWS = 6;
 /** The most vendor logos the header draws before saying how many more vendors there are. */
 export const MAX_VENDORS = 3;
-/** Each row's height in px (a 16px line and the gap), and what the list adds above its rows (the frame's gap, its border and padding, less the room the header's two lines leave): measured in the browser. */
+/** Each row's height in px (a 16px line and the gap), and what the list adds above its rows (the op node's Separator and the frame's gap on each side of it, less the room the header's two lines leave): measured in the browser. */
 export const ROW_HEIGHT = 18;
 export const LIST_HEADER = 8;
 
