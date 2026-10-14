@@ -1,6 +1,6 @@
 import { Text } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
-import { highlightedLines } from "../src/lib/lines.ts";
+import { highlightedLines, spanLines } from "../src/lib/lines.ts";
 
 const doc = Text.of(["one", "two", "three", "four", "five", "six"]);
 /** The offset of `column` on line `n` (1-based). */
@@ -21,5 +21,19 @@ describe("highlightedLines", () => {
 
   it("gives none for no spans", () => {
     expect(highlightedLines(doc, [])).toEqual([]);
+  });
+});
+
+describe("spanLines", () => {
+  const text = doc.toString();
+
+  it("gives the first and last line a span touches, as highlightedLines does", () => {
+    expect(spanLines(text, [at(3, 2), at(5, 1)])).toEqual([3, 5]);
+    expect(spanLines(text, [at(2), at(3)])).toEqual([2, 2]);
+    expect(spanLines(text, [at(1), at(1, 2)])).toEqual([1, 1]);
+  });
+
+  it("clamps offsets past the end to the last line", () => {
+    expect(spanLines(text, [text.length + 5, text.length + 9])).toEqual([6, 6]);
   });
 });
