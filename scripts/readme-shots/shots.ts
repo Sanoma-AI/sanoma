@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -15,10 +16,13 @@ import {
 import { createRequire } from "node:module";
 import { constants, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Browser } from "puppeteer-core";
 import { ensureBuilt, waitFor } from "../../packages/testing/src/build.ts";
-import { launchChrome, recordDemo, seedPendingRuns, still } from "./capture.ts";
+import type { SanomaConfig } from "../../packages/workflows/src/index.ts";
+import { launchChrome, recordDemo, ServerFailure, still } from "./capture.ts";
+
+type Workflows = typeof import("../../packages/workflows/src/index.ts");
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 const assets = join(repo, ".github/assets");
@@ -46,41 +50,59 @@ export default defineConfig({ workflows: [announce], connectors: [withFake(ghost
 const started = Date.now();
 const say = (line: string) => console.log(`readme:shots ${((Date.now() - started) / 1000).toFixed(0)}s: ${line}`);
 
-if (!hasFfmpeg()) fail("ffmpeg is not on PATH; it makes demo.gif (brew install ffmpeg)");
-say("building what is stale (pnpm run build in each package whose dist/ is older than its src/)");
-for (const [dir, outputs] of BUILT) ensureBuilt(join(repo, dir), outputs, ["pnpm", "run", "build"]);
-// Loaded once built: @sanoma/testing's index imports @sanoma/workflows from its dist/.
-const { testDatabaseUrl } = await import("../../packages/testing/src/index.ts");
-// `SANOMA_TEST_DATABASE_URL`'s name plus `_readme_shots`: a worktree's own when that is set per worktree.
-const databaseUrl = new URL(testDatabaseUrl("readme_shots"));
+// The two runs seeded for the Inbox still, as dana: title, body and launch time.
+const SEEDED = [
+  ["Summer sale", "<p>Everything is 20% off until Sunday.</p>", new Date(2027, 5, 1, 9)],
+  ["Pricing update", "<p>New plans for teams, from next month.</p>", new Date(2027, 5, 15, 10)],
+] as const;
 
+// The packages' own requires: `pg` and `@sanoma/workflows` (its dist/, as the company repo loads it).
+const fromSanoma = createRequire(join(repo, "packages/sanoma/package.json"));
+
+const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+const exitCodeOf = (signal: (typeof SIGNALS)[number]) => 128 + constants.signals[signal];
+
+// What one run holds, each released by `cleanup`: the work directory, the server's log beside it
+// (kept after a failure), Chrome, the server and its database.
 const work = mkdtempSync(join(tmpdir(), "readme-shots-"));
-const captured = join(work, "assets");
-const serverLog = join(work, "server.log");
-let browser: Browser | undefined;
+const serverLog = `${work}.log`;
+let keepLog = false;
+let databaseUrl: URL;
+let chrome: Promise<Browser> | undefined;
 let server: ChildProcess | undefined;
 let database = false;
-let interrupted = false;
+let interrupted: (typeof SIGNALS)[number] | undefined;
 let cleaning: Promise<void> | undefined;
 
 // Ctrl-C or a kill: the same cleanup as `finally`, then out with the signal's code (130 for SIGINT).
 // A signal during the cleanup (pnpm passes Ctrl-C on as well) waits for it rather than cutting it short.
-for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+for (const signal of SIGNALS) {
   process.on(signal, () => {
     if (interrupted) return;
-    interrupted = true;
+    interrupted = signal;
     say(`${signal}: cleaning up`);
-    void cleanup().then(() => process.exit(128 + constants.signals[signal]));
+    void cleanup().then(() => process.exit(exitCodeOf(signal)));
   });
 }
 
 try {
-  browser = await launchChrome();
+  if (!hasFfmpeg()) fail("ffmpeg is not on PATH; it makes demo.gif (brew install ffmpeg)");
+  say("building what is stale (pnpm run build in each package whose dist/ is older than its src/)");
+  for (const [dir, outputs] of BUILT) ensureBuilt(join(repo, dir), outputs, ["pnpm", "run", "build"]);
+  // Loaded once built: @sanoma/testing's index imports @sanoma/workflows from its dist/.
+  const { testDatabaseUrl } = await import("../../packages/testing/src/index.ts");
+  // `SANOMA_TEST_DATABASE_URL`'s name plus `_readme_shots`: a worktree's own when that is set per worktree.
+  databaseUrl = new URL(testDatabaseUrl("readme_shots"));
+
+  stopIfInterrupted();
+  chrome = launchChrome();
+  const browser = await chrome;
   await resetDatabase();
-  database = true;
   const acme = join(work, "acme");
   writeRepo(acme);
-  // The server's output goes to a log file, read for its URL and, on a failure, for its last lines.
+  stopIfInterrupted();
+  // The server creates the database, and writes its output to the log, read for its URL.
+  database = true;
   const log = openSync(serverLog, "a");
   server = spawn(process.execPath, [join(repo, "packages/sanoma/dist/cli.js"), "serve"], {
     cwd: acme,
@@ -94,8 +116,9 @@ try {
   const frames = join(work, "frames");
   const runPath = await recordDemo(browser, base, frames);
   say("demo recorded; seeding two more runs that wait on marketing-lead");
-  await seedPendingRuns(browser, base);
+  await seedPendingRuns(acme);
 
+  const captured = join(work, "assets");
   mkdirSync(captured);
   await still(browser, base, "/workflows/announce", join(captured, "workflow.png"), {
     sidebar: false,
@@ -111,32 +134,46 @@ try {
   });
   say("stills taken; making demo.gif");
   makeGif(frames, join(captured, "demo.gif"));
-  // Only once all four are made, so a failure leaves the committed ones as they are.
-  for (const file of ["demo.gif", "workflow.png", "inbox.png", "run.png"]) {
-    copyFileSync(join(captured, file), join(assets, file));
-  }
+  replaceAssets(captured, ["demo.gif", "workflow.png", "inbox.png", "run.png"]);
   say("wrote .github/assets: demo.gif, workflow.png, inbox.png, run.png");
 } catch (err) {
-  if (!interrupted && existsSync(serverLog)) {
-    const tail = readFileSync(serverLog, "utf8").trimEnd().split("\n").slice(-40).join("\n");
-    console.error(`readme:shots: the server's last lines:\n${tail}`);
+  // A signal's handler runs on the event loop: let one that came during a blocking call (ffmpeg,
+  // a build) run before telling a failure from an interruption.
+  await new Promise(setImmediate);
+  if (!interrupted) {
+    keepLog = existsSync(serverLog);
+    report(err);
+    process.exitCode = 1;
   }
-  throw err;
 } finally {
   await cleanup();
 }
 
+/** Throws once a signal has come, so nothing is acquired after the cleanup has begun. */
+function stopIfInterrupted(): void {
+  if (interrupted) throw new Error(`readme:shots: stopped by ${interrupted}`);
+}
+
 /**
- * Closes Chrome, stops the server, drops the database and removes the work directory, each
- * whatever the others do; once, for `finally` and a signal alike.
+ * Closes Chrome (once launched, if it is launching), stops the server, drops the database and
+ * removes the work directory and, unless a failure keeps it, the server's log: each whatever the
+ * others do, and once, for `finally` and a signal alike.
  */
 function cleanup(): Promise<void> {
   cleaning ??= (async () => {
     const steps: [what: string, step: () => unknown][] = [
-      ["close Chrome", () => browser?.close()],
+      [
+        "close Chrome",
+        () =>
+          chrome?.then(
+            (browser) => browser.close(),
+            () => {},
+          ),
+      ],
       ["stop the server", () => server && stop(server)],
       ["drop the database", () => database && dropDatabase()],
       [`remove ${work}`, () => rmSync(work, { recursive: true, force: true })],
+      [`remove ${serverLog}`, () => keepLog || rmSync(serverLog, { force: true })],
     ];
     for (const [what, step] of steps) {
       try {
@@ -147,6 +184,64 @@ function cleanup(): Promise<void> {
     }
   })();
   return cleaning;
+}
+
+/** The error, then the server's log: its last 40 lines when the failure likely starts there, else its path. */
+function report(err: unknown): void {
+  console.error(err);
+  if (!keepLog) return;
+  if (err instanceof ServerFailure) {
+    const tail = readFileSync(serverLog, "utf8").trimEnd().split("\n").slice(-40).join("\n");
+    console.error(`readme:shots: the server's last lines:\n${tail}`);
+  }
+  console.error(`readme:shots: the server's log is ${serverLog}`);
+}
+
+/** A file's temporary name in .github/assets while `replaceAssets` copies it in. */
+function temporary(file: string): string {
+  return join(assets, `.${file}.new`);
+}
+
+/**
+ * Copies `files` from `dir` into .github/assets under temporary names, then renames each into
+ * place, so a failure leaves the committed set as it was; the temporary names go either way.
+ */
+function replaceAssets(dir: string, files: string[]): void {
+  try {
+    for (const file of files) copyFileSync(join(dir, file), temporary(file));
+    for (const file of files) renameSync(temporary(file), join(assets, file));
+  } finally {
+    for (const file of files) rmSync(temporary(file), { force: true });
+  }
+}
+
+/**
+ * Two more runs of announce from dana, waiting on marketing-lead, for the Inbox still: started
+ * through the runtime's client, as the app starts a run, with acme's config.
+ */
+async function seedPendingRuns(acme: string): Promise<void> {
+  const { SanomaClient } = (await import(pathToFileURL(fromSanoma.resolve("@sanoma/workflows")).href)) as Workflows;
+  const { default: config } = (await import(pathToFileURL(join(acme, "sanoma.config.ts")).href)) as {
+    default: SanomaConfig;
+  };
+  const client = await SanomaClient.connect({ ...config, root: acme, databaseUrl: databaseUrl.href });
+  try {
+    for (const [title, body, launchAt] of SEEDED) {
+      const input = { title, body, launchAt: launchAt.toISOString() };
+      const runId = await client.start("announce", input, { startedBy: { id: "dana" } });
+      await waitFor(
+        async () => (await client.run(runId))?.status,
+        (status) => status === "waiting",
+        30_000,
+      ).catch((err: unknown) => {
+        throw new ServerFailure(`readme:shots: seeded run ${runId} did not come to wait on its approval`, {
+          cause: err,
+        });
+      });
+    }
+  } finally {
+    await client.close();
+  }
 }
 
 /** A company repo named acme: the README's workflow, the config above, and `node_modules` reaching this checkout. */
@@ -178,7 +273,9 @@ async function appUrl(child: ChildProcess): Promise<string> {
     },
     Boolean,
     60_000,
-  ).catch((err: unknown) => fail(`the app did not start: ${(err as Error).message}`));
+  ).catch((err: unknown) => {
+    throw new ServerFailure(`readme:shots: the app did not start: ${(err as Error).message}`, { cause: err });
+  });
   return url!;
 }
 
@@ -200,7 +297,7 @@ interface PgClient {
 
 /** Runs `sql` on the server's `postgres` database. `pg` comes from the `sanoma` package, which depends on it. */
 async function onServer(sql: string): Promise<void> {
-  const { Client } = createRequire(join(repo, "packages/sanoma/package.json"))("pg") as {
+  const { Client } = fromSanoma("pg") as {
     Client: new (options: { connectionString: string }) => PgClient;
   };
   const url = new URL(databaseUrl);

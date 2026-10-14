@@ -1,4 +1,4 @@
-// The browser half of `pnpm readme:shots`: the demo's storyboard, the seeded runs and the stills,
+// The browser half of `pnpm readme:shots`: the demo's storyboard and the stills,
 // each scene in a fresh browser context of a local Chrome, light theme.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -39,9 +39,6 @@ interface Scene {
   scale: number;
 }
 
-/** dana at 1200×800 with the sidebar folded: the demo's scene, and the seeding's. */
-const DANA: Scene = { actor: "dana", sidebar: false, width: 1200, height: 800, scale: 1 };
-
 /**
  * A page in a context of its own, with the actor, sidebar and viewport of `scene`, the workflow's
  * rail of runs folded to its dots, and the light theme (the app follows the system's by default).
@@ -77,13 +74,18 @@ async function need(page: Page, selector: string): Promise<ElementHandle> {
   return el;
 }
 
+/** A failure that likely starts in the server (a run that does not move on, an app that does not start). */
+export class ServerFailure extends Error {}
+
 /** Waits until the run's page shows `status`; on timeout, names the status it shows instead. */
 async function statusIs(page: Page, status: string, timeout = 120_000): Promise<void> {
   try {
     await page.waitForFunction((t) => document.getElementById("run-status")?.textContent === t, { timeout }, status);
   } catch (err) {
     const seen = await page.evaluate(() => document.getElementById("run-status")?.textContent).catch(() => undefined);
-    throw new Error(`readme:shots: the run on ${page.url()} is ${seen ?? "not shown"}, not ${status}`, { cause: err });
+    throw new ServerFailure(`readme:shots: the run on ${page.url()} is ${seen ?? "not shown"}, not ${status}`, {
+      cause: err,
+    });
   }
 }
 
@@ -116,19 +118,6 @@ async function typeDateTime(page: Page, selector: string, when: Date, each: () =
   }
 }
 
-/** Sets a datetime-local field to `when` whatever its layout, as an input event the form hears. */
-async function setDateTime(page: Page, selector: string, when: Date): Promise<void> {
-  await page.$eval(
-    selector,
-    (e, value) => {
-      const input = e as HTMLInputElement;
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    },
-    fieldValue(when),
-  );
-}
-
 /**
  * demo.gif's storyboard, at 1200×800: dana starts a run of announce from New run with a launch time
  * about a minute away, marketing-lead approves it in the Inbox with a note, and the run sleeps until
@@ -138,7 +127,7 @@ async function setDateTime(page: Page, selector: string, when: Date): Promise<vo
  */
 export async function recordDemo(browser: Browser, base: string, dir: string): Promise<string> {
   mkdirSync(dir, { recursive: true });
-  const page = await open(browser, base, DANA);
+  const page = await open(browser, base, { actor: "dana", sidebar: false, width: 1200, height: 800, scale: 1 });
   await page.evaluateOnNewDocument(() => {
     addEventListener("DOMContentLoaded", () => {
       const cursor = document.createElement("div");
@@ -273,31 +262,6 @@ export async function recordDemo(browser: Browser, base: string, dir: string): P
     frames.map(([file, seconds]) => `file '${file}'\nduration ${seconds}\n`).join("") + `file '${frames.at(-1)![0]}'\n`;
   writeFileSync(join(dir, "frames.txt"), list);
   return runPath;
-}
-
-/** Two more runs of announce from dana, waiting on marketing-lead, for the Inbox still. */
-export async function seedPendingRuns(browser: Browser, base: string): Promise<void> {
-  const page = await open(browser, base, DANA);
-  let previous = "";
-  for (const [title, body, launchAt] of [
-    ["Summer sale", "<p>Everything is 20% off until Sunday.</p>", new Date(2027, 5, 1, 9)],
-    ["Pricing update", "<p>New plans for teams, from next month.</p>", new Date(2027, 5, 15, 10)],
-  ] as const) {
-    await page.goto(`${base}/workflows/announce?new`, { waitUntil: "networkidle0" });
-    await page.waitForSelector("#field-title");
-    await page.type("#field-title", title);
-    await page.type("#field-body", body);
-    await setDateTime(page, "#field-launchAt", launchAt);
-    await (await byText(page, "button", "Start run")).click();
-    await page.waitForFunction(
-      (prev) => location.pathname.includes("/runs/") && location.pathname !== prev,
-      { timeout: 30_000 },
-      previous,
-    );
-    previous = new URL(page.url()).pathname;
-    await statusIs(page, "waiting");
-  }
-  await page.browserContext().close();
 }
 
 export interface Still {
