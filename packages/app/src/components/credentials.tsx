@@ -58,12 +58,6 @@ function CredentialRow({ credential: c }: { credential: CredentialStatus }) {
     },
     onError: (err) => toast.error(errorMessage(err).trim() || `Could not clear ${c.name}, and no reason was given`),
   });
-  // Under the name: its manual, then who set a stored value and when.
-  const setBy = c.source === "stored" && c.setBy && c.setAt && (
-    <>
-      set by {c.setBy} · <When at={Date.parse(c.setAt)} />
-    </>
-  );
   return (
     <Item role="listitem" variant="outline" size="xs">
       <ItemContent>
@@ -74,38 +68,36 @@ function CredentialRow({ credential: c }: { credential: CredentialStatus }) {
           </ToneBadge>
           {c.optional && <Badge variant="outline">optional</Badge>}
         </ItemHeading>
-        {(setBy || c.description) && (
+        {/* Under the name: its manual, then where its value comes from: the environment, or who
+            stored it and when. */}
+        {c.description && <ItemDescription>{c.description}</ItemDescription>}
+        {c.source === "environment" && <ItemDescription>set in the environment</ItemDescription>}
+        {c.source === "stored" && c.setBy && c.setAt && (
           <ItemDescription>
-            {c.description}
-            {c.description && setBy && " · "}
-            {setBy}
+            set by {c.setBy} · <When at={Date.parse(c.setAt)} />
           </ItemDescription>
         )}
       </ItemContent>
-      <ItemActions>
-        {c.source === "environment" ? (
-          <ItemDescription>set in the environment</ItemDescription>
-        ) : (
-          <>
-            <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
-              {c.status === "set" ? "Replace" : "Set"}
+      {c.source !== "environment" && (
+        <ItemActions>
+          <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
+            {c.status === "set" ? "Replace" : "Set"}
+          </Button>
+          {c.source === "stored" && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={clearing.isPending}
+              onClick={() => clearing.mutate()}
+            >
+              {clearing.isPending && <Spinner data-icon="inline-start" />}
+              Clear
             </Button>
-            {c.source === "stored" && (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                disabled={clearing.isPending}
-                onClick={() => clearing.mutate()}
-              >
-                {clearing.isPending && <Spinner data-icon="inline-start" />}
-                Clear
-              </Button>
-            )}
-            <SetDialog credential={c} open={open} onClose={() => setOpen(false)} />
-          </>
-        )}
-      </ItemActions>
+          )}
+          <SetDialog credential={c} open={open} onClose={() => setOpen(false)} />
+        </ItemActions>
+      )}
     </Item>
   );
 }
