@@ -20,6 +20,7 @@ import {
   type RefObject,
   Suspense,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -320,11 +321,27 @@ export function ApprovalStatusBadge({ status }: { status: ApprovalState["status"
  * A tooltip on a control. Only on what takes focus (a button, a link, or a badge given
  * `tabIndex={0}` because its tooltip says something it does not), so a keyboard reaches it too.
  * Passive detail on many items, such as a time's exact value, is a native `title` instead.
+ * Base UI's tooltip describes nothing, so the tip is also the trigger's `aria-describedby`
+ * through a hidden copy; `describe={false}` when the trigger's name already says it.
  */
-export function Tip({ tip, children }: { tip: ReactNode; children: ReactElement }) {
+export function Tip({
+  tip,
+  describe = true,
+  children,
+}: {
+  tip: ReactNode;
+  describe?: boolean;
+  children: ReactElement;
+}) {
+  const id = useId();
   return (
     <Tooltip>
-      <TooltipTrigger render={children} />
+      <TooltipTrigger render={children} aria-describedby={describe ? id : undefined} />
+      {describe && (
+        <span id={id} hidden>
+          {tip}
+        </span>
+      )}
       <TooltipContent>{tip}</TooltipContent>
     </Tooltip>
   );
@@ -332,8 +349,8 @@ export function Tip({ tip, children }: { tip: ReactNode; children: ReactElement 
 
 /**
  * An icon button with a tooltip: ghost and icon-sized unless props say otherwise, named `label`
- * (its `aria-label`; `tip` unless given) and showing `tip`. Base UI's tooltip adds no
- * `aria-describedby`, so a tip that repeats the name is not read twice.
+ * (its `aria-label`; `tip` unless given) and showing `tip`, which describes it only when the name
+ * does not already say it.
  */
 export function TipButton({
   tip,
@@ -343,7 +360,7 @@ export function TipButton({
   ...props
 }: { tip: string; label?: string } & Omit<ComponentProps<typeof Button>, "aria-label">) {
   return (
-    <Tip tip={tip}>
+    <Tip tip={tip} describe={!label.toLowerCase().includes(tip.toLowerCase())}>
       <Button variant={variant} size={size} aria-label={label} {...props} />
     </Tip>
   );

@@ -1,5 +1,6 @@
 import {
   ChevronsUpDownIcon,
+  type LucideIcon,
   Maximize2Icon,
   Minimize2Icon,
   MonitorIcon,
@@ -14,7 +15,6 @@ import { Avatar, AvatarFallback } from "#/components/ui/avatar.tsx";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
@@ -78,47 +78,65 @@ export function NavUser() {
           <DropdownMenuContent className="min-w-56" side={isMobile ? "bottom" : "right"} align="end" sideOffset={4}>
             {!fromServer && (
               <>
-                <DropdownMenuGroup>
-                  <DropdownMenuItem onClick={() => setActor(null)}>
-                    <UserPenIcon />
-                    Change name
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
+                <DropdownMenuItem onClick={() => setActor(null)}>
+                  <UserPenIcon />
+                  Change name
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
               </>
             )}
-            {/* Each label inside its radio group, which Base UI requires and which names the group; a
-                choice closes the menu (`closeOnClick`; Base UI keeps it open otherwise). */}
-            <DropdownMenuRadioGroup value={theme ?? "system"} onValueChange={setTheme}>
-              <DropdownMenuLabel>Theme</DropdownMenuLabel>
-              <DropdownMenuRadioItem closeOnClick value="light">
-                <SunIcon />
-                Light
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem closeOnClick value="dark">
-                <MoonIcon />
-                Dark
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem closeOnClick value="system">
-                <MonitorIcon />
-                System
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
+            <Choices label="Theme" value={theme ?? "system"} onValueChange={setTheme} choices={THEMES} />
             <DropdownMenuSeparator />
-            <DropdownMenuRadioGroup value={compact ? "compact" : "comfortable"} onValueChange={setDensity}>
-              <DropdownMenuLabel>Density</DropdownMenuLabel>
-              <DropdownMenuRadioItem closeOnClick value="comfortable">
-                <Maximize2Icon />
-                Comfortable
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem closeOnClick value="compact">
-                <Minimize2Icon />
-                Compact
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
+            <Choices
+              label="Density"
+              value={compact ? "compact" : "comfortable"}
+              onValueChange={setDensity}
+              choices={DENSITIES}
+            />
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>
     </SidebarMenu>
+  );
+}
+
+type Choice = { value: string; icon: LucideIcon; label: string };
+
+const THEMES: Choice[] = [
+  { value: "light", icon: SunIcon, label: "Light" },
+  { value: "dark", icon: MoonIcon, label: "Dark" },
+  { value: "system", icon: MonitorIcon, label: "System" },
+];
+
+const DENSITIES: Choice[] = [
+  { value: "comfortable", icon: Maximize2Icon, label: "Comfortable" },
+  { value: "compact", icon: Minimize2Icon, label: "Compact" },
+];
+
+/**
+ * One labelled radio group of the menu. The label sits inside its group, which Base UI requires
+ * and which names the group; a choice closes the menu (`closeOnClick`; Base UI keeps it open).
+ */
+function Choices({
+  label,
+  value,
+  onValueChange,
+  choices,
+}: {
+  label: string;
+  value: string;
+  onValueChange: (value: string) => void;
+  choices: Choice[];
+}) {
+  return (
+    <DropdownMenuRadioGroup value={value} onValueChange={onValueChange}>
+      <DropdownMenuLabel>{label}</DropdownMenuLabel>
+      {choices.map((choice) => (
+        <DropdownMenuRadioItem key={choice.value} closeOnClick value={choice.value}>
+          <choice.icon />
+          {choice.label}
+        </DropdownMenuRadioItem>
+      ))}
+    </DropdownMenuRadioGroup>
   );
 }

@@ -1,5 +1,6 @@
 import { type FitViewOptions, Panel, type PanelProps, useReactFlow, useStore } from "@xyflow/react";
 import { MaximizeIcon, MinusIcon, PlusIcon } from "lucide-react";
+import { useId } from "react";
 import { Slider } from "#/components/ui/slider.tsx";
 import { TipButton } from "./common.tsx";
 
@@ -23,20 +24,25 @@ export function ZoomSlider({
   const maxZoom = useStore((state) => state.maxZoom);
   const { zoomTo, zoomIn, zoomOut, fitView } = useReactFlow();
   const percent = `${(100 * zoom).toFixed(0)}%`;
+  const zoomLabel = useId();
 
   return (
     <Panel className="flex gap-1 rounded-md border bg-card p-1 text-card-foreground" {...props}>
       <TipButton tip="Zoom out" onClick={() => zoomOut({ duration })}>
         <MinusIcon />
       </TipButton>
+      {/* The Slider's thumb takes its name from the root's aria-labelledby, a hidden label. */}
       <div className="flex w-[100px] items-center">
+        <span id={zoomLabel} hidden>
+          Zoom
+        </span>
         <Slider
           value={[zoom]}
           min={minZoom}
           max={maxZoom}
           step={0.01}
           onValueChange={(value) => zoomTo(Array.isArray(value) ? value[0]! : value)}
-          getAriaLabel={() => "Zoom"}
+          aria-labelledby={zoomLabel}
         />
       </div>
       <TipButton tip="Zoom in" onClick={() => zoomIn({ duration })}>

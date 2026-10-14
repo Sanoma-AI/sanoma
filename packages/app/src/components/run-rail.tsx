@@ -82,7 +82,7 @@ export function RunRail({ name }: { name: string }) {
         className="flex flex-none flex-col items-center gap-2 rounded-lg border bg-card p-1.5 text-card-foreground"
       >
         {toggle}
-        <Tip tip="Workflow">
+        <Tip tip="Workflow" describe={false}>
           <Link {...workflowLink} className={`${RAIL_ICON} aria-[current=page]:text-foreground`}>
             <WorkflowIcon className="size-4" />
             <span className="sr-only">Workflow</span>

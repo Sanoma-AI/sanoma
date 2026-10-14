@@ -21,7 +21,7 @@ import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import { errorMessage } from "@sanoma/workflows/shared";
 import { errorBodyOf, type ScenarioEntry, type StartRunRequest } from "../api.ts";
-import { Notice, Tip } from "../components/common.tsx";
+import { Notice, TipButton } from "../components/common.tsx";
 import { useStartRun } from "../queries.ts";
 import {
   buildInput,
@@ -182,19 +182,14 @@ function FieldView({ form, field, path }: { form: StartFormApi; field: SchemaFie
                     <FieldContent>
                       <FieldView form={form} field={{ ...item, label }} path={[...path, i]} />
                     </FieldContent>
-                    {/* Named by its aria-label; Base UI's tooltip adds no description to read twice. */}
-                    <Tip tip={remove}>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="group-disabled/ro:hidden"
-                        onClick={() => f.removeValue(i)}
-                        aria-label={remove}
-                      >
-                        <Trash2Icon />
-                      </Button>
-                    </Tip>
+                    <TipButton
+                      tip={remove}
+                      type="button"
+                      className="group-disabled/ro:hidden"
+                      onClick={() => f.removeValue(i)}
+                    >
+                      <Trash2Icon />
+                    </TipButton>
                   </Field>
                 );
               })}
