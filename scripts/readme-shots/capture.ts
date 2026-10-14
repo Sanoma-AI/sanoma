@@ -5,10 +5,23 @@ import { join } from "node:path";
 import { type Browser, type ElementHandle, launch, type Page } from "puppeteer-core";
 import { RAIL_COOKIE } from "../../packages/app/src/lib/rail.ts";
 
-/** The installed Google Chrome, or the binary `CHROME_PATH` names. */
+/**
+ * The installed Google Chrome, or the binary `CHROME_PATH` names, in US English (where Chrome
+ * takes its locale from `--lang` or `LANG`; on macOS it follows the system's), so a date field
+ * reads month/day/year. It leaves SIGINT, SIGTERM and SIGHUP to the script, which closes it.
+ */
 export async function launchChrome(): Promise<Browser> {
   try {
-    return await launch({ channel: "chrome", executablePath: process.env.CHROME_PATH, headless: true });
+    return await launch({
+      channel: "chrome",
+      executablePath: process.env.CHROME_PATH,
+      headless: true,
+      args: ["--lang=en-US"],
+      env: { ...process.env, LANG: "en_US.UTF-8" },
+      handleSIGINT: false,
+      handleSIGTERM: false,
+      handleSIGHUP: false,
+    });
   } catch (err) {
     throw new Error(
       `readme:shots: could not start ${process.env.CHROME_PATH ?? "Google Chrome"}; install Chrome or set CHROME_PATH to a Chrome or Chromium binary`,
@@ -64,17 +77,27 @@ async function need(page: Page, selector: string): Promise<ElementHandle> {
   return el;
 }
 
-const badgeIs = (page: Page, text: string) =>
-  page.waitForFunction(
-    (t) => document.querySelector('[data-slot="badge"]')?.textContent === t,
-    { timeout: 120_000 },
-    text,
-  );
+/** Waits until the run's page shows `status`; on timeout, names the status it shows instead. */
+async function statusIs(page: Page, status: string, timeout = 120_000): Promise<void> {
+  try {
+    await page.waitForFunction((t) => document.getElementById("run-status")?.textContent === t, { timeout }, status);
+  } catch (err) {
+    const seen = await page.evaluate(() => document.getElementById("run-status")?.textContent).catch(() => undefined);
+    throw new Error(`readme:shots: the run on ${page.url()} is ${seen ?? "not shown"}, not ${status}`, { cause: err });
+  }
+}
 
 const p2 = (n: number) => String(n).padStart(2, "0");
 
-/** Types a datetime-local field's parts: month, day, year, then hours, minutes, AM or PM. */
-async function typeDateTime(page: Page, when: Date, each: () => Promise<void> = async () => {}) {
+/** `when` as a datetime-local field's value: local time, to the minute. */
+const fieldValue = (when: Date) =>
+  `${when.getFullYear()}-${p2(when.getMonth() + 1)}-${p2(when.getDate())}T${p2(when.getHours())}:${p2(when.getMinutes())}`;
+
+/**
+ * Types a datetime-local field's parts, as US English lays them out: month, day, year, then
+ * hours, minutes, AM or PM. Checks the field read them so, since another locale orders them otherwise.
+ */
+async function typeDateTime(page: Page, selector: string, when: Date, each: () => Promise<void>) {
   const hours = when.getHours();
   for (const part of [p2(when.getMonth() + 1), p2(when.getDate()), String(when.getFullYear())]) {
     await page.keyboard.type(part);
@@ -85,6 +108,25 @@ async function typeDateTime(page: Page, when: Date, each: () => Promise<void> = 
     await page.keyboard.type(part);
     await each();
   }
+  const value = await page.$eval(selector, (e) => (e as HTMLInputElement).value);
+  if (value !== fieldValue(when)) {
+    throw new Error(
+      `readme:shots: typed ${fieldValue(when)} as month/day/year, but the field reads "${value}": Chrome lays out dates in another locale's order (on macOS, the system's)`,
+    );
+  }
+}
+
+/** Sets a datetime-local field to `when` whatever its layout, as an input event the form hears. */
+async function setDateTime(page: Page, selector: string, when: Date): Promise<void> {
+  await page.$eval(
+    selector,
+    (e, value) => {
+      const input = e as HTMLInputElement;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    },
+    fieldValue(when),
+  );
 }
 
 /**
@@ -175,12 +217,12 @@ export async function recordDemo(browser: Browser, base: string, dir: string): P
   const field = await need(page, "#field-launchAt");
   const box = (await field.boundingBox())!;
   await click(field, 22 - box.width / 2);
-  await typeDateTime(page, launchAt, () => shot(0.1));
+  await typeDateTime(page, "#field-launchAt", launchAt, () => shot(0.1));
   await shot(0.8);
   // 3. Start run: the run's page, waiting on the approval.
   await click(await byText(page, "button", "Start run"));
   await page.waitForFunction(() => location.pathname.includes("/runs/"));
-  await badgeIs(page, "waiting");
+  await statusIs(page, "waiting");
   await wait(1500);
   await shot(2.6);
   const runPath = new URL(page.url()).pathname;
@@ -207,8 +249,10 @@ export async function recordDemo(browser: Browser, base: string, dir: string): P
   await press();
   await page.goto(base + runPath, { waitUntil: "networkidle0" });
   await wait(1800);
+  // Sleeping until the launch, which a run shows as running: a finished one would tell another story.
+  await statusIs(page, "running", 5000);
   await shot(2.2);
-  await badgeIs(page, "finished");
+  await statusIs(page, "finished");
   await wait(2500);
   await shot(1.8);
   for (let i = 1; i <= 6; i++) {
@@ -234,6 +278,7 @@ export async function recordDemo(browser: Browser, base: string, dir: string): P
 /** Two more runs of announce from dana, waiting on marketing-lead, for the Inbox still. */
 export async function seedPendingRuns(browser: Browser, base: string): Promise<void> {
   const page = await open(browser, base, DANA);
+  let previous = "";
   for (const [title, body, launchAt] of [
     ["Summer sale", "<p>Everything is 20% off until Sunday.</p>", new Date(2027, 5, 1, 9)],
     ["Pricing update", "<p>New plans for teams, from next month.</p>", new Date(2027, 5, 15, 10)],
@@ -242,12 +287,15 @@ export async function seedPendingRuns(browser: Browser, base: string): Promise<v
     await page.waitForSelector("#field-title");
     await page.type("#field-title", title);
     await page.type("#field-body", body);
-    const field = await need(page, "#field-launchAt");
-    const box = (await field.boundingBox())!;
-    await field.click({ offset: { x: 22, y: box.height / 2 } });
-    await typeDateTime(page, launchAt);
+    await setDateTime(page, "#field-launchAt", launchAt);
     await (await byText(page, "button", "Start run")).click();
-    await badgeIs(page, "waiting");
+    await page.waitForFunction(
+      (prev) => location.pathname.includes("/runs/") && location.pathname !== prev,
+      { timeout: 30_000 },
+      previous,
+    );
+    previous = new URL(page.url()).pathname;
+    await statusIs(page, "waiting");
   }
   await page.browserContext().close();
 }

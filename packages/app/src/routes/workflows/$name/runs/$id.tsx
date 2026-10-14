@@ -44,7 +44,9 @@ function RunPage() {
     <WorkflowView key={run.runId} name={run.workflow} workflow={workflow} run={reading}>
       {/* The layout's <h1> is the workflow: the run's own heading is its status. */}
       <div className="flex flex-wrap items-center gap-2">
-        <ToneBadge tone={RUN_TONE[run.status]}>{run.status}</ToneBadge>
+        <ToneBadge id="run-status" tone={RUN_TONE[run.status]}>
+          {run.status}
+        </ToneBadge>
         {run.sandbox !== undefined && <SandboxBadge name={run.sandbox} />}
       </div>
       {error && <Notice variant="destructive">Could not refresh: {error.message}</Notice>}

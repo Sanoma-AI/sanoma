@@ -1,10 +1,22 @@
 // `pnpm readme:shots`: retakes the README's pictures in .github/assets from a running app. See README.md here.
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
+import { constants, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Browser } from "puppeteer-core";
 import { ensureBuilt, waitFor } from "../../packages/testing/src/build.ts";
 import { launchChrome, recordDemo, seedPendingRuns, still } from "./capture.ts";
 
@@ -42,19 +54,40 @@ const { testDatabaseUrl } = await import("../../packages/testing/src/index.ts");
 // `SANOMA_TEST_DATABASE_URL`'s name plus `_readme_shots`: a worktree's own when that is set per worktree.
 const databaseUrl = new URL(testDatabaseUrl("readme_shots"));
 
-const browser = await launchChrome();
 const work = mkdtempSync(join(tmpdir(), "readme-shots-"));
+const captured = join(work, "assets");
+const serverLog = join(work, "server.log");
+let browser: Browser | undefined;
 let server: ChildProcess | undefined;
 let database = false;
+let interrupted = false;
+let cleaning: Promise<void> | undefined;
+
+// Ctrl-C or a kill: the same cleanup as `finally`, then out with the signal's code (130 for SIGINT).
+// A signal during the cleanup (pnpm passes Ctrl-C on as well) waits for it rather than cutting it short.
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+  process.on(signal, () => {
+    if (interrupted) return;
+    interrupted = true;
+    say(`${signal}: cleaning up`);
+    void cleanup().then(() => process.exit(128 + constants.signals[signal]));
+  });
+}
+
 try {
+  browser = await launchChrome();
   await resetDatabase();
   database = true;
   const acme = join(work, "acme");
   writeRepo(acme);
+  // The server's output goes to a log file, read for its URL and, on a failure, for its last lines.
+  const log = openSync(serverLog, "a");
   server = spawn(process.execPath, [join(repo, "packages/sanoma/dist/cli.js"), "serve"], {
     cwd: acme,
     env: { ...process.env, SANOMA_DATABASE_URL: databaseUrl.href, SANOMA_APP_PORT: "0" },
+    stdio: ["ignore", log, log],
   });
+  closeSync(log);
   const base = await appUrl(server);
   say(`app at ${base}`);
 
@@ -63,34 +96,62 @@ try {
   say("demo recorded; seeding two more runs that wait on marketing-lead");
   await seedPendingRuns(browser, base);
 
-  await still(browser, base, "/workflows/announce", join(assets, "workflow.png"), {
+  mkdirSync(captured);
+  await still(browser, base, "/workflows/announce", join(captured, "workflow.png"), {
     sidebar: false,
     select: "ghost.post.publish",
     fullPage: true,
   });
-  await still(browser, base, "/inbox", join(assets, "inbox.png"), { sidebar: true, height: 720 });
-  await still(browser, base, runPath, join(assets, "run.png"), {
+  await still(browser, base, "/inbox", join(captured, "inbox.png"), { sidebar: true, height: 720 });
+  await still(browser, base, runPath, join(captured, "run.png"), {
     sidebar: false,
     select: "Review launch copy",
     tab: "Ledger",
     fullPage: true,
   });
   say("stills taken; making demo.gif");
-  makeGif(frames, join(assets, "demo.gif"));
+  makeGif(frames, join(captured, "demo.gif"));
+  // Only once all four are made, so a failure leaves the committed ones as they are.
+  for (const file of ["demo.gif", "workflow.png", "inbox.png", "run.png"]) {
+    copyFileSync(join(captured, file), join(assets, file));
+  }
   say("wrote .github/assets: demo.gif, workflow.png, inbox.png, run.png");
+} catch (err) {
+  if (!interrupted && existsSync(serverLog)) {
+    const tail = readFileSync(serverLog, "utf8").trimEnd().split("\n").slice(-40).join("\n");
+    console.error(`readme:shots: the server's last lines:\n${tail}`);
+  }
+  throw err;
 } finally {
-  await browser.close();
-  if (server) await stop(server);
-  if (database)
-    await dropDatabase().catch((err: unknown) =>
-      console.error(`readme:shots: could not drop the database: ${String(err)}`),
-    );
-  rmSync(work, { recursive: true, force: true });
+  await cleanup();
+}
+
+/**
+ * Closes Chrome, stops the server, drops the database and removes the work directory, each
+ * whatever the others do; once, for `finally` and a signal alike.
+ */
+function cleanup(): Promise<void> {
+  cleaning ??= (async () => {
+    const steps: [what: string, step: () => unknown][] = [
+      ["close Chrome", () => browser?.close()],
+      ["stop the server", () => server && stop(server)],
+      ["drop the database", () => database && dropDatabase()],
+      [`remove ${work}`, () => rmSync(work, { recursive: true, force: true })],
+    ];
+    for (const [what, step] of steps) {
+      try {
+        await step();
+      } catch (err) {
+        console.error(`readme:shots: could not ${what}: ${String(err)}`);
+      }
+    }
+  })();
+  return cleaning;
 }
 
 /** A company repo named acme: the README's workflow, the config above, and `node_modules` reaching this checkout. */
 function writeRepo(dir: string): void {
-  const readme = readFileSync(join(repo, "README.md"), "utf8");
+  const readme = readFileSync(join(repo, "README.md"), "utf8").replaceAll("\r\n", "\n");
   const block = /^```ts\n\/\/ workflows\/announce\.ts\n([\s\S]*?)^```$/m.exec(readme);
   if (!block?.[1]) fail("README.md has no ```ts block that starts with `// workflows/announce.ts`");
   mkdirSync(join(dir, "workflows"), { recursive: true });
@@ -108,25 +169,17 @@ function writeRepo(dir: string): void {
   }
 }
 
-/** The app's URL, once `sanoma serve` prints it; throws with its output when it exits first or takes 60 s. */
+/** The app's URL, once `sanoma serve` writes it to its log; fails when the server exits first or takes 60 s. */
 async function appUrl(child: ChildProcess): Promise<string> {
-  let output = "";
-  const read = (chunk: Buffer) => (output += chunk.toString());
-  child.stdout?.on("data", read);
-  child.stderr?.on("data", read);
-  try {
-    const url = await waitFor(
-      () => {
-        if (child.exitCode !== null || child.signalCode !== null) throw new Error("sanoma serve exited");
-        return /^acme at (\S+);/m.exec(output)?.[1];
-      },
-      Boolean,
-      60_000,
-    );
-    return url!;
-  } catch (err) {
-    fail(`the app did not start (${(err as Error).message}):\n${output}`);
-  }
+  const url = await waitFor(
+    () => {
+      if (child.exitCode !== null || child.signalCode !== null) throw new Error("sanoma serve exited first");
+      return /^acme at (\S+);/m.exec(readFileSync(serverLog, "utf8"))?.[1];
+    },
+    Boolean,
+    60_000,
+  ).catch((err: unknown) => fail(`the app did not start: ${(err as Error).message}`));
+  return url!;
 }
 
 /** SIGTERM, then SIGKILL after 10 s. */
