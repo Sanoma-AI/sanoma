@@ -1,6 +1,13 @@
 import { useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "#/components/ui/dialog.tsx";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "#/components/ui/dialog.tsx";
 import { Field, FieldGroup, FieldLabel } from "#/components/ui/field.tsx";
 import { Input } from "#/components/ui/input.tsx";
 import { useActor } from "../actor.ts";
@@ -46,10 +53,12 @@ export default function WhoAreYou() {
                 placeholder="marketing-lead"
               />
             </Field>
+          </FieldGroup>
+          <DialogFooter>
             <Button type="submit" disabled={!name.trim()}>
               Continue
             </Button>
-          </FieldGroup>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
