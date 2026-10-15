@@ -1,6 +1,6 @@
-import type { RunStatus, RunSummary } from "@sanoma/workflows";
-import type { WorkflowEntry } from "@sanoma/workflows/describe";
-import { RUN_STATUSES } from "@sanoma/workflows/shared";
+import type { RunStatus, RunSummary } from "@sanoma-ai/workflows";
+import type { WorkflowEntry } from "@sanoma-ai/workflows/describe";
+import { RUN_STATUSES } from "@sanoma-ai/workflows/shared";
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { XIcon } from "lucide-react";

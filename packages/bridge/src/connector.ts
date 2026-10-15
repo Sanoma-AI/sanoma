@@ -10,7 +10,7 @@ import {
   type Resource,
   type ResourceSpec,
   type VendorInfo,
-} from "@sanoma/workflows";
+} from "@sanoma-ai/workflows";
 import type { z } from "zod";
 import { BridgeError, type ResourceState } from "./bridge.ts";
 import { ensureConfigured, type ProviderClient } from "./configure.ts";

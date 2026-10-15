@@ -1,4 +1,4 @@
-# Working on @sanoma/connector-bluesky
+# Working on @sanoma-ai/connector-bluesky
 
 Follow the shared [connector conventions](../AGENTS.md).
 

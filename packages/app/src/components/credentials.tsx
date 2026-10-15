@@ -1,4 +1,4 @@
-import { type CredentialStatus, credentialReady, errorMessage } from "@sanoma/workflows/shared";
+import { type CredentialStatus, credentialReady, errorMessage } from "@sanoma-ai/workflows/shared";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";

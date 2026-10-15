@@ -1,6 +1,6 @@
 # packages/testing/test
 
-Tests for `@sanoma/testing`. `harness.test.ts` and `scenarios.test.ts` need Postgres (`pnpm db:up`).
+Tests for `@sanoma-ai/testing`. `harness.test.ts` and `scenarios.test.ts` need Postgres (`pnpm db:up`).
 
 ## Contents
 

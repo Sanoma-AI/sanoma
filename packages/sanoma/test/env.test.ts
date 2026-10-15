@@ -10,7 +10,7 @@ import {
   resolveConfig,
   type SanomaConfig,
   withSetup,
-} from "@sanoma/workflows";
+} from "@sanoma-ai/workflows";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { renderEnvExample, writeEnvExample } from "../src/env.ts";

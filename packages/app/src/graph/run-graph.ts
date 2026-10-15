@@ -1,6 +1,6 @@
-import type { ApprovalState, LedgerGroup, LedgerRecord, RunSummary } from "@sanoma/workflows";
-import type { OutlineNode } from "@sanoma/workflows/describe";
-import { fitsOp, flatten, isEnded } from "@sanoma/workflows/shared";
+import type { ApprovalState, LedgerGroup, LedgerRecord, RunSummary } from "@sanoma-ai/workflows";
+import type { OutlineNode } from "@sanoma-ai/workflows/describe";
+import { fitsOp, flatten, isEnded } from "@sanoma-ai/workflows/shared";
 import { utcText } from "../lib/time.ts";
 import { APPROVAL_TONE, RUN_TONE, type Tone } from "../lib/tone.ts";
 import { type Ends, outlineGraph } from "./outline-graph.ts";

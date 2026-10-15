@@ -1,6 +1,6 @@
 # packages/bridge/src
 
-Source of `@sanoma/bridge`: the client exported from the package root, the connector fake and the recorded replies it serves, exported as `@sanoma/bridge/fake`, the generic connector as `@sanoma/bridge/connector`, and the generator and state conversions as `@sanoma/bridge/tfschema`.
+Source of `@sanoma-ai/bridge`: the client exported from the package root, the connector fake and the recorded replies it serves, exported as `@sanoma-ai/bridge/fake`, the generic connector as `@sanoma-ai/bridge/connector`, and the generator and state conversions as `@sanoma-ai/bridge/tfschema`.
 
 ## Contents
 

@@ -1,6 +1,6 @@
 # packages/bridge/src/tfschema
 
-OpenTofu provider schemas as Sanoma resources, at `@sanoma/bridge/tfschema` (`../tfschema.ts`). A connector for a vendor with an OpenTofu provider keeps a hand-owned `resources.config.ts` naming the provider and the types it wants; its `pnpm generate` runs `cli.ts` (the package's `sanoma-tfschema` bin) to write `src/resources.gen.ts`, which is checked in. Its driver converts states with `fromTfState` and `toTfState` at run time.
+OpenTofu provider schemas as Sanoma resources, at `@sanoma-ai/bridge/tfschema` (`../tfschema.ts`). A connector for a vendor with an OpenTofu provider keeps a hand-owned `resources.config.ts` naming the provider and the types it wants; its `pnpm generate` runs `cli.ts` (the package's `sanoma-tfschema` bin) to write `src/resources.gen.ts`, which is checked in. Its driver converts states with `fromTfState` and `toTfState` at run time.
 
 ## Contents
 

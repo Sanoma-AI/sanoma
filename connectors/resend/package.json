@@ -1,5 +1,5 @@
 {
-  "name": "@sanoma/connector-resend",
+  "name": "@sanoma-ai/connector-resend",
   "version": "0.1.0",
   "description": "Resend Broadcasts API operations for Sanoma workflows",
   "keywords": [
@@ -52,12 +52,12 @@
     "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
   "devDependencies": {
-    "@sanoma/workflows": "workspace:*",
+    "@sanoma-ai/workflows": "workspace:*",
     "msw": "^3.0.2",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@sanoma/workflows": "^0.1.0",
+    "@sanoma-ai/workflows": "^0.1.0",
     "zod": "^4"
   },
   "engines": {

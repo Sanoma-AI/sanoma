@@ -1,4 +1,4 @@
-import { defineConnector } from "@sanoma/workflows";
+import { defineConnector } from "@sanoma-ai/workflows";
 import { z } from "zod";
 
 /** A post, as the operations return it. */
@@ -44,7 +44,7 @@ export const ghostOps = defineConnector(
   {
     title: "Ghost",
     logo: { svg: glyph("#15171A"), dark: glyph("white") },
-    package: "@sanoma/connector-ghost",
+    package: "@sanoma-ai/connector-ghost",
     homepage: "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/ghost#readme",
   },
 );

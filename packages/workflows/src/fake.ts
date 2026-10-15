@@ -10,7 +10,7 @@ import {
 } from "./op.ts";
 
 /*
- * Fake vendors for tests, at `@sanoma/workflows/fake`. Kept off the main entry so the
+ * Fake vendors for tests, at `@sanoma-ai/workflows/fake`. Kept off the main entry so the
  * runtime bundle carries no test tooling, and so the lint can refuse it in workflow files.
  */
 
@@ -52,7 +52,7 @@ export interface Fake<T, Id extends string = string> {
 
 /**
  * A fake that holds its vendor's objects by resource type (`repository`) and import id, as
- * `@sanoma/bridge`'s `tfFake` does, with fields in the resource's shape: what a scenario's
+ * `@sanoma-ai/bridge`'s `tfFake` does, with fields in the resource's shape: what a scenario's
  * resource steps seed on a sandbox run's own fake. `put` sets the fields over the object there, or
  * makes one; `remove` deletes it, and is nothing when there is none.
  */

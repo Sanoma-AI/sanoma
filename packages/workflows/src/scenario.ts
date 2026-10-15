@@ -36,7 +36,7 @@ import { DRIFT_WORKFLOW, errorMessage, fitsOp, flatten, isEnded } from "./shared
 import type { Call, RunView, Seed } from "./steps.ts";
 
 /*
- * Scenarios, at `@sanoma/workflows/scenario`: Gherkin feature files that say what a sandbox run
+ * Scenarios, at `@sanoma-ai/workflows/scenario`: Gherkin feature files that say what a sandbox run
  * starts from (seeded fake vendors, injected faults), how its approvals are decided, and what it
  * should do. Cucumber runs them (`cucumber.ts`), in two ways: compiling a feature file into
  * scenarios, where the steps only record what they say, and checking a run's ledger against one,

@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { bluesky } from "@sanoma/connector-bluesky";
-import { ghost } from "@sanoma/connector-ghost";
-import { startTestWorker, testDatabaseUrl } from "@sanoma/testing";
+import { bluesky } from "@sanoma-ai/connector-bluesky";
+import { ghost } from "@sanoma-ai/connector-ghost";
+import { startTestWorker, testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {

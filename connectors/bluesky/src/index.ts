@@ -1,4 +1,4 @@
-import { withSetup } from "@sanoma/workflows";
+import { withSetup } from "@sanoma-ai/workflows";
 import { blueskyOps } from "./connector.ts";
 import { blueskyDriver } from "./driver.ts";
 import { fakeBluesky } from "./fake.ts";

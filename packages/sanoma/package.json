@@ -48,9 +48,9 @@
     "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
   "dependencies": {
-    "@sanoma/app": "workspace:*",
-    "@sanoma/bridge": "workspace:*",
-    "@sanoma/workflows": "workspace:*",
+    "@sanoma-ai/app": "workspace:*",
+    "@sanoma-ai/bridge": "workspace:*",
+    "@sanoma-ai/workflows": "workspace:*",
     "@types/node": "^26.6.4",
     "oxlint": "^1.87.0",
     "pg": "^8.23.1",
@@ -58,8 +58,8 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@sanoma/connector-ghost": "workspace:*",
-    "@sanoma/testing": "workspace:*",
+    "@sanoma-ai/connector-ghost": "workspace:*",
+    "@sanoma-ai/testing": "workspace:*",
     "@types/pg": "^8.23.1"
   },
   "engines": {

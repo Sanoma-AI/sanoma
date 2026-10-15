@@ -17,31 +17,31 @@ const THROUGH_CTX = "a workflow must call vendors through ctx, so the policy see
 
 /**
  * The packages the author surface is imported from, each allowing the same names: `sanoma`
- * re-exports what `@sanoma/workflows` allows (and `z`). Adding one here accepts it.
+ * re-exports what `@sanoma-ai/workflows` allows (and `z`). Adding one here accepts it.
  */
-const AUTHOR_PACKAGES: readonly string[] = ["@sanoma/workflows", "sanoma"];
+const AUTHOR_PACKAGES: readonly string[] = ["@sanoma-ai/workflows", "sanoma"];
 
 /** The packages a workflow may import from at all: the author packages, connectors and zod. */
-const ALLOWED_PACKAGE = new RegExp(`^(${[...AUTHOR_PACKAGES, "@sanoma/connector-[a-z0-9-]+", "zod"].join("|")})$`);
+const ALLOWED_PACKAGE = new RegExp(`^(${[...AUTHOR_PACKAGES, "@sanoma-ai/connector-[a-z0-9-]+", "zod"].join("|")})$`);
 
 /** Packages refused by name, with the reason. */
 const REFUSED_PACKAGES: [RegExp, string][] = [
-  [/^@sanoma\/testing(\/|$)/, `fakes and test helpers belong in tests; ${THROUGH_CTX}`],
-  [/^@sanoma\/app(\/|$)/, "the app starts runs and decides approvals, so a workflow could approve itself"],
-  [/^@sanoma\/connector-[^/]+\/(fake|driver)(\/|$)/, `${THROUGH_CTX}; import the connector itself`],
+  [/^@sanoma-ai\/testing(\/|$)/, `fakes and test helpers belong in tests; ${THROUGH_CTX}`],
+  [/^@sanoma-ai\/app(\/|$)/, "the app starts runs and decides approvals, so a workflow could approve itself"],
+  [/^@sanoma-ai\/connector-[^/]+\/(fake|driver)(\/|$)/, `${THROUGH_CTX}; import the connector itself`],
   [/^sanoma\//, "`sanoma` has no entry points for a workflow: import its names from `sanoma` itself"],
 ];
 
 /**
  * What a workflow or policy may import from an author package, besides types: the one list,
- * `allowImportNames` of oxlint.json's `@sanoma/workflows` entry (`sanoma`'s generated
+ * `allowImportNames` of oxlint.json's `@sanoma-ai/workflows` entry (`sanoma`'s generated
  * `oxlint.json` derives its own entry from it). Everything else is
  * refused: the client, the worker and the app could start runs or approve the run's own
  * approvals, a ledger store could forge the audit record (a store keeps the first record per
  * id), and config helpers can read credentials.
  */
 const WORKFLOW_IMPORTS: readonly string[] =
-  restrictedImports(oxlint).find((p) => p.name === "@sanoma/workflows")?.allowImportNames ?? [];
+  restrictedImports(oxlint).find((p) => p.name === "@sanoma-ai/workflows")?.allowImportNames ?? [];
 
 const ALLOWED_NAMES = new Set(WORKFLOW_IMPORTS);
 
@@ -58,7 +58,7 @@ const ERROR_CLASSES = new Set(["DriverError", "SanomaError", "PolicyDeniedError"
 
 /**
  * Checks a workflow or policy file. Imports allowed: the names in `WORKFLOW_IMPORTS` and any
- * type from `@sanoma/workflows` or `sanoma`, `@sanoma/connector-<vendor>`, `zod`, and relative files. With
+ * type from `@sanoma-ai/workflows` or `sanoma`, `@sanoma-ai/connector-<vendor>`, `zod`, and relative files. With
  * `filename`, a relative import must stay inside the file's nearest `workflows/` or `policies/`
  * directory, or its own directory when it has neither. No `instanceof` against the runtime's
  * error classes: read `errorCode(err)`.
@@ -204,5 +204,5 @@ function whyRefused(spec: string, filename: string | undefined, root: string | u
   }
   for (const [pattern, reason] of REFUSED_PACKAGES) if (pattern.test(spec)) return reason;
   if (ALLOWED_PACKAGE.test(spec)) return undefined;
-  return "import only from `sanoma` (or `@sanoma/workflows`), a `@sanoma/connector-*` package, zod, or a file beside this one";
+  return "import only from `sanoma` (or `@sanoma-ai/workflows`), a `@sanoma-ai/connector-*` package, zod, or a file beside this one";
 }

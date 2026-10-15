@@ -1,8 +1,8 @@
 import { dirname } from "node:path";
-import { github as githubConnector } from "@sanoma/connector-github";
-import { fakeGithub } from "@sanoma/connector-github/fake";
-import { stripe as stripeConnector } from "@sanoma/connector-stripe";
-import { fakeStripe } from "@sanoma/connector-stripe/fake";
+import { github as githubConnector } from "@sanoma-ai/connector-github";
+import { fakeGithub } from "@sanoma-ai/connector-github/fake";
+import { stripe as stripeConnector } from "@sanoma-ai/connector-stripe";
+import { fakeStripe } from "@sanoma-ai/connector-stripe/fake";
 import { readResources } from "../../../src/describe.ts";
 import { type Policy, type SanomaConfig, type WorkflowDefinition, withSetup } from "../../../src/index.ts";
 import company from "./sanoma.config.ts";

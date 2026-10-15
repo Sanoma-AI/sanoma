@@ -1,8 +1,8 @@
-import { bluesky } from "@sanoma/connector-bluesky";
-import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
-import { resend } from "@sanoma/connector-resend";
+import { bluesky } from "@sanoma-ai/connector-bluesky";
+import { fakeBluesky } from "@sanoma-ai/connector-bluesky/fake";
+import { resend } from "@sanoma-ai/connector-resend";
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { testDatabaseUrl, withFake } from "@sanoma/testing";
+import { testDatabaseUrl, withFake } from "@sanoma-ai/testing";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {

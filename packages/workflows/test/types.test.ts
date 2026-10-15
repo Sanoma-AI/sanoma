@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { ghost } from "@sanoma/connector-ghost";
+import { ghost } from "@sanoma-ai/connector-ghost";
 import {
   allowAll,
   defineConnector,

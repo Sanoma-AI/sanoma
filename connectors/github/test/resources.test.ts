@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fixturesDir } from "@sanoma/bridge/fake";
-import { fromTfState } from "@sanoma/bridge/tfschema";
+import { fixturesDir } from "@sanoma-ai/bridge/fake";
+import { fromTfState } from "@sanoma-ai/bridge/tfschema";
 import { describe, expect, it } from "vitest";
 import { githubTf } from "../src/connector.ts";
 import { github } from "../src/index.ts";

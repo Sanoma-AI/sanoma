@@ -1,6 +1,6 @@
 # connectors/ghost/src
 
-Source of `@sanoma/connector-ghost`: the operation definitions, the driver that calls the Ghost Admin API, and an in-memory fake for tests.
+Source of `@sanoma-ai/connector-ghost`: the operation definitions, the driver that calls the Ghost Admin API, and an in-memory fake for tests.
 
 ## Contents
 

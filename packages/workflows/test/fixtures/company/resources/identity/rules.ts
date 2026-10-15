@@ -1,4 +1,4 @@
-import { github } from "@sanoma/connector-github/resources";
+import { github } from "@sanoma-ai/connector-github/resources";
 import { docs } from "./github.ts";
 
 // A rule on a repository another data file declares: the import is the reference.

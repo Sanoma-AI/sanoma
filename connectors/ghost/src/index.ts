@@ -1,4 +1,4 @@
-import { withSetup } from "@sanoma/workflows";
+import { withSetup } from "@sanoma-ai/workflows";
 import { ghostOps } from "./connector.ts";
 import { ghostDriver } from "./driver.ts";
 import { fakeGhost } from "./fake.ts";

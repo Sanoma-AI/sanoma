@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { bluesky } from "@sanoma/connector-bluesky";
+import { bluesky } from "@sanoma-ai/connector-bluesky";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { lineStartsOf, offsetOf, readSource } from "../src/ast.ts";

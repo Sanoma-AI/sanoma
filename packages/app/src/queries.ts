@@ -1,6 +1,6 @@
-import type { RunStatus, RunSummary } from "@sanoma/workflows";
-import type { ConfigDescription, OpEntry, WorkflowEntry } from "@sanoma/workflows/describe";
-import { isEnded } from "@sanoma/workflows/shared";
+import type { RunStatus, RunSummary } from "@sanoma-ai/workflows";
+import type { ConfigDescription, OpEntry, WorkflowEntry } from "@sanoma-ai/workflows/describe";
+import { isEnded } from "@sanoma-ai/workflows/shared";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { linkOptions, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";

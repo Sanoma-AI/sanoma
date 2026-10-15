@@ -1,4 +1,4 @@
-import { defineConnector } from "@sanoma/workflows";
+import { defineConnector } from "@sanoma-ai/workflows";
 import { z } from "zod";
 
 /**
@@ -36,7 +36,7 @@ export const resendOps = defineConnector(
   {
     title: "Resend",
     logo: { svg: lettermark("black"), dark: lettermark("#FDFDFD") },
-    package: "@sanoma/connector-resend",
+    package: "@sanoma-ai/connector-resend",
     homepage: "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/resend#readme",
   },
 );

@@ -5,10 +5,10 @@ One command over a company repo: `sanoma` runs its workflows and the app, `sanom
 ## Install
 
 ```sh
-npm install sanoma @sanoma/connector-ghost
+npm install sanoma @sanoma-ai/connector-ghost
 ```
 
-`sanoma` brings `@sanoma/workflows`, `@sanoma/app`, `zod`, `typescript`, `@types/node` and `oxlint` with it: a repo installs nothing else but its connectors. Node's types reach the repo's `tsc` through `sanoma` itself (its declarations reference them, resolved from where it is installed), under pnpm, npm or a link alike, so a repo lists no `@types/node`. A repo that lists its own of another major gets two sets of Node's declarations, which conflict: keep one, by matching sanoma's or letting the installer dedupe them. A tsconfig project that imports nothing from `sanoma` (a scripts directory with a tsconfig of its own, say) gets none this way: it sets `"types": ["node"]` and lists `@types/node` itself. Node 24.2 or later, but not 25 (the bin uses `import.meta.main`, and Cucumber, which runs the scenarios, does not support 25); Docker for the Postgres it starts when none answers.
+`sanoma` brings `@sanoma-ai/workflows`, `@sanoma-ai/app`, `zod`, `typescript`, `@types/node` and `oxlint` with it: a repo installs nothing else but its connectors. Node's types reach the repo's `tsc` through `sanoma` itself (its declarations reference them, resolved from where it is installed), under pnpm, npm or a link alike, so a repo lists no `@types/node`. A repo that lists its own of another major gets two sets of Node's declarations, which conflict: keep one, by matching sanoma's or letting the installer dedupe them. A tsconfig project that imports nothing from `sanoma` (a scripts directory with a tsconfig of its own, say) gets none this way: it sets `"types": ["node"]` and lists `@types/node` itself. Node 24.2 or later, but not 25 (the bin uses `import.meta.main`, and Cucumber, which runs the scenarios, does not support 25); Docker for the Postgres it starts when none answers.
 
 A repo holds `sanoma.config.ts` at its root, with `workflows/`, `policies/`, optional `resources/` (data files) and `scenarios/` (feature files) beside it, and a `tsconfig.json` that extends the one this package ships:
 
@@ -21,7 +21,7 @@ A repo holds `sanoma.config.ts` at its root, with `workflows/`, `policies/`, opt
 
 ```ts
 // sanoma.config.ts
-import { ghost } from "@sanoma/connector-ghost";
+import { ghost } from "@sanoma-ai/connector-ghost";
 import { defineConfig } from "sanoma";
 import policy from "./policies/policy.ts";
 import publish from "./workflows/publish.ts";
@@ -37,7 +37,7 @@ Each connector carries its driver and its fake, so the config names neither. The
 
 ```ts
 // workflows/publish.ts
-import { ghost } from "@sanoma/connector-ghost";
+import { ghost } from "@sanoma-ai/connector-ghost";
 import { defineWorkflow, z } from "sanoma";
 
 export default defineWorkflow({
@@ -49,7 +49,7 @@ export default defineWorkflow({
 });
 ```
 
-A workflow or policy imports from `sanoma` what the lint lets it (`defineWorkflow`, `definePolicy`, `allow`, `deny`, `approve`, `approvedFor`, `allowAll`, `mayDecide`, `errorCode`, `z`, and types); `zod` itself and `@sanoma/workflows` are accepted too. The config file imports `defineConfig` (and a ledger store, `jsonlLedger`, `memoryLedger` or `postgresLedger`, when it names one) from `sanoma`, and its connectors from their packages.
+A workflow or policy imports from `sanoma` what the lint lets it (`defineWorkflow`, `definePolicy`, `allow`, `deny`, `approve`, `approvedFor`, `allowAll`, `mayDecide`, `errorCode`, `z`, and types); `zod` itself and `@sanoma-ai/workflows` are accepted too. The config file imports `defineConfig` (and a ledger store, `jsonlLedger`, `memoryLedger` or `postgresLedger`, when it names one) from `sanoma`, and its connectors from their packages.
 
 ## Commands
 
@@ -84,7 +84,7 @@ The worker and the app run on `SANOMA_DATABASE_URL` (default `postgresql://postg
 }
 ```
 
-`sanoma/oxlint.json` is self-contained (it extends nothing): `@sanoma/workflows`'s rules (the clock, randomness, the network, the environment, the imports a workflow may make, the data-file subset, with its plugin inside `sanoma`) and the rules this repo holds its own code to. Add your own rules beside the `extends`; `sanoma check` leaves an existing file alone.
+`sanoma/oxlint.json` is self-contained (it extends nothing): `@sanoma-ai/workflows`'s rules (the clock, randomness, the network, the environment, the imports a workflow may make, the data-file subset, with its plugin inside `sanoma`) and the rules this repo holds its own code to. Add your own rules beside the `extends`; `sanoma check` leaves an existing file alone.
 
 ## Generated files
 
@@ -95,12 +95,12 @@ The worker and the app run on `SANOMA_DATABASE_URL` (default `postgresql://postg
 
 ## Dev mode
 
-When the repo's `node_modules/sanoma` or any `node_modules/@sanoma/*` is a link into a sanoma checkout (`pnpm link`), or `SANOMA_DEV_REPO` names one, `sanoma` runs `sanoma serve` in a child process and, in every linked package's directory, its `pnpm run watch` (each package's own watch build: `tsc --watch`, and `vite build --watch` too for the app). A change under any linked package's `dist/` restarts the child, after three quarters of a second of quiet, one restart at a time; a child that exits on its own is reported and started again on the next change. The child and each watch run in a process group of their own, so a terminal's ctrl-c reaches `sanoma` alone, which then ends each group (SIGTERM, SIGKILL after 5 seconds) and exits.
+When the repo's `node_modules/sanoma` or any `node_modules/@sanoma-ai/*` is a link into a sanoma checkout (`pnpm link`), or `SANOMA_DEV_REPO` names one, `sanoma` runs `sanoma serve` in a child process and, in every linked package's directory, its `pnpm run watch` (each package's own watch build: `tsc --watch`, and `vite build --watch` too for the app). A change under any linked package's `dist/` restarts the child, after three quarters of a second of quiet, one restart at a time; a child that exits on its own is reported and started again on the next change. The child and each watch run in a process group of their own, so a terminal's ctrl-c reaches `sanoma` alone, which then ends each group (SIGTERM, SIGKILL after 5 seconds) and exits.
 
-Linking some of `sanoma`, `@sanoma/workflows`, `@sanoma/app` and `@sanoma/bridge` and not the others works, with two copies of a package in one process (the linked one, and the one an installed package depends on), and `sanoma` says which still come from their tarballs before it starts the child: `dev mode: sanoma, @sanoma/app, @sanoma/bridge still come from their tarballs: edits to them in the checkout will not show until you pnpm link them too`. Link all four to run the checkout alone.
+Linking some of `sanoma`, `@sanoma-ai/workflows`, `@sanoma-ai/app` and `@sanoma-ai/bridge` and not the others works, with two copies of a package in one process (the linked one, and the one an installed package depends on), and `sanoma` says which still come from their tarballs before it starts the child: `dev mode: sanoma, @sanoma-ai/app, @sanoma-ai/bridge still come from their tarballs: edits to them in the checkout will not show until you pnpm link them too`. Link all four to run the checkout alone.
 
 ## Hosting it yourself
 
-`sanoma worker` and `sanoma app` are the deployment's two processes. A host that composes its own process keeps `startWorker` from `@sanoma/workflows` and `startApp` from `@sanoma/app`, which the bin runs.
+`sanoma worker` and `sanoma app` are the deployment's two processes. A host that composes its own process keeps `startWorker` from `@sanoma-ai/workflows` and `startApp` from `@sanoma-ai/app`, which the bin runs.
 
 Status: early (0.x). License: FSL-1.1-ALv2.

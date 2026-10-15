@@ -1,6 +1,6 @@
-import type { ApprovalState, LedgerBody, LedgerGroup, LedgerRecord, RunStatus, RunSummary } from "@sanoma/workflows";
-import type { OutlineNode } from "@sanoma/workflows/describe";
-import { DEFAULT_SLEEP_NAME } from "@sanoma/workflows/shared";
+import type { ApprovalState, LedgerBody, LedgerGroup, LedgerRecord, RunStatus, RunSummary } from "@sanoma-ai/workflows";
+import type { OutlineNode } from "@sanoma-ai/workflows/describe";
+import { DEFAULT_SLEEP_NAME } from "@sanoma-ai/workflows/shared";
 import { describe, expect, it } from "vitest";
 import { runGraph } from "../src/graph/run-graph.ts";
 import { pairs, spans, summary } from "./graph-helpers.ts";

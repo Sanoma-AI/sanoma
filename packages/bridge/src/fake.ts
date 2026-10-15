@@ -1,4 +1,4 @@
-// `@sanoma/bridge/fake`: a connector's fake, `tfFake`, its real driver over a `stateBridge` of the
+// `@sanoma-ai/bridge/fake`: a connector's fake, `tfFake`, its real driver over a `stateBridge` of the
 // replies recorded in `testdata/` (`loadReplies`). Replaying the bridge itself, and recording
 // fixtures, are this package's test helpers (`test/fake-bridge.ts`, `test/record.ts`).
 export type { FixtureError } from "./fixtures.ts";

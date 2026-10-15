@@ -1,5 +1,5 @@
-import type { ApprovalState, ErrorCode, RecordedDecision } from "@sanoma/workflows";
-import type { Span } from "@sanoma/workflows/describe";
+import type { ApprovalState, ErrorCode, RecordedDecision } from "@sanoma-ai/workflows";
+import type { Span } from "@sanoma-ai/workflows/describe";
 import type { Tone } from "../lib/tone.ts";
 
 /*

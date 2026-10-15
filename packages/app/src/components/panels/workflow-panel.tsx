@@ -1,4 +1,4 @@
-import type { RunSummary } from "@sanoma/workflows";
+import type { RunSummary } from "@sanoma-ai/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { ArrowLeftIcon, WorkflowIcon } from "lucide-react";

@@ -1,11 +1,11 @@
-# @sanoma/connector-ghost
+# @sanoma-ai/connector-ghost
 
-[Ghost Admin API](https://ghost.org/docs/admin-api/) operations for [`@sanoma/workflows`](https://www.npmjs.com/package/@sanoma/workflows).
+[Ghost Admin API](https://ghost.org/docs/admin-api/) operations for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows).
 
 ## Usage
 
 ```sh
-npm install @sanoma/connector-ghost
+npm install @sanoma-ai/connector-ghost
 ```
 
 | Operation            | Effect    | What it does                                             |
@@ -14,8 +14,8 @@ npm install @sanoma/connector-ghost
 | `ghost.post.publish` | `publish` | Publish a draft post on the site. Idempotent.            |
 
 ```ts
-import { ghost } from "@sanoma/connector-ghost";
-import { defineWorkflow } from "@sanoma/workflows";
+import { ghost } from "@sanoma-ai/connector-ghost";
+import { defineWorkflow } from "@sanoma-ai/workflows";
 
 defineWorkflow({
   // ...
@@ -31,10 +31,10 @@ The logo the app shows beside these operations is Ghost's glyph from [simple-ico
 
 ## Driver
 
-`@sanoma/connector-ghost/driver` calls the [Ghost Admin API](https://docs.ghost.org/admin-api/). The `ghost` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `@sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
+`@sanoma-ai/connector-ghost/driver` calls the [Ghost Admin API](https://docs.ghost.org/admin-api/). The `ghost` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `@sanoma-ai/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
 
 ```ts
-import { ghost } from "@sanoma/connector-ghost";
+import { ghost } from "@sanoma-ai/connector-ghost";
 
 export default defineConfig({ workflows, connectors: [ghost], policy });
 ```
@@ -53,7 +53,7 @@ It reads two environment variables on every call, never when the config loads:
 | `GHOST_ADMIN_URL`     | The site's admin URL, such as `https://example.ghost.io` (on Ghost(Pro), the `ghost.io` one). |
 | `GHOST_ADMIN_API_KEY` | A custom integration's Admin API key, `<id>:<secret>`.                                        |
 
-To make the key: in Ghost Admin, **Settings → Integrations → Add custom integration**, name it, and copy its **Admin API key** (not the Content API key). A missing or malformed variable fails the call, naming the variable, and is not retried. The driver declares them in its `env` ([Credentials](https://www.npmjs.com/package/@sanoma/workflows#credentials)), so a worker refuses to start while one is missing or malformed, and the app's connector page shows each one's status and lets you set it.
+To make the key: in Ghost Admin, **Settings → Integrations → Add custom integration**, name it, and copy its **Admin API key** (not the Content API key). A missing or malformed variable fails the call, naming the variable, and is not retried. The driver declares them in its `env` ([Credentials](https://www.npmjs.com/package/@sanoma-ai/workflows#credentials)), so a worker refuses to start while one is missing or malformed, and the app's connector page shows each one's status and lets you set it.
 
 ### Idempotency
 
@@ -69,7 +69,7 @@ You need a Ghost site of your own. Self-hosted Ghost is free and open source (`d
 
 ### Testing the driver
 
-`test/driver.test.ts` replays Ghost's recorded replies (`test/fixtures`) with [`@sanoma/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#replaying-a-vendors-api), which says what `SANOMA_LIVE` and `SANOMA_RECORD` do: `pnpm vitest run connectors/ghost` needs no site. Live, they create posts titled `sanoma test <timestamp>` on the site, publish some, and delete them at the end:
+`test/driver.test.ts` replays Ghost's recorded replies (`test/fixtures`) with [`@sanoma-ai/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#replaying-a-vendors-api), which says what `SANOMA_LIVE` and `SANOMA_RECORD` do: `pnpm vitest run connectors/ghost` needs no site. Live, they create posts titled `sanoma test <timestamp>` on the site, publish some, and delete them at the end:
 
 ```sh
 SANOMA_LIVE=1 GHOST_ADMIN_URL=https://example.ghost.io GHOST_ADMIN_API_KEY=<id>:<secret> pnpm vitest run connectors/ghost
@@ -90,12 +90,12 @@ The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/
 
 ## Testing
 
-`@sanoma/connector-ghost/fake` is an in-memory Ghost, the fake the connector carries: each sandbox run makes one of its own. A test that reads or seeds one attaches it to the connector itself, then checks `state.posts` and `calls`.
+`@sanoma-ai/connector-ghost/fake` is an in-memory Ghost, the fake the connector carries: each sandbox run makes one of its own. A test that reads or seeds one attaches it to the connector itself, then checks `state.posts` and `calls`.
 
 ```ts
-import { withSetup } from "@sanoma/workflows";
-import { ghost } from "@sanoma/connector-ghost";
-import { fakeGhost } from "@sanoma/connector-ghost/fake";
+import { withSetup } from "@sanoma-ai/workflows";
+import { ghost } from "@sanoma-ai/connector-ghost";
+import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
 
 const fake = fakeGhost();
 const worker = await startWorker({
@@ -117,6 +117,6 @@ A repeated idempotency key gets the first reply and changes nothing, as a real v
 
 `fake.reset()` empties it between tests. Pass `{ calls }` with one array to several fakes to see their calls in one order.
 
-[`@sanoma/testing`](https://www.npmjs.com/package/@sanoma/testing) has `startTestWorker` and `testDatabaseUrl` to run a test's worker with the fake on a database of its own.
+[`@sanoma-ai/testing`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md) (in the sanoma repository, not published) has `startTestWorker` and `testDatabaseUrl` to run a test's worker with the fake on a database of its own.
 
 License: FSL-1.1-ALv2.

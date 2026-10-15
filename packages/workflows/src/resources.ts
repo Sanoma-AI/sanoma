@@ -76,7 +76,7 @@ interface FileEntry {
 /**
  * Reads `resources/` under `root`, the config's directory: each `.ts` file in it but
  * `*.test.ts`, `*.d.ts` and `node_modules`, parsed with oxc and held to the data-file subset
- * (`readDataFile`). A constructor import (`@sanoma/connector-github/resources`) is matched to the
+ * (`readDataFile`). A constructor import (`@sanoma-ai/connector-github/resources`) is matched to the
  * connector whose `info.package` it names, never imported; each resource is checked by calling
  * its type, as running the file would, with each resource it names given as that resource.
  *

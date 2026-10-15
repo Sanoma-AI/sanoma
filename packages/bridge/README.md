@@ -1,11 +1,11 @@
-# @sanoma/bridge
+# @sanoma-ai/bridge
 
-Everything OpenTofu in Sanoma. A TypeScript client for [`provider-bridge`](https://github.com/Sanoma-AI/provider-bridge), the Go sidecar that runs OpenTofu providers and serves their schema, import and read over ConnectRPC on a unix socket; a fake that replays the bridge's recorded replies; and, at `@sanoma/bridge/tfschema`, the generator that turns a provider's schema into a connector's resource types, with its `sanoma-tfschema` bin. Connectors for bridged vendors (GitHub, Stripe) are built on it; nothing in the browser may import it. It depends on `@sanoma/workflows` (a peer), never the other way round.
+Everything OpenTofu in Sanoma. A TypeScript client for [`provider-bridge`](https://github.com/Sanoma-AI/provider-bridge), the Go sidecar that runs OpenTofu providers and serves their schema, import and read over ConnectRPC on a unix socket; a fake that replays the bridge's recorded replies; and, at `@sanoma-ai/bridge/tfschema`, the generator that turns a provider's schema into a connector's resource types, with its `sanoma-tfschema` bin. Connectors for bridged vendors (GitHub, Stripe) are built on it; nothing in the browser may import it. It depends on `@sanoma-ai/workflows` (a peer), never the other way round.
 
 ## Usage
 
 ```ts
-import { readPins, startBridge } from "@sanoma/bridge";
+import { readPins, startBridge } from "@sanoma-ai/bridge";
 
 const { "integrations/github": github } = readPins();
 const bridge = await startBridge(); // SANOMA_BRIDGE_BIN, or { bin }
@@ -44,7 +44,7 @@ A failed call throws a `BridgeError` with `code` (Connect's, spelled `invalid_ar
 
 ## The fake
 
-`@sanoma/bridge/fake` publishes one way to fake the bridge: `tfFake`, a connector's real driver over a `stateBridge` of recorded replies ([below](#connectors-for-opentofu-providers)), which every connector's fake uses.
+`@sanoma-ai/bridge/fake` publishes one way to fake the bridge: `tfFake`, a connector's real driver over a `stateBridge` of recorded replies ([below](#connectors-for-opentofu-providers)), which every connector's fake uses.
 
 `stateBridge(state, calls?)` is a `ProviderClient` over a `BridgeState` (`{ objects }`, plain JSON by `<typeName>/<import id>`) that `loadReplies(fixtures, ref)` builds from the recorded replies of a release (each object with the state its read returned, or its import's failure; a read recorded without its import is keyed by its state's `id`). It reads the state on every call, so a test can change an object (drift) or remove it (`gone`), and refuses what the bridge refuses with real `BridgeError`s. `fixturesDir` is this package's `testdata/` as a path.
 
@@ -58,14 +58,14 @@ Fixtures, in provider-bridge's format (its `cmd/bridge-record` writes the same; 
 
 Two test helpers, not part of the package, replay and record the bridge itself, at the Connect level. `fakeBridge({ fixtures?, bridge?, needs? })` ([`test/fake-bridge.ts`](test/fake-bridge.ts)) is a `Bridge` that answers from fixtures (default: `testdata/`), through the same Connect client as the real one (an in-memory router transport), so errors map the same way. It refuses what the bridge refuses: a call before `configure`, another config, an unknown resource type, a pin that does not match the release's sha256 (from `pins.json`, or for a release not pinned there, the sha256 its recorded replies carry; a pin it has nothing to check against is refused too). `calls` lists every call sent, logged by a Connect interceptor on the in-memory transport and the real one alike. Schema documents are parsed once per file for every fake in the process. A call no fixture covers fails, `failed_precondition` for a schema and `not_found` for an import or read, naming the file to record.
 
-Under `SANOMA_LIVE=1` the helper sends its calls to a real bridge (`startBridge(bridge)`), and fails at once when a variable in `needs` (a provider's credentials; none for `hashicorp/null`) is unset; with `SANOMA_RECORD=1` as well, the recorder ([`test/record.ts`](test/record.ts)) rewrites the fixtures it touches (the same variables as [`@sanoma/testing/replay`](../testing/README.md#replaying-a-vendors-api)). `SANOMA_LIVE=1 pnpm vitest run packages/bridge` runs the live test, which records `hashicorp/null` this way (`SANOMA_RECORD=1`, into a temporary directory) and replays it. Recording fetches the schema before `configure` and scrubs: every value of an attribute the schema marks `sensitive` becomes `"<scrubbed>"`; every state string equal to a string in the configure config becomes `"<scrubbed>"`; every config value that is sensitive in the provider's schema or named like a secret (`token`, `api_key`, `password`, ...) is replaced wherever it appears, raw, JSON-escaped or base64, by `<scrubbed:config.<path>>`, and a file in which one survives is not written. `private` stays as base64, and a reply whose private data holds a secret is refused. `scrubbed` lists the paths hit and the secrets. Read the diff, and grep it for credentials, before committing.
+Under `SANOMA_LIVE=1` the helper sends its calls to a real bridge (`startBridge(bridge)`), and fails at once when a variable in `needs` (a provider's credentials; none for `hashicorp/null`) is unset; with `SANOMA_RECORD=1` as well, the recorder ([`test/record.ts`](test/record.ts)) rewrites the fixtures it touches (the same variables as [`@sanoma-ai/testing/replay`](../testing/README.md#replaying-a-vendors-api)). `SANOMA_LIVE=1 pnpm vitest run packages/bridge` runs the live test, which records `hashicorp/null` this way (`SANOMA_RECORD=1`, into a temporary directory) and replays it. Recording fetches the schema before `configure` and scrubs: every value of an attribute the schema marks `sensitive` becomes `"<scrubbed>"`; every state string equal to a string in the configure config becomes `"<scrubbed>"`; every config value that is sensitive in the provider's schema or named like a secret (`token`, `api_key`, `password`, ...) is replaced wherever it appears, raw, JSON-escaped or base64, by `<scrubbed:config.<path>>`, and a file in which one survives is not written. `private` stays as base64, and a reply whose private data holds a secret is refused. `scrubbed` lists the paths hit and the secrets. Read the diff, and grep it for credentials, before committing.
 
 ## Connectors for OpenTofu providers
 
-`tfConnector({ vendor, provider, types, references, missing, info })` from `@sanoma/bridge/connector` is a whole connector for a vendor with an OpenTofu provider, from its generated types (`resources.gen.ts`, see [`src/tfschema/`](src/tfschema/AGENTS.md)). A vendor package keeps only what the schema does not say:
+`tfConnector({ vendor, provider, types, references, missing, info })` from `@sanoma-ai/bridge/connector` is a whole connector for a vendor with an OpenTofu provider, from its generated types (`resources.gen.ts`, see [`src/tfschema/`](src/tfschema/AGENTS.md)). A vendor package keeps only what the schema does not say:
 
 ```ts
-import { tfConnector } from "@sanoma/bridge/connector";
+import { tfConnector } from "@sanoma-ai/bridge/connector";
 import { github_repository, provider } from "./resources.gen.ts";
 
 export const githubTf = tfConnector({
@@ -77,20 +77,20 @@ export const githubTf = tfConnector({
   references: { branch_protection: { repository_id: { type: "github.repository", by: ["name", "node_id"] } } },
   // Which of the bridge's errors mean "no such object": default `not_found`.
   missing: (e) => e.code === "not_found" || e.diagnostics.some((d) => d.summary.startsWith("could not find ")),
-  info: { title: "GitHub", logo: { svg }, package: "@sanoma/connector-github" },
+  info: { title: "GitHub", logo: { svg }, package: "@sanoma-ai/connector-github" },
 });
 githubTf.connector; // the operations: github.repository.read, github.repository.import
 githubTf.resources; // the data-file constructors: githubTf.resources.repository({ name: "sanoma" })
 githubTf.driver(bridge, () => ({ token: process.env.GITHUB_TOKEN })); // the driver; the config is read per call
 ```
 
-The package root exports the connector with its driver and fake attached, `withSetup(githubTf.connector, { driver: githubDriver, fake: fakeGithub })` from `@sanoma/workflows`, which is what a config and workflows import.
+The package root exports the connector with its driver and fake attached, `withSetup(githubTf.connector, { driver: githubDriver, fake: fakeGithub })` from `@sanoma-ai/workflows`, which is what a config and workflows import.
 
 Each type becomes a resource type (`defineResource`, with the generated schema and fields, its `references` as `fields.references`, and an optional `normalize`), given to `defineConnector` under its name; `info.package` is needed, since data files import the constructors from `<package>/resources`. The driver's `import` asks the provider to find the object (the bridge reads it too); `read` refreshes a state from an earlier call, or imports when it has none, or one without an `id`. Either answers `{ gone: true }` when the provider finds nothing, or fails with an error `missing(e)` accepts (`(e: BridgeError) => boolean`, default `e.code === "not_found"`): how each provider says an object is not there is its own, and GitHub's is a `failed_precondition` whose diagnostic says it "could not find" it. States go out in the resource's shape, secrets dropped (`fromTfState`), and come back in the provider's (`toTfState`). The provider is configured through `ensureConfigured`. The bridge's errors become `DriverError`s with its code as `vendorCode` and the provider's diagnostics in the message, retryable only on `unavailable`.
 
 The provider's private data and state version travel in the operation's opaque `handle` (`<version>:<base64>`), so they pass through the runtime: DBOS's step records keep them as they keep every operation's output. The ledger does not: the resource operations declare `handle` opaque, and the ledger records it as `"<handle>"`. Providers rarely put anything but a state version there, but this is a known residual risk: the tests' recorder refuses a fixture whose private data holds a configured secret, and nothing checks the runtime's copies.
 
-`tfFake(githubTf, { fixtures?, missingReply?, calls? })` from `@sanoma/bridge/fake` is the connector's fake: its real driver over a `stateBridge` of the replies recorded for its release (default: this package's `testdata/`), with every fault `defineFake` gives and, with fields in the resource's shape, `put(type, id, fields, { from? })` (an object under that import id: over a copy of the recorded one `from` names, its provider `id` then `fields.id`, else the import id; else over the object already there, keeping its other fields; else a bare one), `override(type, id, fields)` and `remove(type, id)` (nothing when there is no such object) to simulate drift. After `remove`, an import answers as the provider would for a missing object: `missingReply(type, id)`, a bridge error as a fixture records one, or `not_found` without it. Each sandbox run makes one of its own (`fakeGithub()`), holding resources with the same three.
+`tfFake(githubTf, { fixtures?, missingReply?, calls? })` from `@sanoma-ai/bridge/fake` is the connector's fake: its real driver over a `stateBridge` of the replies recorded for its release (default: this package's `testdata/`), with every fault `defineFake` gives and, with fields in the resource's shape, `put(type, id, fields, { from? })` (an object under that import id: over a copy of the recorded one `from` names, its provider `id` then `fields.id`, else the import id; else over the object already there, keeping its other fields; else a bare one), `override(type, id, fields)` and `remove(type, id)` (nothing when there is no such object) to simulate drift. After `remove`, an import answers as the provider would for a missing object: `missingReply(type, id)`, a bridge error as a fixture records one, or `not_found` without it. Each sandbox run makes one of its own (`fakeGithub()`), holding resources with the same three.
 
 ## Environment
 

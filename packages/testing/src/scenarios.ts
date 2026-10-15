@@ -1,16 +1,16 @@
 // The tests are named after the feature files and scenarios, and one for a file that does not load fails by throwing.
 /* oxlint-disable vitest/valid-title, vitest/expect-expect */
 import { fileURLToPath } from "node:url";
-import { memoryLedger, type Principal, resolveConfig, type SanomaConfig } from "@sanoma/workflows";
-import { loadScenarios } from "@sanoma/workflows/scenario";
-import { runScenario } from "@sanoma/workflows/scenarios";
+import { memoryLedger, type Principal, resolveConfig, type SanomaConfig } from "@sanoma-ai/workflows";
+import { loadScenarios } from "@sanoma-ai/workflows/scenario";
+import { runScenario } from "@sanoma-ai/workflows/scenarios";
 import { describe, expect, it } from "vitest";
 import { useTestApp } from "./harness.ts";
 import type { TestWorkerOptions } from "./index.ts";
 
-// One scenario as a sandbox run, from `@sanoma/workflows/scenarios`, where `runScenarios` (what
+// One scenario as a sandbox run, from `@sanoma-ai/workflows/scenarios`, where `runScenarios` (what
 // `sanoma check` runs) is built on it too.
-export { runScenario, type RunScenarioOptions } from "@sanoma/workflows/scenarios";
+export { runScenario, type RunScenarioOptions } from "@sanoma-ai/workflows/scenarios";
 
 /**
  * Registers a vitest test for each scenario in `scenarios/` in the config's root, in a

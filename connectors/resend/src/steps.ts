@@ -1,4 +1,4 @@
-import { defineSteps } from "@sanoma/workflows";
+import { defineSteps } from "@sanoma-ai/workflows";
 import { resendOps } from "./connector.ts";
 
 const { create, send } = resendOps.broadcast;

@@ -42,7 +42,7 @@ importers:
         specifier: ^0.8.15
         version: 0.8.15
     devDependencies:
-      '@sanoma/workflows':
+      '@sanoma-ai/workflows':
         specifier: workspace:*
         version: link:../../packages/workflows
       msw:
@@ -58,7 +58,7 @@ importers:
         specifier: ^6.2.12
         version: 6.2.12
     devDependencies:
-      '@sanoma/workflows':
+      '@sanoma-ai/workflows':
         specifier: workspace:*
         version: link:../../packages/workflows
       msw:
@@ -70,10 +70,10 @@ importers:
 
   connectors/github:
     devDependencies:
-      '@sanoma/bridge':
+      '@sanoma-ai/bridge':
         specifier: workspace:*
         version: link:../../packages/bridge
-      '@sanoma/workflows':
+      '@sanoma-ai/workflows':
         specifier: workspace:*
         version: link:../../packages/workflows
       zod:
@@ -82,7 +82,7 @@ importers:
 
   connectors/resend:
     devDependencies:
-      '@sanoma/workflows':
+      '@sanoma-ai/workflows':
         specifier: workspace:*
         version: link:../../packages/workflows
       msw:
@@ -94,10 +94,10 @@ importers:
 
   connectors/stripe:
     devDependencies:
-      '@sanoma/bridge':
+      '@sanoma-ai/bridge':
         specifier: workspace:*
         version: link:../../packages/bridge
-      '@sanoma/workflows':
+      '@sanoma-ai/workflows':
         specifier: workspace:*
         version: link:../../packages/workflows
       zod:
@@ -170,28 +170,28 @@ importers:
       '@lezer/highlight':
         specifier: ^1.2.5
         version: 1.2.5
-      '@sanoma/bridge':
+      '@sanoma-ai/bridge':
         specifier: workspace:*
         version: link:../bridge
-      '@sanoma/connector-bluesky':
+      '@sanoma-ai/connector-bluesky':
         specifier: workspace:*
         version: link:../../connectors/bluesky
-      '@sanoma/connector-ghost':
+      '@sanoma-ai/connector-ghost':
         specifier: workspace:*
         version: link:../../connectors/ghost
-      '@sanoma/connector-github':
+      '@sanoma-ai/connector-github':
         specifier: workspace:*
         version: link:../../connectors/github
-      '@sanoma/connector-resend':
+      '@sanoma-ai/connector-resend':
         specifier: workspace:*
         version: link:../../connectors/resend
-      '@sanoma/connector-stripe':
+      '@sanoma-ai/connector-stripe':
         specifier: workspace:*
         version: link:../../connectors/stripe
-      '@sanoma/testing':
+      '@sanoma-ai/testing':
         specifier: workspace:*
         version: link:../testing
-      '@sanoma/workflows':
+      '@sanoma-ai/workflows':
         specifier: workspace:*
         version: link:../workflows
       '@tailwindcss/vite':
@@ -237,7 +237,7 @@ importers:
         specifier: ^2.2.0
         version: 2.2.0(@bufbuild/protobuf@2.16.0)(@connectrpc/connect@2.2.0(@bufbuild/protobuf@2.16.0))
     devDependencies:
-      '@sanoma/workflows':
+      '@sanoma-ai/workflows':
         specifier: workspace:*
         version: link:../workflows
       zod:
@@ -246,13 +246,13 @@ importers:
 
   packages/sanoma:
     dependencies:
-      '@sanoma/app':
+      '@sanoma-ai/app':
         specifier: workspace:*
         version: link:../app
-      '@sanoma/bridge':
+      '@sanoma-ai/bridge':
         specifier: workspace:*
         version: link:../bridge
-      '@sanoma/workflows':
+      '@sanoma-ai/workflows':
         specifier: workspace:*
         version: link:../workflows
       '@types/node':
@@ -271,10 +271,10 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
-      '@sanoma/connector-ghost':
+      '@sanoma-ai/connector-ghost':
         specifier: workspace:*
         version: link:../../connectors/ghost
-      '@sanoma/testing':
+      '@sanoma-ai/testing':
         specifier: workspace:*
         version: link:../testing
       '@types/pg':
@@ -290,22 +290,22 @@ importers:
       '@dbos-inc/dbos-sdk':
         specifier: ^5.2.11
         version: 5.2.11
-      '@sanoma/connector-bluesky':
+      '@sanoma-ai/connector-bluesky':
         specifier: workspace:*
         version: link:../../connectors/bluesky
-      '@sanoma/connector-ghost':
+      '@sanoma-ai/connector-ghost':
         specifier: workspace:*
         version: link:../../connectors/ghost
-      '@sanoma/connector-github':
+      '@sanoma-ai/connector-github':
         specifier: workspace:*
         version: link:../../connectors/github
-      '@sanoma/connector-resend':
+      '@sanoma-ai/connector-resend':
         specifier: workspace:*
         version: link:../../connectors/resend
-      '@sanoma/connector-stripe':
+      '@sanoma-ai/connector-stripe':
         specifier: workspace:*
         version: link:../../connectors/stripe
-      '@sanoma/workflows':
+      '@sanoma-ai/workflows':
         specifier: workspace:*
         version: link:../workflows
       msw:

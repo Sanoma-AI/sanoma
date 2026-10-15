@@ -1,4 +1,4 @@
-import { withSetup } from "@sanoma/workflows";
+import { withSetup } from "@sanoma-ai/workflows";
 import { stripeTf } from "./connector.ts";
 import { stripeDriver } from "./driver.ts";
 import { fakeStripe } from "./fake.ts";

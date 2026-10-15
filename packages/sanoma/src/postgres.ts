@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { isLoopback } from "@sanoma/workflows/shared";
+import { isLoopback } from "@sanoma-ai/workflows/shared";
 import { Client } from "pg";
 
 export interface EnsuredPostgres {

@@ -1,6 +1,6 @@
 # packages/bridge/test
 
-Tests for `@sanoma/bridge`, and the helpers that replay and record the bridge for them. All but `live.test.ts` run offline.
+Tests for `@sanoma-ai/bridge`, and the helpers that replay and record the bridge for them. All but `live.test.ts` run offline.
 
 ## Contents
 

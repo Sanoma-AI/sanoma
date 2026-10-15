@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { type CallContext, DriverError } from "@sanoma/workflows";
-import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
-import { fakeGhost } from "@sanoma/connector-ghost/fake";
-import { fakeGithub } from "@sanoma/connector-github/fake";
-import { fakeResend } from "@sanoma/connector-resend/fake";
-import { fakeStripe } from "@sanoma/connector-stripe/fake";
+import { type CallContext, DriverError } from "@sanoma-ai/workflows";
+import { fakeBluesky } from "@sanoma-ai/connector-bluesky/fake";
+import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
+import { fakeGithub } from "@sanoma-ai/connector-github/fake";
+import { fakeResend } from "@sanoma-ai/connector-resend/fake";
+import { fakeStripe } from "@sanoma-ai/connector-stripe/fake";
 import type { FakeCall } from "../src/index.ts";
 
 // No database: the fakes are called the way the runtime calls a driver.

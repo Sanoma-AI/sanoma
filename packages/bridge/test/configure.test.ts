@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { BridgeError, ensureConfigured } from "@sanoma/bridge";
-import { fixturesDir, loadReplies, stateBridge } from "@sanoma/bridge/fake";
+import { BridgeError, ensureConfigured } from "@sanoma-ai/bridge";
+import { fixturesDir, loadReplies, stateBridge } from "@sanoma-ai/bridge/fake";
 
 const ref = { source: "integrations/github", version: "6.13.0" };
 const config = (token: string) => JSON.stringify({ owner: "Sanoma-AI", token });

@@ -1,4 +1,4 @@
-import { defineConnector } from "@sanoma/workflows";
+import { defineConnector } from "@sanoma-ai/workflows";
 import { z } from "zod";
 
 /**
@@ -28,7 +28,7 @@ export const blueskyOps = defineConnector(
   {
     title: "Bluesky",
     logo: { svg: butterfly("#006AFF"), dark: butterfly("white") },
-    package: "@sanoma/connector-bluesky",
+    package: "@sanoma-ai/connector-bluesky",
     homepage: "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/bluesky#readme",
   },
 );

@@ -1,4 +1,4 @@
-import { withFake } from "@sanoma/testing";
+import { withFake } from "@sanoma-ai/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { describeConfig } from "../src/describe.ts";

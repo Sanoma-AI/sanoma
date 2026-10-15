@@ -1,7 +1,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { ResolvedConfig, SanomaConfig } from "@sanoma/workflows";
+import type { ResolvedConfig, SanomaConfig } from "@sanoma-ai/workflows";
 
 /** A mistake in how the bin was called or in what it found: its message is printed alone, and the exit code is 2. */
 export class UsageError extends Error {}

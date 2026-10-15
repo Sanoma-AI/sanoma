@@ -1,7 +1,7 @@
-import { bluesky } from "@sanoma/connector-bluesky";
-import { ghost } from "@sanoma/connector-ghost";
-import { resend } from "@sanoma/connector-resend";
-import { defineFake, type FakeOptions } from "@sanoma/workflows/fake";
+import { bluesky } from "@sanoma-ai/connector-bluesky";
+import { ghost } from "@sanoma-ai/connector-ghost";
+import { resend } from "@sanoma-ai/connector-resend";
+import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
 import { z } from "zod";
 import { defineConnector, defineWorkflow } from "../../src/index.ts";
 

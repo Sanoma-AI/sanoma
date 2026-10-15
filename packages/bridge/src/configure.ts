@@ -1,6 +1,6 @@
 import { type Bridge, BridgeError, type ProviderRef } from "./bridge.ts";
 
-/** The calls of a `Bridge` a driver makes. A `Bridge` is one, and so is `stateBridge` from `@sanoma/bridge/fake`. */
+/** The calls of a `Bridge` a driver makes. A `Bridge` is one, and so is `stateBridge` from `@sanoma-ai/bridge/fake`. */
 export type ProviderClient = Pick<Bridge, "configure" | "import" | "read" | "close">;
 
 interface Configured {

@@ -6,7 +6,7 @@ import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 
 /*
- * Dev mode: when the repo's `sanoma` or a `@sanoma/*` package resolves into a sanoma checkout (a
+ * Dev mode: when the repo's `sanoma` or a `@sanoma-ai/*` package resolves into a sanoma checkout (a
  * `pnpm link`), or `SANOMA_DEV_REPO` is set, `sanoma` runs each linked package's `watch` script
  * and restarts `sanoma serve` when one's `dist/` changes.
  */
@@ -15,21 +15,21 @@ import { pathToFileURL } from "node:url";
 const installed = (path: string) => path.split(sep).includes("node_modules");
 
 export interface LinkedPackage {
-  /** The npm name, such as `@sanoma/workflows`. */
+  /** The npm name, such as `@sanoma-ai/workflows`. */
   name: string;
   /** Where it really is: its directory in the checkout. */
   dir: string;
 }
 
 /**
- * `node_modules/sanoma` and every package under `node_modules/@sanoma/` whose real path is
+ * `node_modules/sanoma` and every package under `node_modules/@sanoma-ai/` whose real path is
  * outside any `node_modules`: the ones a `pnpm link` points into a checkout.
  */
 export function linkedPackages(cwd: string): LinkedPackage[] {
   const modules = join(cwd, "node_modules");
-  const scoped = join(modules, "@sanoma");
+  const scoped = join(modules, "@sanoma-ai");
   const candidates = [
-    ...(existsSync(scoped) ? readdirSync(scoped).map((name) => [`@sanoma/${name}`, join(scoped, name)]) : []),
+    ...(existsSync(scoped) ? readdirSync(scoped).map((name) => [`@sanoma-ai/${name}`, join(scoped, name)]) : []),
     ["sanoma", join(modules, "sanoma")],
   ] as const;
   const linked: LinkedPackage[] = [];
@@ -42,14 +42,14 @@ export function linkedPackages(cwd: string): LinkedPackage[] {
 }
 
 /** The packages a `sanoma` process loads besides the connectors. */
-const CORE = ["sanoma", "@sanoma/workflows", "@sanoma/app", "@sanoma/bridge"];
+const CORE = ["sanoma", "@sanoma-ai/workflows", "@sanoma-ai/app", "@sanoma-ai/bridge"];
 
 /**
- * Of `sanoma`, `@sanoma/workflows`, `@sanoma/app` and `@sanoma/bridge`, those installed (from a
+ * Of `sanoma`, `@sanoma-ai/workflows`, `@sanoma-ai/app` and `@sanoma-ai/bridge`, those installed (from a
  * tarball or a registry) while another of them resolves into a checkout: a partial link, under
  * which two copies of a package run in one process. Empty when none is linked, or all are. Each
  * is found as Node finds it, from the repo's root, else from where `sanoma` really is (where pnpm
- * puts sanoma's own dependencies, `@sanoma/app` among them).
+ * puts sanoma's own dependencies, `@sanoma-ai/app` among them).
  */
 export function partialLink(cwd: string): string[] {
   const sanoma = findPackage("sanoma", cwd);

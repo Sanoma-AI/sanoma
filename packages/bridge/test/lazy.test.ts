@@ -1,4 +1,4 @@
-import { DriverError } from "@sanoma/workflows";
+import { DriverError } from "@sanoma-ai/workflows";
 import { describe, expect, it, vi } from "vitest";
 import {
   type Bridge,
@@ -7,7 +7,7 @@ import {
   ensureConfigured,
   lazyBridge,
   type StartBridgeOptions,
-} from "@sanoma/bridge";
+} from "@sanoma-ai/bridge";
 
 const ref = { source: "integrations/github", version: "6.13.0" };
 

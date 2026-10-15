@@ -1,6 +1,6 @@
-import type { DriftField, DriftReport, DriftResult, RunSummary } from "@sanoma/workflows";
-import type { ConfigDescription, DeclaredResource, ResourceProblem } from "@sanoma/workflows/describe";
-import { isEnded, problemAt } from "@sanoma/workflows/shared";
+import type { DriftField, DriftReport, DriftResult, RunSummary } from "@sanoma-ai/workflows";
+import type { ConfigDescription, DeclaredResource, ResourceProblem } from "@sanoma-ai/workflows/describe";
+import { isEnded, problemAt } from "@sanoma-ai/workflows/shared";
 import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";

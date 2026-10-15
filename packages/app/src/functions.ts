@@ -22,7 +22,7 @@ import { withPrincipal } from "./middleware.ts";
 // The page's reads and changes, as server functions: the app's only HTTP surface. Each parses its
 // argument and calls the server core (server/core.ts). Failures, the actor header and the actor
 // itself are handled once for all of them, in start.ts. Scripts reach the same runs through
-// `SanomaClient` from @sanoma/workflows, not through these.
+// `SanomaClient` from @sanoma-ai/workflows, not through these.
 //
 // Runs carry `unknown` inputs and outputs, which Start's type check can't prove serializable.
 // They are JSON (they come out of Postgres and the ledger as JSON), so that check is off for

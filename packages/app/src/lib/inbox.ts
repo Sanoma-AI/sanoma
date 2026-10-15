@@ -1,5 +1,5 @@
-import type { ApprovalState, RunSummary } from "@sanoma/workflows";
-import { mayDecide } from "@sanoma/workflows/shared";
+import type { ApprovalState, RunSummary } from "@sanoma-ai/workflows";
+import { mayDecide } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useActor } from "../actor.ts";
 import { approvalKey, decidedOf, type InboxFilter, pendingOf, recentRunsQuery, waitingRunsQuery } from "../queries.ts";

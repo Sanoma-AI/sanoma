@@ -1,4 +1,4 @@
-import { tfConnector } from "@sanoma/bridge/connector";
+import { tfConnector } from "@sanoma-ai/bridge/connector";
 import { github_branch_protection, github_repository, github_team_membership, provider } from "./resources.gen.ts";
 
 /**
@@ -41,7 +41,7 @@ export const githubTf = tfConnector({
   info: {
     title: "GitHub",
     logo: { svg: mark("#1F2328"), dark: mark("#FFFFFF") },
-    package: "@sanoma/connector-github",
+    package: "@sanoma-ai/connector-github",
     homepage: "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/github#readme",
   },
 });

@@ -4,20 +4,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { devRepo, end, linkedPackages, partialLink, supervise } from "../src/dev.ts";
-import { waitFor } from "@sanoma/testing";
+import { waitFor } from "@sanoma-ai/testing";
 
 let dir = "";
 const temp = () => (dir = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-dev-"))));
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-/** A repo whose `node_modules/@sanoma/<name>` (or `sanoma`) are symlinks into `checkout/packages/`, or real directories. */
+/** A repo whose `node_modules/@sanoma-ai/<name>` (or `sanoma`) are symlinks into `checkout/packages/`, or real directories. */
 function repoWith(links: Record<string, "linked" | "installed">): { repo: string; checkout: string } {
   const root = temp();
   const repo = join(root, "repo");
   const checkout = join(root, "checkout");
-  mkdirSync(join(repo, "node_modules", "@sanoma"), { recursive: true });
+  mkdirSync(join(repo, "node_modules", "@sanoma-ai"), { recursive: true });
   for (const [name, how] of Object.entries(links)) {
-    const at = name === "sanoma" ? join(repo, "node_modules", name) : join(repo, "node_modules", "@sanoma", name);
+    const at = name === "sanoma" ? join(repo, "node_modules", name) : join(repo, "node_modules", "@sanoma-ai", name);
     if (how === "installed") {
       mkdirSync(at);
       continue;
@@ -30,7 +30,7 @@ function repoWith(links: Record<string, "linked" | "installed">): { repo: string
 }
 
 describe("devRepo", () => {
-  it("is the checkout a linked package is in: sanoma itself, or any @sanoma package", () => {
+  it("is the checkout a linked package is in: sanoma itself, or any @sanoma-ai package", () => {
     const linkedWorkflows = repoWith({ workflows: "linked" });
     expect(devRepo(linkedWorkflows.repo)).toBe(linkedWorkflows.checkout);
     const linkedSanoma = repoWith({ sanoma: "linked", workflows: "installed" });
@@ -49,11 +49,11 @@ describe("devRepo", () => {
 });
 
 describe("linkedPackages", () => {
-  it("lists the linked packages under @sanoma/ and sanoma, with where they are", () => {
+  it("lists the linked packages under @sanoma-ai/ and sanoma, with where they are", () => {
     const { repo, checkout } = repoWith({ workflows: "linked", app: "linked", testing: "installed", sanoma: "linked" });
     expect(linkedPackages(repo)).toEqual([
-      { name: "@sanoma/app", dir: join(checkout, "packages/app") },
-      { name: "@sanoma/workflows", dir: join(checkout, "packages/workflows") },
+      { name: "@sanoma-ai/app", dir: join(checkout, "packages/app") },
+      { name: "@sanoma-ai/workflows", dir: join(checkout, "packages/workflows") },
       { name: "sanoma", dir: join(checkout, "packages/sanoma") },
     ]);
     expect(linkedPackages(repoWith({}).repo)).toEqual([]);
@@ -62,14 +62,14 @@ describe("linkedPackages", () => {
 
 describe("partialLink", () => {
   it("names the core packages still installed when another is linked, each found as Node finds it", () => {
-    // pnpm's layout: sanoma from its tarball, with @sanoma/app and @sanoma/workflows beside it in
-    // .pnpm, not at the top; @sanoma/workflows linked at the top; @sanoma/bridge installed there.
+    // pnpm's layout: sanoma from its tarball, with @sanoma-ai/app and @sanoma-ai/workflows beside it in
+    // .pnpm, not at the top; @sanoma-ai/workflows linked at the top; @sanoma-ai/bridge installed there.
     const { repo } = repoWith({ workflows: "linked", bridge: "installed" });
     const store = join(repo, "node_modules/.pnpm/sanoma@0.1.0/node_modules");
-    for (const name of ["sanoma", "@sanoma/app", "@sanoma/workflows"])
+    for (const name of ["sanoma", "@sanoma-ai/app", "@sanoma-ai/workflows"])
       mkdirSync(join(store, name), { recursive: true });
     symlinkSync(join(store, "sanoma"), join(repo, "node_modules/sanoma"));
-    expect(partialLink(repo)).toEqual(["sanoma", "@sanoma/app", "@sanoma/bridge"]);
+    expect(partialLink(repo)).toEqual(["sanoma", "@sanoma-ai/app", "@sanoma-ai/bridge"]);
 
     // All four linked (the umbrella's own dependencies then resolve inside the checkout): nothing.
     const all = repoWith({ sanoma: "linked", workflows: "linked", app: "linked", bridge: "linked" });

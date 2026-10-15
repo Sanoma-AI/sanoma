@@ -1,15 +1,15 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bluesky } from "@sanoma/connector-bluesky";
-import { ghost } from "@sanoma/connector-ghost";
-import { fakeBluesky } from "@sanoma/connector-bluesky/fake";
-import { fakeGhost } from "@sanoma/connector-ghost/fake";
-import { resend } from "@sanoma/connector-resend";
-import { fakeResend } from "@sanoma/connector-resend/fake";
-import { testDatabaseUrl } from "@sanoma/testing";
-import { type TestApp, useTestApp } from "@sanoma/testing/harness";
-import type { Fake, FakeCall, FakeOptions } from "@sanoma/workflows/fake";
+import { bluesky } from "@sanoma-ai/connector-bluesky";
+import { ghost } from "@sanoma-ai/connector-ghost";
+import { fakeBluesky } from "@sanoma-ai/connector-bluesky/fake";
+import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
+import { resend } from "@sanoma-ai/connector-resend";
+import { fakeResend } from "@sanoma-ai/connector-resend/fake";
+import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { type TestApp, useTestApp } from "@sanoma-ai/testing/harness";
+import type { Fake, FakeCall, FakeOptions } from "@sanoma-ai/workflows/fake";
 import { afterAll, beforeEach } from "vitest";
 import {
   allowAll,

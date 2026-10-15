@@ -33,7 +33,7 @@
           { "name": "crypto", "message": "Workflows are replayed: derive ids from `ctx.runId`." },
           {
             "name": "require",
-            "message": "Import from `@sanoma/workflows`, a `@sanoma/connector-*` package, zod or a file in this directory."
+            "message": "Import from `@sanoma-ai/workflows`, a `@sanoma-ai/connector-*` package, zod or a file in this directory."
           },
           { "name": "eval", "message": "Not allowed in a workflow or policy." },
           { "name": "Function", "message": "Not allowed in a workflow or policy." },
@@ -76,15 +76,15 @@
           {
             "paths": [
               {
-                "name": "@sanoma/testing",
+                "name": "@sanoma-ai/testing",
                 "message": "Fakes and test helpers belong in tests. A workflow must call vendors through ctx, so the policy sees every call."
               },
               {
-                "name": "@sanoma/app",
+                "name": "@sanoma-ai/app",
                 "message": "The app starts runs and decides approvals: a workflow could approve itself."
               },
               {
-                "name": "@sanoma/workflows",
+                "name": "@sanoma-ai/workflows",
                 "allowImportNames": [
                   "defineWorkflow",
                   "definePolicy",
@@ -98,21 +98,21 @@
                   "z"
                 ],
                 "allowTypeImports": true,
-                "message": "A workflow or policy imports only these and types from @sanoma/workflows: the rest (SanomaClient, startWorker, the ledger stores, config helpers) could start runs, approve its own approvals, forge the ledger or read credentials. Ask for approval with `ctx.approval`."
+                "message": "A workflow or policy imports only these and types from @sanoma-ai/workflows: the rest (SanomaClient, startWorker, the ledger stores, config helpers) could start runs, approve its own approvals, forge the ledger or read credentials. Ask for approval with `ctx.approval`."
               }
             ],
             "patterns": [
               {
                 "group": [
-                  "@sanoma/connector-*/fake",
-                  "@sanoma/connector-*/driver",
-                  "@sanoma/workflows/describe",
-                  "@sanoma/workflows/fake",
-                  "@sanoma/workflows/plugin",
-                  "@sanoma/workflows/scenario",
-                  "@sanoma/workflows/scenarios"
+                  "@sanoma-ai/connector-*/fake",
+                  "@sanoma-ai/connector-*/driver",
+                  "@sanoma-ai/workflows/describe",
+                  "@sanoma-ai/workflows/fake",
+                  "@sanoma-ai/workflows/plugin",
+                  "@sanoma-ai/workflows/scenario",
+                  "@sanoma-ai/workflows/scenarios"
                 ],
-                "message": "A workflow must call vendors through ctx, so the policy sees every call: import the connector itself, `@sanoma/connector-<vendor>`."
+                "message": "A workflow must call vendors through ctx, so the policy sees every call: import the connector itself, `@sanoma-ai/connector-<vendor>`."
               }
             ]
           }

@@ -1,6 +1,6 @@
 # packages/workflows/src
 
-The source of `@sanoma/workflows`: how connectors, workflows and policies are declared, how a worker runs them durably on DBOS, and the tools that read them (lint, outline, describe). Its entry points, from `exports` in `package.json`: `.` (`index.ts`), `./describe`, `./fake`, `./plugin`, `./scenario`, `./scenarios` and `./shared`.
+The source of `@sanoma-ai/workflows`: how connectors, workflows and policies are declared, how a worker runs them durably on DBOS, and the tools that read them (lint, outline, describe). Its entry points, from `exports` in `package.json`: `.` (`index.ts`), `./describe`, `./fake`, `./plugin`, `./scenario`, `./scenarios` and `./shared`.
 
 ## Contents
 

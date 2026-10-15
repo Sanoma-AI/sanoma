@@ -1,5 +1,5 @@
-import { loadReplies, stateBridge } from "@sanoma/bridge/fake";
-import { type Driver } from "@sanoma/workflows";
+import { loadReplies, stateBridge } from "@sanoma-ai/bridge/fake";
+import { type Driver } from "@sanoma-ai/workflows";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { stripeDriver } from "../src/driver.ts";
 import { fakeStripe } from "../src/fake.ts";

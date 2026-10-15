@@ -7,9 +7,9 @@ import { errorMessage } from "./shared.ts";
 import { startWorker } from "./worker.ts";
 
 /*
- * `@sanoma/workflows/scenarios`: runs a config's scenarios as sandbox runs, with no test
+ * `@sanoma-ai/workflows/scenarios`: runs a config's scenarios as sandbox runs, with no test
  * framework. Server-side only, like `./scenario`: it loads Cucumber and starts a worker.
- * `sanoma check` runs every scenario through `runScenarios`; `@sanoma/testing/scenarios` wraps
+ * `sanoma check` runs every scenario through `runScenarios`; `@sanoma-ai/testing/scenarios` wraps
  * `runScenario` in a vitest test per scenario.
  */
 

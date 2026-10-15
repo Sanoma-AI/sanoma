@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isLoopback } from "@sanoma/workflows/shared";
+import { isLoopback } from "@sanoma-ai/workflows/shared";
 import { hostName } from "../src/loopback.ts";
 
 // The Host names a loopback-only app answers to. No database, no build.

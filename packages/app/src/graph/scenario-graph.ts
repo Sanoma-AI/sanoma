@@ -1,5 +1,5 @@
 import type { ScenarioEntry } from "../api.ts";
-import { fitsOp } from "@sanoma/workflows/shared";
+import { fitsOp } from "@sanoma-ai/workflows/shared";
 import type { Graph, GraphNode, OpState } from "./types.ts";
 
 /** What a scenario's steps do with an operation. */

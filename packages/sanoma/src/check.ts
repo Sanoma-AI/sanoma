@@ -3,10 +3,10 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import type { SanomaConfig } from "@sanoma/workflows";
-import { describeConfig } from "@sanoma/workflows/describe";
-import { problemLine } from "@sanoma/workflows/shared";
-import { runScenarios } from "@sanoma/workflows/scenarios";
+import type { SanomaConfig } from "@sanoma-ai/workflows";
+import { describeConfig } from "@sanoma-ai/workflows/describe";
+import { problemLine } from "@sanoma-ai/workflows/shared";
+import { runScenarios } from "@sanoma-ai/workflows/scenarios";
 import type { Loaded } from "./config.ts";
 
 export interface CheckResult {

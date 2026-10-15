@@ -2,8 +2,8 @@ import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { BridgeError } from "@sanoma/bridge";
-import { fixturesDir, loadReplies, stateBridge } from "@sanoma/bridge/fake";
+import { BridgeError } from "@sanoma-ai/bridge";
+import { fixturesDir, loadReplies, stateBridge } from "@sanoma-ai/bridge/fake";
 
 const github = { source: "integrations/github", version: "6.13.0" };
 const config = "{}";

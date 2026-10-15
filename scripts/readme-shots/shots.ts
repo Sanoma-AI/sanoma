@@ -39,9 +39,9 @@ const BUILT: [dir: string, outputs: string[]][] = [
 
 // The preview's config: the README's workflow, with Ghost answered by its in-memory fake behind the
 // live connector, so the form still shows Live vendors.
-const CONFIG = `import { ghost } from "@sanoma/connector-ghost";
-import { fakeGhost } from "@sanoma/connector-ghost/fake";
-import { withFake } from "@sanoma/testing";
+const CONFIG = `import { ghost } from "@sanoma-ai/connector-ghost";
+import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
+import { withFake } from "@sanoma-ai/testing";
 import { allowAll, defineConfig } from "sanoma";
 import announce from "./workflows/announce.ts";
 
@@ -57,7 +57,7 @@ const SEEDED = [
   ["Pricing update", "<p>New plans for teams, from next month.</p>", new Date(2027, 5, 15, 10)],
 ] as const;
 
-// The packages' own requires: `pg` and `@sanoma/workflows` (its dist/, as the company repo loads it).
+// The packages' own requires: `pg` and `@sanoma-ai/workflows` (its dist/, as the company repo loads it).
 const fromSanoma = createRequire(join(repo, "packages/sanoma/package.json"));
 
 const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
@@ -91,7 +91,7 @@ try {
   if (!hasFfmpeg()) fail("ffmpeg is not on PATH; it makes demo.gif (brew install ffmpeg)");
   say("building what is stale (pnpm run build in each package whose dist/ is older than its src/)");
   for (const [dir, outputs] of BUILT) ensureBuilt(join(repo, dir), outputs, ["pnpm", "run", "build"]);
-  // Loaded once built: @sanoma/testing's index imports @sanoma/workflows from its dist/.
+  // Loaded once built: @sanoma-ai/testing's index imports @sanoma-ai/workflows from its dist/.
   const { testDatabaseUrl } = await import("../../packages/testing/src/index.ts");
   // `SANOMA_TEST_DATABASE_URL`'s name plus `_readme_shots`: a worktree's own when that is set per worktree.
   databaseUrl = new URL(testDatabaseUrl("readme_shots"));
@@ -228,7 +228,7 @@ function replaceAssets(dir: string, files: string[]): void {
  * through the runtime's client, as the app starts a run, with acme's config.
  */
 async function seedPendingRuns(acme: string): Promise<void> {
-  const { SanomaClient } = (await import(pathToFileURL(fromSanoma.resolve("@sanoma/workflows")).href)) as Workflows;
+  const { SanomaClient } = (await import(pathToFileURL(fromSanoma.resolve("@sanoma-ai/workflows")).href)) as Workflows;
   const { default: config } = (await import(pathToFileURL(join(acme, "sanoma.config.ts")).href)) as {
     default: SanomaConfig;
   };
@@ -263,8 +263,8 @@ function writeRepo(dir: string): void {
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "acme", private: true, type: "module" }));
   for (const [name, target] of [
     ["sanoma", "packages/sanoma"],
-    ["@sanoma/connector-ghost", "connectors/ghost"],
-    ["@sanoma/testing", "packages/testing"],
+    ["@sanoma-ai/connector-ghost", "connectors/ghost"],
+    ["@sanoma-ai/testing", "packages/testing"],
   ] as const) {
     const at = join(dir, "node_modules", name);
     mkdirSync(dirname(at), { recursive: true });

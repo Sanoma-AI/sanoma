@@ -1,6 +1,6 @@
 # packages/app/test
 
-Vitest tests for `@sanoma/app`. They start the app against a real config and render its pages, call the server core as its server functions do, and check the graph, form and loopback code on their own.
+Vitest tests for `@sanoma-ai/app`. They start the app against a real config and render its pages, call the server core as its server functions do, and check the graph, form and loopback code on their own.
 
 ## Contents
 
@@ -15,6 +15,6 @@ Vitest tests for `@sanoma/app`. They start the app against a real config and ren
 | [`wildcard.test.ts`](wildcard.test.ts)             | A computed op id's header and rows                                                                                                                        |
 | [`schema.test.ts`](schema.test.ts)                 | The start form's schema code: fields, starting values, input, issue targets, and datetime-local values                                                    |
 | [`lines.test.ts`](lines.test.ts)                   | `highlightedLines` for the source panel, and `spanLines` for the inspector                                                                                |
-| [`loopback.test.ts`](loopback.test.ts)             | The loopback rule for Host names: `hostName`, then `isLoopback` from `@sanoma/workflows/shared`                                                           |
+| [`loopback.test.ts`](loopback.test.ts)             | The loopback rule for Host names: `hostName`, then `isLoopback` from `@sanoma-ai/workflows/shared`                                                        |
 | [`fixtures/scenarios/`](fixtures/scenarios/)       | The feature file the app tests copy and read their scenarios from                                                                                         |
 | [`graph-helpers.ts`](graph-helpers.ts)             | Edge, node and box helpers for the graph tests, and the drift workflow's shape they share                                                                 |

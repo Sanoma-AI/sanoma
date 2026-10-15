@@ -3,7 +3,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt as ensure } from "@sanoma/testing";
+import { ensureBuilt as ensure } from "@sanoma-ai/testing";
 
 /** The repo's root. */
 export const repo = fileURLToPath(new URL("../../../", import.meta.url));
@@ -30,13 +30,13 @@ export function ensureBuilt(): void {
 /**
  * A fresh copy of `fixtures/project`, with what a company repo installs: `sanoma` as pnpm lays out
  * its tarball (its published files in `.pnpm/sanoma/node_modules/sanoma`, its dependencies linked
- * beside it, not under it) and `@sanoma/connector-ghost`, both reaching this checkout's builds.
+ * beside it, not under it) and `@sanoma-ai/connector-ghost`, both reaching this checkout's builds.
  */
 export function copyFixture(): string {
   const dir = mkdtempSync(join(tmpdir(), "sanoma-fixture-"));
   cpSync(fileURLToPath(new URL("./fixtures/project/", import.meta.url)), dir, { recursive: true });
   const modules = join(dir, "node_modules");
-  link(join(repo, "connectors/ghost"), join(modules, "@sanoma/connector-ghost"));
+  link(join(repo, "connectors/ghost"), join(modules, "@sanoma-ai/connector-ghost"));
 
   const sanoma = join(repo, "packages/sanoma");
   const manifest = JSON.parse(readFileSync(join(sanoma, "package.json"), "utf8")) as {

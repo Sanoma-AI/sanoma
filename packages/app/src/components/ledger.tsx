@@ -1,6 +1,6 @@
-import type { ErrorInfo, LedgerRecord } from "@sanoma/workflows";
-import type { ConfigDescription, OpEntry } from "@sanoma/workflows/describe";
-import { approverLabel } from "@sanoma/workflows/shared";
+import type { ErrorInfo, LedgerRecord } from "@sanoma-ai/workflows";
+import type { ConfigDescription, OpEntry } from "@sanoma-ai/workflows/describe";
+import { approverLabel } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { LocateIcon } from "lucide-react";
 import { memo, type ReactNode } from "react";

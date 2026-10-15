@@ -1,5 +1,5 @@
-import { DriverError } from "@sanoma/workflows";
-import { defineFake, type FakeOptions } from "@sanoma/workflows/fake";
+import { DriverError } from "@sanoma-ai/workflows";
+import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
 import { resendOps } from "./connector.ts";
 
 export interface FakeResendBroadcast {

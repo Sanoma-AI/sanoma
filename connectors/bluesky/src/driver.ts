@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { Agent, AppBskyRichtextFacet, CredentialSession, RichText, XRPCError } from "@atproto/api";
 import { TID } from "@atproto/common-web";
 import { ResponseType } from "@atproto/xrpc";
-import { defineDriver, DriverError, retryableStatus } from "@sanoma/workflows";
+import { defineDriver, DriverError, retryableStatus } from "@sanoma-ai/workflows";
 import { z } from "zod";
 import { blueskyOps } from "./connector.ts";
 

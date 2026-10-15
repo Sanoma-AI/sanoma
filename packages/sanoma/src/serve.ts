@@ -1,5 +1,5 @@
-import { startApp } from "@sanoma/app";
-import { type SanomaConfig, startWorker } from "@sanoma/workflows";
+import { startApp } from "@sanoma-ai/app";
+import { type SanomaConfig, startWorker } from "@sanoma-ai/workflows";
 
 export interface Stoppable {
   stop(): Promise<void>;

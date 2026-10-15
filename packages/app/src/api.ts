@@ -6,16 +6,16 @@ import type {
   LedgerRecord,
   Principal,
   RunSummary,
-} from "@sanoma/workflows";
-import type { Check, Scenario } from "@sanoma/workflows/scenario";
-import { RUN_STATUSES } from "@sanoma/workflows/shared";
+} from "@sanoma-ai/workflows";
+import type { Check, Scenario } from "@sanoma-ai/workflows/scenario";
+import { RUN_STATUSES } from "@sanoma-ai/workflows/shared";
 import { z } from "zod";
 
 /**
  * The shapes the app's server functions take and return. The page imports this file too, so
  * the server and the browser agree on them. Only types come from
- * `@sanoma/workflows`, so the browser bundle never loads the runtime; values the page shares
- * with the runtime come from `@sanoma/workflows/shared`.
+ * `@sanoma-ai/workflows`, so the browser bundle never loads the runtime; values the page shares
+ * with the runtime come from `@sanoma-ai/workflows/shared`.
  */
 
 /**

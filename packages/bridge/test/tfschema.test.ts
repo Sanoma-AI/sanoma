@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import type { Block, CtyType, SchemaDocument } from "@sanoma/bridge";
-import { ctyToZod, fromTfState, generateResources, toTfState } from "@sanoma/bridge/tfschema";
+import type { Block, CtyType, SchemaDocument } from "@sanoma-ai/bridge";
+import { ctyToZod, fromTfState, generateResources, toTfState } from "@sanoma-ai/bridge/tfschema";
 
 /** The zod schema a generated source expression builds. */
 const build = (source: string) => new Function("z", `return ${source}`)(z) as z.ZodType;

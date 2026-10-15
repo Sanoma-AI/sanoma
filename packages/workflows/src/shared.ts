@@ -17,7 +17,7 @@ export type { DeclaredResource, ResourceProblem } from "./resources.ts";
 export type { DriftField, DriftReport, DriftResult, DriftStatus } from "./drift.ts";
 export type { CredentialStatus } from "./env.ts";
 
-// What a UI in the browser may use from the runtime, besides types: `@sanoma/workflows/shared`.
+// What a UI in the browser may use from the runtime, besides types: `@sanoma-ai/workflows/shared`.
 // Nothing here imports DBOS, Node or zod, so a browser bundle can carry it; the runtime uses the
 // same functions, so a page answers these questions the way a run does.
 

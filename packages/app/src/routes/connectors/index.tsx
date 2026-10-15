@@ -1,6 +1,6 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { type CredentialStatus, credentialReady } from "@sanoma/workflows/shared";
+import { type CredentialStatus, credentialReady } from "@sanoma-ai/workflows/shared";
 import { ChevronRightIcon } from "lucide-react";
 import { ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from "#/components/ui/item.tsx";
 import { LinkItem, Nothing, PageHeader, plural, VendorLogo } from "../../components/common.tsx";

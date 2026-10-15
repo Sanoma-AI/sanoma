@@ -1,4 +1,4 @@
-import type { Principal } from "@sanoma/workflows";
+import type { Principal } from "@sanoma-ai/workflows";
 import { ACTOR_HEADER } from "./api.ts";
 
 /** The default `resolveActor`: the URI-encoded name in the `x-sanoma-actor` header, as `{ id }`. */

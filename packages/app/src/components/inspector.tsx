@@ -1,5 +1,5 @@
-import type { ApprovalState, LedgerRecord, RunSummary } from "@sanoma/workflows";
-import type { Span, WorkflowEntry } from "@sanoma/workflows/describe";
+import type { ApprovalState, LedgerRecord, RunSummary } from "@sanoma-ai/workflows";
+import type { Span, WorkflowEntry } from "@sanoma-ai/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { XIcon } from "lucide-react";

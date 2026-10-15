@@ -1,4 +1,4 @@
-import { github } from "@sanoma/connector-github/resources";
+import { github } from "@sanoma-ai/connector-github/resources";
 
 // The company's public repositories, and the rule that guards the website's main branch.
 

@@ -1,4 +1,4 @@
-import { withSetup } from "@sanoma/workflows";
+import { withSetup } from "@sanoma-ai/workflows";
 import { resendOps } from "./connector.ts";
 import { resendDriver } from "./driver.ts";
 import { fakeResend } from "./fake.ts";

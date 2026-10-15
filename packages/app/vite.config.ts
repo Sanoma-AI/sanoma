@@ -7,7 +7,7 @@ import { defineConfig } from "vite";
 // The runtime and what it loads stay outside the server bundle: dist/server/server.js imports
 // them from the consumer's node_modules, so the app and the worker share one copy. (The app
 // imports no connector; a config's connectors reach it only through startApp.)
-const RUNTIME = ["@sanoma/workflows", "@sanoma/bridge", "@dbos-inc/dbos-sdk", "pg", "zod"];
+const RUNTIME = ["@sanoma-ai/workflows", "@sanoma-ai/bridge", "@dbos-inc/dbos-sdk", "pg", "zod"];
 
 export default defineConfig({
   plugins: [
@@ -16,12 +16,12 @@ export default defineConfig({
     tailwindcss(),
     tanstackStart({
       // The browser bundle may import only types from the runtime (DBOS, Postgres), and the values
-      // of `@sanoma/workflows/shared`. `import type` is erased before resolution, so anything else
+      // of `@sanoma-ai/workflows/shared`. `import type` is erased before resolution, so anything else
       // of these reaching the client is a mistake: fail, in dev as in the build. (Start adds these
       // to its own denials, and to the modules marked server-only, such as server/core.ts.)
       importProtection: {
         behavior: "error",
-        client: { specifiers: [/^(@sanoma\/(workflows(?!\/shared$)|bridge|connector-|testing)|@dbos-inc\/|pg$)/] },
+        client: { specifiers: [/^(@sanoma-ai\/(workflows(?!\/shared$)|bridge|connector-|testing)|@dbos-inc\/|pg$)/] },
       },
     }),
     react(),

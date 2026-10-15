@@ -1,4 +1,4 @@
-import { describeFeatures } from "@sanoma/testing/features";
+import { describeFeatures } from "@sanoma-ai/testing/features";
 import { ghost } from "../src/index.ts";
 import { replayOptions } from "./replay.ts";
 

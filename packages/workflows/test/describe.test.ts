@@ -1,13 +1,13 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bluesky } from "@sanoma/connector-bluesky";
-import { ghost } from "@sanoma/connector-ghost";
-import { resend } from "@sanoma/connector-resend";
+import { bluesky } from "@sanoma-ai/connector-bluesky";
+import { ghost } from "@sanoma-ai/connector-ghost";
+import { resend } from "@sanoma-ai/connector-resend";
 import blueskyPkg from "../../../connectors/bluesky/package.json" with { type: "json" };
 import ghostPkg from "../../../connectors/ghost/package.json" with { type: "json" };
 import resendPkg from "../../../connectors/resend/package.json" with { type: "json" };
-import { withFake } from "@sanoma/testing";
+import { withFake } from "@sanoma-ai/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
@@ -123,7 +123,7 @@ describe("describeConfig", () => {
     expect(vendors.ghost?.fake).toBe(true);
     expect(vendors.resend).toMatchObject({
       title: "Resend",
-      package: "@sanoma/connector-resend",
+      package: "@sanoma-ai/connector-resend",
       homepage: "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/resend#readme",
       logo: {
         src: expect.stringMatching(/^data:image\/svg\+xml,/),
@@ -241,9 +241,9 @@ describe("describeConfig's workflow problems", () => {
     const file = join(dir, "announce.ts");
     writeFileSync(
       file,
-      `import { defineWorkflow, SanomaClient } from "@sanoma/workflows";
+      `import { defineWorkflow, SanomaClient } from "@sanoma-ai/workflows";
 import { readFileSync } from "node:fs";
-import { ghost } from "@sanoma/connector-ghost";
+import { ghost } from "@sanoma-ai/connector-ghost";
 import { z } from "zod";
 export default defineWorkflow({
   name: "announce",

@@ -25,7 +25,7 @@ export const all = [defineWorkflow, z, defineConfig, main, Date.now()] as [unkno
   mkdirSync(join(dir, "resources"));
   writeFileSync(
     join(dir, "resources/shop.ts"),
-    `import { ghost } from "@sanoma/connector-ghost/resources";\nexport const p = ghost.post({ title: "X".toLowerCase() });\n`,
+    `import { ghost } from "@sanoma-ai/connector-ghost/resources";\nexport const p = ghost.post({ title: "X".toLowerCase() });\n`,
   );
   const oxlint = join(repo, "packages/sanoma/node_modules/.bin/oxlint");
   const out = spawnSync(oxlint, ["-f", "json", "workflows", "resources"], { cwd: dir, encoding: "utf8" });
@@ -59,13 +59,13 @@ describe("the shipped oxlint.json", () => {
     expect(config.overrides.flatMap((o) => o.jsPlugins ?? [])).toEqual(["./dist/oxlint-plugin.js"]);
   });
 
-  it("allows the same names from sanoma as from @sanoma/workflows", () => {
+  it("allows the same names from sanoma as from @sanoma-ai/workflows", () => {
     const { overrides } = JSON.parse(readFileSync(shipped, "utf8")) as {
       overrides: { rules: Record<string, [string, { paths: { name: string; allowImportNames?: string[] }[] }]> }[];
     };
     const paths = overrides.flatMap((o) => o.rules["no-restricted-imports"]?.[1].paths ?? []);
     const names = (pkg: string) => paths.find((p) => p.name === pkg)?.allowImportNames;
-    expect(names("sanoma")).toEqual(names("@sanoma/workflows"));
+    expect(names("sanoma")).toEqual(names("@sanoma-ai/workflows"));
     expect(names("sanoma")).toContain("z");
   });
 

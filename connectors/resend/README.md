@@ -1,11 +1,11 @@
-# @sanoma/connector-resend
+# @sanoma-ai/connector-resend
 
-[Resend Broadcasts API](https://resend.com/docs/api-reference/broadcasts) operations for [`@sanoma/workflows`](https://www.npmjs.com/package/@sanoma/workflows).
+[Resend Broadcasts API](https://resend.com/docs/api-reference/broadcasts) operations for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows).
 
 ## Usage
 
 ```sh
-npm install @sanoma/connector-resend
+npm install @sanoma-ai/connector-resend
 ```
 
 | Operation                 | Effect  | What it does                                                         |
@@ -14,8 +14,8 @@ npm install @sanoma/connector-resend
 | `resend.broadcast.send`   | `send`  | Send a broadcast to every contact in its audience. Cannot be undone. |
 
 ```ts
-import { resend } from "@sanoma/connector-resend";
-import { defineWorkflow } from "@sanoma/workflows";
+import { resend } from "@sanoma-ai/connector-resend";
+import { defineWorkflow } from "@sanoma-ai/workflows";
 
 defineWorkflow({
   // ...
@@ -31,10 +31,10 @@ The logo the app shows beside these operations is Resend's lettermark from its [
 
 ## Driver
 
-`@sanoma/connector-resend/driver` calls Resend. The `resend` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `@sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
+`@sanoma-ai/connector-resend/driver` calls Resend. The `resend` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `@sanoma-ai/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
 
 ```ts
-import { resend } from "@sanoma/connector-resend";
+import { resend } from "@sanoma-ai/connector-resend";
 
 export default defineConfig({ workflows, connectors: [resend], policy });
 ```
@@ -54,7 +54,7 @@ It reads this on every call, never when the config loads:
 | `RESEND_API_KEY` | A Resend API key.                                                                                                                  |
 | `RESEND_FROM`    | Optional: the sender of a broadcast whose input has no `from`, such as `Acme <news@acme.example>`, on a domain verified in Resend. |
 
-When the key is unset, a call fails, not retryable, naming it; so does a `create` with no sender from either place. The driver declares both in its `env` ([Credentials](https://www.npmjs.com/package/@sanoma/workflows#credentials)): the worker starts without them, warning, and the app's connector page shows their status and lets you set them.
+When the key is unset, a call fails, not retryable, naming it; so does a `create` with no sender from either place. The driver declares both in its `env` ([Credentials](https://www.npmjs.com/package/@sanoma-ai/workflows#credentials)): the worker starts without them, warning, and the app's connector page shows their status and lets you set them.
 
 ### Idempotency
 
@@ -70,7 +70,7 @@ Broadcasts are on the free Marketing plan (1,000 contacts, 3 segments, 3 domains
 
 ### Testing the driver
 
-`test/driver.test.ts` replays Resend's recorded replies (`test/fixtures`) with [`@sanoma/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#replaying-a-vendors-api), which says what `SANOMA_LIVE` and `SANOMA_RECORD` do: `pnpm vitest run connectors/resend` needs no account. Live, they create broadcasts and send one to a test segment:
+`test/driver.test.ts` replays Resend's recorded replies (`test/fixtures`) with [`@sanoma-ai/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#replaying-a-vendors-api), which says what `SANOMA_LIVE` and `SANOMA_RECORD` do: `pnpm vitest run connectors/resend` needs no account. Live, they create broadcasts and send one to a test segment:
 
 ```sh
 SANOMA_LIVE=1 RESEND_API_KEY=re_... RESEND_TEST_AUDIENCE=<segment id> RESEND_TEST_FROM="Test <test@your-domain>" pnpm vitest run connectors/resend
@@ -92,12 +92,12 @@ The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/
 
 ## Testing
 
-`@sanoma/connector-resend/fake` is an in-memory Resend that emails nobody, the fake the connector carries: each sandbox run makes one of its own. A test that reads or seeds one attaches it to the connector itself, then checks `state.broadcasts` and `calls`.
+`@sanoma-ai/connector-resend/fake` is an in-memory Resend that emails nobody, the fake the connector carries: each sandbox run makes one of its own. A test that reads or seeds one attaches it to the connector itself, then checks `state.broadcasts` and `calls`.
 
 ```ts
-import { withSetup } from "@sanoma/workflows";
-import { resend } from "@sanoma/connector-resend";
-import { fakeResend } from "@sanoma/connector-resend/fake";
+import { withSetup } from "@sanoma-ai/workflows";
+import { resend } from "@sanoma-ai/connector-resend";
+import { fakeResend } from "@sanoma-ai/connector-resend/fake";
 
 const fake = fakeResend();
 const worker = await startWorker({
@@ -119,6 +119,6 @@ Like Resend, the fake refuses to send a broadcast twice, unless the second call 
 
 `fake.reset()` empties it between tests. Pass `{ calls }` with one array to several fakes to see their calls in one order.
 
-[`@sanoma/testing`](https://www.npmjs.com/package/@sanoma/testing) has `startTestWorker` and `testDatabaseUrl` to run a test's worker with the fake on a database of its own.
+[`@sanoma-ai/testing`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md) (in the sanoma repository, not published) has `startTestWorker` and `testDatabaseUrl` to run a test's worker with the fake on a database of its own.
 
 License: FSL-1.1-ALv2.

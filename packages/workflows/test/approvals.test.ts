@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { bluesky } from "@sanoma/connector-bluesky";
+import { bluesky } from "@sanoma-ai/connector-bluesky";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { messageKeyOf, topicOf } from "../src/approvals.ts";

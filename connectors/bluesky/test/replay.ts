@@ -1,4 +1,4 @@
-import type { Exchange, ReplayOptions, Sent } from "@sanoma/testing/replay";
+import type { Exchange, ReplayOptions, Sent } from "@sanoma-ai/testing/replay";
 
 // How Bluesky's recorded replies are replayed (and recorded): the driver's tests and the features share it.
 

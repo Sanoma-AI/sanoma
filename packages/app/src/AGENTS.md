@@ -1,6 +1,6 @@
 # packages/app/src
 
-The source of `@sanoma/app`: a TanStack Start app (routes, components, server functions) plus `startApp`, the Node entry that serves its build from a Sanoma config.
+The source of `@sanoma-ai/app`: a TanStack Start app (routes, components, server functions) plus `startApp`, the Node entry that serves its build from a Sanoma config.
 
 ## Contents
 
@@ -26,4 +26,4 @@ The source of `@sanoma/app`: a TanStack Start app (routes, components, server fu
 | [`context.ts`](context.ts)             | `AppContext` and the `ResolveActor` type that `startApp` hands every request                                                                                                                                                                                                                                        |
 | [`actor.ts`](actor.ts)                 | Browser-side actor name: stored in `localStorage` and shared through a React context                                                                                                                                                                                                                                |
 | [`default-actor.ts`](default-actor.ts) | The default `resolveActor`, reading the `x-sanoma-actor` header the page sends                                                                                                                                                                                                                                      |
-| [`loopback.ts`](loopback.ts)           | Host names (`hostName`) and the 403 for requests whose Host is not this machine; which hosts are is `isLoopback` in `@sanoma/workflows/shared`                                                                                                                                                                      |
+| [`loopback.ts`](loopback.ts)           | Host names (`hostName`) and the 403 for requests whose Host is not this machine; which hosts are is `isLoopback` in `@sanoma-ai/workflows/shared`                                                                                                                                                                   |

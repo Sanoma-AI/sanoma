@@ -63,7 +63,7 @@ export const DBOS_DATABASE_OPTIONS = { systemDatabaseIdleTransactionTimeoutMs: 0
 
 /**
  * A DBOS client of the app `applicationName` on the database at `databaseUrl`, as every client of
- * the runtime, its tests and `@sanoma/testing` make one (`DBOS_DATABASE_OPTIONS`).
+ * the runtime, its tests and `@sanoma-ai/testing` make one (`DBOS_DATABASE_OPTIONS`).
  */
 export const dbosClient = (databaseUrl: string, applicationName?: string): Promise<DBOSClient> =>
   DBOSClient.create({

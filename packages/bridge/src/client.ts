@@ -57,7 +57,8 @@ export async function startBridge(options: StartBridgeOptions = {}): Promise<Bri
   const bin = options.bin ?? process.env.SANOMA_BRIDGE_BIN;
   if (!bin) {
     throw new Error(
-      "provider-bridge: no binary. Set SANOMA_BRIDGE_BIN (`pnpm bridge:download` builds one and prints the path) or pass `bin`.",
+      "provider-bridge: no binary. Set SANOMA_BRIDGE_BIN to a provider-bridge binary (build one from " +
+        "https://github.com/Sanoma-AI/provider-bridge, or with `pnpm bridge:download` in a sanoma checkout), or pass `bin`.",
     );
   }
   const tempDir = options.socketPath ? undefined : mkdtempSync(join(tmpdir(), "sanoma-bridge-"));

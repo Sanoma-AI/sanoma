@@ -2,9 +2,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { bluesky } from "@sanoma/connector-bluesky";
-import { ghost } from "@sanoma/connector-ghost";
-import { resend } from "@sanoma/connector-resend";
+import { bluesky } from "@sanoma-ai/connector-bluesky";
+import { ghost } from "@sanoma-ai/connector-ghost";
+import { resend } from "@sanoma-ai/connector-resend";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { defineFake, type Fake } from "../src/fake.ts";
@@ -24,7 +24,7 @@ import { check as checkRun, loadScenarios, type Scenario, type Scope } from "../
 import announce from "./fixtures/announce.ts";
 import { companyConfig } from "./fixtures/company/fakes.ts";
 import inspect from "./fixtures/company/workflows/inspect.ts";
-import { withFake } from "@sanoma/testing";
+import { withFake } from "@sanoma-ai/testing";
 
 // The packages' connectors carry their drivers: announce's operations have one.
 const scopeOf = (connectors: Parameters<typeof resolveConfig>[0]["connectors"]) => {

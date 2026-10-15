@@ -1,5 +1,5 @@
-import { testDatabaseUrl } from "@sanoma/testing";
-import { useTestApp } from "@sanoma/testing/harness";
+import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { useTestApp } from "@sanoma-ai/testing/harness";
 import { describe, expect, it } from "vitest";
 import { type LedgerRecord, memoryLedger, resolveConfig } from "../src/index.ts";
 import { check, drive, loadScenarios, type Scenario } from "../src/scenario.ts";

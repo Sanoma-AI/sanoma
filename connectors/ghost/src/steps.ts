@@ -1,4 +1,4 @@
-import { defineSteps } from "@sanoma/workflows";
+import { defineSteps } from "@sanoma-ai/workflows";
 import { ghostOps } from "./connector.ts";
 
 const { create, publish } = ghostOps.post;

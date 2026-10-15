@@ -1,9 +1,9 @@
-import type { ResourcesConfig } from "@sanoma/bridge/tfschema";
+import type { ResourcesConfig } from "@sanoma-ai/bridge/tfschema";
 
 /**
  * Which of the GitHub provider's resource types `pnpm generate` writes into `resources.gen.ts`,
  * and what its schema does not say. Hand-owned. The release and its sha256 are the pin in
- * `@sanoma/bridge`'s `testdata/pins.json`.
+ * `@sanoma-ai/bridge`'s `testdata/pins.json`.
  */
 export default {
   provider: "integrations/github",

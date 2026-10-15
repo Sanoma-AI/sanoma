@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { testDatabaseUrl } from "@sanoma/testing";
-import { resolveConfig } from "@sanoma/workflows";
+import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { resolveConfig } from "@sanoma-ai/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { check } from "../src/check.ts";
 import { type Loaded, loadConfig } from "../src/config.ts";
@@ -50,16 +50,16 @@ describe("check", () => {
     mkdirSync(join(dir, "resources"));
     writeFileSync(
       join(dir, "resources/shop.ts"),
-      'import { ghost } from "@sanoma/connector-ghost/resources";\nexport const p = ghost.post({ title: "x" });\n',
+      'import { ghost } from "@sanoma-ai/connector-ghost/resources";\nexport const p = ghost.post({ title: "x" });\n',
     );
     const { ok, problems } = await check(await load(), { databaseUrl, log: () => {} });
     expect(ok).toBe(false);
     expect(problems).toEqual([
       // tsc: the entry does not exist.
       expect.stringMatching(
-        /^resources\/shop\.ts:1:23: error TS2307: Cannot find module '@sanoma\/connector-ghost\/resources'/,
+        /^resources\/shop\.ts:1:23: error TS2307: Cannot find module '@sanoma-ai\/connector-ghost\/resources'/,
       ),
-      // oxlint: the unused import, and Date from @sanoma/workflows's rules.
+      // oxlint: the unused import, and Date from @sanoma-ai/workflows's rules.
       expect.stringMatching(/^workflows\/hello\.ts:16:10: Identifier 'readFileSync' is imported but never used/),
       expect.stringMatching(
         /^workflows\/hello\.ts:17:18: Unexpected use of 'Date'\. Workflows are replayed: use `await ctx\.now\(\)`/,

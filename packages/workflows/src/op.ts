@@ -132,7 +132,7 @@ export interface VendorInfo {
   /** The vendor's name as it writes it, such as "Resend". */
   title?: string;
   logo?: { svg: string; dark?: string };
-  /** The connector's npm package name, such as "@sanoma/connector-resend". */
+  /** The connector's npm package name, such as "@sanoma-ai/connector-resend". */
   package?: string;
   /** The connector package's `homepage` from its package.json: where its code and README are, as an https URL. */
   homepage?: string;
@@ -149,11 +149,11 @@ const isResourceGroup = (group: unknown): group is ResourceGroup =>
 /**
  * Declares a vendor's operations, grouped by resource: `defineConnector("ghost", { post: { create: {...} } })`.
  * A group may be a resource type from `defineResource`, under its own `type`, for its `read` and
- * `import`: `defineConnector("github", { repository }, { package: "@sanoma/connector-github" })`;
+ * `import`: `defineConnector("github", { repository }, { package: "@sanoma-ai/connector-github" })`;
  * it must be of the same vendor, and the connector needs `info.package`, whose `/resources`
  * entry exports the types for data files.
  * `info` says who the vendor is and where the connector lives, for a UI:
- * `{ title: "Resend", logo: { svg }, package: "@sanoma/connector-resend", homepage: "https://…" }`.
+ * `{ title: "Resend", logo: { svg }, package: "@sanoma-ai/connector-resend", homepage: "https://…" }`.
  */
 export function defineConnector<const V extends string, const S extends Specs>(
   vendor: V,
@@ -334,7 +334,7 @@ export function checkConnector(value: unknown): asserts value is Connector<any, 
   throw new Error(
     record === undefined
       ? `\`connectors\` holds something that is not a connector: list what the connector packages export (or one from an older build: ${build})`
-      : `The "${String(record.id)}" connector was made by another build of @sanoma/workflows: ${build}`,
+      : `The "${String(record.id)}" connector was made by another build of @sanoma-ai/workflows: ${build}`,
   );
 }
 
