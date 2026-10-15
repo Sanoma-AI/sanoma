@@ -15,4 +15,6 @@ What should change, and why?
 
 ## Context
 
+<!-- For visual issues, upload/embed a current (before) screenshot when feasible. Add an expected (after) reference if available; label mockups. Omit screenshots for nonvisual work. -->
+
 Optional links, examples, or constraints.

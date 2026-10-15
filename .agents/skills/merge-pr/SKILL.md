@@ -5,8 +5,8 @@ description: Verify the linked issue, current review evidence, and checks before
 
 # Merge a PR
 
-1. Confirm the user authorized merging this PR; an instruction to create or review it is not merge authorization. Reuse authorization already given in the conversation.
-2. Read the PR and verify its linked GitHub issue exists and matches the task. If absent, use [create-issue](../create-issue/SKILL.md) and update the PR using [the template](../../../.github/pull_request_template.md).
-3. Verify the current head and base against the [pre-PR review requirements](../create-pr/references/review.md). Complete missing or stale reviews and resolve findings before continuing.
-4. Verify mergeability, required approvals, and successful applicable CI checks for the current head. Resolve conflicts and rerun review/checks when necessary; do not bypass branch rules or merge with failed or pending checks.
-5. Squash-merge the verified head (`gh pr merge <number> --squash --match-head-commit <reviewed-head-sha>`). If the head changes, repeat the verification. Confirm the PR is merged and report the PR and issue status; close the issue only when the work completes it.
+1. Verify user authorization to merge, reusing any already given.
+2. Verify the linked issue matches the task; if missing, use [create-issue](../create-issue/SKILL.md) and link it in the PR.
+3. Verify [review evidence](../create-pr/references/review.md) for the current head and base; complete missing or stale reviews.
+4. Require mergeability, required approvals, and successful applicable CI for the current head. Resolve conflicts and repeat review/checks; never bypass branch rules.
+5. Run `gh pr merge <number> --squash --match-head-commit <reviewed-head-sha>`; recheck if the head changes. Verify the merge and report PR/issue status; close the issue only if complete.
