@@ -1,0 +1,36 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # npm trusted publishing: GitHub signs in to npm for this run
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      # No `cache: pnpm`: a release installs from the lockfile, never from a restored cache.
+      # pnpm 11 publishes without the npm CLI and does the OIDC exchange itself, so no
+      # `registry-url` or npm upgrade is needed (Node 24 bundles npm 11.5.1 or later anyway).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - name: Tag matches the shared version of the public packages
+        if: github.ref_type == 'tag'
+        run: |
+          versions=$(pnpm -r ls --depth -1 --json | jq -r '[.[] | select(.private | not) | .version] | unique | join(" ")')
+          if [ "$versions" != "${GITHUB_REF_NAME#v}" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match the public packages' version: $versions"
+            exit 1
+          fi
+      # Packages whose version is already on npm are skipped without running prepack, so their
+      # dependents need the full build first.
+      - run: pnpm build
+      # --no-git-checks: a tag checkout is a detached HEAD, not the publish branch.
+      - run: pnpm -r publish --no-git-checks
