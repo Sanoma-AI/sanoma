@@ -79,7 +79,9 @@ describe("BridgeError", () => {
 describe("startBridge", () => {
   it("says how to get a binary when it has none", async () => {
     vi.stubEnv("SANOMA_BRIDGE_BIN", "");
-    await expect(startBridge()).rejects.toThrow(/SANOMA_BRIDGE_BIN.*provider-bridge/);
+    await expect(startBridge()).rejects.toThrow(
+      /SANOMA_BRIDGE_BIN.*github\.com\/Sanoma-AI\/provider-bridge.*pnpm bridge:download/,
+    );
   });
 
   it("reports a bridge that exits before it is ready", async () => {

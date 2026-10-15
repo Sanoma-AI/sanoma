@@ -119,6 +119,6 @@ Like Resend, the fake refuses to send a broadcast twice, unless the second call 
 
 `fake.reset()` empties it between tests. Pass `{ calls }` with one array to several fakes to see their calls in one order.
 
-[`@sanoma-ai/testing`](https://www.npmjs.com/package/@sanoma-ai/testing) has `startTestWorker` and `testDatabaseUrl` to run a test's worker with the fake on a database of its own.
+[`@sanoma-ai/testing`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md) (in the sanoma repository, not published) has `startTestWorker` and `testDatabaseUrl` to run a test's worker with the fake on a database of its own.
 
 License: FSL-1.1-ALv2.

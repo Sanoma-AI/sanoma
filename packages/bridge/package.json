@@ -23,6 +23,9 @@
     "dist",
     "testdata/pins.json",
     "testdata/replies",
+    "testdata/schemas",
+    "!testdata/schemas/hashicorp_null_*",
+    "!testdata/schemas/sanoma_testprov_*",
     "README.md",
     "LICENSE"
   ],
