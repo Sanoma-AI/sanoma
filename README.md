@@ -95,16 +95,14 @@ pnpm lint && pnpm format:check
 pnpm build          # compiles each package to dist/ for publishing
 ```
 
-Inside the repo, `@sanoma-ai/*` imports resolve to each package's `src/` (via `paths` in `tsconfig.json` and aliases in `vitest.config.ts`), so tests and typechecks need no build. Published packages ship the compiled `dist/`, not the sources (`@sanoma-ai/workflows` also ships `src/`, which its source maps and call sites point at).
+Inside the repo, `@sanoma-ai/*` imports resolve to each package's `src/` (via `paths` in `tsconfig.json` and aliases in `vitest.config.ts`), so tests and typechecks need no build. Published packages ship the compiled `dist/`, not the sources (`@sanoma-ai/workflows` also ships `src/`, which its source maps point at).
 
 To publish `sanoma` and the `@sanoma-ai/*` packages, logged in to npm as a member of the `sanoma-ai` organization, from a clean checkout of `main`:
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm -r publish --access public   # add --dry-run --no-git-checks to see each tarball first
+pnpm -r publish   # --dry-run first to see each tarball
 ```
-
-Each package's `prepack` rebuilds it, pnpm writes the real version over each `workspace:*`, and the private `@sanoma-ai/testing` is skipped.
 
 ## License
 

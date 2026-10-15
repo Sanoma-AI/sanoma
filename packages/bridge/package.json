@@ -21,8 +21,8 @@
   },
   "files": [
     "dist",
-    "proto",
-    "testdata",
+    "testdata/pins.json",
+    "testdata/replies",
     "README.md",
     "LICENSE"
   ],
