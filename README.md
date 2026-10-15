@@ -97,10 +97,23 @@ pnpm build          # compiles each package to dist/ for publishing
 
 Inside the repo, `@sanoma-ai/*` imports resolve to each package's `src/` (via `paths` in `tsconfig.json` and aliases in `vitest.config.ts`), so tests and typechecks need no build. Published packages ship the compiled `dist/`, not the sources (`@sanoma-ai/workflows` also ships `src/`, which its source maps point at).
 
-To publish `sanoma` and the `@sanoma-ai/*` packages, logged in to npm as a member of the `sanoma-ai` organization, from a clean checkout of `main`:
+## Release
+
+[`release.yml`](.github/workflows/release.yml) publishes `sanoma` and the `@sanoma-ai/*` packages to npm with [trusted publishing](https://docs.npmjs.com/trusted-publishers), so there is no npm token. To release, bump the shared `version` in every public package's `package.json` (not the private `@sanoma-ai/testing`), merge, wait for CI on `main` to pass, then tag `main` and push the tag:
+
+```sh
+git fetch origin && git tag vX.Y.Z origin/main && git push origin vX.Y.Z
+```
+
+The workflow fails if the tagged commit is not on `main` or its CI did not pass, or if the tag doesn't match that version. It skips any package whose version is already on npm, so rerunning a failed run after a partial publish completes the rest.
+
+Each package needs a trusted publisher on npmjs.com, added once by an owner of the `sanoma-ai` organization under the package's Settings → Trusted publishing → GitHub Actions: owner `Sanoma-AI`, repository `sanoma`, workflow `release.yml`. npm adds one only to a package that already exists, so a new package is first published once by hand.
+
+By hand, as that first publish or as a fallback, from a clean checkout of `main` and logged in to npm as a member of the organization (the workflow's steps, run locally):
 
 ```sh
 pnpm install --frozen-lockfile
+pnpm build        # packages already on npm skip prepack, and their dependents build against them
 pnpm -r publish   # --dry-run first to see each tarball
 ```
 

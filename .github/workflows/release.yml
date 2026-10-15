@@ -1,0 +1,48 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  actions: read # to see the tagged commit's CI run
+  contents: read
+  id-token: write # npm trusted publishing
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Actions pinned to commits: this job can publish every package.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Tagged commit is on main and passed CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$GITHUB_REF_NAME is not on main"; exit 1; }
+          ci=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" --branch main --json conclusion -q '.[0].conclusion')
+          [ "$ci" = success ] || { echo "::error::CI on $GITHUB_SHA is '${ci:-not run}', not success"; exit 1; }
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      # No cache: a release never restores another run's cache. pnpm 11 does the npm OIDC exchange itself.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - name: Tag matches the shared version of the public packages
+        run: |
+          versions=$(pnpm -r ls --depth -1 --json | jq -r '[.[] | select(.private | not) | .version] | unique | join(" ")')
+          if [ "$versions" != "${GITHUB_REF_NAME#v}" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match the public packages' version: $versions"
+            exit 1
+          fi
+      # Packages already on npm are skipped without running prepack, so their dependents need this
+      # build; the packages that do publish rebuild in their prepack, which keeps the hand path safe.
+      - run: pnpm build
+      # --no-git-checks: a tag checkout is a detached HEAD, not the publish branch.
+      - run: pnpm -r publish --no-git-checks
