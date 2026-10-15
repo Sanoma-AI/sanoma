@@ -5,9 +5,9 @@ import type { AddressInfo } from "node:net";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { errorMessage, problemLine, resolveConfig, SanomaClient, type SanomaConfig } from "@sanoma/workflows";
-import { describeConfig } from "@sanoma/workflows/describe";
-import { isLoopback } from "@sanoma/workflows/shared";
+import { errorMessage, problemLine, resolveConfig, SanomaClient, type SanomaConfig } from "@sanoma-ai/workflows";
+import { describeConfig } from "@sanoma-ai/workflows/describe";
+import { isLoopback } from "@sanoma-ai/workflows/shared";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import type { AppContext, ResolveActor } from "./context.ts";
 import { hostName, refuseHost } from "./loopback.ts";
@@ -159,7 +159,7 @@ function defaultDistDir(): string {
 
 /** What startApp says when the build it serves is missing, in part or whole. */
 const notBuilt = (path: string) =>
-  new Error(`The app is not built: ${path} is missing. Run \`pnpm --filter @sanoma/app build\` first.`);
+  new Error(`The app is not built: ${path} is missing. Run \`pnpm --filter @sanoma-ai/app build\` first.`);
 
 /** True for the errors that mean a path is not there: missing, or under something that is not a directory. */
 const isMissing = (err: unknown) => {

@@ -1,6 +1,6 @@
 import { Code, ConnectError, createClient, createRouterTransport } from "@connectrpc/connect";
 import { describe, expect, it, vi } from "vitest";
-import { BridgeError, startBridge } from "@sanoma/bridge";
+import { BridgeError, startBridge } from "@sanoma-ai/bridge";
 import { bridgeClient } from "../src/bridge.ts";
 import { BridgeService, Diagnostic_Severity, DiagnosticSchema } from "../src/gen/bridge/v1/bridge_pb.ts";
 
@@ -79,7 +79,9 @@ describe("BridgeError", () => {
 describe("startBridge", () => {
   it("says how to get a binary when it has none", async () => {
     vi.stubEnv("SANOMA_BRIDGE_BIN", "");
-    await expect(startBridge()).rejects.toThrow(/SANOMA_BRIDGE_BIN.*pnpm bridge:download/);
+    await expect(startBridge()).rejects.toThrow(
+      /SANOMA_BRIDGE_BIN.*github\.com\/Sanoma-AI\/provider-bridge.*pnpm bridge:download/,
+    );
   });
 
   it("reports a bridge that exits before it is ready", async () => {

@@ -1,5 +1,5 @@
-import type { WorkflowEntry } from "@sanoma/workflows/describe";
-import { approverLabel } from "@sanoma/workflows/shared";
+import type { WorkflowEntry } from "@sanoma-ai/workflows/describe";
+import { approverLabel } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { type ReactNode, Suspense, useCallback, useMemo, useRef, useState } from "react";

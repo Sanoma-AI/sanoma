@@ -54,7 +54,7 @@ export {
   type DriftResult,
   type DriftStatus,
 } from "./drift.ts";
-// readResources, which parses data files, is at `@sanoma/workflows/describe`.
+// readResources, which parses data files, is at `@sanoma-ai/workflows/describe`.
 export type { DeclaredResource, ResourceProblem } from "./resources.ts";
 export {
   allow,
@@ -96,7 +96,7 @@ export { startWorker, type Worker, type WorkerOptions } from "./worker.ts";
 export { SanomaClient, type RunsFilter, type RunSummary, type StartOptions } from "./client.ts";
 // A raw DBOS client on the runtime's database, for tests and tools that read DBOS directly.
 export { dbosClient } from "./db.ts";
-// Also at `@sanoma/workflows/shared`, which a browser bundle can import.
+// Also at `@sanoma-ai/workflows/shared`, which a browser bundle can import.
 export {
   approverLabel,
   credentialReady,
@@ -112,9 +112,9 @@ export {
   type RunStatus,
 } from "./shared.ts";
 // describeConfig, with the outline and every problem lintWorkflow finds, lives at
-// `@sanoma/workflows/describe`: what a UI renders from, apart from what runs. The worker reads
+// `@sanoma-ai/workflows/describe`: what a UI renders from, apart from what runs. The worker reads
 // each workflow's outline too, to hold its runs to it.
 export { defineDriver, type DriverImpl, type OpIdOf } from "./op.ts";
-// Steps for Gherkin tests, as data; Cucumber runs them from `@sanoma/workflows/scenario`.
+// Steps for Gherkin tests, as data; Cucumber runs them from `@sanoma-ai/workflows/scenario`.
 export { defineSteps, type Expect, type RunView, type Seed, type Steps } from "./steps.ts";
-// defineFake lives at `@sanoma/workflows/fake`: test tooling, not runtime.
+// defineFake lives at `@sanoma-ai/workflows/fake`: test tooling, not runtime.

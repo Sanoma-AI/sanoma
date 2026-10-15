@@ -1,4 +1,4 @@
-import { SanomaClient, type SanomaConfig } from "@sanoma/workflows";
+import { SanomaClient, type SanomaConfig } from "@sanoma-ai/workflows";
 
 /**
  * A run's ledger records, as JSON lines: one `JSON.stringify(record)` per line, in `seq` order,

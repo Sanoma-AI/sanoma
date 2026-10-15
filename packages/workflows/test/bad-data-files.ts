@@ -2,7 +2,7 @@
 // problem is, and what the message says. The lint test and the reader test both check every row,
 // and the shipped oxlint.json test lints them in a project of its own.
 
-const GH = `import { github } from "@sanoma/connector-github/resources";\n\n`;
+const GH = `import { github } from "@sanoma-ai/connector-github/resources";\n\n`;
 
 export const BAD_DATA_FILES: [name: string, source: string, at: string, message: RegExp][] = [
   [

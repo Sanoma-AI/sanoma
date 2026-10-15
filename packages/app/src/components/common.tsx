@@ -1,5 +1,5 @@
 import { useRender } from "@base-ui/react/use-render";
-import type { ApprovalState, Builtin, Effect, LedgerRecord, RecordedDecision } from "@sanoma/workflows";
+import type { ApprovalState, Builtin, Effect, LedgerRecord, RecordedDecision } from "@sanoma-ai/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useMatches } from "@tanstack/react-router";
 import { cva, type VariantProps } from "class-variance-authority";
@@ -39,8 +39,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip
 import { utcText } from "#/lib/time.ts";
 import { cn } from "#/lib/utils.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone, TONE_FILL } from "#/lib/tone.ts";
-import type { OpEntry } from "@sanoma/workflows/describe";
-import { approverLabel } from "@sanoma/workflows/shared";
+import type { OpEntry } from "@sanoma-ai/workflows/describe";
+import { approverLabel } from "@sanoma-ai/workflows/shared";
 import { configQuery } from "../queries.ts";
 import type { PanelSection } from "./app-sidebar.tsx";
 import type { CodeProps } from "./code.tsx";

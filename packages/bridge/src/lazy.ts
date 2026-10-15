@@ -1,4 +1,4 @@
-import { DriverError, errorMessage } from "@sanoma/workflows";
+import { DriverError, errorMessage } from "@sanoma-ai/workflows";
 import { type Bridge, BridgeError } from "./bridge.ts";
 import { startBridge, type StartBridgeOptions } from "./client.ts";
 import { forgetConfigured, type ProviderClient } from "./configure.ts";

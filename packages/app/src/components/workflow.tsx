@@ -1,4 +1,4 @@
-import type { WorkflowEntry } from "@sanoma/workflows/describe";
+import type { WorkflowEntry } from "@sanoma-ai/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { memo, useMemo } from "react";
 import { Badge } from "#/components/ui/badge.tsx";

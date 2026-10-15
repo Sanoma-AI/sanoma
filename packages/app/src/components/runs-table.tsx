@@ -1,4 +1,4 @@
-import type { RunSummary } from "@sanoma/workflows";
+import type { RunSummary } from "@sanoma-ai/workflows";
 import { Link, type NavigateOptions, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";

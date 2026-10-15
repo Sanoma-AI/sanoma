@@ -3,9 +3,9 @@
 // `sanoma` brings them into the program. `preserve` keeps it in `dist/index.d.ts`.
 /// <reference types="node" preserve="true" />
 // What a company repo imports, from one package: what the lint lets a workflow or policy import
-// (`allowImportNames` in `@sanoma/workflows`'s `oxlint.json`: the author surface and `z`), and
+// (`allowImportNames` in `@sanoma-ai/workflows`'s `oxlint.json`: the author surface and `z`), and
 // what `sanoma.config.ts` needs besides its connectors (`defineConfig`, the ledger stores, and
-// `defineSteps` for the company's own scenario steps), with the types those use. Everything else (the client, the worker) stays in `@sanoma/workflows`
+// `defineSteps` for the company's own scenario steps), with the types those use. Everything else (the client, the worker) stays in `@sanoma-ai/workflows`
 // and the bin.
 export {
   allow,
@@ -47,5 +47,5 @@ export {
   type Steps,
   type Use,
   type WorkflowDefinition,
-} from "@sanoma/workflows";
+} from "@sanoma-ai/workflows";
 export { z } from "zod";

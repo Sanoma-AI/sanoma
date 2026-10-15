@@ -1,4 +1,4 @@
-import { tfFake, type TfFakeOptions, type TfFakeState } from "@sanoma/bridge/fake";
+import { tfFake, type TfFakeOptions, type TfFakeState } from "@sanoma-ai/bridge/fake";
 import { stripeTf } from "./connector.ts";
 
 /** The replies the fake serves, written by hand to the provider's schema: there is no Stripe recording yet. */

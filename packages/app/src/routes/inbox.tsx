@@ -1,4 +1,4 @@
-import type { ConfigDescription, OpEntry } from "@sanoma/workflows/describe";
+import type { ConfigDescription, OpEntry } from "@sanoma-ai/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { RUNS_LIMIT } from "../api.ts";

@@ -1,4 +1,4 @@
-import type { ApprovalState, DriftStatus, RecordedDecision, RunStatus } from "@sanoma/workflows";
+import type { ApprovalState, DriftStatus, RecordedDecision, RunStatus } from "@sanoma-ai/workflows";
 
 // The tones live apart from the components, so code without React, such as the run graph's
 // builder, can use them.

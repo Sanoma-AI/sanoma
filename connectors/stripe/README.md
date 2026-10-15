@@ -1,11 +1,11 @@
-# @sanoma/connector-stripe
+# @sanoma-ai/connector-stripe
 
-Stripe resources for [`@sanoma/workflows`](https://www.npmjs.com/package/@sanoma/workflows): products and webhook endpoints, read through the [`stripe/stripe`](https://github.com/stripe/terraform-provider-stripe) OpenTofu provider (0.3.0) on [provider-bridge](https://github.com/Sanoma-AI/provider-bridge). It reads only: there is no create, update or delete yet.
+Stripe resources for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows): products and webhook endpoints, read through the [`stripe/stripe`](https://github.com/stripe/terraform-provider-stripe) OpenTofu provider (0.3.0) on [provider-bridge](https://github.com/Sanoma-AI/provider-bridge). It reads only: there is no create, update or delete yet.
 
 ## Usage
 
 ```sh
-npm install @sanoma/connector-stripe
+npm install @sanoma-ai/connector-stripe
 ```
 
 Each resource type has two operations, both effect `read` and idempotent, with Stripe's id as the policy's `target`:
@@ -17,10 +17,10 @@ Each resource type has two operations, both effect `read` and idempotent, with S
 
 `import` takes `{ id }` and returns the object's `state`; `read` takes a state an earlier call returned, or just `{ id }`, and returns its fresh `state`, or `gone: true`. See [Resources](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#resources).
 
-A data file declares resources with the constructors in `@sanoma/connector-stripe/resources`, naming an object that exists by Stripe's id:
+A data file declares resources with the constructors in `@sanoma-ai/connector-stripe/resources`, naming an object that exists by Stripe's id:
 
 ```ts
-import { stripe } from "@sanoma/connector-stripe/resources";
+import { stripe } from "@sanoma-ai/connector-stripe/resources";
 
 export const pro = stripe.product({ id: "prod_…", name: "Pro", active: true });
 ```
@@ -31,23 +31,23 @@ The logo is Stripe's glyph from [Simple Icons](https://simpleicons.org/?q=stripe
 
 ## Resource types
 
-`src/resources.gen.ts` is generated from the provider's schema by `pnpm generate`, which runs [`@sanoma/bridge/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the provider (its release, sha256 and recorded schema are `@sanoma/bridge`'s pin and fixture), the types, and the attributes whose change replaces the object (a webhook endpoint's `api_version` and `connect`, which Stripe's update does not take). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing. `src/connector.ts` is the rest, one `tfConnector` record from [`@sanoma/bridge/connector`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/README.md#connectors-for-opentofu-providers): each type found by Stripe's `id`, and Stripe's title and logo. What Stripe sets (`created`, `livemode`) is vendor-owned and a data file may not declare it; `id` is too, but the identity names it, so a data file gives it.
+`src/resources.gen.ts` is generated from the provider's schema by `pnpm generate`, which runs [`@sanoma-ai/bridge/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the provider (its release, sha256 and recorded schema are `@sanoma-ai/bridge`'s pin and fixture), the types, and the attributes whose change replaces the object (a webhook endpoint's `api_version` and `connect`, which Stripe's update does not take). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing. `src/connector.ts` is the rest, one `tfConnector` record from [`@sanoma-ai/bridge/connector`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/README.md#connectors-for-opentofu-providers): each type found by Stripe's `id`, and Stripe's title and logo. What Stripe sets (`created`, `livemode`) is vendor-owned and a data file may not declare it; `id` is too, but the identity names it, so a data file gives it.
 
 A webhook endpoint's `secret` is sensitive (Stripe returns it only when the endpoint is created): it is write-only, never compared, and `null` in every state the driver returns.
 
 ## Driver
 
-`@sanoma/connector-stripe/driver` reads through a provider bridge. The `stripe` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `@sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
+`@sanoma-ai/connector-stripe/driver` reads through a provider bridge. The `stripe` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `@sanoma-ai/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
 
 ```ts
-import { stripe } from "@sanoma/connector-stripe";
+import { stripe } from "@sanoma-ai/connector-stripe";
 
 export default defineConfig({ workflows, connectors: [stripe], policy });
 ```
 
 `./driver` (`stripeDriver`; `stripeDriver({ bridge })` reads through a bridge of your own) and `./fake` (`fakeStripe`) are internal entries, for tests.
 
-Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma/bridge`, started on the first call from `SANOMA_BRIDGE_BIN`. It configures the provider on the first call with `{ api_key }`, and again when the key changes, when the provider has exited, or when the bridge has forgotten it. `read` without a state imports, which reads the object too.
+Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma-ai/bridge`, started on the first call from `SANOMA_BRIDGE_BIN`. It configures the provider on the first call with `{ api_key }`, and again when the key changes, when the provider has exited, or when the bridge has forgotten it. `read` without a state imports, which reads the object too.
 
 ### Environment
 
@@ -57,7 +57,7 @@ Read on every call, never when the config loads:
 | ---------------- | ------------------------------------------------------------ |
 | `STRIPE_API_KEY` | A Stripe secret or restricted key; a test-mode one in tests. |
 
-When the key is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets it. The bridge passes the key to the provider through its config only. The default bridge's binary is the process's to set (`SANOMA_BRIDGE_BIN`, see [the bridge](https://www.npmjs.com/package/@sanoma/bridge#environment)), not a credential of the connector.
+When the key is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets it. The bridge passes the key to the provider through its config only. The default bridge's binary is the process's to set (`SANOMA_BRIDGE_BIN`, see [the bridge](https://www.npmjs.com/package/@sanoma-ai/bridge#environment)), not a credential of the connector.
 
 ### Errors and retries
 
@@ -65,15 +65,15 @@ As for GitHub: the bridge's errors become `DriverError`s with its code as `vendo
 
 ## Testing
 
-`@sanoma/connector-stripe/fake` serves the replies in `testdata/replies` (a test-mode product `prod_SanomaTest0001` and webhook endpoint `we_SanomaTest0001`) through the real driver over a `stateBridge` of them (`tfFake`). Those replies are written by hand to the provider's schema, not recorded: no Stripe key was at hand when provider-bridge recorded GitHub's. Replace them with recorded ones (provider-bridge's `bridge-record`) when there is one.
+`@sanoma-ai/connector-stripe/fake` serves the replies in `testdata/replies` (a test-mode product `prod_SanomaTest0001` and webhook endpoint `we_SanomaTest0001`) through the real driver over a `stateBridge` of them (`tfFake`). Those replies are written by hand to the provider's schema, not recorded: no Stripe key was at hand when provider-bridge recorded GitHub's. Replace them with recorded ones (provider-bridge's `bridge-record`) when there is one.
 
 ```ts
-import { fakeStripe } from "@sanoma/connector-stripe/fake";
+import { fakeStripe } from "@sanoma-ai/connector-stripe/fake";
 
 const fake = fakeStripe();
 fake.override("product", "prod_SanomaTest0001", { name: "Renamed" }); // drift: the next read returns it
 ```
 
-It has `put`, `remove` and the faults every fake has, like `fakeGithub`. Import it from `@sanoma/connector-stripe/fake`.
+It has `put`, `remove` and the faults every fake has, like `fakeGithub`. Import it from `@sanoma-ai/connector-stripe/fake`.
 
 License: FSL-1.1-ALv2.

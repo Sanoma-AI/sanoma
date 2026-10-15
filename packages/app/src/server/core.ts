@@ -14,9 +14,9 @@ import {
   Principal,
   type RunSummary,
   type SanomaError,
-} from "@sanoma/workflows";
-import type { ConfigDescription } from "@sanoma/workflows/describe";
-import { check, loadScenarios } from "@sanoma/workflows/scenario";
+} from "@sanoma-ai/workflows";
+import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
+import { check, loadScenarios } from "@sanoma-ai/workflows/scenario";
 import { isNotFound, isRedirect, notFound } from "@tanstack/react-router";
 import type { z } from "zod";
 import {

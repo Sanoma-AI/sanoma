@@ -1,4 +1,4 @@
-import { type Exchange, type ReplayOptions } from "@sanoma/testing/replay";
+import { type Exchange, type ReplayOptions } from "@sanoma-ai/testing/replay";
 
 // How Ghost's recorded replies are replayed (and recorded): the driver's tests and the features share it.
 

@@ -1,5 +1,5 @@
-import type { Driver, DriverFn, OpIdOf } from "@sanoma/workflows";
-import { defineFake, type Fake, type FakeOptions, type ResourceFake } from "@sanoma/workflows/fake";
+import type { Driver, DriverFn, OpIdOf } from "@sanoma-ai/workflows";
+import { defineFake, type Fake, type FakeOptions, type ResourceFake } from "@sanoma-ai/workflows/fake";
 import type { z } from "zod";
 import type { TfConnector, TfResources } from "./connector.ts";
 import type { FixtureError } from "./fixtures.ts";
@@ -11,7 +11,7 @@ import { toTfState } from "./tfschema/state.ts";
 export type TfFakeState = BridgeState;
 
 export interface TfFakeOptions extends FakeOptions {
-  /** Where the recorded replies are (`replies/<release>/…`). Default: `@sanoma/bridge`'s own `testdata/`. */
+  /** Where the recorded replies are (`replies/<release>/…`). Default: `@sanoma-ai/bridge`'s own `testdata/`. */
   fixtures?: string | URL;
   /**
    * What the provider answers an import of an object that is not there, by the connector's

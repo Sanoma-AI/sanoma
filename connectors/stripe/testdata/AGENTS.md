@@ -1,6 +1,6 @@
 # connectors/stripe/testdata
 
-Replies in the recorder's format, written by hand to the provider's schema (`@sanoma/bridge`'s `testdata/schemas/stripe_stripe_0.3.0.json`). Not formatted by oxfmt.
+Replies in the recorder's format, written by hand to the provider's schema (`@sanoma-ai/bridge`'s `testdata/schemas/stripe_stripe_0.3.0.json`). Not formatted by oxfmt.
 
 ## Contents
 

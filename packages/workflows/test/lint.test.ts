@@ -25,7 +25,7 @@ describe("lintWorkflow", () => {
     expect(
       lintWorkflow(
         `
-        import { allow, approve, definePolicy } from "@sanoma/workflows";
+        import { allow, approve, definePolicy } from "@sanoma-ai/workflows";
         export default definePolicy(({ effect, run }) =>
           effect === "publish" && !run.approvals.some((a) => a.approver === "lead") ? approve("lead") : allow(),
         );
@@ -39,8 +39,8 @@ describe("lintWorkflow", () => {
     const problems = messages(`
       import axios from "axios";
       import { x } from "node:fs";
-      import { defineWorkflow } from "@sanoma/workflows";
-      import { ghost } from "@sanoma/connector-ghost";
+      import { defineWorkflow } from "@sanoma-ai/workflows";
+      import { ghost } from "@sanoma-ai/connector-ghost";
       import { z } from "zod";
       import { other } from "./other.ts";
       const m = await import("./lazy.ts");
@@ -55,19 +55,19 @@ describe("lintWorkflow", () => {
   it("refuses the ways around the policy: test fakes, drivers, the app and the config", () => {
     const problems = messages(
       `
-      import { startTestWorker } from "@sanoma/testing";
-      import { fakeGhost } from "@sanoma/connector-ghost/fake";
-      import { ghostDriver } from "@sanoma/connector-ghost/driver";
-      import { startApp } from "@sanoma/app";
+      import { startTestWorker } from "@sanoma-ai/testing";
+      import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
+      import { ghostDriver } from "@sanoma-ai/connector-ghost/driver";
+      import { startApp } from "@sanoma-ai/app";
       import config from "../sanoma.config.ts";
     `,
       "workflows/announce.ts",
     );
     expect(problems).toEqual([
-      expect.stringMatching(/^import "@sanoma\/testing" .*through ctx, so the policy sees every call/),
-      expect.stringMatching(/^import "@sanoma\/connector-ghost\/fake" .*through ctx, so the policy sees every call/),
-      expect.stringMatching(/^import "@sanoma\/connector-ghost\/driver" .*through ctx/),
-      expect.stringMatching(/^import "@sanoma\/app" .*approve itself/),
+      expect.stringMatching(/^import "@sanoma-ai\/testing" .*through ctx, so the policy sees every call/),
+      expect.stringMatching(/^import "@sanoma-ai\/connector-ghost\/fake" .*through ctx, so the policy sees every call/),
+      expect.stringMatching(/^import "@sanoma-ai\/connector-ghost\/driver" .*through ctx/),
+      expect.stringMatching(/^import "@sanoma-ai\/app" .*approve itself/),
       expect.stringMatching(/^import "\.\.\/sanoma\.config\.ts" .*outside workflows\/.*through ctx/),
     ]);
   });
@@ -93,20 +93,20 @@ describe("lintWorkflow", () => {
   it("refuses the runtime's client, worker and app, which a workflow could use to approve itself", () => {
     expect(
       messages(`
-        import { defineWorkflow, SanomaClient } from "@sanoma/workflows";
-        import { startWorker as go } from "@sanoma/workflows";
-        import { startApp } from "@sanoma/workflows";
-        export { SanomaClient as C } from "@sanoma/workflows";
-        import * as sanoma from "@sanoma/workflows";
-        export * from "@sanoma/workflows";
+        import { defineWorkflow, SanomaClient } from "@sanoma-ai/workflows";
+        import { startWorker as go } from "@sanoma-ai/workflows";
+        import { startApp } from "@sanoma-ai/workflows";
+        export { SanomaClient as C } from "@sanoma-ai/workflows";
+        import * as sanoma from "@sanoma-ai/workflows";
+        export * from "@sanoma-ai/workflows";
       `),
     ).toEqual([
       expect.stringMatching(/^SanomaClient is not allowed in a workflow: .*approve its own approvals/),
       expect.stringMatching(/^startWorker is not allowed in a workflow/),
       expect.stringMatching(/^startApp is not allowed in a workflow/),
       expect.stringMatching(/^SanomaClient is not allowed in a workflow/),
-      expect.stringMatching(/^import \* from "@sanoma\/workflows" is not allowed/),
-      expect.stringMatching(/^export \* from "@sanoma\/workflows" is not allowed/),
+      expect.stringMatching(/^import \* from "@sanoma-ai\/workflows" is not allowed/),
+      expect.stringMatching(/^export \* from "@sanoma-ai\/workflows" is not allowed/),
     ]);
   });
 
@@ -120,7 +120,7 @@ describe("lintWorkflow", () => {
         import { main } from "sanoma/dist/cli.js";
       `),
     ).toEqual([
-      expect.stringMatching(/^defineConfig is not allowed in a workflow: .*types from @sanoma\/workflows or sanoma/),
+      expect.stringMatching(/^defineConfig is not allowed in a workflow: .*types from @sanoma-ai\/workflows or sanoma/),
       expect.stringMatching(/^import \* from "sanoma" is not allowed/),
       expect.stringMatching(
         /^import "sanoma\/dist\/cli\.js" is not allowed in a workflow: `sanoma` has no entry points/,
@@ -128,14 +128,14 @@ describe("lintWorkflow", () => {
     ]);
   });
 
-  it("allows only the names a workflow or policy needs from @sanoma/workflows, and any type", () => {
+  it("allows only the names a workflow or policy needs from @sanoma-ai/workflows, and any type", () => {
     expect(
       messages(`
-        import { defineWorkflow, definePolicy, allow, deny, approve, approvedFor, allowAll } from "@sanoma/workflows";
-        import { mayDecide, errorCode } from "@sanoma/workflows";
-        import type { Ctx, PolicyCall, SanomaClient } from "@sanoma/workflows";
-        import { type ApprovalState } from "@sanoma/workflows";
-        export type { Principal } from "@sanoma/workflows";
+        import { defineWorkflow, definePolicy, allow, deny, approve, approvedFor, allowAll } from "@sanoma-ai/workflows";
+        import { mayDecide, errorCode } from "@sanoma-ai/workflows";
+        import type { Ctx, PolicyCall, SanomaClient } from "@sanoma-ai/workflows";
+        import { type ApprovalState } from "@sanoma-ai/workflows";
+        export type { Principal } from "@sanoma-ai/workflows";
       `),
     ).toEqual([]);
   });
@@ -143,9 +143,9 @@ describe("lintWorkflow", () => {
   it("refuses the ledger stores, which could forge the audit record, and config helpers, which read credentials", () => {
     expect(
       messages(`
-        import { jsonlLedger, memoryLedger } from "@sanoma/workflows";
-        import { resolveDatabaseUrl, resolveConfig, defineConfig } from "@sanoma/workflows";
-        import whole from "@sanoma/workflows";
+        import { jsonlLedger, memoryLedger } from "@sanoma-ai/workflows";
+        import { resolveDatabaseUrl, resolveConfig, defineConfig } from "@sanoma-ai/workflows";
+        import whole from "@sanoma-ai/workflows";
       `),
     ).toEqual([
       expect.stringMatching(/^jsonlLedger is not allowed in a workflow: .*forge the ledger/),
@@ -160,7 +160,7 @@ describe("lintWorkflow", () => {
   it("refuses the runtime's error classes, and instanceof against them, whose replayed copies are no instances", () => {
     expect(
       messages(`
-        import { DriverError, errorCode } from "@sanoma/workflows";
+        import { DriverError, errorCode } from "@sanoma-ai/workflows";
         import * as errors from "./errors.ts";
         export const a = (e: unknown) => e instanceof DriverError;
         export const b = (e: unknown) => e instanceof SanomaError;
@@ -184,8 +184,8 @@ describe("lintWorkflow", () => {
 
 /** A workflow file whose `run` has `body`, for the run rules. */
 const workflow = (body: string, params = "ctx, input") => `
-  import { defineWorkflow, errorCode } from "@sanoma/workflows";
-  import { ghost } from "@sanoma/connector-ghost";
+  import { defineWorkflow, errorCode } from "@sanoma-ai/workflows";
+  import { ghost } from "@sanoma-ai/connector-ghost";
   import { z } from "zod";
   const helper = (ctx: any) => ctx.ghost.post.create({ title: "h" });
   const DRAFT = "Draft the post";
@@ -404,7 +404,7 @@ describe("lintResources", () => {
   it("reads every import first, as they are hoisted", () => {
     expect(
       dataFile(`export const rule = github.branch_protection({ repository_id: site, pattern: "main" });
-import { github } from "@sanoma/connector-github/resources";
+import { github } from "@sanoma-ai/connector-github/resources";
 import { site } from "./site.ts";
 `),
     ).toEqual([]);
@@ -412,15 +412,15 @@ import { site } from "./site.ts";
 
   it("refuses an import of anything but constructors and data files", () => {
     expect(
-      dataFile(`import * as gh from "@sanoma/connector-github/resources";
+      dataFile(`import * as gh from "@sanoma-ai/connector-github/resources";
 import site from "./site.ts";
 import "./setup.ts";
-import type { Declared } from "@sanoma/workflows";
+import type { Declared } from "@sanoma-ai/workflows";
 import { docs } from "./docs";
 import { team } from "../../people/team.ts";
 `),
     ).toEqual([
-      '1:8 import * as gh is not allowed in a data file: import the names you use, `import { name } from "@sanoma/connector-github/resources"`',
+      '1:8 import * as gh is not allowed in a data file: import the names you use, `import { name } from "@sanoma-ai/connector-github/resources"`',
       '2:8 import site is not allowed in a data file: import the names you use, `import { name } from "./site.ts"`',
       '3:1 import "./setup.ts" is not allowed in a data file: it imports nothing, and a data file runs no code',
       "4:1 `import type` is not allowed in a data file: it holds values only, and the constructors type them",
@@ -437,7 +437,7 @@ export default [];
 
   it("refuses exports that are not one resource each", () => {
     expect(
-      dataFile(`import { github } from "@sanoma/connector-github/resources";
+      dataFile(`import { github } from "@sanoma-ai/connector-github/resources";
 import { docs } from "./docs.ts";
 export { docs };
 export * from "./docs.ts";
@@ -460,7 +460,7 @@ export default [a, ...docs];
       "7:18 export const d must be a resource constructor call, `<vendor>.<type>({ … })`, with <vendor> imported from a connector's resources entry",
       "8:18 github.repository takes one object literal: `github.repository({ … })`",
       "9:18 github.repository takes one object literal: `github.repository({ … })`",
-      "10:18 docs is not a connector's resource constructors: import it from the connector's resources entry, `import { docs } from \"@sanoma/connector-docs/resources\"`",
+      "10:18 docs is not a connector's resource constructors: import it from the connector's resources entry, `import { docs } from \"@sanoma-ai/connector-docs/resources\"`",
       "11:60 a resource is declared at the top of a data file: give it its own `export const` and name it here",
       "12:49 a method or accessor is not allowed in a data file: a field holds a value",
       "12:86 an empty array slot is not allowed in a data file: write null",
@@ -484,15 +484,15 @@ export default [a, ...docs];
  * A workflow that does everything the checks refuse, one thing per line, so each diagnostic
  * names its line. Some lines are refused by oxlint, some by lintWorkflow, some by both.
  */
-const BAD = `import { SanomaClient, jsonlLedger, DriverError } from "@sanoma/workflows";
-import x from "@sanoma/testing";
-import { fakeGhost } from "@sanoma/connector-ghost/fake";
+const BAD = `import { SanomaClient, jsonlLedger, DriverError } from "@sanoma-ai/workflows";
+import x from "@sanoma-ai/testing";
+import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
 const t = Date.now();
 await fetch("https://example.com");
 const r = Math.random();
 const k = process.env.KEY;
-import { resolveDatabaseUrl } from "@sanoma/workflows";
-import { ghostDriver } from "@sanoma/connector-ghost/driver";
+import { resolveDatabaseUrl } from "@sanoma-ai/workflows";
+import { ghostDriver } from "@sanoma-ai/connector-ghost/driver";
 setTimeout(() => {}, 1);
 const id = crypto.randomUUID();
 const g = globalThis;
@@ -513,10 +513,10 @@ describe("lintWorkflow on a workflow that tries everything", () => {
       [1, "SanomaClient"],
       [1, "jsonlLedger"],
       [1, "DriverError"],
-      [2, 'import "@sanoma/testing"'],
-      [3, 'import "@sanoma/connector-ghost/fake"'],
+      [2, 'import "@sanoma-ai/testing"'],
+      [3, 'import "@sanoma-ai/connector-ghost/fake"'],
       [8, "resolveDatabaseUrl"],
-      [9, 'import "@sanoma/connector-ghost/driver"'],
+      [9, 'import "@sanoma-ai/connector-ghost/driver"'],
       [15, "instanceof DriverError"],
     ]);
   });
@@ -552,9 +552,9 @@ describe("oxlint.json", () => {
     write("policies/bad.ts", `export const hour = new Date().getUTCHours();\n`);
     write(
       "workflows/good.ts",
-      `import { defineWorkflow, errorCode } from "@sanoma/workflows";
-import type { Ctx, SanomaClient } from "@sanoma/workflows";
-import { ghost } from "@sanoma/connector-ghost";
+      `import { defineWorkflow, errorCode } from "@sanoma-ai/workflows";
+import type { Ctx, SanomaClient } from "@sanoma-ai/workflows";
+import { ghost } from "@sanoma-ai/connector-ghost";
 import { z } from "zod";
 
 // Local bindings, property names and types that share a restricted name are fine.
@@ -570,7 +570,7 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
     );
     write(
       "workflows/sandbox.ts",
-      `import { check } from "@sanoma/workflows/scenario";\nexport const checks = [check];\n`,
+      `import { check } from "@sanoma-ai/workflows/scenario";\nexport const checks = [check];\n`,
     );
     // The built-in drift workflow, as if it were the company's: oxlint finds nothing in it.
     write("workflows/drift.ts", readFileSync(new URL("../src/drift.ts", import.meta.url), "utf8"));
@@ -614,14 +614,14 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
       bad(1, imports, /'SanomaClient'.*approve its own approvals/),
       bad(1, imports, /'jsonlLedger'.*forge the ledger/),
       bad(1, imports, /'DriverError'/),
-      bad(2, imports, /@sanoma\/testing.*through ctx/),
-      bad(3, imports, /@sanoma\/connector-ghost\/fake.*through ctx/),
+      bad(2, imports, /@sanoma-ai\/testing.*through ctx/),
+      bad(3, imports, /@sanoma-ai\/connector-ghost\/fake.*through ctx/),
       bad(4, globals, /'Date'.*ctx\.now/),
       bad(5, globals, /'fetch'.*connector operation/),
       bad(6, "eslint(no-restricted-properties)", /Math\.random.*ctx\.runId/),
       bad(7, globals, /'process'.*workflow input/),
       bad(8, imports, /'resolveDatabaseUrl'.*read credentials/),
-      bad(9, imports, /@sanoma\/connector-ghost\/driver.*through ctx/),
+      bad(9, imports, /@sanoma-ai\/connector-ghost\/driver.*through ctx/),
       bad(10, globals, /'setTimeout'.*ctx\.sleep/),
       bad(11, globals, /'crypto'.*ctx\.runId/),
       bad(12, globals, /'globalThis'.*bypass/),
@@ -636,7 +636,7 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
         file: "workflows/sandbox.ts",
         line: 1,
         rule: imports,
-        text: expect.stringMatching(/@sanoma\/workflows\/scenario.*through ctx/),
+        text: expect.stringMatching(/@sanoma-ai\/workflows\/scenario.*through ctx/),
       },
     ]);
   });

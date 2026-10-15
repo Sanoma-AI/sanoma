@@ -2,8 +2,8 @@
 /* oxlint-disable vitest/valid-title, vitest/expect-expect */
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { allowAll, type Connector, memoryLedger, resolveConfig } from "@sanoma/workflows";
-import { featureScenarios, type FeatureTarget, testFeature } from "@sanoma/workflows/scenario";
+import { allowAll, type Connector, memoryLedger, resolveConfig } from "@sanoma-ai/workflows";
+import { featureScenarios, type FeatureTarget, testFeature } from "@sanoma-ai/workflows/scenario";
 import { describe, it } from "vitest";
 import { live, replay, type ReplayOptions } from "./replay.ts";
 

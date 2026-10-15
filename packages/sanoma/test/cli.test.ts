@@ -1,6 +1,6 @@
 import { appendFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { testDatabaseUrl, waitFor } from "@sanoma/testing";
+import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { copyFixture, ensureBuilt, runCli, startCli } from "./fixture.ts";
 

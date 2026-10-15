@@ -1,4 +1,4 @@
-import type { ApprovalState, LedgerBody, LedgerRecord, RunSummary } from "@sanoma/workflows";
+import type { ApprovalState, LedgerBody, LedgerRecord, RunSummary } from "@sanoma-ai/workflows";
 import { describe, expect, it } from "vitest";
 import { outlineGraph } from "../src/graph/outline-graph.ts";
 import { runGraph } from "../src/graph/run-graph.ts";

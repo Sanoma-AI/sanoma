@@ -8,20 +8,20 @@ export default defineConfig({
     // Run tests against source, not dist/. Keep in sync with `paths` in tsconfig.json.
     alias: [
       {
-        find: /^@sanoma\/workflows\/(describe|fake|plugin|shared|scenario|scenarios)$/,
+        find: /^@sanoma-ai\/workflows\/(describe|fake|plugin|shared|scenario|scenarios)$/,
         replacement: src("./packages/workflows/src/$1.ts"),
       },
       {
-        find: /^@sanoma\/testing\/(features|harness|replay|scenarios)$/,
+        find: /^@sanoma-ai\/testing\/(features|harness|replay|scenarios)$/,
         replacement: src("./packages/testing/src/$1.ts"),
       },
-      { find: /^@sanoma\/bridge\/(connector|fake|tfschema)$/, replacement: src("./packages/bridge/src/$1.ts") },
-      { find: /^@sanoma\/(workflows|testing|app|bridge)$/, replacement: src("./packages/$1/src/index.ts") },
+      { find: /^@sanoma-ai\/bridge\/(connector|fake|tfschema)$/, replacement: src("./packages/bridge/src/$1.ts") },
+      { find: /^@sanoma-ai\/(workflows|testing|app|bridge)$/, replacement: src("./packages/$1/src/index.ts") },
       {
-        find: /^@sanoma\/connector-([a-z0-9-]+)\/(driver|fake|resources)$/,
+        find: /^@sanoma-ai\/connector-([a-z0-9-]+)\/(driver|fake|resources)$/,
         replacement: src("./connectors/$1/src/$2.ts"),
       },
-      { find: /^@sanoma\/connector-([a-z0-9-]+)$/, replacement: src("./connectors/$1/src/index.ts") },
+      { find: /^@sanoma-ai\/connector-([a-z0-9-]+)$/, replacement: src("./connectors/$1/src/index.ts") },
       { find: /^sanoma$/, replacement: src("./packages/sanoma/src/index.ts") },
     ],
   },

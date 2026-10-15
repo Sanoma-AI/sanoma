@@ -1,10 +1,10 @@
-import type { ResourceFields } from "@sanoma/workflows";
+import type { ResourceFields } from "@sanoma-ai/workflows";
 import type { z } from "zod";
 import type { ProviderRef } from "../bridge.ts";
 import type { NestedBlock } from "../schema.ts";
 
 // What `resources.gen.ts` declares, and its hand-owned input. The schema document's own types
-// (`SchemaDocument`, `Block`, `Attribute`, ...) are `@sanoma/bridge`'s, from `../schema.ts`.
+// (`SchemaDocument`, `Block`, `Attribute`, ...) are `@sanoma-ai/bridge`'s, from `../schema.ts`.
 
 /**
  * How a resource type's state is laid out, for converting between the provider's state and the
@@ -44,7 +44,7 @@ export type TfProvider = Readonly<ProviderRef> & { readonly protocol: number };
 export interface ResourcesConfig {
   /**
    * The provider's source, such as `integrations/github`. Its version and sha256 come from the
-   * pins (`@sanoma/bridge`'s `testdata/pins.json`), its schema from the recorded schema of that
+   * pins (`@sanoma-ai/bridge`'s `testdata/pins.json`), its schema from the recorded schema of that
    * release beside them.
    */
   provider: string;

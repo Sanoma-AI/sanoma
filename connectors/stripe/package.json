@@ -1,5 +1,5 @@
 {
-  "name": "@sanoma/connector-stripe",
+  "name": "@sanoma-ai/connector-stripe",
   "version": "0.1.0",
   "description": "Stripe resources (products, webhook endpoints) for Sanoma, read through the OpenTofu provider",
   "keywords": [
@@ -57,13 +57,13 @@
     "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
   "devDependencies": {
-    "@sanoma/bridge": "workspace:*",
-    "@sanoma/workflows": "workspace:*",
+    "@sanoma-ai/bridge": "workspace:*",
+    "@sanoma-ai/workflows": "workspace:*",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@sanoma/bridge": "^0.1.0",
-    "@sanoma/workflows": "^0.1.0",
+    "@sanoma-ai/bridge": "^0.1.0",
+    "@sanoma-ai/workflows": "^0.1.0",
     "zod": "^4"
   },
   "engines": {

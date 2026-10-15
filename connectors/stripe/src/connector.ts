@@ -1,4 +1,4 @@
-import { tfConnector } from "@sanoma/bridge/connector";
+import { tfConnector } from "@sanoma-ai/bridge/connector";
 import { provider, stripe_product, stripe_webhook_endpoint } from "./resources.gen.ts";
 
 /**
@@ -26,7 +26,7 @@ export const stripeTf = tfConnector({
   info: {
     title: "Stripe",
     logo: { svg: glyph("#635BFF"), dark: glyph("#FFFFFF") },
-    package: "@sanoma/connector-stripe",
+    package: "@sanoma-ai/connector-stripe",
     homepage: "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/stripe#readme",
   },
 });

@@ -1,4 +1,4 @@
-import type { ApprovalState, RunStatus, RunSummary } from "@sanoma/workflows";
+import type { ApprovalState, RunStatus, RunSummary } from "@sanoma-ai/workflows";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -28,7 +28,7 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "#/components/ui
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
-import { approverLabel, isEnded } from "@sanoma/workflows/shared";
+import { approverLabel, isEnded } from "@sanoma-ai/workflows/shared";
 import { type DecideRequest, errorBodyOf, starterName } from "../api.ts";
 import { decideFn } from "../functions.ts";
 import { configQuery, opsById, RUNS_KEY, runLink, runQuery } from "../queries.ts";

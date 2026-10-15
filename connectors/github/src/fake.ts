@@ -1,4 +1,4 @@
-import { type FixtureError, tfFake, type TfFakeOptions, type TfFakeState } from "@sanoma/bridge/fake";
+import { type FixtureError, tfFake, type TfFakeOptions, type TfFakeState } from "@sanoma-ai/bridge/fake";
 import { githubTf } from "./connector.ts";
 
 /**
@@ -20,7 +20,7 @@ export type FakeGithubState = TfFakeState;
 export type FakeGithubOptions = TfFakeOptions;
 
 /**
- * A GitHub that answers as the provider did when its replies were recorded (`@sanoma/bridge`'s
+ * A GitHub that answers as the provider did when its replies were recorded (`@sanoma-ai/bridge`'s
  * `testdata/replies`), through the real driver over a bridge of those replies: `import` and
  * `read` return the recorded repositories (`Sanoma-AI/sanoma`, `Sanoma-AI/provider-bridge`), and
  * `branch_protection` on `provider-bridge:main` fails as it did (the branch is unprotected).

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { bluesky } from "@sanoma/connector-bluesky";
-import { ghost } from "@sanoma/connector-ghost";
+import { bluesky } from "@sanoma-ai/connector-bluesky";
+import { ghost } from "@sanoma-ai/connector-ghost";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {

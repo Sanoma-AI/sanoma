@@ -3,7 +3,7 @@ import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { Compartment, EditorState, RangeSet } from "@codemirror/state";
 import { Decoration, EditorView, GutterMarker, gutterLineClass, lineNumbers } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
-import type { Span } from "@sanoma/workflows/describe";
+import type { Span } from "@sanoma-ai/workflows/describe";
 import { useEffect, useRef } from "react";
 import { highlightedLines } from "#/lib/lines.ts";
 import { cn } from "#/lib/utils.ts";

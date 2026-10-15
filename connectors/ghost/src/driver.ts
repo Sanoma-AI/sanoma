@@ -1,4 +1,4 @@
-import { DriverError, defineDriver, retryableStatus } from "@sanoma/workflows";
+import { DriverError, defineDriver, retryableStatus } from "@sanoma-ai/workflows";
 import { SignJWT } from "jose";
 import { z } from "zod";
 import { ghostOps, Post } from "./connector.ts";

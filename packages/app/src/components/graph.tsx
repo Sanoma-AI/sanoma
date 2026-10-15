@@ -20,11 +20,11 @@ import {
   useStore,
 } from "@xyflow/react";
 import { cva } from "class-variance-authority";
-import type { OpEntry } from "@sanoma/workflows/describe";
+import type { OpEntry } from "@sanoma-ai/workflows/describe";
 import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
-import { approverLabel } from "@sanoma/workflows/shared";
+import { approverLabel } from "@sanoma-ai/workflows/shared";
 import { layout, type Point } from "../graph/layout.ts";
 import {
   type Graph as GraphData,

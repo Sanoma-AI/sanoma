@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
-import { outlineWorkflow } from "@sanoma/workflows/describe";
+import { outlineWorkflow } from "@sanoma-ai/workflows/describe";
 import { describe, expect, it } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
-import { DEFAULT_SLEEP_NAME } from "@sanoma/workflows/shared";
+import { DEFAULT_SLEEP_NAME } from "@sanoma-ai/workflows/shared";
 import { outlineGraph } from "../src/graph/outline-graph.ts";
 import { type GraphNode, nodeAt, type Step } from "../src/graph/types.ts";
 import { calls, DRIFT_SHAPE, labels, pairs } from "./graph-helpers.ts";

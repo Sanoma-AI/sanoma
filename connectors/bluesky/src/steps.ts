@@ -1,4 +1,4 @@
-import { defineSteps } from "@sanoma/workflows";
+import { defineSteps } from "@sanoma-ai/workflows";
 import { blueskyOps } from "./connector.ts";
 
 const { create } = blueskyOps.post;

@@ -1,5 +1,5 @@
-import type { Principal, ResolvedConfig, SanomaClient } from "@sanoma/workflows";
-import type { ConfigDescription } from "@sanoma/workflows/describe";
+import type { Principal, ResolvedConfig, SanomaClient } from "@sanoma-ai/workflows";
+import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 
 /**
  * Says who is making a request, or undefined when nobody is named. The app refuses a change

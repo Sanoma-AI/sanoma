@@ -1,5 +1,5 @@
-import { defaultBridge, type ProviderClient } from "@sanoma/bridge";
-import { DriverError } from "@sanoma/workflows";
+import { defaultBridge, type ProviderClient } from "@sanoma-ai/bridge";
+import { DriverError } from "@sanoma-ai/workflows";
 import { z } from "zod";
 import { githubTf } from "./connector.ts";
 

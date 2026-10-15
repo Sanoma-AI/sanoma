@@ -1,5 +1,5 @@
-import { github } from "@sanoma/connector-github";
-import { stripe } from "@sanoma/connector-stripe";
+import { github } from "@sanoma-ai/connector-github";
+import { stripe } from "@sanoma-ai/connector-stripe";
 import { z } from "zod";
 import { defineWorkflow } from "../../../../src/index.ts";
 

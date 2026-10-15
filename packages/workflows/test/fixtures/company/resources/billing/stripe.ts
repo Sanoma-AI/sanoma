@@ -1,4 +1,4 @@
-import { stripe } from "@sanoma/connector-stripe/resources";
+import { stripe } from "@sanoma-ai/connector-stripe/resources";
 
 // Stripe names its objects: each declares the id of one that exists (test mode).
 

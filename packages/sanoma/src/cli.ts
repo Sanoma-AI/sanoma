@@ -4,7 +4,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import type { SanomaConfig } from "@sanoma/workflows";
+import type { SanomaConfig } from "@sanoma-ai/workflows";
 import { type Loaded, loadConfig, UsageError } from "./config.ts";
 import type { LinkedPackage } from "./dev.ts";
 
@@ -24,7 +24,7 @@ Runs the repo in the working directory, from its sanoma.config.ts (after its .en
                                       a run's ledger records as JSON lines
 
 SANOMA_DATABASE_URL names Postgres (default postgresql://postgres:dbos@localhost:5433/sanoma); SANOMA_APP_PORT the
-app's port (default 3000; 0 for any free port). With sanoma or a @sanoma package linked from a sanoma checkout,
+app's port (default 3000; 0 for any free port). With sanoma or a @sanoma-ai package linked from a sanoma checkout,
 or SANOMA_DEV_REPO set, \`sanoma\` also runs each linked package's watch build and restarts on a new build.
 `;
 
@@ -92,7 +92,7 @@ const port = () => Number(process.env.SANOMA_APP_PORT ?? 3000);
 
 async function load(): Promise<Loaded> {
   const loaded = await loadConfig();
-  const { resolveConfig } = await import("@sanoma/workflows");
+  const { resolveConfig } = await import("@sanoma-ai/workflows");
   return { ...loaded, resolved: resolveConfig(loaded.config) };
 }
 

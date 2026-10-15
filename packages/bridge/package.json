@@ -1,5 +1,5 @@
 {
-  "name": "@sanoma/bridge",
+  "name": "@sanoma-ai/bridge",
   "version": "0.1.0",
   "description": "Client for provider-bridge, which serves OpenTofu providers' schema, import and read, a fake that replays recorded replies, and the generator of OpenTofu-backed connectors",
   "keywords": [
@@ -65,11 +65,11 @@
     "@connectrpc/connect-node": "^2.2.0"
   },
   "devDependencies": {
-    "@sanoma/workflows": "workspace:*",
+    "@sanoma-ai/workflows": "workspace:*",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@sanoma/workflows": "^0.1.0",
+    "@sanoma-ai/workflows": "^0.1.0",
     "zod": "^4"
   },
   "engines": {

@@ -1,11 +1,11 @@
-# @sanoma/connector-github
+# @sanoma-ai/connector-github
 
-GitHub resources for [`@sanoma/workflows`](https://www.npmjs.com/package/@sanoma/workflows): repositories, branch protection rules and team memberships, read through the [`integrations/github`](https://github.com/integrations/terraform-provider-github) OpenTofu provider (6.13.0) on [provider-bridge](https://github.com/Sanoma-AI/provider-bridge). It reads only: there is no create, update or delete yet.
+GitHub resources for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows): repositories, branch protection rules and team memberships, read through the [`integrations/github`](https://github.com/integrations/terraform-provider-github) OpenTofu provider (6.13.0) on [provider-bridge](https://github.com/Sanoma-AI/provider-bridge). It reads only: there is no create, update or delete yet.
 
 ## Usage
 
 ```sh
-npm install @sanoma/connector-github
+npm install @sanoma-ai/connector-github
 ```
 
 Each resource type has two operations, both effect `read` and idempotent, with the import id as the policy's `target`:
@@ -18,10 +18,10 @@ Each resource type has two operations, both effect `read` and idempotent, with t
 
 `import` takes `{ id }` and returns the object's `state`; `read` takes a state an earlier call returned (`{ id, state, handle }`), or just `{ id }`, and returns its fresh `state`, or `gone: true` when it no longer exists. See [Resources](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#resources).
 
-A data file declares resources with the constructors in `@sanoma/connector-github/resources`:
+A data file declares resources with the constructors in `@sanoma-ai/connector-github/resources`:
 
 ```ts
-import { github } from "@sanoma/connector-github/resources";
+import { github } from "@sanoma-ai/connector-github/resources";
 
 export const site = github.repository({ name: "website", delete_branch_on_merge: true, has_wiki: false });
 export const siteMain = github.branch_protection({ repository_id: site, pattern: "main", enforce_admins: true });
@@ -35,23 +35,23 @@ The logo is GitHub's mark from [Octicons](https://primer.style/octicons/) (`mark
 
 ## Resource types
 
-`src/resources.gen.ts` is generated from the provider's schema by `pnpm generate`, which runs [`@sanoma/bridge/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the provider (its release, sha256 and recorded schema are `@sanoma/bridge`'s pin and fixture), the types to generate, and the attributes whose change replaces the object (ForceNew in the provider's source, which the schema does not carry). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing. `src/connector.ts` is the rest, one `tfConnector` record from [`@sanoma/bridge/connector`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/README.md#connectors-for-opentofu-providers): each type's title, identity and `find`, the field that names another resource (`branch_protection.repository_id`), and GitHub's title, logo and package. The connector, the constructors, the driver and the fake all derive from it.
+`src/resources.gen.ts` is generated from the provider's schema by `pnpm generate`, which runs [`@sanoma-ai/bridge/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the provider (its release, sha256 and recorded schema are `@sanoma-ai/bridge`'s pin and fixture), the types to generate, and the attributes whose change replaces the object (ForceNew in the provider's source, which the schema does not carry). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing. `src/connector.ts` is the rest, one `tfConnector` record from [`@sanoma-ai/bridge/connector`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/README.md#connectors-for-opentofu-providers): each type's title, identity and `find`, the field that names another resource (`branch_protection.repository_id`), and GitHub's title, logo and package. The connector, the constructors, the driver and the fake all derive from it.
 
 Attributes that are computed and not optional (`html_url`, `repo_id`) are vendor-owned: never drift, and a data file may not declare them. Those the provider marks computed and optional (`etag`, `topics`, `visibility`, `default_branch`) are yours to set, and compared only when declared.
 
 ## Driver
 
-`@sanoma/connector-github/driver` reads through a provider bridge. The `github` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `@sanoma/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
+`@sanoma-ai/connector-github/driver` reads through a provider bridge. The `github` connector the package root exports carries it, made once per resolved config, and its fake (`withSetup` from `@sanoma-ai/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that):
 
 ```ts
-import { github } from "@sanoma/connector-github";
+import { github } from "@sanoma-ai/connector-github";
 
 export default defineConfig({ workflows, connectors: [github], policy });
 ```
 
 `./driver` (`githubDriver`; `githubDriver({ bridge })` reads through a bridge of your own) and `./fake` (`fakeGithub`) are internal entries, for tests.
 
-Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma/bridge`, started on the first call from `SANOMA_BRIDGE_BIN`; `bridge` is any `ProviderClient` (a `Bridge` from `startBridge()`, or `stateBridge` in tests). It configures the provider on the first call with `{ owner, token }` from the environment, and again when either changes (closing it first: the bridge refuses a second config), when the provider has exited, or when the bridge has forgotten it (`ensureConfigured`). `read` without a state (or with one that has no `id`) imports, which reads the object too. States leave the driver in the resource's shape, with sensitive attributes set to `null`; the provider's private data and state version travel in the opaque `handle`.
+Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma-ai/bridge`, started on the first call from `SANOMA_BRIDGE_BIN`; `bridge` is any `ProviderClient` (a `Bridge` from `startBridge()`, or `stateBridge` in tests). It configures the provider on the first call with `{ owner, token }` from the environment, and again when either changes (closing it first: the bridge refuses a second config), when the provider has exited, or when the bridge has forgotten it (`ensureConfigured`). `read` without a state (or with one that has no `id`) imports, which reads the object too. States leave the driver in the resource's shape, with sensitive attributes set to `null`; the provider's private data and state version travel in the opaque `handle`.
 
 ### Environment
 
@@ -62,7 +62,7 @@ Read on every call, never when the config loads:
 | `GITHUB_TOKEN` | A GitHub token that can read the repositories, rules and teams named.                                         |
 | `GITHUB_OWNER` | Optional: the organization or user whose repositories the data files describe. Default: the token's own user. |
 
-When the token is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets both. The bridge passes the token and the owner to the provider through its config only, never through the provider's environment. The default bridge's binary is the process's to set (`SANOMA_BRIDGE_BIN`, see [the bridge](https://www.npmjs.com/package/@sanoma/bridge#environment)), not a credential of the connector.
+When the token is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets both. The bridge passes the token and the owner to the provider through its config only, never through the provider's environment. The default bridge's binary is the process's to set (`SANOMA_BRIDGE_BIN`, see [the bridge](https://www.npmjs.com/package/@sanoma-ai/bridge#environment)), not a credential of the connector.
 
 ### Errors and retries
 
@@ -70,12 +70,12 @@ The bridge's errors become `DriverError`s whose `vendorCode` is the bridge's cod
 
 ## Testing
 
-`@sanoma/connector-github/fake` is GitHub as it was when the replies in `@sanoma/bridge`'s `testdata/replies` were recorded (the `Sanoma-AI/sanoma` and `Sanoma-AI/provider-bridge` repositories; `provider-bridge:main` has no branch protection), served through the real driver over a `stateBridge` of them (`tfFake`). It needs no token and reaches nothing.
+`@sanoma-ai/connector-github/fake` is GitHub as it was when the replies in `@sanoma-ai/bridge`'s `testdata/replies` were recorded (the `Sanoma-AI/sanoma` and `Sanoma-AI/provider-bridge` repositories; `provider-bridge:main` has no branch protection), served through the real driver over a `stateBridge` of them (`tfFake`). It needs no token and reaches nothing.
 
 ```ts
-import { withSetup } from "@sanoma/workflows";
-import { github } from "@sanoma/connector-github";
-import { fakeGithub } from "@sanoma/connector-github/fake";
+import { withSetup } from "@sanoma-ai/workflows";
+import { github } from "@sanoma-ai/connector-github";
+import { fakeGithub } from "@sanoma-ai/connector-github/fake";
 
 const fake = fakeGithub();
 const worker = await startWorker({
@@ -88,6 +88,6 @@ fake.override("repository", "sanoma", { delete_branch_on_merge: true }); // drif
 fake.remove("repository", "sanoma"); // the next read and import say it is gone
 ```
 
-`put` and `override` take fields in the resource's shape, as a read returns them (a block of one is an object). `remove` answers an import as the provider does: a branch protection rule with the provider's `failed_precondition` diagnostic, anything else `not_found`. It has the faults every fake has (`failNext`, `loseReply`, `rateLimit`, `hold`, `reset`, `update`); see [Fakes for tests](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#fakes-for-tests). Import it from `@sanoma/connector-github/fake`.
+`put` and `override` take fields in the resource's shape, as a read returns them (a block of one is an object). `remove` answers an import as the provider does: a branch protection rule with the provider's `failed_precondition` diagnostic, anything else `not_found`. It has the faults every fake has (`failNext`, `loseReply`, `rateLimit`, `hold`, `reset`, `update`); see [Fakes for tests](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#fakes-for-tests). Import it from `@sanoma-ai/connector-github/fake`.
 
 License: FSL-1.1-ALv2.

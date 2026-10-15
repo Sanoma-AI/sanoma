@@ -1,4 +1,4 @@
-import type { LedgerRecord } from "@sanoma/workflows";
+import type { LedgerRecord } from "@sanoma-ai/workflows";
 import type { GraphNode } from "../graph/types.ts";
 
 // Between a run's graph and its ledger: the records a node stands for, and the node a record is drawn as.

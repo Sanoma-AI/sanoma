@@ -1,6 +1,6 @@
-# @sanoma/testing
+# @sanoma-ai/testing
 
-Helpers for testing [`@sanoma/workflows`](https://www.npmjs.com/package/@sanoma/workflows) workflows without vendor accounts.
+Helpers for testing [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows) workflows without vendor accounts.
 
 ## Install
 
@@ -17,12 +17,12 @@ Private to this repository: its tests import it through the workspace, and it is
 `ensureBuilt(pkgDir, outputs, build)` runs `build` (a command and its arguments) in `pkgDir` when one of `outputs` is missing or older than a file under its `src/`, for tests of what a package ships from `dist/`. `waitFor(get, done?, timeoutMs?)` calls `get` every 100 ms until `done` holds for its value (by default, until it is truthy), returns that value, and throws after `timeoutMs` (default 15 seconds) naming the last one.
 
 ```ts
-import { ghost } from "@sanoma/connector-ghost";
-import { resend } from "@sanoma/connector-resend";
-import { fakeGhost } from "@sanoma/connector-ghost/fake";
-import { fakeResend } from "@sanoma/connector-resend/fake";
-import { type FakeCall, startTestWorker, testDatabaseUrl, withFake } from "@sanoma/testing";
-import { allowAll } from "@sanoma/workflows";
+import { ghost } from "@sanoma-ai/connector-ghost";
+import { resend } from "@sanoma-ai/connector-resend";
+import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
+import { fakeResend } from "@sanoma-ai/connector-resend/fake";
+import { type FakeCall, startTestWorker, testDatabaseUrl, withFake } from "@sanoma-ai/testing";
+import { allowAll } from "@sanoma-ai/workflows";
 import announce from "./workflows/announce.ts";
 
 const calls: FakeCall[] = [];
@@ -41,7 +41,7 @@ await worker.stop();
 
 ## A test app
 
-`@sanoma/testing/harness` starts a worker and its clients for the tests of a `describe` (or a file), and stops them after (install `vitest` and `@dbos-inc/dbos-sdk` beside it). `useTestApp(config, { databaseUrl, ...options })` takes `startTestWorker`'s arguments and returns a `TestApp`:
+`@sanoma-ai/testing/harness` starts a worker and its clients for the tests of a `describe` (or a file), and stops them after (install `vitest` and `@dbos-inc/dbos-sdk` beside it). `useTestApp(config, { databaseUrl, ...options })` takes `startTestWorker`'s arguments and returns a `TestApp`:
 
 | Member      | What it is                                                                                                                                                                           |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -54,11 +54,11 @@ await worker.stop();
 `client` and `raw` throw "is not started" outside the tests. Fakes a test reads are yours: create them beside the call, pass them with `withFake`, and reset them in your own `beforeEach`.
 
 ```ts
-import { ghost } from "@sanoma/connector-ghost";
-import { fakeGhost } from "@sanoma/connector-ghost/fake";
-import { testDatabaseUrl, withFake } from "@sanoma/testing";
-import { useTestApp } from "@sanoma/testing/harness";
-import { allowAll } from "@sanoma/workflows";
+import { ghost } from "@sanoma-ai/connector-ghost";
+import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
+import { testDatabaseUrl, withFake } from "@sanoma-ai/testing";
+import { useTestApp } from "@sanoma-ai/testing/harness";
+import { allowAll } from "@sanoma-ai/workflows";
 import { beforeEach, expect, it } from "vitest";
 import publish from "./workflows/publish.ts";
 
@@ -81,7 +81,7 @@ A memory ledger lives in the test process, so it outlives a restart there. To ke
 
 ## Fake vendors
 
-Each connector carries its fake, and ships it at its own `/fake` entry, not in this package: `import { fakeGhost } from "@sanoma/connector-ghost/fake";`. Install the connectors you use; their READMEs ([Ghost](https://www.npmjs.com/package/@sanoma/connector-ghost#testing), [Resend](https://www.npmjs.com/package/@sanoma/connector-resend#testing), [Bluesky](https://www.npmjs.com/package/@sanoma/connector-bluesky#testing), [GitHub](https://www.npmjs.com/package/@sanoma/connector-github#testing), [Stripe](https://www.npmjs.com/package/@sanoma/connector-stripe#testing)) say what each fake holds and adds. Each returns:
+Each connector carries its fake, and ships it at its own `/fake` entry, not in this package: `import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";`. Install the connectors you use; their READMEs ([Ghost](https://www.npmjs.com/package/@sanoma-ai/connector-ghost#testing), [Resend](https://www.npmjs.com/package/@sanoma-ai/connector-resend#testing), [Bluesky](https://www.npmjs.com/package/@sanoma-ai/connector-bluesky#testing), [GitHub](https://www.npmjs.com/package/@sanoma-ai/connector-github#testing), [Stripe](https://www.npmjs.com/package/@sanoma-ai/connector-stripe#testing)) say what each fake holds and adds. Each returns:
 
 | Member                 | What it does                                                                                   |
 | ---------------------- | ---------------------------------------------------------------------------------------------- |
@@ -99,16 +99,16 @@ A call that repeats an earlier call's idempotency key gets the earlier reply and
 
 Options: `{ calls }` logs into the array you pass, so several fakes share one ordered log.
 
-To write a fake for another connector, use `defineFake(connector, { initial, ops })` from `@sanoma/workflows/fake`. `ops` gets the state and implements every operation, typed by the connector.
+To write a fake for another connector, use `defineFake(connector, { initial, ops })` from `@sanoma-ai/workflows/fake`. `ops` gets the state and implements every operation, typed by the connector.
 
 `fakeMarketingVendors` is gone: compose the fakes you need, passing them one `calls` array, as in the example above.
 
 ## Replaying a vendor's API
 
-`@sanoma/testing/replay` tests a driver against a vendor's recorded replies, with [msw](https://mswjs.io) (install `msw` and `vitest` beside it). Call `replay(options)` once at the top of a test file: it starts msw for the file and returns `play`, `fixture`, `sent`, `exchanges` and the msw `server`.
+`@sanoma-ai/testing/replay` tests a driver against a vendor's recorded replies, with [msw](https://mswjs.io) (install `msw` and `vitest` beside it). Call `replay(options)` once at the top of a test file: it starts msw for the file and returns `play`, `fixture`, `sent`, `exchanges` and the msw `server`.
 
 ```ts
-import { replay } from "@sanoma/testing/replay";
+import { replay } from "@sanoma-ai/testing/replay";
 
 const { play, sent } = replay({
   fixtures: new URL("./fixtures/", import.meta.url),
@@ -133,15 +133,15 @@ Two variables change what the same tests do:
 
 ## Scenarios
 
-`@sanoma/testing/scenarios` runs a config's [scenarios](https://www.npmjs.com/package/@sanoma/workflows#scenarios-and-sandbox-runs) as vitest tests (install `vitest` and `@dbos-inc/dbos-sdk` beside it). Each scenario is a sandbox run: the worker calls fakes of its own, made by the makers the connectors carry, never a driver.
+`@sanoma-ai/testing/scenarios` runs a config's [scenarios](https://www.npmjs.com/package/@sanoma-ai/workflows#scenarios-and-sandbox-runs) as vitest tests (install `vitest` and `@dbos-inc/dbos-sdk` beside it). Each scenario is a sandbox run: the worker calls fakes of its own, made by the makers the connectors carry, never a driver.
 
-`describeScenarios(config, options)` compiles the `.feature` files in `scenarios/` in the config's root with Cucumber, so a test file awaits it at its top level, and registers a test for each scenario, in a `describe` per file, each over `runScenario` from `@sanoma/workflows/scenarios` (the one implementation; `runScenarios` there, which `sanoma check` runs, needs no vitest); it throws, naming the root or the directory, when the root has no `scenarios/` or it holds no scenarios. A test starts the scenario's sandbox run, decides its approvals as the scenario says, and fails listing each `Then` step that did not hold, with why (each judged on its own). A file that does not load (a step no rule matches, bad JSON, a name used twice) is a failing test named after the file, whose message names the file (and the line, for a step or JSON error). It starts one [test app](#a-test-app) for all its scenarios, before them, with `useTestApp(config, options)`, and stops it after, on `options.databaseUrl`, as for `startTestWorker`. `options.startedBy` starts the runs (default `{ id: "scenarios" }`), and `options.timeoutMs` is how long each may take (`drive`'s, 15 seconds by default); the tests it registers get twice that, so `drive`'s error is the one you see.
+`describeScenarios(config, options)` compiles the `.feature` files in `scenarios/` in the config's root with Cucumber, so a test file awaits it at its top level, and registers a test for each scenario, in a `describe` per file, each over `runScenario` from `@sanoma-ai/workflows/scenarios` (the one implementation; `runScenarios` there, which `sanoma check` runs, needs no vitest); it throws, naming the root or the directory, when the root has no `scenarios/` or it holds no scenarios. A test starts the scenario's sandbox run, decides its approvals as the scenario says, and fails listing each `Then` step that did not hold, with why (each judged on its own). A file that does not load (a step no rule matches, bad JSON, a name used twice) is a failing test named after the file, whose message names the file (and the line, for a step or JSON error). It starts one [test app](#a-test-app) for all its scenarios, before them, with `useTestApp(config, options)`, and stops it after, on `options.databaseUrl`, as for `startTestWorker`. `options.startedBy` starts the runs (default `{ id: "scenarios" }`), and `options.timeoutMs` is how long each may take (`drive`'s, 15 seconds by default); the tests it registers get twice that, so `drive`'s error is the one you see.
 
 ```ts
 // test/scenarios.test.ts
-import { testDatabaseUrl } from "@sanoma/testing";
-import { describeScenarios } from "@sanoma/testing/scenarios";
-import { memoryLedger } from "@sanoma/workflows";
+import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { describeScenarios } from "@sanoma-ai/testing/scenarios";
+import { memoryLedger } from "@sanoma-ai/workflows";
 import config from "../sanoma.config.ts";
 
 await describeScenarios({ ...config, ledger: memoryLedger() }, { databaseUrl: testDatabaseUrl("scenarios") });
@@ -149,7 +149,7 @@ await describeScenarios({ ...config, ledger: memoryLedger() }, { databaseUrl: te
 
 A company config spread into `describeScenarios` keeps its `ledger`, so pass `ledger: memoryLedger()`, as above, to keep test runs out of the project's ledger.
 
-Besides a run's calls and outcome, a scenario can say what the policy did and, with the vendors' fakes holding what the data files declare, what the built-in [drift](https://www.npmjs.com/package/@sanoma/workflows#drift) check finds (the full list of steps is in the workflows package):
+Besides a run's calls and outcome, a scenario can say what the policy did and, with the vendors' fakes holding what the data files declare, what the built-in [drift](https://www.npmjs.com/package/@sanoma-ai/workflows#drift) check finds (the full list of steps is in the workflows package):
 
 ```gherkin
 Scenario: A secret repository is refused
@@ -183,11 +183,11 @@ Scenario: A repository GitHub no longer has
 
 `Given <resource> "<name>" has` and `is gone` change the run's own fake of the vendor before it starts (a GitHub repository by its name, a Stripe object by its id: the resource's import id), for fakes that hold objects, as the GitHub and Stripe ones do; a failed `Then` says what the run did instead (`github.repository.import was allowed, not denied`, `resources/identity/github.ts#docs is gone, not clean`).
 
-`runScenario(scenario, { client, scope, startedBy?, timeoutMs? })`, re-exported from `@sanoma/workflows/scenarios`, runs one scenario against a worker you started, with a `SanomaClient` of it, and returns `{ runId, run, ledger, checks }`: the run's id, its summary, its ledger records and `check(scope, scenario, ledger)`. `timeoutMs` goes to `drive`. Load the scenarios with `await loadScenarios(scope)` from `@sanoma/workflows/scenario`, `scope` being `resolveConfig(config)`.
+`runScenario(scenario, { client, scope, startedBy?, timeoutMs? })`, re-exported from `@sanoma-ai/workflows/scenarios`, runs one scenario against a worker you started, with a `SanomaClient` of it, and returns `{ runId, run, ledger, checks }`: the run's id, its summary, its ledger records and `check(scope, scenario, ledger)`. `timeoutMs` goes to `drive`. Load the scenarios with `await loadScenarios(scope)` from `@sanoma-ai/workflows/scenario`, `scope` being `resolveConfig(config)`.
 
 ## A connector's own features
 
-`@sanoma/testing/features` runs a connector's own feature files, which test its operations with its [steps](https://www.npmjs.com/package/@sanoma/workflows#steps-a-connector-ships) and the generic ones (`{op} is called with`, `it returns`, `it fails with status {int}`), as vitest tests. `describeFeatures(connector, { features, replay })` registers a `describe` per target and a test per scenario in each, in Cucumber, its `When` steps calling the operation directly (no worker, no policy):
+`@sanoma-ai/testing/features` runs a connector's own feature files, which test its operations with its [steps](https://www.npmjs.com/package/@sanoma-ai/workflows#steps-a-connector-ships) and the generic ones (`{op} is called with`, `it returns`, `it fails with status {int}`), as vitest tests. `describeFeatures(connector, { features, replay })` registers a `describe` per target and a test per scenario in each, in Cucumber, its `When` steps calling the operation directly (no worker, no policy):
 
 - `fake`: a new fake of the connector's for each scenario.
 - `driver`: the connector's driver over its vendor's recorded replies, with `replay`'s options (the driver tests' own, so both replay alike). Each scenario plays the fixture named after it, its name in lower case with each run of other characters a `-` (`Publish draft` plays `publish-draft.json`); one with no recording is tagged `@fake-only`, and runs on the fake alone. A missing fixture fails the test, saying so. With `SANOMA_LIVE=1` the driver calls the vendor, as the driver tests do, and with `SANOMA_RECORD=1` too, each scenario's replies are saved as its fixture; what a live scenario creates stays on the account.
@@ -196,7 +196,7 @@ A scenario's checks must hold on both targets, whose ids differ: name what a `Gi
 
 ```ts
 // connectors/ghost/test/features.test.ts
-import { describeFeatures } from "@sanoma/testing/features";
+import { describeFeatures } from "@sanoma-ai/testing/features";
 import { ghost } from "../src/index.ts";
 import { replayOptions } from "./replay.ts";
 

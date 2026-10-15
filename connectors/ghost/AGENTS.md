@@ -1,4 +1,4 @@
-# Working on @sanoma/connector-ghost
+# Working on @sanoma-ai/connector-ghost
 
 Follow the shared [connector conventions](../AGENTS.md).
 

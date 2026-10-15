@@ -2,9 +2,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { github } from "@sanoma/connector-github";
-import { github as githubTypes } from "@sanoma/connector-github/resources";
-import { stripe } from "@sanoma/connector-stripe";
+import { github } from "@sanoma-ai/connector-github";
+import { github as githubTypes } from "@sanoma-ai/connector-github/resources";
+import { stripe } from "@sanoma-ai/connector-stripe";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { describeConfig, readResources } from "../src/describe.ts";
@@ -122,7 +122,7 @@ describe("readResources", () => {
       }
       throw new Error("read without problems");
     };
-    const GH = `import { github } from "@sanoma/connector-github/resources";\n`;
+    const GH = `import { github } from "@sanoma-ai/connector-github/resources";\n`;
 
     it.each(BAD_DATA_FILES)("%s, at file:line:column, as the lint does", (name, source, at, message) => {
       expect(problems({ [`bad/${name}.ts`]: source })).toEqual([
@@ -133,15 +133,15 @@ describe("readResources", () => {
     it("a constructors import that is not exactly the resources entry of a connector the config has", () => {
       expect(
         problems({
-          "a.ts": `import { ghost } from "@sanoma/connector-ghost/resources";\nexport const p = ghost.post({ title: "x" });\n`,
-          "b.ts": `import { gh } from "@sanoma/connector-github/resources";\nexport const r = gh.repository({ name: "x" });\n`,
+          "a.ts": `import { ghost } from "@sanoma-ai/connector-ghost/resources";\nexport const p = ghost.post({ title: "x" });\n`,
+          "b.ts": `import { gh } from "@sanoma-ai/connector-github/resources";\nexport const r = gh.repository({ name: "x" });\n`,
           // acme's package is @acme/sanoma-connector: no name is guessed from the vendor.
-          "c.ts": `import { acme } from "@sanoma/connector-acme/resources";\nexport const w = acme.widget({ name: "x" });\n`,
+          "c.ts": `import { acme } from "@sanoma-ai/connector-acme/resources";\nexport const w = acme.widget({ name: "x" });\n`,
         }),
       ).toEqual([
-        "resources/a.ts:1:10: \"@sanoma/connector-ghost/resources\" is not the resources entry of a connector in the config's `connectors`: add the connector, and import from its package's `/resources`",
-        'resources/b.ts:1:10: "@sanoma/connector-github/resources" exports its constructors as github: `import { github } from "@sanoma/connector-github/resources"`',
-        "resources/c.ts:1:10: \"@sanoma/connector-acme/resources\" is not the resources entry of a connector in the config's `connectors`: add the connector, and import from its package's `/resources`",
+        "resources/a.ts:1:10: \"@sanoma-ai/connector-ghost/resources\" is not the resources entry of a connector in the config's `connectors`: add the connector, and import from its package's `/resources`",
+        'resources/b.ts:1:10: "@sanoma-ai/connector-github/resources" exports its constructors as github: `import { github } from "@sanoma-ai/connector-github/resources"`',
+        "resources/c.ts:1:10: \"@sanoma-ai/connector-acme/resources\" is not the resources entry of a connector in the config's `connectors`: add the connector, and import from its package's `/resources`",
       ]);
     });
 
@@ -158,7 +158,7 @@ describe("readResources", () => {
 export const b = github.repository({ name: "b", html_url: "https://github.com/x/b" });
 export const c = github.repository({ name: "c", has_wiki: "yes" });
 `,
-          "b.ts": `import { stripe } from "@sanoma/connector-stripe/resources";\nexport const p = stripe.product({ name: "Pro" });\n`,
+          "b.ts": `import { stripe } from "@sanoma-ai/connector-stripe/resources";\nexport const p = stripe.product({ name: "Pro" });\n`,
         }),
       ).toEqual([
         "resources/a.ts:2:1: export const a: github.repository: no field wiki",
@@ -268,8 +268,8 @@ export const rule = github.branch_protection({ repository_id: main, pattern: "ne
 describe("describeConfig's problems", () => {
   it("are data: the resources read without one are listed beside them", () => {
     const dir = project({
-      "good.ts": `import { github } from "@sanoma/connector-github/resources";\nexport const web = github.repository({ name: "web" });\n`,
-      "bad.ts": `import { github } from "@sanoma/connector-github/resources";\nimport { web } from "./good.ts";\nexport const docs = github.repository({ name: "docs", description: process.env.X });\nexport const main = github.branch_protection({ repository_id: web, pattern: "main" });\n`,
+      "good.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nexport const web = github.repository({ name: "web" });\n`,
+      "bad.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nimport { web } from "./good.ts";\nexport const docs = github.repository({ name: "docs", description: process.env.X });\nexport const main = github.branch_protection({ repository_id: web, pattern: "main" });\n`,
     });
     try {
       const { resources, problems } = describeConfig({ ...base, root: dir });

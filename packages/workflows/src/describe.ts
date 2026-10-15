@@ -10,7 +10,7 @@ import { allowAll, policyOpOf } from "./policy.ts";
 import { type ResourceFields, resourceTypesOf } from "./resource.ts";
 import { type DeclaredResource, readDataFiles, type ResourceProblem } from "./resources.ts";
 
-// `@sanoma/workflows/describe`: what a UI renders from, apart from the main entry.
+// `@sanoma-ai/workflows/describe`: what a UI renders from, apart from the main entry.
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
 // The reader parses data files with oxc-parser too.
 export type { LintProblem } from "./ast.ts";

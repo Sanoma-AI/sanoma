@@ -3,9 +3,9 @@ import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { bluesky } from "@sanoma/connector-bluesky";
-import { resend } from "@sanoma/connector-resend";
-import { ensureBuilt, testDatabaseUrl, waitFor } from "@sanoma/testing";
+import { bluesky } from "@sanoma-ai/connector-bluesky";
+import { resend } from "@sanoma-ai/connector-resend";
+import { ensureBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import {
   allow,
   approve,
@@ -24,8 +24,8 @@ import {
   startWorker,
   type Worker,
   withSetup,
-} from "@sanoma/workflows";
-import { describeConfig, outlineWorkflow } from "@sanoma/workflows/describe";
+} from "@sanoma-ai/workflows";
+import { describeConfig, outlineWorkflow } from "@sanoma-ai/workflows/describe";
 import { isNotFound } from "@tanstack/react-router";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
@@ -890,7 +890,7 @@ describe("the page", () => {
     expect(blogPage.status).toBe(200);
     expect(blogPage.html).toMatch(/<h1[^>]*>(<img[^>]*>)+Ghost<\/h1>/);
     expect(blogPage.text).toContain("<title>Ghost · Sanoma</title>");
-    expect(blogPage.html).toContain('href="https://www.npmjs.com/package/@sanoma/connector-ghost"');
+    expect(blogPage.html).toContain('href="https://www.npmjs.com/package/@sanoma-ai/connector-ghost"');
     expect(blogPage.html).toContain("<code>ghost.post.create</code>");
     expect(blogPage.text).toContain("<code>Given a post titled {title} exists</code>");
     expect(blogPage.text).not.toContain("Its connector attaches no fake.");
@@ -1449,7 +1449,7 @@ describe("an app configured otherwise", () => {
     dir = mkdtempSync(join(tmpdir(), "sanoma-app-ledger-"));
     mkdirSync(join(dir, "resources"));
     // The same app ("sanoma", as no package.json names it), on its own root: its data files are these.
-    const GH = `import { github } from "@sanoma/connector-github/resources";\n`;
+    const GH = `import { github } from "@sanoma-ai/connector-github/resources";\n`;
     writeFileSync(join(dir, "resources", "good.ts"), `${GH}export const web = github.repository({ name: "web" });\n`);
     writeFileSync(join(dir, "resources", "bad.ts"), `${GH}export const docs = github.repository({ name: 1 });\n`);
     // A directory nothing has written to yet: the worker keeps its records in memory.
@@ -1770,7 +1770,7 @@ describe("startApp", () => {
   it("says to build the app when it is not built", async () => {
     const empty = mkdtempSync(join(tmpdir(), "sanoma-app-dist-"));
     try {
-      await expect(startApp(config, { distDir: empty })).rejects.toThrow(/pnpm --filter @sanoma\/app build/);
+      await expect(startApp(config, { distDir: empty })).rejects.toThrow(/pnpm --filter @sanoma-ai\/app build/);
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }

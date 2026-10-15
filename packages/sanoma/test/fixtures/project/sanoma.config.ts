@@ -1,4 +1,4 @@
-import { ghost } from "@sanoma/connector-ghost";
+import { ghost } from "@sanoma-ai/connector-ghost";
 import { defineConfig } from "sanoma";
 import policy from "./policies/policy.ts";
 import hello from "./workflows/hello.ts";

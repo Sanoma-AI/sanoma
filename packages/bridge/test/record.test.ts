@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Code, ConnectError, createClient, createRouterTransport, type ServiceImpl } from "@connectrpc/connect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { type Bridge, BridgeError, type SchemaDocument } from "@sanoma/bridge";
+import { type Bridge, BridgeError, type SchemaDocument } from "@sanoma-ai/bridge";
 import { bridgeClient } from "../src/bridge.ts";
 import { BridgeService, Diagnostic_Severity, DiagnosticSchema } from "../src/gen/bridge/v1/bridge_pb.ts";
 import { fakeBridge } from "./fake-bridge.ts";

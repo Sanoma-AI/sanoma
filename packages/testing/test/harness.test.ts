@@ -1,6 +1,6 @@
-import { ghost } from "@sanoma/connector-ghost";
-import { fakeGhost } from "@sanoma/connector-ghost/fake";
-import { allowAll, defineWorkflow } from "@sanoma/workflows";
+import { ghost } from "@sanoma-ai/connector-ghost";
+import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
+import { allowAll, defineWorkflow } from "@sanoma-ai/workflows";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { useTestApp } from "../src/harness.ts";

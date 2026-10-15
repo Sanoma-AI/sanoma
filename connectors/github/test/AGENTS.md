@@ -1,6 +1,6 @@
 # connectors/github/test
 
-Tests for the GitHub connector. They run on the replies recorded in `@sanoma/bridge`'s `testdata`, with no token and no network.
+Tests for the GitHub connector. They run on the replies recorded in `@sanoma-ai/bridge`'s `testdata`, with no token and no network.
 
 ## Contents
 

@@ -1,4 +1,4 @@
-import type { OpEntry } from "@sanoma/workflows/describe";
+import type { OpEntry } from "@sanoma-ai/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { ChevronRightIcon, ExternalLinkIcon } from "lucide-react";

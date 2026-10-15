@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bluesky } from "@sanoma/connector-bluesky";
-import { testDatabaseUrl, withFake } from "@sanoma/testing";
+import { bluesky } from "@sanoma-ai/connector-bluesky";
+import { testDatabaseUrl, withFake } from "@sanoma-ai/testing";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { describeConfig } from "../src/describe.ts";

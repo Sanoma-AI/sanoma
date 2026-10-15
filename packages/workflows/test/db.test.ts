@@ -1,5 +1,5 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { testDatabaseUrl } from "@sanoma/testing";
+import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { Pool } from "pg";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createTable, lazyPool, pgCode, prepareDatabase } from "../src/db.ts";

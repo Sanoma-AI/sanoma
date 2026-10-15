@@ -1,5 +1,5 @@
 {
-  "name": "@sanoma/testing",
+  "name": "@sanoma-ai/testing",
   "version": "0.1.0",
   "private": true,
   "description": "Test workers, vendor replay and scenario tests for Sanoma workflows, without vendor accounts",
@@ -56,18 +56,18 @@
   },
   "devDependencies": {
     "@dbos-inc/dbos-sdk": "^5.2.11",
-    "@sanoma/connector-bluesky": "workspace:*",
-    "@sanoma/connector-ghost": "workspace:*",
-    "@sanoma/connector-github": "workspace:*",
-    "@sanoma/connector-resend": "workspace:*",
-    "@sanoma/connector-stripe": "workspace:*",
-    "@sanoma/workflows": "workspace:*",
+    "@sanoma-ai/connector-bluesky": "workspace:*",
+    "@sanoma-ai/connector-ghost": "workspace:*",
+    "@sanoma-ai/connector-github": "workspace:*",
+    "@sanoma-ai/connector-resend": "workspace:*",
+    "@sanoma-ai/connector-stripe": "workspace:*",
+    "@sanoma-ai/workflows": "workspace:*",
     "msw": "^3.0.2",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
     "@dbos-inc/dbos-sdk": "^5.2.11",
-    "@sanoma/workflows": "^0.1.0",
+    "@sanoma-ai/workflows": "^0.1.0",
     "msw": "^3",
     "vitest": "^5",
     "zod": "^4"

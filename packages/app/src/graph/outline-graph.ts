@@ -1,5 +1,5 @@
-import type { Span } from "@sanoma/workflows/describe";
-import { DEFAULT_SLEEP_NAME } from "@sanoma/workflows/shared";
+import type { Span } from "@sanoma-ai/workflows/describe";
+import { DEFAULT_SLEEP_NAME } from "@sanoma-ai/workflows/shared";
 import type { CallStep, Graph, GraphEdge, GraphNode, Step, StepState } from "./types.ts";
 
 /** A graph's two ends: an outline's are plain; a run's say how it started and how it ended. */

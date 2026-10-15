@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { credentialsOf, resolveDatabaseUrl } from "@sanoma/workflows";
+import { credentialsOf, resolveDatabaseUrl } from "@sanoma-ai/workflows";
 import type { Loaded } from "./config.ts";
 
 const HEADER = `# Copy to .env (ignored by git; \`sanoma\` loads it before reading the config). Never commit values.

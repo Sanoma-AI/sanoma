@@ -1,6 +1,6 @@
-import { BridgeError } from "@sanoma/bridge";
-import { type BridgeCall, fixturesDir, loadReplies, stateBridge } from "@sanoma/bridge/fake";
-import { type Driver, DriverError } from "@sanoma/workflows";
+import { BridgeError } from "@sanoma-ai/bridge";
+import { type BridgeCall, fixturesDir, loadReplies, stateBridge } from "@sanoma-ai/bridge/fake";
+import { type Driver, DriverError } from "@sanoma-ai/workflows";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { githubDriver } from "../src/driver.ts";
 import { fakeGithub } from "../src/fake.ts";

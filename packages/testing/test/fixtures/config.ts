@@ -1,8 +1,8 @@
 import { fileURLToPath } from "node:url";
-import { bluesky } from "@sanoma/connector-bluesky";
-import { ghost } from "@sanoma/connector-ghost";
-import { resend } from "@sanoma/connector-resend";
-import { allowAll, memoryLedger, type SanomaConfig } from "@sanoma/workflows";
+import { bluesky } from "@sanoma-ai/connector-bluesky";
+import { ghost } from "@sanoma-ai/connector-ghost";
+import { resend } from "@sanoma-ai/connector-resend";
+import { allowAll, memoryLedger, type SanomaConfig } from "@sanoma-ai/workflows";
 import announce from "../../../workflows/test/fixtures/announce.ts";
 
 // scenarios/announce.feature is a copy of the workflows package's: its scenarios directory also

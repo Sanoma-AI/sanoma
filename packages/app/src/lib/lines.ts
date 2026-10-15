@@ -1,5 +1,5 @@
 import type { Text } from "@codemirror/state";
-import type { Span } from "@sanoma/workflows/describe";
+import type { Span } from "@sanoma-ai/workflows/describe";
 
 /**
  * The numbers of the lines a list of [start, end) ranges touches, in order, once each. Offsets

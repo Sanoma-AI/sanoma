@@ -1,5 +1,5 @@
 // The Host names a loopback-only app answers to. Which addresses count as this machine is
-// `isLoopback` in `@sanoma/workflows/shared`, for what startApp listens on and the Host names it
+// `isLoopback` in `@sanoma-ai/workflows/shared`, for what startApp listens on and the Host names it
 // then answers to alike, so the two can never disagree.
 
 /** The host name in a Host header (`name`, `name:port`, `[v6]:port`), lowercased. */

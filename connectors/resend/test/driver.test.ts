@@ -1,5 +1,5 @@
-import { type Exchange, live, replay } from "@sanoma/testing/replay";
-import type { CallContext } from "@sanoma/workflows";
+import { type Exchange, live, replay } from "@sanoma-ai/testing/replay";
+import type { CallContext } from "@sanoma-ai/workflows";
 import { delay, http, HttpResponse } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import { resendDriver } from "../src/driver.ts";

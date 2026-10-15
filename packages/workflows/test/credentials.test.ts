@@ -1,10 +1,10 @@
-import { blueskyDriver } from "@sanoma/connector-bluesky/driver";
-import { ghostDriver } from "@sanoma/connector-ghost/driver";
-import { githubDriver } from "@sanoma/connector-github/driver";
-import { resendDriver } from "@sanoma/connector-resend/driver";
-import { stripeDriver } from "@sanoma/connector-stripe/driver";
+import { blueskyDriver } from "@sanoma-ai/connector-bluesky/driver";
+import { ghostDriver } from "@sanoma-ai/connector-ghost/driver";
+import { githubDriver } from "@sanoma-ai/connector-github/driver";
+import { resendDriver } from "@sanoma-ai/connector-resend/driver";
+import { stripeDriver } from "@sanoma-ai/connector-stripe/driver";
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { testDatabaseUrl } from "@sanoma/testing";
+import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";

@@ -1,5 +1,5 @@
 {
-  "name": "@sanoma/workflows",
+  "name": "@sanoma-ai/workflows",
   "version": "0.1.0",
   "description": "Business processes as TypeScript functions, run durably on DBOS",
   "keywords": [
@@ -21,6 +21,7 @@
   "files": [
     "dist",
     "src",
+    "!src/AGENTS.md",
     "oxlint.json",
     "README.md",
     "LICENSE"

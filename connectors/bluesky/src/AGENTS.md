@@ -1,6 +1,6 @@
 # connectors/bluesky/src
 
-Source of `@sanoma/connector-bluesky`. Each file is published as its own entry point: the operation definitions, the real driver and the in-memory fake.
+Source of `@sanoma-ai/connector-bluesky`. Each file is published as its own entry point: the operation definitions, the real driver and the in-memory fake.
 
 ## Contents
 

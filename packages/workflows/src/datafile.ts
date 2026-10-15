@@ -65,7 +65,7 @@ const SHAPE =
   "a data file holds only imports, `export const <name> = <vendor>.<type>({ … })` and `export default [ … ]`";
 const IMPORTS =
   "import resource constructors from a connector's resources entry " +
-  '(`import { github } from "@sanoma/connector-github/resources"`) ' +
+  '(`import { github } from "@sanoma-ai/connector-github/resources"`) ' +
   'and resources from other data files (`import { site } from "./github.ts"`)';
 const VALUES = "write a string, number, boolean, null, object or array, or name a declared resource";
 
@@ -240,7 +240,7 @@ export function readDataFile(
     if (imports.find((i) => i.local === vendor)?.kind !== "constructors") {
       fail(
         callee.object,
-        `${vendor} is not a connector's resource constructors: import it from the connector's resources entry, \`import { ${vendor} } from "@sanoma/connector-${vendor}/resources"\``,
+        `${vendor} is not a connector's resource constructors: import it from the connector's resources entry, \`import { ${vendor} } from "@sanoma-ai/connector-${vendor}/resources"\``,
       );
       return;
     }

@@ -1,6 +1,6 @@
 import * as childProcess from "node:child_process";
 import { createServer } from "node:net";
-import { testDatabaseUrl } from "@sanoma/testing";
+import { testDatabaseUrl } from "@sanoma-ai/testing";
 import * as pg from "pg";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { ensurePostgres, masked } from "../src/postgres.ts";

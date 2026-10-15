@@ -1,11 +1,11 @@
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { bluesky } from "@sanoma/connector-bluesky";
-import { ghost } from "@sanoma/connector-ghost";
-import { fakeGhost } from "@sanoma/connector-ghost/fake";
-import { github } from "@sanoma/connector-github";
-import { resend } from "@sanoma/connector-resend";
-import { stripe } from "@sanoma/connector-stripe";
+import { bluesky } from "@sanoma-ai/connector-bluesky";
+import { ghost } from "@sanoma-ai/connector-ghost";
+import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
+import { github } from "@sanoma-ai/connector-github";
+import { resend } from "@sanoma-ai/connector-resend";
+import { stripe } from "@sanoma-ai/connector-stripe";
 import { describe, expect, it, vi } from "vitest";
 import {
   allowAll,
@@ -81,7 +81,7 @@ describe("a connector made by another copy of the package", () => {
     const build = "install the sanoma packages and connectors from one build";
     const later = { ...ghost, [VENDOR]: { ...ghost[VENDOR], format: 2 } } as unknown as Connector<any, any>;
     expect(() => resolveConfig(config({ connectors: [later] }))).toThrow(
-      `The "ghost" connector was made by another build of @sanoma/workflows: ${build}`,
+      `The "ghost" connector was made by another build of @sanoma-ai/workflows: ${build}`,
     );
     // An older build's, its record under an unregistered symbol, is not a connector here at all.
     const older = { [Symbol("sanoma.vendor")]: { id: "ghost" } } as unknown as Connector<any, any>;
