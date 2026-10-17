@@ -68,7 +68,7 @@ const management = defineConnector("supabase", {
       effect: "write",
       idempotent: true,
       description:
-        "Store a project's database URL, through its session pooler with the password in SUPABASE_DB_PASSWORD, as the secret SANOMA_DATABASE_URL_<EXPORT>; kept when one is stored, and never returned",
+        "Store a project's database URL, through its session pooler with the password in SUPABASE_DB_PASSWORD, as the secret SANOMA_DATABASE_URL_<EXPORT>, never returned; refused when that secret holds another URL",
       input: z.object({
         ref: projectRef,
         export: z

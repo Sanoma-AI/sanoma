@@ -76,21 +76,33 @@ describe("the Management API operations", () => {
     await expect(call(driver, "project.health", { ref: REF })).rejects.toMatchObject({ retryable: true, status: 429 });
   });
 
-  it.skipIf(live)("stores the database URL as a secret, returns only its name, and keeps one stored", async () => {
-    play("pooler");
-    const secrets = memorySecrets({ SUPABASE_DB_PASSWORD: "p@ss/word" });
-    const out = await call(driver, "database.storeUrl", { ref: REF, export: "opsStore" }, secrets);
-    expect(out).toEqual({ secret: "SANOMA_DATABASE_URL_OPS_STORE" });
-    expect(await secrets.get("SANOMA_DATABASE_URL_OPS_STORE")).toBe(
-      `postgresql://postgres.${REF}:p%40ss%2Fword@aws-1-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require`,
-    );
-    expect(JSON.stringify(out)).not.toContain("p%40ss");
+  it.skipIf(live)(
+    "stores the database URL as a secret, returns only its name, and refuses another URL stored",
+    async () => {
+      play("pooler");
+      const secrets = memorySecrets({ SUPABASE_DB_PASSWORD: "p@ss/word" });
+      const out = await call(driver, "database.storeUrl", { ref: REF, export: "opsStore" }, secrets);
+      expect(out).toEqual({ secret: "SANOMA_DATABASE_URL_OPS_STORE" });
+      expect(await secrets.get("SANOMA_DATABASE_URL_OPS_STORE")).toBe(
+        `postgresql://postgres.${REF}:p%40ss%2Fword@aws-1-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require`,
+      );
+      expect(JSON.stringify(out)).not.toContain("p%40ss");
 
-    play("pooler");
-    const kept = memorySecrets({ SUPABASE_DB_PASSWORD: "x", SANOMA_DATABASE_URL_STORE: "postgresql://kept" });
-    await call(driver, "database.storeUrl", { ref: REF, export: "store" }, kept);
-    expect(await kept.get("SANOMA_DATABASE_URL_STORE")).toBe("postgresql://kept");
-  });
+      play("pooler");
+      const kept = memorySecrets({ SUPABASE_DB_PASSWORD: "x", SANOMA_DATABASE_URL_STORE: "postgresql://kept" });
+      await expect(call(driver, "database.storeUrl", { ref: REF, export: "store" }, kept)).rejects.toMatchObject({
+        message:
+          "supabase: database.storeUrl: SANOMA_DATABASE_URL_STORE holds another URL (another project, pooler or password); delete it to store this one",
+        retryable: false,
+        vendorCode: "stale",
+      });
+      expect(await kept.get("SANOMA_DATABASE_URL_STORE")).toBe("postgresql://kept");
+
+      // The same URL stored already: done.
+      play("pooler");
+      expect(await call(driver, "database.storeUrl", { ref: REF, export: "opsStore" }, secrets)).toEqual(out);
+    },
+  );
 
   it.skipIf(live)("refuses to store a URL without the database password, before asking Supabase", async () => {
     play("none", []);
@@ -118,7 +130,7 @@ describe.skipIf(live)("supabase.project's create and delete", () => {
     driver = supabaseDriver({ bridge, timeoutMs: 200 });
   });
 
-  it("creates a project once the organization has none of its name, bound by its ref, never returning its password", async () => {
+  it("creates a project once the organization has none of its name (one being deleted is none), bound by its ref, never returning its password", async () => {
     play("projects");
     const created = await call(driver, "project.create", { desired }, scrubbedPassword());
     expect(sent.map((r) => `${r.method} ${r.path}`)).toEqual(["GET /v1/projects"]);

@@ -11,6 +11,7 @@ export interface ApiProject {
   name: string;
   organization_id: string;
   organization_slug?: string;
+  status?: string;
 }
 
 /** One of a project's poolers, as `GET /v1/projects/{ref}/config/database/pooler` lists them. */
@@ -45,6 +46,9 @@ const databaseUrlSecret = (name: string) =>
 /** The secret the project's declared `database_password` names, which the URL is built with. */
 const PASSWORD_SECRET = "SUPABASE_DB_PASSWORD";
 
+/** A project's statuses while it is deleted, and after: not a twin of a new one. */
+const GONE = new Set(["GOING_DOWN", "REMOVED"]);
+
 /** The session pooler's port: the transaction pooler's (6543) does not carry LISTEN/NOTIFY, which DBOS needs. */
 const SESSION_PORT = 5432;
 
@@ -67,7 +71,8 @@ export function withManagement(driver: Driver, api: () => ManagementApi): Driver
     "project.create": async (input: { desired: { name: string; organization_id: string } }, call: CallContext) => {
       const { name, organization_id: org } = input.desired;
       const twin = (await api().projects()).find(
-        (p) => p.name === name && (p.organization_id === org || p.organization_slug === org),
+        (p) =>
+          p.name === name && (p.organization_id === org || p.organization_slug === org) && !GONE.has(p.status ?? ""),
       );
       if (twin) {
         throw new DriverError(
@@ -95,11 +100,14 @@ export function withManagement(driver: Driver, api: () => ManagementApi): Driver
         });
       }
       const { host, port, user, database } = await pooler(ref);
-      await secrets.ensure(
-        secret,
-        () =>
-          `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database)}?sslmode=require`,
-      );
+      const url = `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database)}?sslmode=require`;
+      // The store only adds: a URL stored before for another project or password is refused, not kept.
+      if ((await secrets.ensure(secret, () => url)) !== url) {
+        throw new DriverError(
+          `supabase: database.storeUrl: ${secret} holds another URL (another project, pooler or password); delete it to store this one`,
+          { retryable: false, vendorCode: "stale" },
+        );
+      }
       return { secret };
     },
   };

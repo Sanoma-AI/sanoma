@@ -52,7 +52,11 @@ function managementApi(token: string, timeoutMs: number): ManagementApi {
       } catch {}
       throw apiError(path, res.status, message || res.statusText, retryableStatus(res.status));
     }
-    return (await res.json()) as T;
+    try {
+      return (await res.json()) as T;
+    } catch (e) {
+      throw new DriverError(`supabase: GET ${path} answered ${res.status} without JSON`, { retryable: true, cause: e });
+    }
   };
   return {
     projects: () => get("/v1/projects"),
