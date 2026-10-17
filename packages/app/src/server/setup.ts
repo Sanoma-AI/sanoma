@@ -238,11 +238,14 @@ export async function connectExisting(
     const given = request[what];
     return given ? [{ ...EXISTING[what], given }] : [];
   });
+  const states = await Promise.all(
+    wanted.map(({ vendor, type, given }) => imported(resolved, `${vendor}.${type}`, given.split("/").at(-1)!)),
+  );
   const exports = [];
   const bind: Record<string, string> = {};
-  for (const { given, ...at } of wanted) {
-    const [owner, name] = given.includes("/") ? given.split("/") : [undefined, given];
-    const state = await imported(resolved, `${at.vendor}.${at.type}`, name!);
+  for (const [i, { given, ...at }] of wanted.entries()) {
+    const state = states[i]!;
+    const owner = given.includes("/") ? given.slice(0, given.indexOf("/")) : undefined;
     // The connector reads one owner's repositories (`GITHUB_OWNER`, else the token's user).
     if (owner && String(state.full_name).toLowerCase() !== given.toLowerCase()) {
       throw new ApiError(400, {
@@ -259,9 +262,9 @@ export async function connectExisting(
 
   const git = source && (await gitAt(source.root));
   const branch = git && (await git("remote")) ? CONNECT_BRANCH : undefined;
-  if (git && branch) {
+  if (branch) {
     try {
-      await git("switch", "--quiet", "-c", branch);
+      await git!("switch", "--quiet", "-c", branch);
     } catch (err) {
       throw new ApiError(409, { error: `Could not start the branch ${branch}: ${errorMessage(err)}` });
     }
@@ -274,7 +277,7 @@ export async function connectExisting(
     message: `Connect ${names}`,
     author: actor.id,
   });
-  const diff = git && branch && commit ? await git("show", "--format=", commit.revision) : undefined;
+  const diff = branch && commit ? await git!("show", "--format=", commit.revision) : undefined;
   const runId = await client.apply({ only: Object.keys(bind), bind }, { startedBy: actor });
   return { file: INFRA_FILE, text, runId, ...commit, ...(branch && { branch }), ...(diff && { diff }) };
 }
@@ -304,11 +307,11 @@ async function imported(resolved: AppContext["resolved"], type: string, id: stri
   return found.state;
 }
 
+const execGit = promisify(execFile);
+
 /** Git in `root`, when it is a git checkout: each call's output, trimmed. */
 async function gitAt(root: string) {
   const run = async (...args: string[]) =>
-    (
-      await promisify(execFile)("git", args, { cwd: root, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } })
-    ).stdout.trim();
+    (await execGit("git", args, { cwd: root, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } })).stdout.trim();
   return (await run("rev-parse", "--is-inside-work-tree").catch(() => "")) === "true" ? run : undefined;
 }
