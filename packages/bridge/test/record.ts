@@ -122,7 +122,6 @@ export function recorder(dir: string): Interceptor {
           ? join(change, "plan.json")
           : (release.applies.get(applyKey(req.typeName, req.priorStateJson, req.configJson)) ??
             join(change, "apply.json"));
-      refuseSensitive(file, req.typeName, hits);
       const schema = method === "Plan" ? PlanRequestSchema : ApplyRequestSchema;
       const request = message(schema, { ...req, priorStateJson, configJson } as never);
       const opaque = [req.priorPrivate, ...("planned" in req ? [req.planned, req.plannedPrivate] : [])];
@@ -141,9 +140,28 @@ export function recorder(dir: string): Interceptor {
     return { release, hits, file: readFile(dir, ref, release, req), request, opaque: [req.private] };
   }
 
+  /** Refuses a change the recorder could not write scrubbed before it reaches the provider, so nothing is changed unrecorded. */
+  function refuseSensitive({ provider, typeName, priorStateJson, configJson }: Change) {
+    const release = provider && releases.get(releaseName(provider));
+    if (!release) return;
+    const hits = new Set<string>();
+    try {
+      for (const json of [priorStateJson, configJson]) scrubState(release, typeName, json, hits);
+    } catch {
+      return; // Not JSON: the bridge refuses it.
+    }
+    const sensitive = [...hits].find((path) => path.startsWith(`${typeName}.`));
+    if (sensitive) {
+      throw new Error(
+        `recording a change of ${typeName}: ${sensitive} is sensitive, and the plan would hold it unscrubbed; record this change with provider-bridge's bridge-record`,
+      );
+    }
+  }
+
   return (next) => async (req) => {
     if (req.stream) return next(req);
     const method = req.method.name;
+    if (method === "Plan" || method === "Apply") refuseSensitive(req.message as Change);
     let res: Awaited<ReturnType<typeof next>>;
     try {
       res = await next(req);
@@ -268,16 +286,6 @@ function changeDir(dir: string, ref: ProviderRef, typeName: string, priorStateJs
   const hash = createHash("sha256").update(`${priorStateJson}\n${configJson}`).digest("hex").slice(0, 8);
   const name = id === undefined ? `create-${hash}` : configJson ? `${id}-${hash}` : `${id}-delete`;
   return replyDir(dir, ref, typeName, name);
-}
-
-/** Refuses a plan or apply whose prior state or config held a sensitive value: its `planned` holds it too, as msgpack the recorder cannot scrub. */
-function refuseSensitive(file: string, typeName: string, hits: Set<string>) {
-  const sensitive = [...hits].find((path) => path.startsWith(`${typeName}.`));
-  if (sensitive) {
-    throw new Error(
-      `recording ${file}: ${sensitive} is sensitive, and the plan holds it unscrubbed; record this change with provider-bridge's bridge-record`,
-    );
-  }
 }
 
 function readFile(dir: string, ref: ProviderRef, release: Release, msg: ReadRequest): string {

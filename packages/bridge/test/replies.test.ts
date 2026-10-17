@@ -159,6 +159,16 @@ describe("stateBridge", () => {
       });
       expect(state.objects["github_repository/sanoma"]).toBeUndefined();
       expect((await bridge.read(github, "github_repository", prior)).gone).toBe(true);
+      // An update of an object no longer there fails at the provider.
+      const gone = await bridge.apply(github, "github_repository", {
+        priorStateJson: prior,
+        configJson: "{}",
+        ...update,
+      });
+      expect(gone).toEqual({
+        errors: [expect.objectContaining({ summary: 'github_repository "sanoma" no longer exists' })],
+        warnings: [],
+      });
     });
 
     it("refuses what the bridge refuses", async () => {

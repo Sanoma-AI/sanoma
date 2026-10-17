@@ -65,6 +65,7 @@ const schema: SchemaDocument = {
 const state = (id: string) =>
   `{"count":18446744073709551617,"id":"${id}","owner":"acme-corp","rule":[{"key":"k1"}],"secret":"s3cr3t-value","settings":{"mode":"on","password":"hunter22"},"url":"https://x.example/?t=${token}"}`;
 
+let applies = 0;
 const provider: ServiceImpl<typeof BridgeService> = {
   getSchema: () => ({ schemaJson: `${JSON.stringify(schema, null, 2)}\n`, protocol: 6, sha256: "ab".repeat(32) }),
   configure: () => ({ warnings: [], sha256: "ab".repeat(32) }),
@@ -111,6 +112,7 @@ const provider: ServiceImpl<typeof BridgeService> = {
         };
   },
   apply: (req) => {
+    applies++;
     if (!req.configJson) return {};
     const stateJson = JSON.stringify({ ...JSON.parse(req.configJson), id: "w:new" });
     const resource = { typeName: req.typeName, stateJson };
@@ -269,6 +271,14 @@ describe("recorder", () => {
       .plan(ref, "widget_thing", { configJson: desired("o3", "s3cr3t-value") })
       .catch((e: unknown) => e);
     expect((error as Error).message).toContain("widget_thing.secret is sensitive");
+    // Refused before it reaches the provider, so nothing is changed unrecorded.
+    const before = applies;
+    const apply = bridge.apply(ref, "widget_thing", {
+      configJson: desired("o3", "s3cr3t-value"),
+      planned: new Uint8Array([1]),
+    });
+    await expect(apply).rejects.toThrow("widget_thing.secret is sensitive");
+    expect(applies).toBe(before);
   });
 
   it("writes fixtures the fake replays", async () => {

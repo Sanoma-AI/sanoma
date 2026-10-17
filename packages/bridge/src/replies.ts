@@ -170,7 +170,8 @@ const resourceOf = (o: StateObject): ResourceState => ({
  * prior value, as for a computed attribute; a create plans `id` and the null `vendorOwned`
  * attributes unknown; a change to an `immutable` attribute is a replace. `planned` is the planned
  * state's JSON. `apply` puts the planned state into `state` (a created object gets the id
- * `<type>-<n>`, under that import id), or, for a delete, removes the object.
+ * `<type>-<n>`, under that import id; its other unknowns stay null), or, for a delete, removes
+ * the object; an update of an object no longer there fails in `errors`, as a provider's would.
  */
 export function stateBridge(
   state: BridgeState,
@@ -229,6 +230,10 @@ export function stateBridge(
         return { errors: [], warnings: [] };
       }
       if (!input.planned?.length) throw new BridgeError("invalid_argument", "planned is required with config_json");
+      if (prior && !there) {
+        const summary = `${typeName} "${String(prior.id)}" no longer exists`;
+        return { errors: [{ severity: "error", summary, detail: "", attributePath: "" }], warnings: [] };
+      }
       const planned = JSON.parse(new TextDecoder().decode(input.planned)) as JsonObject;
       let id = prior?.id ?? planned.id;
       if (id === null || id === undefined) {
@@ -268,9 +273,7 @@ export function stateBridge(
       const id = stateId(stateJson);
       calls.push({ method: "read", ref, typeName, ...(id === undefined ? {} : { id }) });
       ready(ref);
-      const found = Object.values(state.objects).find(
-        (o): o is StateObject => !isFailure(o) && o.typeName === typeName && o.state.id === id,
-      );
+      const found = objectWithId(typeName, id)?.[1];
       return found ? { resource: resourceOf(found), gone: false, warnings: [] } : { gone: true, warnings: [] };
     },
     async close(ref) {
