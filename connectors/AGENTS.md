@@ -11,7 +11,7 @@ One workspace package per vendor, each built on `@sanoma-ai/workflows`. A connec
 | [`github/`](github/AGENTS.md)     | `@sanoma-ai/connector-github`: GitHub resources read through its OpenTofu provider          |
 | [`resend/`](resend/AGENTS.md)     | `@sanoma-ai/connector-resend`: Resend broadcast operations and an in-memory fake            |
 | [`stripe/`](stripe/AGENTS.md)     | `@sanoma-ai/connector-stripe`: Stripe resources read through its OpenTofu provider          |
-| [`supabase/`](supabase/AGENTS.md) | `@sanoma-ai/connector-supabase`: Supabase projects read through its OpenTofu provider       |
+| [`supabase/`](supabase/AGENTS.md) | `@sanoma-ai/connector-supabase`: Supabase projects (OpenTofu provider), pooler and health   |
 
 ## Shared connector conventions
 
