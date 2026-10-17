@@ -3,6 +3,8 @@
 // and the shipped oxlint.json test lints them in a project of its own.
 
 const GH = `import { github } from "@sanoma-ai/connector-github/resources";\n\n`;
+const SECRET = `import { secret } from "sanoma/resources";\n`;
+const WEB = `${SECRET}${GH}export const web = github.repository({ name: "web", description: `;
 
 export const BAD_DATA_FILES: [name: string, source: string, at: string, message: RegExp][] = [
   [
@@ -76,6 +78,27 @@ export const BAD_DATA_FILES: [name: string, source: string, at: string, message:
     `${GH}export const web = github.repository({ name: "web", description: process.env.SITE_DESCRIPTION });\n`,
     "3:66",
     /^process is not allowed in a data file: .*cannot read the environment/,
+  ],
+  [
+    "secret-import",
+    `import { secret, sign } from "sanoma/resources";\n${GH}export const web = github.repository({ name: "web" });\n`,
+    "1:18",
+    /^a data file imports only `secret` from "sanoma\/resources"/,
+  ],
+  ["secret-marker", `${WEB}{ $secret: "X" } });\n`, "4:68", /^name a secret with `secret\("NAME"\)`/],
+  ["secret-name", `${WEB}secret("lower") });\n`, "4:73", /^"lower" is not a secret's name: `secret\("NAME"\)`/],
+  [
+    "secret-options",
+    `${WEB}secret("X", { generate: "yes" }) });\n`,
+    "4:78",
+    /^a secret's options are `\{ generate: true \}` or none/,
+  ],
+  ["secret-template", `${WEB}secret(\`X\`) });\n`, "4:66", /^write the secret's name as a string/],
+  [
+    "secret-unimported",
+    `${GH}export const web = github.repository({ name: "web", description: secret("X") });\n`,
+    "3:66",
+    /^import secret to name one: `import \{ secret \} from "sanoma\/resources"`/,
   ],
   [
     "spread",

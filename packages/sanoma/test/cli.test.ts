@@ -17,7 +17,8 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 describe("sanoma serve", () => {
   it("runs the worker and the app, prints what is not configured in one line and where, and stops on SIGINT", async () => {
     dir = copyFixture();
-    const { child, finished, output } = startCli(dir, ["serve"], unconfigured);
+    // No key: serve makes one into .env before the worker starts.
+    const { child, finished, output } = startCli(dir, ["serve"], { ...unconfigured, SANOMA_SECRETS_KEY: "" });
     try {
       const stdout = await waitFor(
         () => output().stdout,
@@ -29,6 +30,8 @@ describe("sanoma serve", () => {
       // The worker's one line, naming the vendor; nothing per variable, and no pg deprecation
       // (DBOS's per-connection SET, see DBOS_DATABASE_OPTIONS).
       expect(stderr).toContain("sanoma: 1 of 1 connectors not configured yet: ghost; set their variables");
+      expect(stderr).toMatch(/created SANOMA_SECRETS_KEY in \S+\.env: it encrypts the stored credentials/);
+      expect(readFileSync(join(dir, ".env"), "utf8")).toMatch(/^SANOMA_SECRETS_KEY=[A-Za-z0-9+/]{43}=\n$/);
       expect(`${stdout}${stderr}`).not.toMatch(/is not configured|DeprecationWarning/);
       const url = stdout.match(/at (http:\/\/127\.0\.0\.1:\d+); ctrl-c to stop/)![1]!;
       // The app is up: its home lists the config's one workflow, rendered on the server.
@@ -65,6 +68,9 @@ describe("sanoma env", () => {
 
 # Optional. Postgres for the worker and the app; default postgresql://postgres:dbos@localhost:5433/sanoma.
 # SANOMA_DATABASE_URL=
+# Optional. Encrypts the stored credentials, and signs GitHub sign-in's cookie: 32 random bytes,
+# base64. \`sanoma\` writes one here when none is set; keep it with the database.
+# SANOMA_SECRETS_KEY=
 # Optional. The app's port; default 3000.
 # SANOMA_APP_PORT=
 # Optional. The address the app listens on; default 127.0.0.1. Any other needs GitHub sign-in.

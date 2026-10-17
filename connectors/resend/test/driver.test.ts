@@ -1,5 +1,5 @@
 import { type Exchange, live, replay } from "@sanoma-ai/testing/replay";
-import type { CallContext } from "@sanoma-ai/workflows";
+import { type CallContext, memorySecrets } from "@sanoma-ai/workflows";
 import { delay, http, HttpResponse } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import { resendDriver } from "../src/driver.ts";
@@ -9,9 +9,21 @@ import { audience, from, replayOptions } from "./replay.ts";
 
 const { server, play, fixture, sent } = replay(replayOptions);
 
-const call: CallContext = { idempotencyKey: "run-1:3", runId: "run-1", opId: "resend.broadcast.create", attempt: 1 };
+const call: CallContext = {
+  idempotencyKey: "run-1:3",
+  runId: "run-1",
+  opId: "resend.broadcast.create",
+  attempt: 1,
+  secrets: memorySecrets(),
+};
 /** The run's next call: its own idempotency key. */
-const sendCall: CallContext = { idempotencyKey: "run-1:4", runId: "run-1", opId: "resend.broadcast.send", attempt: 1 };
+const sendCall: CallContext = {
+  idempotencyKey: "run-1:4",
+  runId: "run-1",
+  opId: "resend.broadcast.send",
+  attempt: 1,
+  secrets: memorySecrets(),
+};
 const driver = resendDriver({ timeoutMs: live ? 15_000 : 200 });
 const create = (input: Record<string, unknown>) => driver.ops["broadcast.create"]!(input, call);
 const send = (id: string) => driver.ops["broadcast.send"]!({ id }, sendCall);

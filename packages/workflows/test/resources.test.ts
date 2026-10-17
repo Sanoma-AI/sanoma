@@ -25,8 +25,13 @@ const widget = defineResource({
   type: "widget",
   title: "Widget",
   identity: "name",
-  schema: z.object({ name: z.string(), size: z.number().nullish(), url: z.string().nullish() }),
-  fields: { immutable: [], vendorOwned: ["url"], writeOnly: [] },
+  schema: z.object({
+    name: z.string(),
+    size: z.number().nullish(),
+    url: z.string().nullish(),
+    token: z.string().min(8).nullish(),
+  }),
+  fields: { immutable: [], vendorOwned: ["url"], writeOnly: ["token"] },
   find: ({ name }) => name,
 });
 const acme = defineConnector("acme", { widget }, { package: "@acme/sanoma-connector" });
@@ -338,6 +343,39 @@ export const main = github.branch_protection({ repository_id: web, pattern: "mai
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("secret()", () => {
+  let dir = "";
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  const ACME = `import { acme } from "@acme/sanoma-connector/resources";\n`;
+
+  it("reads a secret at a write-only field as its marker, imported from either entry", () => {
+    dir = project({
+      "a.ts": `${ACME}import { secret } from "sanoma/resources";\nexport const a = acme.widget({ name: "a", token: secret("A_TOKEN") });\n`,
+      "b.ts": `${ACME}import { secret as s } from "@sanoma-ai/workflows/resources";\nexport const b = acme.widget({ name: "b", token: s("B_TOKEN", { generate: true }) });\n`,
+    });
+    const { resources, problems } = readDataFiles(dir, base.connectors);
+    expect(problems).toEqual([]);
+    expect(resources.map((r) => r.desired)).toEqual([
+      { name: "a", token: { $secret: "A_TOKEN" } },
+      { name: "b", token: { $secret: "B_TOKEN", generate: true } },
+    ]);
+  });
+
+  it("refuses a secret anywhere else, as the type does", () => {
+    dir = project({
+      "a.ts": `${ACME}import { secret } from "sanoma/resources";\nexport const a = acme.widget({ name: secret("A_NAME") });\n`,
+    });
+    expect(readDataFiles(dir, base.connectors).problems).toEqual([
+      {
+        file: "resources/a.ts",
+        line: 3,
+        column: 1,
+        message: "export const a: acme.widget: name is not write-only, so it takes a value, not a secret (A_NAME)",
+      },
+    ]);
   });
 });
 

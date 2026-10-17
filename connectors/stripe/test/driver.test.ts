@@ -1,5 +1,5 @@
 import { loadReplies, stateBridge } from "@sanoma-ai/bridge/fake";
-import { type Driver } from "@sanoma-ai/workflows";
+import { type Driver, memorySecrets } from "@sanoma-ai/workflows";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { stripeDriver } from "../src/driver.ts";
 import { fakeStripe } from "../src/fake.ts";
@@ -11,7 +11,13 @@ const fixtures = new URL("../testdata/", import.meta.url);
 let seq = 0;
 /** Calls one of a driver's operations the way the runtime does. */
 const call = (driver: Driver, op: string, input: unknown): Promise<any> =>
-  driver.ops[op]!(input, { idempotencyKey: `run:${++seq}`, runId: "run", opId: `stripe.${op}`, attempt: 1 });
+  driver.ops[op]!(input, {
+    idempotencyKey: `run:${++seq}`,
+    runId: "run",
+    opId: `stripe.${op}`,
+    attempt: 1,
+    secrets: memorySecrets(),
+  });
 
 describe("stripeDriver", () => {
   let bridge: ReturnType<typeof stateBridge>;

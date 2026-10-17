@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type CallContext, DriverError } from "@sanoma-ai/workflows";
+import { type CallContext, DriverError, memorySecrets } from "@sanoma-ai/workflows";
 import { fakeBluesky } from "@sanoma-ai/connector-bluesky/fake";
 import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
 import { fakeGithub } from "@sanoma-ai/connector-github/fake";
@@ -13,6 +13,7 @@ const call = (idempotencyKey: string, attempt = 1): CallContext => ({
   runId: idempotencyKey.split(":")[0] ?? "run",
   opId: "unused",
   attempt,
+  secrets: memorySecrets(),
 });
 const draft = { title: "Hello world", html: "<p>Hi</p>", status: "draft" as const };
 

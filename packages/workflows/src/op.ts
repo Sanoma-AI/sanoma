@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { Fake } from "./fake.ts";
+import type { Secrets } from "./secret.ts";
 import type { Steps } from "./steps.ts";
 
 /**
@@ -235,6 +236,8 @@ export interface CallContext {
   opId: string;
   /** 1 on the first try; retries count up (idempotent operations only). */
   attempt: number;
+  /** The secrets store, for the values `secret()` markers name: `resolveSecrets(input, call.secrets)`. In memory for a fake. */
+  secrets: Secrets;
 }
 
 export type DriverFn<I = any, O = unknown> = (input: I, call: CallContext) => Promise<O>;

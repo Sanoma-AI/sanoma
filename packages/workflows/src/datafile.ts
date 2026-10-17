@@ -1,6 +1,7 @@
 import { basename, dirname, join } from "node:path";
 import type { Node } from "./ast.ts";
 import { inside, nearestDir, RELATIVE } from "./paths.ts";
+import { type Secret, SECRET_NAME } from "./secret.ts";
 
 // The one definition of what a data file may hold, over an ESTree program from oxc: the reader
 // (`resources.ts`), `lintResources` (`lint.ts`) and the oxlint plugin (`plugin.ts`) all
@@ -29,8 +30,19 @@ Object.defineProperty(Reference.prototype, REFERENCE, { value: true });
 export const isReference = (value: unknown): value is Reference =>
   typeof value === "object" && value !== null && REFERENCE in value;
 
-/** A value in a data file: a literal, or a reference to a declared resource. */
-export type DataValue = null | boolean | number | string | Reference | DataValue[] | { [field: string]: DataValue };
+/** What `secret("NAME")` stands for in a data file: its marker, `{ $secret: "NAME", generate?: true }`. */
+export type SecretRef = Secret;
+
+/** A value in a data file: a literal, a reference to a declared resource, or a secret's marker. */
+export type DataValue =
+  | null
+  | boolean
+  | number
+  | string
+  | Reference
+  | SecretRef
+  | DataValue[]
+  | { [field: string]: DataValue };
 
 /** An `import { name } from "…"`: of a connector's constructors (`from "…/resources"`), or of another data file's resource. */
 export interface DataFileImport {
@@ -68,12 +80,16 @@ export interface DataFile {
 /** A connector's constructors entry: a package specifier that ends in `/resources`. */
 const CONSTRUCTORS = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*\/resources$/;
 
+/** Where a data file imports `secret` from; checked before `CONSTRUCTORS`, which they match too. */
+const SECRET_ENTRIES: ReadonlySet<string> = new Set(["sanoma/resources", "@sanoma-ai/workflows/resources"]);
+const SECRET_CALL = '`secret("NAME")` or `secret("NAME", { generate: true })`, NAME upper case (A-Z, 0-9 and _)';
+
 const SHAPE =
   "a data file holds only imports, `export const <name> = <vendor>.<type>({ … })` and `export default [ … ]`";
 const IMPORTS =
   "import resource constructors from a connector's resources entry " +
   '(`import { github } from "@sanoma-ai/connector-github/resources"`) ' +
-  'and resources from other data files (`import { site } from "./github.ts"`)';
+  'and resources from other data files (`import { site } from "./github.ts"`), and `secret` from "sanoma/resources"';
 const VALUES = "write a string, number, boolean, null, object or array, or name a declared resource";
 
 /**
@@ -101,6 +117,8 @@ export function readDataFile(
   const exports: DataFileExport[] = [];
   // Names a refused import or declaration binds: reported once, where they are bound.
   const refused = new Set<string>();
+  // The local names of `secret`.
+  const secrets = new Set<string>();
 
   // Imports and top-level names first, each once: imports are hoisted, and a reference may name
   // a resource declared further down. An unexported const is refused where it is declared, not
@@ -168,6 +186,21 @@ export function readDataFile(
     }
     if (!s.specifiers.length) {
       fail(s, `import "${spec}" is not allowed in a data file: it imports nothing, and a data file runs no code`);
+      return;
+    }
+    if (SECRET_ENTRIES.has(spec)) {
+      for (const sp of s.specifiers) {
+        if (
+          sp.type === "ImportSpecifier" &&
+          sp.importKind !== "type" &&
+          (sp.imported.name ?? sp.imported.value) === "secret"
+        ) {
+          secrets.add(sp.local.name);
+        } else {
+          fail(sp, `a data file imports only \`secret\` from "${spec}": \`import { secret } from "${spec}"\``);
+          refused.add(sp.local.name);
+        }
+      }
       return;
     }
     for (const sp of s.specifiers) {
@@ -339,6 +372,10 @@ export function readDataFile(
         );
       }
       case "CallExpression":
+        if (node.callee.type === "Identifier" && secrets.has(node.callee.name)) return readSecret(node);
+        if (node.callee.type === "Identifier" && node.callee.name === "secret" && !bound.has("secret")) {
+          return refuse(node, `import secret to name one: \`import { secret } from "sanoma/resources"\``);
+        }
         return refuse(
           node,
           node.callee.type === "MemberExpression" &&
@@ -378,8 +415,32 @@ export function readDataFile(
     if (p.computed) return refuse(p.key, "a computed key is not allowed in a data file: write the field's name");
     const key = keyName(p.key);
     if (key === undefined) return refuse(p.key, "write the field's name, or a string");
+    if (key === "$secret") return refuse(p.key, `name a secret with ${SECRET_CALL}`);
     const v = value(p.value);
     return v === undefined ? undefined : [key, v];
+  }
+
+  /** A `secret(…)` call's marker: literal arguments only. */
+  function readSecret(node: Node): SecretRef | undefined {
+    const [name, options, ...extra] = node.arguments;
+    if (name?.type !== "Literal" || typeof name.value !== "string" || extra.length) {
+      return refuse(node, `write the secret's name as a string: ${SECRET_CALL}`);
+    }
+    if (!SECRET_NAME.test(name.value))
+      return refuse(name, `${JSON.stringify(name.value)} is not a secret's name: ${SECRET_CALL}`);
+    if (options === undefined) return { $secret: name.value };
+    const [generate, ...others] = options.type === "ObjectExpression" ? options.properties : [];
+    if (
+      others.length ||
+      generate?.type !== "Property" ||
+      generate.computed ||
+      (generate.key.name ?? generate.key.value) !== "generate" ||
+      generate.value.type !== "Literal" ||
+      typeof generate.value.value !== "boolean"
+    ) {
+      return refuse(options, `a secret's options are \`{ generate: true }\` or none: ${SECRET_CALL}`);
+    }
+    return generate.value.value ? { $secret: name.value, generate: true } : { $secret: name.value };
   }
 
   function reference(node: Node): Reference | undefined {

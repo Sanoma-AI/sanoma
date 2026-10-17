@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { parse } from "../src/ast.ts";
 import { readDataFile, Reference } from "../src/datafile.ts";
 import { type DataFileContent, formatOptions, renderDataFile, setFields } from "../src/writer.ts";
+import { secret } from "../src/secret.ts";
 import { tree } from "./tree.ts";
 
 // The repository's own oxfmt options, which the fixtures are formatted with.
@@ -172,6 +173,41 @@ export default [repo, rule, empty];
     expect(back.exports.map(({ name, vendor, type, desired }) => ({ name, vendor, type, desired }))).toEqual(
       content.exports,
     );
+  });
+
+  it("writes a secret as secret(), importing it from sanoma/resources", async () => {
+    const content: DataFileContent = {
+      imports: [{ source: "@sanoma-ai/connector-supabase/resources", imported: "supabase", local: "supabase" }],
+      exports: [
+        {
+          name: "db",
+          vendor: "supabase",
+          type: "project",
+          desired: {
+            name: "acme",
+            database_password: secret("SUPABASE_DB_PASSWORD", { generate: true }),
+            hooks: [{ token: secret("HOOK_TOKEN") }],
+          },
+        },
+      ],
+    };
+    const text = await renderDataFile(content, options);
+    expect(text).toBe(`import { supabase } from "@sanoma-ai/connector-supabase/resources";
+import { secret } from "sanoma/resources";
+
+export const db = supabase.project({
+  name: "acme",
+  database_password: secret("SUPABASE_DB_PASSWORD", { generate: true }),
+  hooks: [{ token: secret("HOOK_TOKEN") }],
+});
+
+export default [db];
+`);
+    const back = read(text);
+    expect(back.problems).toEqual([]);
+    expect(back.exports[0]!.desired).toEqual(content.exports[0]!.desired);
+    // Read back and rendered again: the import once.
+    expect(await renderDataFile(back, options)).toBe(text);
   });
 
   it("writes a reference made by another copy of the package", async () => {

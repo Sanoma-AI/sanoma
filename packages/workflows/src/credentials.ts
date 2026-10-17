@@ -1,19 +1,67 @@
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Client } from "pg";
 import { credentialsOf } from "./env.ts";
 import { CREDENTIALS_TABLE as TABLE, type Db, prepareDatabase } from "./db.ts";
 import { info, warn } from "./log.ts";
 import type { Driver } from "./op.ts";
+import type { Secrets } from "./secret.ts";
 import { errorMessage } from "./shared.ts";
 
 // Where the credentials set from the app live: one table in the config's database, beside DBOS's
 // own (made by `prepareDatabase` in db.ts). A value is read here only, by the worker to load it
-// into its environment and by the client to check it, and leaves neither. The write
-// (`storeCredential`) and the read (`storedCredentials`) are the only places that touch `value`,
-// so a hosted deployment's encryption goes there.
+// into its environment or hand it to a driver (`storedSecrets`) and by the client to check it,
+// and leaves none of them. The write (`storeCredential`, `ensureCredential`) and the read
+// (`storedCredentials`) are the only places that touch `value`, which holds it encrypted
+// (`encrypt`) under `SANOMA_SECRETS_KEY`.
 
 /** Where a change is announced, with the variable's name as the payload. */
 const CHANNEL = "sanoma_credentials";
+
+/** The variable holding the key the stored values are encrypted with: 32 bytes, base64. */
+export const SECRETS_KEY = "SANOMA_SECRETS_KEY";
+
+/** What starts an encrypted value; a value without it is a plaintext one stored before encryption, read as it is. */
+const V1 = "v1:";
+const CIPHER = "aes-256-gcm";
+const TAG_BYTES = 16;
+
+/** The key from the environment, or an error naming the variable. */
+function secretsKey(): Buffer {
+  const text = process.env[SECRETS_KEY];
+  if (!text) {
+    throw new Error(
+      `${SECRETS_KEY} is not set: it encrypts the stored credentials; set it to 32 random bytes, base64 (\`openssl rand -base64 32\`)`,
+    );
+  }
+  const key = Buffer.from(text, "base64");
+  if (key.length !== 32) throw new Error(`${SECRETS_KEY} must be 32 bytes, base64; it is ${key.length} bytes`);
+  return key;
+}
+
+/** `value` encrypted for the table: `v1:<iv, base64>:<ciphertext and tag, base64>`, AES-256-GCM. */
+export function encrypt(value: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv(CIPHER, secretsKey(), iv);
+  const sealed = Buffer.concat([cipher.update(value, "utf8"), cipher.final(), cipher.getAuthTag()]);
+  return `${V1}${iv.toString("base64")}:${sealed.toString("base64")}`;
+}
+
+/** The value `name`'s row holds: decrypted, or a plaintext one as it is (it is encrypted on its next write). */
+export function decrypt(name: string, stored: string): string {
+  if (!stored.startsWith(V1)) return stored;
+  const [iv = "", body = ""] = stored.slice(V1.length).split(":");
+  const sealed = Buffer.from(body, "base64");
+  const decipher = createDecipheriv(CIPHER, secretsKey(), Buffer.from(iv, "base64"));
+  decipher.setAuthTag(sealed.subarray(-TAG_BYTES));
+  try {
+    return Buffer.concat([decipher.update(sealed.subarray(0, -TAG_BYTES)), decipher.final()]).toString("utf8");
+  } catch (err) {
+    throw new Error(`the stored ${name} cannot be decrypted: ${SECRETS_KEY} is not the key it was stored with`, {
+      cause: err,
+    });
+  }
+}
 
 /** The stored rows of these names, values included: for loading into an environment or checking, never for showing. */
 export async function storedCredentials(
@@ -24,7 +72,9 @@ export async function storedCredentials(
     `SELECT name, value, set_by, set_at FROM ${TABLE} WHERE name = ANY($1)`,
     [names],
   );
-  return new Map(rows.map((r) => [r.name, { value: r.value, setBy: r.set_by, setAt: r.set_at.toISOString() }]));
+  return new Map(
+    rows.map((r) => [r.name, { value: decrypt(r.name, r.value), setBy: r.set_by, setAt: r.set_at.toISOString() }]),
+  );
 }
 
 /** Upserts the value and announces it, in one statement, so a worker never hears of a change it cannot read. */
@@ -36,8 +86,38 @@ export async function storeCredential(
     `WITH stored AS (INSERT INTO ${TABLE} (name, value, set_by) VALUES ($1, $2, $3) ` +
       "ON CONFLICT (name) DO UPDATE SET value = EXCLUDED.value, set_by = EXCLUDED.set_by, set_at = now() " +
       `RETURNING name) SELECT pg_notify('${CHANNEL}', name) FROM stored`,
-    [name, value, setBy],
+    [name, encrypt(value), setBy],
   );
+}
+
+/**
+ * The stored value of `name`; when there is none, `make()`'s, stored first and announced. Of two
+ * at once, the first stored wins, and both return it.
+ */
+export async function ensureCredential(
+  db: Db,
+  { name, make, setBy }: { name: string; make: () => string; setBy: string },
+): Promise<string> {
+  const stored = (await storedCredentials(db, [name])).get(name);
+  if (stored) return stored.value;
+  await db.query(
+    `WITH stored AS (INSERT INTO ${TABLE} (name, value, set_by) VALUES ($1, $2, $3) ON CONFLICT (name) DO NOTHING ` +
+      `RETURNING name) SELECT pg_notify('${CHANNEL}', name) FROM stored`,
+    [name, encrypt(make()), setBy],
+  );
+  return (await storedCredentials(db, [name])).get(name)!.value;
+}
+
+/**
+ * The secrets store a live driver is given (`CallContext.secrets`): a variable the environment
+ * sets wins, as it does for a driver's `env`; else the stored value. `ensure` stores what it
+ * makes as `setBy`.
+ */
+export function storedSecrets(db: () => Promise<Db>, setBy: string): Secrets {
+  return {
+    get: async (name) => process.env[name] || (await storedCredentials(await db(), [name])).get(name)?.value,
+    ensure: async (name, make) => process.env[name] || ensureCredential(await db(), { name, make, setBy }),
+  };
 }
 
 /** Deletes the row, announcing it when there was one. */

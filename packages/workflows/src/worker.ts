@@ -2,8 +2,8 @@ import { DBOS } from "@dbos-inc/dbos-sdk";
 import { buildCtx, isInfrastructureError } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
-import { watchCredentials } from "./credentials.ts";
-import { DBOS_DATABASE_OPTIONS, prepareDatabase } from "./db.ts";
+import { storedSecrets, watchCredentials } from "./credentials.ts";
+import { DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase } from "./db.ts";
 import type { WorkflowDefinition } from "./define.ts";
 import { credentialsOf, unconfigured, unconfiguredSummary } from "./env.ts";
 import { errorInfo, parseOrThrow } from "./errors.ts";
@@ -63,6 +63,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   setLogLevel(options.logLevel);
   // The config's own, or a Postgres store made for this worker, which `stop` then closes.
   const ledger = ownedLedger(resolved);
+  const secrets = lazyPool(resolved.databaseUrl, "secrets");
   const state: WorkerState = {
     app: resolved.appName,
     ops: resolved.ops,
@@ -74,6 +75,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     steps: resolved.steps,
     policy: resolved.policy,
     ledger: ledger.store,
+    secrets: storedSecrets(() => secrets.db(), "sanoma"),
     workflows: resolved.workflows,
     outlines: new Map([...resolved.workflows].map(([name, wf]) => [name, outlineOf(wf)])),
     stopped: false,
@@ -87,7 +89,12 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       state.stopped = true;
       // Each is closed whatever the one before did; the first failure is what stop throws.
       let failed: { error: unknown } | undefined;
-      for (const close of [() => DBOS.shutdown(), () => credentials.close(), () => ledger.close()]) {
+      for (const close of [
+        () => DBOS.shutdown(),
+        () => credentials.close(),
+        () => secrets.close(),
+        () => ledger.close(),
+      ]) {
         await close().catch((error: unknown) => (failed ??= { error }));
       }
       if (failed) throw failed.error;

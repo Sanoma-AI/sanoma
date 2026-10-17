@@ -1,5 +1,4 @@
 import { execFile, spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
   cpSync,
@@ -12,6 +11,7 @@ import {
 } from "node:fs";
 import { basename, join } from "node:path";
 import { parseEnv, promisify } from "node:util";
+import { writeSecretsKey } from "./key.ts";
 
 const run = promisify(execFile);
 
@@ -73,10 +73,8 @@ export async function startCompany(
   for (const dep of Object.keys(pkg.dependencies)) pkg.dependencies[dep] = `^${own.version}`;
   writeFileSync(manifest, `${JSON.stringify(pkg, null, 2)}\n`);
 
-  writeEnv(join(cwd, ".env"), {
-    SANOMA_DATABASE_URL: DATABASE_URL,
-    SANOMA_SECRETS_KEY: randomBytes(32).toString("base64"),
-  });
+  writeEnv(join(cwd, ".env"), { SANOMA_DATABASE_URL: DATABASE_URL });
+  writeSecretsKey(join(cwd, ".env"));
 
   const packageManager = packageManagerOf(process.env.npm_config_user_agent);
   if (packageManager !== "pnpm") rmSync(join(cwd, "pnpm-workspace.yaml"));
@@ -117,7 +115,7 @@ function writeEnv(file: string, values: Record<string, string>): void {
   const set = parseEnv(text);
   const added = Object.entries(values).filter(([name]) => !(name in set));
   const lines = added.map(([name, value]) => `${name}=${value}\n`).join("");
-  writeFileSync(file, text && !text.endsWith("\n") ? `${text}\n${lines}` : text + lines);
+  writeFileSync(file, text && !text.endsWith("\n") ? `${text}\n${lines}` : text + lines, { mode: 0o600 });
 }
 
 const installWith = (cwd: string, packageManager: string) =>

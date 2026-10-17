@@ -5,6 +5,7 @@ import type { DriverFn, Op } from "./op.ts";
 import type { CallNode } from "./outline.ts";
 import type { Policy } from "./policy.ts";
 import type { Resource } from "./resource.ts";
+import type { Secrets } from "./secret.ts";
 import type { Source } from "./source.ts";
 import type { Steps } from "./steps.ts";
 
@@ -39,6 +40,8 @@ export interface WorkerState {
   /** Its `version`, when it has one, is recorded with each of its decisions. */
   policy: Policy;
   ledger: LedgerStore;
+  /** The stored secrets, for a live run's drivers (`CallContext.secrets`). */
+  secrets: Secrets;
   /**
    * The config's workflows by name, the built-in `drift` among them. A run takes its definition
    * from here, by the name it was registered under: a process registers each name with DBOS once,
@@ -65,6 +68,8 @@ export interface Run {
   sandbox?: string;
   /** A sandbox run's own fakes' functions, by operation id, from `seedSandbox`; unset for a live run. */
   fakeDrivers?: Map<string, DriverFn>;
+  /** A sandbox run's own secrets, in memory, from `seedSandbox`; unset for a live run. */
+  fakeSecrets?: Secrets;
   approvals: ApprovalState[];
   /** The next ledger `seq`. Advanced only outside steps, so a replay counts the same way. */
   seq: number;

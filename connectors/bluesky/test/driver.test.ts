@@ -1,5 +1,5 @@
 import { type Exchange, live, replay } from "@sanoma-ai/testing/replay";
-import type { CallContext } from "@sanoma-ai/workflows";
+import { type CallContext, memorySecrets } from "@sanoma-ai/workflows";
 import { delay, http } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import { blueskyDriver, type BlueskyDriverOptions } from "../src/driver.ts";
@@ -15,6 +15,7 @@ const call = (seq: number): CallContext => ({
   runId,
   opId: "bluesky.post.create",
   attempt: 1,
+  secrets: memorySecrets(),
 });
 const at = live ? new Date().toISOString() : "2026-10-08T00:00:00.000Z";
 const text = `Sanoma driver test ${at} https://example.com`;

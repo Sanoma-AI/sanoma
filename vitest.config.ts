@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
@@ -11,6 +12,7 @@ export default defineConfig({
         find: /^@sanoma-ai\/workflows\/(describe|fake|plugin|shared|scenario|scenarios)$/,
         replacement: src("./packages/workflows/src/$1.ts"),
       },
+      { find: /^@sanoma-ai\/workflows\/resources$/, replacement: src("./packages/workflows/src/secret.ts") },
       {
         find: /^@sanoma-ai\/testing\/(features|harness|replay|scenarios)$/,
         replacement: src("./packages/testing/src/$1.ts"),
@@ -23,6 +25,7 @@ export default defineConfig({
       },
       { find: /^@sanoma-ai\/connector-([a-z0-9-]+)$/, replacement: src("./connectors/$1/src/index.ts") },
       { find: /^sanoma$/, replacement: src("./packages/sanoma/src/index.ts") },
+      { find: /^sanoma\/resources$/, replacement: src("./packages/sanoma/src/resources.ts") },
     ],
   },
   test: {
@@ -32,5 +35,7 @@ export default defineConfig({
     fileParallelism: false,
     // Every spy is undone before the next test, so a test needs no try/finally to put one back.
     restoreMocks: true,
+    // The key stored credentials are encrypted with: made up for each run.
+    env: { SANOMA_SECRETS_KEY: randomBytes(32).toString("base64") },
   },
 });

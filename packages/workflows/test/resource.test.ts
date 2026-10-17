@@ -15,6 +15,7 @@ import {
 } from "../src/index.ts";
 import { VENDOR } from "../src/op.ts";
 import { DECLARED, withoutWriteOnly } from "../src/resource.ts";
+import { secret } from "../src/secret.ts";
 
 const fields = {
   immutable: ["name"],
@@ -114,6 +115,33 @@ describe("defineResource", () => {
     );
     expect(() => repo({ name: "x", wiki: "yes" } as never)).toThrow(/acme\.repo: .*wiki/s);
     expect(() => repo({ name: "" })).toThrow("acme.repo: its name is missing");
+  });
+
+  it("takes a secret at a write-only field only, kept as its marker, which the schema does not judge", () => {
+    const strict = defineResource({
+      vendor: "acme",
+      type: "db",
+      title: "Database",
+      identity: "name",
+      schema: z.object({ name: z.string(), password: z.string().min(12), note: z.string().nullish() }),
+      fields: { immutable: [], vendorOwned: [], writeOnly: ["password"] },
+      find: ({ name }) => name,
+    });
+    const db = strict({ name: "main", password: secret("DB_PASSWORD", { generate: true }) });
+    expect(db.desired).toEqual({ name: "main", password: { $secret: "DB_PASSWORD", generate: true } });
+    expect(JSON.parse(JSON.stringify(db.desired))).toEqual(db.desired);
+    expect(repo({ name: "x", token: secret("REPO_TOKEN") }).desired).toEqual({
+      name: "x",
+      token: { $secret: "REPO_TOKEN" },
+    });
+    // Anywhere else, the type refuses it; the schema still judges the other fields.
+    expect(() => strict({ name: "main", password: "short", note: secret("NOTE") })).toThrow(
+      "acme.db: note is not write-only, so it takes a value, not a secret (NOTE)",
+    );
+    expect(() => repo({ name: secret("NAME") })).toThrow("acme.repo: name is not write-only");
+    expect(() => repo({ name: "x", topics: [secret("TOPIC")] })).toThrow("acme.repo: topics.0 is not write-only");
+    expect(() => strict({ name: "main", password: "short" })).toThrow(/acme\.db: .*password/s);
+    expect(() => secret("db_password")).toThrow(/a secret's name is an environment variable's/);
   });
 
   it("lets a data file name a vendor-owned field its identity is made of", () => {

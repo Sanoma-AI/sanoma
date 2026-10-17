@@ -127,6 +127,7 @@ async function keep(
 /** `sanoma serve` (and `sanoma` outside dev mode): Postgres, then the worker and the app in this process. */
 async function serveCommand(): Promise<never> {
   const loaded = await load();
+  (await import("./key.ts")).ensureSecretsKey(process.cwd(), log);
   const { appName, databaseUrl } = loaded.resolved;
   const { ensurePostgres } = await import("./postgres.ts");
   await ensurePostgres(databaseUrl, { appName, log });
