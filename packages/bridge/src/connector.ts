@@ -206,8 +206,10 @@ const said = (diagnostics: readonly Diagnostic[]) =>
     })
     .join("; ");
 
-const sameSet = (a: readonly string[], b: readonly string[]) =>
-  a.length === b.length && a.toSorted().every((item, i) => item === b.toSorted()[i]);
+const sameSet = (a: readonly string[], b: readonly string[]) => {
+  const other = b.toSorted();
+  return a.length === b.length && a.toSorted().every((item, i) => item === other[i]);
+};
 
 /**
  * A connector for a vendor with an OpenTofu provider, from the types `resources.gen.ts`

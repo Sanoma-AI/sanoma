@@ -161,7 +161,7 @@ const opsOf = <S extends z.ZodObject>(schema: S) => {
   const paths = z.array(z.string());
   return {
     import: { input: z.object({ id: importId }), output },
-    read: { input: z.object({ id: importId, state: record.optional(), handle }), output },
+    read: { input: z.object(known), output },
     plan: {
       input: z.object({ ...known, id: importId.optional(), desired: desired.optional() }),
       output: z.object({
