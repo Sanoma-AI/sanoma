@@ -1,5 +1,4 @@
 import { execFile, spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
   cpSync,
@@ -11,7 +10,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, join } from "node:path";
-import { parseEnv, promisify } from "node:util";
+import { promisify } from "node:util";
+import { addToEnv, writeSecretsKey } from "./key.ts";
 
 const run = promisify(execFile);
 
@@ -73,10 +73,8 @@ export async function startCompany(
   for (const dep of Object.keys(pkg.dependencies)) pkg.dependencies[dep] = `^${own.version}`;
   writeFileSync(manifest, `${JSON.stringify(pkg, null, 2)}\n`);
 
-  writeEnv(join(cwd, ".env"), {
-    SANOMA_DATABASE_URL: DATABASE_URL,
-    SANOMA_SECRETS_KEY: randomBytes(32).toString("base64"),
-  });
+  addToEnv(join(cwd, ".env"), { SANOMA_DATABASE_URL: DATABASE_URL });
+  writeSecretsKey(join(cwd, ".env"));
 
   const packageManager = packageManagerOf(process.env.npm_config_user_agent);
   if (packageManager !== "pnpm") rmSync(join(cwd, "pnpm-workspace.yaml"));
@@ -110,15 +108,6 @@ export const packageName = (dir: string) =>
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/^[-._]+|-+$/g, "") || "company";
-
-/** Adds each variable the file does not set yet, keeping the file's own. */
-function writeEnv(file: string, values: Record<string, string>): void {
-  const text = existsSync(file) ? readFileSync(file, "utf8") : "";
-  const set = parseEnv(text);
-  const added = Object.entries(values).filter(([name]) => !(name in set));
-  const lines = added.map(([name, value]) => `${name}=${value}\n`).join("");
-  writeFileSync(file, text && !text.endsWith("\n") ? `${text}\n${lines}` : text + lines);
-}
 
 const installWith = (cwd: string, packageManager: string) =>
   new Promise<void>((resolve, reject) => {

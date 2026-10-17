@@ -1,5 +1,5 @@
 import { type Exchange, live, replay } from "@sanoma-ai/testing/replay";
-import type { CallContext } from "@sanoma-ai/workflows";
+import { type CallContext, memorySecrets } from "@sanoma-ai/workflows";
 import { decodeProtectedHeader, jwtVerify } from "jose";
 import { delay, http } from "msw";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -13,7 +13,13 @@ import { ADMIN, replayOptions, TEST_KEY } from "./replay.ts";
 const { server, play, fixture, sent, exchanges } = replay(replayOptions);
 
 type Post = z.output<typeof ghost.post.publish.output>;
-const call: CallContext = { idempotencyKey: "run-1:1", runId: "run-1", opId: "ghost.post", attempt: 1 };
+const call: CallContext = {
+  idempotencyKey: "run-1:1",
+  runId: "run-1",
+  opId: "ghost.post",
+  attempt: 1,
+  secrets: memorySecrets(),
+};
 const created: string[] = [];
 const create = async (title: string, driver = ghostDriver()) => {
   const post = (await driver.ops["post.create"]!(

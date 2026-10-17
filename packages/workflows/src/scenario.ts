@@ -32,6 +32,7 @@ import { fill, isBug, seedFrom, shapeOf } from "./fill.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { Driver, Op } from "./op.ts";
 import { type OutlineNode, outlineWorkflow } from "./outline.ts";
+import { memorySecrets } from "./secret.ts";
 import { DRIFT_WORKFLOW, errorMessage, fitsOp, flatten, isEnded } from "./shared.ts";
 import type { Call, RunView, Seed } from "./steps.ts";
 
@@ -879,6 +880,8 @@ function testWorld(built: Built, { driver, fake }: FeatureTarget) {
     const values = new Map<string, unknown>();
     const records: LedgerRecord[] = [];
     let runId = "";
+    // The test's own secrets, in memory: a driver resolves `secret()` markers against them.
+    const secrets = memorySecrets();
     /** A record of the test, as a run's ledger would hold it. */
     const record = (body: Record<string, unknown>) => {
       const seq = records.length;
@@ -892,7 +895,7 @@ function testWorld(built: Built, { driver, fake }: FeatureTarget) {
       const input = op.input.parse(resolve(given, values));
       const fn = driver.ops[`${op.resource}.${op.name}`];
       if (!fn) throw new Error(`the driver under test does not implement ${id}`);
-      const context = { idempotencyKey: `${runId}:${records.length}`, runId, opId: id, attempt: 1 };
+      const context = { idempotencyKey: `${runId}:${records.length}`, runId, opId: id, attempt: 1, secrets };
       return { op, input, output: () => fn(input, context) };
     };
     return {

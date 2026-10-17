@@ -3,6 +3,7 @@ import { ghostDriver } from "@sanoma-ai/connector-ghost/driver";
 import { githubDriver } from "@sanoma-ai/connector-github/driver";
 import { resendDriver } from "@sanoma-ai/connector-resend/driver";
 import { stripeDriver } from "@sanoma-ai/connector-stripe/driver";
+import { createHash } from "node:crypto";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { Client } from "pg";
@@ -18,12 +19,16 @@ import {
   errorCode,
   memoryLedger,
   resolveConfig,
+  resolveSecrets,
   SanomaClient,
   type SanomaConfig,
   startWorker,
   withSetup,
 } from "../src/index.ts";
 import { credentialsOf, unconfigured, unconfiguredSummary } from "../src/env.ts";
+import { storedCredentials } from "../src/credentials.ts";
+import { secret } from "../src/secret.ts";
+import { appRoot } from "./tree.ts";
 import { describeConfig } from "../src/describe.ts";
 
 // Made-up variables and values: nothing here is a credential.
@@ -422,6 +427,123 @@ describe("a worker's credentials", () => {
     // Stopped, it takes back what it set, and leaves what the environment set.
     expect(process.env).not.toHaveProperty(REGION_VAR);
     expect(process.env[URL_VAR]).toBe(FROM_ENV);
+  });
+});
+
+/** Runs `sql` on the table, as a direct connection would: nothing decrypted. */
+async function sql(text: string, values: unknown[]) {
+  const db = new Client({ connectionString: databaseUrl });
+  await db.connect();
+  try {
+    return (await db.query(text, values)).rows;
+  } finally {
+    await db.end();
+  }
+}
+const raw = async (name: string) =>
+  (await sql("SELECT value FROM sanoma_credentials WHERE name = $1", [name]))[0]?.value as string | undefined;
+const legacy = (name: string, value: string) =>
+  sql(
+    "INSERT INTO sanoma_credentials (name, value, set_by) VALUES ($1, $2, 'old') ON CONFLICT (name) DO UPDATE SET value = $2",
+    [name, value],
+  );
+const read = async (name: string) => {
+  const db = new Client({ connectionString: databaseUrl });
+  await db.connect();
+  try {
+    return (await storedCredentials(db, [name])).get(name)?.value;
+  } finally {
+    await db.end();
+  }
+};
+
+describe("encryption at rest", () => {
+  it("stores ciphertext, reads a row stored before as plaintext, and encrypts it on its next write", async () => {
+    vi.stubEnv(KEY_VAR, undefined);
+    await client.setCredential(KEY_VAR, KEY, { by: "alice" });
+    expect(await raw(KEY_VAR)).toMatch(/^v1:[^:]+:[^:]+$/);
+    expect(await raw(KEY_VAR)).not.toContain(KEY);
+    expect(await read(KEY_VAR)).toBe(KEY);
+
+    await legacy(KEY_VAR, "key_plaintext");
+    expect(await read(KEY_VAR)).toBe("key_plaintext");
+    expect((await stored())?.[1]).toMatchObject({ status: "set", source: "stored" });
+    await client.setCredential(KEY_VAR, "key_again", { by: "alice" });
+    expect(await raw(KEY_VAR)).toMatch(/^v1:/);
+    expect(await read(KEY_VAR)).toBe("key_again");
+  });
+
+  it("refuses to store without the key, naming it, and still reads a plaintext row", async () => {
+    vi.stubEnv("SANOMA_SECRETS_KEY", undefined);
+    await expect(client.setCredential(KEY_VAR, KEY, { by: "alice" })).rejects.toThrow(
+      /^SANOMA_SECRETS_KEY is not set: it encrypts the stored credentials/,
+    );
+    expect(await raw(KEY_VAR)).toBeUndefined();
+    await legacy(KEY_VAR, "key_plaintext");
+    expect(await read(KEY_VAR)).toBe("key_plaintext");
+  });
+
+  it("gives a live run's driver its secrets: one marked generate is made once, stored before the vendor call", async () => {
+    const NAME = "TEST_GENERATED_SECRET";
+    await sql("DELETE FROM sanoma_credentials WHERE name = $1", [NAME]);
+    const marker = z.object({ $secret: z.string(), generate: z.literal(true).optional() });
+    const vault = defineConnector("vault", {
+      password: {
+        make: {
+          effect: "write",
+          input: z.object({ password: marker }),
+          output: z.object({ digest: z.string(), storedFirst: z.boolean() }),
+        },
+      },
+    });
+    const vaultDriver = defineDriver(vault, {
+      password: {
+        make: async (input, call) => {
+          const { password } = await resolveSecrets(input, call.secrets);
+          const storedFirst = (await read(NAME)) === password && (await call.secrets.get(NAME)) === password;
+          return { digest: createHash("sha256").update(password).digest("hex"), storedFirst };
+        },
+      },
+    });
+    const makePassword = defineWorkflow({
+      name: "make-password",
+      trigger: "manual",
+      input: z.object({}),
+      uses: [vault.password.make],
+      run: async (ctx) => ctx.vault.password.make({ password: secret(NAME, { generate: true }) }),
+    });
+    const vaultConfig: SanomaConfig = {
+      // An app of its own, so its worker's version never becomes the latest of the acme workers'.
+      root: appRoot("sanoma-test-vault"),
+      workflows: [makePassword],
+      connectors: [withSetup(vault, { driver: () => vaultDriver })],
+      policy: allowAll,
+      ledger: memoryLedger(),
+      databaseUrl,
+    };
+    const vaultClient = await SanomaClient.connect(vaultConfig);
+    const worker = await startWorker(vaultConfig, { quiet: true });
+    try {
+      const run = async () => {
+        const runId = await vaultClient.start(makePassword, {}, { startedBy: { id: "alice" } });
+        return { runId, output: (await vaultClient.result(runId)) as { digest: string; storedFirst: boolean } };
+      };
+      const first = await run();
+      const second = await run();
+      const value = (await read(NAME))!;
+      expect(value).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(first.output).toEqual({ digest: createHash("sha256").update(value).digest("hex"), storedFirst: true });
+      expect(second.output).toEqual(first.output);
+      expect(await raw(NAME)).toMatch(/^v1:/);
+      // The run's input and the ledger hold the marker, never the value.
+      const ledger = await vaultClient.ledger(first.runId);
+      expect(ledger[1]).toMatchObject({ input: { password: { $secret: NAME, generate: true } } });
+      expect(JSON.stringify(ledger)).not.toContain(value);
+    } finally {
+      await worker.stop();
+      await vaultClient.close();
+      await sql("DELETE FROM sanoma_credentials WHERE name = $1", [NAME]);
+    }
   });
 });
 

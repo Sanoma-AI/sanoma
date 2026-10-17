@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { type Connector, type OpSpec, RESOURCE, VENDOR } from "./op.ts";
+import { isSecret, type Secret } from "./secret.ts";
 
 /** Which fields of a resource are flagged, by dotted path (`pages.html_url`; a list's items have no index). */
 export interface ResourceFields {
@@ -100,20 +101,32 @@ export interface Declared<Id extends string = string, T = State> {
 
 /**
  * What a resource type's constructor takes: its fields, where `R` (its `fields.references`)
- * names a path, a declared resource of that type instead of a value (`repository_id: site`).
+ * names a path, a declared resource of that type instead of a value (`repository_id: site`), and
+ * where a string goes, a secret (`secret("NAME")`), which the constructor allows at a write-only
+ * field only.
  */
-export type Declaring<T, R extends References = {}> = [keyof R] extends [never] ? T : DeclaringAt<T, R, "">;
+export type Declaring<T, R extends References = {}> = [keyof R] extends [never]
+  ? WithSecrets<T>
+  : DeclaringAt<T, R, "">;
+
+type WithSecrets<V> = V extends string
+  ? V | Secret
+  : V extends readonly (infer I)[]
+    ? WithSecrets<I>[]
+    : V extends object
+      ? { [K in keyof V]: WithSecrets<V[K]> }
+      : V;
 
 type DeclaringAt<T, R extends References, P extends string> = T extends readonly (infer I)[]
   ? DeclaringAt<I, R, P>[]
   : T extends object
     ? { [K in keyof T]: K extends string ? DeclaringField<T[K], R, P extends "" ? K : `${P}.${K}`> : T[K] }
-    : T;
+    : WithSecrets<T>;
 
 type DeclaringField<V, R extends References, P extends string> = P extends keyof R
-  ? V | DeclaredOf<R[P]["type"]>
+  ? WithSecrets<V> | DeclaredOf<R[P]["type"]>
   : [Extract<keyof R, `${P}.${string}`>] extends [never]
-    ? V
+    ? WithSecrets<V>
     : DeclaringAt<V, R, P>;
 
 type DeclaredOf<Id> = Id extends string ? Declared<Id> : never;
@@ -396,11 +409,21 @@ export function defineResource<
   const named = new Set(identity?.match(/[A-Za-z_][\w.]*/g));
   const owned = new Set(fields.vendorOwned.filter((path) => !named.has(path)));
   const references: References = fields.references ?? {};
+  const writeOnly = new Set(fields.writeOnly);
   const declare = (given: Declaring<z.input<S>, R>): Declared<`${V}.${T}`, z.input<S>> => {
     const refs: Record<string, string> = {};
+    // Where a secret is given, with list items' indexes: the schema does not judge its marker.
+    const secrets = new Set<string>();
     // Each resource `given` names, where `references` allows one of its type, replaced by its name.
     // `path` is the field's, as `references` names it; `at` has list items' indexes too.
     const resolve = (value: unknown, path: string, at: string): unknown => {
+      if (isSecret(value)) {
+        if (!writeOnly.has(path)) {
+          throw new Error(`${what}: ${at} is not write-only, so it takes a value, not a secret (${value.$secret})`);
+        }
+        secrets.add(at);
+        return value;
+      }
       if (isDeclared(value)) {
         const id = value[DECLARED];
         const wants = references[path];
@@ -428,7 +451,8 @@ export function defineResource<
       );
     }
     const parsed = schema.safeParse(desired);
-    if (!parsed.success) throw new Error(`${what}: ${z.prettifyError(parsed.error)}`);
+    const issues = parsed.error?.issues.filter((issue) => !secrets.has(issue.path.join(".")));
+    if (issues?.length) throw new Error(`${what}: ${z.prettifyError(new z.ZodError(issues))}`);
     const name = find?.(desired);
     if (find && (typeof name !== "string" || name === "")) throw new Error(`${what}: its ${identity} is missing`);
     return Object.freeze({

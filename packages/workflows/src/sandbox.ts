@@ -6,6 +6,7 @@ import type { Fake, ResourceFake } from "./fake.ts";
 import { entry, type LedgerRecord, write } from "./ledger.ts";
 import type { DriverFn } from "./op.ts";
 import type { Run } from "./run.ts";
+import { memorySecrets } from "./secret.ts";
 import { type Given, loadScenarios, type Scenario } from "./scenario.ts";
 import { errorMessage } from "./shared.ts";
 
@@ -90,6 +91,8 @@ export function seedResource(
 export async function seedSandbox(run: Run, name: string): Promise<void> {
   const { state } = run;
   let copies: Map<string, DriverFn> | undefined;
+  // The run's secrets, in memory as its fakes are: seeding and its calls share them.
+  const secrets = memorySecrets();
   const { seeds } = await DBOS.runStep(
     async () => {
       // Read in the step, so a recovered run never reads a feature file edited or renamed since.
@@ -126,7 +129,7 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
       for (const [i, given] of scenario.given.entries()) {
         if ("fault" in given) continue;
         if ("op" in given) {
-          const call = { idempotencyKey: `${run.id}:seed:${i}`, runId: run.id, opId: given.op, attempt: 1 };
+          const call = { idempotencyKey: `${run.id}:seed:${i}`, runId: run.id, opId: given.op, attempt: 1, secrets };
           const output = await drivers.get(given.op)!(given.input, call);
           seeded.push({ op: given.op, input: given.input, output });
           continue;
@@ -153,5 +156,6 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
     );
   }
   run.fakeDrivers = copies;
+  run.fakeSecrets = secrets;
   await write(run, entry(run, { type: "scenario.seeded", scenario: name, seeds }));
 }

@@ -93,6 +93,16 @@ export { ApprovalMessage, APPROVALS_EVENT, decisionEventOf } from "./approvals.t
 export { RUNTIME_VERSION } from "./version.ts";
 export type { RunArgs } from "./run.ts";
 export { startWorker, type Worker, type WorkerOptions } from "./worker.ts";
+// `secret` itself is at `@sanoma-ai/workflows/resources`, for data files; this is the drivers' side.
+export {
+  generateSecret,
+  isSecret,
+  memorySecrets,
+  type Resolved,
+  resolveSecrets,
+  type Secret,
+  type Secrets,
+} from "./secret.ts";
 export type { Source } from "./source.ts";
 export { SanomaClient, type RunsFilter, type RunSummary, type StartOptions } from "./client.ts";
 // A raw DBOS client on the runtime's database, for tests and tools that read DBOS directly.

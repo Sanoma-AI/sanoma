@@ -9,7 +9,9 @@ import {
   isReference,
   keyName,
   readDataFile,
+  SECRET_ENTRIES,
 } from "./datafile.ts";
+import { isSecret } from "./secret.ts";
 
 // The data-file writer: what the app's Adopt, and setting up a company, write into the files
 // `datafile.ts` reads. A file is changed in place, one declaration at a time, and everything
@@ -46,6 +48,9 @@ export function formatOptions(root: string): FormatConfig {
  * it is formatted with oxfmt under `options` (`formatOptions`), and every other byte of the file
  * stays as it was.
  *
+ * A value naming a secret adds `import { secret } from "sanoma/resources"` after the file's
+ * imports when it has none.
+ *
  * Throws when the file does not parse, declares no such resource, or a path cannot be set: it
  * runs through a value that is not an object or a list, or ends at a reference to another
  * resource (a person changes a reference; a vendor's value never replaces one).
@@ -62,20 +67,27 @@ export async function setFields(
     const { start, end, replacement } = editAt(declarationOf(text, exportName).object, path, value);
     text = text.slice(0, start) + replacement + text.slice(end);
   }
+  if (Object.values(fields).some(holdsSecret)) text = withSecretImport(text);
   // The declaration on its own: a top-level statement formats the same in its file as alone.
   const { start, end } = declarationOf(text, exportName).statement;
   const formatted = await format(text.slice(start, end), options);
   return text.slice(0, start) + formatted.trimEnd() + text.slice(end);
 }
 
+/** What a data file imports `secret` from when it names one (`readDataFile` lists no such import). */
+const SECRET_IMPORT = { source: "sanoma/resources", imported: "secret", local: "secret" };
+
 /**
  * A whole data file: the imports, one per source, then each resource as `export const`, then
  * `export default` naming them all, formatted with oxfmt under `options`. `readDataFile` reads it
- * back as it was given: what `readDataFile` returns renders the file again.
+ * back as it was given: what `readDataFile` returns renders the file again. A file whose values
+ * name a secret also imports `secret` from "sanoma/resources".
  */
 export async function renderDataFile({ imports, exports }: DataFileContent, options: FormatConfig = {}) {
   const names = new Map<string, string[]>();
-  for (const { source, imported, local } of imports) {
+  const hasSecret = imports.some((i) => i.local === SECRET_IMPORT.local);
+  const all = !hasSecret && exports.some((e) => holdsSecret(e.desired)) ? [...imports, SECRET_IMPORT] : imports;
+  for (const { source, imported, local } of all) {
     const list = names.get(source) ?? [];
     list.push(imported === local ? local : `${imported} as ${local}`);
     names.set(source, list);
@@ -90,6 +102,20 @@ export async function renderDataFile({ imports, exports }: DataFileContent, opti
     `export default [${exports.map((e) => e.name).join(", ")}];`,
   ];
   return format(`${parts.filter(Boolean).join("\n\n")}\n`, options);
+}
+
+/** `text` with `secret` imported after its imports, unless it imports it already. */
+function withSecretImport(text: string): string {
+  const imports = parse("/data-file.ts", text).program.body.filter((s: Node) => s.type === "ImportDeclaration");
+  const has = imports.some(
+    (s: Node) =>
+      SECRET_ENTRIES.has(s.source.value) &&
+      s.specifiers.some((sp: Node) => (sp.imported?.name ?? sp.imported?.value) === "secret"),
+  );
+  if (has) return text;
+  const at = imports.at(-1)?.end ?? 0;
+  const line = `import { ${SECRET_IMPORT.local} } from ${JSON.stringify(SECRET_IMPORT.source)};`;
+  return at ? `${text.slice(0, at)}\n${line}${text.slice(at)}` : `${line}\n${text}`;
 }
 
 /** The `export const` of the resource `name` in `text`, and the object literal its constructor takes. */
@@ -168,9 +194,15 @@ const fieldName = (p: Node): string | undefined => (p.type === "Property" && !p.
 /** A field's name in source: bare when it can be, else a string. */
 const keyOf = (key: string) => (/^[A-Za-z_$][\w$]*$/.test(key) ? key : JSON.stringify(key));
 
+/** True when a value names a secret, itself or anywhere inside it. */
+const holdsSecret = (value: DataValue): boolean =>
+  isSecret(value) ||
+  (typeof value === "object" && value !== null && !isReference(value) && Object.values(value).some(holdsSecret));
+
 /** A value in the data-file subset, as source, on one line: oxfmt lays it out. */
 function literal(value: DataValue): string {
   if (isReference(value)) return value.name;
+  if (isSecret(value)) return `secret(${JSON.stringify(value.$secret)}${value.generate ? ", { generate: true }" : ""})`;
   if (value === null || typeof value === "boolean" || typeof value === "string") return JSON.stringify(value);
   if (typeof value === "number") {
     if (!Number.isFinite(value)) throw new Error(`${value} cannot be written in a data file: write a finite number`);

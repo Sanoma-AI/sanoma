@@ -355,7 +355,14 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed) {
       async () => {
         const at = Date.now();
         attempt = DBOS.stepStatus?.currentAttempt ?? 1;
-        const context: CallContext = { idempotencyKey: `${run.id}:${seq}`, runId: run.id, opId: op.id, attempt };
+        const secrets = run.sandbox === undefined ? run.state.secrets : run.fakeSecrets!;
+        const context: CallContext = {
+          idempotencyKey: `${run.id}:${seq}`,
+          runId: run.id,
+          opId: op.id,
+          attempt,
+          secrets,
+        };
         // A live driver's `env` is checked here, inside the step, by the guard `indexDrivers` put
         // on its function: the refusal is the call's failure, recorded and never retried.
         const output = op.output.parse(await fn(parsed, context));

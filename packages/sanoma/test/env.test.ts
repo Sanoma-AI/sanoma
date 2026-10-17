@@ -47,6 +47,9 @@ const expected = `# Copy to .env (ignored by git; \`sanoma\` loads it before rea
 
 # Optional. Postgres for the worker and the app; default postgresql://postgres:dbos@localhost:5433/sanoma.
 # SANOMA_DATABASE_URL=
+# Optional. Encrypts the stored credentials, and signs GitHub sign-in's cookie: 32 random bytes,
+# base64. \`sanoma\` writes one here when none is set; keep it with the database.
+# SANOMA_SECRETS_KEY=
 # Optional. The app's port; default 3000.
 # SANOMA_APP_PORT=
 # Optional. The address the app listens on; default 127.0.0.1. Any other needs GitHub sign-in.

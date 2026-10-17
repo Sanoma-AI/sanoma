@@ -1,6 +1,6 @@
 import { BridgeError } from "@sanoma-ai/bridge";
 import { type BridgeCall, fixturesDir, loadReplies, stateBridge } from "@sanoma-ai/bridge/fake";
-import { type Driver, DriverError } from "@sanoma-ai/workflows";
+import { type Driver, DriverError, memorySecrets } from "@sanoma-ai/workflows";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { githubDriver } from "../src/driver.ts";
 import { fakeGithub } from "../src/fake.ts";
@@ -10,7 +10,13 @@ import { provider } from "../src/resources.gen.ts";
 let seq = 0;
 /** Calls one of a driver's operations the way the runtime does. */
 const call = (driver: Driver, op: string, input: unknown): Promise<any> =>
-  driver.ops[op]!(input, { idempotencyKey: `run:${++seq}`, runId: "run", opId: `github.${op}`, attempt: 1 });
+  driver.ops[op]!(input, {
+    idempotencyKey: `run:${++seq}`,
+    runId: "run",
+    opId: `github.${op}`,
+    attempt: 1,
+    secrets: memorySecrets(),
+  });
 
 describe("githubDriver", () => {
   let bridge: ReturnType<typeof stateBridge>;

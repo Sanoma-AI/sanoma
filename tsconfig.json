@@ -14,6 +14,7 @@
       "@sanoma-ai/workflows/describe": ["./packages/workflows/src/describe.ts"],
       "@sanoma-ai/workflows/fake": ["./packages/workflows/src/fake.ts"],
       "@sanoma-ai/workflows/plugin": ["./packages/workflows/src/plugin.ts"],
+      "@sanoma-ai/workflows/resources": ["./packages/workflows/src/secret.ts"],
       "@sanoma-ai/workflows/scenario": ["./packages/workflows/src/scenario.ts"],
       "@sanoma-ai/workflows/scenarios": ["./packages/workflows/src/scenarios.ts"],
       "@sanoma-ai/workflows/shared": ["./packages/workflows/src/shared.ts"],
@@ -28,6 +29,7 @@
       "@sanoma-ai/bridge/connector": ["./packages/bridge/src/connector.ts"],
       "@sanoma-ai/bridge/tfschema": ["./packages/bridge/src/tfschema.ts"],
       "sanoma": ["./packages/sanoma/src/index.ts"],
+      "sanoma/resources": ["./packages/sanoma/src/resources.ts"],
       // Before the bare pattern: TypeScript takes the first of two patterns with equal prefixes.
       "@sanoma-ai/connector-*/fake": ["./connectors/*/src/fake.ts"],
       "@sanoma-ai/connector-*/driver": ["./connectors/*/src/driver.ts"],
