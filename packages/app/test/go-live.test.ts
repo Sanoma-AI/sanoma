@@ -120,7 +120,7 @@ let port = 0;
 
 beforeAll(async () => {
   for (const name of NAMES) vi.stubEnv(name, undefined);
-  api.listen({ onUnhandledRequest: "bypass" });
+  api.listen({ onUnhandledFrame: "bypass" });
   await app.client.setSecret("GITHUB_TOKEN", "ghp_test-token", { by: "alice" });
   await app.client.setSecret("SUPABASE_ACCESS_TOKEN", "sbp_test-token", { by: "alice" });
   ctx = {

@@ -93,7 +93,7 @@ export const hostCheckWorkflows = [
 /** A declared host under test, and how to drive it. */
 export interface HostUnderTest {
   /** Its resource type, which meets the contract (`host`). */
-  type: Resource;
+  type: Pick<Resource, "vendor" | "type" | "host">;
   /** Makes the host match its declaration, its revision what its ref names now; returns its state. */
   apply(): Promise<State>;
   /** Stops the host through its resource's operations (its `delete`); `apply` starts it again. */
