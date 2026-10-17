@@ -63,6 +63,10 @@ const GITHUB_API = "https://api.github.com";
 const REPO_NAME = /export const repo = github\.repository\(\{\s*name: "([^"]+)"/;
 const SUPABASE_API = "https://api.supabase.com";
 
+/** The resource types going live declares that the config's connectors do not, and a host when it has none. */
+const missingTypes = (app: AppContext) =>
+  [REPOSITORY, PROJECT].filter((type) => !app.resolved.types.has(type)).concat(hostType(app) ? [] : ["a host type"]);
+
 /** The config's host type: Docker's when it has it, else the first. */
 function hostType({ resolved }: AppContext): Resource | undefined {
   const hosts = [...resolved.types.values()].filter((type) => type.host);
@@ -75,8 +79,8 @@ const exists = (path: string) =>
     () => false,
   );
 
-/** GET `url` with `token` as JSON, or an error saying who answered what. */
-async function getJson<T>(url: string, headers: Record<string, string>, method = "GET"): Promise<T> {
+/** `url`'s answer as JSON, or an error saying who answered what. */
+async function fetchJson<T>(url: string, headers: Record<string, string>, method = "GET"): Promise<T> {
   const res = await fetch(url, { method, headers: { accept: "application/json", ...headers } });
   if (!res.ok) throw new Error(`${new URL(url).host} answered ${res.status} to ${new URL(url).pathname}`);
   return (await res.json()) as T;
@@ -106,7 +110,7 @@ async function installations({ client }: AppContext): Promise<Installation[]> {
   const id = found.get(GITHUB_APP.id)?.value;
   const pem = found.get(GITHUB_APP.pem)?.value;
   if (!id || !pem) return [];
-  return getJson<Installation[]>(`${GITHUB_API}/app/installations`, githubHeaders(appJwt(id, pem)));
+  return fetchJson<Installation[]>(`${GITHUB_API}/app/installations`, githubHeaders(appJwt(id, pem)));
 }
 
 /**
@@ -130,18 +134,18 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
   const [user, orgs, installed, organizations] = await Promise.all([
     github
       ? listed("GitHub's user", async () => [
-          await getJson<{ login: string }>(`${GITHUB_API}/user`, githubHeaders(github)),
+          await fetchJson<{ login: string }>(`${GITHUB_API}/user`, githubHeaders(github)),
         ])
       : [],
     github
       ? listed("GitHub's organizations", () =>
-          getJson<{ login: string }[]>(`${GITHUB_API}/user/orgs`, githubHeaders(github)),
+          fetchJson<{ login: string }[]>(`${GITHUB_API}/user/orgs`, githubHeaders(github)),
         )
       : [],
     listed("The GitHub App's installations", () => installations(app)),
     supabase
       ? listed("Supabase's organizations", () =>
-          getJson<{ id: string; name: string }[]>(`${SUPABASE_API}/v1/organizations`, {
+          fetchJson<{ id: string; name: string }[]>(`${SUPABASE_API}/v1/organizations`, {
             authorization: `Bearer ${supabase}`,
           }),
         )
@@ -166,7 +170,7 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
     organizations: organizations.map(({ id, name }) => ({ id, name })),
     regions: SUPABASE_REGIONS,
     host: host ? { type: `${host.vendor}.${host.type}`, title: host.title } : null,
-    missing: [REPOSITORY, PROJECT].filter((type) => !app.resolved.types.has(type)).concat(host ? [] : ["a host"]),
+    missing: missingTypes(app),
     name: app.description.appName.replaceAll(/[^a-z0-9-]+/gi, "-").toLowerCase(),
     errors,
   };
@@ -176,10 +180,11 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
 export async function renderInfra(app: AppContext, { name, organization, region, port }: Omit<GoLiveRequest, "owner">) {
   const host = hostType(app);
   const vendors = app.description.vendors;
-  const missing = [REPOSITORY, PROJECT].filter((type) => !app.resolved.types.has(type));
+  const missing = missingTypes(app);
   if (missing.length || !host) {
-    const needs = [...missing, ...(host ? [] : ["a host type"])].join(", ");
-    throw new ApiError(409, { error: `The config's connectors declare no ${needs}: add them to sanoma.config.ts` });
+    throw new ApiError(409, {
+      error: `The config's connectors declare no ${missing.join(", ")}: add them to sanoma.config.ts`,
+    });
   }
   const constructors = (vendor: string) => {
     const pkg = vendors[vendor]?.package;
@@ -259,7 +264,7 @@ async function pushToken(app: AppContext, owner: string): Promise<string> {
   const installation = (await installations(app)).find((i) => i.account.login.toLowerCase() === owner.toLowerCase());
   if (!installation) throw new ApiError(409, { error: `No GitHub token, and the App is not installed on ${owner}` });
   const jwt = appJwt(stored.get(GITHUB_APP.id)!.value, stored.get(GITHUB_APP.pem)!.value);
-  const { token: made } = await getJson<{ token: string }>(
+  const { token: made } = await fetchJson<{ token: string }>(
     `${GITHUB_API}/app/installations/${installation.id}/access_tokens`,
     githubHeaders(jwt),
     "POST",

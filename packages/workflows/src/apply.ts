@@ -570,9 +570,9 @@ export function applyWorkflow(
             written ||= wrote.written;
             revision = wrote.revision ?? revision;
           }
-          // Bound first, so an object made is kept whatever its `afterCreate` calls do.
-          // Each `afterCreate` operation, by its id, again every few seconds until its output passes
-          // `until`; one that never does fails the step, and the rest are not called.
+          // Bound first, so an object made is kept whatever its `afterCreate` calls do: each by its
+          // id, again every few seconds until its output passes `until`; one that never does fails
+          // the step, and the rest are not called.
           let stuck: string | undefined;
           for (const hook of todo === "create" ? (spec?.afterCreate ?? []) : []) {
             if (stuck === undefined) {
