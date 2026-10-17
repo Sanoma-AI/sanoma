@@ -31,6 +31,13 @@ export interface TfTypeSpec<S extends z.ZodObject = z.ZodObject> {
   bindingId?: ResourceSpec<S>["bindingId"];
   /** The part of a state a drift check compares; default `compareDeclared`. */
   normalize?: ResourceSpec<S>["normalize"];
+  /**
+   * False for a state the provider returned for no object; default: every state is one. For a
+   * provider that answers a missing object with the state it was given (Supabase's answers a
+   * project's 404 so): the type's `read` then imports by id instead of refreshing the state, so
+   * the provider answers from the id alone, and such a state is gone.
+   */
+  exists?: (state: Record<string, unknown>) => boolean;
 }
 
 /** Per resource type, its `fields.references`: `{ branch_protection: { repository_id: { type: "github.repository" } } }`. */
@@ -98,7 +105,7 @@ const handleOf = (r: ResourceState) => `${r.schemaVersion}:${Buffer.from(r.priva
  *
  * The driver's `import` asks the provider to find the object by its import id (the bridge reads
  * it too), made from the id it is given by `importId` when the driver has one; `read` refreshes
- * a state from an earlier call, or, given none (or one without an `id`), imports. Either answers `{ gone: true }` when the provider finds no object, or fails
+ * a state from an earlier call, or, given none (or one without an `id`, or for a type with `exists`), imports. Either answers `{ gone: true }` when the provider finds no object (or one `exists` refuses), or fails
  * the way `missing` says means none. States go out in the resource's shape, secrets dropped (`fromTfState`), and
  * come back in the provider's (`toTfState`); the provider's private data and state version go
  * in the opaque `handle`. The provider is configured through `ensureConfigured`. The bridge's
@@ -156,7 +163,7 @@ export function tfConnector<
     }
 
     const impl: Record<string, Record<string, DriverFn<any, any>>> = {};
-    for (const [type, { tf }] of Object.entries(types)) {
+    for (const [type, { tf, exists }] of Object.entries(types)) {
       const out = (r: ResourceState) => ({
         state: fromTfState(tf.shape, JSON.parse(r.stateJson) as Record<string, unknown>),
         handle: handleOf(r),
@@ -164,16 +171,17 @@ export function tfConnector<
       const importOne = async (id: string) => {
         const { resources: found } = await bridge.import(provider, tf.typeName, await importId(type, id));
         const r = found.find((f) => f.typeName === tf.typeName);
-        return r ? { id, gone: false, ...out(r) } : { id, gone: true };
+        const o = r && out(r);
+        return o && (!exists || exists(o.state)) ? { id, gone: false, ...o } : { id, gone: true };
       };
       impl[type] = {
         import: ({ id }: { id: string }) => call(`${type}.import`, id, () => importOne(id)),
         read: (input: { id: string; state?: Record<string, unknown>; handle?: string }) =>
           call(`${type}.read`, input.id, async () => {
             const state = input.state && toTfState(tf.shape, input.state);
-            // No state to refresh, or none the provider can find again (it reads by `id`): an
-            // import finds the object, and reads it.
-            if (state?.id === undefined || state.id === null) return importOne(input.id);
+            // No state to refresh, none the provider can find again (it reads by `id`), or a
+            // provider that would echo a missing object's state: an import finds the object, and reads it.
+            if (exists || state?.id === undefined || state.id === null) return importOne(input.id);
             const handle = input.handle === undefined ? undefined : HANDLE.exec(input.handle);
             if (input.handle !== undefined && !handle) {
               throw new DriverError(`${vendor}: ${type}.read was given a handle it did not make`, { retryable: false });

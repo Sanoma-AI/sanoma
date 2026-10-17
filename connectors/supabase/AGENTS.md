@@ -1,0 +1,13 @@
+# Working on @sanoma-ai/connector-supabase
+
+Follow the shared [connector conventions](../AGENTS.md).
+
+- [README](README.md): the project resource, credentials, read/import behavior, and fake usage.
+- [Source map](src/AGENTS.md): generated types, hand-owned connector metadata, driver, and fake.
+- [Test map](test/AGENTS.md): resource metadata and driver behavior over provider fixtures.
+
+Change `src/resources.config.ts` and `src/connector.ts` for resource definitions; do not hand-edit `src/resources.gen.ts`. Regenerate with `pnpm --filter @sanoma-ai/connector-supabase generate`. Read [bridge generation guidance](../../packages/bridge/src/tfschema/AGENTS.md) when changing type conversion.
+
+Preserve write-only treatment of `database_password`: returned states hold `null` and drift comparisons exclude it. Keep `exists` on the project type: the provider answers a missing project with the state it was given, so `read` imports by ref and a state without a `name` is gone. The connector reads and imports only; keep operation effects and fake behavior consistent with that contract.
+
+Run `pnpm vitest run connectors/supabase` and `pnpm typecheck`; these tests need no vendor credentials. After regeneration, check that a second generation produces no diff.

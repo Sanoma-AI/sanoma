@@ -35,7 +35,12 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe("readPins", () => {
   it("reads the pinned releases, keyed by source", () => {
-    expect(Object.keys(pins).toSorted()).toEqual(["hashicorp/null", "integrations/github", "stripe/stripe"]);
+    expect(Object.keys(pins).toSorted()).toEqual([
+      "hashicorp/null",
+      "integrations/github",
+      "stripe/stripe",
+      "supabase/supabase",
+    ]);
     expect(github).toEqual({
       source: "integrations/github",
       version: "6.13.0",

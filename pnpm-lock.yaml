@@ -104,6 +104,18 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  connectors/supabase:
+    devDependencies:
+      '@sanoma-ai/bridge':
+        specifier: workspace:*
+        version: link:../../packages/bridge
+      '@sanoma-ai/workflows':
+        specifier: workspace:*
+        version: link:../../packages/workflows
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
   packages/app:
     dependencies:
       '@base-ui/react':
