@@ -4,6 +4,7 @@ import {
   type ActorInfo,
   AdoptRequest,
   ClearCredentialRequest,
+  ConnectExistingRequest,
   DecideCall,
   GoLiveRequest,
   RunsQuery,
@@ -29,7 +30,7 @@ import {
   withoutSources,
 } from "./server/core.ts";
 import { goLive, goLiveChoices, goLiveHost, goLiveProgress } from "./server/go-live.ts";
-import { setSetupToken, setupStatus } from "./server/setup.ts";
+import { connectExisting, setSetupToken, setupStatus } from "./server/setup.ts";
 import { withPrincipal } from "./middleware.ts";
 
 // The page's reads and changes, as server functions: the app's only HTTP surface. Each parses its
@@ -138,3 +139,8 @@ export const goLiveFn = createServerFn(CHANGE)
 export const goLiveHostFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .handler(({ context }) => goLiveHost(context.app, context.principal));
+/** Declares an existing repository and/or project in infra.ts, commits it, and starts the apply that binds them. */
+export const connectExistingFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .validator(validate(ConnectExistingRequest))
+  .handler(({ data, context }) => connectExisting(context.app, context.principal, data));

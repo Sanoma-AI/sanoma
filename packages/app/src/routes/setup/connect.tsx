@@ -1,5 +1,5 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { ExternalLinkIcon } from "lucide-react";
 import { z } from "zod";
 import { Button } from "#/components/ui/button.tsx";
@@ -62,6 +62,12 @@ function ConnectPage() {
       <Region title="Supabase">
         <ItemGroup>{supabaseToken && <CredentialRow credential={supabaseToken} store={SETUP_STORE} />}</ItemGroup>
       </Region>
+      <p className="text-sm text-muted-foreground">
+        Have a repository or a database already?{" "}
+        <Link to="/setup/existing" className="underline underline-offset-4">
+          Connect an existing one
+        </Link>
+      </p>
     </>
   );
 }

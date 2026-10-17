@@ -220,6 +220,45 @@ export interface GoLiveProgress {
   /** Where the host answers, from the last apply that made or changed it, and whether `/healthz` answers. */
   host: { url: string; healthy: boolean } | null;
 }
+/**
+ * What `connectExistingFn` takes: a GitHub repository (`owner/name`, or a name of the connector's
+ * owner) and a Supabase project's ref, either or both.
+ */
+export const ConnectExistingRequest = z
+  .object({
+    repository: z
+      .string()
+      .trim()
+      .regex(/^([\w-]+\/)?[\w.-]+$/, "Enter a repository as owner/name")
+      .optional(),
+    project: z
+      .string()
+      .trim()
+      .regex(/^[a-z0-9]+$/, "Enter a project's ref: lowercase letters and digits")
+      .optional(),
+  })
+  .refine((r) => r.repository || r.project, { message: "Enter a repository, a project's ref, or both" });
+export type ConnectExistingRequest = z.infer<typeof ConnectExistingRequest>;
+
+/**
+ * What `connectExistingFn` answers: the data file it wrote, relative to the root, and its text;
+ * its commit, on `branch` (with its `diff`) when the repository has a remote and the change waits
+ * for a person to merge it; and the apply run that binds what it declares.
+ */
+export interface ConnectExistingResponse {
+  file: string;
+  text: string;
+  revision?: string;
+  branch?: string;
+  diff?: string;
+  runId: string;
+}
+
+/** Said at the top of `infra.ts` when it declares an existing database, and on the page. */
+export const PASSWORD_NOTE = [
+  "The database password is declared as a generated secret, since Supabase never reads it back.",
+  "Binding the project changes nothing; the next apply that changes it sets a new password.",
+];
 
 /** What `clearCredentialFn` takes: a declared variable, whose stored value it deletes. */
 export const ClearCredentialRequest = z.object({ name: z.string().min(1, "Name a variable") });
