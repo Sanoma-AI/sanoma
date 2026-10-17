@@ -8,6 +8,8 @@ This package owns the provider-bridge client, provider replay, and resource sche
 
 Keep provider configuration serialized through `ensureConfigured`; preserve reconfiguration after credential changes or provider loss. Recorded fixtures must retain secret scrubbing and rejection of secret-bearing private state.
 
+The binary ships in `../bridge-bin/<platform>` ([its notes](../bridge-bin/AGENTS.md)); `RELEASE` in `scripts/download-bridge.ts` pins the provider-bridge release they and `pnpm bridge:download` take.
+
 Do not edit `src/gen/` by hand. Update `proto/` and regenerate with `pnpm --filter @sanoma-ai/bridge run generate`; keep the proto provenance and pinned generator versions aligned as described in [Develop](README.md#develop).
 
 Run `pnpm vitest run packages/bridge connectors/docker connectors/github connectors/stripe connectors/supabase` and `pnpm typecheck`. The default tests are offline; live tests require the separate provider-bridge checkout and explicit live mode.

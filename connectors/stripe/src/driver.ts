@@ -6,7 +6,7 @@ import { stripeTf } from "./connector.ts";
 export interface StripeDriverOptions {
   /**
    * The provider bridge to read through. Default: the process's `defaultBridge()`, started on the
-   * first call from `SANOMA_BRIDGE_BIN`. One per tenant: it holds the key once configured.
+   * first call (`startBridge`'s binary). One per tenant: it holds the key once configured.
    */
   bridge?: ProviderClient;
 }
