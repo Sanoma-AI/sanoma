@@ -47,7 +47,7 @@ export default defineConfig({ workflows, connectors: [stripe], policy });
 
 `./driver` (`stripeDriver`; `stripeDriver({ bridge })` reads through a bridge of your own) and `./fake` (`fakeStripe`) are internal entries, for tests.
 
-Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma-ai/bridge`, started on the first call from `SANOMA_BRIDGE_BIN`. It configures the provider on the first call with `{ api_key }`, and again when the key changes, when the provider has exited, or when the bridge has forgotten it. `read` without a state imports, which reads the object too.
+Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma-ai/bridge`, started on the first call with the binary `startBridge` finds. It configures the provider on the first call with `{ api_key }`, and again when the key changes, when the provider has exited, or when the bridge has forgotten it. `read` without a state imports, which reads the object too.
 
 ### Environment
 
@@ -57,7 +57,7 @@ Read on every call, never when the config loads:
 | ---------------- | ------------------------------------------------------------ |
 | `STRIPE_API_KEY` | A Stripe secret or restricted key; a test-mode one in tests. |
 
-When the key is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets it. The bridge passes the key to the provider through its config only. The default bridge's binary is the process's to set (`SANOMA_BRIDGE_BIN`, see [the bridge](https://www.npmjs.com/package/@sanoma-ai/bridge#environment)), not a credential of the connector.
+When the key is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets it. The bridge passes the key to the provider through its config only. The default bridge's binary comes with `@sanoma-ai/bridge` or from `SANOMA_BRIDGE_BIN` (see [the bridge](https://www.npmjs.com/package/@sanoma-ai/bridge#the-binary)), not a credential of the connector.
 
 ### Errors and retries
 

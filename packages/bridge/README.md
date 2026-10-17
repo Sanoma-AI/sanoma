@@ -8,7 +8,7 @@ Everything OpenTofu in Sanoma. A TypeScript client for [`provider-bridge`](https
 import { readPins, startBridge } from "@sanoma-ai/bridge";
 
 const { "integrations/github": github } = readPins();
-const bridge = await startBridge(); // SANOMA_BRIDGE_BIN, or { bin }
+const bridge = await startBridge(); // SANOMA_BRIDGE_BIN, else the installed platform package, or { bin }
 const { schema } = await bridge.schema(github!); // schema.protocol: 5
 await bridge.configure(github!, JSON.stringify({ owner: "Sanoma-AI", token: process.env.GITHUB_TOKEN }));
 const { resources } = await bridge.import(github!, "github_repository", "provider-bridge");
@@ -95,19 +95,24 @@ The provider's private data and state version travel in the operation's opaque `
 
 ## Environment
 
-| Variable            | What it is                                                                                                                                                                                                                                                                                                                         |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SANOMA_BRIDGE_BIN` | The `provider-bridge` binary `startBridge` runs when no `bin` is given; read when the bridge starts. A process-level override, not a vendor credential: no driver declares it, so the connector pages neither show nor set it. It stays the way to point at a binary until provider-bridge ships releases the bridge can download. |
-| `SANOMA_BRIDGE_SRC` | The provider-bridge checkout `pnpm bridge:download` builds from (default: found beside the repo).                                                                                                                                                                                                                                  |
-| `SANOMA_LIVE`       | `1`: the live test runs, and the tests' `fakeBridge` calls a real bridge.                                                                                                                                                                                                                                                          |
-| `SANOMA_RECORD`     | `1`, with `SANOMA_LIVE=1`: the tests' `fakeBridge` rewrites the fixtures it touches.                                                                                                                                                                                                                                               |
+| Variable            | What it is                                                                                                                                                                                                                                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SANOMA_BRIDGE_BIN` | The `provider-bridge` binary `startBridge` runs when no `bin` is given, before the installed platform package's (see [The binary](#the-binary)); read when the bridge starts. A process-level override, not a vendor credential: no driver declares it, so the connector pages neither show nor set it. |
+| `SANOMA_BRIDGE_SRC` | The provider-bridge checkout `pnpm bridge:download --source` builds from (default: found beside the repo).                                                                                                                                                                                              |
+| `SANOMA_LIVE`       | `1`: the live test runs, and the tests' `fakeBridge` calls a real bridge.                                                                                                                                                                                                                               |
+| `SANOMA_RECORD`     | `1`, with `SANOMA_LIVE=1`: the tests' `fakeBridge` rewrites the fixtures it touches.                                                                                                                                                                                                                    |
 
-`pnpm bridge:download` (at the repo root or here) runs `go build -mod=vendor -o packages/bridge/bin/provider-bridge ./cmd/provider-bridge` in the checkout, with the Go the checkout pins (through `mise x` when mise is installed), and prints the `export SANOMA_BRIDGE_BIN=...` line. `bin/` is gitignored. Downloading a pinned release by checksum is a stub (`RELEASE` and `downloadRelease` in the script) until provider-bridge publishes releases.
+## The binary
+
+`startBridge` runs `bin`, else `SANOMA_BRIDGE_BIN`, else the `bin/provider-bridge` of `@sanoma-ai/bridge-<platform>` for this process's `${process.platform}-${process.arch}` (`darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`), an optional dependency of this package, so npm installs only the one that matches; otherwise it fails, saying how to get one. Each platform package holds the binary of the provider-bridge release that `RELEASE` in [`scripts/download-bridge.ts`](scripts/download-bridge.ts) pins, downloaded from its GitHub release and checked against the archive's pinned sha256 when the package is packed (its `prepack`). A package manager that omits optional dependencies leaves the binary out; set `SANOMA_BRIDGE_BIN` then.
+
+`pnpm bridge:download` (at the repo root or here) downloads the same pinned release for this platform (`--platform` for another, as the packages' `prepack` does) into `bin/provider-bridge` (gitignored) and prints the `export SANOMA_BRIDGE_BIN=...` line. With `--source` it runs `go build -mod=vendor -o packages/bridge/bin/provider-bridge ./cmd/provider-bridge` in a provider-bridge checkout instead, with the Go the checkout pins (through `mise x` when mise is installed). `--out` puts the binary elsewhere.
 
 ## Supply chain
 
 - **Pinned providers, never upgraded implicitly.** Every call names an exact version and, from `pins.json`, the sha256 of the release's SHA256SUMS; the bridge refuses any other release. A pin changes only by hand, in a commit that re-records that release's schema and replies.
 - **Verified by the bridge.** The bridge downloads from registry.opentofu.org only, checks SHA256SUMS' OpenPGP signature and the zip's checksum, and runs only the verified binary (see provider-bridge's README).
+- **A pinned bridge.** The platform packages and `pnpm bridge:download` take the provider-bridge release `RELEASE` names, never "latest", and refuse an archive whose sha256 is not the pinned one. The pin changes only by hand, from the release's `SHA256SUMS`.
 - **Credentials only through `configure`.** The bridge gets a minimal environment and passes providers a smaller one; a driver reads its token per call and sends it in the config, never in a data file or the environment.
 - **One bridge per tenant.** A configured provider holds that tenant's credentials.
 

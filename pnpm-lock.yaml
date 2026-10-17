@@ -261,6 +261,27 @@ importers:
       zod:
         specifier: ^4.6.5
         version: 4.6.5
+    optionalDependencies:
+      '@sanoma-ai/bridge-darwin-arm64':
+        specifier: workspace:*
+        version: link:../bridge-bin/darwin-arm64
+      '@sanoma-ai/bridge-darwin-x64':
+        specifier: workspace:*
+        version: link:../bridge-bin/darwin-x64
+      '@sanoma-ai/bridge-linux-arm64':
+        specifier: workspace:*
+        version: link:../bridge-bin/linux-arm64
+      '@sanoma-ai/bridge-linux-x64':
+        specifier: workspace:*
+        version: link:../bridge-bin/linux-x64
+
+  packages/bridge-bin/darwin-arm64: {}
+
+  packages/bridge-bin/darwin-x64: {}
+
+  packages/bridge-bin/linux-arm64: {}
+
+  packages/bridge-bin/linux-x64: {}
 
   packages/sanoma:
     dependencies:

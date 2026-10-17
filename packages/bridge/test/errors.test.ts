@@ -79,8 +79,9 @@ describe("BridgeError", () => {
 describe("startBridge", () => {
   it("says how to get a binary when it has none", async () => {
     vi.stubEnv("SANOMA_BRIDGE_BIN", "");
+    // The checkout's platform packages are linked but empty: their bin/ is filled when packed.
     await expect(startBridge()).rejects.toThrow(
-      /SANOMA_BRIDGE_BIN.*github\.com\/Sanoma-AI\/provider-bridge.*pnpm bridge:download/,
+      /provider-bridge: no .*SANOMA_BRIDGE_BIN.*github\.com\/Sanoma-AI\/provider-bridge.*pnpm bridge:download/,
     );
   });
 
