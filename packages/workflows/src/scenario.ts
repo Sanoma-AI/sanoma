@@ -33,7 +33,15 @@ import type { LedgerRecord } from "./ledger.ts";
 import type { Driver, Op } from "./op.ts";
 import { type OutlineNode, outlineWorkflow } from "./outline.ts";
 import { memorySecrets } from "./secret.ts";
-import { APPLY_WORKFLOW, DRIFT_WORKFLOW, errorMessage, fitsOp, flatten, isEnded } from "./shared.ts";
+import {
+  APPLY_WORKFLOW,
+  BUILT_IN_WORKFLOWS,
+  DRIFT_WORKFLOW,
+  errorMessage,
+  fitsOp,
+  flatten,
+  isEnded,
+} from "./shared.ts";
 import type { Call, RunView, Seed } from "./steps.ts";
 
 /*
@@ -319,7 +327,6 @@ function builtFor(scope: Scope): Built {
 }
 
 /** The built-in workflows, whose input is never made up: each field is optional, and left out unless given. */
-const builtIns: ReadonlySet<string> = new Set([DRIFT_WORKFLOW, APPLY_WORKFLOW]);
 
 /** A `Then` step of the generic steps: its expectation, checked against the run's records. */
 const expecting = (expect: CoreExpectation): Then => ({ expect, verify: (run) => detailOf(expect, run.records) });
@@ -386,7 +393,7 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
         const given = fieldsFrom(pickle, input, inputOf(name));
         return {
           workflow: name as string,
-          input: builtIns.has(name as string) ? input.parse(given) : fill(input, given),
+          input: BUILT_IN_WORKFLOWS.has(name as string) ? input.parse(given) : fill(input, given),
         };
       },
     },
@@ -396,7 +403,7 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
       // A built-in's input is optional throughout: what is not given is left out, not made up.
       read: ([name]) => ({
         workflow: name as string,
-        input: builtIns.has(name as string) ? {} : fill(workflowOf(name).input, {}),
+        input: BUILT_IN_WORKFLOWS.has(name as string) ? {} : fill(workflowOf(name).input, {}),
       }),
     },
     // An operation's own test: a call made to its driver, or its fake, directly.

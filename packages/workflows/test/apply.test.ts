@@ -282,8 +282,12 @@ describe("the apply workflow on the company's resources", () => {
     });
     // Nothing is changed before it is approved.
     expect(ops(await app.client.ledger(runId)).filter(([op]) => op.endsWith(".create"))).toEqual([]);
+    // Meanwhile someone binds another resource: the run writes its own changes onto that.
+    const meanwhile = { type: "github.repository", id: "R_meanwhile" };
+    writeLockfile(root, { ...readLockfile(root).bindings, [id.old]: meanwhile });
     await app.client.decide(runId, { decision: "approve", by: { id: "lead" } });
     const report = await app.client.applyReport(runId);
+    expect(readLockfile(root).bindings).toMatchObject({ [id.old]: meanwhile, [id.blog]: expect.anything() });
     expect(JSON.parse(approval!.details!)).toEqual(report.plan);
     expect(report.results.filter((r) => r.status === "done").map((r) => r.action)).toEqual([
       "none",
@@ -454,6 +458,12 @@ describe("the apply workflow on a vendor that replaces", () => {
     const after = resultOf(report, deploys)!;
     expect(after).toMatchObject({ status: "done", binding: expect.not.stringMatching(before) });
     expect(objectOf("acme_hook", after.binding!)).toMatchObject({ site_id: readLockfile(root).bindings[web]!.id });
+
+    // Unless answered otherwise.
+    delete state.objects[`acme_hook/${after.binding}`];
+    const forgotten = await apply({ only: [deploys], answers: { [deploys]: "forget" } });
+    expect(forgotten.report.plan.steps).toMatchObject([{ action: "gone", answer: "forget" }]);
+    expect(readLockfile(root).bindings[deploys]).toBeUndefined();
   });
 
   it("fails an update the vendor plans otherwise by the time it runs, and goes on", async () => {

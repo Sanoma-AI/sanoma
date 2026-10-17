@@ -24,7 +24,7 @@ import {
 } from "./op.ts";
 import type { Policy } from "./policy.ts";
 import { isChangeOp, type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
-import { APPLY_WORKFLOW } from "./shared.ts";
+import { APPLY_WORKFLOW, BUILT_IN_WORKFLOWS } from "./shared.ts";
 import type { Steps } from "./steps.ts";
 import { computeVersion } from "./version.ts";
 
@@ -195,10 +195,8 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const types = resourceTypesOf(config.connectors);
   const names = new Map<string, WorkflowDefinition<any, any>>();
   for (const wf of config.workflows) {
-    for (const builtIn of [DRIFT_WORKFLOW, APPLY_WORKFLOW]) {
-      if (wf.name === builtIn) {
-        throw new Error(`A workflow is named "${builtIn}", the name of a built-in workflow; name it otherwise`);
-      }
+    if (BUILT_IN_WORKFLOWS.has(wf.name)) {
+      throw new Error(`A workflow is named "${wf.name}", the name of a built-in workflow; name it otherwise`);
     }
     checkUses(wf, ops, drivers, types);
     const other = names.get(wf.name);

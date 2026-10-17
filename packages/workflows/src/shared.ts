@@ -37,6 +37,9 @@ export const DRIFT_WORKFLOW = "drift";
  */
 export const APPLY_WORKFLOW = "apply";
 
+/** The workflows the runtime adds itself, which a config's own may not be named: drift and apply. */
+export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([DRIFT_WORKFLOW, APPLY_WORKFLOW]);
+
 /**
  * Every run status, in the order a run may pass through them: waiting on the queue, running,
  * waiting for an approval, or ended. `waiting` is `running` with an approval pending.

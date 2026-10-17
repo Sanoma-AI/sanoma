@@ -1,9 +1,9 @@
 import { join, relative, sep } from "node:path";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import type { ApplyDeclared, ApplySteps, PlannedCall } from "./apply.ts";
+import { decide } from "./call.ts";
 import type { Approver } from "./define.ts";
-import { type Bindings, diffLockfiles, LOCKFILE, writeLockfile } from "./lockfile.ts";
-import { type PolicyCall, policyOpOf } from "./policy.ts";
+import { type Binding, type Bindings, diffLockfiles, LOCKFILE, readLockfile, writeLockfile } from "./lockfile.ts";
 import { currentRun, type Run } from "./run.ts";
 import { APPLY_WORKFLOW } from "./shared.ts";
 
@@ -71,30 +71,28 @@ export function applySteps(
           const run = runNow();
           for (const { op: id, input } of calls) {
             const op = run.state.ops.get(id)!;
-            const target = op.target?.(input);
-            const call: PolicyCall = {
-              op: policyOpOf(op),
-              effect: op.effect,
-              ...(typeof target === "string" && { target }),
-              input,
-              actor: run.actor,
-              run: { id: run.id, workflow: run.workflow, approvals: structuredClone(run.approvals) },
-            };
-            const decision = await run.state.policy(call);
+            // Parsed as the call will be, so the policy sees the same input with its defaults.
+            const parsed = op.input.safeParse(input);
+            const decision = await decide(run, op, parsed.success ? parsed.data : input);
             if (decision.kind === "approve") return decision.approver;
           }
           return undefined;
         },
         { name: "apply:policy" },
       ),
-    // Written whole, then committed, in one step whose output is what it wrote. A sandbox run
-    // keeps its lockfile in memory: the run's report has it.
-    write: async (bindings: Bindings, message: string) => {
+    // The one binding changed on the lockfile as it is now, written whole, then committed, in one
+    // step whose output is what it wrote. A sandbox run keeps its lockfile in memory: the run's
+    // report has it.
+    write: async (key: string, binding: Binding | undefined, message: string) => {
       const run = runNow();
       if (run.sandbox !== undefined || root === undefined) return { written: false };
       const { source } = run.state;
       const { revision } = await DBOS.runStep(
         async (): Promise<{ bindings: Bindings; revision?: string }> => {
+          const now = readLockfile(root);
+          if (now.problems.length) throw new Error(`${LOCKFILE} cannot be updated: ${now.problems[0]!.message}`);
+          const { [key]: _, ...others } = now.bindings;
+          const bindings = binding ? { ...others, [key]: binding } : others;
           writeLockfile(root, bindings);
           const paths = [
             relative(source?.root ?? root, join(root, LOCKFILE))

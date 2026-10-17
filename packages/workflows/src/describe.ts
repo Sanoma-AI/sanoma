@@ -2,14 +2,13 @@ import type { z } from "zod";
 import { type LintProblem, readSource, type SourceFile } from "./ast.ts";
 import { resolveConfig, type SanomaConfig } from "./config.ts";
 import { type Builtin, jsonSchemaOf, opIdsOf, type Use } from "./define.ts";
-import { DRIFT_WORKFLOW } from "./drift.ts";
-import { APPLY_WORKFLOW } from "./shared.ts";
 import { lintWorkflow } from "./lint.ts";
 import { type Effect, VENDOR, type VendorInfo } from "./op.ts";
 import { type Outline, outlineWithSource } from "./outline.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
 import { type ResourceFields, resourceTypesOf } from "./resource.ts";
 import { type DataFiles, type DeclaredResource, readDataFiles, type ResourceProblem } from "./resources.ts";
+import { BUILT_IN_WORKFLOWS } from "./shared.ts";
 
 // `@sanoma-ai/workflows/describe`: what a UI renders from, apart from the main entry.
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
@@ -204,7 +203,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     const { outline, source, found } = outlineWithSource(wf, file);
     // What the lint does not report: the file unread, or no workflow of this name in it.
     const own = "error" in outline && !found && (typeof file === "string" || !file.problems.length);
-    const builtin = wf.name === DRIFT_WORKFLOW || wf.name === APPLY_WORKFLOW;
+    const builtin = BUILT_IN_WORKFLOWS.has(wf.name);
     const problems = builtin
       ? []
       : [

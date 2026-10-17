@@ -105,8 +105,12 @@ export interface ApplySteps {
   declared(): Promise<ApplyDeclared>;
   /** Who the policy would hold any of these calls for, the first it holds; undefined when it holds none. */
   holds(calls: PlannedCall[]): Promise<Approver | undefined>;
-  /** Writes the lockfile and commits it with `message`; a sandbox run writes nothing. */
-  write(bindings: Bindings, message: string): Promise<{ written: boolean; revision?: string }>;
+  /**
+   * Binds `key` to `binding` (unbinds it when undefined) in the lockfile as it is now, so a change
+   * another run made since this one read it stays, and commits it with `message`; a sandbox run
+   * writes nothing.
+   */
+  write(key: string, binding: Binding | undefined, message: string): Promise<{ written: boolean; revision?: string }>;
 }
 
 type State = Record<string, unknown>;
@@ -220,9 +224,9 @@ function decide(
   }
   const binding = result.binding!;
   if (result.status === "gone") {
-    // An object that holds no data is made again; anything else, a person decides.
-    if (types.get(key)!.stateless && may("create")) return { ask: { desired } };
     const answer = input.answers?.[r.id];
+    // An object that holds no data is made again, unless answered otherwise; anything else, a person decides.
+    if (answer === undefined && types.get(key)!.stateless && may("create")) return { ask: { desired } };
     const step: PlanStep = { ...head, action: "gone", binding };
     if (answer === "recreate" && !may("create")) return { step, problem: cannot("create") };
     if (answer === "recreate" || answer === "forget") return { step: { ...step, answer } };
@@ -334,7 +338,7 @@ function messageOf(step: PlanStep, before: Binding | undefined, after: Binding |
  *
  * - `bind` when the input gives an object (`bind`) or, unbound, its identity finds one;
  * - `create` when unbound and nothing is found, as its type's `plan` says (a gone object of a
- *   `stateless` type too);
+ *   `stateless` type too, unless answered);
  * - `gone` when its bound object is no longer there: skipped unless `answers` says `recreate`
  *   (created again) or `forget` (unbound);
  * - `update`, `replace` or `none`, as its type's `plan` says for its bound object;
@@ -458,7 +462,7 @@ export function applyWorkflow(
           else if (todo === "forget") delete bindings[key];
           const after = bindings[key];
           if (after?.id !== before?.id) {
-            const wrote = await steps.write(bindings, messageOf(step, before, after));
+            const wrote = await steps.write(key, after, messageOf(step, before, after));
             written ||= wrote.written;
             revision = wrote.revision ?? revision;
           }
