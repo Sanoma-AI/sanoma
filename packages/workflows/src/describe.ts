@@ -21,6 +21,9 @@ export {
   type DeclaredResource,
   type ResourceProblem,
 } from "./resources.ts";
+// The writer: setting a resource's fields in its data file, and rendering a new one.
+export { formatOptions, renderDataFile, setFields, type DataFileContent } from "./writer.ts";
+export { Reference, type DataValue } from "./datafile.ts";
 
 /** What a workflow is, read from its definition: enough to draw a start form and show what it may call. */
 export interface WorkflowEntry {

@@ -21,6 +21,7 @@ import {
   resolveConfig,
   SanomaClient,
   type SanomaConfig,
+  type Source,
   startWorker,
   type Worker,
   withSetup,
@@ -47,6 +48,7 @@ import type { AppContext, ResolveActor } from "../src/context.ts";
 import {
   type ActorContext,
   actorOf,
+  adopt,
   asApiError,
   clearCredential,
   credentials,
@@ -1267,6 +1269,61 @@ describe("resources and drift", () => {
     expect(report.resources.filter((r) => r.status === "clean")).toHaveLength(3);
   });
 
+  it("adopts a drifted field: the vendor's value into the data file, committed through the source", async () => {
+    // A root of its own, so the other tests read the fixture's files as they are.
+    const root = mkdtempSync(join(tmpdir(), "sanoma-adopt-"));
+    cpSync(join(appRoot, "resources"), join(root, "resources"), { recursive: true });
+    const commits: unknown[] = [];
+    const source: Source = {
+      root,
+      commit: (made) => {
+        commits.push(made);
+        return { revision: "0123456789abcdef" };
+      },
+      head: () => "0123456789abcdef",
+    };
+    const adopting: AppContext = { ...ctx, resolved: { ...ctx.resolved, root }, source };
+    const alice = { id: "alice" };
+    const github = "resources/identity/github.ts";
+    const before = readFileSync(join(root, github), "utf8");
+    const website = { runId: driftRun, id: `${github}#website`, paths: ["has_wiki"] };
+    expect(await adopt(adopting, alice, website)).toEqual({ file: github, revision: "0123456789abcdef" });
+    expect(readFileSync(join(root, github), "utf8")).toBe(before.replace("has_wiki: false", "has_wiki: true"));
+    expect(commits).toEqual([{ paths: [github], message: "Adopt has_wiki of website from github", author: "alice" }]);
+
+    // Without a source, the file is written and nothing committed.
+    const stripe = "resources/billing/stripe.ts";
+    const pro = { runId: driftRun, id: `${stripe}#pro`, paths: ["name"] };
+    expect(await adopt({ ...adopting, source: undefined }, alice, pro)).toEqual({ file: stripe });
+    expect(readFileSync(join(root, stripe), "utf8")).toContain('name: "Sanoma Professional",');
+    expect(commits).toHaveLength(1);
+
+    // A commit that fails says so, with the file written.
+    const failing: Source = {
+      ...source,
+      commit: () => {
+        throw new Error("index.lock exists");
+      },
+    };
+    await expect(adopt({ ...adopting, source: failing }, alice, pro)).rejects.toMatchObject({
+      status: 500,
+      body: { error: `Wrote ${stripe}, but could not commit it: index.lock exists` },
+    });
+
+    // Only a field the run found drifted, and only while the file still declares it.
+    await expect(adopt(adopting, alice, { ...website, paths: ["name"] })).rejects.toMatchObject({
+      status: 400,
+      body: { error: `name of ${github}#website has not drifted` },
+    });
+    await expect(adopt(adopting, alice, { ...website, id: `${github}#docs` })).rejects.toMatchObject({ status: 404 });
+    writeFileSync(join(root, github), before.replaceAll("website", "site"));
+    await expect(adopt(adopting, alice, website)).rejects.toMatchObject({
+      status: 409,
+      body: { error: `Could not adopt into ${github}: The data file declares no resource website` },
+    });
+    expect(commits).toHaveLength(1);
+  });
+
   it("renders each resource with its drift badge, the fields that differ, and a link to the run", async () => {
     const resources = await page("/resources");
     expect(resources.status).toBe(200);
@@ -1278,6 +1335,8 @@ describe("resources and drift", () => {
     expect(resources.text.match(/>gone</g)).toHaveLength(1);
     expect(resources.text.match(/>clean</g)).toHaveLength(3);
     expect(resources.text).toContain("2 drifted");
+    // A button to adopt each drifted field.
+    expect(resources.text.match(/>Adopt</g)).toHaveLength(2);
     // Each drifted field, as declared and as the vendor holds it.
     expect(resources.text).toMatch(/<code>has_wiki<\/code>.*?<code>false<\/code>.*?<code>true<\/code>/s);
     expect(resources.text).toMatch(

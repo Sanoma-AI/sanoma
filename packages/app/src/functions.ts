@@ -1,7 +1,15 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { type ActorInfo, ClearCredentialRequest, DecideCall, RunsQuery, SetCredentialRequest } from "./api.ts";
 import {
+  type ActorInfo,
+  AdoptRequest,
+  ClearCredentialRequest,
+  DecideCall,
+  RunsQuery,
+  SetCredentialRequest,
+} from "./api.ts";
+import {
+  adopt,
   clearCredential,
   credentials,
   decide,
@@ -80,6 +88,12 @@ export const decideFn = createServerFn(CHANGE)
 export const getDriftReport = createServerFn(READ)
   .validator(validate(z.object({ runId: z.string().min(1) })))
   .handler(({ data, context }) => driftReport(context.app, data.runId));
+
+/** Writes what the vendor holds for drifted fields into their data file, and commits it when the app has a source. */
+export const adoptFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .validator(validate(AdoptRequest))
+  .handler(({ data, context }) => adopt(context.app, context.principal, data));
 
 /** Each vendor's credential statuses now: they change as people set them, and with the environment. */
 export const getCredentials = createServerFn(READ).handler(({ context }) => credentials(context.app));
