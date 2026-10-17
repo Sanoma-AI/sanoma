@@ -22,14 +22,7 @@ function fakeApi(state: FakeSupabaseState): ManagementApi {
   };
   return {
     projects: async () =>
-      projects().map((p) => ({
-        id: String(p.id),
-        ref: String(p.id),
-        name: String(p.name),
-        organization_id: String(p.organization_id),
-        region: String(p.region),
-        status: "ACTIVE_HEALTHY",
-      })),
+      projects().map((p) => ({ id: String(p.id), name: String(p.name), organization_id: String(p.organization_id) })),
     pooler: async (ref) => {
       const { region } = project(ref, "/config/database/pooler");
       const at = {
@@ -37,7 +30,7 @@ function fakeApi(state: FakeSupabaseState): ManagementApi {
         db_user: `postgres.${ref}`,
         db_name: "postgres",
       };
-      return [{ database_type: "PRIMARY", db_port: 6543, pool_mode: "transaction", ...at }];
+      return [{ database_type: "PRIMARY", ...at }];
     },
     health: async (ref, services) => {
       project(ref, "/health");
