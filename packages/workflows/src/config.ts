@@ -280,8 +280,9 @@ function scenariosAt(root: string | undefined): URL | undefined {
 }
 
 /**
- * The data files under `root`, as a drift run records them: each resource without its write-only
- * values, which a run never compares and never records, and the problems.
+ * The data files under `root` and the lockfile beside them, in one read, as a drift run records
+ * them: each resource with its binding, without its write-only values, which a run never compares
+ * and never records, and the problems.
  */
 async function readDeclared(
   root: string | undefined,
@@ -292,11 +293,13 @@ async function readDeclared(
   const { readDataFiles } = await import("./resources.ts");
   const { resources, problems } = readDataFiles(root, connectors, types);
   return {
-    resources: resources.map(({ id, vendor, type, name, desired, refs }) => ({
+    resources: resources.map(({ id, vendor, type, name, identity, binding, desired, refs }) => ({
       id,
       vendor,
       type,
       name,
+      ...(identity !== undefined && { identity }),
+      ...(binding !== undefined && { binding }),
       desired: withoutWriteOnly(types.get(`${vendor}.${type}`)!.fields, desired),
       refs,
     })),

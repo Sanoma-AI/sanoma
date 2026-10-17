@@ -51,6 +51,7 @@ describe("the company's scenarios", () => {
       ["drift.feature", "drift"],
       ["drift.feature", "drift"],
       ["drift.feature", "drift"],
+      ["drift.feature", "drift"],
       ["inspect.feature", "inspect"],
       ["inspect.feature", "inspect"],
       ["inspect.feature", "inspect"],

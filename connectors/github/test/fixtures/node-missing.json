@@ -1,0 +1,28 @@
+[
+  {
+    "method": "POST",
+    "path": "/graphql",
+    "status": 200,
+    "body": {
+      "data": {
+        "node": null,
+        "viewer": {
+          "login": "someone"
+        }
+      },
+      "errors": [
+        {
+          "type": "NOT_FOUND",
+          "path": ["node"],
+          "locations": [
+            {
+              "line": 2,
+              "column": 3
+            }
+          ],
+          "message": "Could not resolve to a node with the global id of 'R_kgDOAAAAAA'"
+        }
+      ]
+    }
+  }
+]

@@ -10,28 +10,28 @@ npm install @sanoma-ai/connector-stripe
 
 Each resource type has two operations, both effect `read` and idempotent, with Stripe's id as the policy's `target`:
 
-| Type               | Operations                                                       | Import id (identity) |
-| ------------------ | ---------------------------------------------------------------- | -------------------- |
-| `product`          | `stripe.product.read`, `stripe.product.import`                   | `id` (`prod_…`)      |
-| `webhook_endpoint` | `stripe.webhook_endpoint.read`, `stripe.webhook_endpoint.import` | `id` (`we_…`)        |
+| Type               | Operations                                                       | Import id       |
+| ------------------ | ---------------------------------------------------------------- | --------------- |
+| `product`          | `stripe.product.read`, `stripe.product.import`                   | `id` (`prod_…`) |
+| `webhook_endpoint` | `stripe.webhook_endpoint.read`, `stripe.webhook_endpoint.import` | `id` (`we_…`)   |
 
 `import` takes `{ id }` and returns the object's `state`; `read` takes a state an earlier call returned, or just `{ id }`, and returns its fresh `state`, or `gone: true`. See [Resources](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#resources).
 
-A data file declares resources with the constructors in `@sanoma-ai/connector-stripe/resources`, naming an object that exists by Stripe's id:
+A data file declares resources with the constructors in `@sanoma-ai/connector-stripe/resources`, without Stripe's id, which Stripe sets: which object a declaration means is its binding, in the [lockfile](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#bindings), by Stripe's id. A declaration with no binding is `absent` to a drift check.
 
 ```ts
 import { stripe } from "@sanoma-ai/connector-stripe/resources";
 
-export const pro = stripe.product({ id: "prod_…", name: "Pro", active: true });
+export const pro = stripe.product({ name: "Pro", active: true });
 ```
 
-The fields are the provider's attributes, by their names. Only declared fields are compared for drift; `id` is Stripe's, so never compared.
+The fields are the provider's attributes, by their names. Only declared fields are compared for drift.
 
 The logo is Stripe's glyph from [Simple Icons](https://simpleicons.org/?q=stripe) (CC0), there only to identify the service an operation calls.
 
 ## Resource types
 
-`src/resources.gen.ts` is generated from the provider's schema by `pnpm generate`, which runs [`@sanoma-ai/bridge/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the provider (its release, sha256 and recorded schema are `@sanoma-ai/bridge`'s pin and fixture), the types, and the attributes whose change replaces the object (a webhook endpoint's `api_version` and `connect`, which Stripe's update does not take). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing. `src/connector.ts` is the rest, one `tfConnector` record from [`@sanoma-ai/bridge/connector`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/README.md#connectors-for-opentofu-providers): each type found by Stripe's `id`, and Stripe's title and logo. What Stripe sets (`created`, `livemode`) is vendor-owned and a data file may not declare it; `id` is too, but the identity names it, so a data file gives it.
+`src/resources.gen.ts` is generated from the provider's schema by `pnpm generate`, which runs [`@sanoma-ai/bridge/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the provider (its release, sha256 and recorded schema are `@sanoma-ai/bridge`'s pin and fixture), the types, and the attributes whose change replaces the object (a webhook endpoint's `api_version` and `connect`, which Stripe's update does not take). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing. `src/connector.ts` is the rest, one `tfConnector` record from [`@sanoma-ai/bridge/connector`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/README.md#connectors-for-opentofu-providers): each type's title (no identity: an object is found by its binding, Stripe's `id`), and Stripe's title and logo. What Stripe sets (`id`, `created`, `livemode`) is vendor-owned and a data file may not declare it.
 
 A webhook endpoint's `secret` is sensitive (Stripe returns it only when the endpoint is created): it is write-only, never compared, and `null` in every state the driver returns.
 

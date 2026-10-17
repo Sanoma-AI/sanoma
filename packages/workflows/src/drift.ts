@@ -14,11 +14,12 @@ export { DRIFT_WORKFLOW } from "./shared.ts";
 // vendor call goes through `ctx`: the policy sees each (effect `read`) and the ledger records it.
 
 /**
- * How a declared resource compares: `clean` when every declared field holds its declared value,
- * `drifted` when one does not, `gone` when the vendor has no such object, and `error` when it
- * could not be read (the vendor's error, a policy denial, or no driver for its type).
+ * How a declared resource compares: `clean` when every declared field of its bound object holds
+ * its declared value, `drifted` when one does not, `gone` when the vendor no longer has its bound
+ * object, `absent` when it is bound to none (whether or not its identity finds one: `found`), and
+ * `error` when it could not be read (the vendor's error, a policy denial, or no driver for its type).
  */
-export type DriftStatus = "clean" | "drifted" | "gone" | "error";
+export type DriftStatus = "clean" | "drifted" | "gone" | "absent" | "error";
 
 /** One declared resource in a drift report. */
 export interface DriftResult {
@@ -27,9 +28,13 @@ export interface DriftResult {
   /** Its type within the vendor, such as `repository`. */
   type: string;
   vendor: string;
-  /** Its import id. */
+  /** What people call it: its identity, else its export's name. */
   name: string;
   status: DriftStatus;
+  /** The vendor's id of the object the lockfile binds it to; absent when unbound. */
+  binding?: string;
+  /** For `absent`: the binding id of the object its identity found, which apply may bind it to. */
+  found?: string;
   /** The declared fields that differ; empty unless `drifted`. */
   fields: DriftField[];
   /** Why it could not be read, for `error`. */
@@ -59,7 +64,7 @@ export const DriftInput = z.object({}).strict();
  * write-only values, and the problems.
  */
 export interface DriftDeclared {
-  resources: Pick<DeclaredResource, "id" | "vendor" | "type" | "name" | "desired" | "refs">[];
+  resources: Pick<DeclaredResource, "id" | "vendor" | "type" | "name" | "identity" | "binding" | "desired" | "refs">[];
   problems: ResourceProblem[];
 }
 
@@ -77,11 +82,13 @@ type Found = { state: State } | { gone: true } | { error: string };
  * files. `resolveConfig` adds it to a config whose connectors declare resource types, with
  * `declared`, the step that reads the data files.
  *
- * A run reads the data files (`declared`, recorded as a step, so a replay checks the same list),
- * then imports each resource by its import id (its `name`), in the files' order: one vendor call
- * each. An import that says gone is `gone`. Else the state and the declared fields are compared
- * by `diffDeclared`, a reference against the state of the resource it names, read in the same run
- * (so GitHub's node id for a repository counts as its name). A failed call is that resource's
+ * A run reads the data files and the lockfile (`declared`, recorded as a step, so a replay checks
+ * the same list), then imports each resource by its binding, else by its identity, in the files'
+ * order: one vendor call each, none for a resource with neither. A bound resource whose import
+ * says gone is `gone`; an unbound one is `absent`, with the binding id of what its identity found
+ * as `found`. Else the state and the declared fields are compared by `diffDeclared`, a reference
+ * against the state of the resource it names, read in the same run (so GitHub's node id for a
+ * repository counts as its name). A failed call is that resource's
  * `error`, and the run goes on to the next; a failure that ends the run (`isRunControlError`)
  * ends it.
  */
@@ -112,14 +119,16 @@ export function driftWorkflow(
       const { resources, problems } = await declared();
       // Every import first, so a reference compares against what its resource holds now.
       const found = new Map<string, Found>();
-      for (const { id, vendor, type, name } of resources) {
+      for (const { id, vendor, type, identity, binding } of resources) {
         const key = `${vendor}.${type}`;
         const why = types.has(key) ? unreadable.get(key) : `the config's connectors declare no resource type ${key}`;
+        const by = binding ?? identity;
         // An if/else, not a `continue`: the outline draws the import as the way past the error.
         if (why !== undefined) found.set(id, { error: why });
+        else if (by === undefined) found.set(id, { gone: true });
         else {
           try {
-            const out = await ctx[vendor]![type]!.import({ id: name });
+            const out = await ctx[vendor]![type]!.import({ id: by });
             found.set(id, out.gone || !out.state ? { gone: true } : { state: out.state });
           } catch (err) {
             if (isRunControlError(err)) throw err;
@@ -127,12 +136,20 @@ export function driftWorkflow(
           }
         }
       }
-      const results = resources.map(({ id, vendor, type, name, desired, refs }): DriftResult => {
-        const row = { id, type, vendor, name };
+      const results = resources.map(({ id, vendor, type, name, binding, desired, refs }): DriftResult => {
+        const row = { id, type, vendor, name, ...(binding !== undefined && { binding }) };
         const now = found.get(id)!;
         if ("error" in now) return { ...row, status: "error", fields: [], error: now.error };
-        if ("gone" in now) return { ...row, status: "gone", fields: [] };
         const resource = types.get(`${vendor}.${type}`)!;
+        if (binding === undefined) {
+          return {
+            ...row,
+            status: "absent",
+            fields: [],
+            ...("state" in now && { found: resource.bindingId(now.state) }),
+          };
+        }
+        if ("gone" in now) return { ...row, status: "gone", fields: [] };
         // Each reference, by where it is: the values the vendor may hold there for its resource.
         const accept: Record<string, unknown[]> = {};
         for (const [at, target] of Object.entries(refs)) {

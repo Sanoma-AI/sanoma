@@ -33,5 +33,11 @@ export const APPROVAL_TONE: Record<ApprovalState["status"], Tone> = {
 
 export const DECISION_TONE: Record<RecordedDecision["kind"], Tone> = { allow: "ok", deny: "bad", approve: "waiting" };
 
-/** A resource's verdict in a drift check: drifted wants a look, gone or unreadable is wrong. */
-export const DRIFT_TONE: Record<DriftStatus, Tone> = { clean: "ok", drifted: "waiting", gone: "bad", error: "bad" };
+/** A resource's verdict in a drift check: drifted wants a look, gone or unreadable is wrong, absent is not made (or bound) yet. */
+export const DRIFT_TONE: Record<DriftStatus, Tone> = {
+  clean: "ok",
+  drifted: "waiting",
+  gone: "bad",
+  absent: "idle",
+  error: "bad",
+};

@@ -8,7 +8,7 @@ import { type Effect, VENDOR, type VendorInfo } from "./op.ts";
 import { type Outline, outlineWithSource } from "./outline.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
 import { type ResourceFields, resourceTypesOf } from "./resource.ts";
-import { type DeclaredResource, readDataFiles, type ResourceProblem } from "./resources.ts";
+import { type DataFiles, type DeclaredResource, readDataFiles, type ResourceProblem } from "./resources.ts";
 
 // `@sanoma-ai/workflows/describe`: what a UI renders from, apart from the main entry.
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
@@ -24,6 +24,16 @@ export {
 // The writer: setting a resource's fields in its data file, and rendering a new one.
 export { formatOptions, renderDataFile, setFields, type DataFileContent } from "./writer.ts";
 export { Reference, type DataValue } from "./datafile.ts";
+export {
+  LOCKFILE,
+  readLockfile,
+  serializeLockfile,
+  writeLockfile,
+  diffLockfiles,
+  type Binding,
+  type Bindings,
+  type Rebind,
+} from "./lockfile.ts";
 
 /** What a workflow is, read from its definition: enough to draw a start form and show what it may call. */
 export interface WorkflowEntry {
@@ -99,8 +109,8 @@ export interface ResourceTypeEntry {
   vendor: string;
   type: string;
   title: string;
-  /** How a declared resource's import id is made, such as `name` or `repository_id:pattern`. */
-  identity: string;
+  /** How a declared resource's identity is made, such as `name` or `repository_id:pattern`; absent when it is found only by its binding. */
+  identity?: string;
   /** Its flagged fields, by dotted path. */
   fields: ResourceFields;
   /**
@@ -132,6 +142,8 @@ export interface ConfigDescription {
    * less any with a problem and any that names one.
    */
   resources: DeclaredResource[];
+  /** Each binding in the lockfile (`LOCKFILE`) whose key no data file declares, as `readDataFiles` reports it. */
+  orphans: DataFiles["orphans"];
   /** What is wrong in the data files (`readDataFiles`), each at its file, relative to the root, line and column. A workflow's are on its entry. */
   problems: ResourceProblem[];
   /** `defined` is false for `allowAll`. */
@@ -219,6 +231,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     vendors,
     resourceTypes,
     resources: dataFiles.resources,
+    orphans: dataFiles.orphans,
     problems: dataFiles.problems,
     policy: {
       defined: resolved.policy !== allowAll,

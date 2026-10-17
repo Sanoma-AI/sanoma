@@ -8,15 +8,15 @@ GitHub resources for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@san
 npm install @sanoma-ai/connector-github
 ```
 
-Each resource type has two operations, both effect `read` and idempotent, with the import id as the policy's `target`:
+Each resource type has two operations, both effect `read` and idempotent, with the id as the policy's `target`:
 
-| Type                | Operations                                                         | Import id (identity)    |
-| ------------------- | ------------------------------------------------------------------ | ----------------------- |
-| `repository`        | `github.repository.read`, `github.repository.import`               | `name`                  |
-| `branch_protection` | `github.branch_protection.read`, `github.branch_protection.import` | `repository_id:pattern` |
-| `team_membership`   | `github.team_membership.read`, `github.team_membership.import`     | `team_id:username`      |
+| Type                | Operations                                                         | Identity                | Binding id                  |
+| ------------------- | ------------------------------------------------------------------ | ----------------------- | --------------------------- |
+| `repository`        | `github.repository.read`, `github.repository.import`               | `name`                  | `node_id`                   |
+| `branch_protection` | `github.branch_protection.read`, `github.branch_protection.import` | `repository_id:pattern` | `id` (its node id, `BPR_…`) |
+| `team_membership`   | `github.team_membership.read`, `github.team_membership.import`     | `team_id:username`      | `id` (`team_id:username`)   |
 
-`import` takes `{ id }` and returns the object's `state`; `read` takes a state an earlier call returned (`{ id, state, handle }`), or just `{ id }`, and returns its fresh `state`, or `gone: true` when it no longer exists. See [Resources](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#resources).
+`import` takes `{ id }`, an identity or a binding id (what the [lockfile](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#bindings) keeps, which a rename does not change), and returns the object's `state`. The provider imports a repository by its name and a rule by `repository:pattern`, so the driver resolves a node id (`R_…`, `BPR_…`) to those first, with one GraphQL `node(id)` query, and refuses one in a repository of another owner than `GITHUB_OWNER` (default: the token's user); a node id GitHub does not know is gone. The fake finds an object by its binding id too, with no query; `read` takes a state an earlier call returned (`{ id, state, handle }`), or just `{ id }`, and returns its fresh `state`, or `gone: true` when it no longer exists. See [Resources](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#resources).
 
 A data file declares resources with the constructors in `@sanoma-ai/connector-github/resources`:
 
@@ -35,7 +35,7 @@ The logo is GitHub's mark from [Octicons](https://primer.style/octicons/) (`mark
 
 ## Resource types
 
-`src/resources.gen.ts` is generated from the provider's schema by `pnpm generate`, which runs [`@sanoma-ai/bridge/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the provider (its release, sha256 and recorded schema are `@sanoma-ai/bridge`'s pin and fixture), the types to generate, and the attributes whose change replaces the object (ForceNew in the provider's source, which the schema does not carry). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing. `src/connector.ts` is the rest, one `tfConnector` record from [`@sanoma-ai/bridge/connector`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/README.md#connectors-for-opentofu-providers): each type's title, identity and `find`, the field that names another resource (`branch_protection.repository_id`), and GitHub's title, logo and package. The connector, the constructors, the driver and the fake all derive from it.
+`src/resources.gen.ts` is generated from the provider's schema by `pnpm generate`, which runs [`@sanoma-ai/bridge/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the provider (its release, sha256 and recorded schema are `@sanoma-ai/bridge`'s pin and fixture), the types to generate, and the attributes whose change replaces the object (ForceNew in the provider's source, which the schema does not carry). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing. `src/connector.ts` is the rest, one `tfConnector` record from [`@sanoma-ai/bridge/connector`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/README.md#connectors-for-opentofu-providers): each type's title, identity, `find` and `bindingId`, the field that names another resource (`branch_protection.repository_id`), and GitHub's title, logo and package. The connector, the constructors, the driver and the fake all derive from it.
 
 Attributes that are computed and not optional (`html_url`, `repo_id`) are vendor-owned: never drift, and a data file may not declare them. Those the provider marks computed and optional (`etag`, `topics`, `visibility`, `default_branch`) are yours to set, and compared only when declared.
 

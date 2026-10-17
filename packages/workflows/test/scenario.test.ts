@@ -664,6 +664,7 @@ describe("resources and policy outcomes", () => {
     Then resources/identity/github.ts#website is drifted in has_wiki
     And resources/identity/github.ts#docs is gone
     And resources/billing/stripe.ts#pro is clean
+    And resources/billing/stripe.ts#events is absent
 `;
   const INSPECT = `Feature: Inspect
 
@@ -701,10 +702,11 @@ describe("resources and policy outcomes", () => {
         { declared: "resources/identity/github.ts#website", status: "drifted", field: "has_wiki" },
         { declared: "resources/identity/github.ts#docs", status: "gone" },
         { declared: "resources/billing/stripe.ts#pro", status: "clean" },
+        { declared: "resources/billing/stripe.ts#events", status: "absent" },
       ],
     });
     // A step about a resource names no operation.
-    expect(drift!.steps.map((s) => s.op)).toEqual(Array(6).fill(undefined));
+    expect(drift!.steps.map((s) => s.op)).toEqual(Array(7).fill(undefined));
 
     const [held] = await parseCompany(INSPECT);
     expect(held).toMatchObject({
@@ -977,6 +979,7 @@ describe("resources and policy outcomes", () => {
         { step: "other field", declared: website, status: "drifted", field: "name" },
         { step: "clean", declared: website, status: "clean" },
         { step: "gone", declared: "resources/identity/github.ts#docs", status: "gone" },
+        { step: "absent", declared: "resources/identity/github.ts#docs", status: "absent" },
         { step: "clean", declared: "resources/identity/rules.ts#docsMain", status: "clean" },
         { step: "unread", declared: "resources/billing/stripe.ts#pro", status: "clean" },
         { step: "unknown", declared: "resources/x.ts#y", status: "clean" },
@@ -986,6 +989,7 @@ describe("resources and policy outcomes", () => {
         `${website} is drifted in has_wiki, topics, not drifted in name`,
         `${website} is drifted in has_wiki, topics, not clean`,
         "resources/identity/github.ts#docs is clean, not gone",
+        "resources/identity/github.ts#docs is clean, not absent",
         "resources/identity/rules.ts#docsMain is gone, not clean",
         "resources/billing/stripe.ts#pro could not be read: denied by policy: no Stripe",
         "no resource resources/x.ts#y in the report; it has resources/identity/github.ts#website, resources/identity/github.ts#docs, resources/identity/rules.ts#docsMain, resources/billing/stripe.ts#pro",

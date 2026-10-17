@@ -90,7 +90,7 @@ export interface Decision {
  * What the run should do: call an operation (with at least this input) or not, run the step
  * `name`d in the workflow's outline or not, or a number of `times`, have the policy deny an
  * operation (`denied`) or hold one for an approver (`held`), end a certain way, or, for a drift
- * run, report the resource `declared` (`<file>#<export>`) clean, gone, or drifted in a field.
+ * run, report the resource `declared` (`<file>#<export>`) clean, gone, absent, or drifted in a field.
  * A step whose own code checks the run (a connector's or the company's, or an operation's own
  * test's) is `custom`, with what it is about.
  */
@@ -101,7 +101,7 @@ export type Expectation =
   | { step: string; op: string; decision: "denied" }
   | { step: string; op: string; decision: "held"; approver: string }
   | { step: string; outcome: "finished" | "failed"; code?: string }
-  | { step: string; declared: string; status: "clean" | "gone" }
+  | { step: string; declared: string; status: "clean" | "gone" | "absent" }
   | { step: string; declared: string; status: "drifted"; field: string }
   | { step: string; custom: true; op?: string; called?: boolean };
 
@@ -469,7 +469,7 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
       read: ([declared, field]) =>
         expecting({ declared: declared as string, status: "drifted", field: field as string }),
     },
-    ...(["clean", "gone"] as const).map((status): Rule => ({
+    ...(["clean", "gone", "absent"] as const).map((status): Rule => ({
       kind: "then",
       source: `{declared} is ${status}`,
       read: ([declared]) => expecting({ declared: declared as string, status }),

@@ -51,7 +51,7 @@ describe("defineResource", () => {
       id: "acme.repo.import",
       effect: "read",
       idempotent: true,
-      description: "Find a repo by its name and read it; gone when there is none",
+      description: "Find a repo by its name or its binding id and read it; gone when there is none",
       opaque: ["handle"],
     });
     expect(acme.repo.read.description).toBe("Read a repo as it is now; gone when it no longer exists");
@@ -128,6 +128,56 @@ describe("defineResource", () => {
     });
     expect(thing({ id: "t_1" }).name).toBe("t_1");
     expect(() => thing({ id: "t_1", created: 1 })).toThrow("acme.thing: leave out created: the vendor sets it");
+  });
+
+  describe("without find", () => {
+    // A type the vendor names alone: its id is vendor-owned, and only a binding finds an object.
+    const product = defineResource({
+      vendor: "acme",
+      type: "product",
+      title: "Product",
+      schema: z.object({ id: z.string().nullish(), title: z.string(), node: z.string().nullish() }),
+      fields: { immutable: [], vendorOwned: ["id", "node"], writeOnly: [] },
+    });
+
+    it("declares a resource without a name, refusing the vendor's id, and imports by binding id", () => {
+      const pro = product({ title: "Pro" });
+      expect(pro).toMatchObject({ vendor: "acme", type: "product", desired: { title: "Pro" } });
+      expect(pro).not.toHaveProperty("name");
+      expect(() => product({ id: "p_1", title: "Pro" })).toThrow("acme.product: leave out id: the vendor sets it");
+      expect(product.ops.import.description).toBe(
+        "Find a product by its binding id and read it; gone when there is none",
+      );
+    });
+
+    it("keeps its state's id as the binding id by default, or what `bindingId` makes of the state", () => {
+      expect(product.bindingId({ id: "p_1", title: "Pro" })).toBe("p_1");
+      expect(repo.bindingId({ id: 7, name: "sanoma" })).toBe("7");
+      const byNode = defineResource({
+        vendor: "acme",
+        type: "noded",
+        title: "Noded",
+        schema: z.object({ id: z.string().nullish(), node: z.string().nullish() }),
+        fields: { immutable: [], vendorOwned: ["id", "node"], writeOnly: [] },
+        bindingId: ({ node }) => String(node),
+      });
+      expect(byNode.bindingId({ id: "x", node: "N_1" })).toBe("N_1");
+    });
+
+    it("cannot be named by another resource: a reference stands for an identity", () => {
+      const listing = defineResource({
+        vendor: "acme",
+        type: "listing",
+        title: "Listing",
+        identity: "slug",
+        schema: z.object({ slug: z.string(), product: z.string().nullish() }),
+        fields: { immutable: [], vendorOwned: [], writeOnly: [], references: { product: { type: "acme.product" } } },
+        find: ({ slug }) => slug,
+      });
+      expect(() => listing({ slug: "pro", product: product({ title: "Pro" }) })).toThrow(
+        "acme.listing: product names a acme.product, which has no identity to name it by",
+      );
+    });
   });
 
   describe("references", () => {

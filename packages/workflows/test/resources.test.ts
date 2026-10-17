@@ -7,7 +7,7 @@ import { github as githubTypes } from "@sanoma-ai/connector-github/resources";
 import { stripe } from "@sanoma-ai/connector-stripe";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { describeConfig, readResources } from "../src/describe.ts";
+import { describeConfig, readDataFiles, readResources } from "../src/describe.ts";
 import {
   allowAll,
   defineConnector,
@@ -43,13 +43,21 @@ const companyDir = fileURLToPath(new URL("./fixtures/company/", import.meta.url)
 describe("readResources", () => {
   it("reads each declared resource from the data files beside the config, without running them", () => {
     const resources = readResources(company);
-    expect(resources.map((r) => [r.id, r.vendor, r.type, r.name])).toEqual([
-      ["resources/billing/stripe.ts#pro", "stripe", "product", "prod_SanomaFixturePro"],
-      ["resources/billing/stripe.ts#events", "stripe", "webhook_endpoint", "we_SanomaFixtureEvents"],
-      ["resources/identity/github.ts#website", "github", "repository", "website"],
-      ["resources/identity/github.ts#docs", "github", "repository", "docs"],
-      ["resources/identity/github.ts#websiteMain", "github", "branch_protection", "website:main"],
-      ["resources/identity/rules.ts#docsMain", "github", "branch_protection", "docs:main"],
+    // Named by identity, else (Stripe's, which have none) by export; bound as the lockfile says.
+    expect(resources.map((r) => [r.id, r.vendor, r.type, r.name, r.identity, r.binding])).toEqual([
+      ["resources/billing/stripe.ts#pro", "stripe", "product", "pro", undefined, "prod_SanomaFixturePro"],
+      ["resources/billing/stripe.ts#events", "stripe", "webhook_endpoint", "events", undefined, undefined],
+      ["resources/identity/github.ts#website", "github", "repository", "website", "website", "R_website"],
+      ["resources/identity/github.ts#docs", "github", "repository", "docs", "docs", "R_docs"],
+      [
+        "resources/identity/github.ts#websiteMain",
+        "github",
+        "branch_protection",
+        "website:main",
+        "website:main",
+        "BPR_website:main",
+      ],
+      ["resources/identity/rules.ts#docsMain", "github", "branch_protection", "docs:main", "docs:main", undefined],
     ]);
     const website = resources.find((r) => r.id === "resources/identity/github.ts#website")!;
     expect(website).toEqual({
@@ -58,6 +66,8 @@ describe("readResources", () => {
       vendor: "github",
       type: "repository",
       name: "website",
+      identity: "website",
+      binding: "R_website",
       span: [expect.any(Number), expect.any(Number)],
       desired: {
         name: "website",
@@ -99,9 +109,11 @@ describe("readResources", () => {
     });
   });
 
-  it("is what describeConfig lists as the config's resources, without problems", () => {
-    const { resources, problems } = describeConfig(company);
+  it("is what describeConfig lists as the config's resources, with their bindings and the orphans, without problems", () => {
+    const { resources, orphans, problems } = describeConfig(company);
     expect(resources).toEqual(readResources(company));
+    expect(orphans).toEqual(readDataFiles(dirname(company.file!), company.connectors).orphans);
+    expect(orphans).toHaveLength(1);
     expect(problems).toEqual([]);
     expect(JSON.parse(JSON.stringify(resources))).toEqual(resources);
   });
@@ -158,13 +170,15 @@ describe("readResources", () => {
 export const b = github.repository({ name: "b", html_url: "https://github.com/x/b" });
 export const c = github.repository({ name: "c", has_wiki: "yes" });
 `,
-          "b.ts": `import { stripe } from "@sanoma-ai/connector-stripe/resources";\nexport const p = stripe.product({ name: "Pro" });\n`,
+          "b.ts": `import { stripe } from "@sanoma-ai/connector-stripe/resources";\nexport const p = stripe.product({ id: "prod_1", name: "Pro" });\n`,
+          "c.ts": `${GH}export const r = github.repository({ name: "" });\n`,
         }),
       ).toEqual([
         "resources/a.ts:2:1: export const a: github.repository: no field wiki",
         "resources/a.ts:3:1: export const b: github.repository: leave out html_url: the vendor sets it",
         "resources/a.ts:4:1: export const c: github.repository: ✖ Invalid input: expected boolean, received string → at has_wiki",
-        "resources/b.ts:2:1: export const p: stripe.product: its id is missing",
+        "resources/b.ts:2:1: export const p: stripe.product: leave out id: the vendor sets it",
+        "resources/c.ts:2:1: export const r: github.repository: its name is missing",
       ]);
     });
 
@@ -215,7 +229,7 @@ export const rule = github.branch_protection({ repository_id: main, pattern: "ne
       ]);
     });
 
-    it("two resources of one type with one name", () => {
+    it("two resources of one type with one identity, but not two without one", () => {
       expect(
         problems({
           "a.ts": `${GH}export const site = github.repository({ name: "web" });\n`,
@@ -223,6 +237,44 @@ export const rule = github.branch_protection({ repository_id: main, pattern: "ne
         }),
       ).toEqual([
         'resources/b/c.ts:2:1: github.repository "web" is declared twice, also as resources/a.ts#site: declare each resource once, and import it where it is used',
+      ]);
+      const STRIPE = `import { stripe } from "@sanoma-ai/connector-stripe/resources";\n`;
+      dir = project({
+        "a.ts": `${STRIPE}export const pro = stripe.product({ name: "Pro" });\n`,
+        "b.ts": `${STRIPE}export const pro = stripe.product({ name: "Pro" });\n`,
+      });
+      expect(readResources({ ...base, root: dir }).map((r) => r.name)).toEqual(["pro", "pro"]);
+    });
+
+    it("a lockfile that is not JSON, or not bindings", () => {
+      expect(
+        problems({ "a.ts": `${GH}export const r = github.repository({ name: "x" });\n`, "sanoma.lock.json": "{" }),
+      ).toEqual([expect.stringMatching(/^resources\/sanoma\.lock\.json: not JSON: /)]);
+      expect(
+        problems({
+          "sanoma.lock.json": JSON.stringify({ "resources/a.ts#r": { type: "github.repository" }, nope: {} }),
+        }),
+      ).toEqual([
+        'resources/sanoma.lock.json: ✖ Invalid key in record → at nope ✖ Invalid input: expected string, received undefined → at ["resources/a.ts#r"].id',
+      ]);
+    });
+
+    it("a binding of another type than its declaration's, and two declarations bound to one object", () => {
+      expect(
+        problems({
+          "a.ts": `${GH}export const web = github.repository({ name: "web" });
+export const docs = github.repository({ name: "docs" });
+export const main = github.branch_protection({ repository_id: web, pattern: "main" });
+`,
+          "sanoma.lock.json": JSON.stringify({
+            "resources/a.ts#web": { type: "github.repository", id: "R_1" },
+            "resources/a.ts#docs": { type: "github.repository", id: "R_1" },
+            "resources/a.ts#main": { type: "github.repository", id: "R_2" },
+          }),
+        }),
+      ).toEqual([
+        "resources/a.ts:3:1: resources/a.ts#docs is bound to the same github.repository R_1 as resources/a.ts#web in resources/sanoma.lock.json: bind each object once",
+        "resources/a.ts:4:1: resources/a.ts#main is bound to a github.repository in resources/sanoma.lock.json, but declares a github.branch_protection",
       ]);
     });
 
@@ -237,6 +289,30 @@ export const rule = github.branch_protection({ repository_id: main, pattern: "ne
         "The resources' data files have problems:\n  The config has no root, so its data files cannot be found: make it with defineConfig, which records its file, or set its `root`",
       );
     });
+  });
+
+  it("joins each declaration to its binding, and lists the bindings no data file declares", () => {
+    const { resources, bindings, orphans, problems } = readDataFiles(dirname(company.file!), company.connectors);
+    expect(problems).toEqual([]);
+    expect(Object.keys(bindings)).toHaveLength(5);
+    expect(resources.filter((r) => r.binding === undefined).map((r) => r.id)).toEqual([
+      "resources/billing/stripe.ts#events",
+      "resources/identity/rules.ts#docsMain",
+    ]);
+    expect(orphans).toEqual([
+      { key: "resources/billing/stripe.ts#basic", type: "stripe.product", id: "prod_SanomaFixtureBasic" },
+    ]);
+    // A declaration whose value is refused is still declared: its binding is no orphan.
+    const dir = project({
+      "a.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nexport const web = github.repository({ name: process.env.NAME });\n`,
+      "sanoma.lock.json": JSON.stringify({ "resources/a.ts#web": { type: "github.repository", id: "R_1" } }),
+    });
+    try {
+      const refused = readDataFiles(dir, base.connectors);
+      expect([refused.resources, refused.orphans, refused.problems.length]).toEqual([[], [], 1]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("finds a connector by its package, reads only data files, and never imports one", () => {
