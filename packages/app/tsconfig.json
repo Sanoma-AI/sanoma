@@ -20,6 +20,7 @@
     "paths": {
       "@sanoma-ai/workflows": ["../workflows/src/index.ts"],
       "@sanoma-ai/workflows/describe": ["../workflows/src/describe.ts"],
+      "@sanoma-ai/workflows/resources": ["../workflows/src/secret.ts"],
       "@sanoma-ai/workflows/scenario": ["../workflows/src/scenario.ts"],
       "@sanoma-ai/workflows/shared": ["../workflows/src/shared.ts"]
     }
