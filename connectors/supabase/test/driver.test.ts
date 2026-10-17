@@ -82,7 +82,17 @@ describe("supabaseDriver", () => {
     const driver = supabaseDriver();
     expect(Object.keys(driver.env!.shape)).toEqual(["SUPABASE_ACCESS_TOKEN"]);
     expect(driver.env!.shape.SUPABASE_ACCESS_TOKEN!.safeParse(undefined).success).toBe(false);
-    expect(Object.keys(driver.ops)).toEqual(["project.import", "project.read"]);
+    expect(Object.keys(driver.ops).toSorted()).toEqual([
+      "database.storeUrl",
+      "pooler.get",
+      "project.create",
+      "project.delete",
+      "project.health",
+      "project.import",
+      "project.plan",
+      "project.read",
+      "project.update",
+    ]);
   });
 });
 
