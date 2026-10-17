@@ -21,7 +21,6 @@
   },
   "files": [
     "dist",
-    "testdata/replies",
     "README.md",
     "LICENSE"
   ],

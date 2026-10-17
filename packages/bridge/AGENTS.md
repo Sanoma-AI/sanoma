@@ -10,4 +10,4 @@ Keep provider configuration serialized through `ensureConfigured`; preserve reco
 
 Do not edit `src/gen/` by hand. Update `proto/` and regenerate with `pnpm --filter @sanoma-ai/bridge run generate`; keep the proto provenance and pinned generator versions aligned as described in [Develop](README.md#develop).
 
-Run `pnpm vitest run packages/bridge connectors/github connectors/stripe connectors/supabase` and `pnpm typecheck`. The default tests are offline; live tests require the separate provider-bridge checkout and explicit live mode.
+Run `pnpm vitest run packages/bridge connectors/docker connectors/github connectors/stripe connectors/supabase` and `pnpm typecheck`. The default tests are offline; live tests require the separate provider-bridge checkout and explicit live mode.

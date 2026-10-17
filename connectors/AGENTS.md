@@ -1,12 +1,13 @@
 # connectors
 
-One workspace package per vendor, each built on `@sanoma-ai/workflows`. A connector package exports one constant, the vendor's operations with its live driver, its in-memory fake and its steps for Gherkin tests attached (`withSetup`), so a config names the connector alone. A vendor with an OpenTofu provider (GitHub, Stripe, Supabase) is one `tfConnector` record from [`@sanoma-ai/bridge/connector`](../packages/bridge/README.md#connectors-for-opentofu-providers) over the types `pnpm generate` writes, which gives its resource types, connector, driver and fake.
+One workspace package per vendor, each built on `@sanoma-ai/workflows`. A connector package exports one constant, the vendor's operations with its live driver, its in-memory fake and its steps for Gherkin tests attached (`withSetup`), so a config names the connector alone. A vendor with an OpenTofu provider (Docker, GitHub, Stripe, Supabase) is one `tfConnector` record from [`@sanoma-ai/bridge/connector`](../packages/bridge/README.md#connectors-for-opentofu-providers) over the types `pnpm generate` writes, which gives its resource types, connector, driver and fake.
 
 ## Contents
 
 | Path                              | What it is                                                                                  |
 | --------------------------------- | ------------------------------------------------------------------------------------------- |
 | [`bluesky/`](bluesky/AGENTS.md)   | `@sanoma-ai/connector-bluesky`: Bluesky (AT Protocol) post operations and an in-memory fake |
+| [`docker/`](docker/AGENTS.md)     | `@sanoma-ai/connector-docker`: the local Docker host, a container that runs the company     |
 | [`ghost/`](ghost/AGENTS.md)       | `@sanoma-ai/connector-ghost`: Ghost Admin API post operations and an in-memory fake         |
 | [`github/`](github/AGENTS.md)     | `@sanoma-ai/connector-github`: GitHub resources read through its OpenTofu provider          |
 | [`resend/`](resend/AGENTS.md)     | `@sanoma-ai/connector-resend`: Resend broadcast operations and an in-memory fake            |
