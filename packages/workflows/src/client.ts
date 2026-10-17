@@ -368,7 +368,7 @@ export class SanomaClient {
     if (!workflow) {
       throw new SanomaError(
         "invalid_input",
-        `The config's connectors declare no resource types, so there is nothing to ${name === DRIFT_WORKFLOW ? "check for drift" : name}`,
+        `The config's connectors declare no resource types, so it has no built-in ${name} workflow`,
       );
     }
     return workflow;

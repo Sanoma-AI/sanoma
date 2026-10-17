@@ -2,7 +2,7 @@ import { z } from "zod";
 import { defineWorkflow, type WorkflowDefinition } from "./define.ts";
 import { isRunControlError } from "./errors.ts";
 import type { Op } from "./op.ts";
-import { type DriftField, diffDeclared, type Resource } from "./resource.ts";
+import { type DriftField, diffDeclared, fieldPathOf, type Resource } from "./resource.ts";
 import type { DeclaredResource, ResourceProblem } from "./resources.ts";
 import { type DRIFT_WORKFLOW, errorMessage } from "./shared.ts";
 
@@ -141,7 +141,7 @@ export function compare(
     // Each reference, by where it is: the values the vendor may hold there for its resource.
     const accept: Record<string, unknown[]> = {};
     for (const [at, target] of Object.entries(refs)) {
-      const by = resource.fields.references?.[at.replaceAll(/\.\d+(?=\.|$)/g, "")]?.by ?? [];
+      const by = resource.fields.references?.[fieldPathOf(at)]?.by ?? [];
       const named = found.get(target);
       if (named && "state" in named) accept[at] = by.map((field) => named.state[field]).filter((v) => v != null);
     }

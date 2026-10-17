@@ -13,7 +13,7 @@ import {
 import { isRunControlError } from "./errors.ts";
 import type { Binding, Bindings, Rebind } from "./lockfile.ts";
 import type { Op } from "./op.ts";
-import { isObject, type PlanAction, type Resource } from "./resource.ts";
+import { fieldPathOf, holderOf, type PlanAction, type Resource } from "./resource.ts";
 import type { ResourceProblem } from "./resources.ts";
 import { type APPLY_WORKFLOW, errorMessage } from "./shared.ts";
 
@@ -160,14 +160,8 @@ function desiredOf(r: Declaration, types: ReadonlyMap<string, Resource>, binding
   const out = structuredClone(r.desired);
   for (const [at, target] of Object.entries(r.refs)) {
     const bound = bindings[target]?.id;
-    if (!references[at.replaceAll(/\.\d+(?=\.|$)/g, "")]?.by?.length || bound === undefined) continue;
-    const keys = at.split(".");
-    const last = keys.pop()!;
-    const holder = keys.reduce<unknown>(
-      (v, key) => (isObject(v) || Array.isArray(v) ? (v as State)[key] : undefined),
-      out,
-    );
-    if (isObject(holder) || Array.isArray(holder)) (holder as State)[last] = bound;
+    const place = holderOf(out, at);
+    if (references[fieldPathOf(at)]?.by?.length && bound !== undefined && place) place.holder[place.key] = bound;
   }
   return out;
 }
@@ -183,7 +177,11 @@ const unknown = (what: string, list: readonly string[], known: (id: string) => b
   list.filter((id) => !known(id)).map((id) => ({ message: `${what}: ${id} is no declared resource` }));
 
 /** What the input names that is neither declared nor an orphaned binding. */
-function inputProblems(input: ApplyInput, ids: ReadonlySet<string>, orphans: ReadonlySet<string>): ResourceProblem[] {
+function inputProblems(
+  input: ApplyInput,
+  ids: ReadonlyMap<string, unknown>,
+  orphans: ReadonlySet<string>,
+): ResourceProblem[] {
   return [
     ...unknown("only", input.only ?? [], (id) => ids.has(id) || orphans.has(id)),
     ...unknown("bind", Object.keys(input.bind ?? {}), (id) => ids.has(id)),
@@ -375,8 +373,8 @@ export function applyWorkflow(
     run: async (ctx, input) => {
       const { resources, problems: read, bindings: locked, orphans, rebinds } = await steps.declared();
       const wanted = (id: string) => input.only === undefined || input.only.includes(id);
-      const ids = new Set(resources.map((r) => r.id));
-      const problems = [...read, ...inputProblems(input, ids, new Set(orphans.map((o) => o.key)))];
+      const declarations = new Map(resources.map((r) => [r.id, r]));
+      const problems = [...read, ...inputProblems(input, declarations, new Set(orphans.map((o) => o.key)))];
       // Observed as drift does, every import first, by the binding given before the lockfile's.
       const found = new Map<string, Found>();
       for (const resource of resources) {
@@ -430,7 +428,6 @@ export function applyWorkflow(
         await ctx.approval("Apply resource changes", { approver, covers, details: JSON.stringify(plan, null, 2) });
       }
 
-      const declarations = new Map(resources.map((r) => [r.id, r]));
       const bindings: Bindings = { ...locked };
       const results: ApplyResult[] = [];
       let written = false;

@@ -351,18 +351,22 @@ function withAccepted(state: State, desired: State, accept: Readonly<Record<stri
   if (!paths.length) return state;
   const out = structuredClone(state);
   for (const [path, values] of paths) {
-    const keys = path.split(".");
-    const last = keys.pop()!;
-    const holder = keys.reduce<unknown>(
-      (v, key) => (isObject(v) || Array.isArray(v) ? (v as State)[key] : undefined),
-      out,
-    );
-    if (!isObject(holder) && !Array.isArray(holder)) continue;
-    const at = holder as State;
-    if (values.includes(at[last])) at[last] = valueAt(desired, path);
+    const at = holderOf(out, path);
+    if (at && values.includes(at.holder[at.key])) at.holder[at.key] = valueAt(desired, path);
   }
   return out;
 }
+
+/** The object or list holding the value at a dotted path (a list item's by its index), and its key there. */
+export function holderOf(value: unknown, path: string): { holder: State; key: string } | undefined {
+  const keys = path.split(".");
+  const key = keys.pop()!;
+  const holder = keys.reduce<unknown>((v, k) => (isObject(v) || Array.isArray(v) ? (v as State)[k] : undefined), value);
+  return isObject(holder) || Array.isArray(holder) ? { holder: holder as State, key } : undefined;
+}
+
+/** A field's dotted path as `fields` names it, without a list item's index: `teams.0` is `teams`. */
+export const fieldPathOf = (at: string) => at.replaceAll(/\.\d+(?=\.|$)/g, "");
 
 /** The value at a dotted path, a list item's by its index. */
 const valueAt = (value: unknown, path: string) =>
