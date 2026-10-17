@@ -10,21 +10,11 @@
 //   SANOMA_BRIDGE_SRC=~/src/provider-bridge pnpm bridge:download --source
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
-  chmodSync,
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { BRIDGE_PLATFORMS } from "../src/bin.ts";
 
 const packageDir = fileURLToPath(new URL("..", import.meta.url));
 
@@ -58,14 +48,6 @@ export const RELEASE: Release = {
   },
 };
 
-/** The name and URL of `platform`'s archive in `release` (goreleaser's `<os>_<arch>`, with Go's `amd64` for `x64`). */
-export function releaseArchive(platform: string, release: Release = RELEASE): { name: string; url: string } {
-  const [os, arch] = platform.split("-");
-  const name = `provider-bridge_${release.version}_${os}_${arch === "x64" ? "amd64" : arch}.tar.gz`;
-  const url = `https://github.com/${release.owner}/${release.repo}/releases/download/v${release.version}/${name}`;
-  return { name, url };
-}
-
 /**
  * Downloads `platform`'s archive of `release`, checks it against its pinned sha256 and extracts
  * the binary to `out`, executable. Returns `out`. Writes nothing when the check fails.
@@ -75,14 +57,16 @@ export async function downloadRelease(
   platform: string = `${process.platform}-${process.arch}`,
   release: Release = RELEASE,
 ): Promise<string> {
-  if (!BRIDGE_PLATFORMS.includes(platform)) throw new Error(`provider-bridge has no release for ${platform}`);
   const expected = release.sha256[platform];
   if (!release.version || !expected) {
     throw new Error(
       `no pinned provider-bridge release for ${platform} (RELEASE in ${fileURLToPath(import.meta.url)}); build from source with --source`,
     );
   }
-  const { name, url } = releaseArchive(platform, release);
+  // goreleaser's `<os>_<arch>`, with Go's `amd64` for `x64`.
+  const [os, arch] = platform.split("-");
+  const name = `provider-bridge_${release.version}_${os}_${arch === "x64" ? "amd64" : arch}.tar.gz`;
+  const url = `https://github.com/${release.owner}/${release.repo}/releases/download/v${release.version}/${name}`;
   const response = await fetch(url);
   if (!response.ok) throw new Error(`GET ${url}: ${response.status} ${response.statusText}`);
   const archive = Buffer.from(await response.arrayBuffer());
@@ -91,13 +75,7 @@ export async function downloadRelease(
 
   const dir = mkdtempSync(join(tmpdir(), "provider-bridge-"));
   try {
-    writeFileSync(join(dir, name), archive);
-    const tar = spawnSync("tar", ["-xzf", name, "provider-bridge"], {
-      cwd: dir,
-      stdio: ["ignore", "inherit", "inherit"],
-    });
-    if (tar.error) throw tar.error;
-    if (tar.status !== 0) throw new Error(`tar -xzf ${name} failed (exit ${tar.status})`);
+    run(["tar", "-xzf", "-", "provider-bridge"], dir, archive);
     // Copied beside `out`, then renamed over it: a reader never sees half a binary.
     const target = resolve(out);
     mkdirSync(dirname(target), { recursive: true });
@@ -128,11 +106,15 @@ export function findCheckout(): string {
 export function buildBridge(out: string = defaultBin, checkout: string = findCheckout()): string {
   const build = ["go", "build", "-mod=vendor", "-o", resolve(out), "./cmd/provider-bridge"];
   const hasMise = spawnSync("mise", ["--version"], { stdio: "ignore" }).status === 0;
-  const [cmd, ...args] = hasMise ? ["mise", "x", "--", ...build] : build;
-  const result = spawnSync(cmd!, args, { cwd: checkout, stdio: ["ignore", "inherit", "inherit"] });
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`${[cmd, ...args].join(" ")} failed in ${checkout} (exit ${result.status})`);
+  run(hasMise ? ["mise", "x", "--", ...build] : build, checkout);
   return resolve(out);
+}
+
+/** Runs `command` in `cwd`, with `input` on its stdin; throws when it fails. */
+function run([cmd, ...args]: string[], cwd: string, input?: Buffer) {
+  const result = spawnSync(cmd!, args, { cwd, input, stdio: [input ? "pipe" : "ignore", "inherit", "inherit"] });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`${[cmd, ...args].join(" ")} failed in ${cwd} (exit ${result.status})`);
 }
 
 if (import.meta.main) {
