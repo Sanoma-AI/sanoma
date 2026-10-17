@@ -9,13 +9,17 @@ import {
   importsOf,
   observeBy,
   observed,
+  type ResolveOp,
+  type Revision,
+  sourceUrl,
 } from "./drift.ts";
 import { isRunControlError } from "./errors.ts";
 import type { Binding, Bindings, Rebind } from "./lockfile.ts";
 import type { Op } from "./op.ts";
-import { fieldPathOf, holderOf, type PlanAction, type Resource } from "./resource.ts";
+import { fieldPathOf, holderOf, type PlanAction, type Resource, valueAt } from "./resource.ts";
 import type { ResourceProblem } from "./resources.ts";
 import { type APPLY_WORKFLOW, errorMessage } from "./shared.ts";
+import { SOURCE_RESOLVE } from "./source.ts";
 
 export { APPLY_WORKFLOW } from "./shared.ts";
 
@@ -128,7 +132,7 @@ type PlanOp = Op<
 type CreateOp = Op<string, string, "create", { desired: State }, { id: string; state: State }>;
 type UpdateOp = Op<string, string, "update", { id: string; desired: State; expect?: Expect }, { id: string }>;
 type DeleteOp = Op<string, string, "delete", { id: string }, { id: string; gone: true }>;
-type ApplyUse = ImportOp | PlanOp | CreateOp | UpdateOp | DeleteOp | "approval";
+type ApplyUse = ImportOp | PlanOp | CreateOp | UpdateOp | DeleteOp | ResolveOp | "approval";
 
 /** What a step's resource is called in a problem: its file, and its export. */
 const problemOf = (id: string, message: string): ResourceProblem => ({
@@ -159,13 +163,30 @@ function inDependencyOrder<T extends { id: string; refs: Record<string, string> 
  * vendor may hold by another field (`by`, as a repository's node id), that resource's binding id
  * when it has one, made in this run or before.
  */
-function desiredOf(r: Declaration, types: ReadonlyMap<string, Resource>, bindings: Bindings): State {
-  const { references = {} } = types.get(`${r.vendor}.${r.type}`)!.fields;
+function desiredOf(
+  r: Declaration,
+  types: ReadonlyMap<string, Resource>,
+  bindings: Bindings,
+  hosts: ReadonlyMap<string, { source: string; revision: string }>,
+): State {
+  const { fields, host } = types.get(`${r.vendor}.${r.type}`)!;
+  const { references = {} } = fields;
   const out = structuredClone(r.desired);
   for (const [at, target] of Object.entries(r.refs)) {
     const bound = bindings[target]?.id;
     const place = holderOf(out, at);
     if (references[fieldPathOf(at)]?.by?.length && bound !== undefined && place) place.holder[place.key] = bound;
+  }
+  // A host is given its source's clone URL and the commit its ref names now.
+  const run = hosts.get(r.id);
+  if (host && run) {
+    for (const [path, value] of [
+      [host.inputs.source, run.source],
+      [host.revision, run.revision],
+    ] as const) {
+      const place = holderOf(out, path);
+      if (place) place.holder[place.key] = value;
+    }
   }
   return out;
 }
@@ -367,13 +388,19 @@ export function applyWorkflow(
     .filter((op): op is Op => op !== undefined && drivers.has(op.id))
     .toSorted((a, b) => a.id.localeCompare(b.id));
   const usable = new Set(changes.map((op) => op.id));
+  const resolve = ops.get(SOURCE_RESOLVE) as ResolveOp | undefined;
   return defineWorkflow({
     // The literal, held to the one name: the outline finds a workflow by a string, or a const of its own file.
     name: "apply" satisfies typeof APPLY_WORKFLOW,
     title: "Apply resources",
     trigger: "manual",
     input: ApplyInput,
-    uses: [...imports, ...(changes as (PlanOp | CreateOp | UpdateOp | DeleteOp)[]), "approval"],
+    uses: [
+      ...imports,
+      ...(changes as (PlanOp | CreateOp | UpdateOp | DeleteOp)[]),
+      ...(resolve ? [resolve] : []),
+      "approval",
+    ],
     run: async (ctx, input) => {
       const { resources, problems: read, bindings: locked, orphans, rebinds } = await steps.declared();
       const wanted = (id: string) => input.only === undefined || input.only.includes(id);
@@ -398,13 +425,40 @@ export function applyWorkflow(
           }
         }
       }
-      const drift = new Map(compare(types, resources, found).map((result) => [result.id, result]));
-      const desired = new Map(resources.map((r) => [r.id, desiredOf(r, types, locked)]));
+      // A host wanted runs the commit its ref names now, resolved before planning: a merge is a change
+      // to it. One bound by the input needs none.
+      const revisions = new Map<string, Revision>();
+      const hosts = new Map<string, { source: string; revision: string }>();
+      for (const { id, vendor, type, desired, refs } of resources.filter(
+        (r) => wanted(r.id) && input.bind?.[r.id] === undefined,
+      )) {
+        const resource = types.get(`${vendor}.${type}`);
+        const host = resource?.host;
+        const source = host && sourceUrl(desired, refs[host.inputs.source], resource, found);
+        const ref = host && valueAt(desired, host.inputs.ref);
+        if (host && source !== undefined && typeof ref === "string" && ref) {
+          try {
+            const { revision } = await ctx.sanoma!.source!.resolve({ url: source, ref });
+            revisions.set(id, { revision });
+            hosts.set(id, { source, revision });
+          } catch (err) {
+            if (isRunControlError(err)) throw err;
+            revisions.set(id, { error: errorMessage(err) });
+          }
+        }
+      }
+      const drift = new Map(compare(types, resources, found, revisions).map((result) => [result.id, result]));
+      const desired = new Map(resources.map((r) => [r.id, desiredOf(r, types, locked, hosts)]));
 
       const planned: PlanStep[] = [];
       for (const resource of inDependencyOrder(resources).filter((r) => wanted(r.id))) {
         const result = drift.get(resource.id)!;
-        const next = decide(resource, result, found.get(resource.id)!, input, desired.get(resource.id)!, types, usable);
+        const unresolved = revisions.get(resource.id);
+        // A host whose ref could not be resolved has no commit to run (compare says so only for one it found).
+        const next =
+          unresolved && "error" in unresolved && result.status !== "error"
+            ? { problem: problemOf(resource.id, unresolved.error) }
+            : decide(resource, result, found.get(resource.id)!, input, desired.get(resource.id)!, types, usable);
         if (next.ask !== undefined) {
           try {
             const answer = fromPlan(resource, result, await ctx[resource.vendor]![resource.type]!.plan(next.ask));
@@ -445,13 +499,15 @@ export function applyWorkflow(
         const declared = declarations.get(step.id);
         try {
           if (todo === "create") {
-            const made = await ctx[step.vendor]![step.type]!.create({ desired: desiredOf(declared!, types, bindings) });
+            const made = await ctx[step.vendor]![step.type]!.create({
+              desired: desiredOf(declared!, types, bindings, hosts),
+            });
             bindings[key] = { type, id: made.id };
           } else if (todo === "update" && (step.action === "update" || step.action === "replace")) {
             const expect = { action: step.action, replace: step.replace };
             const changed = await ctx[step.vendor]![step.type]!.update({
               id: binding,
-              desired: desiredOf(declared!, types, bindings),
+              desired: desiredOf(declared!, types, bindings, hosts),
               expect,
             });
             bindings[key] = { type, id: changed.id };

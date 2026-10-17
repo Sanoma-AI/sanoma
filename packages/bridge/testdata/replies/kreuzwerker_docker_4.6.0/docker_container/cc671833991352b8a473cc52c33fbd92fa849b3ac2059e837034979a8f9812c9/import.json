@@ -1,0 +1,28 @@
+{
+  "provider": {
+    "source": "kreuzwerker/docker",
+    "version": "4.6.0",
+    "sha256": "324ed53dbcc72fd2fea78ece67e5897bd2a41e840451438eb00a175824c5de52",
+    "protocol": 6
+  },
+  "request": {
+    "provider": {
+      "source": "kreuzwerker/docker",
+      "version": "4.6.0",
+      "sha256": "324ed53dbcc72fd2fea78ece67e5897bd2a41e840451438eb00a175824c5de52"
+    },
+    "typeName": "docker_container",
+    "id": "cc671833991352b8a473cc52c33fbd92fa849b3ac2059e837034979a8f9812c9"
+  },
+  "response": {
+    "resources": [
+      {
+        "typeName": "docker_container",
+        "stateJson": "{\"attach\":null,\"bridge\":\"\",\"capabilities\":[],\"cgroup_parent\":null,\"cgroupns_mode\":null,\"command\":[\"node\",\"-e\",\"require('http').createServer((q, s) => s.end('ok')).listen(3000)\"],\"container_logs\":null,\"container_read_refresh_timeout_milliseconds\":null,\"cpu_period\":null,\"cpu_quota\":null,\"cpu_set\":\"\",\"cpu_shares\":0,\"cpus\":null,\"destroy_grace_seconds\":null,\"device_cgroup_rules\":[],\"device_read_bps\":[],\"device_read_iops\":[],\"device_requests\":[],\"device_write_bps\":[],\"device_write_iops\":[],\"devices\":[],\"dns\":[],\"dns_opts\":[],\"dns_search\":[],\"domainname\":\"\",\"entrypoint\":[\"docker-entrypoint.sh\"],\"env\":null,\"exit_code\":null,\"gpus\":null,\"group_add\":[],\"healthcheck\":[{\"interval\":\"2s\",\"retries\":3,\"start_interval\":\"0s\",\"start_period\":\"10m0s\",\"test\":[\"CMD\",\"node\",\"-e\",\"fetch('http://127.0.0.1:3000/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))\"],\"timeout\":\"3s\"}],\"host\":[],\"hostname\":\"cc6718339913\",\"id\":\"cc671833991352b8a473cc52c33fbd92fa849b3ac2059e837034979a8f9812c9\",\"image\":\"sanoma-test-healthz:dev\",\"init\":false,\"ipc_mode\":\"private\",\"labels\":[],\"log_driver\":\"json-file\",\"log_opts\":{},\"logs\":null,\"max_retry_count\":0,\"memory\":0,\"memory_reservation\":0,\"memory_swap\":0,\"mounts\":[],\"must_run\":null,\"name\":\"sanoma-test-driver\",\"network_data\":[{\"gateway\":\"172.17.0.1\",\"global_ipv6_address\":\"\",\"global_ipv6_prefix_length\":0,\"ip_address\":\"172.17.0.2\",\"ip_prefix_length\":16,\"ipv6_gateway\":\"\",\"mac_address\":\"02:42:ac:11:00:02\",\"network_name\":\"bridge\"}],\"network_mode\":\"bridge\",\"networks_advanced\":[],\"pid_mode\":null,\"platform\":\"linux\",\"ports\":[],\"privileged\":false,\"publish_all_ports\":false,\"read_only\":false,\"remove_volumes\":null,\"restart\":\"unless-stopped\",\"rm\":false,\"runtime\":\"runc\",\"security_opts\":[],\"shm_size\":64,\"start\":null,\"stdin_open\":false,\"stop_signal\":\"\",\"stop_timeout\":0,\"storage_opts\":{},\"sysctls\":{},\"timeouts\":null,\"tmpfs\":{},\"tty\":false,\"ulimit\":[],\"upload\":[],\"user\":\"\",\"userns_mode\":\"\",\"volumes\":[],\"wait\":null,\"wait_timeout\":null,\"working_dir\":\"\"}",
+        "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiY3JlYXRlIjoxMjAwMDAwMDAwMDAwLCJkZWxldGUiOjEyMDAwMDAwMDAwMDAsInVwZGF0ZSI6MTIwMDAwMDAwMDAwMH0sInNjaGVtYV92ZXJzaW9uIjoiMiJ9",
+        "schemaVersion": "2"
+      }
+    ]
+  },
+  "scrubbed": []
+}

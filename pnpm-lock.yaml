@@ -52,6 +52,21 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  connectors/docker:
+    devDependencies:
+      '@sanoma-ai/bridge':
+        specifier: workspace:*
+        version: link:../../packages/bridge
+      '@sanoma-ai/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
+      '@sanoma-ai/workflows':
+        specifier: workspace:*
+        version: link:../../packages/workflows
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
   connectors/ghost:
     dependencies:
       jose:

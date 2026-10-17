@@ -74,7 +74,7 @@ type State = Record<string, unknown>;
 // A resource type's import, as `ctx` gives it: by vendor and type, both only known per run.
 type ImportOp = Op<string, string, "import", { id: string }, { id: string; gone: boolean; state?: State }>;
 // The built-in `sanoma.source.resolve`, which a host's check calls for the commit its ref names now.
-type ResolveOp = typeof sourceOps.source.resolve;
+export type ResolveOp = typeof sourceOps.source.resolve;
 
 /** A clone URL (a scheme's, or scp-like `user@host:path`): what a `by` field of a host's source holds, told from an id. */
 const CLONE_URL = /^((https?|ssh|git|file):\/\/|[\w.-]+@[\w.-]+:)/;
@@ -82,7 +82,7 @@ const CLONE_URL = /^((https?|ssh|git|file):\/\/|[\w.-]+@[\w.-]+:)/;
 /** What one import found: the object's state, that it is gone, or why it could not be read. */
 export type Found = { state: State } | { gone: true } | { error: string };
 /** What a host's ref names now, or why it could not be resolved. */
-type Revision = { revision: string } | { error: string };
+export type Revision = { revision: string } | { error: string };
 
 // What drift and apply share. Observing a resource is one `ctx` call, which a workflow makes in
 // its own `run` (the outline draws only those): `observeBy` says what each import is called with,
@@ -244,7 +244,7 @@ export function driftWorkflow(
  * (`target`), the first of the reference's `by` fields that holds one in that repository's state,
  * read in this run.
  */
-function sourceUrl(
+export function sourceUrl(
   desired: State,
   target: string | undefined,
   { host, fields }: Resource,

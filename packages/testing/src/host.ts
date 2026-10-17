@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -208,6 +208,56 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
   });
   await client.clearCredential(HOST_CHECK_CREDENTIAL, { by: startedBy.id });
   return results;
+}
+
+/** True when a Docker daemon answers the `docker` command: a test of a container host skips without one. */
+export const dockerAvailable = () => spawnSync("docker", ["info"], { stdio: "ignore" }).status === 0;
+
+/**
+ * A host's `apply` and `drift` through the built-in workflows on `client`, whose config declares
+ * the host at `id` (`<file>#<export>`): `apply` runs the apply workflow for it alone, fails unless
+ * the plan has no problem and every step is done, and returns `read` of the binding it left (its
+ * type's `import`, called directly); `drift` runs the drift workflow and returns the host's row;
+ * `binding` is the host's binding after the last apply.
+ */
+export function throughWorkflows(
+  client: SanomaClient,
+  id: string,
+  read: (binding: string) => Promise<State>,
+  timeoutMs = 600_000,
+): Pick<HostUnderTest, "apply" | "drift"> & { binding(): string | undefined } {
+  let bound: string | undefined;
+  const run = async (runId: string) => {
+    const ended = await waitFor(
+      () => client.run(runId),
+      (r) => r !== undefined && isEnded(r.status),
+      timeoutMs,
+    );
+    if (ended?.status !== "finished") throw new Error(`run ${runId} ended ${ended?.status}: ${ended?.error}`);
+  };
+  return {
+    async apply() {
+      const runId = await client.apply({ only: [id] }, { startedBy });
+      await run(runId);
+      const { plan, results, lockfile } = await client.applyReport(runId);
+      const failed = [
+        ...plan.problems.map((p) => p.message),
+        ...results.filter((r) => r.status !== "done").map((r) => `${r.action} ${r.status}: ${r.error ?? ""}`),
+      ];
+      if (failed.length) throw new Error(`apply of ${id}: ${failed.join("; ")}`);
+      bound = lockfile.bindings[id]?.id;
+      if (bound === undefined) throw new Error(`apply left ${id} unbound`);
+      return read(bound);
+    },
+    async drift() {
+      const runId = await client.drift({ startedBy });
+      await run(runId);
+      const row = (await client.driftReport(runId)).resources.find((r) => r.id === id);
+      if (!row) throw new Error(`drift has no row for ${id}`);
+      return row;
+    },
+    binding: () => bound,
+  };
 }
 
 /** What `fakeHost` starts for a revision: the runtime, answering at `url`, until `stop`. */
