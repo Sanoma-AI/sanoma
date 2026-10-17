@@ -1,5 +1,5 @@
 import { createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
-import { type CookieSerializeOptions, parse, serialize } from "cookie-es";
+import { parse, serialize } from "cookie-es";
 import type { LoginProvider } from "../context.ts";
 
 // Sign-in with GitHub: GitHub's OAuth web flow, then a signed session cookie. Who may sign in is
@@ -60,7 +60,7 @@ export function githubLogin({ clientId, clientSecret, repo }: GithubLoginOptions
     const token = await accessToken(code);
     if (!token) return page(400, "GitHub did not sign you in.", true);
     const { login } = (await api(token, "/user")) as { login: string };
-    const clearState = serialize(STATE, "", { ...cookieOptions(request, START), maxAge: 0 });
+    const clearState = cookie(request, STATE, "", START, 0);
     if (!ADMITTED.has(await permission(token, login))) {
       const denied = page(403, `${login} needs write access to ${repo} to use this app.`, false);
       denied.headers.append("set-cookie", clearState);
@@ -70,10 +70,7 @@ export function githubLogin({ clientId, clientSecret, repo }: GithubLoginOptions
     const value = `${login}.${expires}.${mac(`${login}.${expires}`)}`;
     const headers = new Headers({ location: "/" });
     headers.append("set-cookie", clearState);
-    headers.append(
-      "set-cookie",
-      serialize(SESSION, value, { ...cookieOptions(request, "/"), maxAge: SESSION_SECONDS }),
-    );
+    headers.append("set-cookie", cookie(request, SESSION, value, "/", SESSION_SECONDS));
     return new Response(null, { status: 303, headers });
   }
 
@@ -112,15 +109,14 @@ export function githubLogin({ clientId, clientSecret, repo }: GithubLoginOptions
           const to = new URL("https://github.com/login/oauth/authorize");
           to.search = new URLSearchParams({ client_id: clientId, state }).toString();
           const headers = new Headers({ location: to.toString() });
-          headers.append("set-cookie", serialize(STATE, state, { ...cookieOptions(request, START), maxAge: 600 }));
+          headers.append("set-cookie", cookie(request, STATE, state, START, 600));
           return new Response(null, { status: 302, headers });
         }
         case CALLBACK:
           return callback(request, url);
         case SIGN_OUT: {
           if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
-          const cleared = serialize(SESSION, "", { ...cookieOptions(request, "/"), maxAge: 0 });
-          return new Response(null, { status: 204, headers: { "set-cookie": cleared } });
+          return new Response(null, { status: 204, headers: { "set-cookie": cookie(request, SESSION, "", "/", 0) } });
         }
       }
       if (signedIn(request)) return undefined;
@@ -150,13 +146,18 @@ async function api(token: string, path: string, missingIsNone = false): Promise<
 
 const cookies = (request: Request) => parse(request.headers.get("cookie") ?? "");
 
-/** httpOnly, Lax, and Secure when the request came over HTTPS (directly or through a proxy that says so). */
-const cookieOptions = (request: Request, path: string): CookieSerializeOptions => ({
-  path,
-  httpOnly: true,
-  sameSite: "lax",
-  secure: request.url.startsWith("https:") || request.headers.get("x-forwarded-proto") === "https",
-});
+/**
+ * A Set-Cookie line (`maxAge` 0 clears it): httpOnly, Lax, and Secure when the request came over
+ * HTTPS (directly or through a proxy that says so).
+ */
+const cookie = (request: Request, name: string, value: string, path: string, maxAge: number) =>
+  serialize(name, value, {
+    path,
+    maxAge,
+    httpOnly: true,
+    sameSite: "lax",
+    secure: request.url.startsWith("https:") || request.headers.get("x-forwarded-proto") === "https",
+  });
 
 /** A small page of its own: the app's pages are for people signed in. */
 function page(status: number, message: string, signIn: boolean): Response {
