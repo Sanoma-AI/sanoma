@@ -49,12 +49,10 @@ export function readLockfile(root: string): { bindings: Bindings; problems: Reso
 
 /** The lockfile's text for `bindings`: keys sorted, two-space JSON, a trailing newline, so a diff shows only what changed. */
 export function serializeLockfile(bindings: Bindings): string {
-  const sorted = Object.fromEntries(
-    Object.keys(bindings)
-      .toSorted()
-      .map((key) => [key, { type: bindings[key]!.type, id: bindings[key]!.id }]),
-  );
-  return `${JSON.stringify(sorted, null, 2)}\n`;
+  const sorted = Object.entries(bindings)
+    .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([key, { type, id }]) => [key, { type, id }]);
+  return `${JSON.stringify(Object.fromEntries(sorted), null, 2)}\n`;
 }
 
 /** Writes the lockfile under `root` whole or not at all: to a file beside it, then renamed over it. Apply only. */

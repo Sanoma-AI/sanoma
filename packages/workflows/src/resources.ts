@@ -256,15 +256,18 @@ export function readDataFiles(
     const type = `${vendor}.${exp.type}`;
     const object = `${binding.type} ${binding.id}`;
     const first = boundBy.get(object);
-    if (binding.type !== type) {
-      file.problem(exp.start, `${id} is bound to a ${binding.type} in ${LOCKFILE}, but declares a ${type}`);
-    } else if (first !== undefined) {
-      file.problem(exp.start, `${id} is bound to the same ${object} as ${first} in ${LOCKFILE}: bind each object once`);
-    } else {
-      boundBy.set(object, id);
-      continue;
+    const why =
+      binding.type !== type
+        ? `${id} is bound to a ${binding.type} in ${LOCKFILE}, but declares a ${type}`
+        : first !== undefined
+          ? `${id} is bound to the same ${object} as ${first} in ${LOCKFILE}: bind each object once`
+          : undefined;
+    if (why === undefined) boundBy.set(object, id);
+    else {
+      // Left out, as any declaration with a problem, and so is any that names it.
+      file.problem(exp.start, why);
+      done.set(id, undefined);
     }
-    done.set(id, undefined);
   }
   const keys = new Set([...files.values()].flatMap((f) => f.data.declared.map((name) => `${f.rel}#${name}`)));
   const orphans = Object.entries(lock.bindings)
