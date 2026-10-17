@@ -44,5 +44,6 @@ jobs:
       # Packages already on npm are skipped without running prepack, so their dependents need this
       # build; the packages that do publish rebuild in their prepack, which keeps the hand path safe.
       - run: pnpm build
-      # --no-git-checks: a tag checkout is a detached HEAD, not the publish branch.
+      # --no-git-checks: a tag checkout is a detached HEAD, not the publish branch. The prepack of
+      # each @sanoma-ai/bridge-<platform> downloads the provider-bridge release RELEASE pins.
       - run: pnpm -r publish --no-git-checks

@@ -75,6 +75,12 @@
     "@sanoma-ai/workflows": "^0.1.0",
     "zod": "^4"
   },
+  "optionalDependencies": {
+    "@sanoma-ai/bridge-darwin-arm64": "workspace:*",
+    "@sanoma-ai/bridge-darwin-x64": "workspace:*",
+    "@sanoma-ai/bridge-linux-arm64": "workspace:*",
+    "@sanoma-ai/bridge-linux-x64": "workspace:*"
+  },
   "engines": {
     "node": ">=24"
   }

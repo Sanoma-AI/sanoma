@@ -14,6 +14,7 @@ Source of `@sanoma-ai/bridge`: the client exported from the package root, the co
 | [`lazy.ts`](lazy.ts)              | `lazyBridge`: a `ProviderClient` over a bridge started on first call, replaced after a failure or any `unavailable`; `defaultBridge`, the process's one              |
 | [`replies.ts`](replies.ts)        | `loadReplies` and `stateBridge`: recorded replies as mutable state, and a bridge over it, for connectors' fakes                                                      |
 | [`client.ts`](client.ts)          | `startBridge`: spawns `provider-bridge serve`, waits for the ready line, connects over the unix socket                                                               |
+| [`bin.ts`](bin.ts)                | `bridgeBin`: the binary `startBridge` runs by default (`SANOMA_BRIDGE_BIN`, else the installed `@sanoma-ai/bridge-<platform>`'s); `BRIDGE_PLATFORMS`                 |
 | [`fake.ts`](fake.ts)              | The `./fake` entry: re-exports `tfFake`, `loadReplies`, `stateBridge`, `fixturesDir` and their types                                                                 |
 | [`fixtures.ts`](fixtures.ts)      | The fixture format, release names and the schema path, shared by `loadReplies`, the tfschema CLI and the test helpers; the reply paths are in `../test/record.ts`    |
 | [`schema.ts`](schema.ts)          | `SchemaDocument` and its types, `parseSchema`                                                                                                                        |
