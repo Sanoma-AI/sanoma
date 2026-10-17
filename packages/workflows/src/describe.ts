@@ -118,7 +118,7 @@ export interface ResourceTypeEntry {
    * `sanoma:resource-type/<id>`: the operations' contracts `$ref` it instead of repeating it.
    */
   schema: Record<string, unknown>;
-  /** Its operations' ids: `<id>.import` and `<id>.read`. */
+  /** Its operations' ids, sorted: `<id>.import` and `<id>.read`, and for a writable type its change operations. */
   ops: string[];
 }
 
@@ -170,7 +170,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
   // Each resource type's state is described once, on its entry, and referenced from its operations.
   const refs = new Map<z.ZodType, string>([...resources].map(([id, r]) => [r.schema, resourceTypeUri(id)]));
   const resourceTypes: ResourceTypeEntry[] = [...resources]
-    .map(([id, { vendor, type, title, identity, fields, schema }]) => ({
+    .map(([id, { vendor, type, title, identity, fields, schema, ops }]) => ({
       id,
       vendor,
       type,
@@ -178,7 +178,9 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       identity,
       fields,
       schema: { $id: resourceTypeUri(id), ...toJsonSchema(schema, `${id} state`, "output") },
-      ops: [`${id}.import`, `${id}.read`],
+      ops: Object.keys(ops)
+        .map((name) => `${id}.${name}`)
+        .toSorted(),
     }))
     .toSorted((a, b) => a.id.localeCompare(b.id));
 

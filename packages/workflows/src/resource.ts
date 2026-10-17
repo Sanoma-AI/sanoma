@@ -71,6 +71,11 @@ export interface ResourceSpec<S extends z.ZodObject = z.ZodObject> {
    * `compareDeclared`, which keeps the declared fields only.
    */
   normalize?: (state: State, desired: z.input<S>) => State;
+  /**
+   * True when apply may change its objects: the type then has the change operations `plan`,
+   * `create`, `update` and `delete` besides `read` and `import`. Default false.
+   */
+  writable?: boolean;
 }
 
 /**
@@ -135,12 +140,44 @@ const importId = z.string().min(1);
 /** What a driver keeps beside a state (an OpenTofu provider's private data and state version), passed back unchanged. */
 const handle = z.string().optional().describe("The driver's data for the object, opaque: pass it back unchanged");
 
+const record = z.record(z.string(), z.unknown());
+
+/** What a plan of a change says will happen, as `PlanResponse.Action` names it. */
+export const PLAN_ACTIONS = ["none", "create", "update", "replace", "delete"] as const;
+export type PlanAction = (typeof PLAN_ACTIONS)[number];
+
+/** The operations of a writable type that change its objects: only the apply workflow calls them (`isChangeOp`). */
+export const CHANGE_OPS = ["create", "update", "delete"] as const;
+
 const opsOf = <S extends z.ZodObject>(schema: S) => {
   // Both answer `{ gone: true }` when the vendor has no such object, and its state when it has.
   const output = z.object({ id: importId, gone: z.boolean(), state: schema.optional(), handle });
+  const known = { id: importId, state: record.optional(), handle };
+  // The declared fields, a secret marker (`{ $secret }`) at a write-only one: the driver resolves it.
+  const desired = record.describe("The declared fields; a write-only one may hold a secret marker");
+  const changed = z.object({ id: importId, state: schema, handle });
+  const action = z.enum(PLAN_ACTIONS);
+  /** Fields as dotted paths, a list item's with its index. */
+  const paths = z.array(z.string());
   return {
     import: { input: z.object({ id: importId }), output },
-    read: { input: z.object({ id: importId, state: z.record(z.string(), z.unknown()).optional(), handle }), output },
+    read: { input: z.object({ id: importId, state: record.optional(), handle }), output },
+    plan: {
+      input: z.object({ ...known, id: importId.optional(), desired: desired.optional() }),
+      output: z.object({
+        action,
+        // The new state, without write-only fields; a value known only after apply is `null`, its path in `unknown`.
+        planned: record.optional(),
+        unknown: paths,
+        replace: paths.describe("The fields whose change replaces the object: not empty exactly when `replace`"),
+      }),
+    },
+    create: { input: z.object({ desired }), output: changed },
+    update: {
+      input: z.object({ ...known, desired, expect: z.object({ action, replace: paths }).optional() }),
+      output: changed,
+    },
+    delete: { input: z.object(known), output: z.object({ id: importId, gone: z.literal(true) }) },
   };
 };
 
@@ -151,23 +188,48 @@ const opaque = ["handle"] as const;
 const target = ({ id }: { id: string }) => id;
 
 type OpsOf<S extends z.ZodObject> = ReturnType<typeof opsOf<S>>;
-
-/** A resource type's operation specs: `read` and `import`. */
-export type ResourceOps<S extends z.ZodObject> = {
-  [N in keyof OpsOf<S>]: OpSpec<OpsOf<S>[N]["input"], OpsOf<S>[N]["output"]>;
+type Specs<S extends z.ZodObject, N extends keyof OpsOf<S>> = {
+  [K in N]: OpSpec<OpsOf<S>[K]["input"], OpsOf<S>[K]["output"]>;
 };
+
+/**
+ * A resource type's operation specs: `read` and `import`, and for a writable type (`W`) the
+ * change operations `plan`, `create`, `update` and `delete`.
+ */
+export type ResourceOps<S extends z.ZodObject, W extends boolean = false> = Specs<S, "read" | "import"> &
+  ([W] extends [true] ? Specs<S, "plan" | (typeof CHANGE_OPS)[number]> : {});
+
+/**
+ * True for an operation that changes a writable type's objects (`CHANGE_OPS`), which only the
+ * apply workflow may call: by its vendor, resource and name, so a copy of a connector is told too.
+ */
+export function isChangeOp(
+  op: { readonly vendor: string; readonly resource: string; readonly name: string },
+  types: ReadonlyMap<string, Pick<Resource, "writable">>,
+): boolean {
+  return (
+    (CHANGE_OPS as readonly string[]).includes(op.name) && types.get(`${op.vendor}.${op.resource}`)?.writable === true
+  );
+}
 
 /**
  * A resource type: call it to declare a resource in a data file, and give it to
  * `defineConnector` as a group, under its `type`: `defineConnector("github", { repository })`.
  */
-export interface Resource<S extends z.ZodObject = z.ZodObject, Id extends string = string, R extends References = {}>
+export interface Resource<
+  S extends z.ZodObject = z.ZodObject,
+  Id extends string = string,
+  R extends References = {},
+  W extends boolean = boolean,
+>
   extends
-    Readonly<Required<Omit<ResourceSpec<S>, "identity" | "find">>>,
+    Readonly<Required<Omit<ResourceSpec<S>, "identity" | "find" | "writable">>>,
     Readonly<Pick<ResourceSpec<S>, "identity" | "find">> {
   (desired: Declaring<z.input<S>, R>): Declared<Id, z.input<S>>;
-  /** `read` and `import`, each effect `read`, idempotent, with the id as `target`. */
-  readonly ops: ResourceOps<S>;
+  /** `read` and `import`, each effect `read`, idempotent, with the id as `target`; for a writable type, the change operations too. */
+  readonly ops: ResourceOps<S, W>;
+  /** True when apply may change its objects: it has the change operations. */
+  readonly writable: W;
   readonly [RESOURCE]: true;
 }
 
@@ -368,6 +430,23 @@ function pathsIn(value: unknown, paths: ReadonlySet<string>, prefix = ""): strin
  *   returns the same: `{ gone: true }` when the object no longer exists, else its fresh
  *   `state`. A driver may import first when it is given no state.
  *
+ * A `writable` type has the change operations too, which only the apply workflow may call
+ * (`isChangeOp`): `create`, `update` and `delete` effect `write`, and `plan`:
+ *
+ * - `plan` (`read`, idempotent) takes `{ id?, state?, handle?, desired? }`, no `desired` for a
+ *   delete and no `id` for a create, and returns `{ action, planned?, unknown, replace }`:
+ *   what apply would do, the new state without write-only fields, the paths known only after
+ *   apply, and those whose change replaces the object.
+ * - `create` (`target` `new:<vendor>.<type>`) takes `{ desired }` and returns `{ id, state,
+ *   handle? }`, `id` its binding id.
+ * - `update` takes `{ id, state?, handle?, desired, expect? }` and returns the same; given
+ *   `expect` (a plan's `action` and `replace`), it refuses a fresh plan that differs
+ *   (`DriverError`, `vendorCode` `plan_changed`).
+ * - `delete` takes `{ id, state?, handle? }` and returns `{ id, gone: true }`.
+ *
+ * `desired` may hold secret markers at write-only fields, which the driver resolves; no output
+ * holds a write-only value.
+ *
  * The ledger records a `handle` as `"<handle>"`, never its bytes (the operations' `opaque`).
  *
  * Calling the result declares one resource, for a data file: `repository({ name: "sanoma" })`
@@ -383,15 +462,53 @@ export function defineResource<
   const V extends string,
   const T extends string,
   const R extends References = {},
->(spec: ResourceSpec<S> & { vendor: V; type: T; fields: { references?: R } }): Resource<S, `${V}.${T}`, R> {
+  const W extends boolean = false,
+>(
+  spec: ResourceSpec<S> & { vendor: V; type: T; fields: { references?: R }; writable?: W },
+): Resource<S, `${V}.${T}`, R, W> {
   const { vendor, type, schema, fields, find, identity } = spec;
+  const writable = (spec.writable ?? false) as W;
   const what: `${V}.${T}` = `${vendor}.${type}`;
+  const title = spec.title.toLowerCase();
   const io = opsOf(schema);
-  const ops = {
+  // The policy's `target` for a create: the type, as no object has an id yet.
+  const created = `new:${what}`;
+  const changeOps = {
+    plan: {
+      effect: "read",
+      idempotent: true,
+      description: `Plan how apply would make a ${title} match its declaration (or delete it, given none); nothing changes`,
+      ...io.plan,
+      target: ({ id }: { id?: string }) => id ?? created,
+      opaque,
+    },
+    create: {
+      effect: "write",
+      description: `Create a ${title} as declared`,
+      ...io.create,
+      target: () => created,
+      opaque,
+    },
+    update: {
+      effect: "write",
+      description: `Change a ${title} to match its declaration, replacing it where a field cannot change in place`,
+      ...io.update,
+      target,
+      opaque,
+    },
+    delete: {
+      effect: "write",
+      description: `Delete a ${title}; done already when it is gone`,
+      ...io.delete,
+      target,
+      opaque,
+    },
+  } satisfies Specs<S, "plan" | (typeof CHANGE_OPS)[number]>;
+  const base = {
     import: {
       effect: "read",
       idempotent: true,
-      description: `Find a ${spec.title.toLowerCase()} by its ${identity ? `${identity} or its ` : ""}binding id and read it; gone when there is none`,
+      description: `Find a ${title} by its ${identity ? `${identity} or its ` : ""}binding id and read it; gone when there is none`,
       ...io.import,
       target,
       opaque,
@@ -399,12 +516,13 @@ export function defineResource<
     read: {
       effect: "read",
       idempotent: true,
-      description: `Read a ${spec.title.toLowerCase()} as it is now; gone when it no longer exists`,
+      description: `Read a ${title} as it is now; gone when it no longer exists`,
       ...io.read,
       target,
       opaque,
     },
-  } satisfies ResourceOps<S>;
+  } satisfies Specs<S, "read" | "import">;
+  const ops = (writable ? { ...base, ...changeOps } : base) as unknown as ResourceOps<S, W>;
 
   const named = new Set(identity?.match(/[A-Za-z_][\w.]*/g));
   const owned = new Set(fields.vendorOwned.filter((path) => !named.has(path)));
@@ -474,6 +592,7 @@ export function defineResource<
     find,
     bindingId: spec.bindingId ?? ((state: State) => String(state.id)),
     normalize: spec.normalize ?? ((state: State, desired: z.input<S>) => compareDeclared(fields, state, desired)),
+    writable,
     ops,
     // A symbol, so `defineConnector` tells a resource type from a group of operations.
     [RESOURCE]: true as const,

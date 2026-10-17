@@ -1,0 +1,33 @@
+{
+  "provider": {
+    "source": "integrations/github",
+    "version": "6.13.0",
+    "sha256": "2d688e8383ff669297bbb6461f7eb05168f53fe76d3233fdb431e318efedb98f",
+    "protocol": 5
+  },
+  "request": {
+    "provider": {
+      "source": "integrations/github",
+      "version": "6.13.0",
+      "sha256": "2d688e8383ff669297bbb6461f7eb05168f53fe76d3233fdb431e318efedb98f"
+    },
+    "typeName": "github_repository",
+    "priorStateJson": "{\"allow_auto_merge\":false,\"allow_forking\":true,\"allow_merge_commit\":true,\"allow_rebase_merge\":true,\"allow_squash_merge\":true,\"allow_update_branch\":false,\"archive_on_destroy\":null,\"archived\":false,\"auto_init\":false,\"default_branch\":\"main\",\"delete_branch_on_merge\":false,\"description\":\"Sanoma's apply tests: an empty repository\",\"etag\":\"W/\\\"synthetic-1\\\"\",\"fork\":\"false\",\"full_name\":\"sanoma-test/sanoma-apply-test\",\"git_clone_url\":\"git://github.com/sanoma-test/sanoma-apply-test.git\",\"gitignore_template\":null,\"has_discussions\":false,\"has_downloads\":false,\"has_issues\":true,\"has_projects\":true,\"has_wiki\":true,\"homepage_url\":\"\",\"html_url\":\"https://github.com/sanoma-test/sanoma-apply-test\",\"http_clone_url\":\"https://github.com/sanoma-test/sanoma-apply-test.git\",\"id\":\"sanoma-apply-test\",\"ignore_vulnerability_alerts_during_read\":null,\"is_template\":false,\"license_template\":null,\"merge_commit_message\":\"PR_TITLE\",\"merge_commit_title\":\"MERGE_MESSAGE\",\"name\":\"sanoma-apply-test\",\"node_id\":\"R_kgDOSynthetic\",\"pages\":[],\"primary_language\":\"\",\"private\":true,\"repo_id\":1000000001,\"security_and_analysis\":[{\"advanced_security\":[],\"code_security\":[],\"secret_scanning\":[{\"status\":\"disabled\"}],\"secret_scanning_ai_detection\":[],\"secret_scanning_non_provider_patterns\":[],\"secret_scanning_push_protection\":[{\"status\":\"disabled\"}]}],\"source_owner\":\"\",\"source_repo\":\"\",\"squash_merge_commit_message\":\"COMMIT_MESSAGES\",\"squash_merge_commit_title\":\"COMMIT_OR_PR_TITLE\",\"ssh_clone_url\":\"git@github.com:sanoma-test/sanoma-apply-test.git\",\"svn_url\":\"https://github.com/sanoma-test/sanoma-apply-test\",\"template\":[],\"topics\":[],\"visibility\":\"private\",\"vulnerability_alerts\":false,\"web_commit_signoff_required\":false}",
+    "priorPrivate": "eyJzY2hlbWFfdmVyc2lvbiI6IjEifQ==",
+    "priorSchemaVersion": "1",
+    "configJson": "{\"allow_auto_merge\":null,\"allow_forking\":null,\"allow_merge_commit\":null,\"allow_rebase_merge\":null,\"allow_squash_merge\":null,\"allow_update_branch\":null,\"archive_on_destroy\":null,\"archived\":null,\"auto_init\":null,\"default_branch\":null,\"delete_branch_on_merge\":null,\"description\":\"Sanoma's apply tests: an empty repository, updated\",\"etag\":null,\"fork\":null,\"full_name\":null,\"git_clone_url\":null,\"gitignore_template\":null,\"has_discussions\":null,\"has_downloads\":null,\"has_issues\":null,\"has_projects\":null,\"has_wiki\":null,\"homepage_url\":null,\"html_url\":null,\"http_clone_url\":null,\"id\":null,\"ignore_vulnerability_alerts_during_read\":null,\"is_template\":null,\"license_template\":null,\"merge_commit_message\":null,\"merge_commit_title\":null,\"name\":\"sanoma-apply-test\",\"node_id\":null,\"primary_language\":null,\"private\":null,\"repo_id\":null,\"source_owner\":null,\"source_repo\":null,\"squash_merge_commit_message\":null,\"squash_merge_commit_title\":null,\"ssh_clone_url\":null,\"svn_url\":null,\"topics\":null,\"visibility\":\"private\",\"vulnerability_alerts\":null,\"web_commit_signoff_required\":null,\"pages\":[],\"security_and_analysis\":[],\"template\":[]}",
+    "planned": "c3ludGhldGljIHBsYW46IHVwZGF0ZQ==",
+    "plannedPrivate": "eyJzY2hlbWFfdmVyc2lvbiI6IjEifQ=="
+  },
+  "response": {
+    "resource": {
+      "typeName": "github_repository",
+      "stateJson": "{\"allow_auto_merge\":false,\"allow_forking\":true,\"allow_merge_commit\":true,\"allow_rebase_merge\":true,\"allow_squash_merge\":true,\"allow_update_branch\":false,\"archive_on_destroy\":null,\"archived\":false,\"auto_init\":false,\"default_branch\":\"main\",\"delete_branch_on_merge\":false,\"description\":\"Sanoma's apply tests: an empty repository, updated\",\"etag\":\"W/\\\"synthetic-2\\\"\",\"fork\":\"false\",\"full_name\":\"sanoma-test/sanoma-apply-test\",\"git_clone_url\":\"git://github.com/sanoma-test/sanoma-apply-test.git\",\"gitignore_template\":null,\"has_discussions\":false,\"has_downloads\":false,\"has_issues\":true,\"has_projects\":true,\"has_wiki\":true,\"homepage_url\":\"\",\"html_url\":\"https://github.com/sanoma-test/sanoma-apply-test\",\"http_clone_url\":\"https://github.com/sanoma-test/sanoma-apply-test.git\",\"id\":\"sanoma-apply-test\",\"ignore_vulnerability_alerts_during_read\":null,\"is_template\":false,\"license_template\":null,\"merge_commit_message\":\"PR_TITLE\",\"merge_commit_title\":\"MERGE_MESSAGE\",\"name\":\"sanoma-apply-test\",\"node_id\":\"R_kgDOSynthetic\",\"pages\":[],\"primary_language\":\"\",\"private\":true,\"repo_id\":1000000001,\"security_and_analysis\":[{\"advanced_security\":[],\"code_security\":[],\"secret_scanning\":[{\"status\":\"disabled\"}],\"secret_scanning_ai_detection\":[],\"secret_scanning_non_provider_patterns\":[],\"secret_scanning_push_protection\":[{\"status\":\"disabled\"}]}],\"source_owner\":\"\",\"source_repo\":\"\",\"squash_merge_commit_message\":\"COMMIT_MESSAGES\",\"squash_merge_commit_title\":\"COMMIT_OR_PR_TITLE\",\"ssh_clone_url\":\"git@github.com:sanoma-test/sanoma-apply-test.git\",\"svn_url\":\"https://github.com/sanoma-test/sanoma-apply-test\",\"template\":[],\"topics\":[],\"visibility\":\"private\",\"vulnerability_alerts\":false,\"web_commit_signoff_required\":false}",
+      "private": "eyJzY2hlbWFfdmVyc2lvbiI6IjEifQ==",
+      "schemaVersion": "1"
+    }
+  },
+  "scrubbed": [
+    "$GITHUB_TOKEN"
+  ]
+}

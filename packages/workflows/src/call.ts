@@ -28,7 +28,8 @@ import { type CallContext, isOp, type Op } from "./op.ts";
 import { callAt, callName, type CallNode } from "./outline.ts";
 import { DecisionSchema, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
 import type { Run, WorkerState } from "./run.ts";
-import { approverLabel, errorMessage, fitsOp } from "./shared.ts";
+import { isChangeOp } from "./resource.ts";
+import { APPLY_WORKFLOW, approverLabel, errorMessage, fitsOp } from "./shared.ts";
 
 /** DBOS took the run from this execution: it cancelled the run, or another process took it over. */
 const takenByDbos = (err: unknown) =>
@@ -306,6 +307,13 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed) {
         ? `No connector or driver for ${id} in this worker`
         : `No connector or fake for ${id} in this worker: no fake its connectors attach implements it`,
     );
+  }
+  // Only apply changes a declared resource; `resolveConfig` refuses any other workflow that uses such an operation.
+  if (isChangeOp(op, run.state.types) && run.workflow !== APPLY_WORKFLOW) {
+    throw new SanomaError("invalid_input", `${op.id} changes a declared resource, which only ${APPLY_WORKFLOW} does`, {
+      op: op.id,
+      workflow: run.workflow,
+    });
   }
   const parsed = parseOrThrow(op.input, input, `The input to ${op.id} does not match its schema`, { op: op.id });
   // The call's identity (its ledger seq and id, and the driver's idempotency key) is taken

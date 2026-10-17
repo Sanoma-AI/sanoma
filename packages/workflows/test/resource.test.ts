@@ -11,10 +11,13 @@ import {
   defineConnector,
   defineDriver,
   defineResource,
+  defineWorkflow,
   memoryLedger,
+  resolveConfig,
+  withSetup,
 } from "../src/index.ts";
 import { VENDOR } from "../src/op.ts";
-import { DECLARED, withoutWriteOnly } from "../src/resource.ts";
+import { DECLARED, isChangeOp, resourceTypesOf, withoutWriteOnly } from "../src/resource.ts";
 import { secret } from "../src/secret.ts";
 
 const fields = {
@@ -426,5 +429,86 @@ describe("describeConfig with resources", () => {
     const read = ops.find((op) => op.id === "acme.repo.read");
     expect(read?.output).toMatchObject({ properties: { state: { $ref: "sanoma:resource-type/acme.repo" } } });
     expect(JSON.stringify(read?.output)).not.toContain('"wiki"');
+  });
+});
+
+describe("a writable resource type", () => {
+  const box = defineResource({
+    vendor: "crate",
+    type: "box",
+    title: "Box",
+    identity: "name",
+    schema: z.object({ name: z.string(), size: z.number().nullish(), id: z.string().nullish() }),
+    fields: { immutable: ["size"], vendorOwned: ["id"], writeOnly: [] },
+    find: ({ name }) => name,
+    writable: true,
+  });
+  const crate = defineConnector("crate", { box }, { package: "@crate/connector" });
+  const state = { name: "a", size: 1, id: "b-1" };
+  const driver = defineDriver(crate, {
+    box: {
+      import: async ({ id }) => ({ id, gone: false, state }),
+      read: async ({ id }) => ({ id, gone: false, state }),
+      plan: async () => ({
+        action: "create" as const,
+        planned: { name: "a", size: 1, id: null },
+        unknown: ["id"],
+        replace: [],
+      }),
+      create: async () => ({ id: "b-1", state }),
+      update: async ({ id }) => ({ id, state }),
+      delete: async ({ id }) => ({ id, gone: true as const }),
+    },
+  });
+  const changeWorkflow = defineWorkflow({
+    name: "boxes",
+    trigger: "manual",
+    input: z.object({}),
+    uses: [crate.box.create],
+    run: async (ctx) => ctx.crate.box.create({ desired: { name: "a" } }),
+  });
+
+  it("has plan, read, idempotent, and create, update and delete, effect write, besides read and import", () => {
+    expect(Object.keys(crate.box).toSorted()).toEqual(["create", "delete", "import", "plan", "read", "update"]);
+    expect(box.writable).toBe(true);
+    expect(repo.writable).toBe(false);
+    expect(crate.box.plan).toMatchObject({ effect: "read", idempotent: true, opaque: ["handle"] });
+    for (const name of ["create", "update", "delete"] as const) {
+      expect(crate.box[name]).toMatchObject({ effect: "write", idempotent: false, opaque: ["handle"] });
+    }
+    // A create's target is its type: the object has no id yet.
+    expect(crate.box.create.target?.({ desired: {} })).toBe("new:crate.box");
+    expect(crate.box.plan.target?.({ desired: {} })).toBe("new:crate.box");
+    expect(crate.box.plan.target?.({ id: "b-1" })).toBe("b-1");
+    expect(crate.box.delete.target?.({ id: "b-1" })).toBe("b-1");
+    expect(isChangeOp(crate.box.update, resourceTypesOf([crate]))).toBe(true);
+    expect(isChangeOp(crate.box.plan, resourceTypesOf([crate]))).toBe(false);
+  });
+
+  it("checks what a change returns, and takes secret markers in desired", () => {
+    expect(crate.box.update.input.parse({ id: "b-1", desired: { name: "a", token: { $secret: "T" } } })).toBeTruthy();
+    expect(() => crate.box.plan.output.parse({ action: "rebuild", unknown: [], replace: [] })).toThrow(/action/);
+    expect(() => crate.box.delete.output.parse({ id: "b-1", gone: false })).toThrow(/gone/);
+  });
+
+  it("is refused in any workflow's uses but apply's, and listed with its change operations", () => {
+    const config = {
+      workflows: [changeWorkflow],
+      connectors: [withSetup(crate, { driver: () => driver })],
+      policy: allowAll,
+    };
+    expect(() => resolveConfig(config)).toThrow(
+      'Workflow "boxes": crate.box.create changes a declared resource, which only apply does: change the data file instead',
+    );
+    const reading = defineWorkflow({ ...changeWorkflow, name: "plans", uses: [crate.box.plan], run: async () => 1 });
+    const { resourceTypes } = describeConfig({ ...config, workflows: [reading], ledger: memoryLedger() });
+    expect(resourceTypes[0]?.ops).toEqual([
+      "crate.box.create",
+      "crate.box.delete",
+      "crate.box.import",
+      "crate.box.plan",
+      "crate.box.read",
+      "crate.box.update",
+    ]);
   });
 });
