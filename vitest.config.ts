@@ -14,7 +14,7 @@ export default defineConfig({
       },
       { find: /^@sanoma-ai\/workflows\/resources$/, replacement: src("./packages/workflows/src/secret.ts") },
       {
-        find: /^@sanoma-ai\/testing\/(features|harness|replay|scenarios)$/,
+        find: /^@sanoma-ai\/testing\/(features|harness|host|replay|scenarios)$/,
         replacement: src("./packages/testing/src/$1.ts"),
       },
       { find: /^@sanoma-ai\/bridge\/(connector|fake|tfschema)$/, replacement: src("./packages/bridge/src/$1.ts") },

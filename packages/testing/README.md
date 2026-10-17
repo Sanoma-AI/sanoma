@@ -204,3 +204,14 @@ await describeFeatures(ghost, { features: new URL("../features/", import.meta.ur
 ```
 
 Status: early (0.x). License: FSL-1.1-ALv2.
+
+## A host's conformance
+
+`@sanoma-ai/testing/host` decides whether a host (a resource type with a `host`, see [Hosts](../workflows/README.md#hosts)) runs the company as the runtime needs. `checkHost(host)` drives one declared host through callbacks and a `SanomaClient` on its database, and returns each check as `{ name, ok, error? }`: the app answers `/healthz` at its `url`, a queued run drains, `LISTEN` hears a credential change, a sleep survives a restart (`stop`, then `apply`, through the type's own operations), a new commit on the source shows as drift at the host's `revision` that `apply` clears, and none of the host's `secrets` is in any ledger record. The host's config registers `hostCheck` (a connector whose driver reads `HOST_CHECK_TOKEN`) and `hostCheckWorkflows`, which the checks start runs of.
+
+```ts
+const results = await checkHost({ type, apply, stop, client, secrets, commit, drift });
+expect(results.every((r) => r.ok)).toBe(true);
+```
+
+`fakeHost(start)` is a host in this process (`testhost.app`, every change a replace, no secret in its state) and `inProcessHost(config, databaseUrl)` a `start` for it: a worker and a server that answers `/healthz`. `testRepository()` is a bare git repository to be a host's source, with `commit()`.

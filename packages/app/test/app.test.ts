@@ -1166,6 +1166,12 @@ describe("the page", () => {
   it("refuses requests addressed to a name other than this machine's", async () => {
     expect(await rawStatus(app.url, "/workflows", { host: "attacker.example:80" })).toBe(403);
   });
+
+  it("answers a host's probe at /healthz before the login, whatever name it is addressed to", async () => {
+    expect(await rawStatus(app.url, "/healthz", { host: "10.0.0.7:3000" })).toBe(200);
+    const res = await fetch(new URL("/healthz?from=docker", app.url));
+    expect([res.status, await res.text()]).toEqual([200, "ok\n"]);
+  });
   // wave 2 B: New run
   it("renders a workflow's page in Sandbox mode: the scenario's input read-only, and the scenario", async () => {
     const launch = (await scenarios(ctx)).scenarios.find((s) => s.name === SCENARIO)!;
