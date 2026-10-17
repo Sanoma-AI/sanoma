@@ -59,13 +59,14 @@ let ctx: AppContext;
 beforeAll(async () => {
   vi.stubEnv("SANOMA_SECRETS_KEY", KEY);
   for (const name of NAMES) vi.stubEnv(name, "");
-  github.listen({ onUnhandledRequest: "bypass" });
+  github.listen({ onUnhandledFrame: "bypass" });
   ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
   app = await startApp(config, { port: 0 });
   client = await SanomaClient.connect(config);
   ctx = { resolved: resolveConfig(config), description: describeConfig(config), client, login: loopbackLogin() };
-  // The table outlives a run of the tests. (Reading prepares the database.)
-  await client.secrets(NAMES);
+  // The table outlives a run of the tests. (Reading prepares the database; rows stored under
+  // another key fail to read, and are deleted all the same.)
+  await client.secrets(NAMES).catch(() => undefined);
   const db = new Client({ connectionString: config.databaseUrl });
   await db.connect();
   await db.query("DELETE FROM sanoma_credentials WHERE name = ANY($1)", [NAMES]);

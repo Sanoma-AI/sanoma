@@ -60,7 +60,7 @@ const secretsOf =
 export async function appOptions(readSecrets?: ReadSecrets): Promise<Pick<AppOptions, "host" | "login">> {
   const env = process.env;
   const host = env.SANOMA_APP_HOST || undefined;
-  const found = new Map(GITHUB.flatMap((name) => (env[name] ? [[name, env[name]] as const] : [])));
+  const found = new Map<string, string>(GITHUB.flatMap((name) => (env[name] ? [[name, env[name]]] : [])));
   if (found.has("SANOMA_GITHUB_REPO") && readSecrets && CLIENT.some((name) => !found.has(name))) {
     for (const [name, value] of await readSecrets(CLIENT)) if (value) found.set(name, value);
   }
