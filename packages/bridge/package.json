@@ -1,7 +1,7 @@
 {
   "name": "@sanoma-ai/bridge",
   "version": "0.1.0",
-  "description": "Client for provider-bridge, which serves OpenTofu providers' schema, import and read, a fake that replays recorded replies, and the generator of OpenTofu-backed connectors",
+  "description": "Client for provider-bridge, which serves OpenTofu providers' schema, import, read, plan and apply, a fake that replays recorded replies, and the generator of OpenTofu-backed connectors",
   "keywords": [
     "opentofu",
     "provider",
@@ -25,6 +25,7 @@
     "testdata/replies",
     "testdata/schemas",
     "!testdata/schemas/hashicorp_null_*",
+    "!testdata/replies/hashicorp_null_*",
     "!testdata/schemas/sanoma_testprov_*",
     "README.md",
     "LICENSE"

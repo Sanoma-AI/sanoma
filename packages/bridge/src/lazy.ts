@@ -17,7 +17,7 @@ export interface LazyBridgeOptions extends StartBridgeOptions {
  * A provider bridge started on its first call, so loading a config (the app, the tests) never
  * spawns it. A start that fails is tried again on the next call; one that cannot start (no
  * binary) fails the call as a `DriverError` that is not retried, and a `BridgeError` is thrown
- * as it is. When a configure, import or read finds the bridge `unavailable` (it exited, or its
+ * as it is. When a call finds the bridge `unavailable` (it exited, or its
  * socket did), the bridge is stopped and forgotten, with what `ensureConfigured` configured on
  * it, and the next call starts another. The bridge exits with this process, or on `stop()`,
  * after which the next call starts another.
@@ -53,6 +53,8 @@ export function lazyBridge(options: LazyBridgeOptions = {}): LazyBridge {
     configure: (...args) => on((b) => b.configure(...args)),
     import: (...args) => on((b) => b.import(...args)),
     read: (...args) => on((b) => b.read(...args)),
+    plan: (...args) => on((b) => b.plan(...args)),
+    apply: (...args) => on((b) => b.apply(...args)),
     close: async (...args) => (started ? (await started).close(...args) : undefined),
     stop: async () => {
       const current = started;

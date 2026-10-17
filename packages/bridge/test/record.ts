@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type DescMessage, type MessageShape, toJson } from "@bufbuild/protobuf";
@@ -6,6 +7,10 @@ import { codeToString } from "@connectrpc/connect/protocol-connect";
 import type { ProviderRef } from "../src/bridge.ts";
 import { type Fixture, releaseName, releaseSlug, schemaFile, stateId } from "../src/fixtures.ts";
 import {
+  type ApplyRequest,
+  ApplyRequestSchema,
+  type ApplyResponse,
+  ApplyResponseSchema,
   type ConfigureRequest,
   DiagnosticSchema,
   type GetSchemaRequest,
@@ -14,6 +19,11 @@ import {
   ImportRequestSchema,
   type ImportResponse,
   ImportResponseSchema,
+  type PlanRequest,
+  PlanRequestSchema,
+  type PlanResponse,
+  PlanResponse_Action,
+  PlanResponseSchema,
   type ReadRequest,
   ReadRequestSchema,
   type ReadResponse,
@@ -30,6 +40,13 @@ export const typeDir = (dir: string, ref: ProviderRef, typeName: string) =>
 
 export const replyDir = (dir: string, ref: ProviderRef, typeName: string, id: string) =>
   join(typeDir(dir, ref, typeName), slug(id));
+
+const canonical = (text: string) => (text ? JSON.stringify(JSON.parse(text)) : "");
+
+/** What a plan or apply is matched by when replayed: its prior state and config, as JSON values. */
+export function changeKey({ priorStateJson = "", configJson = "" }: { priorStateJson?: string; configJson?: string }) {
+  return `${canonical(priorStateJson)}\n${canonical(configJson)}`;
+}
 
 /** How to (re-)record a missing fixture, for error messages. */
 export const recordHint =
@@ -58,15 +75,28 @@ interface Release {
   config: ConfigValue[];
   /** Where the read of each imported object goes: beside its import. */
   reads: Map<string, string>;
+  /** Where the apply of each planned change goes, by its type, prior state and config: beside its plan. */
+  applies: Map<string, string>;
 }
 
+type Change = PlanRequest | ApplyRequest;
+
+const applyKey = (typeName: string, priorStateJson: string, configJson: string) =>
+  `${typeName}\0${priorStateJson}\0${configJson}`;
+
 /**
- * A Connect interceptor that writes each `GetSchema`, `Import` and `Read` passing through it into
- * `dir` in provider-bridge's fixture format, scrubbed: every value of a sensitive attribute, every
- * string equal to a configure value, and every secret config value (sensitive in the provider's
- * schema, or named like a token or key) wherever it appears. `private` stays as base64; a call
- * whose private data holds a secret is refused. Import and read need the release's schema and
- * config first: the fake calls `schema` before `configure` when it records.
+ * A Connect interceptor that writes each `GetSchema`, `Import`, `Read`, `Plan` and `Apply` passing
+ * through it into `dir` in provider-bridge's fixture format, scrubbed: every value of a sensitive
+ * attribute, every string equal to a configure value, and every secret config value (sensitive in
+ * the provider's schema, or named like a token or key) wherever it appears. `private` and
+ * `planned` stay as base64; a call whose private data or plan holds a secret is refused, and so is
+ * a plan or apply with a sensitive value, which its opaque `planned` would hold unscrubbed. Calls
+ * need the release's schema and config first: the fake calls `schema` before `configure` when it
+ * records.
+ *
+ * A change goes in `<type>/<slug>/`: `create-<hash>`, `<id>-<hash>` (an update), or `<id>-delete`,
+ * the hash of its scrubbed prior state and config. Its `plan.json` is there, and the apply of that
+ * plan beside it: `apply.json`, and for a replace `apply-delete.json` first.
  */
 export function recorder(dir: string): Interceptor {
   const releases = new Map<string, Release>();
@@ -77,35 +107,70 @@ export function recorder(dir: string): Interceptor {
     return { ref, release };
   };
 
-  /** Where an import or read goes, and its request scrubbed. Throws when the release has no schema and config yet. */
-  function prepare(method: "Import" | "Read", msg: ImportRequest | ReadRequest) {
+  /** Where a call goes, and its request scrubbed. Throws when the release has no schema and config yet. */
+  function prepare(method: Recorded, msg: ImportRequest | ReadRequest | Change) {
     const { ref, release } = releaseOf(msg.provider);
     const hits = new Set<string>();
+    if (method === "Plan" || method === "Apply") {
+      const req = msg as Change;
+      const scrub = (json: string) => scrubState(release, req.typeName, json, hits);
+      const priorStateJson = scrub(req.priorStateJson);
+      const configJson = scrub(req.configJson);
+      const change = changeDir(dir, ref, req.typeName, priorStateJson, configJson);
+      const file =
+        method === "Plan"
+          ? join(change, "plan.json")
+          : (release.applies.get(applyKey(req.typeName, req.priorStateJson, req.configJson)) ??
+            join(change, "apply.json"));
+      const schema = method === "Plan" ? PlanRequestSchema : ApplyRequestSchema;
+      const request = message(schema, { ...req, priorStateJson, configJson } as never);
+      const opaque = [req.priorPrivate, ...("planned" in req ? [req.planned, req.plannedPrivate] : [])];
+      return { release, hits, file, request, opaque };
+    }
     if (method === "Import") {
       const req = msg as ImportRequest;
       const file = join(replyDir(dir, ref, req.typeName, req.id), "import.json");
-      return { release, hits, file, request: message(ImportRequestSchema, req) };
+      return { release, hits, file, request: message(ImportRequestSchema, req), opaque: [] };
     }
     const req = msg as ReadRequest;
     const request = message(ReadRequestSchema, {
       ...req,
       stateJson: scrubState(release, req.typeName, req.stateJson, hits),
     });
-    return { release, hits, file: readFile(dir, ref, release, req), request };
+    return { release, hits, file: readFile(dir, ref, release, req), request, opaque: [req.private] };
+  }
+
+  /** Refuses a change the recorder could not write scrubbed before it reaches the provider, so nothing is changed unrecorded. */
+  function refuseSensitive({ provider, typeName, priorStateJson, configJson }: Change) {
+    const release = provider && releases.get(releaseName(provider));
+    if (!release) return;
+    const hits = new Set<string>();
+    try {
+      for (const json of [priorStateJson, configJson]) scrubState(release, typeName, json, hits);
+    } catch {
+      return; // Not JSON: the bridge refuses it.
+    }
+    const sensitive = [...hits].find((path) => path.startsWith(`${typeName}.`));
+    if (sensitive) {
+      throw new Error(
+        `recording a change of ${typeName}: ${sensitive} is sensitive, and the plan would hold it unscrubbed; record this change with provider-bridge's bridge-record`,
+      );
+    }
   }
 
   return (next) => async (req) => {
     if (req.stream) return next(req);
     const method = req.method.name;
+    if (method === "Plan" || method === "Apply") refuseSensitive(req.message as Change);
     let res: Awaited<ReturnType<typeof next>>;
     try {
       res = await next(req);
     } catch (error) {
-      if (method === "Import" || method === "Read") {
+      if (isRecorded(method)) {
         // Recorded when it can be; the caller gets the bridge's own error either way.
         try {
-          const call = prepare(method, req.message as ImportRequest | ReadRequest);
-          write(call.file, call.release, call.request, errorJson(error), call.hits);
+          const call = prepare(method, req.message as ImportRequest | ReadRequest | Change);
+          write(call.file, call.release, call.request, errorJson(error), call.hits, call.opaque);
         } catch {
           // Not recordable (no schema or config yet, or a state that is not JSON).
         }
@@ -125,6 +190,7 @@ export function recorder(dir: string): Interceptor {
           sha256,
           config: known?.config ?? [],
           reads: known?.reads ?? new Map(),
+          applies: known?.applies ?? new Map(),
         });
         writeText(schemaFile(dir, provider), schemaJson);
         break;
@@ -168,12 +234,59 @@ export function recorder(dir: string): Interceptor {
         write(file, release, request, response, hits, [msg.private, ...(out.resource ? [out.resource.private] : [])]);
         break;
       }
+      case "Plan": {
+        const msg = req.message as PlanRequest;
+        const out = res.message as PlanResponse;
+        const call = prepare(method, msg);
+        const plannedStateJson = scrubState(call.release, msg.typeName, out.plannedStateJson, call.hits);
+        const response = message(PlanResponseSchema, { ...out, plannedStateJson });
+        write(call.file, call.release, call.request, response, call.hits, [
+          ...call.opaque,
+          out.planned,
+          out.plannedPrivate,
+        ]);
+        // Its apply goes beside it; a replace is applied as a delete, then a create.
+        const at = dirname(call.file);
+        const { applies } = call.release;
+        applies.set(applyKey(msg.typeName, msg.priorStateJson, msg.configJson), join(at, "apply.json"));
+        if (out.action === PlanResponse_Action.REPLACE) {
+          applies.set(applyKey(msg.typeName, msg.priorStateJson, ""), join(at, "apply-delete.json"));
+          applies.set(applyKey(msg.typeName, "", msg.configJson), join(at, "apply.json"));
+        }
+        break;
+      }
+      case "Apply": {
+        const msg = req.message as ApplyRequest;
+        const out = res.message as ApplyResponse;
+        const call = prepare(method, msg);
+        const resource = out.resource && {
+          ...out.resource,
+          stateJson: scrubState(call.release, out.resource.typeName, out.resource.stateJson, call.hits),
+        };
+        const response = message(ApplyResponseSchema, { ...out, resource });
+        write(call.file, call.release, call.request, response, call.hits, [
+          ...call.opaque,
+          ...(out.resource ? [out.resource.private] : []),
+        ]);
+        break;
+      }
     }
     return res;
   };
 }
 
 const readKey = (typeName: string, id: string) => `${typeName}\0${id}`;
+
+type Recorded = "Import" | "Read" | "Plan" | "Apply";
+const isRecorded = (method: string): method is Recorded => ["Import", "Read", "Plan", "Apply"].includes(method);
+
+/** A change's directory: `create-<hash>`, `<id>-<hash>` or `<id>-delete`, from its scrubbed prior state and config. */
+function changeDir(dir: string, ref: ProviderRef, typeName: string, priorStateJson: string, configJson: string) {
+  const id = priorStateJson ? stateId(priorStateJson) : undefined;
+  const hash = createHash("sha256").update(`${priorStateJson}\n${configJson}`).digest("hex").slice(0, 8);
+  const name = id === undefined ? `create-${hash}` : configJson ? `${id}-${hash}` : `${id}-delete`;
+  return replyDir(dir, ref, typeName, name);
+}
 
 function readFile(dir: string, ref: ProviderRef, release: Release, msg: ReadRequest): string {
   const id = stateId(msg.stateJson) ?? "unknown";

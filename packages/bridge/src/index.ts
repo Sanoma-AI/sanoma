@@ -1,8 +1,13 @@
 export {
+  type ApplyInput,
+  type ApplyResult,
   type Bridge,
   BridgeError,
   type BridgeErrorCode,
   type Diagnostic,
+  type PlanAction,
+  type PlanInput,
+  type PlanResult,
   type ProviderRef,
   type ResourceState,
 } from "./bridge.ts";

@@ -18,6 +18,16 @@ function stub(): Bridge {
     configure: vi.fn<Bridge["configure"]>(async () => ({ warnings: [] })),
     import: vi.fn<Bridge["import"]>(async () => ({ resources: [], warnings: [] })),
     read: vi.fn<Bridge["read"]>(async () => ({ gone: true, warnings: [] })),
+    plan: vi.fn<Bridge["plan"]>(async () => ({
+      action: "none",
+      plannedStateJson: "{}",
+      unknownPaths: [],
+      requiresReplace: [],
+      planned: new Uint8Array(),
+      plannedPrivate: new Uint8Array(),
+      warnings: [],
+    })),
+    apply: vi.fn<Bridge["apply"]>(async () => ({ errors: [], warnings: [] })),
     close: vi.fn<Bridge["close"]>(async () => undefined),
     stop: vi.fn<Bridge["stop"]>(async () => undefined),
   };
@@ -42,6 +52,8 @@ describe("lazyBridge", () => {
     expect(start).not.toHaveBeenCalled();
     await Promise.all([lazy.configure(ref, "{}"), lazy.import(ref, "github_repository", "sanoma")]);
     await lazy.read(ref, "github_repository", "{}");
+    await lazy.plan(ref, "github_repository", { configJson: "{}" });
+    await lazy.apply(ref, "github_repository", { priorStateJson: "{}" });
     await lazy.close(ref);
     expect(start).toHaveBeenCalledTimes(1);
     expect(start).toHaveBeenCalledWith({ readyTimeoutMs: 5 });
@@ -49,6 +61,8 @@ describe("lazyBridge", () => {
     expect(b!.configure).toHaveBeenCalledTimes(1);
     expect(b!.import).toHaveBeenCalledTimes(1);
     expect(b!.read).toHaveBeenCalledTimes(1);
+    expect(b!.plan).toHaveBeenCalledWith(ref, "github_repository", { configJson: "{}" });
+    expect(b!.apply).toHaveBeenCalledWith(ref, "github_repository", { priorStateJson: "{}" });
     expect(b!.close).toHaveBeenCalledWith(ref);
   });
 
