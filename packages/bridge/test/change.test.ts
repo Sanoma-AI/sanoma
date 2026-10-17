@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { readPins } from "@sanoma-ai/bridge";
 import { fixturesDir } from "@sanoma-ai/bridge/fake";
+import { BridgeError } from "../src/bridge.ts";
 import { resourcePath, tfConnector } from "../src/connector.ts";
 import type { TfResourceType, TfShape } from "../src/tfschema/types.ts";
 import { changeReplay } from "./change-replay.ts";
@@ -57,7 +58,7 @@ describe("a writable type's change operations, over hashicorp/null's recorded pl
     // A tf type's change operations are not in its static type (that says only `read` and `import`).
     const thing = (ops as unknown as Record<string, Record<string, Op>>).thing!;
     expect(thing.create).toMatchObject({ effect: "write", idempotent: false });
-    expect(thing.delete).toMatchObject({ effect: "write", idempotent: false });
+    expect(thing.delete).toMatchObject({ effect: "write", idempotent: true });
     expect(thing.plan).toMatchObject({ effect: "read", idempotent: true });
     expect(thing.create!.target!({ desired: {} })).toBe("new:nulls.thing");
     expect(thing.plan!.target!({ desired: {} })).toBe("new:nulls.thing");
@@ -112,6 +113,21 @@ describe("a writable type's change operations, over hashicorp/null's recorded pl
     expect(await call(driver, "thing.delete", replaced)).toEqual({ id: SECOND, gone: true });
     expect(methods()).toEqual(["read"]);
     expect(await call(driver, "thing.plan", { ...replaced })).toEqual({ action: "none", unknown: [], replace: [] });
+  });
+
+  it("only creates when a replace is tried again after its delete (the bridge restarted between the applies)", async () => {
+    const created = await call(driver, "thing.create", { desired: { triggers: { v: "1" } } });
+    const { apply } = bridge;
+    let applies = 0;
+    bridge.apply = async (...args) => {
+      // The create half of the replace: the provider is not configured, and `ensureConfigured` tries again.
+      if (++applies === 2) throw new BridgeError("failed_precondition", "hashicorp/null 3.3.2 is not configured");
+      return apply(...args);
+    };
+    bridge.calls.length = 0;
+    const replaced = await call(driver, "thing.update", { ...created, desired: { triggers: { v: "2" } } });
+    expect(replaced).toMatchObject({ id: SECOND, state: { id: SECOND, triggers: { v: "2" } } });
+    expect(methods()).toEqual(["read", "replace", "apply", "apply"]);
   });
 
   it("refuses an update whose fresh plan is not the one expected, changing nothing", async () => {

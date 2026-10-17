@@ -431,7 +431,7 @@ function pathsIn(value: unknown, paths: ReadonlySet<string>, prefix = ""): strin
  *   `state`. A driver may import first when it is given no state.
  *
  * A `writable` type has the change operations too, which only the apply workflow may call
- * (`isChangeOp`): `create`, `update` and `delete` effect `write`, and `plan`:
+ * (`isChangeOp`): `create`, `update` and `delete` effect `write` (`delete` idempotent), and `plan`:
  *
  * - `plan` (`read`, idempotent) takes `{ id?, state?, handle?, desired? }`, no `desired` for a
  *   delete and no `id` for a create, and returns `{ action, planned?, unknown, replace }`:
@@ -498,6 +498,8 @@ export function defineResource<
     },
     delete: {
       effect: "write",
+      // A retry reads first, and finds the object gone.
+      idempotent: true,
       description: `Delete a ${title}; done already when it is gone`,
       ...io.delete,
       target,

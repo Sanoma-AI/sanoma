@@ -4,7 +4,6 @@ import { pathToFileURL } from "node:url";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, type DriftDeclared, driftWorkflow } from "./drift.ts";
-import { APPLY_WORKFLOW } from "./shared.ts";
 import { statusesOf, unconfigured } from "./env.ts";
 import type { Fake } from "./fake.ts";
 import type { LedgerStore } from "./ledger.ts";
@@ -23,6 +22,7 @@ import {
 } from "./op.ts";
 import type { Policy } from "./policy.ts";
 import { isChangeOp, type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
+import { APPLY_WORKFLOW } from "./shared.ts";
 import type { Steps } from "./steps.ts";
 import { computeVersion } from "./version.ts";
 
@@ -193,10 +193,10 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const types = resourceTypesOf(config.connectors);
   const names = new Map<string, WorkflowDefinition<any, any>>();
   for (const wf of config.workflows) {
-    if (wf.name === DRIFT_WORKFLOW) {
-      throw new Error(
-        `A workflow is named "${DRIFT_WORKFLOW}", the name of the built-in drift workflow; name it otherwise`,
-      );
+    for (const builtIn of [DRIFT_WORKFLOW, APPLY_WORKFLOW]) {
+      if (wf.name === builtIn) {
+        throw new Error(`A workflow is named "${builtIn}", the name of a built-in workflow; name it otherwise`);
+      }
     }
     checkUses(wf, ops, drivers, types);
     const other = names.get(wf.name);

@@ -202,7 +202,7 @@ const sameSet = (a: readonly string[], b: readonly string[]) => {
  * and `delete` plans a delete and applies it, done already when the object is gone. Secret
  * markers in `desired` are resolved (`resolveSecrets`) just before the bridge sees them; the
  * plan's `planned` leaves write-only fields out, and its paths are the resource's (`rules.0.name`).
- * The provider's errors in an apply fail the call, naming the object when it made one.
+ * The provider's errors in an apply fail the call, naming the object it left, and in a replace the one already deleted.
  *
  * The provider is configured through `ensureConfigured`. The bridge's errors become
  * `DriverError`s with its code as `vendorCode` and the provider's diagnostics (with their
@@ -301,23 +301,34 @@ export function tfConnector<
       };
       if (!writable) continue;
 
-      /** The provider's config from declared fields: secrets resolved, every attribute present. */
-      const configOf = async (desired: Record<string, unknown>, ctx: CallContext) =>
-        JSON.stringify(toTfState(tf.shape, await resolveSecrets(desired, ctx.secrets)));
+      /**
+       * The provider's config from declared fields: secrets resolved, every attribute present. For
+       * a plan (`dryRun`), a secret to generate that is not stored yet gets a throwaway value, not stored.
+       */
+      const configOf = async (desired: Record<string, unknown>, ctx: CallContext, dryRun = false) => {
+        const { secrets } = ctx;
+        const view = dryRun
+          ? { ...secrets, ensure: async (name: string, make: () => string) => (await secrets.get(name)) ?? make() }
+          : secrets;
+        return JSON.stringify(toTfState(tf.shape, await resolveSecrets(desired, view)));
+      };
       const paths = (list: readonly string[]) => list.map((path) => resourcePath(tf.shape, path));
       const plan = (prior: ResourceState | undefined, configJson?: string) =>
         bridge.plan(provider, tf.typeName, {
           ...(prior && priorOf(prior)),
           ...(configJson !== undefined && { configJson }),
         });
-      const apply = async (op: string, request: ApplyInput) => {
+      /** Applies `request`; `replaced`, the id of the object a replace already deleted, for the error. */
+      const apply = async (op: string, request: ApplyInput, replaced?: string) => {
         const reply = await bridge.apply(provider, tf.typeName, request);
         if (!reply.errors.length) return reply.resource;
-        const made = reply.resource && bindingId(stateOf(reply.resource.stateJson));
-        throw new DriverError(
-          `${vendor}: ${op} failed${made ? ` (the provider made ${made}, which stands)` : ""}: ${said(reply.errors)}`,
-          { retryable: false, vendorCode: "apply_failed" },
-        );
+        const left = reply.resource && bindingId(stateOf(reply.resource.stateJson));
+        const notes = [replaced && `${replaced} was deleted to replace it`, left && `the provider left ${left}`];
+        const note = notes.filter(Boolean).join("; ");
+        throw new DriverError(`${vendor}: ${op} failed${note ? ` (${note})` : ""}: ${said(reply.errors)}`, {
+          retryable: false,
+          vendorCode: "apply_failed",
+        });
       };
       /** A create or update's output: the object it left, by its binding id. */
       const changed = (op: string, r: ResourceState | undefined) => {
@@ -326,15 +337,15 @@ export function tfConnector<
         return { id: bindingId(o.state), ...o };
       };
       /** Creates the object a create plan (or a replace's) describes. */
-      const create = async (op: string, configJson: string, p: PlanResult) =>
-        changed(op, await apply(op, { configJson, planned: p.planned, plannedPrivate: p.plannedPrivate }));
+      const create = async (op: string, configJson: string, p: PlanResult, replaced?: string) =>
+        changed(op, await apply(op, { configJson, planned: p.planned, plannedPrivate: p.plannedPrivate }, replaced));
 
       Object.assign(impl[type], {
         plan: (input: Known & { id?: string; desired?: Record<string, unknown> }, ctx: CallContext) =>
           call(`${type}.plan`, async () => {
             const prior = input.id === undefined ? undefined : await fresh(`${type}.plan`, input as Known);
             if (!prior && input.desired === undefined) return { action: "none", unknown: [], replace: [] };
-            const p = await plan(prior, input.desired && (await configOf(input.desired, ctx)));
+            const p = await plan(prior, input.desired && (await configOf(input.desired, ctx, true)));
             return {
               action: p.action,
               ...(p.plannedStateJson && { planned: withoutWriteOnly(fields, stateOf(p.plannedStateJson)) }),
@@ -350,9 +361,12 @@ export function tfConnector<
         update: (
           input: Known & { desired: Record<string, unknown>; expect?: { action: PlanAction; replace: string[] } },
           ctx: CallContext,
-        ) =>
-          call(`${type}.update`, async () => {
-            const op = `${type}.update`;
+        ) => {
+          const op = `${type}.update`;
+          // A replace whose delete went through, for a second try (the bridge restarted): it only creates.
+          let deleted: { configJson: string; plan: PlanResult } | undefined;
+          return call(op, async () => {
+            if (deleted) return create(op, deleted.configJson, deleted.plan, input.id);
             const prior = await fresh(op, input);
             if (!prior)
               throw new DriverError(`${vendor}: ${op}: ${input.id} is gone`, { retryable: false, vendorCode: "gone" });
@@ -374,8 +388,10 @@ export function tfConnector<
             }
             // A replace: the old object deleted, then the plan's new one created.
             await apply(op, priorOf(prior));
-            return create(op, configJson, p);
-          }),
+            deleted = { configJson, plan: p };
+            return create(op, configJson, p, input.id);
+          });
+        },
         delete: (input: Known) =>
           call(`${type}.delete`, async () => {
             const op = `${type}.delete`;

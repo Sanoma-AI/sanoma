@@ -468,13 +468,14 @@ describe("a writable resource type", () => {
     run: async (ctx) => ctx.crate.box.create({ desired: { name: "a" } }),
   });
 
-  it("has plan, read, idempotent, and create, update and delete, effect write, besides read and import", () => {
+  it("has plan, read, idempotent, and create, update and delete, effect write (delete idempotent), besides read and import", () => {
     expect(Object.keys(crate.box).toSorted()).toEqual(["create", "delete", "import", "plan", "read", "update"]);
     expect(box.writable).toBe(true);
     expect(repo.writable).toBe(false);
     expect(crate.box.plan).toMatchObject({ effect: "read", idempotent: true, opaque: ["handle"] });
     for (const name of ["create", "update", "delete"] as const) {
-      expect(crate.box[name]).toMatchObject({ effect: "write", idempotent: false, opaque: ["handle"] });
+      // A delete reads first, so a retry finds the object gone.
+      expect(crate.box[name]).toMatchObject({ effect: "write", idempotent: name === "delete", opaque: ["handle"] });
     }
     // A create's target is its type: the object has no id yet.
     expect(crate.box.create.target?.({ desired: {} })).toBe("new:crate.box");
