@@ -157,6 +157,16 @@ describe("connecting an existing repository and database", () => {
       message: "There is no supabase.project sanomamissingproject to connect",
     });
     git("remote", "add", "origin", "https://github.com/acme/ops.git");
+    // A commit that fails leaves the checkout as it was: no file, back on main, no branch.
+    writeFileSync(join(root, ".git/hooks/pre-commit"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    expect(await refused({ project: REF })).toMatchObject({
+      status: 500,
+      message: expect.stringContaining(`Could not commit ${INFRA_FILE}`),
+    });
+    expect(existsSync(join(root, INFRA_FILE))).toBe(false);
+    expect(git("branch", "--show-current")).toBe("main");
+    expect(git("branch", "--list", CONNECT_BRANCH)).toBe("");
+    rmSync(join(root, ".git/hooks/pre-commit"));
     git("branch", CONNECT_BRANCH);
     expect(await refused({ project: REF })).toMatchObject({
       status: 409,

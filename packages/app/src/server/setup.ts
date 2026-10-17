@@ -3,7 +3,7 @@ import "@tanstack/react-start/server-only";
 import { execFile } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { type CredentialStatus, errorMessage, memorySecrets, type Principal } from "@sanoma-ai/workflows";
@@ -223,7 +223,20 @@ const EXISTING = {
  * The imports run here, before the file they declare exists, so outside any run: the policy and
  * the ledger see apply's own import of each, by its binding, when it binds them.
  */
-export async function connectExisting(
+export function connectExisting(
+  app: AppContext,
+  actor: Principal,
+  request: ConnectExistingRequest,
+): Promise<ConnectExistingResponse> {
+  const done = connecting.then(() => connectNow(app, actor, request));
+  connecting = done.catch(() => undefined);
+  return done;
+}
+
+/** The connect under way, if any: one at a time, so two never both find no file and write it. */
+let connecting: Promise<unknown> = Promise.resolve();
+
+async function connectNow(
   { client, resolved, source }: AppContext,
   actor: Principal,
   request: ConnectExistingRequest,
@@ -239,7 +252,7 @@ export async function connectExisting(
     return given ? [{ ...EXISTING[what], given }] : [];
   });
   const states = await Promise.all(
-    wanted.map(({ vendor, type, given }) => imported(resolved, `${vendor}.${type}`, given.split("/").at(-1)!)),
+    wanted.map(({ vendor, type, given }) => imported(resolved, `${vendor}.${type}`, given.split("/").at(-1)!, given)),
   );
   const exports = [];
   const bind: Record<string, string> = {};
@@ -269,24 +282,36 @@ export async function connectExisting(
       throw new ApiError(409, { error: `Could not start the branch ${branch}: ${errorMessage(err)}` });
     }
   }
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, text);
   const names = wanted.map((w) => `${w.vendor} ${w.given}`).join(" and ");
-  const commit = await source?.commit({
-    paths: [relative(source.root, path)],
-    message: `Connect ${names}`,
-    author: actor.id,
-  });
+  let commit: { revision: string } | undefined;
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, text);
+    commit = await source?.commit({
+      paths: [relative(source.root, path)],
+      message: `Connect ${names}`,
+      author: actor.id,
+    });
+  } catch (err) {
+    // Left as it was: no file, and back on the branch it started from, so connecting again works.
+    await rm(path, { force: true });
+    if (branch) await git!("switch", "--quiet", "-").then(() => git!("branch", "-D", branch));
+    throw new ApiError(500, { error: `Could not commit ${INFRA_FILE}: ${errorMessage(err)}` });
+  }
   const diff = branch && commit ? await git!("show", "--format=", commit.revision) : undefined;
-  const runId = await client.apply({ only: Object.keys(bind), bind }, { startedBy: actor });
+  const runId = await client.apply({ only: Object.keys(bind), bind }, { startedBy: actor }).catch((err: unknown) => {
+    throw new ApiError(500, {
+      error: `Committed ${INFRA_FILE}, but could not start the apply that binds it: ${errorMessage(err)}. Apply it from Resources.`,
+    });
+  });
   return { file: INFRA_FILE, text, runId, ...commit, ...(branch && { branch }), ...(diff && { diff }) };
 }
 
 /**
- * The state of the object `id` names, read through its type's import; a 400 when the config
+ * The state of the object `id` names (`given` by the person), read through its type's import; a 400 when the config
  * has no driver for it, or the vendor has no such object, or the read fails.
  */
-async function imported(resolved: AppContext["resolved"], type: string, id: string) {
+async function imported(resolved: AppContext["resolved"], type: string, id: string, given = id) {
   const opId = `${type}.import`;
   const driver = resolved.drivers.get(opId);
   if (!driver) {
@@ -301,9 +326,14 @@ async function imported(resolved: AppContext["resolved"], type: string, id: stri
   try {
     found = (await driver({ id }, call)) as typeof found;
   } catch (err) {
-    throw new ApiError(400, { error: `Could not read the ${type} ${id}: ${errorMessage(err)}` });
+    throw new ApiError(400, { error: `Could not read the ${type} ${given}: ${errorMessage(err)}` });
   }
-  if (found.gone || !found.state) throw new ApiError(400, { error: `There is no ${type} ${id} to connect` });
+  if (found.gone || !found.state) {
+    // A repository is read by its name, among the connector's owner's (`GITHUB_OWNER`, else the token's user).
+    const owner =
+      given === id ? "" : " among the GitHub connector's owner's repositories: set GITHUB_OWNER to its owner";
+    throw new ApiError(400, { error: `There is no ${type} ${given} to connect${owner}` });
+  }
   return found.state;
 }
 
