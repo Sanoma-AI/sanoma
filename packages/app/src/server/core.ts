@@ -1,7 +1,7 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
+import { join, relative } from "node:path";
 import {
   type ApprovalState,
   type DriftReport,
@@ -15,12 +15,14 @@ import {
   type RunSummary,
   type SanomaError,
 } from "@sanoma-ai/workflows";
-import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
+import { type ConfigDescription, type DataValue, formatOptions, setFields } from "@sanoma-ai/workflows/describe";
 import { check, loadScenarios } from "@sanoma-ai/workflows/scenario";
 import { isNotFound, isRedirect, notFound } from "@tanstack/react-router";
 import type { z } from "zod";
 import {
   ACTOR_HEADER,
+  type AdoptRequest,
+  type AdoptResponse,
   ApiError,
   type ClearCredentialRequest,
   type CredentialsResponse,
@@ -271,6 +273,48 @@ export async function lastRuns({ client, description }: AppContext): Promise<Rec
 
 /** The report of a drift run once it ends (`SanomaClient.driftReport`). */
 export const driftReport = ({ client }: AppContext, runId: string): Promise<DriftReport> => client.driftReport(runId);
+
+/**
+ * Adopt: writes what the vendor holds into the data file, for fields a finished drift run found
+ * drifted (`paths`, of the resource `id`), by that run's report, never a value the request gives.
+ * Then commits the file through the app's source, when it has one, as the actor. The next drift
+ * run reads the file as it is now. A 409 when the file no longer has the field where the report
+ * found it (it changed since), or it is a reference to another resource.
+ */
+export async function adopt(
+  { client, resolved, source }: AppContext,
+  actor: Principal,
+  { runId, id, paths }: AdoptRequest,
+): Promise<AdoptResponse> {
+  const result = (await client.driftReport(runId)).resources.find((r) => r.id === id);
+  if (result?.status !== "drifted") {
+    throw new ApiError(404, { error: `Run ${runId} found no drift on ${id}`, code: "invalid_input" });
+  }
+  const fields: Record<string, DataValue> = {};
+  for (const path of paths) {
+    const field = result.fields.find((f) => f.path === path);
+    if (!field) throw new ApiError(400, { error: `${path} of ${id} has not drifted`, code: "invalid_input" });
+    fields[path] = field.actual as DataValue;
+  }
+  if (resolved.root === undefined) throw new Error("The config has no root, so its data files cannot be written");
+  // The id is `<file>#<export>`, the file relative to the root: the drift run read it there.
+  const at = id.lastIndexOf("#");
+  const file = id.slice(0, at);
+  const path = join(resolved.root, file);
+  let text: string;
+  try {
+    text = await setFields(await readFile(path, "utf8"), id.slice(at + 1), fields, formatOptions(resolved.root));
+  } catch (err) {
+    throw new ApiError(409, { error: `Could not adopt into ${file}: ${errorMessage(err)}` });
+  }
+  await writeFile(path, text);
+  const commit = await source?.commit({
+    paths: [relative(source.root, path)],
+    message: `Adopt ${paths.join(", ")} of ${result.name} from ${result.vendor}`,
+    author: actor.id,
+  });
+  return { file, ...(commit && { revision: commit.revision }) };
+}
 
 /**
  * Sends the decision, then answers with the approval once the run has read it, or as it stands

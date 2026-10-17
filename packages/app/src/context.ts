@@ -1,4 +1,4 @@
-import type { Principal, ResolvedConfig, SanomaClient } from "@sanoma-ai/workflows";
+import type { Principal, ResolvedConfig, SanomaClient, Source } from "@sanoma-ai/workflows";
 import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 
 /**
@@ -19,4 +19,6 @@ export interface AppContext {
   client: SanomaClient;
   /** The deployment's own; undefined for the default, the `x-sanoma-actor` header the page sends. */
   resolveActor?: ResolveActor;
+  /** The company's repository, which Adopt commits a data file's change to; without one, it only writes the file. */
+  source?: Source;
 }

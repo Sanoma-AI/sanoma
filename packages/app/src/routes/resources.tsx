@@ -4,7 +4,7 @@ import { isEnded, problemAt } from "@sanoma-ai/workflows/shared";
 import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { CircleAlertIcon, ScanSearchIcon } from "lucide-react";
+import { CircleAlertIcon, FilePenLineIcon, ScanSearchIcon } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -29,7 +29,7 @@ import {
   VendorLogo,
   When,
 } from "../components/common.tsx";
-import { startRunFn } from "../functions.ts";
+import { adoptFn, startRunFn } from "../functions.ts";
 import { configQuery, driftReportQuery, RUNS_KEY, runLink, runsQuery, sourceQuery } from "../queries.ts";
 
 export const Route = createFileRoute("/resources")({
@@ -127,7 +127,12 @@ function WithDrift({ config, drift }: { config: ConfigDescription; drift: string
   const { latest, finished, error } = useLastCheck(drift);
   const checking = latest !== undefined && !isEnded(latest.status);
   return (
-    <Resources config={config} report={finished?.report} action={<RunDriftButton drift={drift} checking={checking} />}>
+    <Resources
+      config={config}
+      report={finished?.report}
+      adopt={finished && { runId: finished.run.runId, drift }}
+      action={<RunDriftButton drift={drift} checking={checking} />}
+    >
       {error && <Notice variant="destructive">Could not refresh the drift checks: {error.message}</Notice>}
       <LastCheck latest={latest} finished={finished} checking={checking} />
     </Resources>
@@ -137,11 +142,13 @@ function WithDrift({ config, drift }: { config: ConfigDescription; drift: string
 function Resources({
   config,
   report,
+  adopt,
   action,
   children,
 }: {
   config: ConfigDescription;
   report?: DriftReport;
+  adopt?: Adopt;
   action?: ReactNode;
   children: ReactNode;
 }) {
@@ -178,6 +185,7 @@ function Resources({
                   row={row}
                   title={titles.get(`${row.vendor}.${row.type}`)}
                   selected={row.id === selected}
+                  adopt={adopt}
                 />
               ))}
             </TableBody>
@@ -277,7 +285,17 @@ function RunDriftButton({ drift, checking }: { drift: string; checking: boolean 
 }
 
 /** A resource's row, and under it the fields that differ, or why it could not be read. */
-function ResourceRow({ row, title, selected }: { row: Row; title: string | undefined; selected: boolean }) {
+function ResourceRow({
+  row,
+  title,
+  selected,
+  adopt,
+}: {
+  row: Row;
+  title: string | undefined;
+  selected: boolean;
+  adopt?: Adopt;
+}) {
   const { result } = row;
   const detail = result !== undefined && (result.fields.length > 0 || result.error !== undefined);
   return (
@@ -316,7 +334,7 @@ function ResourceRow({ row, title, selected }: { row: Row; title: string | undef
         <TableRow className="hover:bg-transparent">
           <TableCell colSpan={4} className="whitespace-normal">
             {result.error === undefined ? (
-              <FieldDiff fields={result.fields} />
+              <FieldDiff id={row.id} fields={result.fields} adopt={adopt} />
             ) : (
               <p className="text-destructive">{result.error}</p>
             )}
@@ -338,8 +356,14 @@ function DriftBadge({ result }: { result: DriftResult | undefined }) {
   );
 }
 
-/** Each declared field that differs: what the data file declares, and what the vendor holds. */
-function FieldDiff({ fields }: { fields: DriftField[] }) {
+/** The drift run whose report the page shows, which Adopt writes the vendor's values from, and the workflow that checks again. */
+interface Adopt {
+  runId: string;
+  drift: string;
+}
+
+/** Each declared field that differs: what the data file declares, what the vendor holds, and a button to adopt that. */
+function FieldDiff({ id, fields, adopt }: { id: string; fields: DriftField[]; adopt?: Adopt }) {
   return (
     <Table className="text-xs">
       <TableHeader>
@@ -347,6 +371,7 @@ function FieldDiff({ fields }: { fields: DriftField[] }) {
           <TableHead>Field</TableHead>
           <TableHead>Declared</TableHead>
           <TableHead>At the vendor</TableHead>
+          {adopt && <TableHead />}
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -361,10 +386,51 @@ function FieldDiff({ fields }: { fields: DriftField[] }) {
             <TableCell className="whitespace-pre-wrap">
               <code>{JSON.stringify(field.actual)}</code>
             </TableCell>
+            {adopt && (
+              <TableCell className="text-right">
+                <AdoptButton adopt={adopt} id={id} path={field.path} />
+              </TableCell>
+            )}
           </TableRow>
         ))}
       </TableBody>
     </Table>
+  );
+}
+
+/** Writes what the vendor holds for one field into its data file (committed, when the app has a source), then checks for drift again. */
+function AdoptButton({ adopt: { runId, drift }, id, path }: { adopt: Adopt; id: string; path: string }) {
+  const queryClient = useQueryClient();
+  const adoptField = useServerFn(adoptFn);
+  const start = useServerFn(startRunFn);
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const adopted = await adoptField({ data: { runId, id, paths: [path] } });
+      await start({ data: { workflow: drift, input: {} } });
+      return adopted;
+    },
+    onSuccess: async ({ file, revision }) => {
+      toast.success(
+        `Wrote ${path} into ${file}${revision ? `, committed as ${revision.slice(0, 7)}` : ""}; checking again`,
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: RUNS_KEY }),
+        queryClient.invalidateQueries({ queryKey: sourceQuery(file).queryKey }),
+      ]);
+    },
+    onError: (err) => toast.error(errorBodyOf(err)?.error ?? err.message),
+  });
+  return (
+    <Button
+      variant="outline"
+      size="xs"
+      title="Write the vendor's value into the data file"
+      onClick={() => mutation.mutate()}
+      disabled={mutation.isPending}
+    >
+      {mutation.isPending ? <Spinner data-icon="inline-start" /> : <FilePenLineIcon data-icon="inline-start" />}
+      Adopt
+    </Button>
   );
 }
 

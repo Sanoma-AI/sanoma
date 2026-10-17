@@ -5,7 +5,14 @@ import type { AddressInfo } from "node:net";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { errorMessage, problemLine, resolveConfig, SanomaClient, type SanomaConfig } from "@sanoma-ai/workflows";
+import {
+  errorMessage,
+  problemLine,
+  resolveConfig,
+  SanomaClient,
+  type SanomaConfig,
+  type Source,
+} from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { isLoopback } from "@sanoma-ai/workflows/shared";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
@@ -28,6 +35,8 @@ export interface AppOptions {
    * the page sends; a hosted deployment passes its own, reading its login.
    */
   resolveActor?: ResolveActor;
+  /** The company's repository: Adopt commits the data file it writes through it. Without one, it only writes the file. */
+  source?: Source;
   /** The built app (`client/` and `server/`). Defaults to the one this package ships. */
   distDir?: string;
 }
@@ -85,7 +94,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   if (connected.status === "rejected") throw connected.reason;
   const entry = loaded.value;
   const client = connected.value;
-  const app: AppContext = { resolved, description, client, resolveActor: options.resolveActor };
+  const app: AppContext = { resolved, description, client, resolveActor: options.resolveActor, source: options.source };
 
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => {

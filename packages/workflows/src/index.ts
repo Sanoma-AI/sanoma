@@ -93,6 +93,7 @@ export { ApprovalMessage, APPROVALS_EVENT, decisionEventOf } from "./approvals.t
 export { RUNTIME_VERSION } from "./version.ts";
 export type { RunArgs } from "./run.ts";
 export { startWorker, type Worker, type WorkerOptions } from "./worker.ts";
+export type { Source } from "./source.ts";
 export { SanomaClient, type RunsFilter, type RunSummary, type StartOptions } from "./client.ts";
 // A raw DBOS client on the runtime's database, for tests and tools that read DBOS directly.
 export { dbosClient } from "./db.ts";

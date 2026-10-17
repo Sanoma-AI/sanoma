@@ -161,6 +161,23 @@ export type SetCredentialRequest = z.infer<typeof SetCredentialRequest>;
 export const ClearCredentialRequest = z.object({ name: z.string().min(1, "Name a variable") });
 export type ClearCredentialRequest = z.infer<typeof ClearCredentialRequest>;
 
+/**
+ * What `adoptFn` takes: a drift run, a resource it found drifted, and the fields whose value at
+ * the vendor to write into the resource's data file.
+ */
+export const AdoptRequest = z.object({
+  runId: z.string().min(1),
+  id: z.string().min(1),
+  paths: z.array(z.string().min(1)).min(1),
+});
+export type AdoptRequest = z.infer<typeof AdoptRequest>;
+
+/** What `adoptFn` answers: the data file it wrote, relative to the root, and the commit, when the app has a source. */
+export interface AdoptResponse {
+  file: string;
+  revision?: string;
+}
+
 /** The `body` of the error a server function fails with. */
 export interface ErrorResponse {
   error: string;
