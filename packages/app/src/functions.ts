@@ -19,8 +19,10 @@ import {
   listRuns,
   readStartRun,
   runDetail,
+  saysWho,
   scenarios,
   setCredential,
+  signOutUrl,
   startRun,
   validate,
   withoutSources,
@@ -50,12 +52,12 @@ export const getSource = createServerFn(READ)
  * resolver that fails is logged, and the nav says so without its detail.
  */
 export const getActor = createServerFn(READ).handler(async ({ context }): Promise<ActorInfo> => {
-  const fromServer = context.app.resolveActor !== undefined;
+  const info = { fromServer: saysWho(context.app), signOut: signOutUrl(context.app) };
   try {
-    return { fromServer, actor: (await context.actor()) ?? null };
+    return { ...info, actor: (await context.actor()) ?? null };
   } catch (err) {
     console.error("sanoma app: resolveActor failed:", err);
-    return { fromServer, actor: null, error: "Could not tell who you are" };
+    return { ...info, actor: null, error: "Could not tell who you are" };
   }
 });
 

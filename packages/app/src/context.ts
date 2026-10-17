@@ -3,10 +3,28 @@ import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 
 /**
  * Says who is making a request, or undefined when nobody is named. The app refuses a change
- * (starting a run, deciding an approval) without one. The default reads the `x-sanoma-actor`
- * header; a hosted deployment replaces it with its own login.
+ * (starting a run, deciding an approval) without one.
  */
 export type ResolveActor = (request: Request) => Principal | undefined | Promise<Principal | undefined>;
+
+/**
+ * Who may use the app and how they sign in. `startApp` calls `check` with the host it is to
+ * listen on before anything else, gives every request to `handle` first, and asks
+ * `resolveActor` who is making a change. The default, `loopbackLogin()`, takes the name the page
+ * sends and refuses any host but this machine; `githubLogin` signs people in with GitHub.
+ */
+export interface LoginProvider {
+  /** Names the provider. One with `handle` serves its routes under `/auth/<name>/`, signing out at `/auth/<name>/signout` (POST). */
+  name: string;
+  /** Throws when the app may not listen on `listenHost` with this provider. */
+  check(listenHost: string): void;
+  resolveActor: ResolveActor;
+  /**
+   * Sees every request first: answers the ones it owns (its `/auth/<name>/` routes, and a request
+   * nobody has signed in for), and returns undefined for the rest, which the app answers.
+   */
+  handle?(request: Request): Response | undefined | Promise<Response | undefined>;
+}
 
 /** What `startApp` hands every request: built once at boot, shared by all requests. */
 export interface AppContext {
@@ -17,8 +35,8 @@ export interface AppContext {
    */
   description: ConfigDescription;
   client: SanomaClient;
-  /** The deployment's own; undefined for the default, the `x-sanoma-actor` header the page sends. */
-  resolveActor?: ResolveActor;
+  /** `AppOptions.login`, or `loopbackLogin()`. */
+  login: LoginProvider;
   /** The company's repository, which Adopt commits a data file's change to; without one, it only writes the file. */
   source?: Source;
 }

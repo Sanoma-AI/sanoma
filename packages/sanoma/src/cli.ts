@@ -24,7 +24,8 @@ Runs the repo in the working directory, from its sanoma.config.ts (after its .en
                                       a run's ledger records as JSON lines
 
 SANOMA_DATABASE_URL names Postgres (default postgresql://postgres:dbos@localhost:5433/sanoma); SANOMA_APP_PORT the
-app's port (default 3000; 0 for any free port). With sanoma or a @sanoma-ai package linked from a sanoma checkout,
+app's port (default 3000; 0 for any free port); SANOMA_APP_HOST its address (default 127.0.0.1; any other needs
+GitHub sign-in, see .env.example). With sanoma or a @sanoma-ai package linked from a sanoma checkout,
 or SANOMA_DEV_REPO set, \`sanoma\` also runs each linked package's watch build and restarts on a new build.
 `;
 

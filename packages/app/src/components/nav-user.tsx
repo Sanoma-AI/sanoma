@@ -1,4 +1,5 @@
 import {
+  LogOutIcon,
   type LucideIcon,
   Maximize2Icon,
   Minimize2Icon,
@@ -28,14 +29,15 @@ import { useDensity } from "./density.tsx";
 
 /**
  * Who you are, the theme and the density, at the foot of the sidebar's section bar: your initials,
- * your name and where it comes from read out to assistive tech and shown atop the menu. The menu
+ * your name and where it comes from read out to assistive tech and shown atop the menu, with Sign
+ * out when the login has one. The menu
  * renders only once opened, in the browser, so the stored theme never reaches the server's markup.
  * Switching to Compact folds the sidebar's panel once (not on a phone, where it is a sheet);
  * switching back leaves the sidebar as it is.
  */
 export function NavUser() {
   const { isMobile, open, setOpen } = useSidebar();
-  const { actor, fromServer, error, setActor } = useActor();
+  const { actor, fromServer, error, signOut, setActor } = useActor();
   const { theme, setTheme } = useTheme();
   const { compact, setCompact } = useDensity();
   const setDensity = (value: string) => {
@@ -79,6 +81,15 @@ export function NavUser() {
             <DropdownMenuSeparator />
           </>
         )}
+        {signOut && (
+          <>
+            <DropdownMenuItem onClick={() => void signOutAt(signOut)}>
+              <LogOutIcon />
+              Sign out
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
         <Choices label="Theme" value={theme ?? "system"} onValueChange={setTheme} choices={THEMES} />
         <DropdownMenuSeparator />
         <Choices
@@ -90,6 +101,12 @@ export function NavUser() {
       </DropdownMenuContent>
     </DropdownMenu>
   );
+}
+
+/** Ends the session, then reloads the app, which shows the login's sign-in page. */
+async function signOutAt(url: string) {
+  await fetch(url, { method: "POST" });
+  window.location.assign("/");
 }
 
 type Choice = { value: string; icon: LucideIcon; label: string };
