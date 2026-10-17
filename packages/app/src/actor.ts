@@ -1,10 +1,10 @@
 import { createContext, useContext, useSyncExternalStore } from "react";
 import type { ActorInfo } from "./api.ts";
 
-// Who you are. With the default resolver there is no login: the page asks once, keeps the name
+// Who you are. With the default loopback login there is none: the page asks once, keeps the name
 // in this browser, and sends it with every change; that name is read only in the browser, and
-// the server render knows no one. A deployment with its own `resolveActor` says who you are
-// itself, and the page shows that instead.
+// the server render knows no one. With a login provider the server says who you are itself, and
+// the page shows that instead.
 
 const ACTOR_KEY = "sanoma.actor";
 
@@ -61,6 +61,8 @@ export interface ActorState {
   fromServer: boolean;
   /** Set when the deployment could not say who you are. */
   error?: string;
+  /** Where to sign out (POST), when the login has its own routes. */
+  signOut?: string;
   setActor(name: string | null): void;
 }
 
@@ -80,12 +82,13 @@ export const useActor = () => useContext(ActorContext);
 export function useActorState(server: ActorInfo): ActorState {
   const stored = useSyncExternalStore(watchActor, loadActor, notRead);
   if (server.fromServer) {
-    const { actor, error } = server;
+    const { actor, error, signOut } = server;
     return {
       actor: actor?.id ?? null,
       groups: actor?.groups ?? [],
       fromServer: true,
       ...(error === undefined ? {} : { error }),
+      signOut,
       setActor() {},
     };
   }

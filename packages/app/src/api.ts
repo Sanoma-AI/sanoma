@@ -19,22 +19,24 @@ import { z } from "zod";
  */
 
 /**
- * Who is asking. There is no login: the page asks once and sends the name in this header with
- * every server function call, which the default `resolveActor` reads.
+ * Who is asking, without a login: the page asks once and sends the name in this header with
+ * every server function call, which the default loopback login reads.
  */
 export const ACTOR_HEADER = "x-sanoma-actor";
 
 /**
- * Who the server says is asking. With a deployment's own `resolveActor` (`fromServer`), it is
- * the deployment's login, which the page shows and cannot change; with the default resolver, it
- * is whatever name the page sends, so the page asks for one and keeps it.
+ * Who the server says is asking. With a login provider (`fromServer`), it is whoever signed in,
+ * which the page shows and cannot change; with the default loopback login, it is whatever name
+ * the page sends, so the page asks for one and keeps it.
  */
 export interface ActorInfo {
   fromServer: boolean;
   /** Null when the request names nobody. */
   actor: Principal | null;
-  /** Set when the deployment's `resolveActor` threw: it could not say. */
+  /** Set when the login's `resolveActor` threw: it could not say. */
   error?: string;
+  /** Where the page signs out (POST), when the login has its own routes. */
+  signOut?: string;
 }
 
 const StartWorkflowRequest = z.object({ workflow: z.string().min(1, "Name a workflow"), input: z.unknown() });

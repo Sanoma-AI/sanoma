@@ -14,27 +14,28 @@ import {
   type Source,
 } from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
-import { isLoopback } from "@sanoma-ai/workflows/shared";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
-import type { AppContext, ResolveActor } from "./context.ts";
-import { hostName, refuseHost } from "./loopback.ts";
+import type { AppContext, LoginProvider } from "./context.ts";
+import { loopbackLogin } from "./loopback.ts";
 
 export { ACTOR_HEADER } from "./api.ts";
-export type { ResolveActor } from "./context.ts";
+export type { LoginProvider, ResolveActor } from "./context.ts";
+export { githubLogin, type GithubLoginOptions } from "./login/github.ts";
+export { loopbackLogin } from "./loopback.ts";
 
 export interface AppOptions {
   /** Defaults to 0: any free port, which `App.url` reports. 3000 is the suggested fixed port. */
   port?: number;
   /**
-   * Defaults to 127.0.0.1, so only this machine can reach the app. There is no login:
-   * anyone who can reach it can start runs and decide approvals as any name.
+   * Defaults to 127.0.0.1, so only this machine can reach the app. Any other host needs a `login`:
+   * the default has none, and refuses to listen there.
    */
   host?: string;
   /**
-   * Says who is making a request. Defaults to the name in the `x-sanoma-actor` header, which
-   * the page sends; a hosted deployment passes its own, reading its login.
+   * Who may use the app and how they sign in. Defaults to `loopbackLogin()`: no login, the name
+   * the page sends in the `x-sanoma-actor` header, on this machine only.
    */
-  resolveActor?: ResolveActor;
+  login?: LoginProvider;
   /** The company's repository: Adopt commits the data file it writes through it. Without one, it only writes the file. */
   source?: Source;
   /** The built app (`client/` and `server/`). Defaults to the one this package ships. */
@@ -59,6 +60,9 @@ interface ServerEntry {
  * data files with problems it warns about and leaves out (the Resources page lists them).
  */
 export async function startApp(config: SanomaConfig, options: AppOptions = {}): Promise<App> {
+  const host = options.host ?? "127.0.0.1";
+  const login = options.login ?? loopbackLogin();
+  login.check(host);
   const resolved = resolveConfig(config);
   const description = describeConfig(config);
   // Problems in the files do not stop the app: a data file's resources are left out (the Resources
@@ -72,8 +76,6 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     console.warn(`sanoma app: the config's files have problems (\`sanoma check\` lists them):\n${list}`);
   }
   const distDir = resolve(options.distDir ?? defaultDistDir());
-  const host = options.host ?? "127.0.0.1";
-  const loopbackOnly = isLoopback(host);
 
   // The build first, importing nothing and connecting to nothing: a missing or half build is
   // refused before anything is opened.
@@ -94,7 +96,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   if (connected.status === "rejected") throw connected.reason;
   const entry = loaded.value;
   const client = connected.value;
-  const app: AppContext = { resolved, description, client, resolveActor: options.resolveActor, source: options.source };
+  const app: AppContext = { resolved, description, client, login, source: options.source };
 
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => {
@@ -108,16 +110,13 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   });
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
-    // When the app listens on this machine only, a page elsewhere could still reach it by
-    // pointing its own host name at 127.0.0.1 (DNS rebinding). Its requests then carry that
-    // name in Host, so anything not addressed to a loopback name is refused: here, where every
-    // request passes (pages, server functions and static files alike).
-    if (loopbackOnly && !isLoopback(hostName(req.headers.host ?? ""))) {
-      return sendNodeResponse(res, refuseHost(req.headers.host ?? ""));
-    }
+    const request = new NodeRequest({ req, res });
+    // The login sees every request first (pages, server functions and static files alike): its
+    // own routes, and any it will not let through.
+    const answer = await login.handle?.(request);
+    if (answer) return sendNodeResponse(res, answer);
     const file = staticFile(files, req);
     if (file) return sendFile(file, req, res);
-    const request = new NodeRequest({ req, res });
     await sendNodeResponse(res, await entry.fetch(request, { context: { app } }));
   }
 

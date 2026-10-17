@@ -44,7 +44,8 @@ import {
   RunsQuery,
   SetCredentialRequest,
 } from "../src/api.ts";
-import type { AppContext, ResolveActor } from "../src/context.ts";
+import type { AppContext, LoginProvider } from "../src/context.ts";
+import { loopbackLogin } from "../src/loopback.ts";
 import {
   type ActorContext,
   actorOf,
@@ -60,8 +61,10 @@ import {
   readStartRun,
   requireActor,
   runDetail,
+  saysWho,
   scenarios,
   serverFnFailure,
+  signOutUrl,
   setCredential,
   startRun,
   validate,
@@ -138,10 +141,10 @@ const clients: SanomaClient[] = [];
  * The context startApp builds for a config and hands every request, on a client of its own: the
  * server functions call the server core with it.
  */
-async function contextOf(cfg: SanomaConfig, resolveActor?: ResolveActor): Promise<AppContext> {
+async function contextOf(cfg: SanomaConfig, login = loopbackLogin()): Promise<AppContext> {
   const client = await SanomaClient.connect(cfg);
   clients.push(client);
-  return { resolved: resolveConfig(cfg), description: describeConfig(cfg), client, resolveActor };
+  return { resolved: resolveConfig(cfg), description: describeConfig(cfg), client, login };
 }
 
 beforeAll(async () => {
@@ -1204,7 +1207,7 @@ describe("the page", () => {
 });
 
 // One more app on the file's database, to test four things a deployment may change: its own
-// resolveActor, listening on every interface, a ledger the worker does not write to, and data
+// login, listening on every interface, a ledger the worker does not write to, and data
 // files, one of them broken.
 describe("resources and drift", () => {
   let driftRun: string;
@@ -1491,11 +1494,21 @@ describe("resources and drift", () => {
   });
 });
 
-/** Says who is asking from a test header, the way a hosted deployment reads its login. */
-const hostedActor: ResolveActor = (request) => {
-  const who = request.headers.get("x-test-user");
-  if (who === "boom") throw new Error("the session store is down");
-  return who ? { id: who, groups: ["marketing"] } : undefined;
+/**
+ * A login that says who is asking from a test header, the way a hosted deployment reads its
+ * session, and serves a sign-out route of its own.
+ */
+const hostedLogin: LoginProvider = {
+  name: "test",
+  check() {},
+  resolveActor(request) {
+    const who = request.headers.get("x-test-user");
+    if (who === "boom") throw new Error("the session store is down");
+    return who ? { id: who, groups: ["marketing"] } : undefined;
+  },
+  handle: (request) =>
+    new URL(request.url).pathname === "/auth/test/signout" ? new Response(null, { status: 204 }) : undefined,
+  signOut: "/auth/test/signout",
 };
 
 describe("an app configured otherwise", () => {
@@ -1514,9 +1527,9 @@ describe("an app configured otherwise", () => {
     // A directory nothing has written to yet: the worker keeps its records in memory.
     const otherConfig = { ...config, ledger: jsonlLedger(join(dir, "ledger")), root: dir };
     const warn = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => void warned.push(args.join(" ")));
-    other = await startApp(otherConfig, { host: "0.0.0.0", resolveActor: hostedActor });
+    other = await startApp(otherConfig, { host: "0.0.0.0", login: hostedLogin });
     warn.mockRestore();
-    otherCtx = await contextOf(otherConfig, hostedActor);
+    otherCtx = await contextOf(otherConfig, hostedLogin);
   });
   afterAll(async () => {
     await other?.close();
@@ -1560,7 +1573,17 @@ describe("an app configured otherwise", () => {
   const workflowsAs = async (user: string) =>
     (await fetch(new URL("/workflows", other.url), { headers: { "x-test-user": user } })).text();
 
-  describe("with its own resolveActor", () => {
+  describe("with a login provider", () => {
+    it("says who is asking itself, and where to sign out", () => {
+      expect([saysWho(ctx), signOutUrl(ctx)]).toEqual([false, undefined]);
+      expect([saysWho(otherCtx), signOutUrl(otherCtx)]).toEqual([true, "/auth/test/signout"]);
+    });
+
+    it("gives the login every request first", async () => {
+      const res = await fetch(new URL("/auth/test/signout", other.url), { method: "POST" });
+      expect(res.status).toBe(204);
+    });
+
     it("starts runs as the principal it resolves, groups included", async () => {
       const started = await post("sso-user");
       expect(started.status).toBeUndefined();
@@ -1826,6 +1849,13 @@ describe("an app whose drivers declare environment variables", () => {
 });
 
 describe("startApp", () => {
+  it("refuses to listen beyond this machine without a login", async () => {
+    await expect(startApp(config, { host: "0.0.0.0" })).rejects.toThrow(
+      /^The app has no login, so it listens on this machine only, not 0\.0\.0\.0/,
+    );
+    expect(() => loopbackLogin().check("::1")).not.toThrow();
+  });
+
   it("says to build the app when it is not built", async () => {
     const empty = mkdtempSync(join(tmpdir(), "sanoma-app-dist-"));
     try {

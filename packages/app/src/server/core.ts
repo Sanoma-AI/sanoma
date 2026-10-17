@@ -37,7 +37,7 @@ import {
   startRunSchema,
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
-import { actorFromHeader } from "../default-actor.ts";
+import { LOOPBACK } from "../loopback.ts";
 
 // What the server functions do. Server-only: each takes the app context that startApp passes
 // with every request. Every expected failure is an ApiError.
@@ -50,13 +50,13 @@ export interface ActorContext {
 
 /**
  * Says who is asking, when asked: start.ts's `actor` middleware gives each request this as
- * `context.actor`, and the resolver (the deployment's, or the header's by default) runs at most
+ * `context.actor`, and the login's resolver (the header's, by default) runs at most
  * once per request, so a read that needs no actor never calls it. A resolver that throws (its
  * session store is down, say) fails that call, inside the handler, so the error middleware
  * answers it as a logged 500.
  */
 export function actorOf(app: AppContext, request: Request): ActorContext["actor"] {
-  const resolve = app.resolveActor ?? actorFromHeader;
+  const resolve = app.login.resolveActor;
   let who: Promise<Principal | undefined> | undefined;
   return () =>
     (who ??= (async () => resolve(request))().catch((err: unknown) => {
@@ -66,17 +66,23 @@ export function actorOf(app: AppContext, request: Request): ActorContext["actor"
 
 /**
  * Who is making a change (resolved at most once per request, see `actorOf`), or a 400 when
- * nobody is named. Only the default resolver reads the header, so only then does the answer
+ * nobody is named. Only the loopback login reads the header, so only then does the answer
  * name it.
  */
 export async function requireActor({ app, actor }: ActorContext): Promise<Principal> {
   const parsed = Principal.safeParse(await actor());
   if (parsed.success) return parsed.data;
-  const error = app.resolveActor
+  const error = saysWho(app)
     ? "This request does not say who is making it: sign in"
     : `Say who you are in the ${ACTOR_HEADER} header`;
   throw new ApiError(400, { error, code: "invalid_input" });
 }
+
+/** True when the login says who is asking; false for the loopback login, which takes the name the page sends. */
+export const saysWho = (app: AppContext) => app.login.name !== LOOPBACK;
+
+/** Where the page signs out, when the login has a route for it. */
+export const signOutUrl = ({ login }: AppContext) => login.signOut;
 
 /** The value, parsed by the schema, or a 400 `invalid_input` with zod's issues. */
 export function parse<T extends z.ZodType>(schema: T, value: unknown, what: string): z.output<T> {

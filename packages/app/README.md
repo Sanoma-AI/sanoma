@@ -1,6 +1,6 @@
 # @sanoma-ai/app
 
-A web UI for a [Sanoma](https://github.com/Sanoma-AI/sanoma) config: the runs, each run's ledger and approvals, a form to start a workflow, and what each workflow may call. It reads the same `sanoma.config.ts` your worker runs, so it shows exactly what the worker enforces: it renders from `describeConfig(config)`, the config's ledger store and Postgres. The only workflow code it reads is each workflow's `run`, once at start, to draw its outline. It runs no workflows itself. The page talks to the server through TanStack Start server functions, its only HTTP surface; scripts and agents reach the same runs through [`SanomaClient`](https://www.npmjs.com/package/@sanoma-ai/workflows#building-your-own-ui), over the same Postgres.
+A web UI for a [Sanoma](https://github.com/Sanoma-AI/sanoma) config: the runs, each run's ledger and approvals, a form to start a workflow, and what each workflow may call. It reads the same `sanoma.config.ts` your worker runs, so it shows exactly what the worker enforces: it renders from `describeConfig(config)`, the config's ledger store and Postgres. The only workflow code it reads is each workflow's `run`, once at start, to draw its outline. It runs no workflows itself. The page talks to the server through TanStack Start server functions, its only HTTP surface besides the login's routes; scripts and agents reach the same runs through [`SanomaClient`](https://www.npmjs.com/package/@sanoma-ai/workflows#building-your-own-ui), over the same Postgres.
 
 It is a [TanStack Start](https://tanstack.com/start) app (React, TanStack Router, Query and Form), built into the package and served by `startApp` from Node.
 
@@ -59,21 +59,36 @@ A `ctx.all` draws as one lane per member, top to bottom in member order, between
 
 Each workflow card on the Workflows page, and a workflow's page, draw the workflow's shape before it runs, from the `outline` that `describeConfig` (`@sanoma-ai/workflows/describe`) reads once per workflow when `startApp` starts; the source under a workflow page's Code tab is the workflow's file as it is when the page asks for it. It is the run graph's drawing without colours: the operations (with their effects), approvals and sleeps the body of `run` calls, a `ctx.all` as lanes, a loop or a `ctx.all` over a list as a box labelled from its code ("for each of subscribers", "repeat while more") (the line into the box goes on inside it to its first nodes, and its last nodes join the line out), an operation or sleep by the name its call gives, and an `if` or `switch` as a diamond that splits into one lane per case, plus a lane marked "otherwise" when the run can go by without any of them (an `if` without `else`, say). It is a reading of the source, labelled so: "Read from the body of run; the functions it calls are not shown, even those defined in it". When the source cannot be read the card says why instead.
 
-## No authentication
+## Login
 
-This is a local tool. There is no login. The page asks "Who are you?" once, keeps the answer in the browser, and sends it, URI-encoded, in the `x-sanoma-actor` header with every server function call; a change that names nobody is refused. Anyone who can reach the app can start runs and decide approvals as any name they type; the approver check only compares names. The app listens on 127.0.0.1 unless you pass another `host`. While it listens on this machine only, it refuses every request (page, server function or static file) whose `Host` names anything but this machine, so another site cannot reach it through DNS rebinding. Do not expose it to a network you do not trust.
+`startApp` takes a `login` provider, which says who may use the app and who is making each change. Without one, the app has no login and listens on this machine only; with one, it may listen on any host.
+
+### No login, on this machine
+
+The default, `loopbackLogin()`. The page asks "Who are you?" once, keeps the answer in the browser, and sends it, URI-encoded, in the `x-sanoma-actor` header with every server function call; a change that names nobody is refused. Anyone who can reach the app can start runs and decide approvals as any name they type; the approver check only compares names. So `startApp` refuses any `host` but this machine's (127.0.0.1, the default, `localhost` or `::1`) without another login. While it listens on this machine only, it refuses every request (page, server function or static file) whose `Host` names anything but this machine, so another site cannot reach it through DNS rebinding.
 
 Reads are open. Anyone who can reach the app sees every run, its ledger (each operation's input and output included) and its approvals, through the page and the server functions it reads them with; nothing asks who they are. On this machine, the Host check above is the only protection. A failure the app does not expect shows only "Something went wrong": its message can name internal details, such as a database host, so the app logs it instead.
 
-### Hosted
+### GitHub
 
-A hosted deployment puts its own authentication in front of the whole app (a reverse proxy or an identity-aware proxy), since the app checks no one on a read. It also replaces the header with its own login through `resolveActor`, which turns each request into the person acting (`{ id, groups? }`), or `undefined` to refuse a change:
+`githubLogin` signs people in with GitHub and admits whoever has write, maintain or admin access to the company's repository, read as they sign in; anyone else gets a 403. Every request without a session gets the sign-in page (a server function call, a 401), so reads are signed in too.
 
 ```ts
-await startApp(config, { resolveActor: async (request) => sessionUser(request) });
+import { githubLogin, startApp } from "@sanoma-ai/app";
+
+await startApp(config, {
+  host: "0.0.0.0",
+  login: githubLogin({ clientId, clientSecret, repo: "acme/company" }),
+});
 ```
 
-With its own `resolveActor`, the page never asks for a name: it shows who the deployment says you are. An approval addressed to a group (`{ group: "finance" }`) can be decided only by a principal whose `groups` lists it, and the default header carries a name only, so group approvals need a `resolveActor` that supplies `groups`. The app calls `resolveActor` only for a request that needs to know who is asking, once per request. One that throws fails the change with a 500, logged as "Could not tell who you are: " and the resolver's message; the menu at the sidebar's foot says "Could not tell who you are" and asks again every 10 seconds.
+The OAuth client is the company's GitHub App's, installed on the repository (Metadata: read), with `<the app's URL>/auth/github/callback` as its callback URL; an OAuth App's token, asked for no scope, cannot read a private repository's permissions. The session is a signed, httpOnly cookie that lasts 12 hours, keyed from `SANOMA_SECRETS_KEY`, which must be set (`githubLogin` throws, naming it, when it is not). `resolveActor` returns `{ id: <their GitHub login> }`, so approvals and the ledger name real people. The menu at the sidebar's foot shows the login and Sign out. The `sanoma` bin builds this from `SANOMA_GITHUB_CLIENT_ID`, `SANOMA_GITHUB_CLIENT_SECRET` and `SANOMA_GITHUB_REPO`, and listens on `SANOMA_APP_HOST`.
+
+### Your own
+
+A `LoginProvider` is `{ name, check(listenHost), resolveActor, handle?, signOut? }`. `check` throws for a host the app may not listen on. `resolveActor` turns a request into the person acting (`{ id, groups? }`), or `undefined` to refuse a change. `handle`, when there is one, sees every request first: it answers its own routes under `/auth/<name>/` and any request it will not let through, and returns `undefined` for the rest. `signOut` is the path the page POSTs to to sign out, which `handle` serves; with it, the menu shows Sign out.
+
+With a login provider, the page never asks for a name: it shows who the login says you are. An approval addressed to a group (`{ group: "finance" }`) can be decided only by a principal whose `groups` lists it, and the default header carries a name only, so group approvals need a `resolveActor` that supplies `groups`. The app calls `resolveActor` only for a request that needs to know who is asking, once per request. One that throws fails the change with a 500, logged as "Could not tell who you are: " and the resolver's message; the menu at the sidebar's foot says "Could not tell who you are" and asks again every 10 seconds.
 
 ## Developing
 

@@ -49,6 +49,13 @@ const expected = `# Copy to .env (ignored by git; \`sanoma\` loads it before rea
 # SANOMA_DATABASE_URL=
 # Optional. The app's port; default 3000.
 # SANOMA_APP_PORT=
+# Optional. The address the app listens on; default 127.0.0.1. Any other needs GitHub sign-in.
+# SANOMA_APP_HOST=
+# Optional. GitHub sign-in: the OAuth client of the company's GitHub App, and the owner/name of the
+# repository whose collaborators with write access or more may sign in. All three or none.
+# SANOMA_GITHUB_CLIENT_ID=
+# SANOMA_GITHUB_CLIENT_SECRET=
+# SANOMA_GITHUB_REPO=
 
 # shop: an API key with read and refund access
 SHOP_API_KEY=
