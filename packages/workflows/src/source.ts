@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { z } from "zod";
 import { defineConnector, defineDriver, DriverError } from "./op.ts";
 
@@ -57,25 +58,18 @@ const COMMIT = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 /** The commit `ref` (a branch, a tag, `HEAD`, a full ref or a commit id) names in the repository at `url`. */
 export async function resolveRevision(url: string, ref: string): Promise<string> {
   if (COMMIT.test(ref)) return ref;
-  const listed = await new Promise<string>((done, fail) =>
-    execFile(
-      "git",
-      ["ls-remote", "--", url, ref, `${ref}^{}`],
-      // Never a prompt for credentials: a repository that needs them and has none fails.
-      { env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, timeout: 30_000 },
-      (err, stdout, stderr) =>
-        err
-          ? fail(
-              new DriverError(`git ls-remote ${url} failed: ${String(stderr).trim() || err.message}`, {
-                retryable: true,
-                cause: err,
-              }),
-            )
-          : done(String(stdout)),
-    ),
-  );
+  const { stdout } = await promisify(execFile)("git", ["ls-remote", "--", url, ref, `${ref}^{}`], {
+    // Never a prompt for credentials: a repository that needs them and has none fails.
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    timeout: 30_000,
+  }).catch((err: { stderr?: string; message: string }) => {
+    throw new DriverError(`git ls-remote ${url} failed: ${err.stderr?.trim() || err.message}`, {
+      retryable: true,
+      cause: err,
+    });
+  });
   const refs = new Map(
-    listed.split("\n").flatMap((line) => {
+    stdout.split("\n").flatMap((line) => {
       const [sha, name] = line.split("\t");
       return sha && name ? [[name, sha] as const] : [];
     }),

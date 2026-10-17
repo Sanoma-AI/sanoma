@@ -12,6 +12,7 @@ import {
   defineResource,
   defineWorkflow,
   type DriftResult,
+  errorMessage,
   isEnded,
   type PlanAction,
   type Resource,
@@ -21,6 +22,7 @@ import {
   withSetup,
 } from "@sanoma-ai/workflows";
 import { z } from "zod";
+import { waitFor } from "./build.ts";
 import { startTestWorker } from "./index.ts";
 
 // The conformance kit for the `Host` contract: whether a host runs the company as the runtime
@@ -136,11 +138,11 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
       await run();
       results.push({ name, ok: true });
     } catch (err) {
-      results.push({ name, ok: false, error: err instanceof Error ? err.message : String(err) });
+      results.push({ name, ok: false, error: errorMessage(err) });
     }
   };
   const ended = (runId: string) =>
-    waitUntil(
+    waitFor(
       () => client.run(runId),
       (r) => r !== undefined && isEnded(r.status),
       timeoutMs,
@@ -164,7 +166,7 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
   await check("LISTEN hears a credential change", async () => {
     await client.setCredential(HOST_CHECK_CREDENTIAL, credential, { by: startedBy.id });
     // The worker loads the value when it hears the change: until then a probe fails, or reads the old one.
-    await waitUntil(
+    await waitFor(
       async () => {
         const runId = await client.start("host-check-credential", {}, { startedBy });
         const run = await ended(runId);
@@ -176,11 +178,7 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
   });
   await check("a sleep survives a restart", async () => {
     const runId = await client.start("host-check-sleep", { seconds: 2 }, { startedBy });
-    await waitUntil(
-      async () => (await client.ledger(runId)).some((r) => r.type === "sleep.started"),
-      Boolean,
-      timeoutMs,
-    );
+    await waitFor(async () => (await client.ledger(runId)).some((r) => r.type === "sleep.started"), Boolean, timeoutMs);
     await host.stop();
     await host.apply();
     await finish(runId);
@@ -200,24 +198,16 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
   await check("no secret is in the ledger", async () => {
     const secrets = [...host.secrets, credential].filter((s) => s.length >= 8);
     const leaks: string[] = [];
-    for (const run of await client.runs({ limit: 1000 })) {
-      const text = JSON.stringify(await client.ledger(run.runId));
+    const runs = await client.runs({ limit: 1000 });
+    const ledgers = await Promise.all(runs.map((run) => client.ledger(run.runId)));
+    runs.forEach((run, i) => {
+      const text = JSON.stringify(ledgers[i]);
       if (secrets.some((secret) => text.includes(secret))) leaks.push(run.runId);
-    }
+    });
     if (leaks.length) throw new Error(`a secret is in the ledger of ${leaks.join(", ")}`);
   });
   await client.clearCredential(HOST_CHECK_CREDENTIAL, { by: startedBy.id });
   return results;
-}
-
-async function waitUntil<T>(get: () => Promise<T>, done: (value: T) => boolean, timeoutMs: number): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const value = await get();
-    if (done(value)) return value;
-    if (Date.now() > deadline) throw new Error(`timed out after ${timeoutMs} ms; last saw ${JSON.stringify(value)}`);
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
 }
 
 /** What `fakeHost` starts for a revision: the runtime, answering at `url`, until `stop`. */

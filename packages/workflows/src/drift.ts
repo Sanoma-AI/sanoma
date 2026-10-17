@@ -2,7 +2,7 @@ import { z } from "zod";
 import { defineWorkflow, type WorkflowDefinition } from "./define.ts";
 import { isRunControlError } from "./errors.ts";
 import type { Op } from "./op.ts";
-import { type DriftField, diffDeclared, fieldPathOf, type Resource } from "./resource.ts";
+import { type DriftField, diffDeclared, fieldPathOf, type Resource, valueAt } from "./resource.ts";
 import type { DeclaredResource, ResourceProblem } from "./resources.ts";
 import { type DRIFT_WORKFLOW, errorMessage } from "./shared.ts";
 
@@ -236,12 +236,6 @@ export function driftWorkflow(
     },
   });
 }
-
-/** The value at a dotted path, a list item's by its index. */
-const valueAt = (value: unknown, path: string) =>
-  path
-    .split(".")
-    .reduce<unknown>((v, key) => (typeof v === "object" && v !== null ? (v as State)[key] : undefined), value);
 
 /**
  * A host's source: the clone URL its data file gives, or, when it names a declared repository

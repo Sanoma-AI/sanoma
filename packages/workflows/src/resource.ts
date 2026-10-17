@@ -374,7 +374,7 @@ export function holderOf(value: unknown, path: string): { holder: State; key: st
 export const fieldPathOf = (at: string) => at.replaceAll(/\.\d+(?=\.|$)/g, "");
 
 /** The value at a dotted path, a list item's by its index. */
-const valueAt = (value: unknown, path: string) =>
+export const valueAt = (value: unknown, path: string) =>
   path.split(".").reduce<unknown>((v, key) => (isObject(v) || Array.isArray(v) ? (v as State)[key] : undefined), value);
 
 /** True when the two are the same JSON, where a missing value is `null`. */
