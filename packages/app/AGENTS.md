@@ -1,6 +1,6 @@
 # Working on @sanoma-ai/app
 
-This package owns the local web UI over a Sanoma config. Its server functions are its only HTTP surface, besides a login provider's `/auth/<name>/` routes; scripts use `SanomaClient` from `@sanoma-ai/workflows`.
+This package owns the local web UI over a Sanoma config. Its server functions are its only HTTP surface, besides a login provider's `/auth/<name>/` routes and `/healthz` (answered before the login); scripts use `SanomaClient` from `@sanoma-ai/workflows`.
 
 ## Read when needed
 

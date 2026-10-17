@@ -61,6 +61,8 @@ Each workflow card on the Workflows page, and a workflow's page, draw the workfl
 
 ## Login
 
+`GET /healthz` answers `ok` before any login, whatever host it is addressed to: a host's probe that the app is up, and nothing more.
+
 `startApp` takes a `login` provider, which says who may use the app and who is making each change. Without one, the app has no login and listens on this machine only; with one, it may listen on any host.
 
 ### No login, on this machine
