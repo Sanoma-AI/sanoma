@@ -1,0 +1,11 @@
+# Secrets must never be committed: .env holds this company's key and credentials.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+node_modules/
+dist/
+.sanoma/
+.DS_Store

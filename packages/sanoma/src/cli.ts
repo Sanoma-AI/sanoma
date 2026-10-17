@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import type { SanomaConfig } from "@sanoma-ai/workflows";
 import { type Loaded, loadConfig, UsageError } from "./config.ts";
@@ -15,7 +15,9 @@ const USAGE = `usage: sanoma [command]
 
 Runs the repo in the working directory, from its sanoma.config.ts (after its .env, when there is one).
 
-  sanoma                              the worker and the app; starts Postgres in Docker when nothing answers
+  sanoma                              the worker and the app; starts Postgres in Docker when nothing answers. In an
+                                      empty directory, first starts a company there: the template, .env, an install
+                                      and a git repository
   sanoma worker                       the worker alone, for a deployment
   sanoma app                          the app alone, for a deployment
   sanoma check                        typecheck, lint, read the config, run every scenario; exit 1 on a problem
@@ -52,6 +54,10 @@ export async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = positionals;
   switch (command) {
     case undefined: {
+      if (!existsSync(join(process.cwd(), "sanoma.config.ts"))) {
+        const { startCompany } = await import("./init.ts");
+        if (await startCompany(process.cwd(), { log })) return serveStarted(process.cwd());
+      }
       const { devRepo, linkedPackages } = await import("./dev.ts");
       const linked = linkedPackages(process.cwd());
       const repo = devRepo(process.cwd(), linked);
@@ -126,6 +132,17 @@ async function serveCommand(): Promise<never> {
   await ensurePostgres(databaseUrl, { appName, log });
   const { serve } = await import("./serve.ts");
   return keep(loaded, (config) => serve(config, { port: port() }));
+}
+
+/**
+ * A company just started in `cwd`: the `sanoma` it installed serves it, in this process, so that
+ * the config and the worker load the same packages; this one when it installed none there.
+ */
+async function serveStarted(cwd: string): Promise<number> {
+  const installed = join(cwd, "node_modules/sanoma/dist/cli.js");
+  if (!existsSync(installed)) return serveCommand();
+  const { main: run } = (await import(pathToFileURL(installed).href)) as { main: typeof main };
+  return run([]);
 }
 
 /**

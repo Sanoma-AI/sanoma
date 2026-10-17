@@ -1,0 +1,4 @@
+# pnpm holds back a release younger than its minimum age; a fresh Sanoma release is one.
+minimumReleaseAgeExclude:
+  - sanoma
+  - "@sanoma-ai/*"
