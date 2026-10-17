@@ -80,8 +80,8 @@ const SECRET_IMPORT = { source: "sanoma/resources", imported: "secret", local: "
  */
 export async function renderDataFile({ imports, exports }: DataFileContent, options: FormatConfig = {}) {
   const names = new Map<string, string[]>();
-  const imported = imports.some((i) => i.local === SECRET_IMPORT.local);
-  const all = !imported && exports.some((e) => holdsSecret(e.desired)) ? [...imports, SECRET_IMPORT] : imports;
+  const hasSecret = imports.some((i) => i.local === SECRET_IMPORT.local);
+  const all = !hasSecret && exports.some((e) => holdsSecret(e.desired)) ? [...imports, SECRET_IMPORT] : imports;
   for (const { source, imported, local } of all) {
     const list = names.get(source) ?? [];
     list.push(imported === local ? local : `${imported} as ${local}`);
