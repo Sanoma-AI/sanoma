@@ -159,6 +159,12 @@ export const SetCredentialRequest = z.object({
 });
 export type SetCredentialRequest = z.infer<typeof SetCredentialRequest>;
 
+/** What the connect page shows (`getSetupStatus`): the GitHub App, once created, and the pasted tokens' statuses. Never a value. */
+export interface SetupStatus {
+  githubApp: { slug: string; setBy?: string; setAt?: string } | null;
+  tokens: CredentialStatus[];
+}
+
 /** What `clearCredentialFn` takes: a declared variable, whose stored value it deletes. */
 export const ClearCredentialRequest = z.object({ name: z.string().min(1, "Name a variable") });
 export type ClearCredentialRequest = z.infer<typeof ClearCredentialRequest>;

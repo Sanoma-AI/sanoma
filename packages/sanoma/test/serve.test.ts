@@ -18,35 +18,61 @@ const GITHUB = {
 describe("appOptions", () => {
   afterEach(() => vi.unstubAllEnvs());
 
-  it("takes the host, and no login, from an environment without GitHub's variables", () => {
+  it("takes the host, and no login, from an environment without GitHub's variables", async () => {
     environment({});
-    expect(appOptions()).toEqual({ host: undefined });
+    expect(await appOptions()).toEqual({ host: undefined });
     environment({ SANOMA_APP_HOST: "localhost" });
-    expect(appOptions()).toEqual({ host: "localhost" });
+    expect(await appOptions()).toEqual({ host: "localhost" });
   });
 
-  it("refuses a host beyond this machine without GitHub sign-in", () => {
+  it("refuses a host beyond this machine without GitHub sign-in", async () => {
     environment({ SANOMA_APP_HOST: "0.0.0.0" });
-    expect(appOptions).toThrow(UsageError);
-    expect(appOptions).toThrow(/^SANOMA_APP_HOST=0\.0\.0\.0 needs GitHub sign-in/);
+    await expect(appOptions()).rejects.toThrow(UsageError);
+    await expect(appOptions()).rejects.toThrow(/^SANOMA_APP_HOST=0\.0\.0\.0 needs GitHub sign-in/);
   });
 
-  it("signs in with GitHub when all three are set", () => {
+  it("signs in with GitHub when all three are set", async () => {
     environment({ ...GITHUB, SANOMA_APP_HOST: "0.0.0.0", SANOMA_SECRETS_KEY: "key" });
-    const { host, login } = appOptions();
+    const { host, login } = await appOptions();
     expect(host).toBe("0.0.0.0");
     expect(login?.name).toBe("github");
   });
 
-  it("names the GitHub variables missing when only some are set", () => {
+  it("names the GitHub variables missing when only some are set", async () => {
     environment({ SANOMA_GITHUB_CLIENT_ID: "id", SANOMA_SECRETS_KEY: "key" });
-    expect(appOptions).toThrow(UsageError);
-    expect(appOptions).toThrow(/SANOMA_GITHUB_CLIENT_SECRET, SANOMA_GITHUB_REPO not set$/);
+    await expect(appOptions()).rejects.toThrow(UsageError);
+    await expect(appOptions()).rejects.toThrow(/SANOMA_GITHUB_CLIENT_SECRET, SANOMA_GITHUB_REPO not set$/);
   });
 
-  it("names SANOMA_SECRETS_KEY when GitHub sign-in has no key to sign with", () => {
+  it("names SANOMA_SECRETS_KEY when GitHub sign-in has no key to sign with", async () => {
     environment({ ...GITHUB, SANOMA_SECRETS_KEY: "" });
-    expect(appOptions).toThrow(UsageError);
-    expect(appOptions).toThrow(/SANOMA_SECRETS_KEY/);
+    await expect(appOptions()).rejects.toThrow(UsageError);
+    await expect(appOptions()).rejects.toThrow(/SANOMA_SECRETS_KEY/);
+  });
+
+  it("reads the client id and secret the GitHub App stored when only the repository is set", async () => {
+    const asked: string[][] = [];
+    const stored = async (names: string[]) => {
+      asked.push(names);
+      return new Map([
+        ["SANOMA_GITHUB_CLIENT_ID", "stored-id"],
+        ["SANOMA_GITHUB_CLIENT_SECRET", "stored-secret"],
+      ]);
+    };
+    environment({ SANOMA_GITHUB_REPO: "acme/company", SANOMA_APP_HOST: "0.0.0.0", SANOMA_SECRETS_KEY: "key" });
+    expect((await appOptions(stored)).login?.name).toBe("github");
+    expect(asked).toEqual([["SANOMA_GITHUB_CLIENT_ID", "SANOMA_GITHUB_CLIENT_SECRET"]]);
+    // Nothing stored: the same refusal as before, naming what is missing.
+    await expect(appOptions(async () => new Map())).rejects.toThrow(
+      /SANOMA_GITHUB_CLIENT_ID, SANOMA_GITHUB_CLIENT_SECRET not set$/,
+    );
+    // A read that fails is a UsageError, saying why.
+    await expect(appOptions(async () => Promise.reject(new Error("no database")))).rejects.toThrow(
+      /^GitHub sign-in could not read the stored client id and secret: no database$/,
+    );
+    // Without the repository, nothing is read.
+    environment({});
+    expect(await appOptions(stored)).toEqual({ host: undefined });
+    expect(asked).toHaveLength(1);
   });
 });

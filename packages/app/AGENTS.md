@@ -1,6 +1,6 @@
 # Working on @sanoma-ai/app
 
-This package owns the local web UI over a Sanoma config. Its server functions are its only HTTP surface, besides a login provider's `/auth/<name>/` routes and `/healthz` (answered before the login); scripts use `SanomaClient` from `@sanoma-ai/workflows`.
+This package owns the local web UI over a Sanoma config. Its server functions are its only HTTP surface, besides a login provider's `/auth/<name>/` routes, `/healthz` (answered before the login) and the GitHub App's manifest flow at `/setup/github/` (server routes in `routes/setup/github/`, behaviour in `src/server/setup.ts`); scripts use `SanomaClient` from `@sanoma-ai/workflows`.
 
 ## Read when needed
 

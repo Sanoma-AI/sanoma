@@ -1,7 +1,15 @@
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { ClientOnly, Link } from "@tanstack/react-router";
-import { BoxesIcon, InboxIcon, type LucideIcon, PlugIcon, ShieldCheckIcon, WorkflowIcon } from "lucide-react";
+import {
+  BoxesIcon,
+  InboxIcon,
+  type LucideIcon,
+  PlugIcon,
+  RocketIcon,
+  ShieldCheckIcon,
+  WorkflowIcon,
+} from "lucide-react";
 import { type CSSProperties, type MouseEvent, type ReactNode, type RefObject, Suspense, useRef, useState } from "react";
 import { NavUser } from "#/components/nav-user.tsx";
 import { Badge } from "#/components/ui/badge.tsx";
@@ -38,11 +46,12 @@ const SECTIONS = [
   { to: "/workflows", label: "Workflows", icon: WorkflowIcon, panel: "workflows" },
   { to: "/resources", label: "Resources", icon: BoxesIcon, panel: undefined },
   { to: "/connectors", label: "Connectors", icon: PlugIcon, panel: undefined },
+  { to: "/setup/connect", label: "Go live", icon: RocketIcon, panel: undefined },
 ] as const satisfies readonly { to: string; label: string; icon: LucideIcon; panel: string | undefined }[];
 
 type Section = (typeof SECTIONS)[number];
 
-/** The sections with a panel. Resources and Connectors have none, until they have something to list. */
+/** The sections with a panel. Resources, Connectors and Go live have none, until they have something to list. */
 export type PanelSection = NonNullable<Section["panel"]>;
 
 /** A section's label, by its panel: the peek's name. */

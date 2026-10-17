@@ -421,6 +421,42 @@ export class SanomaClient {
   }
 
   /**
+   * Stores a secret as `by`, and tells the workers: a value under any variable's name, declared by
+   * a driver or not, such as a data file's `secret("NAME")` or the app's own (its GitHub App's
+   * keys). A name a driver declares is checked as `setCredential` checks it; any other name must
+   * look like a variable's, and the value must not be empty (`invalid_input`, never the value).
+   */
+  async setSecret(name: string, value: string, options: { by: string }): Promise<void> {
+    if ([...credentialsOf(this.drivers, () => undefined).values()].flat().some((c) => c.name === name)) {
+      return this.setCredential(name, value, options);
+    }
+    const setBy = actorOf(options);
+    const problem = !VARIABLE.test(name) ? "That is not a variable name" : !value ? "Enter a value" : undefined;
+    if (problem) {
+      const path = VARIABLE.test(name) ? "value" : "name";
+      throw new SanomaError("invalid_input", problem, { issues: [{ path: [path], message: problem, code: "custom" }] });
+    }
+    await storeCredential(await this.credentialsDb(), { name, value, setBy });
+  }
+
+  /**
+   * The values of these secrets, as a driver's `secrets.get` reads them: this process's
+   * environment, which wins, else the stored value, with who set it and when. A name with neither
+   * is left out. For server code: a page is told whether one is set, never its value.
+   */
+  async secrets(names: readonly string[]): Promise<Map<string, StoredSecret>> {
+    const rows = await storedCredentials(await this.credentialsDb(), names);
+    const found = new Map<string, StoredSecret>();
+    for (const name of names) {
+      const env = process.env[name];
+      const row = rows.get(name);
+      if (env && env !== row?.value) found.set(name, { value: env, source: "environment" });
+      else if (row) found.set(name, { ...row, source: "stored" });
+    }
+    return found;
+  }
+
+  /**
    * Each vendor's declared variables and their statuses now: from this process's environment,
    * which wins, else from the stored credentials, with `source` saying which (a value equal to
    * the stored one, as a worker in this process loads it, is `stored`), and who set a stored one
@@ -542,6 +578,15 @@ const asJson = (v: unknown): unknown => (v === undefined ? undefined : JSON.pars
 
 /** True when the two are the same JSON, whatever the order of their keys. */
 const sameJson = (a: unknown, b: unknown): boolean => isDeepStrictEqual(asJson(a), asJson(b));
+
+/** A secret's value as `SanomaClient.secrets` reads it, and where from. */
+export interface StoredSecret {
+  value: string;
+  source: "environment" | "stored";
+  /** Who stored it (`setSecret`'s `by`), and when, as an ISO 8601 time. */
+  setBy?: string;
+  setAt?: string;
+}
 
 /** What an environment variable's name looks like. */
 const VARIABLE = /^[A-Z_][A-Z0-9_]*$/;

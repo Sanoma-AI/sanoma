@@ -218,6 +218,9 @@ importers:
       '@tanstack/react-start':
         specifier: ^1.168.60
         version: 1.168.60(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(rolldown@1.2.12)(supports-color@11.0.0)(vite@8.3.3(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
@@ -233,6 +236,9 @@ importers:
       msw:
         specifier: ^3.0.2
         version: 3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.3(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+      pg:
+        specifier: ^8.23.1
+        version: 8.23.1
       shadcn:
         specifier: ^4.21.3
         version: 4.21.3(supports-color@11.0.0)

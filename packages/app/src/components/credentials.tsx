@@ -42,14 +42,33 @@ export function Credentials({ vendor }: { vendor: string }) {
 }
 
 /**
+ * Where a row's value is stored and cleared: the connector page's by default. Without `clear`, a
+ * row has no Clear. Either way every credentials query refreshes (`credentialsQuery`'s key is the
+ * prefix of the setup page's too), since both pages show the same rows.
+ */
+export interface CredentialStore {
+  set: typeof setCredentialFn;
+  clear?: typeof clearCredentialFn;
+}
+
+const CONNECTOR_STORE: CredentialStore = { set: setCredentialFn, clear: clearCredentialFn };
+
+/**
  * One variable: its status and manual, and who set a stored value and when. The environment's
  * value wins, so a variable it sets has no controls; any other has Set (Replace once set), and
- * Clear when a value is stored.
+ * Clear when a value is stored and the store can clear it.
  */
-function CredentialRow({ credential: c }: { credential: CredentialStatus }) {
+export function CredentialRow({
+  credential: c,
+  store = CONNECTOR_STORE,
+}: {
+  credential: CredentialStatus;
+  store?: CredentialStore;
+}) {
   const [open, setOpen] = useState(false);
   const queryClient = useQueryClient();
-  const clear = useServerFn(clearCredentialFn);
+  // A hook is called on every render; without `clear` the row shows no Clear, so this is never called.
+  const clear = useServerFn(store.clear ?? clearCredentialFn);
   const clearing = useMutation({
     mutationFn: () => clear({ data: { name: c.name } }),
     onSuccess: async () => {
@@ -83,7 +102,7 @@ function CredentialRow({ credential: c }: { credential: CredentialStatus }) {
           <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
             {c.status === "set" ? "Replace" : "Set"}
           </Button>
-          {c.source === "stored" && (
+          {c.source === "stored" && store.clear && (
             <Button
               type="button"
               size="sm"
@@ -95,7 +114,7 @@ function CredentialRow({ credential: c }: { credential: CredentialStatus }) {
               Clear
             </Button>
           )}
-          <SetDialog credential={c} open={open} onClose={() => setOpen(false)} />
+          <SetDialog credential={c} store={store} open={open} onClose={() => setOpen(false)} />
         </ItemActions>
       )}
     </Item>
@@ -109,17 +128,19 @@ function CredentialRow({ credential: c }: { credential: CredentialStatus }) {
  */
 function SetDialog({
   credential,
+  store,
   open,
   onClose,
 }: {
   credential: CredentialStatus;
+  store: CredentialStore;
   open: boolean;
   onClose: () => void;
 }) {
   const { name } = credential;
   const [value, setValue] = useState("");
   const queryClient = useQueryClient();
-  const set = useServerFn(setCredentialFn);
+  const set = useServerFn(store.set);
   const mutation = useMutation({
     mutationFn: () => set({ data: { name, value } }),
     // Dropped from the cache at once, with the closure that holds the value.
