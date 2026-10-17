@@ -131,14 +131,14 @@ const parsed = (text: string | undefined) => (text ? (JSON.parse(text) as JsonOb
 
 const topLevel = (paths: readonly string[]) => new Set(paths.map((path) => path.split(".")[0]));
 
-/** A plan as `stateBridge` answers it: `planned` is the planned state's JSON. */
+/** A plan as `stateBridge` answers it: `planned` is the planned state's JSON; none for a delete. */
 const planOf = (
   action: PlanAction,
-  planned: JsonObject,
+  planned?: JsonObject,
   unknownPaths: string[] = [],
   requiresReplace: string[] = [],
 ) => {
-  const plannedStateJson = JSON.stringify(planned);
+  const plannedStateJson = planned ? JSON.stringify(planned) : "";
   return {
     action,
     plannedStateJson,
@@ -203,7 +203,7 @@ export function stateBridge(
       log("plan", ref, typeName, prior);
       if (!config) {
         if (!prior) throw new BridgeError("invalid_argument", "prior_state_json or config_json is required");
-        return { ...planOf("delete", {}), plannedStateJson: "", planned: new Uint8Array() };
+        return planOf("delete");
       }
       const { vendorOwned = [], immutable = [] } = types[typeName]?.fields ?? {};
       const computed = topLevel(vendorOwned).add("id");

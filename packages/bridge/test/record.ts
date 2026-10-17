@@ -41,9 +41,6 @@ export const typeDir = (dir: string, ref: ProviderRef, typeName: string) =>
 export const replyDir = (dir: string, ref: ProviderRef, typeName: string, id: string) =>
   join(typeDir(dir, ref, typeName), slug(id));
 
-/** The files of a type's recorded changes: `plan.json`, and `apply.json` or `apply-delete.json` (a replace's delete). */
-export const CHANGE_FILES = /^(plan|apply|apply-delete)\.json$/;
-
 const canonical = (text: string) => (text ? JSON.stringify(JSON.parse(text)) : "");
 
 /** What a plan or apply is matched by when replayed: its prior state and config, as JSON values. */
@@ -128,8 +125,7 @@ export function recorder(dir: string): Interceptor {
       refuseSensitive(file, req.typeName, hits);
       const schema = method === "Plan" ? PlanRequestSchema : ApplyRequestSchema;
       const request = message(schema, { ...req, priorStateJson, configJson } as never);
-      const { planned, plannedPrivate } = req as Partial<ApplyRequest>;
-      const opaque = [req.priorPrivate, ...(planned && plannedPrivate ? [planned, plannedPrivate] : [])];
+      const opaque = [req.priorPrivate, ...("planned" in req ? [req.planned, req.plannedPrivate] : [])];
       return { release, hits, file, request, opaque };
     }
     if (method === "Import") {

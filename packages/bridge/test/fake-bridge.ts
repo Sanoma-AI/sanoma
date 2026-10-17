@@ -26,7 +26,7 @@ import { isObject } from "../src/json.ts";
 import { readPins, testdata } from "../src/pins.ts";
 import type { BridgeCall } from "../src/replies.ts";
 import { parseSchema, type SchemaDocument } from "../src/schema.ts";
-import { CHANGE_FILES, changeKey, recordHint, recorder, replyDir, typeDir } from "./record.ts";
+import { changeKey, recordHint, recorder, replyDir, typeDir } from "./record.ts";
 
 export interface FakeBridgeOptions {
   /** The fixtures: `pins.json`, `schemas/` and `replies/`. Default: this package's `testdata/`. */
@@ -202,8 +202,7 @@ function replayService(dir: string): ServiceImpl<typeof BridgeService> {
   const pins = existsSync(pinsFile) ? readPins(pinsFile) : {};
   const recorded = new Map<string, string | undefined>();
   const configured = new Map<string, string>();
-  const reads = new Map<string, Map<string, Fixture>>();
-  const changes = new Map<string, Map<string, Fixture>>();
+  const indexes = new Map<string, Map<string, Fixture>>();
   const where = (file: string) => relative(dir, file);
 
   /** The release's SHA256SUMS hash: its pin, else what its recorded replies say; undefined when neither knows. */
@@ -256,46 +255,35 @@ function replayService(dir: string): ServiceImpl<typeof BridgeService> {
     return ref;
   }
 
-  /** The recorded reads of a resource type, by the `id` in their request's state. */
-  function readsOf(ref: ProviderRef, typeName: string): Map<string, Fixture> {
-    const key = `${releaseName(ref)} ${typeName}`;
-    let index = reads.get(key);
+  /** A resource type's recorded fixtures whose file name matches `files`, by `keyOf` each (the first of a key wins). */
+  function indexOf(ref: ProviderRef, typeName: string, files: RegExp, keyOf: (f: Fixture) => string | undefined) {
+    const key = `${releaseName(ref)} ${typeName} ${files.source}`;
+    let index = indexes.get(key);
     if (!index) {
       index = new Map();
       const root = typeDir(dir, ref, typeName);
       const folders = existsSync(root) ? readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()) : [];
       for (const folder of folders) {
-        for (const name of readdirSync(join(root, folder.name)).filter((n) => /^read(-\d+)?\.json$/.test(n))) {
+        for (const name of readdirSync(join(root, folder.name)).filter((n) => files.test(n))) {
           const fixture = readFixture(join(root, folder.name, name));
-          const id = stateId(String(fixture.request.stateJson ?? "{}"));
-          if (id !== undefined && !index.has(id)) index.set(id, fixture);
+          const at = keyOf(fixture);
+          if (at !== undefined && !index.has(at)) index.set(at, fixture);
         }
       }
-      reads.set(key, index);
+      indexes.set(key, index);
     }
     return index;
   }
 
-  /** The recorded plans (`plan`) or applies (`apply`) of a resource type, by their prior state and config (`changeKey`). */
-  function changesOf(ref: ProviderRef, typeName: string, kind: "plan" | "apply"): Map<string, Fixture> {
-    const key = `${releaseName(ref)} ${typeName} ${kind}`;
-    let index = changes.get(key);
-    if (!index) {
-      index = new Map();
-      const root = typeDir(dir, ref, typeName);
-      const folders = existsSync(root) ? readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()) : [];
-      for (const folder of folders) {
-        for (const name of readdirSync(join(root, folder.name))) {
-          if (!CHANGE_FILES.test(name) || name.startsWith("plan") !== (kind === "plan")) continue;
-          const fixture = readFixture(join(root, folder.name, name));
-          const at = changeKey(fixture.request as { priorStateJson?: string; configJson?: string });
-          if (!index.has(at)) index.set(at, fixture);
-        }
-      }
-      changes.set(key, index);
-    }
-    return index;
-  }
+  /** The recorded reads of a resource type, by the `id` in their request's state. */
+  const readsOf = (ref: ProviderRef, typeName: string) =>
+    indexOf(ref, typeName, /^read(-\d+)?\.json$/, (f) => stateId(String(f.request.stateJson ?? "{}")));
+
+  /** The recorded plans or applies of a resource type, by their prior state and config. */
+  const changesOf = (ref: ProviderRef, typeName: string, kind: "plan" | "apply") =>
+    indexOf(ref, typeName, kind === "plan" ? /^plan\.json$/ : /^apply(-delete)?\.json$/, (f) =>
+      changeKey(f.request as { priorStateJson?: string; configJson?: string }),
+    );
 
   /** The recorded plan or apply with this prior state and config, or the bridge's refusal of one it would refuse. */
   function changeFixture(
