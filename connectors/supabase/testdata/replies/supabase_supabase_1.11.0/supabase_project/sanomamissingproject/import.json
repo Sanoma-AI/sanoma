@@ -1,0 +1,27 @@
+{
+  "provider": {
+    "source": "supabase/supabase",
+    "version": "1.11.0",
+    "sha256": "954a01a6847a288c643ad0eaddc3131f48a871384d8d37dc9fe92d57d6aabf94",
+    "protocol": 6
+  },
+  "request": {
+    "provider": {
+      "source": "supabase/supabase",
+      "version": "1.11.0",
+      "sha256": "954a01a6847a288c643ad0eaddc3131f48a871384d8d37dc9fe92d57d6aabf94"
+    },
+    "typeName": "supabase_project",
+    "id": "sanomamissingproject"
+  },
+  "response": {
+    "resources": [
+      {
+        "typeName": "supabase_project",
+        "stateJson": "{\"database_password\":null,\"id\":\"sanomamissingproject\",\"instance_size\":null,\"legacy_api_keys_enabled\":null,\"name\":null,\"organization_id\":null,\"region\":null,\"timeouts\":null}"
+      }
+    ]
+  },
+  "scrubbed": [],
+  "synthetic": "Written by hand to the schema's implied type and the provider's source (internal/provider/project_resource.go at v1.11.0), not recorded: no Supabase access token was on the recording machine. Values are made up; re-record with bridge-record."
+}

@@ -1,0 +1,73 @@
+{
+  "name": "@sanoma-ai/connector-supabase",
+  "version": "0.1.0",
+  "description": "Supabase projects for Sanoma, read through the OpenTofu provider",
+  "keywords": [
+    "connector",
+    "database",
+    "opentofu",
+    "postgres",
+    "resources",
+    "sanoma",
+    "supabase"
+  ],
+  "homepage": "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/supabase#readme",
+  "bugs": "https://github.com/Sanoma-AI/sanoma/issues",
+  "license": "FSL-1.1-ALv2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sanoma-AI/sanoma.git",
+    "directory": "connectors/supabase"
+  },
+  "files": [
+    "dist",
+    "testdata/replies",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./resources": {
+      "types": "./dist/resources.d.ts",
+      "default": "./dist/resources.js"
+    },
+    "./driver": {
+      "types": "./dist/driver.d.ts",
+      "default": "./dist/driver.js"
+    },
+    "./fake": {
+      "types": "./dist/fake.d.ts",
+      "default": "./dist/fake.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "generate": "node ../../packages/bridge/src/tfschema/cli.ts src/resources.config.ts src/resources.gen.ts && oxfmt src/resources.gen.ts",
+    "prepack": "pnpm run clean && pnpm run build",
+    "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
+  },
+  "devDependencies": {
+    "@sanoma-ai/bridge": "workspace:*",
+    "@sanoma-ai/workflows": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "@sanoma-ai/bridge": "^0.1.0",
+    "@sanoma-ai/workflows": "^0.1.0",
+    "zod": "^4"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

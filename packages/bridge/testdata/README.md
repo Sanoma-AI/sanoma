@@ -13,8 +13,9 @@ Provider releases tests and the recorder may download, each pinned by the sha256
 | `hashicorp/null` | 3.3.2 | 5 | integration tests (no credentials) |
 | `integrations/github` | 6.13.0 | 5 (SDKv2) | recorded fixtures |
 | `stripe/stripe` | 0.3.0 | 6 (Plugin Framework) | recorded schema |
+| `supabase/supabase` | 1.11.0 | 6 (Plugin Framework) | schema |
 
-Every provider comes from `registry.opentofu.org`. It lists no signing key for `stripe/stripe` 0.3.0, so the bridge verifies that release's `SHA256SUMS` (the GitHub release's own file, which the registry points at) against Stripe's key `A6C87736961A5EF6`, shipped in [`internal/registry/keys/`](../internal/registry/keys/README.md) with its provenance; the bridge still refuses a release no key signs.
+Every provider comes from `registry.opentofu.org`. It lists no signing key for `stripe/stripe` 0.3.0, so the bridge verifies that release's `SHA256SUMS` (the GitHub release's own file, which the registry points at) against Stripe's key `A6C87736961A5EF6`, shipped in [`internal/registry/keys/`](../internal/registry/keys/README.md) with its provenance; the bridge still refuses a release no key signs. Nor does it list one for `supabase/supabase` 1.11.0, whose `SHA256SUMS` Supabase's key `18C770C37712658E` signs (the key the Terraform registry lists): until provider-bridge ships that key, it refuses the release, and the Supabase connector's tests run on its own replies.
 
 ### `schemas/`
 
@@ -24,6 +25,7 @@ Every provider comes from `registry.opentofu.org`. It lists no signing key for `
 | `sanoma_testprov_0.0.1.json` | no credentials | golden of the in-tree protocol 6 test provider (`testprovider/`) |
 | `integrations_github_6.13.0.json` | no credentials (`GetSchema` needs no `Configure`) | 88 resource types, 75 data sources, 356 KB |
 | `stripe_stripe_0.3.0.json` | no credentials | 49 resource types, no data sources, 2.3 MB |
+| `supabase_supabase_1.11.0.json` | no credentials, through a bridge built from provider-bridge main with `--dev-provider` (the release's `SHA256SUMS` checked against Supabase's key `18C770C37712658E` by hand) | 7 resource types, 4 data sources, 28 KB |
 
 ### `replies/`
 

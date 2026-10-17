@@ -126,6 +126,15 @@ describe("generateResources", () => {
     expect(schema.safeParse({ note: "x" }).success).toBe(false);
   });
 
+  it("makes a required secret nullish, as no read returns it", () => {
+    const { schema, fields } = generated({
+      attributes: { name: thing.attributes.name!, password: { type: "string", required: true, sensitive: true } },
+      blocks: {},
+    }).thing;
+    expect(schema.safeParse({ name: "x", password: null }).success).toBe(true);
+    expect(fields.writeOnly).toEqual(["password"]);
+  });
+
   it("turns a list block of at most one item into an object, and keeps other lists", () => {
     const { schema } = generated(thing).thing;
     expect(schema.safeParse({ name: "x", pages: { cname: "a.example", source: { branch: "main" } } }).success).toBe(

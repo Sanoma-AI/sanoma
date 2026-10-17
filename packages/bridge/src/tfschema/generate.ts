@@ -79,9 +79,14 @@ function blockSchema(block: Block, indent: string): string {
   return lines.length ? `z.object({\n${lines.join("\n")}\n${indent}})` : "z.object({})";
 }
 
+/**
+ * An attribute: required when the provider requires it, else nullish. A secret is nullish even
+ * when required (Supabase's `database_password`): no state a read returns holds it, and the
+ * runtime parses every read's output with this schema. So a declaration may leave it out too.
+ */
 function attributeSchema(a: Attribute, indent: string): string {
   const base = a.nestedType ? nestedTypeSchema(a.nestedType, indent) : ctyToZod(a.type);
-  return annotate(a.required ? base : `${base}.nullish()`, a.description, a.deprecated);
+  return annotate(a.required && !isSecret(a) ? base : `${base}.nullish()`, a.description, a.deprecated);
 }
 
 /** A nested attribute (protocol 6), with each child's own flags: required children stay required. */
