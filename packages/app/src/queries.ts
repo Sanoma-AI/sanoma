@@ -19,6 +19,8 @@ import {
   getConfig,
   getCredentials,
   getDriftReport,
+  getGoLiveChoices,
+  getGoLiveProgress,
   getLastRuns,
   getRun,
   getRuns,
@@ -148,6 +150,22 @@ export const credentialsQuery = () =>
 /** What is connected for going live (the connect page): under the credentials' key, so setting one refreshes both. */
 export const setupStatusQuery = () =>
   queryOptions({ queryKey: ["credentials", "setup"], queryFn: () => getSetupStatus(), staleTime: 5_000 });
+
+/** What going live can choose from: read once a minute at most, as each list asks GitHub or Supabase. */
+export const goLiveChoicesQuery = () =>
+  queryOptions({ queryKey: ["credentials", "go-live"], queryFn: () => getGoLiveChoices(), staleTime: 60_000 });
+
+/** How far going live is: read every 2 s while a run goes on or the host is not answering yet. */
+export const goLiveProgressQuery = () =>
+  queryOptions({
+    queryKey: [...RUNS_KEY, "go-live"],
+    queryFn: () => getGoLiveProgress(),
+    refetchInterval: (query) => {
+      const progress = query.state.data;
+      const running = progress?.run && !isEnded(progress.run.status);
+      return running || (progress?.bound.host && !progress.host?.healthy) ? POLL_MS : false;
+    },
+  });
 
 /** The vendor's credential statuses, if its drivers declare any: for `select`. */
 export const credentialsFor = (vendor: string) => (all: CredentialsResponse) => all[vendor];

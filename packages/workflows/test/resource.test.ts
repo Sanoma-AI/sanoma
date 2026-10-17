@@ -328,6 +328,13 @@ describe("withoutWriteOnly", () => {
       name: "sanoma",
       token: { $secret: "TOKEN" },
     });
+    // A map of secrets keeps its markers, and loses any value.
+    const env = { ...fields, writeOnly: ["env"] };
+    expect(withoutWriteOnly(env, { name: "app", env: { KEY: { $secret: "KEY" }, PLAIN: "x" } })).toEqual({
+      name: "app",
+      env: { KEY: { $secret: "KEY" } },
+    });
+    expect(withoutWriteOnly(env, { name: "app", env: { PLAIN: "x" } })).toEqual({ name: "app" });
   });
 });
 

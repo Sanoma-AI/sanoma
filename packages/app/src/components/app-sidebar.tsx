@@ -46,7 +46,7 @@ const SECTIONS = [
   { to: "/workflows", label: "Workflows", icon: WorkflowIcon, panel: "workflows" },
   { to: "/resources", label: "Resources", icon: BoxesIcon, panel: undefined },
   { to: "/connectors", label: "Connectors", icon: PlugIcon, panel: undefined },
-  { to: "/setup/connect", label: "Go live", icon: RocketIcon, panel: undefined },
+  { to: "/setup", label: "Go live", icon: RocketIcon, panel: undefined },
 ] as const satisfies readonly { to: string; label: string; icon: LucideIcon; panel: string | undefined }[];
 
 type Section = (typeof SECTIONS)[number];

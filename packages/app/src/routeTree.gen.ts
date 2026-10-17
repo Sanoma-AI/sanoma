@@ -19,6 +19,7 @@ import { Route as ConnectorsIndexRouteImport } from './routes/connectors/index'
 import { Route as ConnectorsVendorRouteImport } from './routes/connectors/$vendor'
 import { Route as RunsIndexRouteImport } from './routes/runs/index'
 import { Route as RunsIdRouteImport } from './routes/runs/$id'
+import { Route as SetupIndexRouteImport } from './routes/setup/index'
 import { Route as SetupConnectRouteImport } from './routes/setup/connect'
 import { Route as WorkflowsIndexRouteImport } from './routes/workflows/index'
 import { Route as WorkflowsNameRouteRouteImport } from './routes/workflows/$name/route'
@@ -78,6 +79,11 @@ const RunsIdRoute = RunsIdRouteImport.update({
   path: '/runs/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SetupIndexRoute = SetupIndexRouteImport.update({
+  id: '/setup/',
+  path: '/setup/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SetupConnectRoute = SetupConnectRouteImport.update({
   id: '/setup/connect',
   path: '/setup/connect',
@@ -132,6 +138,7 @@ export interface FileRoutesByFullPath {
   '/setup/connect': typeof SetupConnectRoute
   '/connectors/': typeof ConnectorsIndexRoute
   '/runs/': typeof RunsIndexRoute
+  '/setup/': typeof SetupIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
   '/setup/github/callback': typeof SetupGithubCallbackRoute
   '/setup/github/manifest': typeof SetupGithubManifestRoute
@@ -149,6 +156,7 @@ export interface FileRoutesByTo {
   '/setup/connect': typeof SetupConnectRoute
   '/connectors': typeof ConnectorsIndexRoute
   '/runs': typeof RunsIndexRoute
+  '/setup': typeof SetupIndexRoute
   '/workflows': typeof WorkflowsIndexRoute
   '/setup/github/callback': typeof SetupGithubCallbackRoute
   '/setup/github/manifest': typeof SetupGithubManifestRoute
@@ -170,6 +178,7 @@ export interface FileRoutesById {
   '/setup/connect': typeof SetupConnectRoute
   '/connectors/': typeof ConnectorsIndexRoute
   '/runs/': typeof RunsIndexRoute
+  '/setup/': typeof SetupIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
   '/setup/github/callback': typeof SetupGithubCallbackRoute
   '/setup/github/manifest': typeof SetupGithubManifestRoute
@@ -192,6 +201,7 @@ export interface FileRouteTypes {
     | '/setup/connect'
     | '/connectors/'
     | '/runs/'
+    | '/setup/'
     | '/workflows/'
     | '/setup/github/callback'
     | '/setup/github/manifest'
@@ -209,6 +219,7 @@ export interface FileRouteTypes {
     | '/setup/connect'
     | '/connectors'
     | '/runs'
+    | '/setup'
     | '/workflows'
     | '/setup/github/callback'
     | '/setup/github/manifest'
@@ -229,6 +240,7 @@ export interface FileRouteTypes {
     | '/setup/connect'
     | '/connectors/'
     | '/runs/'
+    | '/setup/'
     | '/workflows/'
     | '/setup/github/callback'
     | '/setup/github/manifest'
@@ -247,6 +259,7 @@ export interface RootRouteChildren {
   RunsIdRoute: typeof RunsIdRoute
   SetupConnectRoute: typeof SetupConnectRoute
   RunsIndexRoute: typeof RunsIndexRoute
+  SetupIndexRoute: typeof SetupIndexRoute
   SetupGithubCallbackRoute: typeof SetupGithubCallbackRoute
   SetupGithubManifestRoute: typeof SetupGithubManifestRoute
 }
@@ -321,6 +334,13 @@ declare module '@tanstack/react-router' {
       path: '/runs/$id'
       fullPath: '/runs/$id'
       preLoaderRoute: typeof RunsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/setup/': {
+      id: '/setup/'
+      path: '/setup'
+      fullPath: '/setup/'
+      preLoaderRoute: typeof SetupIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/setup/connect': {
@@ -435,6 +455,7 @@ const rootRouteChildren: RootRouteChildren = {
   RunsIdRoute: RunsIdRoute,
   SetupConnectRoute: SetupConnectRoute,
   RunsIndexRoute: RunsIndexRoute,
+  SetupIndexRoute: SetupIndexRoute,
   SetupGithubCallbackRoute: SetupGithubCallbackRoute,
   SetupGithubManifestRoute: SetupGithubManifestRoute,
 }

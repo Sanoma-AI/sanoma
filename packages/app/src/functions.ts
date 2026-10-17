@@ -5,6 +5,7 @@ import {
   AdoptRequest,
   ClearCredentialRequest,
   DecideCall,
+  GoLiveRequest,
   RunsQuery,
   SetCredentialRequest,
 } from "./api.ts";
@@ -27,6 +28,7 @@ import {
   validate,
   withoutSources,
 } from "./server/core.ts";
+import { goLive, goLiveChoices, goLiveHost, goLiveProgress } from "./server/go-live.ts";
 import { setSetupToken, setupStatus } from "./server/setup.ts";
 import { withPrincipal } from "./middleware.ts";
 
@@ -119,3 +121,20 @@ export const setSetupTokenFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .validator(validate(SetCredentialRequest))
   .handler(({ data, context }) => setSetupToken(context.app, context.principal, data));
+
+/** What going live can choose from: GitHub accounts, Supabase organizations and regions, the host. */
+export const getGoLiveChoices = createServerFn(READ).handler(({ context }) => goLiveChoices(context.app));
+
+/** How far going live is: `infra.ts`, the bindings, the latest apply run, the host. */
+export const getGoLiveProgress = createServerFn(READ).handler(({ context }) => goLiveProgress(context.app));
+
+/** Writes `infra.ts` for the choices and applies the repository and the database. */
+export const goLiveFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .validator(validate(GoLiveRequest))
+  .handler(({ data, context }) => goLive(context.app, context.principal, data));
+
+/** Pushes the local repository, then applies the host. */
+export const goLiveHostFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .handler(({ context }) => goLiveHost(context.app, context.principal));
