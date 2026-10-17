@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { tfConnector } from "@sanoma-ai/bridge/connector";
 import { type BridgeState, stateBridge } from "@sanoma-ai/bridge/fake";
-import { github } from "@sanoma-ai/connector-github";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -312,12 +311,13 @@ describe("the apply workflow on the company's resources", () => {
   });
 
   it("is the only workflow that may change a declared resource", () => {
+    const create = resolveConfig(app.config).ops.get("github.repository.create")!;
     const sneak = defineWorkflow({
       name: "sneak",
       trigger: "manual",
       input: z.object({}),
-      uses: [github.repository.create],
-      run: async (ctx) => ctx.github.repository.create({ desired: { name: "x" } }),
+      uses: [create],
+      run: async () => 1,
     });
     expect(() => resolveConfig({ ...app.config, workflows: [sneak] })).toThrow(
       "github.repository.create changes a declared resource, which only apply does",

@@ -127,7 +127,7 @@ describe("stateBridge", () => {
         github_repository: {
           ...types.github_repository,
           schema: z.object({ node_id: z.string().nullish(), name: z.string() }),
-          shape: { blocks: { pages: {} } },
+          shape: { attributes: [], blocks: { pages: { nesting: "list" as const, shape: { attributes: [] } } } },
         },
       };
       const bridge = stateBridge(state, [], typed);

@@ -16,6 +16,7 @@ import type { ProviderClient } from "./configure.ts";
 import { type Fixture, type FixtureError, isError, releaseName, releaseSlug, stateId, toPath } from "./fixtures.ts";
 import { DiagnosticSchema } from "./gen/bridge/v1/bridge_pb.ts";
 import type { JsonObject } from "./json.ts";
+import type { TfShape } from "./tfschema/types.ts";
 
 /** A call a fake bridge received, in order. */
 export interface BridgeCall {
@@ -60,7 +61,7 @@ export type StateTypes = Record<
     schemaVersion: number;
     fields: Pick<ResourceFields, "vendorOwned" | "immutable">;
     schema?: { shape: Record<string, { safeParse(value: unknown): { success: boolean } }> };
-    shape?: { blocks?: Readonly<Record<string, unknown>> };
+    shape?: TfShape;
   }
 >;
 
