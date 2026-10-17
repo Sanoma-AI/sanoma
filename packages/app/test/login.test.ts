@@ -26,6 +26,8 @@ const github = setupServer(
     const login = String(params.login);
     if (request.headers.get("authorization") !== `Bearer token-${login}`)
       return new HttpResponse(null, { status: 401 });
+    // GitHub may refuse to show a collaborator without push access their own permission.
+    if (login === "triager") return HttpResponse.json({ message: "Must have push access" }, { status: 403 });
     const permission = PERMISSIONS[login];
     return permission
       ? HttpResponse.json({ permission, role_name: permission })
@@ -66,6 +68,9 @@ describe("githubLogin", () => {
     expect(`${to.origin}${to.pathname}`).toBe("https://github.com/login/oauth/authorize");
     expect(to.searchParams.get("client_id")).toBe("client-id");
     const sent = to.searchParams.get("state")!;
+    // The browser sends the state cookie back only to paths under its own.
+    const path = /Path=([^;]+)/.exec(start.headers.get("set-cookie")!)?.[1];
+    expect("/auth/github/callback".startsWith(`${path}/`)).toBe(true);
     const cookie = `sanoma_github_state=${setCookies(start).sanoma_github_state}`;
     return (await login.handle!(request(`/auth/github/callback?code=${user}&state=${state ?? sent}`, { cookie })))!;
   }
@@ -89,7 +94,7 @@ describe("githubLogin", () => {
   });
 
   it("refuses read-only access and a non-collaborator with a 403, and sets no session", async () => {
-    for (const user of ["reader", "stranger"]) {
+    for (const user of ["reader", "triager", "stranger"]) {
       const res = await signIn(user);
       expect(res.status).toBe(403);
       expect(await res.text()).toContain(`${user} needs write access to ${REPO}`);
@@ -141,8 +146,14 @@ describe("githubLogin", () => {
     expect(await login.resolveActor(request("/workflows"))).toBeUndefined();
   });
 
-  it("signs out with a POST, clearing the session cookie", async () => {
+  it("signs out with a POST from its own page, clearing the session cookie", async () => {
     expect((await login.handle!(request("/auth/github/signout")))?.status).toBe(405);
+    const crossSite = new Request(new URL("/auth/github/signout", APP), {
+      method: "POST",
+      headers: { "sec-fetch-site": "cross-site" },
+    });
+    expect((await login.handle!(crossSite))?.status).toBe(403);
+    expect(login.signOut).toBe("/auth/github/signout");
     const res = (await login.handle!(request("/auth/github/signout", { method: "POST" })))!;
     expect(res.status).toBe(204);
     expect(res.headers.get("set-cookie")).toMatch(/^sanoma_session=; Max-Age=0; Path=\//);

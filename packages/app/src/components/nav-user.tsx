@@ -10,6 +10,7 @@ import {
   UserPenIcon,
 } from "lucide-react";
 import { useTheme } from "next-themes";
+import { toast } from "sonner";
 import { cn } from "#/lib/utils.ts";
 import { Avatar, AvatarFallback } from "#/components/ui/avatar.tsx";
 import {
@@ -105,8 +106,9 @@ export function NavUser() {
 
 /** Ends the session, then reloads the app, which shows the login's sign-in page. */
 async function signOutAt(url: string) {
-  await fetch(url, { method: "POST" });
-  window.location.assign("/");
+  const res = await fetch(url, { method: "POST" }).catch(() => undefined);
+  if (res?.ok) window.location.assign("/");
+  else toast.error("Could not sign out");
 }
 
 type Choice = { value: string; icon: LucideIcon; label: string };

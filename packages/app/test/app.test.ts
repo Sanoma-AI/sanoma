@@ -1508,6 +1508,7 @@ const hostedLogin: LoginProvider = {
   },
   handle: (request) =>
     new URL(request.url).pathname === "/auth/test/signout" ? new Response(null, { status: 204 }) : undefined,
+  signOut: "/auth/test/signout",
 };
 
 describe("an app configured otherwise", () => {

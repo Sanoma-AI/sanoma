@@ -81,8 +81,8 @@ export async function requireActor({ app, actor }: ActorContext): Promise<Princi
 /** True when the login says who is asking; false for the loopback login, which takes the name the page sends. */
 export const saysWho = (app: AppContext) => app.login.name !== LOOPBACK;
 
-/** Where the page signs out: a login with routes of its own serves it (see `LoginProvider`). */
-export const signOutUrl = ({ login }: AppContext) => (login.handle ? `/auth/${login.name}/signout` : undefined);
+/** Where the page signs out, when the login has a route for it. */
+export const signOutUrl = ({ login }: AppContext) => login.signOut;
 
 /** The value, parsed by the schema, or a 400 `invalid_input` with zod's issues. */
 export function parse<T extends z.ZodType>(schema: T, value: unknown, what: string): z.output<T> {

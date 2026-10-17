@@ -14,7 +14,7 @@ export type ResolveActor = (request: Request) => Principal | undefined | Promise
  * sends and refuses any host but this machine; `githubLogin` signs people in with GitHub.
  */
 export interface LoginProvider {
-  /** Names the provider. One with `handle` serves its routes under `/auth/<name>/`, signing out at `/auth/<name>/signout` (POST). */
+  /** Names the provider; its routes, if any, are under `/auth/<name>/`. */
   name: string;
   /** Throws when the app may not listen on `listenHost` with this provider. */
   check(listenHost: string): void;
@@ -24,6 +24,8 @@ export interface LoginProvider {
    * nobody has signed in for), and returns undefined for the rest, which the app answers.
    */
   handle?(request: Request): Response | undefined | Promise<Response | undefined>;
+  /** The path the page POSTs to to sign out, which `handle` serves; none, no Sign out. */
+  signOut?: string;
 }
 
 /** What `startApp` hands every request: built once at boot, shared by all requests. */

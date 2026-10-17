@@ -21,8 +21,14 @@ describe("appOptions", () => {
   it("takes the host, and no login, from an environment without GitHub's variables", () => {
     environment({});
     expect(appOptions()).toEqual({ host: undefined });
+    environment({ SANOMA_APP_HOST: "localhost" });
+    expect(appOptions()).toEqual({ host: "localhost" });
+  });
+
+  it("refuses a host beyond this machine without GitHub sign-in", () => {
     environment({ SANOMA_APP_HOST: "0.0.0.0" });
-    expect(appOptions()).toEqual({ host: "0.0.0.0" });
+    expect(appOptions).toThrow(UsageError);
+    expect(appOptions).toThrow(/^SANOMA_APP_HOST=0\.0\.0\.0 needs GitHub sign-in/);
   });
 
   it("signs in with GitHub when all three are set", () => {
@@ -40,6 +46,7 @@ describe("appOptions", () => {
 
   it("names SANOMA_SECRETS_KEY when GitHub sign-in has no key to sign with", () => {
     environment({ ...GITHUB, SANOMA_SECRETS_KEY: "" });
+    expect(appOptions).toThrow(UsageError);
     expect(appOptions).toThrow(/SANOMA_SECRETS_KEY/);
   });
 });

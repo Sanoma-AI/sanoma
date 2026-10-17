@@ -14,10 +14,9 @@ import {
   type Source,
 } from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
-import { isLoopback } from "@sanoma-ai/workflows/shared";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import type { AppContext, LoginProvider } from "./context.ts";
-import { hostName, loopbackLogin, refuseHost } from "./loopback.ts";
+import { loopbackLogin } from "./loopback.ts";
 
 export { ACTOR_HEADER } from "./api.ts";
 export type { LoginProvider, ResolveActor } from "./context.ts";
@@ -77,7 +76,6 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     console.warn(`sanoma app: the config's files have problems (\`sanoma check\` lists them):\n${list}`);
   }
   const distDir = resolve(options.distDir ?? defaultDistDir());
-  const loopbackOnly = isLoopback(host);
 
   // The build first, importing nothing and connecting to nothing: a missing or half build is
   // refused before anything is opened.
@@ -112,15 +110,9 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   });
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
-    // When the app listens on this machine only, a page elsewhere could still reach it by
-    // pointing its own host name at 127.0.0.1 (DNS rebinding). Its requests then carry that
-    // name in Host, so anything not addressed to a loopback name is refused: here, where every
-    // request passes (pages, server functions and static files alike).
-    if (loopbackOnly && !isLoopback(hostName(req.headers.host ?? ""))) {
-      return sendNodeResponse(res, refuseHost(req.headers.host ?? ""));
-    }
     const request = new NodeRequest({ req, res });
-    // The login sees every request first: its own routes, and one nobody has signed in for.
+    // The login sees every request first (pages, server functions and static files alike): its
+    // own routes, and any it will not let through.
     const answer = await login.handle?.(request);
     if (answer) return sendNodeResponse(res, answer);
     const file = staticFile(files, req);

@@ -7,8 +7,9 @@ import type { LoginProvider } from "../context.ts";
 
 export interface GithubLoginOptions {
   /**
-   * The OAuth client, best the company's GitHub App's, installed on `repo`. GitHub sends people
-   * back to the callback URL registered with it: `<the app's URL>/auth/github/callback`.
+   * The OAuth client of the company's GitHub App, installed on `repo` (Metadata: read). GitHub
+   * sends people back to the callback URL registered with it: `<the app's URL>/auth/github/callback`.
+   * An OAuth App's token, asked for no scope, cannot read a private repository's permissions.
    */
   clientId: string;
   clientSecret: string;
@@ -19,6 +20,8 @@ export interface GithubLoginOptions {
 const START = "/auth/github/start";
 const CALLBACK = "/auth/github/callback";
 const SIGN_OUT = "/auth/github/signout";
+/** The state cookie's path: sent to the callback, which reads it, and to start, which sets it. */
+const STATE_PATH = "/auth/github";
 const SESSION = "sanoma_session";
 const STATE = "sanoma_github_state";
 /** How long a sign-in lasts. Access is read as one signs in, so a revoked collaborator keeps it until then. */
@@ -60,7 +63,7 @@ export function githubLogin({ clientId, clientSecret, repo }: GithubLoginOptions
     const token = await accessToken(code);
     if (!token) return page(400, "GitHub did not sign you in.", true);
     const { login } = (await api(token, "/user")) as { login: string };
-    const clearState = cookie(request, STATE, "", START, 0);
+    const clearState = cookie(request, STATE, "", STATE_PATH, 0);
     if (!ADMITTED.has(await permission(token, login))) {
       const denied = page(403, `${login} needs write access to ${repo} to use this app.`, false);
       denied.headers.append("set-cookie", clearState);
@@ -86,7 +89,7 @@ export function githubLogin({ clientId, clientSecret, repo }: GithubLoginOptions
     return body.access_token || undefined;
   }
 
-  /** The user's permission on the repository; `none` when GitHub does not show them it (404). */
+  /** The user's permission on the repository; `none` when GitHub will not show them it (403, 404). */
   async function permission(token: string, login: string): Promise<string> {
     const body = (await api(token, `/repos/${repo}/collaborators/${encodeURIComponent(login)}/permission`, true)) as
       | { permission?: string }
@@ -97,6 +100,7 @@ export function githubLogin({ clientId, clientSecret, repo }: GithubLoginOptions
   return {
     name: "github",
     check() {},
+    signOut: SIGN_OUT,
     resolveActor(request) {
       const login = signedIn(request);
       return login ? { id: login } : undefined;
@@ -109,13 +113,15 @@ export function githubLogin({ clientId, clientSecret, repo }: GithubLoginOptions
           const to = new URL("https://github.com/login/oauth/authorize");
           to.search = new URLSearchParams({ client_id: clientId, state }).toString();
           const headers = new Headers({ location: to.toString() });
-          headers.append("set-cookie", cookie(request, STATE, state, START, 600));
+          headers.append("set-cookie", cookie(request, STATE, state, STATE_PATH, 600));
           return new Response(null, { status: 302, headers });
         }
         case CALLBACK:
           return callback(request, url);
         case SIGN_OUT: {
           if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
+          // Only the app's own page signs you out.
+          if (request.headers.get("sec-fetch-site") === "cross-site") return new Response(null, { status: 403 });
           return new Response(null, { status: 204, headers: { "set-cookie": cookie(request, SESSION, "", "/", 0) } });
         }
       }
@@ -129,7 +135,7 @@ export function githubLogin({ clientId, clientSecret, repo }: GithubLoginOptions
   };
 }
 
-/** A GitHub API read as the user; undefined for a 404 when `missingIsNone`. */
+/** A GitHub API read as the user; undefined for a 403 or 404 (no access) when `missingIsNone`. */
 async function api(token: string, path: string, missingIsNone = false): Promise<unknown> {
   const res = await fetch(`${API}${path}`, {
     headers: {
@@ -139,7 +145,7 @@ async function api(token: string, path: string, missingIsNone = false): Promise<
       "user-agent": "sanoma",
     },
   });
-  if (missingIsNone && res.status === 404) return undefined;
+  if (missingIsNone && (res.status === 403 || res.status === 404)) return undefined;
   if (!res.ok) throw new Error(`GitHub answered ${res.status} for GET ${path}`);
   return res.json();
 }

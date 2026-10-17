@@ -12,7 +12,9 @@ export const LOOPBACK = "loopback";
 
 /**
  * The default login: none. Whoever reaches the app acts as the name the page sends
- * (`actorFromHeader`), so it refuses to listen anywhere but this machine.
+ * (`actorFromHeader`), so it refuses to listen anywhere but this machine. Even there, a page
+ * elsewhere could reach the app by pointing its own host name at 127.0.0.1 (DNS rebinding); its
+ * requests then carry that name in Host, so any request not addressed to a loopback name is refused.
  */
 export function loopbackLogin(): LoginProvider {
   return {
@@ -25,6 +27,10 @@ export function loopbackLogin(): LoginProvider {
       );
     },
     resolveActor: actorFromHeader,
+    handle(request) {
+      const host = request.headers.get("host") ?? "";
+      return isLoopback(hostName(host)) ? undefined : refuseHost(host);
+    },
   };
 }
 
