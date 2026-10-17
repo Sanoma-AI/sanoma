@@ -17,7 +17,15 @@ export const githubTf = tfConnector({
   vendor: "github",
   provider,
   types: {
-    repository: { tf: github_repository, title: "Repository", identity: "name", find: ({ name }) => name },
+    // Bound by its node id, which a rename keeps, as a rule is by its own (its `id`); the driver
+    // resolves either to what the provider imports by.
+    repository: {
+      tf: github_repository,
+      title: "Repository",
+      identity: "name",
+      find: ({ name }) => name,
+      bindingId: ({ node_id }) => String(node_id),
+    },
     branch_protection: {
       tf: github_branch_protection,
       title: "Branch protection rule",

@@ -54,15 +54,15 @@ describe("the stripe connector", () => {
     for (const op of [stripe[type].read, stripe[type].import]) {
       expect(op).toMatchObject({ vendor: "stripe", resource: type, effect: "read", idempotent: true });
     }
-    expect(declare[type].identity).toBe("id");
+    expect(declare[type].identity).toBeUndefined();
+    expect(declare[type].find).toBeUndefined();
   });
 
-  it("declares resources by Stripe's id, which a data file must give", () => {
-    expect(declare.product({ id: "prod_SanomaTest0001", name: "Pro" }).name).toBe("prod_SanomaTest0001");
-    expect(() => declare.product({ name: "Pro" })).toThrow("stripe.product: its id is missing");
-    // Stripe sets `created`; only the id, which the identity names, may be declared of what it owns.
-    expect(() => declare.product({ id: "prod_SanomaTest0001", name: "Pro", created: 1 })).toThrow(
-      "stripe.product: leave out created: the vendor sets it",
+  it("declares resources without an identity: Stripe sets the id, which only a binding holds", () => {
+    expect(declare.product({ name: "Pro" })).not.toHaveProperty("name");
+    expect(() => declare.product({ id: "prod_SanomaTest0001", name: "Pro" })).toThrow(
+      "stripe.product: leave out id: the vendor sets it",
     );
+    expect(declare.product.bindingId({ id: "prod_SanomaTest0001", name: "Pro" })).toBe("prod_SanomaTest0001");
   });
 });

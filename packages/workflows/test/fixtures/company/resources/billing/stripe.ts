@@ -1,16 +1,15 @@
 import { stripe } from "@sanoma-ai/connector-stripe/resources";
 
-// Stripe names its objects: each declares the id of one that exists (test mode).
+// Stripe names its objects, so a declaration names none: the lockfile binds `pro` to a product
+// (test mode), and `events` to nothing yet.
 
 export const pro = stripe.product({
-  id: "prod_SanomaFixturePro",
   name: "Sanoma Pro",
   active: true,
   metadata: { tier: "pro" },
 });
 
 export const events = stripe.webhook_endpoint({
-  id: "we_SanomaFixtureEvents",
   url: "https://example.com/stripe/events",
   enabled_events: ["customer.subscription.created", "invoice.paid"],
   description: "Billing events",

@@ -1,0 +1,22 @@
+{
+  "resources/billing/stripe.ts#basic": {
+    "type": "stripe.product",
+    "id": "prod_SanomaFixtureBasic"
+  },
+  "resources/billing/stripe.ts#pro": {
+    "type": "stripe.product",
+    "id": "prod_SanomaFixturePro"
+  },
+  "resources/identity/github.ts#docs": {
+    "type": "github.repository",
+    "id": "R_docs"
+  },
+  "resources/identity/github.ts#website": {
+    "type": "github.repository",
+    "id": "R_website"
+  },
+  "resources/identity/github.ts#websiteMain": {
+    "type": "github.branch_protection",
+    "id": "BPR_website:main"
+  }
+}

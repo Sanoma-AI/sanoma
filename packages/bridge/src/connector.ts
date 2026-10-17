@@ -23,10 +23,12 @@ export interface TfTypeSpec<S extends z.ZodObject = z.ZodObject> {
   tf: TfResourceType<S>;
   /** What people call it, such as "Repository". */
   title: string;
-  /** How `find` makes the import id, for people: `name`, `repository_id:pattern`. */
-  identity: string;
-  /** The provider's import id for a declared resource. */
-  find: (desired: z.input<S>) => string;
+  /** How `find` makes the identity, for people: `name`, `repository_id:pattern`. Absent with `find`. */
+  identity?: string;
+  /** The provider's import id for a declared resource before it is bound; absent when its fields cannot name it. */
+  find?: (desired: z.input<S>) => string;
+  /** The id a binding keeps, from the resource's state; default `String(state.id)`. */
+  bindingId?: ResourceSpec<S>["bindingId"];
   /** The part of a state a drift check compares; default `compareDeclared`. */
   normalize?: ResourceSpec<S>["normalize"];
 }
@@ -76,9 +78,14 @@ export interface TfConnector<V extends string, T extends Record<string, z.ZodObj
   /**
    * The driver: each operation over `bridge`, with the provider configured with what `config`
    * returns, read on every call (it may throw, such as a `DriverError` for a missing token).
+   * `importId`, given, turns the id an import is given (a binding id the provider cannot import
+   * by, such as GitHub's node id) into the provider's import id, by the connector's type name.
    */
-  driver(bridge: ProviderClient, config: () => Record<string, unknown>): Driver;
+  driver(bridge: ProviderClient, config: () => Record<string, unknown>, importId?: ImportId): Driver;
 }
+
+/** The provider's import id for the id an import is given, by the connector's type name. */
+export type ImportId = (type: string, id: string) => string | Promise<string>;
 
 /** The driver's data about an object: the provider's state version and private data, `<version>:<base64>`. */
 const HANDLE = /^(\d+):([A-Za-z0-9+/]*={0,2})$/;
@@ -90,8 +97,8 @@ const handleOf = (r: ResourceState) => `${r.schemaVersion}:${Buffer.from(r.priva
  * with `read` and `import`, and the driver reads through the provider bridge.
  *
  * The driver's `import` asks the provider to find the object by its import id (the bridge reads
- * it too); `read` refreshes a state from an earlier call, or, given none (or one without an
- * `id`), imports. Either answers `{ gone: true }` when the provider finds no object, or fails
+ * it too), made from the id it is given by `importId` when the driver has one; `read` refreshes
+ * a state from an earlier call, or, given none (or one without an `id`), imports. Either answers `{ gone: true }` when the provider finds no object, or fails
  * the way `missing` says means none. States go out in the resource's shape, secrets dropped (`fromTfState`), and
  * come back in the provider's (`toTfState`); the provider's private data and state version go
  * in the opaque `handle`. The provider is configured through `ensureConfigured`. The bridge's
@@ -107,23 +114,28 @@ export function tfConnector<
   const types = spec.types as Record<string, TfTypeSpec>;
   const references: Record<string, References | undefined> = spec.references ?? {};
   const resources: Record<string, Resource> = Object.fromEntries(
-    Object.entries(types).map(([type, { tf, title, identity, find, normalize }]) => [
+    Object.entries(types).map(([type, { tf, title, identity, find, bindingId, normalize }]) => [
       type,
       defineResource({
         vendor,
         type,
         title,
-        identity,
+        ...(identity !== undefined && { identity }),
         schema: tf.schema,
         fields: references[type] ? { ...tf.fields, references: references[type] } : tf.fields,
-        find,
+        ...(find && { find }),
+        ...(bindingId && { bindingId }),
         ...(normalize && { normalize }),
       }),
     ]),
   );
   const connector = defineConnector(vendor, resources, spec.info);
 
-  function driver(bridge: ProviderClient, config: () => Record<string, unknown>): Driver {
+  function driver(
+    bridge: ProviderClient,
+    config: () => Record<string, unknown>,
+    importId: ImportId = (_, id) => id,
+  ): Driver {
     /**
      * Runs `fn` on a configured provider, with the bridge's errors as `DriverError`s, but for
      * one that says the object `id` is missing: that is `{ id, gone: true }`.
@@ -150,7 +162,7 @@ export function tfConnector<
         handle: handleOf(r),
       });
       const importOne = async (id: string) => {
-        const { resources: found } = await bridge.import(provider, tf.typeName, id);
+        const { resources: found } = await bridge.import(provider, tf.typeName, await importId(type, id));
         const r = found.find((f) => f.typeName === tf.typeName);
         return r ? { id, gone: false, ...out(r) } : { id, gone: true };
       };

@@ -1217,7 +1217,7 @@ describe("resources and drift", () => {
     company.seed();
     company.github.override("repository", "website", { has_wiki: true });
     company.stripe.override("product", "prod_SanomaFixturePro", { name: "Sanoma Professional" });
-    company.github.remove("branch_protection", "docs:main");
+    company.github.remove("branch_protection", "website:main");
     // Started as any workflow is, with its input: nothing.
     const started = await startAs({ workflow: "drift", input: {} }, { actor: "alice" });
     if (started.status) throw new Error(`startRunFn failed with ${started.status}: ${started.body.error}`);
@@ -1255,7 +1255,7 @@ describe("resources and drift", () => {
     expect(forged.body.code).toBe("invalid_input");
   });
 
-  it("finds two drifted, one gone and three clean", () => {
+  it("finds two drifted, one gone, one clean and two absent", () => {
     expect(report.resources.filter((r) => r.status === "drifted")).toEqual([
       expect.objectContaining({
         id: "resources/billing/stripe.ts#pro",
@@ -1267,9 +1267,15 @@ describe("resources and drift", () => {
       }),
     ]);
     expect(report.resources.filter((r) => r.status === "gone").map((r) => r.id)).toEqual([
-      "resources/identity/rules.ts#docsMain",
+      "resources/identity/github.ts#websiteMain",
     ]);
-    expect(report.resources.filter((r) => r.status === "clean")).toHaveLength(3);
+    expect(report.resources.filter((r) => r.status === "clean")).toHaveLength(1);
+    // Not in the lockfile: a Stripe object nothing finds, and a rule GitHub finds by its identity.
+    const absent = report.resources.filter((r) => r.status === "absent");
+    expect(absent.map(({ id, found }) => ({ id, found }))).toEqual([
+      { id: "resources/billing/stripe.ts#events", found: undefined },
+      { id: "resources/identity/rules.ts#docsMain", found: "BPR_docs:main" },
+    ]);
   });
 
   it("adopts a drifted field: the vendor's value into the data file, committed through the source", async () => {
@@ -1336,7 +1342,9 @@ describe("resources and drift", () => {
     expect(resources.text).toContain('href="/resources?resource=resources%2Fidentity%2Fgithub.ts%23website"');
     expect(resources.text.match(/>drifted: 1 field</g)).toHaveLength(2);
     expect(resources.text.match(/>gone</g)).toHaveLength(1);
-    expect(resources.text.match(/>clean</g)).toHaveLength(3);
+    expect(resources.text.match(/>clean</g)).toHaveLength(1);
+    expect(resources.text.match(/>absent</g)).toHaveLength(1);
+    expect(resources.text.match(/>absent: found unbound</g)).toHaveLength(1);
     expect(resources.text).toContain("2 drifted");
     // A button to adopt each drifted field.
     expect(resources.text.match(/>Adopt</g)).toHaveLength(2);

@@ -348,10 +348,14 @@ function ResourceRow({
 /** The latest check's verdict on a resource; "not checked" when it was not in that check. */
 function DriftBadge({ result }: { result: DriftResult | undefined }) {
   if (!result) return <ToneBadge tone="idle">not checked</ToneBadge>;
-  const { status, fields } = result;
+  const { status, fields, found } = result;
   return (
     <ToneBadge tone={DRIFT_TONE[status]}>
-      {status === "drifted" ? `drifted: ${plural(fields.length, "field")}` : status}
+      {status === "drifted"
+        ? `drifted: ${plural(fields.length, "field")}`
+        : status === "absent" && found !== undefined
+          ? "absent: found unbound"
+          : status}
     </ToneBadge>
   );
 }

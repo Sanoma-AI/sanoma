@@ -5,7 +5,7 @@ import type { TfConnector, TfResources } from "./connector.ts";
 import type { FixtureError } from "./fixtures.ts";
 import { fixturesDir } from "./pins.ts";
 import { type BridgeState, loadReplies, stateBridge, type StateObject } from "./replies.ts";
-import { toTfState } from "./tfschema/state.ts";
+import { fromTfState, toTfState } from "./tfschema/state.ts";
 
 /** A connector fake's state: the objects its bridge serves, as `loadReplies` loads them. */
 export type TfFakeState = BridgeState;
@@ -69,7 +69,8 @@ function grouped(driver: Driver) {
  * A fake vendor for an OpenTofu connector: its real driver over a `stateBridge` of the replies
  * recorded from the provider, so nothing reaches the vendor and no credentials are read. It has
  * the faults every fake has (`failNext`, `loseReply`, `rateLimit`, `hold`, `reset`, `update`),
- * and `put`, `override` and `remove` to simulate drift. Each call makes one of its own, with
+ * and `put`, `override` and `remove` to simulate drift. An import finds an object by its import
+ * id, or by its binding id (the resource type's `bindingId` of its state). Each call makes one of its own, with
  * the recorded replies, as each sandbox run does.
  */
 export function tfFake<V extends string, T extends Record<string, z.ZodObject>>(
@@ -77,11 +78,33 @@ export function tfFake<V extends string, T extends Record<string, z.ZodObject>>(
   options: TfFakeOptions = {},
 ): TfFake<V, T> {
   const { fixtures = fixturesDir, missingReply, ...fakeOptions } = options;
+  /**
+   * The import id of the object `id` names: `id` when there is one under it, else that of the
+   * object whose binding id it is (a repository's `node_id`), as the vendor resolves one, else `id`.
+   */
+  const importIdIn = (state: TfFakeState, type: keyof T & string, id: string) => {
+    const { typeName, shape } = tf.types[type];
+    if (state.objects[`${typeName}/${id}`]) return id;
+    const { bindingId } = tf.resources[type];
+    for (const [at, o] of Object.entries(state.objects)) {
+      if (at.startsWith(`${typeName}/`) && !("error" in o) && bindingId(fromTfState(shape, o.state)) === id) {
+        return at.slice(typeName.length + 1);
+      }
+    }
+    return id;
+  };
   const fake = defineFake(
     tf.connector,
     {
       initial: (): TfFakeState => loadReplies(fixtures, tf.provider),
-      ops: (state) => grouped(tf.driver(stateBridge(state), () => ({}))) as never,
+      ops: (state) =>
+        grouped(
+          tf.driver(
+            stateBridge(state),
+            () => ({}),
+            (type, id) => importIdIn(state, type, id),
+          ),
+        ) as never,
     },
     fakeOptions,
   );

@@ -24,6 +24,16 @@ export {
 // The writer: setting a resource's fields in its data file, and rendering a new one.
 export { formatOptions, renderDataFile, setFields, type DataFileContent } from "./writer.ts";
 export { Reference, type DataValue } from "./datafile.ts";
+export {
+  LOCKFILE,
+  readLockfile,
+  serializeLockfile,
+  writeLockfile,
+  diffLockfiles,
+  type Binding,
+  type Bindings,
+  type Rebind,
+} from "./lockfile.ts";
 
 /** What a workflow is, read from its definition: enough to draw a start form and show what it may call. */
 export interface WorkflowEntry {
@@ -99,8 +109,8 @@ export interface ResourceTypeEntry {
   vendor: string;
   type: string;
   title: string;
-  /** How a declared resource's import id is made, such as `name` or `repository_id:pattern`. */
-  identity: string;
+  /** How a declared resource's identity is made, such as `name` or `repository_id:pattern`; absent when it is found only by its binding. */
+  identity?: string;
   /** Its flagged fields, by dotted path. */
   fields: ResourceFields;
   /**

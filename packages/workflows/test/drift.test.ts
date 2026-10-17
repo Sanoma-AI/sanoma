@@ -5,7 +5,7 @@ import { bluesky } from "@sanoma-ai/connector-bluesky";
 import { testDatabaseUrl, withFake } from "@sanoma-ai/testing";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { describeConfig } from "../src/describe.ts";
+import { describeConfig, writeLockfile } from "../src/describe.ts";
 import {
   allow,
   allowAll,
@@ -46,6 +46,8 @@ const policy = definePolicy((call) => {
 const companyOnFakes = companyConfig([], policy, fakes);
 
 const byId = (report: DriftReport) => Object.fromEntries(report.resources.map((r) => [r.id, r]));
+/** What a check of a resource the vendor holds as declared says: clean when it is bound, else absent. */
+const asDeclared = (r: { binding?: string }) => (r.binding === undefined ? "absent" : "clean");
 const opCalls = (records: LedgerRecord[]) => records.filter((r) => r.type === "op.called");
 
 describe("the drift workflow", () => {
@@ -61,25 +63,32 @@ describe("the drift workflow", () => {
     return { runId, report: await app.client.driftReport(runId) };
   }
 
-  it("reports every declared resource clean when the vendors hold what is declared", async () => {
+  it("reports every bound resource clean when the vendors hold what is declared, and the rest absent", async () => {
     // The vendor reorders a set and sets a field nobody declared: neither is drift. And GitHub
     // holds each rule's repository by its node id, which stands for the repository's name.
     github.override("repository", "website", { topics: ["astro", "website"] });
     github.override("repository", "docs", { delete_branch_on_merge: true });
     const { report } = await drift();
-    expect(report.resources.map((r) => [r.id, r.vendor, r.type, r.name, r.status])).toEqual(
-      declared.map((r) => [r.id, r.vendor, r.type, r.name, "clean"]),
+    expect(report.resources.map((r) => [r.id, r.vendor, r.type, r.name, r.binding, r.status])).toEqual(
+      declared.map((r) => [r.id, r.vendor, r.type, r.name, r.binding, asDeclared(r)]),
     );
+    // Unbound: the rule GitHub finds by its identity, with its binding id for apply to bind; the
+    // webhook endpoint has no identity, so nothing finds it.
+    expect(byId(report)["resources/identity/rules.ts#docsMain"]).toMatchObject({
+      status: "absent",
+      found: "BPR_docs:main",
+    });
+    expect(byId(report)["resources/billing/stripe.ts#events"]).not.toHaveProperty("found");
     expect(report.resources.every((r) => r.fields.length === 0)).toBe(true);
     expect(report.problems).toEqual([]);
     expect(report.startedAt).toBeLessThanOrEqual(report.finishedAt);
   });
 
-  it("reports one GitHub field and one Stripe field that changed, and a rule gone; the rest are clean", async () => {
+  it("reports one GitHub field and one Stripe field that changed, and a rule gone; the rest are clean or absent", async () => {
     github.override("repository", "website", { has_wiki: true });
     stripe.override("product", "prod_SanomaFixturePro", { name: "Sanoma Professional" });
     // GitHub answers an import of a rule that is not there as its provider does: failed_precondition.
-    github.remove("branch_protection", "docs:main");
+    github.remove("branch_protection", "website:main");
     const { runId, report } = await drift();
 
     expect(report.resources.filter((r) => r.status === "drifted")).toEqual([
@@ -87,7 +96,8 @@ describe("the drift workflow", () => {
         id: "resources/billing/stripe.ts#pro",
         vendor: "stripe",
         type: "product",
-        name: "prod_SanomaFixturePro",
+        name: "pro",
+        binding: "prod_SanomaFixturePro",
         status: "drifted",
         fields: [{ path: "name", desired: "Sanoma Pro", actual: "Sanoma Professional" }],
       },
@@ -96,33 +106,50 @@ describe("the drift workflow", () => {
         vendor: "github",
         type: "repository",
         name: "website",
+        binding: "R_website",
         status: "drifted",
         fields: [{ path: "has_wiki", desired: false, actual: true }],
       },
     ]);
-    expect(byId(report)["resources/identity/rules.ts#docsMain"]).toMatchObject({ status: "gone", fields: [] });
+    expect(byId(report)["resources/identity/github.ts#websiteMain"]).toMatchObject({ status: "gone", fields: [] });
     expect(report.resources.filter((r) => r.status === "clean").map((r) => r.id)).toEqual([
-      "resources/billing/stripe.ts#events",
       "resources/identity/github.ts#docs",
-      "resources/identity/github.ts#websiteMain",
+    ]);
+    expect(report.resources.filter((r) => r.status === "absent").map((r) => r.id)).toEqual([
+      "resources/billing/stripe.ts#events",
+      "resources/identity/rules.ts#docsMain",
     ]);
 
-    // One vendor call per resource, through ctx: the policy saw each as a read, and the ledger has it.
+    // One vendor call per resource bound or with an identity, by its binding else its identity,
+    // through ctx: the policy saw each as a read, and the ledger has it.
     const records = await app.client.ledger(runId);
     const calls = opCalls(records);
-    const expected = declared.map((r) => [`${r.vendor}.${r.type}.import`, r.name]);
+    const expected = declared.flatMap((r) => {
+      const id = r.binding ?? r.identity;
+      return id === undefined ? [] : [[`${r.vendor}.${r.type}.import`, id]];
+    });
+    expect(expected).toHaveLength(declared.length - 1);
     expect(calls.map((r) => r.type === "op.called" && [r.op, (r.input as { id: string }).id])).toEqual(expected);
     expect(calls.every((r) => r.type === "op.called" && r.effect === "read" && r.decision.kind === "allow")).toBe(true);
     expect(policyCalls.map((c) => [c.op.id, c.effect, c.target])).toEqual(expected.map(([op, id]) => [op, "read", id]));
     // The gone rule's import answered gone, and the driver's handle is recorded by name only.
-    expect(calls.find((r) => r.type === "op.called" && (r.input as { id: string }).id === "docs:main")).toMatchObject({
-      output: { id: "docs:main", gone: true },
-    });
+    expect(
+      calls.find((r) => r.type === "op.called" && (r.input as { id: string }).id === "BPR_website:main"),
+    ).toMatchObject({ output: { id: "BPR_website:main", gone: true } });
     expect(calls[0]).toMatchObject({ output: { gone: false, handle: "<handle>" } });
     expect(JSON.stringify(records)).not.toMatch(/"handle":"\d+:/);
     // The run's record: no input (it read the data files itself), and its report.
     expect(records[0]).toMatchObject({ type: "run.started", input: {} });
     expect(records.at(-1)).toMatchObject({ type: "run.finished", output: report });
+  });
+
+  it("reports an unbound resource absent, without `found`, when its identity finds nothing either", async () => {
+    github.remove("branch_protection", "docs:main");
+    const { report } = await drift();
+    const docsMain = byId(report)["resources/identity/rules.ts#docsMain"];
+    expect(docsMain).toMatchObject({ status: "absent", fields: [] });
+    expect(docsMain).not.toHaveProperty("found");
+    expect(docsMain).not.toHaveProperty("binding");
   });
 
   it("compares a reference by any of the identities its resource holds, read in the same run", async () => {
@@ -156,7 +183,11 @@ describe("the drift workflow", () => {
       fields: [],
       error: expect.stringMatching(/denied by policy: no Stripe/),
     });
-    expect(report.resources.filter((r) => r.status === "clean")).toHaveLength(declared.length - 1);
+    expect(report.resources.filter((r) => r.status === "clean").map((r) => r.id)).toEqual([
+      "resources/identity/github.ts#website",
+      "resources/identity/github.ts#docs",
+      "resources/identity/github.ts#websiteMain",
+    ]);
     expect((await app.client.run(runId))?.status).toBe("finished");
   });
 
@@ -170,7 +201,7 @@ describe("the drift workflow", () => {
   it("runs on a worker started again, which takes its definition by name", async () => {
     await app.restart();
     const { report } = await drift();
-    expect(report.resources.every((r) => r.status === "clean")).toBe(true);
+    expect(report.resources.every((r) => r.status === asDeclared(r))).toBe(true);
   });
 
   it("lists drift runs by workflow, and refuses a report of a run that is none", async () => {
@@ -213,6 +244,7 @@ describe("a drift run's record of the data files", () => {
       `export const hook = acme.hook({ name: "deploys", url: "https://example.com/hook", token: "${secret}" });\n\n` +
       `export default [hook];\n`,
   );
+  writeLockfile(root, { "resources/hooks.ts#hook": { type: "acme.hook", id: "deploys" } });
   const app = useApp("drift-secret", () => ({
     workflows: [],
     connectors: [withFake(acme, acmeFake)],
@@ -230,13 +262,21 @@ describe("a drift run's record of the data files", () => {
         vendor: "acme",
         type: "hook",
         name: "deploys",
+        binding: "deploys",
         status: "drifted",
         fields: [{ path: "url", desired: "https://example.com/hook", actual: "https://example.com/moved" }],
       },
     ]);
     const steps = await app.raw.listWorkflowSteps(runId);
     expect(steps?.find((step) => step.name === "drift:data-files")?.output).toMatchObject({
-      resources: [{ id: "resources/hooks.ts#hook", desired: { name: "deploys", url: "https://example.com/hook" } }],
+      resources: [
+        {
+          id: "resources/hooks.ts#hook",
+          identity: "deploys",
+          binding: "deploys",
+          desired: { name: "deploys", url: "https://example.com/hook" },
+        },
+      ],
     });
     expect(JSON.stringify(steps)).not.toContain(secret);
     expect(JSON.stringify(await app.client.ledger(runId))).not.toContain(secret);

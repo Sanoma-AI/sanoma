@@ -1,0 +1,23 @@
+[
+  {
+    "method": "POST",
+    "path": "/graphql",
+    "status": 200,
+    "body": {
+      "data": {
+        "node": {
+          "pattern": "main",
+          "repository": {
+            "name": "provider-bridge",
+            "owner": {
+              "login": "Sanoma-AI"
+            }
+          }
+        },
+        "viewer": {
+          "login": "someone"
+        }
+      }
+    }
+  }
+]

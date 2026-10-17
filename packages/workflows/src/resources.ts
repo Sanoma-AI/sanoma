@@ -3,6 +3,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { parsed } from "./ast.ts";
 import { rootOf, type SanomaConfig } from "./config.ts";
 import { type DataFile, type DataFileExport, type DataValue, readDataFile, Reference } from "./datafile.ts";
+import { type Binding, type Bindings, LOCKFILE, readLockfile } from "./lockfile.ts";
 import { type Connector, VENDOR } from "./op.ts";
 import type { Span } from "./outline.ts";
 import { type Declared, type Resource, resourceTypesOf } from "./resource.ts";
@@ -16,8 +17,12 @@ export interface DeclaredResource {
   file: string;
   vendor: string;
   type: string;
-  /** Its import id: what the type's `find` makes of its fields. */
+  /** What people call it: its identity, else its export's name. */
   name: string;
+  /** The import id that finds it unbound: what its type's `find` makes of its fields; absent when the type has none. */
+  identity?: string;
+  /** The vendor's id of the object the lockfile binds it to (`LOCKFILE`); absent when unbound. */
+  binding?: string;
   /** Its `export const` statement, as UTF-16 offsets into the file's text. */
   span: Span;
   /** Its fields, as its type checked them: each resource it names as that resource's `name`. */
@@ -43,10 +48,14 @@ export interface ResourceProblem {
   message: string;
 }
 
-/** What the data files declare: each resource read without problems, and the problems. */
+/** What the data files declare: each resource read without problems, the lockfile's bindings, and the problems. */
 export interface DataFiles {
   /** By file and then in file order, less any with a problem, and any that names one. */
   resources: DeclaredResource[];
+  /** The lockfile's bindings, by key (`<file>#<export>`), as read: none when it is missing or has a problem. */
+  bindings: Bindings;
+  /** Each binding whose key no data file declares, by key. */
+  orphans: (Binding & { key: string })[];
   /** By file, line and column. */
   problems: ResourceProblem[];
 }
@@ -82,7 +91,11 @@ interface FileEntry {
  *
  * Problems: anything outside the subset, a constructor or data file the config does not know, a
  * type the connector does not declare, a value the type refuses (a reference where its type
- * takes none among them), a reference cycle, and two resources of one type with one name.
+ * takes none among them), a reference cycle, and two resources of one type with one identity.
+ *
+ * Each declaration is joined to its binding in the lockfile (`readLockfile`) by its key,
+ * `<file>#<export>`; a binding no export declares is an orphan. Problems: the lockfile's, a
+ * binding of another type than its declaration's, and two declarations bound to one object.
  */
 export function readDataFiles(
   root: string | undefined,
@@ -95,8 +108,10 @@ export function readDataFiles(
       message:
         "The config has no root, so its data files cannot be found: make it with defineConfig, which records its file, or set its `root`",
     });
-    return { resources: [], problems };
+    return { resources: [], bindings: {}, orphans: [], problems };
   }
+  const lock = readLockfile(root);
+  problems.push(...lock.problems);
 
   const files = new Map<string, FileEntry>();
   for (const path of dataFilesUnder(join(root, "resources"))) {
@@ -175,7 +190,7 @@ export function readDataFiles(
     visiting.push(id);
     const result = build(file, exp);
     visiting.pop();
-    if (result) {
+    if (result?.declared.name !== undefined) {
       const { vendor, type, name } = result.declared;
       const key = `${vendor}.${type} ${JSON.stringify(name)}`;
       const first = byName.get(key);
@@ -231,18 +246,55 @@ export function readDataFiles(
     }
   }
 
+  // Each binding against its declaration: of its type, and the only one bound to its object.
+  const boundBy = new Map<string, string>();
+  for (const [id, { file, exp }] of declarations) {
+    const binding = lock.bindings[id];
+    // An unknown constructors import was reported with the import.
+    const vendor = vendors.get(file)!.get(exp.vendor);
+    if (binding === undefined || vendor === undefined) continue;
+    const type = `${vendor}.${exp.type}`;
+    const object = `${binding.type} ${binding.id}`;
+    const first = boundBy.get(object);
+    if (binding.type !== type) {
+      file.problem(exp.start, `${id} is bound to a ${binding.type} in ${LOCKFILE}, but declares a ${type}`);
+    } else if (first !== undefined) {
+      file.problem(exp.start, `${id} is bound to the same ${object} as ${first} in ${LOCKFILE}: bind each object once`);
+    } else {
+      boundBy.set(object, id);
+      continue;
+    }
+    done.set(id, undefined);
+  }
+  const keys = new Set([...files.values()].flatMap((f) => f.data.declared.map((name) => `${f.rel}#${name}`)));
+  const orphans = Object.entries(lock.bindings)
+    .filter(([key]) => !keys.has(key))
+    .map(([key, binding]) => ({ key, ...binding }));
+
   const resources: DeclaredResource[] = [];
   for (const [id, { file, exp }] of declarations) {
     const result = declare(id);
     if (!result) continue;
-    const { vendor, type, name, desired } = result.declared;
-    resources.push({ id, file: file.rel, vendor, type, name, span: [exp.start, exp.end], desired, refs: result.refs });
+    const { vendor, type, name: identity, desired } = result.declared;
+    const binding = lock.bindings[id]?.id;
+    resources.push({
+      id,
+      file: file.rel,
+      vendor,
+      type,
+      name: identity ?? exp.name,
+      ...(identity !== undefined && { identity }),
+      ...(binding !== undefined && { binding }),
+      span: [exp.start, exp.end],
+      desired,
+      refs: result.refs,
+    });
   }
   problems.sort(
     (a, b) =>
       (a.file ?? "").localeCompare(b.file ?? "") || (a.line ?? 0) - (b.line ?? 0) || (a.column ?? 0) - (b.column ?? 0),
   );
-  return { resources, problems };
+  return { resources, bindings: lock.bindings, orphans, problems };
 }
 
 /** The data files under `dir`, sorted: regular `.ts` files, less tests, declarations and `node_modules`; none when `dir` is not a directory. */

@@ -1,0 +1,20 @@
+[
+  {
+    "method": "POST",
+    "path": "/graphql",
+    "status": 200,
+    "body": {
+      "data": {
+        "node": {
+          "name": "sanoma",
+          "owner": {
+            "login": "Sanoma-AI"
+          }
+        },
+        "viewer": {
+          "login": "someone"
+        }
+      }
+    }
+  }
+]

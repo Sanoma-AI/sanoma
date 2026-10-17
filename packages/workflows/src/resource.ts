@@ -47,14 +47,23 @@ export interface ResourceSpec<S extends z.ZodObject = z.ZodObject> {
   title: string;
   /**
    * How `find` makes the import id, for people: `name`, `repository_id:pattern`. The fields it
-   * names stay declarable even when the vendor sets them (Stripe's `id`).
+   * names stay declarable even when the vendor sets them. Absent with `find`: a type the vendor
+   * names alone (Stripe's) is found only by its binding.
    */
-  identity: string;
+  identity?: string;
   /** The resource's fields as a read returns them; a data file declares them, less the vendor-owned ones. */
   schema: S;
   fields: ResourceFields;
-  /** The vendor's id for a declared resource (the import id), from its declared fields. */
-  find: (desired: z.input<S>) => string;
+  /**
+   * The import id that finds a declared resource before it is bound, from its declared fields:
+   * its identity. Absent when its fields cannot name it.
+   */
+  find?: (desired: z.input<S>) => string;
+  /**
+   * The id a binding keeps for an object, from its state: stable for the object's life (GitHub's
+   * `node_id`, not its name), and one `import` accepts. Default: `String(state.id)`.
+   */
+  bindingId?: (state: State) => string;
   /**
    * The part of a state that a drift check compares, given what was declared. The check
    * compares `normalize(actual, desired)` with `normalize(desired, desired)`. Default:
@@ -75,8 +84,8 @@ export interface Declared<Id extends string = string, T = State> {
   readonly [DECLARED]: Id;
   readonly vendor: string;
   readonly type: string;
-  /** The vendor's id for it: what `find` made of `desired`. */
-  readonly name: string;
+  /** Its identity, the import id that finds it unbound: what `find` made of `desired`; absent without `find`. */
+  readonly name?: string;
   /**
    * Its fields, each resource it names replaced by that resource's `name`: what its type
    * checked, and what a drift check compares.
@@ -125,7 +134,7 @@ const opsOf = <S extends z.ZodObject>(schema: S) => {
 /** What the ledger keeps of a resource operation's `handle`: its name, never its bytes. */
 const opaque = ["handle"] as const;
 
-/** The policy's `target` for a resource's operations: the import id. */
+/** The policy's `target` for a resource's operations: the id, an identity or a binding id. */
 const target = ({ id }: { id: string }) => id;
 
 type OpsOf<S extends z.ZodObject> = ReturnType<typeof opsOf<S>>;
@@ -139,13 +148,12 @@ export type ResourceOps<S extends z.ZodObject> = {
  * A resource type: call it to declare a resource in a data file, and give it to
  * `defineConnector` as a group, under its `type`: `defineConnector("github", { repository })`.
  */
-export interface Resource<
-  S extends z.ZodObject = z.ZodObject,
-  Id extends string = string,
-  R extends References = {},
-> extends Readonly<Required<ResourceSpec<S>>> {
+export interface Resource<S extends z.ZodObject = z.ZodObject, Id extends string = string, R extends References = {}>
+  extends
+    Readonly<Required<Omit<ResourceSpec<S>, "identity" | "find">>>,
+    Readonly<Pick<ResourceSpec<S>, "identity" | "find">> {
   (desired: Declaring<z.input<S>, R>): Declared<Id, z.input<S>>;
-  /** `read` and `import`, each effect `read`, idempotent, with the import id as `target`. */
+  /** `read` and `import`, each effect `read`, idempotent, with the id as `target`. */
   readonly ops: ResourceOps<S>;
   readonly [RESOURCE]: true;
 }
@@ -339,7 +347,8 @@ function pathsIn(value: unknown, paths: ReadonlySet<string>, prefix = ""): strin
  * derives its operations, `<vendor>.<type>.read` and `<vendor>.<type>.import`, both effect
  * `read` and idempotent, with the import id as the policy's `target`:
  *
- * - `import` takes `{ id }`, the import id, and returns `{ gone: false, state }`, the object's
+ * - `import` takes `{ id }`, an identity (what `find` makes) or a binding id (what `bindingId`
+ *   makes), and returns `{ gone: false, state }`, the object's
  *   state (with the driver's opaque `handle` when it keeps one), or `{ gone: true }` when the
  *   vendor has no such object.
  * - `read` takes `{ id, state?, handle? }`, a state from an earlier `import` or `read`, and
@@ -353,7 +362,8 @@ function pathsIn(value: unknown, paths: ReadonlySet<string>, prefix = ""): strin
  * schema does not have, fields the vendor owns (unless the identity names them), values the
  * schema rejects, and an empty identity. Where `fields.references` allows it, a field may name
  * another declared resource of that type (`repository_id: site`): `desired` holds, and the
- * schema and `find` read, that resource's `name`, and `refs` says where it was named.
+ * schema and `find` read, that resource's `name`, and `refs` says where it was named. A type
+ * without `find` declares resources without a `name`, found only by their bindings.
  */
 export function defineResource<
   S extends z.ZodObject,
@@ -361,14 +371,14 @@ export function defineResource<
   const T extends string,
   const R extends References = {},
 >(spec: ResourceSpec<S> & { vendor: V; type: T; fields: { references?: R } }): Resource<S, `${V}.${T}`, R> {
-  const { vendor, type, schema, fields, find } = spec;
+  const { vendor, type, schema, fields, find, identity } = spec;
   const what: `${V}.${T}` = `${vendor}.${type}`;
   const io = opsOf(schema);
   const ops = {
     import: {
       effect: "read",
       idempotent: true,
-      description: `Find a ${spec.title.toLowerCase()} by its ${spec.identity} and read it; gone when there is none`,
+      description: `Find a ${spec.title.toLowerCase()} by its ${identity ? `${identity} or its ` : ""}binding id and read it; gone when there is none`,
       ...io.import,
       target,
       opaque,
@@ -383,7 +393,7 @@ export function defineResource<
     },
   } satisfies ResourceOps<S>;
 
-  const named = new Set(spec.identity.match(/[A-Za-z_][\w.]*/g));
+  const named = new Set(identity?.match(/[A-Za-z_][\w.]*/g));
   const owned = new Set(fields.vendorOwned.filter((path) => !named.has(path)));
   const references: References = fields.references ?? {};
   const declare = (given: Declaring<z.input<S>, R>): Declared<`${V}.${T}`, z.input<S>> => {
@@ -397,6 +407,8 @@ export function defineResource<
         if (wants === undefined) throw new Error(`${what}: ${at} takes a value, not a resource (${id} ${value.name})`);
         if (wants.type !== id)
           throw new Error(`${what}: ${at} names a resource of type ${wants.type}, not ${id} (${value.name})`);
+        if (value.name === undefined)
+          throw new Error(`${what}: ${at} names a ${id}, which has no identity to name it by`);
         refs[at] = `${id}:${value.name}`;
         return value.name;
       }
@@ -417,18 +429,26 @@ export function defineResource<
     }
     const parsed = schema.safeParse(desired);
     if (!parsed.success) throw new Error(`${what}: ${z.prettifyError(parsed.error)}`);
-    const name = find(desired);
-    if (typeof name !== "string" || name === "") throw new Error(`${what}: its ${spec.identity} is missing`);
-    return Object.freeze({ [DECLARED]: what, vendor, type, name, desired, refs: Object.freeze(refs) });
+    const name = find?.(desired);
+    if (find && (typeof name !== "string" || name === "")) throw new Error(`${what}: its ${identity} is missing`);
+    return Object.freeze({
+      [DECLARED]: what,
+      vendor,
+      type,
+      ...(name !== undefined && { name }),
+      desired,
+      refs: Object.freeze(refs),
+    });
   };
   const resource = Object.assign(declare, {
     vendor,
     type,
     title: spec.title,
-    identity: spec.identity,
+    identity,
     schema,
     fields,
     find,
+    bindingId: spec.bindingId ?? ((state: State) => String(state.id)),
     normalize: spec.normalize ?? ((state: State, desired: z.input<S>) => compareDeclared(fields, state, desired)),
     ops,
     // A symbol, so `defineConnector` tells a resource type from a group of operations.
