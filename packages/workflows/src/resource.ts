@@ -98,7 +98,10 @@ export interface AfterCreate {
   op: string;
   /** Its input, from the new object's binding id and the data file's export that declares it. */
   input: (made: { id: string; export: string }) => unknown;
-  /** Called again, every few seconds, until its output passes this, for up to 10 minutes. */
+  /**
+   * Called again, every few seconds, until its output passes this, for up to 10 minutes; a call
+   * that fails meanwhile is one that did not pass, its output `undefined`.
+   */
   until?: (output: any) => boolean;
 }
 

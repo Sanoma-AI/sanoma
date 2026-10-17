@@ -167,6 +167,9 @@ export interface SetupStatus {
   tokens: CredentialStatus[];
 }
 
+/** The data file going live writes, relative to the config's root. */
+export const INFRA = "resources/sanoma/infra.ts";
+
 /** What going live chooses (`goLiveFn`): who holds the repository, Supabase's organization and region, the host's port. */
 export const GoLiveRequest = z.object({
   owner: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/, "Choose a GitHub account or organization"),

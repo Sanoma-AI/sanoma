@@ -6,7 +6,14 @@ import { dirname, join } from "node:path";
 import { APPLY_WORKFLOW, errorMessage, isEnded, type Principal, type Resource } from "@sanoma-ai/workflows";
 import { type DataValue, formatOptions, readLockfile, Reference, renderDataFile } from "@sanoma-ai/workflows/describe";
 import { secret } from "@sanoma-ai/workflows/resources";
-import { ApiError, type GoLiveChoices, type GoLiveProgress, type GoLiveRequest, type GoLiveRun } from "../api.ts";
+import {
+  ApiError,
+  INFRA,
+  type GoLiveChoices,
+  type GoLiveProgress,
+  type GoLiveRequest,
+  type GoLiveRun,
+} from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
 import { GITHUB_APP } from "./setup.ts";
@@ -16,9 +23,6 @@ import { GITHUB_APP } from "./setup.ts";
 // repository to the new one, apply the host, and wait until it answers. Every change to a vendor
 // is the built-in apply workflow's; what this file calls itself is only reading lists of accounts
 // to choose from, and git.
-
-/** The data file going live writes, relative to the config's root. */
-export const INFRA = "resources/sanoma/infra.ts";
 
 /** What `infra.ts` declares, by export: the lockfile's keys. */
 const KEYS = { repo: `${INFRA}#repo`, store: `${INFRA}#store`, host: `${INFRA}#host` } as const;
@@ -171,7 +175,12 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
     regions: SUPABASE_REGIONS,
     host: host ? { type: `${host.vendor}.${host.type}`, title: host.title } : null,
     missing: missingTypes(app),
-    name: app.description.appName.replaceAll(/[^a-z0-9-]+/gi, "-").toLowerCase(),
+    name:
+      app.description.appName
+        .toLowerCase()
+        .replaceAll(/[^a-z0-9]+/g, "-")
+        .replaceAll(/^-+|-+$/g, "")
+        .slice(0, 63) || "company",
     errors,
   };
 }
@@ -237,6 +246,16 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
   if (await exists(path)) {
     throw new ApiError(409, { error: `${INFRA} is written already: change it in the file, and apply from Resources` });
   }
+  // `SANOMA_SECRETS_KEY` is the host's from this process's environment, where the launcher's
+  // `.env` sets it, and where the secrets store reads it first: there is nothing to store.
+  if (!process.env[SECRETS_KEY]) throw new ApiError(409, { error: `${SECRETS_KEY} is not set` });
+  // The GitHub connector makes the repository with a token of the person's own: an App's
+  // installation alone cannot yet.
+  if (!(await client.secrets(["GITHUB_TOKEN"])).has("GITHUB_TOKEN")) {
+    throw new ApiError(409, {
+      error: "The GitHub connector creates the repository with GITHUB_TOKEN: connect a token",
+    });
+  }
   const text = await renderInfra(app, choices);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, text);
@@ -246,9 +265,6 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
     author: actor.id,
   });
   await client.setSecret("GITHUB_OWNER", choices.owner, { by: actor.id });
-  // `SANOMA_SECRETS_KEY` is the host's from this process's environment, where the launcher's
-  // `.env` sets it, and where the secrets store reads it first: there is nothing to store.
-  if (!process.env[SECRETS_KEY]) throw new ApiError(409, { error: `${SECRETS_KEY} is not set` });
   const runId = await client.apply({ only: [KEYS.repo, KEYS.store] }, { startedBy: actor });
   return { runId };
 }
@@ -284,6 +300,16 @@ export async function goLiveHost(app: AppContext, actor: Principal): Promise<{ r
     throw new ApiError(409, { error: "Apply the repository and the database first" });
   }
   if (!source?.push) throw new ApiError(409, { error: "The app has no repository to push from" });
+  // The project's `afterCreate` stores it; a project bound without it (a hook that failed) cannot run a host.
+  if (!(await client.secrets([DATABASE_URL])).has(DATABASE_URL)) {
+    throw new ApiError(409, {
+      error: `${DATABASE_URL} is not stored: the database's URL was not stored after its create`,
+    });
+  }
+  // What is pushed is `main`, where going live committed: refused on another branch.
+  if ((await source.head()) !== (await Promise.resolve(source.head("main")).catch(() => undefined))) {
+    throw new ApiError(409, { error: "Check out main, where infra.ts and the lockfile are committed, then push" });
+  }
   const owner = (await client.secrets(["GITHUB_OWNER"])).get("GITHUB_OWNER")?.value;
   // The repository's name as going live wrote it, first in the file.
   const name = REPO_NAME.exec(await readFile(join(resolved.root!, INFRA), "utf8"))?.[1];
@@ -320,8 +346,10 @@ async function latestRun({ client }: AppContext): Promise<GoLiveRun | null> {
 
 /** Where the host answers, from the latest finished apply runs that made or changed it, and whether `/healthz` answers. */
 async function hostAnswer({ client }: AppContext): Promise<GoLiveProgress["host"]> {
-  for (const run of await client.runs({ workflow: APPLY_WORKFLOW, status: "finished", limit: 10 })) {
-    const result = (await client.applyReport(run.runId)).results.find((r) => r.id === KEYS.host && r.host);
+  const runs = await client.runs({ workflow: APPLY_WORKFLOW, status: "finished", limit: 10 });
+  const reports = await Promise.all(runs.map((run) => client.applyReport(run.runId)));
+  for (const report of reports) {
+    const result = report.results.find((r) => r.id === KEYS.host && r.host);
     if (result?.host) {
       const { url, healthy } = result.host;
       const answers = await fetch(new URL("/healthz", url), { signal: AbortSignal.timeout(2_000) })

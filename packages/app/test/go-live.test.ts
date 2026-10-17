@@ -29,10 +29,10 @@ import { setupServer } from "msw/node";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { localGitSource } from "../../sanoma/src/source.ts";
-import type { GoLiveProgress } from "../src/api.ts";
+import { type GoLiveProgress, INFRA } from "../src/api.ts";
 import type { AppContext } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";
-import { goLive, goLiveChoices, goLiveHost, goLiveProgress, INFRA, renderInfra } from "../src/server/go-live.ts";
+import { goLive, goLiveChoices, goLiveHost, goLiveProgress, renderInfra } from "../src/server/go-live.ts";
 
 // Going live end to end, on fakes, from a company with nothing but a first commit: the choices
 // (GitHub and Supabase answered by msw), infra.ts written and committed, apply on the repository

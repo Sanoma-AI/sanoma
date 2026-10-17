@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { ExternalLinkIcon, RocketIcon, UploadIcon } from "lucide-react";
+import { APPLY_WORKFLOW, isEnded } from "@sanoma-ai/workflows/shared";
+import { ExternalLinkIcon, PlayIcon, RocketIcon, UploadIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
@@ -10,12 +11,19 @@ import { Input } from "#/components/ui/input.tsx";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup } from "#/components/ui/item.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
-import { errorBodyOf, type GoLiveChoices, type GoLiveRequest, type GoLiveRun } from "../../api.ts";
+import { errorBodyOf, INFRA, type GoLiveChoices, type GoLiveRequest, type GoLiveRun } from "../../api.ts";
 import { ApplyPlanView } from "../../components/apply-plan.tsx";
 import { ButtonLink, ItemHeading, Notice, PageHeader, pageTitle, Region, ToneBadge } from "../../components/common.tsx";
 import { goLiveFn, goLiveHostFn } from "../../functions.ts";
 import { RUN_TONE } from "../../lib/tone.ts";
-import { goLiveChoicesQuery, goLiveProgressQuery, RUNS_KEY, runLink, setupStatusQuery } from "../../queries.ts";
+import {
+  goLiveChoicesQuery,
+  goLiveProgressQuery,
+  RUNS_KEY,
+  runLink,
+  setupStatusQuery,
+  useStartRun,
+} from "../../queries.ts";
 
 export const Route = createFileRoute("/setup/")({
   staticData: { crumb: "Go live" },
@@ -42,7 +50,8 @@ function GoLivePage() {
   const supabase = isSet("SUPABASE_ACCESS_TOKEN");
   const { run, bound } = progress;
   const data = bound.repo && bound.store;
-  const hostRun = run && data && (run.status !== "finished" || run.results?.some((r) => r.id.endsWith("#host")));
+  // The latest run is the host's once it is past the repository and database, or still going.
+  const hostRun = run && data && (!isEnded(run.status) || run.results?.some((r) => r.id === `${INFRA}#host`));
   return (
     <>
       <PageHeader />
@@ -94,7 +103,10 @@ function GoLivePage() {
         {data ? (
           <p>The repository and the database are made, and bound in the lockfile.</p>
         ) : run && progress.infra !== null ? (
-          <RunStatus run={run} />
+          <>
+            <RunStatus run={run} />
+            {isEnded(run.status) && <ApplyAgain />}
+          </>
         ) : (
           <p className="text-muted-foreground">Apply creates them once the file is written.</p>
         )}
@@ -105,7 +117,10 @@ function GoLivePage() {
         ) : progress.host ? (
           <HostAnswer host={progress.host} />
         ) : hostRun ? (
-          <RunStatus run={run} />
+          <>
+            <RunStatus run={run} />
+            {isEnded(run.status) && <PushButton />}
+          </>
         ) : (
           <PushButton />
         )}
@@ -261,6 +276,24 @@ function RunStatus({ run }: { run: GoLiveRun }) {
           {r.id}: {r.error}
         </Notice>
       ))}
+    </div>
+  );
+}
+
+/** Starts apply on the repository and the database again, as Resources' Apply would, on these two. */
+function ApplyAgain() {
+  const start = useStartRun();
+  const only = [`${INFRA}#repo`, `${INFRA}#store`];
+  return (
+    <div>
+      <Button
+        variant="outline"
+        onClick={() => start.mutate({ workflow: APPLY_WORKFLOW, input: { only } })}
+        disabled={start.isPending}
+      >
+        {start.isPending ? <Spinner data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}
+        Apply again
+      </Button>
     </div>
   );
 }

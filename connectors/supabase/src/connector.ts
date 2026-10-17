@@ -30,7 +30,7 @@ export const supabaseTf = tfConnector({
       // Once apply makes a project: its database and pooler healthy, then the URL a worker
       // connects with stored as SANOMA_DATABASE_URL_<EXPORT>, which a host's secrets name.
       afterCreate: [
-        { op: "supabase.project.health", input: ({ id }) => ({ ref: id }), until: (out) => out.healthy === true },
+        { op: "supabase.project.health", input: ({ id }) => ({ ref: id }), until: (out) => out?.healthy === true },
         { op: "supabase.database.storeUrl", input: ({ id, export: name }) => ({ ref: id, export: name }) },
       ],
     },

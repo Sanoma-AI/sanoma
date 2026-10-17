@@ -578,10 +578,21 @@ export function applyWorkflow(
             if (stuck === undefined) {
               const [vendor = "", group = "", name = ""] = hook.op.split(".");
               const given = hook.input({ id: after!.id, export: exportOf(key) });
-              let output = await (ctx[vendor]![group] as unknown as Record<string, Call>)[name]!(given);
-              for (let call = 1; call < AFTER_CREATE_CALLS && hook.until && !hook.until(output); call++) {
-                await ctx.sleep({ seconds: AFTER_CREATE_SECONDS });
-                output = await (ctx[vendor]![group] as unknown as Record<string, Call>)[name]!(given);
+              // With `until`, a failure is one more call that did not pass (a new object's vendor may
+              // not know it yet); without, it fails the step.
+              let output: unknown;
+              for (
+                let call = 0;
+                call < AFTER_CREATE_CALLS && (call === 0 || (hook.until && !hook.until(output)));
+                call++
+              ) {
+                if (call > 0) await ctx.sleep({ seconds: AFTER_CREATE_SECONDS });
+                try {
+                  output = await (ctx[vendor]![group] as unknown as Record<string, Call>)[name]!(given);
+                } catch (err) {
+                  if (isRunControlError(err) || !hook.until) throw err;
+                  output = undefined;
+                }
               }
               if (hook.until && !hook.until(output)) {
                 stuck = `${hook.op} did not pass in ${(AFTER_CREATE_CALLS * AFTER_CREATE_SECONDS) / 60} minutes`;
