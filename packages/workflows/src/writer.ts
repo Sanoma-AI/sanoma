@@ -2,7 +2,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { FormatConfig } from "oxfmt";
 import { type Node, parse } from "./ast.ts";
-import { type DataFileExport, type DataFileImport, type DataValue, readDataFile, Reference } from "./datafile.ts";
+import {
+  type DataFileExport,
+  type DataFileImport,
+  type DataValue,
+  keyName,
+  readDataFile,
+  Reference,
+} from "./datafile.ts";
 
 // The data-file writer: what the app's Adopt, and setting up a company, write into the files
 // `datafile.ts` reads. A file is changed in place, one declaration at a time, and everything
@@ -102,7 +109,6 @@ function editAt(object: Node, path: string, value: DataValue): { start: number; 
   const keys = path.split(".");
   let node = object;
   for (const [i, key] of keys.entries()) {
-    const at = keys.slice(0, i).join(".");
     if (node.type === "ObjectExpression") {
       const field = node.properties.find((p: Node) => fieldName(p) === key);
       if (!field) return added(node, keys.slice(i), value);
@@ -110,7 +116,7 @@ function editAt(object: Node, path: string, value: DataValue): { start: number; 
     } else if (node.type === "ArrayExpression" && /^\d+$/.test(key) && node.elements[Number(key)]) {
       node = node.elements[Number(key)];
     } else {
-      throw new Error(`Cannot set ${path}: ${at} is not an object or a list with item ${key}`);
+      throw new Error(`Cannot set ${path}: ${keys.slice(0, i).join(".")} is not an object or a list with item ${key}`);
     }
   }
   if (node.type === "Identifier") {
@@ -129,15 +135,8 @@ function added(object: Node, [key, ...under]: string[], value: DataValue) {
     : { start: object.start, end: object.end, replacement: `{ ${field} }` };
 }
 
-/** A property's name, as `readDataFile` reads it: an identifier's, or a literal's as a string. */
-const fieldName = (p: Node): string | undefined =>
-  p.type !== "Property" || p.computed
-    ? undefined
-    : p.key.type === "Identifier"
-      ? p.key.name
-      : p.key.type === "Literal"
-        ? String(p.key.value)
-        : undefined;
+/** A property's name, as `readDataFile` reads it. */
+const fieldName = (p: Node): string | undefined => (p.type === "Property" && !p.computed ? keyName(p.key) : undefined);
 
 /** A field's name in source: bare when it can be, else a string. */
 const keyOf = (key: string) => (/^[A-Za-z_$][\w$]*$/.test(key) ? key : JSON.stringify(key));

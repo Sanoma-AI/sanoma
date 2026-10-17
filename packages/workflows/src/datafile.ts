@@ -369,7 +369,7 @@ export function readDataFile(
       return refuse(p, "a method or accessor is not allowed in a data file: a field holds a value");
     }
     if (p.computed) return refuse(p.key, "a computed key is not allowed in a data file: write the field's name");
-    const key = p.key.type === "Identifier" ? p.key.name : p.key.type === "Literal" ? String(p.key.value) : undefined;
+    const key = keyName(p.key);
     if (key === undefined) return refuse(p.key, "write the field's name, or a string");
     const v = value(p.value);
     return v === undefined ? undefined : [key, v];
@@ -398,6 +398,10 @@ export function readDataFile(
 
   return { imports, exports, declared: [...declared], problems };
 }
+
+/** A property's name: an identifier's, or a literal's as a string; undefined for any other key. */
+export const keyName = (key: Node): string | undefined =>
+  key.type === "Identifier" ? key.name : key.type === "Literal" ? String(key.value) : undefined;
 
 /** A node's kind, for a message: `a function declaration`, `an if statement`. */
 function describe(node: Node): string {
