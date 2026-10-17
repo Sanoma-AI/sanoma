@@ -123,6 +123,18 @@ describe("setFields", () => {
       'import { s } from "a/resources";\nexport const x = s.t({ metadata: { "app.owner": "b", app: { tier: 2 } } });\n',
     );
   });
+
+  it("writes a secret as secret(), importing it after the file's imports once", async () => {
+    const text = 'import { s } from "a/resources";\nexport const x = s.t({ name: "x" });\n';
+    const out = await setFields(text, "x", { password: secret("X_PASSWORD") });
+    expect(out).toBe(
+      'import { s } from "a/resources";\nimport { secret } from "sanoma/resources";\nexport const x = s.t({ name: "x", password: secret("X_PASSWORD") });\n',
+    );
+    expect(read(out).problems).toEqual([]);
+    const again = await setFields(out, "x", { token: secret("X_TOKEN", { generate: true }) });
+    expect(again.split('import { secret } from "sanoma/resources";')).toHaveLength(2);
+    expect(again).toContain('token: secret("X_TOKEN", { generate: true }),');
+  });
 });
 
 describe("renderDataFile", () => {

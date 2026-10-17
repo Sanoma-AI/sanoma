@@ -6,17 +6,27 @@ import { parseEnv } from "node:util";
 const KEY = "SANOMA_SECRETS_KEY";
 
 /**
+ * Adds each variable `file` (a `.env`) does not set yet, an empty value counting as unset, and
+ * keeps the file's own; a new file is readable by its owner alone. Returns the names it added.
+ */
+export function addToEnv(file: string, values: Record<string, string>): string[] {
+  const text = existsSync(file) ? readFileSync(file, "utf8") : "";
+  const set = parseEnv(text);
+  const added = Object.keys(values).filter((name) => !set[name]);
+  if (!added.length) return added;
+  const gap = text === "" || text.endsWith("\n") ? "" : "\n";
+  appendFileSync(file, gap + added.map((name) => `${name}=${values[name]}\n`).join(""), { mode: 0o600 });
+  return added;
+}
+
+/**
  * The one writer of `SANOMA_SECRETS_KEY`, which encrypts the stored credentials: unless `file`
- * (a `.env`) already sets it, makes one (32 random bytes, base64) and appends it, making the file
- * readable by its owner alone when it is new. Returns the key it made, or undefined when it kept the file's.
+ * already sets it, makes one (32 random bytes, base64) and adds it (`addToEnv`). Returns the key
+ * it made, or undefined when it kept the file's.
  */
 export function writeSecretsKey(file: string): string | undefined {
-  const text = existsSync(file) ? readFileSync(file, "utf8") : "";
-  if (parseEnv(text)[KEY]) return undefined;
   const key = randomBytes(32).toString("base64");
-  const gap = text === "" || text.endsWith("\n") ? "" : "\n";
-  appendFileSync(file, `${gap}${KEY}=${key}\n`, { mode: 0o600 });
-  return key;
+  return addToEnv(file, { [KEY]: key }).length ? key : undefined;
 }
 
 /**

@@ -9,6 +9,7 @@ import {
   isReference,
   keyName,
   readDataFile,
+  SECRET_ENTRIES,
 } from "./datafile.ts";
 import { isSecret } from "./secret.ts";
 
@@ -47,6 +48,9 @@ export function formatOptions(root: string): FormatConfig {
  * it is formatted with oxfmt under `options` (`formatOptions`), and every other byte of the file
  * stays as it was.
  *
+ * A value naming a secret adds `import { secret } from "sanoma/resources"` after the file's
+ * imports when it has none.
+ *
  * Throws when the file does not parse, declares no such resource, or a path cannot be set: it
  * runs through a value that is not an object or a list, or ends at a reference to another
  * resource (a person changes a reference; a vendor's value never replaces one).
@@ -63,6 +67,7 @@ export async function setFields(
     const { start, end, replacement } = editAt(declarationOf(text, exportName).object, path, value);
     text = text.slice(0, start) + replacement + text.slice(end);
   }
+  if (Object.values(fields).some(holdsSecret)) text = withSecretImport(text);
   // The declaration on its own: a top-level statement formats the same in its file as alone.
   const { start, end } = declarationOf(text, exportName).statement;
   const formatted = await format(text.slice(start, end), options);
@@ -97,6 +102,20 @@ export async function renderDataFile({ imports, exports }: DataFileContent, opti
     `export default [${exports.map((e) => e.name).join(", ")}];`,
   ];
   return format(`${parts.filter(Boolean).join("\n\n")}\n`, options);
+}
+
+/** `text` with `secret` imported after its imports, unless it imports it already. */
+function withSecretImport(text: string): string {
+  const imports = parse("/data-file.ts", text).program.body.filter((s: Node) => s.type === "ImportDeclaration");
+  const has = imports.some(
+    (s: Node) =>
+      SECRET_ENTRIES.has(s.source.value) &&
+      s.specifiers.some((sp: Node) => (sp.imported?.name ?? sp.imported?.value) === "secret"),
+  );
+  if (has) return text;
+  const at = imports.at(-1)?.end ?? 0;
+  const line = `import { ${SECRET_IMPORT.local} } from ${JSON.stringify(SECRET_IMPORT.source)};`;
+  return at ? `${text.slice(0, at)}\n${line}${text.slice(at)}` : `${line}\n${text}`;
 }
 
 /** The `export const` of the resource `name` in `text`, and the object literal its constructor takes. */

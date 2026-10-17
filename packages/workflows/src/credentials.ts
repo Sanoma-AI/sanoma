@@ -39,10 +39,13 @@ function secretsKey(): Buffer {
   return key;
 }
 
-/** `value` encrypted for the table: `v1:<iv, base64>:<ciphertext and tag, base64>`, AES-256-GCM. */
-export function encrypt(value: string): string {
+/**
+ * `name`'s value encrypted for the table: `v1:<iv, base64>:<ciphertext and tag, base64>`,
+ * AES-256-GCM, with the name as associated data, so a value moved to another row does not decrypt.
+ */
+export function encrypt(name: string, value: string): string {
   const iv = randomBytes(12);
-  const cipher = createCipheriv(CIPHER, secretsKey(), iv);
+  const cipher = createCipheriv(CIPHER, secretsKey(), iv).setAAD(Buffer.from(name));
   const sealed = Buffer.concat([cipher.update(value, "utf8"), cipher.final(), cipher.getAuthTag()]);
   return `${V1}${iv.toString("base64")}:${sealed.toString("base64")}`;
 }
@@ -50,16 +53,18 @@ export function encrypt(value: string): string {
 /** The value `name`'s row holds: decrypted, or a plaintext one as it is (it is encrypted on its next write). */
 export function decrypt(name: string, stored: string): string {
   if (!stored.startsWith(V1)) return stored;
+  const key = secretsKey();
   const [iv = "", body = ""] = stored.slice(V1.length).split(":");
   const sealed = Buffer.from(body, "base64");
-  const decipher = createDecipheriv(CIPHER, secretsKey(), Buffer.from(iv, "base64"));
-  decipher.setAuthTag(sealed.subarray(-TAG_BYTES));
   try {
+    const decipher = createDecipheriv(CIPHER, key, Buffer.from(iv, "base64")).setAAD(Buffer.from(name));
+    decipher.setAuthTag(sealed.subarray(-TAG_BYTES));
     return Buffer.concat([decipher.update(sealed.subarray(0, -TAG_BYTES)), decipher.final()]).toString("utf8");
   } catch (err) {
-    throw new Error(`the stored ${name} cannot be decrypted: ${SECRETS_KEY} is not the key it was stored with`, {
-      cause: err,
-    });
+    throw new Error(
+      `the stored ${name} cannot be decrypted: ${SECRETS_KEY} is not the key it was stored with, or the row was not stored as ${name}`,
+      { cause: err },
+    );
   }
 }
 
@@ -86,7 +91,7 @@ export async function storeCredential(
     `WITH stored AS (INSERT INTO ${TABLE} (name, value, set_by) VALUES ($1, $2, $3) ` +
       "ON CONFLICT (name) DO UPDATE SET value = EXCLUDED.value, set_by = EXCLUDED.set_by, set_at = now() " +
       `RETURNING name) SELECT pg_notify('${CHANNEL}', name) FROM stored`,
-    [name, encrypt(value), setBy],
+    [name, encrypt(name, value), setBy],
   );
 }
 
@@ -103,7 +108,7 @@ export async function ensureCredential(
   await db.query(
     `WITH stored AS (INSERT INTO ${TABLE} (name, value, set_by) VALUES ($1, $2, $3) ON CONFLICT (name) DO NOTHING ` +
       `RETURNING name) SELECT pg_notify('${CHANNEL}', name) FROM stored`,
-    [name, encrypt(make()), setBy],
+    [name, encrypt(name, make()), setBy],
   );
   return (await storedCredentials(db, [name])).get(name)!.value;
 }

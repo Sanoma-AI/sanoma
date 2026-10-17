@@ -484,7 +484,7 @@ describe("encryption at rest", () => {
   });
 
   it("gives a live run's driver its secrets: one marked generate is made once, stored before the vendor call", async () => {
-    const NAME = "SANOMA_TEST_GENERATED";
+    const NAME = "TEST_GENERATED_SECRET";
     await sql("DELETE FROM sanoma_credentials WHERE name = $1", [NAME]);
     const marker = z.object({ $secret: z.string(), generate: z.literal(true).optional() });
     const vault = defineConnector("vault", {

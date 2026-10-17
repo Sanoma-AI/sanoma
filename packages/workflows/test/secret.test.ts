@@ -9,9 +9,13 @@ describe("secret", () => {
   it("is a frozen marker naming the secret, from the entry data files import it from", () => {
     expect(secret("DB_PASSWORD")).toEqual({ $secret: "DB_PASSWORD" });
     expect(secret("DB_PASSWORD", { generate: true })).toEqual({ $secret: "DB_PASSWORD", generate: true });
-    expect(secret("DB_PASSWORD", { generate: false })).toEqual({ $secret: "DB_PASSWORD" });
     expect(Object.isFrozen(secret("X"))).toBe(true);
     expect(fromResources).toBe(secret);
+  });
+
+  it("refuses a name that is not upper case, or is one of sanoma's own", () => {
+    expect(() => secret("db_password")).toThrow(/a secret's name is an environment variable's/);
+    expect(() => secret("SANOMA_SECRETS_KEY")).toThrow(/not SANOMA_/);
   });
 });
 
@@ -53,11 +57,17 @@ describe("resolveSecrets", () => {
 
 describe("encrypt and decrypt", () => {
   it("round-trips under the key, as v1:<iv>:<ciphertext and tag>, a new iv each time", () => {
-    const sealed = encrypt("hunter2");
+    const sealed = encrypt("PASSWORD", "hunter2");
     expect(sealed).toMatch(/^v1:[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+$/);
     expect(sealed).not.toContain("hunter2");
-    expect(encrypt("hunter2")).not.toBe(sealed);
+    expect(encrypt("PASSWORD", "hunter2")).not.toBe(sealed);
     expect(decrypt("PASSWORD", sealed)).toBe("hunter2");
+  });
+
+  it("refuses a value moved to another name's row, and a malformed one, naming the row", () => {
+    const sealed = encrypt("PASSWORD", "hunter2");
+    expect(() => decrypt("OTHER", sealed)).toThrow(/^the stored OTHER cannot be decrypted/);
+    expect(() => decrypt("PASSWORD", "v1:x:y")).toThrow(/^the stored PASSWORD cannot be decrypted/);
   });
 
   it("reads a value stored before encryption as it is, with or without a key", () => {
@@ -71,13 +81,15 @@ describe("encrypt and decrypt", () => {
   });
 
   it("refuses without a key, a key of the wrong length, and a value stored under another key, naming the variable", () => {
-    const sealed = encrypt("hunter2");
+    const sealed = encrypt("PASSWORD", "hunter2");
     try {
       vi.stubEnv("SANOMA_SECRETS_KEY", undefined);
-      expect(() => encrypt("x")).toThrow(/^SANOMA_SECRETS_KEY is not set: it encrypts the stored credentials/);
+      expect(() => encrypt("PASSWORD", "x")).toThrow(
+        /^SANOMA_SECRETS_KEY is not set: it encrypts the stored credentials/,
+      );
       expect(() => decrypt("PASSWORD", sealed)).toThrow(/^SANOMA_SECRETS_KEY is not set/);
       vi.stubEnv("SANOMA_SECRETS_KEY", randomBytes(16).toString("base64"));
-      expect(() => encrypt("x")).toThrow("SANOMA_SECRETS_KEY must be 32 bytes, base64; it is 16 bytes");
+      expect(() => encrypt("PASSWORD", "x")).toThrow("SANOMA_SECRETS_KEY must be 32 bytes, base64; it is 16 bytes");
       vi.stubEnv("SANOMA_SECRETS_KEY", randomBytes(32).toString("base64"));
       expect(() => decrypt("PASSWORD", sealed)).toThrow(
         "the stored PASSWORD cannot be decrypted: SANOMA_SECRETS_KEY is not the key it was stored with",
