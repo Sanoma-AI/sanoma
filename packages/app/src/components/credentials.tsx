@@ -1,5 +1,5 @@
 import { type CredentialStatus, credentialReady, errorMessage } from "@sanoma-ai/workflows/shared";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { type QueryKey, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -42,19 +42,41 @@ export function Credentials({ vendor }: { vendor: string }) {
 }
 
 /**
+ * Where a row's value is stored and cleared, and the query it refreshes: the connector page's by
+ * default. Without `clear`, a row has no Clear.
+ */
+export interface CredentialStore {
+  set: typeof setCredentialFn;
+  clear?: typeof clearCredentialFn;
+  queryKey: QueryKey;
+}
+
+const CONNECTOR_STORE: CredentialStore = {
+  set: setCredentialFn,
+  clear: clearCredentialFn,
+  queryKey: credentialsQuery().queryKey,
+};
+
+/**
  * One variable: its status and manual, and who set a stored value and when. The environment's
  * value wins, so a variable it sets has no controls; any other has Set (Replace once set), and
- * Clear when a value is stored.
+ * Clear when a value is stored and the store can clear it.
  */
-function CredentialRow({ credential: c }: { credential: CredentialStatus }) {
+export function CredentialRow({
+  credential: c,
+  store = CONNECTOR_STORE,
+}: {
+  credential: CredentialStatus;
+  store?: CredentialStore;
+}) {
   const [open, setOpen] = useState(false);
   const queryClient = useQueryClient();
-  const clear = useServerFn(clearCredentialFn);
+  const clear = useServerFn(store.clear ?? clearCredentialFn);
   const clearing = useMutation({
     mutationFn: () => clear({ data: { name: c.name } }),
     onSuccess: async () => {
       toast.success(`${c.name} cleared`);
-      await queryClient.invalidateQueries({ queryKey: credentialsQuery().queryKey });
+      await queryClient.invalidateQueries({ queryKey: store.queryKey });
     },
     onError: (err) => toast.error(errorMessage(err).trim() || `Could not clear ${c.name}, and no reason was given`),
   });
@@ -83,7 +105,7 @@ function CredentialRow({ credential: c }: { credential: CredentialStatus }) {
           <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
             {c.status === "set" ? "Replace" : "Set"}
           </Button>
-          {c.source === "stored" && (
+          {c.source === "stored" && store.clear && (
             <Button
               type="button"
               size="sm"
@@ -95,7 +117,7 @@ function CredentialRow({ credential: c }: { credential: CredentialStatus }) {
               Clear
             </Button>
           )}
-          <SetDialog credential={c} open={open} onClose={() => setOpen(false)} />
+          <SetDialog credential={c} store={store} open={open} onClose={() => setOpen(false)} />
         </ItemActions>
       )}
     </Item>
@@ -109,17 +131,19 @@ function CredentialRow({ credential: c }: { credential: CredentialStatus }) {
  */
 function SetDialog({
   credential,
+  store,
   open,
   onClose,
 }: {
   credential: CredentialStatus;
+  store: CredentialStore;
   open: boolean;
   onClose: () => void;
 }) {
   const { name } = credential;
   const [value, setValue] = useState("");
   const queryClient = useQueryClient();
-  const set = useServerFn(setCredentialFn);
+  const set = useServerFn(store.set);
   const mutation = useMutation({
     mutationFn: () => set({ data: { name, value } }),
     // Dropped from the cache at once, with the closure that holds the value.
@@ -129,7 +153,7 @@ function SetDialog({
       setValue("");
       mutation.reset();
       onClose();
-      await queryClient.invalidateQueries({ queryKey: credentialsQuery().queryKey });
+      await queryClient.invalidateQueries({ queryKey: store.queryKey });
     },
   });
   // The schema's reason sits under the field; anything else (the network, a bug) too, as it is.

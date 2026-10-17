@@ -23,6 +23,7 @@ import {
   getRun,
   getRuns,
   getScenarios,
+  getSetupStatus,
   getSource,
   startRunFn,
 } from "./functions.ts";
@@ -143,6 +144,10 @@ export const scenariosNaming =
  */
 export const credentialsQuery = () =>
   queryOptions({ queryKey: ["credentials"], queryFn: () => getCredentials(), staleTime: 5_000 });
+
+/** What is connected for going live (the connect page). */
+export const setupStatusQuery = () =>
+  queryOptions({ queryKey: ["setup"], queryFn: () => getSetupStatus(), staleTime: 5_000 });
 
 /** The vendor's credential statuses, if its drivers declare any: for `select`. */
 export const credentialsFor = (vendor: string) => (all: CredentialsResponse) => all[vendor];

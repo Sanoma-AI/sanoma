@@ -27,6 +27,7 @@ import {
   validate,
   withoutSources,
 } from "./server/core.ts";
+import { setSetupToken, setupStatus } from "./server/setup.ts";
 import { withPrincipal } from "./middleware.ts";
 
 // The page's reads and changes, as server functions: the app's only HTTP surface. Each parses its
@@ -109,3 +110,12 @@ export const clearCredentialFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .validator(validate(ClearCredentialRequest))
   .handler(({ data, context }) => clearCredential(context.app, context.principal, data));
+
+/** What is connected for going live: the GitHub App's slug, and whether each token is set. */
+export const getSetupStatus = createServerFn(READ).handler(({ context }) => setupStatus(context.app));
+
+/** Stores a pasted setup token (`GITHUB_TOKEN`, `SUPABASE_ACCESS_TOKEN`) as the actor; never sent back. */
+export const setSetupTokenFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .validator(validate(SetCredentialRequest))
+  .handler(({ data, context }) => setSetupToken(context.app, context.principal, data));

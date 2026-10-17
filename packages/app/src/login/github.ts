@@ -150,13 +150,13 @@ async function api(token: string, path: string, missingIsNone = false): Promise<
   return res.json();
 }
 
-const cookies = (request: Request) => parse(request.headers.get("cookie") ?? "");
+export const cookies = (request: Request) => parse(request.headers.get("cookie") ?? "");
 
 /**
  * A Set-Cookie line (`maxAge` 0 clears it): httpOnly, Lax, and Secure when the request came over
  * HTTPS (directly or through a proxy that says so).
  */
-const cookie = (request: Request, name: string, value: string, path: string, maxAge: number) =>
+export const cookie = (request: Request, name: string, value: string, path: string, maxAge: number) =>
   serialize(name, value, {
     path,
     maxAge,
