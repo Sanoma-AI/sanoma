@@ -135,31 +135,6 @@ export function observed(state: Record<string, unknown>, container: Inspected): 
 }
 
 /**
- * `bridge`, its imports of a container `observed` through Docker's inspect, inside the driver
- * only, and by its name too (the provider finds one by its id alone).
- */
-function observing(bridge: ProviderClient, host: () => string, inspect: Inspect): ProviderClient {
-  return {
-    configure: (...args) => bridge.configure(...args),
-    read: (...args) => bridge.read(...args),
-    plan: (...args) => bridge.plan(...args),
-    apply: (...args) => bridge.apply(...args),
-    close: (...args) => bridge.close(...args),
-    import: async (ref, typeName, id) => {
-      const container = await inspect(host(), id);
-      const reply = await bridge.import(ref, typeName, container?.Id ?? id);
-      if (!container) return reply;
-      const resources = reply.resources.map((r) =>
-        r.typeName === "docker_container"
-          ? { ...r, stateJson: JSON.stringify(observed(JSON.parse(r.stateJson) as Record<string, unknown>, container)) }
-          : r,
-      );
-      return { ...reply, resources };
-    },
-  };
-}
-
-/**
  * Containers on the Docker daemon at `host` (`dockerHost()` by default, on every call) through
  * the `kreuzwerker/docker` OpenTofu provider on `bridge` (the default bridge when none is given).
  * An import also inspects the container, for the environment and labels the provider never reads
@@ -167,5 +142,15 @@ function observing(bridge: ProviderClient, host: () => string, inspect: Inspect)
  */
 export function dockerDriver({ bridge = defaultBridge(), host, inspect = inspectContainer }: DockerDriverOptions = {}) {
   const at = () => host ?? dockerHost();
-  return Object.freeze({ ...dockerTf.driver(observing(bridge, at, inspect), () => ({ host: at() })), env });
+  const driver = dockerTf.driver(
+    bridge,
+    () => ({ host: at() }),
+    // Docker finds a container by its name too; the provider, by its id alone.
+    async (_, id) => (await inspect(at(), id))?.Id ?? id,
+    async (_, state) => {
+      const container = await inspect(at(), String(state.id));
+      return container ? observed(state, container) : state;
+    },
+  );
+  return Object.freeze({ ...driver, env });
 }

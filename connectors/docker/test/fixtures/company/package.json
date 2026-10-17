@@ -1,0 +1,10 @@
+{
+  "name": "host-check-company",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@sanoma-ai/workflows": "file:vendor/sanoma-ai-workflows.tgz",
+    "sanoma": "file:vendor/sanoma.tgz"
+  },
+  "packageManager": "pnpm@11.15.1"
+}

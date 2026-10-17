@@ -137,12 +137,20 @@ export interface TfConnector<V extends string, T extends Record<string, z.ZodObj
    * returns, read on every call (it may throw, such as a `DriverError` for a missing token).
    * `importId`, given, turns the id an import is given (a binding id the provider cannot import
    * by, such as GitHub's node id) into the provider's import id, by the connector's type name.
+   * `observe`, given, completes each state an import returns.
    */
-  driver(bridge: ProviderClient, config: () => Record<string, unknown>, importId?: ImportId): Driver;
+  driver(bridge: ProviderClient, config: () => Record<string, unknown>, importId?: ImportId, observe?: Observe): Driver;
 }
 
 /** The provider's import id for the id an import is given, by the connector's type name. */
 export type ImportId = (type: string, id: string) => string | Promise<string>;
+
+/**
+ * An imported state, in the provider's shape, with what the provider's read leaves out filled in
+ * from the vendor (Docker's provider never reads a container's environment or labels back), by
+ * the connector's type name. It runs inside the driver, before anything else reads the state.
+ */
+export type Observe = (type: string, state: Record<string, unknown>) => Promise<Record<string, unknown>>;
 
 /** The driver's data about an object: the provider's state version and private data, `<version>:<base64>`. */
 const HANDLE = /^(\d+):([A-Za-z0-9+/]*={0,2})$/;
@@ -283,6 +291,7 @@ export function tfConnector<
     bridge: ProviderClient,
     config: () => Record<string, unknown>,
     importId: ImportId = (_, id) => id,
+    observe?: Observe,
   ): Driver {
     /** Runs `fn` on a configured provider, with the bridge's errors as `DriverError`s. */
     async function call<R>(op: string, fn: () => Promise<R>): Promise<R> {
@@ -312,7 +321,14 @@ export function tfConnector<
       /** The object as the provider has it now, or undefined when there is none (or one `exists` refuses). */
       const importRaw = async (id: string) => {
         const { resources: found } = await bridge.import(provider, tf.typeName, await importId(type, id));
-        const r = found.find((f) => f.typeName === tf.typeName);
+        const at = found.find((f) => f.typeName === tf.typeName);
+        const r =
+          at && observe
+            ? {
+                ...at,
+                stateJson: JSON.stringify(await observe(type, JSON.parse(at.stateJson) as Record<string, unknown>)),
+              }
+            : at;
         return r && (!exists || exists(stateOf(r.stateJson))) ? r : undefined;
       };
       const fresh = async (op: string, input: Known): Promise<ResourceState | undefined> => {
