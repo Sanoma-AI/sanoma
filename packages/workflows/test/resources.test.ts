@@ -109,9 +109,11 @@ describe("readResources", () => {
     });
   });
 
-  it("is what describeConfig lists as the config's resources, without problems", () => {
-    const { resources, problems } = describeConfig(company);
+  it("is what describeConfig lists as the config's resources, with their bindings and the orphans, without problems", () => {
+    const { resources, orphans, problems } = describeConfig(company);
     expect(resources).toEqual(readResources(company));
+    expect(orphans).toEqual(readDataFiles(dirname(company.file!), company.connectors).orphans);
+    expect(orphans).toHaveLength(1);
     expect(problems).toEqual([]);
     expect(JSON.parse(JSON.stringify(resources))).toEqual(resources);
   });

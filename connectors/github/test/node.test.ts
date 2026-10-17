@@ -75,7 +75,7 @@ describe("githubDriver, given a node id", () => {
     expect(imports()).toEqual([]);
   });
 
-  it("is retryable when GitHub fails, and imports a name without a query", async () => {
+  it("is retryable when GitHub fails, and imports a name without a query, even one starting R_", async () => {
     play("unavailable", [{ method: "POST", path: "/graphql", status: 502, body: { message: "Server Error" } }]);
     const driver = githubDriver({ bridge });
     expect(await call(driver, "repository.import", { id: "R_kgDOU0BoZg" }).catch((e) => e)).toMatchObject({
@@ -84,7 +84,12 @@ describe("githubDriver, given a node id", () => {
       message: "github: resolving the node R_kgDOU0BoZg: Server Error",
     });
     await call(driver, "repository.import", { id: "sanoma" });
-    expect(imports()).toEqual([["github_repository", "sanoma"]]);
+    await call(driver, "repository.import", { id: "R_tools" });
+    expect(imports()).toEqual([
+      ["github_repository", "sanoma"],
+      ["github_repository", "R_tools"],
+    ]);
+    expect(sent).toHaveLength(1);
   });
 });
 

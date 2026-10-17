@@ -8,7 +8,7 @@ import { type Effect, VENDOR, type VendorInfo } from "./op.ts";
 import { type Outline, outlineWithSource } from "./outline.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
 import { type ResourceFields, resourceTypesOf } from "./resource.ts";
-import { type DeclaredResource, readDataFiles, type ResourceProblem } from "./resources.ts";
+import { type DataFiles, type DeclaredResource, readDataFiles, type ResourceProblem } from "./resources.ts";
 
 // `@sanoma-ai/workflows/describe`: what a UI renders from, apart from the main entry.
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
@@ -142,6 +142,8 @@ export interface ConfigDescription {
    * less any with a problem and any that names one.
    */
   resources: DeclaredResource[];
+  /** Each binding in the lockfile (`LOCKFILE`) whose key no data file declares, as `readDataFiles` reports it. */
+  orphans: DataFiles["orphans"];
   /** What is wrong in the data files (`readDataFiles`), each at its file, relative to the root, line and column. A workflow's are on its entry. */
   problems: ResourceProblem[];
   /** `defined` is false for `allowAll`. */
@@ -229,6 +231,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     vendors,
     resourceTypes,
     resources: dataFiles.resources,
+    orphans: dataFiles.orphans,
     problems: dataFiles.problems,
     policy: {
       defined: resolved.policy !== allowAll,

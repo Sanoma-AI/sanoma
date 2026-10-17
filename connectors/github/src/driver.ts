@@ -27,11 +27,11 @@ const env = z.object({
 });
 
 /**
- * The node ids a binding keeps that the provider cannot import by, by type: a repository's (`R_…`,
+ * The node ids a binding keeps that the provider cannot import by, by type: a repository's (`R_kgD…`, not `R_` alone, which begins names too,
  * or the legacy base64 of `010:Repository…`) and a branch protection rule's (`BPR_…`).
  */
 const NODE_IDS: Readonly<Record<string, RegExp>> = {
-  repository: /^(R_[\w-]+|MDEwOlJlcG9zaXRvcnk[\w+/=]+)$/,
+  repository: /^(R_kgD[\w-]+|MDEwOlJlcG9zaXRvcnk[\w+/=]+)$/,
   branch_protection: /^BPR_[\w-]+$/,
 };
 
@@ -69,6 +69,7 @@ async function importIdOf(id: string, { token, owner }: { token: string; owner: 
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ query: NODE_QUERY, variables: { id } }),
+      signal: AbortSignal.timeout(30_000),
     });
     status = res.status;
     json = await res.json().catch(() => undefined);
@@ -82,7 +83,7 @@ async function importIdOf(id: string, { token, owner }: { token: string; owner: 
     throw new DriverError(
       `github: resolving the node ${id}: ${failed?.message ?? reply?.message ?? `HTTP ${status}`}`,
       {
-        retryable: retryableStatus(status),
+        retryable: retryableStatus(status) || failed?.type === "RATE_LIMITED",
         status,
         ...(failed?.type && { vendorCode: failed.type }),
       },

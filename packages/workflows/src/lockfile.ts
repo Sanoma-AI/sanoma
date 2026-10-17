@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import type { ResourceProblem } from "./resources.ts";
@@ -59,8 +59,13 @@ export function serializeLockfile(bindings: Bindings): string {
 export function writeLockfile(root: string, bindings: Bindings): void {
   const path = join(root, LOCKFILE);
   const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, serializeLockfile(bindings));
-  renameSync(temporary, path);
+  try {
+    writeFileSync(temporary, serializeLockfile(bindings));
+    renameSync(temporary, path);
+  } catch (err) {
+    rmSync(temporary, { force: true });
+    throw err;
+  }
 }
 
 /**
