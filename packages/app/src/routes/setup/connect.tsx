@@ -32,14 +32,15 @@ export const Route = createFileRoute("/setup/connect")({
 /** What the callback came back with, said on the page. */
 const OUTCOME = {
   connected:
-    "The GitHub App is created and its keys are stored. Install it on the account that will hold the repository.",
+    "The GitHub App is created and its keys are stored. Install it on the account that will hold the repository; sign-in uses it once the app restarts.",
   expired: "That link from GitHub has expired or did not start here: create the App again.",
-  failed: "GitHub did not hand over the App's keys: create the App again.",
+  failed:
+    "The App's keys were not stored (the app's log says why): delete the App on GitHub if it was created, then create it again.",
   "bad-org": "That is not an organization's login.",
 } as const;
 
 /** The pasted tokens' rows store through the setup function, which takes these names only; nothing clears them here. */
-const SETUP_STORE: CredentialStore = { set: setSetupTokenFn, queryKey: setupStatusQuery().queryKey };
+const SETUP_STORE: CredentialStore = { set: setSetupTokenFn };
 
 /** Going live, step 1: the GitHub App (or a token of your own) and a Supabase token, and what is connected. */
 function ConnectPage() {

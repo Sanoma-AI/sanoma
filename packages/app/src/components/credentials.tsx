@@ -1,5 +1,5 @@
 import { type CredentialStatus, credentialReady, errorMessage } from "@sanoma-ai/workflows/shared";
-import { type QueryKey, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -42,20 +42,16 @@ export function Credentials({ vendor }: { vendor: string }) {
 }
 
 /**
- * Where a row's value is stored and cleared, and the query it refreshes: the connector page's by
- * default. Without `clear`, a row has no Clear.
+ * Where a row's value is stored and cleared: the connector page's by default. Without `clear`, a
+ * row has no Clear. Either way every credentials query refreshes (`credentialsQuery`'s key is the
+ * prefix of the setup page's too), since both pages show the same rows.
  */
 export interface CredentialStore {
   set: typeof setCredentialFn;
   clear?: typeof clearCredentialFn;
-  queryKey: QueryKey;
 }
 
-const CONNECTOR_STORE: CredentialStore = {
-  set: setCredentialFn,
-  clear: clearCredentialFn,
-  queryKey: credentialsQuery().queryKey,
-};
+const CONNECTOR_STORE: CredentialStore = { set: setCredentialFn, clear: clearCredentialFn };
 
 /**
  * One variable: its status and manual, and who set a stored value and when. The environment's
@@ -71,12 +67,13 @@ export function CredentialRow({
 }) {
   const [open, setOpen] = useState(false);
   const queryClient = useQueryClient();
+  // A hook is called on every render; without `clear` the row shows no Clear, so this is never called.
   const clear = useServerFn(store.clear ?? clearCredentialFn);
   const clearing = useMutation({
     mutationFn: () => clear({ data: { name: c.name } }),
     onSuccess: async () => {
       toast.success(`${c.name} cleared`);
-      await queryClient.invalidateQueries({ queryKey: store.queryKey });
+      await queryClient.invalidateQueries({ queryKey: credentialsQuery().queryKey });
     },
     onError: (err) => toast.error(errorMessage(err).trim() || `Could not clear ${c.name}, and no reason was given`),
   });
@@ -153,7 +150,7 @@ function SetDialog({
       setValue("");
       mutation.reset();
       onClose();
-      await queryClient.invalidateQueries({ queryKey: store.queryKey });
+      await queryClient.invalidateQueries({ queryKey: credentialsQuery().queryKey });
     },
   });
   // The schema's reason sits under the field; anything else (the network, a bug) too, as it is.

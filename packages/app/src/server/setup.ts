@@ -68,7 +68,8 @@ export function githubManifest(origin: string, name: string) {
     url: origin,
     redirect_url: `${origin}${CALLBACK}`,
     callback_urls: [`${origin}/auth/github/callback`],
-    hook_attributes: { url: `${origin}/webhooks/github` },
+    // Off until the app has a route that receives them: GitHub would fail every delivery.
+    hook_attributes: { url: `${origin}/webhooks/github`, active: false },
     public: false,
     default_permissions: {
       administration: "write",
@@ -124,22 +125,25 @@ export async function githubCallback(app: AppContext, request: Request): Promise
   if (!code || !state || !sent || !signature || sent !== state || !stateSigner().verify(sent, signature)) {
     return toConnect("expired", request);
   }
-  const res = await fetch(`${API}/app-manifests/${encodeURIComponent(code)}/conversions`, {
-    method: "POST",
-    headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "sanoma" },
-  });
-  if (!res.ok) {
-    console.error(`sanoma app: GitHub answered ${res.status} for the App's manifest conversion`);
+  try {
+    const res = await fetch(`${API}/app-manifests/${encodeURIComponent(code)}/conversions`, {
+      method: "POST",
+      headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "sanoma" },
+    });
+    if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
+    const keys = (await res.json()) as Record<keyof typeof GITHUB_APP, unknown> & { owner?: { login?: string } };
+    const by = (await app.login.resolveActor(request))?.id ?? keys.owner?.login ?? "github";
+    await Promise.all(
+      Object.entries(GITHUB_APP).map(([field, name]) => {
+        const value = keys[field as keyof typeof GITHUB_APP];
+        return value === null || value === undefined ? undefined : app.client.setSecret(name, String(value), { by });
+      }),
+    );
+  } catch (err) {
+    // The code works once: the App may exist on GitHub with its keys not (all) stored here.
+    console.error("sanoma app: the GitHub App's keys were not stored:", err);
     return toConnect("failed", request);
   }
-  const keys = (await res.json()) as Record<keyof typeof GITHUB_APP, unknown> & { owner?: { login?: string } };
-  const by = (await app.login.resolveActor(request))?.id ?? keys.owner?.login ?? "github";
-  await Promise.all(
-    Object.entries(GITHUB_APP).map(([field, name]) => {
-      const value = keys[field as keyof typeof GITHUB_APP];
-      return value === null || value === undefined ? undefined : app.client.setSecret(name, String(value), { by });
-    }),
-  );
   return toConnect("connected", request);
 }
 

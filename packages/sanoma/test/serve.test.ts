@@ -66,6 +66,10 @@ describe("appOptions", () => {
     await expect(appOptions(async () => new Map())).rejects.toThrow(
       /SANOMA_GITHUB_CLIENT_ID, SANOMA_GITHUB_CLIENT_SECRET not set$/,
     );
+    // A read that fails is a UsageError, saying why.
+    await expect(appOptions(async () => Promise.reject(new Error("no database")))).rejects.toThrow(
+      /^GitHub sign-in could not read the stored client id and secret: no database$/,
+    );
     // Without the repository, nothing is read.
     environment({});
     expect(await appOptions(stored)).toEqual({ host: undefined });

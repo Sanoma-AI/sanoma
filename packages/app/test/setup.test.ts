@@ -117,6 +117,7 @@ describe("creating the GitHub App", () => {
       public: false,
       default_permissions: { administration: "write", contents: "write", metadata: "read", pull_requests: "write" },
       default_events: ["push", "pull_request"],
+      hook_attributes: { active: false },
     });
     expect(html).toContain('document.getElementById("manifest").submit()');
     const line = res.headers.getSetCookie().find((l) => l.startsWith("sanoma_setup_state="))!;

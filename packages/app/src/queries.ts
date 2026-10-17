@@ -145,9 +145,9 @@ export const scenariosNaming =
 export const credentialsQuery = () =>
   queryOptions({ queryKey: ["credentials"], queryFn: () => getCredentials(), staleTime: 5_000 });
 
-/** What is connected for going live (the connect page). */
+/** What is connected for going live (the connect page): under the credentials' key, so setting one refreshes both. */
 export const setupStatusQuery = () =>
-  queryOptions({ queryKey: ["setup"], queryFn: () => getSetupStatus(), staleTime: 5_000 });
+  queryOptions({ queryKey: ["credentials", "setup"], queryFn: () => getSetupStatus(), staleTime: 5_000 });
 
 /** The vendor's credential statuses, if its drivers declare any: for `select`. */
 export const credentialsFor = (vendor: string) => (all: CredentialsResponse) => all[vendor];

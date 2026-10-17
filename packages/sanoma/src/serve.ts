@@ -33,7 +33,7 @@ async function served(config: SanomaConfig, options: AppOptions): Promise<Served
 }
 
 const GITHUB = ["SANOMA_GITHUB_CLIENT_ID", "SANOMA_GITHUB_CLIENT_SECRET", "SANOMA_GITHUB_REPO"] as const;
-const CLIENT = ["SANOMA_GITHUB_CLIENT_ID", "SANOMA_GITHUB_CLIENT_SECRET"];
+const CLIENT = GITHUB.slice(0, 2);
 
 /** Reads stored secrets by name (`SanomaClient.secrets`): the values found, the environment's first. */
 export type ReadSecrets = (names: string[]) => Promise<Map<string, string>>;
@@ -62,7 +62,10 @@ export async function appOptions(readSecrets?: ReadSecrets): Promise<Pick<AppOpt
   const host = env.SANOMA_APP_HOST || undefined;
   const found = new Map<string, string>(GITHUB.flatMap((name) => (env[name] ? [[name, env[name]]] : [])));
   if (found.has("SANOMA_GITHUB_REPO") && readSecrets && CLIENT.some((name) => !found.has(name))) {
-    for (const [name, value] of await readSecrets(CLIENT)) if (value) found.set(name, value);
+    const stored = await readSecrets(CLIENT).catch((err: unknown) => {
+      throw new UsageError(`GitHub sign-in could not read the stored client id and secret: ${errorMessage(err)}`);
+    });
+    for (const [name, value] of stored) if (value) found.set(name, value);
   }
   const [clientId, clientSecret, repo] = GITHUB.map((name) => found.get(name));
   if (!clientId && !clientSecret && !repo) {
