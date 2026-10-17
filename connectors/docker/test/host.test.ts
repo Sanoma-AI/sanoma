@@ -1,5 +1,5 @@
 import { type ChildProcess, execFileSync, spawn, spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -89,15 +89,17 @@ describe.skipIf(!dockerAvailable() || !bin)("docker.container meets the Host con
     // The company: the fixture with this checkout's packages, packed, and a lockfile.
     cpSync(fileURLToPath(new URL("./fixtures/company/", import.meta.url)), work, { recursive: true });
     const vendor = join(work, "vendor");
-    for (const pkg of ["workflows", "app", "bridge", "sanoma"]) {
-      execFileSync("pnpm", ["pack", "--pack-destination", vendor], {
+    for (const [pkg, file] of Object.entries({
+      workflows: "sanoma-ai-workflows",
+      app: "sanoma-ai-app",
+      bridge: "sanoma-ai-bridge",
+      sanoma: "sanoma",
+    })) {
+      execFileSync("pnpm", ["pack", "--out", join(vendor, `${file}.tgz`)], {
         cwd: join(repoRoot, "packages", pkg),
         stdio: "ignore",
       });
     }
-    for (const file of readdirSync(vendor))
-      cpSync(join(vendor, file), join(vendor, file.replace(/-\d+\.\d+\.\d+\.tgz$/, ".tgz")));
-    for (const file of readdirSync(vendor).filter((f) => /-\d+\.\d+\.\d+\.tgz$/.test(f))) rmSync(join(vendor, file));
     execFileSync("pnpm", ["install", "--lockfile-only"], { cwd: work, stdio: "ignore" });
     repo.git("add", "-A");
     await repo.commit();

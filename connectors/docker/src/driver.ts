@@ -73,10 +73,7 @@ export const inspectContainer: Inspect = (host, id) =>
     const at = host.startsWith("unix://")
       ? { socketPath: host.slice("unix://".length) }
       : host.startsWith("tcp://")
-        ? {
-            host: new URL(host.replace(/^tcp:/, "http:")).hostname,
-            port: Number(new URL(host.replace(/^tcp:/, "http:")).port),
-          }
+        ? { host: new URL(host).hostname, port: Number(new URL(host).port || 2375) }
         : undefined;
     if (!at)
       return reject(
@@ -142,13 +139,15 @@ export function observed(state: Record<string, unknown>, container: Inspected): 
  */
 export function dockerDriver({ bridge = defaultBridge(), host, inspect = inspectContainer }: DockerDriverOptions = {}) {
   const at = () => host ?? dockerHost();
+  // The inspect an import's id came from, which its state is then completed from: one request per import.
+  let last: Inspected | undefined;
   const driver = dockerTf.driver(
     bridge,
     () => ({ host: at() }),
     // Docker finds a container by its name too; the provider, by its id alone.
-    async (_, id) => (await inspect(at(), id))?.Id ?? id,
+    async (_, id) => (last = await inspect(at(), id))?.Id ?? id,
     async (_, state) => {
-      const container = await inspect(at(), String(state.id));
+      const container = last?.Id === state.id ? last : await inspect(at(), String(state.id));
       return container ? observed(state, container) : state;
     },
   );
