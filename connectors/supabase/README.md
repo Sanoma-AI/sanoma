@@ -28,6 +28,8 @@ Three more operations call the Management API, each with the project's ref as `t
 
 `database.storeUrl` builds `postgresql://<user>:<password>@<host>:5432/<database>?sslmode=require` from `pooler.get` and the stored secret `SUPABASE_DB_PASSWORD`, and stores it with the secrets store's `ensure` as `SANOMA_DATABASE_URL_<EXPORT>`, `<EXPORT>` the data file's export in upper snake case (`store` → `SANOMA_DATABASE_URL_STORE`). It returns the secret's name only: the URL is never in an output, the ledger or a log. The store only adds secrets, so when the secret holds another URL (the project was replaced, or its password or pooler changed), `storeUrl` fails (`vendorCode` `stale`), naming it: delete the secret, then store it again. A project being deleted (`GOING_DOWN`, `REMOVED`) does not stop a create of its name.
 
+Apply calls two of them after it creates a project (the type's `afterCreate`): `project.health` until the database and pooler are healthy, then `database.storeUrl` with the data file's export, so a host can name the URL as `secret("SANOMA_DATABASE_URL_STORE")`.
+
 A data file declares a project with the constructor in `@sanoma-ai/connector-supabase/resources`, without its ref, which Supabase sets: which project a declaration means is its binding, in the [lockfile](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#bindings), by its ref. A declaration with no binding is `absent` to a drift check.
 
 ```ts
