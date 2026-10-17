@@ -338,7 +338,12 @@ export function inProcessHost(config: SanomaConfig, databaseUrl: string): StartH
     const server = createServer((req, res) => {
       res.writeHead(req.url === "/healthz" ? 200 : 404).end(req.url === "/healthz" ? "ok\n" : undefined);
     });
-    await new Promise<void>((done) => server.listen(port, "127.0.0.1", done));
+    await new Promise<void>((done, fail) => server.once("error", fail).listen(port, "127.0.0.1", done)).catch(
+      async (err: unknown) => {
+        await worker.stop();
+        throw err;
+      },
+    );
     const { port: bound } = server.address() as AddressInfo;
     return {
       url: `http://127.0.0.1:${bound}`,

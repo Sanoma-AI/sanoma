@@ -5,6 +5,7 @@ import type { Op } from "./op.ts";
 import { type DriftField, diffDeclared, fieldPathOf, type Resource, valueAt } from "./resource.ts";
 import type { DeclaredResource, ResourceProblem } from "./resources.ts";
 import { type DRIFT_WORKFLOW, errorMessage } from "./shared.ts";
+import { SOURCE_RESOLVE, type sourceOps } from "./source.ts";
 
 export type { DriftField } from "./resource.ts";
 export { DRIFT_WORKFLOW } from "./shared.ts";
@@ -73,10 +74,10 @@ type State = Record<string, unknown>;
 // A resource type's import, as `ctx` gives it: by vendor and type, both only known per run.
 type ImportOp = Op<string, string, "import", { id: string }, { id: string; gone: boolean; state?: State }>;
 // The built-in `sanoma.source.resolve`, which a host's check calls for the commit its ref names now.
-type ResolveOp = Op<"sanoma", "source", "resolve", { url: string; ref: string }, { revision: string }>;
+type ResolveOp = typeof sourceOps.source.resolve;
 
-/** A clone URL's schemes: what a `by` field of a host's source holds, told from an id. */
-const CLONE_URL = /^(https?|ssh|git|file):\/\//;
+/** A clone URL (a scheme's, or scp-like `user@host:path`): what a `by` field of a host's source holds, told from an id. */
+const CLONE_URL = /^((https?|ssh|git|file):\/\/|[\w.-]+@[\w.-]+:)/;
 
 /** What one import found: the object's state, that it is gone, or why it could not be read. */
 export type Found = { state: State } | { gone: true } | { error: string };
@@ -157,9 +158,10 @@ export function compare(
     const fields = diffDeclared(resource, now.state, desired, accept);
     const resolved = revisions.get(id);
     if (resolved && "error" in resolved) return { ...row, status: "error", fields: [], error: resolved.error };
+    // A host whose state does not say which commit it runs is not compared.
     const actual = resource.host?.outputs(now.state).revision;
-    if (resolved && actual !== resolved.revision) {
-      fields.push({ path: resource.host!.revision, desired: resolved.revision, actual: actual ?? null });
+    if (resolved && actual !== undefined && actual !== resolved.revision) {
+      fields.push({ path: resource.host!.revision, desired: resolved.revision, actual });
     }
     return { ...row, status: fields.length ? "drifted" : "clean", fields };
   });
@@ -188,7 +190,7 @@ export function driftWorkflow(
   declared: () => Promise<DriftDeclared>,
 ): WorkflowDefinition<readonly (ImportOp | ResolveOp)[], typeof DriftInput> {
   const imports = importsOf(types, ops, drivers);
-  const resolve = ops.get("sanoma.source.resolve" satisfies ResolveOp["id"]) as ResolveOp | undefined;
+  const resolve = ops.get(SOURCE_RESOLVE) as ResolveOp | undefined;
   const uses = [...imports, ...(resolve ? [resolve] : [])];
   return defineWorkflow({
     // The literal, held to the one name: the outline finds a workflow by a string, or a const of its own file.
@@ -221,9 +223,9 @@ export function driftWorkflow(
         const resource = types.get(`${vendor}.${type}`);
         const host = resource?.host;
         const source = host && sourceUrl(desired, refs[host.inputs.source], resource, found);
-        if (host && "state" in found.get(id)! && source !== undefined) {
+        const ref = host && valueAt(desired, host.inputs.ref);
+        if (host && "state" in found.get(id)! && source !== undefined && typeof ref === "string" && ref) {
           try {
-            const ref = String(valueAt(desired, host.inputs.ref));
             revisions.set(id, await ctx.sanoma!.source!.resolve({ url: source, ref }));
           } catch (err) {
             if (isRunControlError(err)) throw err;
