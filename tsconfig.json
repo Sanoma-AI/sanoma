@@ -21,6 +21,7 @@
       "@sanoma-ai/testing": ["./packages/testing/src/index.ts"],
       "@sanoma-ai/testing/features": ["./packages/testing/src/features.ts"],
       "@sanoma-ai/testing/harness": ["./packages/testing/src/harness.ts"],
+      "@sanoma-ai/testing/host": ["./packages/testing/src/host.ts"],
       "@sanoma-ai/testing/replay": ["./packages/testing/src/replay.ts"],
       "@sanoma-ai/testing/scenarios": ["./packages/testing/src/scenarios.ts"],
       "@sanoma-ai/app": ["./packages/app/src/index.ts"],

@@ -60,7 +60,7 @@ export async function resolveRevision(url: string, ref: string): Promise<string>
   const listed = await new Promise<string>((done, fail) =>
     execFile(
       "git",
-      ["ls-remote", "--", url, ref],
+      ["ls-remote", "--", url, ref, `${ref}^{}`],
       // Never a prompt for credentials: a repository that needs them and has none fails.
       { env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, timeout: 30_000 },
       (err, stdout, stderr) =>

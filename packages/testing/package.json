@@ -35,6 +35,10 @@
       "types": "./dist/features.d.ts",
       "default": "./dist/features.js"
     },
+    "./host": {
+      "types": "./dist/host.d.ts",
+      "default": "./dist/host.js"
+    },
     "./harness": {
       "types": "./dist/harness.d.ts",
       "default": "./dist/harness.js"
