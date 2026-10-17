@@ -1,0 +1,8 @@
+[
+  {
+    "method": "GET",
+    "path": "/v1/projects/sanomamissingproject/config/database/pooler",
+    "status": 404,
+    "body": { "message": "Project not found" }
+  }
+]

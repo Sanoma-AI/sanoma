@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fromTfState } from "@sanoma-ai/bridge/tfschema";
+import type { Op } from "@sanoma-ai/workflows";
 import { secret } from "@sanoma-ai/workflows/resources";
 import { describe, expect, it } from "vitest";
 import { supabaseTf } from "../src/connector.ts";
@@ -44,6 +45,22 @@ describe("the supabase connector", () => {
     }
     expect(declare.project.identity).toBeUndefined();
     expect(declare.project.find).toBeUndefined();
+  });
+
+  it("changes projects in apply only, and reads the pooler and health and stores the URL through the Management API", () => {
+    expect(declare.project.writable).toBe(true);
+    // The connector's types do not carry `writable` (`tfConnector`'s), so its change operations are looked up by name.
+    const project: Record<string, Op> = supabase.project;
+    for (const name of ["create", "update", "delete"]) {
+      expect(project[name]).toMatchObject({ effect: "write", resource: "project" });
+    }
+    expect(project.plan).toMatchObject({ effect: "read", idempotent: true });
+    expect(supabase.pooler.get).toMatchObject({ id: "supabase.pooler.get", effect: "read", idempotent: true });
+    expect(supabase.project.health).toMatchObject({ id: "supabase.project.health", effect: "read", idempotent: true });
+    expect(supabase.database.storeUrl).toMatchObject({ id: "supabase.database.storeUrl", effect: "write" });
+    expect(supabase.database.storeUrl.target!({ ref: "abc", export: "store" })).toBe("abc");
+    // Its output holds the secret's name alone.
+    expect(supabase.database.storeUrl.output.parse({ secret: "S", url: "postgresql://x" })).toEqual({ secret: "S" });
   });
 
   it("declares a project without an identity, its password a secret: Supabase sets the ref, which only a binding holds", () => {

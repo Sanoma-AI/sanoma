@@ -115,4 +115,53 @@ describe("fakeSupabase", () => {
     fake.remove("project", REF);
     expect(await call(fake.driver, "project.read", read)).toEqual({ id: REF, gone: true });
   });
+
+  it("creates a project apply declared, answers its pooler, health and URL, refuses its twin, and deletes it", async () => {
+    const fake = fakeSupabase();
+    const driver = fake.driver;
+    const secrets = memorySecrets();
+    const desired = {
+      name: "acme-ops",
+      organization_id: "acme",
+      region: "eu-west-1",
+      database_password: { $secret: "SUPABASE_DB_PASSWORD", generate: true },
+    };
+    const run = (op: string, input: unknown) =>
+      driver.ops[op]!(input, {
+        idempotencyKey: `fake:${++seq}`,
+        runId: "run",
+        opId: `supabase.${op}`,
+        attempt: 1,
+        secrets,
+      }) as Promise<any>;
+    expect(await run("project.plan", { desired })).toMatchObject({ action: "create", unknown: ["id"] });
+    const created = await run("project.create", { desired });
+    expect(created).toMatchObject({ state: { name: "acme-ops", region: "eu-west-1", database_password: null } });
+    const ref = created.id;
+    expect(await secrets.get("SUPABASE_DB_PASSWORD")).toEqual(expect.any(String));
+
+    expect(await run("project.health", { ref })).toEqual({
+      healthy: true,
+      services: [
+        { name: "db", healthy: true, status: "ACTIVE_HEALTHY" },
+        { name: "pooler", healthy: true, status: "ACTIVE_HEALTHY" },
+      ],
+    });
+    const pooler = {
+      host: "aws-0-eu-west-1.pooler.supabase.com",
+      port: 5432,
+      user: `postgres.${ref}`,
+      database: "postgres",
+    };
+    expect(await run("pooler.get", { ref })).toEqual(pooler);
+    expect(await run("database.storeUrl", { ref, export: "store" })).toEqual({ secret: "SANOMA_DATABASE_URL_STORE" });
+    expect(await secrets.get("SANOMA_DATABASE_URL_STORE")).toMatch(
+      new RegExp(`^postgresql://postgres\\.${ref}:[\\w-]+@${pooler.host}:5432/postgres\\?sslmode=require$`),
+    );
+
+    await expect(run("project.create", { desired })).rejects.toMatchObject({ vendorCode: "exists" });
+    expect(await run("project.delete", created)).toEqual({ id: ref, gone: true });
+    await expect(run("pooler.get", { ref })).rejects.toMatchObject({ status: 404, retryable: false });
+    expect(fake.calls.map((c) => c.op).at(-1)).toBe("supabase.pooler.get");
+  });
 });
