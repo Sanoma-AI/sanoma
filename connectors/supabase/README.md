@@ -30,7 +30,7 @@ export const store = supabase.project({
 });
 ```
 
-The fields are the provider's attributes, by their names: `organization_id` is the organization's slug. Only declared fields are compared for drift. The project's host, pooler and health are not attributes of the provider's project, so they are not here.
+The fields are the provider's attributes, by their names: `organization_id` is the organization's slug. Only declared fields are compared for drift. The provider reads `instance_size` back only for a project with a compute add-on (`null` otherwise) and never reads `timeouts`, so declare neither unless that holds. The project's host, pooler and health are not attributes of the provider's project, so they are not here.
 
 The logo is Supabase's bolt from [Simple Icons](https://simpleicons.org/?q=supabase) (CC0), there only to identify the service an operation calls.
 

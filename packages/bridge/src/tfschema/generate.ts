@@ -81,7 +81,8 @@ function blockSchema(block: Block, indent: string): string {
 
 /**
  * An attribute: required when the provider requires it, else nullish. A secret is nullish even
- * when required (Supabase's `database_password`): no state a read returns holds it.
+ * when required (Supabase's `database_password`): no state a read returns holds it, and the
+ * runtime parses every read's output with this schema. So a declaration may leave it out too.
  */
 function attributeSchema(a: Attribute, indent: string): string {
   const base = a.nestedType ? nestedTypeSchema(a.nestedType, indent) : ctyToZod(a.type);
