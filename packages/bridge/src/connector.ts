@@ -16,7 +16,14 @@ import {
   withoutWriteOnly,
 } from "@sanoma-ai/workflows";
 import type { z } from "zod";
-import { BridgeError, type Diagnostic, type ProviderRef, type ResourceState } from "./bridge.ts";
+import {
+  type ApplyInput,
+  BridgeError,
+  type Diagnostic,
+  type PlanInput,
+  type PlanResult,
+  type ResourceState,
+} from "./bridge.ts";
 import { ensureConfigured, type ProviderClient } from "./configure.ts";
 import { fromTfState, toTfState } from "./tfschema/state.ts";
 import type { TfBlockShape, TfProvider, TfResourceType, TfShape } from "./tfschema/types.ts";
@@ -109,42 +116,6 @@ export interface TfConnector<V extends string, T extends Record<string, z.ZodObj
 /** The provider's import id for the id an import is given, by the connector's type name. */
 export type ImportId = (type: string, id: string) => string | Promise<string>;
 
-/** The prior state a plan or apply starts from, from a `ResourceState`; absent for a create. */
-export interface PriorState {
-  priorStateJson?: string;
-  priorPrivate?: Uint8Array;
-  priorSchemaVersion?: number;
-}
-
-/** What a plan answers: `PlanResponse`, its action as `PlanAction` spells it. */
-export interface PlanReply {
-  action: PlanAction;
-  /** Unknown values `null`; empty for a delete. */
-  plannedStateJson: string;
-  /** In the provider's terms: `id`, `rules[0].name`, `tags["env"]`. */
-  unknownPaths: string[];
-  requiresReplace: string[];
-  /** Opaque: pass to `apply` unchanged. */
-  planned: Uint8Array;
-  plannedPrivate: Uint8Array;
-  warnings: Diagnostic[];
-}
-
-/** The bridge's `Plan` and `Apply` (`bridge.proto`), as the change operations call them. */
-export interface ChangeClient {
-  /** No `priorStateJson` plans a create, no `configJson` a delete. Does not refresh: read first. */
-  plan(ref: ProviderRef, typeName: string, request: PriorState & { configJson?: string }): Promise<PlanReply>;
-  /**
-   * Carries out a plan: a delete without `configJson` and `planned`. The provider's errors come
-   * back in `errors`, beside any object it made, never thrown.
-   */
-  apply(
-    ref: ProviderRef,
-    typeName: string,
-    request: PriorState & { configJson?: string; planned?: Uint8Array; plannedPrivate?: Uint8Array },
-  ): Promise<{ resource?: ResourceState; errors: Diagnostic[]; warnings: Diagnostic[] }>;
-}
-
 /** The driver's data about an object: the provider's state version and private data, `<version>:<base64>`. */
 const HANDLE = /^(\d+):([A-Za-z0-9+/]*={0,2})$/;
 const handleOf = (r: ResourceState) => `${r.schemaVersion}:${Buffer.from(r.private).toString("base64")}`;
@@ -192,7 +163,7 @@ export function resourcePath(shape: TfShape, path: string): string {
 }
 
 /** The prior state a plan or apply starts from: the object as last read. */
-const priorOf = (r: ResourceState): PriorState => ({
+const priorOf = (r: ResourceState): PlanInput => ({
   priorStateJson: r.stateJson,
   priorPrivate: r.private,
   priorSchemaVersion: r.schemaVersion,
@@ -286,15 +257,6 @@ export function tfConnector<
         });
       }
     }
-    // Until the bridge's own client has them (`Bridge.plan` and `apply`), a bridge without them cannot change anything.
-    const changes = () => {
-      const b = bridge as Partial<ChangeClient>;
-      if (typeof b.plan !== "function" || typeof b.apply !== "function") {
-        throw new DriverError(`${vendor}: this bridge cannot plan or apply changes`, { retryable: false });
-      }
-      return b as ChangeClient;
-    };
-
     const impl: Record<string, Record<string, DriverFn<any, any>>> = {};
     for (const [type, { tf, exists, writable }] of Object.entries(types)) {
       const { fields, bindingId } = resources[type]!;
@@ -344,12 +306,12 @@ export function tfConnector<
         JSON.stringify(toTfState(tf.shape, await resolveSecrets(desired, ctx.secrets)));
       const paths = (list: readonly string[]) => list.map((path) => resourcePath(tf.shape, path));
       const plan = (prior: ResourceState | undefined, configJson?: string) =>
-        changes().plan(provider, tf.typeName, {
+        bridge.plan(provider, tf.typeName, {
           ...(prior && priorOf(prior)),
           ...(configJson !== undefined && { configJson }),
         });
-      const apply = async (op: string, request: Parameters<ChangeClient["apply"]>[2]) => {
-        const reply = await changes().apply(provider, tf.typeName, request);
+      const apply = async (op: string, request: ApplyInput) => {
+        const reply = await bridge.apply(provider, tf.typeName, request);
         if (!reply.errors.length) return reply.resource;
         const made = reply.resource && bindingId(stateOf(reply.resource.stateJson));
         throw new DriverError(
@@ -364,7 +326,7 @@ export function tfConnector<
         return { id: bindingId(o.state), ...o };
       };
       /** Creates the object a create plan (or a replace's) describes. */
-      const create = async (op: string, configJson: string, p: PlanReply) =>
+      const create = async (op: string, configJson: string, p: PlanResult) =>
         changed(op, await apply(op, { configJson, planned: p.planned, plannedPrivate: p.plannedPrivate }));
 
       Object.assign(impl[type], {

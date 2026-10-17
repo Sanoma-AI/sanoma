@@ -1,9 +1,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { PlanAction } from "@sanoma-ai/workflows";
-import type { ProviderRef, ResourceState } from "../src/bridge.ts";
+import type { PlanResult, ProviderRef, ResourceState } from "../src/bridge.ts";
 import type { ProviderClient } from "../src/configure.ts";
-import type { ChangeClient, PlanReply } from "../src/connector.ts";
 import { type Fixture, releaseSlug, stateId, toPath } from "../src/fixtures.ts";
 import { isObject } from "../src/json.ts";
 
@@ -63,13 +62,10 @@ const resourceOf = (r: Reply): ResourceState => ({
  * config and plan, and fails one it has no recording of. `read` answers with the state it is
  * given (as `hashicorp/null` does), or `gone` once an apply deleted the object with that `id`.
  *
- * Until `stateBridge` plans and applies (`Bridge.plan` and `apply`), the change operations'
- * tests run over this.
+ * Unlike `fakeBridge`, it needs no recorded read, and it records the calls it gets, so the change
+ * operations' tests can check their order.
  */
-export function changeReplay(
-  fixtures: string | URL,
-  ref: ProviderRef,
-): ProviderClient & ChangeClient & { calls: ChangeCall[] } {
+export function changeReplay(fixtures: string | URL, ref: ProviderRef): ProviderClient & { calls: ChangeCall[] } {
   const replies = new Map<string, Record<string, unknown>>();
   const root = join(toPath(fixtures), "replies", releaseSlug(ref));
   for (const type of readdirSync(root)) {
@@ -104,7 +100,7 @@ export function changeReplay(
       const resource = { typeName, stateJson, private: priv ?? new Uint8Array(), schemaVersion: schemaVersion ?? 0 };
       return { resource, gone: false, warnings: [] };
     },
-    async plan(_, typeName, request): Promise<PlanReply> {
+    async plan(_, typeName, request): Promise<PlanResult> {
       const r = reply("plan", typeName, asRequest(request));
       const action = String(r.action).replace("ACTION_", "").toLowerCase() as PlanAction;
       calls.push({ method: "plan", typeName, action });
