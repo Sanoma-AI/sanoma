@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { checkHost, type HostSpec } from "./host.ts";
 import { type Connector, type OpSpec, RESOURCE, VENDOR } from "./op.ts";
-import { isSecret, type Secret } from "./secret.ts";
+import { isSanomaSecret, isSecret, type Secret } from "./secret.ts";
 
 /** Which fields of a resource are flagged, by dotted path (`pages.html_url`; a list's items have no index). */
 export interface ResourceFields {
@@ -85,6 +85,24 @@ export interface ResourceSpec<S extends z.ZodObject = z.ZodObject> {
    * recreated database looks fine and has lost its data. Default: true for a host, else false.
    */
   stateless?: boolean;
+  /**
+   * Operations apply calls, in order, right after it creates one of its objects and binds it: a
+   * Supabase project's health, until it is healthy, then its database URL stored.
+   */
+  afterCreate?: readonly AfterCreate[];
+}
+
+/** One operation apply calls after a create (`ResourceSpec.afterCreate`). */
+export interface AfterCreate {
+  /** The operation's id, among the config's: `supabase.database.storeUrl`. */
+  op: string;
+  /** Its input, from the new object's binding id and the data file's export that declares it. */
+  input: (made: { id: string; export: string }) => unknown;
+  /**
+   * Called again, every few seconds, until its output passes this, for up to 10 minutes; a call
+   * that fails meanwhile is one that did not pass, its output `undefined`.
+   */
+  until?: (output: any) => boolean;
 }
 
 /**
@@ -232,8 +250,8 @@ export interface Resource<
   W extends boolean = boolean,
 >
   extends
-    Readonly<Required<Omit<ResourceSpec<S>, "identity" | "find" | "writable" | "host" | "stateless">>>,
-    Readonly<Pick<ResourceSpec<S>, "identity" | "find" | "host">> {
+    Readonly<Required<Omit<ResourceSpec<S>, "identity" | "find" | "writable" | "host" | "stateless" | "afterCreate">>>,
+    Readonly<Pick<ResourceSpec<S>, "identity" | "find" | "host" | "afterCreate">> {
   (desired: Declaring<z.input<S>, R>): Declared<Id, z.input<S>>;
   /** `read` and `import`, each effect `read`, idempotent, with the id as `target`; for a writable type, the change operations too. */
   readonly ops: ResourceOps<S, W>;
@@ -431,6 +449,10 @@ export function withoutWriteOnly(fields: ResourceFields, desired: State): State 
   return strip(desired, "") as State;
 }
 
+/** True when `path` is one of `paths`, or a field inside one: a secret's map (`secrets.KEY`) is as write-only as the map. */
+const underAny = (path: string, paths: ReadonlySet<string>) =>
+  path.split(".").some((_, i, keys) => paths.has(keys.slice(0, i + 1).join(".")));
+
 /** The dotted paths in `value` that `paths` holds, looking into objects and lists' items. */
 function pathsIn(value: unknown, paths: ReadonlySet<string>, prefix = ""): string[] {
   if (Array.isArray(value)) return [...new Set(value.flatMap((item) => pathsIn(item, paths, prefix)))];
@@ -556,9 +578,6 @@ export function defineResource<
   const owned = new Set(fields.vendorOwned.filter((path) => !named.has(path)));
   const references: References = fields.references ?? {};
   const writeOnly = new Set(fields.writeOnly);
-  /** True at a write-only field, or inside one (a host's `secrets` map). */
-  const isWriteOnly = (path: string) =>
-    path.split(".").some((_, i, keys) => writeOnly.has(keys.slice(0, i + 1).join(".")));
   const declare = (given: Declaring<z.input<S>, R>): Declared<`${V}.${T}`, z.input<S>> => {
     const refs: Record<string, string> = {};
     // Where a secret is given, with list items' indexes: the schema does not judge its marker.
@@ -567,8 +586,11 @@ export function defineResource<
     // `path` is the field's, as `references` names it; `at` has list items' indexes too.
     const resolve = (value: unknown, path: string, at: string): unknown => {
       if (isSecret(value)) {
-        if (!isWriteOnly(path)) {
+        if (!underAny(path, writeOnly)) {
           throw new Error(`${what}: ${at} is not write-only, so it takes a value, not a secret (${value.$secret})`);
+        }
+        if (isSanomaSecret(value.$secret) && !(host && underAny(path, new Set([host.inputs.secrets])))) {
+          throw new Error(`${what}: ${at} names ${value.$secret}, one of sanoma's own: only a host's secrets may`);
         }
         secrets.add(at);
         return value;
@@ -630,6 +652,7 @@ export function defineResource<
     writable,
     ...(host && { host }),
     stateless: spec.stateless ?? host !== undefined,
+    ...(spec.afterCreate && { afterCreate: spec.afterCreate }),
     ops,
     // A symbol, so `defineConnector` tells a resource type from a group of operations.
     [RESOURCE]: true as const,

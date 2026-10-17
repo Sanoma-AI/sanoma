@@ -93,7 +93,7 @@ export const hostCheckWorkflows = [
 /** A declared host under test, and how to drive it. */
 export interface HostUnderTest {
   /** Its resource type, which meets the contract (`host`). */
-  type: Resource;
+  type: Pick<Resource, "vendor" | "type" | "host">;
   /** Makes the host match its declaration, its revision what its ref names now; returns its state. */
   apply(): Promise<State>;
   /** Stops the host through its resource's operations (its `delete`); `apply` starts it again. */
@@ -291,7 +291,13 @@ export const fakeHostType = defineResource({
   title: "Test host",
   identity: "name",
   schema: fakeSchema,
-  fields: { immutable: [], vendorOwned: ["url", "running"], writeOnly: ["secrets"] },
+  fields: {
+    immutable: [],
+    vendorOwned: ["url", "running"],
+    writeOnly: ["secrets"],
+    // A data file may name its source by the repository it declares, whose clone URL apply gives it.
+    references: { source: { type: "github.repository", by: ["http_clone_url"] } },
+  },
   find: ({ name }) => name,
   bindingId: (state) => String(state.name),
   writable: true,

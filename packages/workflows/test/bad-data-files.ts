@@ -93,7 +93,6 @@ export const BAD_DATA_FILES: [name: string, source: string, at: string, message:
     "4:78",
     /^a secret's options are `\{ generate: true \}` or none/,
   ],
-  ["secret-reserved", `${WEB}secret("SANOMA_X") });\n`, "4:73", /^"SANOMA_X" is not a secret's name: .*not SANOMA_/],
   ["secret-template", `${WEB}secret(\`X\`) });\n`, "4:66", /^write the secret's name as a string/],
   [
     "secret-unimported",

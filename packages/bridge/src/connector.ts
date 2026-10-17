@@ -79,6 +79,8 @@ export interface TfTypeSpec<S extends z.ZodObject = z.ZodObject> {
   writable?: boolean;
   /** True when its objects hold no data, so apply makes one gone again without asking (`ResourceSpec.stateless`). */
   stateless?: boolean;
+  /** Operations apply calls after it creates one (`ResourceSpec.afterCreate`). */
+  afterCreate?: ResourceSpec<S>["afterCreate"];
   /**
    * Fields, by dotted path, that hold a secret the provider does not mark sensitive (Docker's
    * container `env`): write-only besides the generated ones, so no output carries them. Each
@@ -261,7 +263,8 @@ export function tfConnector<
   ];
   const resources: Record<string, Resource> = Object.fromEntries(
     Object.entries(types).map(([type, typeSpec]) => {
-      const { tf, title, identity, find, bindingId, normalize, writable, stateless, writeOnly, host } = typeSpec;
+      const { tf, title, identity, find, bindingId, normalize, writable, stateless, writeOnly, host, afterCreate } =
+        typeSpec;
       return [
         type,
         defineResource({
@@ -281,6 +284,7 @@ export function tfConnector<
           ...(writable && { writable }),
           ...(stateless && { stateless }),
           ...(host && { host }),
+          ...(afterCreate && { afterCreate }),
         }),
       ];
     }),

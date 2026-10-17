@@ -14,11 +14,14 @@ export interface Secret {
   readonly generate?: true;
 }
 
+/** A secret's name: an environment variable's, upper case. */
+export const SECRET_NAME = /^[A-Z][A-Z0-9_]*$/;
+
 /**
- * A secret's name: an environment variable's, upper case, and not one of sanoma's own (`SANOMA_…`,
- * its key and database among them), which no vendor is ever given.
+ * True for one of sanoma's own secrets (`SANOMA_…`, its key and database URLs among them): only a
+ * host, which runs the company, is given them, at its `secrets` input (`HostSpec`); never a vendor.
  */
-export const SECRET_NAME = /^(?!SANOMA_)[A-Z][A-Z0-9_]*$/;
+export const isSanomaSecret = (name: string) => name.startsWith("SANOMA_");
 
 /**
  * Names a stored secret for a write-only field of a data file: `secret("SUPABASE_DB_PASSWORD",
@@ -26,9 +29,7 @@ export const SECRET_NAME = /^(?!SANOMA_)[A-Z][A-Z0-9_]*$/;
  */
 export function secret(name: string, options?: { generate: true }): Secret {
   if (!SECRET_NAME.test(name)) {
-    throw new Error(
-      `secret("${name}"): a secret's name is an environment variable's, upper case: A-Z, 0-9 and _, not SANOMA_…`,
-    );
+    throw new Error(`secret("${name}"): a secret's name is an environment variable's, upper case: A-Z, 0-9 and _`);
   }
   return Object.freeze(options?.generate ? { $secret: name, generate: true as const } : { $secret: name });
 }

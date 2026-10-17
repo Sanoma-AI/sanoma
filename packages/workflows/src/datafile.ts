@@ -82,8 +82,7 @@ const CONSTRUCTORS = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*\/res
 
 /** Where a data file imports `secret` from; checked before `CONSTRUCTORS`, which they match too. */
 export const SECRET_ENTRIES: ReadonlySet<string> = new Set(["sanoma/resources", "@sanoma-ai/workflows/resources"]);
-const SECRET_CALL =
-  '`secret("NAME")` or `secret("NAME", { generate: true })`, NAME upper case (A-Z, 0-9 and _), not SANOMA_…';
+const SECRET_CALL = '`secret("NAME")` or `secret("NAME", { generate: true })`, NAME upper case (A-Z, 0-9 and _)';
 
 const SHAPE =
   "a data file holds only imports, `export const <name> = <vendor>.<type>({ … })` and `export default [ … ]`";

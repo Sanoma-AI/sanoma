@@ -76,6 +76,7 @@
     "@sanoma-ai/connector-github": "workspace:*",
     "@sanoma-ai/connector-resend": "workspace:*",
     "@sanoma-ai/connector-stripe": "workspace:*",
+    "@sanoma-ai/connector-supabase": "workspace:*",
     "@sanoma-ai/testing": "workspace:*",
     "@sanoma-ai/workflows": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",

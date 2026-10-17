@@ -221,6 +221,9 @@ importers:
       '@sanoma-ai/connector-stripe':
         specifier: workspace:*
         version: link:../../connectors/stripe
+      '@sanoma-ai/connector-supabase':
+        specifier: workspace:*
+        version: link:../../connectors/supabase
       '@sanoma-ai/testing':
         specifier: workspace:*
         version: link:../testing

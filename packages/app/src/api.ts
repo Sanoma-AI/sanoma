@@ -1,4 +1,6 @@
 import type {
+  ApplyPlan,
+  ApplyResult,
   ApprovalState,
   CredentialStatus,
   ErrorCode,
@@ -163,6 +165,60 @@ export type SetCredentialRequest = z.infer<typeof SetCredentialRequest>;
 export interface SetupStatus {
   githubApp: { slug: string; setBy?: string; setAt?: string } | null;
   tokens: CredentialStatus[];
+}
+
+/** The data file going live writes, relative to the config's root. */
+export const INFRA = "resources/sanoma/infra.ts";
+
+/** What going live chooses (`goLiveFn`): who holds the repository, Supabase's organization and region, the host's port. */
+export const GoLiveRequest = z.object({
+  owner: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/, "Choose a GitHub account or organization"),
+  /** The repository's name, and the Supabase project's and the host's. */
+  name: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9-]{0,62}$/, "Lower case letters, digits and hyphens, starting with a letter or digit"),
+  organization: z.string().min(1, "Choose a Supabase organization"),
+  region: z.string().min(1, "Choose a region"),
+  port: z.number().int().min(1024, "A port from 1024").max(65535, "A port up to 65535"),
+});
+export type GoLiveRequest = z.infer<typeof GoLiveRequest>;
+
+/** What the Go live page offers to choose from (`getGoLiveChoices`), and why a list is empty. */
+export interface GoLiveChoices {
+  /** The GitHub accounts a repository can be made in: the token's user and organizations, and the App's installations. */
+  owners: { login: string; kind: "user" | "organization"; via: "token" | "app" }[];
+  /** The Supabase organizations the stored token sees. */
+  organizations: { id: string; name: string }[];
+  regions: readonly string[];
+  /** The host type the company runs on, `<vendor>.<type>`, and its title; null when the config has none. */
+  host: { type: string; title: string } | null;
+  /** The resource types going live needs that the config's connectors do not declare. */
+  missing: string[];
+  /** A name to suggest: the app's. */
+  name: string;
+  /** What could not be listed, and why. */
+  errors: string[];
+}
+
+/** An apply run as the Go live page follows it: its status, the plan it waits on, and what it did. */
+export interface GoLiveRun {
+  runId: string;
+  status: RunSummary["status"];
+  /** What it asks a person to approve, in the Inbox; the plan. */
+  pending?: { approvalId: string; plan?: ApplyPlan };
+  results?: ApplyResult[];
+  error?: string;
+}
+
+/** How far going live is (`getGoLiveProgress`): told from the files, the lockfile and the runs, so a reload picks it up. */
+export interface GoLiveProgress {
+  /** `resources/sanoma/infra.ts`, once written. */
+  infra: string | null;
+  bound: { repo: boolean; store: boolean; host: boolean };
+  /** The latest apply run. */
+  run: GoLiveRun | null;
+  /** Where the host answers, from the last apply that made or changed it, and whether `/healthz` answers. */
+  host: { url: string; healthy: boolean } | null;
 }
 
 /** What `clearCredentialFn` takes: a declared variable, whose stored value it deletes. */
