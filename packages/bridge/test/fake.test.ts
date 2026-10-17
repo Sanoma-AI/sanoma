@@ -40,6 +40,7 @@ describe("readPins", () => {
     expect(Object.keys(pins).toSorted()).toEqual([
       "hashicorp/null",
       "integrations/github",
+      "kreuzwerker/docker",
       "stripe/stripe",
       "supabase/supabase",
     ]);
@@ -235,8 +236,9 @@ describe("the fixtures", () => {
     expect(replies.length).toBeGreaterThan(0);
     for (const file of replies) {
       const { scrubbed } = JSON.parse(readFileSync(file, "utf8")) as { scrubbed: string[] };
-      // hashicorp/null takes no credentials.
-      expect(scrubbed, file).toEqual(file.includes("hashicorp_null_") ? [] : ["$GITHUB_TOKEN"]);
+      // hashicorp/null and kreuzwerker/docker take no credentials.
+      const none = /hashicorp_null_|kreuzwerker_docker_/.test(file);
+      expect(scrubbed, file).toEqual(none ? [] : ["$GITHUB_TOKEN"]);
     }
   });
 
