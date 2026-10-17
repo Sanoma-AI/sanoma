@@ -13,6 +13,7 @@ import {
   ApiError,
   type ConnectExistingRequest,
   type ConnectExistingResponse,
+  INFRA,
   PASSWORD_NOTE,
   type SetCredentialRequest,
   type SetupStatus,
@@ -182,8 +183,6 @@ const escape = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCode
 // apply run that only binds. In a repository with a remote, the file goes on a branch of its own
 // for a person to merge; without one (local), it is committed where the checkout is.
 
-/** The data file going live declares the company's repository and database in. */
-export const INFRA_FILE = "resources/sanoma/infra.ts";
 /** The branch the change waits on, in a repository with a remote. */
 export const CONNECT_BRANCH = "setup/connect-existing";
 
@@ -214,7 +213,7 @@ const EXISTING = {
 
 /**
  * Connects an existing GitHub repository and/or Supabase project: imports each through its
- * type's import, renders `INFRA_FILE` from what was read, commits it through the app's source
+ * type's import, renders `INFRA` from what was read, commits it through the app's source
  * (on `CONNECT_BRANCH`, checked out, when the repository has a remote), then starts apply with
  * `bind` and `only` for those declarations, so the lockfile gets their bindings and nothing is
  * created. A 409 when the file is there already or the branch is; a 400 when a type has no
@@ -243,9 +242,9 @@ async function connectNow(
 ): Promise<ConnectExistingResponse> {
   const { root } = resolved;
   if (root === undefined) throw new Error("The config has no root, so its data files cannot be written");
-  const path = join(root, INFRA_FILE);
+  const path = join(root, INFRA);
   if (existsSync(path)) {
-    throw new ApiError(409, { error: `${INFRA_FILE} is there already: declare what to connect in it instead` });
+    throw new ApiError(409, { error: `${INFRA} is there already: declare what to connect in it instead` });
   }
   const wanted = (["repository", "project"] as const).flatMap((what) => {
     const given = request[what];
@@ -267,7 +266,7 @@ async function connectNow(
     }
     const read = at.fields.flatMap((f) => (state[f] == null || state[f] === "" ? [] : [[f, state[f] as DataValue]]));
     exports.push({ ...at, desired: { ...Object.fromEntries(read), ...at.set } });
-    bind[`${INFRA_FILE}#${at.name}`] = resolved.types.get(`${at.vendor}.${at.type}`)!.bindingId(state);
+    bind[`${INFRA}#${at.name}`] = resolved.types.get(`${at.vendor}.${at.type}`)!.bindingId(state);
   }
   const imports = wanted.map(({ vendor, source: from }) => ({ source: from, imported: vendor, local: vendor }));
   const rendered = await renderDataFile({ imports, exports }, formatOptions(root));
@@ -296,15 +295,15 @@ async function connectNow(
     // Left as it was: no file, and back on the branch it started from, so connecting again works.
     await rm(path, { force: true });
     if (branch) await git!("switch", "--quiet", "-").then(() => git!("branch", "-D", branch));
-    throw new ApiError(500, { error: `Could not commit ${INFRA_FILE}: ${errorMessage(err)}` });
+    throw new ApiError(500, { error: `Could not commit ${INFRA}: ${errorMessage(err)}` });
   }
   const diff = branch && commit ? await git!("show", "--format=", commit.revision) : undefined;
   const runId = await client.apply({ only: Object.keys(bind), bind }, { startedBy: actor }).catch((err: unknown) => {
     throw new ApiError(500, {
-      error: `Committed ${INFRA_FILE}, but could not start the apply that binds it: ${errorMessage(err)}. Apply it from Resources.`,
+      error: `Committed ${INFRA}, but could not start the apply that binds it: ${errorMessage(err)}. Apply it from Resources.`,
     });
   });
-  return { file: INFRA_FILE, text, runId, ...commit, ...(branch && { branch }), ...(diff && { diff }) };
+  return { file: INFRA, text, runId, ...commit, ...(branch && { branch }), ...(diff && { diff }) };
 }
 
 /**

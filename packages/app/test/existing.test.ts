@@ -13,11 +13,11 @@ import { allowAll, resolveConfig, withSetup } from "@sanoma-ai/workflows";
 import { describeConfig, LOCKFILE, readLockfile } from "@sanoma-ai/workflows/describe";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { localGitSource } from "../../sanoma/src/source.ts";
-import { ApiError } from "../src/api.ts";
+import { ApiError, INFRA } from "../src/api.ts";
 import type { AppContext } from "../src/context.ts";
 import { type App, startApp } from "../src/index.ts";
 import { loopbackLogin } from "../src/loopback.ts";
-import { CONNECT_BRANCH, connectExisting, INFRA_FILE } from "../src/server/setup.ts";
+import { CONNECT_BRANCH, connectExisting } from "../src/server/setup.ts";
 
 // Connecting an existing repository or database (/setup/existing) in a git repository of its
 // own, with and without a remote, on the GitHub and Supabase fakes: the file rendered from what
@@ -50,7 +50,7 @@ const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encodi
 /** The fake's recorded repository and project, as GitHub and Supabase name them. */
 const REPO = "sanoma";
 const REF = "sanomatestprojectref";
-const id = { repo: `${INFRA_FILE}#repo`, store: `${INFRA_FILE}#store` };
+const id = { repo: `${INFRA}#repo`, store: `${INFRA}#store` };
 
 // A fresh repository on main, with one commit and nothing declared.
 beforeEach(() => {
@@ -78,8 +78,8 @@ async function connect(request: { repository?: string; project?: string }) {
 describe("connecting an existing repository and database", () => {
   it("in a repository without a remote: declares both as read, commits, and binds them without creating", async () => {
     const { done, report } = await connect({ repository: REPO, project: REF });
-    const text = readFileSync(join(root, INFRA_FILE), "utf8");
-    expect(done).toMatchObject({ file: INFRA_FILE, text, revision: expect.any(String) });
+    const text = readFileSync(join(root, INFRA), "utf8");
+    expect(done).toMatchObject({ file: INFRA, text, revision: expect.any(String) });
     expect(done.branch).toBeUndefined();
     expect(text).toMatchInlineSnapshot(`
       "// The database password is declared as a generated secret, since Supabase never reads it back.
@@ -132,7 +132,7 @@ describe("connecting an existing repository and database", () => {
     git("remote", "add", "origin", "https://github.com/acme/ops.git");
     const { done, report } = await connect({ repository: REPO });
     expect(done.branch).toBe(CONNECT_BRANCH);
-    expect(done.diff).toContain(`+++ b/${INFRA_FILE}`);
+    expect(done.diff).toContain(`+++ b/${INFRA}`);
     expect(done.diff).toContain("+export const repo = github.repository({");
     expect(done.text).not.toContain("supabase");
     expect(report.plan.steps.map((s) => s.action)).toEqual(["bind"]);
@@ -161,9 +161,9 @@ describe("connecting an existing repository and database", () => {
     writeFileSync(join(root, ".git/hooks/pre-commit"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
     expect(await refused({ project: REF })).toMatchObject({
       status: 500,
-      message: expect.stringContaining(`Could not commit ${INFRA_FILE}`),
+      message: expect.stringContaining(`Could not commit ${INFRA}`),
     });
-    expect(existsSync(join(root, INFRA_FILE))).toBe(false);
+    expect(existsSync(join(root, INFRA))).toBe(false);
     expect(git("branch", "--show-current")).toBe("main");
     expect(git("branch", "--list", CONNECT_BRANCH)).toBe("");
     rmSync(join(root, ".git/hooks/pre-commit"));
@@ -173,7 +173,7 @@ describe("connecting an existing repository and database", () => {
       message: expect.stringContaining(`Could not start the branch ${CONNECT_BRANCH}`),
     });
     mkdirSync(join(root, "resources/sanoma"), { recursive: true });
-    writeFileSync(join(root, INFRA_FILE), "export default [];\n");
+    writeFileSync(join(root, INFRA), "export default [];\n");
     const there = await refused({ project: REF });
     expect(there).toBeInstanceOf(ApiError);
     expect(there).toMatchObject({ status: 409 });
