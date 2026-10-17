@@ -1,0 +1,37 @@
+[
+  {
+    "method": "GET",
+    "path": "/v1/projects/sanomatestprojectref/config/database/pooler",
+    "status": 200,
+    "body": [
+      {
+        "identifier": "sanomatestprojectref-rr-us-east-1-abcde",
+        "database_type": "READ_REPLICA",
+        "is_using_scram_auth": true,
+        "db_user": "postgres.sanomatestprojectref",
+        "db_host": "aws-0-us-east-1.pooler.supabase.com",
+        "db_port": 6543,
+        "db_name": "postgres",
+        "connection_string": "postgresql://postgres.sanomatestprojectref-rr-us-east-1-abcde:[YOUR-PASSWORD]@aws-0-us-east-1.pooler.supabase.com:6543/postgres",
+        "connectionString": "postgresql://postgres.sanomatestprojectref-rr-us-east-1-abcde:[YOUR-PASSWORD]@aws-0-us-east-1.pooler.supabase.com:6543/postgres",
+        "default_pool_size": 15,
+        "max_client_conn": 200,
+        "pool_mode": "transaction"
+      },
+      {
+        "identifier": "sanomatestprojectref",
+        "database_type": "PRIMARY",
+        "is_using_scram_auth": true,
+        "db_user": "postgres.sanomatestprojectref",
+        "db_host": "aws-1-us-east-1.pooler.supabase.com",
+        "db_port": 6543,
+        "db_name": "postgres",
+        "connection_string": "postgresql://postgres.sanomatestprojectref:[YOUR-PASSWORD]@aws-1-us-east-1.pooler.supabase.com:6543/postgres",
+        "connectionString": "postgresql://postgres.sanomatestprojectref:[YOUR-PASSWORD]@aws-1-us-east-1.pooler.supabase.com:6543/postgres",
+        "default_pool_size": 15,
+        "max_client_conn": 200,
+        "pool_mode": "transaction"
+      }
+    ]
+  }
+]

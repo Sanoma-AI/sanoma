@@ -1,0 +1,8 @@
+[
+  {
+    "method": "GET",
+    "path": "/v1/projects/sanomatestprojectref/health?services=db,pooler",
+    "status": 429,
+    "body": { "message": "Too many requests" }
+  }
+]

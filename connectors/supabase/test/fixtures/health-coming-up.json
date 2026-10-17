@@ -1,0 +1,8 @@
+[
+  {
+    "method": "GET",
+    "path": "/v1/projects/sanomatestprojectref/health?services=db",
+    "status": 200,
+    "body": [{ "name": "db", "healthy": false, "status": "COMING_UP", "error": "connection refused" }]
+  }
+]

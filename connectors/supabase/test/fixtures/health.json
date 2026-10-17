@@ -1,0 +1,11 @@
+[
+  {
+    "method": "GET",
+    "path": "/v1/projects/sanomatestprojectref/health?services=db,pooler",
+    "status": 200,
+    "body": [
+      { "name": "db", "healthy": true, "status": "ACTIVE_HEALTHY" },
+      { "name": "pooler", "healthy": true, "status": "ACTIVE_HEALTHY" }
+    ]
+  }
+]
