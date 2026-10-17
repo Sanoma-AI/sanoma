@@ -547,6 +547,35 @@ describe("encryption at rest", () => {
   });
 });
 
+describe("secrets no driver declares", () => {
+  const NAME = "SANOMA_TEST_APP_KEY";
+  afterAll(() => sql("DELETE FROM sanoma_credentials WHERE name = $1", [NAME]));
+
+  it("are stored encrypted by setSecret and read by secrets(), the environment's first", async () => {
+    vi.stubEnv(NAME, undefined);
+    await client.setSecret(NAME, "app-key-value", { by: "alice" });
+    expect(await raw(NAME)).toMatch(/^v1:/);
+    expect(await raw(NAME)).not.toContain("app-key-value");
+    const found = await client.secrets([NAME, "SANOMA_TEST_NOTHING"]);
+    expect([...found.keys()]).toEqual([NAME]);
+    expect(found.get(NAME)).toMatchObject({ value: "app-key-value", source: "stored", setBy: "alice" });
+    vi.stubEnv(NAME, "from-env");
+    expect((await client.secrets([NAME])).get(NAME)).toEqual({ value: "from-env", source: "environment" });
+  });
+
+  it("refuses a name that is not a variable's, an empty value, and a declared name's invalid value", async () => {
+    expect(await refusal(client.setSecret("not a name", "x", { by: "alice" }))).toMatchObject({
+      code: "invalid_input",
+      message: "That is not a variable name",
+    });
+    expect((await refusal(client.setSecret(NAME, "", { by: "alice" }))).message).toBe("Enter a value");
+    // A declared name is checked as setCredential checks it.
+    expect((await refusal(client.setSecret(KEY_VAR, "key_NOT-LOWER", { by: "alice" }))).message).toBe(
+      `${KEY_VAR} cannot be set: an API key, key_<letters>`,
+    );
+  });
+});
+
 describe("the connectors' drivers", () => {
   const bridge = {} as never;
   it.each([
