@@ -14,6 +14,8 @@ export function localGitSource(root: string): Source {
   return {
     root,
     async commit({ paths, message, author }) {
+      // No paths would be every path to git.
+      if (!paths.length) return undefined;
       await git(["add", "--", ...paths]);
       if (!(await git(["status", "--porcelain", "--", ...paths]))) return undefined;
       // Only these paths, whatever else is staged; the email stays the machine's.

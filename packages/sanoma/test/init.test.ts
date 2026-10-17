@@ -22,6 +22,8 @@ const fresh = (name = "Acme Ops") => {
   mkdirSync(dir);
   return dir;
 };
+/** An install that writes pnpm's lockfile alone. */
+const writeLockfile = async (cwd: string) => writeFileSync(join(cwd, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
 afterEach(() => {
   vi.unstubAllEnvs();
   if (dir) rmSync(dir, { recursive: true, force: true });
@@ -41,7 +43,7 @@ describe("startCompany", () => {
     ).toBe(true);
 
     expect(installs).toEqual([[dir, "npm"]]);
-    expect(log).toEqual([`starting a Sanoma company in ${dir}`, "installing with npm", `committed "${FIRST_COMMIT}"`]);
+    expect(log).toEqual([`starting a Sanoma company in ${dir}`, `committed "${FIRST_COMMIT}"; installing with npm`]);
     for (const file of ["sanoma.config.ts", "workflows/publish-post.ts", "policies/policy.ts", "AGENTS.md"]) {
       expect(read(file)).toBe(readFileSync(new URL(file, TEMPLATE), "utf8"));
     }
@@ -49,6 +51,8 @@ describe("startCompany", () => {
     expect(pkg.name).toBe("acme-ops");
     expect(pkg.dependencies).toEqual({ "@sanoma-ai/connector-ghost": `^${version}`, sanoma: `^${version}` });
     expect(existsSync(join(dir, "gitignore"))).toBe(false);
+    // pnpm's alone.
+    expect(existsSync(join(dir, "pnpm-workspace.yaml"))).toBe(false);
     expect(Object.keys(parseEnv(read(".env")))).toEqual(["SANOMA_DATABASE_URL", "SANOMA_SECRETS_KEY"]);
 
     expect(git("log", "--format=%s|%an")).toBe(`${FIRST_COMMIT}|Test User`);
@@ -60,18 +64,32 @@ describe("startCompany", () => {
     expect(git("status", "--porcelain")).toBe("");
   });
 
-  it("keeps the dotfiles a directory holds, adding to them", async () => {
+  it("keeps the dotfiles a directory holds, adding to them, and commits only what it wrote, the lockfile with it", async () => {
     gitIdentity(vi.stubEnv);
+    vi.stubEnv("npm_config_user_agent", "");
     fresh();
     writeFileSync(join(dir, ".gitignore"), "/scratch\n");
     writeFileSync(join(dir, ".env"), "SANOMA_DATABASE_URL=postgresql://elsewhere/acme");
-    expect(await startCompany(dir, { install: async () => {} })).toBe(true);
+    writeFileSync(join(dir, ".npmrc"), "//registry.npmjs.org/:_authToken=secret\n");
+    expect(await startCompany(dir, { install: writeLockfile })).toBe(true);
 
     expect(read(".gitignore")).toMatch(/^\/scratch\n\n# Secrets must never be committed.*\n\.env\n/s);
     const env = parseEnv(read(".env"));
     expect(env.SANOMA_DATABASE_URL).toBe("postgresql://elsewhere/acme");
     expect(Object.keys(env)).toEqual(["SANOMA_DATABASE_URL", "SANOMA_SECRETS_KEY"]);
-    expect(git("ls-files")).not.toMatch(/^\.env$/m);
+    const tracked = git("ls-files").split("\n");
+    expect(tracked).toContain("pnpm-lock.yaml");
+    expect(tracked).toContain("pnpm-workspace.yaml");
+    expect(tracked).not.toContain(".env");
+    expect(tracked).not.toContain(".npmrc");
+    expect(git("log", "--format=%s")).toBe(FIRST_COMMIT);
+  });
+
+  it("leaves a repository with its first commit when the install fails", async () => {
+    gitIdentity(vi.stubEnv);
+    fresh();
+    await expect(startCompany(dir, { install: () => Promise.reject(new Error("offline")) })).rejects.toThrow("offline");
+    expect(git("log", "--format=%s")).toBe(FIRST_COMMIT);
   });
 
   it("leaves a directory that holds anything else alone", async () => {
@@ -95,6 +113,13 @@ describe("packageManagerOf and packageName", () => {
     expect(packageName("Acme Ops")).toBe("acme-ops");
     expect(packageName("_acme.co")).toBe("acme.co");
     expect(packageName("!!!")).toBe("company");
+  });
+
+  it("names it apart from a package it depends on", async () => {
+    gitIdentity(vi.stubEnv);
+    fresh("sanoma");
+    await startCompany(dir, { install: async () => {} });
+    expect(JSON.parse(read("package.json")).name).toBe("sanoma-company");
   });
 
   it("writes the runtime's default database", () => {

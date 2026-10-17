@@ -23,6 +23,9 @@ export const DATABASE_URL = "postgresql://postgres:dbos@localhost:5433/sanoma";
 
 export const FIRST_COMMIT = "Start a Sanoma company";
 
+/** What each package manager writes beside `package.json`. */
+const LOCKFILES = ["pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lock"];
+
 export interface StartOptions {
   /** Runs `<packageManager> install` in the directory; the default inherits this process's stdio. */
   install?: (cwd: string, packageManager: string) => Promise<void>;
@@ -33,10 +36,10 @@ export interface StartOptions {
  * `sanoma` where there is no `sanoma.config.ts`: in an empty directory (dotfiles aside) it starts
  * a company there and says so; anywhere else it does nothing and says it did not. Starting copies
  * the template, names the package after the directory, writes `.env` (the default database and a
- * new `SANOMA_SECRETS_KEY`, keeping what it already holds), installs with the package manager
- * that ran this (`npm_config_user_agent`, else pnpm), and commits everything as the first commit
- * of a git repository, as the machine's git user. Throws before writing anything when git has no
- * user to commit as.
+ * new `SANOMA_SECRETS_KEY`, keeping what it already holds), commits what it wrote as the first
+ * commit of a git repository, as the machine's git user, then installs with the package manager
+ * that ran this (`npm_config_user_agent`, else pnpm) and adds the lockfile to that commit. Throws
+ * before writing anything when git is missing or has no user to commit as.
  */
 export async function startCompany(
   cwd: string,
@@ -44,7 +47,11 @@ export async function startCompany(
 ): Promise<boolean> {
   if (readdirSync(cwd).some((name) => !name.startsWith("."))) return false;
   await run("git", ["var", "GIT_AUTHOR_IDENT"]).catch((err: unknown) => {
-    throw new Error("git needs a user to commit as: set git config user.name and user.email", { cause: err });
+    const missing = (err as NodeJS.ErrnoException).code === "ENOENT";
+    throw new Error(
+      missing ? "git is not installed" : "git needs a user to commit as: set git config user.name and user.email",
+      { cause: err },
+    );
   });
   log(`starting a Sanoma company in ${cwd}`);
   cpSync(TEMPLATE, cwd, { recursive: true, force: false });
@@ -59,9 +66,11 @@ export async function startCompany(
   const own = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
   const manifest = join(cwd, "package.json");
   const pkg = JSON.parse(readFileSync(manifest, "utf8")) as { name: string; dependencies: Record<string, string> };
-  pkg.name = packageName(basename(cwd));
+  const name = packageName(basename(cwd));
+  // npm refuses to install a package into one of the same name (`sanoma` in `sanoma/`).
+  pkg.name = name in pkg.dependencies ? `${name}-company` : name;
   // The template's packages at this launcher's version: Sanoma releases them together.
-  for (const name of Object.keys(pkg.dependencies)) pkg.dependencies[name] = `^${own.version}`;
+  for (const dep of Object.keys(pkg.dependencies)) pkg.dependencies[dep] = `^${own.version}`;
   writeFileSync(manifest, `${JSON.stringify(pkg, null, 2)}\n`);
 
   writeEnv(join(cwd, ".env"), {
@@ -70,13 +79,22 @@ export async function startCompany(
   });
 
   const packageManager = packageManagerOf(process.env.npm_config_user_agent);
-  log(`installing with ${packageManager}`);
-  await install(cwd, packageManager);
+  if (packageManager !== "pnpm") rmSync(join(cwd, "pnpm-workspace.yaml"));
 
+  // Committed before the install, so a failed install leaves a repository to rerun it in; the
+  // lockfile joins the same commit after. Only what this wrote: a dotfile already here may be a secret.
+  const commit = async (...args: string[]) => {
+    const wrote = [...readdirSync(TEMPLATE), ...LOCKFILES]
+      .map((file) => (file === "gitignore" ? ".gitignore" : file))
+      .filter((file) => existsSync(join(cwd, file)));
+    await run("git", ["add", "--", ...wrote], { cwd });
+    await run("git", ["commit", "--quiet", "-m", FIRST_COMMIT, ...args], { cwd });
+  };
   await run("git", ["init", "--quiet", "--initial-branch=main"], { cwd });
-  await run("git", ["add", "--all"], { cwd });
-  await run("git", ["commit", "--quiet", "-m", FIRST_COMMIT], { cwd });
-  log(`committed "${FIRST_COMMIT}"`);
+  await commit();
+  log(`committed "${FIRST_COMMIT}"; installing with ${packageManager}`);
+  await install(cwd, packageManager);
+  await commit("--amend");
   return true;
 }
 

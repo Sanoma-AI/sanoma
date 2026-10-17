@@ -44,6 +44,11 @@ describe("localGitSource", () => {
     const before = await source.head();
     expect(await source.commit({ paths: ["README.md"], message: "Nothing", author: "alice" })).toBeUndefined();
     expect(await source.head()).toBe(before);
+    // No paths is no change, whatever is staged.
+    writeFileSync(join(dir, "other.ts"), "export const b = 2;\n");
+    git("add", "other.ts");
+    expect(await source.commit({ paths: [], message: "Nothing", author: { id: "alice" } })).toBeUndefined();
+    expect(await source.head()).toBe(before);
   });
 
   it("reads the commit a ref names, and refuses one that names none", async () => {

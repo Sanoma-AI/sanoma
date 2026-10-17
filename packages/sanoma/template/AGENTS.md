@@ -17,16 +17,18 @@ The app's name is `package.json`'s `name`. `.env.example` (written by `sanoma en
 
 ## Run
 
+With the package manager whose lockfile is here (`npm run <script>`, `pnpm <script>`, …):
+
 ```sh
-pnpm dev            # Postgres (in Docker when nothing answers), the worker and the app; the app at the printed address
-pnpm check          # tsc, the lint, what the worker would refuse, and every scenario
-pnpm run env        # rewrites .env.example from the connectors' variables
+npm run dev         # Postgres (in Docker when nothing answers), the worker and the app; the app at the printed address
+npm run check       # tsc, the lint, what the worker would refuse, and every scenario
+npm run env         # rewrites .env.example from the connectors' variables
 ```
 
 ## Rules
 
-- A workflow imports only from `sanoma`, its connectors and relative files, and does the same thing every time it is replayed: `ctx.now()` and `ctx.sleep()`, never `Date` or timers; configuration comes in as input, never from `process.env`. `pnpm check` holds workflows, policies and data files to this.
+- A workflow imports only from `sanoma`, its connectors and relative files, and does the same thing every time it is replayed: `ctx.now()` and `ctx.sleep()`, never `Date` or timers; configuration comes in as input, never from `process.env`. The `check` script holds workflows, policies and data files to this.
 - Define each workflow's `name` as a string literal: the app finds the workflow in its file by it.
 - Every operation a workflow calls is listed in its `uses`; add the connector to `sanoma.config.ts` and to `package.json`.
-- Describe each workflow's expected runs in `scenarios/<workflow>/<name>.feature`, and run `pnpm check` after every change.
+- Describe each workflow's expected runs in `scenarios/<workflow>/<name>.feature`, and run the `check` script after every change.
 - Never put credentials in a file here. They live in `.env` or on the app's connector pages, which store them encrypted in the database.
