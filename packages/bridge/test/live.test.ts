@@ -2,12 +2,13 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { type Bridge, BridgeError, type BridgeLog, readPins, startBridge } from "@sanoma-ai/bridge";
+import { type Bridge, BridgeError, type BridgeLog, type PlanInput, readPins, startBridge } from "@sanoma-ai/bridge";
 import { fakeBridge } from "./fake-bridge.ts";
 import { buildBridge } from "../scripts/download-bridge.ts";
 
 // SANOMA_LIVE=1 builds provider-bridge from the sibling checkout and runs hashicorp/null (no
 // credentials; downloaded once from registry.opentofu.org into provider-bridge's test cache).
+// The plan and apply test skips itself when the bridge has no Plan (one built before it had).
 const live = process.env.SANOMA_LIVE === "1";
 const cacheHome =
   process.platform === "darwin"
@@ -15,6 +16,7 @@ const cacheHome =
     : (process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"));
 const nullProvider = readPins()["hashicorp/null"]!;
 const logs: BridgeLog[] = [];
+const triggers = (v: string) => JSON.stringify({ id: null, triggers: { v } });
 const options = () => ({
   bin: process.env.SANOMA_BRIDGE_BIN || buildBridge(),
   cacheDir: join(cacheHome, "provider-bridge-test"),
@@ -92,6 +94,56 @@ describe.skipIf(!live)("startBridge (SANOMA_LIVE=1)", () => {
       expect((await replay.schema(nullProvider)).schema.version).toBe("3.3.2");
       await replay.configure(nullProvider, "{}");
       expect(await replay.read(nullProvider, "null_resource", '{"id":"7"}')).toEqual(reply);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("plans and applies a null_resource (create, no-op, replace, delete), recorded and replayed", async (ctx) => {
+    const dir = mkdtempSync(join(tmpdir(), "sanoma-bridge-live-"));
+    try {
+      vi.stubEnv("SANOMA_RECORD", "1");
+      const recording = fakeBridge({ fixtures: dir, bridge: options() });
+      await recording.configure(nullProvider, "{}");
+      const probe = await recording.plan(nullProvider, "null_resource", {}).catch((e: unknown) => e);
+      if (probe instanceof BridgeError && probe.code === "unimplemented") {
+        await recording.stop();
+        ctx.skip("this provider-bridge has no Plan; build one with Plan and Apply (SANOMA_BRIDGE_BIN)");
+      }
+      expect(probe).toMatchObject({ code: "invalid_argument" });
+
+      const run = async (b: Bridge) => {
+        const plan = (input: PlanInput) => b.plan(nullProvider, "null_resource", input);
+        const create = await plan({ configJson: triggers("1") });
+        expect(create).toMatchObject({ action: "create", unknownPaths: ["id"], requiresReplace: [] });
+        const made = await b.apply(nullProvider, "null_resource", { configJson: triggers("1"), ...create });
+        expect(made.errors).toEqual([]);
+        const prior = {
+          priorStateJson: made.resource!.stateJson,
+          priorPrivate: made.resource!.private,
+          priorSchemaVersion: made.resource!.schemaVersion,
+        };
+        expect(await plan({ ...prior, configJson: triggers("1") })).toMatchObject({ action: "none" });
+        const replace = await plan({ ...prior, configJson: triggers("2") });
+        expect(replace).toMatchObject({ action: "replace", requiresReplace: ["triggers"] });
+        expect(await b.apply(nullProvider, "null_resource", prior)).toEqual({ errors: [], warnings: [] });
+        const replaced = await b.apply(nullProvider, "null_resource", { configJson: triggers("2"), ...replace });
+        const next = JSON.parse(replaced.resource!.stateJson) as { id: string };
+        expect(next.id).not.toBe(JSON.parse(prior.priorStateJson).id);
+        const last = { priorStateJson: replaced.resource!.stateJson, priorSchemaVersion: 0 };
+        expect(await plan(last)).toMatchObject({ action: "delete", planned: new Uint8Array() });
+        expect(await b.apply(nullProvider, "null_resource", last)).toEqual({ errors: [], warnings: [] });
+        return next.id;
+      };
+      const id = await run(recording);
+      await recording.stop();
+
+      vi.stubEnv("SANOMA_LIVE", "");
+      const replay = fakeBridge({ fixtures: dir });
+      await replay.configure(nullProvider, "{}");
+      // The replay answers the same calls with the ids the provider made.
+      expect(await run(replay)).toBe(id);
     } finally {
       vi.unstubAllEnvs();
       rmSync(dir, { recursive: true, force: true });

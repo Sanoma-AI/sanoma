@@ -9,7 +9,9 @@ const testdata = fileURLToPath(new URL("../testdata/", import.meta.url));
 const pins = readPins();
 const github = pins["integrations/github"]!;
 const stripe = pins["stripe/stripe"]!;
+const nullProvider = pins["hashicorp/null"]!;
 const config = JSON.stringify({ owner: "Sanoma-AI", token: "not-a-real-token" });
+const triggers = (v: string) => JSON.stringify({ id: null, triggers: { v } });
 
 const files = (dir: string): string[] =>
   readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
@@ -141,6 +143,58 @@ describe("fakeBridge", () => {
     expect(missingSchema.message).toContain("schemas/hashicorp_random_3.7.2.json");
   });
 
+  it("replays hashicorp/null's recorded change: create, no-op, replace, delete", async () => {
+    const bridge = fakeBridge();
+    await bridge.configure(nullProvider, "{}");
+    const create = await bridge.plan(nullProvider, "null_resource", { configJson: triggers("1") });
+    expect(create).toMatchObject({ action: "create", unknownPaths: ["id"], requiresReplace: [], warnings: [] });
+    expect(JSON.parse(create.plannedStateJson)).toEqual({ id: null, triggers: { v: "1" } });
+    expect(create.planned.length).toBeGreaterThan(0);
+    const made = await bridge.apply(nullProvider, "null_resource", { configJson: triggers("1"), ...create });
+    expect(made.errors).toEqual([]);
+    const prior = made.resource!;
+    expect(JSON.parse(prior.stateJson)).toEqual({ id: "7464986431894282090", triggers: { v: "1" } });
+
+    const change = (configJson?: string) => ({
+      priorStateJson: prior.stateJson,
+      priorSchemaVersion: prior.schemaVersion,
+      ...(configJson && { configJson }),
+    });
+    expect(await bridge.plan(nullProvider, "null_resource", change(triggers("1")))).toMatchObject({ action: "none" });
+    const replace = await bridge.plan(nullProvider, "null_resource", change(triggers("2")));
+    expect(replace).toMatchObject({ action: "replace", requiresReplace: ["triggers"], unknownPaths: ["id"] });
+    expect(await bridge.apply(nullProvider, "null_resource", change())).toEqual({ errors: [], warnings: [] });
+    const replaced = await bridge.apply(nullProvider, "null_resource", { configJson: triggers("2"), ...replace });
+    expect(JSON.parse(replaced.resource!.stateJson)).toMatchObject({ id: "1619236683285190585" });
+
+    const last = { priorStateJson: replaced.resource!.stateJson, priorSchemaVersion: 0 };
+    expect(await bridge.plan(nullProvider, "null_resource", last)).toMatchObject({
+      action: "delete",
+      plannedStateJson: "",
+      planned: new Uint8Array(),
+    });
+    expect(await bridge.apply(nullProvider, "null_resource", last)).toEqual({ errors: [], warnings: [] });
+    expect(
+      bridge.calls.filter((c) => c.method === "plan" || c.method === "apply").map((c) => [c.method, c.id]),
+    ).toEqual([
+      ["plan", undefined],
+      ["apply", undefined],
+      ["plan", "7464986431894282090"],
+      ["plan", "7464986431894282090"],
+      ["apply", "7464986431894282090"],
+      ["apply", undefined],
+      ["plan", "1619236683285190585"],
+      ["apply", "1619236683285190585"],
+    ]);
+
+    const missing = await failure(bridge.plan(nullProvider, "null_resource", { configJson: triggers("9") }));
+    expect(missing.code).toBe("not_found");
+    expect(missing.message).toContain("replies/hashicorp_null_3.3.2/null_resource");
+    const unplanned = await failure(bridge.apply(nullProvider, "null_resource", { configJson: triggers("1") }));
+    expect(unplanned).toMatchObject({ code: "invalid_argument", message: "planned is required with config_json" });
+    expect((await failure(bridge.plan(nullProvider, "null_resource", {}))).code).toBe("invalid_argument");
+  });
+
   it("refuses a live run without the variables it needs, and a replay does not need them", () => {
     vi.stubEnv("GITHUB_TOKEN", "");
     expect(fakeBridge({ needs: ["GITHUB_TOKEN"] }).live).toBe(false);
@@ -181,7 +235,8 @@ describe("the fixtures", () => {
     expect(replies.length).toBeGreaterThan(0);
     for (const file of replies) {
       const { scrubbed } = JSON.parse(readFileSync(file, "utf8")) as { scrubbed: string[] };
-      expect(scrubbed, file).toEqual(["$GITHUB_TOKEN"]);
+      // hashicorp/null takes no credentials.
+      expect(scrubbed, file).toEqual(file.includes("hashicorp_null_") ? [] : ["$GITHUB_TOKEN"]);
     }
   });
 

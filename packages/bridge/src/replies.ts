@@ -1,7 +1,17 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { fromJson, type JsonValue } from "@bufbuild/protobuf";
-import { BridgeError, type BridgeErrorCode, type ProviderRef, type ResourceState, toDiagnostic } from "./bridge.ts";
+import type { ResourceFields } from "@sanoma-ai/workflows";
+import {
+  BridgeError,
+  type BridgeErrorCode,
+  type PlanAction,
+  type PlanResult,
+  type ProviderRef,
+  type ResourceState,
+  toDiagnostic,
+} from "./bridge.ts";
 import type { ProviderClient } from "./configure.ts";
 import { type Fixture, type FixtureError, isError, releaseName, releaseSlug, stateId, toPath } from "./fixtures.ts";
 import { DiagnosticSchema } from "./gen/bridge/v1/bridge_pb.ts";
@@ -9,10 +19,10 @@ import type { JsonObject } from "./json.ts";
 
 /** A call a fake bridge received, in order. */
 export interface BridgeCall {
-  method: "schema" | "configure" | "import" | "read" | "close";
+  method: "schema" | "configure" | "import" | "read" | "plan" | "apply" | "close";
   ref?: ProviderRef;
   typeName?: string;
-  /** The import ID, or the `id` in a read's state. */
+  /** The import ID, or the `id` in a read's state or a plan's or apply's prior state. */
   id?: string;
 }
 
@@ -36,6 +46,17 @@ export type BridgeState = {
 };
 
 const isFailure = (o: StateObject | StateFailure): o is StateFailure => "error" in o;
+
+/**
+ * What a `stateBridge` knows of a resource type to plan and create one, by the provider's type
+ * name, as its `TfResourceType` has it: `fields.vendorOwned` are unknown until applied, a change
+ * to an `immutable` one (by top-level attribute) replaces the object, and a created object has
+ * `schemaVersion`.
+ */
+export type StateTypes = Record<
+  string,
+  { schemaVersion: number; fields: Pick<ResourceFields, "vendorOwned" | "immutable"> }
+>;
 
 /** A `Resource` as a fixture holds it, in Connect's JSON form: int64 as a string, bytes as base64. */
 interface ReplyResource {
@@ -106,6 +127,29 @@ const failure = ({ code, message, diagnostics }: FixtureError) =>
     diagnostics.map((d) => toDiagnostic(fromJson(DiagnosticSchema, d as JsonValue))),
   );
 
+const parsed = (text: string | undefined) => (text ? (JSON.parse(text) as JsonObject) : undefined);
+
+const topLevel = (paths: readonly string[]) => new Set(paths.map((path) => path.split(".")[0]));
+
+/** A plan as `stateBridge` answers it: `planned` is the planned state's JSON. */
+const planOf = (
+  action: PlanAction,
+  planned: JsonObject,
+  unknownPaths: string[] = [],
+  requiresReplace: string[] = [],
+) => {
+  const plannedStateJson = JSON.stringify(planned);
+  return {
+    action,
+    plannedStateJson,
+    unknownPaths,
+    requiresReplace,
+    planned: new TextEncoder().encode(plannedStateJson),
+    plannedPrivate: new Uint8Array(),
+    warnings: [],
+  } satisfies PlanResult;
+};
+
 const resourceOf = (o: StateObject): ResourceState => ({
   typeName: o.typeName,
   stateJson: JSON.stringify(o.state),
@@ -118,18 +162,88 @@ const resourceOf = (o: StateObject): ResourceState => ({
  * type and id (or its recorded failure, or `not_found`), and `read` the object of that type whose
  * `id` is the state's, as it is in `state` now, or `gone` once it is not there. It reads `state`
  * on every call, so a test can change or remove an object between calls. Like the bridge, it
- * refuses an import or read before `configure` and another config until `close`, with real
- * `BridgeError`s. Every call is pushed onto `calls`.
+ * refuses a call before `configure` and another config until `close`, with real `BridgeError`s.
+ * Every call is pushed onto `calls`.
+ *
+ * `plan` diffs the config against the prior state as a provider might, with what `types` says
+ * of the type (nothing: no unknowns but `id`, nothing replaces): a null in the config keeps the
+ * prior value, as for a computed attribute; a create plans `id` and the null `vendorOwned`
+ * attributes unknown; a change to an `immutable` attribute is a replace. `planned` is the planned
+ * state's JSON. `apply` puts the planned state into `state` (a created object gets the id
+ * `<type>-<n>`, under that import id), or, for a delete, removes the object.
  */
-export function stateBridge(state: BridgeState, calls: BridgeCall[] = []): ProviderClient & { calls: BridgeCall[] } {
+export function stateBridge(
+  state: BridgeState,
+  calls: BridgeCall[] = [],
+  types: StateTypes = {},
+): ProviderClient & { calls: BridgeCall[] } {
   const configured = new Map<string, string>();
   const ready = (ref: { source: string; version: string }) => {
     if (!configured.has(releaseName(ref))) {
       throw new BridgeError("failed_precondition", `${releaseName(ref)} is not configured; call Configure first`);
     }
   };
+  /** The object of type `typeName` whose provider id is `id`, and its key in `state.objects`. */
+  const objectWithId = (typeName: string, id: unknown) =>
+    Object.entries(state.objects).find(
+      (entry): entry is [string, StateObject] =>
+        !isFailure(entry[1]) && entry[1].typeName === typeName && entry[1].state.id === id,
+    );
+  const log = (method: "plan" | "apply", ref: ProviderRef, typeName: string, prior: JsonObject | undefined) => {
+    const id = prior && stateId(prior);
+    calls.push({ method, ref, typeName, ...(id === undefined ? {} : { id }) });
+    ready(ref);
+  };
+  let created = 0;
   return {
     calls,
+    async plan(ref, typeName, input) {
+      const prior = parsed(input.priorStateJson);
+      const config = parsed(input.configJson);
+      log("plan", ref, typeName, prior);
+      if (!config) {
+        if (!prior) throw new BridgeError("invalid_argument", "prior_state_json or config_json is required");
+        return { ...planOf("delete", {}), plannedStateJson: "", planned: new Uint8Array() };
+      }
+      const { vendorOwned = [], immutable = [] } = types[typeName]?.fields ?? {};
+      const computed = topLevel(vendorOwned).add("id");
+      const unknown = Object.keys(config).filter((name) => config[name] === null && computed.has(name));
+      if (!prior) return planOf("create", config, unknown);
+      const changed = Object.keys(config).filter(
+        (name) => config[name] !== null && !isDeepStrictEqual(config[name], prior[name] ?? null),
+      );
+      const replaced = topLevel(immutable);
+      const replace = changed.filter((name) => replaced.has(name));
+      if (replace.length) return planOf("replace", config, unknown, replace);
+      const next = { ...prior };
+      for (const name of changed) next[name] = config[name];
+      return planOf(changed.length ? "update" : "none", next);
+    },
+    async apply(ref, typeName, input) {
+      const prior = parsed(input.priorStateJson);
+      log("apply", ref, typeName, prior);
+      const there = prior && objectWithId(typeName, prior.id);
+      if (!input.configJson) {
+        if (!prior) throw new BridgeError("invalid_argument", "prior_state_json or planned is required");
+        if (there) delete state.objects[there[0]];
+        return { errors: [], warnings: [] };
+      }
+      if (!input.planned?.length) throw new BridgeError("invalid_argument", "planned is required with config_json");
+      const planned = JSON.parse(new TextDecoder().decode(input.planned)) as JsonObject;
+      let id = prior?.id ?? planned.id;
+      if (id === null || id === undefined) {
+        do id = `${typeName}-${++created}`;
+        while (objectWithId(typeName, id));
+      }
+      const object: StateObject = {
+        typeName,
+        state: { ...planned, id },
+        private: there?.[1].private ?? "",
+        schemaVersion: there?.[1].schemaVersion ?? types[typeName]?.schemaVersion ?? 0,
+      };
+      state.objects[there?.[0] ?? `${typeName}/${String(id)}`] = object;
+      return { resource: resourceOf(object), errors: [], warnings: [] };
+    },
     async configure(ref, configJson) {
       calls.push({ method: "configure", ref });
       const before = configured.get(releaseName(ref));

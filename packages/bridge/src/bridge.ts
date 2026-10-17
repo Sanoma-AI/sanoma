@@ -5,6 +5,7 @@ import {
   type Diagnostic as DiagnosticMessage,
   Diagnostic_Severity,
   DiagnosticSchema,
+  PlanResponse_Action,
   type Resource,
 } from "./gen/bridge/v1/bridge_pb.ts";
 import { parseSchema, type SchemaDocument } from "./schema.ts";
@@ -41,6 +42,54 @@ export interface ResourceState {
   schemaVersion: number;
 }
 
+/**
+ * What a change is planned from: the prior state, as `read` or `apply` returned it (none to plan
+ * a create), and the desired config, a JSON object of the resource type's implied type with
+ * computed-only attributes null (none to plan a delete).
+ */
+export interface PlanInput {
+  priorStateJson?: string;
+  priorPrivate?: Uint8Array;
+  /** The schema version that wrote the prior state: the provider upgrades it first, as `read` does. */
+  priorSchemaVersion?: number;
+  configJson?: string;
+}
+
+/** What a plan does: `replace` deletes the object and creates it again. */
+export type PlanAction = "none" | "create" | "update" | "replace" | "delete";
+
+export interface PlanResult {
+  action: PlanAction;
+  /** The planned state, unknown values null (listed in `unknownPaths`); empty for a delete. */
+  plannedStateJson: string;
+  /** Attributes known only after apply, in the provider's terms: `id`, `rules[0].name`. */
+  unknownPaths: string[];
+  /** The attributes whose change replaces the object: not empty exactly when `action` is `replace`. */
+  requiresReplace: string[];
+  /** The provider's plan, opaque: pass it to `apply` unchanged. Empty for a delete; for a replace, the new object's. */
+  planned: Uint8Array;
+  plannedPrivate: Uint8Array;
+  warnings: Diagnostic[];
+}
+
+/**
+ * What `apply` carries out: the plan's input, and its `planned` and `plannedPrivate`. A delete
+ * has no config and no `planned`; a replace is two applies, the delete (prior only), then the
+ * create (config and `planned`, no prior).
+ */
+export interface ApplyInput extends PlanInput {
+  planned?: Uint8Array;
+  plannedPrivate?: Uint8Array;
+}
+
+export interface ApplyResult {
+  /** The new state: set whenever the provider returned an object, even with `errors`; absent after a delete. */
+  resource?: ResourceState;
+  /** The provider's error diagnostics: an apply that failed at the provider resolves with them. */
+  errors: Diagnostic[];
+  warnings: Diagnostic[];
+}
+
 /** The provider-bridge API: one bridge process (or its fake) serving any number of providers. */
 export interface Bridge {
   /** The provider's schema document (`schema.protocol` is its plugin protocol) and its release's SHA256SUMS hash. Needs no credentials. */
@@ -72,6 +121,18 @@ export interface Bridge {
     priv?: Uint8Array,
     schemaVersion?: number,
   ): Promise<{ resource?: ResourceState; gone: boolean; warnings: Diagnostic[] }>;
+  /**
+   * Plans the change that makes one resource match `configJson`. It does not refresh: plan from
+   * a fresh `read`. A config the provider rejects is `invalid_argument`, a plan it fails
+   * `failed_precondition`, each with diagnostics.
+   */
+  plan(ref: ProviderRef, typeName: string, input: PlanInput): Promise<PlanResult>;
+  /**
+   * Carries out a plan. The provider's errors are in `errors`, beside the state it returned, so
+   * an object created before an error is not lost; a `BridgeError` means the request was refused
+   * before the provider was called, or the provider process failed.
+   */
+  apply(ref: ProviderRef, typeName: string, input: ApplyInput): Promise<ApplyResult>;
   /** Stops one configured provider, or every one. */
   close(ref?: ProviderRef): Promise<void>;
   /** Stops the bridge and every provider it runs. */
@@ -159,6 +220,22 @@ const toResource = (r: Resource): ResourceState => ({
   schemaVersion: Number(r.schemaVersion),
 });
 
+const actions = {
+  [PlanResponse_Action.NONE]: "none",
+  [PlanResponse_Action.CREATE]: "create",
+  [PlanResponse_Action.UPDATE]: "update",
+  [PlanResponse_Action.REPLACE]: "replace",
+  [PlanResponse_Action.DELETE]: "delete",
+} as const satisfies Record<number, PlanAction>;
+
+/** A plan's or apply's input as the request's prior and config fields. */
+const changeOf = ({ priorStateJson = "", priorPrivate, priorSchemaVersion, configJson = "" }: PlanInput) => ({
+  priorStateJson,
+  configJson,
+  ...(priorPrivate === undefined ? {} : { priorPrivate }),
+  ...(priorSchemaVersion === undefined ? {} : { priorSchemaVersion: BigInt(priorSchemaVersion) }),
+});
+
 /** Runs a call, its failure as a `BridgeError`. */
 async function call<T>(run: () => Promise<T>): Promise<T> {
   try {
@@ -215,6 +292,40 @@ export function bridgeClient(
         return {
           ...(res.resource ? { resource: toResource(res.resource) } : {}),
           gone: res.gone,
+          warnings: res.warnings.map(toDiagnostic),
+        };
+      }),
+    plan: (ref, typeName, input) =>
+      call(async () => {
+        const res = await rpc.plan({ provider: providerOf(ref), typeName, ...changeOf(input) }, options);
+        const action: PlanAction | undefined = actions[res.action as keyof typeof actions];
+        if (!action) throw new BridgeError("internal", `plan ${typeName}: the bridge returned no action`);
+        return {
+          action,
+          plannedStateJson: res.plannedStateJson,
+          unknownPaths: res.unknownPaths,
+          requiresReplace: res.requiresReplace,
+          planned: res.planned,
+          plannedPrivate: res.plannedPrivate,
+          warnings: res.warnings.map(toDiagnostic),
+        };
+      }),
+    apply: (ref, typeName, input) =>
+      call(async () => {
+        const { planned, plannedPrivate } = input;
+        const res = await rpc.apply(
+          {
+            provider: providerOf(ref),
+            typeName,
+            ...changeOf(input),
+            ...(planned === undefined ? {} : { planned }),
+            ...(plannedPrivate === undefined ? {} : { plannedPrivate }),
+          },
+          options,
+        );
+        return {
+          ...(res.resource ? { resource: toResource(res.resource) } : {}),
+          errors: res.errors.map(toDiagnostic),
           warnings: res.warnings.map(toDiagnostic),
         };
       }),

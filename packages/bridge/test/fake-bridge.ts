@@ -14,9 +14,11 @@ import { type Bridge, bridgeClient, type ProviderRef } from "../src/bridge.ts";
 import { startBridge, type StartBridgeOptions } from "../src/client.ts";
 import { type Fixture, isError, releaseName, releaseSlug, schemaFile, stateId, toPath } from "../src/fixtures.ts";
 import {
+  ApplyResponseSchema,
   BridgeService,
   DiagnosticSchema,
   ImportResponseSchema,
+  PlanResponseSchema,
   type ProviderRef as ProviderRefMessage,
   ReadResponseSchema,
 } from "../src/gen/bridge/v1/bridge_pb.ts";
@@ -24,7 +26,7 @@ import { isObject } from "../src/json.ts";
 import { readPins, testdata } from "../src/pins.ts";
 import type { BridgeCall } from "../src/replies.ts";
 import { parseSchema, type SchemaDocument } from "../src/schema.ts";
-import { recordHint, recorder, replyDir, typeDir } from "./record.ts";
+import { CHANGE_FILES, changeKey, recordHint, recorder, replyDir, typeDir } from "./record.ts";
 
 export interface FakeBridgeOptions {
   /** The fixtures: `pins.json`, `schemas/` and `replies/`. Default: this package's `testdata/`. */
@@ -50,6 +52,8 @@ const METHODS: Record<string, BridgeCall["method"]> = {
   Configure: "configure",
   Import: "import",
   Read: "read",
+  Plan: "plan",
+  Apply: "apply",
   Close: "close",
 };
 
@@ -57,13 +61,20 @@ const METHODS: Record<string, BridgeCall["method"]> = {
 function logCalls(calls: BridgeCall[]): Interceptor {
   return (next) => (req) => {
     const method = METHODS[req.method.name];
-    const msg = req.message as { provider?: ProviderRefMessage; typeName?: string; id?: string; stateJson?: string };
+    const msg = req.message as {
+      provider?: ProviderRefMessage;
+      typeName?: string;
+      id?: string;
+      stateJson?: string;
+      priorStateJson?: string;
+    };
     if (method) {
       const { source = "", version = "", sha256 = "" } = msg.provider ?? {};
       let id = msg.id || undefined;
-      if (method === "read") {
+      const state = method === "read" ? msg.stateJson : msg.priorStateJson;
+      if (state) {
         try {
-          id = stateId(msg.stateJson ?? "");
+          id = stateId(state);
         } catch {
           // Not JSON: the bridge refuses it, and the log says so by its call alone.
         }
@@ -132,6 +143,8 @@ function liveBridge(dir: string, options: StartBridgeOptions, log: Interceptor, 
     },
     import: async (ref, typeName, id) => (await bridge()).import(ref, typeName, id),
     read: async (...args) => (await bridge()).read(...args),
+    plan: async (...args) => (await bridge()).plan(...args),
+    apply: async (...args) => (await bridge()).apply(...args),
     close: async (ref) => {
       if (started) await (await started).close(ref);
     },
@@ -190,6 +203,7 @@ function replayService(dir: string): ServiceImpl<typeof BridgeService> {
   const recorded = new Map<string, string | undefined>();
   const configured = new Map<string, string>();
   const reads = new Map<string, Map<string, Fixture>>();
+  const changes = new Map<string, Map<string, Fixture>>();
   const where = (file: string) => relative(dir, file);
 
   /** The release's SHA256SUMS hash: its pin, else what its recorded replies say; undefined when neither knows. */
@@ -262,6 +276,52 @@ function replayService(dir: string): ServiceImpl<typeof BridgeService> {
     return index;
   }
 
+  /** The recorded plans (`plan`) or applies (`apply`) of a resource type, by their prior state and config (`changeKey`). */
+  function changesOf(ref: ProviderRef, typeName: string, kind: "plan" | "apply"): Map<string, Fixture> {
+    const key = `${releaseName(ref)} ${typeName} ${kind}`;
+    let index = changes.get(key);
+    if (!index) {
+      index = new Map();
+      const root = typeDir(dir, ref, typeName);
+      const folders = existsSync(root) ? readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()) : [];
+      for (const folder of folders) {
+        for (const name of readdirSync(join(root, folder.name))) {
+          if (!CHANGE_FILES.test(name) || name.startsWith("plan") !== (kind === "plan")) continue;
+          const fixture = readFixture(join(root, folder.name, name));
+          const at = changeKey(fixture.request as { priorStateJson?: string; configJson?: string });
+          if (!index.has(at)) index.set(at, fixture);
+        }
+      }
+      changes.set(key, index);
+    }
+    return index;
+  }
+
+  /** The recorded plan or apply with this prior state and config, or the bridge's refusal of one it would refuse. */
+  function changeFixture(
+    kind: "plan" | "apply",
+    req: { provider?: ProviderRefMessage; typeName: string; priorStateJson: string; configJson: string },
+  ) {
+    const ref = configuredType(req.provider, req.typeName);
+    if (!req.priorStateJson && !req.configJson) {
+      throw fail(Code.InvalidArgument, "prior_state_json or config_json is required");
+    }
+    let key: string;
+    try {
+      key = changeKey(req);
+    } catch (error) {
+      throw fail(Code.InvalidArgument, `prior_state_json or config_json: ${(error as Error).message}`);
+    }
+    const fixture = changesOf(ref, req.typeName, kind).get(key);
+    if (!fixture) {
+      throw fail(
+        Code.NotFound,
+        `${kind} ${req.typeName}: no recorded ${kind} with this prior state and config under ${where(typeDir(dir, ref, req.typeName))}; ${recordHint}`,
+      );
+    }
+    return fixture;
+  }
+
   return {
     getSchema(req) {
       const ref = release(req.provider);
@@ -321,6 +381,15 @@ function replayService(dir: string): ServiceImpl<typeof BridgeService> {
         );
       }
       return replay(fixture, ReadResponseSchema);
+    },
+    plan(req) {
+      return replay(changeFixture("plan", req), PlanResponseSchema);
+    },
+    apply(req) {
+      if (req.configJson && req.planned.length === 0) {
+        throw fail(Code.InvalidArgument, "planned is required with config_json");
+      }
+      return replay(changeFixture("apply", req), ApplyResponseSchema);
     },
     close(req) {
       if (req.provider?.source) configured.delete(releaseName(release(req.provider)));

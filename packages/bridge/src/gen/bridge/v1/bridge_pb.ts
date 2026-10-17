@@ -13,7 +13,7 @@ import type { Message, UnknownEnum } from "@bufbuild/protobuf";
  * Describes the file bridge/v1/bridge.proto.
  */
 export const file_bridge_v1_bridge: GenFile = /*@__PURE__*/
-  fileDesc("ChZicmlkZ2UvdjEvYnJpZGdlLnByb3RvEhhzYW5vbWEucHJvdmlkZXJicmlkZ2UudjEiPgoLUHJvdmlkZXJSZWYSDgoGc291cmNlGAEgASgJEg8KB3ZlcnNpb24YAiABKAkSDgoGc2hhMjU2GAMgASgJIksKEEdldFNjaGVtYVJlcXVlc3QSNwoIcHJvdmlkZXIYASABKAsyJS5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuUHJvdmlkZXJSZWYiSgoRR2V0U2NoZW1hUmVzcG9uc2USEwoLc2NoZW1hX2pzb24YASABKAkSEAoIcHJvdG9jb2wYAiABKAUSDgoGc2hhMjU2GAMgASgJImAKEENvbmZpZ3VyZVJlcXVlc3QSNwoIcHJvdmlkZXIYASABKAsyJS5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuUHJvdmlkZXJSZWYSEwoLY29uZmlnX2pzb24YAiABKAkiWwoRQ29uZmlndXJlUmVzcG9uc2USNgoId2FybmluZ3MYASADKAsyJC5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuRGlhZ25vc3RpYxIOCgZzaGEyNTYYAiABKAkiWgoIUmVzb3VyY2USEQoJdHlwZV9uYW1lGAEgASgJEhIKCnN0YXRlX2pzb24YAiABKAkSDwoHcHJpdmF0ZRgDIAEoDBIWCg5zY2hlbWFfdmVyc2lvbhgEIAEoAyJnCg1JbXBvcnRSZXF1ZXN0EjcKCHByb3ZpZGVyGAEgASgLMiUuc2Fub21hLnByb3ZpZGVyYnJpZGdlLnYxLlByb3ZpZGVyUmVmEhEKCXR5cGVfbmFtZRgCIAEoCRIKCgJpZBgDIAEoCSJ/Cg5JbXBvcnRSZXNwb25zZRI1CglyZXNvdXJjZXMYASADKAsyIi5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuUmVzb3VyY2USNgoId2FybmluZ3MYAiADKAsyJC5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuRGlhZ25vc3RpYyKuAQoLUmVhZFJlcXVlc3QSNwoIcHJvdmlkZXIYASABKAsyJS5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuUHJvdmlkZXJSZWYSEQoJdHlwZV9uYW1lGAIgASgJEhIKCnN0YXRlX2pzb24YAyABKAkSDwoHcHJpdmF0ZRgEIAEoDBIbCg5zY2hlbWFfdmVyc2lvbhgFIAEoA0gAiAEBQhEKD19zY2hlbWFfdmVyc2lvbiKKAQoMUmVhZFJlc3BvbnNlEjQKCHJlc291cmNlGAEgASgLMiIuc2Fub21hLnByb3ZpZGVyYnJpZGdlLnYxLlJlc291cmNlEgwKBGdvbmUYAiABKAgSNgoId2FybmluZ3MYAyADKAsyJC5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuRGlhZ25vc3RpYyJHCgxDbG9zZVJlcXVlc3QSNwoIcHJvdmlkZXIYASABKAsyJS5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuUHJvdmlkZXJSZWYiDwoNQ2xvc2VSZXNwb25zZSLWAQoKRGlhZ25vc3RpYxI/CghzZXZlcml0eRgBIAEoDjItLnNhbm9tYS5wcm92aWRlcmJyaWRnZS52MS5EaWFnbm9zdGljLlNldmVyaXR5Eg8KB3N1bW1hcnkYAiABKAkSDgoGZGV0YWlsGAMgASgJEhYKDmF0dHJpYnV0ZV9wYXRoGAQgASgJIk4KCFNldmVyaXR5EhgKFFNFVkVSSVRZX1VOU1BFQ0lGSUVEEAASEgoOU0VWRVJJVFlfRVJST1IQARIUChBTRVZFUklUWV9XQVJOSU5HEAIy6QMKDUJyaWRnZVNlcnZpY2USZAoJR2V0U2NoZW1hEiouc2Fub21hLnByb3ZpZGVyYnJpZGdlLnYxLkdldFNjaGVtYVJlcXVlc3QaKy5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuR2V0U2NoZW1hUmVzcG9uc2USZAoJQ29uZmlndXJlEiouc2Fub21hLnByb3ZpZGVyYnJpZGdlLnYxLkNvbmZpZ3VyZVJlcXVlc3QaKy5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuQ29uZmlndXJlUmVzcG9uc2USWwoGSW1wb3J0Eicuc2Fub21hLnByb3ZpZGVyYnJpZGdlLnYxLkltcG9ydFJlcXVlc3QaKC5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuSW1wb3J0UmVzcG9uc2USVQoEUmVhZBIlLnNhbm9tYS5wcm92aWRlcmJyaWRnZS52MS5SZWFkUmVxdWVzdBomLnNhbm9tYS5wcm92aWRlcmJyaWRnZS52MS5SZWFkUmVzcG9uc2USWAoFQ2xvc2USJi5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuQ2xvc2VSZXF1ZXN0Gicuc2Fub21hLnByb3ZpZGVyYnJpZGdlLnYxLkNsb3NlUmVzcG9uc2ViBnByb3RvMw");
+  fileDesc("ChZicmlkZ2UvdjEvYnJpZGdlLnByb3RvEhhzYW5vbWEucHJvdmlkZXJicmlkZ2UudjEiPgoLUHJvdmlkZXJSZWYSDgoGc291cmNlGAEgASgJEg8KB3ZlcnNpb24YAiABKAkSDgoGc2hhMjU2GAMgASgJIksKEEdldFNjaGVtYVJlcXVlc3QSNwoIcHJvdmlkZXIYASABKAsyJS5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuUHJvdmlkZXJSZWYiSgoRR2V0U2NoZW1hUmVzcG9uc2USEwoLc2NoZW1hX2pzb24YASABKAkSEAoIcHJvdG9jb2wYAiABKAUSDgoGc2hhMjU2GAMgASgJImAKEENvbmZpZ3VyZVJlcXVlc3QSNwoIcHJvdmlkZXIYASABKAsyJS5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuUHJvdmlkZXJSZWYSEwoLY29uZmlnX2pzb24YAiABKAkiWwoRQ29uZmlndXJlUmVzcG9uc2USNgoId2FybmluZ3MYASADKAsyJC5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuRGlhZ25vc3RpYxIOCgZzaGEyNTYYAiABKAkiWgoIUmVzb3VyY2USEQoJdHlwZV9uYW1lGAEgASgJEhIKCnN0YXRlX2pzb24YAiABKAkSDwoHcHJpdmF0ZRgDIAEoDBIWCg5zY2hlbWFfdmVyc2lvbhgEIAEoAyJnCg1JbXBvcnRSZXF1ZXN0EjcKCHByb3ZpZGVyGAEgASgLMiUuc2Fub21hLnByb3ZpZGVyYnJpZGdlLnYxLlByb3ZpZGVyUmVmEhEKCXR5cGVfbmFtZRgCIAEoCRIKCgJpZBgDIAEoCSJ/Cg5JbXBvcnRSZXNwb25zZRI1CglyZXNvdXJjZXMYASADKAsyIi5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuUmVzb3VyY2USNgoId2FybmluZ3MYAiADKAsyJC5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuRGlhZ25vc3RpYyKuAQoLUmVhZFJlcXVlc3QSNwoIcHJvdmlkZXIYASABKAsyJS5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuUHJvdmlkZXJSZWYSEQoJdHlwZV9uYW1lGAIgASgJEhIKCnN0YXRlX2pzb24YAyABKAkSDwoHcHJpdmF0ZRgEIAEoDBIbCg5zY2hlbWFfdmVyc2lvbhgFIAEoA0gAiAEBQhEKD19zY2hlbWFfdmVyc2lvbiKKAQoMUmVhZFJlc3BvbnNlEjQKCHJlc291cmNlGAEgASgLMiIuc2Fub21hLnByb3ZpZGVyYnJpZGdlLnYxLlJlc291cmNlEgwKBGdvbmUYAiABKAgSNgoId2FybmluZ3MYAyADKAsyJC5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuRGlhZ25vc3RpYyLbAQoLUGxhblJlcXVlc3QSNwoIcHJvdmlkZXIYASABKAsyJS5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuUHJvdmlkZXJSZWYSEQoJdHlwZV9uYW1lGAIgASgJEhgKEHByaW9yX3N0YXRlX2pzb24YAyABKAkSFQoNcHJpb3JfcHJpdmF0ZRgEIAEoDBIhChRwcmlvcl9zY2hlbWFfdmVyc2lvbhgFIAEoA0gAiAEBEhMKC2NvbmZpZ19qc29uGAYgASgJQhcKFV9wcmlvcl9zY2hlbWFfdmVyc2lvbiL8AgoMUGxhblJlc3BvbnNlEj0KBmFjdGlvbhgBIAEoDjItLnNhbm9tYS5wcm92aWRlcmJyaWRnZS52MS5QbGFuUmVzcG9uc2UuQWN0aW9uEhoKEnBsYW5uZWRfc3RhdGVfanNvbhgCIAEoCRIVCg11bmtub3duX3BhdGhzGAMgAygJEhgKEHJlcXVpcmVzX3JlcGxhY2UYBCADKAkSDwoHcGxhbm5lZBgFIAEoDBIXCg9wbGFubmVkX3ByaXZhdGUYBiABKAwSNgoId2FybmluZ3MYByADKAsyJC5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuRGlhZ25vc3RpYyJ+CgZBY3Rpb24SFgoSQUNUSU9OX1VOU1BFQ0lGSUVEEAASDwoLQUNUSU9OX05PTkUQARIRCg1BQ1RJT05fQ1JFQVRFEAISEQoNQUNUSU9OX1VQREFURRADEhIKDkFDVElPTl9SRVBMQUNFEAQSEQoNQUNUSU9OX0RFTEVURRAFIoYCCgxBcHBseVJlcXVlc3QSNwoIcHJvdmlkZXIYASABKAsyJS5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuUHJvdmlkZXJSZWYSEQoJdHlwZV9uYW1lGAIgASgJEhgKEHByaW9yX3N0YXRlX2pzb24YAyABKAkSFQoNcHJpb3JfcHJpdmF0ZRgEIAEoDBIhChRwcmlvcl9zY2hlbWFfdmVyc2lvbhgFIAEoA0gAiAEBEhMKC2NvbmZpZ19qc29uGAYgASgJEg8KB3BsYW5uZWQYByABKAwSFwoPcGxhbm5lZF9wcml2YXRlGAggASgMQhcKFV9wcmlvcl9zY2hlbWFfdmVyc2lvbiKzAQoNQXBwbHlSZXNwb25zZRI0CghyZXNvdXJjZRgBIAEoCzIiLnNhbm9tYS5wcm92aWRlcmJyaWRnZS52MS5SZXNvdXJjZRI0CgZlcnJvcnMYAiADKAsyJC5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuRGlhZ25vc3RpYxI2Cgh3YXJuaW5ncxgDIAMoCzIkLnNhbm9tYS5wcm92aWRlcmJyaWRnZS52MS5EaWFnbm9zdGljIkcKDENsb3NlUmVxdWVzdBI3Cghwcm92aWRlchgBIAEoCzIlLnNhbm9tYS5wcm92aWRlcmJyaWRnZS52MS5Qcm92aWRlclJlZiIPCg1DbG9zZVJlc3BvbnNlItYBCgpEaWFnbm9zdGljEj8KCHNldmVyaXR5GAEgASgOMi0uc2Fub21hLnByb3ZpZGVyYnJpZGdlLnYxLkRpYWdub3N0aWMuU2V2ZXJpdHkSDwoHc3VtbWFyeRgCIAEoCRIOCgZkZXRhaWwYAyABKAkSFgoOYXR0cmlidXRlX3BhdGgYBCABKAkiTgoIU2V2ZXJpdHkSGAoUU0VWRVJJVFlfVU5TUEVDSUZJRUQQABISCg5TRVZFUklUWV9FUlJPUhABEhQKEFNFVkVSSVRZX1dBUk5JTkcQAjKaBQoNQnJpZGdlU2VydmljZRJkCglHZXRTY2hlbWESKi5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuR2V0U2NoZW1hUmVxdWVzdBorLnNhbm9tYS5wcm92aWRlcmJyaWRnZS52MS5HZXRTY2hlbWFSZXNwb25zZRJkCglDb25maWd1cmUSKi5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuQ29uZmlndXJlUmVxdWVzdBorLnNhbm9tYS5wcm92aWRlcmJyaWRnZS52MS5Db25maWd1cmVSZXNwb25zZRJbCgZJbXBvcnQSJy5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuSW1wb3J0UmVxdWVzdBooLnNhbm9tYS5wcm92aWRlcmJyaWRnZS52MS5JbXBvcnRSZXNwb25zZRJVCgRSZWFkEiUuc2Fub21hLnByb3ZpZGVyYnJpZGdlLnYxLlJlYWRSZXF1ZXN0GiYuc2Fub21hLnByb3ZpZGVyYnJpZGdlLnYxLlJlYWRSZXNwb25zZRJVCgRQbGFuEiUuc2Fub21hLnByb3ZpZGVyYnJpZGdlLnYxLlBsYW5SZXF1ZXN0GiYuc2Fub21hLnByb3ZpZGVyYnJpZGdlLnYxLlBsYW5SZXNwb25zZRJYCgVBcHBseRImLnNhbm9tYS5wcm92aWRlcmJyaWRnZS52MS5BcHBseVJlcXVlc3QaJy5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuQXBwbHlSZXNwb25zZRJYCgVDbG9zZRImLnNhbm9tYS5wcm92aWRlcmJyaWRnZS52MS5DbG9zZVJlcXVlc3QaJy5zYW5vbWEucHJvdmlkZXJicmlkZ2UudjEuQ2xvc2VSZXNwb25zZWIGcHJvdG8z");
 
 /**
  * ProviderRef names a provider release on the OpenTofu registry.
@@ -320,6 +320,278 @@ export const ReadResponseSchema: GenMessage<ReadResponse> = /*@__PURE__*/
   messageDesc(file_bridge_v1_bridge, 9);
 
 /**
+ * @generated from message sanoma.providerbridge.v1.PlanRequest
+ */
+export type PlanRequest = Message<"sanoma.providerbridge.v1.PlanRequest"> & {
+  /**
+   * @generated from field: sanoma.providerbridge.v1.ProviderRef provider = 1;
+   */
+  provider?: ProviderRef | undefined;
+
+  /**
+   * @generated from field: string type_name = 2;
+   */
+  typeName: string;
+
+  /**
+   * Prior state as a JSON object, as Read or Apply returned it; empty to
+   * plan a create.
+   *
+   * @generated from field: string prior_state_json = 3;
+   */
+  priorStateJson: string;
+
+  /**
+   * Resource.private of the prior state.
+   *
+   * @generated from field: bytes prior_private = 4;
+   */
+  priorPrivate: Uint8Array;
+
+  /**
+   * Resource.schema_version of the prior state. When set, the provider
+   * upgrades the prior state first (as Read does); when unset,
+   * prior_state_json must already match the current schema.
+   *
+   * @generated from field: optional int64 prior_schema_version = 5;
+   */
+  priorSchemaVersion?: bigint | undefined;
+
+  /**
+   * Desired configuration as a JSON object of the resource type's implied
+   * type; omitted attributes are null, computed-only attributes must be
+   * null. Empty to plan a delete.
+   *
+   * @generated from field: string config_json = 6;
+   */
+  configJson: string;
+};
+
+/**
+ * Describes the message sanoma.providerbridge.v1.PlanRequest.
+ * Use `create(PlanRequestSchema)` to create a new message.
+ */
+export const PlanRequestSchema: GenMessage<PlanRequest> = /*@__PURE__*/
+  messageDesc(file_bridge_v1_bridge, 10);
+
+/**
+ * @generated from message sanoma.providerbridge.v1.PlanResponse
+ */
+export type PlanResponse = Message<"sanoma.providerbridge.v1.PlanResponse"> & {
+  /**
+   * @generated from field: sanoma.providerbridge.v1.PlanResponse.Action action = 1;
+   */
+  action: PlanResponse_Action;
+
+  /**
+   * The planned new state as a JSON object, unknown values as null (listed
+   * in unknown_paths). Empty for DELETE.
+   *
+   * @generated from field: string planned_state_json = 2;
+   */
+  plannedStateJson: string;
+
+  /**
+   * Attributes known only after apply, as paths in the provider's terms
+   * ("id", "rules[0].name", `tags["env"]`); a set with an unknown element
+   * is listed (and null) as a whole.
+   *
+   * @generated from field: repeated string unknown_paths = 3;
+   */
+  unknownPaths: string[];
+
+  /**
+   * For UPDATE and REPLACE, the attributes whose change requires
+   * replacement; the action is REPLACE exactly when this is not empty.
+   *
+   * @generated from field: repeated string requires_replace = 4;
+   */
+  requiresReplace: string[];
+
+  /**
+   * The planned state as the provider returned it (a msgpack DynamicValue).
+   * Opaque: pass it to Apply unchanged. Empty for DELETE.
+   *
+   * @generated from field: bytes planned = 5;
+   */
+  planned: Uint8Array;
+
+  /**
+   * Provider-private planned data. Opaque: pass it to Apply unchanged.
+   *
+   * @generated from field: bytes planned_private = 6;
+   */
+  plannedPrivate: Uint8Array;
+
+  /**
+   * @generated from field: repeated sanoma.providerbridge.v1.Diagnostic warnings = 7;
+   */
+  warnings: Diagnostic[];
+};
+
+/**
+ * Describes the message sanoma.providerbridge.v1.PlanResponse.
+ * Use `create(PlanResponseSchema)` to create a new message.
+ */
+export const PlanResponseSchema: GenMessage<PlanResponse> = /*@__PURE__*/
+  messageDesc(file_bridge_v1_bridge, 11);
+
+/**
+ * @generated from enum sanoma.providerbridge.v1.PlanResponse.Action
+ */
+export const PlanResponse_Action = {
+  /**
+   * @generated from enum value: ACTION_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED: 0,
+
+  /**
+   * The resource already matches config: nothing to apply.
+   *
+   * @generated from enum value: ACTION_NONE = 1;
+   */
+  NONE: 1,
+
+  /**
+   * @generated from enum value: ACTION_CREATE = 2;
+   */
+  CREATE: 2,
+
+  /**
+   * Updated in place.
+   *
+   * @generated from enum value: ACTION_UPDATE = 3;
+   */
+  UPDATE: 3,
+
+  /**
+   * An attribute that cannot change in place changed (requires_replace):
+   * the resource must be deleted and created again. planned is the plan
+   * of the new object, as for a create: apply a replace as Apply(prior,
+   * no config, no planned), then Apply(no prior, config, planned).
+   *
+   * @generated from enum value: ACTION_REPLACE = 4;
+   */
+  REPLACE: 4,
+
+  /**
+   * @generated from enum value: ACTION_DELETE = 5;
+   */
+  DELETE: 5,
+} as const;
+
+/**
+ * @generated from enum sanoma.providerbridge.v1.PlanResponse.Action
+ */
+export type PlanResponse_Action = (typeof PlanResponse_Action)[keyof typeof PlanResponse_Action] | UnknownEnum;
+
+/**
+ * Describes the enum sanoma.providerbridge.v1.PlanResponse.Action.
+ */
+export const PlanResponse_ActionSchema: GenEnum<PlanResponse_Action> = /*@__PURE__*/
+  enumDesc(file_bridge_v1_bridge, 11, 0);
+
+/**
+ * @generated from message sanoma.providerbridge.v1.ApplyRequest
+ */
+export type ApplyRequest = Message<"sanoma.providerbridge.v1.ApplyRequest"> & {
+  /**
+   * @generated from field: sanoma.providerbridge.v1.ProviderRef provider = 1;
+   */
+  provider?: ProviderRef | undefined;
+
+  /**
+   * @generated from field: string type_name = 2;
+   */
+  typeName: string;
+
+  /**
+   * The prior state the plan was made from (PlanRequest's fields, unchanged);
+   * empty for a create.
+   *
+   * @generated from field: string prior_state_json = 3;
+   */
+  priorStateJson: string;
+
+  /**
+   * Sent as the planned private data of a delete; ignored otherwise.
+   *
+   * @generated from field: bytes prior_private = 4;
+   */
+  priorPrivate: Uint8Array;
+
+  /**
+   * @generated from field: optional int64 prior_schema_version = 5;
+   */
+  priorSchemaVersion?: bigint | undefined;
+
+  /**
+   * The config the plan was made from; empty for a delete.
+   *
+   * @generated from field: string config_json = 6;
+   */
+  configJson: string;
+
+  /**
+   * PlanResponse.planned; empty for a delete (and only then: an empty
+   * planned with a config_json is refused).
+   *
+   * @generated from field: bytes planned = 7;
+   */
+  planned: Uint8Array;
+
+  /**
+   * PlanResponse.planned_private.
+   *
+   * @generated from field: bytes planned_private = 8;
+   */
+  plannedPrivate: Uint8Array;
+};
+
+/**
+ * Describes the message sanoma.providerbridge.v1.ApplyRequest.
+ * Use `create(ApplyRequestSchema)` to create a new message.
+ */
+export const ApplyRequestSchema: GenMessage<ApplyRequest> = /*@__PURE__*/
+  messageDesc(file_bridge_v1_bridge, 12);
+
+/**
+ * @generated from message sanoma.providerbridge.v1.ApplyResponse
+ */
+export type ApplyResponse = Message<"sanoma.providerbridge.v1.ApplyResponse"> & {
+  /**
+   * The new state. Set whenever the provider returned an object, even
+   * alongside errors (a create that failed half way still has an id);
+   * unset after a delete.
+   *
+   * @generated from field: sanoma.providerbridge.v1.Resource resource = 1;
+   */
+  resource?: Resource | undefined;
+
+  /**
+   * Error diagnostics from the provider. Apply reports them here rather
+   * than as a Connect error so that resource survives. A Connect error
+   * means the request was refused before the provider was called, or the
+   * provider process failed.
+   *
+   * @generated from field: repeated sanoma.providerbridge.v1.Diagnostic errors = 2;
+   */
+  errors: Diagnostic[];
+
+  /**
+   * @generated from field: repeated sanoma.providerbridge.v1.Diagnostic warnings = 3;
+   */
+  warnings: Diagnostic[];
+};
+
+/**
+ * Describes the message sanoma.providerbridge.v1.ApplyResponse.
+ * Use `create(ApplyResponseSchema)` to create a new message.
+ */
+export const ApplyResponseSchema: GenMessage<ApplyResponse> = /*@__PURE__*/
+  messageDesc(file_bridge_v1_bridge, 13);
+
+/**
  * @generated from message sanoma.providerbridge.v1.CloseRequest
  */
 export type CloseRequest = Message<"sanoma.providerbridge.v1.CloseRequest"> & {
@@ -336,7 +608,7 @@ export type CloseRequest = Message<"sanoma.providerbridge.v1.CloseRequest"> & {
  * Use `create(CloseRequestSchema)` to create a new message.
  */
 export const CloseRequestSchema: GenMessage<CloseRequest> = /*@__PURE__*/
-  messageDesc(file_bridge_v1_bridge, 10);
+  messageDesc(file_bridge_v1_bridge, 14);
 
 /**
  * @generated from message sanoma.providerbridge.v1.CloseResponse
@@ -349,7 +621,7 @@ export type CloseResponse = Message<"sanoma.providerbridge.v1.CloseResponse"> & 
  * Use `create(CloseResponseSchema)` to create a new message.
  */
 export const CloseResponseSchema: GenMessage<CloseResponse> = /*@__PURE__*/
-  messageDesc(file_bridge_v1_bridge, 11);
+  messageDesc(file_bridge_v1_bridge, 15);
 
 /**
  * @generated from message sanoma.providerbridge.v1.Diagnostic
@@ -385,7 +657,7 @@ export type Diagnostic = Message<"sanoma.providerbridge.v1.Diagnostic"> & {
  * Use `create(DiagnosticSchema)` to create a new message.
  */
 export const DiagnosticSchema: GenMessage<Diagnostic> = /*@__PURE__*/
-  messageDesc(file_bridge_v1_bridge, 12);
+  messageDesc(file_bridge_v1_bridge, 16);
 
 /**
  * @generated from enum sanoma.providerbridge.v1.Diagnostic.Severity
@@ -416,7 +688,7 @@ export type Diagnostic_Severity = (typeof Diagnostic_Severity)[keyof typeof Diag
  * Describes the enum sanoma.providerbridge.v1.Diagnostic.Severity.
  */
 export const Diagnostic_SeveritySchema: GenEnum<Diagnostic_Severity> = /*@__PURE__*/
-  enumDesc(file_bridge_v1_bridge, 12, 0);
+  enumDesc(file_bridge_v1_bridge, 16, 0);
 
 /**
  * BridgeService exposes OpenTofu providers to the Sanoma engine.
@@ -430,6 +702,7 @@ export const Diagnostic_SeveritySchema: GenEnum<Diagnostic_Severity> = /*@__PURE
  *
  * Error diagnostics from the provider become a Connect error whose details
  * carry one Diagnostic per diagnostic; warnings are returned in the response.
+ * Apply is the exception: its errors are in the response, see ApplyResponse.
  *
  * @generated from service sanoma.providerbridge.v1.BridgeService
  */
@@ -478,6 +751,31 @@ export const BridgeService: GenService<{
     methodKind: "unary";
     input: typeof ReadRequestSchema;
     output: typeof ReadResponseSchema;
+  },
+  /**
+   * Plan computes the change that makes one resource match config, as
+   * OpenTofu's plan does: ValidateResourceConfig, the proposed new state
+   * (config over prior), then PlanResourceChange. It does not refresh:
+   * Read first. A destroy plan is not sent to the provider.
+   *
+   * @generated from rpc sanoma.providerbridge.v1.BridgeService.Plan
+   */
+  plan: {
+    methodKind: "unary";
+    input: typeof PlanRequestSchema;
+    output: typeof PlanResponseSchema;
+  },
+  /**
+   * Apply carries out a plan with ApplyResourceChange. Provider errors are
+   * returned in the response, beside whatever state the provider returned,
+   * so an object created before the error is not lost.
+   *
+   * @generated from rpc sanoma.providerbridge.v1.BridgeService.Apply
+   */
+  apply: {
+    methodKind: "unary";
+    input: typeof ApplyRequestSchema;
+    output: typeof ApplyResponseSchema;
   },
   /**
    * Close stops one configured provider, or all of them.

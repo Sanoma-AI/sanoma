@@ -10,5 +10,6 @@ export {
   type StateFailure,
   type StateObject,
   stateBridge,
+  type StateTypes,
 } from "./replies.ts";
 export { type TfFake, tfFake, type TfFakeOptions, type TfFakeState } from "./tffake.ts";
