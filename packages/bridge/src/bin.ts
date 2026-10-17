@@ -33,16 +33,18 @@ export function bridgeBin({
   if (!BRIDGE_PLATFORMS.includes(platform)) {
     throw new Error(`provider-bridge: no release for ${platform}. ${howToGetOne}`);
   }
+  let bin: string;
   try {
-    const bin = join(dirname(createRequire(from).resolve(`${name}/package.json`)), "bin", "provider-bridge");
-    if (existsSync(bin)) return bin;
+    bin = join(dirname(createRequire(from).resolve(`${name}/package.json`)), "bin", "provider-bridge");
   } catch {
-    // not installed
+    throw new Error(
+      `provider-bridge: no binary. ${name}, an optional dependency of @sanoma-ai/bridge, is not installed ` +
+        `(installs that omit optional dependencies leave it out). ${howToGetOne}`,
+    );
   }
-  throw new Error(
-    `provider-bridge: no binary. ${name}, an optional dependency of @sanoma-ai/bridge, is not installed ` +
-      `(installs that omit optional dependencies leave it out). ${howToGetOne}`,
-  );
+  if (existsSync(bin)) return bin;
+  // In a sanoma checkout: the platform packages are linked, and their bin/ is filled only when packed.
+  throw new Error(`provider-bridge: no binary. ${name} is installed without ${bin}. ${howToGetOne}`);
 }
 
 const howToGetOne =

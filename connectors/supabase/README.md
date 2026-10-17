@@ -66,7 +66,7 @@ export default defineConfig({ workflows, connectors: [supabase], policy });
 
 `./driver` (`supabaseDriver`; `supabaseDriver({ bridge })` reads through a bridge of your own, `timeoutMs` bounds a Management API request, 30 seconds by default) and `./fake` (`fakeSupabase`) are internal entries, for tests.
 
-Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma-ai/bridge`, started on the first call from `SANOMA_BRIDGE_BIN`. It configures the provider on the first call with `{ access_token }`, and again when the token changes, when the provider has exited, or when the bridge has forgotten it.
+Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma-ai/bridge`, started on the first call with the binary `startBridge` finds. It configures the provider on the first call with `{ access_token }`, and again when the token changes, when the provider has exited, or when the bridge has forgotten it.
 
 The provider answers a project that does not exist (Supabase's 404) with the state it was given, not with none. So `read` always imports, from the ref alone, never refreshing the state it is given, and a project without a `name` is `gone`.
 
@@ -78,7 +78,7 @@ Read on every call, never when the config loads:
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SUPABASE_ACCESS_TOKEN` | A Supabase personal access token ([account tokens](https://supabase.com/dashboard/account/tokens)), for the provider and the Management API |
 
-When the token is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets it. The bridge passes the token to the provider through its config only. The default bridge's binary is the process's to set (`SANOMA_BRIDGE_BIN`, see [the bridge](https://www.npmjs.com/package/@sanoma-ai/bridge#environment)), not a credential of the connector; it must trust Supabase's signing key, since the OpenTofu registry serves none for this provider.
+When the token is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets it. The bridge passes the token to the provider through its config only. The default bridge's binary comes with `@sanoma-ai/bridge` or from `SANOMA_BRIDGE_BIN` (see [the bridge](https://www.npmjs.com/package/@sanoma-ai/bridge#the-binary)), not a credential of the connector; it must trust Supabase's signing key, since the OpenTofu registry serves none for this provider.
 
 ### Errors and retries
 
