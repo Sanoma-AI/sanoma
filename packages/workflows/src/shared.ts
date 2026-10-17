@@ -31,6 +31,12 @@ export const DEFAULT_SLEEP_NAME = "Sleep";
 export const DRIFT_WORKFLOW = "drift";
 
 /**
+ * The built-in apply workflow's name: the only workflow that may call a writable resource type's
+ * change operations (`create`, `update`, `delete`).
+ */
+export const APPLY_WORKFLOW = "apply";
+
+/**
  * Every run status, in the order a run may pass through them: waiting on the queue, running,
  * waiting for an approval, or ended. `waiting` is `running` with an approval pending.
  */

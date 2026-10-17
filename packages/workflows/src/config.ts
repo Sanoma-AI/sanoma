@@ -21,7 +21,8 @@ import {
   VENDOR,
 } from "./op.ts";
 import type { Policy } from "./policy.ts";
-import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
+import { isChangeOp, type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
+import { APPLY_WORKFLOW } from "./shared.ts";
 import type { Steps } from "./steps.ts";
 import { computeVersion } from "./version.ts";
 
@@ -189,14 +190,15 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const driversByVendor = new Map([...makersOf(config.connectors, "driver")].map(([vendor, make]) => [vendor, make()]));
   const drivers = indexDrivers([...driversByVendor.values()], ops);
   const fakes = makersOf(config.connectors, "fake");
+  const types = resourceTypesOf(config.connectors);
   const names = new Map<string, WorkflowDefinition<any, any>>();
   for (const wf of config.workflows) {
-    if (wf.name === DRIFT_WORKFLOW) {
-      throw new Error(
-        `A workflow is named "${DRIFT_WORKFLOW}", the name of the built-in drift workflow; name it otherwise`,
-      );
+    for (const builtIn of [DRIFT_WORKFLOW, APPLY_WORKFLOW]) {
+      if (wf.name === builtIn) {
+        throw new Error(`A workflow is named "${builtIn}", the name of a built-in workflow; name it otherwise`);
+      }
     }
-    checkUses(wf, ops, drivers);
+    checkUses(wf, ops, drivers, types);
     const other = names.get(wf.name);
     if (other && other !== wf) {
       throw new Error(
@@ -206,7 +208,6 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     names.set(wf.name, wf);
   }
   // Built-in: checking the resources the data files declare against their vendors.
-  const types = resourceTypesOf(config.connectors);
   if (types.size) {
     const declared = () =>
       DBOS.runStep(() => readDeclared(root, config.connectors, types), { name: "drift:data-files" });
@@ -365,13 +366,23 @@ function guarded(vendor: string, env: DriverEnv, fn: DriverFn): DriverFn {
  * Every operation a workflow uses must be one the config's connectors declare, with a driver.
  * The workflow normally imports the same connector object; a copy is accepted only if it
  * declares the same effect and retry setting, and the worker's declaration is used either way.
+ * None may change a declared resource (`isChangeOp`): only the built-in apply workflow does.
  */
-function checkUses(wf: WorkflowDefinition<any, any>, ops: Map<string, Op>, impls: Map<string, unknown>) {
+function checkUses(
+  wf: WorkflowDefinition<any, any>,
+  ops: Map<string, Op>,
+  impls: Map<string, unknown>,
+  types: ReadonlyMap<string, Resource>,
+) {
   const problems: string[] = [];
   for (const op of (wf.uses as readonly Use[]).filter(isOp)) {
     const known = ops.get(op.id);
     if (!known) problems.push(`${op.id} is not declared by any connector in \`connectors\``);
-    else if (known !== op && (known.effect !== op.effect || known.idempotent !== op.idempotent)) {
+    else if (isChangeOp(known, types)) {
+      problems.push(
+        `${op.id} changes a declared resource, which only ${APPLY_WORKFLOW} does: change the data file instead`,
+      );
+    } else if (known !== op && (known.effect !== op.effect || known.idempotent !== op.idempotent)) {
       problems.push(
         `${op.id} is declared with effect "${op.effect}"${op.idempotent ? " (idempotent)" : ""}, ` +
           `but its connector says "${known.effect}"${known.idempotent ? " (idempotent)" : ""}`,

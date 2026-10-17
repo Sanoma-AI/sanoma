@@ -38,14 +38,17 @@ export {
   defineResource,
   diffDeclared,
   type FieldReference,
+  type PlanAction,
   type References,
   type Resource,
   type ResourceFields,
   type ResourceOps,
   type ResourceSpec,
+  withoutWriteOnly,
 } from "./resource.ts";
 export { defineConfig, resolveConfig, resolveDatabaseUrl, type ResolvedConfig, type SanomaConfig } from "./config.ts";
 export { type CredentialStatus, credentialsOf } from "./env.ts";
+export { APPLY_WORKFLOW } from "./shared.ts";
 export {
   DRIFT_WORKFLOW,
   type DriftDeclared,

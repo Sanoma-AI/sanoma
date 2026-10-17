@@ -8,15 +8,17 @@ GitHub resources for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@san
 npm install @sanoma-ai/connector-github
 ```
 
-Each resource type has two operations, both effect `read` and idempotent, with the id as the policy's `target`:
+Each resource type has two operations, both effect `read` and idempotent, with the id as the policy's `target`; a repository is writable, so it has the change operations too, which only apply calls:
 
-| Type                | Operations                                                         | Identity                | Binding id                  |
-| ------------------- | ------------------------------------------------------------------ | ----------------------- | --------------------------- |
-| `repository`        | `github.repository.read`, `github.repository.import`               | `name`                  | `node_id`                   |
-| `branch_protection` | `github.branch_protection.read`, `github.branch_protection.import` | `repository_id:pattern` | `id` (its node id, `BPR_…`) |
-| `team_membership`   | `github.team_membership.read`, `github.team_membership.import`     | `team_id:username`      | `id` (`team_id:username`)   |
+| Type                | Operations                                                                        | Identity                | Binding id                  |
+| ------------------- | --------------------------------------------------------------------------------- | ----------------------- | --------------------------- |
+| `repository`        | `github.repository.read`, `.import`, and `.plan`, `.create`, `.update`, `.delete` | `name`                  | `node_id`                   |
+| `branch_protection` | `github.branch_protection.read`, `github.branch_protection.import`                | `repository_id:pattern` | `id` (its node id, `BPR_…`) |
+| `team_membership`   | `github.team_membership.read`, `github.team_membership.import`                    | `team_id:username`      | `id` (`team_id:username`)   |
 
 `import` takes `{ id }`, an identity or a binding id (what the [lockfile](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#bindings) keeps, which a rename does not change), and returns the object's `state`. The provider imports a repository by its name and a rule by `repository:pattern`, so the driver resolves a node id (`R_…`, `BPR_…`) to those first, with one GraphQL `node(id)` query, and refuses one in a repository of another owner than `GITHUB_OWNER` (default: the token's user); a node id GitHub does not know is gone. The fake finds an object by its binding id too, with no query; `read` takes a state an earlier call returned (`{ id, state, handle }`), or just `{ id }`, and returns its fresh `state`, or `gone: true` when it no longer exists. See [Resources](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#resources).
+
+A repository's `create`, `update` and `delete` plan and apply through the provider (see [`@sanoma-ai/bridge`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/README.md#connectors-for-opentofu-providers)); a create's `id` is the new repository's node id. Their tests replay synthetic replies of an empty repository (`sanoma-apply-test*` in `@sanoma-ai/bridge`'s `testdata/replies`) until they are recorded in a test organization.
 
 A data file declares resources with the constructors in `@sanoma-ai/connector-github/resources`:
 

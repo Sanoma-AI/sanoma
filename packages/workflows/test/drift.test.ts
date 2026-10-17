@@ -333,15 +333,11 @@ describe("the built-in drift workflow in a config", () => {
     ).not.toHaveProperty("builtin");
   });
 
-  it("refuses a config workflow named drift", () => {
-    const named = defineWorkflow({
-      name: "drift",
-      trigger: "manual",
-      input: z.object({}),
-      uses: [],
-      run: async () => 1,
-    });
-    expect(() => resolveConfig({ ...company, workflows: [named] })).toThrow(/built-in drift workflow/);
+  it.each(["drift", "apply"])("refuses a config workflow named %s, a built-in's name", (name) => {
+    const named = defineWorkflow({ name, trigger: "manual", input: z.object({}), uses: [], run: async () => 1 });
+    expect(() => resolveConfig({ ...company, workflows: [named] })).toThrow(
+      `A workflow is named "${name}", the name of a built-in workflow`,
+    );
   });
 
   it("changes the app's version with the operations it uses", () => {

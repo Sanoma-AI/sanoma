@@ -25,6 +25,8 @@ export const githubTf = tfConnector({
       identity: "name",
       find: ({ name }) => name,
       bindingId: ({ node_id }) => String(node_id),
+      // Apply creates, changes and deletes repositories.
+      writable: true,
     },
     branch_protection: {
       tf: github_branch_protection,
