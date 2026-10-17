@@ -110,8 +110,13 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   });
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
+    // A host's probe, before the login: it says the app answers, and nothing else.
+    if (req.url?.split("?")[0] === "/healthz" && (req.method === "GET" || req.method === "HEAD")) {
+      res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+      return void res.end(req.method === "HEAD" ? undefined : "ok\n");
+    }
     const request = new NodeRequest({ req, res });
-    // The login sees every request first (pages, server functions and static files alike): its
+    // Then the login sees every request (pages, server functions and static files alike): its
     // own routes, and any it will not let through.
     const answer = await login.handle?.(request);
     if (answer) return sendNodeResponse(res, answer);

@@ -25,6 +25,7 @@ import {
 import type { Policy } from "./policy.ts";
 import { isChangeOp, type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
 import { APPLY_WORKFLOW, BUILT_IN_WORKFLOWS } from "./shared.ts";
+import { sourceDriver, sourceOps } from "./source.ts";
 import type { Steps } from "./steps.ts";
 import { computeVersion } from "./version.ts";
 
@@ -89,7 +90,7 @@ export interface ResolvedConfig {
   version: string;
   /** The DBOS queue runs are started on: `sanoma:<appName>`. */
   queueName: string;
-  /** The operations the connectors declare, by id. */
+  /** The operations the connectors declare, by id, and the built-in `sanoma.source.resolve` when one declares a host type. */
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id, each guarded by its driver's `env` (`indexDrivers`). */
   drivers: Map<string, DriverFn>;
@@ -188,11 +189,13 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const root = rootOf(config);
   const appName = appNameAt(root);
   const scenarios = scenariosAt(root);
-  const ops = indexConnectors(config.connectors);
-  const driversByVendor = new Map([...makersOf(config.connectors, "driver")].map(([vendor, make]) => [vendor, make()]));
-  const drivers = indexDrivers([...driversByVendor.values()], ops);
-  const fakes = makersOf(config.connectors, "fake");
   const types = resourceTypesOf(config.connectors);
+  // Built-in: `sanoma.source.resolve`, which apply and drift call for a host's revision.
+  const hosts = [...types.values()].some((type) => type.host);
+  const ops = indexConnectors([...config.connectors, ...(hosts ? [sourceOps] : [])]);
+  const driversByVendor = new Map([...makersOf(config.connectors, "driver")].map(([vendor, make]) => [vendor, make()]));
+  const drivers = indexDrivers([...driversByVendor.values(), ...(hosts ? [sourceDriver] : [])], ops);
+  const fakes = makersOf(config.connectors, "fake");
   const names = new Map<string, WorkflowDefinition<any, any>>();
   for (const wf of config.workflows) {
     if (BUILT_IN_WORKFLOWS.has(wf.name)) {

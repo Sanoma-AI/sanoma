@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { checkHost, type HostSpec } from "./host.ts";
 import { type Connector, type OpSpec, RESOURCE, VENDOR } from "./op.ts";
 import { isSecret, type Secret } from "./secret.ts";
 
@@ -76,10 +77,12 @@ export interface ResourceSpec<S extends z.ZodObject = z.ZodObject> {
    * `create`, `update` and `delete` besides `read` and `import`. Default false.
    */
   writable?: boolean;
+  /** Set when the type meets the `Host` contract: it runs the company. Such a type is `writable` and `stateless`. */
+  host?: HostSpec;
   /**
    * True when its objects hold no data, so one gone at the vendor is created again by apply
    * without asking (a host running the company's code); otherwise apply asks first, as a
-   * recreated database looks fine and has lost its data. Default false.
+   * recreated database looks fine and has lost its data. Default: true for a host, else false.
    */
   stateless?: boolean;
 }
@@ -229,13 +232,15 @@ export interface Resource<
   W extends boolean = boolean,
 >
   extends
-    Readonly<Required<Omit<ResourceSpec<S>, "identity" | "find" | "writable">>>,
-    Readonly<Pick<ResourceSpec<S>, "identity" | "find">> {
+    Readonly<Required<Omit<ResourceSpec<S>, "identity" | "find" | "writable" | "host" | "stateless">>>,
+    Readonly<Pick<ResourceSpec<S>, "identity" | "find" | "host">> {
   (desired: Declaring<z.input<S>, R>): Declared<Id, z.input<S>>;
   /** `read` and `import`, each effect `read`, idempotent, with the id as `target`; for a writable type, the change operations too. */
   readonly ops: ResourceOps<S, W>;
   /** True when apply may change its objects: it has the change operations. */
   readonly writable: W;
+  /** True when apply may recreate or replace its objects as routine: they keep no data. */
+  readonly stateless: boolean;
   readonly [RESOURCE]: true;
 }
 
@@ -478,9 +483,10 @@ export function defineResource<
 >(
   spec: ResourceSpec<S> & { vendor: V; type: T; fields: { references?: R }; writable?: W },
 ): Resource<S, `${V}.${T}`, R, W> {
-  const { vendor, type, schema, fields, find, identity } = spec;
+  const { vendor, type, schema, fields, find, identity, host } = spec;
   const writable = (spec.writable ?? false) as W;
   const what: `${V}.${T}` = `${vendor}.${type}`;
+  if (host) checkHost(what, host, spec);
   const title = spec.title.toLowerCase();
   const io = opsOf(schema);
   // The policy's `target` for a create: the type, as no object has an id yet.
@@ -576,6 +582,10 @@ export function defineResource<
     const desired = resolve(given, "", "") as z.input<S>;
     const unknown = Object.keys(desired ?? {}).filter((name) => !Object.hasOwn(schema.shape, name));
     if (unknown.length) throw new Error(`${what}: no field ${unknown.join(", ")}`);
+    // Apply fills a host's revision from its ref: the file names a branch, never a commit.
+    if (host && pathsIn(desired, new Set([host.revision])).length) {
+      throw new Error(`${what}: leave out ${host.revision}: apply sets it from ${host.inputs.ref}`);
+    }
     const vendors = pathsIn(desired, owned);
     if (vendors.length) {
       throw new Error(
@@ -607,7 +617,8 @@ export function defineResource<
     bindingId: spec.bindingId ?? ((state: State) => String(state.id)),
     normalize: spec.normalize ?? ((state: State, desired: z.input<S>) => compareDeclared(fields, state, desired)),
     writable,
-    stateless: spec.stateless ?? false,
+    ...(host && { host }),
+    stateless: spec.stateless ?? host !== undefined,
     ops,
     // A symbol, so `defineConnector` tells a resource type from a group of operations.
     [RESOURCE]: true as const,

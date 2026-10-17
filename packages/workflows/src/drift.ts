@@ -72,9 +72,16 @@ type State = Record<string, unknown>;
 
 // A resource type's import, as `ctx` gives it: by vendor and type, both only known per run.
 type ImportOp = Op<string, string, "import", { id: string }, { id: string; gone: boolean; state?: State }>;
+// The built-in `sanoma.source.resolve`, which a host's check calls for the commit its ref names now.
+type ResolveOp = Op<"sanoma", "source", "resolve", { url: string; ref: string }, { revision: string }>;
+
+/** A clone URL's schemes: what a `by` field of a host's source holds, told from an id. */
+const CLONE_URL = /^(https?|ssh|git|file):\/\//;
 
 /** What one import found: the object's state, that it is gone, or why it could not be read. */
 export type Found = { state: State } | { gone: true } | { error: string };
+/** What a host's ref names now, or why it could not be resolved. */
+type Revision = { revision: string } | { error: string };
 
 // What drift and apply share. Observing a resource is one `ctx` call, which a workflow makes in
 // its own `run` (the outline draws only those): `observeBy` says what each import is called with,
@@ -117,12 +124,14 @@ export const observed = (out: { gone: boolean; state?: State }): Found =>
  * Each declared resource against what its import `found`: `error`, `absent` (unbound, with the
  * binding id of what its identity found as `found`), `gone`, else the state and the declared
  * fields compared by `diffDeclared`, a reference against the state of the resource it names
- * (so GitHub's node id for a repository counts as its name).
+ * (so GitHub's node id for a repository counts as its name). A host with a `revisions` entry
+ * also compares its revision against the commit its ref names now (or is that entry's `error`).
  */
 export function compare(
   types: ReadonlyMap<string, Resource>,
   resources: DriftDeclared["resources"],
   found: ReadonlyMap<string, Found>,
+  revisions: ReadonlyMap<string, Revision> = new Map(),
 ): DriftResult[] {
   return resources.map(({ id, vendor, type, name, binding, desired, refs }): DriftResult => {
     const row = { id, type, vendor, name, ...(binding !== undefined && { binding }) };
@@ -146,6 +155,12 @@ export function compare(
       if (named && "state" in named) accept[at] = by.map((field) => named.state[field]).filter((v) => v != null);
     }
     const fields = diffDeclared(resource, now.state, desired, accept);
+    const resolved = revisions.get(id);
+    if (resolved && "error" in resolved) return { ...row, status: "error", fields: [], error: resolved.error };
+    const actual = resource.host?.outputs(now.state).revision;
+    if (resolved && actual !== resolved.revision) {
+      fields.push({ path: resource.host!.revision, desired: resolved.revision, actual: actual ?? null });
+    }
     return { ...row, status: fields.length ? "drifted" : "clean", fields };
   });
 }
@@ -171,8 +186,10 @@ export function driftWorkflow(
   ops: ReadonlyMap<string, Op>,
   drivers: ReadonlyMap<string, unknown>,
   declared: () => Promise<DriftDeclared>,
-): WorkflowDefinition<readonly ImportOp[], typeof DriftInput> {
-  const uses = importsOf(types, ops, drivers);
+): WorkflowDefinition<readonly (ImportOp | ResolveOp)[], typeof DriftInput> {
+  const imports = importsOf(types, ops, drivers);
+  const resolve = ops.get("sanoma.source.resolve" satisfies ResolveOp["id"]) as ResolveOp | undefined;
+  const uses = [...imports, ...(resolve ? [resolve] : [])];
   return defineWorkflow({
     // The literal, held to the one name: the outline finds a workflow by a string, or a const of its own file.
     name: "drift" satisfies typeof DRIFT_WORKFLOW,
@@ -186,7 +203,7 @@ export function driftWorkflow(
       // Every import first, so a reference compares against what its resource holds now.
       const found = new Map<string, Found>();
       for (const resource of resources) {
-        const by = observeBy(resource, types, uses);
+        const by = observeBy(resource, types, imports);
         // An if/else, not a `continue`: the outline draws the import as the way past the error.
         if (!("id" in by)) found.set(resource.id, by);
         else {
@@ -198,8 +215,49 @@ export function driftWorkflow(
           }
         }
       }
-      const results = compare(types, resources, found);
+      // A host's revision against the commit its ref names now: a merge is drift on the host.
+      const revisions = new Map<string, Revision>();
+      for (const { id, vendor, type, desired, refs } of resources) {
+        const resource = types.get(`${vendor}.${type}`);
+        const host = resource?.host;
+        const source = host && sourceUrl(desired, refs[host.inputs.source], resource, found);
+        if (host && "state" in found.get(id)! && source !== undefined) {
+          try {
+            const ref = String(valueAt(desired, host.inputs.ref));
+            revisions.set(id, await ctx.sanoma!.source!.resolve({ url: source, ref }));
+          } catch (err) {
+            if (isRunControlError(err)) throw err;
+            revisions.set(id, { error: errorMessage(err) });
+          }
+        }
+      }
+      const results = compare(types, resources, found, revisions);
       return { startedAt, finishedAt: await ctx.now(), problems, resources: results } satisfies DriftReport;
     },
   });
+}
+
+/** The value at a dotted path, a list item's by its index. */
+const valueAt = (value: unknown, path: string) =>
+  path
+    .split(".")
+    .reduce<unknown>((v, key) => (typeof v === "object" && v !== null ? (v as State)[key] : undefined), value);
+
+/**
+ * A host's source: the clone URL its data file gives, or, when it names a declared repository
+ * (`target`), the first of the reference's `by` fields that holds one in that repository's state,
+ * read in this run.
+ */
+function sourceUrl(
+  desired: State,
+  target: string | undefined,
+  { host, fields }: Resource,
+  found: ReadonlyMap<string, Found>,
+): string | undefined {
+  const path = host!.inputs.source;
+  const named = target === undefined ? undefined : found.get(target);
+  const by = fields.references?.[path]?.by ?? [];
+  const values =
+    target === undefined ? [valueAt(desired, path)] : named && "state" in named ? by.map((f) => named.state[f]) : [];
+  return values.find((v): v is string => typeof v === "string" && CLONE_URL.test(v));
 }

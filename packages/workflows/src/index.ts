@@ -114,7 +114,8 @@ export {
   type Secret,
   type Secrets,
 } from "./secret.ts";
-export type { Source } from "./source.ts";
+export { resolveRevision, SOURCE_RESOLVE, type Source } from "./source.ts";
+export type { HostCapabilities, HostLifetime, HostOutputs, HostSpec } from "./host.ts";
 export { SanomaClient, type RunsFilter, type RunSummary, type StartOptions } from "./client.ts";
 // A raw DBOS client on the runtime's database, for tests and tools that read DBOS directly.
 export { dbosClient } from "./db.ts";
