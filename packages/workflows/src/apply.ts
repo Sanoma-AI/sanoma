@@ -425,10 +425,13 @@ export function applyWorkflow(
           }
         }
       }
-      // A host wanted runs the commit its ref names now, resolved before planning: a merge is a change to it.
+      // A host wanted runs the commit its ref names now, resolved before planning: a merge is a change
+      // to it. One bound by the input needs none.
       const revisions = new Map<string, Revision>();
       const hosts = new Map<string, { source: string; revision: string }>();
-      for (const { id, vendor, type, desired, refs } of resources.filter((r) => wanted(r.id))) {
+      for (const { id, vendor, type, desired, refs } of resources.filter(
+        (r) => wanted(r.id) && input.bind?.[r.id] === undefined,
+      )) {
         const resource = types.get(`${vendor}.${type}`);
         const host = resource?.host;
         const source = host && sourceUrl(desired, refs[host.inputs.source], resource, found);

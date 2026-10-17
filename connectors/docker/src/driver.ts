@@ -91,7 +91,16 @@ export const inspectContainer: Inspect = (host, id) =>
             }),
           );
         }
-        resolve(JSON.parse(body) as Inspected);
+        try {
+          resolve(JSON.parse(body) as Inspected);
+        } catch (e) {
+          reject(
+            new DriverError(`docker: GET ${path} answered no JSON: ${body.slice(0, 200)}`, {
+              retryable: true,
+              cause: e,
+            }),
+          );
+        }
       });
     });
     req.on("timeout", () => req.destroy(new Error("timed out")));
@@ -115,7 +124,7 @@ export function observed(state: Record<string, unknown>, container: Inspected): 
     ...state,
     ...CREATE_ONLY,
     must_run: container.State.Running,
-    env: (container.Config.Env ?? []).filter((entry) => names.has(entry.slice(0, entry.indexOf("=")))),
+    env: (container.Config.Env ?? []).filter((entry) => names.has(entry.split("=", 1)[0]!)),
     labels: Object.entries(labels)
       .filter(([label]) => label.startsWith("sanoma."))
       .map(([label, value]) => ({ label, value })),
@@ -139,7 +148,8 @@ export function observed(state: Record<string, unknown>, container: Inspected): 
  */
 export function dockerDriver({ bridge = defaultBridge(), host, inspect = inspectContainer }: DockerDriverOptions = {}) {
   const at = () => host ?? dockerHost();
-  // The inspect an import's id came from, which its state is then completed from: one request per import.
+  // The inspect an import's id came from, which its state is then completed from: one request per
+  // import. Dropped once used, as it holds the container's environment (the secrets).
   let last: Inspected | undefined;
   const driver = dockerTf.driver(
     bridge,
@@ -148,6 +158,7 @@ export function dockerDriver({ bridge = defaultBridge(), host, inspect = inspect
     async (_, id) => (last = await inspect(at(), id))?.Id ?? id,
     async (_, state) => {
       const container = last?.Id === state.id ? last : await inspect(at(), String(state.id));
+      last = undefined;
       return container ? observed(state, container) : state;
     },
   );

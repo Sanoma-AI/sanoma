@@ -1,4 +1,5 @@
 import { tfConnector, type TfMapped } from "@sanoma-ai/bridge/connector";
+import { DriverError } from "@sanoma-ai/workflows";
 import { z } from "zod";
 import { docker_container, provider } from "./resources.gen.ts";
 
@@ -67,7 +68,12 @@ export const containerType: TfMapped<typeof container> = {
   schema: container,
   fields: { immutable: [], vendorOwned: ["id", "running"], writeOnly: ["secrets"] },
   toProvider: ({ name, image, source, ref, revision, secrets, port }: Container) => {
-    if (!revision) throw new Error(`docker: container ${name}: no revision: apply sets it from ${ref}`);
+    if (!revision) {
+      throw new DriverError(
+        `docker: container ${name}: no revision: apply sets it from ${ref} once its source exists (apply again after a repository it creates)`,
+        { retryable: false },
+      );
+    }
     const env = { ...secrets, SANOMA_SOURCE: source, SANOMA_REVISION: revision, PORT: String(INTERNAL_PORT) };
     const labels: Record<string, string> = {
       [LABELS.revision]: revision,
