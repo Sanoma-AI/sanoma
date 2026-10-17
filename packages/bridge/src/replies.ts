@@ -51,7 +51,8 @@ const isFailure = (o: StateObject | StateFailure): o is StateFailure => "error" 
  * What a `stateBridge` knows of a resource type to plan and create one, by the provider's type
  * name, as its `TfResourceType` has it: `fields.vendorOwned` are unknown until applied, a change
  * to an `immutable` one (by top-level attribute) replaces the object, and a created object has
- * `schemaVersion`. With its `schema`, a created object's unknown attributes that take a string get one.
+ * `schemaVersion`. With its `schema`, a created object's unknown attributes that take a string get
+ * one; with its `shape`, a block the config leaves empty keeps the prior's, as a computed one would.
  */
 export type StateTypes = Record<
   string,
@@ -59,6 +60,7 @@ export type StateTypes = Record<
     schemaVersion: number;
     fields: Pick<ResourceFields, "vendorOwned" | "immutable">;
     schema?: { shape: Record<string, { safeParse(value: unknown): { success: boolean } }> };
+    shape?: { blocks?: Readonly<Record<string, unknown>> };
   }
 >;
 
@@ -170,8 +172,8 @@ const resourceOf = (o: StateObject): ResourceState => ({
  * Every call is pushed onto `calls`.
  *
  * `plan` diffs the config against the prior state as a provider might, with what `types` says
- * of the type (nothing: no unknowns but `id`, nothing replaces): a null in the config keeps the
- * prior value, as for a computed attribute; a create plans `id` and the null `vendorOwned`
+ * of the type (nothing: no unknowns but `id`, nothing replaces): a null in the config, or an empty
+ * block, keeps the prior value, as for a computed attribute; a create plans `id` and the null `vendorOwned`
  * attributes unknown; a change to an `immutable` attribute is a replace. `planned` is the planned
  * state's JSON. `apply` puts the planned state into `state` (a created object gets the id
  * `<type>-<n>`, under that import id, and each other unknown its type's `schema` takes a string
@@ -215,8 +217,11 @@ export function stateBridge(
       const computed = topLevel(vendorOwned).add("id");
       const unknown = Object.keys(config).filter((name) => config[name] === null && computed.has(name));
       if (!prior) return planOf("create", config, unknown);
+      const blocks = types[typeName]?.shape?.blocks ?? {};
+      const unset = (name: string) =>
+        config[name] === null || (Object.hasOwn(blocks, name) && isDeepStrictEqual(config[name], []));
       const changed = Object.keys(config).filter(
-        (name) => config[name] !== null && !isDeepStrictEqual(config[name], prior[name] ?? null),
+        (name) => !unset(name) && !isDeepStrictEqual(config[name], prior[name] ?? null),
       );
       const replaced = topLevel(immutable);
       const replace = changed.filter((name) => replaced.has(name));

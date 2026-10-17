@@ -1,6 +1,6 @@
 import type { DriftField, DriftReport, DriftResult, RunSummary } from "@sanoma-ai/workflows";
 import type { ConfigDescription, DeclaredResource, ResourceProblem } from "@sanoma-ai/workflows/describe";
-import { errorMessage, isEnded, problemAt } from "@sanoma-ai/workflows/shared";
+import { DRIFT_WORKFLOW, errorMessage, isEnded, problemAt } from "@sanoma-ai/workflows/shared";
 import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -46,7 +46,7 @@ export const Route = createFileRoute("/resources")({
 });
 
 /** The built-in drift workflow's name, when the config has it: its connectors declare resource types. */
-const driftOf = (config: ConfigDescription) => config.workflows.find((wf) => wf.builtin)?.name;
+const driftOf = (config: ConfigDescription) => config.workflows.find((wf) => wf.name === DRIFT_WORKFLOW)?.name;
 
 /** The latest drift run, whatever its status. */
 const latestQuery = (drift: string) => runsQuery({ workflow: drift, limit: 1 });

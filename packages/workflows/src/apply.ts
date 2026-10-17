@@ -172,6 +172,12 @@ function desiredOf(r: Declaration, types: ReadonlyMap<string, Resource>, binding
   return out;
 }
 
+/** Why apply cannot `what` (create, update, delete) an object of a type. */
+const cannotChange = (type: Pick<Resource, "vendor" | "type" | "writable"> | undefined, what: string) =>
+  type?.writable
+    ? `apply cannot ${what} a ${type.vendor}.${type.type}: no driver does`
+    : `apply cannot ${what} it: ${type ? `a ${type.vendor}.${type.type}` : "its type"} is read-only`;
+
 /** The ids in `list` that `known` refuses, as problems of the input's field `what`. */
 const unknown = (what: string, list: readonly string[], known: (id: string) => boolean): ResourceProblem[] =>
   list.filter((id) => !known(id)).map((id) => ({ message: `${what}: ${id} is no declared resource` }));
@@ -201,7 +207,7 @@ function decide(
   const head = { id: r.id, vendor: r.vendor, type: r.type };
   const key = `${r.vendor}.${r.type}`;
   const may = (name: string) => usable.has(`${key}.${name}`);
-  const cannot = (what: string) => problemOf(r.id, `apply cannot ${what} a ${key}: its type has no driver for it`);
+  const cannot = (what: string) => problemOf(r.id, cannotChange(types.get(key)!, what));
   const given = input.bind?.[r.id];
   if (given !== undefined) {
     if (!("state" in now))
@@ -249,16 +255,31 @@ function fromPlan(
   return { problem: problemOf(r.id, `the vendor plans to ${p.action} it, which apply does not do here`) };
 }
 
-/** Each orphaned binding the input wants, after the declarations. */
-const orphanSteps = (orphans: ApplyDeclared["orphans"], input: ApplyInput, wanted: (id: string) => boolean) =>
-  orphans
-    .filter(({ key }) => wanted(key))
-    .map(({ key, type, id }): PlanStep => {
-      const answer = input.answers?.[key];
-      const [vendor = "", name = ""] = type.split(".");
-      const step = { id: key, vendor, type: name, action: "orphan" as const, key, binding: id };
-      return answer === "forget" || answer === "delete" ? { ...step, answer } : step;
-    });
+/** Each orphaned binding the input wants, after the declarations, and the answers that cannot be done. */
+function orphansOf(
+  orphans: ApplyDeclared["orphans"],
+  input: ApplyInput,
+  wanted: (id: string) => boolean,
+  usable: ReadonlySet<string>,
+  types: ReadonlyMap<string, Resource>,
+): { steps: PlanStep[]; problems: ResourceProblem[] } {
+  const steps: PlanStep[] = [];
+  const problems: ResourceProblem[] = [];
+  for (const { key, type, id } of orphans.filter((o) => wanted(o.key))) {
+    const answer = input.answers?.[key];
+    const [vendor = "", name = ""] = type.split(".");
+    const step = { id: key, vendor, type: name, action: "orphan" as const, key, binding: id };
+    const why =
+      answer === "recreate"
+        ? "an orphaned binding is forgotten or its object deleted, not recreated"
+        : answer === "delete" && !usable.has(`${type}.delete`)
+          ? cannotChange(types.get(type), "delete")
+          : undefined;
+    if (why) problems.push(problemOf(key, why));
+    steps.push(answer === undefined || why ? step : { ...step, answer });
+  }
+  return { steps, problems };
+}
 
 /** What running a step does: a change operation, a change to the lockfile only, nothing, or nothing as it waits for an answer. */
 function runOf(step: PlanStep): "create" | "update" | "delete" | "bind" | "forget" | "none" | "skip" {
@@ -395,7 +416,12 @@ export function applyWorkflow(
         if (next.step) planned.push(next.step);
         if (next.problem) problems.push(next.problem);
       }
-      const plan: ApplyPlan = { problems, rebinds, steps: [...planned, ...orphanSteps(orphans, input, wanted)] };
+      const orphaned = orphansOf(orphans, input, wanted, usable, types);
+      const plan: ApplyPlan = {
+        problems: [...problems, ...orphaned.problems],
+        rebinds,
+        steps: [...planned, ...orphaned.steps],
+      };
 
       const writes = writesOf(plan, desired);
       const approver = writes.length ? await steps.holds(writes) : undefined;
