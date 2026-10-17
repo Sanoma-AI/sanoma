@@ -26,7 +26,6 @@ import {
   Problems,
   SectionTitle,
   ShortId,
-  Tip,
   ToneBadge,
   VendorLogo,
   When,
@@ -136,7 +135,7 @@ function WithDrift({ config, drift }: { config: ConfigDescription; drift: string
       adopt={finished && { runId: finished.run.runId, drift }}
       action={
         <div className="flex flex-wrap gap-2">
-          <ApplyButton registered={config.workflows.some((wf) => wf.name === APPLY_WORKFLOW)} />
+          <ApplyButton />
           <RunDriftButton drift={drift} checking={checking} />
         </div>
       }
@@ -276,26 +275,19 @@ function RunDriftButton({ drift, checking }: { drift: string; checking: boolean 
 
 /**
  * Starts the apply workflow on every declared resource: its plan waits for a person in the Inbox
- * wherever the policy holds a change. Disabled, saying why, when the config does not register it.
+ * wherever the policy holds a change. The config registers apply beside drift, so it is here too.
  */
-function ApplyButton({ registered }: { registered: boolean }) {
+function ApplyButton() {
   const start = useStartRun();
-  const button = (
+  return (
     <Button
       variant="outline"
       onClick={() => start.mutate({ workflow: APPLY_WORKFLOW, input: {} })}
-      disabled={!registered || start.isPending}
+      disabled={start.isPending}
     >
       {start.isPending ? <Spinner data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}
       Apply
     </Button>
-  );
-  if (registered) return button;
-  return (
-    <Tip tip="This config does not register the apply workflow, so its resources cannot be changed from here.">
-      {/* A disabled button gets no pointer events: its wrapper shows the tip. */}
-      <span tabIndex={0}>{button}</span>
-    </Tip>
   );
 }
 

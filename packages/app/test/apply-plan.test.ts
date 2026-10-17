@@ -129,7 +129,7 @@ describe("the change view in the app", () => {
     );
   });
 
-  it("shows each resource's binding, the orphaned ones, and Apply, disabled while the config has no apply workflow", async () => {
+  it("shows each resource's binding, the orphaned ones, and Apply", async () => {
     const resources = await page("/resources");
     expect(resources.status).toBe(200);
     expect(resources.text).toContain(">Bound to</th>");
@@ -137,7 +137,6 @@ describe("the change view in the app", () => {
     expect(resources.text).toContain('title="prod_SanomaFixtureBasic">prod_San…</code>');
     expect(resources.text).toContain("Bound, no longer declared");
     expect(resources.text).toMatch(/<code[^>]*>resources\/old\.ts#legacy<\/code>.*?title="R_kgDOlegacy99">R_kgDOle…/s);
-    expect(resources.text).toMatch(/<button[^>]*disabled=""[^>]*>.*?Apply<\/button>/s);
-    expect(resources.text).toContain("This config does not register the apply workflow");
+    expect(resources.text).toMatch(/<button(?![^>]*disabled)[^>]*>.*?Apply<\/button>/s);
   });
 });
