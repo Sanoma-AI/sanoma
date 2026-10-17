@@ -76,6 +76,12 @@ export interface ResourceSpec<S extends z.ZodObject = z.ZodObject> {
    * `create`, `update` and `delete` besides `read` and `import`. Default false.
    */
   writable?: boolean;
+  /**
+   * True when its objects hold no data, so one gone at the vendor is created again by apply
+   * without asking (a host running the company's code); otherwise apply asks first, as a
+   * recreated database looks fine and has lost its data. Default false.
+   */
+  stateless?: boolean;
 }
 
 /**
@@ -345,18 +351,22 @@ function withAccepted(state: State, desired: State, accept: Readonly<Record<stri
   if (!paths.length) return state;
   const out = structuredClone(state);
   for (const [path, values] of paths) {
-    const keys = path.split(".");
-    const last = keys.pop()!;
-    const holder = keys.reduce<unknown>(
-      (v, key) => (isObject(v) || Array.isArray(v) ? (v as State)[key] : undefined),
-      out,
-    );
-    if (!isObject(holder) && !Array.isArray(holder)) continue;
-    const at = holder as State;
-    if (values.includes(at[last])) at[last] = valueAt(desired, path);
+    const at = holderOf(out, path);
+    if (at && values.includes(at.holder[at.key])) at.holder[at.key] = valueAt(desired, path);
   }
   return out;
 }
+
+/** The object or list holding the value at a dotted path (a list item's by its index), and its key there. */
+export function holderOf(value: unknown, path: string): { holder: State; key: string } | undefined {
+  const keys = path.split(".");
+  const key = keys.pop()!;
+  const holder = keys.reduce<unknown>((v, k) => (isObject(v) || Array.isArray(v) ? (v as State)[k] : undefined), value);
+  return isObject(holder) || Array.isArray(holder) ? { holder: holder as State, key } : undefined;
+}
+
+/** A field's dotted path as `fields` names it, without a list item's index: `teams.0` is `teams`. */
+export const fieldPathOf = (at: string) => at.replaceAll(/\.\d+(?=\.|$)/g, "");
 
 /** The value at a dotted path, a list item's by its index. */
 const valueAt = (value: unknown, path: string) =>
@@ -387,8 +397,9 @@ function changes(desired: unknown, actual: unknown, unordered: ReadonlySet<strin
 }
 
 /**
- * `desired` without the fields the type marks write-only (a webhook's `secret`): what a run may
- * record of a declaration. A list's items lose them too.
+ * `desired` without the values at the fields the type marks write-only (a webhook's `secret`):
+ * what a run may record of a declaration. A list's items lose them too. A secret marker
+ * (`secret("NAME")`) stays: it names a stored secret and holds none, and the driver resolves it.
  */
 export function withoutWriteOnly(fields: ResourceFields, desired: State): State {
   if (!fields.writeOnly.length) return desired;
@@ -399,7 +410,8 @@ export function withoutWriteOnly(fields: ResourceFields, desired: State): State 
     return Object.fromEntries(
       Object.entries(value).flatMap(([name, v]) => {
         const at = joinPath(path, name);
-        return drop.has(at) ? [] : [[name, strip(v, at)]];
+        if (!drop.has(at)) return [[name, strip(v, at)]];
+        return isSecret(v) ? [[name, v]] : [];
       }),
     );
   };
@@ -595,6 +607,7 @@ export function defineResource<
     bindingId: spec.bindingId ?? ((state: State) => String(state.id)),
     normalize: spec.normalize ?? ((state: State, desired: z.input<S>) => compareDeclared(fields, state, desired)),
     writable,
+    stateless: spec.stateless ?? false,
     ops,
     // A symbol, so `defineConnector` tells a resource type from a group of operations.
     [RESOURCE]: true as const,

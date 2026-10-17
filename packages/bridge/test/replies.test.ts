@@ -2,6 +2,7 @@ import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { BridgeError } from "@sanoma-ai/bridge";
 import { fixturesDir, loadReplies, stateBridge } from "@sanoma-ai/bridge/fake";
 
@@ -118,6 +119,24 @@ describe("stateBridge", () => {
         node_id: null,
       });
       expect((await bridge.import(github, "github_repository", "github_repository-1")).resources).toEqual([resource]);
+    });
+
+    it("gives a created object's unknown strings a value, and keeps an empty block's prior, given the type's schema and shape", async () => {
+      const state = loadReplies(fixturesDir, github);
+      const typed = {
+        github_repository: {
+          ...types.github_repository,
+          schema: z.object({ node_id: z.string().nullish(), name: z.string() }),
+          shape: { attributes: [], blocks: { pages: { nesting: "list" as const, shape: { attributes: [] } } } },
+        },
+      };
+      const bridge = stateBridge(state, [], typed);
+      await bridge.configure(github, config);
+      const create = await plan(bridge, undefined, desired({}));
+      const { resource } = await bridge.apply(github, "github_repository", { configJson: desired({}), ...create });
+      expect(JSON.parse(resource!.stateJson)).toMatchObject({ id: "github_repository-1", node_id: "node_id-1" });
+      const prior = JSON.stringify({ ...JSON.parse(resource!.stateJson), pages: [{ cname: "x" }] });
+      expect(await plan(bridge, prior, desired({ node_id: "node_id-1", pages: [] }))).toMatchObject({ action: "none" });
     });
 
     it("plans none, an update or a replace against the prior state, applies it, and deletes", async () => {

@@ -9,6 +9,7 @@ import { describeConfig, writeLockfile } from "../src/describe.ts";
 import {
   allow,
   allowAll,
+  APPLY_WORKFLOW,
   defineConnector,
   definePolicy,
   defineResource,
@@ -307,8 +308,8 @@ describe("the built-in drift workflow in a config", () => {
   // The company's connectors with nothing attached: no drivers.
   const bare = { ...company, connectors: company.connectors.map(withoutSetup) };
 
-  it("is added when the connectors declare resource types, using each type's import that has a driver", () => {
-    expect([...resolveConfig(config).workflows.keys()]).toEqual([DRIFT_WORKFLOW]);
+  it("is added, with apply, when the connectors declare resource types, using each type's import that has a driver", () => {
+    expect([...resolveConfig(config).workflows.keys()]).toEqual([DRIFT_WORKFLOW, APPLY_WORKFLOW]);
     const entry = describeConfig(config).workflows.find((wf) => wf.name === DRIFT_WORKFLOW);
     expect(entry).toMatchObject({ name: "drift", title: "Check resources for drift", builtin: true });
     expect(entry?.ops).toEqual([
@@ -320,8 +321,21 @@ describe("the built-in drift workflow in a config", () => {
     ]);
     expect(entry?.input).toMatchObject({ type: "object", additionalProperties: false });
     expect(entry?.outline).toMatchObject({ file: expect.stringMatching(/src\/drift\.ts$/) });
-    // Without drivers it is there all the same, and uses nothing: each resource reports the missing driver.
-    expect(describeConfig(bare).workflows).toMatchObject([{ name: "drift", builtin: true, ops: [] }]);
+    // Apply uses the imports too, and each writable type's change operations.
+    const apply = describeConfig(config).workflows.find((wf) => wf.name === APPLY_WORKFLOW);
+    expect(apply).toMatchObject({ title: "Apply resources", builtin: true, builtins: ["approval"], problems: [] });
+    expect(apply?.ops).toEqual([
+      ...entry!.ops,
+      "github.repository.create",
+      "github.repository.delete",
+      "github.repository.plan",
+      "github.repository.update",
+    ]);
+    // Without drivers they are there all the same, and use nothing: each resource reports the missing driver.
+    expect(describeConfig(bare).workflows).toMatchObject([
+      { name: "apply", builtin: true, ops: [] },
+      { name: "drift", builtin: true, ops: [] },
+    ]);
   });
 
   it("is not added when no connector declares a resource type, and the config's own workflows are not built-in", () => {

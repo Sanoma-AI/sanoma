@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import type { Approver } from "./define.ts";
+import type { ApplyReport } from "./apply.ts";
 import type { DriftReport, DriftResult } from "./drift.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { RecordedDecision } from "./policy.ts";
@@ -99,7 +100,7 @@ type Unstepped<T> = T extends unknown ? Omit<T, "step"> : never;
  * output, or undefined when the report found the resource as expected.
  */
 function driftDetail(
-  e: Extract<CoreExpectation, { declared: string }>,
+  e: Extract<CoreExpectation, { status: string }>,
   end: Extract<LedgerRecord, { type: "run.finished" }>,
 ): string | undefined {
   const report = end.output as Partial<DriftReport> | null | undefined;
@@ -116,13 +117,37 @@ function driftDetail(
 }
 
 /**
+ * Why an apply expectation fails against the report a finished apply run returned as its output:
+ * the resource `created` (a step that created it, done), or `bound` to an object in the lockfile it ended with.
+ */
+function applyDetail(
+  e: Extract<CoreExpectation, { created: true } | { bound: string }>,
+  end: Extract<LedgerRecord, { type: "run.finished" }>,
+): string | undefined {
+  const report = end.output as Partial<ApplyReport> | null | undefined;
+  if (!Array.isArray(report?.results) || !report.lockfile) return "the run's output is not an apply report";
+  if ("bound" in e) {
+    const binding = report.lockfile.bindings[e.declared];
+    if (binding?.id === e.bound) return undefined;
+    return binding ? `${e.declared} is bound to ${binding.id}, not ${e.bound}` : `${e.declared} is not bound`;
+  }
+  const result = report.results.find((r) => r.id === e.declared);
+  // A gone object recreated is bound again; one forgotten is not.
+  const created =
+    result?.status === "done" && (result.action === "create" || (result.action === "gone" && !!result.binding));
+  if (created) return undefined;
+  if (!result) return `apply did nothing with ${e.declared}`;
+  return `apply's ${result.action} of ${e.declared} ${result.status === "failed" ? `failed: ${result.error}` : `was ${result.status}`}`;
+}
+
+/**
  * Why an expectation of the generic steps does not hold against a run's ledger records, or
  * undefined when it does. A call is an `op.called` record without an `error`; one with an error
  * (a policy denial, a rejected approval, a vendor's final failure) was attempted, not made. An
  * operation `was denied` when the policy's decision on some call to it is `deny`, and `was held
  * for` an approver when an approval for that approver holds it: one the policy asked for on its
- * call, or one that `covers` it. A drift expectation reads the report a finished drift run
- * returned. A step named in the workflow's outline is read by the `name` its records carry
+ * call, or one that `covers` it. A drift or apply expectation reads the report a finished run
+ * of it returned. A step named in the workflow's outline is read by the `name` its records carry
  * (its calls made, and `waitsOf`); a record written before steps had names has none.
  */
 export function detailOf(e: CoreExpectation, records: readonly LedgerRecord[]): string | undefined {
@@ -161,5 +186,6 @@ export function detailOf(e: CoreExpectation, records: readonly LedgerRecord[]): 
   }
   // A finished run: what `the run succeeds` expects, and what a drift expectation reads its report from.
   if (end.type === "run.failed") return `the run failed: ${end.error.message}`;
-  return "declared" in e ? driftDetail(e, end) : undefined;
+  if (!("declared" in e)) return undefined;
+  return "status" in e ? driftDetail(e, end) : applyDetail(e, end);
 }

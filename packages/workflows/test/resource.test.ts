@@ -321,6 +321,14 @@ describe("withoutWriteOnly", () => {
       { name: "sanoma", rules: [{ pattern: "main" }] },
     );
   });
+
+  it("keeps a secret's marker, which names a stored value and holds none", () => {
+    const nested = { ...fields, writeOnly: ["token"] };
+    expect(withoutWriteOnly(nested, { name: "sanoma", token: { $secret: "TOKEN" } })).toEqual({
+      name: "sanoma",
+      token: { $secret: "TOKEN" },
+    });
+  });
 });
 
 describe("compareDeclared", () => {

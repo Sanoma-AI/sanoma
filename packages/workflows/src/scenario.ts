@@ -33,7 +33,15 @@ import type { LedgerRecord } from "./ledger.ts";
 import type { Driver, Op } from "./op.ts";
 import { type OutlineNode, outlineWorkflow } from "./outline.ts";
 import { memorySecrets } from "./secret.ts";
-import { DRIFT_WORKFLOW, errorMessage, fitsOp, flatten, isEnded } from "./shared.ts";
+import {
+  APPLY_WORKFLOW,
+  BUILT_IN_WORKFLOWS,
+  DRIFT_WORKFLOW,
+  errorMessage,
+  fitsOp,
+  flatten,
+  isEnded,
+} from "./shared.ts";
 import type { Call, RunView, Seed } from "./steps.ts";
 
 /*
@@ -90,8 +98,9 @@ export interface Decision {
 /**
  * What the run should do: call an operation (with at least this input) or not, run the step
  * `name`d in the workflow's outline or not, or a number of `times`, have the policy deny an
- * operation (`denied`) or hold one for an approver (`held`), end a certain way, or, for a drift
- * run, report the resource `declared` (`<file>#<export>`) clean, gone, absent, or drifted in a field.
+ * operation (`denied`) or hold one for an approver (`held`), end a certain way, for a drift
+ * run, report the resource `declared` (`<file>#<export>`) clean, gone, absent, or drifted in a
+ * field, or for an apply run, create it, or leave it bound to an object (`bound`, its vendor's id).
  * A step whose own code checks the run (a connector's or the company's, or an operation's own
  * test's) is `custom`, with what it is about.
  */
@@ -104,6 +113,8 @@ export type Expectation =
   | { step: string; outcome: "finished" | "failed"; code?: string }
   | { step: string; declared: string; status: "clean" | "gone" | "absent" }
   | { step: string; declared: string; status: "drifted"; field: string }
+  | { step: string; declared: string; created: true }
+  | { step: string; declared: string; bound: string }
   | { step: string; custom: true; op?: string; called?: boolean };
 
 export interface Scenario {
@@ -315,6 +326,8 @@ function builtFor(scope: Scope): Built {
   return built;
 }
 
+/** The built-in workflows, whose input is never made up: each field is optional, and left out unless given. */
+
 /** A `Then` step of the generic steps: its expectation, checked against the run's records. */
 const expecting = (expect: CoreExpectation): Then => ({ expect, verify: (run) => detailOf(expect, run.records) });
 
@@ -377,13 +390,21 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
       takes: TAKES_OBJECT,
       read: ([name], pickle) => {
         const { input } = workflowOf(name);
-        return { workflow: name as string, input: fill(input, fieldsFrom(pickle, input, inputOf(name))) };
+        const given = fieldsFrom(pickle, input, inputOf(name));
+        return {
+          workflow: name as string,
+          input: BUILT_IN_WORKFLOWS.has(name as string) ? input.parse(given) : fill(input, given),
+        };
       },
     },
     {
       kind: "when",
       source: "{workflow} runs",
-      read: ([name]) => ({ workflow: name as string, input: fill(workflowOf(name).input, {}) }),
+      // A built-in's input is optional throughout: what is not given is left out, not made up.
+      read: ([name]) => ({
+        workflow: name as string,
+        input: BUILT_IN_WORKFLOWS.has(name as string) ? {} : fill(workflowOf(name).input, {}),
+      }),
     },
     // An operation's own test: a call made to its driver, or its fake, directly.
     {
@@ -475,6 +496,16 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
       source: `{declared} is ${status}`,
       read: ([declared]) => expecting({ declared: declared as string, status }),
     })),
+    {
+      kind: "then",
+      source: "apply creates {declared}",
+      read: ([declared]) => expecting({ declared: declared as string, created: true }),
+    },
+    {
+      kind: "then",
+      source: "{declared} is bound to {string}",
+      read: ([declared, id]) => expecting({ declared: declared as string, bound: id as string }),
+    },
     { kind: "then", source: "the run succeeds", read: () => expecting({ outcome: "finished" }) },
     { kind: "then", source: "the run fails", read: () => expecting({ outcome: "failed" }) },
     {
@@ -1095,11 +1126,14 @@ async function compile(scope: Scope, dir: string, files: string[]): Promise<Load
               `${where}: scenario "${name}" has no When: say which workflow runs, such as "When <workflow> runs with"`,
             );
           }
-          const drift = spec.expect.find((e) => "declared" in e);
-          if (drift && workflow !== DRIFT_WORKFLOW) {
-            throw new Error(
-              `${where}: "${drift.step}" reads a drift report, so the scenario must run ${DRIFT_WORKFLOW}, not ${workflow}`,
-            );
+          // A step about a declared resource reads the report of the built-in it is about.
+          for (const e of spec.expect) {
+            const reads: string = "declared" in e ? ("status" in e ? DRIFT_WORKFLOW : APPLY_WORKFLOW) : workflow;
+            if (reads !== workflow) {
+              throw new Error(
+                `${where}: "${e.step}" reads ${reads === DRIFT_WORKFLOW ? "a drift" : "an apply"} report, so the scenario must run ${reads}, not ${workflow}`,
+              );
+            }
           }
           inFile.push({
             ...spec,

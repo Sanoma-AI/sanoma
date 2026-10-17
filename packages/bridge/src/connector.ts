@@ -54,6 +54,8 @@ export interface TfTypeSpec<S extends z.ZodObject = z.ZodObject> {
    * `delete`, each read, planned and applied through the bridge in one call. Default false.
    */
   writable?: boolean;
+  /** True when its objects hold no data, so apply makes one gone again without asking (`ResourceSpec.stateless`). */
+  stateless?: boolean;
   /**
    * Fields, by dotted path, that hold a secret the provider does not mark sensitive (Docker's
    * container `env`): write-only besides the generated ones, so no output carries them. Each
@@ -217,25 +219,28 @@ export function tfConnector<
   const types = spec.types as Record<string, TfTypeSpec>;
   const references: Record<string, References | undefined> = spec.references ?? {};
   const resources: Record<string, Resource> = Object.fromEntries(
-    Object.entries(types).map(([type, { tf, title, identity, find, bindingId, normalize, writable, writeOnly }]) => [
-      type,
-      defineResource({
-        vendor,
+    Object.entries(types).map(
+      ([type, { tf, title, identity, find, bindingId, normalize, writable, stateless, writeOnly }]) => [
         type,
-        title,
-        ...(identity !== undefined && { identity }),
-        schema: tf.schema,
-        fields: {
-          ...tf.fields,
-          ...(writeOnly?.length && { writeOnly: [...new Set([...tf.fields.writeOnly, ...writeOnly])] }),
-          ...(references[type] && { references: references[type] }),
-        },
-        ...(find && { find }),
-        ...(bindingId && { bindingId }),
-        ...(normalize && { normalize }),
-        ...(writable && { writable }),
-      }),
-    ]),
+        defineResource({
+          vendor,
+          type,
+          title,
+          ...(identity !== undefined && { identity }),
+          schema: tf.schema,
+          fields: {
+            ...tf.fields,
+            ...(writeOnly?.length && { writeOnly: [...new Set([...tf.fields.writeOnly, ...writeOnly])] }),
+            ...(references[type] && { references: references[type] }),
+          },
+          ...(find && { find }),
+          ...(bindingId && { bindingId }),
+          ...(normalize && { normalize }),
+          ...(writable && { writable }),
+          ...(stateless && { stateless }),
+        }),
+      ],
+    ),
   );
   const connector = defineConnector(vendor, resources, spec.info);
 

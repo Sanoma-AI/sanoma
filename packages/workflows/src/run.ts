@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { ApprovalState, Principal, WorkflowDefinition } from "./define.ts";
 import type { Fake } from "./fake.ts";
 import type { LedgerStore } from "./ledger.ts";
@@ -97,3 +98,9 @@ export interface WorkflowOutline {
   lineStarts: readonly number[];
   calls: readonly CallNode[];
 }
+
+/**
+ * The run whose workflow body is running: what a built-in's own steps read of it (who started
+ * it, whether it is a sandbox run, the worker's source and policy), as no `ctx` member gives them.
+ */
+export const currentRun = new AsyncLocalStorage<Run>();

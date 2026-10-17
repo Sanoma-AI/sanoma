@@ -272,8 +272,8 @@ function targetOf(op: Op, input: unknown): { target?: string } {
   return { target };
 }
 
-/** Asks the policy. Runs inside a step, so it must have no side effects of its own. */
-async function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecision> {
+/** Asks the policy about one call, and checks its answer. Runs inside a step, so it must have no side effects of its own. */
+export async function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecision> {
   const call: PolicyCall = {
     op: policyOpOf(op),
     effect: op.effect,

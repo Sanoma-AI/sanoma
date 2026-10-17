@@ -16,6 +16,7 @@ import type { ProviderClient } from "./configure.ts";
 import { type Fixture, type FixtureError, isError, releaseName, releaseSlug, stateId, toPath } from "./fixtures.ts";
 import { DiagnosticSchema } from "./gen/bridge/v1/bridge_pb.ts";
 import type { JsonObject } from "./json.ts";
+import type { TfShape } from "./tfschema/types.ts";
 
 /** A call a fake bridge received, in order. */
 export interface BridgeCall {
@@ -51,11 +52,17 @@ const isFailure = (o: StateObject | StateFailure): o is StateFailure => "error" 
  * What a `stateBridge` knows of a resource type to plan and create one, by the provider's type
  * name, as its `TfResourceType` has it: `fields.vendorOwned` are unknown until applied, a change
  * to an `immutable` one (by top-level attribute) replaces the object, and a created object has
- * `schemaVersion`.
+ * `schemaVersion`. With its `schema`, a created object's unknown attributes that take a string get
+ * one; with its `shape`, a block the config leaves empty keeps the prior's, as a computed one would.
  */
 export type StateTypes = Record<
   string,
-  { schemaVersion: number; fields: Pick<ResourceFields, "vendorOwned" | "immutable"> }
+  {
+    schemaVersion: number;
+    fields: Pick<ResourceFields, "vendorOwned" | "immutable">;
+    schema?: { shape: Record<string, { safeParse(value: unknown): { success: boolean } }> };
+    shape?: TfShape;
+  }
 >;
 
 /** A `Resource` as a fixture holds it, in Connect's JSON form: int64 as a string, bytes as base64. */
@@ -166,11 +173,12 @@ const resourceOf = (o: StateObject): ResourceState => ({
  * Every call is pushed onto `calls`.
  *
  * `plan` diffs the config against the prior state as a provider might, with what `types` says
- * of the type (nothing: no unknowns but `id`, nothing replaces): a null in the config keeps the
- * prior value, as for a computed attribute; a create plans `id` and the null `vendorOwned`
+ * of the type (nothing: no unknowns but `id`, nothing replaces): a null in the config, or an empty
+ * block, keeps the prior value, as for a computed attribute; a create plans `id` and the null `vendorOwned`
  * attributes unknown; a change to an `immutable` attribute is a replace. `planned` is the planned
  * state's JSON. `apply` puts the planned state into `state` (a created object gets the id
- * `<type>-<n>`, under that import id; its other unknowns stay null), or, for a delete, removes
+ * `<type>-<n>`, under that import id, and each other unknown its type's `schema` takes a string
+ * at `<attribute>-<n>`, as a GitHub repository's `node_id`; the rest stay null), or, for a delete, removes
  * the object; an update of an object no longer there fails in `errors`, as a provider's would.
  */
 export function stateBridge(
@@ -210,8 +218,11 @@ export function stateBridge(
       const computed = topLevel(vendorOwned).add("id");
       const unknown = Object.keys(config).filter((name) => config[name] === null && computed.has(name));
       if (!prior) return planOf("create", config, unknown);
+      const blocks = types[typeName]?.shape?.blocks ?? {};
+      const unset = (name: string) =>
+        config[name] === null || (Object.hasOwn(blocks, name) && isDeepStrictEqual(config[name], []));
       const changed = Object.keys(config).filter(
-        (name) => config[name] !== null && !isDeepStrictEqual(config[name], prior[name] ?? null),
+        (name) => !unset(name) && !isDeepStrictEqual(config[name], prior[name] ?? null),
       );
       const replaced = topLevel(immutable);
       const replace = changed.filter((name) => replaced.has(name));
@@ -239,6 +250,11 @@ export function stateBridge(
       if (id === null || id === undefined) {
         do id = `${typeName}-${++created}`;
         while (objectWithId(typeName, id));
+        const { vendorOwned = [] } = types[typeName]?.fields ?? {};
+        const shape = types[typeName]?.schema?.shape ?? {};
+        for (const name of topLevel(vendorOwned) as Set<string>) {
+          if (planned[name] === null && shape[name]?.safeParse("").success) planned[name] = `${name}-${created}`;
+        }
       }
       const object: StateObject = {
         typeName,

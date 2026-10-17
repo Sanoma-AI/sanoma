@@ -15,6 +15,7 @@ export type {
 } from "./resource.ts";
 export type { DeclaredResource, ResourceProblem } from "./resources.ts";
 export type { DriftField, DriftReport, DriftResult, DriftStatus } from "./drift.ts";
+export type { ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanStep } from "./apply.ts";
 export type { CredentialStatus } from "./env.ts";
 
 // What a UI in the browser may use from the runtime, besides types: `@sanoma-ai/workflows/shared`.
@@ -35,6 +36,9 @@ export const DRIFT_WORKFLOW = "drift";
  * change operations (`create`, `update`, `delete`).
  */
 export const APPLY_WORKFLOW = "apply";
+
+/** The workflows the runtime adds itself, which a config's own may not be named: drift and apply. */
+export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([DRIFT_WORKFLOW, APPLY_WORKFLOW]);
 
 /**
  * Every run status, in the order a run may pass through them: waiting on the queue, running,
