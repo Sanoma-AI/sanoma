@@ -274,14 +274,24 @@ export async function lastRuns({ client, description }: AppContext): Promise<Rec
 /** The report of a drift run once it ends (`SanomaClient.driftReport`). */
 export const driftReport = ({ client }: AppContext, runId: string): Promise<DriftReport> => client.driftReport(runId);
 
+/** The adopt under way, if any: one at a time, so two never read the same file and both write it. */
+let adopting: Promise<unknown> = Promise.resolve();
+
 /**
  * Adopt: writes what the vendor holds into the data file, for fields a finished drift run found
  * drifted (`paths`, of the resource `id`), by that run's report, never a value the request gives.
  * Then commits the file through the app's source, when it has one, as the actor. The next drift
- * run reads the file as it is now. A 409 when the file no longer has the field where the report
- * found it (it changed since), or it is a reference to another resource.
+ * run reads the file as it is now. One adopt runs at a time. A 409 when the file no longer
+ * declares the resource or the field's place, or the field is (or holds) a reference to another
+ * resource; it does not check that the field still holds what the run read.
  */
-export async function adopt(
+export function adopt(app: AppContext, actor: Principal, request: AdoptRequest): Promise<AdoptResponse> {
+  const done = adopting.then(() => adoptNow(app, actor, request));
+  adopting = done.catch(() => undefined);
+  return done;
+}
+
+async function adoptNow(
   { client, resolved, source }: AppContext,
   actor: Principal,
   { runId, id, paths }: AdoptRequest,
@@ -308,12 +318,18 @@ export async function adopt(
     throw new ApiError(409, { error: `Could not adopt into ${file}: ${errorMessage(err)}` });
   }
   await writeFile(path, text);
-  const commit = await source?.commit({
-    paths: [relative(source.root, path)],
-    message: `Adopt ${paths.join(", ")} of ${result.name} from ${result.vendor}`,
-    author: actor.id,
-  });
-  return { file, ...(commit && { revision: commit.revision }) };
+  if (!source) return { file };
+  try {
+    const commit = await source.commit({
+      paths: [relative(source.root, path)],
+      message: `Adopt ${paths.join(", ")} of ${result.name} from ${result.vendor}`,
+      author: actor.id,
+    });
+    return { file, ...(commit && { revision: commit.revision }) };
+  } catch (err) {
+    // Said, not hidden behind a 500's "Something went wrong": the file is written, and uncommitted.
+    throw new ApiError(500, { error: `Wrote ${file}, but could not commit it: ${errorMessage(err)}` });
+  }
 }
 
 /**

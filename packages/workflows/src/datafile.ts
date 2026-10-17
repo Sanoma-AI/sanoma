@@ -22,6 +22,13 @@ export class Reference {
   }
 }
 
+const REFERENCE = Symbol.for("sanoma.reference");
+Object.defineProperty(Reference.prototype, REFERENCE, { value: true });
+
+/** True for a `Reference`, made by any copy of this package: read by a registered symbol, not `instanceof`. */
+export const isReference = (value: unknown): value is Reference =>
+  typeof value === "object" && value !== null && REFERENCE in value;
+
 /** A value in a data file: a literal, or a reference to a declared resource. */
 export type DataValue = null | boolean | number | string | Reference | DataValue[] | { [field: string]: DataValue };
 

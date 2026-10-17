@@ -101,6 +101,26 @@ describe("setFields", () => {
     await expect(setFields(company, "website", { "topics.5": "x" })).rejects.toThrow("with item 5");
     await expect(setFields(company, "website", { name: Number.NaN })).rejects.toThrow("write a finite number");
     await expect(setFields("export const = ;", "x", {})).rejects.toThrow("does not parse");
+    // A reference anywhere in what would be replaced: a list holding one, or an object.
+    await expect(setFields(company, "websiteMain", { required_pull_request_reviews: null })).resolves.toContain(
+      "required_pull_request_reviews: null,",
+    );
+    const named =
+      'import { s } from "a/resources";\nexport const a = s.t({});\nexport const b = s.t({ teams: [a], by: { x: a } });\n';
+    await expect(setFields(named, "b", { teams: ["T_1", "T_2"] })).rejects.toThrow("it names the resource a");
+    await expect(setFields(named, "b", { by: null })).rejects.toThrow("it names the resource a");
+    // A list made under a field the file lacks.
+    await expect(setFields(company, "docs", { "rules.0.x": true })).rejects.toThrow(
+      "Cannot set rules.0.x: the file has no list to hold item 0",
+    );
+  });
+
+  it("reads a key that holds a dot as one field, the longest that the object has", async () => {
+    const text =
+      'import { s } from "a/resources";\nexport const x = s.t({ metadata: { "app.owner": "a", app: { tier: 1 } } });\n';
+    expect(await setFields(text, "x", { "metadata.app.owner": "b", "metadata.app.tier": 2 })).toBe(
+      'import { s } from "a/resources";\nexport const x = s.t({ metadata: { "app.owner": "b", app: { tier: 2 } } });\n',
+    );
   });
 });
 
@@ -152,6 +172,19 @@ export default [repo, rule, empty];
     expect(back.exports.map(({ name, vendor, type, desired }) => ({ name, vendor, type, desired }))).toEqual(
       content.exports,
     );
+  });
+
+  it("writes a reference made by another copy of the package", async () => {
+    // What another copy's Reference is: its own class, with the registered symbol on its prototype.
+    class Other {
+      readonly name: string;
+      constructor(name: string) {
+        this.name = name;
+      }
+    }
+    Object.defineProperty(Other.prototype, Symbol.for("sanoma.reference"), { value: true });
+    const exports = [{ name: "rule", vendor: "s", type: "t", desired: { of: new Other("repo") as Reference } }];
+    expect(await renderDataFile({ imports: [], exports })).toContain("of: repo,");
   });
 
   it("renders sanoma-ops' files from what readDataFile reads, as they are", async () => {

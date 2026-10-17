@@ -1298,6 +1298,18 @@ describe("resources and drift", () => {
     expect(readFileSync(join(root, stripe), "utf8")).toContain('name: "Sanoma Professional",');
     expect(commits).toHaveLength(1);
 
+    // A commit that fails says so, with the file written.
+    const failing: Source = {
+      ...source,
+      commit: () => {
+        throw new Error("index.lock exists");
+      },
+    };
+    await expect(adopt({ ...adopting, source: failing }, alice, pro)).rejects.toMatchObject({
+      status: 500,
+      body: { error: `Wrote ${stripe}, but could not commit it: index.lock exists` },
+    });
+
     // Only a field the run found drifted, and only while the file still declares it.
     await expect(adopt(adopting, alice, { ...website, paths: ["name"] })).rejects.toMatchObject({
       status: 400,

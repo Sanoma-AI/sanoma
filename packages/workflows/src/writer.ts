@@ -6,9 +6,9 @@ import {
   type DataFileExport,
   type DataFileImport,
   type DataValue,
+  isReference,
   keyName,
   readDataFile,
-  Reference,
 } from "./datafile.ts";
 
 // The data-file writer: what the app's Adopt, and setting up a company, write into the files
@@ -104,29 +104,56 @@ function declarationOf(text: string, name: string): { statement: Node; object: N
   return { statement, object: statement.declaration.declarations[0].init.arguments[0] };
 }
 
-/** What setting `path` to `value` in `object` replaces, and with what. */
+/**
+ * What setting `path` to `value` in `object` replaces, and with what. A key may hold a dot
+ * (`metadata: { "app.owner": … }`), and a drift report's path does not say so: at each object,
+ * the longest run of the path's segments that names a field is that field.
+ */
 function editAt(object: Node, path: string, value: DataValue): { start: number; end: number; replacement: string } {
   const keys = path.split(".");
   let node = object;
-  for (const [i, key] of keys.entries()) {
+  for (let i = 0; i < keys.length;) {
     if (node.type === "ObjectExpression") {
-      const field = node.properties.find((p: Node) => fieldName(p) === key);
-      if (!field) return added(node, keys.slice(i), value);
-      node = field.value;
-    } else if (node.type === "ArrayExpression" && /^\d+$/.test(key) && node.elements[Number(key)]) {
-      node = node.elements[Number(key)];
+      const names = new Map<string, Node>(node.properties.map((p: Node) => [fieldName(p), p]));
+      let j = keys.length;
+      while (j > i && !names.has(keys.slice(i, j).join("."))) j--;
+      if (j === i) return added(node, keys.slice(i), path, value);
+      node = names.get(keys.slice(i, j).join("."))!.value;
+      i = j;
+    } else if (node.type === "ArrayExpression" && /^\d+$/.test(keys[i]!) && node.elements[Number(keys[i])]) {
+      node = node.elements[Number(keys[i])];
+      i++;
     } else {
-      throw new Error(`Cannot set ${path}: ${keys.slice(0, i).join(".")} is not an object or a list with item ${key}`);
+      const at = keys.slice(0, i).join(".");
+      throw new Error(`Cannot set ${path}: ${at} is not an object or a list with item ${keys[i]}`);
     }
   }
-  if (node.type === "Identifier") {
-    throw new Error(`Cannot set ${path}: it names the resource ${node.name}; change a reference in the file itself`);
+  const named = referenceIn(node);
+  if (named) {
+    throw new Error(`Cannot set ${path}: it names the resource ${named}; change a reference in the file itself`);
   }
   return { start: node.start, end: node.end, replacement: literal(value) };
 }
 
-/** The edit that adds `keys` (the first missing, then any under it) with `value` at the end of `object`. */
-function added(object: Node, [key, ...under]: string[], value: DataValue) {
+/** The first resource a value names, itself or anywhere inside it: a vendor's value never replaces one. */
+function referenceIn(node: Node): string | undefined {
+  if (node.type === "Identifier") return node.name;
+  const items =
+    node.type === "ArrayExpression" ? node.elements : node.type === "ObjectExpression" ? node.properties : [];
+  for (const item of items) {
+    const named = item && referenceIn(item.type === "Property" ? item.value : item);
+    if (named) return named;
+  }
+  return undefined;
+}
+
+/**
+ * The edit that adds `keys` (the first missing, then any under it) with `value` at the end of
+ * `object`. Only objects are made under it: a list item's index there is refused.
+ */
+function added(object: Node, [key, ...under]: string[], path: string, value: DataValue) {
+  const index = under.find((k) => /^\d+$/.test(k));
+  if (index !== undefined) throw new Error(`Cannot set ${path}: the file has no list to hold item ${index}`);
   const nested = under.reduceRight<DataValue>((v, k) => Object.fromEntries([[k, v]]), value);
   const field = `${keyOf(key!)}: ${literal(nested)}`;
   const last = object.properties.at(-1);
@@ -143,7 +170,7 @@ const keyOf = (key: string) => (/^[A-Za-z_$][\w$]*$/.test(key) ? key : JSON.stri
 
 /** A value in the data-file subset, as source, on one line: oxfmt lays it out. */
 function literal(value: DataValue): string {
-  if (value instanceof Reference) return value.name;
+  if (isReference(value)) return value.name;
   if (value === null || typeof value === "boolean" || typeof value === "string") return JSON.stringify(value);
   if (typeof value === "number") {
     if (!Number.isFinite(value)) throw new Error(`${value} cannot be written in a data file: write a finite number`);

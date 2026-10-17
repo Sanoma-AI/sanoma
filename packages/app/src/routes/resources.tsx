@@ -1,6 +1,6 @@
 import type { DriftField, DriftReport, DriftResult, RunSummary } from "@sanoma-ai/workflows";
 import type { ConfigDescription, DeclaredResource, ResourceProblem } from "@sanoma-ai/workflows/describe";
-import { isEnded, problemAt } from "@sanoma-ai/workflows/shared";
+import { errorMessage, isEnded, problemAt } from "@sanoma-ai/workflows/shared";
 import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -404,19 +404,17 @@ function AdoptButton({ adopt: { runId, drift }, id, path }: { adopt: Adopt; id: 
   const adoptField = useServerFn(adoptFn);
   const start = useServerFn(startRunFn);
   const mutation = useMutation({
-    mutationFn: async () => {
-      const adopted = await adoptField({ data: { runId, id, paths: [path] } });
-      await start({ data: { workflow: drift, input: {} } });
-      return adopted;
-    },
+    mutationFn: () => adoptField({ data: { runId, id, paths: [path] } }),
     onSuccess: async ({ file, revision }) => {
-      toast.success(
-        `Wrote ${path} into ${file}${revision ? `, committed as ${revision.slice(0, 7)}` : ""}; checking again`,
-      );
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: RUNS_KEY }),
-        queryClient.invalidateQueries({ queryKey: sourceQuery(file).queryKey }),
-      ]);
+      toast.success(`Wrote ${path} into ${file}${revision ? `, committed as ${revision.slice(0, 7)}` : ""}`);
+      await queryClient.invalidateQueries({ queryKey: sourceQuery(file).queryKey });
+      // Then checks again, which reads the file as it now is: a failure here leaves the adopt done.
+      try {
+        await start({ data: { workflow: drift, input: {} } });
+      } catch (err) {
+        toast.error(`Could not check for drift again: ${errorBodyOf(err)?.error ?? errorMessage(err)}`);
+      }
+      await queryClient.invalidateQueries({ queryKey: RUNS_KEY });
     },
     onError: (err) => toast.error(errorBodyOf(err)?.error ?? err.message),
   });
