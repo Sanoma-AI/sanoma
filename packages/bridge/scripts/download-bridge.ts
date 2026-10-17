@@ -10,7 +10,7 @@
 //   SANOMA_BRIDGE_SRC=~/src/provider-bridge pnpm bridge:download --source
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -48,14 +48,19 @@ export const RELEASE: Release = {
   },
 };
 
+/** The archive's license texts: provider-bridge's, and those of the vendored modules it links. */
+const licenseFiles = ["LICENSE", "NOTICE", "vendor"];
+
 /**
  * Downloads `platform`'s archive of `release`, checks it against its pinned sha256 and extracts
- * the binary to `out`, executable. Returns `out`. Writes nothing when the check fails.
+ * the binary to `out`, executable, and with `licenses` the archive's license texts into that
+ * directory. Returns `out`. Writes nothing when the check fails.
  */
 export async function downloadRelease(
   out: string = defaultBin,
   platform: string = `${process.platform}-${process.arch}`,
   release: Release = RELEASE,
+  licenses?: string,
 ): Promise<string> {
   const expected = release.sha256[platform];
   if (!release.version || !expected) {
@@ -67,7 +72,7 @@ export async function downloadRelease(
   const [os, arch] = platform.split("-");
   const name = `provider-bridge_${release.version}_${os}_${arch === "x64" ? "amd64" : arch}.tar.gz`;
   const url = `https://github.com/${release.owner}/${release.repo}/releases/download/v${release.version}/${name}`;
-  const response = await fetch(url);
+  const response = await fetch(url, { signal: AbortSignal.timeout(300_000) });
   if (!response.ok) throw new Error(`GET ${url}: ${response.status} ${response.statusText}`);
   const archive = Buffer.from(await response.arrayBuffer());
   const actual = createHash("sha256").update(archive).digest("hex");
@@ -75,16 +80,23 @@ export async function downloadRelease(
 
   const dir = mkdtempSync(join(tmpdir(), "provider-bridge-"));
   try {
-    run(["tar", "-xzf", "-", "provider-bridge"], dir, archive);
+    run(["tar", "-xzf", "-"], dir, archive);
     // Copied beside `out`, then renamed over it: a reader never sees half a binary.
     const target = resolve(out);
     mkdirSync(dirname(target), { recursive: true });
     copyFileSync(join(dir, "provider-bridge"), `${target}.tmp`);
     chmodSync(`${target}.tmp`, 0o755);
     renameSync(`${target}.tmp`, target);
+    if (licenses) {
+      rmSync(licenses, { recursive: true, force: true });
+      for (const file of licenseFiles) {
+        if (existsSync(join(dir, file))) cpSync(join(dir, file), join(licenses, file), { recursive: true });
+      }
+    }
     return target;
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    rmSync(`${resolve(out)}.tmp`, { force: true });
   }
 }
 
@@ -119,14 +131,21 @@ function run([cmd, ...args]: string[], cwd: string, input?: Buffer) {
 
 if (import.meta.main) {
   const { values } = parseArgs({
-    options: { out: { type: "string" }, platform: { type: "string" }, source: { type: "boolean" } },
+    options: {
+      out: { type: "string" },
+      platform: { type: "string" },
+      licenses: { type: "string" },
+      source: { type: "boolean" },
+    },
   });
   if (values.source) {
-    if (values.platform) throw new Error("--platform downloads a release; --source builds for this platform only");
+    if (values.platform || values.licenses) {
+      throw new Error("--platform and --licenses take a release; --source builds for this platform only");
+    }
     const bin = buildBridge(values.out);
     console.log(`built ${bin}\n\nexport SANOMA_BRIDGE_BIN=${bin}`);
   } else {
-    const bin = await downloadRelease(values.out, values.platform);
+    const bin = await downloadRelease(values.out, values.platform, RELEASE, values.licenses);
     console.log(`downloaded provider-bridge ${RELEASE.version} to ${bin}\n\nexport SANOMA_BRIDGE_BIN=${bin}`);
   }
 }

@@ -1,2 +1,3 @@
-# Filled when each package is packed (prepack)
+# Filled when each package is packed (prepack), removed after (postpack)
 */bin/
+*/licenses/
