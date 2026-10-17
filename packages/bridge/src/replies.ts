@@ -51,11 +51,15 @@ const isFailure = (o: StateObject | StateFailure): o is StateFailure => "error" 
  * What a `stateBridge` knows of a resource type to plan and create one, by the provider's type
  * name, as its `TfResourceType` has it: `fields.vendorOwned` are unknown until applied, a change
  * to an `immutable` one (by top-level attribute) replaces the object, and a created object has
- * `schemaVersion`.
+ * `schemaVersion`. With its `schema`, a created object's unknown attributes that take a string get one.
  */
 export type StateTypes = Record<
   string,
-  { schemaVersion: number; fields: Pick<ResourceFields, "vendorOwned" | "immutable"> }
+  {
+    schemaVersion: number;
+    fields: Pick<ResourceFields, "vendorOwned" | "immutable">;
+    schema?: { shape: Record<string, { safeParse(value: unknown): { success: boolean } }> };
+  }
 >;
 
 /** A `Resource` as a fixture holds it, in Connect's JSON form: int64 as a string, bytes as base64. */
@@ -170,7 +174,8 @@ const resourceOf = (o: StateObject): ResourceState => ({
  * prior value, as for a computed attribute; a create plans `id` and the null `vendorOwned`
  * attributes unknown; a change to an `immutable` attribute is a replace. `planned` is the planned
  * state's JSON. `apply` puts the planned state into `state` (a created object gets the id
- * `<type>-<n>`, under that import id; its other unknowns stay null), or, for a delete, removes
+ * `<type>-<n>`, under that import id, and each other unknown its type's `schema` takes a string
+ * at `<attribute>-<n>`, as a GitHub repository's `node_id`; the rest stay null), or, for a delete, removes
  * the object; an update of an object no longer there fails in `errors`, as a provider's would.
  */
 export function stateBridge(
@@ -239,6 +244,11 @@ export function stateBridge(
       if (id === null || id === undefined) {
         do id = `${typeName}-${++created}`;
         while (objectWithId(typeName, id));
+        const { vendorOwned = [] } = types[typeName]?.fields ?? {};
+        const shape = types[typeName]?.schema?.shape ?? {};
+        for (const name of topLevel(vendorOwned) as Set<string>) {
+          if (planned[name] === null && shape[name]?.safeParse("").success) planned[name] = `${name}-${created}`;
+        }
       }
       const object: StateObject = {
         typeName,

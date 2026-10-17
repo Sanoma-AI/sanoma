@@ -15,6 +15,7 @@ export type {
 } from "./resource.ts";
 export type { DeclaredResource, ResourceProblem } from "./resources.ts";
 export type { DriftField, DriftReport, DriftResult, DriftStatus } from "./drift.ts";
+export type { ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanStep } from "./apply.ts";
 export type { CredentialStatus } from "./env.ts";
 
 // What a UI in the browser may use from the runtime, besides types: `@sanoma-ai/workflows/shared`.

@@ -3,6 +3,7 @@ import { type LintProblem, readSource, type SourceFile } from "./ast.ts";
 import { resolveConfig, type SanomaConfig } from "./config.ts";
 import { type Builtin, jsonSchemaOf, opIdsOf, type Use } from "./define.ts";
 import { DRIFT_WORKFLOW } from "./drift.ts";
+import { APPLY_WORKFLOW } from "./shared.ts";
 import { lintWorkflow } from "./lint.ts";
 import { type Effect, VENDOR, type VendorInfo } from "./op.ts";
 import { type Outline, outlineWithSource } from "./outline.ts";
@@ -34,6 +35,8 @@ export {
   type Bindings,
   type Rebind,
 } from "./lockfile.ts";
+// The apply workflow's plan and report, which the app renders.
+export type { ApplyInput, ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanStep } from "./apply.ts";
 
 /** What a workflow is, read from its definition: enough to draw a start form and show what it may call. */
 export interface WorkflowEntry {
@@ -41,7 +44,7 @@ export interface WorkflowEntry {
   title?: string;
   trigger: "manual";
   /**
-   * Set for a workflow the runtime adds itself, `drift`, rather than the config: a label. It
+   * Set for a workflow the runtime adds itself, `drift` or `apply`, rather than the config: a label. It
    * starts like any other.
    */
   builtin?: true;
@@ -201,18 +204,18 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     const { outline, source, found } = outlineWithSource(wf, file);
     // What the lint does not report: the file unread, or no workflow of this name in it.
     const own = "error" in outline && !found && (typeof file === "string" || !file.problems.length);
-    const problems =
-      wf.name === DRIFT_WORKFLOW
-        ? []
-        : [
-            ...(typeof file === "string" ? [] : lint(file)),
-            ...(own ? [{ line: 1, column: 1, message: outline.error }] : []),
-          ];
+    const builtin = wf.name === DRIFT_WORKFLOW || wf.name === APPLY_WORKFLOW;
+    const problems = builtin
+      ? []
+      : [
+          ...(typeof file === "string" ? [] : lint(file)),
+          ...(own ? [{ line: 1, column: 1, message: outline.error }] : []),
+        ];
     return {
       name: wf.name,
       title: wf.title,
       trigger: wf.trigger,
-      ...(wf.name === DRIFT_WORKFLOW && { builtin: true as const }),
+      ...(builtin && { builtin: true as const }),
       input: toJsonSchema(wf.input, `${wf.name} input`, "input"),
       ops: opIdsOf(wf),
       builtins: (wf.uses as Use[]).filter((u): u is Builtin => typeof u === "string"),

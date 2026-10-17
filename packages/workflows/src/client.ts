@@ -9,6 +9,7 @@ import { deleteCredential, storeCredential, storedCredentials } from "./credenti
 import { dbosClient, lazyPool, type LazyPool } from "./db.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { type ApprovalState, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
+import { APPLY_WORKFLOW, type ApplyInput, type ApplyReport } from "./apply.ts";
 import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
 import { parseOrThrow, SanomaError } from "./errors.ts";
 import { type LedgerRecord, type OwnedLedger, ownedLedger } from "./ledger.ts";
@@ -335,31 +336,55 @@ export class SanomaClient {
    * `invalid_input` when the config's connectors declare no resource types, so it has none.
    */
   async drift(options: StartOptions): Promise<string> {
-    const drift = this.config.workflows.get(DRIFT_WORKFLOW);
-    if (!drift) {
-      throw new SanomaError(
-        "invalid_input",
-        "The config's connectors declare no resource types, so there is nothing to check for drift",
-      );
-    }
-    return this.start(drift, {}, options);
+    return this.start(this.builtIn(DRIFT_WORKFLOW), {}, options);
+  }
+
+  /** The report of a drift run once it ends: as `applyReport` for apply. */
+  async driftReport(runId: string): Promise<DriftReport> {
+    return (await this.reportOf(runId, DRIFT_WORKFLOW)) as DriftReport;
   }
 
   /**
-   * The report of a drift run once it ends. Throws `run_not_found`, `invalid_input` for another
+   * Starts the built-in apply workflow, which reads the config's data files itself, with `input`
+   * (`only`, `bind`, `answers`; `{}` for all). Returns the run id; `applyReport` waits for its
+   * report. Throws `invalid_input` when the config's connectors declare no resource types.
+   */
+  async apply(input: ApplyInput, options: StartOptions): Promise<string> {
+    return this.start(this.builtIn(APPLY_WORKFLOW), input, options);
+  }
+
+  /**
+   * The report of an apply run once it ends. Throws `run_not_found`, `invalid_input` for another
    * workflow's run, the run's error when it failed, and `run_running` when it has not ended
    * within 30 s.
    */
-  async driftReport(runId: string): Promise<DriftReport> {
+  async applyReport(runId: string): Promise<ApplyReport> {
+    return (await this.reportOf(runId, APPLY_WORKFLOW)) as ApplyReport;
+  }
+
+  /** The built-in workflow `name`; `invalid_input` when the config has none, as its connectors declare no resource types. */
+  private builtIn(name: string) {
+    const workflow = this.config.workflows.get(name);
+    if (!workflow) {
+      throw new SanomaError(
+        "invalid_input",
+        `The config's connectors declare no resource types, so there is nothing to ${name === DRIFT_WORKFLOW ? "check for drift" : name}`,
+      );
+    }
+    return workflow;
+  }
+
+  /** The output of a run of the built-in `workflow` once it ends. */
+  private async reportOf(runId: string, workflow: string): Promise<unknown> {
     const row = await this.mustExist(runId, { loadOutput: true });
-    if (row.workflowName !== DRIFT_WORKFLOW) {
-      throw new SanomaError("invalid_input", `Run ${runId} is a run of ${row.workflowName}, not of ${DRIFT_WORKFLOW}`, {
+    if (row.workflowName !== workflow) {
+      throw new SanomaError("invalid_input", `Run ${runId} is a run of ${row.workflowName}, not of ${workflow}`, {
         runId,
         workflow: row.workflowName,
       });
     }
     // A finished run's report came with its row; else wait for the run.
-    return (row.status === "SUCCESS" ? row.output : await this.awaitResult(runId, 30_000)) as DriftReport;
+    return row.status === "SUCCESS" ? row.output : await this.awaitResult(runId, 30_000);
   }
 
   /**

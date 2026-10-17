@@ -74,7 +74,81 @@ type State = Record<string, unknown>;
 type ImportOp = Op<string, string, "import", { id: string }, { id: string; gone: boolean; state?: State }>;
 
 /** What one import found: the object's state, that it is gone, or why it could not be read. */
-type Found = { state: State } | { gone: true } | { error: string };
+export type Found = { state: State } | { gone: true } | { error: string };
+
+// What drift and apply share. Observing a resource is one `ctx` call, which a workflow makes in
+// its own `run` (the outline draws only those): `observeBy` says what each import is called with,
+// `observed` reads its answer, and `compare` turns what every import found into drift's results.
+
+/** The `import` ops of the types among `ops` with a driver, by type, sorted: what observing them uses. */
+export function importsOf(
+  types: ReadonlyMap<string, Resource>,
+  ops: ReadonlyMap<string, Op>,
+  drivers: ReadonlyMap<string, unknown>,
+): ImportOp[] {
+  return [...types.keys()].toSorted().flatMap((type) => {
+    const op = ops.get(`${type}.import`);
+    return op && drivers.has(op.id) ? [op as ImportOp] : [];
+  });
+}
+
+/**
+ * What a declared resource is observed by: the import id (`by`, default its binding, else its
+ * identity), or without one what it is found to be: `gone` for none, `error` when its type is
+ * not the connectors' or has no import among `imports`.
+ */
+export function observeBy(
+  { vendor, type, binding, identity }: Pick<DeclaredResource, "vendor" | "type" | "binding" | "identity">,
+  types: ReadonlyMap<string, Resource>,
+  imports: readonly Pick<Op, "id">[],
+  by = binding ?? identity,
+): { id: string } | Found {
+  const key = `${vendor}.${type}`;
+  if (!types.has(key)) return { error: `the config's connectors declare no resource type ${key}` };
+  if (!imports.some((op) => op.id === `${key}.import`)) return { error: `no driver for ${key}.import` };
+  return by === undefined ? { gone: true } : { id: by };
+}
+
+/** What an import's answer found. */
+export const observed = (out: { gone: boolean; state?: State }): Found =>
+  out.gone || !out.state ? { gone: true } : { state: out.state };
+
+/**
+ * Each declared resource against what its import `found`: `error`, `absent` (unbound, with the
+ * binding id of what its identity found as `found`), `gone`, else the state and the declared
+ * fields compared by `diffDeclared`, a reference against the state of the resource it names
+ * (so GitHub's node id for a repository counts as its name).
+ */
+export function compare(
+  types: ReadonlyMap<string, Resource>,
+  resources: DriftDeclared["resources"],
+  found: ReadonlyMap<string, Found>,
+): DriftResult[] {
+  return resources.map(({ id, vendor, type, name, binding, desired, refs }): DriftResult => {
+    const row = { id, type, vendor, name, ...(binding !== undefined && { binding }) };
+    const now = found.get(id)!;
+    if ("error" in now) return { ...row, status: "error", fields: [], error: now.error };
+    const resource = types.get(`${vendor}.${type}`)!;
+    if (binding === undefined) {
+      return {
+        ...row,
+        status: "absent",
+        fields: [],
+        ...("state" in now && { found: resource.bindingId(now.state) }),
+      };
+    }
+    if ("gone" in now) return { ...row, status: "gone", fields: [] };
+    // Each reference, by where it is: the values the vendor may hold there for its resource.
+    const accept: Record<string, unknown[]> = {};
+    for (const [at, target] of Object.entries(refs)) {
+      const by = resource.fields.references?.[at.replaceAll(/\.\d+(?=\.|$)/g, "")]?.by ?? [];
+      const named = found.get(target);
+      if (named && "state" in named) accept[at] = by.map((field) => named.state[field]).filter((v) => v != null);
+    }
+    const fields = diffDeclared(resource, now.state, desired, accept);
+    return { ...row, status: fields.length ? "drifted" : "clean", fields };
+  });
+}
 
 /**
  * The drift workflow for a config: it `uses` the `import` of every resource type the connectors
@@ -98,15 +172,7 @@ export function driftWorkflow(
   drivers: ReadonlyMap<string, unknown>,
   declared: () => Promise<DriftDeclared>,
 ): WorkflowDefinition<readonly ImportOp[], typeof DriftInput> {
-  const uses = [...types.keys()].toSorted().flatMap((type) => {
-    const op = ops.get(`${type}.import`);
-    return op && drivers.has(op.id) ? [op as ImportOp] : [];
-  });
-  // Why a resource of each type cannot be read, if it cannot.
-  const unreadable = new Map<string, string>();
-  for (const type of types.keys()) {
-    if (!uses.some((op) => op.id === `${type}.import`)) unreadable.set(type, `no driver for ${type}.import`);
-  }
+  const uses = importsOf(types, ops, drivers);
   return defineWorkflow({
     // The literal, held to the one name: the outline finds a workflow by a string, or a const of its own file.
     name: "drift" satisfies typeof DRIFT_WORKFLOW,
@@ -119,47 +185,20 @@ export function driftWorkflow(
       const { resources, problems } = await declared();
       // Every import first, so a reference compares against what its resource holds now.
       const found = new Map<string, Found>();
-      for (const { id, vendor, type, identity, binding } of resources) {
-        const key = `${vendor}.${type}`;
-        const why = types.has(key) ? unreadable.get(key) : `the config's connectors declare no resource type ${key}`;
-        const by = binding ?? identity;
+      for (const resource of resources) {
+        const by = observeBy(resource, types, uses);
         // An if/else, not a `continue`: the outline draws the import as the way past the error.
-        if (why !== undefined) found.set(id, { error: why });
-        else if (by === undefined) found.set(id, { gone: true });
+        if (!("id" in by)) found.set(resource.id, by);
         else {
           try {
-            const out = await ctx[vendor]![type]!.import({ id: by });
-            found.set(id, out.gone || !out.state ? { gone: true } : { state: out.state });
+            found.set(resource.id, observed(await ctx[resource.vendor]![resource.type]!.import({ id: by.id })));
           } catch (err) {
             if (isRunControlError(err)) throw err;
-            found.set(id, { error: errorMessage(err) });
+            found.set(resource.id, { error: errorMessage(err) });
           }
         }
       }
-      const results = resources.map(({ id, vendor, type, name, binding, desired, refs }): DriftResult => {
-        const row = { id, type, vendor, name, ...(binding !== undefined && { binding }) };
-        const now = found.get(id)!;
-        if ("error" in now) return { ...row, status: "error", fields: [], error: now.error };
-        const resource = types.get(`${vendor}.${type}`)!;
-        if (binding === undefined) {
-          return {
-            ...row,
-            status: "absent",
-            fields: [],
-            ...("state" in now && { found: resource.bindingId(now.state) }),
-          };
-        }
-        if ("gone" in now) return { ...row, status: "gone", fields: [] };
-        // Each reference, by where it is: the values the vendor may hold there for its resource.
-        const accept: Record<string, unknown[]> = {};
-        for (const [at, target] of Object.entries(refs)) {
-          const by = resource.fields.references?.[at.replaceAll(/\.\d+(?=\.|$)/g, "")]?.by ?? [];
-          const named = found.get(target);
-          if (named && "state" in named) accept[at] = by.map((field) => named.state[field]).filter((v) => v != null);
-        }
-        const fields = diffDeclared(resource, now.state, desired, accept);
-        return { ...row, status: fields.length ? "drifted" : "clean", fields };
-      });
+      const results = compare(types, resources, found);
       return { startedAt, finishedAt: await ctx.now(), problems, resources: results } satisfies DriftReport;
     },
   });

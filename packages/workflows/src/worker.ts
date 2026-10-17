@@ -11,7 +11,7 @@ import { entry, ownedLedger, skipped, write, writeFailure } from "./ledger.ts";
 import { dbosLogger, quietIfSandbox, setLogLevel, warn } from "./log.ts";
 import { lineStartsOf, readSource } from "./ast.ts";
 import { callsOf, outlineWithSource } from "./outline.ts";
-import type { Run, RunArgs, WorkerState, WorkflowOutline } from "./run.ts";
+import { currentRun, type Run, type RunArgs, type WorkerState, type WorkflowOutline } from "./run.ts";
 import type { Source } from "./source.ts";
 import { errorMessage } from "./shared.ts";
 
@@ -248,7 +248,7 @@ async function runWorkflow(name: string, { input, startedBy, sandbox }: RunArgs)
         const { seedSandbox } = await import("./sandbox.ts");
         await seedSandbox(run, sandbox);
       }
-      output = await wf.run(buildCtx(wf, run), parsed);
+      output = await currentRun.run(run, () => wf.run(buildCtx(wf, run), parsed));
     } finally {
       // Before the outcome is written: a call still queued must find the run ended.
       run.ended = true;

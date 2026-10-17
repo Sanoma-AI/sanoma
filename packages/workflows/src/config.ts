@@ -2,8 +2,10 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { DBOS } from "@dbos-inc/dbos-sdk";
+import { type ApplyDeclared, applyWorkflow } from "./apply.ts";
+import { applySteps } from "./apply-steps.ts";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
-import { DRIFT_WORKFLOW, type DriftDeclared, driftWorkflow } from "./drift.ts";
+import { DRIFT_WORKFLOW, driftWorkflow } from "./drift.ts";
 import { statusesOf, unconfigured } from "./env.ts";
 import type { Fake } from "./fake.ts";
 import type { LedgerStore } from "./ledger.ts";
@@ -105,8 +107,8 @@ export interface ResolvedConfig {
   /** The steps scenarios can use besides the generic ones: each connector's (`withSetup`), once each, then the config's own. */
   steps: readonly Steps[];
   /**
-   * By name; each checked against `ops` and `drivers`. The config's, and the built-in `drift`
-   * (`DRIFT_WORKFLOW`) when its connectors declare resource types.
+   * By name; each checked against `ops` and `drivers`. The config's, and the built-ins `drift`
+   * (`DRIFT_WORKFLOW`) and `apply` (`APPLY_WORKFLOW`) when its connectors declare resource types.
    */
   workflows: Map<string, WorkflowDefinition<any, any>>;
   policy: Policy;
@@ -207,11 +209,14 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     }
     names.set(wf.name, wf);
   }
-  // Built-in: checking the resources the data files declare against their vendors.
+  // Built-in: checking the resources the data files declare against their vendors, and applying them.
   if (types.size) {
-    const declared = () =>
-      DBOS.runStep(() => readDeclared(root, config.connectors, types), { name: "drift:data-files" });
-    names.set(DRIFT_WORKFLOW, driftWorkflow(types, ops, drivers, declared));
+    const read = () => readDeclared(root, config.connectors, types);
+    names.set(
+      DRIFT_WORKFLOW,
+      driftWorkflow(types, ops, drivers, () => DBOS.runStep(read, { name: "drift:data-files" })),
+    );
+    names.set(APPLY_WORKFLOW, applyWorkflow(types, ops, drivers, applySteps(appName, root, read)));
   }
   return {
     appName,
@@ -281,18 +286,19 @@ function scenariosAt(root: string | undefined): URL | undefined {
 }
 
 /**
- * The data files under `root` and the lockfile beside them, in one read, as a drift run records
- * them: each resource with its binding, without its write-only values, which a run never compares
- * and never records, and the problems.
+ * The data files under `root` and the lockfile beside them, in one read, as a drift or apply run
+ * records them: each resource with its binding, without its write-only values (a secret marker
+ * names one, and stays), which a run never compares and never records, the bindings, the orphans
+ * and the problems.
  */
 async function readDeclared(
   root: string | undefined,
   connectors: readonly Connector<any, any>[],
   types: ReadonlyMap<string, Resource>,
-): Promise<DriftDeclared> {
-  // Loaded when a drift run reads the files, not with the worker: the reader parses with oxc-parser.
+): Promise<Omit<ApplyDeclared, "rebinds">> {
+  // Loaded when a run reads the files, not with the worker: the reader parses with oxc-parser.
   const { readDataFiles } = await import("./resources.ts");
-  const { resources, problems } = readDataFiles(root, connectors, types);
+  const { resources, bindings, orphans, problems } = readDataFiles(root, connectors, types);
   return {
     resources: resources.map(({ id, vendor, type, name, identity, binding, desired, refs }) => ({
       id,
@@ -304,6 +310,8 @@ async function readDeclared(
       desired: withoutWriteOnly(types.get(`${vendor}.${type}`)!.fields, desired),
       refs,
     })),
+    bindings,
+    orphans,
     problems,
   };
 }

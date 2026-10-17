@@ -48,7 +48,15 @@ export {
 } from "./resource.ts";
 export { defineConfig, resolveConfig, resolveDatabaseUrl, type ResolvedConfig, type SanomaConfig } from "./config.ts";
 export { type CredentialStatus, credentialsOf } from "./env.ts";
-export { APPLY_WORKFLOW } from "./shared.ts";
+export {
+  APPLY_WORKFLOW,
+  ApplyInput,
+  type ApplyPlan,
+  type ApplyReport,
+  type ApplyResult,
+  type PlanAnswer,
+  type PlanStep,
+} from "./apply.ts";
 export {
   DRIFT_WORKFLOW,
   type DriftDeclared,
