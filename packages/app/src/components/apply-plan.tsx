@@ -1,7 +1,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
-import type { ApplyPlan, PlanAnswer, PlanStep } from "../apply-types.ts";
+import type { ApplyPlan, PlanAnswer, PlanStep } from "@sanoma-ai/workflows/describe";
 import { exportName, plannedRows, rebindWords, STEP_GROUPS } from "../lib/apply-plan.ts";
 import { configQuery } from "../queries.ts";
 import { Disclosure, plural, Problems, ShortId as Id, SubsectionTitle, VendorLogo } from "./common.tsx";
