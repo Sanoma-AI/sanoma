@@ -92,4 +92,7 @@ export const supabaseOps = {
   project: { ...supabaseTf.connector.project, ...management.project },
   pooler: management.pooler,
   database: management.database,
-} as typeof supabaseTf.connector & typeof management;
+} as SupabaseOps;
+
+/** The Supabase connector's type: the provider's resource types with the Management API operations. */
+export type SupabaseOps = typeof supabaseTf.connector & typeof management;
