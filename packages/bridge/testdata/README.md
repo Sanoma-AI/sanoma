@@ -42,6 +42,7 @@ Every provider comes from `registry.opentofu.org`, which serves the signing key 
 | `hashicorp_null_3.3.2/null_resource/example-update-1/` | same | `plan.json` only: the same config again is `NONE` |
 | `hashicorp_null_3.3.2/null_resource/example-update-2/` | same | a changed trigger is `REPLACE` (`requiresReplace: ["triggers"]`): `apply-delete.json`, then `apply.json` creates the new object |
 | `hashicorp_null_3.3.2/null_resource/example-delete/` | same | plan `DELETE` (no `planned`), apply returns no resource |
+| `kreuzwerker_docker_4.6.0/docker_container/` | no credentials: local Docker 20.10, 2026-10-17, `connectors/docker/test/driver.test.ts` with `SANOMA_LIVE=1 SANOMA_RECORD=1` | a container created (`create-*`), imported by id, planned `NONE` once its env and labels are filled from Docker's inspect, replaced for a new revision (`apply-delete.json`, then `apply.json`), and deleted; its environment holds the test's made-up secret, as the provider keeps it unmarked |
 
 Not recorded:
 

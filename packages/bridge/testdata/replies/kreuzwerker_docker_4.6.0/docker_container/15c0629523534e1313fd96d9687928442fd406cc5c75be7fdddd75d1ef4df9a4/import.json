@@ -1,0 +1,25 @@
+{
+  "provider": {
+    "source": "kreuzwerker/docker",
+    "version": "4.6.0",
+    "sha256": "324ed53dbcc72fd2fea78ece67e5897bd2a41e840451438eb00a175824c5de52",
+    "protocol": 6
+  },
+  "request": {
+    "provider": {
+      "source": "kreuzwerker/docker",
+      "version": "4.6.0",
+      "sha256": "324ed53dbcc72fd2fea78ece67e5897bd2a41e840451438eb00a175824c5de52"
+    },
+    "typeName": "docker_container",
+    "id": "15c0629523534e1313fd96d9687928442fd406cc5c75be7fdddd75d1ef4df9a4"
+  },
+  "response": {
+    "error": {
+      "code": "not_found",
+      "message": "import docker_container \"15c0629523534e1313fd96d9687928442fd406cc5c75be7fdddd75d1ef4df9a4\": cannot import non-existent remote object",
+      "diagnostics": []
+    }
+  },
+  "scrubbed": []
+}

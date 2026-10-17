@@ -1,0 +1,21 @@
+{
+  "provider": {
+    "source": "kreuzwerker/docker",
+    "version": "4.6.0",
+    "sha256": "324ed53dbcc72fd2fea78ece67e5897bd2a41e840451438eb00a175824c5de52",
+    "protocol": 6
+  },
+  "request": {
+    "provider": {
+      "source": "kreuzwerker/docker",
+      "version": "4.6.0",
+      "sha256": "324ed53dbcc72fd2fea78ece67e5897bd2a41e840451438eb00a175824c5de52"
+    },
+    "typeName": "docker_container",
+    "priorStateJson": "{\"attach\":false,\"bridge\":\"\",\"capabilities\":[],\"cgroup_parent\":null,\"cgroupns_mode\":null,\"command\":[\"node\",\"-e\",\"require('http').createServer((q, s) => s.end('ok')).listen(3000)\"],\"container_logs\":null,\"container_read_refresh_timeout_milliseconds\":15000,\"cpu_period\":null,\"cpu_quota\":null,\"cpu_set\":\"\",\"cpu_shares\":0,\"cpus\":null,\"destroy_grace_seconds\":null,\"device_cgroup_rules\":[],\"device_read_bps\":[],\"device_read_iops\":[],\"device_requests\":[],\"device_write_bps\":[],\"device_write_iops\":[],\"devices\":[],\"dns\":[],\"dns_opts\":[],\"dns_search\":[],\"domainname\":\"\",\"entrypoint\":[\"docker-entrypoint.sh\"],\"env\":[\"SANOMA_SOURCE=git://example.invalid/company.git\",\"SANOMA_REVISION=2222222222222222222222222222222222222222\",\"SANOMA_SECRETS_KEY=docker-test-secret-value\",\"PORT=3000\"],\"exit_code\":null,\"gpus\":null,\"group_add\":[],\"healthcheck\":[{\"interval\":\"2s\",\"retries\":3,\"start_interval\":\"0s\",\"start_period\":\"10m0s\",\"test\":[\"CMD\",\"node\",\"-e\",\"fetch('http://127.0.0.1:3000/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))\"],\"timeout\":\"3s\"}],\"host\":[],\"hostname\":\"15c062952353\",\"id\":\"15c0629523534e1313fd96d9687928442fd406cc5c75be7fdddd75d1ef4df9a4\",\"image\":\"sanoma-test-healthz:dev\",\"init\":false,\"ipc_mode\":\"private\",\"labels\":[{\"label\":\"sanoma.env\",\"value\":\"PORT,SANOMA_REVISION,SANOMA_SECRETS_KEY,SANOMA_SOURCE\"},{\"label\":\"sanoma.ref\",\"value\":\"main\"},{\"label\":\"sanoma.revision\",\"value\":\"2222222222222222222222222222222222222222\"},{\"label\":\"sanoma.source\",\"value\":\"git://example.invalid/company.git\"}],\"log_driver\":\"json-file\",\"log_opts\":{},\"logs\":false,\"max_retry_count\":0,\"memory\":0,\"memory_reservation\":0,\"memory_swap\":0,\"mounts\":[],\"must_run\":true,\"name\":\"sanoma-test-driver\",\"network_data\":[{\"gateway\":\"172.17.0.1\",\"global_ipv6_address\":\"\",\"global_ipv6_prefix_length\":0,\"ip_address\":\"172.17.0.2\",\"ip_prefix_length\":16,\"ipv6_gateway\":\"\",\"mac_address\":\"02:42:ac:11:00:02\",\"network_name\":\"bridge\"}],\"network_mode\":\"bridge\",\"networks_advanced\":[],\"pid_mode\":null,\"platform\":\"linux\",\"ports\":[{\"internal\":3000,\"external\":18557,\"ip\":\"127.0.0.1\",\"protocol\":\"tcp\"}],\"privileged\":false,\"publish_all_ports\":false,\"read_only\":false,\"remove_volumes\":true,\"restart\":\"unless-stopped\",\"rm\":false,\"runtime\":\"runc\",\"security_opts\":[],\"shm_size\":64,\"start\":true,\"stdin_open\":false,\"stop_signal\":\"\",\"stop_timeout\":0,\"storage_opts\":{},\"sysctls\":{},\"timeouts\":null,\"tmpfs\":{},\"tty\":false,\"ulimit\":[],\"upload\":[],\"user\":\"\",\"userns_mode\":\"\",\"volumes\":[],\"wait\":true,\"wait_timeout\":600,\"working_dir\":\"\"}",
+    "priorPrivate": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiY3JlYXRlIjoxMjAwMDAwMDAwMDAwLCJkZWxldGUiOjEyMDAwMDAwMDAwMDAsInVwZGF0ZSI6MTIwMDAwMDAwMDAwMH0sInNjaGVtYV92ZXJzaW9uIjoiMiJ9",
+    "priorSchemaVersion": "2"
+  },
+  "response": {},
+  "scrubbed": []
+}

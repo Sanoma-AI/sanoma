@@ -605,7 +605,7 @@ export const docker_container = {
       .describe("Spec for mounting volumes in the container."),
   }),
   fields: {
-    immutable: [],
+    immutable: ["env", "image", "labels", "name", "ports"],
     vendorOwned: ["bridge", "container_logs", "exit_code", "network_data"],
     writeOnly: [],
     unordered: [
