@@ -1,6 +1,7 @@
 import { fakeHost, fakeHostType, testRepository } from "@sanoma-ai/testing/host";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { secret } from "../src/secret.ts";
 import {
   allowAll,
   defineConnector,
@@ -63,6 +64,20 @@ describe("a host type", () => {
     ],
   ])("is refused with %s", (_, overrides, message) => {
     expect(() => hostOf(overrides)).toThrow(message);
+  });
+
+  it("takes sanoma's own secrets in its secrets map, and no other type does", () => {
+    const service = hostOf({});
+    const env = { SANOMA_DATABASE_URL: secret("SANOMA_DATABASE_URL_STORE"), TOKEN: secret("TOKEN") };
+    const declared = { name: "app", repo: { url: "https://example.com/a.git", branch: "main" }, env };
+    expect(service(declared).desired.env).toEqual({
+      SANOMA_DATABASE_URL: { $secret: "SANOMA_DATABASE_URL_STORE" },
+      TOKEN: { $secret: "TOKEN" },
+    });
+    const plain = defineResource({ vendor: "acme", type: "db", title: "Database", schema, fields });
+    expect(() => plain({ ...declared, env: { KEY: secret("SANOMA_SECRETS_KEY") } })).toThrow(
+      "acme.db: env.KEY names SANOMA_SECRETS_KEY, one of sanoma's own: only a host's secrets may",
+    );
   });
 
   it("refuses a declaration that gives its revision: apply fills it from the ref", () => {

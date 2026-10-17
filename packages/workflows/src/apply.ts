@@ -14,6 +14,7 @@ import {
   sourceUrl,
 } from "./drift.ts";
 import { isRunControlError } from "./errors.ts";
+import type { HostOutputs } from "./host.ts";
 import type { Binding, Bindings, Rebind } from "./lockfile.ts";
 import type { Op } from "./op.ts";
 import { fieldPathOf, holderOf, type PlanAction, type Resource, valueAt } from "./resource.ts";
@@ -77,6 +78,8 @@ export interface ApplyResult {
   status: "done" | "skipped" | "failed";
   /** Its binding after the step, when it has one. */
   binding?: string;
+  /** For a host it created or updated: where it answers, as its state says. */
+  host?: HostOutputs;
   error?: string;
 }
 
@@ -130,9 +133,23 @@ type PlanOp = Op<
   { action: PlanAction; planned?: State; unknown: string[]; replace: string[] }
 >;
 type CreateOp = Op<string, string, "create", { desired: State }, { id: string; state: State }>;
-type UpdateOp = Op<string, string, "update", { id: string; desired: State; expect?: Expect }, { id: string }>;
+type UpdateOp = Op<
+  string,
+  string,
+  "update",
+  { id: string; desired: State; expect?: Expect },
+  { id: string; state: State }
+>;
 type DeleteOp = Op<string, string, "delete", { id: string }, { id: string; gone: true }>;
-type ApplyUse = ImportOp | PlanOp | CreateOp | UpdateOp | DeleteOp | ResolveOp | "approval";
+// An `afterCreate` operation is any of the config's, called by its id (`afterCreate`), so it is
+// listed as an import is.
+type ApplyUse = ImportOp | PlanOp | CreateOp | UpdateOp | DeleteOp | ResolveOp | "approval" | "sleep";
+
+/** How long apply waits between calls of an `afterCreate` operation with `until`, and how many calls it makes. */
+const AFTER_CREATE_SECONDS = 5;
+const AFTER_CREATE_CALLS = 120;
+/** An operation as `ctx` gives it, called by its id. */
+type Call = (input: unknown) => Promise<unknown>;
 
 /** What a step's resource is called in a problem: its file, and its export. */
 const problemOf = (id: string, message: string): ResourceProblem => ({
@@ -322,12 +339,26 @@ function runOf(step: PlanStep): "create" | "update" | "delete" | "bind" | "forge
   }
 }
 
-/** The change calls the plan would make, as the policy would see them, with the declarations' fields as planned. */
-function writesOf(plan: ApplyPlan, desired: ReadonlyMap<string, State>): PlannedCall[] {
+/**
+ * The change calls the plan would make, as the policy would see them, with the declarations'
+ * fields as planned: a create's `afterCreate` writes too, for an object with no id yet.
+ */
+function writesOf(
+  plan: ApplyPlan,
+  desired: ReadonlyMap<string, State>,
+  types: ReadonlyMap<string, Resource>,
+  ops: ReadonlyMap<string, Op>,
+): PlannedCall[] {
   return plan.steps.flatMap((step): PlannedCall[] => {
     const at = `${step.vendor}.${step.type}`;
     const run = runOf(step);
-    if (run === "create") return [{ op: `${at}.create`, input: { desired: desired.get(step.id) } }];
+    if (run === "create") {
+      const made = { id: `new:${at}`, export: exportOf(keyOf(step)) };
+      const after = (types.get(at)?.afterCreate ?? [])
+        .filter((hook) => ops.get(hook.op)?.effect === "write")
+        .map((hook) => ({ op: hook.op, input: hook.input(made) }));
+      return [{ op: `${at}.create`, input: { desired: desired.get(step.id) } }, ...after];
+    }
     if (run === "delete" && "binding" in step) return [{ op: `${at}.delete`, input: { id: step.binding } }];
     if (run !== "update" || (step.action !== "update" && step.action !== "replace")) return [];
     const expect = { action: step.action, replace: step.replace };
@@ -337,6 +368,9 @@ function writesOf(plan: ApplyPlan, desired: ReadonlyMap<string, State>): Planned
 
 /** The lockfile's key a step binds: a declaration's id, or an orphan's key. */
 const keyOf = (step: PlanStep) => (step.action === "orphan" ? step.key : step.id);
+
+/** The export a lockfile key names: `store` of `resources/sanoma/infra.ts#store`. */
+const exportOf = (key: string) => key.slice(key.indexOf("#") + 1);
 
 /** The commit message for a step's change to the lockfile. */
 function messageOf(step: PlanStep, before: Binding | undefined, after: Binding | undefined): string {
@@ -389,6 +423,12 @@ export function applyWorkflow(
     .toSorted((a, b) => a.id.localeCompare(b.id));
   const usable = new Set(changes.map((op) => op.id));
   const resolve = ops.get(SOURCE_RESOLVE) as ResolveOp | undefined;
+  const hooks = [...new Set([...types.values()].flatMap((r) => (r.afterCreate ?? []).map((hook) => hook.op)))]
+    .toSorted()
+    .flatMap((id) => {
+      const op = ops.get(id);
+      return op && drivers.has(id) ? [op] : [];
+    });
   return defineWorkflow({
     // The literal, held to the one name: the outline finds a workflow by a string, or a const of its own file.
     name: "apply" satisfies typeof APPLY_WORKFLOW,
@@ -399,7 +439,9 @@ export function applyWorkflow(
       ...imports,
       ...(changes as (PlanOp | CreateOp | UpdateOp | DeleteOp)[]),
       ...(resolve ? [resolve] : []),
+      ...(hooks as ImportOp[]),
       "approval",
+      ...(hooks.length ? (["sleep"] as const) : []),
     ],
     run: async (ctx, input) => {
       const { resources, problems: read, bindings: locked, orphans, rebinds } = await steps.declared();
@@ -445,6 +487,8 @@ export function applyWorkflow(
             if (isRunControlError(err)) throw err;
             revisions.set(id, { error: errorMessage(err) });
           }
+        } else if (host && source === undefined) {
+          revisions.set(id, { error: "its source has no clone URL yet: apply the repository it names first" });
         }
       }
       const drift = new Map(compare(types, resources, found, revisions).map((result) => [result.id, result]));
@@ -479,7 +523,7 @@ export function applyWorkflow(
         steps: [...planned, ...orphaned.steps],
       };
 
-      const writes = writesOf(plan, desired);
+      const writes = writesOf(plan, desired, types, ops);
       const approver = writes.length ? await steps.holds(writes) : undefined;
       if (approver !== undefined) {
         const covers = [...new Set(writes.map((w) => w.op))].map((id) => ops.get(id)!);
@@ -497,12 +541,15 @@ export function applyWorkflow(
         const before = bindings[key];
         const binding = "binding" in step ? step.binding : "";
         const declared = declarations.get(step.id);
+        const spec = types.get(type);
+        let state: State | undefined;
         try {
           if (todo === "create") {
             const made = await ctx[step.vendor]![step.type]!.create({
               desired: desiredOf(declared!, types, bindings, hosts),
             });
             bindings[key] = { type, id: made.id };
+            state = made.state;
           } else if (todo === "update" && (step.action === "update" || step.action === "replace")) {
             const expect = { action: step.action, replace: step.replace };
             const changed = await ctx[step.vendor]![step.type]!.update({
@@ -511,6 +558,7 @@ export function applyWorkflow(
               expect,
             });
             bindings[key] = { type, id: changed.id };
+            state = changed.state;
           } else if (todo === "delete") {
             await ctx[step.vendor]![step.type]!.delete({ id: binding });
             delete bindings[key];
@@ -522,11 +570,31 @@ export function applyWorkflow(
             written ||= wrote.written;
             revision = wrote.revision ?? revision;
           }
+          // Bound first, so an object made is kept whatever its `afterCreate` calls do.
+          // Each `afterCreate` operation, by its id, again every few seconds until its output passes
+          // `until`; one that never does fails the step, and the rest are not called.
+          let stuck: string | undefined;
+          for (const hook of todo === "create" ? (spec?.afterCreate ?? []) : []) {
+            if (stuck === undefined) {
+              const [vendor = "", group = "", name = ""] = hook.op.split(".");
+              const given = hook.input({ id: after!.id, export: exportOf(key) });
+              let output = await (ctx[vendor]![group] as unknown as Record<string, Call>)[name]!(given);
+              for (let call = 1; call < AFTER_CREATE_CALLS && hook.until && !hook.until(output); call++) {
+                await ctx.sleep({ seconds: AFTER_CREATE_SECONDS });
+                output = await (ctx[vendor]![group] as unknown as Record<string, Call>)[name]!(given);
+              }
+              if (hook.until && !hook.until(output)) {
+                stuck = `${hook.op} did not pass in ${(AFTER_CREATE_CALLS * AFTER_CREATE_SECONDS) / 60} minutes`;
+              }
+            }
+          }
           results.push({
             id: step.id,
             action: step.action,
-            status: todo === "skip" ? "skipped" : "done",
+            status: stuck !== undefined ? "failed" : todo === "skip" ? "skipped" : "done",
             ...(after && { binding: after.id }),
+            ...(spec?.host && state && { host: spec.host.outputs(state) }),
+            ...(stuck !== undefined && { error: stuck }),
           });
         } catch (err) {
           if (isRunControlError(err)) throw err;

@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localGitSource } from "../src/source.ts";
 import { gitIdentity } from "./git.ts";
@@ -55,5 +56,25 @@ describe("localGitSource", () => {
     const source = localGitSource(dir);
     expect(await source.head("main")).toBe(git("rev-parse", "HEAD"));
     await expect(source.head("nope")).rejects.toThrow(/nope/);
+  });
+
+  it("pushes a branch, history and all, to a repository by its URL, keeping the token out of every trace", async () => {
+    const source = localGitSource(dir);
+    const remote = join(dir, "..", `${dir.split("/").at(-1)}-remote.git`);
+    execFileSync("git", ["init", "--quiet", "--bare", "--initial-branch=main", remote]);
+    try {
+      const url = pathToFileURL(remote).href;
+      const token = "ghs_secret-token-value";
+      await source.push!({ url, token, ref: "main" });
+      const pushed = execFileSync("git", ["rev-parse", "main"], { cwd: remote, encoding: "utf8" }).trim();
+      expect(pushed).toBe(await source.head());
+      expect(readFileSync(join(dir, ".git", "config"), "utf8")).not.toContain(token);
+
+      const failed = source.push!({ url: `${url}-missing`, token, ref: "main" });
+      await expect(failed).rejects.toThrow(/^git push to file:.*-missing failed: /);
+      await expect(failed).rejects.not.toThrow(token);
+    } finally {
+      rmSync(remote, { recursive: true, force: true });
+    }
   });
 });

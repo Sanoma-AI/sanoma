@@ -15,13 +15,25 @@ const bolt = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path 
  * identity: its project is the one its binding names, by its ref. The provider answers a project
  * that does not exist with the state it was given, so one without a name is gone. Apply creates,
  * changes and deletes projects. The resource types, the data-file constructors and the
- * provider's driver come from this one record; `supabaseOps` adds the Management API operations.
+ * provider's driver come from this one record; `supabaseOps` adds the Management API operations,
+ * two of which apply calls after it creates a project.
  */
 export const supabaseTf = tfConnector({
   vendor: "supabase",
   provider,
   types: {
-    project: { tf: supabase_project, title: "Project", exists: (state) => state.name != null, writable: true },
+    project: {
+      tf: supabase_project,
+      title: "Project",
+      exists: (state) => state.name != null,
+      writable: true,
+      // Once apply makes a project: its database and pooler healthy, then the URL a worker
+      // connects with stored as SANOMA_DATABASE_URL_<EXPORT>, which a host's secrets name.
+      afterCreate: [
+        { op: "supabase.project.health", input: ({ id }) => ({ ref: id }), until: (out) => out.healthy === true },
+        { op: "supabase.database.storeUrl", input: ({ id, export: name }) => ({ ref: id, export: name }) },
+      ],
+    },
   },
   info: {
     title: "Supabase",

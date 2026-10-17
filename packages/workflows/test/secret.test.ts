@@ -13,9 +13,9 @@ describe("secret", () => {
     expect(fromResources).toBe(secret);
   });
 
-  it("refuses a name that is not upper case, or is one of sanoma's own", () => {
+  it("refuses a name that is not upper case; sanoma's own are for a host's secrets, which its type checks", () => {
     expect(() => secret("db_password")).toThrow(/a secret's name is an environment variable's/);
-    expect(() => secret("SANOMA_SECRETS_KEY")).toThrow(/not SANOMA_/);
+    expect(secret("SANOMA_SECRETS_KEY")).toEqual({ $secret: "SANOMA_SECRETS_KEY" });
   });
 });
 
