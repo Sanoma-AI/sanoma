@@ -1,14 +1,13 @@
-import type { DriftField, DriftReport, DriftResult, RunSummary } from "@sanoma-ai/workflows";
+import type { DriftReport, DriftResult, RunSummary } from "@sanoma-ai/workflows";
 import type { ConfigDescription, DeclaredResource, ResourceProblem } from "@sanoma-ai/workflows/describe";
-import { DRIFT_WORKFLOW, errorMessage, isEnded, problemAt } from "@sanoma-ai/workflows/shared";
+import { APPLY_WORKFLOW, DRIFT_WORKFLOW, isEnded, problemAt } from "@sanoma-ai/workflows/shared";
 import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { CircleAlertIcon, FilePenLineIcon, ScanSearchIcon } from "lucide-react";
+import { PlayIcon, ScanSearchIcon } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
-import { Alert, AlertDescription, AlertTitle } from "#/components/ui/alert.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
@@ -24,13 +23,16 @@ import {
   pageTitle,
   PanelCard,
   plural,
+  Problems,
   SectionTitle,
+  ShortId,
   ToneBadge,
   VendorLogo,
   When,
 } from "../components/common.tsx";
-import { adoptFn, startRunFn } from "../functions.ts";
-import { configQuery, driftReportQuery, RUNS_KEY, runLink, runsQuery, sourceQuery } from "../queries.ts";
+import { type Adopt, FieldDiff } from "../components/field-diff.tsx";
+import { startRunFn } from "../functions.ts";
+import { configQuery, driftReportQuery, RUNS_KEY, runLink, runsQuery, sourceQuery, useStartRun } from "../queries.ts";
 
 export const Route = createFileRoute("/resources")({
   // `resource` names the resource whose declaration the source view shows.
@@ -131,7 +133,12 @@ function WithDrift({ config, drift }: { config: ConfigDescription; drift: string
       config={config}
       report={finished?.report}
       adopt={finished && { runId: finished.run.runId, drift }}
-      action={<RunDriftButton drift={drift} checking={checking} />}
+      action={
+        <div className="flex flex-wrap gap-2">
+          <ApplyButton />
+          <RunDriftButton drift={drift} checking={checking} />
+        </div>
+      }
     >
       {error && <Notice variant="destructive">Could not refresh the drift checks: {error.message}</Notice>}
       <LastCheck latest={latest} finished={finished} checking={checking} />
@@ -175,6 +182,7 @@ function Resources({
                 <TableHead>Name</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Declared in</TableHead>
+                <TableHead>Bound to</TableHead>
                 <TableHead>Drift</TableHead>
               </TableRow>
             </TableHeader>
@@ -192,28 +200,9 @@ function Resources({
           </Table>
         </div>
       )}
+      {config.orphans.length > 0 && <Orphans orphans={config.orphans} titles={titles} />}
       {chosen && <Declaration key={chosen.id} resource={chosen} />}
     </>
-  );
-}
-
-/** What is wrong in the data files: their resources are left out until it is fixed. */
-function Problems({ problems }: { problems: ResourceProblem[] }) {
-  return (
-    <Alert variant="destructive">
-      <CircleAlertIcon />
-      <AlertTitle>{plural(problems.length, "problem")} in the data files: their resources are left out</AlertTitle>
-      <AlertDescription>
-        <ul className="flex flex-col gap-1">
-          {problems.map((p, i) => (
-            // Two problems may share a place and a message: the list never reorders.
-            <li key={i}>
-              {p.file && <code>{problemAt(p)}</code>} {p.message}
-            </li>
-          ))}
-        </ul>
-      </AlertDescription>
-    </Alert>
   );
 }
 
@@ -284,6 +273,24 @@ function RunDriftButton({ drift, checking }: { drift: string; checking: boolean 
   );
 }
 
+/**
+ * Starts the apply workflow on every declared resource: its plan waits for a person in the Inbox
+ * wherever the policy holds a change. The config registers apply beside drift, so it is here too.
+ */
+function ApplyButton() {
+  const start = useStartRun();
+  return (
+    <Button
+      variant="outline"
+      onClick={() => start.mutate({ workflow: APPLY_WORKFLOW, input: {} })}
+      disabled={start.isPending}
+    >
+      {start.isPending ? <Spinner data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}
+      Apply
+    </Button>
+  );
+}
+
 /** A resource's row, and under it the fields that differ, or why it could not be read. */
 function ResourceRow({
   row,
@@ -297,6 +304,8 @@ function ResourceRow({
   adopt?: Adopt;
 }) {
   const { result } = row;
+  // The last check's binding is the newer: the description's is the lockfile's when the app started.
+  const binding = result?.binding ?? row.declared?.binding;
   const detail = result !== undefined && (result.fields.length > 0 || result.error !== undefined);
   return (
     <>
@@ -327,12 +336,19 @@ function ResourceRow({
           )}
         </TableCell>
         <TableCell>
+          {binding ? (
+            <ShortId id={binding} className="text-xs" />
+          ) : (
+            <span className="text-muted-foreground">unbound</span>
+          )}
+        </TableCell>
+        <TableCell>
           <DriftBadge result={result} />
         </TableCell>
       </TableRow>
       {detail && (
         <TableRow className="hover:bg-transparent">
-          <TableCell colSpan={4} className="whitespace-normal">
+          <TableCell colSpan={5} className="whitespace-normal">
             {result.error === undefined ? (
               <FieldDiff id={row.id} fields={result.fields} adopt={adopt} />
             ) : (
@@ -342,6 +358,49 @@ function ResourceRow({
         </TableRow>
       )}
     </>
+  );
+}
+
+/**
+ * The lockfile's bindings that no data file declares: apply asks of each whether to forget it or
+ * delete its object at the vendor.
+ */
+function Orphans({ orphans, titles }: { orphans: ConfigDescription["orphans"]; titles: Map<string, string> }) {
+  return (
+    <section className="flex flex-col gap-2">
+      <SectionTitle>Bound, no longer declared</SectionTitle>
+      <p className="text-sm text-muted-foreground">
+        The lockfile binds these, but no data file declares them. Apply asks whether to forget each binding or delete
+        its object at the vendor.
+      </p>
+      <div className="rounded-lg border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Declared as</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead>Bound to</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {orphans.map((orphan) => (
+              <TableRow key={orphan.key}>
+                <TableCell>
+                  <code className="text-xs">{orphan.key}</code>
+                </TableCell>
+                <TableCell>
+                  {titles.get(orphan.type) ?? orphan.type}{" "}
+                  <code className="text-xs text-muted-foreground">{orphan.type}</code>
+                </TableCell>
+                <TableCell>
+                  <ShortId id={orphan.id} className="text-xs" />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </section>
   );
 }
 
@@ -357,82 +416,6 @@ function DriftBadge({ result }: { result: DriftResult | undefined }) {
           ? "absent: found unbound"
           : status}
     </ToneBadge>
-  );
-}
-
-/** The drift run whose report the page shows, which Adopt writes the vendor's values from, and the workflow that checks again. */
-interface Adopt {
-  runId: string;
-  drift: string;
-}
-
-/** Each declared field that differs: what the data file declares, what the vendor holds, and a button to adopt that. */
-function FieldDiff({ id, fields, adopt }: { id: string; fields: DriftField[]; adopt?: Adopt }) {
-  return (
-    <Table className="text-xs">
-      <TableHeader>
-        <TableRow>
-          <TableHead>Field</TableHead>
-          <TableHead>Declared</TableHead>
-          <TableHead>At the vendor</TableHead>
-          {adopt && <TableHead />}
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {fields.map((field) => (
-          <TableRow key={field.path}>
-            <TableCell>
-              <code>{field.path}</code>
-            </TableCell>
-            <TableCell className="whitespace-pre-wrap">
-              <code>{JSON.stringify(field.desired)}</code>
-            </TableCell>
-            <TableCell className="whitespace-pre-wrap">
-              <code>{JSON.stringify(field.actual)}</code>
-            </TableCell>
-            {adopt && (
-              <TableCell className="text-right">
-                <AdoptButton adopt={adopt} id={id} path={field.path} />
-              </TableCell>
-            )}
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  );
-}
-
-/** Writes what the vendor holds for one field into its data file (committed, when the app has a source), then checks for drift again. */
-function AdoptButton({ adopt: { runId, drift }, id, path }: { adopt: Adopt; id: string; path: string }) {
-  const queryClient = useQueryClient();
-  const adoptField = useServerFn(adoptFn);
-  const start = useServerFn(startRunFn);
-  const mutation = useMutation({
-    mutationFn: () => adoptField({ data: { runId, id, paths: [path] } }),
-    onSuccess: async ({ file, revision }) => {
-      toast.success(`Wrote ${path} into ${file}${revision ? `, committed as ${revision.slice(0, 7)}` : ""}`);
-      await queryClient.invalidateQueries({ queryKey: sourceQuery(file).queryKey });
-      // Then checks again, which reads the file as it now is: a failure here leaves the adopt done.
-      try {
-        await start({ data: { workflow: drift, input: {} } });
-      } catch (err) {
-        toast.error(`Could not check for drift again: ${errorBodyOf(err)?.error ?? errorMessage(err)}`);
-      }
-      await queryClient.invalidateQueries({ queryKey: RUNS_KEY });
-    },
-    onError: (err) => toast.error(errorBodyOf(err)?.error ?? err.message),
-  });
-  return (
-    <Button
-      variant="outline"
-      size="xs"
-      title="Write the vendor's value into the data file"
-      onClick={() => mutation.mutate()}
-      disabled={mutation.isPending}
-    >
-      {mutation.isPending ? <Spinner data-icon="inline-start" /> : <FilePenLineIcon data-icon="inline-start" />}
-      Adopt
-    </Button>
   );
 }
 

@@ -30,8 +30,10 @@ import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import { approverLabel, isEnded } from "@sanoma-ai/workflows/shared";
 import { type DecideRequest, errorBodyOf, starterName } from "../api.ts";
+import { asApplyPlan } from "../lib/apply-plan.ts";
 import { decideFn } from "../functions.ts";
 import { configQuery, opsById, RUNS_KEY, runLink, runQuery } from "../queries.ts";
+import { ApplyPlanView } from "./apply-plan.tsx";
 import {
   ApprovalStatusBadge,
   DecisionNote,
@@ -139,7 +141,7 @@ export function ApprovalDetails({
           </Fact>
         )}
       </Facts>
-      {approval.details && <p>{approval.details}</p>}
+      <Details details={approval.details} />
       {approval.links?.length ? (
         <ItemGroup>
           {approval.links.map((href) => (
@@ -177,6 +179,13 @@ export function ApprovalDetails({
       )}
     </>
   );
+}
+
+/** An approval's details: the plan, when apply asks (`ApplyPlan`, told by its shape), else their text. */
+function Details({ details }: { details: ApprovalState["details"] }) {
+  if (!details) return null;
+  const plan = asApplyPlan(details);
+  return plan ? <ApplyPlanView plan={plan} /> : <p>{details}</p>;
 }
 
 /**

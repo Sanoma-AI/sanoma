@@ -1,5 +1,7 @@
 import { useRender } from "@base-ui/react/use-render";
 import type { ApprovalState, Builtin, Effect, LedgerRecord, RecordedDecision } from "@sanoma-ai/workflows";
+import type { ResourceProblem } from "@sanoma-ai/workflows/describe";
+import { problemAt } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useMatches } from "@tanstack/react-router";
 import { cva, type VariantProps } from "class-variance-authority";
@@ -26,7 +28,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { Alert, AlertDescription } from "#/components/ui/alert.tsx";
+import { Alert, AlertDescription, AlertTitle } from "#/components/ui/alert.tsx";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button, buttonVariants } from "#/components/ui/button.tsx";
 import { ButtonGroup } from "#/components/ui/button-group.tsx";
@@ -36,6 +38,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "
 import { Item, ItemContent, ItemDescription, ItemTitle } from "#/components/ui/item.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
+import { shortId } from "#/lib/apply-plan.ts";
 import { utcText } from "#/lib/time.ts";
 import { cn } from "#/lib/utils.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone, TONE_FILL } from "#/lib/tone.ts";
@@ -682,3 +685,30 @@ export function DecisionNote({ note }: { note: string }) {
 }
 
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** What is wrong in the data files: their resources are left out until it is fixed. */
+export function Problems({ problems }: { problems: ResourceProblem[] }) {
+  return (
+    <Alert variant="destructive">
+      <CircleAlertIcon />
+      <AlertTitle>{plural(problems.length, "problem")} in the data files: their resources are left out</AlertTitle>
+      <AlertDescription>
+        <ul className="flex flex-col gap-1">
+          {problems.map((p, i) => (
+            // Two problems may share a place and a message: the list never reorders.
+            <li key={i}>
+              {p.file && <code>{problemAt(p)}</code>} {p.message}
+            </li>
+          ))}
+        </ul>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+/** A vendor's id, cut short (`shortId`), the whole of it in its title. */
+export const ShortId = ({ id, className }: { id: string; className?: string }) => (
+  <code className={className} title={id}>
+    {shortId(id)}
+  </code>
+);
