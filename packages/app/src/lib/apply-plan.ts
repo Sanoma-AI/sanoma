@@ -56,13 +56,6 @@ export const STEP_GROUPS: [action: PlanAction, title: string][] = [
   ["none", "Unchanged"],
 ];
 
-/** The plan's steps by action, each group in the plan's (dependency) order. */
-export function groupSteps(steps: PlanStep[]): Map<PlanAction, PlanStep[]> {
-  const groups = new Map<PlanAction, PlanStep[]>();
-  for (const step of steps) groups.set(step.action, [...(groups.get(step.action) ?? []), step]);
-  return groups;
-}
-
 /** A create's fields: each planned value, then each path the vendor fills in (`known` false). */
 export function plannedRows({
   planned,

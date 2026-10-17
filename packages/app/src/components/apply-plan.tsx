@@ -1,11 +1,10 @@
-import { problemAt } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import type { ApplyPlan, PlanAnswer, PlanStep } from "../apply-types.ts";
-import { exportName, groupSteps, plannedRows, rebindWords, shortId, STEP_GROUPS } from "../lib/apply-plan.ts";
+import { exportName, plannedRows, rebindWords, STEP_GROUPS } from "../lib/apply-plan.ts";
 import { configQuery } from "../queries.ts";
-import { Disclosure, Notice, plural, SubsectionTitle, VendorLogo } from "./common.tsx";
+import { Disclosure, plural, Problems, ShortId as Id, SubsectionTitle, VendorLogo } from "./common.tsx";
 import { FieldDiff } from "./field-diff.tsx";
 
 /** Each resource type's title, lower case, by `<vendor>.<type>`: the noun a sentence names it by. */
@@ -20,22 +19,11 @@ const nounsOf = (config: { resourceTypes: { id: string; title: string }[] }) =>
  */
 export function ApplyPlanView({ plan }: { plan: ApplyPlan }) {
   const { data: nouns } = useSuspenseQuery({ ...configQuery(), select: nounsOf });
-  const groups = groupSteps(plan.steps);
+  const groups = Map.groupBy(plan.steps, (step) => step.action);
   const unchanged = groups.get("none") ?? [];
   return (
     <div className="flex flex-col gap-(--gap-section)" data-slot="apply-plan">
-      {plan.problems.length > 0 && (
-        <Notice variant="destructive">
-          {plural(plan.problems.length, "problem")} in the data files: their resources are left out.
-          <ul className="flex flex-col gap-1">
-            {plan.problems.map((p, i) => (
-              <li key={i}>
-                {p.file && <code>{problemAt(p)}</code>} {p.message}
-              </li>
-            ))}
-          </ul>
-        </Notice>
-      )}
+      {plan.problems.length > 0 && <Problems problems={plan.problems} />}
       {plan.rebinds.length > 0 && (
         <Group title="Rebinds: changes to the lockfile apply did not make">
           <ul className="flex flex-col gap-1 text-sm">
@@ -98,9 +86,6 @@ function StepName({ step }: { step: PlanStep }) {
     </span>
   );
 }
-
-/** A vendor's id, short, the whole of it in its title. */
-const Id = ({ id }: { id: string }) => <code title={id}>{shortId(id)}</code>;
 
 const ANSWERED: Record<PlanAnswer, string> = {
   recreate: "recreate it",

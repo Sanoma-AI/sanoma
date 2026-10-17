@@ -7,15 +7,7 @@ import { allowAll, defineConfig, memoryLedger, SanomaClient, startWorker, type W
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { companyFakes } from "../../workflows/test/fixtures/company/fakes.ts";
 import { type App, startApp } from "../src/index.ts";
-import {
-  asApplyPlan,
-  exportName,
-  groupSteps,
-  plannedRows,
-  rebindWords,
-  shortId,
-  STEP_GROUPS,
-} from "../src/lib/apply-plan.ts";
+import { asApplyPlan, exportName, plannedRows, rebindWords, shortId, STEP_GROUPS } from "../src/lib/apply-plan.ts";
 import { PLAN } from "./fixtures/apply-plan.ts";
 import reviewPlan from "./fixtures/review-plan.ts";
 
@@ -48,10 +40,8 @@ describe("the change view's words", () => {
     expect(exportName("resources/identity/github.ts#websiteMain")).toBe("websiteMain");
   });
 
-  it("groups the steps by action, every kind of step in the fixture, in the plan's order", () => {
-    const groups = groupSteps(PLAN.steps);
-    expect(STEP_GROUPS.map(([action]) => action)).toEqual([...groups.keys()]);
-    expect(groups.get("create")?.map((s) => s.id)).toEqual(["resources/identity/github.ts#blog"]);
+  it("has a group for each kind of step, each in the fixture once", () => {
+    expect(STEP_GROUPS.map(([action]) => action)).toEqual(PLAN.steps.map((s) => s.action));
   });
 
   it("lists a create's planned fields, then each the vendor fills in, known after apply", () => {
@@ -112,7 +102,7 @@ describe("the change view in the app", () => {
     const open = await page(`/inbox?approval=${runId}/${approval!.id}`);
     expect(open.status).toBe(200);
     for (const words of [
-      "1 problem in the data files: their resources are left out.",
+      "1 problem in the data files: their resources are left out</div>",
       "Rebinds: changes to the lockfile apply did not make",
       "points docs at a different repository: R_kgDOab… → R_kgDOwx…",
       "Create (1)",

@@ -4,11 +4,10 @@ import { APPLY_WORKFLOW, DRIFT_WORKFLOW, isEnded, problemAt } from "@sanoma-ai/w
 import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { CircleAlertIcon, PlayIcon, ScanSearchIcon } from "lucide-react";
+import { PlayIcon, ScanSearchIcon } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
-import { Alert, AlertDescription, AlertTitle } from "#/components/ui/alert.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
@@ -24,7 +23,9 @@ import {
   pageTitle,
   PanelCard,
   plural,
+  Problems,
   SectionTitle,
+  ShortId,
   Tip,
   ToneBadge,
   VendorLogo,
@@ -32,7 +33,6 @@ import {
 } from "../components/common.tsx";
 import { type Adopt, FieldDiff } from "../components/field-diff.tsx";
 import { startRunFn } from "../functions.ts";
-import { shortId } from "../lib/apply-plan.ts";
 import { configQuery, driftReportQuery, RUNS_KEY, runLink, runsQuery, sourceQuery, useStartRun } from "../queries.ts";
 
 export const Route = createFileRoute("/resources")({
@@ -207,26 +207,6 @@ function Resources({
   );
 }
 
-/** What is wrong in the data files: their resources are left out until it is fixed. */
-function Problems({ problems }: { problems: ResourceProblem[] }) {
-  return (
-    <Alert variant="destructive">
-      <CircleAlertIcon />
-      <AlertTitle>{plural(problems.length, "problem")} in the data files: their resources are left out</AlertTitle>
-      <AlertDescription>
-        <ul className="flex flex-col gap-1">
-          {problems.map((p, i) => (
-            // Two problems may share a place and a message: the list never reorders.
-            <li key={i}>
-              {p.file && <code>{problemAt(p)}</code>} {p.message}
-            </li>
-          ))}
-        </ul>
-      </AlertDescription>
-    </Alert>
-  );
-}
-
 /** When the resources were last checked, by which run, what it found, and a check under way. */
 function LastCheck({
   latest,
@@ -365,9 +345,7 @@ function ResourceRow({
         </TableCell>
         <TableCell>
           {binding ? (
-            <code className="text-xs" title={binding}>
-              {shortId(binding)}
-            </code>
+            <ShortId id={binding} className="text-xs" />
           ) : (
             <span className="text-muted-foreground">unbound</span>
           )}
@@ -423,9 +401,7 @@ function Orphans({ orphans, titles }: { orphans: ConfigDescription["orphans"]; t
                   <code className="text-xs text-muted-foreground">{orphan.type}</code>
                 </TableCell>
                 <TableCell>
-                  <code className="text-xs" title={orphan.id}>
-                    {shortId(orphan.id)}
-                  </code>
+                  <ShortId id={orphan.id} className="text-xs" />
                 </TableCell>
               </TableRow>
             ))}
