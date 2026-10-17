@@ -28,13 +28,14 @@ export function ensureBuilt(): void {
 }
 
 /**
- * A fresh copy of `fixtures/project`, with what a company repo installs: `sanoma` as pnpm lays out
- * its tarball (its published files in `.pnpm/sanoma/node_modules/sanoma`, its dependencies linked
- * beside it, not under it) and `@sanoma-ai/connector-ghost`, both reaching this checkout's builds.
+ * A fresh copy of `fixtures/project` (or of the repo at `from`, such as the template), with what a
+ * company repo installs: `sanoma` as pnpm lays out its tarball (its published files in
+ * `.pnpm/sanoma/node_modules/sanoma`, its dependencies linked beside it, not under it) and
+ * `@sanoma-ai/connector-ghost`, both reaching this checkout's builds.
  */
-export function copyFixture(): string {
+export function copyFixture(from = fileURLToPath(new URL("./fixtures/project/", import.meta.url))): string {
   const dir = mkdtempSync(join(tmpdir(), "sanoma-fixture-"));
-  cpSync(fileURLToPath(new URL("./fixtures/project/", import.meta.url)), dir, { recursive: true });
+  cpSync(from, dir, { recursive: true });
   const modules = join(dir, "node_modules");
   link(join(repo, "connectors/ghost"), join(modules, "@sanoma-ai/connector-ghost"));
 

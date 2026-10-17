@@ -12,6 +12,7 @@ import { dbosLogger, quietIfSandbox, setLogLevel, warn } from "./log.ts";
 import { lineStartsOf, readSource } from "./ast.ts";
 import { callsOf, outlineWithSource } from "./outline.ts";
 import type { Run, RunArgs, WorkerState, WorkflowOutline } from "./run.ts";
+import type { Source } from "./source.ts";
 import { errorMessage } from "./shared.ts";
 
 export interface Worker {
@@ -45,6 +46,8 @@ export interface WorkerOptions {
    * restarting during a rolling deploy would otherwise take the new workers' runs.
    */
   promote?: boolean;
+  /** The company's repository, which apply commits the lockfile to; the launcher passes its checkout. */
+  source?: Source;
 }
 
 /**
@@ -66,6 +69,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     drivers: resolved.drivers,
     fakes: resolved.fakes,
     ...(resolved.scenarios && { scenarios: resolved.scenarios }),
+    ...(options.source && { source: options.source }),
     types: resolved.types,
     steps: resolved.steps,
     policy: resolved.policy,

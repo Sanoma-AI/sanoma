@@ -1,6 +1,8 @@
+import { dirname } from "node:path";
 import { type AppOptions, githubLogin, startApp } from "@sanoma-ai/app";
 import { errorMessage, isLoopback, type SanomaConfig, startWorker } from "@sanoma-ai/workflows";
 import { UsageError } from "./config.ts";
+import { localGitSource } from "./source.ts";
 
 export interface Stoppable {
   stop(): Promise<void>;
@@ -11,9 +13,12 @@ export interface Served extends Stoppable {
   url: string;
 }
 
+/** The checkout the config was loaded from (`loadConfig` sets its `file`), as the worker's and the app's `source`. */
+const sourceOf = (config: SanomaConfig) => localGitSource(config.root ?? dirname(config.file!));
+
 /** Starts the worker, promoted: a local worker is always the version to take queued runs, even one seen before. */
 export async function runWorker(config: SanomaConfig): Promise<Stoppable> {
-  const worker = await startWorker(config, { promote: true });
+  const worker = await startWorker(config, { promote: true, source: sourceOf(config) });
   return { stop: () => worker.stop() };
 }
 
@@ -23,7 +28,7 @@ export async function runApp(config: SanomaConfig, { port }: { port: number }): 
 }
 
 async function served(config: SanomaConfig, options: AppOptions): Promise<Served> {
-  const app = await startApp(config, options);
+  const app = await startApp(config, { ...options, source: sourceOf(config) });
   return { url: app.url, stop: () => app.close() };
 }
 

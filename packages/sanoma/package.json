@@ -22,6 +22,7 @@
   },
   "files": [
     "dist",
+    "template",
     "tsconfig.base.json",
     "oxlint.json",
     "README.md",
