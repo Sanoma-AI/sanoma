@@ -401,10 +401,19 @@ function changes(desired: unknown, actual: unknown, unordered: ReadonlySet<strin
   return same(desired, actual) ? [] : [{ path: at, desired: desired ?? null, actual: actual ?? null }];
 }
 
+/** The secret markers in a write-only value, in its place: the value itself, or a map of them (none: `[]`). */
+function markers(value: unknown): unknown[] {
+  if (isSecret(value)) return [value];
+  if (!isObject(value)) return [];
+  const kept = Object.entries(value).flatMap(([name, v]) => markers(v).map((m) => [name, m] as const));
+  return kept.length ? [Object.fromEntries(kept)] : [];
+}
+
 /**
  * `desired` without the values at the fields the type marks write-only (a webhook's `secret`):
  * what a run may record of a declaration. A list's items lose them too. A secret marker
- * (`secret("NAME")`) stays: it names a stored secret and holds none, and the driver resolves it.
+ * (`secret("NAME")`) stays, there or inside a write-only map (a host's `secrets`): it names a
+ * stored secret and holds none, and the driver resolves it.
  */
 export function withoutWriteOnly(fields: ResourceFields, desired: State): State {
   if (!fields.writeOnly.length) return desired;
@@ -415,8 +424,7 @@ export function withoutWriteOnly(fields: ResourceFields, desired: State): State 
     return Object.fromEntries(
       Object.entries(value).flatMap(([name, v]) => {
         const at = joinPath(path, name);
-        if (!drop.has(at)) return [[name, strip(v, at)]];
-        return isSecret(v) ? [[name, v]] : [];
+        return drop.has(at) ? markers(v).map((m) => [name, m]) : [[name, strip(v, at)]];
       }),
     );
   };
@@ -548,6 +556,9 @@ export function defineResource<
   const owned = new Set(fields.vendorOwned.filter((path) => !named.has(path)));
   const references: References = fields.references ?? {};
   const writeOnly = new Set(fields.writeOnly);
+  /** True at a write-only field, or inside one (a host's `secrets` map). */
+  const isWriteOnly = (path: string) =>
+    path.split(".").some((_, i, keys) => writeOnly.has(keys.slice(0, i + 1).join(".")));
   const declare = (given: Declaring<z.input<S>, R>): Declared<`${V}.${T}`, z.input<S>> => {
     const refs: Record<string, string> = {};
     // Where a secret is given, with list items' indexes: the schema does not judge its marker.
@@ -556,7 +567,7 @@ export function defineResource<
     // `path` is the field's, as `references` names it; `at` has list items' indexes too.
     const resolve = (value: unknown, path: string, at: string): unknown => {
       if (isSecret(value)) {
-        if (!writeOnly.has(path)) {
+        if (!isWriteOnly(path)) {
           throw new Error(`${what}: ${at} is not write-only, so it takes a value, not a secret (${value.$secret})`);
         }
         secrets.add(at);

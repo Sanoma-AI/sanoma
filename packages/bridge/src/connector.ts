@@ -7,9 +7,11 @@ import {
   type Driver,
   type DriverFn,
   DriverError,
+  type HostSpec,
   type PlanAction,
   type References,
   type Resource,
+  type ResourceFields,
   type ResourceSpec,
   resolveSecrets,
   type VendorInfo,
@@ -28,10 +30,31 @@ import { ensureConfigured, type ProviderClient } from "./configure.ts";
 import { fromTfState, toTfState } from "./tfschema/state.ts";
 import type { TfBlockShape, TfProvider, TfResourceType, TfShape } from "./tfschema/types.ts";
 
+/**
+ * A resource type whose declared fields are not its provider type's attributes (a host's
+ * `{ name, image, source, ref, secrets, port }` over Docker's `docker_container`): its own schema
+ * and flagged fields, and how its fields map onto the provider's and back, both in the resource's
+ * shape (`fromTfState`'s). The driver maps each config it sends and each state it returns.
+ */
+export interface TfMapped<S extends z.ZodObject = z.ZodObject> {
+  /** The provider's type it is stored as, from `resources.gen.ts`. */
+  over: TfResourceType;
+  /** Its fields as `read` returns them, which a data file declares. */
+  schema: S;
+  fields: ResourceFields;
+  /** The provider's attributes for declared fields, their secrets resolved: what create and update send. */
+  toProvider: (desired: z.output<S>) => Record<string, unknown>;
+  /** The declared fields of a provider state, its write-only attributes `null` already. */
+  fromProvider: (state: Record<string, unknown>) => z.input<S>;
+}
+
 /** One resource type of an OpenTofu connector: its generated type, and what the provider's schema does not say. */
 export interface TfTypeSpec<S extends z.ZodObject = z.ZodObject> {
-  /** The type from `resources.gen.ts`: its provider type name, schema, flagged fields and state layout. */
-  tf: TfResourceType<S>;
+  /**
+   * The type from `resources.gen.ts`: its provider type name, schema, flagged fields and state
+   * layout; or a type of other fields mapped onto one (`TfMapped`).
+   */
+  tf: TfResourceType<S> | TfMapped<S>;
   /** What people call it, such as "Repository". */
   title: string;
   /** How `find` makes the identity, for people: `name`, `repository_id:pattern`. Absent with `find`. */
@@ -59,9 +82,12 @@ export interface TfTypeSpec<S extends z.ZodObject = z.ZodObject> {
   /**
    * Fields, by dotted path, that hold a secret the provider does not mark sensitive (Docker's
    * container `env`): write-only besides the generated ones, so no output carries them. Each
-   * must be optional (nullish in the schema): an output holds it as `null`.
+   * must be optional (nullish in the schema): an output holds it as `null`. For a `TfMapped`
+   * type, the provider's attributes: no state reaches `fromProvider` with them.
    */
   writeOnly?: readonly string[];
+  /** Set when the type meets the `Host` contract (`ResourceSpec.host`). */
+  host?: HostSpec;
 }
 
 /** Per resource type, its `fields.references`: `{ branch_protection: { repository_id: { type: "github.repository" } } }`. */
@@ -104,8 +130,8 @@ export interface TfConnector<V extends string, T extends Record<string, z.ZodObj
   readonly connector: Connector<V, TfResources<V, T, R>>;
   /** The resource types, which declare resources in data files: `resources.repository({ name: "sanoma" })`. */
   readonly resources: TfResources<V, T, R>;
-  /** The generated types, by name. */
-  readonly types: { readonly [K in keyof T]: TfResourceType<T[K]> };
+  /** The provider's types, from `resources.gen.ts`, by name: a `TfMapped` type's is the one it is stored as. */
+  readonly types: { readonly [K in keyof T]: TfResourceType };
   /**
    * The driver: each operation over `bridge`, with the provider configured with what `config`
    * returns, read on every call (it may throw, such as a `DriverError` for a missing token).
@@ -218,9 +244,17 @@ export function tfConnector<
   const { vendor, provider, missing = notFound } = spec;
   const types = spec.types as Record<string, TfTypeSpec>;
   const references: Record<string, References | undefined> = spec.references ?? {};
+  /** The provider's type a type is stored as, and its mapping when it has one. */
+  const providerOf = (tf: TfTypeSpec["tf"]) =>
+    "over" in tf ? { gen: tf.over, mapped: tf } : { gen: tf, mapped: undefined };
+  /** The provider's write-only attributes: the generated ones and the type's `writeOnly`. */
+  const secretsOf = ({ tf, writeOnly = [] }: TfTypeSpec) => [
+    ...new Set([...providerOf(tf).gen.fields.writeOnly, ...writeOnly]),
+  ];
   const resources: Record<string, Resource> = Object.fromEntries(
-    Object.entries(types).map(
-      ([type, { tf, title, identity, find, bindingId, normalize, writable, stateless, writeOnly }]) => [
+    Object.entries(types).map(([type, typeSpec]) => {
+      const { tf, title, identity, find, bindingId, normalize, writable, stateless, writeOnly, host } = typeSpec;
+      return [
         type,
         defineResource({
           vendor,
@@ -230,7 +264,7 @@ export function tfConnector<
           schema: tf.schema,
           fields: {
             ...tf.fields,
-            ...(writeOnly?.length && { writeOnly: [...new Set([...tf.fields.writeOnly, ...writeOnly])] }),
+            ...(!("over" in tf) && writeOnly?.length && { writeOnly: secretsOf(typeSpec) }),
             ...(references[type] && { references: references[type] }),
           },
           ...(find && { find }),
@@ -238,9 +272,10 @@ export function tfConnector<
           ...(normalize && { normalize }),
           ...(writable && { writable }),
           ...(stateless && { stateless }),
+          ...(host && { host }),
         }),
-      ],
-    ),
+      ];
+    }),
   );
   const connector = defineConnector(vendor, resources, spec.info);
 
@@ -263,10 +298,16 @@ export function tfConnector<
       }
     }
     const impl: Record<string, Record<string, DriverFn<any, any>>> = {};
-    for (const [type, { tf, exists, writable }] of Object.entries(types)) {
+    for (const [type, typeSpec] of Object.entries(types)) {
+      const { exists, writable } = typeSpec;
+      const { gen: tf, mapped } = providerOf(typeSpec.tf);
       const { fields, bindingId } = resources[type]!;
-      const shape = withSecrets(tf.shape, fields.writeOnly);
-      const stateOf = (json: string) => fromTfState(shape, JSON.parse(json) as Record<string, unknown>);
+      const shape = withSecrets(tf.shape, secretsOf(typeSpec));
+      /** A provider state as the resource's: in its shape, without secrets, mapped to its fields. */
+      const stateOf = (json: string) => {
+        const state = fromTfState(shape, JSON.parse(json) as Record<string, unknown>);
+        return mapped ? (mapped.fromProvider(state) as Record<string, unknown>) : state;
+      };
       const out = (r: ResourceState) => ({ state: stateOf(r.stateJson), handle: handleOf(r) });
       /** The object as the provider has it now, or undefined when there is none (or one `exists` refuses). */
       const importRaw = async (id: string) => {
@@ -276,10 +317,11 @@ export function tfConnector<
       };
       const fresh = async (op: string, input: Known): Promise<ResourceState | undefined> => {
         try {
-          const state = input.state && toTfState(tf.shape, input.state);
-          // No state to refresh, none the provider can find again (it reads by `id`), or a
-          // provider that would echo a missing object's state: an import finds the object, and reads it.
-          if (exists || state?.id === undefined || state.id === null) return await importRaw(input.id);
+          const state = input.state && !mapped ? toTfState(tf.shape, input.state) : undefined;
+          // No state to refresh, none the provider can find again (it reads by `id`), a provider
+          // that would echo a missing object's state, or a mapped type's (not the provider's
+          // shape): an import finds the object, and reads it.
+          if (exists || mapped || state?.id === undefined || state.id === null) return await importRaw(input.id);
           const handle = input.handle === undefined ? undefined : HANDLE.exec(input.handle);
           if (input.handle !== undefined && !handle) {
             throw new DriverError(`${vendor}: ${op} was given a handle it did not make`, { retryable: false });
@@ -315,7 +357,10 @@ export function tfConnector<
         const view = dryRun
           ? { ...secrets, ensure: async (name: string, make: () => string) => (await secrets.get(name)) ?? make() }
           : secrets;
-        return JSON.stringify(toTfState(tf.shape, await resolveSecrets(desired, view)));
+        const resolved = await resolveSecrets(desired, view);
+        return JSON.stringify(
+          toTfState(tf.shape, mapped ? mapped.toProvider(mapped.schema.parse(resolved)) : resolved),
+        );
       };
       const paths = (list: readonly string[]) => list.map((path) => resourcePath(tf.shape, path));
       const plan = (prior: ResourceState | undefined, configJson?: string) =>
@@ -417,7 +462,10 @@ export function tfConnector<
     provider,
     connector: connector as unknown as Connector<V, TfResources<V, T, Refs>>,
     resources: resources as unknown as TfResources<V, T, Refs>,
-    types: Object.fromEntries(Object.entries(types).map(([type, { tf }]) => [type, tf])) as TfConnector<V, T>["types"],
+    types: Object.fromEntries(Object.entries(types).map(([type, { tf }]) => [type, providerOf(tf).gen])) as TfConnector<
+      V,
+      T
+    >["types"],
     driver,
   };
 }
