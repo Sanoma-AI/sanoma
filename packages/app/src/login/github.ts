@@ -41,16 +41,13 @@ export function githubLogin({ clientId, clientSecret, repo }: GithubLoginOptions
   if (!secretsKey) throw new Error("GitHub sign-in needs SANOMA_SECRETS_KEY, which signs its session cookie");
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo))
     throw new Error(`GitHub sign-in: the repository is "owner/name", not "${repo}"`);
-  const key = Buffer.from(hkdfSync("sha256", secretsKey, "", "sanoma session cookie", 32));
-  const mac = (payload: string) => createHmac("sha256", key).update(payload).digest("base64url");
+  const { sign: mac, verify } = signer(secretsKey, "sanoma session cookie");
 
   /** The login a request's session cookie names: signed here and not expired. */
   function signedIn(request: Request): string | undefined {
     const [login, expires, signature, ...rest] = (cookies(request)[SESSION] ?? "").split(".");
     if (!login || !expires || !signature || rest.length) return undefined;
-    const expected = Buffer.from(mac(`${login}.${expires}`));
-    const given = Buffer.from(signature);
-    if (given.length !== expected.length || !timingSafeEqual(given, expected)) return undefined;
+    if (!verify(`${login}.${expires}`, signature)) return undefined;
     return Number(expires) > Date.now() / 1000 ? login : undefined;
   }
 
@@ -148,6 +145,20 @@ async function api(token: string, path: string, missingIsNone = false): Promise<
   if (missingIsNone && (res.status === 403 || res.status === 404)) return undefined;
   if (!res.ok) throw new Error(`GitHub answered ${res.status} for GET ${path}`);
   return res.json();
+}
+
+/**
+ * Signs short values (a session, a state) with a key derived from `SANOMA_SECRETS_KEY` for
+ * `purpose`, so each use has a key of its own; `verify` compares in constant time.
+ */
+export function signer(secretsKey: string, purpose: string) {
+  const key = Buffer.from(hkdfSync("sha256", secretsKey, "", purpose, 32));
+  const sign = (payload: string) => createHmac("sha256", key).update(payload).digest("base64url");
+  const verify = (payload: string, signature: string) => {
+    const [expected, given] = [Buffer.from(sign(payload)), Buffer.from(signature)];
+    return given.length === expected.length && timingSafeEqual(given, expected);
+  };
+  return { sign, verify };
 }
 
 export const cookies = (request: Request) => parse(request.headers.get("cookie") ?? "");

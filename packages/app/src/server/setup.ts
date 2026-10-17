@@ -1,10 +1,10 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
-import { createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import type { CredentialStatus, Principal } from "@sanoma-ai/workflows";
 import { ApiError, type SetCredentialRequest, type SetupStatus } from "../api.ts";
 import type { AppContext } from "../context.ts";
-import { cookie, cookies } from "../login/github.ts";
+import { cookie, cookies, signer } from "../login/github.ts";
 
 // Going live, step 1: connect GitHub and Supabase. GitHub through an App the company creates
 // with GitHub's manifest flow (`/setup/github/manifest`, then `/setup/github/callback`), whose
@@ -106,7 +106,7 @@ export function manifestPage({ description }: AppContext, request: Request): Res
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
-      "set-cookie": cookie(request, STATE, `${state}.${sign(state)}`, STATE_PATH, 600),
+      "set-cookie": cookie(request, STATE, `${state}.${stateSigner().sign(state)}`, STATE_PATH, 600),
     },
   });
 }
@@ -121,7 +121,7 @@ export async function githubCallback(app: AppContext, request: Request): Promise
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   const [sent, signature] = (cookies(request)[STATE] ?? "").split(".");
-  if (!code || !state || !sent || !signature || sent !== state || !same(signature, sign(sent))) {
+  if (!code || !state || !sent || !signature || sent !== state || !stateSigner().verify(sent, signature)) {
     return toConnect("expired", request);
   }
   const res = await fetch(`${API}/app-manifests/${encodeURIComponent(code)}/conversions`, {
@@ -134,10 +134,12 @@ export async function githubCallback(app: AppContext, request: Request): Promise
   }
   const keys = (await res.json()) as Record<keyof typeof GITHUB_APP, unknown> & { owner?: { login?: string } };
   const by = (await app.login.resolveActor(request))?.id ?? keys.owner?.login ?? "github";
-  for (const [field, name] of Object.entries(GITHUB_APP)) {
-    const value = keys[field as keyof typeof GITHUB_APP];
-    if (value !== null && value !== undefined) await app.client.setSecret(name, String(value), { by });
-  }
+  await Promise.all(
+    Object.entries(GITHUB_APP).map(([field, name]) => {
+      const value = keys[field as keyof typeof GITHUB_APP];
+      return value === null || value === undefined ? undefined : app.client.setSecret(name, String(value), { by });
+    }),
+  );
   return toConnect("connected", request);
 }
 
@@ -148,17 +150,11 @@ function toConnect(github: "connected" | "expired" | "failed" | "bad-org", reque
   return new Response(null, { status: 303, headers });
 }
 
-/** The state's signature, under a key derived from `SANOMA_SECRETS_KEY`, which storing the App's keys needs anyway. */
-function sign(state: string): string {
+/** Signs the state under a key derived from `SANOMA_SECRETS_KEY`, which storing the App's keys needs anyway. */
+function stateSigner() {
   const secretsKey = process.env.SANOMA_SECRETS_KEY;
   if (!secretsKey) throw new Error("Connecting GitHub needs SANOMA_SECRETS_KEY, which encrypts the App's keys");
-  const key = Buffer.from(hkdfSync("sha256", secretsKey, "", "sanoma setup state", 32));
-  return createHmac("sha256", key).update(state).digest("base64url");
-}
-
-function same(a: string, b: string): boolean {
-  const [x, y] = [Buffer.from(a), Buffer.from(b)];
-  return x.length === y.length && timingSafeEqual(x, y);
+  return signer(secretsKey, "sanoma setup state");
 }
 
 const escape = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
