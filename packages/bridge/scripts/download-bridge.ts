@@ -32,19 +32,19 @@ export interface Release {
 }
 
 /**
- * TODO(release): the release `downloadRelease` fetches and the platform packages ship. Filled by
- * hand once provider-bridge v0.1.0 is tagged, from that release's SHA256SUMS, never from "latest";
- * until then `downloadRelease` refuses, and so does packing a platform package.
+ * The release `downloadRelease` fetches and the platform packages ship. Filled by hand from that
+ * release's SHA256SUMS, never from "latest"; a new provider-bridge release means a new entry here
+ * and a new version of the platform packages.
  */
 export const RELEASE: Release = {
   owner: "Sanoma-AI",
   repo: "provider-bridge",
-  version: "",
+  version: "0.1.0",
   sha256: {
-    "darwin-arm64": "",
-    "darwin-x64": "",
-    "linux-arm64": "",
-    "linux-x64": "",
+    "darwin-arm64": "d175ed2141d1bc37e2f98b9e809d32467f710aa3520a793de485781ae46b4dc0",
+    "darwin-x64": "d0f978f8483b01959bc04938b75154a0af64946d7333c0aafd186c55c83ff342",
+    "linux-arm64": "86d902ae7c4fd6e4aa27fe955cecb648eb0b4beda0e9f3fcf4d429169cb58fb5",
+    "linux-x64": "e675dfea90db75899216e4f3bc39615cb41ecd47546ca9fdf53b5a7a73d69daf",
   },
 };
 
