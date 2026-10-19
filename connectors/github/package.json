@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-github",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "GitHub resources (repositories, branch protection, team membership) for Sanoma, read through the OpenTofu provider",
   "keywords": [
     "connector",
@@ -60,8 +60,8 @@
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@sanoma-ai/bridge": "^0.1.0",
-    "@sanoma-ai/workflows": "^0.1.0",
+    "@sanoma-ai/bridge": "^0.2.0",
+    "@sanoma-ai/workflows": "^0.2.0",
     "zod": "^4"
   },
   "engines": {

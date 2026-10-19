@@ -101,7 +101,7 @@ Inside the repo, `@sanoma-ai/*` imports resolve to each package's `src/` (via `p
 
 ## Release
 
-[`release.yml`](.github/workflows/release.yml) publishes `sanoma` and the `@sanoma-ai/*` packages to npm with [trusted publishing](https://docs.npmjs.com/trusted-publishers), so there is no npm token. To release, bump the shared `version` in every public package's `package.json` (not the private `@sanoma-ai/testing`), merge, wait for CI on `main` to pass, then tag `main` and push the tag:
+[`release.yml`](.github/workflows/release.yml) publishes `sanoma` and the `@sanoma-ai/*` packages to npm with [trusted publishing](https://docs.npmjs.com/trusted-publishers), so there is no npm token. To release, bump the shared `version` in every public package's `package.json` (not the private `@sanoma-ai/testing`), the `^` peer ranges on `@sanoma-ai/workflows` and `@sanoma-ai/bridge`, the launcher's template (`packages/sanoma/template/package.json`) and `RUNTIME_VERSION` in `packages/workflows/src/version.ts` (a test checks it), merge, wait for CI on `main` to pass, then tag `main` and push the tag:
 
 ```sh
 git fetch origin && git tag vX.Y.Z origin/main && git push origin vX.Y.Z

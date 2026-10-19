@@ -6,7 +6,7 @@ import { jsonSchemaOf, opIdsOf, type WorkflowDefinition } from "./define.ts";
 import { upFrom } from "./paths.ts";
 
 /** This package's version. A unit test keeps it equal to package.json. */
-export const RUNTIME_VERSION = "0.1.0";
+export const RUNTIME_VERSION = "0.2.0";
 
 /**
  * The sequence of DBOS calls the runtime makes around each `ctx` call: policy step, approval
