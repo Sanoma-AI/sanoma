@@ -8,8 +8,8 @@
     "env": "sanoma env"
   },
   "dependencies": {
-    "@sanoma-ai/connector-ghost": "^0.1.0",
-    "sanoma": "^0.1.0"
+    "@sanoma-ai/connector-ghost": "^0.2.0",
+    "sanoma": "^0.2.0"
   },
   "engines": {
     "node": "^24.2 || >=26"

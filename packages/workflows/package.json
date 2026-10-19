@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/workflows",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Business processes as TypeScript functions, run durably on DBOS",
   "keywords": [
     "approvals",
