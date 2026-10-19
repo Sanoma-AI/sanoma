@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { createClient, type Interceptor } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
+import { bridgeBin } from "./bin.ts";
 import { type Bridge, bridgeClient } from "./bridge.ts";
 import { BridgeService } from "./gen/bridge/v1/bridge_pb.ts";
 
@@ -17,7 +18,7 @@ export interface BridgeLog {
 }
 
 export interface StartBridgeOptions {
-  /** The `provider-bridge` binary. Default: `SANOMA_BRIDGE_BIN` (see `pnpm bridge:download`). */
+  /** The `provider-bridge` binary. Default: `SANOMA_BRIDGE_BIN`, else the one `@sanoma-ai/bridge-<platform>` installed. */
   bin?: string;
   /** Verified provider binaries and schemas. Default: the bridge's (`provider-bridge` in the user cache directory). */
   cacheDir?: string;
@@ -54,13 +55,7 @@ const defaultLogger = (line: BridgeLog) => {
  * process does (it watches stdin) or on `stop()`.
  */
 export async function startBridge(options: StartBridgeOptions = {}): Promise<Bridge> {
-  const bin = options.bin ?? process.env.SANOMA_BRIDGE_BIN;
-  if (!bin) {
-    throw new Error(
-      "provider-bridge: no binary. Set SANOMA_BRIDGE_BIN to a provider-bridge binary (build one from " +
-        "https://github.com/Sanoma-AI/provider-bridge, or with `pnpm bridge:download` in a sanoma checkout), or pass `bin`.",
-    );
-  }
+  const bin = options.bin ?? bridgeBin();
   const tempDir = options.socketPath ? undefined : mkdtempSync(join(tmpdir(), "sanoma-bridge-"));
   const socketPath = options.socketPath ?? join(tempDir!, "bridge.sock");
   const cleanup = () => tempDir && rmSync(tempDir, { recursive: true, force: true });

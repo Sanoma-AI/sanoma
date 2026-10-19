@@ -53,7 +53,7 @@ export default defineConfig({ workflows, connectors: [github], policy });
 
 `./driver` (`githubDriver`; `githubDriver({ bridge })` reads through a bridge of your own) and `./fake` (`fakeGithub`) are internal entries, for tests.
 
-Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma-ai/bridge`, started on the first call from `SANOMA_BRIDGE_BIN`; `bridge` is any `ProviderClient` (a `Bridge` from `startBridge()`, or `stateBridge` in tests). It configures the provider on the first call with `{ owner, token }` from the environment, and again when either changes (closing it first: the bridge refuses a second config), when the provider has exited, or when the bridge has forgotten it (`ensureConfigured`). `read` without a state (or with one that has no `id`) imports, which reads the object too. States leave the driver in the resource's shape, with sensitive attributes set to `null`; the provider's private data and state version travel in the opaque `handle`.
+Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma-ai/bridge`, started on the first call with the binary `startBridge` finds; `bridge` is any `ProviderClient` (a `Bridge` from `startBridge()`, or `stateBridge` in tests). It configures the provider on the first call with `{ owner, token }` from the environment, and again when either changes (closing it first: the bridge refuses a second config), when the provider has exited, or when the bridge has forgotten it (`ensureConfigured`). `read` without a state (or with one that has no `id`) imports, which reads the object too. States leave the driver in the resource's shape, with sensitive attributes set to `null`; the provider's private data and state version travel in the opaque `handle`.
 
 ### Environment
 
@@ -64,7 +64,7 @@ Read on every call, never when the config loads:
 | `GITHUB_TOKEN` | A GitHub token that can read the repositories, rules and teams named.                                         |
 | `GITHUB_OWNER` | Optional: the organization or user whose repositories the data files describe. Default: the token's own user. |
 
-When the token is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets both. The bridge passes the token and the owner to the provider through its config only, never through the provider's environment. The default bridge's binary is the process's to set (`SANOMA_BRIDGE_BIN`, see [the bridge](https://www.npmjs.com/package/@sanoma-ai/bridge#environment)), not a credential of the connector.
+When the token is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets both. The bridge passes the token and the owner to the provider through its config only, never through the provider's environment. The default bridge's binary comes with `@sanoma-ai/bridge` or from `SANOMA_BRIDGE_BIN` (see [the bridge](https://www.npmjs.com/package/@sanoma-ai/bridge#the-binary)), not a credential of the connector.
 
 ### Errors and retries
 

@@ -1,12 +1,17 @@
 // `pnpm bridge:download`: puts a provider-bridge binary in packages/bridge/bin/ and prints the
-// path to export as SANOMA_BRIDGE_BIN. provider-bridge publishes no releases yet, so for now it
-// builds one from a provider-bridge checkout (Go from the checkout's .mise.toml).
+// path to export as SANOMA_BRIDGE_BIN. It downloads the release `RELEASE` pins, checked against
+// its sha256, or with `--source` builds one from a provider-bridge checkout (Go from the
+// checkout's .mise.toml). Each `@sanoma-ai/bridge-<platform>` package fills its `bin/` with it
+// when packed (`--platform`).
 //
-//   pnpm bridge:download                   # finds ../provider-bridge beside the repo (or an ancestor)
-//   SANOMA_BRIDGE_SRC=~/src/provider-bridge pnpm bridge:download
-//   pnpm bridge:download --out /tmp/provider-bridge
+//   pnpm bridge:download                   # the pinned release for this platform
+//   pnpm bridge:download --platform linux-x64 --out /tmp/provider-bridge
+//   pnpm bridge:download --source          # finds ../provider-bridge beside the repo (or an ancestor)
+//   SANOMA_BRIDGE_SRC=~/src/provider-bridge pnpm bridge:download --source
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -16,32 +21,83 @@ const packageDir = fileURLToPath(new URL("..", import.meta.url));
 /** Where the binary goes by default (gitignored). */
 export const defaultBin = join(packageDir, "bin", "provider-bridge");
 
-/**
- * TODO(release): the pinned release to download once provider-bridge publishes them. Fill in by
- * hand from the release's checksums, never from "latest"; until then `downloadRelease` refuses
- * and the script builds from source.
- */
-export const RELEASE = {
-  owner: "Sanoma-AI",
-  repo: "provider-bridge",
-  version: "", // e.g. "0.1.0"
-  /** Hex sha256 of each archive, by `${process.platform}-${process.arch}`. */
-  sha256: {
-    "darwin-arm64": "",
-    "darwin-x64": "",
-    "linux-arm64": "",
-    "linux-x64": "",
-  } as Record<string, string>,
-};
+/** A provider-bridge release on GitHub, and the sha256 of each platform's archive. */
+export interface Release {
+  owner: string;
+  repo: string;
+  /** Without the tag's `v`, e.g. "0.1.0". */
+  version: string;
+  /** Hex sha256 of each archive (its line in the release's SHA256SUMS), by `${process.platform}-${process.arch}`. */
+  sha256: Record<string, string>;
+}
 
 /**
- * STUB: downloads `RELEASE` for this platform, checks the archive against its pinned sha256 and
- * extracts the binary to `out`. Not implemented: there are no releases yet.
+ * The release `downloadRelease` fetches and the platform packages ship. Filled by hand from that
+ * release's SHA256SUMS, never from "latest"; a new provider-bridge release means a new entry here
+ * and a new version of the platform packages.
  */
-export function downloadRelease(_out: string): never {
-  throw new Error(
-    `provider-bridge has no pinned release yet (RELEASE.version is empty in ${fileURLToPath(import.meta.url)}); build from source instead`,
-  );
+export const RELEASE: Release = {
+  owner: "Sanoma-AI",
+  repo: "provider-bridge",
+  version: "0.1.0",
+  sha256: {
+    "darwin-arm64": "d175ed2141d1bc37e2f98b9e809d32467f710aa3520a793de485781ae46b4dc0",
+    "darwin-x64": "d0f978f8483b01959bc04938b75154a0af64946d7333c0aafd186c55c83ff342",
+    "linux-arm64": "86d902ae7c4fd6e4aa27fe955cecb648eb0b4beda0e9f3fcf4d429169cb58fb5",
+    "linux-x64": "e675dfea90db75899216e4f3bc39615cb41ecd47546ca9fdf53b5a7a73d69daf",
+  },
+};
+
+/** The archive's license texts: provider-bridge's, and those of the vendored modules it links. */
+const licenseFiles = ["LICENSE", "NOTICE", "vendor"];
+
+/**
+ * Downloads `platform`'s archive of `release`, checks it against its pinned sha256 and extracts
+ * the binary to `out`, executable, and with `licenses` the archive's license texts into that
+ * directory. Returns `out`. Writes nothing when the check fails.
+ */
+export async function downloadRelease(
+  out: string = defaultBin,
+  platform: string = `${process.platform}-${process.arch}`,
+  release: Release = RELEASE,
+  licenses?: string,
+): Promise<string> {
+  const expected = release.sha256[platform];
+  if (!release.version || !expected) {
+    throw new Error(
+      `no pinned provider-bridge release for ${platform} (RELEASE in ${fileURLToPath(import.meta.url)}); build from source with --source`,
+    );
+  }
+  // goreleaser's `<os>_<arch>`, with Go's `amd64` for `x64`.
+  const [os, arch] = platform.split("-");
+  const name = `provider-bridge_${release.version}_${os}_${arch === "x64" ? "amd64" : arch}.tar.gz`;
+  const url = `https://github.com/${release.owner}/${release.repo}/releases/download/v${release.version}/${name}`;
+  const response = await fetch(url, { signal: AbortSignal.timeout(300_000) });
+  if (!response.ok) throw new Error(`GET ${url}: ${response.status} ${response.statusText}`);
+  const archive = Buffer.from(await response.arrayBuffer());
+  const actual = createHash("sha256").update(archive).digest("hex");
+  if (actual !== expected) throw new Error(`${name} has sha256 ${actual}, not the pinned ${expected}; refusing it`);
+
+  const dir = mkdtempSync(join(tmpdir(), "provider-bridge-"));
+  try {
+    run(["tar", "-xzf", "-"], dir, archive);
+    // Copied beside `out`, then renamed over it: a reader never sees half a binary.
+    const target = resolve(out);
+    mkdirSync(dirname(target), { recursive: true });
+    copyFileSync(join(dir, "provider-bridge"), `${target}.tmp`);
+    chmodSync(`${target}.tmp`, 0o755);
+    renameSync(`${target}.tmp`, target);
+    if (licenses) {
+      rmSync(licenses, { recursive: true, force: true });
+      for (const file of licenseFiles) {
+        if (existsSync(join(dir, file))) cpSync(join(dir, file), join(licenses, file), { recursive: true });
+      }
+    }
+    return target;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(`${resolve(out)}.tmp`, { force: true });
+  }
 }
 
 /** The provider-bridge checkout: `SANOMA_BRIDGE_SRC`, else a `provider-bridge` directory beside this repo or one of its ancestors. */
@@ -62,15 +118,34 @@ export function findCheckout(): string {
 export function buildBridge(out: string = defaultBin, checkout: string = findCheckout()): string {
   const build = ["go", "build", "-mod=vendor", "-o", resolve(out), "./cmd/provider-bridge"];
   const hasMise = spawnSync("mise", ["--version"], { stdio: "ignore" }).status === 0;
-  const [cmd, ...args] = hasMise ? ["mise", "x", "--", ...build] : build;
-  const result = spawnSync(cmd!, args, { cwd: checkout, stdio: ["ignore", "inherit", "inherit"] });
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`${[cmd, ...args].join(" ")} failed in ${checkout} (exit ${result.status})`);
+  run(hasMise ? ["mise", "x", "--", ...build] : build, checkout);
   return resolve(out);
 }
 
+/** Runs `command` in `cwd`, with `input` on its stdin; throws when it fails. */
+function run([cmd, ...args]: string[], cwd: string, input?: Buffer) {
+  const result = spawnSync(cmd!, args, { cwd, input, stdio: [input ? "pipe" : "ignore", "inherit", "inherit"] });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`${[cmd, ...args].join(" ")} failed in ${cwd} (exit ${result.status})`);
+}
+
 if (import.meta.main) {
-  const { values } = parseArgs({ options: { out: { type: "string" } } });
-  const bin = buildBridge(values.out);
-  console.log(`built ${bin}\n\nexport SANOMA_BRIDGE_BIN=${bin}`);
+  const { values } = parseArgs({
+    options: {
+      out: { type: "string" },
+      platform: { type: "string" },
+      licenses: { type: "string" },
+      source: { type: "boolean" },
+    },
+  });
+  if (values.source) {
+    if (values.platform || values.licenses) {
+      throw new Error("--platform and --licenses take a release; --source builds for this platform only");
+    }
+    const bin = buildBridge(values.out);
+    console.log(`built ${bin}\n\nexport SANOMA_BRIDGE_BIN=${bin}`);
+  } else {
+    const bin = await downloadRelease(values.out, values.platform, RELEASE, values.licenses);
+    console.log(`downloaded provider-bridge ${RELEASE.version} to ${bin}\n\nexport SANOMA_BRIDGE_BIN=${bin}`);
+  }
 }

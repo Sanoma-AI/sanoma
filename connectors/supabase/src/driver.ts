@@ -7,7 +7,7 @@ import { apiError, type ManagementApi, withManagement } from "./management.ts";
 export interface SupabaseDriverOptions {
   /**
    * The provider bridge to read through. Default: the process's `defaultBridge()`, started on the
-   * first call from `SANOMA_BRIDGE_BIN`. One per tenant: it holds the token once configured.
+   * first call (`startBridge`'s binary). One per tenant: it holds the token once configured.
    */
   bridge?: ProviderClient;
   /** How long a Management API request may take, in milliseconds. Default 30 seconds. */

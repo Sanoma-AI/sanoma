@@ -1,0 +1,39 @@
+{
+  "name": "@sanoma-ai/bridge-linux-arm64",
+  "version": "0.1.0",
+  "description": "The provider-bridge binary for Linux on arm64, installed by @sanoma-ai/bridge as an optional dependency",
+  "keywords": [
+    "opentofu",
+    "provider",
+    "sanoma"
+  ],
+  "homepage": "https://github.com/Sanoma-AI/provider-bridge#readme",
+  "bugs": "https://github.com/Sanoma-AI/sanoma/issues",
+  "license": "FSL-1.1-ALv2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sanoma-AI/sanoma.git",
+    "directory": "packages/bridge-bin/linux-arm64"
+  },
+  "bin": {
+    "provider-bridge": "bin/provider-bridge"
+  },
+  "files": [
+    "bin",
+    "licenses",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "os": [
+      "linux"
+    ],
+    "cpu": [
+      "arm64"
+    ],
+    "access": "public"
+  },
+  "scripts": {
+    "prepack": "node ../../bridge/scripts/download-bridge.ts --platform linux-arm64 --out bin/provider-bridge --licenses licenses",
+    "postpack": "rm -rf bin licenses"
+  }
+}

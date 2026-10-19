@@ -1,5 +1,6 @@
 packages:
   - packages/*
+  - packages/bridge-bin/*
   - connectors/*
 allowBuilds:
   lefthook: false
