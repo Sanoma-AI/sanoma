@@ -28,12 +28,12 @@ export interface CheckOptions {
 }
 
 /** The directories oxlint reads, those that exist. */
-const LINTED = ["workflows", "policies", "resources"];
+const LINTED = ["workflows", "policies", "resources", "sites"];
 
 /**
  * Checks a repo the way its tests would, without a test framework: `tsc -p tsconfig.json` in
  * its root; oxlint in the root, with the repo's `.oxlintrc.json` (written when missing, to extend
- * this package's `oxlint.json`), over `workflows/`, `policies/` and `resources/`; every problem
+ * this package's `oxlint.json`), over `workflows/`, `policies/`, `resources/` and `sites/`; every problem
  * `describeConfig` finds in the data files and the workflows' files (the import rules and what
  * the outline cannot draw: what the worker refuses to start with); these three at once, their
  * problems in that order. Then every scenario against the fakes (`runScenarios`), each step that

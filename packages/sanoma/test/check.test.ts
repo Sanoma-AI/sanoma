@@ -78,4 +78,17 @@ describe("check", () => {
     const { problems } = await check(await load(), { databaseUrl, log: () => {} });
     expect(problems).toContain("A post goes out › the run fails: the run finished");
   }, 180_000);
+
+  it("lints sites/ when there is one", async () => {
+    mkdirSync(join(dir, "sites/x/routes"), { recursive: true });
+    writeFileSync(join(dir, "sites/x/routes/index.ts"), "export const key = process.env.KEY;\n");
+    const log: string[] = [];
+    const { problems } = await check(await load(), { databaseUrl, log: (l) => log.push(l) });
+    expect(log).toContain("oxlint workflows policies resources sites");
+    expect(problems).toContainEqual(
+      expect.stringMatching(
+        /^sites\/x\/routes\/index\.ts:1:20: Unexpected use of 'process'\. A site runs in the browser/,
+      ),
+    );
+  }, 180_000);
 });
