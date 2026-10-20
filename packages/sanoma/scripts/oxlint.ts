@@ -4,9 +4,12 @@
 // - `@sanoma-ai/workflows`'s `oxlint.json` (its overrides for `workflows/**`, `policies/**` and
 //   `resources/**`), with an entry for `sanoma` derived from `@sanoma-ai/workflows`'s (the same
 //   names), `sanoma/**` refused, and the data-file plugin loaded from this package's `dist/`;
+// - an override for `sites/**`: a site is client code, with no server, runtime, connector or
+//   environment of its own (the plugin's `site-file` says the rest);
 // - the rules this checkout holds its own code to (the root `.oxlintrc.json`), without its test
 //   framework's and its own paths.
 import { readFileSync, writeFileSync } from "node:fs";
+import { REMEDY } from "../src/site-lint.ts";
 
 type Json = Record<string, any>;
 const read = (path: string): Json => JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));
@@ -50,13 +53,68 @@ const overrides = (workflows.overrides as Json[]).map((override) => {
   };
 });
 
+const SERVER = `A site has no server code: ${REMEDY}`;
+const APP = "A site imports the app's components from `@sanoma-ai/app/ui`; the rest of the app is its server.";
+const sites = {
+  files: ["sites/**"],
+  // The listing of the sites the build generates.
+  excludeFiles: ["sites/__virtual.ts"],
+  jsPlugins: ["./dist/oxlint-plugin.js"],
+  rules: {
+    // Types are erased at build: a site may import them from anywhere.
+    "no-restricted-imports": [
+      "error",
+      {
+        paths: [
+          ...[own, "@sanoma-ai/workflows", "@sanoma-ai/bridge", "pg"].map((name) => ({ name, message: SERVER })),
+          { name: "@sanoma-ai/app", message: APP },
+          {
+            name: "@tanstack/react-start",
+            message: `${SERVER} Its route APIs (\`createFileRoute\`, \`Link\`, …) come from \`sanoma/site\` too.`,
+          },
+        ].map((path) => ({ ...path, allowTypeImports: true })),
+        patterns: [
+          {
+            group: [
+              `${own}/**`,
+              `!${own}/site`,
+              "@sanoma-ai/workflows/**",
+              "@sanoma-ai/bridge/**",
+              "@dbos-inc/**",
+              "pg/**",
+              "@tanstack/react-start/**",
+            ],
+            message: SERVER,
+          },
+          { group: ["@sanoma-ai/app/**", "!@sanoma-ai/app/ui"], message: APP },
+          {
+            group: ["@sanoma-ai/testing", "@sanoma-ai/testing/**"],
+            message: `Fakes and test helpers belong in tests. ${SERVER}`,
+          },
+          {
+            group: ["@sanoma-ai/connector-*", "@sanoma-ai/connector-*/**"],
+            message: `A site calls no vendor itself, so the policy sees every call: ${REMEDY}`,
+          },
+          { group: ["node:*"], message: `A site runs in the browser: ${REMEDY}` },
+        ].map((pattern) => ({ ...pattern, allowTypeImports: true })),
+      },
+    ],
+    "no-restricted-globals": [
+      "error",
+      { name: "process", message: `A site runs in the browser and holds no credentials: ${REMEDY}` },
+      { name: "require", message: `A site runs in the browser and imports with \`import\`: ${REMEDY}` },
+    ],
+    "sanoma/site-file": "error",
+  },
+};
+
 const config = {
   plugins: (root.plugins as string[]).filter((p) => p !== "vitest"),
   categories: root.categories,
   env: root.env,
   rules: Object.fromEntries(Object.entries(root.rules as Json).filter(([name]) => !name.startsWith("vitest/"))),
   ignorePatterns: (root.ignorePatterns as string[]).filter((p) => p.startsWith("**/")),
-  overrides,
+  overrides: [...overrides, sites],
 };
 
 writeFileSync(new URL("../oxlint.json", import.meta.url), `${JSON.stringify(config, null, 2)}\n`);
