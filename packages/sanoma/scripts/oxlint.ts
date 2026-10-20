@@ -69,7 +69,6 @@ const sites = {
             name: "@sanoma-ai/app",
             message: "A site imports the app's components from `@sanoma-ai/app/ui`; the rest of the app is its server.",
           },
-          { name: "@sanoma-ai/testing", message: `Fakes and test helpers belong in tests. ${SERVER}` },
           {
             name: "@tanstack/react-start",
             message: `${SERVER} Its route APIs (\`createFileRoute\`, \`Link\`, …) come from \`${own}/site\` too.`,
@@ -87,7 +86,10 @@ const sites = {
             ],
             message: SERVER,
           },
-          { group: ["@sanoma-ai/testing/**"], message: `Fakes and test helpers belong in tests. ${SERVER}` },
+          {
+            group: ["@sanoma-ai/testing", "@sanoma-ai/testing/**"],
+            message: `Fakes and test helpers belong in tests. ${SERVER}`,
+          },
           {
             group: ["@sanoma-ai/connector-*", "@sanoma-ai/connector-*/**"],
             message: `A site calls no vendor itself, so the policy sees every call: ${REMEDY}`,

@@ -62,7 +62,7 @@ export const siteFile = {
         if (basename(context.filename).includes(".server.")) {
           context.report({
             message: `A site has no server code, so no *.server.* file: ${REMEDY}`,
-            node: { range: [program.range[0], program.range[0]] },
+            node: program,
           });
         }
       },
