@@ -27,7 +27,7 @@ export const all = [defineWorkflow, z, defineConfig, main, Date.now()] as [unkno
     join(dir, "resources/shop.ts"),
     `import { ghost } from "@sanoma-ai/connector-ghost/resources";\nexport const p = ghost.post({ title: "X".toLowerCase() });\n`,
   );
-  // A site: what it may import, then one problem per line from line 5 on.
+  // A site: what it may import (types from anywhere among them), then one problem per line from line 7 on.
   mkdirSync(join(dir, "sites/x/routes"), { recursive: true });
   mkdirSync(join(dir, "sites/x/components"));
   writeFileSync(join(dir, "sites/x/components/card.tsx"), "export const Card = 1;\n");
@@ -37,6 +37,8 @@ export const all = [defineWorkflow, z, defineConfig, main, Date.now()] as [unkno
 import { Button } from "@sanoma-ai/app/ui";
 import { useState } from "react";
 import { Card } from "../components/card";
+import type { Ctx } from "sanoma";
+import type { hello as Hello } from "../../../workflows/hello";
 import { Client } from "pg";
 import { ghost } from "@sanoma-ai/connector-ghost";
 import { createIsomorphicFn } from "@tanstack/react-start";
@@ -49,7 +51,10 @@ import { fake } from "@sanoma-ai/testing";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { readFileSync } from "node:fs";
 import { hello } from "../../../workflows/hello";
-export const all = [createFileRoute, Button, useState, Card, Client, ghost, createIsomorphicFn, serverOnly, defineWorkflow, main, startApp, startWorker, fake, DBOS, readFileSync, hello, process.env.KEY];
+import { handler } from "@sanoma-ai/app/server";
+export const all = [createFileRoute, Button, useState, Card, Client, ghost, createIsomorphicFn, serverOnly, defineWorkflow, main, startApp, startWorker, fake, DBOS, readFileSync, hello, handler, process.env.KEY];
+export const pg = require("pg");
+export type Types = [Ctx<[]>, typeof Hello];
 `,
   );
   writeFileSync(join(dir, "sites/x/routes/a.server.ts"), "export const a = 1;\n");
@@ -137,6 +142,7 @@ describe("the shipped oxlint.json", () => {
   it("refuses a site's server code, one problem each, and passes what a site may import and the build's listing", () => {
     const imports = "eslint(no-restricted-imports)";
     const site = "sanoma(site-file)";
+    const globals = "eslint(no-restricted-globals)";
     const index = "sites/x/routes/index.tsx";
     const server = /A site has no server code: call an operation or start a workflow through `api` from `sanoma\/site`/;
     expect(found.filter((f) => f.file.startsWith("sites/"))).toEqual([
@@ -153,39 +159,41 @@ describe("the shipped oxlint.json", () => {
         rule: site,
         text: expect.stringMatching(/route has no `server` handlers/),
       },
-      { file: index, line: 5, rule: imports, text: expect.stringMatching(/^'pg'.*/) },
+      { file: index, line: 7, rule: imports, text: expect.stringMatching(/^'pg'.*/) },
       {
         file: index,
-        line: 6,
+        line: 8,
         rule: imports,
         text: expect.stringMatching(/'@sanoma-ai\/connector-ghost'.*calls no vendor/),
       },
       {
         file: index,
-        line: 7,
+        line: 9,
         rule: imports,
         text: expect.stringMatching(/^'@tanstack\/react-start' .*come from `sanoma\/site`/),
       },
-      { file: index, line: 8, rule: imports, text: expect.stringMatching(server) },
-      { file: index, line: 9, rule: imports, text: expect.stringMatching(/^'sanoma' /) },
-      { file: index, line: 10, rule: imports, text: expect.stringMatching(/^'sanoma\/dist\/cli\.js'/) },
-      { file: index, line: 11, rule: imports, text: expect.stringMatching(/`@sanoma-ai\/app\/ui`/) },
-      { file: index, line: 12, rule: imports, text: expect.stringMatching(server) },
-      { file: index, line: 13, rule: imports, text: expect.stringMatching(/belong in tests/) },
-      { file: index, line: 14, rule: imports, text: expect.stringMatching(/^'@dbos-inc\/dbos-sdk'/) },
-      { file: index, line: 15, rule: imports, text: expect.stringMatching(/^'node:fs'.*runs in the browser/) },
+      { file: index, line: 10, rule: imports, text: expect.stringMatching(server) },
+      { file: index, line: 11, rule: imports, text: expect.stringMatching(/^'sanoma' /) },
+      { file: index, line: 12, rule: imports, text: expect.stringMatching(/^'sanoma\/dist\/cli\.js'/) },
+      { file: index, line: 13, rule: imports, text: expect.stringMatching(/`@sanoma-ai\/app\/ui`/) },
+      { file: index, line: 14, rule: imports, text: expect.stringMatching(server) },
+      { file: index, line: 15, rule: imports, text: expect.stringMatching(/belong in tests/) },
+      { file: index, line: 16, rule: imports, text: expect.stringMatching(/^'@dbos-inc\/dbos-sdk'/) },
+      { file: index, line: 17, rule: imports, text: expect.stringMatching(/^'node:fs'.*runs in the browser/) },
       {
         file: index,
-        line: 16,
+        line: 18,
         rule: site,
         text: expect.stringMatching(/\.\.\/\.\.\/\.\.\/workflows\/hello leaves sites\//),
       },
       {
         file: index,
-        line: 17,
-        rule: "eslint(no-restricted-globals)",
-        text: expect.stringMatching(/'process'.*no credentials/),
+        line: 19,
+        rule: imports,
+        text: expect.stringMatching(/^'@sanoma-ai\/app\/server'.*`@sanoma-ai\/app\/ui`/),
       },
+      { file: index, line: 20, rule: globals, text: expect.stringMatching(/'process'.*no credentials/) },
+      { file: index, line: 21, rule: globals, text: expect.stringMatching(/'require'.*imports with `import`/) },
     ]);
   });
 });

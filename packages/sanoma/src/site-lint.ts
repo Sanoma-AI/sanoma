@@ -1,4 +1,4 @@
-import { basename, dirname, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
 // The oxlint rule `sanoma/site-file`: what the generated `oxlint.json`'s `sites/**` override cannot
 // say with oxlint's own rules. A site is client code with no server of its own: no `*.server.*`
@@ -13,25 +13,24 @@ interface AstNode {
 }
 interface RuleContext {
   filename: string;
+  cwd: string;
   report(diagnostic: { message: string; node: Pick<AstNode, "range"> }): void;
 }
 
-const REMEDY = "call an operation or start a workflow through `api` from `sanoma/site`.";
+/** What a site does instead of server code: the remedy every refusal under `sites/` names. */
+export const REMEDY = "call an operation or start a workflow through `api` from `sanoma/site`.";
 
 /** The server-side builders TanStack Start exports; a site has no server code. */
 const SERVER_CALLS = new Set(["createServerFn", "createServerOnlyFn", "createMiddleware"]);
 
-/** A callee's name: `f` for `f(…)` and `x.f(…)`. */
-const calleeName = (callee: AstNode): string | undefined =>
-  callee.type === "Identifier" ? callee.name : callee.type === "MemberExpression" ? callee.property.name : undefined;
+/** `f` for a call `f(…)`: a namespace import of TanStack Start is refused by the imports rule. */
+const calleeName = (callee: AstNode): string | undefined => (callee.type === "Identifier" ? callee.name : undefined);
 
-/** The nearest directory above `file` named `sites`. */
-function sitesOf(file: string): string | undefined {
-  for (let dir = dirname(file); dir !== dirname(dir); dir = dirname(dir)) {
-    if (basename(dir) === "sites") return dir;
-  }
-  return undefined;
-}
+/** Whether `path` is `dir` or inside it. */
+const inside = (dir: string, path: string): boolean => {
+  const to = relative(dir, path);
+  return to !== ".." && !to.startsWith(`..${sep}`);
+};
 
 export const siteFile = {
   meta: {
@@ -42,15 +41,17 @@ export const siteFile = {
     },
   },
   create(context: RuleContext) {
-    const sites = sitesOf(context.filename);
-    /** A relative import that resolves outside `sites/`. */
-    const leaves = (source: unknown): boolean => {
-      if (typeof source !== "string" || !source.startsWith(".") || sites === undefined) return false;
-      const to = relative(sites, resolve(dirname(context.filename), source));
-      return to === ".." || to.startsWith(`..${sep}`);
+    // oxlint runs in the repo's root, where the override's `sites/**` matches.
+    const sites = join(context.cwd, "sites");
+    /** A relative import, not of types alone, that resolves outside `sites/`. */
+    const leaves = (node: AstNode): boolean => {
+      const source: unknown = node.source?.value;
+      if (typeof source !== "string" || !source.startsWith(".") || !inside(sites, context.filename)) return false;
+      if (node.importKind === "type" || node.exportKind === "type") return false;
+      return !inside(sites, resolve(dirname(context.filename), source));
     };
     const imported = (node: AstNode) => {
-      if (node.source && leaves(node.source.value)) {
+      if (leaves(node)) {
         context.report({
           message: `A site imports only from inside sites/, \`sanoma/site\`, \`@sanoma-ai/app/ui\` and its packages: ${String(node.source.value)} leaves sites/.`,
           node: node.source,
@@ -79,7 +80,7 @@ export const siteFile = {
         // createFileRoute("/path")({ server: { handlers } })
         if (call.callee.type !== "CallExpression" || calleeName(call.callee.callee) !== "createFileRoute") return;
         const server = (call.arguments[0]?.properties as AstNode[] | undefined)?.find(
-          (p) => p.type === "Property" && (p.key.name ?? p.key.value) === "server",
+          (p) => p.type === "Property" && !p.computed && (p.key.name ?? p.key.value) === "server",
         );
         if (server) {
           context.report({ message: `A site's route has no \`server\` handlers: ${REMEDY}`, node: server });

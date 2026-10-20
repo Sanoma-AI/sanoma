@@ -9,6 +9,7 @@
 // - the rules this checkout holds its own code to (the root `.oxlintrc.json`), without its test
 //   framework's and its own paths.
 import { readFileSync, writeFileSync } from "node:fs";
+import { REMEDY } from "../src/site-lint.ts";
 
 type Json = Record<string, any>;
 const read = (path: string): Json => JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));
@@ -52,28 +53,26 @@ const overrides = (workflows.overrides as Json[]).map((override) => {
   };
 });
 
-const REMEDY = `call an operation or start a workflow through \`api\` from \`${own}/site\`.`;
 const SERVER = `A site has no server code: ${REMEDY}`;
+const APP = "A site imports the app's components from `@sanoma-ai/app/ui`; the rest of the app is its server.";
 const sites = {
   files: ["sites/**"],
   // The listing of the sites the build generates.
   excludeFiles: ["sites/__virtual.ts"],
   jsPlugins: ["./dist/oxlint-plugin.js"],
   rules: {
+    // Types are erased at build: a site may import them from anywhere.
     "no-restricted-imports": [
       "error",
       {
         paths: [
           ...[own, "@sanoma-ai/workflows", "@sanoma-ai/bridge", "pg"].map((name) => ({ name, message: SERVER })),
-          {
-            name: "@sanoma-ai/app",
-            message: "A site imports the app's components from `@sanoma-ai/app/ui`; the rest of the app is its server.",
-          },
+          { name: "@sanoma-ai/app", message: APP },
           {
             name: "@tanstack/react-start",
-            message: `${SERVER} Its route APIs (\`createFileRoute\`, \`Link\`, …) come from \`${own}/site\` too.`,
+            message: `${SERVER} Its route APIs (\`createFileRoute\`, \`Link\`, …) come from \`sanoma/site\` too.`,
           },
-        ],
+        ].map((path) => ({ ...path, allowTypeImports: true })),
         patterns: [
           {
             group: [
@@ -83,9 +82,11 @@ const sites = {
               "@sanoma-ai/bridge/**",
               "@dbos-inc/**",
               "pg/**",
+              "@tanstack/react-start/**",
             ],
             message: SERVER,
           },
+          { group: ["@sanoma-ai/app/**", "!@sanoma-ai/app/ui"], message: APP },
           {
             group: ["@sanoma-ai/testing", "@sanoma-ai/testing/**"],
             message: `Fakes and test helpers belong in tests. ${SERVER}`,
@@ -95,16 +96,13 @@ const sites = {
             message: `A site calls no vendor itself, so the policy sees every call: ${REMEDY}`,
           },
           { group: ["node:*"], message: `A site runs in the browser: ${REMEDY}` },
-          { group: ["@tanstack/react-start/**"], message: SERVER },
-        ],
+        ].map((pattern) => ({ ...pattern, allowTypeImports: true })),
       },
     ],
     "no-restricted-globals": [
       "error",
-      {
-        name: "process",
-        message: `A site runs in the browser and holds no credentials: ${REMEDY}`,
-      },
+      { name: "process", message: `A site runs in the browser and holds no credentials: ${REMEDY}` },
+      { name: "require", message: `A site runs in the browser and imports with \`import\`: ${REMEDY}` },
     ],
     "sanoma/site-file": "error",
   },

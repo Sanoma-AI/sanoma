@@ -93,7 +93,7 @@ The worker and the app run on `SANOMA_DATABASE_URL` (default `postgresql://postg
 }
 ```
 
-`sanoma/oxlint.json` is self-contained (it extends nothing): `@sanoma-ai/workflows`'s rules (the clock, randomness, the network, the environment, the imports a workflow may make, the data-file subset, with its plugin inside `sanoma`), a site's (client code only: no server function, `*.server.*` file or route `server` handlers, no import of the runtime, a connector, Postgres, DBOS, Node's modules or TanStack Start, no relative import out of `sites/`, no `process`; `sites/__virtual.ts`, the build's listing, aside) and the rules this repo holds its own code to. Add your own rules beside the `extends`; `sanoma check` leaves an existing file alone.
+`sanoma/oxlint.json` is self-contained (it extends nothing): `@sanoma-ai/workflows`'s rules (the clock, randomness, the network, the environment, the imports a workflow may make, the data-file subset, with its plugin inside `sanoma`), a site's (client code only: no server function, `*.server.*` file or route `server` handlers, no import of the runtime, a connector, Postgres, DBOS, Node's modules or TanStack Start, no relative import out of `sites/`, no `process` or `require`; types may be imported from anywhere; `sites/__virtual.ts`, the build's listing, aside) and the rules this repo holds its own code to. Add your own rules beside the `extends`; `sanoma check` leaves an existing file alone.
 
 ## Generated files
 
