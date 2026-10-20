@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { Collection } from "./collection.ts";
 import type { ApprovalState, Principal, WorkflowDefinition } from "./define.ts";
 import type { Fake } from "./fake.ts";
 import type { LedgerStore } from "./ledger.ts";
@@ -37,6 +38,8 @@ export interface WorkerState {
   /** The worker's `source`, when it was given one. */
   source?: Source;
   types: ReadonlyMap<string, Resource>;
+  /** The collections, by name, which scenarios' steps may name (`data.<name>`). */
+  collections: ReadonlyMap<string, Collection>;
   steps: readonly Steps[];
   /** Its `version`, when it has one, is recorded with each of its decisions. */
   policy: Policy;

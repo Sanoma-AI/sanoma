@@ -186,7 +186,7 @@ Every call is a step with a name, which a test and the graph name it by: `ctx.gi
 
 ### Drivers
 
-A driver implements a connector's operations with `defineDriver(connector, { resource: { name: (input, call) => … } })`, typed by the connector's schemas, and its package attaches it to the connector it exports (`withSetup`). `call` carries `idempotencyKey`, the same on every retry and replay of one call: pass it to the vendor (or dedupe on it) so a crash between the vendor's reply and the checkpoint does not repeat the side effect. It carries `secrets` too, the store `secret()` markers name (see [Secrets](#secrets)). A driver reads its credentials when it is called, never from the config, and declares them (see [Credentials](#credentials)).
+A driver implements a connector's operations with `defineDriver(connector, { resource: { name: (input, call) => … } })`, typed by the connector's schemas, and its package attaches it to the connector it exports (`withSetup`). `call` carries `idempotencyKey`, the same on every retry and replay of one call: pass it to the vendor (or dedupe on it) so a crash between the vendor's reply and the checkpoint does not repeat the side effect. It carries `secrets` too, the store `secret()` markers name (see [Secrets](#secrets)), and `by`, who the call is made as (`run:<id>` inside a run). A driver reads its credentials when it is called, never from the config, and declares them (see [Credentials](#credentials)).
 
 When the vendor says no, throw a `DriverError(message, { retryable, status?, vendorCode? })`. An operation declared `idempotent` is tried up to three times (after 1 and 2 seconds) unless the error says `retryable: false` or the reply fails the output schema; any other operation is tried once. When the tries run out, the run fails with the last try's error, not a wrapper: for a `DriverError`, `errorCode(err)` is `"driver_failed"` and the ledger records the vendor's message, status and code. Anything else a driver throws (a `TypeError`, a plain `Error`) fails the run as it is, with no code.
 
@@ -233,6 +233,37 @@ A field may name another declared resource where the type's `fields.references` 
 Only declared fields are compared for drift, as CloudFormation does: `compareDeclared(fields, state, desired)` keeps the fields `desired` declares, minus `vendorOwned` and `writeOnly` ones, picking objects field by field, list items against the declared item at the same index, and the items of an `unordered` list (a set) against what any declared item declares, sorted, so a set is compared as a multiset whatever order the vendor returns it in. A drift check compares `normalize(actual, desired)` with `normalize(desired, desired)`, leaf by leaf: `diffDeclared(resource, state, desired, accept?)` returns each declared field that differs, `{ path, desired, actual }`, where `accept` gives, by a reference's path, the values that stand for the resource it names. `withoutWriteOnly(fields, desired)` drops write-only values from a declaration, keeping a secret's marker, which names a stored value and holds none. So a field left out is never drift, which covers attributes an OpenTofu provider marks `computed` and `optional` (GitHub's `etag`, `topics`): they are the user's to set, so not `vendorOwned`, but the vendor fills them in when nobody does.
 
 `describeConfig` lists the resource types as `resourceTypes`, each `{ id: "<vendor>.<type>", vendor, type, title, identity, fields, schema, ops }`: `schema` is its state as JSON Schema, with `$id` `sanoma:resource-type/<id>`, which its operations' contracts `$ref` rather than repeat. `@sanoma-ai/workflows/shared` exports the `Resource`, `ResourceSpec`, `ResourceFields`, `References`, `FieldReference`, `Declared`, `Declaring`, `DeclaredResource` and `ResourceProblem` types.
+
+### Collections
+
+A collection holds the company's own records, the state no vendor holds. `collection()`, from `@sanoma-ai/workflows/data`, declares one with plain values: a name (a lowercase letter, then letters and digits), its key, and typed fields.
+
+```ts
+import { collection } from "@sanoma-ai/workflows/data";
+
+export const outbound = collection({
+  name: "outbound",
+  key: "company", // a required text field
+  fields: {
+    company: "text",
+    stage: { enum: ["researched", "contacted", "won", "lost"] },
+    owner: "person",
+    lastTouched: { type: "date", optional: true },
+  },
+});
+```
+
+A field is `"text"`, `"number"`, `"boolean"`, `"date"` (ISO 8601: a date, or a date and time with its offset) or `"person"` (a person's id), `{ type, optional: true }`, or `{ enum: [...] }` (optional too). A record is typed by them (`RecordOf<typeof outbound.fields>`), and `save` refuses a field that is not declared. The config lists the collections, `collections: [outbound]`. Their operations are of the vendor `data` (`DATA_VENDOR`, which no connector may take): `data.outbound.get` (`{ key }`: the record, or `null`), `.list` (`{ where?, order?, limit? }`: fields equal to a value or within `{ gt, gte, lt, lte }`, sorted by a field, or `-field` for descending, with missing values last, else by key; 1 to 1000 records, 100 by default), `.save` (`{ record }`: added, or replacing the one with its key) and `.delete` (`{ key }`: `{ deleted }`). `get` and `list` are effect `read`, `save` and `delete` `write`, all idempotent, and the policy's `target` is `data:outbound/<key>` (`data:outbound` for a list). A workflow names them in `uses` and calls them on `ctx`, as any operation:
+
+```ts
+uses: [outbound.get, outbound.save],
+async run(ctx, { company }) {
+  const lead = await ctx.data.outbound.get({ key: company });
+  if (lead) await ctx.data.outbound.save({ record: { ...lead.record, stage: "contacted" } });
+},
+```
+
+`get`, `list` and `save` answer `Saved` records, `{ key, record, updatedAt, updatedBy }`, where `updatedBy` is who the call was made as (`CallContext.by`: `run:<id>` inside a run). The records are JSON rows of one table the runtime creates beside the ledger, `sanoma_data` (`collection`, `key`, `record`, `updated_at`, `updated_by`), in the config's database. A declaration changes with no migration: a record saved under an older one comes back as it is stored, with `issues` (`{ path, message }`) where the fields no longer accept it. A sandbox run keeps the records in memory, in a fake that starts empty: a scenario seeds a record as it seeds a resource, `Given data.outbound "Acme" has` with a table of fields (the key is the quoted name, and what the table leaves out is made up), and removes one with `Given data.outbound "Acme" is gone`. `describeConfig` lists them as `collections`, each `{ name, title?, key, fields, record, ops }`, `record` being the JSON Schema `save` accepts, with `$id` `sanoma:collection/<name>`. `@sanoma-ai/workflows/shared` exports `DATA_VENDOR` and the `Saved` and `ListQuery` types.
 
 ### Data files
 

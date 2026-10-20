@@ -36,6 +36,7 @@ import { memorySecrets } from "./secret.ts";
 import {
   APPLY_WORKFLOW,
   BUILT_IN_WORKFLOWS,
+  DATA_VENDOR,
   DRIFT_WORKFLOW,
   errorMessage,
   fitsOp,
@@ -152,10 +153,10 @@ export interface Check {
 }
 
 /**
- * What steps can name: the config's operations, workflows and resource types by id, the steps
- * its connectors (and the company) ship, and where the feature files are.
+ * What steps can name: the config's operations, workflows, resource types and collections by id,
+ * the steps its connectors (and the company) ship, and where the feature files are.
  */
-export type Scope = Pick<ResolvedConfig, "ops" | "workflows" | "scenarios" | "types" | "steps">;
+export type Scope = Pick<ResolvedConfig, "ops" | "workflows" | "scenarios" | "types" | "collections" | "steps">;
 
 type Kind = ScenarioStep["kind"];
 type Fault = Extract<Seed, { fault: unknown }>["fault"];
@@ -314,6 +315,7 @@ function builtFor(scope: Scope): Built {
     cached &&
     cached.scope.workflows === scope.workflows &&
     cached.scope.types === scope.types &&
+    cached.scope.collections === scope.collections &&
     cached.scope.steps === scope.steps
   ) {
     return cached;
@@ -333,12 +335,21 @@ const expecting = (expect: CoreExpectation): Then => ({ expect, verify: (run) =>
 
 /** The rules a scope has, and the parameter types their expressions use. */
 function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSpec[] } {
-  const { types } = scope;
+  const { types, collections } = scope;
+  // A collection's records are seeded as a resource's objects are, by `data.<name>`, through its operations.
+  const collectionOf = (id: unknown) =>
+    (id as string).startsWith(`${DATA_VENDOR}.`)
+      ? collections.get((id as string).slice(DATA_VENDOR.length + 1))
+      : undefined;
+  const seedable = new Map<string, unknown>([
+    ...types,
+    ...[...collections.keys()].map((n) => [`${DATA_VENDOR}.${n}`, n] as const),
+  ]);
   const parameterTypes: ParameterTypeSpec[] = [
     { name: "op", regexp: /\S+/, transformer: known("operation", scope.ops) },
     { name: "workflow", regexp: /\S+/, transformer: known("workflow", scope.workflows) },
     { name: "who", regexp: /\S+/, transformer: (s) => s },
-    { name: "resource", regexp: /\S+/, transformer: known("resource type", types) },
+    { name: "resource", regexp: /\S+/, transformer: known("resource type", seedable) },
     // A declared resource, as a drift report names it: `<file>#<export>`.
     { name: "declared", regexp: /[^\s#]+#\S+/, transformer: (s) => s },
     { name: "field", regexp: /\S+/, transformer: (s) => s },
@@ -368,21 +379,28 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
       kind: "given",
       source: "{resource} {string} has",
       takes: TAKES_OBJECT,
-      read: ([resource, name], pickle) => [
-        {
-          ...object(resource, name),
-          fields: fieldsFrom(
-            pickle,
-            types.get(resource as string)!.schema,
-            `${resource as string} "${name as string}"`,
-          ),
-        },
-      ],
+      read: ([resource, name], pickle) => {
+        const owner = `${resource as string} "${name as string}"`;
+        const c = collectionOf(resource);
+        if (c) {
+          // The record with its key, the fields the step gives, and the rest made up.
+          const record = shapeOf(opOf(c.save.id).input).record!;
+          return [
+            { op: c.save.id, input: { record: fill(record, { ...fieldsFrom(pickle, record, owner), [c.key]: name }) } },
+          ];
+        }
+        return [
+          { ...object(resource, name), fields: fieldsFrom(pickle, types.get(resource as string)!.schema, owner) },
+        ];
+      },
     },
     {
       kind: "given",
       source: "{resource} {string} is gone",
-      read: ([resource, name]) => [{ ...object(resource, name), gone: true }],
+      read: ([resource, name]) => {
+        const c = collectionOf(resource);
+        return [c ? { op: c.delete.id, input: { key: name } } : { ...object(resource, name), gone: true }];
+      },
     },
     {
       kind: "when",

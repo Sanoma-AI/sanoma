@@ -9,7 +9,7 @@ export default defineConfig({
     // Run tests against source, not dist/. Keep in sync with `paths` in tsconfig.json.
     alias: [
       {
-        find: /^@sanoma-ai\/workflows\/(describe|fake|plugin|shared|scenario|scenarios)$/,
+        find: /^@sanoma-ai\/workflows\/(data|describe|fake|plugin|shared|scenario|scenarios)$/,
         replacement: src("./packages/workflows/src/$1.ts"),
       },
       { find: /^@sanoma-ai\/workflows\/resources$/, replacement: src("./packages/workflows/src/secret.ts") },

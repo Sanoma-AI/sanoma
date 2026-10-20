@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import { type LintProblem, readSource, type SourceFile } from "./ast.ts";
+import { type Field, recordSchemaOf } from "./collection.ts";
 import { resolveConfig, type SanomaConfig } from "./config.ts";
 import { type Builtin, jsonSchemaOf, opIdsOf, type Use } from "./define.ts";
 import { lintWorkflow } from "./lint.ts";
@@ -124,6 +125,20 @@ export interface ResourceTypeEntry {
   ops: string[];
 }
 
+/** A collection the config declares (`collection()`). */
+export interface CollectionEntry {
+  name: string;
+  title?: string;
+  /** The field each record is found by. */
+  key: string;
+  /** Its fields as declared. */
+  fields: Record<string, Field>;
+  /** What `save` accepts, as JSON Schema, with `$id` `sanoma:collection/<name>`. */
+  record: Record<string, unknown>;
+  /** Its operations' ids: `data.<name>.get`, `.list`, `.save` and `.delete`. */
+  ops: string[];
+}
+
 /**
  * A plain-JSON description of what a config can do: its workflows, the operations they call,
  * and whether a policy gates them. The app server builds it from the config and sends it to the
@@ -139,6 +154,8 @@ export interface ConfigDescription {
   vendors: Record<string, VendorEntry>;
   /** The resource types the connectors declare, by `id`. */
   resourceTypes: ResourceTypeEntry[];
+  /** The config's collections, by name. */
+  collections: CollectionEntry[];
   /**
    * The resources the data files under `resources/` declare, by file and then in file order,
    * less any with a problem and any that names one.
@@ -185,6 +202,17 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
         .toSorted(),
     }))
     .toSorted((a, b) => a.id.localeCompare(b.id));
+
+  const collections: CollectionEntry[] = [...resolved.collections.values()]
+    .map((c) => ({
+      name: c.name,
+      ...(c.title !== undefined && { title: c.title }),
+      key: c.key,
+      fields: c.fields,
+      record: { $id: `sanoma:collection/${c.name}`, ...toJsonSchema(recordSchemaOf(c), `${c.name} record`, "input") },
+      ops: [c.get, c.list, c.save, c.delete].map((op) => op.id),
+    }))
+    .toSorted((a, b) => a.name.localeCompare(b.name));
 
   const ops: OpEntry[] = [...resolved.ops.values()].map((op) => ({
     ...policyOpOf(op),
@@ -234,6 +262,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     ops,
     vendors,
     resourceTypes,
+    collections,
     resources: dataFiles.resources,
     orphans: dataFiles.orphans,
     problems: dataFiles.problems,

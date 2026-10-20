@@ -238,6 +238,11 @@ export interface CallContext {
   attempt: number;
   /** The secrets store, for the values `secret()` markers name: `resolveSecrets(input, call.secrets)`. In memory for a fake. */
   secrets: Secrets;
+  /**
+   * Who the call is made as: `run:<runId>` for a call in a run. A collection's save records it
+   * as the record's `updatedBy`.
+   */
+  by?: string;
 }
 
 export type DriverFn<I = any, O = unknown> = (input: I, call: CallContext) => Promise<O>;
