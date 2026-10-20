@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DATA_TABLE, type LazyPool } from "./db.ts";
 import { defineFake, type Fake } from "./fake.ts";
+import { isObject } from "./resource.ts";
 import {
   type CallContext,
   type Connector,
@@ -124,8 +125,6 @@ export function collection<
   }) as unknown as Collection<N, F, K>;
 }
 
-const isObject = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null;
-
 /** Throws unless `kind` is a field `collection()` takes: a type, the type marked optional, or an enum of distinct strings. */
 function checkField(where: string, field: string, kind: unknown): void {
   const refused = (why: string) => new Error(`${where}: the field "${field}" ${why}`);
@@ -136,7 +135,7 @@ function checkField(where: string, field: string, kind: unknown): void {
     if (!types.includes(kind)) throw refused(kinds);
     return;
   }
-  if (!isObject(kind) || Array.isArray(kind)) throw refused(kinds);
+  if (!isObject(kind)) throw refused(kinds);
   const { type, enum: values, optional, ...rest } = kind;
   if (Object.keys(rest).length || (type === undefined) === (values === undefined)) throw refused(kinds);
   if (optional !== undefined && optional !== true) throw refused("may only be marked `optional: true`");
