@@ -18,7 +18,7 @@ const plugin = {
         type: "problem",
         docs: {
           description:
-            "A data file under resources/ holds only imports, `export const <name> = <vendor>.<type>({ … })` with literal fields, and `export default [ … ]`",
+            "A data file under resources/ holds only imports, `export const <name> = <vendor>.<type>({ … })` with literal fields, and `export default [ … ]`; resources/data.ts holds only collections, `collection({ … })` from sanoma/data",
         },
       },
       create(context: Context) {

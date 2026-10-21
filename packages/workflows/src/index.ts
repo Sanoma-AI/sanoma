@@ -47,6 +47,8 @@ export {
   withoutWriteOnly,
 } from "./resource.ts";
 export { defineConfig, resolveConfig, resolveDatabaseUrl, type ResolvedConfig, type SanomaConfig } from "./config.ts";
+// `collection()` itself is at `@sanoma-ai/workflows/data`, for `resources/data.ts`; this tells one apart, as the launcher does.
+export { isCollection } from "./collection.ts";
 export { type CredentialStatus, credentialsOf } from "./env.ts";
 export {
   APPLY_WORKFLOW,

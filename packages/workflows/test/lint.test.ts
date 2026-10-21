@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -88,6 +88,44 @@ describe("lintWorkflow", () => {
     expect(messages(`import { f } from "../f.ts";`, "src/flow.ts")).toEqual([
       expect.stringMatching(/^import "\.\.\/f\.ts" .*outside this directory/),
     ]);
+  });
+
+  it("allows the one file outside workflows/ and policies/ that holds the collections, resources/data.ts, by its real path", () => {
+    const src = `import { outbound } from "../resources/data.ts";`;
+    expect(messages(src, "/repo/workflows/next.ts")).toEqual([]);
+    expect(messages(src, "/repo/policies/policy.ts")).toEqual([]);
+    expect(messages(`import { outbound } from "../../resources/data.ts";`, "/repo/workflows/sub/next.ts")).toEqual([]);
+    expect(
+      messages(
+        `import { site } from "../resources/github.ts";\nimport { x } from "../resources/area/data.ts";\nimport config from "../sanoma.config.ts";`,
+        "/repo/workflows/next.ts",
+      ),
+    ).toEqual(
+      ["../resources/github.ts", "../resources/area/data.ts", "../sanoma.config.ts"].map((spec) =>
+        expect.stringMatching(
+          new RegExp(
+            `^import "${spec.replaceAll(".", "\\.")}" .*outside workflows/.*only resources/data\\.ts \\(the collections\\) may be imported$`,
+          ),
+        ),
+      ),
+    );
+    // Without a workflows/ or policies/ tree, there is no company root to find it in.
+    expect(messages(src, "/repo/src/next.ts")).toEqual([expect.stringMatching(/outside this directory/)]);
+    // By real path: a link to the collections is them, and a link to another file is not.
+    const root = mkdtempSync(join(tmpdir(), "sanoma-lint-"));
+    const at = (path: string) => join(root, path);
+    try {
+      mkdirSync(at("resources"));
+      writeFileSync(at("resources/data.ts"), "");
+      writeFileSync(at("resources/other.ts"), "");
+      symlinkSync(at("resources/data.ts"), at("resources/collections.ts"));
+      symlinkSync(at("resources/other.ts"), at("resources/linked.ts"));
+      const linked = (name: string) => messages(`import { x } from "../resources/${name}";`, at("workflows/next.ts"));
+      expect(linked("collections.ts")).toEqual([]);
+      expect(linked("linked.ts")).toEqual([expect.stringMatching(/outside workflows\//)]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("refuses the runtime's client, worker and app, which a workflow could use to approve itself", () => {
@@ -435,6 +473,51 @@ export default [];
     ).toEqual([]);
   });
 
+  it("holds resources/data.ts to collections, imported from sanoma/data, and refuses them in any other data file", () => {
+    const data = "/repo/resources/data.ts";
+    const outbound = fileURLToPath(new URL("./fixtures/outbound/resources/data.ts", import.meta.url));
+    expect(dataFile(readFileSync(outbound, "utf8"), data)).toEqual([]);
+    const ONLY =
+      'resources/data.ts holds collections only, since workflows and the runtime import it: `import { collection } from "sanoma/data"` and `export const <name> = collection({ name: "…", key: "…", fields: { … } })`; declare a connector\'s resources in another data file';
+    // Any import but sanoma/data, a connector's constructors among them, and anything but a collection.
+    expect(
+      dataFile(
+        `import { collection, z } from "sanoma/data";
+import { github } from "@sanoma-ai/connector-github/resources";
+import { secret } from "sanoma/resources";
+import { team } from "./people/team.ts";
+export const leads = collection({ name: "leads", key: "id", fields: { id: "text" } });
+export const site = github.repository({ name: "site" });
+export const odd = collection({ name: "odd", key: "id", fields: { id: leads }, extra: 1 });
+export default [leads];
+`,
+        data,
+      ),
+    ).toEqual([
+      '1:22 a data file imports only `collection` from "sanoma/data": `import { collection } from "sanoma/data"`',
+      `2:24 import "@sanoma-ai/connector-github/resources" is not allowed in resources/data.ts: ${ONLY}`,
+      `3:24 import "sanoma/resources" is not allowed in resources/data.ts: ${ONLY}`,
+      `4:22 import "./people/team.ts" is not allowed in resources/data.ts: ${ONLY}`,
+      expect.stringMatching(/^7:31 collection\(\) takes `\{ name, key, fields, title\? \}` written out/),
+      `8:1 export default is not allowed in resources/data.ts: ${ONLY}`,
+    ]);
+    expect(dataFile(`export const n = 1;\n`, data)).toEqual([`1:18 export const n must be a collection: ${ONLY}`]);
+    // Anywhere else, a collection is refused where it is imported, and resources/data.ts is no data file to import from.
+    expect(
+      dataFile(`import { collection } from "sanoma/data";
+import { leads } from "../data.ts";
+export const more = collection({ name: "more", key: "id", fields: { id: "text" } });
+`),
+    ).toEqual([
+      '1:28 import "sanoma/data" is not allowed here: collections are declared in resources/data.ts, the one data file workflows and the runtime import; move it there',
+      '2:23 import "../data.ts" is not allowed in a data file: resources/data.ts holds collections, which no resource names; import resources from other data files',
+    ]);
+    // Only the file directly under resources/ is the collections'.
+    expect(dataFile(`import { collection } from "sanoma/data";\n`, "/repo/resources/area/data.ts")).toEqual([
+      expect.stringMatching(/^1:28 import "sanoma\/data" is not allowed here/),
+    ]);
+  });
+
   it("refuses exports that are not one resource each", () => {
     expect(
       dataFile(`import { github } from "@sanoma-ai/connector-github/resources";
@@ -579,6 +662,8 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
     // Outside workflows/ and policies/, nothing is restricted.
     write("lib/clock.ts", `export const now = () => Date.now() + Math.random();\n`);
     for (const path of GOOD) write(path, readFileSync(fixture(path), "utf8"));
+    // The collections' file: the rule finds nothing in it.
+    write("resources/data.ts", readFileSync(new URL("./fixtures/outbound/resources/data.ts", import.meta.url), "utf8"));
     for (const [name, source] of BAD_DATA_FILES) write(`resources/bad/${name}.ts`, source);
     found = lint();
   });

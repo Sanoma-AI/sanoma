@@ -2,6 +2,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ResolvedConfig, SanomaConfig } from "@sanoma-ai/workflows";
+import type { Collection } from "@sanoma-ai/workflows/data";
 
 /** A mistake in how the bin was called or in what it found: its message is printed alone, and the exit code is 2. */
 export class UsageError extends Error {}
@@ -23,6 +24,11 @@ export interface Loaded extends LoadedConfig {
  * through `defineConfig` again, since the config module's own call recorded its `file`, and a
  * config made without it gets this file as its `file`. Throws a `UsageError` when the file is
  * missing or its default export is no config.
+ *
+ * Then `<root>/resources/data.ts`, when there is one, is imported by its real path, as the
+ * workflows that name its collections import it: each of its exports is a collection, added to
+ * the config's `collections` (one it lists already is kept, once). An export that is not a
+ * collection is a `UsageError` naming the file.
  */
 export async function loadConfig(cwd = process.cwd()): Promise<LoadedConfig> {
   const env = join(cwd, ".env");
@@ -40,7 +46,29 @@ export async function loadConfig(cwd = process.cwd()): Promise<LoadedConfig> {
     );
   }
   config.file ??= file;
-  return { config, root: config.root ?? dirname(file) };
+  const root = config.root ?? dirname(file);
+  await addCollections(config, root);
+  return { config, root };
+}
+
+/** Adds the collections `<root>/resources/data.ts` exports to the config's, when the file exists. */
+async function addCollections(config: SanomaConfig, root: string): Promise<void> {
+  const path = join(root, "resources", "data.ts");
+  if (!existsSync(path)) return;
+  const file = realpathSync(path);
+  // Imported here, not at the top: `cli.ts` loads this module before any command needs the runtime.
+  const { isCollection } = await import("@sanoma-ai/workflows");
+  const mod = (await import(pathToFileURL(file).href)) as Record<string, unknown>;
+  const collections = new Set<Collection>(config.collections);
+  for (const [name, value] of Object.entries(mod)) {
+    if (!isCollection(value)) {
+      throw new UsageError(
+        `${file} exports ${name}, which is not a collection: resources/data.ts holds collections only, each \`export const ${name} = collection({ name, key, fields })\` with collection from "sanoma/data"`,
+      );
+    }
+    collections.add(value);
+  }
+  config.collections = [...collections];
 }
 
 const isConfig = (x: unknown): x is SanomaConfig =>

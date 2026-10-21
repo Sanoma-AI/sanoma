@@ -72,6 +72,51 @@ describe("check", () => {
     ]);
   }, 180_000);
 
+  it("passes collections in resources/data.ts, which the config lists not, and a workflow importing them", async () => {
+    const own = copyFixture();
+    try {
+      writeFileSync(
+        join(own, "sanoma.config.ts"),
+        readFileSync(join(own, "sanoma.config.ts"), "utf8")
+          .replace(
+            'import hello from "./workflows/hello.ts";',
+            'import hello from "./workflows/hello.ts";\nimport next from "./workflows/next.ts";',
+          )
+          .replace("workflows: [hello]", "workflows: [hello, next]"),
+      );
+      mkdirSync(join(own, "resources"));
+      writeFileSync(
+        join(own, "resources/data.ts"),
+        'import { collection } from "sanoma/data";\n\nexport const leads = collection({ name: "leads", key: "id", fields: { id: "text", won: "boolean" } });\n',
+      );
+      writeFileSync(
+        join(own, "workflows/next.ts"),
+        `import { defineWorkflow, z } from "sanoma";
+import { leads } from "../resources/data.ts";
+
+export default defineWorkflow({
+  name: "next",
+  trigger: "manual",
+  input: z.object({ id: z.string() }),
+  uses: [leads.get],
+  run: async (ctx, { id }) => (await ctx.data.leads.get({ key: id }))?.record.won ?? false,
+});
+`,
+      );
+      const loaded = await loadConfig(own);
+      expect(loaded.config.collections?.map((c) => c.name)).toEqual(["leads"]);
+      const log: string[] = [];
+      const result = await check(
+        { ...loaded, resolved: resolveConfig(loaded.config) },
+        { databaseUrl, log: (l) => log.push(l) },
+      );
+      expect(result).toEqual({ ok: true, problems: [] });
+      expect(log).toContain("oxlint workflows policies resources");
+    } finally {
+      rmSync(own, { recursive: true, force: true });
+    }
+  }, 180_000);
+
   it("reports a scenario step that does not hold", async () => {
     const feature = join(dir, "scenarios/hello/hello.feature");
     writeFileSync(feature, readFileSync(feature, "utf8").replace("And the run succeeds", "And the run fails"));

@@ -34,6 +34,22 @@ export interface DeclaredResource {
   refs: Record<string, string>;
 }
 
+/**
+ * A collection `resources/data.ts` declares, as read without running it: where it is, for the
+ * Resources page. Its fields are the collection's own (`describeConfig`'s `collections`), from
+ * the same file, which the runtime imports.
+ */
+export interface DeclaredCollection {
+  /** `<file>#<export>`, as a resource's: `resources/data.ts#outbound`. */
+  id: string;
+  /** `resources/data.ts`. */
+  file: string;
+  /** The collection's name, its operations' middle segment (`data.<name>.get`). */
+  name: string;
+  /** Its `export const` statement, as UTF-16 offsets into the file's text. */
+  span: Span;
+}
+
 /** Something wrong in the data files, or in finding them. */
 export interface ResourceProblem {
   /**
@@ -56,6 +72,8 @@ export interface DataFiles {
   bindings: Bindings;
   /** Each binding whose key no data file declares, by key. */
   orphans: (Binding & { key: string })[];
+  /** The collections `resources/data.ts` declares, in file order. */
+  collections: DeclaredCollection[];
   /** By file, line and column. */
   problems: ResourceProblem[];
 }
@@ -93,6 +111,9 @@ interface FileEntry {
  * type the connector does not declare, a value the type refuses (a reference where its type
  * takes none among them), a reference cycle, and two resources of one type with one identity.
  *
+ * The collections `resources/data.ts` declares are listed as they are read (`collections`),
+ * never matched to a connector, a resource type or the lockfile: the runtime imports that file.
+ *
  * Each declaration is joined to its binding in the lockfile (`readLockfile`) by its key,
  * `<file>#<export>`; a binding no export declares is an orphan. Problems: the lockfile's, a
  * binding of another type than its declaration's, and two declarations bound to one object.
@@ -108,7 +129,7 @@ export function readDataFiles(
       message:
         "The config has no root, so its data files cannot be found: make it with defineConfig, which records its file, or set its `root`",
     });
-    return { resources: [], bindings: {}, orphans: [], problems };
+    return { resources: [], bindings: {}, orphans: [], collections: [], problems };
   }
   const lock = readLockfile(root);
   problems.push(...lock.problems);
@@ -293,11 +314,19 @@ export function readDataFiles(
       refs: result.refs,
     });
   }
+  const collections = [...files.values()].flatMap(({ rel, data }) =>
+    data.collections.map((c) => ({
+      id: `${rel}#${c.export}`,
+      file: rel,
+      name: c.name,
+      span: [c.start, c.end] as Span,
+    })),
+  );
   problems.sort(
     (a, b) =>
       (a.file ?? "").localeCompare(b.file ?? "") || (a.line ?? 0) - (b.line ?? 0) || (a.column ?? 0) - (b.column ?? 0),
   );
-  return { resources, bindings: lock.bindings, orphans, problems };
+  return { resources, bindings: lock.bindings, orphans, collections, problems };
 }
 
 /** The data files under `dir`, sorted: regular `.ts` files, less tests, declarations and `node_modules`; none when `dir` is not a directory. */

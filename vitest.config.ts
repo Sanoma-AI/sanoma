@@ -28,6 +28,7 @@ export default defineConfig({
       { find: /^sanoma$/, replacement: src("./packages/sanoma/src/index.ts") },
       { find: /^sanoma\/resources$/, replacement: src("./packages/sanoma/src/resources.ts") },
       { find: /^(sanoma|@sanoma-ai\/app)\/site$/, replacement: src("./packages/app/src/site.ts") },
+      { find: /^sanoma\/data$/, replacement: src("./packages/sanoma/src/data.ts") },
     ],
   },
   test: {

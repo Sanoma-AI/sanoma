@@ -1,5 +1,10 @@
 import type { DriftReport, DriftResult, RunSummary } from "@sanoma-ai/workflows";
-import type { ConfigDescription, DeclaredResource, ResourceProblem } from "@sanoma-ai/workflows/describe";
+import type {
+  CollectionEntry,
+  ConfigDescription,
+  DeclaredResource,
+  ResourceProblem,
+} from "@sanoma-ai/workflows/describe";
 import { APPLY_WORKFLOW, DRIFT_WORKFLOW, isEnded, problemAt } from "@sanoma-ai/workflows/shared";
 import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
@@ -163,7 +168,9 @@ function Resources({
   const rows = useMemo(() => rowsOf(config.resources, report), [config.resources, report]);
   const problems = useMemo(() => problemsOf(config.problems, report), [config.problems, report]);
   const titles = useMemo(() => new Map(config.resourceTypes.map((t) => [t.id, t.title])), [config.resourceTypes]);
-  const chosen = config.resources.find((r) => r.id === selected);
+  const chosen =
+    config.resources.find((r) => r.id === selected) ??
+    config.collections.find((c) => c.declared?.id === selected)?.declared;
 
   return (
     <>
@@ -171,9 +178,11 @@ function Resources({
       {problems.length > 0 && <Problems problems={problems} />}
       {children}
       {rows.length === 0 ? (
-        <Nothing title="No resources declared">
-          Declare them in data files under <code>resources/</code>, beside the config.
-        </Nothing>
+        config.collections.length === 0 && (
+          <Nothing title="No resources declared">
+            Declare them in data files under <code>resources/</code>, beside the config.
+          </Nothing>
+        )
       ) : (
         <div className="rounded-lg border">
           <Table>
@@ -201,6 +210,7 @@ function Resources({
         </div>
       )}
       {config.orphans.length > 0 && <Orphans orphans={config.orphans} titles={titles} />}
+      {config.collections.length > 0 && <Collections collections={config.collections} selected={selected} />}
       {chosen && <Declaration key={chosen.id} resource={chosen} />}
     </>
   );
@@ -404,6 +414,59 @@ function Orphans({ orphans, titles }: { orphans: ConfigDescription["orphans"]; t
   );
 }
 
+/** The collections the config declares: the company's own records, kept in its database, not at a vendor. */
+function Collections({ collections, selected }: { collections: CollectionEntry[]; selected: string | undefined }) {
+  return (
+    <section className="flex flex-col gap-2">
+      <SectionTitle>Collections</SectionTitle>
+      <p className="text-sm text-muted-foreground">
+        The company's own records, kept in its database: workflows read and save them through{" "}
+        <code>data.&lt;name&gt;</code> operations, under the policy.
+      </p>
+      <div className="rounded-lg border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Key</TableHead>
+              <TableHead>Fields</TableHead>
+              <TableHead>Declared in</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {collections.map(({ name, title, key, fields, declared }) => (
+              <TableRow key={name} data-state={declared && declared.id === selected ? "selected" : undefined}>
+                <TableCell className="font-medium">
+                  {title ?? name} <code className="text-xs text-muted-foreground">data.{name}</code>
+                </TableCell>
+                <TableCell>
+                  <code className="text-xs">{key}</code>
+                </TableCell>
+                <TableCell>{Object.keys(fields).join(", ")}</TableCell>
+                <TableCell>
+                  {declared ? (
+                    <Link
+                      to="/resources"
+                      search={{ resource: declared.id }}
+                      replace
+                      resetScroll={false}
+                      className="font-mono text-xs underline-offset-4 hover:underline"
+                    >
+                      {declared.id}
+                    </Link>
+                  ) : (
+                    <span className="text-muted-foreground">the config</span>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </section>
+  );
+}
+
 /** The latest check's verdict on a resource; "not checked" when it was not in that check. */
 function DriftBadge({ result }: { result: DriftResult | undefined }) {
   if (!result) return <ToneBadge tone="idle">not checked</ToneBadge>;
@@ -419,8 +482,8 @@ function DriftBadge({ result }: { result: DriftResult | undefined }) {
   );
 }
 
-/** The resource's `export const` in its data file, marked. */
-function Declaration({ resource: { file, span } }: { resource: DeclaredResource }) {
+/** A declaration's `export const` in its data file, marked: a resource's or a collection's. */
+function Declaration({ resource: { file, span } }: { resource: Pick<DeclaredResource, "file" | "span"> }) {
   const { data, error } = useQuery(sourceQuery(file));
   const highlight = useMemo(() => [span], [span]);
   return (

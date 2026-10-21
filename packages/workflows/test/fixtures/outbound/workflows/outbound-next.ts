@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { defineWorkflow } from "../../../../src/index.ts";
+import { defineWorkflow } from "@sanoma-ai/workflows";
 import { outbound } from "../resources/data.ts";
 
 /** Moves a company's lead on to contacted, and says who saved it; a company with no lead is left alone. */

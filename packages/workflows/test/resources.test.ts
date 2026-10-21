@@ -7,6 +7,8 @@ import { github as githubTypes } from "@sanoma-ai/connector-github/resources";
 import { stripe } from "@sanoma-ai/connector-stripe";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { parsed } from "../src/ast.ts";
+import { readDataFile } from "../src/datafile.ts";
 import { describeConfig, readDataFiles, readResources } from "../src/describe.ts";
 import {
   allowAll,
@@ -339,6 +341,82 @@ export const main = github.branch_protection({ repository_id: web, pattern: "mai
           name: "big",
           desired: { name: "big", size: -2 },
         }),
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("collections in resources/data.ts", () => {
+  const DATA = `import { collection } from "sanoma/data";
+
+export const leads = collection({
+  name: "outbound",
+  title: "Outbound",
+  key: "company",
+  fields: { company: "text", stage: { enum: ["new", "won"] }, seats: { type: "number", optional: true } },
+});
+`;
+
+  it("are read as their declarations' plain values, never as resources", () => {
+    const filename = "/repo/resources/data.ts";
+    const { program } = parsed(DATA, filename);
+    expect(readDataFile(program, filename)).toEqual({
+      imports: [],
+      exports: [],
+      collections: [
+        {
+          export: "leads",
+          name: "outbound",
+          title: "Outbound",
+          key: "company",
+          fields: { company: "text", stage: { enum: ["new", "won"] }, seats: { type: "number", optional: true } },
+          start: DATA.indexOf("export const"),
+          end: DATA.length - 1,
+        },
+      ],
+      declared: [],
+      problems: [],
+    });
+  });
+
+  it("are listed where they are declared, beside the resources, matched to no connector, type or lockfile", () => {
+    const dir = project({
+      "data.ts": DATA,
+      "identity/github.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nexport const site = github.repository({ name: "site" });\n`,
+    });
+    try {
+      const read = readDataFiles(dir, base.connectors);
+      expect(read.problems).toEqual([]);
+      expect(read.collections).toEqual([
+        {
+          id: "resources/data.ts#leads",
+          file: "resources/data.ts",
+          name: "outbound",
+          span: [DATA.indexOf("export const"), DATA.length - 1],
+        },
+      ]);
+      expect(read.resources.map((r) => r.id)).toEqual(["resources/identity/github.ts#site"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("are no resource another data file names", () => {
+    const dir = project({
+      "data.ts": DATA,
+      "identity/github.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nimport { leads } from "../data.ts";\nexport const site = github.repository({ name: leads });\n`,
+    });
+    try {
+      expect(readDataFiles(dir, base.connectors).problems).toEqual([
+        {
+          file: "resources/identity/github.ts",
+          line: 2,
+          column: 23,
+          message:
+            'import "../data.ts" is not allowed in a data file: resources/data.ts holds collections, which no resource names; import resources from other data files',
+        },
       ]);
     } finally {
       rmSync(dir, { recursive: true, force: true });

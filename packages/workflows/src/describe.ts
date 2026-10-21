@@ -8,7 +8,13 @@ import { type Effect, VENDOR, type VendorInfo } from "./op.ts";
 import { type Outline, outlineWithSource } from "./outline.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
 import { type ResourceFields, resourceTypesOf } from "./resource.ts";
-import { type DataFiles, type DeclaredResource, readDataFiles, type ResourceProblem } from "./resources.ts";
+import {
+  type DataFiles,
+  type DeclaredCollection,
+  type DeclaredResource,
+  readDataFiles,
+  type ResourceProblem,
+} from "./resources.ts";
 import { BUILT_IN_WORKFLOWS } from "./shared.ts";
 
 // `@sanoma-ai/workflows/describe`: what a UI renders from, apart from the main entry.
@@ -19,6 +25,7 @@ export {
   readDataFiles,
   readResources,
   type DataFiles,
+  type DeclaredCollection,
   type DeclaredResource,
   type ResourceProblem,
 } from "./resources.ts";
@@ -137,6 +144,8 @@ export interface CollectionEntry {
   record: Record<string, unknown>;
   /** Its operations' ids: `data.<name>.get`, `.list`, `.save` and `.delete`. */
   ops: string[];
+  /** Where `resources/data.ts` declares it, read as the data files are; absent for one declared elsewhere. */
+  declared?: DeclaredCollection;
 }
 
 /**
@@ -203,6 +212,8 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     }))
     .toSorted((a, b) => a.id.localeCompare(b.id));
 
+  const dataFiles = readDataFiles(resolved.root, config.connectors, resources);
+  const declared = new Map(dataFiles.collections.map((d) => [d.name, d]));
   const collections: CollectionEntry[] = [...resolved.collections.values()]
     .map((c) => ({
       name: c.name,
@@ -211,6 +222,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       fields: c.fields,
       record: { $id: `sanoma:collection/${c.name}`, ...toJsonSchema(recordSchemaOf(c), `${c.name} record`, "input") },
       ops: [c.get, c.list, c.save, c.delete].map((op) => op.id),
+      ...(declared.has(c.name) && { declared: declared.get(c.name) }),
     }))
     .toSorted((a, b) => a.name.localeCompare(b.name));
 
@@ -253,7 +265,6 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     };
   });
   workflows.sort((a, b) => a.name.localeCompare(b.name));
-  const dataFiles = readDataFiles(resolved.root, config.connectors, resources);
 
   return {
     appName: resolved.appName,
