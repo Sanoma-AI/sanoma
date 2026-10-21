@@ -1,6 +1,6 @@
-import type { WorkflowEntry } from "@sanoma-ai/workflows/describe";
+import type { ConfigDescription, WorkflowEntry } from "@sanoma-ai/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { memo, useMemo } from "react";
+import { memo, useCallback, useMemo } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Item, ItemContent, ItemDescription, ItemGroup } from "#/components/ui/item.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
@@ -21,11 +21,13 @@ export function Retired({ name }: { name: string }) {
 
 /** What a workflow may call, the built-ins it uses, its input and the sites' pages that call it, one section each. */
 export const WorkflowSections = memo(function WorkflowSections({ workflow }: { workflow: WorkflowEntry }) {
-  const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
-  const { data: sites } = useSuspenseQuery({
-    ...configQuery(),
-    select: (config) => siteCallers(config, "workflow", workflow.name),
-  });
+  const select = useCallback(
+    (config: ConfigDescription) => ({ ops: opsById(config), sites: siteCallers(config, "workflow", workflow.name) }),
+    [workflow.name],
+  );
+  const {
+    data: { ops, sites },
+  } = useSuspenseQuery({ ...configQuery(), select });
   const fields = useMemo(() => fieldsOf(workflow.input), [workflow.input]);
   return (
     <>

@@ -1,7 +1,9 @@
-import { basename, dirname, isAbsolute, relative, sep } from "node:path";
+import { readdirSync, statSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 
-// Where an import may reach, as the lints and the data-file reader all decide it, and the one
-// walk up the directories. Node's `path` only, no parser: the oxlint plugin loads it.
+// Where an import may reach, as the lints and the data-file reader all decide it, the one walk up
+// the directories and the one walk down (`filesUnder`). Node's `path` and `fs` only, no parser:
+// the oxlint plugin loads it.
 
 /** A relative import specifier: `./x.ts`, `../y.ts`. */
 export const RELATIVE = /^\.\.?\//;
@@ -29,4 +31,17 @@ export function nearestDir(filename: string, names: readonly string[]): string {
 export function inside(dir: string, path: string): boolean {
   const rel = relative(dir, path);
   return rel === "" || (rel.split(sep)[0] !== ".." && !isAbsolute(rel));
+}
+
+/** True when `path` is a directory. */
+export const isDirectory = (path: string): boolean => statSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false;
+
+/** The files under `dir` whose name `keep` takes, sorted, outside `node_modules`; none when `dir` is not a directory. */
+export function filesUnder(dir: string, keep: (name: string) => boolean): string[] {
+  if (!isDirectory(dir)) return [];
+  return readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((d) => d.isFile() && keep(d.name))
+    .map((d) => join(d.parentPath, d.name))
+    .filter((path) => !relative(dir, path).split(sep).includes("node_modules"))
+    .toSorted();
 }

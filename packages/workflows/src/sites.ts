@@ -1,10 +1,11 @@
-import { readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { childrenOf, type LintProblem, type Node, readSource, type SourceFile } from "./ast.ts";
 import { keyName } from "./datafile.ts";
 import type { ConfigDescription } from "./describe.ts";
 import { stringValue, unwrap } from "./outline.ts";
-import { apiNameOf, DATA_VENDOR } from "./shared.ts";
+import { filesUnder, isDirectory } from "./paths.ts";
+import { apiNameOf, DATA_VENDOR, SITE_NAME } from "./shared.ts";
 
 // What a company's sites call, read from their source with oxc and never run: the reverse index
 // a workflow's page shows as Used by, and the names `sanoma check` holds to the config.
@@ -27,7 +28,7 @@ export interface SiteCall {
   /** From 1, in UTF-16 code units. */
   column: number;
   /**
-   * The path of the page the file is, from its `createFileRoute` id: groups and pathless
+   * The path of the page the file is, from its `createFileRoute` (or `createLazyFileRoute`) id: groups and pathless
    * segments left out, no trailing slash (`/sites/sales`). Absent for a file that is no page,
    * such as a component's.
    */
@@ -42,28 +43,30 @@ export interface SiteEntry {
   title?: string;
   /** Its calls, by file and then in the file's order. */
   calls: SiteCall[];
-  /** Each call to a workflow, a collection or an operation the config does not have, at its file. */
+  /** Each call to a workflow, a collection or an operation the config does not have, or to an operation a page may not call directly, at its file. */
   problems: (LintProblem & { file: string })[];
 }
 
-/** A site's folder name, as `sitesOf` in `@sanoma-ai/app/build` mounts one: a URL segment. */
-const SITE_NAME = /^[a-z][a-z0-9-]*$/;
 /** Where a site's code is: its pages and its components. */
 const SITE_DIRS = ["routes", "components"];
 /** Where `api` and `defineSite` come from: `sanoma/site`, which re-exports the app's. */
 const SITE_SOURCES: ReadonlySet<string> = new Set(["sanoma/site", "@sanoma-ai/app/site"]);
-const UI_SOURCE = "@sanoma-ai/app/ui";
+const UI_SOURCES: ReadonlySet<string> = new Set(["@sanoma-ai/app/ui"]);
 const KIND_NAMES = { workflow: "workflow", collection: "collection", op: "operation" } as const;
+/** What makes a route from its id, whose first argument is the id. */
+const ROUTE_MAKERS: ReadonlySet<string> = new Set(["createFileRoute", "createLazyFileRoute"]);
 
 /**
  * The sites under `root`: each folder of `sites/` with a `routes/` whose name is a URL segment,
- * by name. Reads `routes/**` and `components/**` (`.ts` and `.tsx`) of each with oxc, never
- * running them: each `<RunForm workflow="…" />` whose `RunForm` is imported from
- * `@sanoma-ai/app/ui`, and each call on `api` imported from `sanoma/site`: `api.<name>(…)` and
- * `api.<name>.<method>(…)` call a workflow, `api.data.<collection>.<op>(…)` a collection, and
- * `api.<vendor>.<resource>.<op>(…)` an operation. A name that is not written out (a variable, a
- * template with holes, a computed member) is skipped, as is a call through a namespace import or
- * a destructured `api`. Each call naming what `description` does not have is a problem.
+ * by name (as `@sanoma-ai/app/build`'s `sitesOf` mounts them). Reads `routes/**` and
+ * `components/**` (`.ts` and `.tsx`, less tests and declarations) of each with oxc, never running
+ * them: each `<RunForm workflow="…" />` whose `RunForm` is imported from `@sanoma-ai/app/ui`, and
+ * each use of `api` imported from `sanoma/site`, called or passed on (`queryFn: api.data.leads.list`):
+ * `api.<name>` and `api.<name>.<method>` are a workflow, `api.data.<collection>.<op>` a collection,
+ * and `api.<vendor>.<resource>.<op>` an operation. A name that is not written out (a variable, a
+ * template with holes, a computed member) is skipped, as is a use through a namespace import or a
+ * destructured `api`. A call to what `description` does not have, or to an operation a page may
+ * not call directly, is a problem.
  */
 export function readSites(
   root: string | undefined,
@@ -74,86 +77,99 @@ export function readSites(
   if (!isDirectory(dir)) return [];
   const workflows = new Set(description.workflows.map((wf) => wf.name));
   const collections = new Set(description.collections.map((c) => c.name));
-  const ops = new Set(description.ops.map((op) => op.id));
+  const ops = new Map(description.ops.map((op) => [op.id, op]));
   // A workflow's api name to its name: two of one api name are a problem on the workflows.
   const byApiName = new Map(description.workflows.map((wf) => [apiNameOf(wf.name), wf.name]));
-  const exists = ({ kind, target }: SiteCall) =>
-    (kind === "workflow" ? workflows : kind === "collection" ? collections : ops).has(target);
+
+  /** A call as written, resolved as the app's `callApi` resolves it, with why it would fail. */
+  const resolve = ({ kind, name, via, ...at }: Written): { call: SiteCall; problem?: string } => {
+    const target = kind === "workflow" && via === "api" ? (byApiName.get(name) ?? name) : name;
+    const found =
+      kind === "workflow"
+        ? via === "api"
+          ? byApiName.has(name)
+          : workflows.has(name)
+        : kind === "collection"
+          ? collections.has(name)
+          : ops.has(name);
+    const problem = !found
+      ? `calls ${KIND_NAMES[kind]} "${target}", which does not exist`
+      : kind === "op" && !ops.get(name)!.direct
+        ? `calls operation "${target}", which a page may not call directly: start a workflow that calls it`
+        : undefined;
+    return { call: { kind, target, via, ...at }, ...(problem && { problem }) };
+  };
 
   return readdirSync(dir, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && SITE_NAME.test(d.name) && isDirectory(join(dir, d.name, "routes")))
+    .filter((d) => d.isDirectory() && SITE_NAME.test(d.name) && existsSync(join(dir, d.name, "routes")))
     .map((d) => d.name)
     .toSorted()
     .map((name) => {
-      const files = SITE_DIRS.flatMap((sub) => sourcesUnder(join(dir, name, sub))).toSorted();
-      const calls = files.flatMap((path) => {
+      const files = SITE_DIRS.flatMap((sub) => filesUnder(join(dir, name, sub), isSource)).toSorted();
+      const resolved = files.flatMap((path) => {
         const file = readSource(path);
-        return typeof file === "string" ? [] : callsIn(file, relative(root, path).split(sep).join("/"), byApiName);
+        return typeof file === "string" ? [] : usesIn(file, relative(root, path).split(sep).join("/")).map(resolve);
       });
       const title = titleOf(join(dir, name, "site.ts"));
-      const problems = calls
-        .filter((call) => !exists(call))
-        .map(({ kind, target, file, line, column }) => ({
-          file,
-          line,
-          column,
-          message: `calls ${KIND_NAMES[kind]} "${target}", which does not exist`,
-        }));
+      const calls = resolved.map((r) => r.call);
+      const problems = resolved.flatMap(({ call: { file, line, column }, problem }) =>
+        problem === undefined ? [] : [{ file, line, column, message: problem }],
+      );
       return { name, ...(title !== undefined && { title }), calls, problems };
     });
 }
 
-/** The calls in one file, in its order. */
-function callsIn({ program, at }: SourceFile, file: string, byApiName: ReadonlyMap<string, string>): SiteCall[] {
+/** A use of `api` or a `RunForm`, as written: the name it gives, before it is resolved. */
+type Written = Omit<SiteCall, "target"> & { name: string };
+
+/** The uses in one file, in its order. */
+function usesIn({ program, at }: SourceFile, file: string): Written[] {
   const api = importedAs(program, SITE_SOURCES, "api");
-  const runForm = importedAs(program, new Set([UI_SOURCE]), "RunForm");
+  const runForm = importedAs(program, UI_SOURCES, "RunForm");
   if (!api.size && !runForm.size) return [];
-  const found: Omit<SiteCall, "page">[] = [];
+  const found: Omit<Written, "page">[] = [];
   let page: string | undefined;
   const visit = (node: Node) => {
     if (!node) return;
-    if (node.type === "CallExpression") {
+    if (node.type === "MemberExpression") {
+      const named = apiPath(node, api);
+      // The outermost member of a path on `api`: what it names, called or not; its inner members are not visited.
+      if (named) return void found.push({ ...named, via: "api", file, ...at(node.start) });
+    } else if (node.type === "CallExpression" && page === undefined) {
       const callee = unwrap(node.callee);
-      if (page === undefined && callee?.type === "Identifier" && callee.name === "createFileRoute") {
+      if (callee?.type === "Identifier" && ROUTE_MAKERS.has(callee.name)) {
         const id = stringValue(node.arguments[0]);
         if (id !== undefined) page = pageOf(id);
       }
-      const called = apiCall(callee, api, byApiName);
-      if (called) found.push({ ...called, via: "api", file, ...at(node.start) });
     } else if (node.type === "JSXOpeningElement" && node.name.type === "JSXIdentifier" && runForm.has(node.name.name)) {
       const attribute = node.attributes.find(
         (a: Node) => a.type === "JSXAttribute" && a.name.type === "JSXIdentifier" && a.name.name === "workflow",
       );
       const value = attribute?.value?.type === "JSXExpressionContainer" ? attribute.value.expression : attribute?.value;
-      const target = stringValue(value);
-      if (target !== undefined) found.push({ kind: "workflow", target, via: "RunForm", file, ...at(node.start) });
+      const name = stringValue(value);
+      if (name !== undefined) found.push({ kind: "workflow", name, via: "RunForm", file, ...at(node.start) });
     }
     for (const child of childrenOf(node)) visit(child);
   };
   visit(program);
-  return found.map((call) => (page === undefined ? call : { ...call, page }));
+  return found.map((use) => (page === undefined ? use : { ...use, page }));
 }
 
-/** What a call on `api` names, from its callee; undefined for any other callee, or a name not written out. */
-function apiCall(
-  callee: Node,
-  api: ReadonlySet<string>,
-  byApiName: ReadonlyMap<string, string>,
-): Pick<SiteCall, "kind" | "target"> | undefined {
+/** What a member path on `api` names; undefined for a path on anything else, a name not written out, or no name. */
+function apiPath(member: Node, api: ReadonlySet<string>): Pick<Written, "kind" | "name"> | undefined {
   const path: string[] = [];
-  let node = callee;
+  let node = member;
   while (node?.type === "MemberExpression") {
     const key: string | undefined = node.computed ? stringValue(node.property) : node.property.name;
     if (key === undefined) return undefined;
     path.unshift(key);
     node = unwrap(node.object);
   }
-  if (node?.type !== "Identifier" || !api.has(node.name) || !path.length) return undefined;
-  const [name, second] = path as [string, ...string[]];
-  if (name === DATA_VENDOR) return path.length === 3 ? { kind: "collection", target: second! } : undefined;
-  if (path.length === 3) return { kind: "op", target: path.join(".") };
-  if (path.length > 2) return undefined;
-  return { kind: "workflow", target: byApiName.get(name) ?? name };
+  if (node?.type !== "Identifier" || !api.has(node.name)) return undefined;
+  const [first, second] = path as [string, ...string[]];
+  if (first === DATA_VENDOR) return path.length === 3 ? { kind: "collection", name: second! } : undefined;
+  if (path.length === 3) return { kind: "op", name: path.join(".") };
+  return path.length <= 2 ? { kind: "workflow", name: first } : undefined;
 }
 
 /** The local names `imported` has in the file, imported as a value from one of `sources`. */
@@ -200,12 +216,5 @@ const pageOf = (id: string): string =>
     .map((s) => s.replace(/_$/, ""))
     .join("/")}`;
 
-/** The `.ts` and `.tsx` files under `dir`, less declarations; none when it is not a directory. */
-function sourcesUnder(dir: string): string[] {
-  if (!isDirectory(dir)) return [];
-  return readdirSync(dir, { recursive: true, withFileTypes: true })
-    .filter((d) => d.isFile() && /\.tsx?$/.test(d.name) && !d.name.endsWith(".d.ts"))
-    .map((d) => join(d.parentPath, d.name));
-}
-
-const isDirectory = (path: string) => statSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false;
+/** A site's source file: `.ts` or `.tsx`, but a test or a declaration. */
+const isSource = (name: string) => /\.tsx?$/.test(name) && !/\.(test|d)\.tsx?$/.test(name);

@@ -1,10 +1,11 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { parsed } from "./ast.ts";
 import { rootOf, type SanomaConfig } from "./config.ts";
 import { type DataFile, type DataFileExport, type DataValue, readDataFile, Reference } from "./datafile.ts";
 import { type Binding, type Bindings, LOCKFILE, readLockfile } from "./lockfile.ts";
 import { type Connector, VENDOR } from "./op.ts";
+import { filesUnder } from "./paths.ts";
 import type { Span } from "./outline.ts";
 import { type Declared, type Resource, resourceTypesOf } from "./resource.ts";
 import { problemLine } from "./shared.ts";
@@ -329,12 +330,6 @@ export function readDataFiles(
   return { resources, bindings: lock.bindings, orphans, collections, problems };
 }
 
-/** The data files under `dir`, sorted: regular `.ts` files, less tests, declarations and `node_modules`; none when `dir` is not a directory. */
-function dataFilesUnder(dir: string): string[] {
-  if (!statSync(dir, { throwIfNoEntry: false })?.isDirectory()) return [];
-  return readdirSync(dir, { recursive: true, withFileTypes: true })
-    .filter((d) => d.isFile() && d.name.endsWith(".ts") && !d.name.endsWith(".test.ts") && !d.name.endsWith(".d.ts"))
-    .map((d) => join(d.parentPath, d.name))
-    .filter((path) => !relative(dir, path).split(sep).includes("node_modules"))
-    .toSorted();
-}
+/** The data files under `dir`, sorted: regular `.ts` files, less tests, declarations and `node_modules`. */
+const dataFilesUnder = (dir: string): string[] =>
+  filesUnder(dir, (name) => name.endsWith(".ts") && !name.endsWith(".test.ts") && !name.endsWith(".d.ts"));

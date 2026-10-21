@@ -136,7 +136,7 @@ An operation's call and a start send a new id each (`crypto.randomUUID()`, lette
 | `run_running`      | 409    | `.result` waited and the run has not ended (`runId`)                                                                                                                                                                 |
 | `run_not_found`    | 404    | No such run of that workflow                                                                                                                                                                                         |
 
-`describeConfig` reads what each site calls from its source, never running it (`readSites`, in `@sanoma-ai/workflows/describe`): a workflow's page and a collection's list the sites' pages that call them under **Used by**, and a call to a workflow, collection or operation the config does not have fails `sanoma check`. Name what a site calls in its code (`<RunForm workflow="announce" />`, `api.announce.start(…)`, `api.data.outbound.list()`): a name held in a variable or built at run time is not read, so its page is not listed.
+`describeConfig` reads what each site calls from its source, never running it (`readSites`, in `@sanoma-ai/workflows/describe`): a workflow's page and a collection's list the sites' pages that call them under **Used by**, and a call to a workflow, collection or operation the config does not have, or to an operation a page may not call directly, fails `sanoma check`. A page links there only when this build serves it. Name what a site calls in its code (`<RunForm workflow="announce" />`, `api.announce.start(…)`, `api.data.outbound.list()`): a name held in a variable or built at run time is not read, so its page is not listed.
 
 ## Screens
 

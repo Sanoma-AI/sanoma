@@ -1,7 +1,8 @@
 // The app's build, Node only: the package's own (`vite.config.ts`), and a company repo's with its
 // sites, the app's routes plus every `sites/<name>/routes` as one TanStack Start build under
 // `<repo>/.sanoma/app`. Nothing is written into the app package or under `node_modules`. Only
-// Node's modules load with this file; Vite and its plugins load when a config or build needs them.
+// Node's modules (and `@sanoma-ai/workflows/shared`, plain values) load with this file; Vite and
+// its plugins load when a config or build needs them.
 import { createHash } from "node:crypto";
 import {
   copyFileSync,
@@ -18,6 +19,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { SITE_NAME } from "@sanoma-ai/workflows/shared";
 import type { InlineConfig, Logger, Plugin } from "vite";
 import type { ServerEntry } from "./context.ts";
 
@@ -38,9 +40,6 @@ const CLIENT_DENIED = /^(@sanoma-ai\/(workflows(?!\/shared$)|bridge|connector-|t
 
 /** What a company file may import without the company depending on it: the app's own copy, so there is one. */
 const SHARED = /^(react|react-dom|@tanstack\/[^/]+|@sanoma-ai\/app)(\/.*)?$/;
-
-/** A site's folder name: one URL segment. */
-const SITE_NAME = /^[a-z][a-z0-9-]*$/;
 
 /**
  * `sites/__virtual.ts`, committed and never edited by hand: the sites mount's listing, every

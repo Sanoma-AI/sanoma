@@ -80,6 +80,14 @@ function linkTag(html: string, text: string) {
   return start < 0 ? undefined : html.slice(start, html.indexOf(">", start) + 1);
 }
 
+/** The page's region or section under the heading `title`, up to the next heading, or the page's end. */
+function sectionAfter(html: string, title: string) {
+  const start = html.search(new RegExp(`<h[23][^>]*>${title}</h[23]>`));
+  if (start < 0) return "";
+  const next = html.slice(start + 1).search(/<h[1-6][ >]|<script/);
+  return next < 0 ? html.slice(start) : html.slice(start, start + 1 + next);
+}
+
 /**
  * A class only a site uses, put together here so that Tailwind, scanning this package for the
  * package's own build, does not find it in this file.
@@ -299,11 +307,7 @@ describe("a company's app with its sites", () => {
   it("lists under a workflow's Used by the site's pages that call it, each linking to its page, and a component's file", async () => {
     const html = (await (await fetch(new URL("/workflows/hello", app.url))).text()).replaceAll("<!-- -->", "");
     expect(html).toMatch(/<h3[^>]*>Used by<\/h3>/);
-    // The section, up to the page's scripts, whose state holds the description.
-    const usedBy = html.slice(
-      html.search(/<h3[^>]*>Used by<\/h3>/),
-      html.indexOf("<script", html.indexOf(">Used by<")),
-    );
+    const usedBy = sectionAfter(html, "Used by");
     for (const [page, via] of [
       ["/sites/hello/run", "RunForm"],
       ["/sites/hello/started", "api"],
@@ -320,7 +324,8 @@ describe("a company's app with its sites", () => {
 
   it("lists under a collection's Used by the site's page that reads it, linking to the page", async () => {
     const html = (await (await fetch(new URL("/data/leads", app.url))).text()).replaceAll("<!-- -->", "");
-    const usedBy = html.slice(html.indexOf(">Used by</h2>"), html.indexOf("<script", html.indexOf(">Used by</h2>")));
+    expect(html).toContain(">Used by</h2>");
+    const usedBy = sectionAfter(html, "Used by");
     expect(usedBy).toMatch(/Hello desk<code[^>]*>\/sites\/hello\/leads<\/code>.*?through api</);
     expect(linkTag(usedBy, "/sites/hello/leads</code>")).toContain('href="/sites/hello/leads"');
     // No workflow uses leads, and the pages that call only hello are not listed.

@@ -3,7 +3,7 @@ import type { ApprovalState, Builtin, Effect, LedgerRecord, RecordedDecision } f
 import type { ResourceProblem } from "@sanoma-ai/workflows/describe";
 import { problemAt } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { Link, useMatches } from "@tanstack/react-router";
+import { Link, useMatches, useRouter } from "@tanstack/react-router";
 import { cva, type VariantProps } from "class-variance-authority";
 import {
   ChevronRightIcon,
@@ -74,9 +74,11 @@ export const useCrumbs = () => {
   return useMatches({
     select: (matches) => {
       const crumbs = matches.flatMap(({ id, pathname, staticData, loaderData }) => {
-        // A site's loader may answer with anything an `api` call does, a string or a number too.
-        const named = typeof loaderData === "object" && loaderData !== null && "crumb" in loaderData;
-        const label = (named ? loaderData.crumb : undefined) ?? staticData.crumb;
+        // A site's loader may answer with anything an `api` call does, a string or a number too,
+        // or `any` while `api` is untyped: read as `unknown`, so no loader's type reaches here.
+        const data: unknown = loaderData;
+        const named = typeof data === "object" && data !== null && "crumb" in data;
+        const label = (named ? (data.crumb as string | undefined) : undefined) ?? staticData.crumb;
         return label ? [{ id, pathname, label }] : [];
       });
       const page = matches.at(-1);
@@ -677,10 +679,11 @@ interface UsedByProps {
 
 /**
  * What calls something: each workflow, linking to its page, then each site's file under the
- * site's title and how it calls (a page links to itself, but one with a path parameter, which has
- * no one URL; a component's file names the file).
+ * site's title and how it calls (a page this build serves links to itself, but one with a path
+ * parameter, which has no one URL; a component's file names the file).
  */
 export function UsedByList({ workflows = [], sites = [] }: UsedByProps) {
+  const { routesByPath } = useRouter();
   if (!workflows.length && !sites.length) return <None />;
   return (
     <ItemGroup>
@@ -690,9 +693,7 @@ export function UsedByList({ workflows = [], sites = [] }: UsedByProps) {
             <ItemContent>
               <ItemTitle>{wf.title ?? wf.name}</ItemTitle>
             </ItemContent>
-            <ItemActions>
-              <ChevronRightIcon className="size-4" />
-            </ItemActions>
+            {CHEVRON}
           </Link>
         </LinkItem>
       ))}
@@ -706,13 +707,11 @@ export function UsedByList({ workflows = [], sites = [] }: UsedByProps) {
             <ItemDescription>through {via.join(" and ")}</ItemDescription>
           </ItemContent>
         );
-        return page && !page.includes("$") ? (
+        return page && !page.includes("$") && page in routesByPath ? (
           <LinkItem key={file} variant="outline" size="xs">
             <Link to={page}>
               {content}
-              <ItemActions>
-                <ChevronRightIcon className="size-4" />
-              </ItemActions>
+              {CHEVRON}
             </Link>
           </LinkItem>
         ) : (
@@ -724,6 +723,13 @@ export function UsedByList({ workflows = [], sites = [] }: UsedByProps) {
     </ItemGroup>
   );
 }
+
+/** The end of a row that links elsewhere. */
+const CHEVRON = (
+  <ItemActions>
+    <ChevronRightIcon className="size-4" />
+  </ItemActions>
+);
 
 /** What a section says when it has nothing to list. */
 export function None({ children = "None." }: { children?: ReactNode }) {

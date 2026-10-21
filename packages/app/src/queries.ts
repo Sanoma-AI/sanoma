@@ -152,9 +152,9 @@ export function siteCallers(config: ConfigDescription, kind: SiteCall["kind"], t
     for (const call of site.calls) {
       if (call.kind !== kind || call.target !== target) continue;
       const { file, page, via } = call;
-      const caller = byFile.get(file) ?? { site: site.title ?? site.name, file, ...(page && { page }), via: [] };
+      let caller = byFile.get(file);
+      if (!caller) byFile.set(file, (caller = { site: site.title ?? site.name, file, ...(page && { page }), via: [] }));
       if (!caller.via.includes(via)) caller.via.push(via);
-      byFile.set(file, caller);
     }
   }
   return [...byFile.values()];

@@ -32,6 +32,12 @@ const acme = defineConnector("acme", {
       output: z.object({ id: z.string() }),
       target: ({ id }: { id: string }) => `customer/${id}`,
     },
+    rename: {
+      effect: "write",
+      input: z.object({ id: z.string() }),
+      output: z.object({ id: z.string() }),
+      target: ({ id }: { id: string }) => `customer/${id}`,
+    },
   },
 });
 
@@ -78,8 +84,8 @@ describe("readSites", () => {
             target: "leads",
             via: "api",
             file: "sites/hello/routes/leads.tsx",
-            line: 8,
-            column: 36,
+            line: 7,
+            column: 17,
             page: "/sites/hello/leads",
           },
           {
@@ -120,6 +126,8 @@ describe("readSites", () => {
           "void sanoma.gone.start({});",
           "void sanoma.data.nope.list();",
           "void sanoma.acme.customer.nope({});",
+          "void sanoma.acme.customer.rename({ id: '1' });",
+          'void sanoma["outbound-next"]();',
           'return <RunForm workflow={"gone"} />;',
         ].join("\n  "),
       ),
@@ -129,7 +137,7 @@ describe("readSites", () => {
         'import { api } from "sanoma/site";',
         "return api.data.leads.save({ company: 'Acme', stage: 'new' });",
       ),
-      // Names not written out, a namespace import and a type-only one: none read.
+      // Names not written out, a namespace import and a type-only one: none read; a path passed on is.
       "sites/desk/components/dynamic.tsx": [
         'import * as site from "sanoma/site";',
         'import type { api as typed } from "sanoma/site";',
@@ -144,6 +152,16 @@ describe("readSites", () => {
         "  <RunForm workflow={`${form}`} />,",
         "];",
         "export type Typed = typeof typed;",
+        "export const ref = { queryFn: api.data.leads.list };",
+        "",
+      ].join("\n"),
+      // A test is not read; a lazy route's page is its id's.
+      "sites/desk/components/x.test.tsx": 'import { api } from "sanoma/site";\nexport const x = () => api.gone();\n',
+      "sites/desk/routes/later.lazy.tsx": [
+        'import { createLazyFileRoute } from "@tanstack/react-router";',
+        'import { api } from "sanoma/site";',
+        "",
+        'export const Route = createLazyFileRoute("/sites/desk/later")({ component: () => void api.hello.latest() });',
         "",
       ].join("\n"),
       // A site with no calls, and no site.ts.
@@ -164,6 +182,14 @@ describe("readSites", () => {
             kind: "collection",
             target: "leads",
             via: "api",
+            file: "sites/desk/components/dynamic.tsx",
+            line: 14,
+            column: 31,
+          },
+          {
+            kind: "collection",
+            target: "leads",
+            via: "api",
             file: "sites/desk/routes/(admin)/_auth/settings.tsx",
             line: 7,
             column: 10,
@@ -175,13 +201,33 @@ describe("readSites", () => {
           { kind: "workflow", target: "gone", via: "api", ...at(11, 8) },
           { kind: "collection", target: "nope", via: "api", ...at(12, 8) },
           { kind: "op", target: "acme.customer.nope", via: "api", ...at(13, 8) },
-          { kind: "workflow", target: "gone", via: "RunForm", ...at(14, 10) },
+          { kind: "op", target: "acme.customer.rename", via: "api", ...at(14, 8) },
+          // A workflow by its name, not its api name: `callApi` would not find it.
+          { kind: "workflow", target: "outbound-next", via: "api", ...at(15, 8) },
+          { kind: "workflow", target: "gone", via: "RunForm", ...at(16, 10) },
+          {
+            kind: "workflow",
+            target: "hello",
+            via: "api",
+            file: "sites/desk/routes/later.lazy.tsx",
+            line: 4,
+            column: 87,
+            page: "/sites/desk/later",
+          },
         ],
         problems: [
           { file: index, line: 11, column: 8, message: 'calls workflow "gone", which does not exist' },
           { file: index, line: 12, column: 8, message: 'calls collection "nope", which does not exist' },
           { file: index, line: 13, column: 8, message: 'calls operation "acme.customer.nope", which does not exist' },
-          { file: index, line: 14, column: 10, message: 'calls workflow "gone", which does not exist' },
+          {
+            file: index,
+            line: 14,
+            column: 8,
+            message:
+              'calls operation "acme.customer.rename", which a page may not call directly: start a workflow that calls it',
+          },
+          { file: index, line: 15, column: 8, message: 'calls workflow "outbound-next", which does not exist' },
+          { file: index, line: 16, column: 10, message: 'calls workflow "gone", which does not exist' },
         ],
       },
       { name: "quiet", calls: [], problems: [] },
