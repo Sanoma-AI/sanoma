@@ -30,7 +30,7 @@ npm run env         # rewrites .env.example from the connectors' variables
 
 ## Rules
 
-- A workflow imports only from `sanoma`, its connectors and relative files, and does the same thing every time it is replayed: `ctx.now()` and `ctx.sleep()`, never `Date` or timers; configuration comes in as input, never from `process.env`. The `check` script holds workflows and data files to this.
+- A workflow imports only from `sanoma`, its connectors and relative files, and does the same thing every time it is replayed: `ctx.now()` and `ctx.sleep()`, never `Date` (but `new Date(await ctx.now())` for a date) or timers; configuration comes in as input, never from `process.env`. The `check` script holds workflows and data files to this.
 - Define each workflow's `name` as a string literal: the app finds the workflow in its file by it.
 - Every operation a workflow calls is listed in its `uses`; add the connector to `sanoma.config.ts` and to `package.json`.
 - Declare the company's own records as collections in `resources/data.ts`, which imports only `collection` from `sanoma/data` and holds nothing else: the runtime imports it, and so does a workflow that names a collection's operations (`import { outbound } from "../resources/data.ts"`, the one file outside `workflows/` a workflow may import). Every other data file is read, never run.

@@ -2,13 +2,11 @@
   "overrides": [
     {
       "files": ["workflows/**"],
+      "jsPlugins": ["./dist/plugin.js"],
       "rules": {
+        "sanoma/date": "error",
         "no-restricted-globals": [
           "error",
-          {
-            "name": "Date",
-            "message": "Workflows are replayed: use `await ctx.now()` for the time and `ctx.sleep({ until })` to wait for a date."
-          },
           {
             "name": "fetch",
             "message": "A workflow must call vendors through ctx, so the policy sees every call: use a connector operation listed in `uses`."

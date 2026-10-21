@@ -245,7 +245,7 @@ const twice = (name: string, fix: string) =>
   );
 
 describe("lintWorkflow on run, which the worker holds to the outline", () => {
-  it("passes loops, a switch with break, a try with a rethrow, ctx.all over .map, ctx.runId and ctx.now, and a return at the end", () => {
+  it("passes loops, a switch with break, a try with a rethrow, ctx.all over .map, ctx.runId, ctx.now and a date from it, and a return at the end", () => {
     expect(
       inRun(`
         for (const t of input.ts) await ctx.ghost.post.create({ title: t });
@@ -260,7 +260,7 @@ describe("lintWorkflow on run, which the worker holds to the outline", () => {
           if (errorCode(err) === "run_ended") throw err;
         }
         await ctx.all(input.ts.map((t) => () => ctx.ghost.post.create({ title: t })));
-        console.log(ctx.runId, await ctx.now());
+        console.log(ctx.runId, await ctx.now(), new Date(await ctx.now()).toISOString());
         return input.ts.length;
       `),
     ).toEqual([]);
@@ -595,7 +595,11 @@ const fanned = await Promise.all([t, r]);
 const settled = await Promise.allSettled([t, r]);
 const raced = await Promise.race([t, r]);
 const first = await Promise.any([t, r]);
-export const all = [SanomaClient, jsonlLedger, x, fakeGhost, t, r, k, resolveDatabaseUrl, ghostDriver, id, g, ws, p, vendor, fanned, settled, raced, first];
+const today = new Date();
+const given = new Date(k);
+const unawaited = new Date(ctx.now());
+const later = new Date(await (async () => ctx.now())());
+export const all = [SanomaClient, jsonlLedger, x, fakeGhost, t, r, k, resolveDatabaseUrl, ghostDriver, id, g, ws, p, vendor, fanned, settled, raced, first, today, given, unawaited, later];
 `;
 
 describe("lintWorkflow on a workflow that tries everything", () => {
@@ -615,6 +619,7 @@ describe("lintWorkflow on a workflow that tries everything", () => {
 });
 
 const globals = "eslint(no-restricted-globals)";
+const date = "sanoma(date)";
 const imports = "eslint(no-restricted-imports)";
 /** A diagnostic oxlint reports on a line of BAD. */
 const bad = (line: number, rule: string, text: RegExp) => ({
@@ -651,10 +656,20 @@ import { z } from "zod";
 // Local bindings, property names and types that share a restricted name are fine.
 const process = { step: 1 };
 const o = { Date: 1, fetch: 2 };
-type T = { crypto: string };
+type T = { crypto: string; at: Date };
 const n = o.Date + o.fetch + process.step + Math.floor(1.5);
 
-export default defineWorkflow({ name: "good", input: z.object({}), uses: [ghost.post.create], run: async () => n });
+export default defineWorkflow({
+  name: "good",
+  input: z.object({}),
+  uses: [ghost.post.create],
+  // A date of the time ctx.now() read, today's and tomorrow's.
+  run: async (ctx) => [
+    n,
+    new Date(await ctx.now()).toISOString(),
+    new Date((await ctx.now()) + 86_400_000).toISOString().slice(0, 10),
+  ],
+});
 export type { T };
 export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
 `,
@@ -710,7 +725,7 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
       bad(1, imports, /'DriverError'/),
       bad(2, imports, /@sanoma-ai\/testing.*through ctx/),
       bad(3, imports, /@sanoma-ai\/connector-ghost\/fake.*through ctx/),
-      bad(4, globals, /'Date'.*ctx\.now/),
+      bad(4, date, /`await ctx\.now\(\)` for the time, `new Date\(await ctx\.now\(\)\)` for a date/),
       bad(5, globals, /'fetch'.*connector operation/),
       bad(6, "eslint(no-restricted-properties)", /Math\.random.*ctx\.runId/),
       bad(7, globals, /'process'.*workflow input/),
@@ -726,6 +741,11 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
       // A race has no ctx.all to point at: nothing races.
       bad(18, "eslint(no-restricted-properties)", /Promise\.race.*nothing races: pick one call, or sleep/),
       bad(19, "eslint(no-restricted-properties)", /Promise\.any.*nothing races/),
+      // A date only of what `await ctx.now()` read, there in the argument.
+      bad(20, date, /new Date\(await ctx\.now\(\)\)/),
+      bad(21, date, /new Date\(await ctx\.now\(\)\)/),
+      bad(22, date, /new Date\(await ctx\.now\(\)\)/),
+      bad(23, date, /new Date\(await ctx\.now\(\)\)/),
       {
         file: "workflows/sandbox.ts",
         line: 1,
