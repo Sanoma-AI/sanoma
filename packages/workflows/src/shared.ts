@@ -179,8 +179,8 @@ type DecidedRun = { actor?: Pick<Principal, "id"> | undefined };
 /**
  * True when `by` may decide the approval on `run`: `by.id` is the approver, or `by.groups` holds
  * the approver group. The run's own actor is refused only while someone else could decide (separation
- * of duties): the approver is a group with another declared member in `people`. Pure: everything
- * it reads is passed in.
+ * of duties): the approver is a group with another declared person in `people` (an agent does not
+ * count). Pure: everything it reads is passed in.
  */
 export const mayDecide = (
   approval: Pick<ApprovalState, "approver">,
@@ -201,8 +201,8 @@ export function refusalOf(
   }
   if (!by.groups?.includes(approver.group)) return `${by.id} is not in ${approverLabel(approver)}`;
   if (by.id !== run.actor?.id) return undefined;
-  const someoneElse = principalIdsOf(people).some(
-    (id) => id !== by.id && principalOf(id, people)?.groups?.includes(approver.group),
+  const someoneElse = personsOf(people).some(
+    ({ id }) => id !== by.id && principalOf(id, people)?.groups?.includes(approver.group),
   );
   return someoneElse ? OWN_CHANGE : undefined;
 }

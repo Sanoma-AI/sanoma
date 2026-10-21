@@ -138,11 +138,11 @@ describe("mayDecide", () => {
     expect(mayDecide(own, ada, run, declared({ marketing: ["ada"] }))).toBe(true);
     // A second member joining flips it.
     expect(refusalOf(own, ada, run, declared({ marketing: ["ada", "dave"] }))).toBe(OWN_CHANGE);
-    // In `agents`, the declared agents are the members; the runtime's own are not.
+    // Only another person counts: an agent in the group, or in `agents`, does not.
+    expect(mayDecide(own, ada, run, declared({ marketing: ["ada", "bot"] }, ["bot"]))).toBe(true);
     const bot = { id: "bot", groups: ["agents"] };
     const agents = { approver: { group: "agents" } };
-    expect(mayDecide(agents, bot, { actor: bot }, declared({}, ["bot"]))).toBe(true);
-    expect(refusalOf(agents, bot, { actor: bot }, declared({}, ["bot", "other-bot"]))).toBe(OWN_CHANGE);
+    expect(mayDecide(agents, bot, { actor: bot }, declared({}, ["bot", "other-bot"]))).toBe(true);
   });
 });
 
@@ -347,9 +347,10 @@ export const bob = sanoma.person({ id: "bob" });
 export const carol = sanoma.person({ id: "carol" });
 export const dave = sanoma.person({ id: "dave" });
 export const solo = sanoma.person({ id: "solo" });
+export const helper = sanoma.agent({ id: "helper" });
 export const marketing = sanoma.group({ name: "marketing", members: [carol, dave] });
 export const sales = sanoma.group({ name: "sales", members: [bob] });
-export const solos = sanoma.group({ name: "solos", members: [solo] });
+export const solos = sanoma.group({ name: "solos", members: [solo, helper] });
 `;
   const root = rootWith({
     "resources/people.ts": peopleFile,
@@ -475,7 +476,7 @@ forbid (principal == Sanoma::Principal::"solo", action == Sanoma::Action::"blues
     expect(ofType(records, "approval.decided")[0]).toMatchObject({ by: "carol" });
   });
 
-  it("lets the starter decide alone in the approver group, and refuses them once someone else joins it", async () => {
+  it("lets the starter decide with only an agent beside them in the approver group, and refuses them once a person joins it", async () => {
     const solo = { id: "solo" };
     const first = await c().start(shout, { text: "alone" }, { startedBy: solo });
     await waitFor(pending(c, first));
@@ -491,7 +492,7 @@ forbid (principal == Sanoma::Principal::"solo", action == Sanoma::Action::"blues
 
     // bob joins the group: now someone else could decide, so the starter may not, in the client or the run.
     const file = join(root, "resources/people.ts");
-    writeFileSync(file, peopleFile.replace("members: [solo]", "members: [solo, bob]"));
+    writeFileSync(file, peopleFile.replace("members: [solo, helper]", "members: [solo, helper, bob]"));
     try {
       const second = await c().start(shout, { text: "not alone" }, { startedBy: solo });
       await waitFor(pending(c, second));
