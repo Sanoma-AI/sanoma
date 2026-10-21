@@ -156,6 +156,12 @@ const inside = (file: string, dir: string) => {
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 };
 
+/** A company's own file (a module id's path): in the repo, not in a dependency. */
+const companyFile = (id: string, repo: string) => {
+  const file = id.split("?")[0]!;
+  return inside(file, repo) && !file.includes(`${sep}node_modules${sep}`);
+};
+
 export interface AppViteOptions {
   /** A company repo: build it, the app's routes and its sites, as one Start build. Without one, the package's own build. */
   repo?: string;
@@ -286,9 +292,7 @@ function sharedDeps(repo: string, src: string): Plugin {
     name: "sanoma:shared-deps",
     enforce: "pre",
     async resolveId(source, importer, options) {
-      if (!importer || !SHARED.test(source)) return;
-      const file = importer.split("?")[0]!;
-      if (!inside(file, repo) || file.includes(`${sep}node_modules${sep}`)) return;
+      if (!importer || !SHARED.test(source) || !companyFile(importer, repo)) return;
       return this.resolve(source, router, { ...options, skipSelf: true });
     },
   };
@@ -386,7 +390,6 @@ function devPlugins(repo: string, src: string): Plugin[] {
   // A file in the app's source whose id, with the specifier in its query, stands in for a
   // company file's shared import on the server: the module runner resolves it from the app.
   const proxy = `${join(src, "dev-imports.ts")}?sanoma-shared=`;
-  const companyFile = (file: string) => inside(file, repo) && !file.includes(`${sep}node_modules${sep}`);
   // (#163 A5: the watcher that regenerates .sanoma/api.ts as workflows and collections change goes here.)
   return [
     {
@@ -450,8 +453,7 @@ function devPlugins(repo: string, src: string): Plugin[] {
       enforce: "post",
       applyToEnvironment: (env) => env.name === "ssr",
       transform(code, id) {
-        const file = id.split("?")[0]!;
-        if (!companyFile(file) || !/\.[jt]sx?$/.test(file)) return;
+        if (!companyFile(id, repo) || !/\.[jt]sx?$/.test(id.split("?")[0]!)) return;
         return code.replace(
           /((?:from|import)\s*\(?\s*)(["'])([^"']+)\2/g,
           (match, before: string, quote: string, spec: string) =>

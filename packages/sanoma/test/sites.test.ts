@@ -64,9 +64,6 @@ function installedCopy(): string {
   return copy;
 }
 
-/** A page's HTML without React's text separators. */
-const page = async (url: string) => (await (await fetch(url)).text()).replaceAll("<!-- -->", "");
-
 /** The status of a GET sent with `headers`, Host among them, which fetch does not let a caller set. */
 function rawStatus(url: string, headers: Record<string, string>) {
   const { hostname, port, pathname } = new URL(url);
@@ -225,12 +222,12 @@ describe("sanoma with sites: the dev server", () => {
 export const Route = createFileRoute("/sites/second/")({ component: () => <p>The second site</p> });
 `,
     );
-    await waitFor(
-      async () => (await fetch(`${url}/sites/second`)).status,
-      (status) => status === 200,
+    const second = await waitFor(
+      () => fetch(`${url}/sites/second`),
+      (res) => res.status === 200,
       20_000,
     );
-    expect(await page(`${url}/sites/second`)).toContain("The second site");
+    expect(await second.text()).toContain("The second site");
   }, 60_000);
 
   it("hydrates a site with one React, updates it in place on an edit, and navigates to the app in the same document", async (ctx) => {
