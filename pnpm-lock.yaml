@@ -386,6 +386,9 @@ importers:
 
   packages/workflows:
     dependencies:
+      '@cedar-policy/cedar-wasm':
+        specifier: 4.14.0
+        version: 4.14.0
       '@cucumber/cucumber':
         specifier: 13.3.0
         version: 13.3.0
@@ -618,6 +621,9 @@ packages:
 
   '@bufbuild/protobuf@2.16.0':
     resolution: {integrity: sha512-FWa0sPlqYGJgpTs6OxBRcL/AW4JT0OIO+W1ajerluoTVh8CV0B7XM1qsNCRgnkSCkRCgOICKHRQlY17jrsm0+Q==}
+
+  '@cedar-policy/cedar-wasm@4.14.0':
+    resolution: {integrity: sha512-TPyz3zMl5r7W5iSHq51IgG+NTILGoXB0VPrEcXnzCEpPUqL/7b+AtMPVVHB/UoJWuXA8YORjLuWxKHUW33ePAA==}
 
   '@codemirror/autocomplete@6.20.3':
     resolution: {integrity: sha512-tlosUqb+3BbxCxZdu4tKeRghPFC+QM7q4X5YhKV2eCmPG+1r2F3f4AaSz5sCrFqUtX4Jh20VFTKecl16MgiV9g==}
@@ -4261,6 +4267,8 @@ snapshots:
       '@types/react': 19.3.0
 
   '@bufbuild/protobuf@2.16.0': {}
+
+  '@cedar-policy/cedar-wasm@4.14.0': {}
 
   '@codemirror/autocomplete@6.20.3':
     dependencies:

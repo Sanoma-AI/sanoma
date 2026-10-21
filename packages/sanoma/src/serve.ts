@@ -3,8 +3,16 @@ import { realpathSync } from "node:fs";
 import { dirname, extname, isAbsolute, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type AppOptions, githubLogin, startApp } from "@sanoma-ai/app";
-import { errorMessage, isLoopback, SanomaClient, type SanomaConfig, startWorker } from "@sanoma-ai/workflows";
-import { describeConfig, writeApi } from "@sanoma-ai/workflows/describe";
+import {
+  errorMessage,
+  isLoopback,
+  type ResolvedConfig,
+  resolveConfig,
+  SanomaClient,
+  type SanomaConfig,
+  startWorker,
+} from "@sanoma-ai/workflows";
+import { describeConfig, NO_PEOPLE, schemaOf, writeGenerated } from "@sanoma-ai/workflows/describe";
 import { UsageError } from "./config.ts";
 import { runtimeFrom, siteBuild } from "./sites.ts";
 import { localGitSource } from "./source.ts";
@@ -37,6 +45,8 @@ export interface ServeOptions {
   log: (line: string) => void;
   /** With sites, serve them from Vite's dev server, edits showing as they are saved, instead of building them. */
   dev?: boolean;
+  /** The config, resolved, when the caller has it: the Cedar schema is made from it. */
+  resolved?: ResolvedConfig;
 }
 
 /** Starts the app on `port`, with the host and login `appOptions` reads, and the sites built; `url` says where. */
@@ -46,13 +56,17 @@ export async function runApp(config: SanomaConfig, options: ServeOptions): Promi
 
 /**
  * What the app starts with: the port, the host and login `appOptions` reads, and what it serves
- * (`appSites`); `.sanoma/api.ts` written first (`writeApi`), for an editor and the sites.
+ * (`appSites`); the generated files written first (`writeGenerated`: `.sanoma/api.ts` and the
+ * Cedar schema), for an editor, the sites and the policies' author.
  */
-async function appStart(config: SanomaConfig, { port, log, dev = false }: ServeOptions): Promise<AppOptions> {
+async function appStart(
+  config: SanomaConfig,
+  { port, log, dev = false, resolved = resolveConfig(config) }: ServeOptions,
+): Promise<AppOptions> {
   const options = { port, ...(await appOptions(secretsOf(config))) };
   // For an editor and the sites' types only: a checkout it cannot write still serves.
-  await writeApi(rootOf(config), describeConfig(config)).catch((err: unknown) =>
-    log(`could not write .sanoma/api.ts: ${errorMessage(err)}`),
+  await writeGenerated(rootOf(config), describeConfig(config), schemaOf(resolved, NO_PEOPLE)).catch((err: unknown) =>
+    log(`could not write .sanoma/: ${errorMessage(err)}`),
   );
   const sites = await appSites(rootOf(config), log, dev ? options.host : false);
   return { ...options, ...sites, ...(sites.dev && { dev: { ...sites.dev, onFileChange: apiWriter(config, log) } }) };
@@ -100,7 +114,7 @@ async function appSites(
 const NOT_CONFIG = new Set(["sites", ".sanoma", "node_modules", ".git"]);
 
 /**
- * Writes `.sanoma/api.ts` again on a change to a file the config may be read from: the config's
+ * Writes the generated files again on a change to a file the config may be read from: the config's
  * own, or TypeScript under the root outside `NOT_CONFIG` (a workflow may import a relative file
  * anywhere). In a child `sanoma api`, in the config's directory, where it loads the config: this
  * process holds the config as it was loaded, and Node imports a module once. One child at a time;
@@ -122,7 +136,7 @@ function apiWriter(config: SanomaConfig, log: (line: string) => void): (file: st
     running = true;
     again = false;
     spawn(process.execPath, [cli, "api"], { cwd, stdio: "inherit" })
-      .once("error", (err) => log(`could not write .sanoma/api.ts: ${err.message}`))
+      .once("error", (err) => log(`could not write .sanoma/: ${err.message}`))
       .once("close", () => {
         running = false;
         if (again) run();

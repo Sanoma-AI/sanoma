@@ -33,6 +33,8 @@ export interface PolicyCall {
    * A policy request has `requestedBy: "policy"` and the `op` it held.
    */
   run: { id: string; workflow: string; approvals: readonly ApprovalState[] };
+  /** For a collection's `save` or `delete`: the record as it was, when there was one. */
+  before?: unknown;
 }
 
 /**
@@ -109,7 +111,31 @@ export function approve(approver: Approver, { title, covers }: { title?: string;
 export type Policy = ((call: PolicyCall) => Decision | Promise<Decision>) & {
   /** Names this version of the policy, from `definePolicy(fn, { version })`. */
   readonly version?: string;
+  /** `cedar` for a policy made from `policies/*.cedar` (`cedarPolicy`); a function has none. */
+  readonly kind?: "cedar";
+  /**
+   * What the policy would answer for each request ahead of the call, its input unknown. A
+   * function cannot be asked ahead: `definePolicy`'s have no `preview`.
+   */
+  readonly preview?: (requests: readonly PreviewRequest[]) => PreviewAnswer[];
 };
+
+/** A question asked ahead of a call: may `principal` take `action` (an operation, or `workflow:<name>` to start one) on `resource` (an operation's target)? */
+export interface PreviewRequest {
+  principal: Principal;
+  action: { id: string; effect?: Effect };
+  resource?: string;
+}
+
+/**
+ * A preview's answer: `depends` when the unknown input decides it. `rule` is the Cedar policy
+ * behind a hold, a deny or a dependence; `approver`, a hold's.
+ */
+export interface PreviewAnswer {
+  answer: "allow" | "hold" | "deny" | "depends";
+  rule?: { id: string; file: string; title?: string; reason?: string };
+  approver?: Approver;
+}
 
 /** A policy, optionally named with a version so a reader can tell which rules decided a call. */
 export function definePolicy(
@@ -124,8 +150,12 @@ export function definePolicy(
   return Object.freeze(options.version === undefined ? defined : Object.assign(defined, { version: options.version }));
 }
 
-/** Allows every operation call. A config says so explicitly: `policy: allowAll`. */
-export const allowAll: Policy = definePolicy(() => allow());
+/** Allows every operation call: the policy of a config that names none and has no `policies/*.cedar`. */
+export const allowAll: Policy = Object.freeze(
+  Object.assign(() => allow(), {
+    preview: (requests: readonly PreviewRequest[]): PreviewAnswer[] => requests.map(() => ({ answer: "allow" })),
+  }),
+);
 
 /**
  * True when an approval in the run was approved, covers the operation, and was addressed to

@@ -75,7 +75,7 @@ export async function main(argv: string[]): Promise<number> {
     }
     case "app": {
       const { runApp } = await import("./serve.ts");
-      return keep(await load(), (config) => runApp(config, { port: port(), log }));
+      return keep(await load(), (config, resolved) => runApp(config, { port: port(), log, resolved }));
     }
     case "check":
       return runCheck();
@@ -109,10 +109,21 @@ const parse = (argv: string[]) =>
 
 const port = () => Number(process.env.SANOMA_APP_PORT ?? 3000);
 
-async function load(): Promise<Loaded> {
+/**
+ * The config, loaded and resolved, its policy made from `policies/*.cedar` when it names none
+ * (`usePolicies`): a problem with them is a `UsageError`, so nothing starts on policies that do
+ * not hold. Without `policies`, they are left to the caller (`check` reports them).
+ */
+async function load({ policies = true } = {}): Promise<Loaded> {
   const loaded = await loadConfig();
   const { resolveConfig } = await import("@sanoma-ai/workflows");
-  return { ...loaded, resolved: resolveConfig(loaded.config) };
+  const resolved = { ...loaded, resolved: resolveConfig(loaded.config) };
+  if (policies) {
+    const { usePolicies } = await import("./policies.ts");
+    const problems = await usePolicies(resolved);
+    if (problems.length) throw new UsageError(`The policies do not hold:\n${problems.join("\n")}`);
+  }
+  return resolved;
 }
 
 /**
@@ -122,9 +133,9 @@ async function load(): Promise<Loaded> {
  */
 async function keep(
   { config, resolved }: Loaded,
-  start: (config: SanomaConfig) => Promise<{ stop(): Promise<void>; url?: string }>,
+  start: (config: SanomaConfig, resolved: Loaded["resolved"]) => Promise<{ stop(): Promise<void>; url?: string }>,
 ): Promise<never> {
-  const started = await start(config);
+  const started = await start(config, resolved);
   const running = `${resolved.appName} running ${[...resolved.workflows.keys()].join(", ")}`;
   if (started.url === undefined) {
     console.log(`${running}; ctrl-c to stop`);
@@ -147,7 +158,7 @@ async function serveCommand(devServer: boolean): Promise<never> {
   const { ensurePostgres } = await import("./postgres.ts");
   await ensurePostgres(databaseUrl, { appName, log });
   const { serve } = await import("./serve.ts");
-  return keep(loaded, (config) => serve(config, { port: port(), log, dev: devServer }));
+  return keep(loaded, (config, resolved) => serve(config, { port: port(), log, dev: devServer, resolved }));
 }
 
 /**
@@ -199,17 +210,18 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
   return new Promise(() => {});
 }
 
-/** `sanoma api` (hidden): writes `.sanoma/api.ts` from the config, as `check` and `serve` do. */
+/** `sanoma api` (hidden): writes the generated files from the config, as `check` and `serve` do. */
 async function writeApiCommand(): Promise<number> {
-  const { config, root } = await loadConfig();
-  const { API_FILE, describeConfig, writeApi } = await import("@sanoma-ai/workflows/describe");
-  if ((await writeApi(root, describeConfig(config))).wrote) log(`wrote ${API_FILE}`);
+  const { config, root, resolved } = await load({ policies: false });
+  const { describeConfig, NO_PEOPLE, schemaOf, writeGenerated } = await import("@sanoma-ai/workflows/describe");
+  const { wrote } = await writeGenerated(root, describeConfig(config), schemaOf(resolved, NO_PEOPLE));
+  for (const file of wrote) log(`wrote ${file}`);
   return 0;
 }
 
 /** `sanoma check`: Postgres made to answer while tsc, oxlint and the config are read; the scenarios on `<database>_check`. */
 async function runCheck(): Promise<number> {
-  const loaded = await load();
+  const loaded = await load({ policies: false });
   const { appName, databaseUrl } = loaded.resolved;
   const [{ ensurePostgres }, { check }] = await Promise.all([import("./postgres.ts"), import("./check.ts")]);
   const own = new URL(databaseUrl);
@@ -223,7 +235,7 @@ async function runCheck(): Promise<number> {
 }
 
 async function env(checkOnly: boolean): Promise<number> {
-  const loaded = await load();
+  const loaded = await load({ policies: false });
   const { writeEnvExample } = await import("./env.ts");
   const { changed } = writeEnvExample(loaded, { check: checkOnly });
   if (!checkOnly) {

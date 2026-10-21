@@ -302,7 +302,7 @@ describe("the server functions", () => {
     const body = withoutSources(ctx.description);
     expect(body.appName).toBe("sanoma");
     expect(body.version).toMatch(/^sanoma@/);
-    expect(body.policy).toEqual({ defined: true, version: "test-1" });
+    expect(body.policy).toEqual({ defined: true, kind: "function", version: "test-1" });
     const wf = body.workflows.find((w) => w.name === "announce");
     expect(wf?.ops).toHaveLength(5);
     expect(wf?.ops).toEqual(expect.arrayContaining(["ghost.post.publish", "resend.broadcast.send"]));

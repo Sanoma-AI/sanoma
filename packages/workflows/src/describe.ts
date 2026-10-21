@@ -48,7 +48,9 @@ export {
 // What the sites call, read from their source: a workflow's Used by.
 export { readSites, type SiteCall, type SiteEntry } from "./sites.ts";
 // The generated SDK, `.sanoma/api.ts`: a site's `api` typed from this description.
-export { API_FILE, generateApi, writeApi } from "./sdk.ts";
+export { API_FILE, generateApi, writeApi, writeGenerated } from "./sdk.ts";
+// The Cedar schema, `.sanoma/schema.cedarschema`: what a company's policies are validated and decided against.
+export { NO_PEOPLE, SCHEMA_FILE, schemaOf, schemaText, type CedarSchemaJson, type PolicyPeople } from "./schema.ts";
 // The apply workflow's plan and report, which the app renders.
 export type { ApplyInput, ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanStep } from "./apply.ts";
 
@@ -183,8 +185,8 @@ export interface ConfigDescription {
   orphans: DataFiles["orphans"];
   /** What is wrong in the data files (`readDataFiles`), each at its file, relative to the root, line and column. A workflow's are on its entry. */
   problems: ResourceProblem[];
-  /** `defined` is false for `allowAll`. */
-  policy: { defined: boolean; version?: string };
+  /** `defined` is false for `allowAll`; `kind` is `cedar` for `policies/*.cedar` (`cedarPolicy`), else `function`. */
+  policy: { defined: boolean; kind: "cedar" | "function"; version?: string };
   /**
    * The sites under `sites/`, by name, with what each calls (`readSites`), and its calls to what
    * the config does not have as its problems; none when the root has no `sites/`.
@@ -296,6 +298,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     problems: dataFiles.problems,
     policy: {
       defined: resolved.policy !== allowAll,
+      kind: resolved.policy.kind ?? "function",
       ...(resolved.policy.version === undefined ? {} : { version: resolved.policy.version }),
     },
     sites: readSites(resolved.root, { workflows, collections, ops }),

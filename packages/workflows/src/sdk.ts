@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { CollectionEntry, ConfigDescription, OpEntry, WorkflowEntry } from "./describe.ts";
 import { isObject } from "./resource.ts";
+import { type CedarSchemaJson, SCHEMA_FILE, schemaText } from "./schema.ts";
 import { apiNameOf, DATA_VENDOR, problemLine } from "./shared.ts";
 
 // A company's generated SDK, `.sanoma/api.ts`: the types of a site's `api` from `sanoma/site`,
@@ -81,11 +82,32 @@ export async function writeApi(
   description: ConfigDescription,
 ): Promise<{ wrote: boolean; file: string }> {
   const file = join(root, API_FILE);
-  const { source } = generateApi(description);
-  if ((await readFile(file, "utf8").catch(() => undefined)) === source) return { wrote: false, file };
+  return { wrote: await writeChanged(file, generateApi(description).source), file };
+}
+
+/**
+ * The generated files, each written when its text changed: `.sanoma/api.ts` (`writeApi`) and the
+ * Cedar schema's text, `.sanoma/schema.cedarschema` (`schemaText` of `schemaOf`). `wrote` lists
+ * those written, relative to the root.
+ */
+export async function writeGenerated(
+  root: string,
+  description: ConfigDescription,
+  schema: CedarSchemaJson,
+): Promise<{ wrote: string[] }> {
+  const [api, cedar] = await Promise.all([
+    writeApi(root, description),
+    writeChanged(join(root, SCHEMA_FILE), schemaText(schema)),
+  ]);
+  return { wrote: [...(api.wrote ? [API_FILE] : []), ...(cedar ? [SCHEMA_FILE] : [])] };
+}
+
+/** Writes `text` to `file` unless the file holds it already; true when it wrote. */
+async function writeChanged(file: string, text: string): Promise<boolean> {
+  if ((await readFile(file, "utf8").catch(() => undefined)) === text) return false;
   await mkdir(dirname(file), { recursive: true });
-  await writeFile(file, source);
-  return { wrote: true, file };
+  await writeFile(file, text);
+  return true;
 }
 
 const workflowMember = (wf: WorkflowEntry) =>

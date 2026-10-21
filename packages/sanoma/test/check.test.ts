@@ -11,11 +11,12 @@ import { copyFixture, ensureBuilt } from "./fixture.ts";
 const databaseUrl = testDatabaseUrl("sanoma-check");
 
 let dir = "";
-/** The fixture copy's config, loaded and resolved, as the bin does. */
-const load = async (): Promise<Loaded> => {
-  const loaded = await loadConfig(dir);
+/** A fixture copy's config, loaded and resolved, as the bin does. */
+const loadIn = async (root: string): Promise<Loaded> => {
+  const loaded = await loadConfig(root);
   return { ...loaded, resolved: resolveConfig(loaded.config) };
 };
+const load = () => loadIn(dir);
 beforeAll(() => {
   ensureBuilt();
   dir = copyFixture();
@@ -30,15 +31,19 @@ describe("check", () => {
       problems: [],
     });
     // The generated SDK first, before tsc: the sites' tsc reads it.
-    expect(log.slice(0, 6)).toEqual([
+    expect(log.slice(0, 7)).toEqual([
       "config",
       "wrote .sanoma/api.ts",
+      "wrote .sanoma/schema.cedarschema",
       "tsc",
       "wrote .oxlintrc.json",
       "oxlint workflows policies",
       "scenarios",
     ]);
     expect(readFileSync(join(dir, ".sanoma/api.ts"), "utf8")).toContain("hello: WorkflowFn<");
+    expect(readFileSync(join(dir, ".sanoma/schema.cedarschema"), "utf8")).toContain(
+      'action "ghost.post.publish" in [Action::"effect:publish"]',
+    );
     expect(log).toContain("passed hello/hello.feature › A post goes out");
     expect(readFileSync(join(dir, ".oxlintrc.json"), "utf8")).toBe(
       `{\n  "extends": [\n    "./node_modules/sanoma/oxlint.json"\n  ]\n}\n`,
@@ -120,6 +125,49 @@ export default defineWorkflow({
       expect(log).toContain("oxlint workflows policies resources");
     } finally {
       rmSync(own, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it("decides with policies/*.cedar when the config names no policy, and reports what is wrong with them", async () => {
+    // Node imports a config once per process: a copy each, its config written before it is loaded.
+    const both = copyFixture();
+    const own = copyFixture();
+    try {
+      const rule = 'forbid (principal, action == Sanoma::Action::"ghost.post.publish", resource);\n';
+      writeFileSync(join(both, "policies/publish.cedar"), rule);
+      // Beside the config's policy: one or the other.
+      expect((await check(await loadIn(both), { databaseUrl, log: () => {} })).problems).toContain(
+        "policies/publish.cedar: sanoma.config.ts names a `policy` too; a repo decides with its policies/*.cedar or its policy, not both",
+      );
+
+      rmSync(join(own, "policies/policy.ts"));
+      writeFileSync(
+        join(own, "sanoma.config.ts"),
+        readFileSync(join(own, "sanoma.config.ts"), "utf8")
+          .replace('import policy from "./policies/policy.ts";\n', "")
+          .replace("  policy,\n", ""),
+      );
+      // A field the operation's input does not have, at its line and column.
+      const cedar = join(own, "policies/publish.cedar");
+      writeFileSync(
+        cedar,
+        '@reason("Not that post")\nforbid (principal, action == Sanoma::Action::"ghost.post.publish", resource)\nwhen { context.input.idd == "never" };\n',
+      );
+      const bad = await check(await loadIn(own), { databaseUrl, log: () => {} });
+      expect(bad.ok).toBe(false);
+      expect(bad.problems).toEqual([
+        expect.stringMatching(
+          /^policies\/publish\.cedar:3:8: policies\/publish\.cedar#1: .*attribute `input\.idd` in context for Sanoma::Action::"ghost\.post\.publish" not found \(did you mean `id`\?\)$/,
+        ),
+      ]);
+
+      // Valid: the scenario runs under it, and publishes.
+      writeFileSync(cedar, readFileSync(cedar, "utf8").replace("input.idd", "input.id"));
+      const loaded = await loadIn(own);
+      expect(await check(loaded, { databaseUrl, log: () => {} })).toEqual({ ok: true, problems: [] });
+      expect(loaded.config.policy?.kind).toBe("cedar");
+    } finally {
+      for (const copy of [both, own]) rmSync(copy, { recursive: true, force: true });
     }
   }, 180_000);
 

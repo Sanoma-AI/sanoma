@@ -78,6 +78,7 @@
     "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
   "dependencies": {
+    "@cedar-policy/cedar-wasm": "4.14.0",
     "@cucumber/cucumber": "13.3.0",
     "@cucumber/cucumber-expressions": "^20.1.0",
     "@cucumber/messages": "^34.2.1",

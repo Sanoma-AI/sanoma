@@ -177,16 +177,18 @@ describe("describeConfig", () => {
 
   it("says whether a policy other than allowAll is configured, and its version, and names the app and version", () => {
     const plain = describeConfig(base);
-    expect(plain.policy).toEqual({ defined: false });
+    const none = { kind: "function" };
+    expect(plain.policy).toEqual({ defined: false, ...none });
     // No package.json in the directory of this file, which defined the config: the app is "sanoma".
     expect(plain.appName).toBe("sanoma");
     expect(plain.version).toMatch(/^sanoma@[0-9a-f]{64}$/);
     const gated = defineConfig({ ...base, policy: definePolicy(() => allow()) });
-    expect(describeConfig(gated).policy).toEqual({ defined: true });
+    expect(describeConfig(gated).policy).toEqual({ defined: true, ...none });
     const versioned = definePolicy(() => allow(), { version: "2026-10-07" });
     expect(versioned.version).toBe("2026-10-07");
     expect(describeConfig({ ...base, policy: versioned }).policy).toEqual({
       defined: true,
+      ...none,
       version: "2026-10-07",
     });
     expect(() => definePolicy(() => allow(), { version: "" })).toThrow("`version` must be a non-empty string");

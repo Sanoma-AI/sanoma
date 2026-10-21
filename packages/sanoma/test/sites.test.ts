@@ -169,7 +169,7 @@ export const Route = createFileRoute("/sites/hello/gone")({ component: () => <Ru
     ]);
     expect(found.stderr).not.toMatch(/^build /m);
     expect(existsSync(join(dir, "sites/__virtual.ts"))).toBe(false);
-    expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts"]);
+    expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts", "schema.cedarschema"]);
   }, 180_000);
 
   it("reports two pages claiming one path", async () => {
@@ -295,13 +295,13 @@ export const Route = createFileRoute("/sites/second/")({ component: () => <p>The
 });
 
 describe("sanoma without sites", () => {
-  it("serves the app's own build, as before: no dev server, nothing written but the generated SDK", async () => {
+  it("serves the app's own build, as before: no dev server, nothing written but the generated files", async () => {
     dir = installedCopy();
     rmSync(join(dir, "sites"), { recursive: true });
     const stderr = await serveOnce(async (url) => {
       expect((await fetch(`${url}/workflows`)).status).toBe(200);
     }, []);
     expect(stderr).not.toContain("dev server");
-    expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts"]);
+    expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts", "schema.cedarschema"]);
   }, 120_000);
 });

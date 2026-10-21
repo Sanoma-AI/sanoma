@@ -42,7 +42,7 @@ export async function loadConfig(cwd = process.cwd()): Promise<LoadedConfig> {
   const config = mod.default;
   if (!isConfig(config)) {
     throw new UsageError(
-      `${file} must export a config as its default export: \`export default defineConfig({ workflows, connectors, policy })\``,
+      `${file} must export a config as its default export: \`export default defineConfig({ workflows, connectors })\``,
     );
   }
   config.file ??= file;
@@ -73,4 +73,4 @@ async function addCollections(config: SanomaConfig, root: string): Promise<void>
 }
 
 const isConfig = (x: unknown): x is SanomaConfig =>
-  typeof x === "object" && x !== null && "workflows" in x && "connectors" in x && "policy" in x;
+  typeof x === "object" && x !== null && "workflows" in x && "connectors" in x;

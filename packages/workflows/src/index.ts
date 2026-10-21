@@ -83,8 +83,19 @@ export {
   type PolicyCall,
   type PolicyOp,
   policyOpOf,
+  type PreviewAnswer,
+  type PreviewRequest,
   type RecordedDecision,
 } from "./policy.ts";
+export {
+  cedarPolicy,
+  type CedarPolicySource,
+  loadPolicies,
+  POLICIES_DIR,
+  type PolicyProblem,
+  readPolicyFiles,
+  validatePolicies,
+} from "./cedar.ts";
 export {
   ApprovalPendingError,
   errorCode,
