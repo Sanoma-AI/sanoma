@@ -62,9 +62,12 @@ const record = (attributes: Record<string, TypeOfAttribute<string>>): RecordType
 });
 const optional = (type: Type<string>): TypeOfAttribute<string> => ({ ...type, required: false });
 
-/** The Cedar type of a zod schema, through its JSON Schema; undefined when it has none. */
+/**
+ * The Cedar type of a zod schema's parsed value (`io: "output"`: what the policy is given, defaults
+ * filled and transforms applied), through its JSON Schema; undefined when it has none.
+ */
 const typeOf = (schema: Parameters<typeof jsonSchemaOf>[0]) => {
-  const json = jsonSchemaOf(schema, "input");
+  const json = jsonSchemaOf(schema, "output");
   return cedarType(json, { root: json, seen: new Set() });
 };
 
@@ -88,7 +91,7 @@ const WRITES = new Set(["save", "delete"]);
  *   as it was for a collection's `save` and `delete`;
  * - `workflow:<name>` per workflow, in the group `start`, on a `Workflow`, with its `input`.
  *
- * Zod to Cedar, through JSON Schema: string and enum `String`, integer `Long`, boolean `Bool`,
+ * Zod to Cedar, through the JSON Schema of the parsed value: string and enum `String`, integer `Long`, boolean `Bool`,
  * object a record (its optional and nullable fields optional), array a `Set`; a decimal number
  * is a `String`; a field with no Cedar type (a union of types, a map, a recursive type) is left
  * out, so a policy naming it fails validation. Pure: the same config and people give the same schema.

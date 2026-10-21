@@ -30,8 +30,9 @@ export interface CedarPolicySource {
   text: string;
   /** Relative to the root, such as `policies/money.cedar`. */
   file: string;
-  /** The line its text starts on in `file`, from 1. */
+  /** The line and column its text starts at in `file`, from 1. */
   line: number;
+  column: number;
   effect: "permit" | "forbid";
   /** `@hold(...)`: a declared group, a declared person's id, or `on-behalf-of`. */
   hold?: string;
@@ -93,23 +94,24 @@ export function loadPolicies(files: readonly { file: string; text: string }[]): 
     const inOrder = parts.policies
       .map((part) => {
         let offset = text.indexOf(part);
-        while (placed.has(offset)) offset = text.indexOf(part, offset + 1);
+        while (offset >= 0 && placed.has(offset)) offset = text.indexOf(part, offset + 1);
         placed.add(offset);
-        return { part, offset };
+        // A part that is not a slice of the text (none is, as Cedar 4.14 cuts them) keeps Cedar's order, last.
+        return { part, offset: offset < 0 ? Infinity : offset };
       })
       .toSorted((a, b) => a.offset - b.offset);
     inOrder.forEach(({ part, offset }, n) => {
       const answer = cedar.policyToJson(part);
       if (answer.type === "failure") {
-        problems.push(...answer.errors.map((e) => problemOf(e, { file, text: part, at: at(text, offset).line })));
+        problems.push(...answer.errors.map((e) => problemOf(e, { file, text: part, at: at(text, offset) })));
         return;
       }
       const { effect, annotations = {} } = answer.json;
       const id = annotations.id ?? `${file}#${n + 1}`;
-      const line = at(text, offset).line;
+      const { line, column } = at(text, offset);
       if (id === ALLOW_ID || policies.some((p) => p.id === id)) {
         const why = id === ALLOW_ID ? "is the runtime's own policy's" : "is another policy's";
-        problems.push({ file, line, column: 1, message: `the id "${id}" ${why}: give this one another @id` });
+        problems.push({ file, line, message: `the id "${id}" ${why}: give this one another @id` });
         return;
       }
       policies.push({
@@ -117,6 +119,7 @@ export function loadPolicies(files: readonly { file: string; text: string }[]): 
         text: part,
         file,
         line,
+        column,
         effect,
         ...(annotations.hold !== undefined && { hold: annotations.hold }),
         ...(annotations.title !== undefined && { title: annotations.title }),
@@ -147,10 +150,10 @@ export function validatePolicies(
   const byId = new Map(policies.map((p) => [p.id, p]));
   const cedar = answer.validationErrors.map(({ policyId, error }) => {
     const p = byId.get(policyId)!;
-    return { ...problemOf(error, { file: p.file, text: p.text, at: p.line }), policy: policyId };
+    return { ...problemOf(error, { file: p.file, text: p.text, at: p }), policy: policyId };
   });
   const ours = policies.flatMap((p): PolicyProblem[] => {
-    const place = { file: p.file, line: p.line, column: 1, policy: p.id };
+    const place = { file: p.file, line: p.line, policy: p.id };
     if (p.effect === "permit") {
       return [{ ...place, message: "a permit changes nothing: every call no forbid refuses is allowed already" }];
     }
@@ -460,19 +463,23 @@ function folded(expr: Expr): boolean | undefined {
 /** Cedar's message, with its help when it has one. */
 const messageOf = (e: DetailedError) => (e.help ? `${e.message} (${e.help})` : e.message);
 
-/** A Cedar error as a problem at its place in `text`, which starts on line `at` of `file`. */
-function problemOf(error: DetailedError, where: { file: string; text: string; at?: number }): PolicyProblem {
+/** A Cedar error as a problem at its place in `text`, which starts at `at` in `file`. */
+function problemOf(
+  error: DetailedError,
+  where: { file: string; text: string; at?: { line: number; column: number } },
+): PolicyProblem {
   const start = error.sourceLocations?.[0]?.start;
   // Cedar counts bytes; a line and column count characters.
   const place =
     start === undefined
-      ? { line: where.at ?? 1 }
+      ? { line: where.at?.line ?? 1 }
       : at(where.text, Buffer.from(where.text).subarray(0, start).toString().length, where.at);
   return { file: where.file, ...place, message: messageOf(error) };
 }
 
-/** The line and column of `offset` in `text`, which starts on line `first`. */
-function at(text: string, offset: number, first = 1): { line: number; column: number } {
+/** The line and column of `offset` in `text`, which starts at `from`. */
+function at(text: string, offset: number, from = { line: 1, column: 1 }): { line: number; column: number } {
   const before = text.slice(0, Math.max(offset, 0)).split("\n");
-  return { line: first + before.length - 1, column: before.at(-1)!.length + 1 };
+  const column = before.at(-1)!.length + 1;
+  return { line: from.line + before.length - 1, column: before.length === 1 ? from.column + column - 1 : column };
 }

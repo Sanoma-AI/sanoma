@@ -25,10 +25,10 @@ export async function usePolicies({ config, root }: LoadedConfig, people: Policy
   const { policies, problems } = loadPolicies(files);
   problems.push(...validatePolicies(resolved, policies, people));
   if (problems.length) {
-    // One line per place: a policy scoped to every action can fail the same way for each.
+    // One line per place Cedar points at: a policy scoped to every action fails the same way for each.
     const places = new Set<string>();
     return problems.flatMap(({ policy, ...p }) => {
-      const place = p.line === undefined ? undefined : `${p.file}:${p.line}:${p.column}`;
+      const place = p.column === undefined ? undefined : `${p.file}:${p.line}:${p.column}`;
       if (place !== undefined && places.has(place)) return [];
       if (place !== undefined) places.add(place);
       return [problemLine({ ...p, message: policy ? `${policy}: ${p.message}` : p.message })];

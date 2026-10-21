@@ -36,6 +36,13 @@ const shop = defineConnector("shop", {
       output: z.object({ id: z.string() }),
     },
   },
+  tags: {
+    set: {
+      effect: "write",
+      input: z.object({ tags: z.string().transform((s) => s.split(",")) }),
+      output: z.object({}),
+    },
+  },
   notes: {
     add: {
       effect: "write",
@@ -58,7 +65,11 @@ const refund = defineWorkflow({
 });
 const fake = defineFake(shop, {
   initial: () => ({}),
-  ops: () => ({ refunds: { create: async () => ({ id: "re_1" }) }, notes: { add: async () => ({}) } }),
+  ops: () => ({
+    refunds: { create: async () => ({ id: "re_1" }) },
+    tags: { set: async () => ({}) },
+    notes: { add: async () => ({}) },
+  }),
 });
 const config = defineConfig({
   workflows: [refund],
@@ -244,6 +255,19 @@ describe("loadPolicies and validatePolicies", () => {
     ]);
   });
 
+  it("places an error in a policy that starts mid-line at its column in the file", () => {
+    const { policies } = loadPolicies([
+      {
+        file: "policies/one.cedar",
+        text: 'forbid (principal, action, resource); forbid (principal, action == Sanoma::Action::"shop.refunds.create", resource) when { context.input.amont > 1 };',
+      },
+    ]);
+    expect(policies[1]).toMatchObject({ line: 1, column: 39 });
+    expect(validatePolicies(resolved, policies, people)).toEqual([
+      expect.objectContaining({ line: 1, column: 124, message: expect.stringContaining("input.amont") }),
+    ]);
+  });
+
   it("reports a file that does not parse, a template and two policies with one id", () => {
     const { problems } = loadPolicies([
       { file: "policies/a.cedar", text: '@id("x") forbid (principal, action, resource);\n' },
@@ -256,7 +280,6 @@ describe("loadPolicies and validatePolicies", () => {
       {
         file: "policies/b.cedar",
         line: 2,
-        column: 1,
         message: 'the id "x" is another policy\'s: give this one another @id',
       },
       expect.objectContaining({ file: "policies/c.cedar", line: 1, message: expect.stringContaining("template") }),
@@ -346,6 +369,19 @@ describe("cedarPolicy", () => {
       reason: "cannot resolve approver",
       reasons: ["policies/x.cedar#1"],
     });
+  });
+
+  it("types the context as the parsed input, so a transform's value does not fail the call", async () => {
+    // A transform's output has no JSON Schema, so no Cedar type: left out, and the call still decided.
+    expect(text).toMatch(/action "shop\.tags\.set"[^;]*input: \{\s*\}/);
+    const call = {
+      op: policyOpOf(shop.tags.set),
+      effect: "write",
+      input: { tags: ["a", "b"] },
+      actor: { id: "bo" },
+      run: run(),
+    } as const;
+    expect(await policy(call)).toMatchObject({ kind: "allow" });
   });
 
   it("is of kind cedar, versioned by its text", () => {

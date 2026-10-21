@@ -50,7 +50,7 @@ const LINTED = ["workflows", "policies", "resources", "sites"];
  * the config does not have; with sites, their generated files written first and, beside those
  * three, the app built with them and `tsc -p sites/tsconfig.json` (`checkSites`). Their problems
  * in the order tsc, the sites' tsc, oxlint, the policies, the config, the folders refused as
- * sites, the sites' build. Then every scenario against the fakes (`runScenarios`), each step that did not hold a
+ * sites, the sites' build. Then, unless the policies do not hold, every scenario against the fakes (`runScenarios`), each step that did not hold a
  * problem. `ok` when there are no problems.
  */
 export async function check(
@@ -81,6 +81,8 @@ export async function check(
 
   if (resolved.scenarios === undefined) {
     log("no scenarios: the config's root has no `scenarios/` directory");
+  } else if (policies.length) {
+    log("no scenarios: the policies do not hold");
   } else {
     await ready;
     log("scenarios");
