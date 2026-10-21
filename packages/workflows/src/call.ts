@@ -468,13 +468,14 @@ async function all(run: Run, list: unknown, node: string): Promise<unknown[]> {
 
 /**
  * Waits, durably, until the time or for the duration the request names, and records when it
- * ends. For a duration that is the time the sleep started plus the duration, as the runtime saw
- * it (`Date.now()`, which adds no DBOS call): a replay may compute another, but the store keeps
+ * ends. For a duration that is the record's `at` plus the duration, one read of the runtime's
+ * clock (`Date.now()`, which adds no DBOS call): a replay may compute another, but the store keeps
  * the first record with the id, so the record says what the first execution waited for.
  */
 async function sleep(run: Run, raw: unknown, at: Placed) {
   const req = checkSleep(raw);
   const seq = run.seq++;
+  const started = Date.now();
   let until: number;
   let ms: number;
   if ("until" in req) {
@@ -487,9 +488,9 @@ async function sleep(run: Run, raw: unknown, at: Placed) {
       (req.minutes ?? 0) * 60_000 +
       (req.hours ?? 0) * 3_600_000 +
       (req.days ?? 0) * 86_400_000;
-    until = Date.now() + ms;
+    until = started + ms;
   }
-  await write(run, entry(run, { type: "sleep.started", ...at, until }, { seq }));
+  await write(run, entry(run, { type: "sleep.started", ...at, until }, { seq, at: started }));
   // A time already past waits not at all, and adds no step. A sandbox run never waits.
   if (ms > 0 && run.sandbox === undefined) await DBOS.sleep(ms);
 }
