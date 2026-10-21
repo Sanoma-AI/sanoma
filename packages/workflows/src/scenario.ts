@@ -29,7 +29,7 @@ import {
 import { errorCode, errorInfo, SanomaError } from "./errors.ts";
 import { type CallRecord, contains, type CoreExpectation, detailOf, isCall } from "./expectations.ts";
 import type { Fake } from "./fake.ts";
-import { fill, isBug, seedFrom, shapeOf } from "./fill.ts";
+import { fill, isBug, objectUnder, seedFrom, shapeOf } from "./fill.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { Driver, Op } from "./op.ts";
 import { type OutlineNode, outlineWorkflow } from "./outline.ts";
@@ -240,11 +240,31 @@ function fieldOf(schema: z.ZodType, name: string, owner: string): z.ZodType {
 
 const issues = (error: z.ZodError) => error.issues.map((i) => i.message).join("; ");
 
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * Why `field` refuses `value`, or undefined when it takes it. `partial`, for what a `Then` expects
+ * at least: an object may leave fields out at any depth, and only the fields it has are checked.
+ */
+function refusal(field: z.ZodType, value: unknown, what: string, partial: boolean): string | undefined {
+  const object = partial && isObject(value) ? objectUnder(field) : undefined;
+  if (!object) {
+    const parsed = field.safeParse(value);
+    return parsed.success ? undefined : `${what} cannot be ${JSON.stringify(value)}: ${issues(parsed.error)}`;
+  }
+  for (const [name, v] of Object.entries(value as Record<string, unknown>)) {
+    const why = refusal(fieldOf(object, name, what), v, `${name} in ${what}`, true);
+    if (why) return why;
+  }
+  return undefined;
+}
+
 /**
  * The value text from a table cell or a phrase gives a field: the text itself when the field
  * takes it, else the text read as JSON (a number, `true`, a list) when the field takes that.
  */
-function valueFor(field: z.ZodType, text: string, what: string): unknown {
+function valueFor(field: z.ZodType, text: string, what: string, partial = false): unknown {
   const asText = field.safeParse(text);
   if (asText.success) return text;
   let json: unknown;
@@ -253,17 +273,18 @@ function valueFor(field: z.ZodType, text: string, what: string): unknown {
   } catch {
     throw new Error(`${what} cannot be ${JSON.stringify(text)}: ${issues(asText.error)}`);
   }
-  const asJson = field.safeParse(json);
-  if (!asJson.success) throw new Error(`${what} cannot be ${text}: ${issues(asJson.error)}`);
+  const why = refusal(field, json, what, partial);
+  if (why) throw new Error(why);
   return json;
 }
 
 /**
  * The fields the step's doc string (a JSON object) or two-column table gives `owner` (an
  * operation's input, or a resource), each checked against its field in `schema`: a field it
- * lacks, or a value it refuses, is an error.
+ * lacks, or a value it refuses, is an error. `partial` (a `Then`'s "at least these fields"):
+ * an object value may leave fields out, at any depth.
  */
-function fieldsFrom(pickle: PickleStep, schema: z.ZodType, owner: string): Record<string, unknown> {
+function fieldsFrom(pickle: PickleStep, schema: z.ZodType, owner: string, partial = false): Record<string, unknown> {
   const { docString, dataTable } = pickle.argument ?? {};
   const what = (name: string) => `${name} in ${owner}`;
   if (dataTable) {
@@ -271,7 +292,7 @@ function fieldsFrom(pickle: PickleStep, schema: z.ZodType, owner: string): Recor
       dataTable.rows.map(({ cells }) => {
         if (cells.length !== 2) throw new Error(`the table after "${pickle.text}" needs two columns: name | value`);
         const [name, text] = cells.map((c) => c.value) as [string, string];
-        return [name, valueFor(fieldOf(schema, name, owner), text, what(name))];
+        return [name, valueFor(fieldOf(schema, name, owner), text, what(name), partial)];
       }),
     );
   }
@@ -282,14 +303,12 @@ function fieldsFrom(pickle: PickleStep, schema: z.ZodType, owner: string): Recor
   } catch (err) {
     throw new Error(`the doc string after "${pickle.text}" is not JSON: ${errorMessage(err)}`, { cause: err });
   }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`"${pickle.text}" needs a JSON object`);
-  }
+  if (!isObject(value)) throw new Error(`"${pickle.text}" needs a JSON object`);
   for (const [name, v] of Object.entries(value)) {
-    const parsed = fieldOf(schema, name, owner).safeParse(v);
-    if (!parsed.success) throw new Error(`${what(name)} cannot be ${JSON.stringify(v)}: ${issues(parsed.error)}`);
+    const why = refusal(fieldOf(schema, name, owner), v, what(name), partial);
+    if (why) throw new Error(why);
   }
-  return value as Record<string, unknown>;
+  return value;
 }
 
 /** A parameter's transform: the name, when `ids` has it. */
@@ -504,7 +523,7 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
       source: "{op} was called with",
       takes: TAKES_OBJECT,
       read: ([op], pickle) =>
-        expecting({ op: op as string, input: fieldsFrom(pickle, opOf(op).input, inputOf(op)), called: true }),
+        expecting({ op: op as string, input: fieldsFrom(pickle, opOf(op).input, inputOf(op), true), called: true }),
     },
     ...[true, false].map((called): Rule => ({
       kind: "then",
@@ -545,7 +564,11 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
         // An unnamed call with a computed segment is named by the operation it calls.
         const op = scope.ops.get(node.id) ?? (node.name === undefined ? scope.ops.get(name as string) : undefined);
         if (!op) throw new Error(`${step} calls ${node.id}, whose input cannot be read: name its operation in full`);
-        return expecting({ name: name as string, input: fieldsFrom(pickle, op.input, inputOf(op.id)), called: true });
+        return expecting({
+          name: name as string,
+          input: fieldsFrom(pickle, op.input, inputOf(op.id), true),
+          called: true,
+        });
       },
     },
     ...[true, false].map((called): Rule => ({
@@ -603,7 +626,7 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
           const last = lastCall(records);
           if (typeof last === "string") return last;
           if (last.error) return `it failed: ${last.error.code ?? last.error.name}: ${last.error.message}`;
-          const expected = fieldsFrom(pickle, opOf(last.op).output, `${last.op}'s output`);
+          const expected = fieldsFrom(pickle, opOf(last.op).output, `${last.op}'s output`, true);
           return contains(last.output, expected) ? undefined : `it returned ${JSON.stringify(last.output)}`;
         },
       }),

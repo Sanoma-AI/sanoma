@@ -84,6 +84,11 @@ const check = (s: Scenario, records: readonly LedgerRecord[]) =>
 /** A feature with one scenario that runs tally with these table rows. */
 const tallyWith = (rows: string) => `Feature: T\n  Scenario: S\n    When tally runs with\n${rows}`;
 
+/** A scenario that expects crm.contact.save with `given` (a doc string's or a table's lines), after `keyword`. */
+const saving = (given: string, keyword = "Then") =>
+  `Feature: A\n  Scenario: S\n    When announce runs\n    ${keyword} crm.contact.save was called with\n${given}`;
+const doc = (json: string) => `      """\n      ${json}\n      """\n`;
+
 /** A feature with one scenario that runs announce on made-up input. */
 const feature = (name: string) => `Feature: Announce\n  Scenario: ${name}\n    When announce runs\n`;
 
@@ -419,6 +424,51 @@ describe("parseFeature", () => {
     When announce runs
 `),
       ).toMatch(/^x\.feature:3: title in ghost\.post\.create's input cannot be 7: /);
+    });
+
+    describe("an expected call's object fields", () => {
+      const crm = defineConnector("crm", {
+        contact: {
+          save: {
+            effect: "write",
+            input: z.object({
+              record: z.object({
+                name: z.string(),
+                stage: z.enum(["lead", "won"]),
+                owner: z.object({ id: z.string() }),
+              }),
+            }),
+            output: z.object({}),
+          },
+        },
+      });
+      const crmScope = scopeOf([ghost, resend, bluesky, crm]);
+      it("takes some fields of an object at any depth, from a doc string or a table cell", async () => {
+        for (const given of [
+          doc('{ "record": { "stage": "won", "owner": {} } }'),
+          '      | record | { "stage": "won", "owner": {} } |\n',
+        ]) {
+          const [scenario] = await parseFeature(saving(given), "x.feature", crmScope);
+          expect(scenario?.expect).toEqual([
+            expect.objectContaining({ op: "crm.contact.save", input: { record: { stage: "won", owner: {} } } }),
+          ]);
+        }
+      });
+
+      it("checks the fields given against their schemas, naming the nested field", async () => {
+        expect(await thrown(saving(doc('{ "record": { "stage": "lost" } }')), crmScope)).toMatch(
+          /^x\.feature:4: stage in record in crm\.contact\.save's input cannot be "lost": /,
+        );
+        expect(await thrown(saving(doc('{ "record": { "owner": { "name": "Ada" } } }')), crmScope)).toBe(
+          'x.feature:4: no field "name" in owner in record in crm.contact.save\'s input; it has id',
+        );
+      });
+
+      it("still needs a whole object to seed a call", async () => {
+        expect(await thrown(saving(doc('{ "record": { "stage": "won" } }'), "Given"), crmScope)).toMatch(
+          /^x\.feature:4: record in crm\.contact\.save's input cannot be \{"stage":"won"\}: /,
+        );
+      });
     });
 
     it("reads a phrase's field as its own type, even one named like a built-in type", async () => {
