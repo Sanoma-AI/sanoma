@@ -1,5 +1,5 @@
 import { DBOS, DBOSClient } from "@dbos-inc/dbos-sdk";
-import { setTimeout } from "node:timers/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { Client, escapeIdentifier, Pool } from "pg";
 import { warn } from "./log.ts";
 import { errorMessage } from "./shared.ts";
@@ -99,12 +99,6 @@ const INSUFFICIENT_PRIVILEGE = "42501";
 /** Postgres's code for a database that is not there (`invalid_catalog_name`). */
 const NO_DATABASE = "3D000";
 
-/** The advisory lock a preparation of a database holds (`lockPreparation`), in that database. */
-const PREPARE_LOCK = "hashtext('sanoma.prepareDatabase')";
-
-/** How long a preparation waits before it asks for the lock again (`lockPreparation`). */
-const LOCK_POLL_MS = 50;
-
 /** A pool opened on first use, once its database is prepared, and ended by `close`. */
 export interface LazyPool {
   db(): Promise<Pool>;
@@ -173,12 +167,10 @@ async function prepare(databaseUrl: string): Promise<void> {
     throw unprepared(err);
   });
   try {
-    try {
-      await DBOS.migrate(databaseUrl);
-    } catch (err) {
-      // A DBOS table made meanwhile by a process that does not take the lock: it is there.
+    await DBOS.migrate(databaseUrl).catch((err: unknown) => {
+      // A DBOS table made meanwhile by a release from before the lock, mid-upgrade: it is there.
       if (!madeAlready(err)) throw unprepared(err);
-    }
+    });
     for (const [what, ddl] of TABLES) await createTable(conn, ddl, what);
     await guardIdleTransactions(conn);
   } finally {
@@ -188,16 +180,12 @@ async function prepare(databaseUrl: string): Promise<void> {
 }
 
 /**
- * A connection to the database at `databaseUrl`, made first when it is not there, that holds the
- * preparation's lock until it ends: a second process preparing the database waits for the first,
- * then finds everything made. Two processes running `DBOS.migrate` on a new database at once lose
- * to each other inside DBOS's own migrations, as a deadlock (40P01) between their `CREATE INDEX
- * CONCURRENTLY`s or as "tuple concurrently updated" (XX000), so the race is prevented rather than
- * each way of losing it forgiven. The lock is the session's (`pg_advisory_lock`'s kind), held
- * outside any transaction, and waited for by asking again (`pg_try_advisory_lock`), never by a
- * blocked statement: `CREATE INDEX CONCURRENTLY` waits for every older snapshot in its database,
- * and a statement blocked on the lock keeps one, so the migration would wait on the waiter that
- * waits on it, through a holder (this connection) Postgres cannot see is waiting on the migration.
+ * A connection to the database at `databaseUrl` (made first when missing) holding the
+ * preparation's session lock until it ends, so a second process waits, then finds everything
+ * made. Racing `DBOS.migrate`s lose to each other in many ways (40P01, XX000), so the race is
+ * prevented rather than each loss forgiven. The lock is polled, never waited for by a blocked
+ * statement: `CREATE INDEX CONCURRENTLY` waits on that statement's snapshot, a deadlock Postgres
+ * cannot see (the lock's holder is this connection, not the migration's).
  */
 async function lockPreparation(databaseUrl: string): Promise<Client> {
   const conn = await connect(databaseUrl).catch(async (err: unknown) => {
@@ -206,8 +194,8 @@ async function lockPreparation(databaseUrl: string): Promise<Client> {
     return connect(databaseUrl);
   });
   try {
-    const ask = `SELECT pg_try_advisory_lock(${PREPARE_LOCK}) AS locked`;
-    while (!(await conn.query<{ locked: boolean }>(ask)).rows[0]!.locked) await setTimeout(LOCK_POLL_MS);
+    const ask = "SELECT pg_try_advisory_lock(hashtext('sanoma.prepareDatabase')) AS locked";
+    while (!(await conn.query<{ locked: boolean }>(ask)).rows[0]!.locked) await delay(50);
     return conn;
   } catch (err) {
     await conn.end().catch(() => undefined);
@@ -217,6 +205,8 @@ async function lockPreparation(databaseUrl: string): Promise<Client> {
 
 async function connect(databaseUrl: string): Promise<Client> {
   const conn = new Client({ connectionString: databaseUrl });
+  // An error nobody listens for ends the process; the query in flight fails with it.
+  conn.on("error", (err) => warn(`a preparation connection failed: ${errorMessage(err)}`));
   await conn.connect();
   return conn;
 }
@@ -227,7 +217,7 @@ async function connect(databaseUrl: string): Promise<Client> {
  */
 async function createDatabase(databaseUrl: string): Promise<void> {
   const url = new URL(databaseUrl);
-  const name = decodeURIComponent(url.pathname.slice(1));
+  const name = decodeURI(url.pathname.slice(1));
   url.pathname = "/postgres";
   const admin = await connect(url.toString());
   try {
