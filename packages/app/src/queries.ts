@@ -24,6 +24,7 @@ import {
 } from "./api.ts";
 import {
   getActor,
+  getAvailableConnectors,
   getConfig,
   getCredentials,
   getDriftReport,
@@ -215,6 +216,10 @@ export const credentialsQuery = () =>
 /** What is connected for going live (the connect page): under the credentials' key, so setting one refreshes both. */
 export const setupStatusQuery = () =>
   queryOptions({ queryKey: ["credentials", "setup"], queryFn: () => getSetupStatus(), staleTime: 5_000 });
+
+/** The connectors on npm the config does not install: read every 10 minutes at most, as npm's list changes rarely. */
+export const availableConnectorsQuery = () =>
+  queryOptions({ queryKey: ["available-connectors"], queryFn: () => getAvailableConnectors(), staleTime: 10 * 60_000 });
 
 /** What going live can choose from: read once a minute at most, as each list asks GitHub or Supabase. */
 export const goLiveChoicesQuery = () =>

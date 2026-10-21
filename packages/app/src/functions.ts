@@ -34,6 +34,7 @@ import {
   validate,
   withoutSources,
 } from "./server/core.ts";
+import { availableConnectors } from "./server/available.ts";
 import { goLive, goLiveChoices, goLiveHost, goLiveProgress } from "./server/go-live.ts";
 import { connectExisting, setSetupToken, setupStatus } from "./server/setup.ts";
 import { withPrincipal } from "./middleware.ts";
@@ -139,6 +140,9 @@ export const setSetupTokenFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .validator(validate(SetCredentialRequest))
   .handler(({ data, context }) => setSetupToken(context.app, context.principal, data));
+
+/** The connector packages on npm that the config does not install. */
+export const getAvailableConnectors = createServerFn(READ).handler(({ context }) => availableConnectors(context.app));
 
 /** What going live can choose from: GitHub accounts, Supabase organizations and regions, the host. */
 export const getGoLiveChoices = createServerFn(READ).handler(({ context }) => goLiveChoices(context.app));

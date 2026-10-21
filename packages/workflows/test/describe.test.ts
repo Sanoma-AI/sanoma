@@ -1,16 +1,17 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bluesky } from "@sanoma-ai/connector-bluesky";
+import { docker } from "@sanoma-ai/connector-docker";
 import { ghost } from "@sanoma-ai/connector-ghost";
+import { github } from "@sanoma-ai/connector-github";
 import { resend } from "@sanoma-ai/connector-resend";
-import blueskyPkg from "../../../connectors/bluesky/package.json" with { type: "json" };
-import ghostPkg from "../../../connectors/ghost/package.json" with { type: "json" };
-import resendPkg from "../../../connectors/resend/package.json" with { type: "json" };
+import { stripe } from "@sanoma-ai/connector-stripe";
+import { supabase } from "@sanoma-ai/connector-supabase";
 import { withFake } from "@sanoma-ai/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { defineConfig, defineConnector, defineWorkflow, memoryLedger } from "../src/index.ts";
+import { defineConfig, defineConnector, defineWorkflow, memoryLedger, vendorInfo } from "../src/index.ts";
 import { describeConfig, outlineWorkflow } from "../src/describe.ts";
 import { defineFake } from "../src/fake.ts";
 import { VENDOR } from "../src/op.ts";
@@ -128,12 +129,38 @@ describe("describeConfig", () => {
     for (const vendor of ["ghost", "bluesky"]) expect(vendors[vendor]?.logo?.src).toBeDefined();
   });
 
-  it.each([
-    { vendor: "resend", connector: resend, pkg: resendPkg },
-    { vendor: "ghost", connector: ghost, pkg: ghostPkg },
-    { vendor: "bluesky", connector: bluesky, pkg: blueskyPkg },
-  ])("names the $vendor connector's package and homepage as its package.json does", ({ connector, pkg }) => {
-    expect(connector[VENDOR].info).toMatchObject({ package: pkg.name, homepage: pkg.homepage });
+  // The app finds connectors not installed on npm by the keyword, and shows them by the `sanoma` field.
+  it.each(Object.entries({ bluesky, docker, ghost, github, resend, stripe, supabase }))(
+    "takes the %s connector's title, logo, package and homepage from its package.json, which npm can list",
+    (vendor, connector) => {
+      const dir = new URL(`../../../connectors/${vendor}/`, import.meta.url);
+      const pkg = JSON.parse(readFileSync(new URL("package.json", dir), "utf8"));
+      expect(pkg.keywords).toContain("sanoma-connector");
+      const { title, logo, logoDark } = pkg.sanoma;
+      const files: string[] = [logo, logoDark].filter(Boolean);
+      expect(pkg.files).toEqual(expect.arrayContaining(files));
+      const [svg, dark] = files.map((file) => readFileSync(new URL(file, dir), "utf8").trim());
+      expect(connector[VENDOR].info).toEqual({ title, logo: { svg, dark }, package: pkg.name, homepage: pkg.homepage });
+    },
+  );
+
+  it("refuses a package.json without a sanoma field that names the vendor", () => {
+    const root = mkdtempSync(join(tmpdir(), "vendor-info-"));
+    try {
+      mkdirSync(join(root, "src"));
+      const moduleUrl = new URL(`file://${root}/src/connector.ts`);
+      writeFileSync(join(root, "package.json"), JSON.stringify({ name: "sanoma-connector-acme" }));
+      expect(() => vendorInfo(moduleUrl)).toThrow(
+        'sanoma-connector-acme: package.json needs a "sanoma" field with a title',
+      );
+      writeFileSync(
+        join(root, "package.json"),
+        JSON.stringify({ name: "sanoma-connector-acme", sanoma: { title: "Acme" } }),
+      );
+      expect(vendorInfo(moduleUrl)).toEqual({ title: "Acme", package: "sanoma-connector-acme" });
+    } finally {
+      rmSync(root, { recursive: true });
+    }
   });
 
   it("refuses a homepage that is not an https URL", () => {

@@ -195,6 +195,36 @@ export const GoLiveRequest = z.object({
 });
 export type GoLiveRequest = z.infer<typeof GoLiveRequest>;
 
+/**
+ * Whose a connector is: Sanoma's own (the `@sanoma-ai/` scope) or the community's, any other
+ * package. Sanoma's reviewed list, when it exists, will say more.
+ */
+export type Tier = "official" | "community";
+
+export const tierOf = (pkg: string): Tier => (pkg.startsWith("@sanoma-ai/") ? "official" : "community");
+
+/** A connector package on npm that the config does not install (`getAvailableConnectors`). */
+export interface AvailableConnector {
+  /** The npm package name, what `pnpm add` takes. */
+  package: string;
+  /** The vendor's name, from the package's `sanoma` field. */
+  title: string;
+  description?: string;
+  /** Its latest version. */
+  version: string;
+  tier: Tier;
+  /** Its logos as https URLs of the published files, for an `<img>` only. */
+  logo?: { src: string; dark?: string };
+  /** Where its code and README are, as an https URL. */
+  homepage?: string;
+}
+
+/** The connectors npm lists that the config does not install; `error` when npm could not be searched. */
+export interface AvailableConnectors {
+  connectors: AvailableConnector[];
+  error?: string;
+}
+
 /** What the Go live page offers to choose from (`getGoLiveChoices`), and why a list is empty. */
 export interface GoLiveChoices {
   /** The GitHub accounts a repository can be made in: the token's user and organizations, and the App's installations. */

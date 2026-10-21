@@ -5,6 +5,7 @@ import { problemAt } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useMatches, useRouter } from "@tanstack/react-router";
 import { cva, type VariantProps } from "class-variance-authority";
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle";
 import { ClockIcon } from "@phosphor-icons/react/dist/csr/Clock";
@@ -154,11 +155,34 @@ export const effectBadge = cva("", {
 });
 
 /**
- * A vendor's logo, 16 px unless `className` sizes it, named by the vendor's title for assistive
- * tech unless `alt` says otherwise (`""` where the title is beside it): its connector's light
- * variant, and its dark one under the dark theme. Nothing when the connector gives no logo.
+ * A logo, 16 px unless `className` sizes it: `src`, and `dark` instead under the dark theme. Only
+ * ever an `<img>`, where an SVG's scripts and external references never run or load.
  */
-/** A vendor's logo; `fallback` draws in its place when the config has no logo for the vendor. */
+export function Logo({
+  src,
+  dark,
+  alt,
+  className,
+}: {
+  src: string;
+  dark?: string | undefined;
+  alt: string;
+  className?: string | undefined;
+}) {
+  // A hidden <img> is out of the accessibility tree: one name is read either way.
+  return (
+    <>
+      <img src={src} alt={alt} className={cn("size-4 shrink-0", dark && "dark:hidden", className)} />
+      {dark && <img src={dark} alt={alt} className={cn("hidden size-4 shrink-0 dark:block", className)} />}
+    </>
+  );
+}
+
+/**
+ * A vendor's logo, as `Logo` draws it, named by the vendor's title for assistive tech unless
+ * `alt` says otherwise (`""` where the title is beside it). `fallback` draws in its place when the
+ * config has no logo for the vendor.
+ */
 export function VendorLogo({
   vendor,
   alt,
@@ -172,15 +196,7 @@ export function VendorLogo({
 }) {
   const { data: entry } = useSuspenseQuery({ ...configQuery(), select: (config) => config.vendors[vendor] });
   if (!entry?.logo) return fallback;
-  const { src, dark } = entry.logo;
-  const name = alt ?? entry.title;
-  // A hidden <img> is out of the accessibility tree: one name is read either way.
-  return (
-    <>
-      <img src={src} alt={name} className={cn("size-4 shrink-0", dark && "dark:hidden", className)} />
-      {dark && <img src={dark} alt={name} className={cn("hidden size-4 shrink-0 dark:block", className)} />}
-    </>
-  );
+  return <Logo {...entry.logo} alt={alt ?? entry.title} className={className} />;
 }
 
 /**
@@ -490,6 +506,18 @@ export function ButtonLink({
     render: children,
     props: { "data-slot": "button", className: cn(buttonVariants({ variant, size }), className) },
   });
+}
+
+/** A link off the app, in a new tab, which its icon says. */
+export function ExternalLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <ButtonLink variant="link" size="sm">
+      <a href={href} target="_blank" rel="noreferrer">
+        {children}
+        <ArrowSquareOutIcon aria-hidden="true" data-icon="inline-end" />
+      </a>
+    </ButtonLink>
+  );
 }
 
 /** JSON behind a disclosure, for inputs and outputs that are usually too long to show inline. */

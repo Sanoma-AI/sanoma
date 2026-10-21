@@ -6,7 +6,8 @@
     "blog",
     "connector",
     "ghost",
-    "sanoma"
+    "sanoma",
+    "sanoma-connector"
   ],
   "homepage": "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/ghost#readme",
   "bugs": "https://github.com/Sanoma-AI/sanoma/issues",
@@ -19,6 +20,8 @@
   "files": [
     "dist",
     "features",
+    "logo.svg",
+    "logo-dark.svg",
     "README.md",
     "LICENSE"
   ],
@@ -63,5 +66,10 @@
   },
   "engines": {
     "node": ">=24"
+  },
+  "sanoma": {
+    "title": "Ghost",
+    "logo": "logo.svg",
+    "logoDark": "logo-dark.svg"
   }
 }
