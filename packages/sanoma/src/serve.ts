@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { dirname, extname } from "node:path";
+import { realpathSync } from "node:fs";
+import { dirname, extname, isAbsolute, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type AppOptions, githubLogin, startApp } from "@sanoma-ai/app";
 import { errorMessage, isLoopback, SanomaClient, type SanomaConfig, startWorker } from "@sanoma-ai/workflows";
@@ -53,7 +54,8 @@ async function appStart(config: SanomaConfig, { port, log, dev = false }: ServeO
   await writeApi(rootOf(config), describeConfig(config)).catch((err: unknown) =>
     log(`could not write .sanoma/api.ts: ${errorMessage(err)}`),
   );
-  return { ...options, ...(await appSites(rootOf(config), log, dev ? options.host : false)) };
+  const sites = await appSites(rootOf(config), log, dev ? options.host : false);
+  return { ...options, ...sites, ...(sites.dev && { dev: { ...sites.dev, onFileChange: apiWriter(config, log) } }) };
 }
 
 async function served(config: SanomaConfig, options: AppOptions): Promise<Served> {
@@ -91,29 +93,43 @@ async function appSites(
   }
   if (!sites.length) return {};
   log(`serving the app with ${named} from Vite's dev server: edits show as they are saved`);
-  return { dev: { repo: root, onConfigChange: apiWriter(root, log) } };
+  return { dev: { repo: root } };
 }
 
+/** Where a change cannot reach the config from: the sites, what sanoma writes, the install, git. */
+const NOT_CONFIG = new Set(["sites", ".sanoma", "node_modules", ".git"]);
+
 /**
- * Writes `.sanoma/api.ts` again, in a child `sanoma api`: this process holds the config as it
- * was loaded, and Node imports a module once. One child at a time; changes while one runs are
- * one more run after it.
+ * Writes `.sanoma/api.ts` again on a change to a file the config may be read from: the config's
+ * own, or TypeScript under the root outside `NOT_CONFIG` (a workflow may import a relative file
+ * anywhere). In a child `sanoma api`, in the config's directory, where it loads the config: this
+ * process holds the config as it was loaded, and Node imports a module once. One child at a time;
+ * changes while one runs are one more run after it.
  */
-function apiWriter(root: string, log: (line: string) => void): () => void {
+function apiWriter(config: SanomaConfig, log: (line: string) => void): (file: string) => void {
   const cli = fileURLToPath(new URL(`./cli${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
+  // By real path, as the dev server's watcher names files.
+  const root = realpathSync(rootOf(config));
+  const cwd = config.file ? dirname(config.file) : root;
+  const readsConfig = (file: string) => {
+    if (file === config.file) return true;
+    const path = relative(root, file);
+    return /\.tsx?$/.test(path) && !path.startsWith("..") && !isAbsolute(path) && !NOT_CONFIG.has(path.split(sep)[0]!);
+  };
   let running = false;
   let again = false;
   const run = () => {
     running = true;
     again = false;
-    spawn(process.execPath, [cli, "api"], { cwd: root, stdio: "inherit" })
+    spawn(process.execPath, [cli, "api"], { cwd, stdio: "inherit" })
       .once("error", (err) => log(`could not write .sanoma/api.ts: ${err.message}`))
       .once("close", () => {
         running = false;
         if (again) run();
       });
   };
-  return () => {
+  return (file) => {
+    if (!readsConfig(file)) return;
     if (running) again = true;
     else run();
   };

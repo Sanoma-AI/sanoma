@@ -224,12 +224,12 @@ describe("sanoma with sites: the dev server", () => {
       workflow,
       readFileSync(workflow, "utf8").replace("{ who: z.string() }", "{ who: z.string(), times: z.number() }"),
     );
+    // The file, and the child's line, which crosses a pipe after it.
     await waitFor(
-      async () => readFileSync(api, "utf8"),
-      (text) => text.includes("times: number;"),
+      () => ({ text: readFileSync(api, "utf8"), stderr: running!.output().stderr }),
+      ({ text, stderr }) => text.includes("times: number;") && stderr.includes("wrote .sanoma/api.ts"),
       20_000,
     );
-    expect(running!.output().stderr).toContain("wrote .sanoma/api.ts");
   }, 60_000);
 
   it("serves a new site folder without a restart", async () => {
