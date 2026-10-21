@@ -254,21 +254,21 @@ export class SanomaClient {
     if (!fn) throw new SanomaError("invalid_input", `${op.id} has no driver: the connector package must attach one`);
     const parsed = parseOrThrow(op.input, input, `The input to ${op.id} does not match its schema`, { op: op.id });
     const runId = `direct:${actor.id}:${id}`;
+    const heldId = `call:${actor.id}:${id}`;
+    const held: RunArgs = { input: { op: op.id, input }, startedBy: actor };
     const logged = recorded(op, parsed);
     const write = op.effect !== "read";
-    if (write) {
-      const first = await this.recordedCall(runId, op.id, logged);
+    // Only an id the caller gave can have been used: a write made, or held, with it settles it.
+    if (write && options.id !== undefined) {
+      const first = (await this.recordedCall(runId, op.id, logged)) ?? (await this.heldCall(op.id, heldId, held));
       if (first) return first.output;
     }
     const decision = await decideCall(policy, op, parsed, actor, { id: runId, workflow: CALL_WORKFLOW, approvals: [] });
     if (decision.kind === "deny") throw new PolicyDeniedError(op.id, decision.reason);
     if (decision.kind === "approve") {
-      const held = await this.start(
-        CALL_WORKFLOW,
-        { op: op.id, input },
-        { startedBy: actor, runId: `call:${actor.id}:${id}` },
-      );
-      throw new ApprovalPendingError(op.id, held);
+      await this.start(CALL_WORKFLOW, held.input, { startedBy: actor, runId: heldId });
+      // A read held before, whose run has ended since, answers with that run's result.
+      return (await this.heldCall(op.id, heldId, held))!.output;
     }
     const context: CallContext = {
       idempotencyKey: runId,
@@ -370,13 +370,30 @@ export class SanomaClient {
       );
     }
     if (first.error) {
-      throw new SanomaError("driver_failed", `${opId} failed when first called as ${runId}: ${first.error.message}`, {
-        runId,
-        op: opId,
-        error: first.error,
-      });
+      throw new SanomaError(
+        "driver_failed",
+        `${opId} failed when first called as ${runId}: ${first.error.message}; call again with another id`,
+        {
+          runId,
+          op: opId,
+          error: first.error,
+        },
+      );
     }
     return { output: first.output };
+  }
+
+  /**
+   * What the held call's run `heldId` returned once it ended (its error, when it failed);
+   * `approval_pending` while it has not; undefined when there is no such run. Refused
+   * (`invalid_input`) when the run was started with another input or by someone else.
+   */
+  private async heldCall(opId: string, heldId: string, args: RunArgs): Promise<{ output: unknown } | undefined> {
+    const [row] = await this.dbos.listWorkflows({ workflowIDs: [heldId], loadInput: false, loadOutput: false });
+    if (!row) return undefined;
+    await this.mustMatch(heldId, args);
+    if (!isEnded(runStatus(row.status, []))) throw new ApprovalPendingError(opId, heldId);
+    return { output: await this.awaitResult(heldId, 30_000) };
   }
 
   /**

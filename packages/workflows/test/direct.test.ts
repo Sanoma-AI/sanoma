@@ -251,6 +251,12 @@ describe("a direct call", () => {
     await client.decide(runId, { decision: "approve", by: { id: "lead" } });
     expect(await client.result(runId)).toMatchObject({ key: "Acme", record: won, updatedBy: "ada" });
     expect(await rows()).toEqual([{ key: "Acme", record: won, updated_by: "ada" }]);
+    // The same call once its run has ended answers with what the run returned, and writes nothing more.
+    expect(await client.call("data.outbound.save", { record: won }, { actor: ada, id: held })).toMatchObject({
+      key: "Acme",
+      updatedBy: "ada",
+    });
+    expect(await rows()).toHaveLength(1);
     const listing = vi.spyOn(dbos(), "listWorkflows");
     try {
       expect(await client.latest(CALL_WORKFLOW)).toMatchObject({
