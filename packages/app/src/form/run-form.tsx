@@ -29,12 +29,13 @@ export function RunForm({ workflow }: { workflow: string }) {
         <CardDescription>Starts a live run of {entry.name}.</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {started && (
+        {started?.workflow === entry.name && (
           <Notice>
             Run started. <Link {...runLink(started)}>Open the run</Link>
           </Notice>
         )}
-        <StartForm workflow={entry} onStarted={setStarted} />
+        {/* Keyed: the form builds its defaults once per mount, so another workflow gets its own. */}
+        <StartForm key={entry.name} workflow={entry} onStarted={setStarted} />
       </CardContent>
     </Card>
   );

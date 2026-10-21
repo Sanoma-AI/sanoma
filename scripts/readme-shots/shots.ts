@@ -48,36 +48,11 @@ import announce from "./workflows/announce.ts";
 export default defineConfig({ workflows: [announce], connectors: [withFake(ghost, fakeGhost())], policy: allowAll });
 `;
 
-// A small site for the site still: a page of the app's kit with the announce workflow's RunForm.
-const SITE: Record<string, string> = {
-  "sites/launches/site.ts": `import { defineSite } from "sanoma/site";
+// The site still's site: its site.ts here, its page the packages/app README's (`writeRepo`).
+const SITE_TS = `import { defineSite } from "sanoma/site";
 
 export default defineSite({ title: "Launch desk" });
-`,
-  "sites/launches/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
-import { Fact, Facts, PageHeader, Region, RunForm } from "@sanoma-ai/app/ui";
-
-export const Route = createFileRoute("/sites/launches/")({ component: LaunchDesk });
-
-function LaunchDesk() {
-  return (
-    <>
-      <PageHeader title="Launch desk" />
-      <Region title="How a launch goes">
-        <Facts>
-          <Fact label="Draft">A Ghost post, written from the form below</Fact>
-          <Fact label="Review">marketing-lead approves the launch copy in the Inbox</Fact>
-          <Fact label="Launch">Published at the launch time</Fact>
-        </Facts>
-      </Region>
-      <Region title="Announce a launch">
-        <RunForm workflow="announce" />
-      </Region>
-    </>
-  );
-}
-`,
-};
+`;
 
 const started = Date.now();
 const say = (line: string) => console.log(`readme:shots ${((Date.now() - started) / 1000).toFixed(0)}s: ${line}`);
@@ -284,7 +259,7 @@ async function seedPendingRuns(acme: string): Promise<void> {
   }
 }
 
-/** A company repo named acme: the README's workflow, the config and site above, and `node_modules` reaching this checkout. */
+/** A company repo named acme: the README's workflow, the config above, the packages/app README's site page, and `node_modules` reaching this checkout. */
 function writeRepo(dir: string): void {
   const readme = readFileSync(join(repo, "README.md"), "utf8").replaceAll("\r\n", "\n");
   const block = /^```ts\n\/\/ workflows\/announce\.ts\n([\s\S]*?)^```$/m.exec(readme);
@@ -292,10 +267,13 @@ function writeRepo(dir: string): void {
   mkdirSync(join(dir, "workflows"), { recursive: true });
   writeFileSync(join(dir, "workflows/announce.ts"), block[1]);
   writeFileSync(join(dir, "sanoma.config.ts"), CONFIG);
-  for (const [path, text] of Object.entries(SITE)) {
-    mkdirSync(dirname(join(dir, path)), { recursive: true });
-    writeFileSync(join(dir, path), text);
-  }
+  const appReadme = readFileSync(join(repo, "packages/app/README.md"), "utf8").replaceAll("\r\n", "\n");
+  const page = /^```tsx\n\/\/ sites\/launches\/routes\/index\.tsx\n([\s\S]*?)^```$/m.exec(appReadme);
+  if (!page?.[1])
+    fail("packages/app/README.md has no ```tsx block that starts with `// sites/launches/routes/index.tsx`");
+  mkdirSync(join(dir, "sites/launches/routes"), { recursive: true });
+  writeFileSync(join(dir, "sites/launches/site.ts"), SITE_TS);
+  writeFileSync(join(dir, "sites/launches/routes/index.tsx"), page[1]);
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "acme", private: true, type: "module" }));
   for (const [name, target] of [
     ["sanoma", "packages/sanoma"],

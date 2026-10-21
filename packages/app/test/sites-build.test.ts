@@ -69,7 +69,7 @@ const sitePage = (
 ) => `import { createFileRoute } from "@tanstack/react-router";
 ${line}
 
-export const Route = createFileRoute("${path}")({ component: () => <p>{${shown}}</p> });
+export const Route = createFileRoute("${path}")({ component: () => <div>{${shown}}</div> });
 `;
 
 /** The opening tag of the link around the first `text`. */
@@ -164,8 +164,9 @@ describe("a company's app with its sites", () => {
     const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
     if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
     const browser = await launch({ executablePath: chrome, headless: true });
-    const client = await SanomaClient.connect(config);
+    let client: SanomaClient | undefined;
     try {
+      client = await SanomaClient.connect(config);
       const page = await browser.newPage();
       // A desktop window, where the New run panel shows beside the graph.
       await page.setViewport({ width: 1440, height: 900 });
@@ -187,7 +188,7 @@ describe("a company's app with its sites", () => {
       // A string, run in the page: this file is typed for Node, without the DOM's `location`.
       await page.waitForFunction(String.raw`/^\/workflows\/hello\/runs\/[^/]+$/.test(location.pathname)`);
     } finally {
-      await client.close();
+      await client?.close();
       await browser.close();
     }
   });

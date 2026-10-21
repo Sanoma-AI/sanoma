@@ -76,21 +76,24 @@ A site imports its UI from `@sanoma-ai/app/ui`, the app's own components, so its
 - the hooks `useActor` (who is signed in) and `useDensity` (Compact or not);
 - `RunForm({ workflow })`, the app's start form for a workflow, its fields drawn from the workflow's input schema.
 
-`RunForm` names the workflow with a link to its page, starts a live run as the app's New run does, with the server's complaints shown on the fields they name, and once the run starts stays on the page and links to the run, where its graph, ledger and approvals are. A name the config does not have renders a notice saying so.
+`RunForm` names the workflow with a link to its page, starts a live run, with the server's complaints shown on the fields they name, and once the run starts stays on the page and links to the run, where its graph, ledger and approvals are. A name the config does not have renders a notice saying so.
 
 ```tsx
 // sites/launches/routes/index.tsx
 import { createFileRoute } from "@tanstack/react-router";
-import { Fact, Facts, Region, RunForm } from "@sanoma-ai/app/ui";
+import { Fact, Facts, PageHeader, Region, RunForm } from "@sanoma-ai/app/ui";
 
 export const Route = createFileRoute("/sites/launches/")({ component: LaunchDesk });
 
 function LaunchDesk() {
   return (
     <>
+      <PageHeader title="Launch desk" />
       <Region title="How a launch goes">
         <Facts>
+          <Fact label="Draft">A Ghost post, written from the form below</Fact>
           <Fact label="Review">marketing-lead approves the launch copy in the Inbox</Fact>
+          <Fact label="Launch">Published at the launch time</Fact>
         </Facts>
       </Region>
       <Region title="Announce a launch">

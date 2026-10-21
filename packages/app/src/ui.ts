@@ -142,6 +142,6 @@ export {
   toneBadge,
 } from "./components/common.tsx";
 export type { Tone } from "./lib/tone.ts";
-export { useActor } from "./actor.ts";
+export { type ActorState, useActor } from "./actor.ts";
 export { useDensity } from "./components/density.tsx";
 export { RunForm } from "./form/run-form.tsx";

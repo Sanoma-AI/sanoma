@@ -115,11 +115,9 @@ function useStartForm(
   // schema and answers with its issues, which land on the fields they name. Once it has started,
   // `useStartRun` moves the page on to the run, or `onStarted` has it.
   const submit = async (request: StartRunRequest) => {
+    let started: StartRunResponse;
     try {
-      // Not `onStarted?.(await …)`: without `onStarted`, that would skip the start too.
-      const started = await start.mutateAsync(request);
-      onStarted?.(started);
-      return undefined;
+      started = await start.mutateAsync(request);
     } catch (err) {
       const body = errorBodyOf(err);
       if (!body?.issues?.length) {
@@ -145,6 +143,9 @@ function useStartForm(
           : "The input does not match the workflow's schema";
       return { form: message, fields: byField };
     }
+    // Outside the try: the run has started, so a throw here is not a failure to start it.
+    onStarted?.(started);
+    return undefined;
   };
   return useForm({
     defaultValues,
