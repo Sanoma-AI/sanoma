@@ -6,11 +6,13 @@ import type {
   ErrorCode,
   InputIssue,
   LedgerRecord,
+  PreviewAnswer,
+  PreviewRequest,
   Principal,
   RunSummary,
 } from "@sanoma-ai/workflows";
 import type { Check, Scenario } from "@sanoma-ai/workflows/scenario";
-import { RUN_STATUSES } from "@sanoma-ai/workflows/shared";
+import { EFFECTS, RUN_STATUSES } from "@sanoma-ai/workflows/shared";
 import { z } from "zod";
 
 /**
@@ -307,6 +309,20 @@ export const CallRequest = z.object({
 });
 export type CallRequest = z.infer<typeof CallRequest>;
 
+/** What `previewFn` asks (`PreviewRequest` without its principal): at most 200 actions, each on a target when known. */
+export const PreviewQuery = z
+  .array(
+    z.object({
+      action: z.object({ id: z.string().min(1), effect: z.enum(EFFECTS).optional() }),
+      resource: z.string().min(1).optional(),
+    }),
+  )
+  .max(200) satisfies z.ZodType<Omit<PreviewRequest, "principal">[]>;
+export type PreviewQuery = z.infer<typeof PreviewQuery>;
+
+/** The policy's answer to each, in order: `custom` for every one when it cannot be asked ahead (a `definePolicy` function). */
+export type PreviewResult = PreviewAnswer | { answer: "custom" };
+
 /** The `body` of the error a server function fails with. */
 export interface ErrorResponse {
   error: string;
@@ -316,6 +332,8 @@ export interface ErrorResponse {
   issues?: InputIssue[];
   /** For `not_approver`: who may decide. */
   approver?: ApprovalState["approver"];
+  /** For `not_approver`: why not, `OWN_CHANGE` for the run's own actor. */
+  reason?: string;
   /** For `approval_pending`: the run of the built-in `call` workflow the call waits in; for `run_running`, the run. */
   runId?: string;
 }

@@ -28,7 +28,7 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "#/components/ui
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
-import { approverLabel, isEnded } from "@sanoma-ai/workflows/shared";
+import { approverLabel, isEnded, OWN_CHANGE } from "@sanoma-ai/workflows/shared";
 import { type DecideRequest, errorBodyOf, starterName } from "../api.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
 import { decideFn } from "../functions.ts";
@@ -117,7 +117,7 @@ export function ApprovalDetails({
           <Covers covers={approval.covers} />
         </Fact>
         <Fact label="Asked by">
-          <RequestedBy requestedBy={approval.requestedBy} op={approval.op} />
+          <RequestedBy requestedBy={approval.requestedBy} op={approval.op} reasons={approval.reasons} />
         </Fact>
         <Fact label="Asked">
           <When at={approval.requestedAt} />
@@ -302,7 +302,9 @@ function DecideDialog({
     !mutation.error || noteError
       ? undefined
       : body?.code === "not_approver"
-        ? `Only ${approverLabel(body.approver ?? approval.approver)} can decide this`
+        ? body.reason === OWN_CHANGE
+          ? "You started this run, so someone else must decide this"
+          : `Only ${approverLabel(body.approver ?? approval.approver)} can decide this`
         : mutation.error.message;
   const verb = decision === "reject" ? "Reject" : "Approve";
 

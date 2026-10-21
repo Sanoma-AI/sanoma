@@ -767,7 +767,7 @@ describe("the page", () => {
     const open = await page(`/inbox?approval=${id}/${hold.id}`);
     expect(openTitle(open.html)).toBe(HOLD_TITLE);
     expect(open.text).toContain(
-      `held&#x27;s run</a> of <a href="/workflows/announce">Announce a launch</a> wants to publish a post in Ghost, send a broadcast in Resend, and create a post in Bluesky.`,
+      `held&#x27;s run</a> of <a href="/workflows/announce">Announce a launch</a> wants to publish a post in Ghost, send a broadcast in Resend, and create a post in Bluesky: “${HOLD_TITLE}”.`,
     );
 
     const decided = await approveAs(hold.id, "   ");
@@ -827,7 +827,7 @@ describe("the page", () => {
     expect(rows.indexOf(second!)).toBeLessThan(rows.indexOf(first!));
     expect(currentRow(inbox.html)).toBe(rows[0]);
     expect(inbox.text).toContain("tester&#x27;s run</a> of");
-    expect(inbox.text).toContain("is waiting on this decision.");
+    expect(inbox.text).toContain("is waiting on this decision: “");
     expect(inbox.text).toMatch(/Announce a launch · from tester/);
     expect(inbox.html).toContain(">Approve<");
 

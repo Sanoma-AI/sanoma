@@ -11,9 +11,8 @@ import type {
 import { recordSchemaOf } from "./collection.ts";
 import type { ResolvedConfig } from "./config.ts";
 import { jsonSchemaOf } from "./define.ts";
-import type { Effect } from "./op.ts";
 import { isObject } from "./resource.ts";
-import { DATA_VENDOR, groupNamesOf, type PeopleResource } from "./shared.ts";
+import { DATA_VENDOR, EFFECTS, groupNamesOf, type PeopleResource, WORKFLOW_ACTION } from "./shared.ts";
 
 // The Cedar schema a company's policies are validated and decided against: made from the
 // resolved config and the people, in memory for the evaluator, and written as text to
@@ -33,12 +32,6 @@ export const SCHEMA_FILE = join(".sanoma", "schema.cedarschema");
 
 /** The schema's namespace: policies name `Sanoma::Group::"finance"`, `Sanoma::Action::"effect:money"`. */
 export const NAMESPACE = "Sanoma";
-
-/** Every effect, each an action group (`effect:<effect>`) its operations are in. */
-const EFFECTS: readonly Effect[] = ["read", "write", "publish", "send", "money", "access"];
-
-/** What a workflow start's action id starts with: `workflow:<name>`. */
-export const WORKFLOW_ACTION = "workflow:";
 
 /** The action group every workflow start (`workflow:<name>`) is in. */
 export const START = "start";

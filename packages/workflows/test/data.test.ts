@@ -189,9 +189,12 @@ describe("a workflow reading and saving a record", () => {
         },
       ]);
       expect(calls[1]!.output).toMatchObject({ key: "Acme", updatedBy: `run:${runId}` });
-      expect(seen.filter((c) => c.run.id === runId).map(({ op, effect, target }) => [op.id, effect, target])).toEqual([
-        ["data.outbound.get", "read", "data:outbound/Acme"],
-        ["data.outbound.save", "write", "data:outbound/Acme"],
+      expect(
+        seen.filter((c) => c.run.id === runId).map(({ op, effect, target, before }) => [op.id, effect, target, before]),
+      ).toEqual([
+        ["data.outbound.get", "read", "data:outbound/Acme", undefined],
+        // A save sees the record it replaces.
+        ["data.outbound.save", "write", "data:outbound/Acme", lead],
       ]);
       const { rows } = await pool.query(`SELECT record, updated_by FROM ${DATA_TABLE} WHERE collection = 'outbound'`);
       expect(rows).toEqual([{ record: { ...lead, stage: "contacted" }, updated_by: `run:${runId}` }]);

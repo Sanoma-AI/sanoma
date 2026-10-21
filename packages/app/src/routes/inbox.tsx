@@ -1,4 +1,5 @@
 import type { ConfigDescription, OpEntry } from "@sanoma-ai/workflows/describe";
+import { WORKFLOW_ACTION } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { RUNS_LIMIT } from "../api.ts";
@@ -93,12 +94,16 @@ const AND = new Intl.ListFormat("en", { type: "conjunction" });
  * has it. "an" before a, e, i or o only: a resource starting with u is more often "a user".
  */
 function doing(id: string, op: OpEntry | undefined, config: ConfigDescription) {
+  if (id.startsWith(WORKFLOW_ACTION)) return "start";
   if (!op) return `call ${id}`;
   const resource = op.resource.replaceAll("_", " ");
   return `${op.name} ${/^[aeio]/i.test(resource) ? "an" : "a"} ${resource} in ${config.vendors[op.vendor]?.title ?? op.vendor}`;
 }
 
-/** The approval in a sentence: whose run of which workflow (its title) wants to do what. */
+/**
+ * The approval in a sentence: whose run of which workflow (its title) wants to do what (start,
+ * for a start the policy holds), and the approval's title, with the policy's rules behind it.
+ */
 function Asks({ run, approval, workflow }: Entry & { workflow: string }) {
   const { data: config } = useSuspenseQuery(configQuery());
   const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
@@ -113,7 +118,13 @@ function Asks({ run, approval, workflow }: Entry & { workflow: string }) {
       <Link to="/workflows/$name" params={{ name: run.workflow }}>
         {workflow}
       </Link>{" "}
-      {what}.
+      {what}: “{approval.title}”
+      {approval.reasons?.length ? (
+        <>
+          , by <code>{approval.reasons.join(", ")}</code>
+        </>
+      ) : null}
+      .
     </p>
   );
 }

@@ -80,6 +80,8 @@ export type LedgerRecord = {
       op?: string;
       /** The held call's `seq`, which its `op.called` record has, for a policy request. */
       opSeq?: number;
+      /** The policies that held the call, by id, for a policy request whose policy names them. */
+      reasons?: string[];
     }
   /** A message the approval ignored: from someone other than the approver, or not a decision. */
   | { type: "approval.refused"; approval: string; by?: string; reason: string }

@@ -17,7 +17,7 @@ import {
   type PreviewAnswer,
   type PreviewRequest,
 } from "./policy.ts";
-import { cedarValue, cedarWasm, contextTypeOf, messageOf, NAMESPACE, schemaOf, WORKFLOW_ACTION } from "./schema.ts";
+import { cedarValue, cedarWasm, contextTypeOf, messageOf, NAMESPACE, schemaOf } from "./schema.ts";
 import {
   approverLabel,
   approverOf,
@@ -26,6 +26,7 @@ import {
   type PeopleResource,
   principalIdsOf,
   principalOf,
+  WORKFLOW_ACTION,
 } from "./shared.ts";
 
 // A company's policies in Cedar (`policies/**/*.cedar`), decided with `@cedar-policy/cedar-wasm`
@@ -199,12 +200,12 @@ export function validatePolicies(
  * - deny, a determining `forbid` without `@hold`: `deny` with its `@reason`, or "Refused by <id>";
  * - deny by `@hold` forbids only: each lifted once an approval addressed to its approver and
  *   covering the operation is approved (`approvedFor`); allowed when all are, else `approve` for
- *   the first, in the order written, with its `@title`.
+ *   the first, in the order written, with its `@title` and its id as `reasons`.
  *
  * An approver is a declared group (`{ group }`), a declared person's id, or the principal's
  * `onBehalfOf`; a principal acting for no one makes `on-behalf-of` a deny, "cannot resolve
  * approver". A policy that fails to evaluate is a deny naming it (Cedar would skip it).
- * `preview` asks the same ahead of a call, its context unknown.
+ * `preview` asks the same ahead of a call, its context unknown; `start`, about a run's start.
  */
 export function cedarPolicy(
   resolved: Pick<ResolvedConfig, "ops" | "workflows" | "collections">,
@@ -263,11 +264,17 @@ export function cedarPolicy(
     };
   };
 
-  const decide = (call: PolicyCall): Decision => {
-    const principal = directory.principal(call.actor);
-    const context = { input: call.input, ...(call.before !== undefined && { before: call.before }) };
+  /** May `actor` take `action` on `target` with `context`, given the run's `approvals` so far. */
+  const authorize = (
+    actor: Principal,
+    action: string,
+    target: string | undefined,
+    context: Record<string, unknown>,
+    approvals: PolicyCall["run"]["approvals"],
+  ): Decision => {
+    const principal = directory.principal(actor);
     const answer = cedar.statefulIsAuthorized({
-      ...requestOf(principal, call.op.id, call.target, () => context),
+      ...requestOf(principal, action, target, () => context),
       preparsedSchemaName: set,
       preparsedPolicySetId: set,
       validateRequest: true,
@@ -287,11 +294,24 @@ export function cedarPolicy(
         reasons,
       );
     }
-    const waiting = holds.find(({ approver }) => !approvedFor(call.run.approvals, call.op.id, approver!));
+    const waiting = holds.find(({ approver }) => !approvedFor(approvals, action, approver!));
     if (!waiting) return allow(reasons);
     const approver = waiting.approver!;
-    return approve(approver, { title: waiting.p.title ?? `${call.op.id} needs ${approverLabel(approver)}` });
+    const title = waiting.p.title ?? `${action} needs ${approverLabel(approver)}`;
+    return approve(approver, { title, reasons: [waiting.p.id] });
   };
+
+  const decide = (call: PolicyCall): Decision =>
+    authorize(
+      call.actor,
+      call.op.id,
+      call.target,
+      { input: call.input, ...(call.before !== undefined && { before: call.before }) },
+      call.run.approvals,
+    );
+
+  const start = (actor: Principal, workflow: string, input: unknown): Decision =>
+    authorize(actor, `${WORKFLOW_ACTION}${workflow}`, undefined, { input }, []);
 
   const preview = (requests: readonly PreviewRequest[]): PreviewAnswer[] =>
     requests.map(({ principal: actor, action, resource }) => {
@@ -316,7 +336,7 @@ export function cedarPolicy(
       return open ? { answer: "depends", rule: ruleOf(open) } : { answer: "allow" };
     });
 
-  return Object.freeze(Object.assign(decide, { kind: "cedar" as const, version, preview }));
+  return Object.freeze(Object.assign(decide, { kind: "cedar" as const, version, preview, start }));
 }
 
 /** A policy as a preview names it. */

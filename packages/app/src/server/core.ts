@@ -31,6 +31,8 @@ import {
   type CredentialsResponse,
   type DecideCall,
   type ErrorResponse,
+  type PreviewQuery,
+  type PreviewResult,
   type RunDetail,
   RunsQuery,
   type ScenariosResponse,
@@ -354,6 +356,19 @@ export function decide({ client }: AppContext, actor: Principal, call: DecideCal
   });
 }
 
+/**
+ * What the policy would answer `actor` for each request, its input unknown (`Policy.preview`):
+ * `custom` for every one when the policy cannot be asked ahead (a `definePolicy` function).
+ */
+export function preview(
+  { resolved: { policy } }: AppContext,
+  actor: Principal,
+  requests: PreviewQuery,
+): PreviewResult[] {
+  if (!policy.preview) return requests.map(() => ({ answer: "custom" }));
+  return policy.preview(requests.map((request) => ({ ...request, principal: actor })));
+}
+
 /** Each vendor's credential statuses now, from the app's environment and the stored credentials. */
 export const credentials = async ({ client }: AppContext): Promise<CredentialsResponse> =>
   Object.fromEntries(await client.credentials());
@@ -471,7 +486,10 @@ export function asApiError(err: unknown): ApiError {
   // Read by property, not instanceof: DBOS hands a run's errors back as copies.
   const data: Record<string, unknown> = (err as Partial<SanomaError>).data ?? {};
   if (Array.isArray(data.issues)) body.issues = data.issues as InputIssue[];
-  if (code === "not_approver") body.approver = data.approver as ErrorResponse["approver"];
+  if (code === "not_approver") {
+    body.approver = data.approver as ErrorResponse["approver"];
+    if (typeof data.reason === "string") body.reason = data.reason;
+  }
   if ((code === "approval_pending" || code === "run_running") && typeof data.runId === "string")
     body.runId = data.runId;
   return new ApiError(status, body);

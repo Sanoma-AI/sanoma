@@ -2,7 +2,6 @@ import { fileURLToPath } from "node:url";
 import { getCallSites } from "node:util";
 import { z } from "zod";
 import { isOp, type Op } from "./op.ts";
-import { approverLabel } from "./shared.ts";
 
 /**
  * Who is acting: the person or agent that starts a run, calls an operation or decides an
@@ -33,12 +32,6 @@ export const Approver: z.ZodType<Approver> = z.union(
   [z.string().regex(/\S/), z.object({ group: z.string().regex(/\S/) })],
   { error: 'needs an approver: a name, or { group: "name" }' },
 );
-
-/** Why `by` may not decide the approval, naming who may. */
-export const notApprover = ({ approver }: Pick<ApprovalState, "approver">, by: Principal): string =>
-  typeof approver === "string"
-    ? `${by.id} is not the approver; ${approverLabel(approver)} is`
-    : `${by.id} is not in ${approverLabel(approver)}`;
 
 /** True when the two name the same approver: the same id, or the same group. */
 export const sameApprover = (a: Approver, b: Approver): boolean =>
@@ -97,6 +90,8 @@ export interface ApprovalState extends Omit<ApprovalRequest, "covers"> {
   opSeq?: number;
   /** For a policy request: the held call's input. */
   input?: unknown;
+  /** For a policy request: the policies that held the call, by id, when the policy names them. */
+  reasons?: string[];
   status: "pending" | "approved" | "rejected";
   requestedAt: number;
   decidedBy?: string;

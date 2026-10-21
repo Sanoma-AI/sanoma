@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Collection } from "./collection.ts";
-import type { ApprovalState, Principal, WorkflowDefinition } from "./define.ts";
+import type { ApprovalState, Approver, Principal, WorkflowDefinition } from "./define.ts";
 import type { Fake } from "./fake.ts";
 import type { LedgerStore } from "./ledger.ts";
 import type { DriverFn, Op } from "./op.ts";
@@ -17,6 +17,18 @@ export interface RunArgs {
   startedBy: Principal;
   /** The scenario a sandbox run is seeded from; the run calls the fakes instead of the drivers. */
   sandbox?: string;
+  /**
+   * The policy's hold on the start (`workflow:<name>`), as `SanomaClient.start` was answered: the
+   * run waits for this approval before its body runs.
+   */
+  hold?: StartHold;
+}
+
+/** A start the policy held: whom it asks, the approval's title, and the rules that held it. */
+export interface StartHold {
+  approver: Approver;
+  title: string;
+  reasons?: string[];
 }
 
 /**

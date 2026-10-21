@@ -153,7 +153,7 @@ export const LedgerRow = memo(function LedgerRow({
       body = (
         <p>
           “{record.title}” asked of {approverLabel(record.approver)} by{" "}
-          <RequestedBy requestedBy={record.requestedBy} op={record.op} />
+          <RequestedBy requestedBy={record.requestedBy} op={record.op} reasons={record.reasons} />
         </p>
       );
       break;

@@ -2,6 +2,7 @@ import type { RunSummary } from "./client.ts";
 import type { CredentialStatus } from "./env.ts";
 import type { ApprovalState, Approver, Principal } from "./define.ts";
 import type { LedgerRecord } from "./ledger.ts";
+import type { Effect } from "./op.ts";
 import type { DeclaredResource, ResourceProblem } from "./resources.ts";
 import type { OutlineNode } from "./outline.ts";
 
@@ -44,6 +45,12 @@ export const APPLY_WORKFLOW = "apply";
  * `list`, `save` and `delete`. No connector may take it.
  */
 export const DATA_VENDOR = "data";
+
+/** Every effect an operation may have, each an action group (`effect:<effect>`) of the Cedar schema. */
+export const EFFECTS = ["read", "write", "publish", "send", "money", "access"] as const satisfies readonly Effect[];
+
+/** What a workflow start's action id starts with, as a policy names it: `workflow:<name>`. */
+export const WORKFLOW_ACTION = "workflow:";
 
 /** A site's folder name under `sites/`, its URL segment: what the app mounts and `readSites` reads. */
 export const SITE_NAME = /^[a-z][a-z0-9-]*$/;
@@ -160,13 +167,32 @@ export const ENDED_STATUSES = ["finished", "failed", "cancelled"] as const satis
 /** True when the run has finished, failed or been cancelled. */
 export const isEnded = (status: RunStatus): boolean => (ENDED_STATUSES as readonly RunStatus[]).includes(status);
 
+/** Why the run's own actor may not decide an approval on it: separation of duties (`mayDecide`). */
+export const OWN_CHANGE = "own change";
+
+/** A run as `mayDecide` reads it: who started it, its own actor. */
+type DecidedRun = { actor?: Pick<Principal, "id"> | undefined };
+
 /**
- * True when `by` may decide the approval: `by.id` is the approver, or `by.groups` holds the
- * approver group. Pure: everything it reads is already recorded.
+ * True when `by` may decide the approval on `run`: `by.id` is the approver, or `by.groups` holds
+ * the approver group, and `by` is not the run's own actor, whatever group they are in (separation
+ * of duties). Pure: everything it reads is already recorded.
  */
-export function mayDecide(approval: Pick<ApprovalState, "approver">, by: Principal): boolean {
-  const { approver } = approval;
-  return typeof approver === "string" ? approver === by.id : (by.groups?.includes(approver.group) ?? false);
+export const mayDecide = (approval: Pick<ApprovalState, "approver">, by: Principal, run: DecidedRun): boolean =>
+  refusalOf(approval, by, run) === undefined;
+
+/** Why `by` may not decide the approval on `run` (`mayDecide`), naming who may, or `OWN_CHANGE`; undefined when they may. */
+export function refusalOf(
+  { approver }: Pick<ApprovalState, "approver">,
+  by: Principal,
+  run: DecidedRun,
+): string | undefined {
+  if (typeof approver === "string") {
+    if (approver !== by.id) return `${by.id} is not the approver; ${approverLabel(approver)} is`;
+  } else if (!by.groups?.includes(approver.group)) {
+    return `${by.id} is not in ${approverLabel(approver)}`;
+  }
+  return by.id === run.actor?.id ? OWN_CHANGE : undefined;
 }
 
 /** A declared resource as the people functions read it: only the runtime's people types count. */

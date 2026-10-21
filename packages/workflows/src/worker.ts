@@ -1,4 +1,5 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
+import { awaitApproval } from "./approvals.ts";
 import { buildCtx, isInfrastructureError } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
@@ -13,7 +14,7 @@ import { lineStartsOf, readSource } from "./ast.ts";
 import { callsOf, outlineWithSource } from "./outline.ts";
 import { currentRun, type Run, type RunArgs, type WorkerState, type WorkflowOutline } from "./run.ts";
 import type { Source } from "./source.ts";
-import { errorMessage } from "./shared.ts";
+import { errorMessage, WORKFLOW_ACTION } from "./shared.ts";
 
 export interface Worker {
   /**
@@ -218,7 +219,7 @@ function register(name: string) {
 }
 
 /** One run of the workflow registered as `name`, on the state of the worker running when it starts. */
-async function runWorkflow(name: string, { input, startedBy, sandbox }: RunArgs): Promise<unknown> {
+async function runWorkflow(name: string, { input, startedBy, sandbox, hold }: RunArgs): Promise<unknown> {
   const state = current;
   // A stopped worker's state stays current while DBOS shuts down.
   if (!state || state.stopped) throw new Error(`Run of "${name}" started with no worker running`);
@@ -245,6 +246,12 @@ async function runWorkflow(name: string, { input, startedBy, sandbox }: RunArgs)
     try {
       // The one parse of the input: the client checked it, but sent it as given.
       const parsed = parseOrThrow(wf.input, input, `The input does not match ${wf.name}'s schema`);
+      if (hold) {
+        // The policy held the start: the body waits for the approval, and a rejection fails the run.
+        const action = `${WORKFLOW_ACTION}${wf.name}`;
+        const held = { op: action, input, reasons: hold.reasons };
+        await awaitApproval(run, hold.title, { approver: hold.approver, covers: [action] }, undefined, held);
+      }
       if (sandbox !== undefined) {
         // Imported here, so a live worker never loads the Gherkin parser or faker.
         const { seedSandbox } = await import("./sandbox.ts");

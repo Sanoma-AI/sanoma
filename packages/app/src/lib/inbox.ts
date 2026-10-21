@@ -15,10 +15,15 @@ export const findEntry = (entries: Entry[], key: string | undefined) =>
 
 /**
  * Of these approvals, those `actor` may decide; none while the page knows no name. A group
- * approver counts only when the deployment vouches for groups: a typed name has none.
+ * approver counts only when the deployment vouches for groups: a typed name has none. Never one
+ * on a run `actor` started (`mayDecide`).
  */
 export const decidableBy = (actor: string | null | undefined, groups: readonly string[]) => (entries: Entry[]) =>
-  actor ? entries.filter(({ approval }) => mayDecide(approval, { id: actor, groups: [...groups] })) : [];
+  actor
+    ? entries.filter(({ run, approval }) =>
+        mayDecide(approval, { id: actor, groups: [...groups] }, { actor: run.startedBy }),
+      )
+    : [];
 
 /** The pending approvals, and those you may decide (`mine`), with the waiting runs' read's error. */
 export function usePending() {
