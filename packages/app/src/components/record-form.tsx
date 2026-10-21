@@ -93,6 +93,11 @@ export function RecordForm({
     if (Object.keys(built.errors).length) return { fields: built.errors };
     const input = { record: built.input };
     try {
+      // Add makes a record: a key that names one already is the person's to open, not to replace.
+      const typed = built.input[key];
+      if (!saved && typeof typed === "string" && typed && (await (api as UntypedApi).data[name].get({ key: typed }))) {
+        return { fields: { [key]: "A record has this key already: open it to change it" } };
+      }
       await call.mutateAsync({ op: "save", input });
     } catch (err) {
       if (toastIfHeld(err)) {
@@ -136,7 +141,7 @@ export function RecordForm({
                 {submitting ? <Spinner data-icon="inline-start" /> : <SaveIcon data-icon="inline-start" />}
                 {submitting ? "Saving…" : "Save"}
               </Button>
-              {saved && <DeleteRecord name={name} recordKey={saved.key} onDeleted={onDone} />}
+              {saved && <DeleteRecord name={name} recordKey={saved.key} disabled={submitting} onDeleted={onDone} />}
             </>
           )}
         </FormFoot>
@@ -146,7 +151,18 @@ export function RecordForm({
 }
 
 /** Delete, and the dialog that asks before it calls `data.<name>.delete`; a denial shows in the dialog. */
-function DeleteRecord({ name, recordKey, onDeleted }: { name: string; recordKey: string; onDeleted: () => void }) {
+function DeleteRecord({
+  name,
+  recordKey,
+  disabled,
+  onDeleted,
+}: {
+  name: string;
+  recordKey: string;
+  /** While a save is under way: one write at a time. */
+  disabled: boolean;
+  onDeleted: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const call = useRecordCall(name);
   const remove = async () => {
@@ -163,7 +179,7 @@ function DeleteRecord({ name, recordKey, onDeleted }: { name: string; recordKey:
   };
   return (
     <>
-      <Button type="button" variant="outline" className="ml-auto" onClick={() => setOpen(true)}>
+      <Button type="button" variant="outline" className="ml-auto" disabled={disabled} onClick={() => setOpen(true)}>
         <Trash2Icon data-icon="inline-start" />
         Delete
       </Button>

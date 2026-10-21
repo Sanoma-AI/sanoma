@@ -31,6 +31,7 @@ import {
   initialValue,
   initialValues,
   issueTarget,
+  issueText,
   pathName,
   type ScalarField,
   toLocalInput,
@@ -135,7 +136,7 @@ export function errorsOf(
   for (const issue of body.issues) {
     const target = issueTarget(fields, at(issue.path), issue.message);
     if (target) byField[target.name] ??= target.message;
-    else rest.push(issue.path.length ? `${pathName(issue.path)}: ${issue.message}` : issue.message);
+    else rest.push(issueText(issue));
   }
   // A form-level message only for what no field shows.
   const placed = Object.keys(byField).length > 0;

@@ -157,7 +157,7 @@ try {
   // The grid sorted by stage, a record open in the form beside it.
   await still(browser, base, "/data/outbound?order=stage&record=Initech", join(captured, "data.png"), {
     sidebar: true,
-    height: 720,
+    fullPage: true,
   });
   say("stills taken; making demo.gif");
   stopIfInterrupted();

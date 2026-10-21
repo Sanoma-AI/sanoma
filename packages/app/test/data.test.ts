@@ -313,6 +313,16 @@ describe("the Data section", () => {
         updatedBy: "ada",
       });
 
+      // Add again under that key: refused on the field, the record as it was.
+      await tab.click('a[href="/data/outbound?new=true"]');
+      await tab.waitForSelector("#field-company:not(:disabled)");
+      await tab.type("#field-company", "Puppet");
+      await tab.type("#field-contact", "other@puppet.test");
+      await tab.select("#field-stage", "1");
+      await tab.click('button[type="submit"]');
+      await tab.waitForSelector("::-p-text(A record has this key already)");
+      expect((await puppet())?.record.contact).toBe("pat@puppet.test");
+
       // Edit: the key stays, the stage moves on.
       await tab.click('a[href="/data/outbound?record=Puppet"]');
       await tab.waitForSelector("#field-company:disabled");

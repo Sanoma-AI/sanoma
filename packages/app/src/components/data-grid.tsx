@@ -2,12 +2,12 @@ import type { CollectionEntry } from "@sanoma-ai/workflows/describe";
 import { LIST_LIMIT, type Saved } from "@sanoma-ai/workflows/shared";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, SearchIcon } from "lucide-react";
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Field, FieldLabel } from "#/components/ui/field.tsx";
 import { Input } from "#/components/ui/input.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
-import { pathName } from "../form/schema.ts";
+import { issueText } from "../form/schema.ts";
 import { type DataSearch, enumFields, LIMIT_CHOICES } from "../queries.ts";
 import { Nothing, Tip, ToneBadge, When } from "./common.tsx";
 import { LinkRow } from "./runs-table.tsx";
@@ -28,12 +28,20 @@ export function GridFilters({ collection, search }: { collection: CollectionEntr
   const set = (next: Partial<DataSearch>) =>
     void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true, resetScroll: false });
   // The key typed so far; the URL, and the grid with it, follow once typing pauses. A URL that
-  // changes otherwise (Back, a link) sets it.
+  // changes otherwise (Back, a link) sets it, but not the URL catching up with what was typed.
   const [key, setKey] = useState(search.key ?? "");
-  useEffect(() => setKey(search.key ?? ""), [search.key]);
+  const written = useRef(search.key);
   useEffect(() => {
-    if (key === (search.key ?? "")) return;
-    const timer = setTimeout(() => set({ key: key || undefined }), TYPING_MS);
+    if (search.key === written.current) return;
+    written.current = search.key;
+    setKey(search.key ?? "");
+  }, [search.key]);
+  useEffect(() => {
+    if ((key || undefined) === written.current) return;
+    const timer = setTimeout(() => {
+      written.current = key || undefined;
+      set({ key: written.current });
+    }, TYPING_MS);
     return () => clearTimeout(timer);
     // Typing alone writes the URL: not the URL's own change, which the effect above follows.
   }, [key]);
@@ -229,7 +237,7 @@ function Value({ value }: { value: unknown }) {
 
 /** A record the fields no longer accept: a badge, and where they refuse it in its tooltip. */
 function IssuesFlag({ issues }: { issues: NonNullable<Saved["issues"]> }) {
-  const text = issues.map(({ path, message }) => (path.length ? `${pathName(path)}: ${message}` : message)).join("; ");
+  const text = issues.map(issueText).join("; ");
   return (
     <Tip tip={`Saved before its fields changed: ${text}`}>
       <ToneBadge tone="bad" tabIndex={0}>

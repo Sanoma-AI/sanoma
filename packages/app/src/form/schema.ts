@@ -157,6 +157,10 @@ function initialScalar(field: ScalarField, d: unknown): ScalarValue {
   }
 }
 
+/** An issue as one line: its path as a field's name (`pathName`), then its message. */
+export const issueText = ({ path, message }: { path: readonly (string | number)[]; message: string }) =>
+  path.length ? `${pathName(path)}: ${message}` : message;
+
 /** A field's name in the form: `title`, `details.email`, `links[0]`, `people[0].name`. */
 export const pathName = (path: readonly (string | number)[]) =>
   path.reduce<string>((name, p) => (typeof p === "number" ? `${name}[${p}]` : name ? `${name}.${p}` : p), "");
