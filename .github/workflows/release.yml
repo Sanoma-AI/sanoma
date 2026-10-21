@@ -41,7 +41,7 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME does not match the public packages' version: $versions"
             exit 1
           fi
-      # Packages already on npm are skipped without running prepack, so their dependents need this
+      # Packages already public are skipped without running prepack, so their dependents need this
       # build; the packages being staged rebuild in their prepack, which keeps the hand path safe.
       - run: pnpm build
       # Staged, not published: the trusted publishers allow `npm stage publish` only, and a
@@ -55,7 +55,7 @@ jobs:
           jq -r '.publishedPackages[] | "\(.name)@\(.version) \(.stageId // error("no stage id for \(.name)"))"' pnpm-publish-summary.json > staged.txt
           cat staged.txt
           if [ ! -s staged.txt ]; then
-            echo "Nothing staged: every public version is already on npm." >> "$GITHUB_STEP_SUMMARY"
+            echo "Nothing staged: every version is already public." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           {
