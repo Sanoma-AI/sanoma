@@ -1,7 +1,7 @@
 {
   "overrides": [
     {
-      "files": ["workflows/**", "policies/**"],
+      "files": ["workflows/**"],
       "rules": {
         "no-restricted-globals": [
           "error",
@@ -35,8 +35,8 @@
             "name": "require",
             "message": "Import from `@sanoma-ai/workflows`, a `@sanoma-ai/connector-*` package, zod or a file in this directory."
           },
-          { "name": "eval", "message": "Not allowed in a workflow or policy." },
-          { "name": "Function", "message": "Not allowed in a workflow or policy." },
+          { "name": "eval", "message": "Not allowed in a workflow." },
+          { "name": "Function", "message": "Not allowed in a workflow." },
           {
             "name": "globalThis",
             "message": "Reaching globals through globalThis would bypass these rules: use `ctx`."
@@ -85,20 +85,9 @@
               },
               {
                 "name": "@sanoma-ai/workflows",
-                "allowImportNames": [
-                  "defineWorkflow",
-                  "definePolicy",
-                  "allow",
-                  "deny",
-                  "approve",
-                  "approvedFor",
-                  "allowAll",
-                  "mayDecide",
-                  "errorCode",
-                  "z"
-                ],
+                "allowImportNames": ["defineWorkflow", "mayDecide", "errorCode", "z"],
                 "allowTypeImports": true,
-                "message": "A workflow or policy imports only these and types from @sanoma-ai/workflows: the rest (SanomaClient, startWorker, the ledger stores, config helpers) could start runs, approve its own approvals, forge the ledger or read credentials. Ask for approval with `ctx.approval`."
+                "message": "A workflow imports only these and types from @sanoma-ai/workflows: the rest (SanomaClient, startWorker, the ledger stores, config helpers) could start runs, approve its own approvals, forge the ledger or read credentials. Ask for approval with `ctx.approval`."
               }
             ],
             "patterns": [

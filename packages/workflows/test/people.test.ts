@@ -8,7 +8,6 @@ import { z } from "zod";
 import { sanoma } from "../src/constructors.ts";
 import { admit, describeConfig, readPeople } from "../src/describe.ts";
 import {
-  allowAll,
   approverOf,
   declaresPeople,
   defineWorkflow,
@@ -52,7 +51,7 @@ describe("the people types", () => {
       [true, {}],
       [true, {}],
     ]);
-    const resolved = resolveConfig({ workflows: [], connectors: [], policy: allowAll });
+    const resolved = resolveConfig({ workflows: [], connectors: [] });
     expect(resolved.types.size).toBe(0);
     expect([...resolved.ops.keys()].filter((id) => id.startsWith("sanoma."))).toEqual([]);
     expect([...resolved.workflows.keys()]).toEqual([]);
@@ -131,7 +130,7 @@ describe("people in a data file", () => {
       groups: ["agents", "finance"],
       onBehalfOf: "bo",
     });
-    const description = describeConfig({ workflows: [], connectors: [], policy: allowAll, root });
+    const description = describeConfig({ workflows: [], connectors: [], root });
     expect(description.problems).toEqual([]);
     expect(description.resources.map((r) => r.id)).toEqual(declared.map((r) => r.id));
     expect(description.resourceTypes.map((t) => t.id)).toEqual(["sanoma.agent", "sanoma.group", "sanoma.person"]);
@@ -199,10 +198,10 @@ describe("the client, with people declared", () => {
       return "done";
     },
   });
-  const config: SanomaConfig = { workflows: [held], connectors: [], policy: allowAll, root };
+  const config: SanomaConfig = { workflows: [held], connectors: [], root };
   const app = useTestApp(config, { databaseUrl });
 
-  it("refuses to start, call or decide as anyone not declared, and takes the id alone", async () => {
+  it("refuses to start, call, decide or set a credential as anyone not declared, and takes the id alone", async () => {
     expect(await failure(app.client.start(held, {}, { startedBy: "cy" }))).toMatchObject({
       code: "not_admitted",
       message: "cy is not declared in resources/people.ts",
@@ -210,6 +209,13 @@ describe("the client, with people declared", () => {
     expect(await failure(app.client.call("data.none.list", {}, { actor: { id: "cy" } }))).toMatchObject({
       code: "not_admitted",
     });
+    for (const write of [
+      app.client.setCredential("SHOP_KEY", "key", { by: "cy" }),
+      app.client.setSecret("SHOP_KEY", "key", { by: "cy" }),
+      app.client.clearCredential("SHOP_KEY", { by: "cy" }),
+    ]) {
+      expect(await failure(write)).toMatchObject({ code: "not_admitted" });
+    }
     // Claiming finance does not put bo's run's approver in it: ada decides as declared.
     const runId = await app.client.start(held, {}, { startedBy: { id: "bo", groups: ["admin"] } });
     expect((await app.client.run(runId))?.startedBy).toEqual({ id: "bo" });

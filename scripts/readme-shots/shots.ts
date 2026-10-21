@@ -42,10 +42,10 @@ const BUILT: [dir: string, outputs: string[]][] = [
 const CONFIG = `import { ghost } from "@sanoma-ai/connector-ghost";
 import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
 import { withFake } from "@sanoma-ai/testing";
-import { allowAll, defineConfig } from "sanoma";
+import { defineConfig } from "sanoma";
 import announce from "./workflows/announce.ts";
 
-export default defineConfig({ workflows: [announce], connectors: [withFake(ghost, fakeGhost())], policy: allowAll });
+export default defineConfig({ workflows: [announce], connectors: [withFake(ghost, fakeGhost())] });
 `;
 
 // The site still's site: its site.ts here, its page the packages/app README's (`writeRepo`).

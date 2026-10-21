@@ -10,15 +10,7 @@ import resendPkg from "../../../connectors/resend/package.json" with { type: "js
 import { withFake } from "@sanoma-ai/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import {
-  allow,
-  allowAll,
-  defineConfig,
-  defineConnector,
-  definePolicy,
-  defineWorkflow,
-  memoryLedger,
-} from "../src/index.ts";
+import { allow, defineConfig, defineConnector, definePolicy, defineWorkflow, memoryLedger } from "../src/index.ts";
 import { describeConfig, outlineWorkflow } from "../src/describe.ts";
 import { defineFake } from "../src/fake.ts";
 import { VENDOR } from "../src/op.ts";
@@ -29,7 +21,6 @@ import announce from "./fixtures/announce.ts";
 const base = defineConfig({
   workflows: [announce],
   connectors: [ghost, resend, bluesky],
-  policy: allowAll,
   ledger: memoryLedger(),
 });
 
@@ -215,9 +206,7 @@ describe("describeConfig", () => {
     const fake = defineFake(odd, { initial: () => ({}), ops: () => ({ thing: { get: async () => new Map() } }) });
     // `unrepresentable: "any"` keeps custom types as {}; only a schema that throws is reported.
     expect(() =>
-      describeConfig(
-        defineConfig({ workflows: [wf], connectors: [withFake(odd, fake)], policy: allowAll, ledger: memoryLedger() }),
-      ),
+      describeConfig(defineConfig({ workflows: [wf], connectors: [withFake(odd, fake)], ledger: memoryLedger() })),
     ).not.toThrow();
   });
 

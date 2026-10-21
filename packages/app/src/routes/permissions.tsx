@@ -6,8 +6,8 @@ import { useState } from "react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "#/components/ui/sheet.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { PREVIEW_TONE } from "#/lib/tone.ts";
-import type { PermissionsResponse, PermissionsRow, PreviewResult } from "../api.ts";
-import { Fact, Facts, Notice, Nothing, PageHeader, pageTitle, ToneBadge } from "../components/common.tsx";
+import type { PermissionsResponse, PermissionsRow } from "../api.ts";
+import { Fact, Facts, Nothing, PageHeader, pageTitle, ToneBadge } from "../components/common.tsx";
 import { PolicyFacts } from "../components/panels/permissions-panel.tsx";
 import { permissionsQuery } from "../queries.ts";
 
@@ -55,12 +55,6 @@ function PermissionsPage() {
           <Facts>
             <PolicyFacts policy={data.policy} />
           </Facts>
-          {data.policy.kind === "function" && (
-            <Notice>
-              A policy written as a function cannot be asked ahead: it decides each call as it is made. Rules in{" "}
-              <code>policies/*.cedar</code> fill this grid.
-            </Notice>
-          )}
           <div className="rounded-lg border">
             <Table>
               <TableHeader>
@@ -126,7 +120,7 @@ function Rows({
                 <Mark
                   cell={cell}
                   what={`${row.id} for ${someoneIn(group)}`}
-                  open={cell.answer !== "custom" && cell.rule ? () => choose({ kind, row, group, cell }) : undefined}
+                  open={cell.rule ? () => choose({ kind, row, group, cell }) : undefined}
                 />
               </TableCell>
             );
@@ -138,7 +132,7 @@ function Rows({
 }
 
 /** A cell: `allow` muted, else a badge in its tone (a hold naming whom it asks), a button when it opens a rule. */
-function Mark({ cell, what, open }: { cell: PreviewResult; what: string; open: (() => void) | undefined }) {
+function Mark({ cell, what, open }: { cell: PreviewAnswer; what: string; open: (() => void) | undefined }) {
   if (cell.answer === "allow") return <span className="text-muted-foreground">allow</span>;
   const label = cell.answer === "hold" && cell.approver ? `hold · ${approverLabel(cell.approver)}` : cell.answer;
   const button = open && {

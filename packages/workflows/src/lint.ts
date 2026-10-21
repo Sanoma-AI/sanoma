@@ -34,7 +34,7 @@ const REFUSED_PACKAGES: [RegExp, string][] = [
 ];
 
 /**
- * What a workflow or policy may import from an author package, besides types: the one list,
+ * What a workflow may import from an author package, besides types: the one list,
  * `allowImportNames` of oxlint.json's `@sanoma-ai/workflows` entry (`sanoma`'s generated
  * `oxlint.json` derives its own entry from it). Everything else is
  * refused: the client, the worker and the app could start runs or approve the run's own
@@ -47,7 +47,7 @@ const WORKFLOW_IMPORTS: readonly string[] =
 const ALLOWED_NAMES = new Set(WORKFLOW_IMPORTS);
 
 const NOT_ALLOWED =
-  `a workflow or policy imports only ${WORKFLOW_IMPORTS.join(", ")} and types from ` +
+  `a workflow imports only ${WORKFLOW_IMPORTS.join(", ")} and types from ` +
   `${AUTHOR_PACKAGES.join(" or ")}: the rest could start runs, approve its own approvals, forge the ledger or read credentials`;
 
 /**
@@ -58,11 +58,11 @@ const NOT_ALLOWED =
 const ERROR_CLASSES = new Set(["DriverError", "SanomaError", "PolicyDeniedError", "RejectedError"]);
 
 /**
- * Checks a workflow or policy file. Imports allowed: the names in `WORKFLOW_IMPORTS` and any
+ * Checks a workflow file. Imports allowed: the names in `WORKFLOW_IMPORTS` and any
  * type from `@sanoma-ai/workflows` or `sanoma`, `@sanoma-ai/connector-<vendor>`, `zod`, and relative files. With
- * `filename`, a relative import must stay inside the file's nearest `workflows/` or `policies/`
- * directory, or its own directory when it has neither; the one file outside it a workflow or
- * policy may import is the company's `resources/data.ts`, its collections (by real path). No
+ * `filename`, a relative import must stay inside the file's nearest `workflows/` directory, or its
+ * own directory when it has none; the one file outside it a workflow may import is the company's
+ * `resources/data.ts`, its collections (by real path). No
  * `instanceof` against the runtime's error classes: read `errorCode(err)`.
  *
  * In each workflow's `run` (the literal `defineWorkflow` is called with), it reports what the
@@ -84,7 +84,7 @@ export function lintWorkflow(input: string | SourceFile, path?: string): LintPro
   const read = typeof input === "string" ? parsed(input, filename ?? "workflow.ts") : input;
   const { program, at } = read;
   const problems = [...read.problems];
-  const root = filename === undefined ? undefined : nearestDir(filename, ["workflows", "policies"]);
+  const root = filename === undefined ? undefined : nearestDir(filename, ["workflows"]);
 
   const checkSource = (node: Node) => {
     const spec: string = node.source.value;
@@ -202,7 +202,7 @@ function whyRefused(spec: string, filename: string | undefined, root: string | u
     if (filename === undefined || root === undefined) return undefined;
     const target = join(dirname(filename), spec);
     if (inside(root, target)) return undefined;
-    const tree = basename(root) === "workflows" || basename(root) === "policies";
+    const tree = basename(root) === "workflows";
     // The collections, which a workflow names in `uses`: the one data file the runtime imports too.
     if (tree && realPath(target) === realPath(join(dirname(root), "resources", COLLECTIONS_FILE))) return undefined;
     return (

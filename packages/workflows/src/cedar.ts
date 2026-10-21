@@ -8,6 +8,7 @@ import type { Approver, Principal } from "./define.ts";
 import { filesUnder } from "./paths.ts";
 import {
   allow,
+  allowAll,
   approve,
   approvedFor,
   type Decision,
@@ -17,6 +18,7 @@ import {
   type PreviewAnswer,
   type PreviewRequest,
 } from "./policy.ts";
+import { readPeople } from "./resources.ts";
 import { cedarValue, cedarWasm, contextTypeOf, messageOf, NAMESPACE, schemaOf } from "./schema.ts";
 import {
   approverLabel,
@@ -26,6 +28,7 @@ import {
   type PeopleResource,
   principalIdsOf,
   principalOf,
+  problemLine,
   WORKFLOW_ACTION,
 } from "./shared.ts";
 
@@ -336,7 +339,35 @@ export function cedarPolicy(
       return open ? { answer: "depends", rule: ruleOf(open) } : { answer: "allow" };
     });
 
-  return Object.freeze(Object.assign(decide, { kind: "cedar" as const, version, preview, start }));
+  return Object.freeze(Object.assign(decide, { version, preview, start }));
+}
+
+/**
+ * The policy of the repo at `root`: its `policies/**\/*.cedar` over `resolved` and the people its
+ * data files declare (`readPeople`, `cedarPolicy`), or `allowAll` when it has none. With problems
+ * (`loadPolicies`, `validatePolicies`), each a printable line (`file:line:col: <policy id>:
+ * <message>`), a policy that refuses every call, start and preview naming the first: a repo never
+ * runs on part of its rules.
+ */
+export function policyAt(
+  root: string | undefined,
+  resolved: Pick<ResolvedConfig, "ops" | "workflows" | "collections">,
+): { policy: Policy; problems: string[] } {
+  const files = root === undefined ? [] : readPolicyFiles(root);
+  if (!files.length) return { policy: allowAll, problems: [] };
+  const { people } = readPeople(root);
+  const { policies, problems } = loadPolicies(files);
+  problems.push(...validatePolicies(resolved, policies, people));
+  if (!problems.length) return { policy: cedarPolicy(resolved, policies, people), problems: [] };
+  const lines = problems.map(({ policy, ...p }) =>
+    problemLine({ ...p, message: policy ? `${policy}: ${p.message}` : p.message }),
+  );
+  const refused = deny(`The policies do not hold: ${lines[0]}`);
+  const policy: Policy = Object.assign(() => refused, {
+    start: () => refused,
+    preview: (requests: readonly PreviewRequest[]): PreviewAnswer[] => requests.map(() => ({ answer: "deny" })),
+  });
+  return { policy: Object.freeze(policy), problems: lines };
 }
 
 /** A policy as a preview names it. */

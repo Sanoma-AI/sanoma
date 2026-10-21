@@ -69,13 +69,13 @@ unless { principal in Sanoma::Group::"finance" };
 `;
 
 const config = { workflows: [refund], connectors: [withFake(shop, fake)], root };
-const resolved = resolveConfig({ ...config, policy: allowAll });
+const resolved = resolveConfig({ ...config });
 const cedar = cedarPolicy(
   resolved,
   loadPolicies([{ file: "policies/refunds.cedar", text: POLICIES }]).policies,
   readPeople(root).people,
 );
-const description = describeConfig({ ...config, policy: allowAll });
+const description = describeConfig({ ...config });
 const requests = previewRequests(description.workflows[0]!, new Map(description.ops.map((op) => [op.id, op])));
 
 /** The line the run form shows `who`, named in the loopback login's header, under `policy`. */

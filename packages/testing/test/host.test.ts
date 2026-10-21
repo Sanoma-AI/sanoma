@@ -2,7 +2,6 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  allowAll,
   type CallContext,
   memoryLedger,
   memorySecrets,
@@ -45,7 +44,6 @@ describe("the host conformance kit", () => {
   const config: SanomaConfig = {
     workflows: [...hostCheckWorkflows],
     connectors: [hostCheck],
-    policy: allowAll,
     root,
     ledger: memoryLedger(),
     databaseUrl,

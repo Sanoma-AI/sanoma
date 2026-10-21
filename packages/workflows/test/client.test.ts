@@ -190,8 +190,8 @@ describe("SanomaClient", () => {
   });
 
   it("checks the config on connect, the way the worker does", async () => {
-    await expect(SanomaClient.connect({ ...app.config, policy: "allow" as never })).rejects.toThrow(
-      "The config's `policy` must be a policy: definePolicy(...), or leave it out to allow every call",
+    await expect(SanomaClient.connect({ ...app.config, ledger: { read: 1 } as never })).rejects.toThrow(
+      /^The config's `ledger` must be a ledger store/,
     );
   });
 });

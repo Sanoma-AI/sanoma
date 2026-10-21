@@ -78,7 +78,6 @@ export {
   approve,
   approvedFor,
   type Decision,
-  definePolicy,
   deny,
   type Policy,
   type PolicyCall,

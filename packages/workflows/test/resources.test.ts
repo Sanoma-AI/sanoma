@@ -10,14 +10,7 @@ import { z } from "zod";
 import { parsed } from "../src/ast.ts";
 import { readDataFile } from "../src/datafile.ts";
 import { describeConfig, readDataFiles, readResources } from "../src/describe.ts";
-import {
-  allowAll,
-  defineConnector,
-  defineResource,
-  memoryLedger,
-  resolveConfig,
-  type SanomaConfig,
-} from "../src/index.ts";
+import { defineConnector, defineResource, memoryLedger, resolveConfig, type SanomaConfig } from "../src/index.ts";
 import { BAD_DATA_FILES } from "./bad-data-files.ts";
 import company from "./fixtures/company/sanoma.config.ts";
 
@@ -41,7 +34,6 @@ const acme = defineConnector("acme", { widget }, { package: "@acme/sanoma-connec
 const base = {
   workflows: [],
   connectors: [github, stripe, acme],
-  policy: allowAll,
   ledger: memoryLedger(),
 } satisfies SanomaConfig;
 

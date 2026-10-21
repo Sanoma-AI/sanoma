@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { collection, collectionsFake, recordIssues } from "../src/collection.ts";
 import { describeConfig } from "../src/describe.ts";
 import { lintResources } from "../src/lint.ts";
-import { allowAll, defineConnector, memorySecrets, type Op, resolveConfig } from "../src/index.ts";
+import { defineConnector, memorySecrets, type Op, resolveConfig } from "../src/index.ts";
 import { loadScenarios } from "../src/scenario.ts";
 import config from "./fixtures/outbound/sanoma.config.ts";
 import { outbound } from "./fixtures/outbound/resources/data.ts";
@@ -211,7 +211,7 @@ describe("the collections' fake", () => {
 });
 
 describe("a config's collections", () => {
-  const base = { workflows: [], connectors: [], policy: allowAll };
+  const base = { workflows: [], connectors: [] };
 
   it("are registered under the vendor data: their operations, a driver and a fake", () => {
     const resolved = resolveConfig({ ...base, workflows: [outboundNext], collections: [outbound, outbound] });

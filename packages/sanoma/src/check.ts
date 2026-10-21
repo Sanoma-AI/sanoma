@@ -14,7 +14,6 @@ import {
 import { problemLine } from "@sanoma-ai/workflows/shared";
 import { runScenarios } from "@sanoma-ai/workflows/scenarios";
 import type { Loaded } from "./config.ts";
-import { usePolicies } from "./policies.ts";
 import { runtimeFrom, siteBuild } from "./sites.ts";
 
 export interface CheckResult {
@@ -36,15 +35,14 @@ export interface CheckOptions {
 }
 
 /** The directories oxlint reads, those that exist. */
-const LINTED = ["workflows", "policies", "resources", "sites"];
+const LINTED = ["workflows", "resources", "sites"];
 
 /**
- * Checks a repo the way its tests would, without a test framework: its policy made from
- * `policies/*.cedar` when the config names none (`usePolicies`, whose problems are the check's);
- * the generated files written first (`writeGenerated`: `.sanoma/api.ts` and the Cedar schema,
+ * Checks a repo the way its tests would, without a test framework: what is wrong in its
+ * `policies/**\/*.cedar` (`policyProblems`, as `resolveConfig` reads them); the generated files written first (`writeGenerated`: `.sanoma/api.ts` and the Cedar schema,
  * each when it changed); `tsc -p tsconfig.json` in
  * its root; oxlint in the root, with the repo's `.oxlintrc.json` (written when missing, to extend
- * this package's `oxlint.json`), over `workflows/`, `policies/`, `resources/` and `sites/`; every problem
+ * this package's `oxlint.json`), over `workflows/`, `resources/` and `sites/`; every problem
  * `describeConfig` finds in the data files and the workflows' files (the import rules and what
  * the outline cannot draw: what the worker refuses to start with), and each site's call to what
  * the config does not have; with sites, their generated files written first and, beside those
@@ -60,7 +58,7 @@ export async function check(
   // Awaited below when there are scenarios; otherwise its failure is nobody's.
   ready.catch(() => {});
   log("config");
-  const policies = await usePolicies({ config, root, resolved });
+  const policies = resolved.policyProblems;
   const description = describeConfig(config);
   const { wrote } = await writeGenerated(root, description, schemaOf(resolved, readPeople(root).people));
   for (const file of wrote) log(`wrote ${file}`);

@@ -3,7 +3,6 @@ import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { secret } from "../src/secret.ts";
 import {
-  allowAll,
   defineConnector,
   defineResource,
   DRIFT_WORKFLOW,
@@ -119,7 +118,7 @@ describe("sanoma.source.resolve", () => {
 
   it("is registered, with its driver, for a config that declares a host type, and drift uses it", () => {
     const { connector } = fakeHost(async () => ({ url: "http://127.0.0.1:1", stop: async () => undefined }));
-    const hosted = resolveConfig({ workflows: [], connectors: [connector], policy: allowAll });
+    const hosted = resolveConfig({ workflows: [], connectors: [connector] });
     expect(hosted.ops.get(SOURCE_RESOLVE)).toMatchObject({ effect: "read", idempotent: true });
     expect(hosted.drivers.has(SOURCE_RESOLVE)).toBe(true);
     expect(
@@ -132,7 +131,6 @@ describe("sanoma.source.resolve", () => {
     const plain = resolveConfig({
       workflows: [],
       connectors: [defineConnector("acme", { db }, { package: "@acme/connector" })],
-      policy: allowAll,
     });
     expect(plain.ops.has(SOURCE_RESOLVE)).toBe(false);
   });

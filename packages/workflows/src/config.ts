@@ -32,7 +32,8 @@ import {
   setupOf,
   VENDOR,
 } from "./op.ts";
-import { allowAll, type Policy } from "./policy.ts";
+import { policyAt } from "./cedar.ts";
+import type { Policy } from "./policy.ts";
 import { isChangeOp, type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
 import { APPLY_WORKFLOW, BUILT_IN_WORKFLOWS, CALL_WORKFLOW, DATA_VENDOR } from "./shared.ts";
 import { sourceDriver, sourceOps } from "./source.ts";
@@ -40,11 +41,11 @@ import type { Steps } from "./steps.ts";
 import { computeVersion } from "./version.ts";
 
 /**
- * What a worker runs, on which connectors, under which policy: the argument to `startWorker`.
+ * What a worker runs, on which connectors: the argument to `startWorker`.
  * A project usually keeps it in `sanoma.config.ts` and passes it in; nothing loads that file
  * automatically. The rest is convention: each connector carries its driver and its fake
- * (`withSetup`), the app's name is its `package.json`'s, and the scenarios and data files are
- * `scenarios/` and `resources/` in `root`.
+ * (`withSetup`), the app's name is its `package.json`'s, and the scenarios, data files and
+ * policies are `scenarios/`, `resources/` and `policies/` in `root`.
  */
 export interface SanomaConfig {
   workflows: WorkflowDefinition<any, any>[];
@@ -56,11 +57,6 @@ export interface SanomaConfig {
    * package attaches the maker of.
    */
   connectors: Connector<any, any>[];
-  /**
-   * Checked before every operation call. Without one, every call is allowed (`allowAll`), unless
-   * the launcher finds `policies/*.cedar` in the root and makes the policy from them (`cedarPolicy`).
-   */
-  policy?: Policy;
   /**
    * Where the audit record goes. Default: `postgresLedger` on the config's database, which the
    * worker, the app and other processes share; the worker and the client each make their own
@@ -142,7 +138,13 @@ export interface ResolvedConfig {
    * and `call` (`CALL_WORKFLOW`) when an operation may be called directly (`isDirect`).
    */
   workflows: Map<string, WorkflowDefinition<any, any>>;
+  /**
+   * Checked before every operation call and run start: the root's `policies/**\/*.cedar`
+   * (`policyAt`), `allowAll` without any, and one that refuses everything while they have problems.
+   */
   policy: Policy;
+  /** What is wrong in the policies, one printable line each (`file:line:col: <policy id>: <message>`). */
+  policyProblems: string[];
   /** The config's `ledger`, when it gives one; the worker and the client otherwise make `postgresLedger` on `databaseUrl` (`ownedLedger`). */
   ledger?: LedgerStore;
   /**
@@ -193,7 +195,8 @@ export function rootOf(config: Pick<SanomaConfig, "root" | "file">): string | un
 /**
  * Checks a config and derives what the runtime needs from it: the drivers and fakes from the
  * connectors' setups (`withSetup`), the collections' operations, driver and fake, and from
- * `root`, the app's name (`package.json`) and the scenarios (`scenarios/`). Throws what
+ * `root`, the app's name (`package.json`), the scenarios (`scenarios/`) and the policy
+ * (`policies/`, `policyAt`). Throws what
  * `startWorker` would refuse, with the same message, so `describeConfig`, `SanomaClient.connect`
  * and the app fail the same way the worker does. It opens nothing and reads no file outside
  * `root`. Each entry point resolves once: the worker and the client when they start, the app at
@@ -206,9 +209,6 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   for (const connector of config.connectors as unknown[]) checkConnector(connector);
   if (!Array.isArray(config.workflows)) {
     throw new Error("The config needs `workflows`: an array of defineWorkflow definitions");
-  }
-  if (config.policy !== undefined && typeof config.policy !== "function") {
-    throw new Error("The config's `policy` must be a policy: definePolicy(...), or leave it out to allow every call");
   }
   // An untyped config naming fake drivers would otherwise run live. Delete once sanoma-ops has migrated.
   if (config.drivers !== undefined || config.fakes !== undefined)
@@ -272,6 +272,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   // Built-in: a direct call the policy holds for an approval, made a run, when any operation may be called directly.
   const call = callWorkflow(ops, drivers, types);
   if (call.uses.length) names.set(CALL_WORKFLOW, call);
+  const { policy, problems: policyProblems } = policyAt(root, { ops, workflows: names, collections });
   return {
     appName,
     databaseUrl,
@@ -288,7 +289,8 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     collections,
     ...(dataStore && { dataStore }),
     workflows: names,
-    policy: config.policy ?? allowAll,
+    policy,
+    policyProblems,
     ...(ledger !== undefined && { ledger }),
     ...(root !== undefined && { root }),
   };

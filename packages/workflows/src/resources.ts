@@ -1,7 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { parsed } from "./ast.ts";
-import { connectorsOf, rootOf, type SanomaConfig } from "./config.ts";
 import {
   type DataFile,
   type DataFileExport,
@@ -95,20 +94,6 @@ export interface DataFiles {
   collections: DeclaredCollection[];
   /** By file, line and column. */
   problems: ResourceProblem[];
-}
-
-/**
- * The resources the config's data files declare, read without importing or running them; throws
- * one error listing every problem, each at `file:line:column`, for a test or CI to fail on.
- * `describeConfig` lists the same, with the problems beside them instead.
- */
-export function readResources(config: SanomaConfig): DeclaredResource[] {
-  const { resources, problems } = readDataFiles(rootOf(config), connectorsOf(config));
-  if (problems.length) {
-    const lines = problems.map((p) => `  ${problemLine(p)}`);
-    throw new Error(`The resources' data files have problems:\n${lines.join("\n")}`);
-  }
-  return resources;
 }
 
 /** What the data files declare of the people: the resources `principalOf` takes, and what is wrong in their files. */

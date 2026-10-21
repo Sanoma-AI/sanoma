@@ -77,7 +77,7 @@ unless { principal in Sanoma::Group::"finance" };
 forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"shop.refunds.list", resource);
 `;
 
-const config: SanomaConfig = { workflows: [refund], connectors: [withFake(shop, fake)], root, policy: allowAll };
+const config: SanomaConfig = { workflows: [refund], connectors: [withFake(shop, fake)], root };
 const resolved = resolveConfig(config);
 const cedar = cedarPolicy(
   resolved,

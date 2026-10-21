@@ -4,7 +4,6 @@ import { ensureBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import {
   allow,
-  allowAll,
   approve,
   definePolicy,
   deny,
@@ -197,7 +196,6 @@ describe("the Data section", () => {
       workflows: [],
       connectors: [],
       collections: [older],
-      policy: allowAll,
       ledger: memoryLedger(),
       databaseUrl: testApp.config.databaseUrl,
     });

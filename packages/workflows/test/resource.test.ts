@@ -4,7 +4,6 @@ import { z } from "zod";
 import { describeConfig } from "../src/describe.ts";
 import { defineFake } from "../src/fake.ts";
 import {
-  allowAll,
   compareDeclared,
   defineConfig,
   diffDeclared,
@@ -422,7 +421,6 @@ describe("describeConfig with resources", () => {
         ),
         defineConnector("plain", {}),
       ],
-      policy: allowAll,
       ledger: memoryLedger(),
     });
     const { resourceTypes, ops } = describeConfig(config);
@@ -512,7 +510,6 @@ describe("a writable resource type", () => {
     const config = {
       workflows: [changeWorkflow],
       connectors: [withSetup(crate, { driver: () => driver })],
-      policy: allowAll,
     };
     expect(() => resolveConfig(config)).toThrow(
       'Workflow "boxes": crate.box.create changes a declared resource, which only apply does: change the data file instead',

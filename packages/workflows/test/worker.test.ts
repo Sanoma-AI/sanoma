@@ -6,7 +6,6 @@ import { testDatabaseUrl, withFake } from "@sanoma-ai/testing";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
-  allowAll,
   defineConnector,
   defineWorkflow,
   memoryLedger,
@@ -26,7 +25,6 @@ const ledger = memoryLedger();
 const config = (options: Partial<SanomaConfig>): SanomaConfig => ({
   workflows: [announce],
   connectors: vendors.connectors,
-  policy: allowAll,
   ledger,
   databaseUrl: "postgresql://unused@localhost:1/unused",
   ...options,
@@ -70,7 +68,6 @@ const refused: [string, Partial<SanomaConfig>, RegExp][] = [
     { workflows: [announce, { ...announce }] },
     /^Two different workflow definitions are named "announce"/,
   ],
-  ["a policy that is not a function", { policy: "allow" as never }, /^The config's `policy` must be a policy/],
   [
     "a ledger that is not a store",
     { ledger: { read: 1 } as never },
@@ -113,7 +110,6 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       databaseUrl: "postgresql://unused@localhost:1/unused",
       version: expect.stringMatching(/^sanoma@[0-9a-f]{64}$/),
       queueName: "sanoma:sanoma",
-      policy: allowAll,
       workflows: new Map([["announce", announce]]),
     });
     expect([...resolved.ops.keys()].toSorted()).toEqual([

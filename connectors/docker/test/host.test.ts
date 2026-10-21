@@ -15,7 +15,6 @@ import {
   throughWorkflows,
 } from "@sanoma-ai/testing/host";
 import {
-  allowAll,
   type CallContext,
   memoryLedger,
   memorySecrets,
@@ -145,7 +144,7 @@ describe.skipIf(!dockerAvailable() || !bin)("docker.container meets the Host con
       `import { docker } from "@sanoma-ai/connector-docker/resources";\nimport { secret } from "sanoma/resources";\n\n` +
         `export const host = docker.container({\n${JSON.stringify(declared, null, 2).slice(2, -2)},\n  secrets: {\n${secretsOf}\n` +
         // Not secrets: the sign-in `sanoma serve` needs on 0.0.0.0, and the pinned version.
-        `    SANOMA_GITHUB_CLIENT_ID: secret("HOST_GITHUB_CLIENT_ID"),\n    SANOMA_GITHUB_REPO: secret("HOST_GITHUB_REPO"),\n` +
+        `    SANOMA_GITHUB_CLIENT_ID: secret("HOST_GITHUB_CLIENT_ID"),\n` +
         `    DBOS__APPVERSION: secret("HOST_APP_VERSION"),\n  },\n});\n\nexport default [host];\n`,
     );
     bridge = await startBridge({ bin });
@@ -153,7 +152,6 @@ describe.skipIf(!dockerAvailable() || !bin)("docker.container meets the Host con
     const config: SanomaConfig = {
       workflows: [],
       connectors: [withSetup(dockerOps, { driver: () => driver })],
-      policy: allowAll,
       root,
       ledger: memoryLedger(),
       databaseUrl: operatorDb,
@@ -164,7 +162,6 @@ describe.skipIf(!dockerAvailable() || !bin)("docker.container meets the Host con
     for (const [name, value] of Object.entries({
       ...secrets,
       HOST_GITHUB_CLIENT_ID: "host-check-client",
-      HOST_GITHUB_REPO: "sanoma-test/company",
       HOST_APP_VERSION: APP_VERSION,
     })) {
       await operator.setSecret(name, value, by);
@@ -175,7 +172,6 @@ describe.skipIf(!dockerAvailable() || !bin)("docker.container meets the Host con
     company = await SanomaClient.connect({
       workflows: [...hostCheckWorkflows],
       connectors: [hostCheck],
-      policy: allowAll,
       root: companyRoot,
       databaseUrl: companyDb,
     });

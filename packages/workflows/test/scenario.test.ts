@@ -32,7 +32,6 @@ const scopeOf = (connectors: Parameters<typeof resolveConfig>[0]["connectors"]) 
   const resolved = resolveConfig({
     workflows: [announce],
     connectors,
-    policy: allowAll,
     ledger: memoryLedger(),
   });
   return resolved satisfies Scope;
@@ -762,7 +761,6 @@ describe("resources and policy outcomes", () => {
     const resolved = resolveConfig({
       workflows: [ping],
       connectors: [withFake(acme, plain)],
-      policy: allowAll,
       ledger: memoryLedger(),
     });
     const [seeded] = await parseFeature(
@@ -1048,7 +1046,6 @@ describe("steps by name", () => {
   const within = resolveConfig({
     workflows: [named, computed],
     connectors: [ghost],
-    policy: allowAll,
     ledger: memoryLedger(),
   });
   const failing = async (text: string) => (await compiled(text, within)).errors.map((e) => e.message).join("\n");

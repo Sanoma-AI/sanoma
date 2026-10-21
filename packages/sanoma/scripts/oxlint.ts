@@ -1,8 +1,7 @@
 // Writes this package's `oxlint.json`, the lint a company repo's `.oxlintrc.json` extends: run by
 // `build`, before tsc. It is self-contained, with no `extends` into `node_modules` (which the
 // installer lays out), made of:
-// - `@sanoma-ai/workflows`'s `oxlint.json` (its overrides for `workflows/**`, `policies/**` and
-//   `resources/**`), with an entry for `sanoma` derived from `@sanoma-ai/workflows`'s (the same
+// - `@sanoma-ai/workflows`'s `oxlint.json` (its overrides for `workflows/**` and `resources/**`), with an entry for `sanoma` derived from `@sanoma-ai/workflows`'s (the same
 //   names), `sanoma/**` refused, and the data-file plugin loaded from this package's `dist/`;
 // - an override for `sites/**`: a site is client code, with no server, runtime, connector or
 //   environment of its own (the plugin's `site-file` says the rest);
@@ -37,7 +36,7 @@ const overrides = (workflows.overrides as Json[]).map((override) => {
             {
               ...author,
               name: own,
-              message: `A workflow or policy imports only these and types from ${own}: the rest (defineConfig, the ledger stores) belongs in sanoma.config.ts, where the drivers and credentials are. Ask for approval with \`ctx.approval\`.`,
+              message: `A workflow imports only these and types from ${own}: the rest (defineConfig, the ledger stores) belongs in sanoma.config.ts, where the drivers and credentials are. Ask for approval with \`ctx.approval\`.`,
             },
           ],
           patterns: [

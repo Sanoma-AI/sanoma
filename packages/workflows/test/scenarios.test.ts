@@ -4,16 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, describe, expect, it, onTestFinished, vi } from "vitest";
-import { readPeople } from "../src/describe.ts";
-import {
-  allowAll,
-  cedarPolicy,
-  loadPolicies,
-  memoryLedger,
-  readPolicyFiles,
-  resolveConfig,
-  type SanomaConfig,
-} from "../src/index.ts";
+import { memoryLedger, type SanomaConfig } from "../src/index.ts";
 import { runScenarios } from "../src/scenarios.ts";
 import announce from "./fixtures/announce.ts";
 import peopleConfig from "./fixtures/people/sanoma.config.ts";
@@ -33,7 +24,6 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 const config: SanomaConfig = {
   workflows: [announce],
   connectors: marketingFakes().connectors,
-  policy: allowAll,
   ledger: memoryLedger(),
   root,
 };
@@ -119,16 +109,9 @@ describe("runScenarios", () => {
 });
 
 describe("runScenarios with people and a Cedar policy", () => {
-  // The people fixture: its policy made from policies/*.cedar, as the launcher makes it.
-  const resolved = resolveConfig(peopleConfig);
-  const policy = cedarPolicy(
-    resolved,
-    loadPolicies(readPolicyFiles(resolved.root!)).policies,
-    readPeople(resolved.root).people,
-  );
-
+  // The people fixture: its policy is its root's policies/*.cedar.
   it("starts each run as the person or agent acting, and checks the hold for a group and the denial's reason", async () => {
-    await expect(runScenarios({ ...peopleConfig, policy }, { databaseUrl })).resolves.toEqual({
+    await expect(runScenarios(peopleConfig, { databaseUrl })).resolves.toEqual({
       passed: ["A large refund waits for finance", "An agent refunds nothing"],
       failed: [],
     });

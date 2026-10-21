@@ -8,7 +8,6 @@ import { resend } from "@sanoma-ai/connector-resend";
 import { stripe } from "@sanoma-ai/connector-stripe";
 import { describe, expect, it, vi } from "vitest";
 import {
-  allowAll,
   type Connector,
   defineSteps,
   memoryLedger,
@@ -24,7 +23,6 @@ import { tree } from "./tree.ts";
 const config = (options: Partial<SanomaConfig> = {}): SanomaConfig => ({
   workflows: [announce],
   connectors: [ghost, resend, bluesky],
-  policy: allowAll,
   ledger: memoryLedger(),
   ...options,
 });

@@ -271,7 +271,7 @@ export class SanomaClient {
     runId: string | undefined,
   ): Promise<StartHold | undefined> {
     const { policy } = this.config;
-    if (BUILT_IN_WORKFLOWS.has(workflow) || !policy.start) return undefined;
+    if (BUILT_IN_WORKFLOWS.has(workflow)) return undefined;
     if (runId !== undefined && (await this.row(runId))) return undefined;
     const decision = await decideStart(policy, workflow, input, startedBy);
     if (decision.kind === "allow") return undefined;
@@ -674,12 +674,13 @@ export class SanomaClient {
    * loads it into its environment, unless its environment sets the variable itself. Refuses
    * (`invalid_input`) a name no driver declares, and a value the variable's schema refuses, with
    * the schema's reason and never the value; an empty value too (`clearCredential` unsets one).
-   * Nothing records the value but its row, which records `by` and when.
+   * Nothing records the value but its row, which records `by` and when. `by` is admitted as
+   * `start`'s `startedBy` is (`not_admitted`).
    */
   async setCredential(name: string, value: string, options: { by: string }): Promise<void> {
+    const setBy = await this.admittedBy(options);
     // Checked against every declaration of the name, as the worker checks it.
     const statuses = this.declared(name, (n) => (n === name ? value : undefined));
-    const setBy = actorOf(options);
     const refused = statuses.find((c) => c.status !== "set");
     if (refused) {
       const problem = refused.problem ?? "it is empty; clear it to unset it";
@@ -694,11 +695,11 @@ export class SanomaClient {
   /**
    * Deletes the stored value of a declared variable, and tells the workers, which unset it unless
    * their environment sets it. `by` is who asks; nothing records it once the row is gone.
-   * Refuses (`invalid_input`) a name no driver declares.
+   * Refuses (`invalid_input`) a name no driver declares, and `by` as `setCredential` does.
    */
   async clearCredential(name: string, options: { by: string }): Promise<void> {
+    await this.admittedBy(options);
     this.declared(name, () => undefined);
-    actorOf(options);
     await deleteCredential(await this.credentialsDb(), name);
   }
 
@@ -712,7 +713,7 @@ export class SanomaClient {
     if ([...credentialsOf(this.drivers, () => undefined).values()].flat().some((c) => c.name === name)) {
       return this.setCredential(name, value, options);
     }
-    const setBy = actorOf(options);
+    const setBy = await this.admittedBy(options);
     const problem = !VARIABLE.test(name) ? "That is not a variable name" : !value ? "Enter a value" : undefined;
     if (problem) {
       const path = VARIABLE.test(name) ? "value" : "name";
@@ -801,6 +802,11 @@ export class SanomaClient {
     // Loaded when asked, not with the client: the reader parses with oxc-parser.
     const { admit, readPeople } = await import("./resources.ts");
     return admit(principal, readPeople(this.config.root));
+  }
+
+  /** `options.by`, who sets or clears a credential, admitted (`admitted`): their id. */
+  private async admittedBy(options: { by: string }): Promise<string> {
+    return (await this.admitted({ id: actorOf(options) })).id;
   }
 
   /** Refuses a run id whose run, as stored, was started with another input, by someone else, or in another sandbox. */

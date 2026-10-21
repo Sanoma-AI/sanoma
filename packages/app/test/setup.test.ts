@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
-import { allowAll, defineConfig, resolveConfig, SanomaClient } from "@sanoma-ai/workflows";
+import { defineConfig, resolveConfig, SanomaClient } from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -25,7 +25,6 @@ const root = mkdtempSync(join(tmpdir(), "sanoma-setup-"));
 const config = defineConfig({
   workflows: [],
   connectors: [],
-  policy: allowAll,
   databaseUrl: testDatabaseUrl("setup"),
   root,
 });

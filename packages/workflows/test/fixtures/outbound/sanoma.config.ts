@@ -1,4 +1,4 @@
-import { allowAll, defineConfig, memoryLedger } from "../../../src/index.ts";
+import { defineConfig, memoryLedger } from "../../../src/index.ts";
 import { outbound } from "./resources/data.ts";
 import outboundNext from "./workflows/outbound-next.ts";
 
@@ -7,7 +7,6 @@ import outboundNext from "./workflows/outbound-next.ts";
 export default defineConfig({
   workflows: [outboundNext],
   connectors: [],
-  policy: allowAll,
   collections: [outbound],
   ledger: memoryLedger(),
 });

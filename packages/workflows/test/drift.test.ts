@@ -8,7 +8,6 @@ import { z } from "zod";
 import { describeConfig, writeLockfile } from "../src/describe.ts";
 import {
   allow,
-  allowAll,
   APPLY_WORKFLOW,
   defineConnector,
   definePolicy,
@@ -289,7 +288,6 @@ describe("SanomaClient's drift", () => {
     const marketing = await SanomaClient.connect({
       workflows: [],
       connectors: [bluesky],
-      policy: allowAll,
       ledger: memoryLedger(),
       databaseUrl,
     });

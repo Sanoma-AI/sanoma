@@ -9,7 +9,7 @@ import { supabase } from "@sanoma-ai/connector-supabase";
 import { fakeSupabase } from "@sanoma-ai/connector-supabase/fake";
 import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
-import { allowAll, resolveConfig, withSetup } from "@sanoma-ai/workflows";
+import { resolveConfig, withSetup } from "@sanoma-ai/workflows";
 import { describeConfig, LOCKFILE, readLockfile } from "@sanoma-ai/workflows/describe";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { localGitSource } from "../../sanoma/src/source.ts";
@@ -34,7 +34,6 @@ const source = localGitSource(root);
 const config = {
   workflows: [],
   connectors: [withSetup(github, { driver: () => gh.driver }), withSetup(supabase, { driver: () => sb.driver })],
-  policy: allowAll,
   root,
 };
 const test = useTestApp(config, { databaseUrl: testDatabaseUrl("existing"), source });

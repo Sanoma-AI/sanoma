@@ -2,7 +2,6 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  allowAll,
   type Connector,
   defineConnector,
   type Driver,
@@ -32,7 +31,6 @@ const carrying = (driver: Driver): Connector<any, any> =>
 const config: SanomaConfig = {
   workflows: [],
   connectors: [carrying(shop), carrying(mail)],
-  policy: allowAll,
   ledger: memoryLedger(),
 };
 
@@ -54,11 +52,10 @@ const expected = `# Copy to .env (ignored by git; \`sanoma\` loads it before rea
 # SANOMA_APP_PORT=
 # Optional. The address the app listens on; default 127.0.0.1. Any other needs GitHub sign-in.
 # SANOMA_APP_HOST=
-# Optional. GitHub sign-in: the OAuth client of the company's GitHub App, and the owner/name of the
-# repository it is installed on. Who may sign in is resources/people.ts. All three or none.
+# Optional. GitHub sign-in: the OAuth client of the company's GitHub App. Who may sign in is
+# resources/people.ts. Both or neither.
 # SANOMA_GITHUB_CLIENT_ID=
 # SANOMA_GITHUB_CLIENT_SECRET=
-# SANOMA_GITHUB_REPO=
 
 # shop: an API key with read and refund access
 SHOP_API_KEY=

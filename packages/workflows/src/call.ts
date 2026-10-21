@@ -364,13 +364,10 @@ export function decideCall(
 
 /**
  * Asks the policy whether `actor` may start a run of `workflow` with `input` (`Policy.start`, the
- * action `workflow:<name>`), as `SanomaClient.start` does before it queues one; allowed by a
- * policy that has no `start`.
+ * action `workflow:<name>`), as `SanomaClient.start` does before it queues one.
  */
 export function decideStart(policy: Policy, workflow: string, input: unknown, actor: Principal) {
-  const { start } = policy;
-  if (!start) return Promise.resolve<RecordedDecision>({ kind: "allow" });
-  return ask(policy, `${WORKFLOW_ACTION}${workflow}`, () => start(actor, workflow, input));
+  return ask(policy, `${WORKFLOW_ACTION}${workflow}`, () => policy.start(actor, workflow, input));
 }
 
 /**

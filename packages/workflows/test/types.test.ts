@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { ghost } from "@sanoma-ai/connector-ghost";
 import {
-  allowAll,
   defineConnector,
   defineDriver,
   defineWorkflow,
@@ -143,13 +142,13 @@ export const noGroup = attached.setup;
 // The keys a config no longer has are typed `never`, each with a deprecation saying where it went.
 export const stale: SanomaConfig[] = [
   // @ts-expect-error each connector carries its driver
-  { workflows: [], connectors: [], policy: allowAll, drivers: [] },
+  { workflows: [], connectors: [], drivers: [] },
   // @ts-expect-error each connector carries the maker of its fake
-  { workflows: [], connectors: [], policy: allowAll, fakes: [] },
+  { workflows: [], connectors: [], fakes: [] },
   // @ts-expect-error the app's name is <root>/package.json's
-  { workflows: [], connectors: [], policy: allowAll, appName: "acme" },
+  { workflows: [], connectors: [], appName: "acme" },
   // @ts-expect-error the scenarios are <root>/scenarios/
-  { workflows: [], connectors: [], policy: allowAll, scenarios: new URL("file:///srv/acme/scenarios/") },
+  { workflows: [], connectors: [], scenarios: new URL("file:///srv/acme/scenarios/") },
 ];
 
 // A collection's records are typed by its fields; its operations by the record.
@@ -203,7 +202,6 @@ export const dealsFlow = defineWorkflow({
 export const withCollections: SanomaConfig = {
   workflows: [dealsFlow],
   connectors: [],
-  policy: allowAll,
   collections: [deals],
 };
 

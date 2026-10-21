@@ -77,11 +77,10 @@ describe("sanoma env", () => {
 # SANOMA_APP_PORT=
 # Optional. The address the app listens on; default 127.0.0.1. Any other needs GitHub sign-in.
 # SANOMA_APP_HOST=
-# Optional. GitHub sign-in: the OAuth client of the company's GitHub App, and the owner/name of the
-# repository it is installed on. Who may sign in is resources/people.ts. All three or none.
+# Optional. GitHub sign-in: the OAuth client of the company's GitHub App. Who may sign in is
+# resources/people.ts. Both or neither.
 # SANOMA_GITHUB_CLIENT_ID=
 # SANOMA_GITHUB_CLIENT_SECRET=
-# SANOMA_GITHUB_REPO=
 
 # ghost: the site's admin URL, such as https://example.ghost.io
 GHOST_ADMIN_URL=

@@ -110,28 +110,18 @@ export function approve(
 }
 
 /**
- * Decides whether a run may make an operation call: allow it, deny it (the run fails),
- * or hold it until someone approves. Runs are replayed after a restart, so a policy must
- * decide the same way every time from the call alone: no clock, randomness or network.
- * `lintWorkflow` checks a policy file for these too. Each decision is recorded once made,
- * and a replay reuses it, but a call interrupted before that is decided again. A policy
- * must not have side effects.
+ * Decides whether a run may make an operation call: allow it, deny it (the run fails), or hold it
+ * until someone approves. A company's is made from its Cedar files (`cedarPolicy`); a repo with
+ * none has `allowAll`. Each decision is recorded once made, and a replay reuses it, but a call
+ * interrupted before that is decided again.
  */
 export type Policy = ((call: PolicyCall) => Decision | Promise<Decision>) & {
-  /** Names this version of the policy, from `definePolicy(fn, { version })`. */
+  /** Names this version of the policy: a hash of the Cedar policies' ids and text. */
   readonly version?: string;
-  /** `cedar` for a policy made from `policies/*.cedar` (`cedarPolicy`); a function has none. */
-  readonly kind?: "cedar";
-  /**
-   * What the policy would answer for each request ahead of the call, its input unknown. A
-   * function cannot be asked ahead: `definePolicy`'s have no `preview`.
-   */
-  readonly preview?: (requests: readonly PreviewRequest[]) => PreviewAnswer[];
-  /**
-   * May `actor` start a run of `workflow` with `input` (the action `workflow:<name>`)? A function
-   * is written for operation calls: `definePolicy`'s have no `start`, and every start is allowed.
-   */
-  readonly start?: (actor: Principal, workflow: string, input: unknown) => Decision;
+  /** What the policy would answer for each request ahead of the call, its input unknown. */
+  readonly preview: (requests: readonly PreviewRequest[]) => PreviewAnswer[];
+  /** May `actor` start a run of `workflow` with `input` (the action `workflow:<name>`)? */
+  readonly start: (actor: Principal, workflow: string, input: unknown) => Decision;
 };
 
 /** A question asked ahead of a call: may `principal` take `action` (an operation, or `workflow:<name>` to start one) on `resource` (an operation's target)? */
@@ -151,22 +141,10 @@ export interface PreviewAnswer {
   approver?: Approver;
 }
 
-/** A policy, optionally named with a version so a reader can tell which rules decided a call. */
-export function definePolicy(
-  policy: (call: PolicyCall) => Decision | Promise<Decision>,
-  options: { version?: string } = {},
-): Policy {
-  if (typeof policy !== "function") throw new Error("definePolicy expects a function of the call");
-  if (options.version !== undefined && (typeof options.version !== "string" || !options.version.trim())) {
-    throw new Error("definePolicy: `version` must be a non-empty string");
-  }
-  const defined = (call: PolicyCall) => policy(call);
-  return Object.freeze(options.version === undefined ? defined : Object.assign(defined, { version: options.version }));
-}
-
-/** Allows every operation call: the policy of a config that names none and has no `policies/*.cedar`. */
+/** Allows every operation call and run start: the policy of a repo with no `policies/**\/*.cedar`. */
 export const allowAll: Policy = Object.freeze(
   Object.assign(() => allow(), {
+    start: () => allow(),
     preview: (requests: readonly PreviewRequest[]): PreviewAnswer[] => requests.map(() => ({ answer: "allow" })),
   }),
 );

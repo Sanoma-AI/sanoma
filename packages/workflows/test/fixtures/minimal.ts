@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { allowAll, defineConnector, defineWorkflow, type SanomaConfig } from "../../src/index.ts";
+import { defineConnector, defineWorkflow, type SanomaConfig } from "../../src/index.ts";
 
 /** A workflow that calls nothing and returns 1. */
 export const noop = defineWorkflow({
@@ -14,6 +14,5 @@ export const noop = defineWorkflow({
 export const minimal = (databaseUrl: string): SanomaConfig => ({
   workflows: [noop],
   connectors: [defineConnector("none", {})],
-  policy: allowAll,
   databaseUrl,
 });
