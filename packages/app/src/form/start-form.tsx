@@ -2,7 +2,7 @@ import type { WorkflowEntry } from "@sanoma-ai/workflows/describe";
 import { useForm } from "@tanstack/react-form";
 import { useHydrated } from "@tanstack/react-router";
 import { PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
-import { type ComponentProps, useMemo } from "react";
+import { type ComponentProps, type ReactNode, useMemo } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Checkbox } from "#/components/ui/checkbox.tsx";
 import {
@@ -31,6 +31,7 @@ import {
   initialValue,
   initialValues,
   issueTarget,
+  issueText,
   pathName,
   type ScalarField,
   toLocalInput,
@@ -79,25 +80,82 @@ export function StartForm({
             <FieldView key={field.key} form={form} field={field} path={[field.key]} />
           ))}
         </fieldset>
-        <form.Subscribe selector={(s) => [s.errorMap.onSubmit, s.isSubmitting] as const}>
-          {([error, submitting]) => (
-            <>
-              {typeof error === "string" && error && <Notice variant="destructive">{error}</Notice>}
-              <Field orientation="horizontal">
-                <Button type="submit" disabled={submitting}>
-                  {submitting ? <Spinner data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}
-                  {submitting ? "Starting…" : scenario ? "Start sandbox run" : "Start run"}
-                </Button>
-              </Field>
-            </>
+        <FormFoot form={form}>
+          {(submitting) => (
+            <Button type="submit" disabled={submitting}>
+              {submitting ? <Spinner data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}
+              {submitting ? "Starting…" : scenario ? "Start sandbox run" : "Start run"}
+            </Button>
           )}
-        </form.Subscribe>
+        </FormFoot>
       </FieldGroup>
     </form>
   );
 }
 
-type FormValues = Record<string, any>;
+/** What a form over schema fields holds, by field name. */
+export type FormValues = Record<string, any>;
+
+/** What a form's submit answers: nothing once it is done, else the form's message and each field's. */
+export type SubmitErrors = { form?: string | undefined; fields: Record<string, string> } | undefined;
+
+/**
+ * A TanStack Form over schema fields, from `defaultValues`, whose submit is `submit`: the call is
+ * the validation, as the server checks what it is sent, and the errors it answers land on the
+ * fields (`errorsOf`). The start form's and the record form's.
+ */
+export function useSchemaForm(defaultValues: FormValues, submit: (values: FormValues) => Promise<SubmitErrors>) {
+  return useForm({ defaultValues, validators: { onSubmitAsync: ({ value }) => submit(value) } });
+}
+
+export type SchemaFormApi = ReturnType<typeof useSchemaForm>;
+
+/**
+ * A refused call's errors, for a form over `fields`: the server's issues on the fields they name
+ * (`at` maps an issue's path to the form's), the rest as the form's message, or `mismatch` when
+ * every issue found a field none shows; any other failure's message, `failed` when it has none.
+ */
+export function errorsOf(
+  err: unknown,
+  fields: SchemaField[],
+  {
+    at = (path) => path,
+    mismatch,
+    failed,
+  }: { at?: (path: (string | number)[]) => (string | number)[]; mismatch: string; failed: string },
+): NonNullable<SubmitErrors> {
+  const body = errorBodyOf(err);
+  if (!body?.issues?.length) {
+    // Not the server's answer (the network, a bug): keep the raw value for whoever debugs it.
+    if (!body) console.error(`sanoma app: ${failed}:`, err);
+    // `fields` must be there, even empty, for the form to read `form` as its own error.
+    return { form: errorMessage(err).trim() || `${failed}, and no reason was given`, fields: {} };
+  }
+  const byField: Record<string, string> = {};
+  const rest: string[] = [];
+  for (const issue of body.issues) {
+    const target = issueTarget(fields, at(issue.path), issue.message);
+    if (target) byField[target.name] ??= target.message;
+    else rest.push(issueText(issue));
+  }
+  // A form-level message only for what no field shows.
+  const placed = Object.keys(byField).length > 0;
+  return { form: rest.length ? rest.join("; ") : placed ? undefined : mismatch, fields: byField };
+}
+
+/** A form's foot: the message no field shows, then its buttons, `children` (told while it submits). */
+export function FormFoot({ form, children }: { form: SchemaFormApi; children: (submitting: boolean) => ReactNode }) {
+  return (
+    <form.Subscribe selector={(s) => [s.errorMap.onSubmit, s.isSubmitting] as const}>
+      {([error, submitting]) => (
+        <>
+          {typeof error === "string" && error && <Notice variant="destructive">{error}</Notice>}
+          <Field orientation="horizontal">{children(submitting)}</Field>
+        </>
+      )}
+    </form.Subscribe>
+  );
+}
 
 function useStartForm(
   workflow: string,
@@ -114,57 +172,40 @@ function useStartForm(
   // Starting the run is the validation: the server checks the input against the workflow's zod
   // schema and answers with its issues, which land on the fields they name. Once it has started,
   // `useStartRun` moves the page on to the run, or `onStarted` has it.
-  const submit = async (request: StartRunRequest) => {
+  const submit = async (request: StartRunRequest): Promise<SubmitErrors> => {
     let started: StartRunResponse;
     try {
       started = await start.mutateAsync(request);
     } catch (err) {
-      const body = errorBodyOf(err);
-      if (!body?.issues?.length) {
-        // Not the server's answer (the network, a bug): keep the raw value for whoever debugs it.
-        if (!body) console.error("sanoma app: starting the run failed:", err);
-        const message = errorMessage(err).trim() || "Could not start the run, and no reason was given";
-        // `fields` must be there, even empty, for the form to read `form` as its own error.
-        return { form: message, fields: {} };
-      }
-      const byField: Record<string, string> = {};
-      const rest: string[] = [];
-      for (const issue of body.issues) {
-        const target = issueTarget(fields, whole ? [WHOLE, ...issue.path] : issue.path, issue.message);
-        if (target) byField[target.name] ??= target.message;
-        else rest.push(issue.path.length ? `${pathName(issue.path)}: ${issue.message}` : issue.message);
-      }
-      // A form-level message only for what no field shows.
-      const placed = Object.keys(byField).length > 0;
-      const message = rest.length
-        ? rest.join("; ")
-        : placed
-          ? undefined
-          : "The input does not match the workflow's schema";
-      return { form: message, fields: byField };
+      return errorsOf(err, fields, {
+        at: (path) => (whole ? [WHOLE, ...path] : path),
+        mismatch: "The input does not match the workflow's schema",
+        failed: "Could not start the run",
+      });
     }
     // Outside the try: the run has started, so a throw here is not a failure to start it.
     onStarted?.(started);
     return undefined;
   };
-  return useForm({
-    defaultValues,
-    validators: {
-      onSubmitAsync: async ({ value }) => {
-        // A sandbox run takes its input from the scenario, on the server.
-        if (scenario) return submit({ scenario: scenario.name });
-        const built = buildInput(fields, value);
-        if (Object.keys(built.errors).length) return { fields: built.errors };
-        return submit({ workflow, input: whole ? built.input[WHOLE] : built.input });
-      },
-    },
+  return useSchemaForm(defaultValues, async (value) => {
+    // A sandbox run takes its input from the scenario, on the server.
+    if (scenario) return submit({ scenario: scenario.name });
+    const built = buildInput(fields, value);
+    if (Object.keys(built.errors).length) return { fields: built.errors };
+    return submit({ workflow, input: whole ? built.input[WHOLE] : built.input });
   });
 }
 
-type StartFormApi = ReturnType<typeof useStartForm>;
-
 /** One field, by its kind: a control, a set of controls, or a list with Add and Remove (hidden while read-only). */
-function FieldView({ form, field, path }: { form: StartFormApi; field: SchemaField; path: (string | number)[] }) {
+export function FieldView({
+  form,
+  field,
+  path,
+}: {
+  form: SchemaFormApi;
+  field: SchemaField;
+  path: (string | number)[];
+}) {
   const name = pathName(path);
   if (field.kind === "object") {
     return (
@@ -227,14 +268,18 @@ function FieldView({ form, field, path }: { form: StartFormApi; field: SchemaFie
   return <ScalarView form={form} field={field} name={name} />;
 }
 
-/** The text-like kinds, each one <Input>. */
+/** The text-like kinds, each one <Input>. A person is their id, as text. */
 const INPUT_TYPE = {
   string: { type: "text" },
+  person: { type: "text", autoComplete: "off" },
   number: { type: "number", step: "any" },
   integer: { type: "number", step: 1 },
 } as const;
 
-function ScalarView({ form, field, name }: { form: StartFormApi; field: ScalarField; name: string }) {
+/** A date alone, as a date input holds it. */
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+function ScalarView({ form, field, name }: { form: SchemaFormApi; field: ScalarField; name: string }) {
   const id = `field-${name}`;
   return (
     <form.Field name={name}>
@@ -274,9 +319,19 @@ function ScalarView({ form, field, name }: { form: StartFormApi; field: ScalarFi
         let control;
         switch (field.kind) {
           case "string":
+          case "person":
           case "number":
           case "integer":
             control = <Input {...common} {...INPUT_TYPE[field.kind]} value={text} onChange={onText} />;
+            break;
+          case "date":
+            // A date and time a workflow saved keeps its time: it shows as one.
+            control =
+              text === "" || DATE_ONLY.test(text) ? (
+                <Input {...common} type="date" value={text} onChange={onText} />
+              ) : (
+                <DateTimeInput {...common} value={text} onChange={f.handleChange} />
+              );
             break;
           case "datetime":
             control = <DateTimeInput {...common} value={text} onChange={f.handleChange} />;

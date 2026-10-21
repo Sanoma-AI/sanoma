@@ -11,12 +11,15 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ConnectorsRouteRouteImport } from './routes/connectors/route'
+import { Route as DataRouteRouteImport } from './routes/data/route'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as ResourcesRouteImport } from './routes/resources'
 import { Route as StartRouteImport } from './routes/start'
 import { Route as WorkflowsRouteRouteImport } from './routes/workflows/route'
 import { Route as ConnectorsIndexRouteImport } from './routes/connectors/index'
 import { Route as ConnectorsVendorRouteImport } from './routes/connectors/$vendor'
+import { Route as DataIndexRouteImport } from './routes/data/index'
+import { Route as DataNameRouteImport } from './routes/data/$name'
 import { Route as RunsIndexRouteImport } from './routes/runs/index'
 import { Route as RunsIdRouteImport } from './routes/runs/$id'
 import { Route as SetupIndexRouteImport } from './routes/setup/index'
@@ -38,6 +41,11 @@ const IndexRoute = IndexRouteImport.update({
 const ConnectorsRouteRoute = ConnectorsRouteRouteImport.update({
   id: '/connectors',
   path: '/connectors',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DataRouteRoute = DataRouteRouteImport.update({
+  id: '/data',
+  path: '/data',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InboxRoute = InboxRouteImport.update({
@@ -69,6 +77,16 @@ const ConnectorsVendorRoute = ConnectorsVendorRouteImport.update({
   id: '/$vendor',
   path: '/$vendor',
   getParentRoute: () => ConnectorsRouteRoute,
+} as any)
+const DataIndexRoute = DataIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => DataRouteRoute,
+} as any)
+const DataNameRoute = DataNameRouteImport.update({
+  id: '/$name',
+  path: '/$name',
+  getParentRoute: () => DataRouteRoute,
 } as any)
 const RunsIndexRoute = RunsIndexRouteImport.update({
   id: '/runs/',
@@ -134,16 +152,19 @@ const WorkflowsNameRunsIdRoute = WorkflowsNameRunsIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/connectors': typeof ConnectorsRouteRouteWithChildren
+  '/data': typeof DataRouteRouteWithChildren
   '/workflows': typeof WorkflowsRouteRouteWithChildren
   '/inbox': typeof InboxRoute
   '/resources': typeof ResourcesRoute
   '/start': typeof StartRoute
   '/workflows/$name': typeof WorkflowsNameRouteRouteWithChildren
   '/connectors/$vendor': typeof ConnectorsVendorRoute
+  '/data/$name': typeof DataNameRoute
   '/runs/$id': typeof RunsIdRoute
   '/setup/connect': typeof SetupConnectRoute
   '/setup/existing': typeof SetupExistingRoute
   '/connectors/': typeof ConnectorsIndexRoute
+  '/data/': typeof DataIndexRoute
   '/runs/': typeof RunsIndexRoute
   '/setup/': typeof SetupIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
@@ -159,10 +180,12 @@ export interface FileRoutesByTo {
   '/resources': typeof ResourcesRoute
   '/start': typeof StartRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
+  '/data/$name': typeof DataNameRoute
   '/runs/$id': typeof RunsIdRoute
   '/setup/connect': typeof SetupConnectRoute
   '/setup/existing': typeof SetupExistingRoute
   '/connectors': typeof ConnectorsIndexRoute
+  '/data': typeof DataIndexRoute
   '/runs': typeof RunsIndexRoute
   '/setup': typeof SetupIndexRoute
   '/workflows': typeof WorkflowsIndexRoute
@@ -176,16 +199,19 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/connectors': typeof ConnectorsRouteRouteWithChildren
+  '/data': typeof DataRouteRouteWithChildren
   '/workflows': typeof WorkflowsRouteRouteWithChildren
   '/inbox': typeof InboxRoute
   '/resources': typeof ResourcesRoute
   '/start': typeof StartRoute
   '/workflows/$name': typeof WorkflowsNameRouteRouteWithChildren
   '/connectors/$vendor': typeof ConnectorsVendorRoute
+  '/data/$name': typeof DataNameRoute
   '/runs/$id': typeof RunsIdRoute
   '/setup/connect': typeof SetupConnectRoute
   '/setup/existing': typeof SetupExistingRoute
   '/connectors/': typeof ConnectorsIndexRoute
+  '/data/': typeof DataIndexRoute
   '/runs/': typeof RunsIndexRoute
   '/setup/': typeof SetupIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
@@ -200,16 +226,19 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/connectors'
+    | '/data'
     | '/workflows'
     | '/inbox'
     | '/resources'
     | '/start'
     | '/workflows/$name'
     | '/connectors/$vendor'
+    | '/data/$name'
     | '/runs/$id'
     | '/setup/connect'
     | '/setup/existing'
     | '/connectors/'
+    | '/data/'
     | '/runs/'
     | '/setup/'
     | '/workflows/'
@@ -225,10 +254,12 @@ export interface FileRouteTypes {
     | '/resources'
     | '/start'
     | '/connectors/$vendor'
+    | '/data/$name'
     | '/runs/$id'
     | '/setup/connect'
     | '/setup/existing'
     | '/connectors'
+    | '/data'
     | '/runs'
     | '/setup'
     | '/workflows'
@@ -241,16 +272,19 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/connectors'
+    | '/data'
     | '/workflows'
     | '/inbox'
     | '/resources'
     | '/start'
     | '/workflows/$name'
     | '/connectors/$vendor'
+    | '/data/$name'
     | '/runs/$id'
     | '/setup/connect'
     | '/setup/existing'
     | '/connectors/'
+    | '/data/'
     | '/runs/'
     | '/setup/'
     | '/workflows/'
@@ -264,6 +298,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ConnectorsRouteRoute: typeof ConnectorsRouteRouteWithChildren
+  DataRouteRoute: typeof DataRouteRouteWithChildren
   WorkflowsRouteRoute: typeof WorkflowsRouteRouteWithChildren
   InboxRoute: typeof InboxRoute
   ResourcesRoute: typeof ResourcesRoute
@@ -291,6 +326,13 @@ declare module '@tanstack/react-router' {
       path: '/connectors'
       fullPath: '/connectors'
       preLoaderRoute: typeof ConnectorsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/data': {
+      id: '/data'
+      path: '/data'
+      fullPath: '/data'
+      preLoaderRoute: typeof DataRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/inbox': {
@@ -334,6 +376,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/connectors/$vendor'
       preLoaderRoute: typeof ConnectorsVendorRouteImport
       parentRoute: typeof ConnectorsRouteRoute
+    }
+    '/data/': {
+      id: '/data/'
+      path: '/'
+      fullPath: '/data/'
+      preLoaderRoute: typeof DataIndexRouteImport
+      parentRoute: typeof DataRouteRoute
+    }
+    '/data/$name': {
+      id: '/data/$name'
+      path: '/$name'
+      fullPath: '/data/$name'
+      preLoaderRoute: typeof DataNameRouteImport
+      parentRoute: typeof DataRouteRoute
     }
     '/runs/': {
       id: '/runs/'
@@ -436,6 +492,20 @@ const ConnectorsRouteRouteWithChildren = ConnectorsRouteRoute._addFileChildren(
   ConnectorsRouteRouteChildren,
 )
 
+interface DataRouteRouteChildren {
+  DataNameRoute: typeof DataNameRoute
+  DataIndexRoute: typeof DataIndexRoute
+}
+
+const DataRouteRouteChildren: DataRouteRouteChildren = {
+  DataNameRoute: DataNameRoute,
+  DataIndexRoute: DataIndexRoute,
+}
+
+const DataRouteRouteWithChildren = DataRouteRoute._addFileChildren(
+  DataRouteRouteChildren,
+)
+
 interface WorkflowsNameRouteRouteChildren {
   WorkflowsNameNewRoute: typeof WorkflowsNameNewRoute
   WorkflowsNameIndexRoute: typeof WorkflowsNameIndexRoute
@@ -468,6 +538,7 @@ const WorkflowsRouteRouteWithChildren = WorkflowsRouteRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ConnectorsRouteRoute: ConnectorsRouteRouteWithChildren,
+  DataRouteRoute: DataRouteRouteWithChildren,
   WorkflowsRouteRoute: WorkflowsRouteRouteWithChildren,
   InboxRoute: InboxRoute,
   ResourcesRoute: ResourcesRoute,

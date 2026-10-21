@@ -419,14 +419,17 @@ function Orphans({ orphans, titles }: { orphans: ConfigDescription["orphans"]; t
   );
 }
 
-/** The collections the config declares: the company's own records, kept in its database, not at a vendor. */
+/**
+ * The collections the config declares: the company's own records, kept in its database, not at a
+ * vendor; each links to its grid under Data, and to its declaration.
+ */
 function Collections({ collections, selected }: { collections: CollectionEntry[]; selected: string | undefined }) {
   return (
     <section className="flex flex-col gap-2">
       <SectionTitle>Collections</SectionTitle>
       <p className="text-sm text-muted-foreground">
         The company's own records, kept in its database: workflows read and save them through{" "}
-        <code>data.&lt;name&gt;</code> operations, under the policy.
+        <code>data.&lt;name&gt;</code> operations, under the policy, and people in their grid under Data.
       </p>
       <div className="rounded-lg border">
         <Table>
@@ -442,7 +445,10 @@ function Collections({ collections, selected }: { collections: CollectionEntry[]
             {collections.map(({ name, title, key, fields, declared }) => (
               <TableRow key={name} data-state={declared && declared.id === selected ? "selected" : undefined}>
                 <TableCell className="font-medium">
-                  {title ?? name} <code className="text-xs text-muted-foreground">data.{name}</code>
+                  <Link to="/data/$name" params={{ name }} className="underline-offset-4 hover:underline">
+                    {title ?? name}
+                  </Link>{" "}
+                  <code className="text-xs text-muted-foreground">data.{name}</code>
                 </TableCell>
                 <TableCell>
                   <code className="text-xs">{key}</code>

@@ -1,15 +1,14 @@
 import type { OpEntry } from "@sanoma-ai/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
+import { ExternalLinkIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
-import { ItemActions, ItemContent, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
+import { ItemGroup } from "#/components/ui/item.tsx";
 import type { ScenarioEntry } from "../../api.ts";
 import {
   ButtonLink,
   Expandable,
-  LinkItem,
   None,
   Notice,
   OpItem,
@@ -17,6 +16,7 @@ import {
   pageTitle,
   Region,
   Section,
+  UsedBy,
   VendorLogo,
 } from "../../components/common.tsx";
 import { Credentials } from "../../components/credentials.tsx";
@@ -91,26 +91,7 @@ function ConnectorPage() {
           </>
         )}
       </Region>
-      <Region title="Used by">
-        {workflows.length === 0 ? (
-          <None />
-        ) : (
-          <ItemGroup>
-            {workflows.map((wf) => (
-              <LinkItem key={wf.name} variant="outline" size="xs">
-                <Link to="/workflows/$name" params={{ name: wf.name }}>
-                  <ItemContent>
-                    <ItemTitle>{wf.title ?? wf.name}</ItemTitle>
-                  </ItemContent>
-                  <ItemActions>
-                    <ChevronRightIcon className="size-4" />
-                  </ItemActions>
-                </Link>
-              </LinkItem>
-            ))}
-          </ItemGroup>
-        )}
-      </Region>
+      <UsedBy workflows={workflows} />
     </>
   );
 }

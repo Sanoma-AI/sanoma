@@ -12,7 +12,7 @@ import {
   type Op,
   type OpSpec,
 } from "./op.ts";
-import { checkCollection, DATA_VENDOR, type FIELD_TYPES, type ListQuery, type Saved } from "./shared.ts";
+import { checkCollection, DATA_VENDOR, type FIELD_TYPES, LIST_LIMIT, type ListQuery, type Saved } from "./shared.ts";
 
 // A company's own records: a collection is declared with plain values (a name, a key and typed
 // fields), and its `get`, `list`, `save` and `delete` are operations of the vendor `data`, under
@@ -106,14 +106,23 @@ export function collection<
   }) as unknown as Collection<N, F, K>;
 }
 
-/** A date or a date and time with its offset, as ISO 8601 writes them. */
-const DATE = z.union([z.iso.date(), z.iso.datetime({ offset: true })]);
+/**
+ * A date or a date and time with its offset, as ISO 8601 writes them, marked `format: "date"` in
+ * its JSON Schema (beside the union's own), which a form reads to draw a date's input.
+ */
+const DATE = z.union([z.iso.date(), z.iso.datetime({ offset: true })]).meta({ format: "date" });
+
+/**
+ * A person's id: text that is not empty, marked `format: "person"` in its JSON Schema, which a form
+ * reads to draw a person's input.
+ */
+const PERSON = z.string().min(1).meta({ format: "person" });
 
 /** The schema of a field's value, required. */
 function valueSchema(kind: Field): z.ZodType {
   if (typeof kind === "object" && "enum" in kind) return z.enum(kind.enum);
   const type = typeof kind === "string" ? kind : kind.type;
-  return { text: z.string(), person: z.string().min(1), date: DATE, number: z.number(), boolean: z.boolean() }[type];
+  return { text: z.string(), person: PERSON, date: DATE, number: z.number(), boolean: z.boolean() }[type];
 }
 
 /**
@@ -158,7 +167,7 @@ function specsOf(name: string, key: string, fields: Record<string, Field>, recor
       input: z.object({
         where: where.optional(),
         order: z.enum([...names, ...names.map((n) => `-${n}`)] as [string, ...string[]]).optional(),
-        limit: z.number().int().min(1).max(1000).default(100),
+        limit: z.number().int().min(1).max(LIST_LIMIT.max).default(LIST_LIMIT.default),
       }),
       output: z.array(SAVED),
       target: () => `${DATA_VENDOR}:${name}`,

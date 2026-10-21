@@ -1,6 +1,6 @@
 import type { RunStatus, RunSummary } from "@sanoma-ai/workflows";
-import type { ConfigDescription, OpEntry, WorkflowEntry } from "@sanoma-ai/workflows/describe";
-import { apiNameOf, isEnded } from "@sanoma-ai/workflows/shared";
+import type { CollectionEntry, ConfigDescription, OpEntry, WorkflowEntry } from "@sanoma-ai/workflows/describe";
+import { apiNameOf, isEnded, LIST_LIMIT, type ListQuery, type Saved } from "@sanoma-ai/workflows/shared";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { linkOptions, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -64,10 +64,16 @@ const byTitle = (a: string, b: string) => a.localeCompare(b, "en");
 /** A vendor a workflow calls, by id, and its title (its id when the config gives none). */
 export type CalledVendor = { id: string; title: string };
 
-/** The vendors these operations are from, each once, sorted by title. */
+/**
+ * The outside vendors these operations are from, each once, sorted by title: those a connector
+ * brings (`config.vendors`), never the built-in `sanoma` and `data`, which call nothing outside.
+ */
 const vendorsCalling = (config: ConfigDescription, ops: Map<string, OpEntry>, ids: readonly string[]): CalledVendor[] =>
   [...new Set(ids.flatMap((id) => ops.get(id)?.vendor ?? []))]
-    .map((id) => ({ id, title: config.vendors[id]?.title ?? id }))
+    .flatMap((id) => {
+      const vendor = config.vendors[id];
+      return vendor ? [{ id, title: vendor.title }] : [];
+    })
     .toSorted((a, b) => byTitle(a.title, b.title));
 
 /** The vendors the workflow's operations call, sorted by title: for `select`. None for a workflow the config does not have. */
@@ -106,6 +112,28 @@ export const connectorNamed = (id: string) => (config: ConfigDescription) =>
 /** The config's workflow of this name, if it has one: for `select`, or called with the config. */
 export const workflowNamed = (name: string) => (config: ConfigDescription) =>
   config.workflows.find((wf) => wf.name === name);
+
+/** The config's collection of this name, if it has one: for `select`, or called with the config. */
+export const collectionNamed = (name: string) => (config: ConfigDescription) =>
+  config.collections.find((c) => c.name === name);
+
+/**
+ * What uses the collection: the workflows that name one of its operations in `uses`, sorted by
+ * title, the built-in `call` (which may call every direct operation) left out. For `select`.
+ */
+export const usedBy = (collection: string) => (config: ConfigDescription) => {
+  const ops = new Set(collectionNamed(collection)(config)?.ops);
+  const workflows = config.workflows
+    .filter((wf) => !wf.builtin && wf.ops.some((op) => ops.has(op)))
+    .toSorted((a, b) => byTitle(a.title ?? a.name, b.title ?? b.name));
+  return { workflows };
+};
+
+/** A collection's enum fields, each with its values, in the collection's order. */
+export const enumFields = (fields: CollectionEntry["fields"]) =>
+  Object.entries(fields).flatMap(([name, kind]) =>
+    typeof kind === "object" && "enum" in kind ? [{ name, values: kind.enum as readonly string[] }] : [],
+  );
 
 /** Each workflow's title (its name when it has none), by name: for `select`. */
 export const workflowTitles = (config: ConfigDescription) =>
@@ -377,6 +405,69 @@ export const runQuery = (id: string) =>
       return !status || isEnded(status) ? false : POLL_MS;
     },
   });
+
+/** Every collection's records are under this key, each collection's under its name after it. */
+export const DATA_KEY = ["data"] as const;
+
+/**
+ * A collection's records, as `data.<name>.list` answers this query: called through `api` (the
+ * site's path, `callFn`) as the person asking, whom the policy decides each read for.
+ */
+export const recordsQuery = (name: string, query: ListQuery<Record<string, unknown>>) =>
+  queryOptions({
+    queryKey: [...DATA_KEY, name, query],
+    queryFn: () => (api as UntypedApi).data[name].list(query) as Promise<Saved[]>,
+    // Read while the server rendered the page, not again as it hydrates; a save or a delete
+    // refreshes them at once.
+    staleTime: 5_000,
+  });
+
+/** The choices of the grid's limit, up to `list`'s most; it lists `LIST_LIMIT.default` at first. */
+export const LIMIT_CHOICES = [25, LIST_LIMIT.default, 250, LIST_LIMIT.max] as const;
+
+/**
+ * The grid's search (`/data/<name>`): `?order=` (a field, or `-field` for descending), `?limit=`,
+ * `?key=` (the keys that start with it), `?where=` (an enum field's value, by field), and the
+ * record open in the form, `?record=<key>`, or `?new` for a new one. Anything else reads as none.
+ */
+export const DataSearch = z.object({
+  order: z.string().min(1).optional().catch(undefined),
+  limit: z.coerce.number().int().min(1).max(LIST_LIMIT.max).optional().catch(undefined),
+  key: z.string().min(1).optional().catch(undefined),
+  where: z.record(z.string(), z.string()).optional().catch(undefined),
+  record: z.string().min(1).optional().catch(undefined),
+  new: WorkflowSearch.shape.new,
+});
+export type DataSearch = z.infer<typeof DataSearch>;
+
+/** The grid's search with no record open in the form: for a link's or `navigate`'s `search`. */
+export const closeRecord = (prev: DataSearch): DataSearch => ({ ...prev, record: undefined, new: undefined });
+
+/** The highest code point: after every string that starts with a prefix, under `list`'s byte order. */
+const LAST = "\u{10FFFF}";
+
+/**
+ * What the grid asks `list` for, from its search: an order of a field the collection has, an
+ * enum field equal to one of its values, the keys that start with `?key=` (a range, as `list`
+ * compares text byte by byte), and the limit, 100 by default. What names nothing is left out.
+ */
+export function listQueryOf(
+  { key, fields }: Pick<CollectionEntry, "key" | "fields">,
+  search: Pick<DataSearch, "order" | "limit" | "key" | "where">,
+): ListQuery<Record<string, unknown>> & { limit: number } {
+  const where: Record<string, unknown> = {};
+  for (const { name, values } of enumFields(fields)) {
+    const value = search.where?.[name];
+    if (value !== undefined && values.includes(value)) where[name] = value;
+  }
+  if (search.key) where[key] = { gte: search.key, lt: search.key + LAST };
+  const order = search.order && Object.hasOwn(fields, search.order.replace(/^-/, "")) ? search.order : undefined;
+  return {
+    ...(Object.keys(where).length > 0 && { where }),
+    ...(order && { order }),
+    limit: search.limit ?? LIST_LIMIT.default,
+  };
+}
 
 /** A finished drift run's report, which never changes. */
 export const driftReportQuery = (runId: string) =>

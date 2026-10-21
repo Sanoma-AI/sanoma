@@ -1,12 +1,13 @@
 /**
  * Fields for a start form, read from a workflow's input JSON Schema (`describeConfig`'s
- * `workflows[].input`). Strings, date-times, numbers, booleans and enums get their own control;
+ * `workflows[].input`), or for a record form, from a collection's (`collections[].record`).
+ * Strings, dates, date-times, people, numbers, booleans and enums get their own control;
  * arrays and objects get one level of nesting (an array of objects, or an object, of those
  * kinds); anything else is entered as JSON. The server validates the input with the workflow's
  * zod schema, so this only shapes the form and never decides what is valid.
  */
 
-export type Scalar = "string" | "datetime" | "number" | "integer" | "boolean" | "enum" | "json";
+export type Scalar = "string" | "date" | "datetime" | "person" | "number" | "integer" | "boolean" | "enum" | "json";
 
 interface Base {
   /** The property's name in its object. */
@@ -36,8 +37,9 @@ export interface ArrayField extends Base {
 export type Field = ScalarField | ObjectField | ArrayField;
 
 /**
- * What the form holds for a scalar: text for most (an enum holds its option's index, a date-time
- * its ISO text, which `DateTimeInput` shows in the browser's time zone), a checkbox state for booleans.
+ * What the form holds for a scalar: text for most (an enum holds its option's index, a date or a
+ * date-time its ISO text, which `DateTimeInput` shows in the browser's time zone, a person their
+ * id), a checkbox state for booleans.
  */
 export type ScalarValue = string | boolean | undefined;
 export type Value = ScalarValue | Record<string, ScalarValue> | Value[];
@@ -85,13 +87,23 @@ function fieldOf(key: string, prop: Schema, required: boolean, depth: number): F
 /** An object that also takes other keys can't be shown as just its properties. */
 const hasExtraKeys = (prop: Schema) => prop.additionalProperties !== undefined && prop.additionalProperties !== false;
 
+/** A string's kind by its `format`: a person's id (a collection's `person` field), a date, or a date and time. */
+const STRING_KINDS = new Map<unknown, Scalar>([
+  ["person", "person"],
+  ["date", "date"],
+  ["date-time", "datetime"],
+]);
+
 function scalarKind(prop: Schema): Scalar {
   if (Array.isArray(prop.enum) && prop.enum.length && prop.enum.every((v) => v === null || typeof v !== "object")) {
     return "enum";
   }
+  // By its format first: a collection's date, a date or a date and time, is a union marked a date.
+  const kind = STRING_KINDS.get(prop.format);
+  if (kind && (prop.type === "string" || Array.isArray(prop.anyOf))) return kind;
   switch (prop.type) {
     case "string":
-      return prop.format === "date-time" ? "datetime" : "string";
+      return "string";
     case "number":
       return "number";
     case "integer":
@@ -127,7 +139,9 @@ export function initialValue(field: Field, d: unknown): Value {
 function initialScalar(field: ScalarField, d: unknown): ScalarValue {
   switch (field.kind) {
     case "string":
+    case "date":
     case "datetime":
+    case "person":
       return typeof d === "string" ? d : "";
     case "number":
     case "integer":
@@ -142,6 +156,10 @@ function initialScalar(field: ScalarField, d: unknown): ScalarValue {
       return d === undefined ? "" : JSON.stringify(d, null, 2);
   }
 }
+
+/** An issue as one line: its path as a field's name (`pathName`), then its message. */
+export const issueText = ({ path, message }: { path: readonly (string | number)[]; message: string }) =>
+  path.length ? `${pathName(path)}: ${message}` : message;
 
 /** A field's name in the form: `title`, `details.email`, `links[0]`, `people[0].name`. */
 export const pathName = (path: readonly (string | number)[]) =>
@@ -206,10 +224,11 @@ function read(field: Field, raw: unknown, path: (string | number)[], errors: Rec
 function readScalar(field: ScalarField, raw: unknown, name: string, errors: Record<string, string>): unknown {
   if (field.kind === "boolean") return typeof raw === "boolean" ? raw : OMIT;
   const text = typeof raw === "string" ? raw : "";
-  if (field.kind === "string") return text !== "" || field.required ? text : OMIT;
+  if (field.kind === "string" || field.kind === "person") return text !== "" || field.required ? text : OMIT;
   if (!text.trim()) return OMIT;
   switch (field.kind) {
-    // Already ISO (`DateTimeInput`): the server's schema says whether it is a date and time.
+    // Already ISO (a date input, `DateTimeInput`): the server's schema says whether it is one.
+    case "date":
     case "datetime":
       return text;
     case "number":

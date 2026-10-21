@@ -291,6 +291,8 @@ describe("a config's collections", () => {
     expect(collections[0]!.record.properties).toMatchObject({
       stage: { enum: ["researched", "contacted", "replied", "meeting", "won", "lost"] },
       seats: { type: "number" },
+      // A person is marked, so a form draws a person's input.
+      owner: { type: "string", minLength: 1, format: "person" },
     });
     expect(ops.filter((op) => op.vendor === "data").map((op) => [op.id, op.effect])).toEqual([
       ["data.outbound.delete", "write"],

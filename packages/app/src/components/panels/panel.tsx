@@ -17,7 +17,7 @@ import { StatusDot, TipButton, When } from "../common.tsx";
 
 // What the sidebar's panel lists, and the pieces every panel shares.
 
-/** A section's panel: the Inbox's approvals, the workflows, one workflow's runs (drilled in), or the sites. */
+/** A section's panel: the Inbox's approvals, the workflows, one workflow's runs (drilled in), the sites, or the collections. */
 export type Panel = { kind: PanelSection } | { kind: "workflow"; name: string };
 
 /**
