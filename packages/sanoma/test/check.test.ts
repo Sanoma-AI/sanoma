@@ -73,7 +73,7 @@ describe("check", () => {
       // oxlint: the unused import, and Date from @sanoma-ai/workflows's rules.
       expect.stringMatching(/^workflows\/hello\.ts:16:10: Identifier 'readFileSync' is imported but never used/),
       expect.stringMatching(
-        /^workflows\/hello\.ts:17:18: Unexpected use of 'Date'\. Workflows are replayed: use `await ctx\.now\(\)`/,
+        /^workflows\/hello\.ts:17:18: Workflows are replayed, so a workflow reads the clock with `await ctx\.now\(\)`/,
       ),
       // describeConfig: the data file, then the workflow's file.
       "resources/shop.ts:2:1: ghost has no resource type post: its types are ",

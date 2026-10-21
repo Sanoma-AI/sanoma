@@ -9,6 +9,8 @@ import type {
   BroadcastsGetResponses,
   BroadcastsSendData,
   BroadcastsSendResponses,
+  EmailsSendData,
+  EmailsSendResponses,
 } from "./types.gen.ts";
 
 export type Options<
@@ -28,6 +30,22 @@ export type Options<
    */
   meta?: keyof ClientMeta extends never ? Record<string, unknown> : ClientMeta;
 };
+
+/**
+ * Send an email
+ */
+export const emailsSend = <ThrowOnError extends boolean = true>(
+  options?: Options<EmailsSendData, ThrowOnError>,
+): RequestResult<EmailsSendResponses, unknown, ThrowOnError> =>
+  (options?.client ?? client).post<EmailsSendResponses, unknown, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/emails",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  });
 
 /**
  * Create a broadcast

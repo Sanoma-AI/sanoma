@@ -48,7 +48,7 @@ A company repo is an ES module package (`"type": "module"`, as `sanoma init` wri
 
 ### A site's imports
 
-A site's route file imports `createFileRoute` from `@tanstack/react-router` (the route generator rewrites the path there, and only there) and the rest from `sanoma/site`, which is this package's `@sanoma-ai/app/site`: the app's own router's `Link`, `Outlet`, `useNavigate`, `useParams`, `useSearch`, `useRouter`, `useRouterState`, `getRouteApi`, `linkOptions`, `redirect` and `notFound` (and their types), and `defineSite`. `sites/<name>/site.ts`, optional, names the site:
+A site's route file imports `createFileRoute` from `@tanstack/react-router` (the route generator rewrites the path there, and only there) and the rest from `sanoma/site`, which is this package's `@sanoma-ai/app/site`: the app's own router's `Link`, `Outlet`, `useNavigate`, `useParams`, `useSearch`, `useRouter`, `useRouterState`, `getRouteApi`, `linkOptions`, `redirect` and `notFound` (and their types), `defineSite`, and `api` with `ApiError` and `errorBodyOf` ([Calling operations and workflows](#calling-operations-and-workflows)). `sites/<name>/site.ts`, optional, names the site:
 
 ```ts
 // sites/help/site.ts
@@ -135,6 +135,24 @@ An operation's call and a start send a new id each (`crypto.randomUUID()`, lette
 | `approval_pending` | 409    | The policy holds the call for an approval: `runId` is the run of the built-in `call` workflow that makes it once approved, in the Inbox and at `/workflows/call/runs/<runId>`; `api.call.result(runId)` waits for it |
 | `run_running`      | 409    | `.result` waited and the run has not ended (`runId`)                                                                                                                                                                 |
 | `run_not_found`    | 404    | No such run of that workflow                                                                                                                                                                                         |
+
+`sanoma/site` exports `ApiError` (`status`, and `body`, an `ErrorResponse`: `error`, `code`, and `issues`, `runId` and the rest as the code has them) and `errorBodyOf(err)`, the body when `err` is an `ApiError` and `undefined` otherwise, so a page branches on a code without a cast. A held write is `approval_pending`, with the `runId` of the run that makes it once approved:
+
+```tsx
+import { api, errorBodyOf } from "sanoma/site";
+
+/** Marks the company won, or says where the change waits for its approval. */
+async function markWon(company: string): Promise<string> {
+  try {
+    await api.data.outbound.save({ record: { company, stage: "won" } });
+    return "Saved";
+  } catch (err) {
+    const body = errorBodyOf(err);
+    if (body?.code === "approval_pending") return `Waiting for approval: /workflows/call/runs/${body.runId}`;
+    throw err;
+  }
+}
+```
 
 `describeConfig` reads what each site calls from its source, never running it (`readSites`, in `@sanoma-ai/workflows/describe`): a workflow's page and a collection's list the sites' pages that call them under **Used by**, and a call to a workflow, collection or operation the config does not have, or to an operation a page may not call directly, fails `sanoma check`. A page links there only when this build serves it. Name what a site calls in its code (`<RunForm workflow="announce" />`, `api.announce.start(…)`, `api.data.outbound.list()`): a name held in a variable or built at run time is not read, so its page is not listed.
 

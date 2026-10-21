@@ -2,7 +2,7 @@
 // `build`, before tsc. It is self-contained, with no `extends` into `node_modules` (which the
 // installer lays out), made of:
 // - `@sanoma-ai/workflows`'s `oxlint.json` (its overrides for `workflows/**` and `resources/**`), with an entry for `sanoma` derived from `@sanoma-ai/workflows`'s (the same
-//   names), `sanoma/**` refused, and the data-file plugin loaded from this package's `dist/`;
+//   names), `sanoma/**` refused, and the plugin (`data-file`, `date`) loaded from this package's `dist/`;
 // - an override for `sites/**`: a site is client code, with no server, runtime, connector or
 //   environment of its own (the plugin's `site-file` says the rest);
 // - the rules this checkout holds its own code to (the root `.oxlintrc.json`), without its test
@@ -17,11 +17,10 @@ const own = read("../package.json").name as string;
 const workflows = read("../node_modules/@sanoma-ai/workflows/oxlint.json");
 const root = read("../../../.oxlintrc.json");
 
-const overrides = (workflows.overrides as Json[]).map((override) => {
+const overrides = (workflows.overrides as Json[]).map((given) => {
+  const override = given.jsPlugins ? { ...given, jsPlugins: ["./dist/oxlint-plugin.js"] } : given;
   const rule = override.rules["no-restricted-imports"] as [string, { paths: Json[]; patterns: Json[] }] | undefined;
-  if (rule === undefined) {
-    return override.jsPlugins ? { ...override, jsPlugins: ["./dist/oxlint-plugin.js"] } : override;
-  }
+  if (rule === undefined) return override;
   const [severity, { paths, patterns }] = rule;
   const author = paths.find((p) => p.name === "@sanoma-ai/workflows")!;
   return {

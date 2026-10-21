@@ -133,8 +133,10 @@ describe("the shipped oxlint.json", () => {
       {
         file: "workflows/via-sanoma.ts",
         line: 4,
-        rule: "eslint(no-restricted-globals)",
-        text: expect.stringMatching(/'Date'.*ctx\.now/),
+        rule: "sanoma(date)",
+        text: expect.stringMatching(
+          /reads the clock with `await ctx\.now\(\)`, never `Date`: `new Date\(await ctx\.now\(\)\)` for a date/,
+        ),
       },
     ]);
   });

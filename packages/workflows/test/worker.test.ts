@@ -123,6 +123,7 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       "ghost.post.publish",
       "resend.broadcast.create",
       "resend.broadcast.send",
+      "resend.emails.send",
     ]);
     expect([...resolved.drivers.keys()].toSorted()).toEqual([...resolved.ops.keys()].toSorted());
     expect(resolved.ledger).toBe(ledger);

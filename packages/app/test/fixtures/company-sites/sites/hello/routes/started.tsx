@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { api } from "sanoma/site";
+import { api, errorBodyOf } from "sanoma/site";
 
 /** Starts hello as whoever is asking while the page renders: its loader calls `api`. */
 export const Route = createFileRoute("/sites/hello/started")({
@@ -8,7 +8,7 @@ export const Route = createFileRoute("/sites/hello/started")({
       const { runId } = (await api.hello.start({ who: "the site" })) as { runId: string };
       return `Started ${runId}`;
     } catch (err) {
-      return `Refused: ${(err as { body?: { code?: string } }).body?.code}`;
+      return `Refused: ${errorBodyOf(err)?.code}`;
     }
   },
   component: Started,

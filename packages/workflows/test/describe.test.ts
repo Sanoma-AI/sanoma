@@ -67,6 +67,7 @@ describe("describeConfig", () => {
       "ghost.post.publish",
       "resend.broadcast.create",
       "resend.broadcast.send",
+      "resend.emails.send",
     ]);
     const publish = ops.find((o) => o.id === "ghost.post.publish")!;
     expect(publish).toMatchObject({
