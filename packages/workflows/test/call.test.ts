@@ -461,7 +461,7 @@ describe("ctx.sleep", () => {
     const [, napped, finished] = await c().ledger(timer!);
     expect(napped).toMatchObject({ type: "sleep.started" });
     const until = (napped as { until: number }).until;
-    expect(until - napped!.at).toBeGreaterThanOrEqual(300);
+    expect(until - napped!.at).toBe(300);
     expect(until).toBeGreaterThanOrEqual(before + 300);
     expect(finished!.at).toBeGreaterThanOrEqual(until);
   });
