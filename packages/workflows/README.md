@@ -153,7 +153,7 @@ Every store keeps the first record of an id: a run replayed after a restart writ
 
 ### Approvals
 
-An approval comes from the workflow (`ctx.approval(title, { approver, covers?, links?, details? })`) or from the policy holding a call (a `@hold`). Each is in `run.approvals` with its `status`, so a later policy call can see it.
+An approval comes from the workflow (`ctx.approval(title, { approver, covers?, links?, details? })`) or from the policy holding a call (a `@hold`). Each is in `run.approvals` with its `status`, so a later call it covers is let through once it is approved.
 
 `covers` says which operations an approval stands for, as op ids in the approval's state. A policy hold covers the operation it held; a workflow's approval covers the operations it names, or none. The runtime lifts a hold with `approvedFor(run.approvals, op.id, approver)`: approved, covering this operation, and addressed to the hold's approver. The last part matters: a workflow can request an approval covering any operation from anyone it names, so a check on `covers` alone would let a workflow launder a sign-off through its own `ctx.approval`. Covers name operations, not inputs: an approval that covers `shop.order.refund` covers every later refund call in the run.
 

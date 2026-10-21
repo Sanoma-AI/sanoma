@@ -13,6 +13,7 @@ import {
   approvedFor,
   type Decision,
   deny,
+  denyAll,
   type Policy,
   type PolicyCall,
   type PreviewAnswer,
@@ -368,12 +369,7 @@ export function policyAt(
   const lines = problems.map(({ policy, ...p }) =>
     problemLine({ ...p, message: policy ? `${policy}: ${p.message}` : p.message }),
   );
-  const refused = deny(`The policies do not hold: ${lines[0]}`);
-  const policy: Policy = Object.assign(() => refused, {
-    start: () => refused,
-    preview: (requests: readonly PreviewRequest[]): PreviewAnswer[] => requests.map(() => ({ answer: "deny" })),
-  });
-  return { policy: Object.freeze(policy), problems: lines };
+  return { policy: denyAll(`The policies do not hold: ${lines[0]}`), problems: lines };
 }
 
 /** A policy as a preview names it. */

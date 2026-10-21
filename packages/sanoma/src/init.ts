@@ -11,8 +11,11 @@ import {
 } from "node:fs";
 import { userInfo } from "node:os";
 import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { RUNTIME_AGENTS } from "@sanoma-ai/workflows";
+import { readPeople } from "@sanoma-ai/workflows/describe";
+import { groupNamesOf, principalIdsOf } from "@sanoma-ai/workflows/shared";
 import { addToEnv, writeSecretsKey } from "./key.ts";
 
 const run = promisify(execFile);
@@ -131,11 +134,15 @@ const output = (cmd: string, args: string[]) =>
     () => "",
   );
 
-/** The ids and group names the template's people file declares besides the founder's. */
-const TEMPLATE_NAMES = ["reviewer", "admin", "editor"];
-
-/** `id`, unless it is empty, one of the template's names, or one of the runtime's own agents': then "founder". */
-const free = (id: string) => (id && ![...TEMPLATE_NAMES, ...RUNTIME_AGENTS].includes(id) ? id : "founder");
+/**
+ * `id`, unless it is empty or taken, by a person, agent or group the template declares or by one
+ * of the runtime's own agents: then "founder".
+ */
+function free(id: string): string {
+  const { people } = readPeople(fileURLToPath(TEMPLATE));
+  const taken = [...principalIdsOf(people), ...groupNamesOf(people), ...RUNTIME_AGENTS];
+  return id && !taken.includes(id) ? id : "founder";
+}
 
 /** This machine's user name as one word; empty when the OS names none. */
 function machineUser(): string {

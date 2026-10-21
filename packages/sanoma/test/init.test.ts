@@ -149,7 +149,7 @@ describe("whoIsStarting", () => {
   it("takes the GitHub login as the id, unless the template's people or the runtime's agents have it", async () => {
     signedIn("ada-ortiz");
     expect(await whoIsStarting()).toMatchObject({ id: "ada-ortiz", github: "ada-ortiz" });
-    for (const taken of ["reviewer", "editor", "admin", "scenarios"]) {
+    for (const taken of ["reviewer", "editor", "admin", "agents", "scenarios"]) {
       signedIn(taken);
       expect(await whoIsStarting()).toMatchObject({ id: "founder", github: taken });
     }

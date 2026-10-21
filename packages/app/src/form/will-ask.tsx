@@ -20,6 +20,6 @@ export function WillAsk({ workflow }: { workflow: WorkflowEntry }) {
     ...previewQuery(actor ?? "", workflow.name, requests),
     enabled: policy.defined && !!actor,
   });
-  const line = policy.defined && answers ? willAsk(requests, answers) : undefined;
+  const line = answers && willAsk(requests, answers);
   return line ? <CardDescription>{line}</CardDescription> : null;
 }

@@ -28,7 +28,7 @@ import { currentGroup, entry, skipped, write, writeFailure } from "./ledger.ts";
 import { shown } from "./log.ts";
 import { type CallContext, isOp, type Op } from "./op.ts";
 import { callAt, callName, type CallNode } from "./outline.ts";
-import { allowAll, DecisionSchema, type Policy, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
+import { allowAll, type Decision, type Policy, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
 import type { Run, WorkerState } from "./run.ts";
 import { isChangeOp } from "./resource.ts";
 import {
@@ -263,16 +263,6 @@ function strict<T extends object>(obj: T, path: string, workflow: string): T {
   });
 }
 
-/** Checks a policy's answer, and copies it so nothing else the policy returned is recorded. */
-function checkDecision(decision: unknown, opId: string): RecordedDecision {
-  const parsed = DecisionSchema.safeParse(decision);
-  if (parsed.success) return parsed.data;
-  const why = parsed.error.issues[0]?.message ?? "not a decision";
-  throw new Error(
-    `The policy returned ${shown(decision)} for ${opId}: ${why}; use allow(), deny(reason) or approve(approver)`,
-  );
-}
-
 /** The resource instance the call acts on, from the operation's `target`, when it declares one. */
 function targetOf(op: Op, input: unknown): { target?: string } {
   if (!op.target) return {};
@@ -284,7 +274,7 @@ function targetOf(op: Op, input: unknown): { target?: string } {
 }
 
 /**
- * Asks the policy about one call, and checks its answer, with the record a collection's `save` or
+ * Asks the policy about one call, with the record a collection's `save` or
  * `delete` replaces as `before` (`beforeOf`). Runs inside a step, so it must have no side effects
  * of its own.
  */
@@ -347,7 +337,7 @@ export async function beforeOf(
 }
 
 /**
- * Asks `policy` about one call of `op` as `actor` in `run`, and checks its answer: a direct call
+ * Asks `policy` about one call of `op` as `actor` in `run`: a direct call
  * (`SanomaClient.call`), with the record a collection's write replaces as `before` (`beforeOf`).
  */
 export function decideCall(
@@ -357,7 +347,7 @@ export function decideCall(
   actor: Principal,
   run: PolicyCall["run"],
   before: Pick<PolicyCall, "before"> = {},
-): Promise<RecordedDecision> {
+): RecordedDecision {
   const call = { ...callOf(op, input, actor, run), ...before };
   return ask(policy, op.id, () => policy(call));
 }
@@ -371,25 +361,24 @@ export function decideStart(policy: Policy, workflow: string, input: unknown, ac
 }
 
 /**
- * The policy's answer about `id` (`answer`), checked. A policy that fails is named in the error,
- * with its error's code, unless the worker is stopping (`state`).
+ * The policy's answer about `id` (`answer`), with its version. A policy that fails is named in
+ * the error, with its error's code, unless the worker is stopping (`state`).
  */
-async function ask(
+function ask(
   policy: Policy,
   id: string,
-  answer: () => unknown,
+  answer: () => Decision,
   state: Pick<WorkerState, "stopped"> = { stopped: false },
-): Promise<RecordedDecision> {
-  let answered: unknown;
+): RecordedDecision {
+  let decision: Decision;
   try {
-    answered = await answer();
+    decision = answer();
   } catch (err) {
     // Named here, so the run's error and the ledger say which call the policy failed on, with
     // the code the policy's error had.
     if (isInfrastructureError(err, state)) throw err;
     throw keepCode(new Error(`The policy failed deciding ${id}: ${errorMessage(err)}`, { cause: err }), err);
   }
-  const decision = checkDecision(answered, id);
   return policy.version === undefined ? decision : { ...decision, policyVersion: policy.version };
 }
 
@@ -432,8 +421,8 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed) {
   }
   if (decision.kind === "approve") {
     const title = decision.title ?? `${op.id} needs ${approverLabel(decision.approver)}`;
-    // A hold covers the call it held, and any other operations the policy named.
-    const covers = [...new Set([op.id, ...(decision.covers ?? [])])];
+    // A hold covers the call it held.
+    const covers = [op.id];
     try {
       await awaitApproval(run, title, { approver: decision.approver, covers }, place, {
         op: op.id,

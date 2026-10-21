@@ -25,7 +25,7 @@ import {
 } from "./errors.ts";
 import { insertRecord, type LedgerRecord, type OwnedLedger, ownedLedger } from "./ledger.ts";
 import type { CallContext, Driver, Op } from "./op.ts";
-import type { RecordedDecision } from "./policy.ts";
+import { allowAll, type RecordedDecision } from "./policy.ts";
 import type { RunArgs, StartHold } from "./run.ts";
 import type { Secrets } from "./secret.ts";
 import {
@@ -272,9 +272,9 @@ export class SanomaClient {
     runId: string | undefined,
   ): Promise<StartHold | undefined> {
     const { policy } = this.config;
-    if (BUILT_IN_WORKFLOWS.has(workflow)) return undefined;
+    if (BUILT_IN_WORKFLOWS.has(workflow) || policy === allowAll) return undefined;
     if (runId !== undefined && (await this.row(runId))) return undefined;
-    const decision = await decideStart(policy, workflow, input, startedBy);
+    const decision = decideStart(policy, workflow, input, startedBy);
     if (decision.kind === "allow") return undefined;
     const action = `${WORKFLOW_ACTION}${workflow}`;
     if (decision.kind === "deny") throw new PolicyDeniedError(action, decision.reason);
@@ -327,7 +327,7 @@ export class SanomaClient {
       ),
     );
     const run = { id: runId, workflow: CALL_WORKFLOW, approvals: [] };
-    const decision = await decideCall(policy, op, parsed, actor, run, before);
+    const decision = decideCall(policy, op, parsed, actor, run, before);
     if (decision.kind === "deny") throw new PolicyDeniedError(op.id, decision.reason);
     if (decision.kind === "approve") {
       await this.start(CALL_WORKFLOW, held.input, { startedBy: actor, runId: heldId });
@@ -807,7 +807,8 @@ export class SanomaClient {
 
   /** `options.by`, who sets or clears a credential, admitted (`admitted`): their id. */
   private async admittedBy(options: { by: string }): Promise<string> {
-    return (await this.admitted({ id: actorOf(options) })).id;
+    const by = parseOrThrow(z.string().min(1), options?.by, '`by` must name who is asking, such as "alice"');
+    return (await this.admitted({ id: by })).id;
   }
 
   /** Refuses a run id whose run, as stored, was started with another input, by someone else, or in another sandbox. */
@@ -926,9 +927,6 @@ export interface StoredSecret {
 const VARIABLE = /^[A-Z_][A-Z0-9_]*$/;
 
 /** `options.by`, who sets or clears a credential: a name, or `invalid_input`. */
-const actorOf = (options: { by: string }): string =>
-  parseOrThrow(z.string().min(1), options?.by, '`by` must name who is asking, such as "alice"');
-
 const alreadyDecided = (runId: string, a: ApprovalState) =>
   new SanomaError("already_decided", `${a.id} on run ${runId} was already ${a.status} by ${a.decidedBy}`, {
     runId,

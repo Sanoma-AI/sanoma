@@ -36,8 +36,9 @@ export interface WorkerOptions {
   /** The least severe level of the runtime's and DBOS's messages to show, for the whole process: `warn` by default. */
   logLevel?: string;
   /**
-   * Start without naming the vendors not configured yet (`unconfigured` still does): for a worker
-   * whose runs use the fakes alone, as `runScenarios`'s.
+   * Start without naming the vendors not configured yet (`unconfigured` still does), or the
+   * policies' problems: for a worker whose runs use the fakes alone, as `runScenarios`'s, which
+   * `sanoma check` reports them beside.
    */
   quiet?: boolean;
   /**
@@ -146,7 +147,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     await warnAboutStrandedRuns(resolved);
     const summary = unconfiguredSummary(worker.unconfigured, resolved.driversByVendor.size);
     if (summary && !options.quiet) warn(summary);
-    if (resolved.policyProblems.length) {
+    if (resolved.policyProblems.length && !options.quiet) {
       warn(`the policies do not hold, so every call and start is refused:\n  ${resolved.policyProblems.join("\n  ")}`);
     }
   } catch (err) {

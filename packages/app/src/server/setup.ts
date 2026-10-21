@@ -19,6 +19,7 @@ import {
   type SetupStatus,
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
+import type { ActorContext } from "./core.ts";
 import { cookie, cookies, signer } from "../login/github.ts";
 import { escapeHtml } from "../login/page.ts";
 
@@ -104,14 +105,17 @@ export function githubManifest(origin: string, name: string) {
  * name, and the App's keys are stored as that person. The person names and creates the App on
  * GitHub's page. Nobody asking goes back to the connect page, which says so.
  */
-export async function manifestPage({ description, login }: AppContext, request: Request): Promise<Response> {
+export async function manifestPage(
+  { app: { description }, actor: resolve }: ActorContext,
+  request: Request,
+): Promise<Response> {
   const url = new URL(request.url);
   const org = url.searchParams.get("org")?.trim();
   if (org && !/^[\w-]+$/.test(org)) return toConnect("bad-org");
-  const actor = await login.resolveActor(request);
+  const actor = await resolve();
   if (!actor) return toConnect("nobody");
   const state = randomBytes(16).toString("base64url");
-  const signed = `${state}.${Buffer.from(actor.id).toString("base64url")}`;
+  const payload = `${state}.${Buffer.from(actor.id).toString("base64url")}`;
   const to = new URL(
     org ? `https://github.com/organizations/${org}/settings/apps/new` : "https://github.com/settings/apps/new",
   );
@@ -128,7 +132,7 @@ export async function manifestPage({ description, login }: AppContext, request: 
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
-      "set-cookie": cookie(request, STATE, `${signed}.${stateSigner().sign(signed)}`, STATE_PATH, 600),
+      "set-cookie": cookie(request, STATE, `${payload}.${stateSigner().sign(payload)}`, STATE_PATH, 600),
     },
   });
 }
@@ -143,8 +147,8 @@ export async function githubCallback(app: AppContext, request: Request): Promise
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   const [sent, who, signature] = (cookies(request)[STATE] ?? "").split(".");
-  const signed = `${sent}.${who}`;
-  if (!code || !state || !sent || !who || !signature || sent !== state || !stateSigner().verify(signed, signature)) {
+  const payload = `${sent}.${who}`;
+  if (!code || !state || !sent || !who || !signature || sent !== state || !stateSigner().verify(payload, signature)) {
     return toConnect("expired", request);
   }
   // Who started the flow, as the manifest page admitted them.

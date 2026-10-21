@@ -412,9 +412,7 @@ describe("cedarPolicy", () => {
   });
 
   it("decides through decideCall, stamped with its version", async () => {
-    expect(
-      await decideCall(policy, shop.refunds.create, { amount: 2_000_000, customer: "c" }, { id: "bo" }, run()),
-    ).toEqual({
+    expect(decideCall(policy, shop.refunds.create, { amount: 2_000_000, customer: "c" }, { id: "bo" }, run())).toEqual({
       kind: "approve",
       approver: { group: "finance" },
       title: "Refund over 10,000",
@@ -658,7 +656,7 @@ when { context.input.amont > 5 };
     // A worker on it starts, and says why it refuses everything.
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      await (await startWorker({ ...at(root), databaseUrl: testDatabaseUrl("cedar_mounts") })).stop();
+      await (await startWorker({ ...at(root), databaseUrl: testDatabaseUrl("cedar_refusing") })).stop();
       expect(warn.mock.calls.flat().join("\n")).toContain(
         `the policies do not hold, so every call and start is refused:\n  ${policyProblems[0]}`,
       );
