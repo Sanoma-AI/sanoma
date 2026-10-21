@@ -85,7 +85,15 @@ export type LedgerRecord = {
     }
   /** A message the approval ignored: from someone other than the approver, or not a decision. */
   | { type: "approval.refused"; approval: string; by?: string; reason: string }
-  | { type: "approval.decided"; approval: string; decision: "approve" | "reject"; by: string; note?: string }
+  | {
+      type: "approval.decided";
+      approval: string;
+      decision: "approve" | "reject";
+      by: string;
+      note?: string;
+      /** Set when `by` started the run: nobody else could decide (`mayDecide`). */
+      alone?: true;
+    }
   /**
    * A `ctx.sleep` began; `until` is when it ends, in ms since the epoch: the time asked for, or
    * for a duration the record's `at` plus the duration, as the runtime saw it. Written

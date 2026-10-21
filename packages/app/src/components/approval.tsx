@@ -132,6 +132,7 @@ export function ApprovalDetails({
         {approval.decidedBy && (
           <Fact label="Decided">
             {approval.status} by {approval.decidedBy}
+            {approval.alone ? " (nobody else could)" : null}
             {approval.decidedAt ? (
               <>
                 , <When at={approval.decidedAt} />
@@ -303,7 +304,7 @@ function DecideDialog({
       ? undefined
       : body?.code === "not_approver"
         ? body.reason === OWN_CHANGE
-          ? "You started this run, so someone else must decide this"
+          ? `You started this run, so someone else in ${approverLabel(body.approver ?? approval.approver)} must decide this`
           : `Only ${approverLabel(body.approver ?? approval.approver)} can decide this`
         : mutation.error.message;
   const verb = decision === "reject" ? "Reject" : "Approve";

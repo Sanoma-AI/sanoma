@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { bluesky } from "@sanoma-ai/connector-bluesky";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -12,7 +14,7 @@ import {
   type LedgerRecord,
   mayDecide,
 } from "../src/index.ts";
-import { OWN_CHANGE, refusalOf } from "../src/shared.ts";
+import { OWN_CHANGE, type PeopleResource, refusalOf } from "../src/shared.ts";
 import announce from "./fixtures/announce.ts";
 import { inSeconds, pending, rootWith, useApp, waitFor } from "./harness.ts";
 
@@ -99,26 +101,50 @@ describe("approvedFor", () => {
   });
 });
 
+/** The people resources as the data files declare them: each group by name, with its members' ids. */
+const declared = (groups: Record<string, string[]>, agents: string[] = []): PeopleResource[] => [
+  ...Object.entries(groups).map(([name, members]) => ({
+    vendor: "sanoma",
+    type: "group",
+    desired: { name, members },
+  })),
+  ...agents.map((id) => ({ vendor: "sanoma", type: "agent", desired: { id } })),
+];
+
 describe("mayDecide", () => {
   const run = { actor: { id: "ada" } };
+  const marketing = declared({ marketing: ["ada", "carol"] });
+
   it("matches a named approver by id, and a group approver by the principal's groups", () => {
-    expect(mayDecide({ approver: "lead" }, { id: "lead" }, run)).toBe(true);
-    expect(mayDecide({ approver: "lead" }, { id: "intern", groups: ["lead"] }, run)).toBe(false);
-    expect(mayDecide({ approver: { group: "marketing" } }, { id: "carol", groups: ["ops", "marketing"] }, run)).toBe(
-      true,
-    );
-    expect(mayDecide({ approver: { group: "marketing" } }, { id: "marketing" }, run)).toBe(false);
-    expect(mayDecide({ approver: { group: "marketing" } }, { id: "bob", groups: [] }, run)).toBe(false);
+    expect(mayDecide({ approver: "lead" }, { id: "lead" }, run, marketing)).toBe(true);
+    expect(mayDecide({ approver: "lead" }, { id: "intern", groups: ["lead"] }, run, marketing)).toBe(false);
+    const group = { approver: { group: "marketing" } };
+    expect(mayDecide(group, { id: "carol", groups: ["ops", "marketing"] }, run, marketing)).toBe(true);
+    expect(mayDecide(group, { id: "marketing" }, run, marketing)).toBe(false);
+    expect(mayDecide(group, { id: "bob", groups: [] }, run, marketing)).toBe(false);
   });
 
-  it("refuses the run's own actor, in the group or named, and says why; an agent's person may decide", () => {
+  it("refuses the run's own actor while someone else in the group could decide, and says why; an agent's person may decide", () => {
     const own = { approver: { group: "marketing" } };
-    expect(mayDecide(own, { id: "ada", groups: ["marketing"] }, run)).toBe(false);
-    expect(refusalOf(own, { id: "ada", groups: ["marketing"] }, run)).toBe(OWN_CHANGE);
-    expect(mayDecide({ approver: "ada" }, { id: "ada" }, run)).toBe(false);
-    expect(refusalOf(own, { id: "ada" }, run)).toBe("ada is not in group marketing");
-    expect(mayDecide({ approver: "bo" }, { id: "bo" }, { actor: { id: "refund-bot" } })).toBe(true);
-    expect(mayDecide({ approver: "bo" }, { id: "bo" }, {})).toBe(true);
+    expect(mayDecide(own, { id: "ada", groups: ["marketing"] }, run, marketing)).toBe(false);
+    expect(refusalOf(own, { id: "ada", groups: ["marketing"] }, run, marketing)).toBe(OWN_CHANGE);
+    expect(refusalOf(own, { id: "ada" }, run, marketing)).toBe("ada is not in group marketing");
+    expect(mayDecide({ approver: "bo" }, { id: "bo" }, { actor: { id: "refund-bot" } }, [])).toBe(true);
+    expect(mayDecide({ approver: "bo" }, { id: "bo" }, {}, [])).toBe(true);
+  });
+
+  it("lets the run's own actor decide when nobody else could: named, alone in the group, or with no other declared agent", () => {
+    const own = { approver: { group: "marketing" } };
+    const ada = { id: "ada", groups: ["marketing"] };
+    expect(mayDecide({ approver: "ada" }, { id: "ada" }, run, marketing)).toBe(true);
+    expect(mayDecide(own, ada, run, declared({ marketing: ["ada"] }))).toBe(true);
+    // A second member joining flips it.
+    expect(refusalOf(own, ada, run, declared({ marketing: ["ada", "dave"] }))).toBe(OWN_CHANGE);
+    // In `agents`, the declared agents are the members; the runtime's own are not.
+    const bot = { id: "bot", groups: ["agents"] };
+    const agents = { approver: { group: "agents" } };
+    expect(mayDecide(agents, bot, { actor: bot }, declared({}, ["bot"]))).toBe(true);
+    expect(refusalOf(agents, bot, { actor: bot }, declared({}, ["bot", "other-bot"]))).toBe(OWN_CHANGE);
   });
 });
 
@@ -244,6 +270,21 @@ describe("approvals a workflow asks for", () => {
     await c().result(runId);
   });
 
+  it("lets the run's starter decide an approval that names them, and records that nobody else could", async () => {
+    const runId = await c().start(odd, { request: { approver: "alice" } }, { startedBy: alice });
+    await waitFor(pending(c, runId));
+
+    expect(await c().decide(runId, { decision: "approve", by: alice })).toMatchObject({
+      status: "approved",
+      decidedBy: "alice",
+      alone: true,
+    });
+    expect(await c().result(runId)).toMatchObject({ approvedBy: "alice" });
+    expect(ofType(await c().ledger(runId), "approval.decided")).toEqual([
+      expect.objectContaining({ by: "alice", alone: true }),
+    ]);
+  });
+
   it("refuses a second decision as already_decided, and one with nothing to decide as no_pending_approval", async () => {
     const runId = await c().start(announce, input("Twice"), { startedBy: alice });
     await waitFor(pending(c, runId));
@@ -298,8 +339,7 @@ describe("approvals a workflow asks for", () => {
 
 describe("approvals a policy asks for", () => {
   // The test picks a rule per run by who starts it: each Cedar policy names its principal.
-  const root = rootWith({
-    "resources/people.ts": `import { sanoma } from "sanoma/resources";
+  const peopleFile = `import { sanoma } from "sanoma/resources";
 
 export const each = sanoma.person({ id: "each" });
 export const group = sanoma.person({ id: "group" });
@@ -308,15 +348,22 @@ export const intern = sanoma.person({ id: "intern" });
 export const bob = sanoma.person({ id: "bob" });
 export const carol = sanoma.person({ id: "carol" });
 export const dave = sanoma.person({ id: "dave" });
+export const solo = sanoma.person({ id: "solo" });
 export const marketing = sanoma.group({ name: "marketing", members: [carol, dave] });
 export const sales = sanoma.group({ name: "sales", members: [bob] });
-`,
+export const solos = sanoma.group({ name: "solos", members: [solo] });
+`;
+  const root = rootWith({
+    "resources/people.ts": peopleFile,
     "policies/policy.cedar": `// The README's policy: each publishing operation needs marketing-lead's approval.
 @hold("marketing-lead")
 forbid (principal == Sanoma::Principal::"each", action in Sanoma::Action::"effect:publish", resource);
 
 @hold("marketing")
 forbid (principal == Sanoma::Principal::"group", action == Sanoma::Action::"bluesky.post.create", resource);
+
+@hold("solos")
+forbid (principal == Sanoma::Principal::"solo", action == Sanoma::Action::"bluesky.post.create", resource);
 `,
   });
   const app = useApp("approvals-policy", () => ({ workflows: [announce, shout, launder], root }));
@@ -428,6 +475,41 @@ forbid (principal == Sanoma::Principal::"group", action == Sanoma::Action::"blue
     const records = await c().ledger(runId);
     expect(ofType(records, "approval.requested")[0]).toMatchObject({ approver: { group: "marketing" } });
     expect(ofType(records, "approval.decided")[0]).toMatchObject({ by: "carol" });
+  });
+
+  it("lets the starter decide alone in the approver group, and refuses them once someone else joins it", async () => {
+    const solo = { id: "solo" };
+    const first = await c().start(shout, { text: "alone" }, { startedBy: solo });
+    await waitFor(pending(c, first));
+    expect(await c().decide(first, { decision: "approve", by: solo })).toMatchObject({
+      status: "approved",
+      decidedBy: "solo",
+      alone: true,
+    });
+    await c().result(first);
+    expect(ofType(await c().ledger(first), "approval.decided")).toEqual([
+      expect.objectContaining({ by: "solo", alone: true }),
+    ]);
+
+    // bob joins the group: now someone else could decide, so the starter may not, in the client or the run.
+    const file = join(root, "resources/people.ts");
+    writeFileSync(file, peopleFile.replace("members: [solo]", "members: [solo, bob]"));
+    try {
+      const second = await c().start(shout, { text: "not alone" }, { startedBy: solo });
+      await waitFor(pending(c, second));
+      const own = await caught(c().decide(second, { decision: "approve", by: solo }));
+      expect(own).toMatchObject({ message: "own change (approval-1)", data: { reason: OWN_CHANGE } });
+      await app.raw.send(second, { decision: "approve", by: { id: "solo", groups: ["solos"] } }, "approval-1");
+      await waitFor(async () => (await c().approvals(second))[0]?.refused.length === 1);
+      expect((await c().approvals(second))[0]?.refused[0]).toMatchObject({ by: "solo", reason: OWN_CHANGE });
+
+      const decided = await c().decide(second, { decision: "approve", by: { id: "bob" } });
+      expect(decided).toMatchObject({ status: "approved", decidedBy: "bob" });
+      expect(decided).not.toHaveProperty("alone");
+      await c().result(second);
+    } finally {
+      writeFileSync(file, peopleFile);
+    }
   });
 
   it("tells the loser of two decisions sent at once that it was already decided, by whom", async () => {

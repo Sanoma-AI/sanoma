@@ -559,9 +559,12 @@ export class SanomaClient {
         { runId, ...(approvalId ? { approvalId } : {}) },
       );
     }
-    const reason = refusalOf(target, msg.by, {
-      actor: row.authenticatedUser ? { id: row.authenticatedUser } : undefined,
-    });
+    const reason = refusalOf(
+      target,
+      msg.by,
+      { actor: row.authenticatedUser ? { id: row.authenticatedUser } : undefined },
+      readPeople(this.config.root).people,
+    );
     if (reason !== undefined) {
       throw new SanomaError("not_approver", `${reason} (${target.id})`, {
         runId,

@@ -6,7 +6,8 @@ import { entry, write } from "./ledger.ts";
 import { warn } from "./log.ts";
 import type { Placed } from "./call.ts";
 import type { Run } from "./run.ts";
-import { approverLabel, mayDecide, refusalOf } from "./shared.ts";
+import { readPeople } from "./resources.ts";
+import { approverLabel, refusalOf } from "./shared.ts";
 
 // The wire contract between a run waiting on approvals and whoever decides them. The client
 // imports this file and never the worker's.
@@ -62,8 +63,8 @@ export interface HeldCall {
 }
 
 /**
- * Waits, durably, for a decision from someone who may make it (`mayDecide`: never the run's own
- * actor). Throws `RejectedError` on a rejection. Without `held`, the workflow asked
+ * Waits, durably, for a decision from someone who may make it (`mayDecide`: the run's own actor
+ * only while nobody else could). Throws `RejectedError` on a rejection. Without `held`, the workflow asked
  * (`ctx.approval`); with it, the policy did, and `place` is the held call's outline node and name
  * (none for a run's start, which is no call in the outline).
  */
@@ -118,9 +119,15 @@ export async function awaitApproval(
     const at = await DBOS.now();
     const parsed = ApprovalMessage.safeParse(raw);
     const msg = parsed.success ? parsed.data : undefined;
-    if (!msg || !mayDecide(state, msg.by, run)) {
+    // Checked against the people the data files declare now, in a step: a replay decides the same.
+    const refusal = msg
+      ? await DBOS.runStep(async () => refusalOf(state, msg.by, run, readPeople(run.state.root).people) ?? null, {
+          name: `decider:${state.id}`,
+        })
+      : "not a valid decision message";
+    if (!msg || refusal !== null) {
       const by = msg?.by.id ?? senderOf(raw);
-      const reason = (msg && refusalOf(state, msg.by, run)) ?? "not a valid decision message";
+      const reason = refusal ?? "not a valid decision message";
       state.refused.push({
         ...(by === undefined ? {} : { by }),
         ...(msg?.id === undefined ? {} : { id: msg.id }),
@@ -138,12 +145,15 @@ export async function awaitApproval(
       );
       continue;
     }
+    // The run's own actor decides only when nobody else could, which the record says.
+    const alone = msg.by.id === run.actor.id ? { alone: true as const } : {};
     Object.assign(state, {
       status: statusOf(msg.decision),
       decidedBy: msg.by.id,
       decidedAt: at,
       note: msg.note,
       decidedWith: msg.id,
+      ...alone,
     });
     // The list first, then the ledger, then the decision event: whoever sees the event sees both.
     await DBOS.setEvent(APPROVALS_EVENT, all);
@@ -151,7 +161,14 @@ export async function awaitApproval(
       run,
       entry(
         run,
-        { type: "approval.decided", approval: state.id, decision: msg.decision, by: msg.by.id, note: msg.note },
+        {
+          type: "approval.decided",
+          approval: state.id,
+          decision: msg.decision,
+          by: msg.by.id,
+          note: msg.note,
+          ...alone,
+        },
         { key: state.id, at },
       ),
     );
