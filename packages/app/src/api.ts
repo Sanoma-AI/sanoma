@@ -3,9 +3,11 @@ import type {
   ApplyResult,
   ApprovalState,
   CredentialStatus,
+  Effect,
   ErrorCode,
   InputIssue,
   LedgerRecord,
+  PreviewAnswer,
   Principal,
   RunSummary,
 } from "@sanoma-ai/workflows";
@@ -307,6 +309,26 @@ export const CallRequest = z.object({
 });
 export type CallRequest = z.infer<typeof CallRequest>;
 
+const EFFECTS = ["read", "write", "publish", "send", "money", "access"] as const satisfies readonly Effect[];
+
+/**
+ * What `previewFn` asks the policy, as the session's actor: at most 200 actions, each an
+ * operation's id with its effect, or `workflow:<name>` for a start, on an operation's target when
+ * one is known.
+ */
+export const PreviewQuery = z
+  .array(
+    z.object({
+      action: z.object({ id: z.string().min(1), effect: z.enum(EFFECTS).optional() }),
+      resource: z.string().min(1).optional(),
+    }),
+  )
+  .max(200);
+export type PreviewQuery = z.infer<typeof PreviewQuery>;
+
+/** The policy's answer to each, in order: `custom` for every one when it cannot be asked ahead (a `definePolicy` function). */
+export type PreviewResult = PreviewAnswer | { answer: "custom" };
+
 /** The `body` of the error a server function fails with. */
 export interface ErrorResponse {
   error: string;
@@ -316,6 +338,8 @@ export interface ErrorResponse {
   issues?: InputIssue[];
   /** For `not_approver`: who may decide. */
   approver?: ApprovalState["approver"];
+  /** For `not_approver`: why not, `OWN_CHANGE` for the run's own actor. */
+  reason?: string;
   /** For `approval_pending`: the run of the built-in `call` workflow the call waits in; for `run_running`, the run. */
   runId?: string;
 }

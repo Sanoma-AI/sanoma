@@ -349,24 +349,22 @@ export function TipButton({
   );
 }
 
-/** The policy's decision on an operation call; a denial's reason is its tooltip. */
+/**
+ * The policy's decision on an operation call. A denial's tooltip is its reason, a hold's its
+ * title, each with the rules behind it (`reasons`, the policies' ids).
+ */
 export function DecisionBadge({ decision }: { decision: RecordedDecision }) {
   const tone = DECISION_TONE[decision.kind];
-  if (decision.kind === "deny") {
-    return (
-      <Tip tip={decision.reason}>
-        <ToneBadge tone={tone} tabIndex={0}>
-          deny
-        </ToneBadge>
-      </Tip>
-    );
-  }
-  return (
-    <ToneBadge tone={tone}>
-      {decision.kind}
-      {decision.kind === "approve" ? ` · ${approverLabel(decision.approver)}` : ""}
+  const label = decision.kind === "approve" ? `approve · ${approverLabel(decision.approver)}` : decision.kind;
+  const said = decision.kind === "deny" ? decision.reason : decision.kind === "approve" ? decision.title : undefined;
+  const rules = decision.kind !== "allow" && decision.reasons?.length ? `By ${decision.reasons.join(", ")}` : undefined;
+  const tip = [said, rules].filter(Boolean).join(". ");
+  const badge = (
+    <ToneBadge tone={tone} tabIndex={tip ? 0 : undefined}>
+      {label}
     </ToneBadge>
   );
+  return tip ? <Tip tip={tip}>{badge}</Tip> : badge;
 }
 
 function ago(ms: number, now: number): string {
@@ -750,14 +748,20 @@ export function Fact({ label, children }: { label: string; children: ReactNode }
   );
 }
 
-/** Who asked for an approval: "the policy, holding <op>" or "the workflow". */
-export function RequestedBy({ requestedBy, op }: Pick<ApprovalState, "requestedBy" | "op">) {
-  return requestedBy === "policy" ? (
+/** Who asked for an approval: "the policy (<its rules' ids>), holding <op>" or "the workflow". */
+export function RequestedBy({ requestedBy, op, reasons }: Pick<ApprovalState, "requestedBy" | "op" | "reasons">) {
+  if (requestedBy !== "policy") return "the workflow";
+  return (
     <>
-      the policy, holding <code>{op}</code>
+      the policy
+      {reasons?.length ? (
+        <>
+          {" "}
+          (<code>{reasons.join(", ")}</code>)
+        </>
+      ) : null}
+      , holding <code>{op}</code>
     </>
-  ) : (
-    "the workflow"
   );
 }
 

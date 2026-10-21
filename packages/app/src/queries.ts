@@ -15,6 +15,7 @@ import { z } from "zod";
 import {
   type CredentialsResponse,
   pendingApprovals,
+  type PreviewQuery,
   RUNS_LIMIT,
   type RunsQuery,
   type ScenariosResponse,
@@ -34,6 +35,7 @@ import {
   getScenarios,
   getSetupStatus,
   getSource,
+  previewFn,
   startRunFn,
 } from "./functions.ts";
 import type { UntypedApi } from "./api-client.ts";
@@ -425,6 +427,18 @@ export function useStartRun({ navigate = true }: { navigate?: boolean } = {}) {
     },
   });
 }
+
+/**
+ * What the policy would answer `actor` for `requests` ahead of a run of `workflow` (`previewFn`,
+ * which asks as the session's actor): asked once per actor and workflow, never per input, since
+ * the input is not known ahead. The policy cannot change while the app runs.
+ */
+export const previewQuery = (actor: string, workflow: string, requests: PreviewQuery) =>
+  queryOptions({
+    queryKey: ["preview", actor, workflow],
+    queryFn: () => previewFn({ data: requests }),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
 
 export const runQuery = (id: string) =>
   queryOptions({

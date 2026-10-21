@@ -8,6 +8,7 @@ import {
   ConnectExistingRequest,
   DecideCall,
   GoLiveRequest,
+  PreviewQuery,
   RunsQuery,
   SetCredentialRequest,
 } from "./api.ts";
@@ -21,6 +22,7 @@ import {
   fileSource,
   lastRuns,
   listRuns,
+  preview,
   readStartRun,
   runDetail,
   saysWho,
@@ -86,6 +88,15 @@ export const startRunFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .validator(readStartRun)
   .handler(({ data, context }) => startRun(context.app, context.principal, data));
+
+/**
+ * What the policy would answer the person asking for each action ahead of a call, its input
+ * unknown (`preview`): asked as the session's actor, never as one the page names.
+ */
+export const previewFn = createServerFn(READ)
+  .middleware([withPrincipal])
+  .validator(validate(PreviewQuery))
+  .handler(({ data, context }) => preview(context.app, context.principal, data));
 
 export const decideFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
