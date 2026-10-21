@@ -335,13 +335,14 @@ export type PreviewQuery = z.infer<typeof PreviewQuery>;
 export type PreviewResult = PreviewAnswer | { answer: "custom" };
 
 /**
- * The Permissions page's grid (`getPermissions`): the policy, its columns (the declared groups and
- * `agents`, sorted), and a row for each workflow's start, then each operation a person may call
- * directly, with the policy's answer for each group (`cells`, in `groups`' order).
+ * The Permissions page's grid (`getPermissions`): the policy, its columns (`null` for someone in
+ * no group, then the declared groups and `agents`, sorted), and a row for each workflow's start,
+ * then each operation a person may call directly, with the policy's answer for each column
+ * (`cells`, in `groups`' order).
  */
 export interface PermissionsResponse {
   policy: ConfigDescription["policy"];
-  groups: string[];
+  groups: (string | null)[];
   rows: { kind: "workflow" | "op"; id: string; title?: string; cells: PreviewResult[] }[];
 }
 

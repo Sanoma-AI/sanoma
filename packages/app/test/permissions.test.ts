@@ -89,29 +89,24 @@ const gridOf = (policy: Policy) =>
   permissions({ resolved: { ...resolved, policy }, description: describeConfig({ ...config, policy }) });
 
 describe("the Permissions grid", () => {
-  it("asks the policy for each group, the start of each workflow and each direct operation", () => {
+  const hold = {
+    answer: "hold",
+    rule: { id: "policies/refunds.cedar#1", file: "policies/refunds.cedar", title: "Refunds need finance" },
+    approver: { group: "finance" },
+  };
+
+  it("asks the policy for someone in no group and in each group, the start of each workflow and each direct operation", () => {
     const grid = gridOf(cedar);
-    expect(grid).toMatchObject({ policy: { defined: true, kind: "cedar" }, groups: ["agents", "finance"] });
+    expect(grid).toMatchObject({ policy: { defined: true, kind: "cedar" }, groups: [null, "agents", "finance"] });
     expect(grid.rows).toEqual([
-      {
-        kind: "workflow",
-        id: "refund",
-        title: "Refund",
-        cells: [
-          {
-            answer: "hold",
-            rule: { id: "policies/refunds.cedar#1", file: "policies/refunds.cedar", title: "Refunds need finance" },
-            approver: { group: "finance" },
-          },
-          // Someone in finance is not held: the hold's own approver.
-          { answer: "allow" },
-        ],
-      },
+      // Someone in finance is not held: the hold's own approver.
+      { kind: "workflow", id: "refund", title: "Refund", cells: [hold, hold, { answer: "allow" }] },
       {
         // A money operation is called only in a run: not a row.
         kind: "op",
         id: "shop.refunds.list",
         cells: [
+          { answer: "allow" },
           {
             answer: "deny",
             rule: { id: "no-agent-reads", file: "policies/refunds.cedar", reason: "Agents read no refunds" },
@@ -122,13 +117,32 @@ describe("the Permissions grid", () => {
     ]);
   });
 
+  it("holds an agent for whom it acts for, and refuses everyone else that hold", () => {
+    const onBehalf = cedarPolicy(
+      resolved,
+      loadPolicies([
+        {
+          file: "policies/agents.cedar",
+          text: '@hold("on-behalf-of")\nforbid (principal, action == Sanoma::Action::"shop.refunds.list", resource);\n',
+        },
+      ]).policies,
+      readPeople(root).people,
+    );
+    const rule = { id: "policies/agents.cedar#1", file: "policies/agents.cedar" };
+    expect(gridOf(onBehalf).rows[1]!.cells).toEqual([
+      { answer: "deny", rule },
+      { answer: "hold", rule, approver: "whom it acts for" },
+      { answer: "deny", rule },
+    ]);
+  });
+
   it("is every cell custom for a function, and allow with no policy", () => {
     const fn = gridOf(definePolicy(() => allow()));
     expect(fn.policy).toEqual({ defined: true, kind: "function" });
-    expect(fn.rows.flatMap((row) => row.cells)).toEqual(Array.from({ length: 4 }, () => ({ answer: "custom" })));
+    expect(fn.rows.flatMap((row) => row.cells)).toEqual(Array.from({ length: 6 }, () => ({ answer: "custom" })));
     const none = gridOf(allowAll);
     expect(none.policy.defined).toBe(false);
-    expect(none.rows.flatMap((row) => row.cells)).toEqual(Array.from({ length: 4 }, () => ({ answer: "allow" })));
+    expect(none.rows.flatMap((row) => row.cells)).toEqual(Array.from({ length: 6 }, () => ({ answer: "allow" })));
   });
 });
 
@@ -164,12 +178,13 @@ describe("the Permissions page", () => {
     expect(html).toContain("Cedar, policies/*.cedar");
     expect(html).toContain(`<code>${cedar.version}</code>`);
     expect([...html.matchAll(/<th [^>]*scope="col"[^>]*>([^<]*)<\/th>/g)].map(([, name]) => name)).toEqual([
+      "No group",
       "agents",
       "finance",
     ]);
-    expect(html).toContain('aria-label="hold · finance: the rule for refund for agents"');
-    expect(html).toContain('aria-label="deny: the rule for shop.refunds.list for agents"');
-    expect(html.match(/>allow</g)).toHaveLength(2);
+    expect(html).toContain('aria-label="hold · finance: the rule for refund for someone in no group"');
+    expect(html).toContain('aria-label="deny: the rule for shop.refunds.list for someone in agents"');
+    expect(html.match(/>allow</g)).toHaveLength(3);
   });
 
   it("picks a declared person, shows their groups, and a cell's rule in a sheet, in Chrome", async (ctx) => {
@@ -198,14 +213,14 @@ describe("the Permissions page", () => {
         await tab.waitForSelector(`[data-slot="sheet-content"]::-p-text(${rule})`);
         return (await tab.evaluate(`document.querySelector('[data-slot="sheet-content"]').textContent`)) as string;
       };
-      await tab.click('button[aria-label="deny: the rule for shop.refunds.list for agents"]');
+      await tab.click('button[aria-label="deny: the rule for shop.refunds.list for someone in agents"]');
       const deny = await sheet("no-agent-reads");
       expect(deny).toContain("Agents read no refunds");
       expect(deny).toContain("policies/refunds.cedar");
       await tab.keyboard.press("Escape");
       await tab.waitForFunction(`!document.querySelector('[data-slot="sheet-content"]')`);
 
-      await tab.click('button[aria-label="hold · finance: the rule for refund for agents"]');
+      await tab.click('button[aria-label="hold · finance: the rule for refund for someone in agents"]');
       expect(await sheet("Refunds need finance")).toContain("group finance");
     } finally {
       await browser.close();

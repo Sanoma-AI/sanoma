@@ -47,6 +47,7 @@ import {
   isEnded,
   principalIdsOf,
   principalOf,
+  problemLine,
   RUNTIME_AGENTS,
 } from "./shared.ts";
 import type { Call, RunView, Seed } from "./steps.ts";
@@ -333,7 +334,8 @@ function builtFor(scope: Scope): Built {
     cached.scope.workflows === scope.workflows &&
     cached.scope.types === scope.types &&
     cached.scope.collections === scope.collections &&
-    cached.scope.steps === scope.steps
+    cached.scope.steps === scope.steps &&
+    cached.scope.root === scope.root
   ) {
     return cached;
   }
@@ -375,9 +377,12 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
   const workflowOf = (name: unknown) => scope.workflows.get(name as string)!;
   // The people as the root's data files declare them when a step names one (`readPeople`, read
   // again only once a file changed). While they declare no one, any id goes, as a run's start admits.
-  /** `who`, a declared person or agent. */
+  /** `who`, a declared person or agent, while the people's files have no problems (a run's start admits no one then). */
   const actorNamed = (who: string) => {
-    const { people } = readPeople(scope.root);
+    const { people, problems } = readPeople(scope.root);
+    if (problems.length && !RUNTIME_AGENTS.includes(who)) {
+      throw new Error(`${who} cannot act while resources/ has problems: ${problems.map(problemLine).join("; ")}`);
+    }
     if (!declaresPeople(people) || principalOf(who, people)) return who;
     const ids = [...principalIdsOf(people), ...RUNTIME_AGENTS].join(", ");
     throw new Error(`${who} is not a declared person or agent; resources/ declares ${ids}`);

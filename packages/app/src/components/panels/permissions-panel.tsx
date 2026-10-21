@@ -1,6 +1,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { SidebarContent, SidebarGroup } from "#/components/ui/sidebar.tsx";
+import type { PermissionsResponse } from "../../api.ts";
 import { permissionsQuery } from "../../queries.ts";
 import { Fact, Facts } from "../common.tsx";
 import { PanelFooterLink, PanelHeader } from "./panel.tsx";
@@ -18,7 +19,7 @@ export function PermissionsPanel() {
         <SidebarGroup className="text-sm">
           <Facts>
             <PolicyFacts policy={data.policy} />
-            <Fact label="Groups">{data.groups.length}</Fact>
+            <Fact label="Groups">{data.groups.filter((group) => group !== null).length}</Fact>
             <Fact label="Workflows">{count("workflow")}</Fact>
             <Fact label="Operations">{count("op")}</Fact>
           </Facts>
@@ -29,11 +30,16 @@ export function PermissionsPanel() {
   );
 }
 
-/** The policy's kind, Cedar or a function, and its version when it has one: for `Facts`. */
-export function PolicyFacts({ policy }: { policy: { kind: "cedar" | "function"; version?: string } }) {
+/** The policy's kind, Cedar or a function (or none), and its version when it has one: for `Facts`. */
+export function PolicyFacts({ policy }: { policy: PermissionsResponse["policy"] }) {
+  const kind = !policy.defined
+    ? "None"
+    : policy.kind === "cedar"
+      ? "Cedar, policies/*.cedar"
+      : "A function, definePolicy";
   return (
     <>
-      <Fact label="Policy">{policy.kind === "cedar" ? "Cedar, policies/*.cedar" : "A function, definePolicy"}</Fact>
+      <Fact label="Policy">{kind}</Fact>
       {policy.version !== undefined && (
         <Fact label="Version">
           <code>{policy.version}</code>

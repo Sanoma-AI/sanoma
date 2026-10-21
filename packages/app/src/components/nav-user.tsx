@@ -69,7 +69,7 @@ export function NavUser() {
         <span className="sr-only">
           {/* The name in this browser is read after hydration: until then, none. */}
           {(actor !== undefined || fromServer) && <span>{name}</span>}
-          {member && <span>, {member}</span>}
+          {member && <span>{`, ${member}`}</span>}
           {status && <span>{status}</span>}
         </span>
       </DropdownMenuTrigger>

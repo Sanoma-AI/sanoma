@@ -16,7 +16,7 @@ import {
   type RunSummary,
   type SanomaError,
 } from "@sanoma-ai/workflows";
-import { apiNameOf, groupNamesOf, WORKFLOW_ACTION } from "@sanoma-ai/workflows/shared";
+import { AGENTS, apiNameOf, groupNamesOf, WORKFLOW_ACTION } from "@sanoma-ai/workflows/shared";
 import { type ConfigDescription, type DataValue, formatOptions, setFields } from "@sanoma-ai/workflows/describe";
 import { check, loadScenarios } from "@sanoma-ai/workflows/scenario";
 import { isNotFound, isRedirect, notFound } from "@tanstack/react-router";
@@ -264,7 +264,11 @@ export async function startRun(
       throw noSuch("scenario", `No scenario named "${body.scenario}"${known}${notLoaded(errors)}`);
     }
     return {
-      runId: await client.start(workflow, scenario.input, { startedBy: actor, sandbox: scenario.name }),
+      // As whoever the scenario says is acting, else the person starting it: a sandbox run calls fakes alone.
+      runId: await client.start(workflow, scenario.input, {
+        startedBy: scenario.startedBy ?? actor,
+        sandbox: scenario.name,
+      }),
       workflow: scenario.workflow,
     };
   }
@@ -371,22 +375,45 @@ export function preview(
 }
 
 /**
- * The Permissions page's grid (`getPermissions`): for each group, the declared ones and `agents`,
- * what the policy would answer someone in it alone (`{ id: "group:<name>", groups: [name] }`), the
- * input unknown (`preview`), for the start of each of the config's own workflows, in its order,
- * then each operation a person may call directly, by id. Nobody's own answer: the actor asking
- * is not used.
+ * Whom the `agents` column's agent acts for: a hold `@hold("on-behalf-of")` asks them. Only an
+ * agent acts for someone, so in any other column that hold refuses, as it does a person.
+ */
+const ACTS_FOR = "whom it acts for";
+
+/** Each app's grid, by its resolved config: the policy and the people cannot change while it runs. */
+const grids = new WeakMap<object, PermissionsResponse>();
+
+/**
+ * The Permissions page's grid (`getPermissions`): for someone in no group, then for each group,
+ * the declared ones and `agents`, what the policy would answer someone in it alone
+ * (`{ id: "group:<name>", groups: [name] }`, an agent acting for `ACTS_FOR`), the input unknown
+ * (`preview`), for the start of each of the config's own workflows, in its order, then each
+ * operation a person may call directly, by id. Nobody's own answer: the actor asking is not used.
  */
 export function permissions(app: Pick<AppContext, "resolved" | "description">): PermissionsResponse {
+  let grid = grids.get(app.resolved);
+  if (!grid) grids.set(app.resolved, (grid = gridOf(app)));
+  return grid;
+}
+
+function gridOf(app: Pick<AppContext, "resolved" | "description">): PermissionsResponse {
   const { description } = app;
-  const groups = groupNamesOf(description.resources);
+  const groups = [null, ...groupNamesOf(description.resources)];
   const workflows = description.workflows.filter((w) => !w.builtin);
   const ops = description.ops.filter((op) => op.direct).toSorted((a, b) => a.id.localeCompare(b.id));
   const requests: PreviewQuery = [
     ...workflows.map(({ name }) => ({ action: { id: `${WORKFLOW_ACTION}${name}` } })),
     ...ops.map(({ id, effect }) => ({ action: { id, effect } })),
   ];
-  const columns = groups.map((group) => preview(app, { id: `group:${group}`, groups: [group] }, requests));
+  const columns = groups.map((group) =>
+    preview(
+      app,
+      group === null
+        ? { id: "group:", groups: [] }
+        : { id: `group:${group}`, groups: [group], ...(group === AGENTS && { onBehalfOf: ACTS_FOR }) },
+      requests,
+    ),
+  );
   const cells = (row: number) => columns.map((answers) => answers[row]!);
   return {
     policy: description.policy,

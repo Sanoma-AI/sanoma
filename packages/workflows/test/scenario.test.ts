@@ -1432,6 +1432,25 @@ describe("people in a scenario: who is acting, held for a group, denied with a r
     );
   });
 
+  it("lets no one but the runtime's agents act while the people's files have problems", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sanoma-people-"));
+    dirs.push(root);
+    mkdirSync(join(root, "resources"));
+    writeFileSync(
+      join(root, "resources", "people.ts"),
+      `import { sanoma } from "@sanoma-ai/workflows/resources";\n\nexport const ada = sanoma.person({ id: "ada" });\nexport const other = sanoma.person({ id: "ada" });\n`,
+    );
+    const broken = { ...people, root };
+    await expect(
+      parseFeature(scenarioOf("    Given ada is acting\n    When refund runs\n"), "x.feature", broken),
+    ).rejects.toThrow(
+      /^x\.feature:3: ada cannot act while resources\/ has problems: resources\/people\.ts:4:1: sanoma\.person "ada" is declared twice/,
+    );
+    await expect(
+      parseFeature(scenarioOf("    Given scenarios is acting\n    When refund runs\n"), "x.feature", broken),
+    ).resolves.toMatchObject([{ startedBy: "scenarios" }]);
+  });
+
   it("takes any id, and any group, while the data files declare no one", async () => {
     const [s] = await parse(
       'Feature: A\n  Scenario: S\n    Given whoever is acting\n    When announce runs\n    Then ghost.post.publish was held for group "editors"\n',

@@ -20,8 +20,13 @@ export const Route = createFileRoute("/permissions")({
 });
 
 type Row = PermissionsResponse["rows"][number];
+/** A column: a group's name, or `null` for someone in no group. */
+type Group = PermissionsResponse["groups"][number];
 /** A cell the policy answered with a rule behind it: what the sheet shows. */
-type Chosen = { row: Row; group: string; cell: PreviewAnswer };
+type Chosen = { row: Row; group: Group; cell: PreviewAnswer };
+
+/** Whom a column is about, in words. */
+const someoneIn = (group: Group) => `someone in ${group ?? "no group"}`;
 
 /** Each answer's tone: a hold waits on someone, a deny refuses, the input decides `depends`. */
 const TONE: Record<Exclude<PreviewResult["answer"], "allow">, Tone> = {
@@ -32,7 +37,8 @@ const TONE: Record<Exclude<PreviewResult["answer"], "allow">, Tone> = {
 };
 
 /**
- * What the policy answers each group (the declared ones and `agents`, across) for each workflow's
+ * What the policy answers someone in no group and in each group (the declared ones and `agents`),
+ * across, for each workflow's
  * start and each operation a person may call directly (down), the input unknown. A cell with a
  * rule behind it opens the rule in a sheet. Nothing here is edited: the policy is
  * `policies/*.cedar`, written by the agent.
@@ -44,7 +50,7 @@ function PermissionsPage() {
   const [open, setOpen] = useState(false);
   const workflows = data.rows.filter((row) => row.kind === "workflow");
   const ops = data.rows.filter((row) => row.kind === "op");
-  const choose = (row: Row, group: string, cell: PreviewResult) => {
+  const choose = (row: Row, group: Group, cell: PreviewResult) => {
     if (cell.answer === "custom" || !cell.rule) return undefined;
     return () => {
       setChosen({ row, group, cell });
@@ -77,8 +83,8 @@ function PermissionsPage() {
                     <span className="sr-only">Workflow or operation</span>
                   </TableHead>
                   {data.groups.map((group) => (
-                    <TableHead key={group} scope="col">
-                      {group}
+                    <TableHead key={group ?? ""} scope="col">
+                      {group ?? "No group"}
                     </TableHead>
                   ))}
                 </TableRow>
@@ -105,8 +111,8 @@ function Rows({
 }: {
   title: string;
   rows: Row[];
-  groups: string[];
-  choose: (row: Row, group: string, cell: PreviewResult) => (() => void) | undefined;
+  groups: Group[];
+  choose: (row: Row, group: Group, cell: PreviewResult) => (() => void) | undefined;
 }) {
   if (rows.length === 0) return null;
   return (
@@ -127,9 +133,13 @@ function Rows({
               <code>{row.id}</code>
             )}
           </TableHead>
-          {row.cells.map((cell, i) => (
-            <TableCell key={groups[i]}>
-              <Mark cell={cell} open={choose(row, groups[i]!, cell)} what={`${row.id} for ${groups[i]}`} />
+          {groups.map((group, i) => (
+            <TableCell key={group ?? ""}>
+              <Mark
+                cell={row.cells[i]!}
+                open={choose(row, group, row.cells[i]!)}
+                what={`${row.id} for ${someoneIn(group)}`}
+              />
             </TableCell>
           ))}
         </TableRow>
@@ -169,7 +179,7 @@ function Rule({ row, group, cell }: Chosen) {
             : cell.answer === "deny"
               ? "Refuses"
               : "May hold or refuse, depending on the input,"}{" "}
-          {row.kind === "workflow" ? `starting ${row.title ?? row.id}` : <code>{row.id}</code>} for someone in {group}.
+          {row.kind === "workflow" ? `starting ${row.title ?? row.id}` : <code>{row.id}</code>} for {someoneIn(group)}.
         </SheetDescription>
       </SheetHeader>
       <div className="px-4">
