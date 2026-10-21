@@ -26,7 +26,7 @@ export const CANNOT_ASK = "This policy cannot be asked ahead.";
 const named = (id: string) => (id.startsWith(WORKFLOW_ACTION) ? "the start" : id);
 
 /** An approver as the line names it: the person's id, or the group's name. */
-export const asked = (approver: Approver) => (typeof approver === "string" ? approver : approver.group);
+const asked = (approver: Approver) => (typeof approver === "string" ? approver : approver.group);
 
 /**
  * What the policy will do ahead of the run, in one line: nothing when it allows everything;

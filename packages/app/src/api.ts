@@ -6,7 +6,6 @@ import type {
   ErrorCode,
   InputIssue,
   LedgerRecord,
-  PeopleResource,
   PreviewAnswer,
   PreviewRequest,
   Principal,
@@ -53,15 +52,6 @@ export interface ActorInfo {
   /** Where the page signs out (POST), when the login has its own routes. */
   signOut?: string;
 }
-
-/**
- * The people the data files declare (`sanoma.person`), by id with their names, whom the loopback
- * login's "Who are you?" offers: not agents, who never sign in.
- */
-export const declaredPeople = (people: readonly PeopleResource[]) =>
-  people.flatMap(({ vendor, type, desired }) =>
-    vendor === "sanoma" && type === "person" ? [desired as { id: string; name?: string }] : [],
-  );
 
 const StartWorkflowRequest = z.object({ workflow: z.string().min(1, "Name a workflow"), input: z.unknown() });
 
@@ -334,16 +324,23 @@ export type PreviewQuery = z.infer<typeof PreviewQuery>;
 /** The policy's answer to each, in order: `custom` for every one when it cannot be asked ahead (a `definePolicy` function). */
 export type PreviewResult = PreviewAnswer | { answer: "custom" };
 
+/** A row of the Permissions grid: a workflow (its start) or an operation, and the policy's answer for each column. */
+export interface PermissionsRow {
+  id: string;
+  title?: string;
+  cells: PreviewResult[];
+}
+
 /**
  * The Permissions page's grid (`getPermissions`): the policy, its columns (`null` for someone in
- * no group, then the declared groups and `agents`, sorted), and a row for each workflow's start,
- * then each operation a person may call directly, with the policy's answer for each column
- * (`cells`, in `groups`' order).
+ * no group, then the declared groups and `agents`, sorted), and a row for each workflow's start
+ * and for each operation a person may call directly, each with a cell per column.
  */
 export interface PermissionsResponse {
   policy: ConfigDescription["policy"];
   groups: (string | null)[];
-  rows: { kind: "workflow" | "op"; id: string; title?: string; cells: PreviewResult[] }[];
+  workflows: PermissionsRow[];
+  ops: PermissionsRow[];
 }
 
 /** The `body` of the error a server function fails with. */

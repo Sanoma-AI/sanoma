@@ -418,15 +418,12 @@ function gridOf(app: Pick<AppContext, "resolved" | "description">): PermissionsR
   return {
     policy: description.policy,
     groups,
-    rows: [
-      ...workflows.map(({ name, title }, i) => ({
-        kind: "workflow" as const,
-        id: name,
-        ...(title !== undefined && { title }),
-        cells: cells(i),
-      })),
-      ...ops.map(({ id }, i) => ({ kind: "op" as const, id, cells: cells(workflows.length + i) })),
-    ],
+    workflows: workflows.map(({ name, title }, i) => ({
+      id: name,
+      ...(title !== undefined && { title }),
+      cells: cells(i),
+    })),
+    ops: ops.map(({ id }, i) => ({ id, cells: cells(workflows.length + i) })),
   };
 }
 

@@ -1,4 +1,3 @@
-import { type PeopleResource, principalOf } from "@sanoma-ai/workflows/shared";
 import { createContext, useContext, useEffect, useSyncExternalStore } from "react";
 import { ACTOR_COOKIE, ACTOR_KEY, type ActorInfo } from "./api.ts";
 
@@ -68,10 +67,7 @@ const notRead = () => undefined;
 export interface ActorState {
   /** The name, or null for none; undefined only until the page has read the browser's storage. */
   actor: string | null | undefined;
-  /**
-   * The groups you are in: those the deployment vouches for, or with the default resolver those
-   * the data files put the name in (none for a name they do not declare).
-   */
+  /** The groups you are in, as the server admits you (none for a name it takes as given). */
   groups: readonly string[];
   /** Whom you act for, when you are a declared agent acting for someone (`onBehalfOf`). */
   onBehalfOf?: string;
@@ -95,10 +91,10 @@ export const useActor = () => useContext(ActorContext);
 
 /**
  * The actor state for the root. With a deployment's own resolver, who the server says; else the
- * name in this browser's storage, read once hydrated so hydration matches the server, as the
- * data files' `people` declare it (`principalOf`), which is how the server admits it.
+ * name in this browser's storage, read once hydrated so hydration matches the server, with the
+ * groups the server admits it in.
  */
-export function useActorState(server: ActorInfo, people: readonly PeopleResource[]): ActorState {
+export function useActorState(server: ActorInfo): ActorState {
   const stored = useSyncExternalStore(watchActor, loadActor, notRead);
   // The cookie follows the stored name, as this page or another tab changes it.
   useEffect(() => {
@@ -116,11 +112,12 @@ export function useActorState(server: ActorInfo, people: readonly PeopleResource
       setActor() {},
     };
   }
-  const declared = stored ? principalOf(stored, people) : undefined;
+  // The server's answer is about this name until the root asks again for a new one.
+  const admitted = stored && stored === server.actor?.id ? server.actor : undefined;
   return {
     actor: stored,
-    groups: declared?.groups ?? [],
-    ...(declared?.onBehalfOf !== undefined && { onBehalfOf: declared.onBehalfOf }),
+    groups: admitted?.groups ?? [],
+    ...(admitted?.onBehalfOf !== undefined && { onBehalfOf: admitted.onBehalfOf }),
     fromServer: false,
     setActor: saveActor,
   };

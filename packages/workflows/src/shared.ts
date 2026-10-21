@@ -208,13 +208,17 @@ export const RUNTIME_AGENTS: readonly string[] = ["scenarios", "host-check", "sc
 const peopleOfType = <T>(resources: readonly PeopleResource[], type: "person" | "agent" | "group") =>
   resources.flatMap((r) => (r.vendor === "sanoma" && r.type === type ? [r.desired as T] : []));
 
-type PersonFields = { id: string; email?: string; github?: string };
+type PersonFields = { id: string; name?: string; email?: string; github?: string };
 type AgentFields = { id: string; onBehalfOf?: string };
 type GroupFields = { name: string; members: string[] };
 
 /** The groups a policy may name and a principal may be in: the declared ones and `agents`, sorted. */
 export const groupNamesOf = (resources: readonly PeopleResource[]): string[] =>
   [...new Set([...peopleOfType<GroupFields>(resources, "group").map((g) => g.name), AGENTS])].toSorted();
+
+/** The declared people (`sanoma.person`), in the order declared: not agents, who never sign in. */
+export const personsOf = (resources: readonly PeopleResource[]): PersonFields[] =>
+  peopleOfType<PersonFields>(resources, "person");
 
 /** The ids of the declared people and agents (not the runtime's own). */
 export const principalIdsOf = (resources: readonly PeopleResource[]): string[] =>

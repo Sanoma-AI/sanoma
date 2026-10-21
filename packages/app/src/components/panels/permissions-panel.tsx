@@ -11,7 +11,6 @@ import { PanelFooterLink, PanelHeader } from "./panel.tsx";
 /** The policy's kind and version, how many groups, workflows and operations the grid has, and the grid at its foot. */
 export function PermissionsPanel() {
   const { data } = useSuspenseQuery(permissionsQuery());
-  const count = (kind: "workflow" | "op") => data.rows.filter((row) => row.kind === kind).length;
   return (
     <>
       <PanelHeader section="permissions" title="Permissions" />
@@ -20,8 +19,8 @@ export function PermissionsPanel() {
           <Facts>
             <PolicyFacts policy={data.policy} />
             <Fact label="Groups">{data.groups.filter((group) => group !== null).length}</Fact>
-            <Fact label="Workflows">{count("workflow")}</Fact>
-            <Fact label="Operations">{count("op")}</Fact>
+            <Fact label="Workflows">{data.workflows.length}</Fact>
+            <Fact label="Operations">{data.ops.length}</Fact>
           </Facts>
         </SidebarGroup>
       </SidebarContent>

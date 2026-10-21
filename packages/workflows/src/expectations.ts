@@ -83,9 +83,13 @@ const words = (d: RecordedDecision) =>
 /** What the policy decided for the calls, each decision once: `allowed and held for finance`. */
 const decisions = (calls: CallRecord[]) => [...new Set(calls.map((r) => words(r.decision)))].join(" and ");
 
-/** True when `who` names the approver: a person by id, or a group by its name; only a group's with `group`. */
-const isApprover = (approver: Approver, who: string, group?: true) =>
-  typeof approver === "string" ? !group && approver === who : approver.group === who;
+/** True when `who` names the approver: a person by id, or a group by its name; `{ group }` the group alone. */
+const isApprover = (approver: Approver, who: Approver) =>
+  typeof who !== "string"
+    ? typeof approver !== "string" && approver.group === who.group
+    : typeof approver === "string"
+      ? approver === who
+      : approver.group === who;
 
 /** How a drift report found a resource, as words: `clean`, `gone`, `drifted in has_wiki, topics`. */
 const found = (r: DriftResult) =>
@@ -145,7 +149,7 @@ function applyDetail(
  * undefined when it does. A call is an `op.called` record without an `error`; one with an error
  * (a policy denial, a rejected approval, a vendor's final failure) was attempted, not made. An
  * operation `was denied` when the policy's decision on some call to it is `deny` (for the `reason`
- * expected, when there is one), and `was held for` an approver (a group alone, with `group`) when
+ * expected, when there is one), and `was held for` an approver (a group alone, as `{ group }`) when
  * an approval for that approver holds it: one the policy asked for on its call, or one that `covers` it. A drift or apply expectation reads the report a finished run
  * of it returned. A step named in the workflow's outline is read by the `name` its records carry
  * (its calls made, and `waitsOf`); a record written before steps had names has none.
@@ -167,10 +171,9 @@ export function detailOf(e: CoreExpectation, records: readonly LedgerRecord[]): 
       return tries.length ? `${e.op} was ${decisions(tries)}, not denied` : `no call to ${e.op}`;
     }
     const holds = records.filter(isRequest).filter((r) => r.op === e.op || r.covers.includes(e.op));
-    if (holds.some((r) => isApprover(r.approver, e.approver, e.group))) return undefined;
-    const expected = e.group ? approverLabel({ group: e.approver }) : e.approver;
+    if (holds.some((r) => isApprover(r.approver, e.approver))) return undefined;
     return holds.length
-      ? `${e.op} was held for ${[...new Set(holds.map((r) => approverLabel(r.approver)))].join(" and ")}, not ${expected}`
+      ? `${e.op} was held for ${[...new Set(holds.map((r) => approverLabel(r.approver)))].join(" and ")}, not ${approverLabel(e.approver)}`
       : tries.length
         ? `${e.op} was ${decisions(tries)}, not held`
         : `no call to ${e.op}`;

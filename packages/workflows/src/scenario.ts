@@ -13,6 +13,7 @@ import {
 } from "@cucumber/messages";
 import type { z } from "zod";
 import type { RunSummary, SanomaClient } from "./client.ts";
+import type { Approver } from "./define.ts";
 import type { ResolvedConfig } from "./config.ts";
 import {
   buildLibrary,
@@ -25,14 +26,14 @@ import {
   stepResults,
   StepStatus,
 } from "./cucumber.ts";
-import { errorInfo, SanomaError } from "./errors.ts";
+import { errorCode, errorInfo, SanomaError } from "./errors.ts";
 import { type CallRecord, contains, type CoreExpectation, detailOf, isCall } from "./expectations.ts";
 import type { Fake } from "./fake.ts";
 import { fill, isBug, seedFrom, shapeOf } from "./fill.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { Driver, Op } from "./op.ts";
 import { type OutlineNode, outlineWorkflow } from "./outline.ts";
-import { readPeople } from "./resources.ts";
+import { admit, readPeople } from "./resources.ts";
 import { memorySecrets } from "./secret.ts";
 import {
   APPLY_WORKFLOW,
@@ -46,8 +47,6 @@ import {
   groupNamesOf,
   isEnded,
   principalIdsOf,
-  principalOf,
-  problemLine,
   RUNTIME_AGENTS,
 } from "./shared.ts";
 import type { Call, RunView, Seed } from "./steps.ts";
@@ -107,7 +106,7 @@ export interface Decision {
  * What the run should do: call an operation (with at least this input) or not, run the step
  * `name`d in the workflow's outline or not, or a number of `times`, have the policy deny an
  * operation (`denied`, for a `reason` when the step names one) or hold one for an approver
- * (`held`: a person's id or a group's name, or with `group` a group's alone), end a certain way,
+ * (`held`: a person's id or a group's name, or `{ group }` a group's alone), end a certain way,
  * for a drift run, report the resource `declared` (`<file>#<export>`) clean, gone, absent, or
  * drifted in a field, or for an apply run, create it, or leave it bound to an object (`bound`,
  * its vendor's id).
@@ -119,7 +118,7 @@ export type Expectation =
   | { step: string; name: string; input?: unknown; called: boolean }
   | { step: string; name: string; times: number }
   | { step: string; op: string; decision: "denied"; reason?: string }
-  | { step: string; op: string; decision: "held"; approver: string; group?: true }
+  | { step: string; op: string; decision: "held"; approver: Approver }
   | { step: string; outcome: "finished" | "failed"; code?: string }
   | { step: string; declared: string; status: "clean" | "gone" | "absent" }
   | { step: string; declared: string; status: "drifted"; field: string }
@@ -187,11 +186,12 @@ interface Then {
 }
 
 /**
- * What a step of each kind reads into; `any` is a decision, which a step of any keyword may make.
- * A `Given` seeds, or says who acts (`{who} is acting`).
+ * What a step of each kind reads into; `any` is a decision, which a step of any keyword may make,
+ * and `actor` a `Given` saying who starts the run (`{who} is acting`), by id.
  */
 interface Items {
-  given: Unstepped<Given>[] | { actor: string };
+  given: Unstepped<Given>[];
+  actor: string;
   when: When;
   then: Then;
   any: Unstepped<Decision>;
@@ -376,16 +376,17 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
   const opOf = (id: unknown) => scope.ops.get(id as string)!;
   const workflowOf = (name: unknown) => scope.workflows.get(name as string)!;
   // The people as the root's data files declare them when a step names one (`readPeople`, read
-  // again only once a file changed). While they declare no one, any id goes, as a run's start admits.
-  /** `who`, a declared person or agent, while the people's files have no problems (a run's start admits no one then). */
+  // again only once a file changed): while they declare no one, any id and any group go.
+  /** `who`, as a run's start admits them (`admit`): a declared person or agent. */
   const actorNamed = (who: string) => {
-    const { people, problems } = readPeople(scope.root);
-    if (problems.length && !RUNTIME_AGENTS.includes(who)) {
-      throw new Error(`${who} cannot act while resources/ has problems: ${problems.map(problemLine).join("; ")}`);
+    const declared = readPeople(scope.root);
+    try {
+      return admit({ id: who }, declared).id;
+    } catch (err) {
+      if (errorCode(err) !== "not_admitted" || declared.problems.length) throw err;
+      const ids = [...principalIdsOf(declared.people), ...RUNTIME_AGENTS].join(", ");
+      throw new Error(`${who} is not a declared person or agent; resources/ declares ${ids}`, { cause: err });
     }
-    if (!declaresPeople(people) || principalOf(who, people)) return who;
-    const ids = [...principalIdsOf(people), ...RUNTIME_AGENTS].join(", ");
-    throw new Error(`${who} is not a declared person or agent; resources/ declares ${ids}`);
   };
   /** `group`, a declared group or `agents`. */
   const groupNamed = (group: string) => {
@@ -400,7 +401,7 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
     return { resource: id as string, vendor, type, name: name as string };
   };
   const rules: Rule[] = [
-    { kind: "given", source: "{who} is acting", read: ([who]) => ({ actor: actorNamed(who as string) }) },
+    { kind: "actor", source: "{who} is acting", read: ([who]) => actorNamed(who as string) },
     {
       kind: "given",
       source: "{op} was called with",
@@ -523,7 +524,7 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
       kind: "then",
       source: "{op} was held for group {string}",
       read: ([op, group]) =>
-        expecting({ op: op as string, decision: "held", approver: groupNamed(group as string), group: true }),
+        expecting({ op: op as string, decision: "held", approver: { group: groupNamed(group as string) } }),
     },
     {
       kind: "then",
@@ -876,7 +877,9 @@ const ambiguous = (text: string, sources: string[]) =>
 function ruleFor(built: Built, expression: string, pickle: PickleStep): Rule {
   const kind = pickle.type && KINDS[pickle.type];
   if (!kind) throw new Error(`"${pickle.text}" needs a Given, When or Then before it`);
-  const rules = built.byExpression.get(expression)!.filter((r) => r.kind === kind || r.kind === "any");
+  const rules = built.byExpression
+    .get(expression)!
+    .filter((r) => r.kind === kind || r.kind === "any" || (r.kind === "actor" && kind === "given"));
   if (rules.length === 0) throw new Error(noMatch(built, pickle.text));
   if (rules.length > 1)
     throw new Error(
@@ -909,14 +912,13 @@ function compileWorld(built: Built, specs: Map<string, Spec>) {
         const { text } = pickle;
         const step: ScenarioStep = { text, kind: KINDS[pickle.type!]! };
         switch (rule.kind) {
+          case "actor":
+            if (spec.startedBy !== undefined)
+              throw new Error(`${spec.startedBy} is acting already: a run has one actor`);
+            spec.startedBy = rule.read(args, pickle);
+            break;
           case "given": {
             const items = rule.read(args, pickle);
-            if (!Array.isArray(items)) {
-              if (spec.startedBy !== undefined)
-                throw new Error(`${spec.startedBy} is acting already: a run has one actor`);
-              spec.startedBy = items.actor;
-              break;
-            }
             spec.given.push(...items.map((item) => ({ step: text, ...item }) as Given));
             const [first] = items;
             if (first && "op" in first) step.op = first.op;
@@ -1018,10 +1020,7 @@ function testWorld(built: Built, { driver, fake }: FeatureTarget) {
         switch (rule.kind) {
           case "given": {
             const seeds: { op: string; input: unknown; output: unknown }[] = [];
-            const items = rule.read(args, pickle);
-            if (!Array.isArray(items))
-              throw new Error(`"${text}" says who starts a run: a step for a scenario in scenarios/`);
-            for (const item of items) {
+            for (const item of rule.read(args, pickle)) {
               if ("resource" in item) throw new Error(`"${text}" seeds a resource: a step for a sandbox run`);
               if ("fault" in item) {
                 if (!fake) throw new Error(`"${text}" injects a fault, which only a fake can`);
@@ -1069,6 +1068,8 @@ function testWorld(built: Built, { driver, fake }: FeatureTarget) {
             throw new Error(
               `"${text}" decides an approval: a step for a scenario in scenarios/, not an operation's own test`,
             );
+          case "actor":
+            throw new Error(`"${text}" says who starts a run: a step for a scenario in scenarios/`);
           case "then": {
             const detail = rule.read(args, pickle).verify(viewOf(records));
             if (detail !== undefined) throw new Error(detail);

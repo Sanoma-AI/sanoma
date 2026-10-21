@@ -1388,7 +1388,7 @@ describe("people in a scenario: who is acting, held for a group, denied with a r
     expect(held).toMatchObject({
       startedBy: "bo",
       expect: [
-        { op: "shop.refunds.create", decision: "held", approver: "finance", group: true },
+        { op: "shop.refunds.create", decision: "held", approver: { group: "finance" } },
         { op: "shop.refunds.create", called: true },
         { outcome: "finished" },
       ],
@@ -1444,7 +1444,7 @@ describe("people in a scenario: who is acting, held for a group, denied with a r
     await expect(
       parseFeature(scenarioOf("    Given ada is acting\n    When refund runs\n"), "x.feature", broken),
     ).rejects.toThrow(
-      /^x\.feature:3: ada cannot act while resources\/ has problems: resources\/people\.ts:4:1: sanoma\.person "ada" is declared twice/,
+      /^x\.feature:3: ada cannot be admitted while the people's files have problems: resources\/people\.ts:4:1: sanoma\.person "ada" is declared twice/,
     );
     await expect(
       parseFeature(scenarioOf("    Given scenarios is acting\n    When refund runs\n"), "x.feature", broken),
@@ -1457,7 +1457,7 @@ describe("people in a scenario: who is acting, held for a group, denied with a r
     );
     expect(s).toMatchObject({
       startedBy: "whoever",
-      expect: [{ op: "ghost.post.publish", decision: "held", approver: "editors", group: true }],
+      expect: [{ op: "ghost.post.publish", decision: "held", approver: { group: "editors" } }],
     });
   });
 
@@ -1498,7 +1498,7 @@ describe("people in a scenario: who is acting, held for a group, denied with a r
     expect(detailOf({ op, decision: "denied", reason: "No" }, [called(0, { kind: "allow" })])).toBe(
       "shop.refunds.create was allowed, not denied",
     );
-    const group = { op, decision: "held", approver: "finance", group: true } as const;
+    const group = { op, decision: "held", approver: { group: "finance" } } as const;
     expect(detailOf(group, [heldFor({ group: "finance" })])).toBeUndefined();
     // A person named like the group is not the group; `held for {who}` takes either.
     expect(detailOf(group, [heldFor("finance")])).toBe("shop.refunds.create was held for finance, not group finance");

@@ -17,11 +17,12 @@ import {
   type SanomaConfig,
 } from "@sanoma-ai/workflows";
 import { describeConfig, readPeople } from "@sanoma-ai/workflows/describe";
+import { personsOf } from "@sanoma-ai/workflows/shared";
 import { defineFake } from "@sanoma-ai/workflows/fake";
 import { executablePath, launch } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { ACTOR_COOKIE, declaredPeople } from "../src/api.ts";
+import { ACTOR_COOKIE } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { permissions } from "../src/server/core.ts";
 
@@ -98,12 +99,11 @@ describe("the Permissions grid", () => {
   it("asks the policy for someone in no group and in each group, the start of each workflow and each direct operation", () => {
     const grid = gridOf(cedar);
     expect(grid).toMatchObject({ policy: { defined: true, kind: "cedar" }, groups: [null, "agents", "finance"] });
-    expect(grid.rows).toEqual([
-      // Someone in finance is not held: the hold's own approver.
-      { kind: "workflow", id: "refund", title: "Refund", cells: [hold, hold, { answer: "allow" }] },
+    // Someone in finance is not held: the hold's own approver.
+    expect(grid.workflows).toEqual([{ id: "refund", title: "Refund", cells: [hold, hold, { answer: "allow" }] }]);
+    expect(grid.ops).toEqual([
       {
         // A money operation is called only in a run: not a row.
-        kind: "op",
         id: "shop.refunds.list",
         cells: [
           { answer: "allow" },
@@ -129,7 +129,7 @@ describe("the Permissions grid", () => {
       readPeople(root).people,
     );
     const rule = { id: "policies/agents.cedar#1", file: "policies/agents.cedar" };
-    expect(gridOf(onBehalf).rows[1]!.cells).toEqual([
+    expect(gridOf(onBehalf).ops[0]!.cells).toEqual([
       { answer: "deny", rule },
       { answer: "hold", rule, approver: "whom it acts for" },
       { answer: "deny", rule },
@@ -139,18 +139,22 @@ describe("the Permissions grid", () => {
   it("is every cell custom for a function, and allow with no policy", () => {
     const fn = gridOf(definePolicy(() => allow()));
     expect(fn.policy).toEqual({ defined: true, kind: "function" });
-    expect(fn.rows.flatMap((row) => row.cells)).toEqual(Array.from({ length: 6 }, () => ({ answer: "custom" })));
+    expect([...fn.workflows, ...fn.ops].flatMap((row) => row.cells)).toEqual(
+      Array.from({ length: 6 }, () => ({ answer: "custom" })),
+    );
     const none = gridOf(allowAll);
     expect(none.policy.defined).toBe(false);
-    expect(none.rows.flatMap((row) => row.cells)).toEqual(Array.from({ length: 6 }, () => ({ answer: "allow" })));
+    expect([...none.workflows, ...none.ops].flatMap((row) => row.cells)).toEqual(
+      Array.from({ length: 6 }, () => ({ answer: "allow" })),
+    );
   });
 });
 
 describe("the picker's people", () => {
   it("are the declared persons, not agents nor groups, with their names; none when no one is declared", () => {
-    expect(declaredPeople(readPeople(root).people)).toEqual([{ id: "ada", name: "Ada Lovelace" }, { id: "bo" }]);
+    expect(personsOf(readPeople(root).people)).toEqual([{ id: "ada", name: "Ada Lovelace" }, { id: "bo" }]);
     // Then the dialog asks for a name, as it did before people were declared.
-    expect(declaredPeople([])).toEqual([]);
+    expect(personsOf([])).toEqual([]);
   });
 });
 
@@ -182,7 +186,7 @@ describe("the Permissions page", () => {
       "agents",
       "finance",
     ]);
-    expect(html).toContain('aria-label="hold · finance: the rule for refund for someone in no group"');
+    expect(html).toContain('aria-label="hold · group finance: the rule for refund for someone in no group"');
     expect(html).toContain('aria-label="deny: the rule for shop.refunds.list for someone in agents"');
     expect(html.match(/>allow</g)).toHaveLength(3);
   });
@@ -220,7 +224,7 @@ describe("the Permissions page", () => {
       await tab.keyboard.press("Escape");
       await tab.waitForFunction(`!document.querySelector('[data-slot="sheet-content"]')`);
 
-      await tab.click('button[aria-label="hold · finance: the rule for refund for someone in agents"]');
+      await tab.click('button[aria-label="hold · group finance: the rule for refund for someone in agents"]');
       expect(await sheet("Refunds need finance")).toContain("group finance");
     } finally {
       await browser.close();

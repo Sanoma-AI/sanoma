@@ -1,9 +1,9 @@
-import { type QueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { type QueryClient, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createRootRouteWithContext, HeadContent, Link, Outlet, Scripts, useMatches } from "@tanstack/react-router";
 import { createIsomorphicFn } from "@tanstack/react-start";
 import { getCookie } from "@tanstack/react-start/server";
 import { ThemeProvider } from "next-themes";
-import { Fragment, lazy, type ReactNode, Suspense } from "react";
+import { Fragment, lazy, type ReactNode, Suspense, useEffect } from "react";
 import { AppSidebar, useSidebarWidths } from "#/components/app-sidebar.tsx";
 import { DENSITY_COOKIE, DensityProvider } from "#/components/density.tsx";
 import { NewWorkflowDialog } from "#/components/new-workflow.tsx";
@@ -98,8 +98,14 @@ const WhoAreYou = lazy(() => import("../components/who-are-you.tsx"));
 
 function Root() {
   const { data: server } = useSuspenseQuery(actorQuery());
-  const { data: people } = useSuspenseQuery({ ...configQuery(), select: (config) => config.resources });
-  const actor = useActorState(server, people);
+  const actor = useActorState(server);
+  // With the default login, a name chosen here is asked about again: who the server admits it as.
+  const queryClient = useQueryClient();
+  const said = server.actor?.id ?? null;
+  useEffect(() => {
+    if (!actor.fromServer && actor.actor !== undefined && actor.actor !== said)
+      void queryClient.invalidateQueries({ queryKey: actorQuery().queryKey });
+  }, [actor.fromServer, actor.actor, said, queryClient]);
   // Only these fields: the root's loader data is new on every navigation, a field is not.
   const sidebarOpen = Route.useLoaderData({ select: (data) => data.sidebarOpen });
   const compact = Route.useLoaderData({ select: (data) => data.compact });
