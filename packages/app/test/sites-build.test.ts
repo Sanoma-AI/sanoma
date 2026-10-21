@@ -289,8 +289,7 @@ describe("a company's app with its sites", () => {
 describe("@sanoma-ai/app/ui", () => {
   it("exports the kit's list and nothing else, so each addition is deliberate", async () => {
     // By a path TypeScript does not follow: the kit is JSX and DOM, checked by typecheck:ui.
-    const kit = fileURLToPath(new URL("../src/ui.ts", import.meta.url));
-    const ui = (await import(kit)) as Record<string, unknown>;
+    const ui = (await import(new URL("../src/ui.ts", import.meta.url).href)) as Record<string, unknown>;
     expect(Object.keys(ui).toSorted()).toMatchInlineSnapshot(`
       [
         "Alert",
