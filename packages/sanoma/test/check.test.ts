@@ -171,6 +171,35 @@ export default defineWorkflow({
     }
   }, 180_000);
 
+  it("passes a @hold for a group once resources/people.ts declares it", async () => {
+    const own = copyFixture();
+    try {
+      rmSync(join(own, "policies/policy.ts"));
+      writeFileSync(
+        join(own, "sanoma.config.ts"),
+        readFileSync(join(own, "sanoma.config.ts"), "utf8")
+          .replace('import policy from "./policies/policy.ts";\n', "")
+          .replace("  policy,\n", ""),
+      );
+      writeFileSync(
+        join(own, "policies/publish.cedar"),
+        '@hold("finance")\nforbid (principal, action == Sanoma::Action::"ghost.post.publish", resource)\nwhen { context.input.id == "never" };\n',
+      );
+      expect((await check(await loadIn(own), { databaseUrl, log: () => {} })).problems).toEqual([
+        'policies/publish.cedar:1:1: policies/publish.cedar#1: @hold("finance") names no declared group or person, nor "on-behalf-of"',
+      ]);
+
+      mkdirSync(join(own, "resources"));
+      writeFileSync(
+        join(own, "resources/people.ts"),
+        'import { sanoma } from "sanoma/resources";\n\nexport const ada = sanoma.person({ id: "ada" });\nexport const finance = sanoma.group({ name: "finance", members: [ada] });\n',
+      );
+      expect(await check(await loadIn(own), { databaseUrl, log: () => {} })).toEqual({ ok: true, problems: [] });
+    } finally {
+      rmSync(own, { recursive: true, force: true });
+    }
+  }, 180_000);
+
   it("reports a scenario step that does not hold", async () => {
     const feature = join(dir, "scenarios/hello/hello.feature");
     writeFileSync(feature, readFileSync(feature, "utf8").replace("And the run succeeds", "And the run fails"));

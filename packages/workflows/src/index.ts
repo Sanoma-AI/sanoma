@@ -47,6 +47,7 @@ export {
   withoutWriteOnly,
 } from "./resource.ts";
 export { defineConfig, resolveConfig, resolveDatabaseUrl, type ResolvedConfig, type SanomaConfig } from "./config.ts";
+// `sanoma` itself (the people types' constructors) is at `@sanoma-ai/workflows/resources`, for data files.
 // `collection()` itself is at `@sanoma-ai/workflows/data`, for `resources/data.ts`; this tells one apart, as the launcher does.
 export { isCollection } from "./collection.ts";
 export { type CredentialStatus, credentialsOf } from "./env.ts";
@@ -103,6 +104,7 @@ export {
   type ErrorInfo,
   type InputIssue,
   invalidInput,
+  NotAdmittedError,
   PolicyDeniedError,
   RejectedError,
   SanomaError,
@@ -144,7 +146,14 @@ export {
 export { dbosClient } from "./db.ts";
 // Also at `@sanoma-ai/workflows/shared`, which a browser bundle can import.
 export {
+  AGENTS,
   approverLabel,
+  approverOf,
+  declaresPeople,
+  type PeopleResource,
+  personOf,
+  principalOf,
+  RUNTIME_AGENTS,
   credentialReady,
   DEFAULT_SLEEP_NAME,
   ENDED_STATUSES,

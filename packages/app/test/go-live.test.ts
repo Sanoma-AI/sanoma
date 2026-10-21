@@ -32,6 +32,7 @@ import { localGitSource } from "../../sanoma/src/source.ts";
 import { type GoLiveProgress, INFRA } from "../src/api.ts";
 import type { AppContext } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";
+import { admitting } from "../src/login/admission.ts";
 import { goLive, goLiveChoices, goLiveHost, goLiveProgress, renderInfra } from "../src/server/go-live.ts";
 
 // Going live end to end, on fakes, from a company with nothing but a first commit: the choices
@@ -127,7 +128,7 @@ beforeAll(async () => {
     resolved: resolveConfig(app.config),
     description: describeConfig(app.config),
     client: app.client,
-    login: loopbackLogin(),
+    login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
     source,
   };
   // A free port for the host.

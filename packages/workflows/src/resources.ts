@@ -1,14 +1,32 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { parsed } from "./ast.ts";
-import { rootOf, type SanomaConfig } from "./config.ts";
-import { type DataFile, type DataFileExport, type DataValue, readDataFile, Reference } from "./datafile.ts";
+import { connectorsOf, rootOf, type SanomaConfig } from "./config.ts";
+import {
+  type DataFile,
+  type DataFileExport,
+  type DataValue,
+  readDataFile,
+  Reference,
+  SECRET_ENTRIES,
+} from "./datafile.ts";
 import { type Binding, type Bindings, LOCKFILE, readLockfile } from "./lockfile.ts";
 import { type Connector, VENDOR } from "./op.ts";
 import { filesUnder } from "./paths.ts";
+import { peopleConnector } from "./person.ts";
 import type { Span } from "./outline.ts";
 import { type Declared, type Resource, resourceTypesOf } from "./resource.ts";
-import { problemLine } from "./shared.ts";
+import { Principal } from "./define.ts";
+import { NotAdmittedError } from "./errors.ts";
+import {
+  AGENTS,
+  declaresPeople,
+  type PeopleResource,
+  personOf,
+  principalOf,
+  problemLine,
+  RUNTIME_AGENTS,
+} from "./shared.ts";
 
 /** A resource a data file declares, as read from the file without running it. */
 export interface DeclaredResource {
@@ -85,12 +103,112 @@ export interface DataFiles {
  * `describeConfig` lists the same, with the problems beside them instead.
  */
 export function readResources(config: SanomaConfig): DeclaredResource[] {
-  const { resources, problems } = readDataFiles(rootOf(config), config.connectors);
+  const { resources, problems } = readDataFiles(rootOf(config), connectorsOf(config));
   if (problems.length) {
     const lines = problems.map((p) => `  ${problemLine(p)}`);
     throw new Error(`The resources' data files have problems:\n${lines.join("\n")}`);
   }
   return resources;
+}
+
+/** What the data files declare of the people: the resources `principalOf` takes, and what is wrong in their files. */
+export interface DeclaredPeople {
+  people: DeclaredResource[];
+  /**
+   * The problems in each file that declares (or tries to declare) a person, agent or group, and
+   * an id two of them share or one of the runtime's own agents (`RUNTIME_AGENTS`) takes. While
+   * there are any, nobody is admitted: a broken file never admits more than it says.
+   */
+  problems: ResourceProblem[];
+}
+
+/** A file that imports the runtime's constructors, `sanoma` (by any local name): the files `readPeople` reads. */
+const DECLARES_PEOPLE = /\{[^}]*\bsanoma\b[^}]*\}\s*from\s*["'](?:sanoma|@sanoma-ai\/workflows)\/resources["']/;
+/** The last read of the people under each root, by what its data files were then (`filesStamp`). */
+const peopleRead = new Map<string, { stamp: string; read: DeclaredPeople }>();
+
+/** Each data file under `root` with its size and modification time: unchanged while the files are. */
+const filesStamp = (root: string) =>
+  dataFilesUnder(join(root, "resources"))
+    .map((path) => {
+      // Gone since it was listed (an editor's save by rename): stamped as such, and read next time.
+      const stat = statSync(path, { bigint: true, throwIfNoEntry: false });
+      return `${path} ${stat?.size} ${stat?.mtimeNs}`;
+    })
+    .join("\n");
+
+/**
+ * The people, agents and groups the data files under `root` declare (`sanoma.person`, `.agent`,
+ * `.group`), read without running them, as `principalOf` takes them, with what is wrong in their
+ * files; none without a root. Read again only when a data file changed (by its size and time),
+ * so a new colleague is admitted once their file is saved, and a request costs a `stat` per file.
+ */
+export function readPeople(root: string | undefined): DeclaredPeople {
+  if (root === undefined) return { people: [], problems: [] };
+  const stamp = filesStamp(root);
+  const cached = peopleRead.get(root);
+  if (cached?.stamp === stamp) return cached.read;
+  const read = readDataFiles(root, [peopleConnector], undefined, (source) => DECLARES_PEOPLE.test(source));
+  const people = read.resources;
+  // The people are never bound, so the lockfile's problems are not theirs.
+  const own = read.problems.filter((p) => p.file !== LOCKFILE);
+  const ids = new Map<string, DeclaredResource>();
+  for (const r of people) {
+    if (r.type === "group") {
+      if (r.name === AGENTS) {
+        own.push({
+          file: r.file,
+          message: `${r.id} is named "${AGENTS}", the group every agent is in: give it another name`,
+        });
+      }
+      continue;
+    }
+    const id = r.name;
+    const other = ids.get(id);
+    if (other || RUNTIME_AGENTS.includes(id)) {
+      own.push({
+        file: r.file,
+        message: other
+          ? `${r.id} has the id "${id}", which ${other.id} has: give each person and agent their own`
+          : `${r.id} has the id "${id}", one of the runtime's own agents': give it another`,
+      });
+    }
+    ids.set(id, r);
+  }
+  const declared = { people, problems: own };
+  peopleRead.set(root, { stamp, read: declared });
+  return declared;
+}
+
+/**
+ * Who `asking` is admitted as, by the people the data files declare (`readPeople`): the declared
+ * principal (`principalOf`) of the id it names, a person's or an agent's; for a sign-in
+ * (`signIn`), of the person it matches (`personOf`: email, GitHub login, then id), never an agent.
+ * While no person is declared, whoever names an id is taken as given. Throws `NotAdmittedError`
+ * for anyone else, and for everyone while the people's files have problems.
+ */
+export function admit(
+  asking: { id?: string; email?: string; github?: string; groups?: string[]; onBehalfOf?: string },
+  { people, problems }: { people: readonly PeopleResource[]; problems: readonly ResourceProblem[] },
+  signIn = false,
+): Principal {
+  const who = asking.github ?? asking.id ?? asking.email ?? "This sign-in";
+  if (problems.length) {
+    // The runtime's own agents are declared by no file, so a broken one does not stop them (`check`'s scenarios).
+    if (!signIn && asking.id !== undefined && RUNTIME_AGENTS.includes(asking.id)) {
+      return principalOf(asking.id, people)!;
+    }
+    throw new NotAdmittedError(who, problems.map(problemLine));
+  }
+  if (!declaresPeople(people)) {
+    const given = Principal.safeParse(asking).data;
+    if (given) return given;
+  } else {
+    const id = signIn ? personOf(asking, people) : asking.id;
+    const admitted = id === undefined ? undefined : principalOf(id, people);
+    if (admitted) return admitted;
+  }
+  throw new NotAdmittedError(who);
 }
 
 interface FileEntry {
@@ -118,11 +236,15 @@ interface FileEntry {
  * Each declaration is joined to its binding in the lockfile (`readLockfile`) by its key,
  * `<file>#<export>`; a binding no export declares is an orphan. Problems: the lockfile's, a
  * binding of another type than its declaration's, and two declarations bound to one object.
+ *
+ * `partial` reads part of the files: only those whose source it passes, and in them, an import of
+ * a connector not in `connectors`, or of a file left out, is left unread rather than reported.
  */
 export function readDataFiles(
   root: string | undefined,
   connectors: readonly Connector<any, any>[],
   types: ReadonlyMap<string, Resource> = resourceTypesOf(connectors),
+  partial?: (source: string) => boolean,
 ): DataFiles {
   const problems: ResourceProblem[] = [];
   if (root === undefined) {
@@ -136,9 +258,14 @@ export function readDataFiles(
   problems.push(...lock.problems);
 
   const files = new Map<string, FileEntry>();
+  const left = new Set<string>();
   for (const path of dataFilesUnder(join(root, "resources"))) {
     const rel = relative(root, path).split(sep).join("/");
     const source = readFileSync(path, "utf8");
+    if (partial && !partial(source)) {
+      left.add(path);
+      continue;
+    }
     const { program, problems: syntax, at } = parsed(source, path);
     const data = readDataFile(program, path, join(root, "resources"));
     const problem = (offset: number, message: string) => problems.push({ file: rel, ...at(offset), message });
@@ -153,6 +280,8 @@ export function readDataFiles(
     const { id, info } = connector[VENDOR];
     if (info?.package) entries.set(`${info.package}/resources`, id);
   }
+  // The runtime's own (`peopleConnector`, package `sanoma`) is imported from either name of its entry.
+  if (entries.get("sanoma/resources") === "sanoma") for (const entry of SECRET_ENTRIES) entries.set(entry, "sanoma");
 
   // What each file's names stand for, and every resource read by its id.
   const vendors = new Map<FileEntry, Map<string, string>>();
@@ -164,6 +293,7 @@ export function readDataFiles(
     for (const imp of file.data.imports) {
       if (imp.kind === "constructors") {
         const vendor = entries.get(imp.source);
+        if (vendor === undefined && partial) continue;
         if (vendor === undefined) {
           file.problem(
             imp.start,
@@ -179,7 +309,9 @@ export function readDataFiles(
         }
         continue;
       }
-      const other = files.get(resolve(dirname(path), imp.source));
+      const target = resolve(dirname(path), imp.source);
+      const other = files.get(target);
+      if (!other && left.has(target)) continue;
       if (!other) {
         file.problem(imp.start, `"${imp.source}" is not a data file under resources/`);
       } else if (!other.data.declared.includes(imp.imported)) {

@@ -30,6 +30,15 @@ import type { RunArgs } from "./run.ts";
 import type { Secrets } from "./secret.ts";
 import { CALL_WORKFLOW, DATA_VENDOR, errorMessage, isEnded, mayDecide, type RunStatus } from "./shared.ts";
 
+/** A principal, or its id alone. */
+const PrincipalOrId = z.union([
+  z
+    .string()
+    .regex(/\S/)
+    .transform((id) => ({ id })),
+  Principal,
+]);
+
 /**
  * The run status each DBOS status maps to. `waiting` is PENDING with an approval pending, so
  * only the approvals tell it from `running`. Keyed by every DBOS status, so one a later DBOS
@@ -90,7 +99,7 @@ export interface RunSummary {
   runId: string;
   workflow: string;
   status: RunStatus;
-  /** Who started the run, as passed to `start`. */
+  /** Who started the run, as `start` admitted them. */
   startedBy?: Principal;
   createdAt: number;
   updatedAt?: number;
@@ -101,12 +110,17 @@ export interface RunSummary {
 }
 
 export interface StartOptions {
-  /** Recorded as the run's actor in the ledger and passed to the policy. */
-  startedBy: Principal;
+  /**
+   * Who starts it, by id (`"ada"`, or `{ id: "ada" }`): recorded as the run's actor in the ledger
+   * and passed to the policy. When the data files declare people, the run is started as the
+   * declared principal (`principalOf`: their groups, not any given here), and an id nobody
+   * declares is refused with `not_admitted`.
+   */
+  startedBy: Principal | string;
   /**
    * Use this run id instead of a new one, so a retried start makes one run. Starting an id
    * that exists returns it, without starting another, when the workflow, the input (compared
-   * as JSON), `startedBy` and `sandbox` are the same, and throws `invalid_input` naming what differs
+   * as JSON), `startedBy`'s id and `sandbox` are the same, and throws `invalid_input` naming what differs
    * when they are not. Of two starts racing with one new id, the first's run stands.
    */
   runId?: string;
@@ -120,8 +134,11 @@ export interface StartOptions {
 
 /** What `SanomaClient.call` takes besides the operation's id and its input. */
 export interface CallOptions {
-  /** Who calls: the policy decides as them, a write's record names them, and a save's `updatedBy` is their id. */
-  actor: Principal;
+  /**
+   * Who calls, by id, admitted as `startedBy` is: the policy decides as them, a write's record
+   * names them, and a save's `updatedBy` is their id.
+   */
+  actor: Principal | string;
   /**
    * The call's id, so a retried write is made once: the same id with the same input returns what
    * the first call returned, with another input is refused (`invalid_input`). A new one by default.
@@ -172,6 +189,13 @@ export class SanomaClient {
     input: z.input<S>,
     options: StartOptions,
   ): Promise<string> {
+    const startedBy = await this.admitted(
+      parseOrThrow(
+        PrincipalOrId,
+        options?.startedBy,
+        '`startedBy` must be a principal, such as "alice" or { id: "alice" }',
+      ),
+    );
     if (typeof workflow === "string") {
       const named = this.config.workflows.get(workflow);
       if (!named) {
@@ -184,11 +208,6 @@ export class SanomaClient {
       workflow = named;
     }
     parseOrThrow(workflow.input, input, `The input does not match ${workflow.name}'s schema`);
-    const startedBy = parseOrThrow(
-      Principal,
-      options?.startedBy,
-      '`startedBy` must be a principal, such as { id: "alice" }',
-    );
     const { runId } = options;
     const sandbox = parseOrThrow(
       z.string().min(1).optional(),
@@ -196,6 +215,7 @@ export class SanomaClient {
       "`sandbox` must be the name of a scenario in the config's `scenarios/`",
     );
     const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }) };
+    const { onBehalfOf } = startedBy;
     // An id DBOS has already returns that run, unless it is another workflow's, which DBOS refuses.
     const handle = await this.dbos
       .enqueue(
@@ -206,8 +226,9 @@ export class SanomaClient {
           applicationName: this.config.appName,
           authenticatedUser: startedBy.id,
           authenticatedRoles: startedBy.groups ?? [],
-          // Kept on the run's status row too, so a listing tells sandbox runs apart without its input.
-          ...(sandbox === undefined ? {} : { attributes: { sandbox } }),
+          // Kept on the run's status row too, so a listing tells sandbox runs apart without its input,
+          // and says whom an agent's run is for (DBOS keeps the principal's id and groups itself).
+          ...((sandbox !== undefined || onBehalfOf !== undefined) && { attributes: { sandbox, onBehalfOf } }),
         },
         args,
       )
@@ -241,7 +262,9 @@ export class SanomaClient {
    * as the person, which makes it once approved, and this throws `approval_pending` with its id.
    */
   async call(opId: string, input: unknown, options: CallOptions): Promise<unknown> {
-    const actor = parseOrThrow(Principal, options?.actor, '`actor` must be a principal, such as { id: "alice" }');
+    const actor = await this.admitted(
+      parseOrThrow(PrincipalOrId, options?.actor, '`actor` must be a principal, such as "alice" or { id: "alice" }'),
+    );
     const id =
       parseOrThrow(z.string().min(1).optional(), options.id, "`id` must be a non-empty string") ?? randomUUID();
     const { ops, types, drivers, policy } = this.config;
@@ -475,7 +498,8 @@ export class SanomaClient {
     approvalId?: string,
     options: { timeoutSeconds?: number } = {},
   ): Promise<ApprovalState> {
-    const msg = parseOrThrow(ApprovalMessage, message, "Not a decision");
+    const given = parseOrThrow(ApprovalMessage, message, "Not a decision");
+    const msg = { ...given, by: await this.admitted(given.by) };
     // A run that does not exist has no approvals, so run_not_found never hides already_decided.
     const [all, row] = await Promise.all([this.approvals(runId), this.mustExist(runId)]);
     const target = approvalId ? all.find((a) => a.id === approvalId) : all.find((a) => a.status === "pending");
@@ -724,11 +748,24 @@ export class SanomaClient {
     return this.credentialsPool.db();
   }
 
+  /**
+   * The principal as the data files declare it (`admit`): its id alone is taken, never the groups
+   * a caller gives, and an id nobody declares is `not_admitted`.
+   */
+  private async admitted(principal: Principal): Promise<Principal> {
+    // Loaded when asked, not with the client: the reader parses with oxc-parser.
+    const { admit, readPeople } = await import("./resources.ts");
+    return admit(principal, readPeople(this.config.root));
+  }
+
   /** Refuses a run id whose run, as stored, was started with another input, by someone else, or in another sandbox. */
   private async mustMatch(runId: string, args: RunArgs) {
     const [stored] = ((await this.dbos.getWorkflow(runId))?.input ?? []) as [RunArgs?];
+    // Who started it by id alone: their groups are the people files' at the time, which may change.
     const differs = (["input", "startedBy", "sandbox"] as const).filter(
-      (key) => !stored || !sameJson(stored[key], args[key]),
+      (key) =>
+        !stored ||
+        (key === "startedBy" ? stored.startedBy?.id !== args.startedBy.id : !sameJson(stored[key], args[key])),
     );
     if (differs.length) {
       throw new SanomaError(
@@ -777,11 +814,18 @@ export class SanomaClient {
   }): Promise<RunSummary> {
     const approvals = await this.approvals(r.workflowID);
     const groups = r.authenticatedRoles ?? [];
+    const onBehalfOf = r.attributes?.onBehalfOf;
     return {
       runId: r.workflowID,
       workflow: r.workflowName,
       status: runStatus(r.status, approvals),
-      startedBy: r.authenticatedUser ? { id: r.authenticatedUser, ...(groups.length ? { groups } : {}) } : undefined,
+      startedBy: r.authenticatedUser
+        ? {
+            id: r.authenticatedUser,
+            ...(groups.length ? { groups } : {}),
+            ...(typeof onBehalfOf === "string" && { onBehalfOf }),
+          }
+        : undefined,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
       approvals,

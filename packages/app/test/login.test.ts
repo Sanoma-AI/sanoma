@@ -1,15 +1,13 @@
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LoginProvider } from "../src/context.ts";
+import { sanoma } from "@sanoma-ai/workflows/resources";
+import type { AdmittingLogin, LoginProvider } from "../src/context.ts";
+import { admitting } from "../src/login/admission.ts";
 import { githubLogin } from "../src/login/github.ts";
 
-// GitHub sign-in against a GitHub made of msw handlers: the token exchange, the user, and their
-// permission on the repository. Each test signs someone in through the provider's own routes.
-
-const REPO = "acme/company";
-/** Each user's token, and their permission on REPO; one not listed is no collaborator (404). */
-const PERMISSIONS: Record<string, string> = { writer: "write", maintainer: "maintain", reader: "read" };
+// GitHub sign-in against a GitHub made of msw handlers: the token exchange and the user. Each
+// test signs someone in through the provider's own routes; the people file admits them.
 
 const github = setupServer(
   http.post("https://github.com/login/oauth/access_token", async ({ request }) => {
@@ -20,19 +18,8 @@ const github = setupServer(
     return HttpResponse.json({ access_token: `token-${code}`, token_type: "bearer" });
   }),
   http.get("https://api.github.com/user", ({ request }) =>
-    HttpResponse.json({ login: request.headers.get("authorization")?.replace("Bearer token-", "") }),
+    HttpResponse.json({ login: request.headers.get("authorization")?.replace("Bearer token-", ""), id: 1 }),
   ),
-  http.get("https://api.github.com/repos/acme/company/collaborators/:login/permission", ({ params, request }) => {
-    const login = String(params.login);
-    if (request.headers.get("authorization") !== `Bearer token-${login}`)
-      return new HttpResponse(null, { status: 401 });
-    // GitHub may refuse to show a collaborator without push access their own permission.
-    if (login === "triager") return HttpResponse.json({ message: "Must have push access" }, { status: 403 });
-    const permission = PERMISSIONS[login];
-    return permission
-      ? HttpResponse.json({ permission, role_name: permission })
-      : new HttpResponse(null, { status: 404 });
-  }),
 );
 
 beforeAll(() => github.listen({ onUnhandledFrame: "error" }));
@@ -56,7 +43,7 @@ describe("githubLogin", () => {
   let login: LoginProvider;
   beforeEach(() => {
     vi.stubEnv("SANOMA_SECRETS_KEY", "a test key");
-    login = githubLogin({ clientId: "client-id", clientSecret: "client-secret", repo: REPO });
+    login = githubLogin({ clientId: "client-id", clientSecret: "client-secret" });
   });
   afterEach(() => vi.unstubAllEnvs());
 
@@ -75,31 +62,17 @@ describe("githubLogin", () => {
     return (await login.handle!(request(`/auth/github/callback?code=${user}&state=${state ?? sent}`, { cookie })))!;
   }
 
-  it("admits a collaborator with write access, and resolveActor returns their login", async () => {
+  it("signs in whoever GitHub says, and resolveActor returns their login, whatever their access to the repository", async () => {
     const res = await signIn("writer");
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("/");
     const set = res.headers.getSetCookie().join("\n");
-    expect(set).toMatch(/sanoma_session=writer\.\d+\.[\w-]+; Max-Age=43200; Path=\/; HttpOnly; Secure; SameSite=Lax/);
+    expect(set).toMatch(/sanoma_session=[\w-]+\.\d+\.[\w-]+; Max-Age=43200; Path=\/; HttpOnly; Secure; SameSite=Lax/);
     expect(set).toMatch(/sanoma_github_state=; Max-Age=0/);
     const signedIn = request("/workflows", { cookie: session(res) });
-    expect(await login.resolveActor(signedIn)).toEqual({ id: "writer" });
+    expect(await login.resolveActor(signedIn)).toEqual({ github: "writer" });
     // The app answers the page: the login has nothing to say.
     expect(await login.handle!(signedIn)).toBeUndefined();
-  });
-
-  it("admits maintain too", async () => {
-    const res = await signIn("maintainer");
-    expect(await login.resolveActor(request("/", { cookie: session(res) }))).toEqual({ id: "maintainer" });
-  });
-
-  it("refuses read-only access and a non-collaborator with a 403, and sets no session", async () => {
-    for (const user of ["reader", "triager", "stranger"]) {
-      const res = await signIn(user);
-      expect(res.status).toBe(403);
-      expect(await res.text()).toContain(`${user} needs write access to ${REPO}`);
-      expect(setCookies(res).sanoma_session).toBeUndefined();
-    }
   });
 
   it("refuses a callback whose state is not the one it set, and a code GitHub refuses", async () => {
@@ -115,13 +88,18 @@ describe("githubLogin", () => {
     const cookie = session(await signIn("writer"));
     const [, value] = cookie.split("=");
     const [, expires, mac] = value!.split(".");
-    const tampered = [`sanoma_session=admin.${expires}.${mac}`, `sanoma_session=writer.${Number(expires) + 1}.${mac}`];
+    const admin = Buffer.from(JSON.stringify({ login: "admin", id: 1 })).toString("base64url");
+    const [user] = value!.split(".");
+    const tampered = [
+      `sanoma_session=${admin}.${expires}.${mac}`,
+      `sanoma_session=${user}.${Number(expires) + 1}.${mac}`,
+    ];
     for (const bad of tampered) {
       expect(await login.resolveActor(request("/", { cookie: bad }))).toBeUndefined();
       expect((await login.handle!(request("/", { cookie: bad })))?.status).toBe(401);
     }
     vi.stubEnv("SANOMA_SECRETS_KEY", "another key");
-    const other = githubLogin({ clientId: "client-id", clientSecret: "client-secret", repo: REPO });
+    const other = githubLogin({ clientId: "client-id", clientSecret: "client-secret" });
     expect(await other.resolveActor(request("/", { cookie }))).toBeUndefined();
   });
 
@@ -159,11 +137,61 @@ describe("githubLogin", () => {
     expect(res.headers.get("set-cookie")).toMatch(/^sanoma_session=; Max-Age=0; Path=\//);
   });
 
-  it("refuses to start without SANOMA_SECRETS_KEY, naming it, or with a repository that is not owner/name", () => {
+  it("refuses to start without SANOMA_SECRETS_KEY, naming it", () => {
     vi.stubEnv("SANOMA_SECRETS_KEY", "");
-    expect(() => githubLogin({ clientId: "id", clientSecret: "secret", repo: REPO })).toThrow(/SANOMA_SECRETS_KEY/);
-    vi.stubEnv("SANOMA_SECRETS_KEY", "a test key");
-    expect(() => githubLogin({ clientId: "id", clientSecret: "secret", repo: "company" })).toThrow(/owner\/name/);
+    expect(() => githubLogin({ clientId: "id", clientSecret: "secret" })).toThrow(/SANOMA_SECRETS_KEY/);
+  });
+
+  describe("admitting only declared people", () => {
+    const ada = sanoma.person({ id: "ada", github: "Writer" });
+    const bo = sanoma.person({ id: "bo", email: "bo@acme.test", github: "stranger" });
+    const people = [ada, bo, sanoma.agent({ id: "bot" }), sanoma.group({ name: "finance", members: [ada] })];
+    let admitted: AdmittingLogin;
+    beforeEach(() => {
+      admitted = admitting(login, () => ({ people, problems: [] }));
+    });
+
+    it("takes a declared person's login, ignoring case, as the declared principal", async () => {
+      const cookie = session(await signIn("writer"));
+      expect(await admitted.resolveActor(request("/", { cookie }))).toEqual({ id: "ada", groups: ["finance"] });
+      expect(await admitted.handle!(request("/workflows", { cookie }))).toBeUndefined();
+    });
+
+    it("matches a verified email before a login", async () => {
+      github.use(
+        http.get("https://api.github.com/user", () =>
+          HttpResponse.json({ login: "writer", id: 7, email: "BO@acme.test" }),
+        ),
+      );
+      const cookie = session(await signIn("writer"));
+      expect(await admitted.resolveActor(request("/", { cookie }))).toEqual({ id: "bo", groups: [] });
+    });
+
+    it("refuses anyone else: a page for a page, JSON not_admitted for a server function or a change", async () => {
+      const cookie = session(await signIn("nobody"));
+      expect(await admitted.resolveActor(request("/", { cookie }))).toBeUndefined();
+      const page = (await admitted.handle!(request("/workflows", { cookie })))!;
+      expect(page.status).toBe(403);
+      expect(await page.text()).toContain("nobody is not declared in resources/people.ts. Ask");
+      for (const call of [request("/_serverFn/abc", { cookie }), request("/workflows", { cookie, method: "POST" })]) {
+        const res = (await admitted.handle!(call))!;
+        expect(res.status).toBe(403);
+        expect(await res.json()).toEqual({
+          error: "nobody is not declared in resources/people.ts",
+          code: "not_admitted",
+        });
+      }
+      // Its own routes and the sign-in page still answer.
+      expect((await admitted.handle!(request("/workflows")))?.status).toBe(401);
+      expect((await admitted.handle!(request("/auth/github/start")))?.status).toBe(302);
+    });
+
+    it("admits nobody while no person is declared: GitHub names no id to take as given", async () => {
+      const cookie = session(await signIn("writer"));
+      expect(
+        await admitting(login, () => ({ people: [], problems: [] })).resolveActor(request("/", { cookie })),
+      ).toBeUndefined();
+    });
   });
 
   it("listens on any host", () => {

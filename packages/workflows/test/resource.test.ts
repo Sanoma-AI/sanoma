@@ -426,7 +426,8 @@ describe("describeConfig with resources", () => {
       ledger: memoryLedger(),
     });
     const { resourceTypes, ops } = describeConfig(config);
-    expect(resourceTypes).toEqual([
+    // Beside the runtime's own, every config's: the people types.
+    expect(resourceTypes.filter((t) => t.vendor !== "sanoma")).toEqual([
       {
         id: "acme.repo",
         vendor: "acme",

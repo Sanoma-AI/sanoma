@@ -16,7 +16,15 @@ import { parseEnv } from "node:util";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { resolveDatabaseUrl } from "@sanoma-ai/workflows";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { DATABASE_URL, FIRST_COMMIT, packageManagerOf, packageName, startCompany, TEMPLATE } from "../src/init.ts";
+import {
+  DATABASE_URL,
+  declareFounder,
+  FIRST_COMMIT,
+  packageManagerOf,
+  packageName,
+  startCompany,
+  TEMPLATE,
+} from "../src/init.ts";
 import { copyFixture, ensureBuilt, runCli } from "./fixture.ts";
 import { gitIdentity } from "./git.ts";
 
@@ -31,6 +39,8 @@ const fresh = (name = "Acme Ops") => {
   mkdirSync(dir);
   return dir;
 };
+/** Who starts the company in these tests: never `gh`, which may be signed in on this machine. */
+const creator = async () => ({ id: "ada", name: "Ada Ortiz", github: "ada-ortiz" });
 /** An install that writes pnpm's lockfile alone. */
 const writeLockfile = async (cwd: string) => writeFileSync(join(cwd, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
 afterEach(() => {
@@ -46,6 +56,7 @@ describe("startCompany", () => {
     const log: string[] = [];
     expect(
       await startCompany(fresh(), {
+        creator,
         install: async (cwd, pm) => void installs.push([cwd, pm]),
         log: (line) => log.push(line),
       }),
@@ -63,6 +74,10 @@ describe("startCompany", () => {
     // pnpm's alone.
     expect(existsSync(join(dir, "pnpm-workspace.yaml"))).toBe(false);
     expect(Object.keys(parseEnv(read(".env")))).toEqual(["SANOMA_DATABASE_URL", "SANOMA_SECRETS_KEY"]);
+    // Its creator is its first person, so the app admits them.
+    expect(read("resources/people.ts")).toContain(
+      'export const founder = sanoma.person({ id: "ada", name: "Ada Ortiz", github: "ada-ortiz" });',
+    );
 
     expect(git("log", "--format=%s|%an")).toBe(`${FIRST_COMMIT}|Test User`);
     expect(git("branch", "--show-current")).toBe("main");
@@ -80,7 +95,7 @@ describe("startCompany", () => {
     writeFileSync(join(dir, ".gitignore"), "/scratch\n");
     writeFileSync(join(dir, ".env"), "SANOMA_DATABASE_URL=postgresql://elsewhere/acme");
     writeFileSync(join(dir, ".npmrc"), "//registry.npmjs.org/:_authToken=secret\n");
-    expect(await startCompany(dir, { install: writeLockfile })).toBe(true);
+    expect(await startCompany(dir, { creator, install: writeLockfile })).toBe(true);
 
     expect(read(".gitignore")).toMatch(/^\/scratch\n\n# Secrets must never be committed.*\n\.env\n/s);
     const env = parseEnv(read(".env"));
@@ -97,15 +112,28 @@ describe("startCompany", () => {
   it("leaves a repository with its first commit when the install fails", async () => {
     gitIdentity(vi.stubEnv);
     fresh();
-    await expect(startCompany(dir, { install: () => Promise.reject(new Error("offline")) })).rejects.toThrow("offline");
+    await expect(startCompany(dir, { creator, install: () => Promise.reject(new Error("offline")) })).rejects.toThrow(
+      "offline",
+    );
     expect(git("log", "--format=%s")).toBe(FIRST_COMMIT);
   });
 
   it("leaves a directory that holds anything else alone", async () => {
     fresh();
     writeFileSync(join(dir, "notes.txt"), "mine\n");
-    expect(await startCompany(dir, { install: () => Promise.reject(new Error("no install")) })).toBe(false);
+    expect(await startCompany(dir, { creator, install: () => Promise.reject(new Error("no install")) })).toBe(false);
     expect(existsSync(join(dir, "sanoma.config.ts"))).toBe(false);
+  });
+});
+
+describe("declareFounder", () => {
+  it("writes the creator in as given, a $ in a name too, and refuses a file without a founder", () => {
+    const text =
+      'import { sanoma } from "sanoma/resources";\nexport const founder = sanoma.person({ id: "founder" });\n';
+    expect(declareFounder(text, { id: "ann", name: "Ann $' Co" })).toContain(
+      'export const founder = sanoma.person({ id: "ann", name: "Ann $\' Co" });',
+    );
+    expect(() => declareFounder("export {};\n", { id: "ann" })).toThrow("declares no `founder`");
   });
 });
 
@@ -127,7 +155,7 @@ describe("packageManagerOf and packageName", () => {
   it("names it apart from a package it depends on", async () => {
     gitIdentity(vi.stubEnv);
     fresh("sanoma");
-    await startCompany(dir, { install: async () => {} });
+    await startCompany(dir, { creator, install: async () => {} });
     expect(JSON.parse(read("package.json")).name).toBe("sanoma-company");
   });
 

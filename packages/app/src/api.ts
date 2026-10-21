@@ -32,6 +32,9 @@ export const ACTOR_HEADER = "x-sanoma-actor";
  */
 export const ACTOR_COOKIE = "sanoma_actor";
 
+/** Where the page keeps the name in this browser's storage, which the header is sent from. */
+export const ACTOR_KEY = "sanoma.actor";
+
 /**
  * Who the server says is asking. With a login provider (`fromServer`), it is whoever signed in,
  * which the page shows and cannot change; with the default loopback login, it is whatever name

@@ -213,8 +213,8 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
 /** `sanoma api` (hidden): writes the generated files from the config, as `check` and `serve` do. */
 async function writeApiCommand(): Promise<number> {
   const { config, root, resolved } = await load({ policies: false });
-  const { describeConfig, NO_PEOPLE, schemaOf, writeGenerated } = await import("@sanoma-ai/workflows/describe");
-  const { wrote } = await writeGenerated(root, describeConfig(config), schemaOf(resolved, NO_PEOPLE));
+  const { describeConfig, readPeople, schemaOf, writeGenerated } = await import("@sanoma-ai/workflows/describe");
+  const { wrote } = await writeGenerated(root, describeConfig(config), schemaOf(resolved, readPeople(root).people));
   for (const file of wrote) log(`wrote ${file}`);
   return 0;
 }

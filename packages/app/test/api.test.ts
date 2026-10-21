@@ -21,6 +21,7 @@ import { ACTOR_HEADER, ApiError, CallRequest, type ErrorResponse } from "../src/
 import { createApi } from "../src/api-client.ts";
 import type { AppContext } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";
+import { admitting } from "../src/login/admission.ts";
 import { actorOf, callApi, requireActor, serverFnFailure, validate } from "../src/server/core.ts";
 
 // Needs Postgres (`pnpm db:up`). A site's `api`: `callFn` through the server core, as its server
@@ -83,7 +84,7 @@ async function call(data: unknown, actor: string | null = "ada") {
     resolved: resolveConfig(testApp.config),
     description: describeConfig(testApp.config),
     client: testApp.client,
-    login: loopbackLogin(),
+    login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
   });
   const headers = actor === null ? {} : { [ACTOR_HEADER]: actor };
   const request = { app, actor: actorOf(app, new Request("http://127.0.0.1/", { headers })) };

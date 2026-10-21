@@ -2,7 +2,7 @@ import type { RunSummary } from "./client.ts";
 import type { CredentialStatus } from "./env.ts";
 import type { ApprovalState, Approver, Principal } from "./define.ts";
 import type { LedgerRecord } from "./ledger.ts";
-import type { ResourceProblem } from "./resources.ts";
+import type { DeclaredResource, ResourceProblem } from "./resources.ts";
 import type { OutlineNode } from "./outline.ts";
 
 // Types only: resource types as a UI reads them. Erased from the bundle.
@@ -167,6 +167,85 @@ export const isEnded = (status: RunStatus): boolean => (ENDED_STATUSES as readon
 export function mayDecide(approval: Pick<ApprovalState, "approver">, by: Principal): boolean {
   const { approver } = approval;
   return typeof approver === "string" ? approver === by.id : (by.groups?.includes(approver.group) ?? false);
+}
+
+/** A declared resource as the people functions read it: only the runtime's people types count. */
+export type PeopleResource = Pick<DeclaredResource, "vendor" | "type" | "desired">;
+
+/** The group every agent is in, the runtime's own among them: no data file declares it. */
+export const AGENTS = "agents";
+
+/** The runtime's own agents (scenarios, the host check, scheduled runs), declared whether a data file names them or not. */
+export const RUNTIME_AGENTS: readonly string[] = ["scenarios", "host-check", "schedule"];
+
+/** The declared resources of one of the runtime's people types, by `desired`. */
+const peopleOfType = <T>(resources: readonly PeopleResource[], type: "person" | "agent" | "group") =>
+  resources.flatMap((r) => (r.vendor === "sanoma" && r.type === type ? [r.desired as T] : []));
+
+type PersonFields = { id: string; email?: string; github?: string };
+type AgentFields = { id: string; onBehalfOf?: string };
+type GroupFields = { name: string; members: string[] };
+
+/** The groups a policy may name and a principal may be in: the declared ones and `agents`, sorted. */
+export const groupNamesOf = (resources: readonly PeopleResource[]): string[] =>
+  [...new Set([...peopleOfType<GroupFields>(resources, "group").map((g) => g.name), AGENTS])].toSorted();
+
+/** The ids of the declared people and agents (not the runtime's own). */
+export const principalIdsOf = (resources: readonly PeopleResource[]): string[] =>
+  [...peopleOfType<PersonFields>(resources, "person"), ...peopleOfType<AgentFields>(resources, "agent")].map(
+    (p) => p.id,
+  );
+
+/** True when the data files declare a person, agent or group: then only a declared principal is admitted. */
+export const declaresPeople = (resources: readonly PeopleResource[]): boolean =>
+  resources.some((r) => r.vendor === "sanoma");
+
+/**
+ * The principal a declared person or agent (or one of the runtime's own agents) acts as, read
+ * from the data files' resources: its id, every group that lists it (and `agents` for an agent),
+ * sorted, and an agent's `onBehalfOf`. Undefined for an id nobody declares.
+ */
+export function principalOf(id: string, resources: readonly PeopleResource[]): Principal | undefined {
+  const agent = peopleOfType<AgentFields>(resources, "agent").find((a) => a.id === id);
+  const isAgent = agent !== undefined || RUNTIME_AGENTS.includes(id);
+  if (!isAgent && !peopleOfType<PersonFields>(resources, "person").some((p) => p.id === id)) return undefined;
+  const groups = peopleOfType<GroupFields>(resources, "group")
+    .filter((g) => g.members.includes(id))
+    .map((g) => g.name);
+  return {
+    id,
+    groups: [...new Set(isAgent ? [...groups, AGENTS] : groups)].toSorted(),
+    ...(agent?.onBehalfOf !== undefined && { onBehalfOf: agent.onBehalfOf }),
+  };
+}
+
+/**
+ * Who `name` is as an approver: a declared group's name (or `agents`) as `{ group }`, else a
+ * declared person's or agent's id; undefined when it is neither.
+ */
+export function approverOf(name: string, resources: readonly PeopleResource[]): Approver | undefined {
+  if (groupNamesOf(resources).includes(name)) return { group: name };
+  return principalOf(name, resources) && name;
+}
+
+/** True for two strings the same but for case: an email or a GitHub login. */
+const same = (a: string | undefined, b: string | undefined) =>
+  a !== undefined && b !== undefined && a.toLowerCase() === b.toLowerCase();
+
+/**
+ * The id of the declared person a sign-in vouches for, or undefined: by email first, then by
+ * GitHub login (each ignoring case), then by id. Never an agent's: agents do not sign in.
+ */
+export function personOf(
+  login: { email?: string; github?: string; id?: string },
+  resources: readonly PeopleResource[],
+): string | undefined {
+  const people = peopleOfType<PersonFields>(resources, "person");
+  return (
+    people.find((p) => same(p.email, login.email)) ??
+    people.find((p) => same(p.github, login.github)) ??
+    people.find((p) => login.id !== undefined && p.id === login.id)
+  )?.id;
 }
 
 /** Who may decide, as text: the person's id, or "group <name>". */

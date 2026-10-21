@@ -17,18 +17,16 @@ import {
   type PreviewAnswer,
   type PreviewRequest,
 } from "./policy.ts";
+import { cedarValue, cedarWasm, contextTypeOf, messageOf, NAMESPACE, schemaOf, WORKFLOW_ACTION } from "./schema.ts";
 import {
-  cedarValue,
-  cedarWasm,
-  contextTypeOf,
+  approverLabel,
+  approverOf,
+  DATA_VENDOR,
   groupNamesOf,
-  messageOf,
-  NAMESPACE,
-  type PolicyPeople,
-  schemaOf,
-  WORKFLOW_ACTION,
-} from "./schema.ts";
-import { approverLabel, DATA_VENDOR } from "./shared.ts";
+  type PeopleResource,
+  principalIdsOf,
+  principalOf,
+} from "./shared.ts";
 
 // A company's policies in Cedar (`policies/**/*.cedar`), decided with `@cedar-policy/cedar-wasm`
 // against the schema of its resolved config (`schemaOf`). Allow is the default: the runtime adds
@@ -161,7 +159,7 @@ export function loadPolicies(files: readonly { file: string; text: string }[]): 
 export function validatePolicies(
   resolved: Pick<ResolvedConfig, "ops" | "workflows" | "collections">,
   policies: readonly CedarPolicySource[],
-  people: PolicyPeople,
+  people: readonly PeopleResource[],
 ): PolicyProblem[] {
   const answer = cedarWasm().validate({
     schema: schemaOf(resolved, people),
@@ -211,7 +209,7 @@ export function validatePolicies(
 export function cedarPolicy(
   resolved: Pick<ResolvedConfig, "ops" | "workflows" | "collections">,
   policies: readonly CedarPolicySource[],
-  people: PolicyPeople,
+  people: readonly PeopleResource[],
 ): Policy {
   const cedar = cedarWasm();
   const schema = schemaOf(resolved, people);
@@ -230,7 +228,7 @@ export function cedarPolicy(
    * The determining `forbid`s, in the order written, each with whom it holds for: the first that
    * refuses (no `@hold`, else a hold for no one), or the holds.
    */
-  const forbidsOf = (ids: readonly string[], principal: Actor) => {
+  const forbidsOf = (ids: readonly string[], principal: Principal) => {
     const holds = policies
       .filter((p) => p.effect === "forbid" && ids.includes(p.id))
       .map((p) => ({ p, approver: p.hold === undefined ? undefined : holdOf(p.hold, principal, people) }));
@@ -240,7 +238,7 @@ export function cedarPolicy(
 
   /** What `request` is about: a workflow start on its `Workflow`, an operation on its target, in its collection for `data`. */
   const requestOf = (
-    principal: Actor,
+    principal: Principal,
     action: string,
     target: string | undefined,
     context: (names: string[]) => Record<string, unknown>,
@@ -332,61 +330,43 @@ const ruleOf = (p: CedarPolicySource) => ({
 /** The first 12 hex digits of a SHA-256 of `value` as JSON. */
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 12);
 
-/** A principal as the policy sees it: its groups and whom it acts for. */
-type Actor = Principal & { onBehalfOf?: string };
-
 const uid = (type: string, id: string) => ({ type: `${NAMESPACE}::${type}`, id });
 /** Every field of a context unknown: partial evaluation leaves what depends on it. */
 const unknown = (names: string[]) =>
   Object.fromEntries(names.map((name) => [name, { __extn: { fn: "unknown", arg: name } }]));
 
-// Stand-ins for P1's `principalOf(id, resources)` and `approverOf(name, resources)` in
-// `shared.ts` (#197), with their signatures: replaced by those once they land.
-
-/** The declared principal `id`, with the groups it is a member of (an agent's among them, `agents`), or undefined. */
-function principalOf(id: string, resources: PolicyPeople): Actor | undefined {
-  const declared = resources.people.find((p) => p.id === id);
-  if (!declared) return undefined;
-  const groups = resources.groups.filter((g) => g.members.includes(id)).map((g) => g.name);
-  return { id, groups, ...(declared.onBehalfOf !== undefined && { onBehalfOf: declared.onBehalfOf }) };
-}
-
-/** Who `name` addresses as an approver: a declared group (`agents` among them), else a declared person, else undefined. */
-function approverOf(name: string, resources: PolicyPeople): Approver | undefined {
-  if (groupNamesOf(resources).includes(name)) return { group: name };
-  return resources.people.some((p) => p.id === name) ? name : undefined;
-}
-
 /** Whom `@hold(hold)` holds the call for, resolved for `principal`: undefined when it names no one. */
-const holdOf = (hold: string, principal: Actor, people: PolicyPeople): Approver | undefined =>
+const holdOf = (hold: string, principal: Principal, people: readonly PeopleResource[]): Approver | undefined =>
   hold === ON_BEHALF_OF ? principal.onBehalfOf : approverOf(hold, people);
 
 interface Directory {
   /** The principal with the groups and `onBehalfOf` it is declared with added. */
-  principal(actor: Principal): Actor;
+  principal(actor: Principal): Principal;
   /** What a request about `actor` needs: its entity, and that of whom it acts for. */
-  entities(actor: Actor): EntityJson[];
+  entities(actor: Principal): EntityJson[];
 }
 
 /** The people as Cedar entities, made once: each a `Principal` in its groups, with `onBehalfOf` when it acts for someone. */
-function directoryOf(people: PolicyPeople): Directory {
+function directoryOf(people: readonly PeopleResource[]): Directory {
   const groups = new Set(groupNamesOf(people));
-  const principal = (actor: Principal): Actor => {
-    const declared = principalOf(actor.id, people);
-    const onBehalfOf = (actor as Actor).onBehalfOf ?? declared?.onBehalfOf;
+  const principal = (actor: Principal): Principal => {
+    // An admitted principal (`admit`) carries its groups as the files say now: those are taken as
+    // they are. One without groups is given those declared when the policy was made.
+    const declared = actor.groups === undefined ? principalOf(actor.id, people) : undefined;
+    const onBehalfOf = actor.onBehalfOf ?? declared?.onBehalfOf;
     return {
       ...actor,
       groups: [...new Set([...(actor.groups ?? []), ...(declared?.groups ?? [])])],
       ...(onBehalfOf !== undefined && { onBehalfOf }),
     };
   };
-  const entityOf = (p: Actor): EntityJson => ({
+  const entityOf = (p: Principal): EntityJson => ({
     uid: uid("Principal", p.id),
     attrs: p.onBehalfOf === undefined ? {} : { onBehalfOf: { __entity: uid("Principal", p.onBehalfOf) } },
     // Only the groups the schema enumerates: Cedar refuses any other.
     parents: (p.groups ?? []).filter((g) => groups.has(g)).map((g) => uid("Group", g)),
   });
-  const declared = new Map(people.people.map((p) => [p.id, entityOf(principal({ id: p.id }))]));
+  const declared = new Map(principalIdsOf(people).map((id) => [id, entityOf(principal({ id }))]));
   return {
     principal,
     entities: (actor) => {

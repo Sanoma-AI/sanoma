@@ -17,6 +17,7 @@ import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, driftWorkflow } from "./drift.ts";
 import { statusesOf, unconfigured } from "./env.ts";
 import type { Fake } from "./fake.ts";
+import { peopleConnector } from "./person.ts";
 import type { LedgerStore } from "./ledger.ts";
 import {
   type Connector,
@@ -258,7 +259,10 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   }
   // Built-in: checking the resources the data files declare against their vendors, and applying them.
   if (types.size) {
-    const read = () => readDeclared(root, config.connectors, types);
+    const connectors = connectorsOf(config);
+    // The types the data files may declare: the vendors' and the people's, whose resources are left out.
+    const declarable = resourceTypesOf(connectors);
+    const read = () => readDeclared(root, connectors, declarable, types);
     names.set(
       DRIFT_WORKFLOW,
       driftWorkflow(types, ops, drivers, () => DBOS.runStep(read, { name: "drift:data-files" })),
@@ -313,6 +317,12 @@ function collectionsOf(config: SanomaConfig): Map<string, Collection> {
   }
   return collections;
 }
+
+/** The config's connectors and the runtime's people types' (`peopleConnector`): what its data files are read against. */
+export const connectorsOf = (config: Pick<SanomaConfig, "connectors">): Connector<any, any>[] => [
+  ...config.connectors,
+  peopleConnector,
+];
 
 /**
  * What the connectors' setups attach under `key` (`withSetup`), by vendor id in `connectors`
@@ -370,22 +380,26 @@ function scenariosAt(root: string | undefined): URL | undefined {
 async function readDeclared(
   root: string | undefined,
   connectors: readonly Connector<any, any>[],
+  declarable: ReadonlyMap<string, Resource>,
   types: ReadonlyMap<string, Resource>,
 ): Promise<Omit<ApplyDeclared, "rebinds">> {
   // Loaded when a run reads the files, not with the worker: the reader parses with oxc-parser.
   const { readDataFiles } = await import("./resources.ts");
-  const { resources, bindings, orphans, problems } = readDataFiles(root, connectors, types);
+  const { resources, bindings, orphans, problems } = readDataFiles(root, connectors, declarable);
   return {
-    resources: resources.map(({ id, vendor, type, name, identity, binding, desired, refs }) => ({
-      id,
-      vendor,
-      type,
-      name,
-      ...(identity !== undefined && { identity }),
-      ...(binding !== undefined && { binding }),
-      desired: withoutWriteOnly(types.get(`${vendor}.${type}`)!.fields, desired),
-      refs,
-    })),
+    // Only `types`' resources have a vendor object to check or apply: not the people's (vendorless).
+    resources: resources
+      .filter((r) => types.has(`${r.vendor}.${r.type}`))
+      .map(({ id, vendor, type, name, identity, binding, desired, refs }) => ({
+        id,
+        vendor,
+        type,
+        name,
+        ...(identity !== undefined && { identity }),
+        ...(binding !== undefined && { binding }),
+        desired: withoutWriteOnly(types.get(`${vendor}.${type}`)!.fields, desired),
+        refs,
+      })),
     bindings,
     orphans,
     problems,

@@ -1,13 +1,11 @@
 import { createContext, useContext, useEffect, useSyncExternalStore } from "react";
-import { ACTOR_COOKIE, type ActorInfo } from "./api.ts";
+import { ACTOR_COOKIE, ACTOR_KEY, type ActorInfo } from "./api.ts";
 
 // Who you are. With the default loopback login there is none: the page asks once, keeps the name
 // in this browser, and sends it with every change. It keeps it in a cookie too, so that the server
 // render of a page whose loader calls `api` knows who is asking; the page itself reads the name
 // only in the browser. With a login provider the server says who you are itself, and the page
 // shows that instead.
-
-const ACTOR_KEY = "sanoma.actor";
 
 /** The name this page last saved, which outlasts storage that is blocked until the page reloads. */
 let saved: string | null | undefined;

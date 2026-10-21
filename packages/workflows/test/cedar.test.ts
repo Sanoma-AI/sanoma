@@ -5,6 +5,7 @@ import { withFake } from "@sanoma-ai/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { decideCall } from "../src/call.ts";
+import { sanoma } from "../src/constructors.ts";
 import { collection } from "../src/data.ts";
 import type { ApprovalState } from "../src/define.ts";
 import { describeConfig, SCHEMA_FILE, schemaOf, schemaText, writeGenerated } from "../src/describe.ts";
@@ -79,14 +80,16 @@ const config = defineConfig({
 });
 const resolved = resolveConfig(config);
 
-const people = {
-  people: [{ id: "ada" }, { id: "bo" }, { id: "cy" }, { id: "refund-bot", onBehalfOf: "bo" }],
-  groups: [
-    { name: "finance", members: ["ada"] },
-    { name: "sales", members: ["bo", "refund-bot"] },
-    { name: "agents", members: ["refund-bot"] },
-  ],
-};
+const [ada, bo, cy] = ["ada", "bo", "cy"].map((id) => sanoma.person({ id }));
+const refundBot = sanoma.agent({ id: "refund-bot", onBehalfOf: bo! });
+const people = [
+  ada!,
+  bo!,
+  cy!,
+  refundBot,
+  sanoma.group({ name: "finance", members: [ada!] }),
+  sanoma.group({ name: "sales", members: [bo!, refundBot] }),
+];
 
 const FILES = [
   {

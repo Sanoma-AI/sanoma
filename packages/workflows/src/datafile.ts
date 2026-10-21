@@ -94,7 +94,10 @@ export interface DataFile {
 /** A connector's constructors entry: a package specifier that ends in `/resources`. */
 const CONSTRUCTORS = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*\/resources$/;
 
-/** Where a data file imports `secret` from; checked before `CONSTRUCTORS`, which they match too. */
+/**
+ * Where a data file imports `secret` from, and `sanoma`, the runtime's own resource constructors
+ * (its people: `sanoma.person`, `.agent`, `.group`); checked before `CONSTRUCTORS`, which they match too.
+ */
 export const SECRET_ENTRIES: ReadonlySet<string> = new Set(["sanoma/resources", "@sanoma-ai/workflows/resources"]);
 /** Where `resources/data.ts` imports `collection` from, and the only imports it may make. */
 export const DATA_ENTRIES: ReadonlySet<string> = new Set(["sanoma/data", "@sanoma-ai/workflows/data"]);
@@ -240,14 +243,18 @@ export function readDataFile(
         : [];
     if (locals) {
       for (const sp of s.specifiers) {
-        if (
-          sp.type === "ImportSpecifier" &&
-          sp.importKind !== "type" &&
-          (sp.imported.name ?? sp.imported.value) === only
-        ) {
+        const imported =
+          sp.type === "ImportSpecifier" && sp.importKind !== "type" && (sp.imported.name ?? sp.imported.value);
+        if (imported === only) {
           locals.add(sp.local.name);
+        } else if (imported === "sanoma" && SECRET_ENTRIES.has(spec)) {
+          // The runtime's own constructors, matched to its connector as a connector's are.
+          imports.push({ kind: "constructors", source: spec, imported, local: sp.local.name, start: sp.start });
         } else {
-          fail(sp, `a data file imports only \`${only}\` from "${spec}": \`import { ${only} } from "${spec}"\``);
+          const [names, allowed] = SECRET_ENTRIES.has(spec)
+            ? ["`secret` and `sanoma`", `${only}, sanoma`]
+            : [`\`${only}\``, only];
+          fail(sp, `a data file imports only ${names} from "${spec}": \`import { ${allowed} } from "${spec}"\``);
           refused.add(sp.local.name);
         }
       }

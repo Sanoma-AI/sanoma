@@ -1,7 +1,7 @@
 import type { z } from "zod";
 import { type LintProblem, readSource, type SourceFile } from "./ast.ts";
 import { type Field, recordSchemaOf } from "./collection.ts";
-import { resolveConfig, type SanomaConfig } from "./config.ts";
+import { connectorsOf, resolveConfig, type SanomaConfig } from "./config.ts";
 import { type Builtin, jsonSchemaOf, opIdsOf, type Use } from "./define.ts";
 import { isDirect } from "./direct.ts";
 import { lintWorkflow } from "./lint.ts";
@@ -25,10 +25,13 @@ export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./ou
 // The reader parses data files with oxc-parser too.
 export type { LintProblem } from "./ast.ts";
 export {
+  admit,
   readDataFiles,
+  readPeople,
   readResources,
   type DataFiles,
   type DeclaredCollection,
+  type DeclaredPeople,
   type DeclaredResource,
   type ResourceProblem,
 } from "./resources.ts";
@@ -50,7 +53,7 @@ export { readSites, type SiteCall, type SiteEntry } from "./sites.ts";
 // The generated SDK, `.sanoma/api.ts`: a site's `api` typed from this description.
 export { API_FILE, generateApi, writeApi, writeGenerated } from "./sdk.ts";
 // The Cedar schema, `.sanoma/schema.cedarschema`: what a company's policies are validated and decided against.
-export { NO_PEOPLE, SCHEMA_FILE, schemaOf, schemaText, type CedarSchemaJson, type PolicyPeople } from "./schema.ts";
+export { SCHEMA_FILE, schemaOf, schemaText, type CedarSchemaJson } from "./schema.ts";
 // The apply workflow's plan and report, which the app renders.
 export type { ApplyInput, ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanStep } from "./apply.ts";
 
@@ -211,7 +214,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     const { id, info } = connector[VENDOR];
     vendors[id] ??= vendorEntry(id, info, resolved.fakes.has(id));
   }
-  const resources = resourceTypesOf(config.connectors);
+  const resources = resourceTypesOf(connectorsOf(config));
   // Each resource type's state is described once, on its entry, and referenced from its operations.
   const refs = new Map<z.ZodType, string>([...resources].map(([id, r]) => [r.schema, resourceTypeUri(id)]));
   const resourceTypes: ResourceTypeEntry[] = [...resources]
@@ -229,7 +232,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     }))
     .toSorted((a, b) => a.id.localeCompare(b.id));
 
-  const dataFiles = readDataFiles(resolved.root, config.connectors, resources);
+  const dataFiles = readDataFiles(resolved.root, connectorsOf(config), resources);
   const declared = new Map(dataFiles.collections.map((d) => [d.name, d]));
   const collections: CollectionEntry[] = [...resolved.collections.values()]
     .map((c) => ({

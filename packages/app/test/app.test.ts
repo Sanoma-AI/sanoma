@@ -47,6 +47,7 @@ import {
 } from "../src/api.ts";
 import type { AppContext, LoginProvider } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";
+import { admitting } from "../src/login/admission.ts";
 import {
   type ActorContext,
   actorOf,
@@ -151,7 +152,12 @@ const clients: SanomaClient[] = [];
 async function contextOf(cfg: SanomaConfig, login = loopbackLogin()): Promise<AppContext> {
   const client = await SanomaClient.connect(cfg);
   clients.push(client);
-  return { resolved: resolveConfig(cfg), description: describeConfig(cfg), client, login };
+  return {
+    resolved: resolveConfig(cfg),
+    description: describeConfig(cfg),
+    client,
+    login: admitting(login, () => ({ people: [], problems: [] })),
+  };
 }
 
 beforeAll(async () => {

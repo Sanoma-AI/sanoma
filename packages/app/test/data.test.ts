@@ -22,6 +22,7 @@ import outboundNext from "../../workflows/test/fixtures/outbound/workflows/outbo
 import { ACTOR_COOKIE, ApiError, CallRequest, type ErrorResponse } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { loopbackLogin } from "../src/loopback.ts";
+import { admitting } from "../src/login/admission.ts";
 import { callApi, serverFnFailure, validate } from "../src/server/core.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it when dist/server/server.js
@@ -106,7 +107,7 @@ async function callAs(actor: string, data: CallRequest) {
     resolved: resolveConfig(testApp.config),
     description: describeConfig(testApp.config),
     client: testApp.client,
-    login: loopbackLogin(),
+    login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
   };
   try {
     return { body: (await callApi(context, { id: actor }, validate(CallRequest)(data))) as any };
