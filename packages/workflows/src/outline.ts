@@ -576,7 +576,7 @@ function ctxPath(callee: Node, ctx: string): string[] | undefined {
 }
 
 /** A string literal's value, or a template literal's with nothing interpolated. */
-function stringValue(node: Node): string | undefined {
+export function stringValue(node: Node): string | undefined {
   const n = unwrap(node);
   if (n?.type === "Literal" && typeof n.value === "string") return n.value;
   if (n?.type === "TemplateLiteral" && n.expressions.length === 0) return n.quasis[0]?.value.cooked ?? undefined;

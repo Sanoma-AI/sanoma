@@ -117,7 +117,7 @@ describe("sanoma check with sites", () => {
     expect(ok.stderr.trimEnd().split("\n").at(-1)).toBe("ok");
   }, 180_000);
 
-  it("reports a link to a page that does not exist and an import the browser may not make at their lines, and a folder whose name is not a URL segment", async () => {
+  it("reports a link to a page that does not exist, an import the browser may not make and a call to a workflow that does not exist at their lines, and a folder whose name is not a URL segment", async () => {
     dir = copyFixture(fixture);
     const index = join(dir, "sites/hello/routes/index.tsx");
     writeFileSync(index, readFileSync(index, "utf8").replace('to="/workflows"', 'to="/sites/hello/nope"'));
@@ -129,10 +129,19 @@ import * as runtime from "@sanoma-ai/workflows";
 export const Route = createFileRoute("/sites/hello/runtime")({ component: () => <p>{String(runtime)}</p> });
 `,
     );
+    writeFileSync(
+      join(dir, "sites/hello/routes/gone.tsx"),
+      `import { createFileRoute } from "@tanstack/react-router";
+import { RunForm } from "@sanoma-ai/app/ui";
+
+export const Route = createFileRoute("/sites/hello/gone")({ component: () => <RunForm workflow="gone" /> });
+`,
+    );
     mkdirSync(join(dir, "sites/Bad_Name/routes"), { recursive: true });
     const found = await runCli(dir, ["check"], env);
     expect(found.code, found.stderr).toBe(1);
     const problems = found.stdout.trimEnd().split("\n");
+    expect(problems).toContain('sites/hello/routes/gone.tsx:4:78: calls workflow "gone", which does not exist');
     expect(problems).toContainEqual(
       expect.stringMatching(/^sites\/hello\/routes\/index\.tsx:9:\d+: error TS\d+: .*"\/sites\/hello\/nope"/),
     );

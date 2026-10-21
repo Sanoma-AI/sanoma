@@ -1,4 +1,5 @@
 import { allow, defineConfig, definePolicy, defineWorkflow, z } from "sanoma";
+import { leads } from "./resources/data.ts";
 
 const hello = defineWorkflow({
   name: "hello",
@@ -9,9 +10,10 @@ const hello = defineWorkflow({
   run: async (_ctx, { who }) => ({ greeting: `hello ${who}` }),
 });
 
-/** A company with one site, sites/hello. */
+/** A company with one site, sites/hello, and one collection. */
 export default defineConfig({
   workflows: [hello],
   connectors: [],
+  collections: [leads],
   policy: definePolicy(() => allow()),
 });

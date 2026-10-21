@@ -296,6 +296,28 @@ describe("a company's app with its sites", () => {
     expect(readFileSync(tree, "utf8")).not.toContain("/sites/hello/about");
   });
 
+  it("lists under a workflow's Used by the site's pages that call it, each linking to its page, and a component's file", async () => {
+    const html = (await (await fetch(new URL("/workflows/hello", app.url))).text()).replaceAll("<!-- -->", "");
+    expect(html).toMatch(/<h3[^>]*>Used by<\/h3>/);
+    // The section, up to the page's scripts, whose state holds the description.
+    const usedBy = html.slice(
+      html.search(/<h3[^>]*>Used by<\/h3>/),
+      html.indexOf("<script", html.indexOf(">Used by<")),
+    );
+    for (const [page, via] of [
+      ["/sites/hello/run", "RunForm"],
+      ["/sites/hello/started", "api"],
+    ]) {
+      expect(linkTag(usedBy, `${page}</code>`)).toContain(`href="${page}"`);
+      expect(usedBy).toMatch(new RegExp(`Hello desk<code[^>]*>${page}</code>.*?through ${via}<`));
+    }
+    // A component's file, which is no one page, unlinked (first, as its file sorts first); the page
+    // that reads leads, which calls no workflow, is not listed.
+    expect(usedBy).toMatch(/Hello desk<code[^>]*>sites\/hello\/components\/greet\.tsx<\/code>.*?through api</);
+    expect(usedBy.indexOf("greet.tsx")).toBeLessThan(usedBy.indexOf("<a "));
+    expect(usedBy).not.toContain("/sites/hello/leads");
+  });
+
   it("type-checks a site's links against the app's pages and the sites', and refuses a path that is neither", async () => {
     // The tsc a company runs: sanoma's.
     const sanoma = createRequire(join(realpathSync(join(repo, "node_modules", "sanoma")), "package.json"));

@@ -37,11 +37,12 @@ const LINTED = ["workflows", "policies", "resources", "sites"];
  * its root; oxlint in the root, with the repo's `.oxlintrc.json` (written when missing, to extend
  * this package's `oxlint.json`), over `workflows/`, `policies/`, `resources/` and `sites/`; every problem
  * `describeConfig` finds in the data files and the workflows' files (the import rules and what
- * the outline cannot draw: what the worker refuses to start with); with sites, their generated
- * files written first and, beside those three, the app built with them and `tsc -p
- * sites/tsconfig.json` (`checkSites`). Their problems in the order tsc, the sites' tsc, oxlint,
- * the config, the folders refused as sites, the sites' build. Then every scenario against the fakes (`runScenarios`), each step
- * that did not hold a problem. `ok` when there are no problems.
+ * the outline cannot draw: what the worker refuses to start with), and each site's call to what
+ * the config does not have; with sites, their generated files written first and, beside those
+ * three, the app built with them and `tsc -p sites/tsconfig.json` (`checkSites`). Their problems
+ * in the order tsc, the sites' tsc, oxlint, the config, the folders refused as sites, the sites'
+ * build. Then every scenario against the fakes (`runScenarios`), each step that did not hold a
+ * problem. `ok` when there are no problems.
  */
 export async function check(
   { config, root, resolved }: Loaded,
@@ -134,12 +135,14 @@ async function lint(root: string, log: (line: string) => void): Promise<string[]
 
 /**
  * `describeConfig`'s problems: the data files', then each workflow's, its file relative to the
- * root. A file defining several workflows gives each its problems: one line each here.
+ * root, then each site's (a call to what the config does not have). A file defining several
+ * workflows gives each its problems: one line each here.
  */
-function configProblems({ problems, workflows }: ConfigDescription, root: string): string[] {
+function configProblems({ problems, workflows, sites }: ConfigDescription, root: string): string[] {
   const lines = new Set([
     ...problems.map(problemLine),
     ...workflows.flatMap((wf) => wf.problems.map((p) => problemLine({ file: relative(root, wf.file), ...p }))),
+    ...sites.flatMap((site) => site.problems.map(problemLine)),
   ]);
   return [...lines];
 }
