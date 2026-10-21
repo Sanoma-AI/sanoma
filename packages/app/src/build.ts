@@ -79,9 +79,10 @@ export function sitesOf(repo: string): { sites: string[]; refused: string[] } {
 }
 
 /**
- * Writes the sites' generated files: `sites/__virtual.ts` when missing or different,
- * `sites/tsconfig.json` when missing, and `.sanoma/app/tsconfig.json` always (the route generator
- * reads `sites/tsconfig.json`, and so the file it extends, when it loads the listing).
+ * Writes the sites' generated files: `sites/__virtual.ts` and `.sanoma/app/tsconfig.json` when
+ * missing or different (the route generator reads `sites/tsconfig.json`, and so the file it
+ * extends, when it loads the listing), `sites/tsconfig.json` when missing. An unchanged file is
+ * not rewritten: a running dev server reloads every page when one does.
  */
 export function writeSiteFiles(repo: string): void {
   const root = realpathSync(repo);
@@ -89,11 +90,14 @@ export function writeSiteFiles(repo: string): void {
   const out = join(root, ".sanoma", "app");
   mkdirSync(sites, { recursive: true });
   mkdirSync(out, { recursive: true });
-  const virtual = join(sites, "__virtual.ts");
-  if (!existsSync(virtual) || readFileSync(virtual, "utf8") !== SITES_VIRTUAL) writeFileSync(virtual, SITES_VIRTUAL);
+  writeChanged(join(sites, "__virtual.ts"), SITES_VIRTUAL);
   const sitesTsconfig = join(sites, "tsconfig.json");
   if (!existsSync(sitesTsconfig)) writeFileSync(sitesTsconfig, '{ "extends": "../.sanoma/app/tsconfig.json" }\n');
-  writeFileSync(join(out, "tsconfig.json"), `${JSON.stringify(siteTsconfig(root), null, 2)}\n`);
+  writeChanged(join(out, "tsconfig.json"), `${JSON.stringify(siteTsconfig(root), null, 2)}\n`);
+}
+
+function writeChanged(file: string, text: string): void {
+  if (!existsSync(file) || readFileSync(file, "utf8") !== text) writeFileSync(file, text);
 }
 
 /**
@@ -233,6 +237,8 @@ function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom): InlineConfi
         srcDirectory,
         router: {
           generatedRouteTree: routeTree,
+          // The generator's temporary files, otherwise under `.tanstack/tmp` in the process's cwd.
+          tmpDir: join(out, "tmp"),
           // The app's routes at the root, and the sites' listing at /sites. The app's __root.tsx
           // is the tree's root, not a route of the "." mount.
           virtualRouteConfig: {
