@@ -296,7 +296,11 @@ export interface AdoptResponse {
 export const CallRequest = z.object({
   name: z.string().min(1, "Name an operation or a workflow"),
   input: z.unknown().optional(),
-  id: z.string().min(1).max(200).optional(),
+  // Letters, digits, _ and -: never one of the runtime's own run ids (`call:<actor>:<id>`, `direct:…`).
+  id: z
+    .string()
+    .regex(/^[\w-]{1,200}$/, "An id is letters, digits, _ and -")
+    .optional(),
 });
 export type CallRequest = z.infer<typeof CallRequest>;
 

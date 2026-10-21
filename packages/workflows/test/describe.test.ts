@@ -320,7 +320,14 @@ describe("a workflow's name in a site's api", () => {
   it("is a problem on a workflow when another workflow, a vendor or the collections have it", () => {
     const { workflows } = describeConfig({
       ...base,
-      workflows: [announce, renamed("outbound-next"), renamed("outboundNext"), renamed("ghost"), renamed("data")],
+      workflows: [
+        announce,
+        renamed("outbound-next"),
+        renamed("outboundNext"),
+        renamed("ghost"),
+        renamed("data"),
+        renamed("then"),
+      ],
     });
     const apiProblems = workflows.map((wf) => [
       wf.name,
@@ -338,6 +345,7 @@ describe("a workflow's name in a site's api", () => {
         "outboundNext",
         [[1, 1, 'A site calls this workflow api.outboundNext, as workflow "outbound-next" is: rename it']],
       ],
+      ["then", [[1, 1, "A site calls this workflow api.then, which a promise would take for its own: rename it"]]],
     ]);
   });
 });

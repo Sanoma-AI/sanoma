@@ -191,6 +191,11 @@ describe("callFn", () => {
       status: 400,
       body: { code: "invalid_input", issues: [expect.objectContaining({ path: ["company"] })] },
     });
+    // An id is the caller's own, never one of the runtime's (`call:<actor>:<id>`).
+    expect(await call({ name: "outboundNext.start", input: { company: "Bob" }, id: "call:bob:1" })).toMatchObject({
+      status: 400,
+      body: { code: "invalid_input", issues: [expect.objectContaining({ path: ["id"] })] },
+    });
     expect(await call({ name: "outboundNext.result", input: {} })).toMatchObject({
       status: 400,
       body: { code: "invalid_input" },

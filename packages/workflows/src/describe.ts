@@ -295,26 +295,21 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
  * `data` is a problem, at 1:1 of its file. A built-in is never the one renamed.
  */
 function addApiNameProblems(workflows: WorkflowEntry[], vendors: ReadonlySet<string>) {
-  const named = new Map<string, WorkflowEntry[]>();
   for (const wf of workflows) {
+    if (wf.builtin) continue;
     const api = apiNameOf(wf.name);
-    named.set(api, [...(named.get(api) ?? []), wf]);
-  }
-  for (const [api, entries] of named) {
-    for (const wf of entries) {
-      if (wf.builtin) continue;
-      const others = entries.filter((other) => other !== wf).map((other) => `"${other.name}"`);
-      const taken = others.length
-        ? `as workflow ${others.join(" and ")} is`
-        : api === DATA_VENDOR
-          ? "which is the collections'"
-          : vendors.has(api)
-            ? `which is the vendor ${api}'s operations`
+    const others = workflows.filter((other) => other !== wf && apiNameOf(other.name) === api);
+    const taken = others.length
+      ? `as workflow ${others.map((other) => `"${other.name}"`).join(" and ")} is`
+      : api === DATA_VENDOR
+        ? "which is the collections'"
+        : vendors.has(api)
+          ? `which is the vendor ${api}'s operations`
+          : api === "then"
+            ? "which a promise would take for its own"
             : undefined;
-      if (taken) {
-        wf.problems.push({ line: 1, column: 1, message: `A site calls this workflow api.${api}, ${taken}: rename it` });
-      }
-    }
+    if (taken)
+      wf.problems.push({ line: 1, column: 1, message: `A site calls this workflow api.${api}, ${taken}: rename it` });
   }
 }
 

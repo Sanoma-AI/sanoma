@@ -1,8 +1,8 @@
 import type { Principal } from "@sanoma-ai/workflows";
+import { parse } from "cookie-es";
 import { isLoopback } from "@sanoma-ai/workflows/shared";
 import { ACTOR_COOKIE, ACTOR_HEADER } from "./api.ts";
 import type { LoginProvider } from "./context.ts";
-import { cookies } from "./login/github.ts";
 
 // The loopback login, and the Host names a loopback-only app answers to. Which addresses count
 // as this machine is `isLoopback` in `@sanoma-ai/workflows/shared`, for what startApp listens on
@@ -48,7 +48,8 @@ export function actorFromHeader(request: Request): Principal | undefined {
 }
 
 /** The name in the page's `sanoma_actor` cookie (decoded as it is parsed), as `{ id }`: whom the loopback login takes without a header. */
-export const actorFromCookie = (request: Request): Principal | undefined => named(cookies(request)[ACTOR_COOKIE] ?? "");
+export const actorFromCookie = (request: Request): Principal | undefined =>
+  named(parse(request.headers.get("cookie") ?? "")[ACTOR_COOKIE] ?? "");
 
 const named = (name: string): Principal | undefined => (name.trim() ? { id: name.trim() } : undefined);
 

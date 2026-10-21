@@ -2,6 +2,7 @@
 import "@tanstack/react-start/server-only";
 import { readFile, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import {
   type ApprovalState,
   type DriftReport,
@@ -365,8 +366,9 @@ export const setCredential = ({ client }: AppContext, actor: Principal, { name, 
 export const clearCredential = ({ client }: AppContext, actor: Principal, { name }: ClearCredentialRequest) =>
   client.clearCredential(name, { by: actor.id });
 
-/** The longest a site's `api.<workflow>.result` waits for a run in one request. */
+/** The longest a site's `api.<workflow>.result` waits for a run in one request, and how often it looks. */
 export const RESULT_WAIT_MS = 20_000;
+const RESULT_POLL_MS = 250;
 
 const RunRef = z.object({ runId: z.string().min(1) });
 const ResultRef = RunRef.extend({ waitMs: z.number().int().min(0).optional() });
@@ -381,14 +383,16 @@ const RunsLimit = RunsQuery.pick({ limit: true });
  * Anything else is `invalid_input`.
  */
 export async function callApi(app: AppContext, actor: Principal, { name, input, id }: CallRequest): Promise<unknown> {
-  const { client, description } = app;
-  if (description.ops.some((op) => op.id === name)) {
+  const { client, description, resolved } = app;
+  if (resolved.ops.has(name)) {
     return client.call(name, input ?? {}, { actor, ...(id === undefined ? {} : { id }) });
   }
   const [api, method = "start", ...rest] = name.split(".");
-  const workflow = rest.length ? undefined : description.workflows.find((wf) => apiNameOf(wf.name) === api)?.name;
+  // Two workflows of one api name (a problem describeConfig reports) are neither.
+  const named = rest.length ? [] : description.workflows.filter((wf) => apiNameOf(wf.name) === api);
+  const workflow = named.length === 1 ? named[0]!.name : undefined;
   if (!workflow) throw notCallable(name);
-  const read = <T extends z.ZodType>(schema: T) => parse(schema, input, "The input");
+  const read = <T extends z.ZodType>(schema: T) => parse(schema, input ?? {}, "The input");
   switch (method) {
     case "start": {
       const options = { startedBy: actor, ...(id === undefined ? {} : { runId: id }) };
@@ -396,13 +400,21 @@ export async function callApi(app: AppContext, actor: Principal, { name, input, 
     }
     case "result": {
       const { runId, waitMs = RESULT_WAIT_MS } = read(ResultRef);
-      await runOf(app, workflow, runId);
-      return client.result(runId, Math.min(waitMs, RESULT_WAIT_MS));
+      const until = Date.now() + Math.min(waitMs, RESULT_WAIT_MS);
+      // Its status polled here rather than `client.result`'s wait, whose DBOS poller outlives
+      // the timeout: a page asks again every 20 s while a run waits for days.
+      while (!isEnded((await runOf(app, workflow, runId)).status)) {
+        if (Date.now() >= until) {
+          throw new ApiError(409, { error: `Run ${runId} is still running`, code: "run_running", runId });
+        }
+        await sleep(RESULT_POLL_MS);
+      }
+      return client.result(runId);
     }
     case "latest":
       return client.latest(workflow);
     case "runs":
-      return listRuns(app, { ...parse(RunsLimit, input ?? {}, "The input"), workflow });
+      return listRuns(app, { ...read(RunsLimit), workflow });
     case "approvals":
       return (await runOf(app, workflow, read(RunRef).runId)).approvals;
     case "ledger": {

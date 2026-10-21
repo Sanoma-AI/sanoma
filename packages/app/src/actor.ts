@@ -53,10 +53,14 @@ function watchActor(onChange: () => void) {
 /** How long the name's cookie lasts, as long as storage keeps the name: a year, renewed on each visit. */
 const COOKIE_SECONDS = 60 * 60 * 24 * 365;
 
-/** Keeps the name (or none) in `ACTOR_COOKIE`, URI-encoded, for the server's render. */
+/**
+ * Keeps the name (or none) in `ACTOR_COOKIE`, URI-encoded, for the server's render. Strict: a page
+ * another site sends the browser to renders as nobody, so its loader's `api` calls are refused,
+ * since the loopback login has nothing else to tell that visit apart.
+ */
 function keepInCookie(name: string | null) {
   const value = name ? `${encodeURIComponent(name)}; max-age=${COOKIE_SECONDS}` : "; max-age=0";
-  document.cookie = `${ACTOR_COOKIE}=${value}; path=/; samesite=lax`;
+  document.cookie = `${ACTOR_COOKIE}=${value}; path=/; samesite=strict`;
 }
 
 /** The server, and the browser while it hydrates, have read no name: undefined. */

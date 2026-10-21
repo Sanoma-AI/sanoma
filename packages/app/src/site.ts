@@ -1,9 +1,8 @@
 // What a site imports, as `sanoma/site` (`@sanoma-ai/app/site`): `defineSite`, the route APIs of
 // the app's own TanStack Router, so a site and the app share one router, and `api`, which calls
 // the app's server function. Source, loaded only by Vite in a company's build; browser code,
-// nothing server-side. A route file still imports
-// `createFileRoute` from `@tanstack/react-router` itself: the route generator rewrites its path
-// there, and only there.
+// nothing server-side. A route file still imports `createFileRoute` from `@tanstack/react-router`
+// itself: the route generator rewrites its path there, and only there.
 import type { ComponentType } from "react";
 import { type Api, createApi } from "./api-client.ts";
 import { callFn } from "./functions.ts";

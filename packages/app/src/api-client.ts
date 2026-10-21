@@ -34,10 +34,16 @@ const RUN_READS = new Map<string, (args: unknown[]) => unknown>([
   ["ledger", ([runId]) => ({ runId })],
 ]);
 
+/** A new random id: a UUID, or 32 hex digits where `randomUUID` is missing (a page served over plain HTTP elsewhere than this machine). */
+const newId = (): string =>
+  typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+
 /**
  * An `api` over `transport`: a call on a path sends `{ name: <the path, joined with ".">, input }`.
  * An operation's call, a start, and a workflow called as a function send a new id each time
- * (`crypto.randomUUID()`): a retried request is made once, and a person's next attempt is a new
+ * (`newId`): a retried request is made once, and a person's next attempt is a new
  * call, since a failed write's id is spent. A workflow called as a function starts it, then asks
  * for its result until the run has ended (`run_running` in between).
  */
@@ -46,7 +52,7 @@ export function createApi(transport: Transport): Api {
     const name = path.join(".");
     const read = path.length === 2 ? RUN_READS.get(path[1]!) : undefined;
     if (read) return transport({ name, input: read(args) });
-    const started = transport({ name, input: args[0], id: crypto.randomUUID() });
+    const started = transport({ name, input: args[0], id: newId() });
     if (path.length !== 1) return started;
     const { runId } = (await started) as { runId: string };
     for (;;) {
