@@ -3,11 +3,12 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import type { SanomaConfig } from "@sanoma-ai/workflows";
+import { errorMessage, type SanomaConfig } from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { problemLine } from "@sanoma-ai/workflows/shared";
 import { runScenarios } from "@sanoma-ai/workflows/scenarios";
 import type { Loaded } from "./config.ts";
+import { refusedSite, runtimeFrom, siteBuild } from "./sites.ts";
 
 export interface CheckResult {
   ok: boolean;
@@ -35,9 +36,11 @@ const LINTED = ["workflows", "policies", "resources", "sites"];
  * its root; oxlint in the root, with the repo's `.oxlintrc.json` (written when missing, to extend
  * this package's `oxlint.json`), over `workflows/`, `policies/`, `resources/` and `sites/`; every problem
  * `describeConfig` finds in the data files and the workflows' files (the import rules and what
- * the outline cannot draw: what the worker refuses to start with); these three at once, their
- * problems in that order. Then every scenario against the fakes (`runScenarios`), each step that
- * did not hold a problem. `ok` when there are no problems.
+ * the outline cannot draw: what the worker refuses to start with); with sites, their generated
+ * files written first and, beside those three, the app built with them and `tsc -p
+ * sites/tsconfig.json` (`checkSites`). Their problems in the order tsc, the sites' tsc, oxlint,
+ * the config, the sites' build. Then every scenario against the fakes (`runScenarios`), each step
+ * that did not hold a problem. `ok` when there are no problems.
  */
 export async function check(
   { config, root, resolved }: Loaded,
@@ -45,8 +48,16 @@ export async function check(
 ): Promise<CheckResult> {
   // Awaited below when there are scenarios; otherwise its failure is nobody's.
   ready.catch(() => {});
-  const found = await Promise.all([typecheck(root, log), lint(root, log), configProblems(config, root, log)]);
-  const problems = found.flat();
+  // (.sanoma/api.ts is written here, first, once there is one.)
+  const build = await siteBuild(root);
+  build?.writeSiteFiles(root);
+  const [tsc, sites, lints, read] = await Promise.all([
+    typecheck(root, log),
+    build ? checkSites(build, root, log) : { typed: [], built: [] },
+    lint(root, log),
+    configProblems(config, root, log),
+  ]);
+  const problems = [...tsc, ...sites.typed, ...lints, ...read, ...sites.built];
 
   if (resolved.scenarios === undefined) {
     log("no scenarios: the config's root has no `scenarios/` directory");
@@ -57,6 +68,30 @@ export async function check(
     for (const f of failed) problems.push(`${f.scenario} › ${f.step}: ${f.message}`);
   }
   return { ok: problems.length === 0, problems };
+}
+
+/**
+ * The sites: each folder refused for its name, then the app built with the others (`buildApp`,
+ * reused when nothing changed), so two pages claiming one path or a site importing server code is
+ * a problem; then `tsc -p sites/tsconfig.json`, which needs the route tree the build generates
+ * (it gives every `Link` its type), so it runs once there is one.
+ */
+async function checkSites(
+  build: typeof import("@sanoma-ai/app/build"),
+  root: string,
+  log: (line: string) => void,
+): Promise<{ typed: string[]; built: string[] }> {
+  const { sites, refused } = build.sitesOf(root);
+  const built = refused.map(refusedSite);
+  if (!sites.length) return { typed: [], built };
+  log(`build ${sites.join(" ")}`);
+  await build.buildApp(root, { runtimeFrom: runtimeFrom() }).catch((err: unknown) => {
+    built.push(errorMessage(err));
+  });
+  if (!existsSync(join(root, ".sanoma", "app", "routeTree.gen.ts"))) return { typed: [], built };
+  log("tsc sites");
+  const tsc = await run(binOf("typescript"), ["-p", join("sites", "tsconfig.json"), "--pretty", "false"], root);
+  return { typed: tsc.code === 0 ? [] : tscProblems(tsc), built };
 }
 
 /** `tsc -p tsconfig.json` in the root. */

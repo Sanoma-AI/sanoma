@@ -2,6 +2,7 @@ import { dirname } from "node:path";
 import { type AppOptions, githubLogin, startApp } from "@sanoma-ai/app";
 import { errorMessage, isLoopback, SanomaClient, type SanomaConfig, startWorker } from "@sanoma-ai/workflows";
 import { UsageError } from "./config.ts";
+import { runtimeFrom, siteBuild } from "./sites.ts";
 import { localGitSource } from "./source.ts";
 
 export interface Stoppable {
@@ -13,8 +14,11 @@ export interface Served extends Stoppable {
   url: string;
 }
 
-/** The checkout the config was loaded from (`loadConfig` sets its `file`), as the worker's and the app's `source`. */
-const sourceOf = (config: SanomaConfig) => localGitSource(config.root ?? dirname(config.file!));
+/** The checkout the config was loaded from (`loadConfig` sets its `file`). */
+const rootOf = (config: SanomaConfig) => config.root ?? dirname(config.file!);
+
+/** The checkout, as the worker's and the app's `source`. */
+const sourceOf = (config: SanomaConfig) => localGitSource(rootOf(config));
 
 /** Starts the worker, promoted: a local worker is always the version to take queued runs, even one seen before. */
 export async function runWorker(config: SanomaConfig): Promise<Stoppable> {
@@ -22,14 +26,50 @@ export async function runWorker(config: SanomaConfig): Promise<Stoppable> {
   return { stop: () => worker.stop() };
 }
 
-/** Starts the app on `port` (0 for any free port), with the host and login `appOptions` reads; `url` says where. */
-export async function runApp(config: SanomaConfig, { port }: { port: number }): Promise<Served> {
-  return served(config, { port, ...(await appOptions(secretsOf(config))) });
+export interface ServeOptions {
+  /** The app's port: 0 for any free port. */
+  port: number;
+  /** Receives what the sites' build has to say. */
+  log: (line: string) => void;
+}
+
+/** Starts the app on `port`, with the host and login `appOptions` reads, and the sites built; `url` says where. */
+export async function runApp(config: SanomaConfig, options: ServeOptions): Promise<Served> {
+  return served(config, await appStart(config, options));
+}
+
+/** What the app starts with: the port, the host and login `appOptions` reads, and the build it serves (`appBuilt`). */
+async function appStart(config: SanomaConfig, { port, log }: ServeOptions): Promise<AppOptions> {
+  const options = { port, ...(await appOptions(secretsOf(config))) };
+  return { ...options, distDir: await appBuilt(rootOf(config), log) };
 }
 
 async function served(config: SanomaConfig, options: AppOptions): Promise<Served> {
   const app = await startApp(config, { ...options, source: sourceOf(config) });
   return { url: app.url, stop: () => app.close() };
+}
+
+/**
+ * The app the repo serves: with sites, its own build of the app and every site, built into
+ * `.sanoma/app/build/<key>` or reused when the key matches; with none, `undefined`, the build the
+ * app ships. A folder that is not a site for its name is logged and left out.
+ */
+async function appBuilt(root: string, log: (line: string) => void): Promise<string | undefined> {
+  const build = await siteBuild(root);
+  if (!build) return undefined;
+  const { sites, refused } = build.sitesOf(root);
+  if (!sites.length) {
+    // buildApp says the same of each when there is a build to run.
+    for (const name of refused) {
+      log(`sites/${name} is not mounted: a site's folder name is a URL segment (lowercase letters, digits and dashes)`);
+    }
+    return undefined;
+  }
+  const named = `${sites.length} site${sites.length === 1 ? "" : "s"} (${sites.join(", ")})`;
+  log(`building the app with ${named}`);
+  const { distDir, built } = await build.buildApp(root, { log, runtimeFrom: runtimeFrom() });
+  if (!built) log("app build up to date");
+  return distDir;
 }
 
 const GITHUB = ["SANOMA_GITHUB_CLIENT_ID", "SANOMA_GITHUB_CLIENT_SECRET", "SANOMA_GITHUB_REPO"] as const;
@@ -85,10 +125,10 @@ export async function appOptions(readSecrets?: ReadSecrets): Promise<Pick<AppOpt
   }
 }
 
-/** The worker first, then the app, in this process; `stop` stops the app, then the worker. */
-export async function serve(config: SanomaConfig, { port }: { port: number }): Promise<Served> {
-  // Read before the worker starts, so a mistake in the variables starts nothing.
-  const options = { port, ...(await appOptions(secretsOf(config))) };
+/** The sites' build, the worker, then the app, in this process; `stop` stops the app, then the worker. */
+export async function serve(config: SanomaConfig, serveOptions: ServeOptions): Promise<Served> {
+  // Read and built before the worker starts, so a mistake in the variables or a site starts nothing.
+  const options = await appStart(config, serveOptions);
   const worker = await runWorker(config);
   let app: Served;
   try {

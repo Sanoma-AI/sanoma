@@ -15,12 +15,14 @@ const USAGE = `usage: sanoma [command]
 
 Runs the repo in the working directory, from its sanoma.config.ts (after its .env, when there is one).
 
-  sanoma                              the worker and the app; starts Postgres in Docker when nothing answers. In an
-                                      empty directory, first starts a company there: the template, .env, an install
-                                      and a git repository
+  sanoma                              the worker and the app; starts Postgres in Docker when nothing answers, and
+                                      first builds the app with the repo's sites/ when it has any. In an empty
+                                      directory, first starts a company there: the template, .env, an install and a
+                                      git repository
   sanoma worker                       the worker alone, for a deployment
-  sanoma app                          the app alone, for a deployment
-  sanoma check                        typecheck, lint, read the config, run every scenario; exit 1 on a problem
+  sanoma app                          the app alone (built with the sites), for a deployment
+  sanoma check                        typecheck, lint, read the config, build and typecheck the sites, run every
+                                      scenario; exit 1 on a problem
   sanoma env [--check]                write .env.example from the drivers' variables; --check exits 1 when it is out of date
   sanoma ledger export <runId> [--out <file>]
                                       a run's ledger records as JSON lines
@@ -71,7 +73,7 @@ export async function main(argv: string[]): Promise<number> {
     }
     case "app": {
       const { runApp } = await import("./serve.ts");
-      return keep(await load(), (config) => runApp(config, { port: port() }));
+      return keep(await load(), (config) => runApp(config, { port: port(), log }));
     }
     case "check":
       return runCheck();
@@ -132,7 +134,7 @@ async function serveCommand(): Promise<never> {
   const { ensurePostgres } = await import("./postgres.ts");
   await ensurePostgres(databaseUrl, { appName, log });
   const { serve } = await import("./serve.ts");
-  return keep(loaded, (config) => serve(config, { port: port() }));
+  return keep(loaded, (config) => serve(config, { port: port(), log }));
 }
 
 /**
