@@ -183,7 +183,7 @@ describe("the template", () => {
     const logged = checked.stderr.split("\n");
     expect(logged.indexOf("wrote .sanoma/api.ts")).toBeGreaterThan(-1);
     expect(logged.indexOf("wrote .sanoma/api.ts")).toBeLessThan(logged.indexOf("tsc"));
-    expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts"]);
+    expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts", "schema.cedarschema"]);
     expect(readFileSync(join(dir, ".sanoma/api.ts"), "utf8")).toContain("publishPost: WorkflowFn<");
     const current = await runCli(dir, ["env", "--check"], env);
     expect(current.code, current.stderr).toBe(0);

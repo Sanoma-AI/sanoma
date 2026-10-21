@@ -42,8 +42,8 @@ describe("sanoma serve", () => {
       expect([...rows].map(([, name]) => name)).toEqual(["hello"]);
       // On a config without problems: startApp warns about any it finds in the files before it listens.
       expect(output().stderr).not.toContain("the config's files have problems");
-      // No sites: the build the app ships, and nothing written under .sanoma but the generated SDK.
-      expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts"]);
+      // No sites: the build the app ships, and nothing written under .sanoma but the generated files.
+      expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts", "schema.cedarschema"]);
     } finally {
       child.kill("SIGINT");
     }
