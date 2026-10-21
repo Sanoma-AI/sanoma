@@ -33,7 +33,7 @@ import { fill, isBug, seedFrom, shapeOf } from "./fill.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { Driver, Op } from "./op.ts";
 import { type OutlineNode, outlineWorkflow } from "./outline.ts";
-import { admit, readPeople } from "./resources.ts";
+import { admit, type DeclaredPeople, readPeople } from "./resources.ts";
 import { memorySecrets } from "./secret.ts";
 import {
   APPLY_WORKFLOW,
@@ -47,6 +47,7 @@ import {
   groupNamesOf,
   isEnded,
   principalIdsOf,
+  problemLine,
   RUNTIME_AGENTS,
 } from "./shared.ts";
 import type { Call, RunView, Seed } from "./steps.ts";
@@ -388,9 +389,14 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
       throw new Error(`${who} is not a declared person or agent; resources/ declares ${ids}`, { cause: err });
     }
   };
-  /** `group`, a declared group or `agents`. */
+  /** `group`, a declared group or `agents`, while the people's files have no problems. */
   const groupNamed = (group: string) => {
-    const { people } = readPeople(scope.root);
+    const { people, problems } = readPeople(scope.root);
+    if (problems.length) {
+      throw new Error(
+        `no group can be told while the people's files have problems: ${problems.map(problemLine).join("; ")}`,
+      );
+    }
     const groups = groupNamesOf(people);
     if (!declaresPeople(people) || groups.includes(group)) return group;
     throw new Error(`no group "${group}"; resources/ declares ${groups.join(", ")}`);
@@ -723,7 +729,8 @@ function lastCall(records: readonly LedgerRecord[]): CallRecord | string {
 
 /** Every step the scope knows, for an error: the generic ones by keyword, then each operation's phrases and each step library's steps under its name. */
 function knownSteps(rules: Rule[]): string {
-  const keyword = (kind: Rule["kind"]) => (kind === "any" ? "Given/When/Then" : kind[0]!.toUpperCase() + kind.slice(1));
+  const keyword = (kind: Rule["kind"]) =>
+    kind === "any" ? "Given/When/Then" : kind === "actor" ? "Given" : kind[0]!.toUpperCase() + kind.slice(1);
   const line = (r: Rule) => `${keyword(r.kind)} ${r.source}${r.takes ? ` (and ${r.takes})` : ""}`;
   const { generic = [], ...groups } = Object.groupBy(rules, (r) => r.group ?? "generic");
   return [
@@ -1261,18 +1268,22 @@ async function compile(scope: Scope, dir: string, files: string[]): Promise<Load
 }
 
 /**
- * Each scope's scenarios as last read, with the stamp of the files they were read from. By
- * scope, since what a file means depends on its operations and workflows.
+ * Each scope's scenarios as last read, with the stamp of the files they were read from and the
+ * people they were checked against (`readPeople`'s answer, the same object until a data file
+ * changes). By scope, since what a file means depends on its operations and workflows.
  */
-const loadedByScope = new WeakMap<Scope, { stamp: string; loaded: Promise<LoadedScenarios> }>();
+const loadedByScope = new WeakMap<
+  Scope,
+  { stamp: string; people: DeclaredPeople | undefined; loaded: Promise<LoadedScenarios> }
+>();
 
 /**
  * Every scenario in the `.feature` files under `scenarios` (a `file:` URL to a directory),
  * compiled by Cucumber, with an error for each file that does not compile and each name used
  * twice. No directory, or none given, is no scenarios. Rejects when an operation's phrase names
  * a field it lacks. The files are compiled again only once one is added, removed or written
- * (its name, `mtimeMs` or size changes): until then each call returns the same object, which
- * callers must not change.
+ * (its name, `mtimeMs` or size changes), or the people's data files change: until then each
+ * call returns the same object, which callers must not change.
  */
 export async function loadScenarios(scope: Scope): Promise<LoadedScenarios> {
   if (!scope.scenarios) return { scenarios: [], errors: [] };
@@ -1288,10 +1299,12 @@ export async function loadScenarios(scope: Scope): Promise<LoadedScenarios> {
       return [file, mtimeMs, size];
     }),
   ]);
+  // None without a root, which declares no one.
+  const people = scope.root === undefined ? undefined : readPeople(scope.root);
   const cached = loadedByScope.get(scope);
-  if (cached?.stamp === stamp) return cached.loaded;
+  if (cached?.stamp === stamp && cached.people === people) return cached.loaded;
   const loaded = files.length ? compile(scope, dir, files) : Promise.resolve({ scenarios: [], errors: [] });
-  loadedByScope.set(scope, { stamp, loaded });
+  loadedByScope.set(scope, { stamp, people, loaded });
   // A compile that throws (a bug) is not kept: the next call tries again.
   loaded.catch(() => {
     if (loadedByScope.get(scope)?.loaded === loaded) loadedByScope.delete(scope);

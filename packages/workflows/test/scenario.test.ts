@@ -1449,6 +1449,13 @@ describe("people in a scenario: who is acting, held for a group, denied with a r
     await expect(
       parseFeature(scenarioOf("    Given scenarios is acting\n    When refund runs\n"), "x.feature", broken),
     ).resolves.toMatchObject([{ startedBy: "scenarios" }]);
+    await expect(
+      parseFeature(
+        scenarioOf('    When refund runs\n    Then shop.refunds.create was held for group "finance"\n'),
+        "x.feature",
+        broken,
+      ),
+    ).rejects.toThrow(/^x\.feature:4: no group can be told while the people's files have problems: /);
   });
 
   it("takes any id, and any group, while the data files declare no one", async () => {

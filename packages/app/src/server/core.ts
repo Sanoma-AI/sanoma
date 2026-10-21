@@ -264,11 +264,7 @@ export async function startRun(
       throw noSuch("scenario", `No scenario named "${body.scenario}"${known}${notLoaded(errors)}`);
     }
     return {
-      // As whoever the scenario says is acting, else the person starting it: a sandbox run calls fakes alone.
-      runId: await client.start(workflow, scenario.input, {
-        startedBy: scenario.startedBy ?? actor,
-        sandbox: scenario.name,
-      }),
+      runId: await client.start(workflow, scenario.input, { startedBy: actor, sandbox: scenario.name }),
       workflow: scenario.workflow,
     };
   }
@@ -380,7 +376,7 @@ export function preview(
  */
 const ACTS_FOR = "whom it acts for";
 
-/** Each app's grid, by its resolved config: the policy and the people cannot change while it runs. */
+/** Each app's grid, by its resolved config: built from the policy and the description, both read once as the app starts. */
 const grids = new WeakMap<object, PermissionsResponse>();
 
 /**

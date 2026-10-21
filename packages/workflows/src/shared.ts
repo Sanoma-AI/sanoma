@@ -222,9 +222,7 @@ export const personsOf = (resources: readonly PeopleResource[]): PersonFields[] 
 
 /** The ids of the declared people and agents (not the runtime's own). */
 export const principalIdsOf = (resources: readonly PeopleResource[]): string[] =>
-  [...peopleOfType<PersonFields>(resources, "person"), ...peopleOfType<AgentFields>(resources, "agent")].map(
-    (p) => p.id,
-  );
+  [...personsOf(resources), ...peopleOfType<AgentFields>(resources, "agent")].map((p) => p.id);
 
 /** True when the data files declare a person, agent or group: then only a declared principal is admitted. */
 export const declaresPeople = (resources: readonly PeopleResource[]): boolean =>
@@ -270,7 +268,7 @@ export function personOf(
   login: { email?: string; github?: string; id?: string },
   resources: readonly PeopleResource[],
 ): string | undefined {
-  const people = peopleOfType<PersonFields>(resources, "person");
+  const people = personsOf(resources);
   return (
     people.find((p) => same(p.email, login.email)) ??
     people.find((p) => same(p.github, login.github)) ??

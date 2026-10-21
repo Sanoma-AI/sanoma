@@ -103,7 +103,7 @@ function Root() {
   const queryClient = useQueryClient();
   const said = server.actor?.id ?? null;
   useEffect(() => {
-    if (!actor.fromServer && actor.actor !== undefined && actor.actor !== said)
+    if (!actor.fromServer && actor.actor && actor.actor !== said)
       void queryClient.invalidateQueries({ queryKey: actorQuery().queryKey });
   }, [actor.fromServer, actor.actor, said, queryClient]);
   // Only these fields: the root's loader data is new on every navigation, a field is not.
