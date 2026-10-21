@@ -17,7 +17,7 @@ import {
   type RunSummary,
   type SanomaError,
 } from "@sanoma-ai/workflows";
-import { AGENTS, apiNameOf, groupNamesOf, WORKFLOW_ACTION } from "@sanoma-ai/workflows/shared";
+import { AGENTS, apiNameOf, groupNamesOf } from "@sanoma-ai/workflows/shared";
 import { type ConfigDescription, type DataValue, formatOptions, setFields } from "@sanoma-ai/workflows/describe";
 import { check, loadScenarios } from "@sanoma-ai/workflows/scenario";
 import { isNotFound, isRedirect, notFound } from "@tanstack/react-router";
@@ -44,6 +44,7 @@ import {
   startRunSchema,
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
+import { previewRequests } from "../lib/preview.ts";
 import { LOOPBACK } from "../loopback.ts";
 
 // What the server functions do. Server-only: each takes the app context that startApp passes
@@ -393,19 +394,15 @@ export function permissions(app: Pick<AppContext, "resolved" | "description">): 
 function gridOf(app: Pick<AppContext, "resolved" | "description">): PermissionsResponse {
   const { description } = app;
   const groups = [null, ...groupNamesOf(description.resources)];
-  const effects = new Map(description.ops.map(({ id, effect }) => [id, effect]));
-  const workflows = description.workflows
-    .filter((w) => !w.builtin)
-    .map(({ name, title, ops }) => ({ name, title, ops: [...new Set(ops)] }));
-  const direct = description.ops
-    .filter((op) => op.direct)
-    .map(({ id }) => id)
-    .toSorted((a, b) => a.localeCompare(b));
-  // Each action asked once, whichever rows show it: each workflow's start, the operations they use, the direct ones.
-  const actions = [
-    ...new Set([...workflows.flatMap(({ name, ops }) => [`${WORKFLOW_ACTION}${name}`, ...ops]), ...direct]),
+  const opsById = new Map(description.ops.map((op) => [op.id, op]));
+  const workflows = description.workflows.filter((w) => !w.builtin);
+  const direct = description.ops.filter((op) => op.direct).toSorted((a, b) => a.id.localeCompare(b.id));
+  // Every row's question, in the grid's order: each workflow's start, then the operations it may
+  // call, as the run form asks them (`previewRequests`); then each direct operation.
+  const requests: PreviewQuery = [
+    ...workflows.flatMap((w) => previewRequests(w, opsById)),
+    ...direct.map(({ id, effect }) => ({ action: { id, effect } })),
   ];
-  const requests: PreviewQuery = actions.map((id) => ({ action: { id, effect: effects.get(id) } }));
   const columns = groups.map((group) =>
     preview(
       app,
@@ -415,20 +412,20 @@ function gridOf(app: Pick<AppContext, "resolved" | "description">): PermissionsR
       requests,
     ),
   );
-  const at = new Map(actions.map((action, i) => [action, i]));
-  const row = (id: string, action = id): PermissionsRow => ({
+  const rows = requests.map(({ action: { id } }, i): PermissionsRow => ({
     id,
-    cells: columns.map((answers) => answers[at.get(action)!]!),
-  });
+    cells: columns.map((answers) => answers[i]!),
+  }));
+  // Each workflow's rows: its start, then one per operation it may call.
+  let at = 0;
   return {
     policy: description.policy,
     groups,
-    workflows: workflows.map(({ name, title, ops }) => ({
-      ...row(name, `${WORKFLOW_ACTION}${name}`),
-      ...(title !== undefined && { title }),
-      ops: ops.map((id) => row(id)),
-    })),
-    ops: direct.map((id) => row(id)),
+    workflows: workflows.map(({ name, title, ops }) => {
+      const [start, ...called] = rows.slice(at, (at += 1 + ops.length));
+      return { ...start!, id: name, ...(title !== undefined && { title }), ops: called };
+    }),
+    ops: rows.slice(at),
   };
 }
 

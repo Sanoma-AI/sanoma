@@ -6,6 +6,7 @@ import { Fragment, useState } from "react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "#/components/ui/sheet.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { PREVIEW_TONE } from "#/lib/tone.ts";
+import { cn } from "#/lib/utils.ts";
 import type { PermissionsResponse, PermissionsRow } from "../api.ts";
 import { Fact, Facts, Nothing, PageHeader, pageTitle, ToneBadge } from "../components/common.tsx";
 import { PolicyFacts } from "../components/panels/permissions-panel.tsx";
@@ -105,8 +106,9 @@ function Rows({
       {rows.map((row) => (
         <Fragment key={row.id}>
           <Line kind={kind} row={row} groups={groups} choose={choose} />
-          {row.ops?.map((op) => (
-            <Line key={op.id} kind="op" row={op} under={row} groups={groups} choose={choose} />
+          {row.ops?.map((op, i) => (
+            // By position: a workflow may list an operation twice, as the run form asks it twice.
+            <Line key={i} kind="op" row={op} under={row} groups={groups} choose={choose} />
           ))}
         </Fragment>
       ))}
@@ -130,7 +132,7 @@ function Line({
 }) {
   return (
     <TableRow>
-      <TableHead scope="row" className={under ? "pl-8 font-normal" : "font-normal"}>
+      <TableHead scope="row" className={cn("font-normal", under && "pl-8")}>
         {kind === "workflow" ? (
           <Link to="/workflows/$name" params={{ name: row.id }} className="hover:underline">
             {row.title ?? row.id}
@@ -146,7 +148,7 @@ function Line({
             <Mark
               cell={cell}
               what={`${row.id}${under ? ` in ${under.id}` : ""} for ${someoneIn(group)}`}
-              open={cell.rule ? () => choose({ kind, row, ...(under && { under }), group, cell }) : undefined}
+              open={cell.rule ? () => choose({ kind, row, under, group, cell }) : undefined}
             />
           </TableCell>
         );
