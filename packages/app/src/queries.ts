@@ -334,12 +334,13 @@ export const runLink = (run: Pick<RunSummary, "runId" | "workflow">) =>
   linkOptions({ to: "/workflows/$name/runs/$id", params: { name: run.workflow, id: run.runId } });
 
 /**
- * Starts a run (or a scenario's sandbox run), then says so, refreshes the lists of runs and opens
- * the run's page. A failure is the caller's to show: the start form puts it on its fields.
+ * Starts a run (or a scenario's sandbox run), then says so, refreshes the lists of runs and,
+ * unless `navigate` is false, opens the run's page. A failure is the caller's to show: the start
+ * form puts it on its fields. The one place the browser starts a run.
  */
-export function useStartRun() {
+export function useStartRun({ navigate = true }: { navigate?: boolean } = {}) {
   const start = useServerFn(startRunFn);
-  const navigate = useNavigate();
+  const go = useNavigate();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (request: StartRunRequest) => start({ data: request }),
@@ -349,7 +350,7 @@ export function useStartRun() {
       );
       // The lists show the new run at once, not at their next poll.
       void queryClient.invalidateQueries({ queryKey: RUNS_KEY });
-      await navigate(runLink(started));
+      if (navigate) await go(runLink(started));
     },
   });
 }

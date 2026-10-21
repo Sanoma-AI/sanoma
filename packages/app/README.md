@@ -67,7 +67,48 @@ function Home() {
 }
 ```
 
-With sites, the sidebar's bar has Sites, linking to the first site's home. Its panel lists each site under its title (its folder's name without one) with its pages, each named by its route's `staticData.crumb` or its path under the site (a page with a path parameter is left out), and a site's page starts its crumbs with the site's title. `@sanoma-ai/app/site` ships as source (`src/site.ts`), compiled by Vite in the company's build; it holds nothing server-side.
+### The kit
+
+A site imports its UI from `@sanoma-ai/app/ui`, the app's own components, so its pages look like the app's (Tailwind's classes and the theme's tokens apply to a site's files too). It is an explicit list, and nothing else of the app is public:
+
+- the shadcn components the app is built from: `Button`, `Input`, `Label`, `Textarea`, `Checkbox`, `NativeSelect`, `Slider`, `Badge`, `Separator`, `Skeleton`, `Spinner`, and the parts of `Field`, `Card`, `Alert`, `Table`, `Tabs`, `Dialog`, `Sheet`, `Popover`, `Tooltip`, `DropdownMenu`, `Empty`, `Item`, `ButtonGroup`, `Collapsible`, `Breadcrumb` and `Avatar`; and sonner's `toast`, shown by the app's toaster;
+- the app's own pieces: `PageHeader`, `Region`, `Facts` and `Fact`, `Tip`, `ButtonLink`, `ToneBadge`, `toneBadge`, `effectBadge`, `StatusDot` (and the `Tone` type), `Notice` and `Nothing`;
+- the hooks `useActor` (who is signed in) and `useDensity` (Compact or not);
+- `RunForm({ workflow })`, the app's start form for a workflow, its fields drawn from the workflow's input schema.
+
+`RunForm` names the workflow with a link to its page, starts a live run, with the server's complaints shown on the fields they name, and once the run starts stays on the page and links to the run, where its graph, ledger and approvals are. A name the config does not have renders a notice saying so.
+
+```tsx
+// sites/launches/routes/index.tsx
+import { createFileRoute } from "@tanstack/react-router";
+import { Fact, Facts, PageHeader, Region, RunForm } from "@sanoma-ai/app/ui";
+
+export const Route = createFileRoute("/sites/launches/")({ component: LaunchDesk });
+
+function LaunchDesk() {
+  return (
+    <>
+      <PageHeader title="Launch desk" />
+      <Region title="How a launch goes">
+        <Facts>
+          <Fact label="Draft">A Ghost post, written from the form below</Fact>
+          <Fact label="Review">marketing-lead approves the launch copy in the Inbox</Fact>
+          <Fact label="Launch">Published at the launch time</Fact>
+        </Facts>
+      </Region>
+      <Region title="Announce a launch">
+        <RunForm workflow="announce" />
+      </Region>
+    </>
+  );
+}
+```
+
+![A site's page in the app: the Sites panel, a Region of Facts and the announce workflow's RunForm](https://github.com/Sanoma-AI/sanoma/raw/main/.github/assets/site.png)
+
+A site's page inside the app's shell: the kit's `Region` and `Facts`, and `RunForm` drawing announce's fields from its schema.
+
+With sites, the sidebar's bar has Sites, linking to the first site's home. Its panel lists each site under its title (its folder's name without one) with its pages, each named by its route's `staticData.crumb` or its path under the site (a page with a path parameter is left out), and a site's page starts its crumbs with the site's title. `@sanoma-ai/app/site` and `@sanoma-ai/app/ui` ship as source (`src/site.ts`, `src/ui.ts`), compiled by Vite in the company's build; they hold nothing server-side (a server function is a fetch in the browser).
 
 ## Screens
 

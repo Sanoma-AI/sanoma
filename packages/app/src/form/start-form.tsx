@@ -20,7 +20,7 @@ import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import { errorMessage } from "@sanoma-ai/workflows/shared";
-import { errorBodyOf, type ScenarioEntry, type StartRunRequest } from "../api.ts";
+import { errorBodyOf, type ScenarioEntry, type StartRunRequest, type StartRunResponse } from "../api.ts";
 import { Notice, TipButton } from "../components/common.tsx";
 import { useStartRun } from "../queries.ts";
 import {
@@ -40,11 +40,20 @@ import {
 const WHOLE = "input";
 
 /**
- * A form for a workflow's input, from its JSON Schema. Starts the run and opens it. With
- * `scenario`, it shows the scenario's input, read-only, and starts a sandbox run of it: the
- * server takes the input from the scenario, not from the form.
+ * A form for a workflow's input, from its JSON Schema. Starts the run and opens it, or, with
+ * `onStarted`, hands it the run and stays. With `scenario`, it shows the scenario's input,
+ * read-only, and starts a sandbox run of it: the server takes the input from the scenario, not
+ * from the form.
  */
-export function StartForm({ workflow, scenario }: { workflow: WorkflowEntry; scenario?: ScenarioEntry }) {
+export function StartForm({
+  workflow,
+  scenario,
+  onStarted,
+}: {
+  workflow: WorkflowEntry;
+  scenario?: ScenarioEntry;
+  onStarted?: (run: StartRunResponse) => void;
+}) {
   const { fields, whole } = useMemo(() => {
     const read = fieldsOf(workflow.input);
     const all: SchemaField[] = read ?? [
@@ -52,7 +61,7 @@ export function StartForm({ workflow, scenario }: { workflow: WorkflowEntry; sce
     ];
     return { fields: all, whole: !read };
   }, [workflow.input]);
-  const form = useStartForm(workflow.name, fields, whole, scenario);
+  const form = useStartForm(workflow.name, fields, whole, scenario, onStarted);
 
   return (
     <form
@@ -90,19 +99,25 @@ export function StartForm({ workflow, scenario }: { workflow: WorkflowEntry; sce
 
 type FormValues = Record<string, any>;
 
-function useStartForm(workflow: string, fields: SchemaField[], whole: boolean, scenario?: ScenarioEntry) {
-  const start = useStartRun();
+function useStartForm(
+  workflow: string,
+  fields: SchemaField[],
+  whole: boolean,
+  scenario?: ScenarioEntry,
+  onStarted?: (run: StartRunResponse) => void,
+) {
+  const start = useStartRun({ navigate: !onStarted });
   const defaultValues = useMemo(() => {
     const input = scenario && (whole ? { [WHOLE]: scenario.input } : scenario.input);
     return initialValues(fields, input) as FormValues;
   }, [fields, whole, scenario]);
   // Starting the run is the validation: the server checks the input against the workflow's zod
   // schema and answers with its issues, which land on the fields they name. Once it has started,
-  // `useStartRun` moves the page on to the run.
+  // `useStartRun` moves the page on to the run, or `onStarted` has it.
   const submit = async (request: StartRunRequest) => {
+    let started: StartRunResponse;
     try {
-      await start.mutateAsync(request);
-      return undefined;
+      started = await start.mutateAsync(request);
     } catch (err) {
       const body = errorBodyOf(err);
       if (!body?.issues?.length) {
@@ -128,6 +143,9 @@ function useStartForm(workflow: string, fields: SchemaField[], whole: boolean, s
           : "The input does not match the workflow's schema";
       return { form: message, fields: byField };
     }
+    // Outside the try: the run has started, so a throw here is not a failure to start it.
+    onStarted?.(started);
+    return undefined;
   };
   return useForm({
     defaultValues,

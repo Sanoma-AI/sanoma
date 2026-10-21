@@ -48,6 +48,12 @@ import announce from "./workflows/announce.ts";
 export default defineConfig({ workflows: [announce], connectors: [withFake(ghost, fakeGhost())], policy: allowAll });
 `;
 
+// The site still's site: its site.ts here, its page the packages/app README's (`writeRepo`).
+const SITE_TS = `import { defineSite } from "sanoma/site";
+
+export default defineSite({ title: "Launch desk" });
+`;
+
 const started = Date.now();
 const say = (line: string) => console.log(`readme:shots ${((Date.now() - started) / 1000).toFixed(0)}s: ${line}`);
 
@@ -135,12 +141,13 @@ try {
     tab: "Ledger",
     fullPage: true,
   });
+  await still(browser, base, "/sites/launches", join(captured, "site.png"), { sidebar: true, fullPage: true });
   say("stills taken; making demo.gif");
   stopIfInterrupted();
   await makeGif(frames, join(captured, "demo.gif"));
   stopIfInterrupted();
-  replaceAssets(captured, ["demo.gif", "workflow.png", "inbox.png", "run.png"]);
-  say("wrote .github/assets: demo.gif, workflow.png, inbox.png, run.png");
+  replaceAssets(captured, ["demo.gif", "workflow.png", "inbox.png", "run.png", "site.png"]);
+  say("wrote .github/assets: demo.gif, workflow.png, inbox.png, run.png, site.png");
 } catch (err) {
   // A signal's handler runs on the event loop: let one that came during a blocking call (a build)
   // run before telling a failure from an interruption. One setImmediate can fire in the same turn,
@@ -252,7 +259,7 @@ async function seedPendingRuns(acme: string): Promise<void> {
   }
 }
 
-/** A company repo named acme: the README's workflow, the config above, and `node_modules` reaching this checkout. */
+/** A company repo named acme: the README's workflow, the config above, the packages/app README's site page, and `node_modules` reaching this checkout. */
 function writeRepo(dir: string): void {
   const readme = readFileSync(join(repo, "README.md"), "utf8").replaceAll("\r\n", "\n");
   const block = /^```ts\n\/\/ workflows\/announce\.ts\n([\s\S]*?)^```$/m.exec(readme);
@@ -260,6 +267,13 @@ function writeRepo(dir: string): void {
   mkdirSync(join(dir, "workflows"), { recursive: true });
   writeFileSync(join(dir, "workflows/announce.ts"), block[1]);
   writeFileSync(join(dir, "sanoma.config.ts"), CONFIG);
+  const appReadme = readFileSync(join(repo, "packages/app/README.md"), "utf8").replaceAll("\r\n", "\n");
+  const page = /^```tsx\n\/\/ sites\/launches\/routes\/index\.tsx\n([\s\S]*?)^```$/m.exec(appReadme);
+  if (!page?.[1])
+    fail("packages/app/README.md has no ```tsx block that starts with `// sites/launches/routes/index.tsx`");
+  mkdirSync(join(dir, "sites/launches/routes"), { recursive: true });
+  writeFileSync(join(dir, "sites/launches/site.ts"), SITE_TS);
+  writeFileSync(join(dir, "sites/launches/routes/index.tsx"), page[1]);
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "acme", private: true, type: "module" }));
   for (const [name, target] of [
     ["sanoma", "packages/sanoma"],

@@ -13,6 +13,7 @@ function Hello() {
         Clicked {count}
       </button>
       <Link to="/workflows">Workflows</Link>
+      <Link to="/sites/hello/run">Greet someone</Link>
     </div>
   );
 }
