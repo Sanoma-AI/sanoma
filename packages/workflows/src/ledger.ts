@@ -86,7 +86,7 @@ export type LedgerRecord = {
   | { type: "approval.decided"; approval: string; decision: "approve" | "reject"; by: string; note?: string }
   /**
    * A `ctx.sleep` began; `until` is when it ends, in ms since the epoch: the time asked for, or
-   * for a duration the time the sleep started plus the duration, as the runtime saw it. Written
+   * for a duration the record's `at` plus the duration, as the runtime saw it. Written
    * for a time already past too, which waits not at all.
    */
   | {

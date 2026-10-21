@@ -1,5 +1,6 @@
 import { DBOS, DBOSClient } from "@dbos-inc/dbos-sdk";
-import { Client, Pool } from "pg";
+import { setTimeout as delay } from "node:timers/promises";
+import { Client, escapeIdentifier, Pool } from "pg";
 import { warn } from "./log.ts";
 import { errorMessage } from "./shared.ts";
 
@@ -44,11 +45,12 @@ const TABLES: readonly [what: string, ddl: string][] = [
 export const pgCode = (err: unknown): string => (err as { code?: unknown } | null)?.code?.toString() ?? "";
 
 /**
- * Postgres's codes for a row type or a table another process made first. Two racing `CREATE TABLE
- * IF NOT EXISTS` both pass the check, and the loser fails on the table's row type in `pg_type`:
- * as a unique violation (23505), or as a duplicate object (42710, "type ... already exists").
+ * Postgres's codes for a database, a row type or a table another process made first. Two racing
+ * `CREATE TABLE IF NOT EXISTS` both pass the check, and the loser fails on the table's row type in
+ * `pg_type`: as a unique violation (23505), or as a duplicate object (42710, "type ... already
+ * exists"). Two racing `CREATE DATABASE` fail as 42P04, or on `pg_database` as 23505.
  */
-const MADE_ALREADY = new Set(["23505", "42P07", "42710"]);
+const MADE_ALREADY = new Set(["23505", "42P04", "42P07", "42710"]);
 
 /** True for the failure of a create that another process won: what was to be made is there. */
 export const madeAlready = (err: unknown): boolean => MADE_ALREADY.has(pgCode(err));
@@ -94,6 +96,9 @@ const IDLE_IN_TRANSACTION_TIMEOUT = "60s";
 /** Postgres's code for a statement the role lacks the privilege for. */
 const INSUFFICIENT_PRIVILEGE = "42501";
 
+/** Postgres's code for a database that is not there (`invalid_catalog_name`). */
+const NO_DATABASE = "3D000";
+
 /** A pool opened on first use, once its database is prepared, and ended by `close`. */
 export interface LazyPool {
   db(): Promise<Pool>;
@@ -138,8 +143,8 @@ const prepared = new Map<string, Promise<void>>();
  * database itself and DBOS's tables when they are not there yet (as a worker's launch makes
  * them; credentials may be set, and a ledger read, before any worker has run), then the
  * credentials, ledger and data tables, and its idle-transaction timeout (`guardIdleTransactions`).
- * Two processes preparing one database both succeed. A
- * preparation that fails is forgotten, so the next call tries again.
+ * Two processes preparing one database both succeed: the second waits for the first
+ * (`lockPreparation`). A preparation that fails is forgotten, so the next call tries again.
  */
 export function prepareDatabase(databaseUrl: string): Promise<void> {
   let preparing = prepared.get(databaseUrl);
@@ -153,33 +158,86 @@ export function prepareDatabase(databaseUrl: string): Promise<void> {
   return preparing;
 }
 
+/** The error a preparation fails with, its cause `err`. */
+const unprepared = (err: unknown): Error =>
+  new Error(`could not prepare the database: ${errorMessage(err)}`, { cause: err });
+
 async function prepare(databaseUrl: string): Promise<void> {
+  const conn = await lockPreparation(databaseUrl).catch((err: unknown) => {
+    throw unprepared(err);
+  });
   try {
-    await DBOS.migrate(databaseUrl);
-  } catch (err) {
-    // The database, or a DBOS table, made by another process meanwhile: it is there.
-    if (!madeAlready(err)) throw new Error(`could not prepare the database: ${errorMessage(err)}`, { cause: err });
-  }
-  const conn = new Client({ connectionString: databaseUrl });
-  await conn.connect();
-  try {
+    await DBOS.migrate(databaseUrl).catch((err: unknown) => {
+      // A DBOS table made meanwhile by a release from before the lock, mid-upgrade: it is there.
+      if (!madeAlready(err)) throw unprepared(err);
+    });
     for (const [what, ddl] of TABLES) await createTable(conn, ddl, what);
     await guardIdleTransactions(conn);
   } finally {
-    await conn.end();
+    // Ending the session releases the lock; a failure to end it must not hide the preparation's.
+    await conn.end().catch(() => undefined);
+  }
+}
+
+/**
+ * A connection to the database at `databaseUrl` (made first when missing) holding the
+ * preparation's session lock until it ends, so a second process waits, then finds everything
+ * made. Racing `DBOS.migrate`s lose to each other in many ways (40P01, XX000), so the race is
+ * prevented rather than each loss forgiven. The lock is polled, never waited for by a blocked
+ * statement: `CREATE INDEX CONCURRENTLY` waits on that statement's snapshot, a deadlock Postgres
+ * cannot see (the lock's holder is this connection, not the migration's).
+ */
+async function lockPreparation(databaseUrl: string): Promise<Client> {
+  const conn = await connect(databaseUrl).catch(async (err: unknown) => {
+    if (pgCode(err) !== NO_DATABASE) throw err;
+    await createDatabase(databaseUrl);
+    return connect(databaseUrl);
+  });
+  try {
+    const ask = "SELECT pg_try_advisory_lock(hashtext('sanoma.prepareDatabase')) AS locked";
+    while (!(await conn.query<{ locked: boolean }>(ask)).rows[0]!.locked) await delay(50);
+    return conn;
+  } catch (err) {
+    await conn.end().catch(() => undefined);
+    throw err;
+  }
+}
+
+async function connect(databaseUrl: string): Promise<Client> {
+  const conn = new Client({ connectionString: databaseUrl, connectionTimeoutMillis: 10_000 });
+  // An error nobody listens for ends the process; the query in flight fails with it.
+  conn.on("error", (err) => warn(`a preparation connection failed: ${errorMessage(err)}`));
+  await conn.connect();
+  return conn;
+}
+
+/**
+ * Makes the database at `databaseUrl` through its server's `postgres` database, as `DBOS.migrate`
+ * would. Another process making it first is no failure.
+ */
+async function createDatabase(databaseUrl: string): Promise<void> {
+  const url = new URL(databaseUrl);
+  const name = decodeURI(url.pathname.slice(1));
+  url.pathname = "/postgres";
+  const admin = await connect(url.toString());
+  try {
+    await admin.query(`CREATE DATABASE ${escapeIdentifier(name)}`);
+  } catch (err) {
+    if (!madeAlready(err)) throw err;
+  } finally {
+    await admin.end();
   }
 }
 
 /**
  * Sets `idle_in_transaction_session_timeout` on the database, for each session that starts after,
  * as DBOS would per connection (`DBOS_DATABASE_OPTIONS`), unless the server, the role or the
- * database sets it already. One process at a time (an advisory lock), so two preparing at once
- * both succeed. A role that may not alter the database leaves it, quietly: its administrator decides.
+ * database sets it already. `db` holds the preparation's lock, so one process at a time. A role
+ * that may not alter the database leaves it, quietly: its administrator decides.
  */
 async function guardIdleTransactions(db: Db): Promise<void> {
   try {
     await db.query(`DO $$ BEGIN
-      PERFORM pg_advisory_xact_lock(hashtext('sanoma.idle_in_transaction_session_timeout'));
       IF current_setting('idle_in_transaction_session_timeout') = '0' AND NOT EXISTS (
         SELECT FROM pg_db_role_setting s JOIN pg_database d ON d.oid = s.setdatabase, unnest(s.setconfig) c
         WHERE d.datname = current_database() AND s.setrole = 0 AND c LIKE 'idle_in_transaction_session_timeout=%'
@@ -189,9 +247,7 @@ async function guardIdleTransactions(db: Db): Promise<void> {
       END IF;
     END $$`);
   } catch (err) {
-    if (pgCode(err) !== INSUFFICIENT_PRIVILEGE) {
-      throw new Error(`could not prepare the database: ${errorMessage(err)}`, { cause: err });
-    }
+    if (pgCode(err) !== INSUFFICIENT_PRIVILEGE) throw unprepared(err);
   }
 }
 
