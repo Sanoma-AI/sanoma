@@ -4,6 +4,14 @@ import { pathToFileURL } from "node:url";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { type ApplyDeclared, applyWorkflow } from "./apply.ts";
 import { applySteps } from "./apply-steps.ts";
+import {
+  type Collection,
+  collectionsConnector,
+  collectionsDriver,
+  collectionsFake,
+  isCollection,
+} from "./collection.ts";
+import { lazyPool, type LazyPool } from "./db.ts";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, driftWorkflow } from "./drift.ts";
 import { statusesOf, unconfigured } from "./env.ts";
@@ -24,7 +32,7 @@ import {
 } from "./op.ts";
 import type { Policy } from "./policy.ts";
 import { isChangeOp, type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
-import { APPLY_WORKFLOW, BUILT_IN_WORKFLOWS } from "./shared.ts";
+import { APPLY_WORKFLOW, BUILT_IN_WORKFLOWS, DATA_VENDOR } from "./shared.ts";
 import { sourceDriver, sourceOps } from "./source.ts";
 import type { Steps } from "./steps.ts";
 import { computeVersion } from "./version.ts";
@@ -76,6 +84,11 @@ export interface SanomaConfig {
   scenarios?: never;
   /** The company's own steps for its scenarios (`defineSteps`), besides those its connectors ship. */
   steps?: Steps[];
+  /**
+   * The company's collections (`collection()`): their operations are `data.<name>.<op>`, their
+   * records in the config's database, and in memory for a sandbox run.
+   */
+  collections?: readonly Collection[];
 }
 
 /** A config, checked, with everything a worker, client or app derives from it. */
@@ -90,7 +103,10 @@ export interface ResolvedConfig {
   version: string;
   /** The DBOS queue runs are started on: `sanoma:<appName>`. */
   queueName: string;
-  /** The operations the connectors declare, by id, and the built-in `sanoma.source.resolve` when one declares a host type. */
+  /**
+   * The operations the connectors declare, by id, the built-in `sanoma.source.resolve` when one
+   * declares a host type, and the collections' (`data.<name>.<op>`).
+   */
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id, each guarded by its driver's `env` (`indexDrivers`). */
   drivers: Map<string, DriverFn>;
@@ -107,6 +123,13 @@ export interface ResolvedConfig {
   types: ReadonlyMap<string, Resource>;
   /** The steps scenarios can use besides the generic ones: each connector's (`withSetup`), once each, then the config's own. */
   steps: readonly Steps[];
+  /** The config's collections, by name: their operations are in `ops` and `drivers`, their fake in `fakes`, under `DATA_VENDOR`. */
+  collections: ReadonlyMap<string, Collection>;
+  /**
+   * The pool the collections' driver keeps their records through, when there are any: opened on
+   * its first call, and closed by whoever calls the driver (the worker, when it stops).
+   */
+  dataStore?: LazyPool;
   /**
    * By name; each checked against `ops` and `drivers`. The config's, and the built-ins `drift`
    * (`DRIFT_WORKFLOW`) and `apply` (`APPLY_WORKFLOW`) when its connectors declare resource types.
@@ -162,12 +185,12 @@ export function rootOf(config: Pick<SanomaConfig, "root" | "file">): string | un
 
 /**
  * Checks a config and derives what the runtime needs from it: the drivers and fakes from the
- * connectors' setups (`withSetup`), and from `root`, the app's name (`package.json`) and the
- * scenarios (`scenarios/`). Throws what `startWorker` would refuse, with the same message, so
- * `describeConfig`, `SanomaClient.connect` and the app fail the same way the worker does. It
- * opens nothing and reads no file outside `root`. Each entry
- * point resolves once: the worker and the client when they start, the app at `startApp`, the
- * `sanoma` bin when it loads the config.
+ * connectors' setups (`withSetup`), the collections' operations, driver and fake, and from
+ * `root`, the app's name (`package.json`) and the scenarios (`scenarios/`). Throws what
+ * `startWorker` would refuse, with the same message, so `describeConfig`, `SanomaClient.connect`
+ * and the app fail the same way the worker does. It opens nothing and reads no file outside
+ * `root`. Each entry point resolves once: the worker and the client when they start, the app at
+ * `startApp`, the `sanoma` bin when it loads the config.
  */
 export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   if (!Array.isArray(config.connectors)) {
@@ -185,6 +208,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     throw new Error(
       "The config's `drivers` and `fakes` are gone: each connector carries its driver and its fake; leave them out",
     );
+  const collections = collectionsOf(config);
   const ledger = ledgerOf(config);
   const root = rootOf(config);
   const appName = appNameAt(root);
@@ -192,10 +216,26 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const types = resourceTypesOf(config.connectors);
   // Built-in: `sanoma.source.resolve`, which apply and drift call for a host's revision.
   const hosts = [...types.values()].some((type) => type.host);
-  const ops = indexConnectors([...config.connectors, ...(hosts ? [sourceOps] : [])]);
+  // Built-in: the collections' operations, `data.<name>.<op>`, on the config's database.
+  const databaseUrl = resolveDatabaseUrl(config);
+  const declared = [...collections.values()];
+  const dataStore = declared.length ? lazyPool(databaseUrl, "data") : undefined;
+  const ops = indexConnectors([
+    ...config.connectors,
+    ...(hosts ? [sourceOps] : []),
+    ...(dataStore ? [collectionsConnector(declared)] : []),
+  ]);
   const driversByVendor = new Map([...makersOf(config.connectors, "driver")].map(([vendor, make]) => [vendor, make()]));
-  const drivers = indexDrivers([...driversByVendor.values(), ...(hosts ? [sourceDriver] : [])], ops);
+  const drivers = indexDrivers(
+    [
+      ...driversByVendor.values(),
+      ...(hosts ? [sourceDriver] : []),
+      ...(dataStore ? [collectionsDriver(declared, dataStore)] : []),
+    ],
+    ops,
+  );
   const fakes = makersOf(config.connectors, "fake");
+  if (dataStore) fakes.set(DATA_VENDOR, () => collectionsFake(declared));
   const names = new Map<string, WorkflowDefinition<any, any>>();
   for (const wf of config.workflows) {
     if (BUILT_IN_WORKFLOWS.has(wf.name)) {
@@ -221,7 +261,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   }
   return {
     appName,
-    databaseUrl: resolveDatabaseUrl(config),
+    databaseUrl,
     // The built-in's code and operations are part of the app's version, like the config's own.
     version: computeVersion({ appName, workflows: [...names.values()] }),
     queueName: `sanoma:${appName}`,
@@ -232,11 +272,37 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     ...(scenarios && { scenarios }),
     types,
     steps: [...new Set([...config.connectors.flatMap((c) => setupOf(c).steps ?? []), ...(config.steps ?? [])])],
+    collections,
+    ...(dataStore && { dataStore }),
     workflows: names,
     policy: config.policy,
     ...(ledger !== undefined && { ledger }),
     ...(root !== undefined && { root }),
   };
+}
+
+/**
+ * The config's collections by name, checked: each one `collection()` made, no two with one name,
+ * and no connector of their vendor, `DATA_VENDOR`.
+ */
+function collectionsOf(config: SanomaConfig): Map<string, Collection> {
+  const list: unknown = config.collections ?? [];
+  if (!Array.isArray(list)) {
+    throw new Error("The config's `collections` must be an array of the collections `collection()` declares");
+  }
+  if (config.connectors.some((c) => c[VENDOR].id === DATA_VENDOR)) {
+    throw new Error(
+      `A connector in \`connectors\` is of the vendor "${DATA_VENDOR}", which the collections' operations are of; name it otherwise`,
+    );
+  }
+  const collections = new Map<string, Collection>();
+  for (const c of list) {
+    if (!isCollection(c)) throw new Error("`collections` holds something `collection()` did not make");
+    const other = collections.get(c.name);
+    if (other && other !== c) throw new Error(`Two collections are named "${c.name}"; name each once`);
+    collections.set(c.name, c);
+  }
+  return collections;
 }
 
 /**

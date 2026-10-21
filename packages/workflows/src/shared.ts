@@ -37,6 +37,40 @@ export const DRIFT_WORKFLOW = "drift";
  */
 export const APPLY_WORKFLOW = "apply";
 
+/**
+ * The vendor of the collections' operations, `data.<collection>.<op>`: a collection's `get`,
+ * `list`, `save` and `delete`. No connector may take it.
+ */
+export const DATA_VENDOR = "data";
+
+/**
+ * A record of a collection as `get`, `list` and `save` answer it: its key, the record, and when
+ * and by whom it was last saved (`updatedBy`: a person's id, or `run:<id>` for a run). A record
+ * saved under an older declaration comes back as it is stored, with `issues` saying where the
+ * fields no longer accept it.
+ */
+export type Saved<R = Record<string, unknown>> = {
+  key: string;
+  record: R;
+  /** ISO 8601. */
+  updatedAt: string;
+  updatedBy: string;
+  issues?: { path: (string | number)[]; message: string }[];
+};
+
+/**
+ * What a collection's `list` takes: fields equal to a value or within a range (`where`), the
+ * field to sort by (`-field` for descending; by key otherwise), and how many at most (1 to
+ * 1000, default 100).
+ */
+export type ListQuery<R> = {
+  where?: { [F in keyof R]?: Exclude<R[F], undefined> | Range<Exclude<R[F], undefined>> };
+  order?: (keyof R & string) | `-${keyof R & string}`;
+  limit?: number;
+};
+
+type Range<V> = { gt?: V; gte?: V; lt?: V; lte?: V };
+
 /** The workflows the runtime adds itself, which a config's own may not be named: drift and apply. */
 export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([DRIFT_WORKFLOW, APPLY_WORKFLOW]);
 

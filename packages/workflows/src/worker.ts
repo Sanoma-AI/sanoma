@@ -72,6 +72,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     ...(resolved.scenarios && { scenarios: resolved.scenarios }),
     ...(options.source && { source: options.source }),
     types: resolved.types,
+    collections: resolved.collections,
     steps: resolved.steps,
     policy: resolved.policy,
     ledger: ledger.store,
@@ -94,6 +95,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
         () => credentials.close(),
         () => secrets.close(),
         () => ledger.close(),
+        async () => resolved.dataStore?.close(),
       ]) {
         await close().catch((error: unknown) => (failed ??= { error }));
       }

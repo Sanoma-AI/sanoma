@@ -11,6 +11,7 @@ import {
   type SanomaConfig,
   withSetup,
 } from "../src/index.ts";
+import { collection, type RecordOf, type Saved } from "../src/data.ts";
 
 // These assertions are checked by `pnpm typecheck`; the runtime test only keeps vitest happy.
 const shop = defineConnector("shop", {
@@ -150,6 +151,61 @@ export const stale: SanomaConfig[] = [
   // @ts-expect-error the scenarios are <root>/scenarios/
   { workflows: [], connectors: [], policy: allowAll, scenarios: new URL("file:///srv/acme/scenarios/") },
 ];
+
+// A collection's records are typed by its fields; its operations by the record.
+const deals = collection({
+  name: "deals",
+  key: "id",
+  fields: {
+    id: "text",
+    amount: "number",
+    open: "boolean",
+    closes: "date",
+    owner: "person",
+    stage: { enum: ["new", "won"] },
+    note: { type: "text", optional: true },
+  },
+});
+type Deal = RecordOf<typeof deals.fields>;
+const deal: Deal = { id: "d1", amount: 10, open: true, closes: "2026-10-20", owner: "leon", stage: "won" };
+export const typed: [Deal, Saved<Deal>["record"]] = [deal, { ...deal, note: "renewal" }];
+export const wrongDeals: Deal[] = [
+  // @ts-expect-error an enum field takes one of its strings
+  { ...deal, stage: "lost" },
+  // @ts-expect-error a number field takes a number
+  { ...deal, amount: "10" },
+  // @ts-expect-error a required field is required
+  { id: "d2", amount: 1, open: false, closes: "2026-10-20", owner: "leon" },
+];
+// @ts-expect-error the key is a required text field: not a number
+export const numberKey = () => collection({ name: "x", key: "n", fields: { n: "number" } });
+// @ts-expect-error the key is a required text field: not an optional one
+export const optionalKey = () => collection({ name: "x", key: "t", fields: { t: { type: "text", optional: true } } });
+export const dealsFlow = defineWorkflow({
+  name: "deals-flow",
+  trigger: "manual",
+  input: z.object({ id: z.string() }),
+  uses: [deals.get, deals.list, deals.save],
+  run: async (ctx, { id }) => {
+    const found: Saved<Deal> | null = await ctx.data.deals.get({ key: id });
+    const open = await ctx.data.deals.list({ where: { open: true, amount: { gte: 5 } }, order: "-closes", limit: 10 });
+    const amounts: number[] = open.map((s) => s.record.amount);
+    // @ts-expect-error a filter names a field the collection has
+    await ctx.data.deals.list({ where: { total: 5 } });
+    // @ts-expect-error an order names a field, or a field with a minus
+    await ctx.data.deals.list({ order: "+closes" });
+    // @ts-expect-error delete is not in `uses`
+    await ctx.data.deals.delete({ key: id });
+    if (found) await ctx.data.deals.save({ record: { ...found.record, stage: "won" } });
+    return amounts;
+  },
+});
+export const withCollections: SanomaConfig = {
+  workflows: [dealsFlow],
+  connectors: [],
+  policy: allowAll,
+  collections: [deals],
+};
 
 describe("types", () => {
   it("keys a driver's operations by resource and name", () => {

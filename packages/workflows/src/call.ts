@@ -370,6 +370,7 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed) {
           opId: op.id,
           attempt,
           secrets,
+          by: `run:${run.id}`,
         };
         // A live driver's `env` is checked here, inside the step, by the guard `indexDrivers` put
         // on its function: the refusal is the call's failure, recorded and never retried.

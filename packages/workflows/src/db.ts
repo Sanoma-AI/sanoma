@@ -3,9 +3,10 @@ import { Client, Pool } from "pg";
 import { warn } from "./log.ts";
 import { errorMessage } from "./shared.ts";
 
-// The runtime's own tables live in the config's database, beside DBOS's: the credentials and the
-// ledger. What they share is here: the one preparation of a database, a pool that opens once it
-// is prepared and survives a dropped connection, and a table creation two processes may race.
+// The runtime's own tables live in the config's database, beside DBOS's: the credentials, the
+// ledger and the collections' records. What they share is here: the one preparation of a
+// database, a pool that opens once it is prepared and survives a dropped connection, and a table
+// creation two processes may race.
 
 /** A connection or a pool: what the queries take. */
 export type Db = Pick<Pool | Client, "query">;
@@ -14,6 +15,8 @@ export type Db = Pick<Pool | Client, "query">;
 export const CREDENTIALS_TABLE = "sanoma_credentials";
 /** Where the Postgres ledger keeps its records. */
 export const LEDGER_TABLE = "sanoma_ledger";
+/** Where the collections keep their records (`collection.ts`): one row per collection and key, the record as JSON. */
+export const DATA_TABLE = "sanoma_data";
 
 /** The runtime's tables, each with the word the messages name it by. */
 const TABLES: readonly [what: string, ddl: string][] = [
@@ -30,13 +33,22 @@ const TABLES: readonly [what: string, ddl: string][] = [
       `run_id text NOT NULL, seq integer NOT NULL, record jsonb NOT NULL); ` +
       `CREATE INDEX IF NOT EXISTS ${LEDGER_TABLE}_run_seq ON ${LEDGER_TABLE} (run_id, seq, n)`,
   ],
+  [
+    "data",
+    `CREATE TABLE IF NOT EXISTS ${DATA_TABLE} (collection text NOT NULL, key text NOT NULL, record jsonb NOT NULL, ` +
+      "updated_at timestamptz NOT NULL DEFAULT now(), updated_by text NOT NULL, PRIMARY KEY (collection, key))",
+  ],
 ];
 
 /** The Postgres error code of `err`, or an empty string when it has none. */
 export const pgCode = (err: unknown): string => (err as { code?: unknown } | null)?.code?.toString() ?? "";
 
-/** Postgres's codes for a row type or a table another process made first. */
-const MADE_ALREADY = new Set(["23505", "42P07"]);
+/**
+ * Postgres's codes for a row type or a table another process made first. Two racing `CREATE TABLE
+ * IF NOT EXISTS` both pass the check, and the loser fails on the table's row type in `pg_type`:
+ * as a unique violation (23505), or as a duplicate object (42710, "type ... already exists").
+ */
+const MADE_ALREADY = new Set(["23505", "42P07", "42710"]);
 
 /** True for the failure of a create that another process won: what was to be made is there. */
 export const madeAlready = (err: unknown): boolean => MADE_ALREADY.has(pgCode(err));
@@ -125,7 +137,7 @@ const prepared = new Map<string, Promise<void>>();
  * Makes the database at `databaseUrl` ready for the runtime, once per process and URL: the
  * database itself and DBOS's tables when they are not there yet (as a worker's launch makes
  * them; credentials may be set, and a ledger read, before any worker has run), then the
- * credentials and ledger tables, and its idle-transaction timeout (`guardIdleTransactions`).
+ * credentials, ledger and data tables, and its idle-transaction timeout (`guardIdleTransactions`).
  * Two processes preparing one database both succeed. A
  * preparation that fails is forgotten, so the next call tries again.
  */
