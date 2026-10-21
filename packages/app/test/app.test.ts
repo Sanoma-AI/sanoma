@@ -1648,7 +1648,9 @@ describe("an app configured otherwise", () => {
       // The user menu's trigger: the deployment's name for you, and whose name it is. Nothing
       // asks for a name or says one is kept here (the menu, with no "Change name" either,
       // renders only once opened).
-      expect(html).toMatch(/>sso-user<\/span><span[^>]*>Signed in by the deployment<\/span>/);
+      expect(html).toMatch(
+        />sso-user<\/span><span[^>]*>, marketing<\/span><span[^>]*>Signed in by the deployment<\/span>/,
+      );
       expect(html).not.toContain("Who are you?");
       expect(html).not.toContain("Name kept in this browser");
     });

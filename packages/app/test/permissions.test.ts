@@ -1,0 +1,233 @@
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { ensureBuilt, testDatabaseUrl, withFake } from "@sanoma-ai/testing";
+import { useTestApp } from "@sanoma-ai/testing/harness";
+import {
+  allow,
+  allowAll,
+  cedarPolicy,
+  defineConnector,
+  definePolicy,
+  defineWorkflow,
+  loadPolicies,
+  type Policy,
+  resolveConfig,
+  type SanomaConfig,
+} from "@sanoma-ai/workflows";
+import { describeConfig, readPeople } from "@sanoma-ai/workflows/describe";
+import { personsOf } from "@sanoma-ai/workflows/shared";
+import { defineFake } from "@sanoma-ai/workflows/fake";
+import { executablePath, launch } from "puppeteer-core";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
+import { ACTOR_COOKIE } from "../src/api.ts";
+import { type App, startApp } from "../src/index.ts";
+import { permissions } from "../src/server/core.ts";
+
+// The Permissions page: its grid through the server core (`getPermissions`), the page as the
+// server renders it, and in Chrome the who-are-you picker, the groups under your name and a
+// cell's rule in its sheet. The page needs Postgres (`pnpm db:up`) and the built app; the test in
+// a browser needs Google Chrome, or `CHROME_PATH`, and skips without either.
+
+const appDir = fileURLToPath(new URL("..", import.meta.url));
+
+const shop = defineConnector("shop", {
+  refunds: {
+    create: { effect: "money", input: z.object({ amount: z.number().int() }), output: z.object({ id: z.string() }) },
+    list: { effect: "read", input: z.object({}), output: z.array(z.object({ id: z.string() })) },
+  },
+});
+const fake = defineFake(shop, {
+  initial: () => ({}),
+  ops: () => ({ refunds: { create: async () => ({ id: "re_1" }), list: async () => [] } }),
+});
+const refund = defineWorkflow({
+  name: "refund",
+  title: "Refund",
+  trigger: "manual",
+  input: z.object({ amount: z.number().int() }),
+  uses: [shop.refunds.create],
+  run: async (ctx, { amount }) => ctx.shop.refunds.create({ amount }),
+});
+
+const root = mkdtempSync(join(tmpdir(), "sanoma-permissions-"));
+mkdirSync(join(root, "resources"));
+writeFileSync(
+  join(root, "resources", "people.ts"),
+  `import { sanoma } from "sanoma/resources";
+
+export const ada = sanoma.person({ id: "ada", name: "Ada Lovelace" });
+export const bo = sanoma.person({ id: "bo" });
+export const refundBot = sanoma.agent({ id: "refund-bot", onBehalfOf: bo });
+export const finance = sanoma.group({ name: "finance", members: [ada] });
+`,
+);
+afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+// A hold on a start and a deny on a direct read, each for those outside a group.
+const POLICIES = `@hold("finance")
+@title("Refunds need finance")
+forbid (principal, action == Sanoma::Action::"workflow:refund", resource)
+unless { principal in Sanoma::Group::"finance" };
+
+@id("no-agent-reads")
+@reason("Agents read no refunds")
+forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"shop.refunds.list", resource);
+`;
+
+const config: SanomaConfig = { workflows: [refund], connectors: [withFake(shop, fake)], root, policy: allowAll };
+const resolved = resolveConfig(config);
+const cedar = cedarPolicy(
+  resolved,
+  loadPolicies([{ file: "policies/refunds.cedar", text: POLICIES }]).policies,
+  readPeople(root).people,
+);
+
+/** The grid under `policy`, as `getPermissions` answers it. */
+const gridOf = (policy: Policy) =>
+  permissions({ resolved: { ...resolved, policy }, description: describeConfig({ ...config, policy }) });
+
+describe("the Permissions grid", () => {
+  const hold = {
+    answer: "hold",
+    rule: { id: "policies/refunds.cedar#1", file: "policies/refunds.cedar", title: "Refunds need finance" },
+    approver: { group: "finance" },
+  };
+
+  it("asks the policy for someone in no group and in each group, the start of each workflow and each direct operation", () => {
+    const grid = gridOf(cedar);
+    expect(grid).toMatchObject({ policy: { defined: true, kind: "cedar" }, groups: [null, "agents", "finance"] });
+    // Someone in finance is not held: the hold's own approver.
+    expect(grid.workflows).toEqual([{ id: "refund", title: "Refund", cells: [hold, hold, { answer: "allow" }] }]);
+    expect(grid.ops).toEqual([
+      {
+        // A money operation is called only in a run: not a row.
+        id: "shop.refunds.list",
+        cells: [
+          { answer: "allow" },
+          {
+            answer: "deny",
+            rule: { id: "no-agent-reads", file: "policies/refunds.cedar", reason: "Agents read no refunds" },
+          },
+          { answer: "allow" },
+        ],
+      },
+    ]);
+  });
+
+  it("holds an agent for whom it acts for, and refuses everyone else that hold", () => {
+    const onBehalf = cedarPolicy(
+      resolved,
+      loadPolicies([
+        {
+          file: "policies/agents.cedar",
+          text: '@hold("on-behalf-of")\nforbid (principal, action == Sanoma::Action::"shop.refunds.list", resource);\n',
+        },
+      ]).policies,
+      readPeople(root).people,
+    );
+    const rule = { id: "policies/agents.cedar#1", file: "policies/agents.cedar" };
+    expect(gridOf(onBehalf).ops[0]!.cells).toEqual([
+      { answer: "deny", rule },
+      { answer: "hold", rule, approver: "whom it acts for" },
+      { answer: "deny", rule },
+    ]);
+  });
+
+  it("is every cell custom for a function, and allow with no policy", () => {
+    const fn = gridOf(definePolicy(() => allow()));
+    expect(fn.policy).toEqual({ defined: true, kind: "function" });
+    expect([...fn.workflows, ...fn.ops].flatMap((row) => row.cells)).toEqual(
+      Array.from({ length: 6 }, () => ({ answer: "custom" })),
+    );
+    const none = gridOf(allowAll);
+    expect(none.policy.defined).toBe(false);
+    expect([...none.workflows, ...none.ops].flatMap((row) => row.cells)).toEqual(
+      Array.from({ length: 6 }, () => ({ answer: "allow" })),
+    );
+  });
+});
+
+describe("the picker's people", () => {
+  it("are the declared persons, not agents nor groups, with their names; none when no one is declared", () => {
+    expect(personsOf(readPeople(root).people)).toEqual([{ id: "ada", name: "Ada Lovelace" }, { id: "bo" }]);
+    // Then the dialog asks for a name, as it did before people were declared.
+    expect(personsOf([])).toEqual([]);
+  });
+});
+
+describe("the Permissions page", () => {
+  const testApp = useTestApp({ ...config, policy: cedar }, { databaseUrl: testDatabaseUrl("permissions") });
+  let app: App;
+
+  beforeAll(async () => {
+    ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
+    app = await startApp(testApp.config, { port: 0 });
+  }, 120_000);
+
+  afterAll(async () => {
+    await app?.close();
+  });
+
+  it("puts Permissions in the bar, the policy in its panel and header, and a cell per group", async () => {
+    const res = await fetch(new URL("/permissions", app.url), {
+      headers: { cookie: `${ACTOR_COOKIE}=ada` },
+    });
+    expect(res.status).toBe(200);
+    const html = (await res.text()).replaceAll("<!-- -->", "");
+    expect(html).toMatch(/<a [^>]*href="\/permissions"[^>]*>(?:(?!<\/a>)[\s\S])*<span>Permissions<\/span>/);
+    expect(html).toContain(">Permissions</h2>");
+    expect(html).toContain("Cedar, policies/*.cedar");
+    expect(html).toContain(`<code>${cedar.version}</code>`);
+    expect([...html.matchAll(/<th [^>]*scope="col"[^>]*>([^<]*)<\/th>/g)].map(([, name]) => name)).toEqual([
+      "No group",
+      "agents",
+      "finance",
+    ]);
+    expect(html).toContain('aria-label="hold · group finance: the rule for refund for someone in no group"');
+    expect(html).toContain('aria-label="deny: the rule for shop.refunds.list for someone in agents"');
+    expect(html.match(/>allow</g)).toHaveLength(3);
+  });
+
+  it("picks a declared person, shows their groups, and a cell's rule in a sheet, in Chrome", async (ctx) => {
+    const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
+    if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
+    const browser = await launch({ executablePath: chrome, headless: true });
+    try {
+      const tab = await browser.newPage();
+      await tab.setViewport({ width: 1440, height: 900 });
+      await tab.goto(new URL("/permissions", app.url).href, { waitUntil: "networkidle0" });
+      // No name yet: the declared people to choose from, not the agent.
+      const picker = await tab.waitForSelector("select#who-name");
+      expect(await picker!.evaluate((s) => [...s.options].map((o) => [o.value, o.textContent]))).toEqual([
+        ["", "Choose a person"],
+        ["ada", "Ada Lovelace (ada)"],
+        ["bo", "bo"],
+      ]);
+      await tab.select("select#who-name", "ada");
+      await tab.click('[role="dialog"] button[type="submit"]');
+      await tab.waitForFunction(`!document.querySelector("select#who-name")`);
+      // Your groups under your name.
+      await tab.waitForSelector('[data-slot="sidebar-footer"] .sr-only::-p-text(finance)');
+
+      // The sheet's text, once it shows the rule.
+      const sheet = async (rule: string) => {
+        await tab.waitForSelector(`[data-slot="sheet-content"]::-p-text(${rule})`);
+        return (await tab.evaluate(`document.querySelector('[data-slot="sheet-content"]').textContent`)) as string;
+      };
+      await tab.click('button[aria-label="deny: the rule for shop.refunds.list for someone in agents"]');
+      const deny = await sheet("no-agent-reads");
+      expect(deny).toContain("Agents read no refunds");
+      expect(deny).toContain("policies/refunds.cedar");
+      await tab.keyboard.press("Escape");
+      await tab.waitForFunction(`!document.querySelector('[data-slot="sheet-content"]')`);
+
+      await tab.click('button[aria-label="hold · group finance: the rule for refund for someone in agents"]');
+      expect(await sheet("Refunds need finance")).toContain("group finance");
+    } finally {
+      await browser.close();
+    }
+  }, 60_000);
+});

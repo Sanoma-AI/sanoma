@@ -18,21 +18,28 @@ export interface RunScenarioOptions {
   client: SanomaClient;
   /** What the scenario was loaded from (`loadScenarios`), whose feature files its run is checked against: the resolved config. */
   scope: Scope;
-  /** Who starts the run. Defaults to `{ id: "scenarios" }`. */
-  startedBy?: Principal;
+  /**
+   * Who starts the run, by id (`"ada"` or `{ id: "ada" }`), unless the scenario says who is acting.
+   * Defaults to `scenarios`, one of the runtime's own agents.
+   */
+  startedBy?: Principal | string;
   /** How long the run may take, passed to `drive`. */
   timeoutMs?: number;
 }
 
 /**
- * Runs a scenario as a sandbox run: starts its workflow with its input, decides its approvals
- * as it says, and checks the run's ledger against it (`check`: Cucumber runs its `Then` steps).
+ * Runs a scenario as a sandbox run: starts its workflow with its input, as whoever it says is
+ * acting, decides its approvals as it says, and checks the run's ledger against it (`check`:
+ * Cucumber runs its `Then` steps).
  */
 export async function runScenario(
   scenario: Scenario,
-  { client, scope, startedBy = { id: "scenarios" }, timeoutMs }: RunScenarioOptions,
+  { client, scope, startedBy = "scenarios", timeoutMs }: RunScenarioOptions,
 ): Promise<{ runId: string; run: RunSummary; ledger: LedgerRecord[]; checks: Check[] }> {
-  const runId = await client.start(scenario.workflow, scenario.input, { startedBy, sandbox: scenario.name });
+  const runId = await client.start(scenario.workflow, scenario.input, {
+    startedBy: scenario.startedBy ?? startedBy,
+    sandbox: scenario.name,
+  });
   const run = await drive(client, runId, scenario, { timeoutMs });
   const ledger = await client.ledger(runId);
   return { runId, run, ledger, checks: await check(scope, scenario, ledger) };
@@ -49,8 +56,8 @@ export interface ScenarioFailure {
 export interface RunScenariosOptions {
   /** The Postgres the worker and the client run on, instead of the config's: a database of its own. */
   databaseUrl: string;
-  /** Who starts the runs. Defaults to `{ id: "scenarios" }`. */
-  startedBy?: Principal;
+  /** Who starts the runs whose scenario does not say who is acting (`runScenario`'s). */
+  startedBy?: Principal | string;
   /** How long each run may take (`drive`'s; 15 seconds by default). */
   timeoutMs?: number;
   /** Receives a line per scenario as it ends. */

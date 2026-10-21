@@ -208,7 +208,7 @@ export const RUNTIME_AGENTS: readonly string[] = ["scenarios", "host-check", "sc
 const peopleOfType = <T>(resources: readonly PeopleResource[], type: "person" | "agent" | "group") =>
   resources.flatMap((r) => (r.vendor === "sanoma" && r.type === type ? [r.desired as T] : []));
 
-type PersonFields = { id: string; email?: string; github?: string };
+type PersonFields = { id: string; name?: string; email?: string; github?: string };
 type AgentFields = { id: string; onBehalfOf?: string };
 type GroupFields = { name: string; members: string[] };
 
@@ -216,11 +216,13 @@ type GroupFields = { name: string; members: string[] };
 export const groupNamesOf = (resources: readonly PeopleResource[]): string[] =>
   [...new Set([...peopleOfType<GroupFields>(resources, "group").map((g) => g.name), AGENTS])].toSorted();
 
+/** The declared people (`sanoma.person`), in the order declared: not agents, who never sign in. */
+export const personsOf = (resources: readonly PeopleResource[]): PersonFields[] =>
+  peopleOfType<PersonFields>(resources, "person");
+
 /** The ids of the declared people and agents (not the runtime's own). */
 export const principalIdsOf = (resources: readonly PeopleResource[]): string[] =>
-  [...peopleOfType<PersonFields>(resources, "person"), ...peopleOfType<AgentFields>(resources, "agent")].map(
-    (p) => p.id,
-  );
+  [...personsOf(resources), ...peopleOfType<AgentFields>(resources, "agent")].map((p) => p.id);
 
 /** True when the data files declare a person, agent or group: then only a declared principal is admitted. */
 export const declaresPeople = (resources: readonly PeopleResource[]): boolean =>
@@ -266,7 +268,7 @@ export function personOf(
   login: { email?: string; github?: string; id?: string },
   resources: readonly PeopleResource[],
 ): string | undefined {
-  const people = peopleOfType<PersonFields>(resources, "person");
+  const people = personsOf(resources);
   return (
     people.find((p) => same(p.email, login.email)) ??
     people.find((p) => same(p.github, login.github)) ??

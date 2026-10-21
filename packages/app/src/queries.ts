@@ -30,6 +30,7 @@ import {
   getGoLiveChoices,
   getGoLiveProgress,
   getLastRuns,
+  getPermissions,
   getRun,
   getRuns,
   getScenarios,
@@ -437,6 +438,14 @@ export const previewQuery = (actor: string, workflow: string, requests: PreviewQ
   queryOptions({
     queryKey: ["preview", actor, workflow],
     queryFn: () => previewFn({ data: requests }),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+
+/** The Permissions page's grid (`getPermissions`): the policy cannot change while the app runs. */
+export const permissionsQuery = () =>
+  queryOptions({
+    queryKey: ["permissions"],
+    queryFn: () => getPermissions(),
     staleTime: Number.POSITIVE_INFINITY,
   });
 

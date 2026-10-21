@@ -11,6 +11,7 @@ import type {
   Principal,
   RunSummary,
 } from "@sanoma-ai/workflows";
+import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 import type { Check, Scenario } from "@sanoma-ai/workflows/scenario";
 import { EFFECTS, RUN_STATUSES } from "@sanoma-ai/workflows/shared";
 import { z } from "zod";
@@ -322,6 +323,25 @@ export type PreviewQuery = z.infer<typeof PreviewQuery>;
 
 /** The policy's answer to each, in order: `custom` for every one when it cannot be asked ahead (a `definePolicy` function). */
 export type PreviewResult = PreviewAnswer | { answer: "custom" };
+
+/** A row of the Permissions grid: a workflow (its start) or an operation, and the policy's answer for each column. */
+export interface PermissionsRow {
+  id: string;
+  title?: string;
+  cells: PreviewResult[];
+}
+
+/**
+ * The Permissions page's grid (`getPermissions`): the policy, its columns (`null` for someone in
+ * no group, then the declared groups and `agents`, sorted), and a row for each workflow's start
+ * and for each operation a person may call directly, each with a cell per column.
+ */
+export interface PermissionsResponse {
+  policy: ConfigDescription["policy"];
+  groups: (string | null)[];
+  workflows: PermissionsRow[];
+  ops: PermissionsRow[];
+}
 
 /** The `body` of the error a server function fails with. */
 export interface ErrorResponse {

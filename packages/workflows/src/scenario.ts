@@ -13,6 +13,7 @@ import {
 } from "@cucumber/messages";
 import type { z } from "zod";
 import type { RunSummary, SanomaClient } from "./client.ts";
+import type { Approver } from "./define.ts";
 import type { ResolvedConfig } from "./config.ts";
 import {
   buildLibrary,
@@ -25,23 +26,29 @@ import {
   stepResults,
   StepStatus,
 } from "./cucumber.ts";
-import { errorInfo, SanomaError } from "./errors.ts";
+import { errorCode, errorInfo, SanomaError } from "./errors.ts";
 import { type CallRecord, contains, type CoreExpectation, detailOf, isCall } from "./expectations.ts";
 import type { Fake } from "./fake.ts";
 import { fill, isBug, seedFrom, shapeOf } from "./fill.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { Driver, Op } from "./op.ts";
 import { type OutlineNode, outlineWorkflow } from "./outline.ts";
+import { admit, type DeclaredPeople, readPeople } from "./resources.ts";
 import { memorySecrets } from "./secret.ts";
 import {
   APPLY_WORKFLOW,
   BUILT_IN_WORKFLOWS,
   DATA_VENDOR,
+  declaresPeople,
   DRIFT_WORKFLOW,
   errorMessage,
   fitsOp,
   flatten,
+  groupNamesOf,
   isEnded,
+  principalIdsOf,
+  problemLine,
+  RUNTIME_AGENTS,
 } from "./shared.ts";
 import type { Call, RunView, Seed } from "./steps.ts";
 
@@ -99,9 +106,11 @@ export interface Decision {
 /**
  * What the run should do: call an operation (with at least this input) or not, run the step
  * `name`d in the workflow's outline or not, or a number of `times`, have the policy deny an
- * operation (`denied`) or hold one for an approver (`held`), end a certain way, for a drift
- * run, report the resource `declared` (`<file>#<export>`) clean, gone, absent, or drifted in a
- * field, or for an apply run, create it, or leave it bound to an object (`bound`, its vendor's id).
+ * operation (`denied`, for a `reason` when the step names one) or hold one for an approver
+ * (`held`: a person's id or a group's name, or `{ group }` a group's alone), end a certain way,
+ * for a drift run, report the resource `declared` (`<file>#<export>`) clean, gone, absent, or
+ * drifted in a field, or for an apply run, create it, or leave it bound to an object (`bound`,
+ * its vendor's id).
  * A step whose own code checks the run (a connector's or the company's, or an operation's own
  * test's) is `custom`, with what it is about.
  */
@@ -109,8 +118,8 @@ export type Expectation =
   | { step: string; op: string; input?: unknown; called: boolean }
   | { step: string; name: string; input?: unknown; called: boolean }
   | { step: string; name: string; times: number }
-  | { step: string; op: string; decision: "denied" }
-  | { step: string; op: string; decision: "held"; approver: string }
+  | { step: string; op: string; decision: "denied"; reason?: string }
+  | { step: string; op: string; decision: "held"; approver: Approver }
   | { step: string; outcome: "finished" | "failed"; code?: string }
   | { step: string; declared: string; status: "clean" | "gone" | "absent" }
   | { step: string; declared: string; status: "drifted"; field: string }
@@ -133,6 +142,8 @@ export interface Scenario {
   text: string;
   /** Every step in order, for a list and for marking graph nodes. */
   steps: ScenarioStep[];
+  /** Who starts the run, by id, when a `Given <who> is acting` says: a declared person or agent. */
+  startedBy?: string;
   given: Given[];
   input: unknown;
   decisions: Decision[];
@@ -154,9 +165,13 @@ export interface Check {
 
 /**
  * What steps can name: the config's operations, workflows, resource types and collections by id,
- * the steps its connectors (and the company) ship, and where the feature files are.
+ * the steps its connectors (and the company) ship, where the feature files are, and the root
+ * whose data files declare its people.
  */
-export type Scope = Pick<ResolvedConfig, "ops" | "workflows" | "scenarios" | "types" | "collections" | "steps">;
+export type Scope = Pick<
+  ResolvedConfig,
+  "ops" | "workflows" | "scenarios" | "types" | "collections" | "steps" | "root"
+>;
 
 type Kind = ScenarioStep["kind"];
 type Fault = Extract<Seed, { fault: unknown }>["fault"];
@@ -171,9 +186,13 @@ interface Then {
   verify(run: RunView): string | undefined;
 }
 
-/** What a step of each kind reads into; `any` is a decision, which a step of any keyword may make. */
+/**
+ * What a step of each kind reads into; `any` is a decision, which a step of any keyword may make,
+ * and `actor` a `Given` saying who starts the run (`{who} is acting`), by id.
+ */
 interface Items {
   given: Unstepped<Given>[];
+  actor: string;
   when: When;
   then: Then;
   any: Unstepped<Decision>;
@@ -316,7 +335,8 @@ function builtFor(scope: Scope): Built {
     cached.scope.workflows === scope.workflows &&
     cached.scope.types === scope.types &&
     cached.scope.collections === scope.collections &&
-    cached.scope.steps === scope.steps
+    cached.scope.steps === scope.steps &&
+    cached.scope.root === scope.root
   ) {
     return cached;
   }
@@ -356,12 +376,38 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
   ];
   const opOf = (id: unknown) => scope.ops.get(id as string)!;
   const workflowOf = (name: unknown) => scope.workflows.get(name as string)!;
+  // The people as the root's data files declare them when a step names one (`readPeople`, read
+  // again only once a file changed): while they declare no one, any id and any group go.
+  /** `who`, as a run's start admits them (`admit`): a declared person or agent. */
+  const actorNamed = (who: string) => {
+    const declared = readPeople(scope.root);
+    try {
+      return admit({ id: who }, declared).id;
+    } catch (err) {
+      if (errorCode(err) !== "not_admitted" || declared.problems.length) throw err;
+      const ids = [...principalIdsOf(declared.people), ...RUNTIME_AGENTS].join(", ");
+      throw new Error(`${who} is not a declared person or agent; resources/ declares ${ids}`, { cause: err });
+    }
+  };
+  /** `group`, a declared group or `agents`, while the people's files have no problems. */
+  const groupNamed = (group: string) => {
+    const { people, problems } = readPeople(scope.root);
+    if (problems.length) {
+      throw new Error(
+        `no group can be told while the people's files have problems: ${problems.map(problemLine).join("; ")}`,
+      );
+    }
+    const groups = groupNamesOf(people);
+    if (!declaresPeople(people) || groups.includes(group)) return group;
+    throw new Error(`no group "${group}"; resources/ declares ${groups.join(", ")}`);
+  };
   /** A resource step's object: its type's id, vendor and type, and its import id. */
   const object = (id: unknown, name: unknown) => {
     const { vendor, type } = types.get(id as string)!;
     return { resource: id as string, vendor, type, name: name as string };
   };
   const rules: Rule[] = [
+    { kind: "actor", source: "{who} is acting", read: ([who]) => actorNamed(who as string) },
     {
       kind: "given",
       source: "{op} was called with",
@@ -472,8 +518,19 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
     },
     {
       kind: "then",
+      source: "{op} was denied with {string}",
+      read: ([op, reason]) => expecting({ op: op as string, decision: "denied", reason: reason as string }),
+    },
+    {
+      kind: "then",
       source: "{op} was held for {who}",
       read: ([op, who]) => expecting({ op: op as string, decision: "held", approver: who as string }),
+    },
+    {
+      kind: "then",
+      source: "{op} was held for group {string}",
+      read: ([op, group]) =>
+        expecting({ op: op as string, decision: "held", approver: { group: groupNamed(group as string) } }),
     },
     {
       kind: "then",
@@ -672,7 +729,8 @@ function lastCall(records: readonly LedgerRecord[]): CallRecord | string {
 
 /** Every step the scope knows, for an error: the generic ones by keyword, then each operation's phrases and each step library's steps under its name. */
 function knownSteps(rules: Rule[]): string {
-  const keyword = (kind: Rule["kind"]) => (kind === "any" ? "Given/When/Then" : kind[0]!.toUpperCase() + kind.slice(1));
+  const keyword = (kind: Rule["kind"]) =>
+    kind === "any" ? "Given/When/Then" : kind === "actor" ? "Given" : kind[0]!.toUpperCase() + kind.slice(1);
   const line = (r: Rule) => `${keyword(r.kind)} ${r.source}${r.takes ? ` (and ${r.takes})` : ""}`;
   const { generic = [], ...groups } = Object.groupBy(rules, (r) => r.group ?? "generic");
   return [
@@ -826,7 +884,9 @@ const ambiguous = (text: string, sources: string[]) =>
 function ruleFor(built: Built, expression: string, pickle: PickleStep): Rule {
   const kind = pickle.type && KINDS[pickle.type];
   if (!kind) throw new Error(`"${pickle.text}" needs a Given, When or Then before it`);
-  const rules = built.byExpression.get(expression)!.filter((r) => r.kind === kind || r.kind === "any");
+  const rules = built.byExpression
+    .get(expression)!
+    .filter((r) => r.kind === kind || r.kind === "any" || (r.kind === "actor" && kind === "given"));
   if (rules.length === 0) throw new Error(noMatch(built, pickle.text));
   if (rules.length > 1)
     throw new Error(
@@ -859,6 +919,11 @@ function compileWorld(built: Built, specs: Map<string, Spec>) {
         const { text } = pickle;
         const step: ScenarioStep = { text, kind: KINDS[pickle.type!]! };
         switch (rule.kind) {
+          case "actor":
+            if (spec.startedBy !== undefined)
+              throw new Error(`${spec.startedBy} is acting already: a run has one actor`);
+            spec.startedBy = rule.read(args, pickle);
+            break;
           case "given": {
             const items = rule.read(args, pickle);
             spec.given.push(...items.map((item) => ({ step: text, ...item }) as Given));
@@ -1010,6 +1075,8 @@ function testWorld(built: Built, { driver, fake }: FeatureTarget) {
             throw new Error(
               `"${text}" decides an approval: a step for a scenario in scenarios/, not an operation's own test`,
             );
+          case "actor":
+            throw new Error(`"${text}" says who starts a run: a step for a scenario in scenarios/`);
           case "then": {
             const detail = rule.read(args, pickle).verify(viewOf(records));
             if (detail !== undefined) throw new Error(detail);
@@ -1201,18 +1268,22 @@ async function compile(scope: Scope, dir: string, files: string[]): Promise<Load
 }
 
 /**
- * Each scope's scenarios as last read, with the stamp of the files they were read from. By
- * scope, since what a file means depends on its operations and workflows.
+ * Each scope's scenarios as last read, with the stamp of the files they were read from and the
+ * people they were checked against (`readPeople`'s answer, the same object until a data file
+ * changes). By scope, since what a file means depends on its operations and workflows.
  */
-const loadedByScope = new WeakMap<Scope, { stamp: string; loaded: Promise<LoadedScenarios> }>();
+const loadedByScope = new WeakMap<
+  Scope,
+  { stamp: string; people: DeclaredPeople | undefined; loaded: Promise<LoadedScenarios> }
+>();
 
 /**
  * Every scenario in the `.feature` files under `scenarios` (a `file:` URL to a directory),
  * compiled by Cucumber, with an error for each file that does not compile and each name used
  * twice. No directory, or none given, is no scenarios. Rejects when an operation's phrase names
  * a field it lacks. The files are compiled again only once one is added, removed or written
- * (its name, `mtimeMs` or size changes): until then each call returns the same object, which
- * callers must not change.
+ * (its name, `mtimeMs` or size changes), or the people's data files change: until then each
+ * call returns the same object, which callers must not change.
  */
 export async function loadScenarios(scope: Scope): Promise<LoadedScenarios> {
   if (!scope.scenarios) return { scenarios: [], errors: [] };
@@ -1228,10 +1299,12 @@ export async function loadScenarios(scope: Scope): Promise<LoadedScenarios> {
       return [file, mtimeMs, size];
     }),
   ]);
+  // None without a root, which declares no one.
+  const people = scope.root === undefined ? undefined : readPeople(scope.root);
   const cached = loadedByScope.get(scope);
-  if (cached?.stamp === stamp) return cached.loaded;
+  if (cached?.stamp === stamp && cached.people === people) return cached.loaded;
   const loaded = files.length ? compile(scope, dir, files) : Promise.resolve({ scenarios: [], errors: [] });
-  loadedByScope.set(scope, { stamp, loaded });
+  loadedByScope.set(scope, { stamp, people, loaded });
   // A compile that throws (a bug) is not kept: the next call tries again.
   loaded.catch(() => {
     if (loadedByScope.get(scope)?.loaded === loaded) loadedByScope.delete(scope);

@@ -67,8 +67,10 @@ const notRead = () => undefined;
 export interface ActorState {
   /** The name, or null for none; undefined only until the page has read the browser's storage. */
   actor: string | null | undefined;
-  /** The groups the deployment vouches for. None with the default resolver: a typed name has none. */
+  /** The groups you are in, as the server admits you (none for a name it takes as given). */
   groups: readonly string[];
+  /** Whom you act for, when you are a declared agent acting for someone (`onBehalfOf`). */
+  onBehalfOf?: string;
   /** True when the deployment says who you are: the page shows it and cannot change it. */
   fromServer: boolean;
   /** Set when the deployment could not say who you are. */
@@ -89,7 +91,8 @@ export const useActor = () => useContext(ActorContext);
 
 /**
  * The actor state for the root. With a deployment's own resolver, who the server says; else the
- * name in this browser's storage, read once hydrated so hydration matches the server.
+ * name in this browser's storage, read once hydrated so hydration matches the server, with the
+ * groups the server admits it in.
  */
 export function useActorState(server: ActorInfo): ActorState {
   const stored = useSyncExternalStore(watchActor, loadActor, notRead);
@@ -102,15 +105,19 @@ export function useActorState(server: ActorInfo): ActorState {
     return {
       actor: actor?.id ?? null,
       groups: actor?.groups ?? [],
+      ...(actor?.onBehalfOf !== undefined && { onBehalfOf: actor.onBehalfOf }),
       fromServer: true,
       ...(error === undefined ? {} : { error }),
       signOut,
       setActor() {},
     };
   }
+  // The server's answer is about this name until the root asks again for a new one.
+  const admitted = stored && stored === server.actor?.id ? server.actor : undefined;
   return {
     actor: stored,
-    groups: [],
+    groups: admitted?.groups ?? [],
+    ...(admitted?.onBehalfOf !== undefined && { onBehalfOf: admitted.onBehalfOf }),
     fromServer: false,
     setActor: saveActor,
   };

@@ -22,6 +22,7 @@ import {
   fileSource,
   lastRuns,
   listRuns,
+  permissions,
   preview,
   readStartRun,
   runDetail,
@@ -94,6 +95,12 @@ export const previewFn = createServerFn(READ)
   .middleware([withPrincipal])
   .validator(validate(PreviewQuery))
   .handler(({ data, context }) => preview(context.app, context.principal, data));
+
+/**
+ * The Permissions page's grid (`permissions`): what the policy would answer each group, whoever
+ * is asking.
+ */
+export const getPermissions = createServerFn(READ).handler(({ context }) => permissions(context.app));
 
 export const decideFn = createServerFn(CHANGE)
   .middleware([withPrincipal])

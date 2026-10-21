@@ -4,9 +4,19 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, describe, expect, it, onTestFinished, vi } from "vitest";
-import { allowAll, memoryLedger, type SanomaConfig } from "../src/index.ts";
+import { readPeople } from "../src/describe.ts";
+import {
+  allowAll,
+  cedarPolicy,
+  loadPolicies,
+  memoryLedger,
+  readPolicyFiles,
+  resolveConfig,
+  type SanomaConfig,
+} from "../src/index.ts";
 import { runScenarios } from "../src/scenarios.ts";
 import announce from "./fixtures/announce.ts";
+import peopleConfig from "./fixtures/people/sanoma.config.ts";
 import { marketingFakes } from "./harness.ts";
 
 // Needs Postgres (`pnpm db:up`). A root of its own, with the announce scenarios in its
@@ -103,6 +113,23 @@ describe("runScenarios", () => {
   it("passes and fails nothing for a config with no scenarios", async () => {
     await expect(runScenarios({ ...config, root: join(root, "elsewhere") }, { databaseUrl })).resolves.toEqual({
       passed: [],
+      failed: [],
+    });
+  });
+});
+
+describe("runScenarios with people and a Cedar policy", () => {
+  // The people fixture: its policy made from policies/*.cedar, as the launcher makes it.
+  const resolved = resolveConfig(peopleConfig);
+  const policy = cedarPolicy(
+    resolved,
+    loadPolicies(readPolicyFiles(resolved.root!)).policies,
+    readPeople(resolved.root).people,
+  );
+
+  it("starts each run as the person or agent acting, and checks the hold for a group and the denial's reason", async () => {
+    await expect(runScenarios({ ...peopleConfig, policy }, { databaseUrl })).resolves.toEqual({
+      passed: ["A large refund waits for finance", "An agent refunds nothing"],
       failed: [],
     });
   });

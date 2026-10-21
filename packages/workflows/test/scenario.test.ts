@@ -24,6 +24,7 @@ import { check as checkRun, loadScenarios, type Scenario, type Scope } from "../
 import announce from "./fixtures/announce.ts";
 import { companyConfig } from "./fixtures/company/fakes.ts";
 import inspect from "./fixtures/company/workflows/inspect.ts";
+import peopleConfig from "./fixtures/people/sanoma.config.ts";
 import { withFake } from "@sanoma-ai/testing";
 
 // The packages' connectors carry their drivers: announce's operations have one.
@@ -1370,5 +1371,144 @@ describe("Cucumber", () => {
         'x.feature:2: scenario "S" no longer has the expectations it was read with',
       );
     });
+  });
+});
+
+/** A feature with one scenario of these steps. */
+const scenarioOf = (steps: string) => `Feature: R\n  Scenario: S\n${steps}`;
+
+describe("people in a scenario: who is acting, held for a group, denied with a reason", () => {
+  // The people fixture's root declares ada, bo, the agent refund-bot and the group finance.
+  const people = resolveConfig(peopleConfig);
+  const parsePeople = (text: string) => parseFeature(text, "people.feature", people);
+
+  it("reads who starts the run, a hold for a group and a denial's reason", async () => {
+    const text = readFileSync(new URL("./fixtures/people/scenarios/refund.feature", import.meta.url), "utf8");
+    const [held, denied] = await parsePeople(text);
+    expect(held).toMatchObject({
+      startedBy: "bo",
+      expect: [
+        { op: "shop.refunds.create", decision: "held", approver: { group: "finance" } },
+        { op: "shop.refunds.create", called: true },
+        { outcome: "finished" },
+      ],
+    });
+    expect(held!.steps[0]).toEqual({ text: "bo is acting", kind: "given" });
+    expect(held!.given).toEqual([]);
+    expect(denied).toMatchObject({
+      startedBy: "refund-bot",
+      expect: [
+        { op: "shop.refunds.create", decision: "denied", reason: "Agents do not refund" },
+        { outcome: "failed" },
+      ],
+    });
+    expect(denied!.steps[2]).toMatchObject({ op: "shop.refunds.create", decision: "denied" });
+  });
+
+  it("refuses someone, or a group, the data files do not declare, and a second actor", async () => {
+    const thrownBy = async (steps: string) => {
+      try {
+        await parsePeople(scenarioOf(steps));
+      } catch (err) {
+        return (err as Error).message;
+      }
+      throw new Error("expected the feature not to load");
+    };
+    expect(await thrownBy("    Given cy is acting\n    When refund runs\n")).toBe(
+      "people.feature:3: cy is not a declared person or agent; resources/ declares ada, bo, refund-bot, scenarios, host-check, schedule",
+    );
+    expect(await thrownBy('    When refund runs\n    Then shop.refunds.create was held for group "sales"\n')).toBe(
+      'people.feature:4: no group "sales"; resources/ declares agents, finance',
+    );
+    expect(await thrownBy("    Given ada is acting\n    And bo is acting\n    When refund runs\n")).toBe(
+      "people.feature:4: ada is acting already: a run has one actor",
+    );
+    // A runtime agent is always declared, and a group by a person's id is not a group.
+    await expect(
+      parsePeople(scenarioOf("    Given scenarios is acting\n    When refund runs\n")),
+    ).resolves.toMatchObject([{ startedBy: "scenarios" }]);
+    expect(await thrownBy('    When refund runs\n    Then shop.refunds.create was held for group "ada"\n')).toMatch(
+      /no group "ada"/,
+    );
+  });
+
+  it("lets no one but the runtime's agents act while the people's files have problems", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sanoma-people-"));
+    dirs.push(root);
+    mkdirSync(join(root, "resources"));
+    writeFileSync(
+      join(root, "resources", "people.ts"),
+      `import { sanoma } from "@sanoma-ai/workflows/resources";\n\nexport const ada = sanoma.person({ id: "ada" });\nexport const other = sanoma.person({ id: "ada" });\n`,
+    );
+    const broken = { ...people, root };
+    await expect(
+      parseFeature(scenarioOf("    Given ada is acting\n    When refund runs\n"), "x.feature", broken),
+    ).rejects.toThrow(
+      /^x\.feature:3: ada cannot be admitted while the people's files have problems: resources\/people\.ts:4:1: sanoma\.person "ada" is declared twice/,
+    );
+    await expect(
+      parseFeature(scenarioOf("    Given scenarios is acting\n    When refund runs\n"), "x.feature", broken),
+    ).resolves.toMatchObject([{ startedBy: "scenarios" }]);
+    await expect(
+      parseFeature(
+        scenarioOf('    When refund runs\n    Then shop.refunds.create was held for group "finance"\n'),
+        "x.feature",
+        broken,
+      ),
+    ).rejects.toThrow(/^x\.feature:4: no group can be told while the people's files have problems: /);
+  });
+
+  it("takes any id, and any group, while the data files declare no one", async () => {
+    const [s] = await parse(
+      'Feature: A\n  Scenario: S\n    Given whoever is acting\n    When announce runs\n    Then ghost.post.publish was held for group "editors"\n',
+    );
+    expect(s).toMatchObject({
+      startedBy: "whoever",
+      expect: [{ op: "ghost.post.publish", decision: "held", approver: { group: "editors" } }],
+    });
+  });
+
+  it("says who a hold was for when it was not the group, and what a denial said when it was not the reason", () => {
+    const common = { v: 1, app: "a", runId: "r", at: 0, actor: { id: "bo" }, workflow: "refund" } as const;
+    const op = "shop.refunds.create";
+    const called = (seq: number, decision: Extract<LedgerRecord, { type: "op.called" }>["decision"]) =>
+      ({
+        ...common,
+        id: `r:op.called:${seq}`,
+        seq,
+        type: "op.called",
+        op,
+        effect: "money",
+        input: { amount: 1 },
+        decision,
+        durationMs: 1,
+      }) as LedgerRecord;
+    const heldFor = (approver: Extract<LedgerRecord, { type: "approval.requested" }>["approver"]) =>
+      ({
+        ...common,
+        id: "r:approval.requested:1",
+        seq: 1,
+        type: "approval.requested",
+        approval: "approval-1",
+        title: "Refund over 10,000",
+        approver,
+        requestedBy: "policy",
+        op,
+        covers: [op],
+      }) as LedgerRecord;
+    const denied = [called(0, { kind: "deny", reason: "Agents do not refund" })];
+    expect(detailOf({ op, decision: "denied", reason: "Agents do not refund" }, denied)).toBeUndefined();
+    expect(detailOf({ op, decision: "denied" }, denied)).toBeUndefined();
+    expect(detailOf({ op, decision: "denied", reason: "No" }, denied)).toBe(
+      'shop.refunds.create was denied with "Agents do not refund", not "No"',
+    );
+    expect(detailOf({ op, decision: "denied", reason: "No" }, [called(0, { kind: "allow" })])).toBe(
+      "shop.refunds.create was allowed, not denied",
+    );
+    const group = { op, decision: "held", approver: { group: "finance" } } as const;
+    expect(detailOf(group, [heldFor({ group: "finance" })])).toBeUndefined();
+    // A person named like the group is not the group; `held for {who}` takes either.
+    expect(detailOf(group, [heldFor("finance")])).toBe("shop.refunds.create was held for finance, not group finance");
+    expect(detailOf({ op, decision: "held", approver: "finance" }, [heldFor("finance")])).toBeUndefined();
   });
 });

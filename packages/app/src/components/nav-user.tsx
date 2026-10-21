@@ -30,15 +30,15 @@ import { useDensity } from "./density.tsx";
 
 /**
  * Who you are, the theme and the density, at the foot of the sidebar's section bar: your initials,
- * your name and where it comes from read out to assistive tech and shown atop the menu, with Sign
- * out when the login has one. The menu
+ * your name, your groups (and whom you act for, as an agent) and where the name comes from read
+ * out to assistive tech and shown atop the menu, with Sign out when the login has one. The menu
  * renders only once opened, in the browser, so the stored theme never reaches the server's markup.
  * Switching to Compact folds the sidebar's panel once (not on a phone, where it is a sheet);
  * switching back leaves the sidebar as it is.
  */
 export function NavUser() {
   const { isMobile, open, setOpen } = useSidebar();
-  const { actor, fromServer, error, signOut, setActor } = useActor();
+  const { actor, groups, onBehalfOf, fromServer, error, signOut, setActor } = useActor();
   const { theme, setTheme } = useTheme();
   const { compact, setCompact } = useDensity();
   const setDensity = (value: string) => {
@@ -51,6 +51,13 @@ export function NavUser() {
   const status =
     error ?? (actor ? (fromServer ? "Signed in by the deployment" : "Name kept in this browser") : undefined);
   const name = actor ?? (fromServer ? "Not signed in" : "Who are you?");
+  // Under the name, once there is one: the groups, and whom an agent acts for.
+  const member = actor
+    ? [
+        groups.length ? groups.join(", ") : "no groups",
+        ...(onBehalfOf === undefined ? [] : [`for ${onBehalfOf}`]),
+      ].join(" · ")
+    : undefined;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="flex size-10 items-center justify-center rounded-md outline-hidden transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring data-popup-open:bg-sidebar-accent">
@@ -62,6 +69,7 @@ export function NavUser() {
         <span className="sr-only">
           {/* The name in this browser is read after hydration: until then, none. */}
           {(actor !== undefined || fromServer) && <span>{name}</span>}
+          {member && <span>{`, ${member}`}</span>}
           {status && <span>{status}</span>}
         </span>
       </DropdownMenuTrigger>
@@ -69,6 +77,7 @@ export function NavUser() {
         <DropdownMenuGroup>
           <DropdownMenuLabel className="flex flex-col gap-0.5">
             <span className="text-sm text-foreground">{name}</span>
+            {member && <span className="font-normal text-foreground">{member}</span>}
             {status && <span className={cn("font-normal", error && "text-destructive")}>{status}</span>}
           </DropdownMenuLabel>
         </DropdownMenuGroup>
