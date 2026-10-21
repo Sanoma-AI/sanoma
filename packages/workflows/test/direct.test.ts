@@ -9,24 +9,19 @@ import { z } from "zod";
 import { DATA_TABLE, LEDGER_TABLE } from "../src/db.ts";
 import { describeConfig } from "../src/describe.ts";
 import {
-  allow,
-  approve,
   CALL_WORKFLOW,
   defineConnector,
   defineDriver,
-  definePolicy,
   defineWorkflow,
-  deny,
   isDirect,
   type LedgerRecord,
-  type PolicyCall,
   resolveConfig,
   SanomaClient,
   type SanomaConfig,
   withSetup,
 } from "../src/index.ts";
 import { outbound } from "./fixtures/outbound/resources/data.ts";
-import { failure, waitFor } from "./harness.ts";
+import { failure, rootWith, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. Operations called directly (`SanomaClient.call`): a read checked
 // and not recorded, a write recorded with its record in one transaction, a hold made a run of the
@@ -59,21 +54,28 @@ const acmeDriver = defineDriver(acme, {
   },
 });
 
-const seen: PolicyCall[] = [];
 /** Allows, but denies a lead `lost` and holds one `won` for `lead`. */
-const policy = definePolicy((call) => {
-  seen.push(call);
-  const stage = (call.input as { record?: { stage?: string } }).record?.stage;
-  if (stage === "lost") return deny("leads are not lost");
-  if (stage === "won") return approve("lead");
-  return allow();
+const root = rootWith({
+  "policies/policy.cedar": `@reason("leads are not lost")
+forbid (principal, action == Sanoma::Action::"data.outbound.save", resource)
+when { context.input.record.stage == "lost" };
+
+@hold("lead")
+forbid (principal, action == Sanoma::Action::"data.outbound.save", resource)
+when { context.input.record.stage == "won" };
+`,
+  "resources/people.ts": `import { sanoma } from "sanoma/resources";
+
+export const ada = sanoma.person({ id: "ada" });
+export const lead = sanoma.person({ id: "lead" });
+`,
 });
 
 const config: SanomaConfig = {
   workflows: [],
   connectors: [withSetup(acme, { driver: () => acmeDriver })],
   collections: [outbound],
-  policy,
+  root,
 };
 const lead = (company: string, stage = "researched") => ({
   company,
@@ -112,7 +114,6 @@ describe("a direct call", () => {
     await db?.end();
   });
   beforeEach(async () => {
-    seen.length = 0;
     await db.query(`DELETE FROM ${DATA_TABLE} WHERE collection = 'outbound'`);
     await db.query(`DELETE FROM ${LEDGER_TABLE} WHERE run_id LIKE 'direct:%'`);
   });
@@ -145,13 +146,6 @@ describe("a direct call", () => {
       enqueue.mockRestore();
       list.mockRestore();
     }
-    expect(seen[1]).toMatchObject({
-      op: { id: "acme.customer.get" },
-      effect: "read",
-      target: "customer/c1",
-      actor: ada,
-      run: { id: "direct:ada:r1", workflow: "call", approvals: [] },
-    });
     // Only the save is recorded.
     expect((await records()).map((r) => r.id)).toEqual(["direct:ada:seed:op.called:0"]);
   });
@@ -174,13 +168,14 @@ describe("a direct call", () => {
         runId: "direct:ada:w1",
         seq: 0,
         at: expect.any(Number),
-        actor: ada,
+        // Admitted: as the people files declare ada, in no group.
+        actor: { ...ada, groups: [] },
         workflow: "call",
         type: "op.called",
         op: "data.outbound.save",
         effect: "write",
         input: { record: lead("Acme") },
-        decision: { kind: "allow" },
+        decision: { kind: "allow", reasons: ["allow-by-default"], policyVersion: expect.any(String) },
         output: saved,
         durationMs: expect.any(Number),
       },
@@ -212,10 +207,12 @@ describe("a direct call", () => {
   });
 
   it("keeps neither the record nor its ledger record when the ledger cannot store it", async () => {
-    // A NUL in the actor, which only the ledger's record holds, and which Postgres's jsonb refuses.
-    const nul = { id: "ada", groups: ["\u0000"] };
-    const err = await failure(client.call("data.outbound.save", { record: lead("Acme") }, { actor: nul, id: "w4" }));
-    expect(String(err)).toMatch(/Ledger record direct:ada:w4:op.called:0 can't be stored/);
+    // A NUL in the call's id, which only the ledger's row holds (its run id), and which Postgres
+    // refuses; the record was saved before it, in the same transaction.
+    const err = await failure(
+      client.call("data.outbound.save", { record: lead("Acme") }, { actor: ada, id: "w4\u0000" }),
+    );
+    expect(String(err)).toMatch(/invalid byte sequence/);
     expect(await rows()).toEqual([]);
     expect(await records()).toEqual([]);
   });
@@ -287,7 +284,6 @@ describe("a direct call", () => {
     expect(await failure(client.call("acme.customer.get", { id: "c1" }, { actor: { id: "" } }))).toMatchObject({
       code: "invalid_input",
     });
-    expect(seen).toEqual([]);
   });
 
   it("refuses a resource type's operation and the runtime's own", async () => {

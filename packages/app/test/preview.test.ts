@@ -1,17 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  allow,
-  allowAll,
-  cedarPolicy,
-  defineConnector,
-  definePolicy,
-  defineWorkflow,
-  loadPolicies,
-  type Policy,
-  resolveConfig,
-} from "@sanoma-ai/workflows";
+import { allowAll, defineConnector, defineWorkflow, type Policy, resolveConfig } from "@sanoma-ai/workflows";
 import { describeConfig, readPeople } from "@sanoma-ai/workflows/describe";
 import { defineFake } from "@sanoma-ai/workflows/fake";
 import { withFake } from "@sanoma-ai/testing";
@@ -68,14 +58,14 @@ forbid (principal, action in Sanoma::Action::"effect:money", resource)
 unless { principal in Sanoma::Group::"finance" };
 `;
 
+mkdirSync(join(root, "policies"));
+writeFileSync(join(root, "policies", "refunds.cedar"), POLICIES);
+
 const config = { workflows: [refund], connectors: [withFake(shop, fake)], root };
-const resolved = resolveConfig({ ...config });
-const cedar = cedarPolicy(
-  resolved,
-  loadPolicies([{ file: "policies/refunds.cedar", text: POLICIES }]).policies,
-  readPeople(root).people,
-);
-const description = describeConfig({ ...config });
+// The root's policy, made from policies/refunds.cedar.
+const resolved = resolveConfig(config);
+const cedar = resolved.policy;
+const description = describeConfig(config);
 const requests = previewRequests(description.workflows[0]!, new Map(description.ops.map((op) => [op.id, op])));
 
 /** The line the run form shows `who`, named in the loopback login's header, under `policy`. */
@@ -104,14 +94,8 @@ describe("the will-ask line", () => {
     expect(await lineFor(cedar, "ada")).toBeUndefined();
   });
 
-  it("says nothing under allowAll, and that a function policy cannot be asked ahead", async () => {
+  it("says nothing under allowAll", async () => {
     expect(await lineFor(allowAll, "bo")).toBeUndefined();
-    expect(
-      await lineFor(
-        definePolicy(() => allow()),
-        "bo",
-      ),
-    ).toBe("This policy cannot be asked ahead.");
   });
 
   it("says when the input decides, naming the rule", () => {

@@ -1,5 +1,4 @@
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tfConnector } from "@sanoma-ai/bridge/connector";
 import { type BridgeState, stateBridge } from "@sanoma-ai/bridge/fake";
@@ -9,12 +8,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { LOCKFILE, readLockfile, serializeLockfile, writeLockfile } from "../src/describe.ts";
 import {
-  allow,
-  approve,
-  approvedFor,
   type ApplyInput,
   type ApplyReport,
-  definePolicy,
   defineWorkflow,
   type LedgerRecord,
   memoryLedger,
@@ -26,19 +21,26 @@ import {
 } from "../src/index.ts";
 import { companyFakes } from "./fixtures/company/fakes.ts";
 import company from "./fixtures/company/sanoma.config.ts";
-import { pending, waitFor } from "./harness.ts";
+import { pending, rootWith, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. Apply on a copy of a company's data files and lockfile (so the
 // fixture's stay as they are), against fakes: the company's GitHub and Stripe, and Acme, a
 // vendor made here over a `stateBridge` whose sites are replaced when their region changes.
 const alice = { id: "alice" };
-// The policy holds every change of hers for the lead, once per run, as a team would.
 const careful = { id: "careful" };
-const policy = definePolicy((call) =>
-  call.actor.id === careful.id && call.effect === "write" && !approvedFor(call.run.approvals, call.op.id, "lead")
-    ? approve("lead")
-    : allow(),
-);
+// The policy holds every change of careful's for the lead, as a team would; the approval that
+// covers a change lifts the hold for it.
+const POLICY = `@hold("lead")
+forbid (principal == Sanoma::Principal::"careful", action in Sanoma::Action::"effect:write", resource);
+`;
+const PEOPLE = `import { sanoma } from "sanoma/resources";
+
+export const alice = sanoma.person({ id: "alice" });
+export const careful = sanoma.person({ id: "careful" });
+export const lead = sanoma.person({ id: "lead" });
+`;
+/** A root with the policy and the people, for a test to add its data files to. */
+const rootWithPolicy = () => rootWith({ "policies/policy.cedar": POLICY, "resources/people.ts": PEOPLE });
 
 /** A source that records its commits, in a directory of its own. */
 function recordingSource(root: string) {
@@ -60,12 +62,11 @@ const actions = (report: ApplyReport) => report.plan.steps.map((s) => [s.id.repl
 const resultOf = (report: ApplyReport, id: string) => report.results.find((r) => r.id === id);
 
 describe("the apply workflow on the company's resources", () => {
-  const root = mkdtempSync(join(tmpdir(), "sanoma-apply-"));
-  afterAll(() => rmSync(root, { recursive: true, force: true }));
+  const root = rootWithPolicy();
   const fakes = companyFakes();
   const { source, commits } = recordingSource(root);
   const app = useTestApp(
-    { workflows: [], connectors: fakes.connectors, policy, ledger: memoryLedger(), root },
+    { workflows: [], connectors: fakes.connectors, ledger: memoryLedger(), root },
     { databaseUrl: testDatabaseUrl("apply"), source },
   );
 
@@ -77,10 +78,11 @@ describe("the apply workflow on the company's resources", () => {
     basic: "resources/billing/stripe.ts#basic",
     old: "resources/identity/old.ts#old",
   };
-  // The fixture's data files and lockfile, and a repository nobody has made yet.
+  // The fixture's data files and lockfile, the people, and a repository nobody has made yet.
   beforeEach(() => {
     rmSync(join(root, "resources"), { recursive: true, force: true });
     cpSync(join(dirname(company.file!), "resources"), join(root, "resources"), { recursive: true });
+    writeFileSync(join(root, "resources/people.ts"), PEOPLE);
     writeFileSync(
       join(root, "resources/identity/blog.ts"),
       `import { github } from "@sanoma-ai/connector-github/resources";\n\n` +
@@ -363,7 +365,7 @@ const acmeTf = tfConnector({
 });
 
 describe("the apply workflow on a vendor that replaces", () => {
-  const root = mkdtempSync(join(tmpdir(), "sanoma-apply-acme-"));
+  const root = rootWithPolicy();
   const file = join(root, "resources/acme.ts");
   const declare = (region: string) =>
     writeFileSync(
@@ -373,7 +375,6 @@ describe("the apply workflow on a vendor that replaces", () => {
         `export const deploys = acme.hook({ url: "https://example.com/deploys", site_id: web });\n\n` +
         `export default [web, deploys];\n`,
     );
-  mkdirSync(join(root, "resources"));
   declare("eu");
   const token = "token-no-record-may-hold";
   beforeAll(() => {
@@ -381,14 +382,13 @@ describe("the apply workflow on a vendor that replaces", () => {
   });
   afterAll(() => {
     delete process.env.ACME_TOKEN;
-    rmSync(root, { recursive: true, force: true });
   });
   const state: BridgeState = { objects: {} };
   const bridge = stateBridge(state, [], { acme_site: site, acme_hook: hook });
   const acme = withSetup(acmeTf.connector, { driver: () => acmeTf.driver(bridge, () => ({})) });
   const { source, commits } = recordingSource(root);
   const app = useTestApp(
-    { workflows: [], connectors: [acme], policy, ledger: memoryLedger(), root },
+    { workflows: [], connectors: [acme], ledger: memoryLedger(), root },
     { databaseUrl: testDatabaseUrl("apply-acme"), source },
   );
   const web = "resources/acme.ts#web";

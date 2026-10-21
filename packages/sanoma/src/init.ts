@@ -131,8 +131,8 @@ const output = (cmd: string, args: string[]) =>
     () => "",
   );
 
-/** `id`, unless it is empty, the template's editor's, or one of the runtime's own agents': then "founder". */
-const free = (id: string) => (id && id !== "editor" && !RUNTIME_AGENTS.includes(id) ? id : "founder");
+/** `id`, unless it is empty, the template's reviewer's, or one of the runtime's own agents': then "founder". */
+const free = (id: string) => (id && id !== "reviewer" && !RUNTIME_AGENTS.includes(id) ? id : "founder");
 
 /** This machine's user name as one word; empty when the OS names none. */
 function machineUser(): string {

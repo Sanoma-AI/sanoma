@@ -7,26 +7,22 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { describeConfig, writeLockfile } from "../src/describe.ts";
 import {
-  allow,
   APPLY_WORKFLOW,
   defineConnector,
-  definePolicy,
   defineResource,
   defineWorkflow,
-  deny,
   DRIFT_WORKFLOW,
   type DriftReport,
   errorCode,
   type LedgerRecord,
   memoryLedger,
-  type PolicyCall,
   resolveConfig,
   SanomaClient,
 } from "../src/index.ts";
 import { defineFake } from "../src/fake.ts";
-import { companyConfig, companyFakes, nodeIdOf } from "./fixtures/company/fakes.ts";
+import { companyConfig, companyDir, companyFakes, nodeIdOf } from "./fixtures/company/fakes.ts";
 import company from "./fixtures/company/sanoma.config.ts";
-import { useApp, withoutSetup } from "./harness.ts";
+import { rootWith, useApp, withoutSetup } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. The company fixture's data files, checked against the GitHub
 // and Stripe fakes, which hold an object for each declared resource as the vendor would.
@@ -36,14 +32,18 @@ const alice = { id: "alice" };
 const fakes = companyFakes();
 const { github, stripe, declared, seed } = fakes;
 
-const policyCalls: PolicyCall[] = [];
-// Refuses Stripe products to "no-stripe", so one resource fails and the run goes on.
-const policy = definePolicy((call) => {
-  policyCalls.push(call);
-  return call.actor.id === "no-stripe" && call.op.id === "stripe.product.import" ? deny("no Stripe") : allow();
-});
+// The company's data files, with a policy that refuses Stripe products to "no-stripe", so one
+// resource fails and the run goes on.
+const policyRoot = rootWith(
+  {
+    "policies/policy.cedar": `@reason("no Stripe")
+forbid (principal == Sanoma::Principal::"no-stripe", action == Sanoma::Action::"stripe.product.import", resource);
+`,
+  },
+  companyDir,
+);
 // The company's own fakes replace useApp's, the marketing vendors', whose connectors this config replaces.
-const companyOnFakes = companyConfig([], policy, fakes);
+const companyOnFakes = companyConfig([], fakes, policyRoot);
 
 const byId = (report: DriftReport) => Object.fromEntries(report.resources.map((r) => [r.id, r]));
 /** What a check of a resource the vendor holds as declared says: clean when it is bound, else absent. */
@@ -55,7 +55,6 @@ describe("the drift workflow", () => {
 
   beforeEach(() => {
     seed();
-    policyCalls.length = 0;
   });
 
   async function drift(startedBy = alice) {
@@ -121,7 +120,7 @@ describe("the drift workflow", () => {
     ]);
 
     // One vendor call per resource bound or with an identity, by its binding else its identity,
-    // through ctx: the policy saw each as a read, and the ledger has it.
+    // through ctx: the policy allowed each as a read, by its default, and the ledger has it.
     const records = await app.client.ledger(runId);
     const calls = opCalls(records);
     const expected = declared.flatMap((r) => {
@@ -130,8 +129,9 @@ describe("the drift workflow", () => {
     });
     expect(expected).toHaveLength(declared.length - 1);
     expect(calls.map((r) => r.type === "op.called" && [r.op, (r.input as { id: string }).id])).toEqual(expected);
-    expect(calls.every((r) => r.type === "op.called" && r.effect === "read" && r.decision.kind === "allow")).toBe(true);
-    expect(policyCalls.map((c) => [c.op.id, c.effect, c.target])).toEqual(expected.map(([op, id]) => [op, "read", id]));
+    expect(calls.map((r) => r.type === "op.called" && [r.effect, r.decision])).toEqual(
+      expected.map(() => ["read", { kind: "allow", reasons: ["allow-by-default"], policyVersion: expect.any(String) }]),
+    );
     // The gone rule's import answered gone, and the driver's handle is recorded by name only.
     expect(
       calls.find((r) => r.type === "op.called" && (r.input as { id: string }).id === "BPR_website:main"),

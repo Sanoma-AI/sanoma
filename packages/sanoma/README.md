@@ -1,6 +1,6 @@
 # sanoma
 
-One command over a company repo: `sanoma` runs its workflows and the app, `sanoma check` checks it, `sanoma env` writes its `.env.example`, `sanoma ledger export` exports a run. It also carries the surface a workflow or policy imports (`defineWorkflow`, `definePolicy`, the decisions, `defineConfig` and the types), so a repo depends on `sanoma` and its connectors, and writes no `worker.ts`, `app.ts`, compose file or vitest config.
+One command over a company repo: `sanoma` runs its workflows and the app, `sanoma check` checks it, `sanoma env` writes its `.env.example`, `sanoma ledger export` exports a run. It also carries the surface a workflow imports (`defineWorkflow`, `defineConfig` and the types), so a repo depends on `sanoma` and its connectors, and writes no `worker.ts`, `app.ts`, compose file or vitest config.
 
 ## Start a company
 
@@ -9,7 +9,7 @@ mkdir acme && cd acme
 npx sanoma
 ```
 
-In an empty directory (dotfiles aside), `sanoma` starts a company there, then runs it: it copies the template this package ships (`template/`: `sanoma.config.ts`, a `publish-post` workflow with its scenarios, a policy, an empty `resources/` tree, `AGENTS.md`, `.env.example`), names the package after the directory, writes `.env` with the default `SANOMA_DATABASE_URL` and a new `SANOMA_SECRETS_KEY` (keeping what a `.env` there already sets), commits what it wrote (never a dotfile that was already there) as the first commit of a git repository on `main`, "Start a Sanoma company", as your git user, then installs with the package manager that ran it (`npm_config_user_agent`; pnpm when it names none) and adds the lockfile to that commit. The `sanoma` it installed then serves the company. Without git or a git user it stops before writing anything; a failed install leaves the commit, to install and run `sanoma` again in. A directory holding anything else and no `sanoma.config.ts` is refused, as for every command.
+In an empty directory (dotfiles aside), `sanoma` starts a company there, then runs it: it copies the template this package ships (`template/`: `sanoma.config.ts`, a `publish-post` workflow with its scenarios, `policies/policy.cedar`, `resources/people.ts` with you as its first person (your GitHub login as `gh` is signed in, else this machine's user name, named as git's `user.name`), an empty `resources/` tree, `AGENTS.md`, `.env.example`), names the package after the directory, writes `.env` with the default `SANOMA_DATABASE_URL` and a new `SANOMA_SECRETS_KEY` (keeping what a `.env` there already sets), commits what it wrote (never a dotfile that was already there) as the first commit of a git repository on `main`, "Start a Sanoma company", as your git user, then installs with the package manager that ran it (`npm_config_user_agent`; pnpm when it names none) and adds the lockfile to that commit. The `sanoma` it installed then serves the company. Without git or a git user it stops before writing anything; a failed install leaves the commit, to install and run `sanoma` again in. A directory holding anything else and no `sanoma.config.ts` is refused, as for every command.
 
 ## Install
 
@@ -19,12 +19,12 @@ npm install sanoma @sanoma-ai/connector-ghost
 
 `sanoma` brings `@sanoma-ai/workflows`, `@sanoma-ai/app`, `zod`, `typescript`, `@types/node` and `oxlint` with it: a repo installs nothing else but its connectors. Node's types reach the repo's `tsc` through `sanoma` itself (its declarations reference them, resolved from where it is installed), under pnpm, npm or a link alike, so a repo lists no `@types/node`. A repo that lists its own of another major gets two sets of Node's declarations, which conflict: keep one, by matching sanoma's or letting the installer dedupe them. A tsconfig project that imports nothing from `sanoma` (a scripts directory with a tsconfig of its own, say) gets none this way: it sets `"types": ["node"]` and lists `@types/node` itself. Node 24.2 or later, but not 25 (the bin uses `import.meta.main`, and Cucumber, which runs the scenarios, does not support 25); Docker for the Postgres it starts when none answers.
 
-A repo holds `sanoma.config.ts` at its root, with `workflows/`, `policies/`, optional `resources/` (data files) and `scenarios/` (feature files) beside it, and a `tsconfig.json` that extends the one this package ships:
+A repo holds `sanoma.config.ts` at its root, with `workflows/`, optional `policies/` (Cedar files), `resources/` (data files, the people among them) and `scenarios/` (feature files) beside it, and a `tsconfig.json` that extends the one this package ships:
 
 ```json
 {
   "extends": "sanoma/tsconfig.json",
-  "include": ["sanoma.config.ts", "workflows", "policies", "resources"]
+  "include": ["sanoma.config.ts", "workflows", "resources"]
 }
 ```
 
@@ -32,17 +32,15 @@ A repo holds `sanoma.config.ts` at its root, with `workflows/`, `policies/`, opt
 // sanoma.config.ts
 import { ghost } from "@sanoma-ai/connector-ghost";
 import { defineConfig } from "sanoma";
-import policy from "./policies/policy.ts";
 import publish from "./workflows/publish.ts";
 
 export default defineConfig({
   workflows: [publish],
   connectors: [ghost],
-  policy,
 });
 ```
 
-Each connector carries its driver and its fake, so the config names neither. The rest is the repo's layout: the app's name is `package.json`'s `name`, the scenarios are `scenarios/` and the data files `resources/`, beside `sanoma.config.ts`. The ledger is Postgres's, on the config's database; `ledger: jsonlLedger(dir)` keeps it in files instead.
+Each connector carries its driver and its fake, so the config names neither. The rest is the repo's layout: the app's name is `package.json`'s `name`, the scenarios are `scenarios/`, the data files `resources/` and the policies `policies/**/*.cedar`, beside `sanoma.config.ts` (see [People and policies](#people-and-policies)). The ledger is Postgres's, on the config's database; `ledger: jsonlLedger(dir)` keeps it in files instead.
 
 ```ts
 // workflows/publish.ts
@@ -58,7 +56,7 @@ export default defineWorkflow({
 });
 ```
 
-A workflow or policy imports from `sanoma` what the lint lets it (`defineWorkflow`, `definePolicy`, `allow`, `deny`, `approve`, `approvedFor`, `allowAll`, `mayDecide`, `errorCode`, `z`, and types); `zod` itself and `@sanoma-ai/workflows` are accepted too. The config file imports `defineConfig` (and a ledger store, `jsonlLedger`, `memoryLedger` or `postgresLedger`, when it names one) from `sanoma`, and its connectors from their packages. A site, `sites/<name>/` (pages the app serves under `/sites/<name>/`), imports `defineSite`, the app's route APIs (`Link`, `Outlet`, `useNavigate`, …) and `api`, which calls the company's operations and workflows as the person on the page ([calling operations and workflows](https://www.npmjs.com/package/@sanoma-ai/app#calling-operations-and-workflows)), from `sanoma/site`, and `createFileRoute` from `@tanstack/react-router`; the [app's README](https://www.npmjs.com/package/@sanoma-ai/app#a-sites-imports) has the whole list. A data file under `resources/` imports `secret` from `sanoma/resources`, and `resources/data.ts`, the company's [collections](../workflows/README.md#collections), imports `collection` from `sanoma/data` and nothing else:
+A workflow imports from `sanoma` what the lint lets it (`defineWorkflow`, `mayDecide`, `errorCode`, `z`, and types); `zod` itself and `@sanoma-ai/workflows` are accepted too. The config file imports `defineConfig` (and a ledger store, `jsonlLedger`, `memoryLedger` or `postgresLedger`, when it names one) from `sanoma`, and its connectors from their packages. A site, `sites/<name>/` (pages the app serves under `/sites/<name>/`), imports `defineSite`, the app's route APIs (`Link`, `Outlet`, `useNavigate`, …) and `api`, which calls the company's operations and workflows as the person on the page ([calling operations and workflows](https://www.npmjs.com/package/@sanoma-ai/app#calling-operations-and-workflows)), from `sanoma/site`, and `createFileRoute` from `@tanstack/react-router`; the [app's README](https://www.npmjs.com/package/@sanoma-ai/app#a-sites-imports) has the whole list. A data file under `resources/` imports `secret` and `sanoma` (the people types) from `sanoma/resources`, and `resources/data.ts`, the company's [collections](../workflows/README.md#collections), imports `collection` from `sanoma/data` and nothing else:
 
 ```ts
 // resources/data.ts
@@ -73,6 +71,29 @@ export const outbound = collection({
 
 Every command that loads the config imports `resources/data.ts` too, when there is one, and adds its collections to the config's `collections` (each of its exports must be one), so `sanoma.config.ts` does not list them. A workflow that calls `ctx.data.outbound.get` imports `outbound` from `../resources/data.ts` to name it in `uses`: the one file outside `workflows/` the lint lets it import.
 
+## People and policies
+
+`resources/people.ts` declares who uses the company's app, the agents that act in it and the groups ([people](https://www.npmjs.com/package/@sanoma-ai/workflows#people)), and `policies/*.cedar` who may do what ([policies](https://www.npmjs.com/package/@sanoma-ai/workflows#policies)):
+
+```ts
+// resources/people.ts
+import { sanoma } from "sanoma/resources";
+
+export const ada = sanoma.person({ id: "ada", name: "Ada Ortiz", email: "ada@acme.test", github: "ada-ortiz" });
+export const bo = sanoma.person({ id: "bo" });
+export const editor = sanoma.group({ name: "editor", members: [ada] });
+```
+
+```cedar
+// policies/policy.cedar
+@hold("editor")
+@title("Review before it goes out")
+forbid (principal, action in [Sanoma::Action::"effect:publish", Sanoma::Action::"effect:send"], resource)
+unless { principal in Sanoma::Group::"editor" };
+```
+
+Only a declared person signs in to the app (on this machine by picking their name; with GitHub sign-in by their verified email, then their `github` login), starts a run, calls an operation or decides an approval, and nobody decides an approval on a run they started. Everything is allowed unless a `forbid` refuses it: one with `@hold` waits for that group's or person's approval, one without is denied with its `@reason`. Write them against `.sanoma/schema.cedarschema`, which `sanoma check` and `sanoma` write from the config: each operation's id as an action in its effect's group, `workflow:<name>` for a run's start, the groups the people file declares, and each operation's input as `context.input`. `sanoma check` reports a policy problem at its place and runs no scenario until there are none; `sanoma` refuses to start on one. A scenario runs as the agent `scenarios` unless it says who is acting (`Given bo is acting`), and checks the policy with `Then ghost.post.publish was held for group "editor"` and `Then <op> was denied with "<reason>"`. The app's Permissions page shows what the policies answer for each group.
+
 ## Commands
 
 Run them from the directory that holds `sanoma.config.ts`. Each loads `.env` there first, when there is one (a variable already set wins), then the config.
@@ -81,12 +102,12 @@ Run them from the directory that holds `sanoma.config.ts`. Each loads `.env` the
 | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `sanoma`                                      | Makes `SANOMA_SECRETS_KEY`, which encrypts the stored credentials, when the environment and `.env` have none, appending it to `.env` with one line saying so; makes sure Postgres answers (see [Postgres](#postgres)), then starts the worker (promoted, so a local worker takes every queued run) and the app in one process, and prints `<appName> running <workflows>` and `<appName> at http://127.0.0.1:3000; ctrl-c to stop`; the worker says `sanoma: 2 of 5 connectors not configured yet: ghost, resend; …` first when some vendors' variables are missing or invalid (a call to one fails, naming them, until they are set; nothing when all are set). When the repo has [sites](#sites), it serves the app and the sites from a dev server that shows each edit as it is saved (see [Developing a site](#developing-a-site)). In [dev mode](#dev-mode) it runs them in a child it restarts. In an empty directory it first [starts a company](#start-a-company). The worker and the app are given the repo's git checkout as their `source`, which commits to the current branch. |
 | `sanoma worker`, `sanoma app`                 | One of the two alone, for a deployment that runs them apart (`app` builds the app with the [sites](#sites)). Neither touches Docker.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `sanoma check`                                | Writes [`.sanoma/api.ts`](#sites) first, when it changed; then `tsc -p tsconfig.json`; oxlint over `workflows/`, `policies/`, `resources/` and `sites/` (those that exist) with the repo's `.oxlintrc.json`, written when missing (see [the lint](#the-lint)); every problem `describeConfig` finds (an import a workflow may not make, what its graph cannot draw, a data file outside the subset: what the worker would refuse; a site's call to a workflow, collection or operation the config does not have); with [sites](#sites), the app built with them and `tsc -p sites/tsconfig.json`; then every scenario against the fakes, on a database of its own (`<database>_check`), each step that did not hold a problem. Prints each problem on a line, `file:line:col: message` or `scenario › step: message`, and exits 1 when there is one. No vitest.                                                                                                                                                                                                                              |
+| `sanoma check`                                | Writes [`.sanoma/api.ts`](#sites) and `.sanoma/schema.cedarschema` first, each when it changed; then `tsc -p tsconfig.json`; oxlint over `workflows/`, `resources/` and `sites/` (those that exist) with the repo's `.oxlintrc.json`, written when missing (see [the lint](#the-lint)); every problem `describeConfig` finds (an import a workflow may not make, what its graph cannot draw, a data file outside the subset: what the worker would refuse; a site's call to a workflow, collection or operation the config does not have); every problem in the [policies](#people-and-policies), at its `file:line:col` with the policy's id; with [sites](#sites), the app built with them and `tsc -p sites/tsconfig.json`; then, unless the policies have a problem, every scenario against the fakes, on a database of its own (`<database>_check`), each step that did not hold a problem. Prints each problem on a line, `file:line:col: message` or `scenario › step: message`, and exits 1 when there is one. No vitest.                                                            |
 | `sanoma env [--check]`                        | Writes `.env.example`: the variables `sanoma` reads, then every variable the connectors' drivers declare, by vendor, with its description; optional ones commented out. `--check` writes nothing and exits 1 with "`.env.example` is out of date: run `sanoma env`" when the file differs, for CI.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `sanoma ledger export <runId> [--out <file>]` | A run's ledger records from the config's store (the Postgres ledger on its database when it names none), as JSON lines (the shape `jsonlLedger` keeps), to stdout or `--out`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `sanoma --help`                               | The usage.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
-Exit codes: 2 for a mistake in the call or the repo (no `sanoma.config.ts`, an unknown command or option, a bad argument), printed with the usage where it helps; 1 for failed checks and failures while running; 0 otherwise. `SANOMA_APP_PORT` is the app's port (default 3000; 0 for any free port, which the printed address reports). `SANOMA_APP_HOST` is its address (default 127.0.0.1); any other needs [GitHub sign-in](../app/README.md#github), which `SANOMA_GITHUB_CLIENT_ID`, `SANOMA_GITHUB_CLIENT_SECRET` and `SANOMA_GITHUB_REPO` turn on (all three or none, with `SANOMA_SECRETS_KEY` set; the client id and secret may instead be the stored ones the app's Go live page saved when it created the GitHub App); a mistake in them exits 2 before anything starts. On SIGINT or SIGTERM the app, then the worker, stop, and the process exits 0.
+Exit codes: 2 for a mistake in the call or the repo (no `sanoma.config.ts`, an unknown command or option, a bad argument), printed with the usage where it helps; 1 for failed checks and failures while running; 0 otherwise. `SANOMA_APP_PORT` is the app's port (default 3000; 0 for any free port, which the printed address reports). `SANOMA_APP_HOST` is its address (default 127.0.0.1); any other needs [GitHub sign-in](../app/README.md#github), which `SANOMA_GITHUB_CLIENT_ID` and `SANOMA_GITHUB_CLIENT_SECRET` turn on (both or neither, with `SANOMA_SECRETS_KEY` set; on a host beyond this machine, or with one of them set, the other may be the stored one the app's Go live page saved when it created the GitHub App); a mistake in them exits 2 before anything starts, as does a problem in the policies. On SIGINT or SIGTERM the app, then the worker, stop, and the process exits 0.
 
 ## Postgres
 
@@ -98,7 +119,7 @@ The worker and the app run on `SANOMA_DATABASE_URL` (default `postgresql://postg
 
 ## The lint
 
-`sanoma check` lints `workflows/`, `policies/`, `resources/` and `sites/`, those that exist, with oxlint, run in the repo's root on the repo's own `.oxlintrc.json`, so an editor's oxlint reads the same file and the rules' `workflows/**` globs match against the root. `sanoma check` writes that file when there is none:
+`sanoma check` lints `workflows/`, `resources/` and `sites/`, those that exist, with oxlint, run in the repo's root on the repo's own `.oxlintrc.json`, so an editor's oxlint reads the same file and the rules' `workflows/**` globs match against the root. `sanoma check` writes that file when there is none:
 
 ```json
 {

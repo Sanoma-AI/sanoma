@@ -85,6 +85,11 @@ const refused: [string, Partial<SanomaConfig>, RegExp][] = [
     /^The config's `drivers` and `fakes` are gone: each connector carries its driver and its fake; leave them out$/,
   ],
   ["`fakes`, alone", { fakes: [] } as never, /^The config's `drivers` and `fakes` are gone/],
+  [
+    "a `policy`, which an untyped config might still name (it would otherwise run allowing everything)",
+    { policy: () => ({ kind: "deny", reason: "no" }) } as never,
+    /^The config's `policy` is gone: the policy is policies\/\*\.cedar in the root; leave it out$/,
+  ],
 ];
 
 describe("startWorker, resolveConfig and describeConfig", () => {

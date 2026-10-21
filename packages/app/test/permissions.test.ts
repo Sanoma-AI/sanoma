@@ -5,11 +5,9 @@ import { fileURLToPath } from "node:url";
 import { ensureBuilt, testDatabaseUrl, withFake } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import {
-  allow,
   allowAll,
   cedarPolicy,
   defineConnector,
-  definePolicy,
   defineWorkflow,
   loadPolicies,
   type Policy,
@@ -22,7 +20,7 @@ import { defineFake } from "@sanoma-ai/workflows/fake";
 import { executablePath, launch } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { ACTOR_COOKIE } from "../src/api.ts";
+import { ACTOR_COOKIE, ACTOR_KEY } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { permissions } from "../src/server/core.ts";
 
@@ -77,17 +75,18 @@ unless { principal in Sanoma::Group::"finance" };
 forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"shop.refunds.list", resource);
 `;
 
-const config: SanomaConfig = { workflows: [refund], connectors: [withFake(shop, fake)], root };
-const resolved = resolveConfig(config);
-const cedar = cedarPolicy(
-  resolved,
-  loadPolicies([{ file: "policies/refunds.cedar", text: POLICIES }]).policies,
-  readPeople(root).people,
-);
+mkdirSync(join(root, "policies"));
+writeFileSync(join(root, "policies", "refunds.cedar"), POLICIES);
 
-/** The grid under `policy`, as `getPermissions` answers it. */
-const gridOf = (policy: Policy) =>
-  permissions({ resolved: { ...resolved, policy }, description: describeConfig({ ...config, policy }) });
+const config: SanomaConfig = { workflows: [refund], connectors: [withFake(shop, fake)], root };
+// The root's policy, made from policies/refunds.cedar.
+const resolved = resolveConfig(config);
+const cedar = resolved.policy;
+const description = describeConfig(config);
+
+/** The grid under `policy`, as `getPermissions` answers it, `described` as the description says it. */
+const gridOf = (policy: Policy, described = description.policy) =>
+  permissions({ resolved: { ...resolved, policy }, description: { ...description, policy: described } });
 
 describe("the Permissions grid", () => {
   const hold = {
@@ -98,7 +97,7 @@ describe("the Permissions grid", () => {
 
   it("asks the policy for someone in no group and in each group, the start of each workflow and each direct operation", () => {
     const grid = gridOf(cedar);
-    expect(grid).toMatchObject({ policy: { defined: true, kind: "cedar" }, groups: [null, "agents", "finance"] });
+    expect(grid).toMatchObject({ policy: { defined: true }, groups: [null, "agents", "finance"] });
     // Someone in finance is not held: the hold's own approver.
     expect(grid.workflows).toEqual([{ id: "refund", title: "Refund", cells: [hold, hold, { answer: "allow" }] }]);
     expect(grid.ops).toEqual([
@@ -136,13 +135,8 @@ describe("the Permissions grid", () => {
     ]);
   });
 
-  it("is every cell custom for a function, and allow with no policy", () => {
-    const fn = gridOf(definePolicy(() => allow()));
-    expect(fn.policy).toEqual({ defined: true, kind: "function" });
-    expect([...fn.workflows, ...fn.ops].flatMap((row) => row.cells)).toEqual(
-      Array.from({ length: 6 }, () => ({ answer: "custom" })),
-    );
-    const none = gridOf(allowAll);
+  it("is every cell allow with no policy", () => {
+    const none = gridOf(allowAll, { defined: false });
     expect(none.policy.defined).toBe(false);
     expect([...none.workflows, ...none.ops].flatMap((row) => row.cells)).toEqual(
       Array.from({ length: 6 }, () => ({ answer: "allow" })),
@@ -159,7 +153,7 @@ describe("the picker's people", () => {
 });
 
 describe("the Permissions page", () => {
-  const testApp = useTestApp({ ...config, policy: cedar }, { databaseUrl: testDatabaseUrl("permissions") });
+  const testApp = useTestApp(config, { databaseUrl: testDatabaseUrl("permissions") });
   let app: App;
 
   beforeAll(async () => {
@@ -191,7 +185,7 @@ describe("the Permissions page", () => {
     expect(html.match(/>allow</g)).toHaveLength(3);
   });
 
-  it("picks a declared person, shows their groups, and a cell's rule in a sheet, in Chrome", async (ctx) => {
+  it("picks a declared person, shows their groups, a cell's rule in a sheet, and the New run panel's will-ask line, in Chrome", async (ctx) => {
     const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
     if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
     const browser = await launch({ executablePath: chrome, headless: true });
@@ -226,6 +220,17 @@ describe("the Permissions page", () => {
 
       await tab.click('button[aria-label="hold · group finance: the rule for refund for someone in agents"]');
       expect(await sheet("Refunds need finance")).toContain("group finance");
+
+      // The New run panel says what the policy will ask, for bo and not for ada, who is in finance.
+      const newRun = async (who: string) => {
+        await tab.evaluate((key, name) => localStorage.setItem(key, name), ACTOR_KEY, who);
+        await tab.goto(new URL("/workflows/refund?new", app.url).href, { waitUntil: "networkidle0" });
+        await tab.waitForSelector("form");
+      };
+      await newRun("bo");
+      await tab.waitForFunction(`document.body.textContent.includes("Will ask finance before the start.")`);
+      await newRun("ada");
+      expect(await tab.evaluate("document.body.textContent")).not.toContain("Will ask");
     } finally {
       await browser.close();
     }

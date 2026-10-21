@@ -9,7 +9,6 @@ import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { defineFake, type Fake } from "../src/fake.ts";
 import {
-  allowAll,
   defineConnector,
   defineResource,
   defineSteps,
@@ -650,7 +649,7 @@ const made = (fakes: ReadonlyMap<string, () => Fake<any, any>>) =>
 
 describe("resources and policy outcomes", () => {
   // The company fixture's connectors, which declare resource types, its fakes and its inspect workflow.
-  const company = resolveConfig({ ...companyConfig([inspect], allowAll), ledger: memoryLedger() });
+  const company = resolveConfig({ ...companyConfig([inspect]), ledger: memoryLedger() });
   const parseCompany = (text: string) => parseFeature(text, "company.feature", company);
   const DRIFT = `Feature: Drift
 

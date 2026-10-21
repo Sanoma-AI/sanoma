@@ -1,19 +1,12 @@
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
-import {
-  allow,
-  approve,
-  defineConnector,
-  defineDriver,
-  definePolicy,
-  deny,
-  resolveConfig,
-  type SanomaConfig,
-  withSetup,
-} from "@sanoma-ai/workflows";
+import { defineConnector, defineDriver, resolveConfig, type SanomaConfig, withSetup } from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { outbound } from "../../workflows/test/fixtures/outbound/resources/data.ts";
 import outboundNext from "../../workflows/test/fixtures/outbound/workflows/outbound-next.ts";
@@ -47,21 +40,38 @@ const acmeDriver = defineDriver(acme, {
   customer: { get: async ({ id }) => ({ id, name: "Acme Ltd" }), rename: async (input) => input },
 });
 
-/** Allows, but denies a lead `lost` and holds one `won` for `lead`. */
-const policy = definePolicy(({ input }) => {
-  const stage = (input as { record?: { stage?: string } }).record?.stage;
-  if (stage === "lost") return deny("leads are not lost");
-  if (stage === "won") return approve("lead");
-  return allow();
-});
+// The outbound fixture, copied to a root of its own: its collection, and its workflow, which imports
+// it from there, with its people and a policy that allows, but denies a lead `lost` and holds one
+// `won` for `lead`.
+const root = mkdtempSync(join(tmpdir(), "sanoma-api-"));
+cpSync(fileURLToPath(new URL("../../workflows/test/fixtures/outbound/", import.meta.url)), root, { recursive: true });
+writeFileSync(
+  join(root, "resources/people.ts"),
+  `import { sanoma } from "sanoma/resources";
 
-// The outbound fixture's root: its collection, and its workflow, which imports it from there.
+export const ada = sanoma.person({ id: "ada" });
+export const lead = sanoma.person({ id: "lead" });
+`,
+);
+mkdirSync(join(root, "policies"));
+writeFileSync(
+  join(root, "policies/leads.cedar"),
+  `@reason("leads are not lost")
+forbid (principal, action == Sanoma::Action::"data.outbound.save", resource)
+when { context.input.record.stage == "lost" };
+
+@hold("lead")
+forbid (principal, action == Sanoma::Action::"data.outbound.save", resource)
+when { context.input.record.stage == "won" };
+`,
+);
+afterAll(() => rmSync(root, { recursive: true, force: true }));
+
 const config: SanomaConfig = {
   workflows: [outboundNext],
   connectors: [withSetup(acme, { driver: () => acmeDriver })],
   collections: [outbound],
-  policy,
-  root: fileURLToPath(new URL("../../workflows/test/fixtures/outbound/", import.meta.url)),
+  root,
 };
 const testApp = useTestApp(config, { databaseUrl: testDatabaseUrl("api") });
 

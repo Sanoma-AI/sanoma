@@ -5,25 +5,19 @@ import { withFake } from "@sanoma-ai/testing";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
-  allow,
   defineConnector,
-  definePolicy,
   defineWorkflow,
-  deny,
   DriverError,
   errorCode,
   type LedgerRecord,
   type LedgerStore,
   memoryLedger,
-  type PolicyCall,
-  policyOpOf,
-  SanomaError,
   withSetup,
 } from "../src/index.ts";
 import { defineFake } from "../src/fake.ts";
 import announce from "./fixtures/announce.ts";
 import fanout, { fakeStats, stats } from "./fixtures/fanout.ts";
-import { failure, inSeconds, pending, types, useApp, waitFor } from "./harness.ts";
+import { failure, inSeconds, pending, rootWith, types, useApp, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`.
 const alice = { id: "alice" };
@@ -481,102 +475,42 @@ describe("ctx.sleep", () => {
 });
 
 describe("the call a policy sees", () => {
-  const seen: PolicyCall[] = [];
-  const policy = definePolicy(
-    // Async: a policy may return a promise of its decision.
-    async (call) => {
-      await Promise.resolve();
-      // A copy proves the call is plain data: structuredClone refuses functions such as zod schemas.
-      seen.push(structuredClone(call));
-      if (call.target === "note/broken") throw new Error("no rule for broken notes");
-      if (call.target === "note/odd") throw new SanomaError("invalid_input", "odd is no note id", { id: "odd" });
-      return call.target === "note/locked"
-        ? deny("the note is locked", ["note/locked is read-only"])
-        : allow([`${call.op.id} may change ${call.target ?? "anything"}`]);
-    },
-    { version: "notes-1" },
-  );
+  // The operation's target is the Cedar resource the policy names.
+  const root = rootWith({
+    "policies/policy.cedar": `@id("locked-notes")
+@reason("the note is locked")
+forbid (principal, action == Sanoma::Action::"notes.note.update", resource == Sanoma::Target::"note/locked");
+`,
+  });
   const app = useApp("call-policy", (vendors) => ({
-    workflows: [edit, post, tag],
+    workflows: [edit, tag],
     connectors: [...vendors.connectors, withFake(notes, notesFake), withFake(tags, tagsFake)],
-    policy,
+    root,
     ledger: memoryLedger(),
   }));
   const c = () => app.client;
 
-  it("is plain data with the operation's target, and its reasons are recorded with the policy's version", async () => {
-    seen.length = 0;
+  it("decides on the operation's target, and its reasons are recorded with the policy's version", async () => {
     const runId = await c().start(edit, { id: "n1" }, { startedBy: alice });
     expect(await c().result(runId)).toEqual({ id: "n1" });
-    expect(seen).toEqual([
-      {
-        op: { id: "notes.note.update", vendor: "notes", resource: "note", name: "update", effect: "write" },
-        effect: "write",
-        target: "note/n1",
-        input: { id: "n1", text: "hi" },
-        actor: alice,
-        run: { id: runId, workflow: "edit", approvals: [] },
-      },
-    ]);
-    // What a policy test builds the op with.
-    expect(seen[0]?.op).toEqual(policyOpOf(notes.note.update));
+    const version = expect.stringMatching(/^[0-9a-f]{12}$/);
     expect((await c().ledger(runId)).at(-2)).toMatchObject({
       op: "notes.note.update",
-      decision: { kind: "allow", reasons: ["notes.note.update may change note/n1"], policyVersion: "notes-1" },
+      decision: { kind: "allow", reasons: ["allow-by-default"], policyVersion: version },
     });
 
     const denied = await c().start(edit, { id: "locked" }, { startedBy: alice });
     expect(errorCode(await failure(c().result(denied)))).toBe("policy_denied");
     expect((await c().ledger(denied)).at(-2)).toMatchObject({
-      decision: {
-        kind: "deny",
-        reason: "the note is locked",
-        reasons: ["note/locked is read-only"],
-        policyVersion: "notes-1",
-      },
-    });
-  });
-
-  it("fails the run naming the call when the policy throws", async () => {
-    const runId = await c().start(edit, { id: "broken" }, { startedBy: alice });
-    const err = await failure(c().result(runId));
-    expect(err).toMatchObject({ message: "The policy failed deciding notes.note.update: no rule for broken notes" });
-    expect(types(await c().ledger(runId))).toEqual(["run.started", "run.failed"]);
-    expect((await c().ledger(runId)).at(-1)).toMatchObject({
-      error: { message: "The policy failed deciding notes.note.update: no rule for broken notes" },
-    });
-
-    // A coded error keeps its code and data through the naming.
-    const odd = await failure(c().result(await c().start(edit, { id: "odd" }, { startedBy: alice })));
-    expect(errorCode(odd)).toBe("invalid_input");
-    expect(odd).toMatchObject({
-      message: "The policy failed deciding notes.note.update: odd is no note id",
-      data: { id: "odd" },
+      decision: { kind: "deny", reason: "the note is locked", reasons: ["locked-notes"], policyVersion: version },
     });
   });
 
   it("fails the run, before the policy decides, when the operation's target is not a string", async () => {
-    seen.length = 0;
     const runId = await c().start(tag, { id: "t1" }, { startedBy: alice });
     const err = await failure(c().result(runId));
     expect(err).toMatchObject({ message: "tags.tag.add: `target` returned number, not a string" });
-    expect(seen).toEqual([]);
     expect(types(await c().ledger(runId))).toEqual(["run.started", "run.failed"]);
-  });
-
-  it("has no target when the operation declares none", async () => {
-    seen.length = 0;
-    const runId = await c().start(post, { text: "hi" }, { startedBy: alice });
-    await c().result(runId);
-    expect(seen).toHaveLength(1);
-    expect(seen[0]).not.toHaveProperty("target");
-    expect(seen[0]?.op).toEqual({
-      id: "bluesky.post.create",
-      vendor: "bluesky",
-      resource: "post",
-      name: "create",
-      effect: "publish",
-    });
   });
 });
 
@@ -856,8 +790,12 @@ describe("a call queued behind a refused one", () => {
     uses: [ghost.post.publish, "sleep"],
     run: async (ctx, { id }) => Promise.all([ctx.ghost.post.publish({ id }), kept(ctx.sleep({ ms: 50 }))]),
   });
-  const policy = definePolicy(({ op }) => (op.id === "ghost.post.publish" ? deny("not today") : allow()));
-  const app = useApp("call-ended", () => ({ workflows: [both, asking, napping], policy }));
+  const root = rootWith({
+    "policies/policy.cedar": `@reason("not today")
+forbid (principal, action == Sanoma::Action::"ghost.post.publish", resource);
+`,
+  });
+  const app = useApp("call-ended", () => ({ workflows: [both, asking, napping], root }));
   const c = () => app.client;
   const steps = async (runId: string) => ((await app.raw.listWorkflowSteps(runId)) ?? []).map((s) => s.name);
 

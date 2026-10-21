@@ -4,11 +4,11 @@ import { Pool } from "pg";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { collection, collectionsDriver } from "../src/collection.ts";
 import { DATA_TABLE, lazyPool } from "../src/db.ts";
-import { allow, definePolicy, type LedgerRecord, memorySecrets, type Op, type PolicyCall } from "../src/index.ts";
+import { type LedgerRecord, memorySecrets, type Op } from "../src/index.ts";
 import { check, drive, loadScenarios } from "../src/scenario.ts";
 import { outbound } from "./fixtures/outbound/resources/data.ts";
 import outboundNext from "./fixtures/outbound/workflows/outbound-next.ts";
-import { useApp } from "./harness.ts";
+import { rootWith, useApp } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. The collections' records in `sanoma_data`: the table, the driver,
 // a workflow reading and saving a record in a live run, and the fixture's scenarios in sandbox runs.
@@ -153,20 +153,21 @@ describe("the collections' driver on Postgres", () => {
 });
 
 describe("a workflow reading and saving a record", () => {
-  const seen: PolicyCall[] = [];
-  const app = useApp("data_run", () => ({
-    workflows: [outboundNext],
-    collections: [outbound],
-    // Records each call it decides, for its target.
-    policy: definePolicy((call) => {
-      seen.push(call);
-      return allow();
-    }),
-    root: fileURLToPath(new URL("./fixtures/outbound/", import.meta.url)),
-  }));
+  // The outbound fixture, with a policy that refuses a save with no record before it: one that
+  // passes shows the policy was given the record the save replaces.
+  const root = rootWith(
+    {
+      "policies/policy.cedar": `@reason("a save replaces a lead")
+forbid (principal, action == Sanoma::Action::"data.outbound.save", resource in Sanoma::Collection::"outbound")
+unless { context has before };
+`,
+    },
+    fileURLToPath(new URL("./fixtures/outbound/", import.meta.url)),
+  );
+  const app = useApp("data_run", () => ({ workflows: [outboundNext], collections: [outbound], root }));
   const db = () => new Pool({ connectionString: app.config.databaseUrl!, max: 1 });
 
-  it("calls get and save as nodes under the policy, and the record says the run saved it", async () => {
+  it("calls get and save as nodes under the policy, the save with the record it replaces, and the record says the run saved it", async () => {
     const pool = db();
     try {
       await pool.query(`DELETE FROM ${DATA_TABLE} WHERE collection = 'outbound'`);
@@ -189,13 +190,8 @@ describe("a workflow reading and saving a record", () => {
         },
       ]);
       expect(calls[1]!.output).toMatchObject({ key: "Acme", updatedBy: `run:${runId}` });
-      expect(
-        seen.filter((c) => c.run.id === runId).map(({ op, effect, target, before }) => [op.id, effect, target, before]),
-      ).toEqual([
-        ["data.outbound.get", "read", "data:outbound/Acme", undefined],
-        // A save sees the record it replaces.
-        ["data.outbound.save", "write", "data:outbound/Acme", lead],
-      ]);
+      // A save sees the record it replaces: the policy let it through.
+      expect(calls.map(({ decision }) => decision.kind)).toEqual(["allow", "allow"]);
       const { rows } = await pool.query(`SELECT record, updated_by FROM ${DATA_TABLE} WHERE collection = 'outbound'`);
       expect(rows).toEqual([{ record: { ...lead, stage: "contacted" }, updated_by: `run:${runId}` }]);
     } finally {

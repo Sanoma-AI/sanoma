@@ -83,6 +83,8 @@ export interface SanomaConfig {
   appName?: never;
   /** @deprecated Gone: the scenarios are `<root>/scenarios/`. Leave it out. */
   scenarios?: never;
+  /** @deprecated Gone: the policy is `<root>/policies/**\/*.cedar`. Leave it out. */
+  policy?: never;
   /** The company's own steps for its scenarios (`defineSteps`), besides those its connectors ship. */
   steps?: Steps[];
   /**
@@ -215,6 +217,10 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     throw new Error(
       "The config's `drivers` and `fakes` are gone: each connector carries its driver and its fake; leave them out",
     );
+  // An untyped config naming its policy would otherwise run allowing everything. Delete once sanoma-ops has migrated.
+  if (config.policy !== undefined) {
+    throw new Error("The config's `policy` is gone: the policy is policies/*.cedar in the root; leave it out");
+  }
   const collections = collectionsOf(config);
   const ledger = ledgerOf(config);
   const root = rootOf(config);

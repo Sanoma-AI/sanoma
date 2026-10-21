@@ -5,12 +5,13 @@ import { FlaskConicalIcon, GlobeIcon } from "lucide-react";
 import { useMemo } from "react";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { StartForm } from "../form/start-form.tsx";
+import { WillAsk } from "../form/will-ask.tsx";
 import { configQuery, scenariosFor, scenariosQuery, vendorsOf } from "../queries.ts";
 import { Disclosure, Nothing, Notice, Segment, Segmented } from "./common.tsx";
 
 /**
  * A new run of the workflow, live or in the sandbox: its input from its schema, or a scenario's,
- * which the scenario's run takes from the scenario. On either pane of the workflow's page, in the
+ * which the scenario's run takes from the scenario, and what the policy will ask (`WillAsk`). On either pane of the workflow's page, in the
  * inspector while `?new` is set; `?scenario=` picks Sandbox and the scenario.
  */
 export function NewRun({ workflow }: { workflow: WorkflowEntry }) {
@@ -88,6 +89,7 @@ export function NewRun({ workflow }: { workflow: WorkflowEntry }) {
           ) : (
             <VendorsNotice name={name} />
           )}
+          <WillAsk workflow={workflow} />
           {/* Keyed: the form builds its defaults once per mount. */}
           <StartForm key={scenario?.name ?? "live"} workflow={workflow} scenario={scenario} />
           {scenario && (

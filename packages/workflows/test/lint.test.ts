@@ -24,20 +24,6 @@ describe("lintWorkflow", () => {
     },
   );
 
-  it("passes a policy file", () => {
-    expect(
-      lintWorkflow(
-        `
-        import { allow, approve, definePolicy } from "@sanoma-ai/workflows";
-        export default definePolicy(({ effect, run }) =>
-          effect === "publish" && !run.approvals.some((a) => a.approver === "lead") ? approve("lead") : allow(),
-        );
-      `,
-        "policies/policy.ts",
-      ),
-    ).toEqual([]);
-  });
-
   it("refuses imports outside the allowlist, and dynamic imports", () => {
     const problems = messages(`
       import axios from "axios";
@@ -75,28 +61,26 @@ describe("lintWorkflow", () => {
     ]);
   });
 
-  it("allows relative imports that stay inside the file's workflows/ or policies/ tree", () => {
+  it("allows relative imports that stay inside the file's workflows/ tree", () => {
     const src = `
       import { a } from "./shared.ts";
       import { b } from "../lib/b.ts";
       import { c } from "./sub/c.ts";
     `;
     expect(messages(src, "workflows/sub/announce.ts")).toEqual([]);
-    expect(messages(src, "/repo/policies/sub/policy.ts")).toEqual([]);
     expect(messages(`import { d } from "../../d.ts";`, "/repo/workflows/sub/x.ts")).toEqual([
       expect.stringMatching(/^import "\.\.\/\.\.\/d\.ts" .*outside workflows\//),
     ]);
-    // Without a workflows/ or policies/ ancestor, the file's own directory is the tree.
+    // Without a workflows/ ancestor, the file's own directory is the tree.
     expect(messages(`import { e } from "./e.ts";`, "src/flow.ts")).toEqual([]);
     expect(messages(`import { f } from "../f.ts";`, "src/flow.ts")).toEqual([
       expect.stringMatching(/^import "\.\.\/f\.ts" .*outside this directory/),
     ]);
   });
 
-  it("allows the one file outside workflows/ and policies/ that holds the collections, resources/data.ts, by its real path", () => {
+  it("allows the one file outside workflows/ that holds the collections, resources/data.ts, by its real path", () => {
     const src = `import { outbound } from "../resources/data.ts";`;
     expect(messages(src, "/repo/workflows/next.ts")).toEqual([]);
-    expect(messages(src, "/repo/policies/policy.ts")).toEqual([]);
     expect(messages(`import { outbound } from "../../resources/data.ts";`, "/repo/workflows/sub/next.ts")).toEqual([]);
     expect(
       messages(
@@ -112,7 +96,7 @@ describe("lintWorkflow", () => {
         ),
       ),
     );
-    // Without a workflows/ or policies/ tree, there is no company root to find it in.
+    // Without a workflows/ tree, there is no company root to find it in.
     expect(messages(src, "/repo/src/next.ts")).toEqual([expect.stringMatching(/outside this directory/)]);
     // By real path: a link to the collections is them, and a link to another file is not.
     const root = mkdtempSync(join(tmpdir(), "sanoma-lint-"));
@@ -154,7 +138,7 @@ describe("lintWorkflow", () => {
   it("accepts sanoma as the import source, with the same names, and refuses its subpaths", () => {
     expect(
       messages(`
-        import { defineWorkflow, definePolicy, allow, deny, approve, approvedFor, allowAll } from "sanoma";
+        import { defineWorkflow } from "sanoma";
         import { mayDecide, errorCode, z, type Ctx } from "sanoma";
         import { defineConfig } from "sanoma";
         import * as s from "sanoma";
@@ -169,16 +153,21 @@ describe("lintWorkflow", () => {
     ]);
   });
 
-  it("allows only the names a workflow or policy needs from @sanoma-ai/workflows, and any type", () => {
+  it("allows only the names a workflow needs from @sanoma-ai/workflows, and any type", () => {
     expect(
       messages(`
-        import { defineWorkflow, definePolicy, allow, deny, approve, approvedFor, allowAll } from "@sanoma-ai/workflows";
+        import { defineWorkflow } from "@sanoma-ai/workflows";
         import { mayDecide, errorCode } from "@sanoma-ai/workflows";
         import type { Ctx, PolicyCall, SanomaClient } from "@sanoma-ai/workflows";
         import { type ApprovalState } from "@sanoma-ai/workflows";
         export type { Principal } from "@sanoma-ai/workflows";
       `),
     ).toEqual([]);
+    // A policy is Cedar, in policies/*.cedar: a workflow has no use for the decisions.
+    expect(messages(`import { allow, allowAll } from "@sanoma-ai/workflows";`)).toEqual([
+      expect.stringMatching(/^allow is not allowed in a workflow/),
+      expect.stringMatching(/^allowAll is not allowed in a workflow/),
+    ]);
   });
 
   it("refuses the ledger stores, which could forge the audit record, and config helpers, which read credentials", () => {
@@ -652,7 +641,6 @@ describe("oxlint.json", () => {
     dir = mkdtempSync(join(tmpdir(), "sanoma-oxlint-"));
     write(".oxlintrc.json", JSON.stringify({ extends: [fragment] }));
     write("workflows/bad.ts", BAD);
-    write("policies/bad.ts", `export const hour = new Date().getUTCHours();\n`);
     write(
       "workflows/good.ts",
       `import { defineWorkflow, errorCode } from "@sanoma-ai/workflows";
@@ -679,7 +667,7 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
     for (const name of ["drift", "apply"]) {
       write(`workflows/${name}.ts`, readFileSync(new URL(`../src/${name}.ts`, import.meta.url), "utf8"));
     }
-    // Outside workflows/ and policies/, nothing is restricted.
+    // Outside workflows/, nothing is restricted.
     write("lib/clock.ts", `export const now = () => Date.now() + Math.random();\n`);
     for (const path of GOOD) write(path, readFileSync(fixture(path), "utf8"));
     // The collections' file: the rule finds nothing in it.
@@ -717,7 +705,6 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
       .map(({ file, line, rule, text }) => ({ file, line, rule, text }))
       .toSorted((a, b) => a.file.localeCompare(b.file) || a.line! - b.line!);
     expect(problems).toEqual([
-      { file: "policies/bad.ts", line: 1, rule: globals, text: expect.stringMatching(/'Date'.*ctx\.now/) },
       bad(1, imports, /'SanomaClient'.*approve its own approvals/),
       bad(1, imports, /'jsonlLedger'.*forge the ledger/),
       bad(1, imports, /'DriverError'/),

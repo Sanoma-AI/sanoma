@@ -1,4 +1,4 @@
-import { appendFileSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -108,7 +108,7 @@ describe("sanoma check", () => {
 });
 
 describe("sanoma --help and mistakes", () => {
-  it("prints the usage, and exits 2 for an unknown command or option, a missing value, or a directory without a config", async () => {
+  it("prints the usage, and exits 2 for an unknown command or option, a missing value, policies that do not hold, or a directory without a config", async () => {
     dir = copyFixture();
     const help = await runCli(dir, ["--help"], env);
     expect(help.code).toBe(0);
@@ -123,6 +123,14 @@ describe("sanoma --help and mistakes", () => {
     const value = await runCli(dir, ["ledger", "export", "r1", "--out"], env);
     expect(value.code).toBe(2);
     expect(value.stderr).toMatch(/^Option '--out <value>' argument missing/);
+    // A policy that does not hold starts nothing: exit 2, naming it at its place.
+    mkdirSync(join(dir, "policies"));
+    writeFileSync(join(dir, "policies/x.cedar"), "permit (principal, action, resource);\n");
+    const policies = await runCli(dir, ["worker"], env);
+    expect(policies.code).toBe(2);
+    expect(policies.stderr).toMatch(
+      /^The policies do not hold:\npolicies\/x\.cedar:1:1: policies\/x\.cedar#1: a permit changes nothing/,
+    );
     rmSync(join(dir, "sanoma.config.ts"));
     const missing = await runCli(dir, ["env"], env);
     expect(missing.code).toBe(2);

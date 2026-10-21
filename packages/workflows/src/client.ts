@@ -217,14 +217,15 @@ export class SanomaClient {
       }
       workflow = named;
     }
-    parseOrThrow(workflow.input, input, `The input does not match ${workflow.name}'s schema`);
+    // The policy decides the start on the input as parsed, its defaults filled, as the Cedar schema types it.
+    const parsed = parseOrThrow(workflow.input, input, `The input does not match ${workflow.name}'s schema`);
     const { runId } = options;
     const sandbox = parseOrThrow(
       z.string().min(1).optional(),
       options.sandbox,
       "`sandbox` must be the name of a scenario in the config's `scenarios/`",
     );
-    const hold = await this.startHold(workflow.name, input, startedBy, runId);
+    const hold = await this.startHold(workflow.name, parsed, startedBy, runId);
     const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }), ...(hold && { hold }) };
     const { onBehalfOf } = startedBy;
     // An id DBOS has already returns that run, unless it is another workflow's, which DBOS refuses.

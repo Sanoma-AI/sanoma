@@ -3,21 +3,45 @@ import { useTestApp } from "@sanoma-ai/testing/harness";
 import { describe, expect, it } from "vitest";
 import { type LedgerRecord, memoryLedger, resolveConfig } from "../src/index.ts";
 import { check, drive, loadScenarios, type Scenario } from "../src/scenario.ts";
-import { companyConfig, companyFakes } from "./fixtures/company/fakes.ts";
-import policy from "./fixtures/company/policies/policy.ts";
+import { companyConfig, companyDir, companyFakes } from "./fixtures/company/fakes.ts";
 import inspect from "./fixtures/company/workflows/inspect.ts";
+import { rootWith } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. The company fixture's scenarios: the policy outcomes, seeded
-// resources and drift results its feature files expect, on the inspect workflow, its policy and
-// the built-in drift workflow, against GitHub's and Stripe's fakes.
+// resources and drift results its feature files expect, on the inspect workflow, the policy
+// below and the built-in drift workflow, against GitHub's and Stripe's fakes.
 const databaseUrl = testDatabaseUrl("steps");
 const alice = { id: "alice" };
+/** The runtime's agent that runs scenarios: drift and apply run as it. */
+const agent = { id: "scenarios" };
+
+// The policy inspect.feature expects: a secret repository is never read, and a person reads a
+// product once finance says so; the runtime's agents, which check drift, read without asking.
+const root = rootWith(
+  {
+    "policies/policy.cedar": `@reason("secret repositories stay private")
+forbid (principal, action == Sanoma::Action::"github.repository.import", resource)
+when { context.input.id like "secret*" };
+
+@hold("finance")
+@title("Read a product")
+forbid (principal, action == Sanoma::Action::"stripe.product.import", resource)
+unless { principal in Sanoma::Group::"agents" };
+`,
+    "resources/people.ts": `import { sanoma } from "sanoma/resources";
+
+export const alice = sanoma.person({ id: "alice" });
+export const finance = sanoma.person({ id: "finance" });
+`,
+  },
+  companyDir,
+);
 
 // The drivers are these fakes'; each sandbox run makes its own from the packages' makers.
 // Unseeded: each fake holds what its replies were recorded with.
 const fakes = companyFakes();
 const { github, stripe } = fakes;
-const config = { ...companyConfig([inspect], policy, fakes), ledger: memoryLedger() };
+const config = { ...companyConfig([inspect], fakes, root), ledger: memoryLedger() };
 const scope = resolveConfig(config);
 const loaded = await loadScenarios(scope);
 const scenario = (name: string): Scenario => loaded.scenarios.find((s) => s.name === name)!;
@@ -36,7 +60,8 @@ describe("the company's scenarios", () => {
     let ledger = ledgers.get(s.name);
     if (!ledger) {
       ledger = (async () => {
-        const runId = await app.client.start(s.workflow, s.input, { startedBy: alice, sandbox: s.name });
+        const startedBy = s.workflow === "inspect" ? alice : agent;
+        const runId = await app.client.start(s.workflow, s.input, { startedBy, sandbox: s.name });
         await drive(app.client, runId, s);
         return app.client.ledger(runId);
       })();

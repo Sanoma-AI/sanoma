@@ -1,28 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { bluesky } from "@sanoma-ai/connector-bluesky";
-import { ghost } from "@sanoma-ai/connector-ghost";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import {
-  allow,
-  approve,
-  approvedFor,
-  type Decision,
-  definePolicy,
-  defineWorkflow,
-  deny,
-  errorCode,
-  memoryLedger,
-  type Policy,
-  withSetup,
-} from "../src/index.ts";
+import { defineWorkflow, errorCode, memoryLedger, withSetup } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
-import { inSeconds, pending, types, useApp, waitFor } from "./harness.ts";
+import { inSeconds, pending, rootWith, types, useApp, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`.
 const alice = { id: "alice", groups: ["marketing"] };
 
-/** Posts twice at once, under a policy that holds each call for an approval. */
+/** Posts twice at once, under a policy that holds each post for an approval. */
 const twin = defineWorkflow({
   name: "twin",
   trigger: "manual",
@@ -205,32 +192,35 @@ describe("announce", () => {
 });
 
 describe("announce under a policy", () => {
-  // Deterministic: each decision depends on the call alone. The test picks a policy per run by actor.
-  const byActor: Record<string, Policy> = {
-    "no-email": ({ effect }) => (effect === "send" ? deny("no email this week") : allow()),
-    // Holds the first publish; its approval covers both publishing operations.
-    "lead-publishes": ({ op, effect, run }) =>
-      effect === "publish" && !approvedFor(run.approvals, op.id, "marketing-lead")
-        ? approve("marketing-lead", { covers: [ghost.post.publish, bluesky.post.create] })
-        : allow(),
-    "approve-nobody": ({ effect }) => (effect === "publish" ? ({ kind: "approve" } as unknown as Decision) : allow()),
-    "hold-each": ({ op, input, run }) =>
-      run.approvals.some(
-        (a) =>
-          a.requestedBy === "policy" &&
-          a.op === op.id &&
-          a.status === "approved" &&
-          JSON.stringify(a.input) === JSON.stringify(input),
-      )
-        ? allow()
-        : approve("lead"),
-  };
-  const policy = definePolicy((call) => byActor[call.actor.id]?.(call) ?? allow());
-  const app = useApp("announce-policy", () => ({
-    workflows: [announce, twin],
-    policy,
-    ledger: memoryLedger(),
-  }));
+  // The test picks a rule per run by who starts it: each Cedar policy names its principal.
+  const root = rootWith({
+    "resources/people.ts": `import { sanoma } from "sanoma/resources";
+
+export const noEmail = sanoma.person({ id: "no-email" });
+export const leadPublishes = sanoma.person({ id: "lead-publishes" });
+export const holdEach = sanoma.person({ id: "hold-each" });
+export const marketingLead = sanoma.person({ id: "marketing-lead" });
+export const lead = sanoma.person({ id: "lead" });
+export const editor = sanoma.person({ id: "editor" });
+`,
+    "policies/policy.cedar": `@reason("no email this week")
+forbid (principal == Sanoma::Principal::"no-email", action in Sanoma::Action::"effect:send", resource);
+
+// Holds the blog's publish for the lead, once a run.
+@hold("marketing-lead")
+forbid (principal == Sanoma::Principal::"lead-publishes", action == Sanoma::Action::"ghost.post.publish", resource);
+
+// Each post for a different approver, so neither approval lets the other post through.
+@hold("lead")
+forbid (principal == Sanoma::Principal::"hold-each", action == Sanoma::Action::"bluesky.post.create", resource)
+when { context.input.text == "one" };
+
+@hold("editor")
+forbid (principal == Sanoma::Principal::"hold-each", action == Sanoma::Action::"bluesky.post.create", resource)
+when { context.input.text == "two" };
+`,
+  });
+  const app = useApp("announce-policy", () => ({ workflows: [announce, twin], root, ledger: memoryLedger() }));
   const c = () => app.client;
 
   it("fails the run when the policy denies a call, records the denial, and keeps the code through DBOS", async () => {
@@ -357,22 +347,6 @@ describe("announce under a policy", () => {
     expect(records.at(-1)).toMatchObject({ type: "run.failed" });
   });
 
-  it("fails the run, naming the operation, when the policy returns a malformed decision", async () => {
-    const runId = await c().start(
-      announce,
-      { title: "Malformed", body: "<p>x</p>", launchAt: inSeconds(1) },
-      { startedBy: { id: "approve-nobody" } },
-    );
-    await waitFor(pending(c, runId));
-    await c().decide(runId, { decision: "approve", by: { id: "marketing-lead" } });
-
-    await expect(c().result(runId)).rejects.toThrow(
-      'The policy returned {"kind":"approve"} for ghost.post.publish: needs an approver: a name, or { group: "name" }',
-    );
-    expect(app.ops()).toEqual(["ghost.post.create", "resend.broadcast.create"]);
-    expect((await c().ledger(runId)).at(-1)).toMatchObject({ type: "run.failed" });
-  });
-
   it("runs calls made at the same time one after the other, so their approvals come one at a time, in order", async () => {
     // Under Promise.all the second call waits for the first to settle. Otherwise the order in
     // which concurrent calls reach DBOS would decide their DBOS function ids, their ledger seq
@@ -392,7 +366,7 @@ describe("announce under a policy", () => {
     expect((await c().approvals(runId))[1]).toMatchObject({ id: "approval-2", input: { text: "two" } });
     expect(app.vendors.bluesky.state.posts.map((p) => p.text)).toEqual(["one"]);
 
-    await c().decide(runId, { decision: "approve", by: { id: "lead" } }, "approval-2");
+    await c().decide(runId, { decision: "approve", by: { id: "editor" } }, "approval-2");
     expect(await c().result(runId)).toEqual([expect.objectContaining({ uri: expect.any(String) }), expect.anything()]);
     expect(app.vendors.bluesky.state.posts.map((p) => p.text)).toEqual(["one", "two"]);
     const records = await c().ledger(runId);

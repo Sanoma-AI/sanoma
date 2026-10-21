@@ -22,14 +22,13 @@ import { resend } from "@sanoma-ai/connector-resend";
 import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
 import { fakeResend } from "@sanoma-ai/connector-resend/fake";
 import { type FakeCall, startTestWorker, testDatabaseUrl, withFake } from "@sanoma-ai/testing";
-import { allowAll } from "@sanoma-ai/workflows";
 import announce from "./workflows/announce.ts";
 
 const calls: FakeCall[] = [];
 const blog = fakeGhost({ calls });
 const email = fakeResend({ calls });
 const worker = await startTestWorker(
-  { workflows: [announce], connectors: [withFake(ghost, blog), withFake(resend, email)], policy: allowAll },
+  { workflows: [announce], connectors: [withFake(ghost, blog), withFake(resend, email)] },
   { databaseUrl: testDatabaseUrl("announce") }, // the database this file's tests run on
 );
 
@@ -58,13 +57,12 @@ import { ghost } from "@sanoma-ai/connector-ghost";
 import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
 import { testDatabaseUrl, withFake } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
-import { allowAll } from "@sanoma-ai/workflows";
 import { beforeEach, expect, it } from "vitest";
 import publish from "./workflows/publish.ts";
 
 const blog = fakeGhost();
 const app = useTestApp(
-  { workflows: [publish], connectors: [withFake(ghost, blog)], policy: allowAll },
+  { workflows: [publish], connectors: [withFake(ghost, blog)] },
   { databaseUrl: testDatabaseUrl("publish") },
 );
 beforeEach(() => blog.reset());

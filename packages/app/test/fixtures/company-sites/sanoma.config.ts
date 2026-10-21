@@ -1,4 +1,4 @@
-import { allow, defineConfig, definePolicy, defineWorkflow, z } from "sanoma";
+import { defineConfig, defineWorkflow, z } from "sanoma";
 import { leads } from "./resources/data.ts";
 
 const hello = defineWorkflow({
@@ -15,5 +15,4 @@ export default defineConfig({
   workflows: [hello],
   connectors: [],
   collections: [leads],
-  policy: definePolicy(() => allow()),
 });
