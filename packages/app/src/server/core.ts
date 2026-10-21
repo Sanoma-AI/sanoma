@@ -380,9 +380,9 @@ const grids = new WeakMap<object, PermissionsResponse>();
  * The Permissions page's grid (`getPermissions`): for someone in no group, then for each group,
  * the declared ones and `agents`, what the policy would answer someone in it alone
  * (`{ id: "group:<name>", groups: [name] }`, an agent acting for `ACTS_FOR`), the input unknown
- * (`preview`), for the start of each of the config's own workflows, in its order, each with the
- * operations it uses, in its order, then each operation a person may call directly, by id.
- * Nobody's own answer: the actor asking is not used.
+ * (`preview`), for the start of each of the config's own workflows, by name, each with the
+ * operations it uses, in the order it declares them, then each operation a person may call
+ * directly, by id. Nobody's own answer: the actor asking is not used.
  */
 export function permissions(app: Pick<AppContext, "resolved" | "description">): PermissionsResponse {
   let grid = grids.get(app.resolved);
@@ -394,16 +394,18 @@ function gridOf(app: Pick<AppContext, "resolved" | "description">): PermissionsR
   const { description } = app;
   const groups = [null, ...groupNamesOf(description.resources)];
   const effects = new Map(description.ops.map(({ id, effect }) => [id, effect]));
-  const workflows = description.workflows.filter((w) => !w.builtin);
+  const workflows = description.workflows
+    .filter((w) => !w.builtin)
+    .map(({ name, title, ops }) => ({ name, title, ops: [...new Set(ops)] }));
   const direct = description.ops
     .filter((op) => op.direct)
     .map(({ id }) => id)
     .toSorted((a, b) => a.localeCompare(b));
-  // Every row's request, in the grid's order: each workflow's start, then the operations it uses; then the direct ones.
-  const requests: PreviewQuery = [
-    ...workflows.flatMap(({ name, ops }) => [`${WORKFLOW_ACTION}${name}`, ...ops]),
-    ...direct,
-  ].map((id) => ({ action: { id, effect: effects.get(id) } }));
+  // Each action asked once, whichever rows show it: each workflow's start, the operations they use, the direct ones.
+  const actions = [
+    ...new Set([...workflows.flatMap(({ name, ops }) => [`${WORKFLOW_ACTION}${name}`, ...ops]), ...direct]),
+  ];
+  const requests: PreviewQuery = actions.map((id) => ({ action: { id, effect: effects.get(id) } }));
   const columns = groups.map((group) =>
     preview(
       app,
@@ -413,22 +415,20 @@ function gridOf(app: Pick<AppContext, "resolved" | "description">): PermissionsR
       requests,
     ),
   );
-  // The next row, its cells the next answer in each column: called in the requests' order.
-  let row = 0;
-  const next = (id: string): PermissionsRow => {
-    const cells = columns.map((answers) => answers[row]!);
-    row++;
-    return { id, cells };
-  };
+  const at = new Map(actions.map((action, i) => [action, i]));
+  const row = (id: string, action = id): PermissionsRow => ({
+    id,
+    cells: columns.map((answers) => answers[at.get(action)!]!),
+  });
   return {
     policy: description.policy,
     groups,
     workflows: workflows.map(({ name, title, ops }) => ({
-      ...next(name),
+      ...row(name, `${WORKFLOW_ACTION}${name}`),
       ...(title !== undefined && { title }),
-      ops: ops.map(next),
+      ops: ops.map((id) => row(id)),
     })),
-    ops: direct.map(next),
+    ops: direct.map((id) => row(id)),
   };
 }
 
