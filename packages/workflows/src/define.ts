@@ -5,17 +5,22 @@ import { isOp, type Op } from "./op.ts";
 import { approverLabel } from "./shared.ts";
 
 /**
- * Who is acting: the person or service that starts a run or decides an approval. `id` is
- * whatever the deployment identifies people by; `groups` are the roles it vouches for.
+ * Who is acting: the person or agent that starts a run, calls an operation or decides an
+ * approval. With people declared (`sanoma.person`, `sanoma.agent`, `sanoma.group` in data files),
+ * a principal is a declared one, its `groups` every group that lists it; an agent is in the group
+ * `agents`, and `onBehalfOf` names the person it acts for.
  */
 export interface Principal {
   id: string;
   groups?: string[];
+  /** For an agent: the id of the person whose instruction it carries. */
+  onBehalfOf?: string;
 }
 
 export const Principal: z.ZodType<Principal> = z.object({
   id: z.string().regex(/\S/, "id must not be blank"),
   groups: z.array(z.string()).optional(),
+  onBehalfOf: z.string().regex(/\S/, "onBehalfOf must not be blank").optional(),
 });
 
 export type Builtin = "approval" | "sleep" | "all";

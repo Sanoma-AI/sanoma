@@ -52,8 +52,8 @@
       "default": "./dist/plugin.js"
     },
     "./resources": {
-      "types": "./dist/secret.d.ts",
-      "default": "./dist/secret.js"
+      "types": "./dist/constructors.d.ts",
+      "default": "./dist/constructors.js"
     },
     "./scenario": {
       "types": "./dist/scenario.d.ts",

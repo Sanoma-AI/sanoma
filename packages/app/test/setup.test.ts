@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { type App, startApp } from "../src/index.ts";
 import type { AppContext } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";
+import { admitting } from "../src/login/admission.ts";
 import { GITHUB_APP, githubManifest, setSetupToken, setupStatus } from "../src/server/setup.ts";
 
 // Connecting GitHub and Supabase (/setup/connect): the GitHub App's manifest page, its callback
@@ -63,7 +64,12 @@ beforeAll(async () => {
   ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
   app = await startApp(config, { port: 0 });
   client = await SanomaClient.connect(config);
-  ctx = { resolved: resolveConfig(config), description: describeConfig(config), client, login: loopbackLogin() };
+  ctx = {
+    resolved: resolveConfig(config),
+    description: describeConfig(config),
+    client,
+    login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
+  };
   // The table outlives a run of the tests. (Reading prepares the database; rows stored under
   // another key fail to read, and are deleted all the same.)
   await client.secrets(NAMES).catch(() => undefined);

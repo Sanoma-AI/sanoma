@@ -24,8 +24,8 @@ export interface ResourceFields {
 
 /** Where a field names another declared resource: see `ResourceFields.references`. */
 export interface FieldReference {
-  /** The `<vendor>.<type>` of the resource it names. */
-  readonly type: string;
+  /** The `<vendor>.<type>` of the resource it names, or the types it may name one of. */
+  readonly type: string | readonly string[];
   /**
    * The fields of that resource's state the vendor may hold here instead of its `name`, such as
    * GitHub's `node_id`: a drift check takes any of their values, read in the same run, as the
@@ -85,6 +85,12 @@ export interface ResourceSpec<S extends z.ZodObject = z.ZodObject> {
    * recreated database looks fine and has lost its data. Default: true for a host, else false.
    */
   stateless?: boolean;
+  /**
+   * True when there is no vendor object behind a declaration: the repo is all there is of it (the
+   * runtime's people, `sanoma.person`). Such a type has no operations, so no driver, and drift and
+   * apply pass its resources by. Default false.
+   */
+  vendorless?: boolean;
   /**
    * Operations apply calls, in order, right after it creates one of its objects and binds it: a
    * Supabase project's health, until it is healthy, then its database URL stored.
@@ -156,12 +162,14 @@ type DeclaringAt<T, R extends References, P extends string> = T extends readonly
     : WithSecrets<T>;
 
 type DeclaringField<V, R extends References, P extends string> = P extends keyof R
-  ? WithSecrets<V> | DeclaredOf<R[P]["type"]>
+  ? V extends readonly (infer I)[]
+    ? (WithSecrets<I> | DeclaredOf<R[P]["type"]>)[]
+    : WithSecrets<V> | DeclaredOf<R[P]["type"]>
   : [Extract<keyof R, `${P}.${string}`>] extends [never]
     ? WithSecrets<V>
     : DeclaringAt<V, R, P>;
 
-type DeclaredOf<Id> = Id extends string ? Declared<Id> : never;
+type DeclaredOf<Id> = Id extends string ? Declared<Id> : Id extends readonly (infer E)[] ? DeclaredOf<E> : never;
 
 const importId = z.string().min(1);
 /** What a driver keeps beside a state (an OpenTofu provider's private data and state version), passed back unchanged. */
@@ -259,7 +267,11 @@ export interface Resource<
   W extends boolean = boolean,
 >
   extends
-    Readonly<Required<Omit<ResourceSpec<S>, "identity" | "find" | "writable" | "host" | "stateless" | "afterCreate">>>,
+    Readonly<
+      Required<
+        Omit<ResourceSpec<S>, "identity" | "find" | "writable" | "host" | "stateless" | "afterCreate" | "vendorless">
+      >
+    >,
     Readonly<Pick<ResourceSpec<S>, "identity" | "find" | "host" | "afterCreate">> {
   (desired: Declaring<z.input<S>, R>): Declared<Id, z.input<S>>;
   /** `read` and `import`, each effect `read`, idempotent, with the id as `target`; for a writable type, the change operations too. */
@@ -268,6 +280,8 @@ export interface Resource<
   readonly writable: W;
   /** True when apply may recreate or replace its objects as routine: they keep no data. */
   readonly stateless: boolean;
+  /** True when there is no vendor object behind it (`ResourceSpec.vendorless`): it has no operations. */
+  readonly vendorless: boolean;
   readonly [RESOURCE]: true;
 }
 
@@ -526,6 +540,8 @@ export function defineResource<
   const writable = (spec.writable ?? false) as W;
   const what: `${V}.${T}` = `${vendor}.${type}`;
   if (host) checkHost(what, host, spec);
+  if (spec.vendorless && (writable || host))
+    throw new Error(`${what}: a vendorless type has no object to change or host`);
   const title = spec.title.toLowerCase();
   const io = opsOf(schema);
   // The policy's `target` for a create: the type, as no object has an id yet.
@@ -581,7 +597,7 @@ export function defineResource<
       opaque,
     },
   } satisfies Specs<S, "read" | "import">;
-  const ops = (writable ? { ...base, ...changeOps } : base) as unknown as ResourceOps<S, W>;
+  const ops = (spec.vendorless ? {} : writable ? { ...base, ...changeOps } : base) as unknown as ResourceOps<S, W>;
 
   const named = new Set(identity?.match(/[A-Za-z_][\w.]*/g));
   const owned = new Set(fields.vendorOwned.filter((path) => !named.has(path)));
@@ -608,8 +624,9 @@ export function defineResource<
         const id = value[DECLARED];
         const wants = references[path];
         if (wants === undefined) throw new Error(`${what}: ${at} takes a value, not a resource (${id} ${value.name})`);
-        if (wants.type !== id)
-          throw new Error(`${what}: ${at} names a resource of type ${wants.type}, not ${id} (${value.name})`);
+        const types = [wants.type].flat();
+        if (!types.includes(id))
+          throw new Error(`${what}: ${at} names a resource of type ${types.join(" or ")}, not ${id} (${value.name})`);
         if (value.name === undefined)
           throw new Error(`${what}: ${at} names a ${id}, which has no identity to name it by`);
         refs[at] = `${id}:${value.name}`;
@@ -661,6 +678,7 @@ export function defineResource<
     writable,
     ...(host && { host }),
     stateless: spec.stateless ?? host !== undefined,
+    vendorless: spec.vendorless ?? false,
     ...(spec.afterCreate && { afterCreate: spec.afterCreate }),
     ops,
     // A symbol, so `defineConnector` tells a resource type from a group of operations.

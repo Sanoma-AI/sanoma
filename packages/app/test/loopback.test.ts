@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { isLoopback } from "@sanoma-ai/workflows/shared";
 import { ACTOR_COOKIE, ACTOR_HEADER } from "../src/api.ts";
+import { sanoma } from "@sanoma-ai/workflows/resources";
+import { admitting } from "../src/login/admission.ts";
 import { actorFromCookie, hostName, loopbackLogin } from "../src/loopback.ts";
 
 // The Host names a loopback-only app answers to, and whom it takes a request to be from. No
@@ -47,5 +49,40 @@ describe("whom the loopback login takes a request to be from", () => {
       headers: { cookie: `${ACTOR_COOKIE}=${encodeURIComponent("100%41")}` },
     });
     expect(actorFromCookie(request)).toEqual({ id: "100%41" });
+  });
+});
+
+/** A request from this machine, naming `name` in the header. */
+const asked = (name: string, path = "/", method = "GET") =>
+  new Request(`http://127.0.0.1${path}`, { method, headers: { host: "127.0.0.1", [ACTOR_HEADER]: name } });
+
+describe("the loopback login, admitting only declared people", () => {
+  const ada = sanoma.person({ id: "ada" });
+  const people = [ada, sanoma.agent({ id: "bot" }), sanoma.group({ name: "finance", members: [ada] })];
+  const login = admitting(loopbackLogin(), () => ({ people, problems: [] }));
+
+  it("takes a declared person's id as the declared principal", async () => {
+    expect(await login.resolveActor(asked("ada"))).toEqual({ id: "ada", groups: ["finance"] });
+    expect(await login.handle!(asked("ada"))).toBeUndefined();
+  });
+
+  it("refuses an agent's id and an undeclared name: a page to forget it, JSON for a server function", async () => {
+    for (const name of ["bot", "scenarios", "Ada"]) {
+      expect(await login.resolveActor(asked(name))).toBeUndefined();
+      const page = (await login.handle!(asked(name)))!;
+      expect(page.status).toBe(403);
+      expect(await page.text()).toContain("Use another name");
+      const fn = (await login.handle!(asked(name, "/_serverFn/abc", "POST")))!;
+      expect(await fn.json()).toEqual({
+        error: `${name} is not declared in resources/people.ts`,
+        code: "not_admitted",
+      });
+    }
+  });
+
+  it("takes any name as given while no person is declared", async () => {
+    expect(await admitting(loopbackLogin(), () => ({ people: [], problems: [] })).resolveActor(asked("cy"))).toEqual({
+      id: "cy",
+    });
   });
 });

@@ -83,7 +83,7 @@ export const BAD_DATA_FILES: [name: string, source: string, at: string, message:
     "secret-import",
     `import { secret, sign } from "sanoma/resources";\n${GH}export const web = github.repository({ name: "web" });\n`,
     "1:18",
-    /^a data file imports only `secret` from "sanoma\/resources"/,
+    /^a data file imports only `secret` and `sanoma` from "sanoma\/resources"/,
   ],
   ["secret-marker", `${WEB}{ $secret: "X" } });\n`, "4:68", /^name a secret with `secret\("NAME"\)`/],
   ["secret-name", `${WEB}secret("lower") });\n`, "4:73", /^"lower" is not a secret's name: `secret\("NAME"\)`/],

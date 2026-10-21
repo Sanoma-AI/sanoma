@@ -447,6 +447,7 @@ async function runOf({ client }: AppContext, workflow: string, runId: string): P
 const STATUS: Partial<Record<NonNullable<ErrorResponse["code"]>, number>> = {
   invalid_input: 400,
   not_approver: 403,
+  not_admitted: 403,
   policy_denied: 403,
   run_not_found: 404,
   no_pending_approval: 404,

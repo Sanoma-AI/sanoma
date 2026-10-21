@@ -13,7 +13,7 @@ import type { ResolvedConfig } from "./config.ts";
 import { jsonSchemaOf } from "./define.ts";
 import type { Effect } from "./op.ts";
 import { isObject } from "./resource.ts";
-import { DATA_VENDOR } from "./shared.ts";
+import { DATA_VENDOR, groupNamesOf, type PeopleResource } from "./shared.ts";
 
 // The Cedar schema a company's policies are validated and decided against: made from the
 // resolved config and the people, in memory for the evaluator, and written as text to
@@ -42,25 +42,6 @@ export const WORKFLOW_ACTION = "workflow:";
 
 /** The action group every workflow start (`workflow:<name>`) is in. */
 export const START = "start";
-
-/** The built-in group every agent is in: a rule about agents is `principal in Sanoma::Group::"agents"`. */
-export const AGENTS = "agents";
-
-/**
- * The people and agents a policy decides over, and their groups: the resolved resources of the
- * built-in `sanoma.person`, `sanoma.agent` and `sanoma.group`. Membership is the groups'.
- */
-export interface PolicyPeople {
-  people: readonly { id: string; onBehalfOf?: string }[];
-  groups: readonly { name: string; members: readonly string[] }[];
-}
-
-/** No one declared: the launcher's people until the people file is read. */
-export const NO_PEOPLE: PolicyPeople = { people: [], groups: [] };
-
-/** The groups a policy may name: the declared ones and `agents`, sorted. */
-export const groupNamesOf = (people: PolicyPeople): string[] =>
-  [...new Set([...people.groups.map((g) => g.name), AGENTS])].toSorted();
 
 const STRING = { type: "EntityOrCommon", name: "String" } as const;
 const LONG = { type: "EntityOrCommon", name: "Long" } as const;
@@ -108,7 +89,7 @@ const WRITES = new Set(["save", "delete"]);
  */
 function buildSchema(
   resolved: Pick<ResolvedConfig, "ops" | "workflows" | "collections">,
-  people: PolicyPeople,
+  people: readonly PeopleResource[],
 ): CedarSchemaJson {
   const applies = (resource: string, context: Record<string, TypeOfAttribute<string>>) => ({
     principalTypes: ["Principal"],
@@ -142,7 +123,7 @@ function buildSchema(
   return { [NAMESPACE]: { entityTypes, actions } };
 }
 
-const schemas = new WeakMap<object, WeakMap<PolicyPeople, CedarSchemaJson>>();
+const schemas = new WeakMap<object, WeakMap<readonly PeopleResource[], CedarSchemaJson>>();
 
 /**
  * The Cedar schema for a resolved config and its people (`buildSchema`), made once for each pair:
@@ -150,7 +131,7 @@ const schemas = new WeakMap<object, WeakMap<PolicyPeople, CedarSchemaJson>>();
  */
 export function schemaOf(
   resolved: Pick<ResolvedConfig, "ops" | "workflows" | "collections">,
-  people: PolicyPeople,
+  people: readonly PeopleResource[],
 ): CedarSchemaJson {
   let byPeople = schemas.get(resolved.ops);
   if (!byPeople) schemas.set(resolved.ops, (byPeople = new WeakMap()));

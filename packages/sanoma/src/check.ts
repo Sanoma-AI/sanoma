@@ -7,7 +7,7 @@ import { errorMessage } from "@sanoma-ai/workflows";
 import {
   type ConfigDescription,
   describeConfig,
-  NO_PEOPLE,
+  readPeople,
   schemaOf,
   writeGenerated,
 } from "@sanoma-ai/workflows/describe";
@@ -62,7 +62,7 @@ export async function check(
   log("config");
   const policies = await usePolicies({ config, root, resolved });
   const description = describeConfig(config);
-  const { wrote } = await writeGenerated(root, description, schemaOf(resolved, NO_PEOPLE));
+  const { wrote } = await writeGenerated(root, description, schemaOf(resolved, readPeople(root).people));
   for (const file of wrote) log(`wrote ${file}`);
   const build = await siteBuild(root);
   const { sites, refused } = build?.sitesOf(root) ?? { sites: [], refused: [] };
@@ -156,6 +156,8 @@ function configProblems({ problems, workflows, sites }: ConfigDescription, root:
     ...problems.map(problemLine),
     ...workflows.flatMap((wf) => wf.problems.map((p) => problemLine({ file: relative(root, wf.file), ...p }))),
     ...sites.flatMap((site) => site.problems.map(problemLine)),
+    // The people's own (an id two share, a reserved one), which admit nobody while they stand.
+    ...readPeople(root).problems.map(problemLine),
   ]);
   return [...lines];
 }

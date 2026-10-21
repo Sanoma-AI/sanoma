@@ -14,9 +14,10 @@ import {
   type SanomaConfig,
   type Source,
 } from "@sanoma-ai/workflows";
-import { describeConfig } from "@sanoma-ai/workflows/describe";
+import { describeConfig, readPeople } from "@sanoma-ai/workflows/describe";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import type { AppContext, LoginProvider, ServerEntry } from "./context.ts";
+import { admitting } from "./login/admission.ts";
 import { loopbackLogin } from "./loopback.ts";
 
 export { ACTOR_HEADER } from "./api.ts";
@@ -72,12 +73,13 @@ interface Responder {
  */
 export async function startApp(config: SanomaConfig, options: AppOptions = {}): Promise<App> {
   const host = options.host ?? "127.0.0.1";
-  const login = options.login ?? loopbackLogin();
-  login.check(host);
+  const given = options.login ?? loopbackLogin();
+  given.check(host);
   if (options.dev && !isLoopback(host)) {
     throw new Error(`The dev server listens on this machine only, not ${host}: serve a build there`);
   }
   const resolved = resolveConfig(config);
+  const login = admitting(given, () => readPeople(resolved.root));
   const description = describeConfig(config);
   // Problems in the files do not stop the app: a data file's resources are left out (the Resources
   // page lists the problems), a workflow the worker will refuse is shown with its outline's error,

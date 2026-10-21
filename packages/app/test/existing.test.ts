@@ -17,6 +17,7 @@ import { ApiError, INFRA } from "../src/api.ts";
 import type { AppContext } from "../src/context.ts";
 import { type App, startApp } from "../src/index.ts";
 import { loopbackLogin } from "../src/loopback.ts";
+import { admitting } from "../src/login/admission.ts";
 import { CONNECT_BRANCH, connectExisting } from "../src/server/setup.ts";
 
 // Connecting an existing repository or database (/setup/existing) in a git repository of its
@@ -42,7 +43,7 @@ const context = (): AppContext => ({
   resolved: resolveConfig(test.config),
   description: describeConfig(test.config),
   client: test.client,
-  login: loopbackLogin(),
+  login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
   source,
 });
 

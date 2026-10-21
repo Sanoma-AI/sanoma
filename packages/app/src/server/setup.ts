@@ -20,6 +20,7 @@ import {
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { cookie, cookies, signer } from "../login/github.ts";
+import { escapeHtml } from "../login/page.ts";
 
 // Going live, step 1: connect GitHub and Supabase. GitHub through an App the company creates
 // with GitHub's manifest flow (`/setup/github/manifest`, then `/setup/github/callback`), whose
@@ -114,8 +115,8 @@ export function manifestPage({ description }: AppContext, request: Request): Res
   const html =
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Create the GitHub App · Sanoma</title></head>` +
     `<body style="font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem">` +
-    `<form id="manifest" method="post" action="${escape(to.toString())}">` +
-    `<input type="hidden" name="manifest" value="${escape(manifest)}">` +
+    `<form id="manifest" method="post" action="${escapeHtml(to.toString())}">` +
+    `<input type="hidden" name="manifest" value="${escapeHtml(manifest)}">` +
     `<p>Taking you to GitHub to create the App…</p><button type="submit">Continue to GitHub</button></form>` +
     `<script>document.getElementById("manifest").submit()</script></body></html>`;
   return new Response(html, {
@@ -175,8 +176,6 @@ function stateSigner() {
   if (!secretsKey) throw new Error("Connecting GitHub needs SANOMA_SECRETS_KEY, which encrypts the App's keys");
   return signer(secretsKey, "sanoma setup state");
 }
-
-const escape = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 // Connecting an existing repository or database: each is imported by its name or ref, declared
 // in `resources/sanoma/infra.ts` from what was read, and bound to that file's declaration by an

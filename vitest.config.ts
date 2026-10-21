@@ -12,7 +12,7 @@ export default defineConfig({
         find: /^@sanoma-ai\/workflows\/(data|describe|fake|plugin|shared|scenario|scenarios)$/,
         replacement: src("./packages/workflows/src/$1.ts"),
       },
-      { find: /^@sanoma-ai\/workflows\/resources$/, replacement: src("./packages/workflows/src/secret.ts") },
+      { find: /^@sanoma-ai\/workflows\/resources$/, replacement: src("./packages/workflows/src/constructors.ts") },
       {
         find: /^@sanoma-ai\/testing\/(features|harness|host|replay|scenarios)$/,
         replacement: src("./packages/testing/src/$1.ts"),

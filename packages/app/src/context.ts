@@ -2,10 +2,20 @@ import type { Principal, ResolvedConfig, SanomaClient, Source } from "@sanoma-ai
 import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 
 /**
+ * What a login vouches for about who is asking: a name they gave (`id`, the loopback's), a
+ * verified email, a GitHub login. The app admits the declared person they match (`personOf`).
+ */
+export interface LoginIdentity {
+  id?: string;
+  email?: string;
+  github?: string;
+}
+
+/**
  * Says who is making a request, or undefined when nobody is named. The app refuses a change
  * (starting a run, deciding an approval) without one.
  */
-export type ResolveActor = (request: Request) => Principal | undefined | Promise<Principal | undefined>;
+export type ResolveActor = (request: Request) => LoginIdentity | undefined | Promise<LoginIdentity | undefined>;
 
 /**
  * Who may use the app and how they sign in. `startApp` calls `check` with the host it is to
@@ -28,6 +38,11 @@ export interface LoginProvider {
   signOut?: string;
 }
 
+/** A login as the app uses it (`admitting`): `resolveActor` names the declared principal asking, or nobody. */
+export interface AdmittingLogin extends Omit<LoginProvider, "resolveActor"> {
+  resolveActor(request: Request): Promise<Principal | undefined>;
+}
+
 /** What `startApp` hands every request: built once at boot, shared by all requests. */
 export interface AppContext {
   resolved: ResolvedConfig;
@@ -37,8 +52,8 @@ export interface AppContext {
    */
   description: ConfigDescription;
   client: SanomaClient;
-  /** `AppOptions.login`, or `loopbackLogin()`. */
-  login: LoginProvider;
+  /** `AppOptions.login`, or `loopbackLogin()`, admitting only a declared person (`admitting`). */
+  login: AdmittingLogin;
   /** The company's repository, which Adopt commits a data file's change to; without one, it only writes the file. */
   source?: Source;
 }

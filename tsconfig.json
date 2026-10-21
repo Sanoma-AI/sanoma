@@ -15,7 +15,7 @@
       "@sanoma-ai/workflows/describe": ["./packages/workflows/src/describe.ts"],
       "@sanoma-ai/workflows/fake": ["./packages/workflows/src/fake.ts"],
       "@sanoma-ai/workflows/plugin": ["./packages/workflows/src/plugin.ts"],
-      "@sanoma-ai/workflows/resources": ["./packages/workflows/src/secret.ts"],
+      "@sanoma-ai/workflows/resources": ["./packages/workflows/src/constructors.ts"],
       "@sanoma-ai/workflows/scenario": ["./packages/workflows/src/scenario.ts"],
       "@sanoma-ai/workflows/scenarios": ["./packages/workflows/src/scenarios.ts"],
       "@sanoma-ai/workflows/shared": ["./packages/workflows/src/shared.ts"],

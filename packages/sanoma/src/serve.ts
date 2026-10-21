@@ -12,7 +12,7 @@ import {
   type SanomaConfig,
   startWorker,
 } from "@sanoma-ai/workflows";
-import { describeConfig, NO_PEOPLE, schemaOf, writeGenerated } from "@sanoma-ai/workflows/describe";
+import { describeConfig, readPeople, schemaOf, writeGenerated } from "@sanoma-ai/workflows/describe";
 import { UsageError } from "./config.ts";
 import { runtimeFrom, siteBuild } from "./sites.ts";
 import { localGitSource } from "./source.ts";
@@ -65,9 +65,11 @@ async function appStart(
 ): Promise<AppOptions> {
   const options = { port, ...(await appOptions(secretsOf(config))) };
   // For an editor and the sites' types only: a checkout it cannot write still serves.
-  await writeGenerated(rootOf(config), describeConfig(config), schemaOf(resolved, NO_PEOPLE)).catch((err: unknown) =>
-    log(`could not write .sanoma/: ${errorMessage(err)}`),
-  );
+  await writeGenerated(
+    rootOf(config),
+    describeConfig(config),
+    schemaOf(resolved, readPeople(rootOf(config)).people),
+  ).catch((err: unknown) => log(`could not write .sanoma/: ${errorMessage(err)}`));
   const sites = await appSites(rootOf(config), log, dev ? options.host : false);
   return { ...options, ...sites, ...(sites.dev && { dev: { ...sites.dev, onFileChange: apiWriter(config, log) } }) };
 }
@@ -196,7 +198,7 @@ export async function appOptions(readSecrets?: ReadSecrets): Promise<Pick<AppOpt
     throw new UsageError(`GitHub sign-in needs ${GITHUB.join(", ")}: ${missing.join(", ")} not set`);
   }
   try {
-    return { host, login: githubLogin({ clientId, clientSecret, repo }) };
+    return { host, login: githubLogin({ clientId, clientSecret }) };
   } catch (err) {
     throw new UsageError(errorMessage(err));
   }
