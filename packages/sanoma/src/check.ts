@@ -8,7 +8,7 @@ import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { problemLine } from "@sanoma-ai/workflows/shared";
 import { runScenarios } from "@sanoma-ai/workflows/scenarios";
 import type { Loaded } from "./config.ts";
-import { refusedSite, runtimeFrom, siteBuild } from "./sites.ts";
+import { runtimeFrom, siteBuild } from "./sites.ts";
 
 export interface CheckResult {
   ok: boolean;
@@ -82,22 +82,22 @@ async function checkSites(
   log: (line: string) => void,
 ): Promise<{ typed: string[]; built: string[] }> {
   const { sites, refused } = build.sitesOf(root);
-  const built = refused.map(refusedSite);
+  const built = refused.map(
+    (name) => `sites/${name}: a site's folder name is a URL segment (lowercase letters, digits and dashes)`,
+  );
   if (!sites.length) return { typed: [], built };
   log(`build ${sites.join(" ")}`);
   await build.buildApp(root, { runtimeFrom: runtimeFrom() }).catch((err: unknown) => {
     built.push(errorMessage(err));
   });
   if (!existsSync(join(root, ".sanoma", "app", "routeTree.gen.ts"))) return { typed: [], built };
-  log("tsc sites");
-  const tsc = await run(binOf("typescript"), ["-p", join("sites", "tsconfig.json"), "--pretty", "false"], root);
-  return { typed: tsc.code === 0 ? [] : tscProblems(tsc), built };
+  return { typed: await typecheck(root, log, "sites/tsconfig.json"), built };
 }
 
-/** `tsc -p tsconfig.json` in the root. */
-async function typecheck(root: string, log: (line: string) => void): Promise<string[]> {
-  log("tsc");
-  const tsc = await run(binOf("typescript"), ["-p", "tsconfig.json", "--pretty", "false"], root);
+/** `tsc -p <project>` in the root (`tsconfig.json`, or the sites' `sites/tsconfig.json`). */
+async function typecheck(root: string, log: (line: string) => void, project = "tsconfig.json"): Promise<string[]> {
+  log(project === "tsconfig.json" ? "tsc" : `tsc ${project}`);
+  const tsc = await run(binOf("typescript"), ["-p", project, "--pretty", "false"], root);
   return tsc.code === 0 ? [] : tscProblems(tsc);
 }
 

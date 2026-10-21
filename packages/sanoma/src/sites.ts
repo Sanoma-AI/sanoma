@@ -11,7 +11,3 @@ export const runtimeFrom = () => realpathSync(fileURLToPath(new URL("../package.
 /** `@sanoma-ai/app/build` when the repo has a `sites/` directory: a repo without one never loads the app's build. */
 export const siteBuild = async (root: string) =>
   existsSync(join(root, "sites")) ? await import("@sanoma-ai/app/build") : undefined;
-
-/** A refused site folder's problem: its name is not one URL segment. */
-export const refusedSite = (name: string) =>
-  `sites/${name}: a site's folder name is a URL segment (lowercase letters, digits and dashes)`;

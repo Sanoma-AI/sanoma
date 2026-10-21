@@ -68,7 +68,7 @@ describe("sanoma check with sites", () => {
     const ok = await runCli(dir, ["check"], env);
     expect(ok.code, `${ok.stdout}${ok.stderr}`).toBe(0);
     expect(ok.stderr).toContain("build hello");
-    expect(ok.stderr).toContain("tsc sites");
+    expect(ok.stderr).toContain("tsc sites/tsconfig.json");
     expect(ok.stderr.trimEnd().split("\n").at(-1)).toBe("ok");
   }, 180_000);
 
