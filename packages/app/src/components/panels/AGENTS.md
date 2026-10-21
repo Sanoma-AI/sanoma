@@ -10,8 +10,9 @@ The panels of the sidebar ([`app-sidebar.tsx`](../app-sidebar.tsx)): each lists 
 | [`workflows-panel.tsx`](workflows-panel.tsx) | The Workflows section: New workflow, Find a workflow, those waiting on you with their counts, the rest by their last run, and See all                                                          |
 | [`workflow-panel.tsx`](workflow-panel.tsx)   | Inside a workflow: ← Workflows, its Workflow pane, its runs filtered by `?runs=` (the open one marked), and All runs                                                                           |
 | [`inbox-panel.tsx`](inbox-panel.tsx)         | The Inbox: For you or Everyone (`?show=`), their approvals (the open one marked), Decided today, and All decided, read with `lib/inbox.ts` as the Inbox page is                                |
+| [`sites-panel.tsx`](sites-panel.tsx)         | The Sites: each of the company's sites under its title (and icon) with its pages (`useSites`), the open one marked                                                                             |
 
 ## Maintenance
 
 - A panel's links need no handler: a link followed in the sheet or the peek closes it, from one click handler on each (`app-sidebar.tsx`).
-- A route names its section in `staticData.section`; Resources and Connectors have no panel. A section's panel peeks from the bar on a wider screen whenever no panel is docked: the sidebar folded, or a page with no panel.
+- A route names its section in `staticData.section`, and a site's page is under Sites; Resources and Connectors have no panel. A section's panel peeks from the bar on a wider screen whenever no panel is docked: the sidebar folded, or a page with no panel.

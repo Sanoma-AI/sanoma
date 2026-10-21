@@ -26,7 +26,9 @@
     "tsconfig.base.json",
     "oxlint.json",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "site.js",
+    "site.d.ts"
   ],
   "type": "module",
   "sideEffects": false,
@@ -40,6 +42,10 @@
     "./resources": {
       "types": "./dist/resources.d.ts",
       "default": "./dist/resources.js"
+    },
+    "./site": {
+      "types": "./site.d.ts",
+      "default": "./site.js"
     },
     "./tsconfig.json": "./tsconfig.base.json"
   },

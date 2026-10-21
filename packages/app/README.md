@@ -44,6 +44,31 @@ const app = await startApp(config, { distDir });
 
 A company repo is an ES module package (`"type": "module"`, as `sanoma init` writes it): Vite names the server entry `server.mjs` otherwise.
 
+### A site's imports
+
+A site's route file imports `createFileRoute` from `@tanstack/react-router` (the route generator rewrites the path there, and only there) and the rest from `sanoma/site`, which is this package's `@sanoma-ai/app/site`: the app's own router's `Link`, `Outlet`, `useNavigate`, `useParams`, `useSearch`, `useRouter`, `useRouterState`, `getRouteApi`, `linkOptions`, `redirect` and `notFound` (and their types), and `defineSite`. `sites/<name>/site.ts`, optional, names the site:
+
+```ts
+// sites/help/site.ts
+import { defineSite } from "sanoma/site";
+
+export default defineSite({ title: "Help desk" });
+```
+
+```tsx
+// sites/help/routes/index.tsx
+import { createFileRoute } from "@tanstack/react-router";
+import { Link } from "sanoma/site";
+
+export const Route = createFileRoute("/sites/help/")({ component: Home });
+
+function Home() {
+  return <Link to="/workflows">Workflows</Link>;
+}
+```
+
+With sites, the sidebar's bar has Sites, linking to the first site's home. Its panel lists each site under its title (its folder's name without one) with its pages, each named by its route's `staticData.crumb` or its path under the site (a page with a path parameter is left out), and a site's page starts its crumbs with the site's title. `@sanoma-ai/app/site` ships as source (`src/site.ts`), compiled by Vite in the company's build; it holds nothing server-side.
+
 ## Screens
 
 Five sections, in the sidebar's section bar: Inbox, Workflows, Resources, Connectors and Go live. The app opens on Workflows, its home, which lists each workflow and how its last run went. Old links still work: `/` redirects to `/workflows`, `/runs` to its All runs view, `/runs/<id>` to the run's page under its workflow, and `/start?workflow=<name>` to that workflow's page with its New run panel open, which says if the workflow is unknown (`/start` naming none, to `/workflows`).

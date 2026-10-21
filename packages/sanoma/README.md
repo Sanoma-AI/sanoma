@@ -58,7 +58,7 @@ export default defineWorkflow({
 });
 ```
 
-A workflow or policy imports from `sanoma` what the lint lets it (`defineWorkflow`, `definePolicy`, `allow`, `deny`, `approve`, `approvedFor`, `allowAll`, `mayDecide`, `errorCode`, `z`, and types); `zod` itself and `@sanoma-ai/workflows` are accepted too. The config file imports `defineConfig` (and a ledger store, `jsonlLedger`, `memoryLedger` or `postgresLedger`, when it names one) from `sanoma`, and its connectors from their packages.
+A workflow or policy imports from `sanoma` what the lint lets it (`defineWorkflow`, `definePolicy`, `allow`, `deny`, `approve`, `approvedFor`, `allowAll`, `mayDecide`, `errorCode`, `z`, and types); `zod` itself and `@sanoma-ai/workflows` are accepted too. The config file imports `defineConfig` (and a ledger store, `jsonlLedger`, `memoryLedger` or `postgresLedger`, when it names one) from `sanoma`, and its connectors from their packages. A site, `sites/<name>/` (pages the app serves under `/sites/<name>/`), imports `defineSite` and the app's route APIs (`Link`, `Outlet`, `useNavigate`, …) from `sanoma/site`, and `createFileRoute` from `@tanstack/react-router`; the [app's README](https://www.npmjs.com/package/@sanoma-ai/app#a-sites-imports) has the whole list.
 
 ## Commands
 

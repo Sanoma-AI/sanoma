@@ -98,9 +98,10 @@ export function writeSiteFiles(repo: string): void {
 
 /**
  * `.sanoma/app/tsconfig.json`: the app's compiler options, with the app's own copies of React,
- * TanStack and the app for a site's imports (the company does not install them), and the app's
- * `./routeTree.gen.ts` read from `.sanoma/app` (`rootDirs`), so links are typed across the app and
- * every site. Absolute paths: the file is generated and ignored.
+ * TanStack and the app for a site's imports (the company does not install them), and the app
+ * router's `#/routeTree.gen.ts` the one in `.sanoma/app`, so links are typed across the app and
+ * every site (`paths` win over the app's `imports`, and over its own tree in a checkout). Absolute
+ * paths: the file is generated and ignored.
  */
 function siteTsconfig(root: string) {
   const { src, tsconfig } = appSources();
@@ -110,9 +111,9 @@ function siteTsconfig(root: string) {
   return {
     extends: tsconfig,
     compilerOptions: {
-      rootDirs: [src, out],
       types: [],
       paths: {
+        "#/routeTree.gen.ts": [join(out, "routeTree.gen.ts")],
         react: [react],
         "react/*": [`${react}/*`],
         "react-dom": [reactDom],
@@ -216,11 +217,11 @@ function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom): InlineConfi
     cacheDir: join(out, "vite"),
     plugins: [
       {
-        // The app's router imports its tree as "./routeTree.gen.ts": the one in .sanoma/app.
+        // The app's router imports its tree as "#/routeTree.gen.ts": the one in .sanoma/app.
         name: "sanoma:route-tree",
         enforce: "pre",
         resolveId(source, importer) {
-          if (importer && /^\.\/routeTree\.gen(\.ts)?$/.test(source) && dirname(importer.split("?")[0]!) === src) {
+          if (importer && source === "#/routeTree.gen.ts" && dirname(importer.split("?")[0]!) === src) {
             return routeTree;
           }
         },
