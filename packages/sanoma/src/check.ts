@@ -4,10 +4,19 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { errorMessage } from "@sanoma-ai/workflows";
-import { API_FILE, type ConfigDescription, describeConfig, writeApi } from "@sanoma-ai/workflows/describe";
+import {
+  API_FILE,
+  type ConfigDescription,
+  describeConfig,
+  NO_PEOPLE,
+  SCHEMA_FILE,
+  writeApi,
+  writeSchema,
+} from "@sanoma-ai/workflows/describe";
 import { problemLine } from "@sanoma-ai/workflows/shared";
 import { runScenarios } from "@sanoma-ai/workflows/scenarios";
 import type { Loaded } from "./config.ts";
+import { loadPolicies } from "./policies.ts";
 import { runtimeFrom, siteBuild } from "./sites.ts";
 
 export interface CheckResult {
@@ -32,16 +41,18 @@ export interface CheckOptions {
 const LINTED = ["workflows", "policies", "resources", "sites"];
 
 /**
- * Checks a repo the way its tests would, without a test framework: `.sanoma/api.ts` written first
- * (`writeApi`, when it changed), from the config's description; `tsc -p tsconfig.json` in
+ * Checks a repo the way its tests would, without a test framework: its policy made from
+ * `policies/*.cedar` when the config names none (`loadPolicies`, whose problems are the check's);
+ * `.sanoma/api.ts` and the Cedar schema written first (`writeApi`, `writeSchema`, each when it
+ * changed), from the config's description; `tsc -p tsconfig.json` in
  * its root; oxlint in the root, with the repo's `.oxlintrc.json` (written when missing, to extend
  * this package's `oxlint.json`), over `workflows/`, `policies/`, `resources/` and `sites/`; every problem
  * `describeConfig` finds in the data files and the workflows' files (the import rules and what
  * the outline cannot draw: what the worker refuses to start with), and each site's call to what
  * the config does not have; with sites, their generated files written first and, beside those
  * three, the app built with them and `tsc -p sites/tsconfig.json` (`checkSites`). Their problems
- * in the order tsc, the sites' tsc, oxlint, the config, the folders refused as sites, the sites'
- * build. Then every scenario against the fakes (`runScenarios`), each step that did not hold a
+ * in the order tsc, the sites' tsc, oxlint, the policies, the config, the folders refused as
+ * sites, the sites' build. Then every scenario against the fakes (`runScenarios`), each step that did not hold a
  * problem. `ok` when there are no problems.
  */
 export async function check(
@@ -51,8 +62,15 @@ export async function check(
   // Awaited below when there are scenarios; otherwise its failure is nobody's.
   ready.catch(() => {});
   log("config");
+  const policies = await loadPolicies({ config, root }, NO_PEOPLE);
   const description = describeConfig(config);
   if ((await writeApi(root, description)).wrote) log(`wrote ${API_FILE}`);
+  const schema = await writeSchema(root, description, NO_PEOPLE);
+  if (schema.wrote) log(`wrote ${SCHEMA_FILE}`);
+  // What the schema cannot type matters only to a policy written in Cedar.
+  if (description.policy.kind === "cedar" || policies.length) {
+    for (const problem of schema.problems) log(`${SCHEMA_FILE}: ${problem}`);
+  }
   const build = await siteBuild(root);
   const { sites, refused } = build?.sitesOf(root) ?? { sites: [], refused: [] };
   // Before tsc and oxlint read sites/, as `sanoma` writes them: only when there is a site.
@@ -66,7 +84,7 @@ export async function check(
   const unmounted = refused.map(
     (name) => `sites/${name}: a site's folder name is a URL segment (lowercase letters, digits and dashes)`,
   );
-  const problems = [...tsc, ...checked.typed, ...lints, ...read, ...unmounted, ...checked.built];
+  const problems = [...tsc, ...checked.typed, ...lints, ...policies, ...read, ...unmounted, ...checked.built];
 
   if (resolved.scenarios === undefined) {
     log("no scenarios: the config's root has no `scenarios/` directory");

@@ -31,7 +31,7 @@ import {
   setupOf,
   VENDOR,
 } from "./op.ts";
-import type { Policy } from "./policy.ts";
+import { allowAll, type Policy } from "./policy.ts";
 import { isChangeOp, type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
 import { APPLY_WORKFLOW, BUILT_IN_WORKFLOWS, CALL_WORKFLOW, DATA_VENDOR } from "./shared.ts";
 import { sourceDriver, sourceOps } from "./source.ts";
@@ -55,8 +55,11 @@ export interface SanomaConfig {
    * package attaches the maker of.
    */
   connectors: Connector<any, any>[];
-  /** Checked before every operation call. Required: `allowAll` says that every call is allowed. */
-  policy: Policy;
+  /**
+   * Checked before every operation call. Without one, every call is allowed (`allowAll`), unless
+   * the launcher finds `policies/*.cedar` in the root and makes the policy from them (`cedarPolicy`).
+   */
+  policy?: Policy;
   /**
    * Where the audit record goes. Default: `postgresLedger` on the config's database, which the
    * worker, the app and other processes share; the worker and the client each make their own
@@ -203,8 +206,8 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   if (!Array.isArray(config.workflows)) {
     throw new Error("The config needs `workflows`: an array of defineWorkflow definitions");
   }
-  if (typeof config.policy !== "function") {
-    throw new Error("The config needs a `policy`; use `allowAll` to allow every operation call");
+  if (config.policy !== undefined && typeof config.policy !== "function") {
+    throw new Error("The config's `policy` must be a policy: definePolicy(...), or leave it out to allow every call");
   }
   // An untyped config naming fake drivers would otherwise run live. Delete once sanoma-ops has migrated.
   if (config.drivers !== undefined || config.fakes !== undefined)
@@ -281,7 +284,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     collections,
     ...(dataStore && { dataStore }),
     workflows: names,
-    policy: config.policy,
+    policy: config.policy ?? allowAll,
     ...(ledger !== undefined && { ledger }),
     ...(root !== undefined && { root }),
   };

@@ -79,12 +79,26 @@ export {
   type Decision,
   definePolicy,
   deny,
+  type Mount,
   type Policy,
   type PolicyCall,
   type PolicyOp,
   policyOpOf,
+  type PolicyRule,
+  type Preview,
+  type PreviewRequest,
   type RecordedDecision,
 } from "./policy.ts";
+export {
+  cedarPolicy,
+  type CedarPolicyOptions,
+  POLICIES_DIR,
+  policiesOf,
+  type PolicyProblem,
+  type PolicySource,
+  readPolicyFiles,
+  validatePolicies,
+} from "./cedar.ts";
 export {
   ApprovalPendingError,
   errorCode,

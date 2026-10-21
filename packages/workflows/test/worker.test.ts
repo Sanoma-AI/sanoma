@@ -70,7 +70,7 @@ const refused: [string, Partial<SanomaConfig>, RegExp][] = [
     { workflows: [announce, { ...announce }] },
     /^Two different workflow definitions are named "announce"/,
   ],
-  ["no policy", { policy: undefined as never }, /^The config needs a `policy`; use `allowAll`/],
+  ["a policy that is not a function", { policy: "allow" as never }, /^The config's `policy` must be a policy/],
   [
     "a ledger that is not a store",
     { ledger: { read: 1 } as never },

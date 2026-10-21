@@ -109,8 +109,19 @@ const parse = (argv: string[]) =>
 
 const port = () => Number(process.env.SANOMA_APP_PORT ?? 3000);
 
-async function load(): Promise<Loaded> {
+/**
+ * The config, loaded and resolved, its policy made from `policies/*.cedar` when it names none
+ * (`loadPolicies`): a problem with them is a `UsageError`, so nothing starts on policies that do
+ * not hold. Without `policies`, they are left to the caller (`check` reports them).
+ */
+async function load({ policies = true } = {}): Promise<Loaded> {
   const loaded = await loadConfig();
+  if (policies) {
+    const { loadPolicies } = await import("./policies.ts");
+    const { NO_PEOPLE } = await import("@sanoma-ai/workflows/describe");
+    const problems = await loadPolicies(loaded, NO_PEOPLE);
+    if (problems.length) throw new UsageError(`The policies do not hold:\n${problems.join("\n")}`);
+  }
   const { resolveConfig } = await import("@sanoma-ai/workflows");
   return { ...loaded, resolved: resolveConfig(loaded.config) };
 }
@@ -199,17 +210,20 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
   return new Promise(() => {});
 }
 
-/** `sanoma api` (hidden): writes `.sanoma/api.ts` from the config, as `check` and `serve` do. */
+/** `sanoma api` (hidden): writes `.sanoma/api.ts` and the Cedar schema from the config, as `check` and `serve` do. */
 async function writeApiCommand(): Promise<number> {
   const { config, root } = await loadConfig();
-  const { API_FILE, describeConfig, writeApi } = await import("@sanoma-ai/workflows/describe");
-  if ((await writeApi(root, describeConfig(config))).wrote) log(`wrote ${API_FILE}`);
+  const { API_FILE, describeConfig, NO_PEOPLE, SCHEMA_FILE, writeApi, writeSchema } =
+    await import("@sanoma-ai/workflows/describe");
+  const description = describeConfig(config);
+  if ((await writeApi(root, description)).wrote) log(`wrote ${API_FILE}`);
+  if ((await writeSchema(root, description, NO_PEOPLE)).wrote) log(`wrote ${SCHEMA_FILE}`);
   return 0;
 }
 
 /** `sanoma check`: Postgres made to answer while tsc, oxlint and the config are read; the scenarios on `<database>_check`. */
 async function runCheck(): Promise<number> {
-  const loaded = await load();
+  const loaded = await load({ policies: false });
   const { appName, databaseUrl } = loaded.resolved;
   const [{ ensurePostgres }, { check }] = await Promise.all([import("./postgres.ts"), import("./check.ts")]);
   const own = new URL(databaseUrl);
@@ -223,7 +237,7 @@ async function runCheck(): Promise<number> {
 }
 
 async function env(checkOnly: boolean): Promise<number> {
-  const loaded = await load();
+  const loaded = await load({ policies: false });
   const { writeEnvExample } = await import("./env.ts");
   const { changed } = writeEnvExample(loaded, { check: checkOnly });
   if (!checkOnly) {
