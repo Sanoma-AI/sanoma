@@ -6,7 +6,7 @@ export const Route = createFileRoute("/sites/hello/")({ component: Hello });
 function Hello() {
   const [count, setCount] = useState(0);
   return (
-    <div className="tracking-[0.37em]">
+    <div>
       <p>Hello from the hello site</p>
       <button type="button" onClick={() => setCount(count + 1)}>
         Clicked {count}

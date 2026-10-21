@@ -49,15 +49,27 @@ const entries = (dir: string) =>
     .map((path) => `${path} ${lstatSync(path).mtimeMs}`)
     .toSorted();
 
-/** A site page at /sites/hello/ that imports `line`, and shows `shown`. */
-const helloImporting = (line: string, shown: string) => `import { createFileRoute } from "@tanstack/react-router";
+/** A site page at `path` that imports `line`, and shows `shown`. */
+const sitePage = (
+  path: string,
+  line: string,
+  shown: string,
+) => `import { createFileRoute } from "@tanstack/react-router";
 ${line}
 
-export const Route = createFileRoute("/sites/hello/")({ component: () => <p>{${shown}}</p> });
+export const Route = createFileRoute("${path}")({ component: () => <p>{${shown}}</p> });
 `;
 
+/**
+ * A class only a site uses, put together here so that Tailwind, scanning this package for the
+ * package's own build, does not find it in this file.
+ */
+const siteClass = ["tracking", "[0.37em]"].join("-");
+
 describe("a company's app with its sites", () => {
-  const repo = company();
+  const repo = company({
+    "sites/hello/routes/styled.tsx": sitePage("/sites/hello/styled", "", `<span className="${siteClass}" />`),
+  });
   const untouched = { src: join(appDir, "src"), modules: join(appDir, "node_modules") };
   const before = { src: [] as string[], modules: [] as string[] };
   let result: { distDir: string; built: boolean };
@@ -115,6 +127,9 @@ describe("a company's app with its sites", () => {
     expect(imported.filter((specifier) => !/^(node:|file:\/\/)|^module$/.test(specifier))).toEqual([]);
     expect(imported.some((specifier) => /^file:.*\/workflows\/dist\/index\.js$/.test(specifier))).toBe(true);
     const client = join(result.distDir, "client", "assets");
+    // Tailwind finds a site's classes from the repo, the root.
+    const css = readdirSync(client).filter((f) => f.endsWith(".css"));
+    expect(css.some((f) => readFileSync(join(client, f), "utf8").includes("letter-spacing:.37em"))).toBe(true);
     for (const file of readdirSync(client).filter((f) => f.endsWith(".js"))) {
       const code = readFileSync(join(client, file), "utf8");
       expect(code, file).not.toMatch(/DBOSClient|systemDatabaseUrl|@cucumber|faker|pg-protocol|pg-pool|pg_notify/);
@@ -123,10 +138,7 @@ describe("a company's app with its sites", () => {
 
   it("reuses a build of the same sites, and builds again when a site changes", async () => {
     expect(await buildApp(repo)).toEqual({ distDir: result.distDir, built: false });
-    writeFileSync(
-      join(repo, "sites", "hello", "routes", "about.tsx"),
-      helloImporting("", '"About"').replace("/sites/hello/", "/sites/hello/about"),
-    );
+    writeFileSync(join(repo, "sites", "hello", "routes", "about.tsx"), sitePage("/sites/hello/about", "", '"About"'));
     const changed = await buildApp(repo);
     expect(changed.built).toBe(true);
     expect(changed.distDir).not.toBe(result.distDir);
@@ -153,12 +165,13 @@ describe("the sites' generated files", () => {
 });
 
 describe("a build that fails, or leaves a site out", () => {
-  it("refuses a site that imports the runtime", async () => {
+  it.each([
+    ["the runtime", '"@sanoma-ai/workflows"'],
+    ["the runtime through sanoma", '"sanoma"'],
+    ["the app's Node entry", '"@sanoma-ai/app"'],
+  ])("refuses a site that imports %s", async (_, from) => {
     const repo = company({
-      "sites/hello/routes/index.tsx": helloImporting(
-        'import { startWorker } from "@sanoma-ai/workflows";',
-        "String(startWorker)",
-      ),
+      "sites/hello/routes/index.tsx": sitePage("/sites/hello/", `import * as runtime from ${from};`, "String(runtime)"),
     });
     await expect(buildApp(repo)).rejects.toThrow(/Import denied in client environment/);
   });
@@ -166,7 +179,11 @@ describe("a build that fails, or leaves a site out", () => {
   it("refuses a site that imports a .server.ts file", async () => {
     const repo = company({
       "sites/hello/secret.server.ts": 'export const secret = () => "s";\n',
-      "sites/hello/routes/index.tsx": helloImporting('import { secret } from "../secret.server.ts";', "secret()"),
+      "sites/hello/routes/index.tsx": sitePage(
+        "/sites/hello/",
+        'import { secret } from "../secret.server.ts";',
+        "secret()",
+      ),
     });
     await expect(buildApp(repo)).rejects.toThrow(/Import denied in client environment/);
     // Nothing left half built.
@@ -176,10 +193,7 @@ describe("a build that fails, or leaves a site out", () => {
 
   it("names the path two pages claim, and their files", async () => {
     const repo = company({
-      "sites/hello/routes/(again)/index.tsx": helloImporting("", '"Again"').replace(
-        "/sites/hello/",
-        "/sites/hello/(again)/",
-      ),
+      "sites/hello/routes/(again)/index.tsx": sitePage("/sites/hello/(again)/", "", '"Again"'),
     });
     await expect(buildApp(repo)).rejects.toThrow(
       "More than one page claims /sites/hello/: sites/hello/routes/index.tsx, sites/hello/routes/(again)/index.tsx",
@@ -188,10 +202,7 @@ describe("a build that fails, or leaves a site out", () => {
 
   it("reports a folder whose name is not a URL segment, and does not mount it", async () => {
     const repo = company({
-      "sites/Not_A_Segment/routes/index.tsx": helloImporting("", '"Refused"').replace(
-        "/sites/hello/",
-        "/sites/Not_A_Segment/",
-      ),
+      "sites/Not_A_Segment/routes/index.tsx": sitePage("/sites/Not_A_Segment/", "", '"Refused"'),
     });
     expect(sitesOf(repo)).toEqual({ sites: ["hello"], refused: ["Not_A_Segment"] });
     const lines: string[] = [];

@@ -54,7 +54,7 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 
 export default () =>
   readdirSync(here, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && /^[a-z][a-z0-9-]*$/.test(d.name) && existsSync(join(here, d.name, "routes")))
+    .filter((d) => d.isDirectory() && /${SITE_NAME.source}/.test(d.name) && existsSync(join(here, d.name, "routes")))
     .map((d) => ({ type: "physical" as const, directory: \`\${d.name}/routes\`, pathPrefix: \`/\${d.name}\` }));
 `;
 
@@ -105,17 +105,18 @@ export function writeSiteFiles(repo: string): void {
 function siteTsconfig(root: string) {
   const { src, tsconfig } = appSources();
   const out = join(root, ".sanoma", "app");
-  const types = (name: string) => installed(`@types/${name}`);
+  const react = installed("@types/react");
+  const reactDom = installed("@types/react-dom");
   return {
     extends: tsconfig,
     compilerOptions: {
       rootDirs: [src, out],
       types: [],
       paths: {
-        react: [types("react")],
-        "react/*": [`${types("react")}/*`],
-        "react-dom": [types("react-dom")],
-        "react-dom/*": [`${types("react-dom")}/*`],
+        react: [react],
+        "react/*": [`${react}/*`],
+        "react-dom": [reactDom],
+        "react-dom/*": [`${reactDom}/*`],
         "@tanstack/*": [`${dirname(installed("@tanstack/react-router"))}/*`],
         "@sanoma-ai/app/*": [`${src}/*.ts`],
       },
@@ -124,14 +125,23 @@ function siteTsconfig(root: string) {
   };
 }
 
-/** Where a bare import from the app package finds `name`: its own node_modules, or (pnpm) beside it. */
-function installed(name: string): string {
-  for (let dir = pkgDir; ; dir = dirname(dir)) {
+/** Where a bare import from `from` finds the package `name`: its own node_modules, or (pnpm) beside it. */
+function moduleDir(name: string, from: string): string | undefined {
+  for (let dir = from; ; dir = dirname(dir)) {
     const found = join(dir, "node_modules", name);
     if (existsSync(found)) return found;
-    if (dirname(dir) === dir) throw new Error(`${name} is not installed beside @sanoma-ai/app (${pkgDir})`);
+    if (dirname(dir) === dir) return undefined;
   }
 }
+
+/** Where the app package finds `name`. */
+function installed(name: string): string {
+  const found = moduleDir(name, pkgDir);
+  if (found === undefined) throw new Error(`${name} is not installed beside @sanoma-ai/app (${pkgDir})`);
+  return found;
+}
+
+const defaultRuntimeFrom = join(pkgDir, "package.json");
 
 const inside = (file: string, dir: string) => {
   const rel = relative(dir, file);
@@ -191,7 +201,7 @@ function packageConfig(): InlineConfig {
  * directory, the route tree the app's routes with `sites/` mounted at `/sites`, all of it written
  * under `.sanoma/app`. A site resolves React, TanStack and the app as the app does.
  */
-function repoConfig(repo: string, runtimeFrom = join(pkgDir, "package.json")): InlineConfig {
+function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom): InlineConfig {
   const { src } = appSources();
   const out = join(repo, ".sanoma", "app");
   const routeTree = join(out, "routeTree.gen.ts");
@@ -241,7 +251,8 @@ function repoConfig(repo: string, runtimeFrom = join(pkgDir, "package.json")): I
           // The app's source (relative to the root when it is installed in the repo) and the sites.
           include: [`${src}/**`, `${srcDirectory}/**`, "sites/**"],
           // The defaults exclude node_modules, where the app's own source is in a company's install.
-          client: { specifiers: [CLIENT_DENIED], excludeFiles: [] },
+          // A site reaches the runtime most easily through `sanoma`, and Node's startApp through the app's root.
+          client: { specifiers: [CLIENT_DENIED, /^(sanoma|@sanoma-ai\/app)$/], excludeFiles: [] },
           server: { excludeFiles: [] },
         },
       }),
@@ -299,16 +310,25 @@ function runtimeExternal(runtimeFrom: string): Plugin {
   };
 }
 
-/** The build's key: the app's version and source directory, and every file under `sites/`. */
-function buildKey(repo: string): string {
+/**
+ * The build's key: the app's version and source directory, every file under `sites/` (dotfiles
+ * aside), and where the runtime the server bundle imports by URL is installed (a real path names
+ * its version under pnpm), so an upgrade of the runtime is a new build.
+ */
+function buildKey(repo: string, runtimeFrom: string): string {
   const { src } = appSources();
   const hash = createHash("sha256");
   const { version } = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8")) as { version: string };
   hash.update(`${version}\0${src}\0`);
+  const workflows = moduleDir("@sanoma-ai/workflows", dirname(runtimeFrom));
+  for (const name of RUNTIME) {
+    const dir = moduleDir(name, dirname(runtimeFrom)) ?? (workflows && moduleDir(name, realpathSync(workflows)));
+    hash.update(`${name}=${dir === undefined ? "" : realpathSync(dir)}\0`);
+  }
   const sites = join(repo, "sites");
   const files = existsSync(sites) ? readdirSync(sites, { recursive: true, withFileTypes: true }) : [];
   for (const file of files
-    .filter((entry) => entry.isFile())
+    .filter((entry) => entry.isFile() && !entry.name.startsWith("."))
     .map((entry) => join(entry.parentPath, entry.name))
     .toSorted()) {
     hash
@@ -342,7 +362,8 @@ export async function buildApp(
   for (const name of sitesOf(root).refused) {
     log?.(`sites/${name} is not mounted: a site's folder name is a URL segment (lowercase letters, digits and dashes)`);
   }
-  const distDir = join(root, ".sanoma", "app", "build", buildKey(root));
+  const runtimeFrom = options.runtimeFrom ?? defaultRuntimeFrom;
+  const distDir = join(root, ".sanoma", "app", "build", buildKey(root, runtimeFrom));
   if (existsSync(distDir)) return { distDir, built: false };
   const outDir = `${distDir}.${process.pid}.tmp`;
   const vite = await import("vite");
@@ -355,12 +376,17 @@ export async function buildApp(
   };
   try {
     const builder = await vite.createBuilder({
-      ...appViteConfig({ repo: root, runtimeFrom: options.runtimeFrom }),
+      ...appViteConfig({ repo: root, runtimeFrom }),
       build: { outDir, emptyOutDir: true },
       logLevel: "warn",
       customLogger,
     });
     await builder.buildApp();
+    if (!existsSync(join(outDir, "server", "server.js"))) {
+      throw new Error(
+        `The app's server entry was not built as server/server.js: is ${root}/package.json "type": "module"?`,
+      );
+    }
     renameSync(outDir, distDir);
   } catch (err) {
     rmSync(outDir, { recursive: true, force: true });
