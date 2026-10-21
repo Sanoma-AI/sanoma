@@ -1,12 +1,12 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { z } from "zod";
-import { type ApprovalRequest, type ApprovalResult, type ApprovalState, notApprover, Principal } from "./define.ts";
+import { type ApprovalRequest, type ApprovalResult, type ApprovalState, Principal } from "./define.ts";
 import { RejectedError } from "./errors.ts";
 import { entry, write } from "./ledger.ts";
 import { warn } from "./log.ts";
 import type { Placed } from "./call.ts";
 import type { Run } from "./run.ts";
-import { approverLabel, mayDecide } from "./shared.ts";
+import { approverLabel, refusalOf } from "./shared.ts";
 
 // The wire contract between a run waiting on approvals and whoever decides them. The client
 // imports this file and never the worker's.
@@ -71,7 +71,7 @@ export async function awaitApproval(
   run: Run,
   title: string,
   req: CheckedApproval,
-  place: Placed | Record<string, never>,
+  place: Placed | undefined,
   held?: HeldCall,
 ): Promise<ApprovalResult> {
   const { covers } = req;
@@ -118,21 +118,23 @@ export async function awaitApproval(
     const at = await DBOS.now();
     const parsed = ApprovalMessage.safeParse(raw);
     const msg = parsed.success ? parsed.data : undefined;
-    if (!msg || !mayDecide(state, msg.by, run)) {
+    // Why the run refuses it: anything but a decision `mayDecide` lets through.
+    const reason = msg ? refusalOf(state, msg.by, run) : "not a valid decision message";
+    if (reason !== undefined || !msg) {
       const by = msg?.by.id ?? senderOf(raw);
-      const reason = msg ? notApprover(state, msg.by) : "not a valid decision message";
+      const why = reason ?? "";
       state.refused.push({
         ...(by === undefined ? {} : { by }),
         ...(msg?.id === undefined ? {} : { id: msg.id }),
         at,
-        reason,
+        reason: why,
       });
       await DBOS.setEvent(APPROVALS_EVENT, all);
       await write(
         run,
         entry(
           run,
-          { type: "approval.refused", approval: state.id, ...(by === undefined ? {} : { by }), reason },
+          { type: "approval.refused", approval: state.id, ...(by === undefined ? {} : { by }), reason: why },
           { key: `${state.id}:refused:${state.refused.length}`, at },
         ),
       );

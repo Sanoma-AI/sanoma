@@ -7,6 +7,7 @@ import type {
   InputIssue,
   LedgerRecord,
   PreviewAnswer,
+  PreviewRequest,
   Principal,
   RunSummary,
 } from "@sanoma-ai/workflows";
@@ -308,11 +309,7 @@ export const CallRequest = z.object({
 });
 export type CallRequest = z.infer<typeof CallRequest>;
 
-/**
- * What `previewFn` asks the policy, as the session's actor: at most 200 actions, each an
- * operation's id with its effect, or `workflow:<name>` for a start, on an operation's target when
- * one is known.
- */
+/** What `previewFn` asks (`PreviewRequest` without its principal): at most 200 actions, each on a target when known. */
 export const PreviewQuery = z
   .array(
     z.object({
@@ -320,7 +317,7 @@ export const PreviewQuery = z
       resource: z.string().min(1).optional(),
     }),
   )
-  .max(200);
+  .max(200) satisfies z.ZodType<Omit<PreviewRequest, "principal">[]>;
 export type PreviewQuery = z.infer<typeof PreviewQuery>;
 
 /** The policy's answer to each, in order: `custom` for every one when it cannot be asked ahead (a `definePolicy` function). */

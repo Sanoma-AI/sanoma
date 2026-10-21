@@ -127,6 +127,11 @@ export type Policy = ((call: PolicyCall) => Decision | Promise<Decision>) & {
    * function cannot be asked ahead: `definePolicy`'s have no `preview`.
    */
   readonly preview?: (requests: readonly PreviewRequest[]) => PreviewAnswer[];
+  /**
+   * May `actor` start a run of `workflow` with `input` (the action `workflow:<name>`)? A function
+   * is written for operation calls: `definePolicy`'s have no `start`, and every start is allowed.
+   */
+  readonly start?: (actor: Principal, workflow: string, input: unknown) => Decision;
 };
 
 /** A question asked ahead of a call: may `principal` take `action` (an operation, or `workflow:<name>` to start one) on `resource` (an operation's target)? */

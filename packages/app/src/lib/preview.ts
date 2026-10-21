@@ -1,21 +1,16 @@
 import type { Approver } from "@sanoma-ai/workflows";
 import type { OpEntry, WorkflowEntry } from "@sanoma-ai/workflows/describe";
-import { flatten, WORKFLOW_ACTION } from "@sanoma-ai/workflows/shared";
+import { WORKFLOW_ACTION } from "@sanoma-ai/workflows/shared";
 import type { PreviewQuery, PreviewResult } from "../api.ts";
 
 // The run form's "will ask" line: what the policy would answer the person for a workflow's start
-// and every operation its outline may call, before the run starts (`previewFn`).
+// and every operation it may call, before the run starts (`previewFn`).
 
-/**
- * What to ask ahead of a run of `workflow`: its start, then each operation its outline may call,
- * once, with its effect (an operation whose id is computed, each it may be).
- */
+/** What to ask ahead of a run of `workflow`: its start, then each operation it may call, with its effect. */
 export function previewRequests(workflow: WorkflowEntry, ops: ReadonlyMap<string, OpEntry>): PreviewQuery {
-  const nodes = "nodes" in workflow.outline ? flatten(workflow.outline.nodes) : [];
-  const ids = new Set(nodes.flatMap((node) => (node.kind === "op" ? (node.ops ?? [node.id]) : [])));
   return [
     { action: { id: `${WORKFLOW_ACTION}${workflow.name}` } },
-    ...[...ids].map((id) => {
+    ...workflow.ops.map((id) => {
       const effect = ops.get(id)?.effect;
       return { action: effect === undefined ? { id } : { id, effect } };
     }),
@@ -23,6 +18,9 @@ export function previewRequests(workflow: WorkflowEntry, ops: ReadonlyMap<string
 }
 
 const AND = new Intl.ListFormat("en", { type: "conjunction" });
+
+/** The line for a policy that cannot be asked ahead (a `definePolicy` function). */
+export const CANNOT_ASK = "This policy cannot be asked ahead.";
 
 /** The action as the line names it: the start, or the operation's id. */
 const named = (id: string) => (id.startsWith(WORKFLOW_ACTION) ? "the start" : id);
@@ -37,7 +35,7 @@ const asked = (approver: Approver) => (typeof approver === "string" ? approver :
  * "This policy cannot be asked ahead" when it cannot be (a `definePolicy` function).
  */
 export function willAsk(requests: PreviewQuery, answers: readonly PreviewResult[]): string | undefined {
-  if (answers.some(({ answer }) => answer === "custom")) return "This policy cannot be asked ahead.";
+  if (answers.some(({ answer }) => answer === "custom")) return CANNOT_ASK;
   // By approver, a person and a group of one name apart: each named as the line names it.
   const holds = new Map<string, { who: string; actions: string[] }>();
   const others: string[] = [];

@@ -33,8 +33,6 @@ export const SCHEMA_FILE = join(".sanoma", "schema.cedarschema");
 /** The schema's namespace: policies name `Sanoma::Group::"finance"`, `Sanoma::Action::"effect:money"`. */
 export const NAMESPACE = "Sanoma";
 
-export { WORKFLOW_ACTION } from "./shared.ts";
-
 /** The action group every workflow start (`workflow:<name>`) is in. */
 export const START = "start";
 

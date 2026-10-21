@@ -89,10 +89,7 @@ export const startRunFn = createServerFn(CHANGE)
   .validator(readStartRun)
   .handler(({ data, context }) => startRun(context.app, context.principal, data));
 
-/**
- * What the policy would answer the person asking for each action ahead of a call, its input
- * unknown (`preview`): asked as the session's actor, never as one the page names.
- */
+/** The policy's answers ahead of a call (`preview`), as the session's actor, never one the page names. */
 export const previewFn = createServerFn(READ)
   .middleware([withPrincipal])
   .validator(validate(PreviewQuery))

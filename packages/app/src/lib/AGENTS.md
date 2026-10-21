@@ -11,7 +11,7 @@ Small helpers shared by components and graph code.
 | [`inbox.ts`](inbox.ts)           | The Inbox's approvals for its page and panel: `useInbox`, `useDecided`, `usePending` (those you may decide too), `countByWorkflow`                                          |
 | [`lines.ts`](lines.ts)           | Line numbers touched by a list of source spans, and a span's first and last line                                                                                            |
 | [`motion.ts`](motion.ts)         | `useReducedMotion` hook                                                                                                                                                     |
-| [`preview.ts`](preview.ts)       | The run form's will-ask line: `previewRequests` (a workflow's start and the operations its outline calls) and `willAsk` (the policy's answers as one line)                  |
+| [`preview.ts`](preview.ts)       | The run form's will-ask line: `previewRequests` (a workflow's start and the operations it may call) and `willAsk` (the policy's answers as one line)                        |
 | [`records.ts`](records.ts)       | Between a run's graph and its ledger: `recordsFor` (a node's records) and `nodesByRecord`                                                                                   |
 | [`sites.ts`](sites.ts)           | The company's sites for the Sites panel and the crumbs: `useSites` (each site's title from its `site.ts`, by a root-relative glob, and its pages from the router), `siteOf` |
 | [`time.ts`](time.ts)             | `utcText`: a time as UTC text, the same on server and browser                                                                                                               |

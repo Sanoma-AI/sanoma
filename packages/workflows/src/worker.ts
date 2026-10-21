@@ -250,7 +250,7 @@ async function runWorkflow(name: string, { input, startedBy, sandbox, hold }: Ru
         // The policy held the start: the body waits for the approval, and a rejection fails the run.
         const action = `${WORKFLOW_ACTION}${wf.name}`;
         const held = { op: action, input, reasons: hold.reasons };
-        await awaitApproval(run, hold.title, { approver: hold.approver, covers: [action] }, {}, held);
+        await awaitApproval(run, hold.title, { approver: hold.approver, covers: [action] }, undefined, held);
       }
       if (sandbox !== undefined) {
         // Imported here, so a live worker never loads the Gherkin parser or faker.

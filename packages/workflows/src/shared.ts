@@ -170,20 +170,29 @@ export const isEnded = (status: RunStatus): boolean => (ENDED_STATUSES as readon
 /** Why the run's own actor may not decide an approval on it: separation of duties (`mayDecide`). */
 export const OWN_CHANGE = "own change";
 
+/** A run as `mayDecide` reads it: who started it, its own actor. */
+type DecidedRun = { actor?: Pick<Principal, "id"> | undefined };
+
 /**
  * True when `by` may decide the approval on `run`: `by.id` is the approver, or `by.groups` holds
- * the approver group, and `by` is not the run's own actor (who started it), who may never
- * decide on their own change, whatever group they are in. An agent's person is not its actor: Bo
- * may decide on a run refund-bot started for him. Pure: everything it reads is already recorded.
+ * the approver group, and `by` is not the run's own actor, whatever group they are in (separation
+ * of duties). Pure: everything it reads is already recorded.
  */
-export function mayDecide(
-  approval: Pick<ApprovalState, "approver">,
+export const mayDecide = (approval: Pick<ApprovalState, "approver">, by: Principal, run: DecidedRun): boolean =>
+  refusalOf(approval, by, run) === undefined;
+
+/** Why `by` may not decide the approval on `run` (`mayDecide`), naming who may, or `OWN_CHANGE`; undefined when they may. */
+export function refusalOf(
+  { approver }: Pick<ApprovalState, "approver">,
   by: Principal,
-  run: { actor?: Pick<Principal, "id"> | undefined },
-): boolean {
-  const { approver } = approval;
-  const addressed = typeof approver === "string" ? approver === by.id : (by.groups?.includes(approver.group) ?? false);
-  return addressed && by.id !== run.actor?.id;
+  run: DecidedRun,
+): string | undefined {
+  if (typeof approver === "string") {
+    if (approver !== by.id) return `${by.id} is not the approver; ${approverLabel(approver)} is`;
+  } else if (!by.groups?.includes(approver.group)) {
+    return `${by.id} is not in ${approverLabel(approver)}`;
+  }
+  return by.id === run.actor?.id ? OWN_CHANGE : undefined;
 }
 
 /** A declared resource as the people functions read it: only the runtime's people types count. */

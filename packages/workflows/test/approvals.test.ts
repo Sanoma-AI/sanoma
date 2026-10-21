@@ -3,7 +3,6 @@ import { bluesky } from "@sanoma-ai/connector-bluesky";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { messageKeyOf, topicOf } from "../src/approvals.ts";
-import { notApprover } from "../src/define.ts";
 import {
   allow,
   approve,
@@ -17,7 +16,7 @@ import {
   mayDecide,
   type Policy,
 } from "../src/index.ts";
-import { OWN_CHANGE } from "../src/shared.ts";
+import { OWN_CHANGE, refusalOf } from "../src/shared.ts";
 import announce from "./fixtures/announce.ts";
 import { inSeconds, pending, useApp, waitFor } from "./harness.ts";
 
@@ -119,9 +118,9 @@ describe("mayDecide", () => {
   it("refuses the run's own actor, in the group or named, and says why; an agent's person may decide", () => {
     const own = { approver: { group: "marketing" } };
     expect(mayDecide(own, { id: "ada", groups: ["marketing"] }, run)).toBe(false);
-    expect(notApprover(own, { id: "ada", groups: ["marketing"] })).toBe(OWN_CHANGE);
+    expect(refusalOf(own, { id: "ada", groups: ["marketing"] }, run)).toBe(OWN_CHANGE);
     expect(mayDecide({ approver: "ada" }, { id: "ada" }, run)).toBe(false);
-    expect(notApprover(own, { id: "ada" })).toBe("ada is not in group marketing");
+    expect(refusalOf(own, { id: "ada" }, run)).toBe("ada is not in group marketing");
     expect(mayDecide({ approver: "bo" }, { id: "bo" }, { actor: { id: "refund-bot" } })).toBe(true);
     expect(mayDecide({ approver: "bo" }, { id: "bo" }, {})).toBe(true);
   });

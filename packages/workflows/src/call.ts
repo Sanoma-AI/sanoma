@@ -28,14 +28,7 @@ import { currentGroup, entry, skipped, write, writeFailure } from "./ledger.ts";
 import { shown } from "./log.ts";
 import { type CallContext, isOp, type Op } from "./op.ts";
 import { callAt, callName, type CallNode } from "./outline.ts";
-import {
-  DecisionSchema,
-  type Policy,
-  type PolicyCall,
-  type PolicyOp,
-  policyOpOf,
-  type RecordedDecision,
-} from "./policy.ts";
+import { allowAll, DecisionSchema, type Policy, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
 import type { Run, WorkerState } from "./run.ts";
 import { isChangeOp } from "./resource.ts";
 import {
@@ -297,21 +290,22 @@ function targetOf(op: Op, input: unknown): { target?: string } {
  */
 export async function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecision> {
   const seen = { id: run.id, workflow: run.workflow, approvals: structuredClone(run.approvals) };
-  const live = run.sandbox === undefined;
-  const before = await beforeOf(op, input, run.state.collections, (get, key) =>
-    (live ? run.state.drivers : run.fakeDrivers)?.get(get)?.(
+  const { policy } = run.state;
+  const before = await beforeOf(policy, op, input, run.state.collections, (get, key) =>
+    driverOf(run, get)?.(
       { key },
-      {
-        idempotencyKey: `${run.id}:${get}:${String(key)}`,
-        runId: run.id,
-        opId: get,
-        attempt: 1,
-        secrets: live ? run.state.secrets : run.fakeSecrets!,
-      },
+      { idempotencyKey: `${run.id}:${get}`, runId: run.id, opId: get, attempt: 1, secrets: secretsOf(run) },
     ),
   );
-  return ask(run.state.policy, { ...callOf(op, input, run.actor, seen), ...before }, run.state);
+  const call = { ...callOf(op, input, run.actor, seen), ...before };
+  return ask(policy, op.id, () => policy(call), run.state);
 }
+
+/** The run's function for an operation: its own fake's in a sandbox run, never a vendor's; else the driver's. */
+const driverOf = (run: Run, id: string) => (run.sandbox === undefined ? run.state.drivers : run.fakeDrivers)?.get(id);
+
+/** The secrets a run's calls read: its own in a sandbox run, else the stored ones. */
+const secretsOf = (run: Run) => (run.sandbox === undefined ? run.state.secrets : run.fakeSecrets!);
 
 /** One call of `op` as `actor` in `run`, as a policy sees it. */
 const callOf = (op: Op, input: unknown, actor: Principal, run: PolicyCall["run"]): PolicyCall => ({
@@ -325,17 +319,18 @@ const callOf = (op: Op, input: unknown, actor: Principal, run: PolicyCall["run"]
 
 /**
  * For a collection's `save` or `delete`, the record it replaces or removes, read once with the
- * collection's `get` (`read`, the run's driver or fake, or a direct call's): `{ before }` when
- * there is one, else nothing. A failed read is named, keeping its error's code.
+ * collection's `get` (`read`): `{ before }` when there is one, else nothing, and nothing read
+ * under `allowAll`, which reads no call. A failed read is named, keeping its error's code.
  */
 export async function beforeOf(
+  policy: Policy,
   op: Op,
   input: unknown,
   collections: ReadonlyMap<string, Collection>,
   read: (get: string, key: unknown) => Promise<unknown> | undefined,
 ): Promise<{ before?: unknown }> {
   const collection = op.vendor === DATA_VENDOR ? collections.get(op.resource) : undefined;
-  if (!collection || (op.name !== "save" && op.name !== "delete")) return {};
+  if (policy === allowAll || !collection || (op.name !== "save" && op.name !== "delete")) return {};
   const key =
     op.name === "save"
       ? (input as { record: Record<string, unknown> }).record[collection.key]
@@ -352,7 +347,6 @@ export async function beforeOf(
 /**
  * Asks `policy` about one call of `op` as `actor` in `run`, and checks its answer: a direct call
  * (`SanomaClient.call`), with the record a collection's write replaces as `before` (`beforeOf`).
- * A policy that fails is named in the error, with its error's code.
  */
 export function decideCall(
   policy: Policy,
@@ -360,51 +354,43 @@ export function decideCall(
   input: unknown,
   actor: Principal,
   run: PolicyCall["run"],
-  { before }: Pick<PolicyCall, "before"> = {},
+  before: Pick<PolicyCall, "before"> = {},
 ): Promise<RecordedDecision> {
-  return ask(policy, { ...callOf(op, input, actor, run), ...(before !== undefined && { before }) });
+  const call = { ...callOf(op, input, actor, run), ...before };
+  return ask(policy, op.id, () => policy(call));
 }
 
 /**
- * Asks a Cedar policy whether `actor` may start a run of `workflow` with `input`, as
- * `SanomaClient.start` does before it queues one: the action `workflow:<name>` on the
- * workflow, its input the context. A function policy (`definePolicy`) is written for operation
- * calls, and is not asked: the start is allowed, as it always was.
+ * Asks the policy whether `actor` may start a run of `workflow` with `input` (`Policy.start`, the
+ * action `workflow:<name>`), as `SanomaClient.start` does before it queues one; allowed by a
+ * policy that has no `start`.
  */
-export function decideStart(
-  policy: Policy,
-  workflow: string,
-  input: unknown,
-  actor: Principal,
-  runId: string,
-): Promise<RecordedDecision> {
-  if (policy.kind !== "cedar") return Promise.resolve({ kind: "allow" });
-  // A start is no operation: Cedar reads the action's id alone, so the rest only fills the shape.
-  const id = `${WORKFLOW_ACTION}${workflow}` as PolicyOp["id"];
-  const op: PolicyOp = { id, vendor: "workflow", resource: workflow, name: "start", effect: "write" };
-  return ask(policy, { op, effect: op.effect, input, actor, run: { id: runId, workflow, approvals: [] } });
+export function decideStart(policy: Policy, workflow: string, input: unknown, actor: Principal) {
+  const { start } = policy;
+  if (!start) return Promise.resolve<RecordedDecision>({ kind: "allow" });
+  return ask(policy, `${WORKFLOW_ACTION}${workflow}`, () => start(actor, workflow, input));
 }
 
 /**
- * Asks `policy` about `call`, and checks its answer. A policy that fails is named in the error,
+ * The policy's answer about `id` (`answer`), checked. A policy that fails is named in the error,
  * with its error's code, unless the worker is stopping (`state`).
  */
 async function ask(
   policy: Policy,
-  call: PolicyCall,
+  id: string,
+  answer: () => unknown,
   state: Pick<WorkerState, "stopped"> = { stopped: false },
 ): Promise<RecordedDecision> {
-  const { id } = call.op;
-  let answer: unknown;
+  let answered: unknown;
   try {
-    answer = await policy(call);
+    answered = await answer();
   } catch (err) {
     // Named here, so the run's error and the ledger say which call the policy failed on, with
     // the code the policy's error had.
     if (isInfrastructureError(err, state)) throw err;
     throw keepCode(new Error(`The policy failed deciding ${id}: ${errorMessage(err)}`, { cause: err }), err);
   }
-  const decision = checkDecision(answer, id);
+  const decision = checkDecision(answered, id);
   return policy.version === undefined ? decision : { ...decision, policyVersion: policy.version };
 }
 
@@ -412,7 +398,7 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed) {
   // The worker's declaration, never the workflow's: its effect, schemas and retry setting.
   const op = run.state.ops.get(id);
   // A sandbox run calls its own fakes, never a vendor.
-  const fn = run.sandbox === undefined ? run.state.drivers.get(id) : run.fakeDrivers?.get(id);
+  const fn = driverOf(run, id);
   if (!op || !fn) {
     throw new Error(
       run.sandbox === undefined
@@ -476,7 +462,7 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed) {
       async () => {
         const at = Date.now();
         attempt = DBOS.stepStatus?.currentAttempt ?? 1;
-        const secrets = run.sandbox === undefined ? run.state.secrets : run.fakeSecrets!;
+        const secrets = secretsOf(run);
         const context: CallContext = {
           idempotencyKey: `${run.id}:${seq}`,
           runId: run.id,

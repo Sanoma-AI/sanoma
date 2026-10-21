@@ -2,7 +2,6 @@ import { fileURLToPath } from "node:url";
 import { getCallSites } from "node:util";
 import { z } from "zod";
 import { isOp, type Op } from "./op.ts";
-import { approverLabel, mayDecide, OWN_CHANGE } from "./shared.ts";
 
 /**
  * Who is acting: the person or agent that starts a run, calls an operation or decides an
@@ -33,18 +32,6 @@ export const Approver: z.ZodType<Approver> = z.union(
   [z.string().regex(/\S/), z.object({ group: z.string().regex(/\S/) })],
   { error: 'needs an approver: a name, or { group: "name" }' },
 );
-
-/**
- * Why `by` may not decide the approval (`mayDecide` said no): naming who may, or `OWN_CHANGE`
- * when it is addressed to `by`, so `by` started the run.
- */
-export const notApprover = (approval: Pick<ApprovalState, "approver">, by: Principal): string => {
-  const { approver } = approval;
-  if (mayDecide(approval, by, {})) return OWN_CHANGE;
-  return typeof approver === "string"
-    ? `${by.id} is not the approver; ${approverLabel(approver)} is`
-    : `${by.id} is not in ${approverLabel(approver)}`;
-};
 
 /** True when the two name the same approver: the same id, or the same group. */
 export const sameApprover = (a: Approver, b: Approver): boolean =>

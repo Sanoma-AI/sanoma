@@ -10,7 +10,7 @@ import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.
 import { deleteCredential, storeCredential, storedCredentials, storedSecrets } from "./credentials.ts";
 import { dbosClient, lazyPool, type LazyPool } from "./db.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
-import { type ApprovalState, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
+import { type ApprovalState, Principal, type WorkflowDefinition } from "./define.ts";
 import { APPLY_WORKFLOW, type ApplyInput, type ApplyReport } from "./apply.ts";
 import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
 import { isDirect } from "./direct.ts";
@@ -35,7 +35,7 @@ import {
   DATA_VENDOR,
   errorMessage,
   isEnded,
-  mayDecide,
+  refusalOf,
   type RunStatus,
   WORKFLOW_ACTION,
 } from "./shared.ts";
@@ -224,12 +224,7 @@ export class SanomaClient {
       options.sandbox,
       "`sandbox` must be the name of a scenario in the config's `scenarios/`",
     );
-    const id = runId ?? randomUUID();
-    // A run the id names already is returned as it is (below), whatever the policy says now.
-    const hold =
-      runId !== undefined && (await this.exists(runId))
-        ? undefined
-        : await this.startHold(workflow.name, input, startedBy, id);
+    const hold = await this.startHold(workflow.name, input, startedBy, runId);
     const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }), ...(hold && { hold }) };
     const { onBehalfOf } = startedBy;
     // An id DBOS has already returns that run, unless it is another workflow's, which DBOS refuses.
@@ -238,7 +233,7 @@ export class SanomaClient {
         {
           queueName: this.config.queueName,
           workflowName: workflow.name,
-          workflowID: id,
+          workflowID: runId,
           applicationName: this.config.appName,
           authenticatedUser: startedBy.id,
           authenticatedRoles: startedBy.groups ?? [],
@@ -267,19 +262,20 @@ export class SanomaClient {
   /**
    * The policy's answer to starting a run of `workflow` as `startedBy` (`decideStart`), for a
    * workflow of the config's own: a deny throws `policy_denied`; a hold is what the run waits on
-   * before its body. The built-in workflows' starts are not asked: their calls are.
+   * before its body. A run `runId` names already is returned as it is, whatever the policy says now.
    */
   private async startHold(
     workflow: string,
     input: unknown,
     startedBy: Principal,
-    runId: string,
+    runId: string | undefined,
   ): Promise<StartHold | undefined> {
     if (BUILT_IN_WORKFLOWS.has(workflow)) return undefined;
-    const decision = await decideStart(this.config.policy, workflow, input, startedBy, runId);
-    if (decision.kind === "deny") throw new PolicyDeniedError(`${WORKFLOW_ACTION}${workflow}`, decision.reason);
-    if (decision.kind !== "approve") return undefined;
-    const { approver, title = `${workflow} needs ${approverLabel(approver)}`, reasons } = decision;
+    const decision = await decideStart(this.config.policy, workflow, input, startedBy);
+    if (decision.kind === "allow" || (runId !== undefined && (await this.row(runId)))) return undefined;
+    const action = `${WORKFLOW_ACTION}${workflow}`;
+    if (decision.kind === "deny") throw new PolicyDeniedError(action, decision.reason);
+    const { approver, title = `${action} needs ${approverLabel(approver)}`, reasons } = decision;
     return { approver, title, ...(reasons && { reasons }) };
   }
 
@@ -321,7 +317,7 @@ export class SanomaClient {
       const first = (await this.recordedCall(runId, op.id, logged)) ?? (await this.heldCall(op.id, heldId, held));
       if (first) return first.output;
     }
-    const before = await beforeOf(op, parsed, this.config.collections, (get, key) =>
+    const before = await beforeOf(policy, op, parsed, this.config.collections, (get, key) =>
       drivers.get(get)?.(
         { key },
         { idempotencyKey: `${runId}:before`, runId, opId: get, attempt: 1, secrets: this.storedSecrets, by: actor.id },
@@ -562,8 +558,10 @@ export class SanomaClient {
         { runId, ...(approvalId ? { approvalId } : {}) },
       );
     }
-    if (!mayDecide(target, msg.by, { actor: row.authenticatedUser ? { id: row.authenticatedUser } : undefined })) {
-      const reason = notApprover(target, msg.by);
+    const reason = refusalOf(target, msg.by, {
+      actor: row.authenticatedUser ? { id: row.authenticatedUser } : undefined,
+    });
+    if (reason !== undefined) {
       throw new SanomaError("not_approver", `${reason} (${target.id})`, {
         runId,
         approvalId: target.id,
@@ -821,14 +819,15 @@ export class SanomaClient {
     }
   }
 
-  /** True when a run has this id. */
-  private async exists(runId: string): Promise<boolean> {
-    return (await this.dbos.listWorkflows({ workflowIDs: [runId], loadInput: false, loadOutput: false })).length > 0;
+  /** The run's status row, read without its input (and its output, unless asked), if there is one. */
+  private async row(runId: string, { loadOutput = false } = {}) {
+    const [row] = await this.dbos.listWorkflows({ workflowIDs: [runId], loadInput: false, loadOutput });
+    return row;
   }
 
-  /** The run's status row, read without its input (and its output, unless asked), or `run_not_found`. */
-  private async mustExist(runId: string, { loadOutput = false } = {}) {
-    const [row] = await this.dbos.listWorkflows({ workflowIDs: [runId], loadInput: false, loadOutput });
+  /** The run's status row, as `row` reads it, or `run_not_found`. */
+  private async mustExist(runId: string, options: { loadOutput?: boolean } = {}) {
+    const row = await this.row(runId, options);
     if (!row) throw new SanomaError("run_not_found", `No run ${runId}`, { runId });
     return row;
   }
