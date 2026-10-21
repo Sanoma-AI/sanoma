@@ -69,18 +69,11 @@ function failure(op: string, timeoutMs: number) {
   };
 }
 
-/**
- * The broadcast or email (`what`) in a reply Resend accepted: the spec leaves its id optional, and
- * a proxy may answer instead.
- */
-function replied<T extends { id?: string }>(
-  op: string,
-  what: string,
-  reply: { data: T; response: Response },
-): T & { id: string } {
+/** The broadcast or email in a reply Resend accepted: the spec leaves its id optional, and a proxy may answer instead. */
+function replied<T extends { id?: string }>(op: string, reply: { data: T; response: Response }): T & { id: string } {
   if (reply.data?.id) return reply.data as T & { id: string };
   const { status } = reply.response;
-  throw new DriverError(`resend: ${op} replied ${status} without ${what} id`, { retryable: false, status });
+  throw new DriverError(`resend: ${op} replied ${status} without an id`, { retryable: false, status });
 }
 
 /** The sender: the input's `from`, else `RESEND_FROM`, read at the call; Resend requires one. */
@@ -131,17 +124,13 @@ export function resendDriver(options: ResendDriverOptions = {}) {
               name: call.idempotencyKey,
             },
           });
-          return { id: replied("broadcast.create", "a broadcast", reply).id };
+          return { id: replied("broadcast.create", reply).id };
         },
         send: async ({ id }, call) => {
           const api = client("broadcast.send", call);
           // A replay of a send whose reply was lost must not send again: send only a broadcast that
           // is still a draft or scheduled, and otherwise say where it is.
-          const { status } = replied(
-            "broadcast.send",
-            "a broadcast",
-            await broadcastsGet({ client: api, path: { id } }),
-          );
+          const { status } = replied("broadcast.send", await broadcastsGet({ client: api, path: { id } }));
           if (status === "sent") return { id, status: "sent" as const };
           if (status === "queued") return { id, status: "queued" as const };
           if (status !== "draft" && status !== "scheduled") {
@@ -154,7 +143,7 @@ export function resendDriver(options: ResendDriverOptions = {}) {
           }
           const reply = await broadcastsSend({ client: api, path: { id }, body: {} });
           // Resend replies with the id only: it accepts the broadcast and sends it in the background.
-          return { id: replied("broadcast.send", "a broadcast", reply).id, status: "queued" as const };
+          return { id: replied("broadcast.send", reply).id, status: "queued" as const };
         },
       },
       emails: {
@@ -165,7 +154,7 @@ export function resendDriver(options: ResendDriverOptions = {}) {
             client: client("emails.send", call),
             body: { to, from: senderOf("emails.send", from), subject, html, text },
           });
-          return { id: replied("emails.send", "an email", reply).id };
+          return { id: replied("emails.send", reply).id };
         },
       },
     },

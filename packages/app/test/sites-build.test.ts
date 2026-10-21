@@ -74,13 +74,16 @@ ${line}
 export const Route = createFileRoute("${path}")({ component: () => <div>{${shown}}</div> });
 `;
 
-/** A site page that reads a refusal without a cast, with `errorBodyOf` and `ApiError` from sanoma/site, branching on `code`. */
-const refusal = (code: string) => `import { createFileRoute } from "@tanstack/react-router";
+/**
+ * A site page that starts hello for `who` and reads a refusal without a cast, with `errorBodyOf`
+ * and `ApiError` from sanoma/site, branching on `code`.
+ */
+const starting = (who: string, code: string) => `import { createFileRoute } from "@tanstack/react-router";
 import { api, ApiError, errorBodyOf, type ErrorResponse } from "sanoma/site";
 
 async function start(): Promise<string> {
   try {
-    return (await api.hello.start({ who: "Ada" })).runId;
+    return (await api.hello.start({ who: ${who} })).runId;
   } catch (err) {
     const body: ErrorResponse | undefined = errorBodyOf(err);
     if (body?.code === "${code}") return \`waiting in \${body.runId}\`;
@@ -372,19 +375,13 @@ describe("a company's app with its sites", () => {
     // `api` is untyped until .sanoma/api.ts types it (the fixture's started.tsx, above), as the
     // generated file does: through Register, with the types sanoma/site re-exports.
     expect((await writeApi(repo, describeConfig(config))).wrote).toBe(true);
-    const call = (who: string) =>
-      sitePage("/sites/hello/styled", 'import { api } from "sanoma/site";', `void api.hello.start({ who: ${who} })`);
-    writeFileSync(join(repo, "sites", "hello", "routes", "styled.tsx"), call('"Ada"'));
+    // A start, and its refusal read without a cast; then input and a code the runtime does not take.
+    writeFileSync(join(repo, "sites", "hello", "routes", "styled.tsx"), starting('"Ada"', "approval_pending"));
     expect(check()).toMatchObject({ status: 0, stdout: "" });
-    writeFileSync(join(repo, "sites", "hello", "routes", "styled.tsx"), call("1"));
-    expect(check().stdout).toMatch(/^sites\/hello\/routes\/styled\.tsx\(\d+,\d+\): error TS2322: [^\n]*'number'/);
-    // A refusal, read without a cast, and a code the runtime does not have.
-    writeFileSync(join(repo, "sites", "hello", "routes", "styled.tsx"), refusal("approval_pending"));
-    expect(check()).toMatchObject({ status: 0, stdout: "" });
-    writeFileSync(join(repo, "sites", "hello", "routes", "styled.tsx"), refusal("approval_pendng"));
-    expect(check().stdout).toMatch(
-      /^sites\/hello\/routes\/styled\.tsx\(\d+,\d+\): error TS2367: [^\n]*"approval_pendng"/,
-    );
+    writeFileSync(join(repo, "sites", "hello", "routes", "styled.tsx"), starting("1", "approval_pendng"));
+    const { stdout } = check();
+    expect(stdout).toMatch(/^sites\/hello\/routes\/styled\.tsx\(\d+,\d+\): error TS2322: [^\n]*'number'/m);
+    expect(stdout).toMatch(/^sites\/hello\/routes\/styled\.tsx\(\d+,\d+\): error TS2367: [^\n]*"approval_pendng"/m);
   });
 });
 

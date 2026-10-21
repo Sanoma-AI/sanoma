@@ -596,12 +596,9 @@ const settled = await Promise.allSettled([t, r]);
 const raced = await Promise.race([t, r]);
 const first = await Promise.any([t, r]);
 const today = new Date();
-const given = new Date(k);
-const unawaited = new Date(ctx.now());
-const later = new Date(await (async () => ctx.now())());
-let read = await ctx.now();
-const reassigned = new Date(read);
-export const all = [SanomaClient, jsonlLedger, x, fakeGhost, t, r, k, resolveDatabaseUrl, ghostDriver, id, g, ws, p, vendor, fanned, settled, raced, first, today, given, unawaited, later, reassigned];
+const called = Date();
+const Clock = Date;
+export const all = [SanomaClient, jsonlLedger, x, fakeGhost, t, r, k, resolveDatabaseUrl, ghostDriver, id, g, ws, p, vendor, fanned, settled, raced, first, today, called, Clock];
 `;
 
 describe("lintWorkflow on a workflow that tries everything", () => {
@@ -665,14 +662,14 @@ export default defineWorkflow({
   name: "good",
   input: z.object({}),
   uses: [ghost.post.create],
-  // A date of the time ctx.now() read, in the call or held in a const: now, today's and tomorrow's.
+  // Dates that read no clock: of the time ctx.now() read, and of dates the workflow has.
   run: async (ctx) => {
     const now = await ctx.now();
     return [
       n,
       new Date(await ctx.now()).toISOString(),
-      new Date(now).toISOString().slice(0, 10),
       new Date(now + 86_400_000).toISOString().slice(0, 10),
+      new Date("2026-10-21").getTime() + Date.parse("2026-10-21") + Date.UTC(2026, 9, 21),
     ];
   },
 });
@@ -734,7 +731,7 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
       bad(
         4,
         date,
-        /`await ctx\.now\(\)` for the time, `new Date\(await ctx\.now\(\)\)` \(or of a `const` holding it\) for a date/,
+        /reads the clock with `await ctx\.now\(\)`, never `Date`: `new Date\(await ctx\.now\(\)\)` for a date/,
       ),
       bad(5, globals, /'fetch'.*connector operation/),
       bad(6, "eslint(no-restricted-properties)", /Math\.random.*ctx\.runId/),
@@ -751,13 +748,10 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
       // A race has no ctx.all to point at: nothing races.
       bad(18, "eslint(no-restricted-properties)", /Promise\.race.*nothing races: pick one call, or sleep/),
       bad(19, "eslint(no-restricted-properties)", /Promise\.any.*nothing races/),
-      // A date only of what `await ctx.now()` read, there in the argument.
+      // Every read of the clock, and `Date` passed on, where no lint follows it.
       bad(20, date, /new Date\(await ctx\.now\(\)\)/),
       bad(21, date, /new Date\(await ctx\.now\(\)\)/),
       bad(22, date, /new Date\(await ctx\.now\(\)\)/),
-      bad(23, date, /new Date\(await ctx\.now\(\)\)/),
-      // A `let` may hold another value by then; only a `const` holds the read.
-      bad(25, date, /a `const` holding it/),
       {
         file: "workflows/sandbox.ts",
         line: 1,

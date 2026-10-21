@@ -247,12 +247,20 @@ const issues = (error: z.ZodError) => error.issues.map((i) => i.message).join(";
  */
 function refusal(field: z.ZodType, value: unknown, what: string, partial: boolean): string | undefined {
   const object = partial && isObject(value) ? objectUnder(field) : undefined;
-  if (!object) {
-    const parsed = field.safeParse(value);
-    return parsed.success ? undefined : `${what} cannot be ${JSON.stringify(value)}: ${issues(parsed.error)}`;
-  }
-  for (const [name, v] of Object.entries(value as Record<string, unknown>)) {
-    const why = refusal(fieldOf(object, name, what), v, `${name} in ${what}`, true);
+  if (object) return fieldsRefusal(object, value as Record<string, unknown>, what, true);
+  const parsed = field.safeParse(value);
+  return parsed.success ? undefined : `${what} cannot be ${JSON.stringify(value)}: ${issues(parsed.error)}`;
+}
+
+/** Why the object schema refuses the first of `fields` it refuses (`refusal`), `owner` its owner in errors. */
+function fieldsRefusal(
+  schema: z.ZodType,
+  fields: Record<string, unknown>,
+  owner: string,
+  partial: boolean,
+): string | undefined {
+  for (const [name, v] of Object.entries(fields)) {
+    const why = refusal(fieldOf(schema, name, owner), v, `${name} in ${owner}`, partial);
     if (why) return why;
   }
   return undefined;
@@ -302,10 +310,8 @@ function fieldsFrom(pickle: PickleStep, schema: z.ZodType, owner: string, partia
     throw new Error(`the doc string after "${pickle.text}" is not JSON: ${errorMessage(err)}`, { cause: err });
   }
   if (!isObject(value)) throw new Error(`"${pickle.text}" needs a JSON object`);
-  for (const [name, v] of Object.entries(value)) {
-    const why = refusal(fieldOf(schema, name, owner), v, what(name), partial);
-    if (why) throw new Error(why);
-  }
+  const why = fieldsRefusal(schema, value, owner, partial);
+  if (why) throw new Error(why);
   return value;
 }
 

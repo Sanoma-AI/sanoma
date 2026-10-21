@@ -197,7 +197,7 @@ describe("resendDriver", () => {
       await expect(send("bc_1")).rejects.toMatchObject({
         name: "DriverError",
         retryable: false,
-        message: "resend: broadcast.send replied 200 without a broadcast id",
+        message: "resend: broadcast.send replied 200 without an id",
       });
       expect(sent.map((r) => r.method)).toEqual(["GET"]);
     });

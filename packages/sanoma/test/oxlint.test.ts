@@ -135,7 +135,7 @@ describe("the shipped oxlint.json", () => {
         line: 4,
         rule: "sanoma(date)",
         text: expect.stringMatching(
-          /`await ctx\.now\(\)` for the time, `new Date\(await ctx\.now\(\)\)` \(or of a `const` holding it\) for a date/,
+          /reads the clock with `await ctx\.now\(\)`, never `Date`: `new Date\(await ctx\.now\(\)\)` for a date/,
         ),
       },
     ]);
