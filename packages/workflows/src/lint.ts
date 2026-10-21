@@ -62,8 +62,8 @@ const ERROR_CLASSES = new Set(["DriverError", "SanomaError", "PolicyDeniedError"
  * type from `@sanoma-ai/workflows` or `sanoma`, `@sanoma-ai/connector-<vendor>`, `zod`, and relative files. With
  * `filename`, a relative import must stay inside the file's nearest `workflows/` or `policies/`
  * directory, or its own directory when it has neither; the one file outside it a workflow or
- * policy may import is the company's `resources/data.ts`, its collections (by real path). No `instanceof` against the runtime's
- * error classes: read `errorCode(err)`.
+ * policy may import is the company's `resources/data.ts`, its collections (by real path). No
+ * `instanceof` against the runtime's error classes: read `errorCode(err)`.
  *
  * In each workflow's `run` (the literal `defineWorkflow` is called with), it reports what the
  * outline cannot draw, as the worker refuses to start with (`outlineBody`): `ctx` used other

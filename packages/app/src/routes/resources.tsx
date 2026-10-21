@@ -301,6 +301,19 @@ function ApplyButton() {
   );
 }
 
+/** A declaration's id, linking to it shown in its data file below the tables. */
+const DeclarationLink = ({ id }: { id: string }) => (
+  <Link
+    to="/resources"
+    search={{ resource: id }}
+    replace
+    resetScroll={false}
+    className="font-mono text-xs underline-offset-4 hover:underline"
+  >
+    {id}
+  </Link>
+);
+
 /** A resource's row, and under it the fields that differ, or why it could not be read. */
 function ResourceRow({
   row,
@@ -331,15 +344,7 @@ function ResourceRow({
         </TableCell>
         <TableCell>
           {row.declared ? (
-            <Link
-              to="/resources"
-              search={{ resource: row.id }}
-              replace
-              resetScroll={false}
-              className="font-mono text-xs underline-offset-4 hover:underline"
-            >
-              {row.id}
-            </Link>
+            <DeclarationLink id={row.id} />
           ) : (
             // Read by the last check, but not by the app when it started: its declaration is not at hand.
             <code className="text-xs">{row.id}</code>
@@ -445,15 +450,7 @@ function Collections({ collections, selected }: { collections: CollectionEntry[]
                 <TableCell>{Object.keys(fields).join(", ")}</TableCell>
                 <TableCell>
                   {declared ? (
-                    <Link
-                      to="/resources"
-                      search={{ resource: declared.id }}
-                      replace
-                      resetScroll={false}
-                      className="font-mono text-xs underline-offset-4 hover:underline"
-                    >
-                      {declared.id}
-                    </Link>
+                    <DeclarationLink id={declared.id} />
                   ) : (
                     <span className="text-muted-foreground">the config</span>
                   )}

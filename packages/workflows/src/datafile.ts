@@ -221,7 +221,7 @@ export function readDataFile(
       for (const sp of s.specifiers) refused.add(sp.local.name);
       return;
     }
-    const refusal = DATA_ENTRIES.has(spec) ? undefined : whyRefused(spec);
+    const refusal = whyRefused(spec);
     if (refusal) {
       fail(s.source, `import "${spec}" is not allowed in a data file: ${refusal}`);
       for (const sp of s.specifiers) refused.add(sp.local.name);
@@ -270,7 +270,7 @@ export function readDataFile(
 
   /** Why an import's specifier is not allowed in a data file, or undefined when it is. */
   function whyRefused(spec: string): string | undefined {
-    if (!RELATIVE.test(spec)) return CONSTRUCTORS.test(spec) ? undefined : IMPORTS;
+    if (!RELATIVE.test(spec)) return CONSTRUCTORS.test(spec) || DATA_ENTRIES.has(spec) ? undefined : IMPORTS;
     if (!spec.endsWith(".ts")) return "name the data file with its `.ts` extension";
     if (join(dirname(filename), spec) === join(root, COLLECTIONS_FILE)) {
       return "resources/data.ts holds collections, which no resource names; import resources from other data files";
