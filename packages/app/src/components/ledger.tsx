@@ -9,6 +9,7 @@ import { utcText } from "#/lib/time.ts";
 import type { RunCheck } from "../api.ts";
 import { configQuery, opsById } from "../queries.ts";
 import {
+  ALONE,
   DecisionBadge,
   DecisionNote,
   Expandable,
@@ -162,6 +163,7 @@ export const LedgerRow = memo(function LedgerRow({
       body = (
         <p>
           {record.by} {record.decision === "approve" ? "approved" : "rejected"} “{title(record.approval)}”
+          {record.alone ? ALONE : null}
           {record.note ? <DecisionNote note={record.note} /> : null}
         </p>
       );

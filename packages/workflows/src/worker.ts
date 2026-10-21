@@ -77,6 +77,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     collections: resolved.collections,
     steps: resolved.steps,
     policy: resolved.policy,
+    ...(resolved.root !== undefined && { root: resolved.root }),
     ledger: ledger.store,
     secrets: storedSecrets(() => secrets.db(), "sanoma"),
     workflows: resolved.workflows,

@@ -35,6 +35,7 @@ import { decideFn } from "../functions.ts";
 import { configQuery, opsById, RUNS_KEY, runLink, runQuery } from "../queries.ts";
 import { ApplyPlanView } from "./apply-plan.tsx";
 import {
+  ALONE,
   ApprovalStatusBadge,
   DecisionNote,
   Disclosure,
@@ -132,6 +133,7 @@ export function ApprovalDetails({
         {approval.decidedBy && (
           <Fact label="Decided">
             {approval.status} by {approval.decidedBy}
+            {approval.alone ? ALONE : null}
             {approval.decidedAt ? (
               <>
                 , <When at={approval.decidedAt} />
@@ -303,7 +305,7 @@ function DecideDialog({
       ? undefined
       : body?.code === "not_approver"
         ? body.reason === OWN_CHANGE
-          ? "You started this run, so someone else must decide this"
+          ? `You started this run, so someone else in ${approverLabel(body.approver ?? approval.approver)} must decide this`
           : `Only ${approverLabel(body.approver ?? approval.approver)} can decide this`
         : mutation.error.message;
   const verb = decision === "reject" ? "Reject" : "Approve";

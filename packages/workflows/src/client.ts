@@ -538,7 +538,8 @@ export class SanomaClient {
     options: { timeoutSeconds?: number } = {},
   ): Promise<ApprovalState> {
     const given = parseOrThrow(ApprovalMessage, message, "Not a decision");
-    const msg = { ...given, by: await this.admitted(given.by) };
+    const declared = readPeople(this.config.root);
+    const msg = { ...given, by: admit(given.by, declared) };
     // A run that does not exist has no approvals, so run_not_found never hides already_decided.
     const [all, row] = await Promise.all([this.approvals(runId), this.mustExist(runId)]);
     const target = approvalId ? all.find((a) => a.id === approvalId) : all.find((a) => a.status === "pending");
@@ -559,9 +560,12 @@ export class SanomaClient {
         { runId, ...(approvalId ? { approvalId } : {}) },
       );
     }
-    const reason = refusalOf(target, msg.by, {
-      actor: row.authenticatedUser ? { id: row.authenticatedUser } : undefined,
-    });
+    const reason = refusalOf(
+      target,
+      msg.by,
+      { actor: row.authenticatedUser ? { id: row.authenticatedUser } : undefined },
+      declared.people,
+    );
     if (reason !== undefined) {
       throw new SanomaError("not_approver", `${reason} (${target.id})`, {
         runId,

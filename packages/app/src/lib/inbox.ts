@@ -1,8 +1,16 @@
 import type { ApprovalState, RunSummary } from "@sanoma-ai/workflows";
-import { mayDecide } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useActor } from "../actor.ts";
-import { approvalKey, decidedOf, type InboxFilter, pendingOf, recentRunsQuery, waitingRunsQuery } from "../queries.ts";
+import { decidableBy } from "./decidable.ts";
+import {
+  approvalKey,
+  configQuery,
+  decidedOf,
+  type InboxFilter,
+  pendingOf,
+  recentRunsQuery,
+  waitingRunsQuery,
+} from "../queries.ts";
 
 // The Inbox's approvals, as its page and its panel read them.
 
@@ -13,23 +21,12 @@ export type Entry = { run: RunSummary; approval: ApprovalState };
 export const findEntry = (entries: Entry[], key: string | undefined) =>
   key === undefined ? undefined : entries.find((entry) => approvalKey(entry) === key);
 
-/**
- * Of these approvals, those `actor` may decide; none while the page knows no name. A group
- * approver counts only when the deployment vouches for groups: a typed name has none. Never one
- * on a run `actor` started (`mayDecide`).
- */
-export const decidableBy = (actor: string | null | undefined, groups: readonly string[]) => (entries: Entry[]) =>
-  actor
-    ? entries.filter(({ run, approval }) =>
-        mayDecide(approval, { id: actor, groups: [...groups] }, { actor: run.startedBy }),
-      )
-    : [];
-
 /** The pending approvals, and those you may decide (`mine`), with the waiting runs' read's error. */
 export function usePending() {
   const { actor, groups } = useActor();
   const { data: pending, error } = useSuspenseQuery({ ...waitingRunsQuery(), select: pendingOf });
-  return { actor, pending, mine: decidableBy(actor, groups)(pending), error };
+  const { data: people } = useSuspenseQuery({ ...configQuery(), select: (config) => config.resources });
+  return { actor, pending, mine: decidableBy(actor, groups, people)(pending), error };
 }
 
 /** How many of these approvals each workflow's runs wait on, by name. */

@@ -55,6 +55,8 @@ export interface WorkerState {
   steps: readonly Steps[];
   /** Its `version`, when it has one, is recorded with each of its decisions. */
   policy: Policy;
+  /** The config's directory, whose data files declare the people an approval's decider is checked against (`readPeople`). */
+  root?: string;
   ledger: LedgerStore;
   /** The stored secrets, for a live run's drivers (`CallContext.secrets`). */
   secrets: Secrets;

@@ -349,7 +349,7 @@ export interface ErrorResponse {
   issues?: InputIssue[];
   /** For `not_approver`: who may decide. */
   approver?: ApprovalState["approver"];
-  /** For `not_approver`: why not, `OWN_CHANGE` for the run's own actor. */
+  /** For `not_approver`: why not, `OWN_CHANGE` for the run's own actor while someone else could decide. */
   reason?: string;
   /** For `approval_pending`: the run of the built-in `call` workflow the call waits in; for `run_running`, the run. */
   runId?: string;

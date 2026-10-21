@@ -167,7 +167,10 @@ export const ENDED_STATUSES = ["finished", "failed", "cancelled"] as const satis
 /** True when the run has finished, failed or been cancelled. */
 export const isEnded = (status: RunStatus): boolean => (ENDED_STATUSES as readonly RunStatus[]).includes(status);
 
-/** Why the run's own actor may not decide an approval on it: separation of duties (`mayDecide`). */
+/**
+ * Why the run's own actor may not decide an approval on it: separation of duties (`mayDecide`),
+ * while someone else could decide it.
+ */
 export const OWN_CHANGE = "own change";
 
 /** A run as `mayDecide` reads it: who started it, its own actor. */
@@ -175,24 +178,33 @@ type DecidedRun = { actor?: Pick<Principal, "id"> | undefined };
 
 /**
  * True when `by` may decide the approval on `run`: `by.id` is the approver, or `by.groups` holds
- * the approver group, and `by` is not the run's own actor, whatever group they are in (separation
- * of duties). Pure: everything it reads is already recorded.
+ * the approver group. The run's own actor is refused only while someone else could decide (separation
+ * of duties): the approver is a group with another declared person in `people` (an agent does not
+ * count). Pure: everything it reads is passed in.
  */
-export const mayDecide = (approval: Pick<ApprovalState, "approver">, by: Principal, run: DecidedRun): boolean =>
-  refusalOf(approval, by, run) === undefined;
+export const mayDecide = (
+  approval: Pick<ApprovalState, "approver">,
+  by: Principal,
+  run: DecidedRun,
+  people: readonly PeopleResource[],
+): boolean => refusalOf(approval, by, run, people) === undefined;
 
 /** Why `by` may not decide the approval on `run` (`mayDecide`), naming who may, or `OWN_CHANGE`; undefined when they may. */
 export function refusalOf(
   { approver }: Pick<ApprovalState, "approver">,
   by: Principal,
   run: DecidedRun,
+  people: readonly PeopleResource[],
 ): string | undefined {
   if (typeof approver === "string") {
-    if (approver !== by.id) return `${by.id} is not the approver; ${approverLabel(approver)} is`;
-  } else if (!by.groups?.includes(approver.group)) {
-    return `${by.id} is not in ${approverLabel(approver)}`;
+    return approver === by.id ? undefined : `${by.id} is not the approver; ${approverLabel(approver)} is`;
   }
-  return by.id === run.actor?.id ? OWN_CHANGE : undefined;
+  if (!by.groups?.includes(approver.group)) return `${by.id} is not in ${approverLabel(approver)}`;
+  if (by.id !== run.actor?.id) return undefined;
+  const someoneElse = personsOf(people).some(
+    ({ id }) => id !== by.id && principalOf(id, people)?.groups?.includes(approver.group),
+  );
+  return someoneElse ? OWN_CHANGE : undefined;
 }
 
 /** A declared resource as the people functions read it: only the runtime's people types count. */
