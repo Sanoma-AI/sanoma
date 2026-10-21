@@ -80,6 +80,14 @@ function linkTag(html: string, text: string) {
   return start < 0 ? undefined : html.slice(start, html.indexOf(">", start) + 1);
 }
 
+/** The page's region or section under the heading `title`, up to the next heading, or the page's end. */
+function sectionAfter(html: string, title: string) {
+  const start = html.search(new RegExp(`<h[23][^>]*>${title}</h[23]>`));
+  if (start < 0) return "";
+  const next = html.slice(start + 1).search(/<h[1-6][ >]|<script/);
+  return next < 0 ? html.slice(start) : html.slice(start, start + 1 + next);
+}
+
 /**
  * A class only a site uses, put together here so that Tailwind, scanning this package for the
  * package's own build, does not find it in this file.
@@ -294,6 +302,35 @@ describe("a company's app with its sites", () => {
     rmSync(join(repo, "sites", "hello", "routes", "about.tsx"));
     expect(await buildApp(repo)).toEqual({ distDir: result.distDir, built: false });
     expect(readFileSync(tree, "utf8")).not.toContain("/sites/hello/about");
+  });
+
+  it("lists under a workflow's Used by the site's pages that call it, each linking to its page, and a component's file", async () => {
+    const html = (await (await fetch(new URL("/workflows/hello", app.url))).text()).replaceAll("<!-- -->", "");
+    expect(html).toMatch(/<h3[^>]*>Used by<\/h3>/);
+    const usedBy = sectionAfter(html, "Used by");
+    for (const [page, via] of [
+      ["/sites/hello/run", "RunForm"],
+      ["/sites/hello/started", "api"],
+    ]) {
+      expect(linkTag(usedBy, `${page}</code>`)).toContain(`href="${page}"`);
+      expect(usedBy).toMatch(new RegExp(`Hello desk<code[^>]*>${page}</code>.*?through ${via}<`));
+    }
+    // A component's file, which is no one page, unlinked (first, as its file sorts first); the page
+    // that reads leads, which calls no workflow, is not listed.
+    expect(usedBy).toMatch(/Hello desk<code[^>]*>sites\/hello\/components\/greet\.tsx<\/code>.*?through api</);
+    expect(usedBy.indexOf("greet.tsx")).toBeLessThan(usedBy.indexOf("<a "));
+    expect(usedBy).not.toContain("/sites/hello/leads");
+  });
+
+  it("lists under a collection's Used by the site's page that reads it, linking to the page", async () => {
+    const html = (await (await fetch(new URL("/data/leads", app.url))).text()).replaceAll("<!-- -->", "");
+    expect(html).toContain(">Used by</h2>");
+    const usedBy = sectionAfter(html, "Used by");
+    expect(usedBy).toMatch(/Hello desk<code[^>]*>\/sites\/hello\/leads<\/code>.*?through api</);
+    expect(linkTag(usedBy, "/sites/hello/leads</code>")).toContain('href="/sites/hello/leads"');
+    // No workflow uses leads, and the pages that call only hello are not listed.
+    expect(usedBy).not.toContain("/workflows/");
+    expect(usedBy).not.toContain("/sites/hello/run");
   });
 
   it("type-checks a site's links against the app's pages and the sites', and refuses a path that is neither", async () => {

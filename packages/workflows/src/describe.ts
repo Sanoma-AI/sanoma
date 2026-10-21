@@ -18,6 +18,7 @@ import {
 } from "./resources.ts";
 import { apiNameProblem } from "./sdk.ts";
 import { apiNameOf, BUILT_IN_WORKFLOWS, DATA_VENDOR } from "./shared.ts";
+import { readSites, type SiteEntry } from "./sites.ts";
 
 // `@sanoma-ai/workflows/describe`: what a UI renders from, apart from the main entry.
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
@@ -44,6 +45,8 @@ export {
   type Bindings,
   type Rebind,
 } from "./lockfile.ts";
+// What the sites call, read from their source: a workflow's Used by.
+export { readSites, type SiteCall, type SiteEntry } from "./sites.ts";
 // The generated SDK, `.sanoma/api.ts`: a site's `api` typed from this description.
 export { API_FILE, generateApi, writeApi } from "./sdk.ts";
 // The apply workflow's plan and report, which the app renders.
@@ -182,6 +185,11 @@ export interface ConfigDescription {
   problems: ResourceProblem[];
   /** `defined` is false for `allowAll`. */
   policy: { defined: boolean; version?: string };
+  /**
+   * The sites under `sites/`, by name, with what each calls (`readSites`), and its calls to what
+   * the config does not have as its problems; none when the root has no `sites/`.
+   */
+  sites: SiteEntry[];
 }
 
 /**
@@ -189,7 +197,8 @@ export interface ConfigDescription {
  * credentials (`SanomaClient.credentials` gives their statuses) and what is wrong in a workflow's
  * file, which the worker refuses when it reads the outline: that is data, on each workflow's
  * entry, as the data files' problems are, `problems`, beside the resources read without any.
- * Each workflow's file is read and parsed once, however many workflows it defines.
+ * Each workflow's file is read and parsed once, however many workflows it defines. The sites'
+ * code is read too (`readSites`): what each calls, and its calls to what the config lacks as its problems.
  */
 export function describeConfig(config: SanomaConfig): ConfigDescription {
   const resolved = resolveConfig(config);
@@ -289,6 +298,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       defined: resolved.policy !== allowAll,
       ...(resolved.policy.version === undefined ? {} : { version: resolved.policy.version }),
     },
+    sites: readSites(resolved.root, { workflows, collections, ops }),
   };
 }
 

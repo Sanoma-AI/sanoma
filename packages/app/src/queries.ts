@@ -1,5 +1,11 @@
 import type { RunStatus, RunSummary } from "@sanoma-ai/workflows";
-import type { CollectionEntry, ConfigDescription, OpEntry, WorkflowEntry } from "@sanoma-ai/workflows/describe";
+import type {
+  CollectionEntry,
+  ConfigDescription,
+  OpEntry,
+  SiteCall,
+  WorkflowEntry,
+} from "@sanoma-ai/workflows/describe";
 import { apiNameOf, isEnded, LIST_LIMIT, type ListQuery, type Saved } from "@sanoma-ai/workflows/shared";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { linkOptions, useNavigate } from "@tanstack/react-router";
@@ -119,15 +125,40 @@ export const collectionNamed = (name: string) => (config: ConfigDescription) =>
 
 /**
  * What uses the collection: the workflows that name one of its operations in `uses`, sorted by
- * title, the built-in `call` (which may call every direct operation) left out. For `select`.
+ * title, the built-in `call` (which may call every direct operation) left out, and the sites'
+ * files that call it (`siteCallers`). For `select`.
  */
 export const usedBy = (collection: string) => (config: ConfigDescription) => {
   const ops = new Set(collectionNamed(collection)(config)?.ops);
   const workflows = config.workflows
     .filter((wf) => !wf.builtin && wf.ops.some((op) => ops.has(op)))
     .toSorted((a, b) => byTitle(a.title ?? a.name, b.title ?? b.name));
-  return { workflows };
+  return { workflows, sites: siteCallers(config, "collection", collection) };
 };
+
+/** A site's file that calls something, and how: its page, when the file is one. */
+export interface SiteCaller {
+  /** The site's title, else its name. */
+  site: string;
+  file: string;
+  page?: string;
+  via: SiteCall["via"][];
+}
+
+/** The sites' files that call the workflow, collection or operation, each once, in the sites' order (`describeConfig`'s `sites`). */
+export function siteCallers(config: ConfigDescription, kind: SiteCall["kind"], target: string): SiteCaller[] {
+  const byFile = new Map<string, SiteCaller>();
+  for (const site of config.sites) {
+    for (const call of site.calls) {
+      if (call.kind !== kind || call.target !== target) continue;
+      const { file, page, via } = call;
+      let caller = byFile.get(file);
+      if (!caller) byFile.set(file, (caller = { site: site.title ?? site.name, file, ...(page && { page }), via: [] }));
+      if (!caller.via.includes(via)) caller.via.push(via);
+    }
+  }
+  return [...byFile.values()];
+}
 
 /** A collection's enum fields, each with its values, in the collection's order. */
 export const enumFields = (fields: CollectionEntry["fields"]) =>

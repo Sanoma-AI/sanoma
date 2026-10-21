@@ -1,12 +1,12 @@
-import type { WorkflowEntry } from "@sanoma-ai/workflows/describe";
+import type { ConfigDescription, WorkflowEntry } from "@sanoma-ai/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { memo, useMemo } from "react";
+import { memo, useCallback, useMemo } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Item, ItemContent, ItemDescription, ItemGroup } from "#/components/ui/item.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
 import { type Field, fieldsOf } from "../form/schema.ts";
-import { configQuery, opsById } from "../queries.ts";
-import { BUILTIN_ICON, ItemHeading, Json, None, Notice, OpItem, Section } from "./common.tsx";
+import { configQuery, opsById, siteCallers } from "../queries.ts";
+import { BUILTIN_ICON, ItemHeading, Json, None, Notice, OpItem, Section, UsedByList } from "./common.tsx";
 
 // A workflow's pieces, as a workflow's own page shows them.
 
@@ -19,9 +19,15 @@ export function Retired({ name }: { name: string }) {
   );
 }
 
-/** What a workflow may call, the built-ins it uses and its input, one section each. */
+/** What a workflow may call, the built-ins it uses, its input and the sites' pages that call it, one section each. */
 export const WorkflowSections = memo(function WorkflowSections({ workflow }: { workflow: WorkflowEntry }) {
-  const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
+  const select = useCallback(
+    (config: ConfigDescription) => ({ ops: opsById(config), sites: siteCallers(config, "workflow", workflow.name) }),
+    [workflow.name],
+  );
+  const {
+    data: { ops, sites },
+  } = useSuspenseQuery({ ...configQuery(), select });
   const fields = useMemo(() => fieldsOf(workflow.input), [workflow.input]);
   return (
     <>
@@ -65,6 +71,10 @@ export const WorkflowSections = memo(function WorkflowSections({ workflow }: { w
         ) : (
           <Json value={workflow.input} />
         )}
+      </Section>
+      <Separator />
+      <Section title="Used by">
+        <UsedByList sites={sites} />
       </Section>
     </>
   );

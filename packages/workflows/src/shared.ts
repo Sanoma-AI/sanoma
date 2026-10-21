@@ -45,6 +45,9 @@ export const APPLY_WORKFLOW = "apply";
  */
 export const DATA_VENDOR = "data";
 
+/** A site's folder name under `sites/`, its URL segment: what the app mounts and `readSites` reads. */
+export const SITE_NAME = /^[a-z][a-z0-9-]*$/;
+
 /**
  * A record of a collection as `get`, `list` and `save` answer it: its key, the record, and when
  * and by whom it was last saved (`updatedBy`: a person's id, or `run:<id>` for a run). A record
