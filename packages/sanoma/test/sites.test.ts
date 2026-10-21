@@ -216,6 +216,22 @@ describe("sanoma with sites: the dev server", () => {
     expect(existsSync(join(repo, ".sanoma/app/build"))).toBe(false);
   }, 60_000);
 
+  it("writes .sanoma/api.ts at start, and again when a workflow changes", async () => {
+    const api = join(repo, ".sanoma/api.ts");
+    expect(readFileSync(api, "utf8")).toContain("hello: WorkflowFn<{\n    who: string;\n  }, unknown>;");
+    const workflow = join(repo, "workflows/hello.ts");
+    writeFileSync(
+      workflow,
+      readFileSync(workflow, "utf8").replace("{ who: z.string() }", "{ who: z.string(), times: z.number() }"),
+    );
+    await waitFor(
+      async () => readFileSync(api, "utf8"),
+      (text) => text.includes("times: number;"),
+      20_000,
+    );
+    expect(running!.output().stderr).toContain("wrote .sanoma/api.ts");
+  }, 60_000);
+
   it("serves a new site folder without a restart", async () => {
     mkdirSync(join(repo, "sites/second/routes"), { recursive: true });
     writeFileSync(

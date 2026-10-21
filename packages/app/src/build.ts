@@ -339,8 +339,10 @@ export interface AppDevServer {
  * options are the build's and `sanoma check` beside it never rewrites the tree) with the
  * dev-only plugins (`devPlugins`), and hot updates over `http`'s upgrade. Writes the sites'
  * generated files first. A new site folder is live once its first route file is written.
+ * `onConfigChange` is called when a file under `workflows/` or `resources/`, or
+ * `sanoma.config.ts`, changes: what `.sanoma/api.ts` is written from.
  */
-export async function appDevServer(repo: string, http: Server): Promise<AppDevServer> {
+export async function appDevServer(repo: string, http: Server, onConfigChange?: () => void): Promise<AppDevServer> {
   const root = realpathSync(repo);
   writeSiteFiles(root);
   const { src } = appSources();
@@ -350,7 +352,7 @@ export async function appDevServer(repo: string, http: Server): Promise<AppDevSe
     ...base,
     appType: "custom",
     clearScreen: false,
-    plugins: [...(base.plugins ?? []), ...devPlugins(root, src)],
+    plugins: [...(base.plugins ?? []), ...devPlugins(root, src, onConfigChange)],
     server: {
       middlewareMode: true,
       hmr: { server: http },
@@ -387,7 +389,7 @@ export async function appDevServer(repo: string, http: Server): Promise<AppDevSe
  * a site must reach the app's copies, in the browser and on the server, as the build's
  * `sanoma:shared-deps` makes it.
  */
-function devPlugins(repo: string, src: string): Plugin[] {
+function devPlugins(repo: string, src: string, onConfigChange?: () => void): Plugin[] {
   const sitesDir = join(repo, "sites") + sep;
   const css = join(src, "style.css");
   // A file in the app's source whose id, with the specifier in its query, stands in for a
@@ -396,8 +398,22 @@ function devPlugins(repo: string, src: string): Plugin[] {
   // How Vite's nested include reaches the app from the repo: through sanoma, which a company
   // installs, or directly.
   const viaApp = moduleDir("sanoma", repo) ? "sanoma > @sanoma-ai/app" : "@sanoma-ai/app";
-  // (#163 A5: the watcher that regenerates .sanoma/api.ts as workflows and collections change goes here.)
+  // What the config is read from: a change there is one to .sanoma/api.ts.
+  const configFiles = [join(repo, "workflows") + sep, join(repo, "resources") + sep];
+  const isConfigFile = (file: string) =>
+    file === join(repo, "sanoma.config.ts") || configFiles.some((dir) => file.startsWith(dir));
   return [
+    {
+      name: "sanoma:dev-config",
+      apply: "serve",
+      configureServer(server) {
+        if (!onConfigChange) return;
+        const changed = (file: string) => {
+          if (isConfigFile(file)) onConfigChange();
+        };
+        for (const event of ["add", "change", "unlink"] as const) server.watcher.on(event, changed);
+      },
+    },
     {
       // The root's dedupe resolves from the repo, where pnpm installs no React.
       name: "sanoma:dev-server-dedupe",

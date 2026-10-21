@@ -1,4 +1,6 @@
-import { dirname } from "node:path";
+import { spawn } from "node:child_process";
+import { dirname, extname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { type AppOptions, githubLogin, startApp } from "@sanoma-ai/app";
 import { errorMessage, isLoopback, SanomaClient, type SanomaConfig, startWorker } from "@sanoma-ai/workflows";
 import { describeConfig, writeApi } from "@sanoma-ai/workflows/describe";
@@ -89,7 +91,32 @@ async function appSites(
   }
   if (!sites.length) return {};
   log(`serving the app with ${named} from Vite's dev server: edits show as they are saved`);
-  return { dev: { repo: root } };
+  return { dev: { repo: root, onConfigChange: apiWriter(root, log) } };
+}
+
+/**
+ * Writes `.sanoma/api.ts` again, in a child `sanoma api`: this process holds the config as it
+ * was loaded, and Node imports a module once. One child at a time; changes while one runs are
+ * one more run after it.
+ */
+function apiWriter(root: string, log: (line: string) => void): () => void {
+  const cli = fileURLToPath(new URL(`./cli${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
+  let running = false;
+  let again = false;
+  const run = () => {
+    running = true;
+    again = false;
+    spawn(process.execPath, [cli, "api"], { cwd: root, stdio: "inherit" })
+      .once("error", (err) => log(`could not write .sanoma/api.ts: ${err.message}`))
+      .once("close", () => {
+        running = false;
+        if (again) run();
+      });
+  };
+  return () => {
+    if (running) again = true;
+    else run();
+  };
 }
 
 const GITHUB = ["SANOMA_GITHUB_CLIENT_ID", "SANOMA_GITHUB_CLIENT_SECRET", "SANOMA_GITHUB_REPO"] as const;

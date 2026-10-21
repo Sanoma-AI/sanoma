@@ -79,6 +79,9 @@ export async function main(argv: string[]): Promise<number> {
     }
     case "check":
       return runCheck();
+    case "api":
+      // Hidden: the dev server runs it when the config's files change.
+      return writeApiCommand();
     case "env":
       return env(values.check ?? false);
     case "ledger": {
@@ -194,6 +197,14 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
     await watchers.stop();
   });
   return new Promise(() => {});
+}
+
+/** `sanoma api` (hidden): writes `.sanoma/api.ts` from the config, as `check` and `serve` do. */
+async function writeApiCommand(): Promise<number> {
+  const { config, root } = await loadConfig();
+  const { API_FILE, describeConfig, writeApi } = await import("@sanoma-ai/workflows/describe");
+  if ((await writeApi(root, describeConfig(config))).wrote) log(`wrote ${API_FILE}`);
+  return 0;
 }
 
 /** `sanoma check`: Postgres made to answer while tsc, oxlint and the config are read; the scenarios on `<database>_check`. */
