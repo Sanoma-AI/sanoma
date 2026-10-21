@@ -15,21 +15,23 @@ import {
   type RunSummary,
   type SanomaError,
 } from "@sanoma-ai/workflows";
+import { apiNameOf } from "@sanoma-ai/workflows/shared";
 import { type ConfigDescription, type DataValue, formatOptions, setFields } from "@sanoma-ai/workflows/describe";
 import { check, loadScenarios } from "@sanoma-ai/workflows/scenario";
 import { isNotFound, isRedirect, notFound } from "@tanstack/react-router";
-import type { z } from "zod";
+import { z } from "zod";
 import {
   ACTOR_HEADER,
   type AdoptRequest,
   type AdoptResponse,
   ApiError,
+  type CallRequest,
   type ClearCredentialRequest,
   type CredentialsResponse,
   type DecideCall,
   type ErrorResponse,
   type RunDetail,
-  type RunsQuery,
+  RunsQuery,
   type ScenariosResponse,
   type SetCredentialRequest,
   type StartRunRequest,
@@ -363,13 +365,83 @@ export const setCredential = ({ client }: AppContext, actor: Principal, { name, 
 export const clearCredential = ({ client }: AppContext, actor: Principal, { name }: ClearCredentialRequest) =>
   client.clearCredential(name, { by: actor.id });
 
+/** The longest a site's `api.<workflow>.result` waits for a run in one request. */
+export const RESULT_WAIT_MS = 20_000;
+
+const RunRef = z.object({ runId: z.string().min(1) });
+const ResultRef = RunRef.extend({ waitMs: z.number().int().min(0).optional() });
+const RunsLimit = RunsQuery.pick({ limit: true });
+
+/**
+ * A site's `api` call (`callFn`), as the person asking. An operation's id calls it directly
+ * (`SanomaClient.call`, which refuses one that is not direct), with `{}` for no input. A
+ * workflow's api name (`apiNameOf`) starts it, as does `<name>.start`, answering `{ runId }`;
+ * `<name>.result` (`{ runId, waitMs? }`, at most 20 s), `.latest`, `.runs` (`{ limit? }`),
+ * `.approvals` and `.ledger` (`{ runId }`) read its runs, a run of another workflow being none.
+ * Anything else is `invalid_input`.
+ */
+export async function callApi(app: AppContext, actor: Principal, { name, input, id }: CallRequest): Promise<unknown> {
+  const { client, description } = app;
+  if (description.ops.some((op) => op.id === name)) {
+    return client.call(name, input ?? {}, { actor, ...(id === undefined ? {} : { id }) });
+  }
+  const [api, method = "start", ...rest] = name.split(".");
+  const workflow = rest.length ? undefined : description.workflows.find((wf) => apiNameOf(wf.name) === api)?.name;
+  if (!workflow) throw notCallable(name);
+  const read = <T extends z.ZodType>(schema: T) => parse(schema, input, "The input");
+  switch (method) {
+    case "start": {
+      const options = { startedBy: actor, ...(id === undefined ? {} : { runId: id }) };
+      return { runId: await client.start(workflow, input, options) };
+    }
+    case "result": {
+      const { runId, waitMs = RESULT_WAIT_MS } = read(ResultRef);
+      await runOf(app, workflow, runId);
+      return client.result(runId, Math.min(waitMs, RESULT_WAIT_MS));
+    }
+    case "latest":
+      return client.latest(workflow);
+    case "runs":
+      return listRuns(app, { ...parse(RunsLimit, input ?? {}, "The input"), workflow });
+    case "approvals":
+      return (await runOf(app, workflow, read(RunRef).runId)).approvals;
+    case "ledger": {
+      const { runId } = read(RunRef);
+      await runOf(app, workflow, runId);
+      return client.ledger(runId);
+    }
+    default:
+      throw notCallable(name);
+  }
+}
+
+/** The 400 for a name `callApi` does not know. */
+const notCallable = (name: string) =>
+  new ApiError(400, {
+    error:
+      `api.${name} is neither an operation nor a workflow: call an operation by its id, a workflow by its ` +
+      "camelCase name, or its .start, .result, .latest, .runs, .approvals or .ledger",
+    code: "invalid_input",
+  });
+
+/** The run, when it is one of the workflow's; a 404 otherwise. */
+async function runOf({ client }: AppContext, workflow: string, runId: string): Promise<RunSummary> {
+  const run = await client.run(runId);
+  if (run?.workflow !== workflow)
+    throw new ApiError(404, { error: `No run ${runId} of ${workflow}`, code: "run_not_found" });
+  return run;
+}
+
 const STATUS: Partial<Record<NonNullable<ErrorResponse["code"]>, number>> = {
   invalid_input: 400,
   not_approver: 403,
+  policy_denied: 403,
   run_not_found: 404,
   no_pending_approval: 404,
   already_decided: 409,
   run_ended: 409,
+  run_running: 409,
+  approval_pending: 409,
 };
 
 /**
@@ -387,6 +459,8 @@ export function asApiError(err: unknown): ApiError {
   const data: Record<string, unknown> = (err as Partial<SanomaError>).data ?? {};
   if (Array.isArray(data.issues)) body.issues = data.issues as InputIssue[];
   if (code === "not_approver") body.approver = data.approver as ErrorResponse["approver"];
+  if ((code === "approval_pending" || code === "run_running") && typeof data.runId === "string")
+    body.runId = data.runId;
   return new ApiError(status, body);
 }
 

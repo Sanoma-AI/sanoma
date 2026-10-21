@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   type ActorInfo,
   AdoptRequest,
+  CallRequest,
   ClearCredentialRequest,
   ConnectExistingRequest,
   DecideCall,
@@ -12,6 +13,7 @@ import {
 } from "./api.ts";
 import {
   adopt,
+  callApi,
   clearCredential,
   credentials,
   decide,
@@ -144,3 +146,12 @@ export const connectExistingFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .validator(validate(ConnectExistingRequest))
   .handler(({ data, context }) => connectExisting(context.app, context.principal, data));
+
+/**
+ * A site's `api` (api-client.ts): an operation called directly, or a workflow started or its runs
+ * read, as the person asking (`callApi`).
+ */
+export const callFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .validator(validate(CallRequest))
+  .handler(({ data, context }) => callApi(context.app, context.principal, data));

@@ -19,8 +19,12 @@ import { fileURLToPath } from "node:url";
 import { buildApp, sitesOf, writeSiteFiles } from "@sanoma-ai/app/build";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { defineConfig, SanomaClient, startWorker, type Worker } from "@sanoma-ai/workflows";
+<<<<<<< HEAD
 import { executablePath, launch } from "puppeteer-core";
+=======
+>>>>>>> 3923f63 (A4: callFn and the api client from sanoma/site, the loopback actor cookie for SSR)
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ACTOR_COOKIE, ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import fixture from "./fixtures/company-sites/sanoma.config.ts";
 
@@ -145,6 +149,7 @@ describe("a company's app with its sites", () => {
     expect(await workflows.text()).toContain("Say hello");
   });
 
+<<<<<<< HEAD
   it("serves a site's RunForm: the workflow's fields under a link to its page, live only, or a notice naming a workflow the config lacks", async () => {
     const site = await fetch(new URL("/sites/hello/run", app.url));
     expect(site.status).toBe(200);
@@ -190,6 +195,30 @@ describe("a company's app with its sites", () => {
     } finally {
       await client?.close();
       await browser.close();
+=======
+  it("renders a page whose loader calls api as the person asking: the loopback login's header, else its cookie", async () => {
+    const client = await SanomaClient.connect(config);
+    try {
+      /** What /sites/hello/started's loader answered, and who started the run it started. */
+      const started = async (headers: Record<string, string>) => {
+        const html = (await (await fetch(new URL("/sites/hello/started", app.url), { headers })).text()).replaceAll(
+          "<!-- -->",
+          "",
+        );
+        const said = html.match(/<p>((?:Started|Refused:) [^<]+)<\/p>/)?.[1];
+        const runId = said?.match(/^Started (.+)$/)?.[1];
+        return { said, by: runId && (await client.run(runId))?.startedBy };
+      };
+      const cookie = `${ACTOR_COOKIE}=${encodeURIComponent("Ada Lovelace")}`;
+      expect(await started({ cookie })).toEqual({
+        said: expect.stringMatching(/^Started /),
+        by: { id: "Ada Lovelace" },
+      });
+      expect((await started({ cookie, [ACTOR_HEADER]: "grace" })).by).toEqual({ id: "grace" });
+      expect(await started({})).toEqual({ said: "Refused: invalid_input", by: undefined });
+    } finally {
+      await client.close();
+>>>>>>> 3923f63 (A4: callFn and the api client from sanoma/site, the loopback actor cookie for SSR)
     }
   });
 
@@ -287,6 +316,24 @@ describe("a company's app with its sites", () => {
     const refused = check();
     expect(refused.status).not.toBe(0);
     expect(refused.stdout).toMatch(/^sites\/hello\/routes\/styled\.tsx\(\d+,\d+\): error TS\d+: [^\n]*"\/sites\/nope"/);
+    // `api` is untyped until .sanoma/api.ts types it (the fixture's started.tsx, above), as A5's
+    // generated file does: through Register, with the types sanoma/site re-exports.
+    writeFileSync(
+      join(repo, ".sanoma", "api.ts"),
+      `import type { WorkflowFn } from "sanoma/site";
+declare module "sanoma/site" {
+  interface Register {
+    api: { hello: WorkflowFn<{ who: string }, { greeting: string }> };
+  }
+}
+`,
+    );
+    const call = (who: string) =>
+      sitePage("/sites/hello/styled", 'import { api } from "sanoma/site";', `void api.hello.start({ who: ${who} })`);
+    writeFileSync(join(repo, "sites", "hello", "routes", "styled.tsx"), call('"Ada"'));
+    expect(check()).toMatchObject({ status: 0, stdout: "" });
+    writeFileSync(join(repo, "sites", "hello", "routes", "styled.tsx"), call("1"));
+    expect(check().stdout).toMatch(/^sites\/hello\/routes\/styled\.tsx\(\d+,\d+\): error TS2322: [^\n]*'number'/);
   });
 });
 

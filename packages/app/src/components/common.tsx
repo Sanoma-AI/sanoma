@@ -74,7 +74,9 @@ export const useCrumbs = () => {
   return useMatches({
     select: (matches) => {
       const crumbs = matches.flatMap(({ id, pathname, staticData, loaderData }) => {
-        const label = (loaderData && "crumb" in loaderData ? loaderData.crumb : undefined) ?? staticData.crumb;
+        // A site's loader may answer with anything an `api` call does, a string or a number too.
+        const named = typeof loaderData === "object" && loaderData !== null && "crumb" in loaderData;
+        const label = (named ? loaderData.crumb : undefined) ?? staticData.crumb;
         return label ? [{ id, pathname, label }] : [];
       });
       const page = matches.at(-1);

@@ -1,10 +1,11 @@
-import { createContext, useContext, useSyncExternalStore } from "react";
-import type { ActorInfo } from "./api.ts";
+import { createContext, useContext, useEffect, useSyncExternalStore } from "react";
+import { ACTOR_COOKIE, type ActorInfo } from "./api.ts";
 
 // Who you are. With the default loopback login there is none: the page asks once, keeps the name
-// in this browser, and sends it with every change; that name is read only in the browser, and
-// the server render knows no one. With a login provider the server says who you are itself, and
-// the page shows that instead.
+// in this browser, and sends it with every change. It keeps it in a cookie too, so that the server
+// render of a page whose loader calls `api` knows who is asking; the page itself reads the name
+// only in the browser. With a login provider the server says who you are itself, and the page
+// shows that instead.
 
 const ACTOR_KEY = "sanoma.actor";
 
@@ -49,6 +50,15 @@ function watchActor(onChange: () => void) {
   };
 }
 
+/** How long the name's cookie lasts, as long as storage keeps the name: a year, renewed on each visit. */
+const COOKIE_SECONDS = 60 * 60 * 24 * 365;
+
+/** Keeps the name (or none) in `ACTOR_COOKIE`, URI-encoded, for the server's render. */
+function keepInCookie(name: string | null) {
+  const value = name ? `${encodeURIComponent(name)}; max-age=${COOKIE_SECONDS}` : "; max-age=0";
+  document.cookie = `${ACTOR_COOKIE}=${value}; path=/; samesite=lax`;
+}
+
 /** The server, and the browser while it hydrates, have read no name: undefined. */
 const notRead = () => undefined;
 
@@ -81,6 +91,10 @@ export const useActor = () => useContext(ActorContext);
  */
 export function useActorState(server: ActorInfo): ActorState {
   const stored = useSyncExternalStore(watchActor, loadActor, notRead);
+  // The cookie follows the stored name, as this page or another tab changes it.
+  useEffect(() => {
+    if (!server.fromServer && stored !== undefined) keepInCookie(stored);
+  }, [server.fromServer, stored]);
   if (server.fromServer) {
     const { actor, error, signOut } = server;
     return {

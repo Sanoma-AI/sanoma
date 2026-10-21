@@ -16,7 +16,7 @@ import {
   readDataFiles,
   type ResourceProblem,
 } from "./resources.ts";
-import { BUILT_IN_WORKFLOWS } from "./shared.ts";
+import { apiNameOf, BUILT_IN_WORKFLOWS, DATA_VENDOR } from "./shared.ts";
 
 // `@sanoma-ai/workflows/describe`: what a UI renders from, apart from the main entry.
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
@@ -269,6 +269,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     };
   });
   workflows.sort((a, b) => a.name.localeCompare(b.name));
+  addApiNameProblems(workflows, new Set(ops.map((op) => op.vendor)));
 
   return {
     appName: resolved.appName,
@@ -286,6 +287,35 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       ...(resolved.policy.version === undefined ? {} : { version: resolved.policy.version }),
     },
   };
+}
+
+/**
+ * A site's `api` names each workflow `apiNameOf(name)` beside the vendors' operations and the
+ * collections (`api.data`), so a workflow whose name comes out as another's, a vendor's id or
+ * `data` is a problem, at 1:1 of its file. A built-in is never the one renamed.
+ */
+function addApiNameProblems(workflows: WorkflowEntry[], vendors: ReadonlySet<string>) {
+  const named = new Map<string, WorkflowEntry[]>();
+  for (const wf of workflows) {
+    const api = apiNameOf(wf.name);
+    named.set(api, [...(named.get(api) ?? []), wf]);
+  }
+  for (const [api, entries] of named) {
+    for (const wf of entries) {
+      if (wf.builtin) continue;
+      const others = entries.filter((other) => other !== wf).map((other) => `"${other.name}"`);
+      const taken = others.length
+        ? `as workflow ${others.join(" and ")} is`
+        : api === DATA_VENDOR
+          ? "which is the collections'"
+          : vendors.has(api)
+            ? `which is the vendor ${api}'s operations`
+            : undefined;
+      if (taken) {
+        wf.problems.push({ line: 1, column: 1, message: `A site calls this workflow api.${api}, ${taken}: rename it` });
+      }
+    }
+  }
 }
 
 /** `fn`, called once per argument for as long as the returned function lives. */

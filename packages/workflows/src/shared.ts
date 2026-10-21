@@ -1,5 +1,7 @@
+import type { RunSummary } from "./client.ts";
 import type { CredentialStatus } from "./env.ts";
 import type { ApprovalState, Approver, Principal } from "./define.ts";
+import type { LedgerRecord } from "./ledger.ts";
 import type { ResourceProblem } from "./resources.ts";
 import type { OutlineNode } from "./outline.ts";
 
@@ -221,3 +223,42 @@ export const isLoopback = (host: string) =>
 /** Whether a driver's environment variable lets it run: set, or unset and optional. */
 export const credentialReady = ({ status, optional }: CredentialStatus): boolean =>
   status === "set" || (status === "missing" && optional);
+
+/**
+ * A workflow's name in a site's `api`: kebab-case made camelCase, `outbound-next` as
+ * `api.outboundNext`. `describeConfig` reports two workflows that come out the same, or one that
+ * comes out as a vendor's id or `data`, as a problem on the workflow.
+ */
+export const apiNameOf = (name: string): string => name.replace(/-([a-z0-9])/g, (_, c: string) => c.toUpperCase());
+
+/**
+ * A workflow as a site's `api` has it (`api.<apiNameOf(name)>`), started as the person on the
+ * page. Called, it starts a run and resolves with its output once the run ends, or rejects with
+ * its error; `start` gives the run's id at once, and the rest read runs of this workflow.
+ */
+export interface WorkflowFn<I, O> {
+  (input: I): Promise<O>;
+  /** Starts a run with this input, and answers with its id. */
+  start(input: I): Promise<{ runId: string }>;
+  /** The run's output once it ends, or its error; `run_running` when it has not ended within `waitMs` (at most 20 s). */
+  result(runId: string, waitMs?: number): Promise<O>;
+  /** The newest finished run's output, and when it finished (ms since the epoch); null when none has. */
+  latest(): Promise<{ runId: string; output: O; at: number } | null>;
+  /** Its latest runs, newest first. */
+  runs(query?: { limit?: number }): Promise<RunSummary[]>;
+  /** The run's approvals, decided and waiting. */
+  approvals(runId: string): Promise<ApprovalState[]>;
+  /** The run's ledger records, in order. */
+  ledger(runId: string): Promise<LedgerRecord[]>;
+}
+
+/** An operation a site may call directly (a read, or a collection's write), as the person on the page. */
+export type OpFn<I, O> = (input: I) => Promise<O>;
+
+/** A collection as a site's `api.data.<name>` has it: its four operations (`Saved`, `ListQuery`). */
+export interface CollectionApi<R> {
+  get: OpFn<{ key: string }, Saved<R> | null>;
+  list(query?: ListQuery<R>): Promise<Saved<R>[]>;
+  save: OpFn<{ record: R }, Saved<R>>;
+  delete: OpFn<{ key: string }, { deleted: boolean }>;
+}
