@@ -19,13 +19,14 @@ import { fileURLToPath } from "node:url";
 import { buildApp, sitesOf, writeSiteFiles } from "@sanoma-ai/app/build";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { defineConfig, SanomaClient, startWorker, type Worker } from "@sanoma-ai/workflows";
-import { launch } from "puppeteer-core";
+import { executablePath, launch } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type App, startApp } from "../src/index.ts";
 import fixture from "./fixtures/company-sites/sanoma.config.ts";
 
-// Needs Postgres (`pnpm db:up`), the built workflows package (the server bundle imports the
-// runtime from its dist/) and Google Chrome, or `CHROME_PATH` naming a Chrome or Chromium binary.
+// Needs Postgres (`pnpm db:up`) and the built workflows package (the server bundle imports the
+// runtime from its dist/). The one test in a browser needs Google Chrome, or `CHROME_PATH` naming
+// a Chrome or Chromium binary, and skips without either.
 const appDir = fileURLToPath(new URL("..", import.meta.url));
 const fixtureDir = fileURLToPath(new URL("./fixtures/company-sites/", import.meta.url));
 const config = defineConfig({ ...fixture, databaseUrl: testDatabaseUrl("sites_build") });
@@ -159,8 +160,10 @@ describe("a company's app with its sites", () => {
     expect(missing).not.toContain("field-");
   });
 
-  it("starts a run from a site's RunForm and links to it there, while the app's New run opens the run's page", async () => {
-    const browser = await launch({ channel: "chrome", executablePath: process.env.CHROME_PATH, headless: true });
+  it("starts a run from a site's RunForm and links to it there, while the app's New run opens the run's page", async (ctx) => {
+    const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
+    if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
+    const browser = await launch({ executablePath: chrome, headless: true });
     const client = await SanomaClient.connect(config);
     try {
       const page = await browser.newPage();
