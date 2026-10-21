@@ -53,9 +53,10 @@ export interface AppContext {
   description: ConfigDescription;
   /**
    * The root's `policies/**\/*.cedar` (`readPolicyFiles`), read as it starts, beside the policy
-   * `resolveConfig` made from them: the source the Permissions page shows with its grid.
+   * `resolveConfig` made from them: the source the Permissions page shows with its grid; none
+   * when not given.
    */
-  policyFiles: { file: string; text: string }[];
+  policyFiles?: { file: string; text: string }[];
   client: SanomaClient;
   /** `AppOptions.login`, or `loopbackLogin()`, admitting only a declared person (`admitting`). */
   login: AdmittingLogin;

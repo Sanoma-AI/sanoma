@@ -29,8 +29,9 @@ import { permissions } from "../src/server/core.ts";
 
 // The Permissions page: its grid and the policy files through the server core
 // (`getPermissions`), the page as the server renders it, and in Chrome the who-are-you picker,
-// the groups under your name, a cell's rule in its sheet and its lines in the code. The page needs Postgres (`pnpm db:up`) and the built app; the test in
-// a browser needs Google Chrome, or `CHROME_PATH`, and skips without either.
+// the groups under your name, a cell's rule in its sheet and its lines in the code. The page
+// needs Postgres (`pnpm db:up`) and the built app; the test in a browser needs Google Chrome, or
+// `CHROME_PATH`, and skips without either.
 
 const appDir = fileURLToPath(new URL("..", import.meta.url));
 

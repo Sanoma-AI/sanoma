@@ -1,8 +1,9 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import type { PreviewAnswer } from "@sanoma-ai/workflows";
+import type { Span } from "@sanoma-ai/workflows/describe";
 import { approverLabel } from "@sanoma-ai/workflows/shared";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardHeader } from "#/components/ui/card.tsx";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "#/components/ui/sheet.tsx";
@@ -39,8 +40,6 @@ export const Route = createFileRoute("/permissions")({
 type Group = PermissionsResponse["groups"][number];
 /** What a row is about: a workflow's start, or an operation, called in a workflow or directly. */
 type Kind = "workflow" | "op";
-/** A policy file: its path, its text, and where each of its policies is. */
-type PolicyFile = PermissionsResponse["files"][number];
 /** A cell the policy answered with a rule behind it, and the workflow its operation is called in: what the sheet shows. */
 type Chosen = { kind: Kind; row: PermissionsRow; under?: PermissionsRow; group: Group; cell: PreviewAnswer };
 
@@ -59,22 +58,25 @@ function PermissionsPage() {
   // The cell shown, kept while the sheet closes so its content stays through the animation.
   const [chosen, setChosen] = useState<Chosen>();
   const [open, setOpen] = useState(false);
-  // The rule whose lines the code marks: a new object each time it is shown, so its card comes
-  // into view again. Set once the sheet has closed, whose closing would otherwise undo the scroll.
-  const [shown, setShown] = useState<{ rule: string }>();
-  const showing = useRef<string>(undefined);
+  // The rule whose lines the code marks, by id; `showing` while the sheet closes to show it.
+  const [shown, setShown] = useState<string>();
+  const showing = useRef(false);
+  const reducedMotion = useReducedMotion();
   const choose = (cell: Chosen) => {
     setChosen(cell);
     setOpen(true);
   };
   const rule = chosen?.cell.rule?.id;
-  const show =
-    rule !== undefined && data.files.some((f) => f.policies.some((p) => p.id === rule))
-      ? () => {
-          showing.current = rule;
-          setOpen(false);
-        }
-      : undefined;
+  // The file the chosen cell's rule is written in: none for a rule with no file.
+  const ruleFile = data.files.find((f) => f.policies.some((p) => p.id === rule))?.file;
+  // Once the sheet has closed: before, its closing would put the page back where it was.
+  const showRule = () => {
+    showing.current = false;
+    setShown(rule);
+    document
+      .getElementById(ruleFile!)
+      ?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "nearest" });
+  };
   return (
     <>
       <PageHeader />
@@ -105,8 +107,8 @@ function PermissionsPage() {
               <Rows kind="op" rows={data.ops} groups={data.groups} choose={choose} />
             </Table>
           </div>
-          {data.files.map((file) => (
-            <PolicyCode key={file.file} file={file} shown={shown} />
+          {data.files.map(({ file, text, policies }) => (
+            <PolicyCode key={file} file={file} text={text} span={policies.find((p) => p.id === shown)?.span} />
           ))}
         </>
       )}
@@ -114,12 +116,24 @@ function PermissionsPage() {
         open={open}
         onOpenChange={setOpen}
         onOpenChangeComplete={(isOpen) => {
-          if (isOpen || showing.current === undefined) return;
-          setShown({ rule: showing.current });
-          showing.current = undefined;
+          if (!isOpen && showing.current) showRule();
         }}
       >
-        <SheetContent>{chosen && <Rule {...chosen} show={show} />}</SheetContent>
+        <SheetContent>
+          {chosen && (
+            <Rule
+              {...chosen}
+              show={
+                ruleFile === undefined
+                  ? undefined
+                  : () => {
+                      showing.current = true;
+                      setOpen(false);
+                    }
+              }
+            />
+          )}
+        </SheetContent>
       </Sheet>
     </>
   );
@@ -217,25 +231,12 @@ function Mark({ cell, what, open }: { cell: PreviewAnswer; what: string; open: (
 
 /**
  * A policy file, read-only and plain (the app has no Cedar grammar), titled by its path, as high
- * as its lines up to the workflow Code card's height. The `shown` rule's lines are marked, and
- * the card comes into view when it is shown.
+ * as its lines up to the workflow Code card's height, `span` (the shown rule's) marked. Its id
+ * is its path, which Show the rule scrolls to.
  */
-function PolicyCode({
-  file: { file, text, policies },
-  shown,
-}: {
-  file: PolicyFile;
-  shown: { rule: string } | undefined;
-}) {
-  const span = policies.find((p) => p.id === shown?.rule)?.span;
-  const card = useRef<HTMLDivElement>(null);
-  const reducedMotion = useReducedMotion();
-  useEffect(() => {
-    if (span) card.current?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "nearest" });
-    // `shown` too: each time a rule is shown, even the same one again.
-  }, [shown, span, reducedMotion]);
+function PolicyCode({ file, text, span }: { file: string; text: string; span: Span | undefined }) {
   return (
-    <Card ref={card} className="scroll-mt-4 gap-0 overflow-hidden py-0">
+    <Card id={file} className="scroll-mt-4 gap-0 overflow-hidden py-0">
       <CardHeader className="border-b py-2 compact:py-1 [.border-b]:pb-2 compact:[.border-b]:pb-1">
         <CardHeading className="font-mono text-sm">{file}</CardHeading>
       </CardHeader>

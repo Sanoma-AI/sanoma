@@ -426,7 +426,7 @@ function gridOf(app: Pick<AppContext, "resolved" | "description" | "policyFiles"
       return { ...start!, id: name, ...(title !== undefined && { title }), ops: called };
     }),
     ops: rows.slice(at),
-    files: sourcesOf(app.policyFiles),
+    files: sourcesOf(app.policyFiles ?? []),
   };
 }
 
@@ -434,7 +434,7 @@ function gridOf(app: Pick<AppContext, "resolved" | "description" | "policyFiles"
  * The policy files, each with `\n` line endings, as the Code view counts offsets, and the span
  * of each of its policies (`loadPolicies`) in that text.
  */
-function sourcesOf(read: AppContext["policyFiles"]): PermissionsResponse["files"] {
+function sourcesOf(read: { file: string; text: string }[]): PermissionsResponse["files"] {
   const files = read.map(({ file, text }) => ({ file, text: text.replaceAll("\r\n", "\n") }));
   const { policies } = loadPolicies(files);
   return files.map(({ file, text }) => {

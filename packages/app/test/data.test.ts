@@ -117,7 +117,6 @@ async function callAs(actor: string, data: CallRequest) {
   const context = {
     resolved: resolveConfig(testApp.config),
     description: describeConfig(testApp.config),
-    policyFiles: [],
     client: testApp.client,
     login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
   };

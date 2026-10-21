@@ -10,8 +10,8 @@ import { cn } from "#/lib/utils.ts";
 
 // A workflow's source (or a policy file's, plain), read-only, drawn with CodeMirror. It needs the
 // DOM, so the pages load this module only in the browser (CodePanel in common.tsx: React.lazy,
-// once seen); the server renders the source as plain text instead. Colours come from the --code-* tokens in style.css,
-// so `.dark` flips the view with the rest of the page.
+// once seen); the server renders the source as plain text instead. Colours come from the
+// --code-* tokens in style.css, so `.dark` flips the view with the rest of the page.
 
 export interface CodeProps {
   source: string;
