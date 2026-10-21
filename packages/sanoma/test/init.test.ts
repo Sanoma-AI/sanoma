@@ -11,7 +11,6 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { resolveDatabaseUrl } from "@sanoma-ai/workflows";
@@ -24,6 +23,7 @@ import {
   packageName,
   startCompany,
   TEMPLATE,
+  whoIsStarting,
 } from "../src/init.ts";
 import { copyFixture, ensureBuilt, runCli } from "./fixture.ts";
 import { gitIdentity } from "./git.ts";
@@ -64,7 +64,7 @@ describe("startCompany", () => {
 
     expect(installs).toEqual([[dir, "npm"]]);
     expect(log).toEqual([`starting a Sanoma company in ${dir}`, `committed "${FIRST_COMMIT}"; installing with npm`]);
-    for (const file of ["sanoma.config.ts", "workflows/publish-post.ts", "policies/policy.ts", "AGENTS.md"]) {
+    for (const file of ["sanoma.config.ts", "workflows/publish-post.ts", "policies/policy.cedar", "AGENTS.md"]) {
       expect(read(file)).toBe(readFileSync(new URL(file, TEMPLATE), "utf8"));
     }
     const pkg = JSON.parse(read("package.json")) as { name: string; dependencies: Record<string, string> };
@@ -137,6 +137,25 @@ describe("declareFounder", () => {
   });
 });
 
+/** A `gh` signed in as `login`, first on the PATH. */
+const signedIn = (login: string) => {
+  const bin = mkdtempSync(join(tmpdir(), "sanoma-gh-"));
+  writeFileSync(join(bin, "gh"), `#!/bin/sh\necho ${login}\n`);
+  chmodSync(join(bin, "gh"), 0o755);
+  vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+};
+
+describe("whoIsStarting", () => {
+  it("takes the GitHub login as the id, unless the template's people or the runtime's agents have it", async () => {
+    signedIn("ada-ortiz");
+    expect(await whoIsStarting()).toMatchObject({ id: "ada-ortiz", github: "ada-ortiz" });
+    for (const taken of ["reviewer", "editor", "admin", "agents", "scenarios"]) {
+      signedIn(taken);
+      expect(await whoIsStarting()).toMatchObject({ id: "founder", github: taken });
+    }
+  });
+});
+
 describe("packageManagerOf and packageName", () => {
   it("takes the package manager from the user agent, pnpm when it names none", () => {
     expect(packageManagerOf("pnpm/11.15.1 npm/? node/v24.2.0")).toBe("pnpm");
@@ -198,8 +217,12 @@ describe("sanoma in an empty directory", () => {
 describe("the template", () => {
   beforeAll(ensureBuilt, 600_000);
 
-  it("passes sanoma check without building the app (it has no sites), and its .env.example is current", async () => {
-    dir = copyFixture(fileURLToPath(TEMPLATE));
+  it("starts a company that passes sanoma check, its policy and scenarios with it, without building the app (it has no sites), and its .env.example is current", async () => {
+    gitIdentity(vi.stubEnv);
+    const started = fresh();
+    await startCompany(started, { creator, install: async () => {} });
+    dir = copyFixture(started);
+    rmSync(started, { recursive: true, force: true });
     const env = {
       SANOMA_DATABASE_URL: testDatabaseUrl("sanoma-template"),
       GHOST_ADMIN_URL: "",
@@ -212,6 +235,9 @@ describe("the template", () => {
     expect(logged.indexOf("wrote .sanoma/api.ts")).toBeGreaterThan(-1);
     expect(logged.indexOf("wrote .sanoma/api.ts")).toBeLessThan(logged.indexOf("tsc"));
     expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts", "schema.cedarschema"]);
+    // The policy holds, so the scenarios ran: each passed under it.
+    expect(logged).toContain("passed publish-post/publish.feature › The editor approves");
+    expect(logged).toContain("passed publish-post/publish.feature › An editor publishes without a review");
     expect(readFileSync(join(dir, ".sanoma/api.ts"), "utf8")).toContain("publishPost: WorkflowFn<");
     const current = await runCli(dir, ["env", "--check"], env);
     expect(current.code, current.stderr).toBe(0);

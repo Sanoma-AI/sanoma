@@ -4,31 +4,31 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { testDatabaseUrl, withFake } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { decideCall } from "../src/call.ts";
 import { sanoma } from "../src/constructors.ts";
 import { collection } from "../src/data.ts";
 import type { ApprovalState } from "../src/define.ts";
-import { describeConfig, readPeople, SCHEMA_FILE, schemaOf, schemaText, writeGenerated } from "../src/describe.ts";
+import { describeConfig, SCHEMA_FILE, schemaOf, schemaText, writeGenerated } from "../src/describe.ts";
 import { defineFake } from "../src/fake.ts";
 import {
-  allow,
   allowAll,
   cedarPolicy,
   defineConfig,
   defineConnector,
-  definePolicy,
   defineWorkflow,
   loadPolicies,
   memoryLedger,
+  SanomaClient,
   type PolicyCall,
   policyOpOf,
   readPolicyFiles,
   resolveConfig,
   validatePolicies,
 } from "../src/index.ts";
-import { failure, waitFor } from "./harness.ts";
+import { startWorker } from "../src/worker.ts";
+import { failure, rootWith, waitFor } from "./harness.ts";
 
 // The two policies of the Cedar investigation, against made-up operations: refunds over 10,000
 // held for finance, and only sales may mark a lead won; and agents held for whom they act for.
@@ -300,7 +300,7 @@ describe("loadPolicies and validatePolicies", () => {
       mkdirSync(join(root, "policies/team"), { recursive: true });
       writeFileSync(join(root, "policies/z.cedar"), "z");
       writeFileSync(join(root, "policies/team/a.cedar"), "a");
-      writeFileSync(join(root, "policies/policy.ts"), "");
+      writeFileSync(join(root, "policies/README.md"), "");
       expect(readPolicyFiles(root)).toEqual([
         { file: "policies/team/a.cedar", text: "a" },
         { file: "policies/z.cedar", text: "z" },
@@ -406,21 +406,13 @@ describe("cedarPolicy", () => {
     });
   });
 
-  it("is of kind cedar, versioned by its text", () => {
-    expect(policy.kind).toBe("cedar");
+  it("is versioned by its text", () => {
     expect(policy.version).toMatch(/^[0-9a-f]{12}$/);
     expect(cedarPolicy(resolved, loaded.policies.slice(1), people).version).not.toBe(policy.version);
-    expect(describeConfig({ ...config, policy }).policy).toEqual({
-      defined: true,
-      kind: "cedar",
-      version: policy.version,
-    });
   });
 
   it("decides through decideCall, stamped with its version", async () => {
-    expect(
-      await decideCall(policy, shop.refunds.create, { amount: 2_000_000, customer: "c" }, { id: "bo" }, run()),
-    ).toEqual({
+    expect(decideCall(policy, shop.refunds.create, { amount: 2_000_000, customer: "c" }, { id: "bo" }, run())).toEqual({
       kind: "approve",
       approver: { group: "finance" },
       title: "Refund over 10,000",
@@ -435,7 +427,7 @@ const ask = (principal: string, id: string) => ({ principal: { id: principal }, 
 describe("preview", () => {
   it("answers allow, hold, deny or depends with the input unknown, naming the policy and approver", () => {
     expect(
-      policy.preview!([
+      policy.preview([
         ask("bo", "shop.refunds.create"),
         ask("ada", "shop.refunds.create"),
         ask("refund-bot", "shop.refunds.create"),
@@ -459,9 +451,9 @@ describe("preview", () => {
     ]);
   });
 
-  it("is allow for allowAll, and none for a policy written as a function", () => {
-    expect(allowAll.preview!([ask("bo", "shop.refunds.create")])).toEqual([{ answer: "allow" }]);
-    expect(definePolicy(() => allow()).preview).toBeUndefined();
+  it("is allow for allowAll, as is its start", () => {
+    expect(allowAll.preview([ask("bo", "shop.refunds.create")])).toEqual([{ answer: "allow" }]);
+    expect(allowAll.start({ id: "bo" }, "refund", {})).toEqual({ kind: "allow" });
   });
 });
 
@@ -491,7 +483,8 @@ export const sales = sanoma.group({ name: "sales", members: [cy] });
   const mark = defineWorkflow({
     name: "mark",
     trigger: "manual",
-    input: z.object({ key: z.string() }),
+    // A default the callers leave out: the start is decided on the input as parsed, which has it.
+    input: z.object({ key: z.string(), by: z.string().default("hand") }),
     uses: [leads.save],
     run: async (ctx, { key }) => ctx.data.leads.save({ record: { id: key, stage: "won" } }),
   });
@@ -507,14 +500,33 @@ forbid (principal, action == Sanoma::Action::"workflow:payout", resource);
 @reason("Nobody marks leads by hand")
 forbid (principal, action == Sanoma::Action::"workflow:mark", resource)
 when { context.input.key == "refused" };
+
+@id("payout-sales")
+@hold("sales")
+@title("Big payouts need sales too")
+forbid (principal, action == Sanoma::Action::"workflow:payout", resource)
+when { context.input.amount > 100 };
+
+@id("l20-finance")
+@hold("finance")
+forbid (principal, action == Sanoma::Action::"data.leads.save", resource == Sanoma::Target::"data:leads/l20");
+
+@id("l20-ada")
+@hold("ada")
+forbid (principal, action == Sanoma::Action::"data.leads.save", resource == Sanoma::Target::"data:leads/l20");
+
+@id("l11-kept")
+@reason("That lead stays")
+forbid (principal, action in Sanoma::Action::"effect:write", resource == Sanoma::Target::"data:leads/l11");
 `,
     },
     FILES[1]!,
   ];
-  const shared = { workflows: [payout, mark], collections: [leads], connectors: [], root, databaseUrl };
-  const declared = readPeople(root).people;
+  mkdirSync(join(root, "policies"));
+  for (const { file, text: body } of files) writeFileSync(join(root, file), body);
+  // The policy is the root's Cedar files, as the runtime reads them.
   const app = useTestApp(
-    { ...shared, policy: cedarPolicy(resolveConfig(shared), loadPolicies(files).policies, declared) },
+    { workflows: [payout, mark], collections: [leads], connectors: [], root, databaseUrl },
     { databaseUrl },
   );
 
@@ -540,6 +552,26 @@ when { context.input.key == "refused" };
       reasons: ["payout-hold"],
     });
     expect(await app.client.result(runId)).toEqual({ paid: 5, run: runId });
+  });
+
+  it("lifts each of a start's holds in turn, and a call's, before going on", async () => {
+    const pending = async (runId: string, count: number) => {
+      await waitFor(async () => (await app.client.approvals(runId)).length === count);
+      return (await app.client.approvals(runId)).at(-1)!;
+    };
+    const big = await app.client.start(payout, { amount: 500 }, { startedBy: "ada" });
+    expect(await pending(big, 1)).toMatchObject({ approver: { group: "finance" }, status: "pending" });
+    await app.client.decide(big, { decision: "approve", by: { id: "bo" } });
+    expect(await pending(big, 2)).toMatchObject({ title: "Big payouts need sales too", status: "pending" });
+    await app.client.decide(big, { decision: "approve", by: { id: "cy" } });
+    expect(await app.client.result(big)).toEqual({ paid: 500, run: big });
+
+    const held = await app.client.start(mark, { key: "l20" }, { startedBy: "cy" });
+    expect(await pending(held, 1)).toMatchObject({ approver: { group: "finance" }, reasons: ["l20-finance"] });
+    await app.client.decide(held, { decision: "approve", by: { id: "bo" } });
+    expect(await pending(held, 2)).toMatchObject({ approver: "ada", reasons: ["l20-ada"] });
+    await app.client.decide(held, { decision: "approve", by: { id: "ada" } });
+    expect(await app.client.result(held)).toMatchObject({ key: "l20" });
   });
 
   it("refuses a start the policy denies, and starts nothing", async () => {
@@ -586,5 +618,93 @@ when { context.input.key == "refused" };
     expect(
       await failure(app.client.call("data.leads.save", { record: { id: "l3", stage: "won" } }, { actor: "ada" })),
     ).toMatchObject({ code: "policy_denied" });
+  });
+
+  it("gives a record saved under fields since changed as it was: fixed and deleted, unless a policy reads what it lacks", async () => {
+    // The collection as it was: no stage. The schema, which requires one, cannot hold such a record as `before`.
+    const older = collection({ name: "leads", key: "id", fields: { id: "text" } });
+    const client = await SanomaClient.connect({
+      workflows: [],
+      connectors: [],
+      collections: [older],
+      ledger: memoryLedger(),
+      databaseUrl,
+    });
+    try {
+      for (const id of ["l8", "l9", "l10", "l11"]) {
+        await client.call("data.leads.save", { record: { id } }, { actor: "ada" });
+      }
+    } finally {
+      await client.close();
+    }
+    const fixed = { record: { id: "l9", stage: "open" } };
+    expect(await app.client.call("data.leads.save", fixed, { actor: "ada" })).toMatchObject({ key: "l9" });
+    await app.client.call("data.leads.delete", { key: "l8" }, { actor: "ada" });
+    expect(await app.client.call("data.leads.get", { key: "l8" }, { actor: "ada" })).toBeNull();
+    // Marking it won asks leads-won for its stage before, which it lacks: denied, not let through.
+    const won = { record: { id: "l10", stage: "won" } };
+    expect(await failure(app.client.call("data.leads.save", won, { actor: "ada" }))).toMatchObject({
+      code: "policy_denied",
+      message: expect.stringMatching(/^data\.leads\.save was denied by policy: leads-won failed: /),
+    });
+    // A policy on the action's group still holds for such a record.
+    expect(await failure(app.client.call("data.leads.delete", { key: "l11" }, { actor: "ada" }))).toMatchObject({
+      code: "policy_denied",
+      message: "data.leads.delete was denied by policy: That lead stays",
+    });
+  });
+});
+
+/** The config, with its root here. */
+const at = (root: string) => ({ ...config, root });
+
+describe("the root's policy, as resolveConfig reads it", () => {
+  const peopleFile = `import { sanoma } from "sanoma/resources";
+
+export const ada = sanoma.person({ id: "ada" });
+export const bo = sanoma.person({ id: "bo" });
+export const finance = sanoma.group({ name: "finance", members: [ada] });
+`;
+
+  it("is the root's policies/**/*.cedar, which describeConfig says it has, with their version", async () => {
+    const root = rootWith({ "resources/people.ts": peopleFile, [FILES[0]!.file]: FILES[0]!.text });
+    const { policy: cedar, policyProblems } = resolveConfig(at(root));
+    expect(policyProblems).toEqual([]);
+    expect(cedar.version).toMatch(/^[0-9a-f]{12}$/);
+    expect(await cedar(refundCall(2_000_000, "bo"))).toMatchObject({ kind: "approve", approver: { group: "finance" } });
+    expect(describeConfig(at(root)).policy).toEqual({ defined: true, version: cedar.version });
+  });
+
+  it("is allowAll for a root with no policies, which describeConfig says it has not", () => {
+    const root = rootWith({ "resources/people.ts": peopleFile });
+    expect(resolveConfig(at(root))).toMatchObject({ policy: allowAll, policyProblems: [] });
+    expect(describeConfig(at(root)).policy).toEqual({ defined: false });
+  });
+
+  it("refuses every call, start and preview while the policies have a problem, naming the first", async () => {
+    const root = rootWith({
+      "resources/people.ts": peopleFile,
+      "policies/money.cedar": `@id("typo")
+forbid (principal, action == Sanoma::Action::"shop.refunds.create", resource)
+when { context.input.amont > 5 };
+`,
+    });
+    const { policy: refusing, policyProblems } = resolveConfig(at(root));
+    expect(policyProblems).toEqual([expect.stringMatching(/^policies\/money\.cedar:3:\d+: typo: .*amont/)]);
+    const reason = `The policies do not hold: ${policyProblems[0]}`;
+    expect(await refusing(refundCall(5, "ada"))).toEqual({ kind: "deny", reason });
+    expect(refusing.start({ id: "ada" }, "refund", { amount: 5 })).toEqual({ kind: "deny", reason });
+    expect(refusing.preview([ask("ada", "shop.refunds.create")])).toEqual([{ answer: "deny" }]);
+    expect(describeConfig(at(root)).policy).toEqual({ defined: true, problems: policyProblems });
+    // A worker on it starts, and says why it refuses everything.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await (await startWorker({ ...at(root), databaseUrl: testDatabaseUrl("cedar_refusing") })).stop();
+      expect(warn.mock.calls.flat().join("\n")).toContain(
+        `the policies do not hold, so every call and start is refused:\n  ${policyProblems[0]}`,
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

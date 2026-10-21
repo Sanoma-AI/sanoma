@@ -12,6 +12,7 @@ import {
   invalidInput,
   isEnded,
   type LedgerRecord,
+  type PreviewAnswer,
   Principal,
   type RunSummary,
   type SanomaError,
@@ -33,7 +34,6 @@ import {
   type ErrorResponse,
   type PermissionsResponse,
   type PreviewQuery,
-  type PreviewResult,
   type RunDetail,
   RunsQuery,
   type ScenariosResponse,
@@ -357,16 +357,12 @@ export function decide({ client }: AppContext, actor: Principal, call: DecideCal
   });
 }
 
-/**
- * What the policy would answer `actor` for each request, its input unknown (`Policy.preview`):
- * `custom` for every one when the policy cannot be asked ahead (a `definePolicy` function).
- */
+/** What the policy would answer `actor` for each request, its input unknown (`Policy.preview`). */
 export function preview(
   { resolved: { policy } }: Pick<AppContext, "resolved">,
   actor: Principal,
   requests: PreviewQuery,
-): PreviewResult[] {
-  if (!policy.preview) return requests.map(() => ({ answer: "custom" }));
+): PreviewAnswer[] {
   return policy.preview(requests.map((request) => ({ ...request, principal: actor })));
 }
 

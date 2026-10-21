@@ -19,8 +19,8 @@ function company(files: Record<string, string>): string {
 }
 
 const CONFIG = (collections = "") =>
-  `import { allowAll, defineConfig } from "sanoma";\n${collections ? 'import { leads } from "./resources/data.ts";\n' : ""}` +
-  `export default defineConfig({ workflows: [], connectors: [], policy: allowAll${collections} });\n`;
+  `import { defineConfig } from "sanoma";\n${collections ? 'import { leads } from "./resources/data.ts";\n' : ""}` +
+  `export default defineConfig({ workflows: [], connectors: []${collections} });\n`;
 const DATA = `import { collection } from "sanoma/data";
 export const leads = collection({ name: "leads", key: "id", fields: { id: "text" } });
 export const deals = collection({ name: "deals", key: "id", fields: { id: "text", won: "boolean" } });

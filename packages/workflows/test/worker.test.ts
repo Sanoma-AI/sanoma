@@ -6,7 +6,6 @@ import { testDatabaseUrl, withFake } from "@sanoma-ai/testing";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
-  allowAll,
   defineConnector,
   defineWorkflow,
   memoryLedger,
@@ -26,7 +25,6 @@ const ledger = memoryLedger();
 const config = (options: Partial<SanomaConfig>): SanomaConfig => ({
   workflows: [announce],
   connectors: vendors.connectors,
-  policy: allowAll,
   ledger,
   databaseUrl: "postgresql://unused@localhost:1/unused",
   ...options,
@@ -70,7 +68,6 @@ const refused: [string, Partial<SanomaConfig>, RegExp][] = [
     { workflows: [announce, { ...announce }] },
     /^Two different workflow definitions are named "announce"/,
   ],
-  ["a policy that is not a function", { policy: "allow" as never }, /^The config's `policy` must be a policy/],
   [
     "a ledger that is not a store",
     { ledger: { read: 1 } as never },
@@ -88,6 +85,11 @@ const refused: [string, Partial<SanomaConfig>, RegExp][] = [
     /^The config's `drivers` and `fakes` are gone: each connector carries its driver and its fake; leave them out$/,
   ],
   ["`fakes`, alone", { fakes: [] } as never, /^The config's `drivers` and `fakes` are gone/],
+  [
+    "a `policy`, which an untyped config might still name (it would otherwise run allowing everything)",
+    { policy: () => ({ kind: "deny", reason: "no" }) } as never,
+    /^The config's `policy` is gone: the policy is policies\/\*\.cedar in the root; leave it out$/,
+  ],
 ];
 
 describe("startWorker, resolveConfig and describeConfig", () => {
@@ -113,7 +115,6 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       databaseUrl: "postgresql://unused@localhost:1/unused",
       version: expect.stringMatching(/^sanoma@[0-9a-f]{64}$/),
       queueName: "sanoma:sanoma",
-      policy: allowAll,
       workflows: new Map([["announce", announce]]),
     });
     expect([...resolved.ops.keys()].toSorted()).toEqual([

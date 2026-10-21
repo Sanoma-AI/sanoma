@@ -1,6 +1,6 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { bluesky } from "@sanoma-ai/connector-bluesky";
 import { ghost } from "@sanoma-ai/connector-ghost";
 import { fakeBluesky } from "@sanoma-ai/connector-bluesky/fake";
@@ -12,7 +12,6 @@ import { type TestApp, useTestApp } from "@sanoma-ai/testing/harness";
 import type { Fake, FakeCall, FakeOptions } from "@sanoma-ai/workflows/fake";
 import { afterAll, beforeEach } from "vitest";
 import {
-  allowAll,
   type Connector,
   jsonlLedger,
   type LedgerRecord,
@@ -22,6 +21,23 @@ import {
 } from "../src/index.ts";
 import { VENDOR } from "../src/op.ts";
 import announce from "./fixtures/announce.ts";
+
+/**
+ * A company root of its own for a test file: a fresh directory with `files` (a path under the root
+ * and its text, such as `policies/policy.cedar` and `resources/people.ts`), over a copy of `from`
+ * when given; removed after the file's tests. The policy is the root's Cedar files, so a test
+ * that needs one writes it here.
+ */
+export function rootWith(files: Record<string, string>, from?: string): string {
+  const root = mkdtempSync(join(tmpdir(), "sanoma-root-"));
+  if (from !== undefined) cpSync(from, root, { recursive: true });
+  for (const [path, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), text);
+  }
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+  return root;
+}
 
 export async function waitFor(check: () => Promise<boolean> | boolean, timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs;
@@ -114,7 +130,6 @@ export function useApp(
       workflows: [announce],
       // Live runs on these fakes; each sandbox run on its own, from the packages' makers.
       connectors: vendors.connectors,
-      policy: allowAll,
       ledger: jsonlLedger(ledgerDir),
       ...overrides(vendors),
     },

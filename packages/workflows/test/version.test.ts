@@ -6,7 +6,6 @@ import { startTestWorker, testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
-  allowAll,
   dbosClient,
   defineWorkflow,
   memoryLedger,
@@ -49,7 +48,6 @@ const quick = defineWorkflow({
 const base: SanomaConfig = {
   workflows: [announce],
   connectors: vendors.connectors,
-  policy: allowAll,
   ledger: memoryLedger(),
   root: appRoot("acme"),
 };
@@ -88,7 +86,6 @@ describe("the application version", () => {
     expect(versionOf({ workflows: [loudlyAgain] })).toBe(loud);
 
     expect(versionOf({ connectors: marketingFakes().connectors })).toBe(versionOf({}));
-    expect(versionOf({ policy: () => ({ kind: "deny", reason: "no" }) })).toBe(versionOf({}));
     expect(versionOf({ workflows: [] })).not.toBe(versionOf({}));
   });
 

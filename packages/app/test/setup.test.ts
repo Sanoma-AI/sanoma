@@ -1,10 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
-import { allowAll, defineConfig, resolveConfig, SanomaClient } from "@sanoma-ai/workflows";
+import { defineConfig, resolveConfig, SanomaClient } from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -22,10 +22,15 @@ import { GITHUB_APP, githubManifest, setSetupToken, setupStatus } from "../src/s
 
 const appDir = fileURLToPath(new URL("..", import.meta.url));
 const root = mkdtempSync(join(tmpdir(), "sanoma-setup-"));
+// Declared, so storing the App's keys admits who asked.
+mkdirSync(join(root, "resources"));
+writeFileSync(
+  join(root, "resources", "people.ts"),
+  'import { sanoma } from "sanoma/resources";\n\nexport const alice = sanoma.person({ id: "alice" });\n',
+);
 const config = defineConfig({
   workflows: [],
   connectors: [],
-  policy: allowAll,
   databaseUrl: testDatabaseUrl("setup"),
   root,
 });
@@ -87,6 +92,8 @@ afterAll(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
+/** Who asks, as the loopback login's cookie names her. */
+const AS_ALICE = "sanoma_actor=alice";
 const get = (path: string, cookie?: string) =>
   fetch(new URL(path, app.url), { redirect: "manual", headers: cookie ? { cookie } : {} });
 
@@ -110,7 +117,7 @@ function form(html: string) {
 
 describe("creating the GitHub App", () => {
   it("posts the manifest to GitHub from a page that submits itself, with the state in a signed cookie", async () => {
-    const res = await get("/setup/github/manifest");
+    const res = await get("/setup/github/manifest", AS_ALICE);
     expect(res.status).toBe(200);
     const html = await res.text();
     const { action, manifest } = form(html);
@@ -128,19 +135,24 @@ describe("creating the GitHub App", () => {
     expect(html).toContain('document.getElementById("manifest").submit()');
     const line = res.headers.getSetCookie().find((l) => l.startsWith("sanoma_setup_state="))!;
     expect(line).toMatch(/Path=\/setup\/github;.*HttpOnly/);
-    expect(stateCookie(res)).toMatch(new RegExp(`^sanoma_setup_state=${state}\\.[\\w-]+$`));
+    // The state, who asked and the signature.
+    expect(stateCookie(res)).toMatch(new RegExp(`^sanoma_setup_state=${state}\\.[\\w-]+\\.[\\w-]+$`));
   });
 
   it("creates it in an organization's settings, and refuses a name that is not a login", async () => {
-    const { action } = form(await (await get("/setup/github/manifest?org=acme-co")).text());
+    const { action } = form(await (await get("/setup/github/manifest?org=acme-co", AS_ALICE)).text());
     expect(`${action.origin}${action.pathname}`).toBe("https://github.com/organizations/acme-co/settings/apps/new");
     const bad = await get("/setup/github/manifest?org=acme%2F..");
     expect(bad.status).toBe(303);
     expect(bad.headers.get("location")).toBe("/setup/connect?github=bad-org");
+    // Nobody asking: the keys could be stored as no one, so GitHub is not asked.
+    const nobody = await get("/setup/github/manifest");
+    expect(nobody.status).toBe(303);
+    expect(nobody.headers.get("location")).toBe("/setup/connect?github=nobody");
   });
 
   it("refuses a callback whose state is not the cookie's, or whose cookie is not signed here, asking GitHub nothing", async () => {
-    const start = await get("/setup/github/manifest");
+    const start = await get("/setup/github/manifest", AS_ALICE);
     const cookie = stateCookie(start);
     const state = cookie.split("=")[1]!.split(".")[0]!;
     for (const [query, sent] of [
@@ -157,7 +169,7 @@ describe("creating the GitHub App", () => {
   });
 
   it("says so when GitHub will not convert the code", async () => {
-    const cookie = stateCookie(await get("/setup/github/manifest"));
+    const cookie = stateCookie(await get("/setup/github/manifest", AS_ALICE));
     const state = cookie.split("=")[1]!.split(".")[0]!;
     const res = await get(`/setup/github/callback?code=stale&state=${state}`, cookie);
     expect(res.headers.get("location")).toBe("/setup/connect?github=failed");
@@ -165,7 +177,7 @@ describe("creating the GitHub App", () => {
   });
 
   it("exchanges the code and stores the App's keys encrypted, under their own names", async () => {
-    const cookie = stateCookie(await get("/setup/github/manifest"));
+    const cookie = stateCookie(await get("/setup/github/manifest", AS_ALICE));
     const state = cookie.split("=")[1]!.split(".")[0]!;
     const res = await get(`/setup/github/callback?code=good&state=${state}`, cookie);
     expect(res.status).toBe(303);
@@ -175,7 +187,7 @@ describe("creating the GitHub App", () => {
 
     const stored = await client.secrets(Object.values(GITHUB_APP));
     expect([...stored.keys()].toSorted()).toEqual(Object.values(GITHUB_APP).toSorted());
-    expect(stored.get(GITHUB_APP.client_secret)).toMatchObject({ value: KEYS.client_secret, setBy: "acme" });
+    expect(stored.get(GITHUB_APP.client_secret)).toMatchObject({ value: KEYS.client_secret, setBy: "alice" });
     expect(stored.get(GITHUB_APP.id)?.value).toBe("4242");
     expect(stored.get(GITHUB_APP.pem)?.value).toBe(KEYS.pem);
     // Encrypted: under another key, nothing reads.
@@ -188,7 +200,7 @@ describe("creating the GitHub App", () => {
 describe("the connect page", () => {
   it("says what is connected, and stores a pasted token, never showing a value", async () => {
     expect(await setupStatus(ctx)).toEqual({
-      githubApp: { slug: KEYS.slug, setBy: "acme", setAt: expect.any(String) },
+      githubApp: { slug: KEYS.slug, setBy: "alice", setAt: expect.any(String) },
       tokens: [
         expect.objectContaining({ name: "GITHUB_TOKEN", status: "missing" }),
         expect.objectContaining({ name: "SUPABASE_ACCESS_TOKEN", status: "missing" }),

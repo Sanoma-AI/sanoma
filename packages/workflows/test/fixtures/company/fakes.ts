@@ -4,7 +4,7 @@ import { fakeGithub } from "@sanoma-ai/connector-github/fake";
 import { stripe as stripeConnector } from "@sanoma-ai/connector-stripe";
 import { fakeStripe } from "@sanoma-ai/connector-stripe/fake";
 import { readResources } from "../../../src/describe.ts";
-import { type Policy, type SanomaConfig, type WorkflowDefinition, withSetup } from "../../../src/index.ts";
+import { type SanomaConfig, type WorkflowDefinition, withSetup } from "../../../src/index.ts";
 import company from "./sanoma.config.ts";
 
 /** GitHub's node id for a repository, as the fake holds it: what a rule's `repository_id` holds. */
@@ -56,13 +56,17 @@ export function companyFakes() {
 
 /**
  * The company's config as a test's app runs it: its connectors, and its root for the data files
- * and scenarios, with these workflows under this policy, on `fakes` (default: fresh
+ * and scenarios (default: this fixture's, which has no policies, so every call is allowed; a test
+ * gives a copy with its own, `rootWith`), with these workflows, on `fakes` (default: fresh
  * `companyFakes()`, unseeded) as the drivers.
  */
 export function companyConfig(
   workflows: WorkflowDefinition<any, any>[],
-  policy: Policy,
   fakes = companyFakes(),
+  root = companyDir,
 ): SanomaConfig {
-  return { workflows, connectors: fakes.connectors, root: dirname(company.file!), policy };
+  return { workflows, connectors: fakes.connectors, root };
 }
+
+/** The fixture's directory: its root. */
+export const companyDir = dirname(company.file!);

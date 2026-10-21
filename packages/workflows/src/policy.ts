@@ -1,14 +1,10 @@
-import { z } from "zod";
-import { type ApprovalState, Approver, Covers, type Principal, sameApprover } from "./define.ts";
+import { type ApprovalState, type Approver, type Principal, sameApprover } from "./define.ts";
 import type { Effect, Op } from "./op.ts";
 
 /** An operation as a policy sees it: plain data, without its schemas. */
 export type PolicyOp = Pick<Op, "id" | "vendor" | "resource" | "name" | "effect">;
 
-/**
- * An operation as a policy sees it, for a `PolicyCall`: what the runtime passes, so a policy
- * test can build a call from the connector, `{ op: policyOpOf(shop.order.refund), ... }`.
- */
+/** An operation as a policy sees it, for a `PolicyCall`: what the runtime passes. */
 export const policyOpOf = ({ id, vendor, resource, name, effect }: Op): PolicyOp => ({
   id,
   vendor,
@@ -17,7 +13,7 @@ export const policyOpOf = ({ id, vendor, resource, name, effect }: Op): PolicyOp
   effect,
 });
 
-/** What a policy sees for each operation a run calls. Plain data, so a test can build one by hand. */
+/** What a policy sees for each operation a run calls: plain data. */
 export interface PolicyCall {
   op: PolicyOp;
   /** The same as `op.effect`. */
@@ -46,92 +42,53 @@ export type Decision =
   | { kind: "deny"; reason: string; reasons?: string[] }
   | ApproveDecision;
 
-/**
- * Hold the call until the approver decides: a person's id, or `{ group }` for anyone in it.
- * The approval covers the held operation, and `covers` adds others, so a policy can let their
- * later calls through once it is approved.
- */
+/** Hold the call until the approver decides: a person's id, or `{ group }` for anyone in it. */
 interface ApproveDecision {
   kind: "approve";
   approver: Approver;
   title?: string;
-  covers?: Op[];
   reasons?: string[];
 }
 
-const ReasonList = z.array(z.string(), { error: "reasons must be a list of strings" }).optional();
-
-/**
- * Checks a policy's answer. Parsing also copies it, so nothing else the policy returned is kept,
- * and turns `covers` into op ids.
- */
-export const DecisionSchema = z.discriminatedUnion(
-  "kind",
-  [
-    z.object({ kind: z.literal("allow"), reasons: ReasonList }),
-    z.object({ kind: z.literal("deny"), reason: z.string({ error: "deny needs a reason" }), reasons: ReasonList }),
-    z.object({
-      kind: z.literal("approve"),
-      approver: Approver,
-      title: z.string({ error: "the title must be a string" }).optional(),
-      covers: Covers,
-      reasons: ReasonList,
-    }),
-  ],
-  { error: "not a decision" },
-);
-
-/**
- * A decision as checked and as the ledger records it: `covers` by op id, and the `version` of
- * the policy that made it, when it has one.
- */
-export type RecordedDecision = z.output<typeof DecisionSchema> & { policyVersion?: string };
+/** A decision as the ledger records it, with the `version` of the policy that made it, when it has one. */
+export type RecordedDecision = Decision & { policyVersion?: string };
 
 export const allow = (reasons?: string[]): Decision =>
   reasons === undefined ? { kind: "allow" } : { kind: "allow", reasons };
 export const deny = (reason: string, reasons?: string[]): Decision =>
   reasons === undefined ? { kind: "deny", reason } : { kind: "deny", reason, reasons };
 
-/**
- * Holds the call for `approver`. `covers` lists other operations the approval also stands for;
- * `reasons`, the rules that held it, as `allow` and `deny` take them.
- */
-export function approve(
-  approver: Approver,
-  { title, covers, reasons }: { title?: string; covers?: Op[]; reasons?: string[] } = {},
-): Decision {
+/** Holds the call for `approver`; `reasons`, the rules that held it, as `allow` and `deny` take them. */
+export function approve(approver: Approver, { title, reasons }: { title?: string; reasons?: string[] } = {}): Decision {
   return {
     kind: "approve",
     approver,
     ...(title === undefined ? {} : { title }),
-    ...(covers === undefined ? {} : { covers }),
     ...(reasons === undefined ? {} : { reasons }),
   };
 }
 
 /**
- * Decides whether a run may make an operation call: allow it, deny it (the run fails),
- * or hold it until someone approves. Runs are replayed after a restart, so a policy must
- * decide the same way every time from the call alone: no clock, randomness or network.
- * `lintWorkflow` checks a policy file for these too. Each decision is recorded once made,
- * and a replay reuses it, but a call interrupted before that is decided again. A policy
- * must not have side effects.
+ * Decides whether a run may make an operation call: allow it, deny it (the run fails), or hold it
+ * until someone approves. A company's is made from its Cedar files (`cedarPolicy`); a repo with
+ * none has `allowAll`. Each decision is recorded once made, and a replay reuses it, but a call
+ * interrupted before that is decided again.
  */
-export type Policy = ((call: PolicyCall) => Decision | Promise<Decision>) & {
-  /** Names this version of the policy, from `definePolicy(fn, { version })`. */
+export type Policy = ((call: PolicyCall) => Decision) & {
+  /** Names this version of the policy: a hash of the Cedar policies' ids and text. */
   readonly version?: string;
-  /** `cedar` for a policy made from `policies/*.cedar` (`cedarPolicy`); a function has none. */
-  readonly kind?: "cedar";
+  /** What the policy would answer for each request ahead of the call, its input unknown. */
+  readonly preview: (requests: readonly PreviewRequest[]) => PreviewAnswer[];
   /**
-   * What the policy would answer for each request ahead of the call, its input unknown. A
-   * function cannot be asked ahead: `definePolicy`'s have no `preview`.
+   * May `actor` start a run of `workflow` with `input` (the action `workflow:<name>`), given the
+   * run's `approvals` so far (none before it starts)?
    */
-  readonly preview?: (requests: readonly PreviewRequest[]) => PreviewAnswer[];
-  /**
-   * May `actor` start a run of `workflow` with `input` (the action `workflow:<name>`)? A function
-   * is written for operation calls: `definePolicy`'s have no `start`, and every start is allowed.
-   */
-  readonly start?: (actor: Principal, workflow: string, input: unknown) => Decision;
+  readonly start: (
+    actor: Principal,
+    workflow: string,
+    input: unknown,
+    approvals?: readonly ApprovalState[],
+  ) => Decision;
 };
 
 /** A question asked ahead of a call: may `principal` take `action` (an operation, or `workflow:<name>` to start one) on `resource` (an operation's target)? */
@@ -151,25 +108,20 @@ export interface PreviewAnswer {
   approver?: Approver;
 }
 
-/** A policy, optionally named with a version so a reader can tell which rules decided a call. */
-export function definePolicy(
-  policy: (call: PolicyCall) => Decision | Promise<Decision>,
-  options: { version?: string } = {},
-): Policy {
-  if (typeof policy !== "function") throw new Error("definePolicy expects a function of the call");
-  if (options.version !== undefined && (typeof options.version !== "string" || !options.version.trim())) {
-    throw new Error("definePolicy: `version` must be a non-empty string");
-  }
-  const defined = (call: PolicyCall) => policy(call);
-  return Object.freeze(options.version === undefined ? defined : Object.assign(defined, { version: options.version }));
-}
+/** A policy that decides every call and start as `decide` does, and previews each as `answer`. */
+const decidingAll = (decide: () => Decision, answer: "allow" | "deny"): Policy =>
+  Object.freeze(
+    Object.assign(decide, {
+      start: decide,
+      preview: (requests: readonly PreviewRequest[]): PreviewAnswer[] => requests.map(() => ({ answer })),
+    }),
+  );
 
-/** Allows every operation call: the policy of a config that names none and has no `policies/*.cedar`. */
-export const allowAll: Policy = Object.freeze(
-  Object.assign(() => allow(), {
-    preview: (requests: readonly PreviewRequest[]): PreviewAnswer[] => requests.map(() => ({ answer: "allow" })),
-  }),
-);
+/** Allows every operation call and run start: the policy of a repo with no `policies/**\/*.cedar`. */
+export const allowAll: Policy = decidingAll(() => allow(), "allow");
+
+/** Refuses every operation call and run start, and previews each as a deny, saying `reason`. */
+export const denyAll = (reason: string): Policy => decidingAll(() => deny(reason), "deny");
 
 /**
  * True when an approval in the run was approved, covers the operation, and was addressed to

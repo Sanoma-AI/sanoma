@@ -2,15 +2,7 @@ import { bluesky } from "@sanoma-ai/connector-bluesky";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { outlineWorkflow } from "../src/describe.ts";
-import {
-  allowAll,
-  type Ctx,
-  defineWorkflow,
-  errorCode,
-  type LedgerRecord,
-  memoryLedger,
-  startWorker,
-} from "../src/index.ts";
+import { type Ctx, defineWorkflow, errorCode, type LedgerRecord, memoryLedger, startWorker } from "../src/index.ts";
 import { failure, useApp } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`.
@@ -153,7 +145,6 @@ describe("a workflow the outline cannot draw", () => {
     const config = {
       workflows: [helper],
       connectors: [bluesky],
-      policy: allowAll,
       ledger: memoryLedger(),
       databaseUrl: "postgresql://unused@localhost:1/unused",
     };

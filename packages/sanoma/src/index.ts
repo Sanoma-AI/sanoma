@@ -2,16 +2,12 @@
 // dependencies (`@types/node` among them) are under any installer, and any file importing
 // `sanoma` brings them into the program. `preserve` keeps it in `dist/index.d.ts`.
 /// <reference types="node" preserve="true" />
-// What a company repo imports, from one package: what the lint lets a workflow or policy import
+// What a company repo imports, from one package: what the lint lets a workflow import
 // (`allowImportNames` in `@sanoma-ai/workflows`'s `oxlint.json`: the author surface and `z`), and
 // what `sanoma.config.ts` needs besides its connectors (`defineConfig`, the ledger stores, and
 // `defineSteps` for the company's own scenario steps), with the types those use. Everything else (the client, the worker) stays in `@sanoma-ai/workflows`
 // and the bin.
 export {
-  allow,
-  allowAll,
-  approve,
-  approvedFor,
   type ApprovalRequest,
   type ApprovalResult,
   type ApprovalState,
@@ -19,12 +15,9 @@ export {
   type Builtin,
   type Connector,
   type Ctx,
-  type Decision,
   defineConfig,
-  definePolicy,
   defineSteps,
   defineWorkflow,
-  deny,
   type Driver,
   errorCode,
   type ErrorCode,
@@ -34,9 +27,6 @@ export {
   type LedgerStore,
   mayDecide,
   memoryLedger,
-  type Policy,
-  type PolicyCall,
-  type PolicyOp,
   postgresLedger,
   type Principal,
   type RunView,

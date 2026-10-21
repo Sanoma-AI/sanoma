@@ -10,15 +10,7 @@ import resendPkg from "../../../connectors/resend/package.json" with { type: "js
 import { withFake } from "@sanoma-ai/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import {
-  allow,
-  allowAll,
-  defineConfig,
-  defineConnector,
-  definePolicy,
-  defineWorkflow,
-  memoryLedger,
-} from "../src/index.ts";
+import { defineConfig, defineConnector, defineWorkflow, memoryLedger } from "../src/index.ts";
 import { describeConfig, outlineWorkflow } from "../src/describe.ts";
 import { defineFake } from "../src/fake.ts";
 import { VENDOR } from "../src/op.ts";
@@ -29,7 +21,6 @@ import announce from "./fixtures/announce.ts";
 const base = defineConfig({
   workflows: [announce],
   connectors: [ghost, resend, bluesky],
-  policy: allowAll,
   ledger: memoryLedger(),
 });
 
@@ -175,23 +166,13 @@ describe("describeConfig", () => {
     expect(Object.isFrozen(counter[VENDOR].info?.logo)).toBe(true);
   });
 
-  it("says whether a policy other than allowAll is configured, and its version, and names the app and version", () => {
+  it("says the policy is undefined without policies/*.cedar, and names the app and version", () => {
     const plain = describeConfig(base);
-    const none = { kind: "function" };
-    expect(plain.policy).toEqual({ defined: false, ...none });
+    // The root's policies, when it has any, are cedar.test.ts's.
+    expect(plain.policy).toEqual({ defined: false });
     // No package.json in the directory of this file, which defined the config: the app is "sanoma".
     expect(plain.appName).toBe("sanoma");
     expect(plain.version).toMatch(/^sanoma@[0-9a-f]{64}$/);
-    const gated = defineConfig({ ...base, policy: definePolicy(() => allow()) });
-    expect(describeConfig(gated).policy).toEqual({ defined: true, ...none });
-    const versioned = definePolicy(() => allow(), { version: "2026-10-07" });
-    expect(versioned.version).toBe("2026-10-07");
-    expect(describeConfig({ ...base, policy: versioned }).policy).toEqual({
-      defined: true,
-      ...none,
-      version: "2026-10-07",
-    });
-    expect(() => definePolicy(() => allow(), { version: "" })).toThrow("`version` must be a non-empty string");
   });
 
   it("is plain JSON: it round-trips through JSON.stringify unchanged", () => {
@@ -215,9 +196,7 @@ describe("describeConfig", () => {
     const fake = defineFake(odd, { initial: () => ({}), ops: () => ({ thing: { get: async () => new Map() } }) });
     // `unrepresentable: "any"` keeps custom types as {}; only a schema that throws is reported.
     expect(() =>
-      describeConfig(
-        defineConfig({ workflows: [wf], connectors: [withFake(odd, fake)], policy: allowAll, ledger: memoryLedger() }),
-      ),
+      describeConfig(defineConfig({ workflows: [wf], connectors: [withFake(odd, fake)], ledger: memoryLedger() })),
     ).not.toThrow();
   });
 

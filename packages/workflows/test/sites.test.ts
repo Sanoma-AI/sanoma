@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { describeConfig } from "../src/describe.ts";
-import { allowAll, defineConnector, defineWorkflow, type SanomaConfig } from "../src/index.ts";
+import { defineConnector, defineWorkflow, type SanomaConfig } from "../src/index.ts";
 import { leads } from "../../app/test/fixtures/company-sites/resources/data.ts";
 import { tree } from "./tree.ts";
 
@@ -46,7 +46,6 @@ const config = (root: string, more: Partial<SanomaConfig> = {}): SanomaConfig =>
   workflows: [hello],
   connectors: [],
   collections: [leads],
-  policy: allowAll,
   ...more,
 });
 

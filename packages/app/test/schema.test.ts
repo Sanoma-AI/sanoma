@@ -9,7 +9,6 @@ import {
   issueTarget,
   toLocalInput,
 } from "../src/form/schema.ts";
-import { allowAll } from "../../workflows/src/index.ts";
 import { describeConfig } from "../../workflows/src/describe.ts";
 import { jsonSchemaOf } from "../../workflows/src/define.ts";
 import { outbound } from "../../workflows/test/fixtures/outbound/resources/data.ts";
@@ -38,7 +37,6 @@ describe("fieldsOf", () => {
       workflows: [],
       connectors: [],
       collections: [outbound],
-      policy: allowAll,
     }).collections;
     const record = fieldsOf(entry!.record)!;
     expect(record.map((f) => [f.key, f.kind, f.required])).toEqual([

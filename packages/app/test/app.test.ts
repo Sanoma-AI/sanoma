@@ -3,16 +3,10 @@ import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { bluesky } from "@sanoma-ai/connector-bluesky";
-import { resend } from "@sanoma-ai/connector-resend";
 import { ensureBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import {
-  allow,
-  approve,
-  approvedFor,
   defineConfig,
   defineConnector,
-  definePolicy,
   type DriftReport,
   DriverError,
   jsonlLedger,
@@ -80,23 +74,6 @@ const distDir = join(appDir, "dist");
 
 const HOLD_TITLE = "Publish the held post";
 
-// Holds publish and send for marketing-lead, unless they already approved something in the run.
-// A run started by "held" is held by the policy itself, once for everything it publishes.
-const policy = definePolicy(
-  ({ op, effect, actor, run }) => {
-    if (effect !== "publish" && effect !== "send") return allow();
-    if (actor.id === "held") {
-      return approvedFor(run.approvals, op.id, "marketing-lead")
-        ? allow()
-        : approve("marketing-lead", { title: HOLD_TITLE, covers: [resend.broadcast.send, bluesky.post.create] });
-    }
-    return run.approvals.some((a) => a.approver === "marketing-lead" && a.status === "approved")
-      ? allow()
-      : approve("marketing-lead");
-  },
-  { version: "test-1" },
-);
-
 // The marketing vendors: live runs call these fakes.
 const vendors = marketingFakes();
 const blog = vendors.ghost;
@@ -116,6 +93,21 @@ cpSync(
   fileURLToPath(new URL("../../workflows/test/fixtures/outbound/resources/data.ts", import.meta.url)),
   join(appRoot, "resources/data.ts"),
 );
+// Who may act here (`p<n>` in resources/people.ts), and the policy: a run "held" starts waits for
+// marketing-lead before it publishes the post.
+const PEOPLE = ["alice", "Ålice", "tester", "held", "marketing-lead", "someone-else"];
+writeFileSync(
+  join(appRoot, "resources/people.ts"),
+  `import { sanoma } from "sanoma/resources";\n\n${PEOPLE.map((id, i) => `export const p${i} = sanoma.person({ id: "${id}" });\n`).join("")}`,
+);
+mkdirSync(join(appRoot, "policies"));
+writeFileSync(
+  join(appRoot, "policies/hold.cedar"),
+  `@hold("marketing-lead")
+@title("${HOLD_TITLE}")
+forbid (principal == Sanoma::Principal::"held", action == Sanoma::Action::"ghost.post.publish", resource);
+`,
+);
 const featureFile = join(scenariosDir, "announce.feature");
 /** A vendor with a workflow operation and no setup, so no fake: its connector page says so. */
 const chat = defineConnector("chat", {
@@ -126,7 +118,6 @@ const config = defineConfig({
   workflows: [announce],
   connectors: [...vendors.connectors, ...company.connectors, chat],
   collections: [outbound],
-  policy,
   ledger: memoryLedger(),
   databaseUrl: testDatabaseUrl("app"),
   root: appRoot,
@@ -308,7 +299,7 @@ describe("the server functions", () => {
     const body = withoutSources(ctx.description);
     expect(body.appName).toBe("sanoma");
     expect(body.version).toMatch(/^sanoma@/);
-    expect(body.policy).toEqual({ defined: true, kind: "function", version: "test-1" });
+    expect(body.policy).toEqual({ defined: true, version: expect.stringMatching(/^[0-9a-f]{12}$/) });
     const wf = body.workflows.find((w) => w.name === "announce");
     expect(wf?.ops).toHaveLength(5);
     expect(wf?.ops).toEqual(expect.arrayContaining(["ghost.post.publish", "resend.broadcast.send"]));
@@ -326,8 +317,11 @@ describe("the server functions", () => {
     // Whether each vendor's connector attaches a fake: Ghost's and GitHub's do, chat's does not.
     expect(body.vendors).toMatchObject({ ghost: { fake: true }, github: { fake: true }, chat: { fake: false } });
     expect(body.vendors.resend).toMatchObject({ title: "Resend", logo: { src: expect.stringMatching(/^data:/) } });
-    // The data files under the config's root, without problems, passed through as they are.
-    expect(body.resources.map((r) => r.id)).toEqual(company.declared.map((r) => r.id));
+    // The data files under the config's root, without problems, passed through as they are: the people too.
+    expect(body.resources.map((r) => r.id)).toEqual([
+      ...company.declared.map((r) => r.id),
+      ...PEOPLE.map((_, i) => `resources/people.ts#p${i}`),
+    ]);
     expect(body.problems).toEqual([]);
     // Its collections, with where resources/data.ts declares each.
     expect(body.collections.map((c) => [c.name, c.declared?.id])).toEqual([["outbound", "resources/data.ts#outbound"]]);
@@ -767,7 +761,7 @@ describe("the page", () => {
     const open = await page(`/inbox?approval=${id}/${hold.id}`);
     expect(openTitle(open.html)).toBe(HOLD_TITLE);
     expect(open.text).toContain(
-      `held&#x27;s run</a> of <a href="/workflows/announce">Announce a launch</a> wants to publish a post in Ghost, send a broadcast in Resend, and create a post in Bluesky: “${HOLD_TITLE}”.`,
+      `held&#x27;s run</a> of <a href="/workflows/announce">Announce a launch</a> wants to publish a post in Ghost: “${HOLD_TITLE}”, by <code>policies/hold.cedar#1</code>.`,
     );
 
     const decided = await approveAs(hold.id, "   ");
@@ -1591,6 +1585,30 @@ describe("an app configured otherwise", () => {
         message: expect.stringMatching(/^export const docs: github\.repository: /),
       },
     ]);
+  });
+
+  it("boots with policies that do not hold, and says so, as they refuse everything", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sanoma-app-policy-"));
+    mkdirSync(join(root, "policies"));
+    writeFileSync(join(root, "policies", "bad.cedar"), "forbid (principal, action, resource) when { context.nope };\n");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const refusing = await startApp({ ...config, root });
+      // The policy it has refuses, and the page says so.
+      const pages = Promise.all([
+        page("/workflows", refusing.url),
+        page("/permissions", refusing.url, { headers: { cookie: "sanoma_actor=ada" } }),
+      ]);
+      const [workflows, permissions] = await pages.finally(() => refusing.close());
+      expect(workflows.text).toContain(
+        "policies/*.cedar do not hold, so every operation call and run start is refused",
+      );
+      expect(permissions.text).toContain("Cedar, policies/*.cedar, which do not hold: all refused");
+      expect(warn.mock.calls.flat().join("\n")).toMatch(/files have problems.*\n {2}policies\/bad\.cedar:1:\d+: /s);
+    } finally {
+      warn.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("shows the data files' problems on the resources page, and the resources it could read", async () => {

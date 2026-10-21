@@ -151,8 +151,7 @@ function apiWriter(config: SanomaConfig, log: (line: string) => void): (file: st
   };
 }
 
-const GITHUB = ["SANOMA_GITHUB_CLIENT_ID", "SANOMA_GITHUB_CLIENT_SECRET", "SANOMA_GITHUB_REPO"] as const;
-const CLIENT = GITHUB.slice(0, 2);
+const GITHUB = ["SANOMA_GITHUB_CLIENT_ID", "SANOMA_GITHUB_CLIENT_SECRET"] as const;
 
 /** Reads stored secrets by name (`SanomaClient.secrets`): the values found, the environment's first. */
 export type ReadSecrets = (names: string[]) => Promise<Map<string, string>>;
@@ -171,29 +170,28 @@ const secretsOf =
 
 /**
  * The app's host (`SANOMA_APP_HOST`, default 127.0.0.1) and, when the `SANOMA_GITHUB_*` variables
- * are set, GitHub sign-in; all three or none, and any host but this machine needs it. An empty
- * value is the same as unset. With the repository set, a client id or secret the environment
- * leaves unset is read from the stored secrets (`readSecrets`), where creating the GitHub App on
- * the app's connect page put them. A mistake in them is a UsageError.
+ * are set, GitHub sign-in; both or neither, and any host but this machine needs it. An empty
+ * value is the same as unset. On a host beyond this machine, or with one of them set, one the
+ * environment leaves unset is read from the stored secrets (`readSecrets`), where creating the
+ * GitHub App on the app's connect page put them. A mistake in them is a UsageError.
  */
 export async function appOptions(readSecrets?: ReadSecrets): Promise<Pick<AppOptions, "host" | "login">> {
   const env = process.env;
   const host = env.SANOMA_APP_HOST || undefined;
+  const beyond = host !== undefined && !isLoopback(host);
   const found = new Map<string, string>(GITHUB.flatMap((name) => (env[name] ? [[name, env[name]]] : [])));
-  if (found.has("SANOMA_GITHUB_REPO") && readSecrets && CLIENT.some((name) => !found.has(name))) {
-    const stored = await readSecrets(CLIENT).catch((err: unknown) => {
+  if ((beyond || found.size) && readSecrets && found.size < GITHUB.length) {
+    const stored = await readSecrets([...GITHUB]).catch((err: unknown) => {
       throw new UsageError(`GitHub sign-in could not read the stored client id and secret: ${errorMessage(err)}`);
     });
-    for (const [name, value] of stored) if (value) found.set(name, value);
+    for (const [name, value] of stored) if (value && !found.has(name)) found.set(name, value);
   }
-  const [clientId, clientSecret, repo] = GITHUB.map((name) => found.get(name));
-  if (!clientId && !clientSecret && !repo) {
-    if (host && !isLoopback(host)) {
-      throw new UsageError(`SANOMA_APP_HOST=${host} needs GitHub sign-in: set ${GITHUB.join(", ")}`);
-    }
+  const [clientId, clientSecret] = GITHUB.map((name) => found.get(name));
+  if (!clientId && !clientSecret) {
+    if (beyond) throw new UsageError(`SANOMA_APP_HOST=${host} needs GitHub sign-in: set ${GITHUB.join(", ")}`);
     return { host };
   }
-  if (!clientId || !clientSecret || !repo) {
+  if (!clientId || !clientSecret) {
     const missing = GITHUB.filter((name) => !found.has(name));
     throw new UsageError(`GitHub sign-in needs ${GITHUB.join(", ")}: ${missing.join(", ")} not set`);
   }

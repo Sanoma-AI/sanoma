@@ -1,18 +1,10 @@
-import { existsSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
-import {
-  allow,
-  allowAll,
-  approve,
-  definePolicy,
-  deny,
-  memoryLedger,
-  resolveConfig,
-  SanomaClient,
-  type SanomaConfig,
-} from "@sanoma-ai/workflows";
+import { memoryLedger, resolveConfig, SanomaClient, type SanomaConfig } from "@sanoma-ai/workflows";
 import { collection } from "@sanoma-ai/workflows/data";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { executablePath, launch } from "puppeteer-core";
@@ -34,21 +26,40 @@ import { callApi, serverFnFailure, validate } from "../src/server/core.ts";
 
 const appDir = fileURLToPath(new URL("..", import.meta.url));
 
-/** Allows, but denies a lead `lost` and holds one `won` for `lead`. */
-const policy = definePolicy(({ input }) => {
-  const stage = (input as { record?: { stage?: string } }).record?.stage;
-  if (stage === "lost") return deny("leads are not lost");
-  if (stage === "won") return approve("lead");
-  return allow();
-});
+// The outbound fixture, copied to a root of its own: its collection, declared in resources/data.ts,
+// with its people and a policy that allows, but denies a lead `lost` and holds one `won` for `lead`.
+const root = mkdtempSync(join(tmpdir(), "sanoma-data-"));
+cpSync(fileURLToPath(new URL("../../workflows/test/fixtures/outbound/", import.meta.url)), root, { recursive: true });
+writeFileSync(
+  join(root, "resources/people.ts"),
+  `import { sanoma } from "sanoma/resources";
 
-// The outbound fixture's root: its collection, declared in resources/data.ts, and its workflow.
+export const ada = sanoma.person({ id: "ada" });
+export const bo = sanoma.person({ id: "bo" });
+export const cy = sanoma.person({ id: "cy" });
+export const lead = sanoma.person({ id: "lead" });
+`,
+);
+mkdirSync(join(root, "policies"));
+writeFileSync(
+  join(root, "policies/leads.cedar"),
+  `@reason("leads are not lost")
+forbid (principal, action == Sanoma::Action::"data.outbound.save", resource)
+when { context.input.record.stage == "lost" };
+
+@hold("lead")
+forbid (principal, action == Sanoma::Action::"data.outbound.save", resource)
+when { context.input.record.stage == "won" };
+`,
+);
+afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+// The outbound fixture's workflow, over that root.
 const config: SanomaConfig = {
   workflows: [outboundNext],
   connectors: [],
   collections: [outbound],
-  policy,
-  root: fileURLToPath(new URL("../../workflows/test/fixtures/outbound/", import.meta.url)),
+  root,
 };
 const testApp = useTestApp(config, { databaseUrl: testDatabaseUrl("data") });
 let app: App;
@@ -197,7 +208,6 @@ describe("the Data section", () => {
       workflows: [],
       connectors: [],
       collections: [older],
-      policy: allowAll,
       ledger: memoryLedger(),
       databaseUrl: testApp.config.databaseUrl,
     });

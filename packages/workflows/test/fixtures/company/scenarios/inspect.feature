@@ -1,5 +1,6 @@
 Feature: Inspect a repository and a product
-  The policy keeps secret repositories private, and has finance say before a product is read.
+  The policy keeps secret repositories private, and has finance say before a person reads a
+  product (steps.test.ts gives this fixture that policy).
   GitHub's fake holds the repositories its replies were recorded with (sanoma, provider-bridge).
 
   Scenario: A secret repository is refused

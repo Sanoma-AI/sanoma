@@ -128,20 +128,17 @@ function ConfigFacts() {
             <code>{config.version}</code>
           </Fact>
           <Fact label="Policy">
-            {config.policy.defined ? (
+            {config.policy.problems ? (
               <>
-                a policy checks every operation call
-                {config.policy.version ? (
-                  <>
-                    {" "}
-                    (version <code>{config.policy.version}</code>)
-                  </>
-                ) : (
-                  " (no version named)"
-                )}
+                policies/*.cedar do not hold, so every operation call and run start is refused (
+                <code>sanoma check</code> says why)
+              </>
+            ) : config.policy.defined ? (
+              <>
+                policies/*.cedar check every operation call and run start (version <code>{config.policy.version}</code>)
               </>
             ) : (
-              "allowAll: every operation call is allowed"
+              "none: every operation call is allowed"
             )}
           </Fact>
         </Facts>

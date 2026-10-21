@@ -85,6 +85,8 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   // page lists the problems), a workflow the worker will refuse is shown with its outline's error,
   // and a site's call to what the config lacks fails when it is made.
   const lines = new Set([
+    // The policies refuse every call and start until these are fixed.
+    ...resolved.policyProblems,
     ...description.problems.map(problemLine),
     ...description.workflows.flatMap((wf) => wf.problems.map((p) => problemLine({ file: wf.file, ...p }))),
     ...description.sites.flatMap((site) => site.problems.map(problemLine)),

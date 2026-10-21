@@ -4,21 +4,17 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { messageKeyOf, topicOf } from "../src/approvals.ts";
 import {
-  allow,
-  approve,
   approvedFor,
   type ApprovalState,
   decisionEventOf,
-  definePolicy,
   defineWorkflow,
   errorCode,
   type LedgerRecord,
   mayDecide,
-  type Policy,
 } from "../src/index.ts";
 import { OWN_CHANGE, refusalOf } from "../src/shared.ts";
 import announce from "./fixtures/announce.ts";
-import { inSeconds, pending, useApp, waitFor } from "./harness.ts";
+import { inSeconds, pending, rootWith, useApp, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`.
 const alice = { id: "alice" };
@@ -301,22 +297,29 @@ describe("approvals a workflow asks for", () => {
 });
 
 describe("approvals a policy asks for", () => {
-  // The test picks a policy per run by actor.
-  const byActor: Record<string, Policy> = {
-    // The README's policy: each publishing operation needs an approval that covers it.
-    each: ({ effect, op, run }) =>
-      effect === "publish" && !approvedFor(run.approvals, op.id, "marketing-lead")
-        ? approve("marketing-lead")
-        : allow(),
-    broad: ({ effect, op, run }) =>
-      effect === "publish" && !approvedFor(run.approvals, op.id, "marketing-lead")
-        ? approve("marketing-lead", { title: "Publish everywhere", covers: [bluesky.post.create] })
-        : allow(),
-    group: ({ op, run }) =>
-      approvedFor(run.approvals, op.id, { group: "marketing" }) ? allow() : approve({ group: "marketing" }),
-  };
-  const policy = definePolicy((call) => byActor[call.actor.id]?.(call) ?? allow());
-  const app = useApp("approvals-policy", () => ({ workflows: [announce, shout, launder], policy }));
+  // The test picks a rule per run by who starts it: each Cedar policy names its principal.
+  const root = rootWith({
+    "resources/people.ts": `import { sanoma } from "sanoma/resources";
+
+export const each = sanoma.person({ id: "each" });
+export const group = sanoma.person({ id: "group" });
+export const lead = sanoma.person({ id: "marketing-lead" });
+export const intern = sanoma.person({ id: "intern" });
+export const bob = sanoma.person({ id: "bob" });
+export const carol = sanoma.person({ id: "carol" });
+export const dave = sanoma.person({ id: "dave" });
+export const marketing = sanoma.group({ name: "marketing", members: [carol, dave] });
+export const sales = sanoma.group({ name: "sales", members: [bob] });
+`,
+    "policies/policy.cedar": `// The README's policy: each publishing operation needs marketing-lead's approval.
+@hold("marketing-lead")
+forbid (principal == Sanoma::Principal::"each", action in Sanoma::Action::"effect:publish", resource);
+
+@hold("marketing")
+forbid (principal == Sanoma::Principal::"group", action == Sanoma::Action::"bluesky.post.create", resource);
+`,
+  });
+  const app = useApp("approvals-policy", () => ({ workflows: [announce, shout, launder], root }));
   const c = () => app.client;
 
   it("covers only the held operation by default, so a later publish of another one is held again", async () => {
@@ -365,33 +368,6 @@ describe("approvals a policy asks for", () => {
     await waitFor(pending(c, runId, 3));
     await c().decide(runId, { decision: "approve", by: lead });
     await c().result(runId);
-  });
-
-  it("lets a later call through when the policy's approval covers its operation too", async () => {
-    const runId = await c().start(announce, input("Broad"), { startedBy: { id: "broad" } });
-    await waitFor(pending(c, runId));
-    await c().decide(runId, { decision: "approve", by: lead });
-    await waitFor(pending(c, runId, 2));
-    expect((await c().approvals(runId))[1]).toMatchObject({
-      title: "Publish everywhere",
-      op: "ghost.post.publish",
-      covers: ["ghost.post.publish", "bluesky.post.create"],
-    });
-
-    await c().decide(runId, { decision: "approve", by: lead });
-    await c().result(runId);
-    expect(await c().approvals(runId)).toHaveLength(2);
-    expect(app.ops()).toHaveLength(5);
-
-    const calls = ofType(await c().ledger(runId), "op.called");
-    // The decision is recorded with the operations it named, by id.
-    expect(calls.find((r) => r.op === "ghost.post.publish")?.decision).toEqual({
-      kind: "approve",
-      approver: "marketing-lead",
-      title: "Publish everywhere",
-      covers: ["bluesky.post.create"],
-    });
-    expect(calls.find((r) => r.op === "bluesky.post.create")?.decision).toEqual({ kind: "allow" });
   });
 
   it("does not let a workflow launder a sign-off through an approver of its own choosing", async () => {
@@ -445,7 +421,7 @@ describe("approvals a policy asks for", () => {
     ]);
     expect(app.ops()).toEqual([]);
 
-    const decided = await c().decide(runId, { decision: "approve", by: { id: "carol", groups: ["marketing"] } });
+    const decided = await c().decide(runId, { decision: "approve", by: { id: "carol" } });
     expect(decided).toMatchObject({ status: "approved", decidedBy: "carol" });
     await c().result(runId);
     expect(app.ops()).toEqual(["bluesky.post.create"]);

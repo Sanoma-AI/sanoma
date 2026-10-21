@@ -4,19 +4,22 @@ import { join, relative, sep } from "node:path";
 import type { CedarValueJson, DetailedError, EntityJson, Expr, PolicyJson } from "@cedar-policy/cedar-wasm/nodejs";
 import { locator } from "./ast.ts";
 import type { ResolvedConfig } from "./config.ts";
-import type { Approver, Principal } from "./define.ts";
+import type { ApprovalState, Approver, Principal } from "./define.ts";
 import { filesUnder } from "./paths.ts";
 import {
   allow,
+  allowAll,
   approve,
   approvedFor,
   type Decision,
   deny,
+  denyAll,
   type Policy,
   type PolicyCall,
   type PreviewAnswer,
   type PreviewRequest,
 } from "./policy.ts";
+import { readPeople } from "./resources.ts";
 import { cedarValue, cedarWasm, contextTypeOf, messageOf, NAMESPACE, schemaOf } from "./schema.ts";
 import {
   approverLabel,
@@ -26,6 +29,7 @@ import {
   type PeopleResource,
   principalIdsOf,
   principalOf,
+  problemLine,
   WORKFLOW_ACTION,
 } from "./shared.ts";
 
@@ -192,8 +196,8 @@ export function validatePolicies(
 }
 
 /**
- * The policy a repo's Cedar files make, the runtime's `permit` added; `kind` is `cedar`, and its
- * `version` a hash of the policies' ids and text. It decides each call with `statefulIsAuthorized`
+ * The policy a repo's Cedar files make, the runtime's `permit` added; its `version` a hash of the
+ * policies' ids and text. It decides each call with `statefulIsAuthorized`
  * over the policy set and the schema of `resolved` (`schemaOf`), each parsed once:
  *
  * - allow: `allow`, with the policies that allowed as `reasons`;
@@ -204,7 +208,9 @@ export function validatePolicies(
  *
  * An approver is a declared group (`{ group }`), a declared person's id, or the principal's
  * `onBehalfOf`; a principal acting for no one makes `on-behalf-of` a deny, "cannot resolve
- * approver". A policy that fails to evaluate is a deny naming it (Cedar would skip it).
+ * approver". A policy that fails to evaluate is a deny naming it (Cedar would skip it), as is one
+ * reading a field a `before` lacks: a record saved under fields since changed is asked about
+ * without the schema, so it can still be fixed or deleted.
  * `preview` asks the same ahead of a call, its context unknown; `start`, about a run's start.
  */
 export function cedarPolicy(
@@ -273,12 +279,24 @@ export function cedarPolicy(
     approvals: PolicyCall["run"]["approvals"],
   ): Decision => {
     const principal = directory.principal(actor);
-    const answer = cedar.statefulIsAuthorized({
-      ...requestOf(principal, action, target, () => context),
-      preparsedSchemaName: set,
-      preparsedPolicySetId: set,
-      validateRequest: true,
-    });
+    const check = (asked: Record<string, unknown>) =>
+      cedar.statefulIsAuthorized({
+        ...requestOf(principal, action, target, () => asked),
+        preparsedSchemaName: set,
+        validateRequest: true,
+        preparsedPolicySetId: set,
+      });
+    let answer = check(context);
+    // A record saved under fields since changed does not fit the schema as `before`. When the rest
+    // of the call does, it is asked again without the schema (the context is plain values), the
+    // action's groups given as entities: a policy reading a field the record lacks fails, so denies.
+    const { before, ...rest } = context;
+    if (answer.type === "failure" && before !== undefined && check(rest).type === "success") {
+      const request = requestOf(principal, action, target, () => context);
+      const groups = schema[NAMESPACE]?.actions[action]?.memberOf ?? [];
+      request.entities.push({ uid: request.action, attrs: {}, parents: groups.map((g) => uid("Action", g.id)) });
+      answer = cedar.statefulIsAuthorized({ ...request, preparsedPolicySetId: set });
+    }
     // A request the schema refuses (an input Cedar cannot hold) is denied, not an error of the call.
     if (answer.type === "failure")
       return deny(`The call does not fit the Cedar schema: ${answer.errors.map(messageOf).join("; ")}`);
@@ -310,8 +328,8 @@ export function cedarPolicy(
       call.run.approvals,
     );
 
-  const start = (actor: Principal, workflow: string, input: unknown): Decision =>
-    authorize(actor, `${WORKFLOW_ACTION}${workflow}`, undefined, { input }, []);
+  const start = (actor: Principal, workflow: string, input: unknown, approvals: readonly ApprovalState[] = []) =>
+    authorize(actor, `${WORKFLOW_ACTION}${workflow}`, undefined, { input }, approvals);
 
   const preview = (requests: readonly PreviewRequest[]): PreviewAnswer[] =>
     requests.map(({ principal: actor, action, resource }) => {
@@ -336,7 +354,30 @@ export function cedarPolicy(
       return open ? { answer: "depends", rule: ruleOf(open) } : { answer: "allow" };
     });
 
-  return Object.freeze(Object.assign(decide, { kind: "cedar" as const, version, preview, start }));
+  return Object.freeze(Object.assign(decide, { version, preview, start }));
+}
+
+/**
+ * The policy of the repo at `root`: its `policies/**\/*.cedar` over `resolved` and the people its
+ * data files declare (`readPeople`, `cedarPolicy`), or `allowAll` when it has none. With problems
+ * (`loadPolicies`, `validatePolicies`), each a printable line (`file:line:col: <policy id>:
+ * <message>`), a policy that refuses every call, start and preview naming the first: a repo never
+ * runs on part of its rules.
+ */
+export function policyAt(
+  root: string | undefined,
+  resolved: Pick<ResolvedConfig, "ops" | "workflows" | "collections">,
+): { policy: Policy; problems: string[] } {
+  const files = root === undefined ? [] : readPolicyFiles(root);
+  if (!files.length) return { policy: allowAll, problems: [] };
+  const { people } = readPeople(root);
+  const { policies, problems } = loadPolicies(files);
+  problems.push(...validatePolicies(resolved, policies, people));
+  if (!problems.length) return { policy: cedarPolicy(resolved, policies, people), problems: [] };
+  const lines = problems.map(({ policy, ...p }) =>
+    problemLine({ ...p, message: policy ? `${policy}: ${p.message}` : p.message }),
+  );
+  return { policy: denyAll(`The policies do not hold: ${lines[0]}`), problems: lines };
 }
 
 /** A policy as a preview names it. */

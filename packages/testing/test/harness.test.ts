@@ -1,6 +1,6 @@
 import { ghost } from "@sanoma-ai/connector-ghost";
 import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
-import { allowAll, defineWorkflow } from "@sanoma-ai/workflows";
+import { defineWorkflow } from "@sanoma-ai/workflows";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { useTestApp } from "../src/harness.ts";
@@ -21,10 +21,7 @@ const draft = defineWorkflow({
 const alice = { id: "alice" };
 
 describe("useTestApp", () => {
-  const app = useTestApp(
-    { workflows: [draft], connectors: [withFake(ghost, blog)], policy: allowAll },
-    { databaseUrl },
-  );
+  const app = useTestApp({ workflows: [draft], connectors: [withFake(ghost, blog)] }, { databaseUrl });
 
   it("keeps one config, so the client reads both runs across a restart", async () => {
     // On the database given, whatever the config says.

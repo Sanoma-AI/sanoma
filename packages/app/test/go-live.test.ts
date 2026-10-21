@@ -13,16 +13,7 @@ import { fakeSupabase } from "@sanoma-ai/connector-supabase/fake";
 import { testDatabaseUrl, waitFor, withFake } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import { fakeHost } from "@sanoma-ai/testing/host";
-import {
-  allow,
-  approve,
-  approvedFor,
-  definePolicy,
-  isEnded,
-  memoryLedger,
-  resolveConfig,
-  type SanomaConfig,
-} from "@sanoma-ai/workflows";
+import { isEnded, memoryLedger, resolveConfig, type SanomaConfig } from "@sanoma-ai/workflows";
 import { describeConfig, readDataFiles, readLockfile } from "@sanoma-ai/workflows/describe";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -48,9 +39,26 @@ const remotes = join(dir, "remotes");
 const remote = join(remotes, "acme", "acme-ops.git");
 const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
 
-// The company: a first commit, nothing in resources/.
+// The company: a first commit, its people and its policy, which holds every change for the lead,
+// once per run, as a team would.
 mkdirSync(root);
 writeFileSync(join(root, "package.json"), `${JSON.stringify({ name: "acme-ops", private: true }, null, 2)}\n`);
+mkdirSync(join(root, "resources"));
+writeFileSync(
+  join(root, "resources/people.ts"),
+  `import { sanoma } from "sanoma/resources";
+
+export const alice = sanoma.person({ id: "alice" });
+export const lead = sanoma.person({ id: "lead" });
+`,
+);
+mkdirSync(join(root, "policies"));
+writeFileSync(
+  join(root, "policies/changes.cedar"),
+  `@hold("lead")
+forbid (principal, action in Sanoma::Action::"effect:write", resource);
+`,
+);
 // Every git here signs as the test, and reaches GitHub's URLs in the bare repositories under `remotes`.
 const gitConfig = join(dir, "gitconfig");
 writeFileSync(
@@ -85,14 +93,9 @@ beforeAll(async () => {
 });
 
 const githubFake = fakeGithub();
-// The policy holds every change for the lead, once per run, as a team would.
-const policy = definePolicy((call) =>
-  call.effect === "write" && !approvedFor(call.run.approvals, call.op.id, "lead") ? approve("lead") : allow(),
-);
 const config: SanomaConfig = {
   workflows: [],
   connectors: [withFake(github, githubFake), withFake(supabase, fakeSupabase()), host.connector],
-  policy,
   ledger: memoryLedger(),
   root,
 };

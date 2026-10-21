@@ -37,7 +37,7 @@ describe("check", () => {
       "wrote .sanoma/schema.cedarschema",
       "tsc",
       "wrote .oxlintrc.json",
-      "oxlint workflows policies",
+      "oxlint workflows",
       "scenarios",
     ]);
     expect(readFileSync(join(dir, ".sanoma/api.ts"), "utf8")).toContain("hello: WorkflowFn<");
@@ -122,65 +122,46 @@ export default defineWorkflow({
         { databaseUrl, log: (l) => log.push(l) },
       );
       expect(result).toEqual({ ok: true, problems: [] });
-      expect(log).toContain("oxlint workflows policies resources");
+      expect(log).toContain("oxlint workflows resources");
     } finally {
       rmSync(own, { recursive: true, force: true });
     }
   }, 180_000);
 
-  it("decides with policies/*.cedar when the config names no policy, and reports what is wrong with them", async () => {
-    // Node imports a config once per process: a copy each, its config written before it is loaded.
-    const both = copyFixture();
+  it("decides with policies/*.cedar, and reports what is wrong with them at their place, running no scenario", async () => {
     const own = copyFixture();
     try {
-      const rule = 'forbid (principal, action == Sanoma::Action::"ghost.post.publish", resource);\n';
-      writeFileSync(join(both, "policies/publish.cedar"), rule);
-      // Beside the config's policy: one or the other.
-      expect((await check(await loadIn(both), { databaseUrl, log: () => {} })).problems).toContain(
-        "policies/publish.cedar: sanoma.config.ts names a `policy` too; a repo decides with its policies/*.cedar or its policy, not both",
-      );
-
-      rmSync(join(own, "policies/policy.ts"));
-      writeFileSync(
-        join(own, "sanoma.config.ts"),
-        readFileSync(join(own, "sanoma.config.ts"), "utf8")
-          .replace('import policy from "./policies/policy.ts";\n', "")
-          .replace("  policy,\n", ""),
-      );
+      mkdirSync(join(own, "policies"));
       // A field the operation's input does not have, at its line and column.
       const cedar = join(own, "policies/publish.cedar");
       writeFileSync(
         cedar,
         '@reason("Not that post")\nforbid (principal, action == Sanoma::Action::"ghost.post.publish", resource)\nwhen { context.input.idd == "never" };\n',
       );
-      const bad = await check(await loadIn(own), { databaseUrl, log: () => {} });
+      const log: string[] = [];
+      const bad = await check(await loadIn(own), { databaseUrl, log: (l) => log.push(l) });
       expect(bad.ok).toBe(false);
       expect(bad.problems).toEqual([
         expect.stringMatching(
           /^policies\/publish\.cedar:3:8: policies\/publish\.cedar#1: .*attribute `input\.idd` in context for Sanoma::Action::"ghost\.post\.publish" not found \(did you mean `id`\?\)$/,
         ),
       ]);
+      expect(log).toContain("no scenarios: the policies do not hold");
 
       // Valid: the scenario runs under it, and publishes.
       writeFileSync(cedar, readFileSync(cedar, "utf8").replace("input.idd", "input.id"));
       const loaded = await loadIn(own);
       expect(await check(loaded, { databaseUrl, log: () => {} })).toEqual({ ok: true, problems: [] });
-      expect(loaded.config.policy?.kind).toBe("cedar");
+      expect(loaded.resolved.policyProblems).toEqual([]);
     } finally {
-      for (const copy of [both, own]) rmSync(copy, { recursive: true, force: true });
+      rmSync(own, { recursive: true, force: true });
     }
   }, 180_000);
 
   it("passes a @hold for a group once resources/people.ts declares it", async () => {
     const own = copyFixture();
     try {
-      rmSync(join(own, "policies/policy.ts"));
-      writeFileSync(
-        join(own, "sanoma.config.ts"),
-        readFileSync(join(own, "sanoma.config.ts"), "utf8")
-          .replace('import policy from "./policies/policy.ts";\n', "")
-          .replace("  policy,\n", ""),
-      );
+      mkdirSync(join(own, "policies"));
       writeFileSync(
         join(own, "policies/publish.cedar"),
         '@hold("finance")\nforbid (principal, action == Sanoma::Action::"ghost.post.publish", resource)\nwhen { context.input.id == "never" };\n',
@@ -212,7 +193,7 @@ export default defineWorkflow({
     writeFileSync(join(dir, "sites/x/routes/index.ts"), "export const key = process.env.KEY;\n");
     const log: string[] = [];
     const { problems } = await check(await load(), { databaseUrl, log: (l) => log.push(l) });
-    expect(log).toContain("oxlint workflows policies resources sites");
+    expect(log).toContain("oxlint workflows resources sites");
     expect(problems).toContainEqual(
       expect.stringMatching(
         /^sites\/x\/routes\/index\.ts:1:20: Unexpected use of 'process'\. A site runs in the browser/,

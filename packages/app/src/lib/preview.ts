@@ -1,7 +1,7 @@
-import type { Approver } from "@sanoma-ai/workflows";
+import type { Approver, PreviewAnswer } from "@sanoma-ai/workflows";
 import type { OpEntry, WorkflowEntry } from "@sanoma-ai/workflows/describe";
 import { WORKFLOW_ACTION } from "@sanoma-ai/workflows/shared";
-import type { PreviewQuery, PreviewResult } from "../api.ts";
+import type { PreviewQuery } from "../api.ts";
 
 // The run form's "will ask" line: what the policy would answer the person for a workflow's start
 // and every operation it may call, before the run starts (`previewFn`).
@@ -19,9 +19,6 @@ export function previewRequests(workflow: WorkflowEntry, ops: ReadonlyMap<string
 
 const AND = new Intl.ListFormat("en", { type: "conjunction" });
 
-/** The line for a policy that cannot be asked ahead (a `definePolicy` function). */
-export const CANNOT_ASK = "This policy cannot be asked ahead.";
-
 /** The action as the line names it: the start, or the operation's id. */
 const named = (id: string) => (id.startsWith(WORKFLOW_ACTION) ? "the start" : id);
 
@@ -31,17 +28,15 @@ const asked = (approver: Approver) => (typeof approver === "string" ? approver :
 /**
  * What the policy will do ahead of the run, in one line: nothing when it allows everything;
  * "Will ask finance before the start" for each approver it holds for; "<rule> refuses <op>: <its
- * reason>" for a deny; "<rule> may hold <op>, depending on the input" when the input decides; and
- * "This policy cannot be asked ahead" when it cannot be (a `definePolicy` function).
+ * reason>" for a deny; and "<rule> may hold <op>, depending on the input" when the input decides.
  */
-export function willAsk(requests: PreviewQuery, answers: readonly PreviewResult[]): string | undefined {
-  if (answers.some(({ answer }) => answer === "custom")) return CANNOT_ASK;
+export function willAsk(requests: PreviewQuery, answers: readonly PreviewAnswer[]): string | undefined {
   // By approver, a person and a group of one name apart: each named as the line names it.
   const holds = new Map<string, { who: string; actions: string[] }>();
   const others: string[] = [];
   answers.forEach((a, i) => {
     const action = named(requests[i]!.action.id);
-    if (a.answer === "custom" || a.answer === "allow") return;
+    if (a.answer === "allow") return;
     const rule = a.rule ? (a.rule.title ?? a.rule.id) : "The policy";
     if (a.answer === "hold") {
       // A hold always names its approver (`cedarPolicy`).

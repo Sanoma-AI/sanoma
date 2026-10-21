@@ -4,7 +4,7 @@ import { type DBOSClient, Error as DBOSErrors, type WorkflowStatusString } from 
 import type { Pool } from "pg";
 import { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, messageKeyOf, topicOf } from "./approvals.ts";
-import { beforeOf, decideCall, decideStart, recorded } from "./call.ts";
+import { beforeOf, decideCall, decideStart, recorded, startHoldOf } from "./call.ts";
 import { collectionsDriver } from "./collection.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { deleteCredential, storeCredential, storedCredentials, storedSecrets } from "./credentials.ts";
@@ -25,11 +25,11 @@ import {
 } from "./errors.ts";
 import { insertRecord, type LedgerRecord, type OwnedLedger, ownedLedger } from "./ledger.ts";
 import type { CallContext, Driver, Op } from "./op.ts";
-import type { RecordedDecision } from "./policy.ts";
+import { allowAll, type RecordedDecision } from "./policy.ts";
+import { admit, readPeople } from "./resources.ts";
 import type { RunArgs, StartHold } from "./run.ts";
 import type { Secrets } from "./secret.ts";
 import {
-  approverLabel,
   BUILT_IN_WORKFLOWS,
   CALL_WORKFLOW,
   DATA_VENDOR,
@@ -217,14 +217,15 @@ export class SanomaClient {
       }
       workflow = named;
     }
-    parseOrThrow(workflow.input, input, `The input does not match ${workflow.name}'s schema`);
+    // The policy decides the start on the input as parsed, its defaults filled, as the Cedar schema types it.
+    const parsed = parseOrThrow(workflow.input, input, `The input does not match ${workflow.name}'s schema`);
     const { runId } = options;
     const sandbox = parseOrThrow(
       z.string().min(1).optional(),
       options.sandbox,
       "`sandbox` must be the name of a scenario in the config's `scenarios/`",
     );
-    const hold = await this.startHold(workflow.name, input, startedBy, runId);
+    const hold = await this.startHold(workflow.name, parsed, startedBy, runId);
     const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }), ...(hold && { hold }) };
     const { onBehalfOf } = startedBy;
     // An id DBOS has already returns that run, unless it is another workflow's, which DBOS refuses.
@@ -271,14 +272,12 @@ export class SanomaClient {
     runId: string | undefined,
   ): Promise<StartHold | undefined> {
     const { policy } = this.config;
-    if (BUILT_IN_WORKFLOWS.has(workflow) || !policy.start) return undefined;
+    if (BUILT_IN_WORKFLOWS.has(workflow) || policy === allowAll) return undefined;
     if (runId !== undefined && (await this.row(runId))) return undefined;
-    const decision = await decideStart(policy, workflow, input, startedBy);
+    const decision = decideStart(policy, workflow, input, startedBy);
     if (decision.kind === "allow") return undefined;
-    const action = `${WORKFLOW_ACTION}${workflow}`;
-    if (decision.kind === "deny") throw new PolicyDeniedError(action, decision.reason);
-    const { approver, title = `${action} needs ${approverLabel(approver)}`, reasons } = decision;
-    return { approver, title, ...(reasons && { reasons }) };
+    if (decision.kind === "deny") throw new PolicyDeniedError(`${WORKFLOW_ACTION}${workflow}`, decision.reason);
+    return startHoldOf(workflow, decision);
   }
 
   /**
@@ -326,7 +325,7 @@ export class SanomaClient {
       ),
     );
     const run = { id: runId, workflow: CALL_WORKFLOW, approvals: [] };
-    const decision = await decideCall(policy, op, parsed, actor, run, before);
+    const decision = decideCall(policy, op, parsed, actor, run, before);
     if (decision.kind === "deny") throw new PolicyDeniedError(op.id, decision.reason);
     if (decision.kind === "approve") {
       await this.start(CALL_WORKFLOW, held.input, { startedBy: actor, runId: heldId });
@@ -674,12 +673,13 @@ export class SanomaClient {
    * loads it into its environment, unless its environment sets the variable itself. Refuses
    * (`invalid_input`) a name no driver declares, and a value the variable's schema refuses, with
    * the schema's reason and never the value; an empty value too (`clearCredential` unsets one).
-   * Nothing records the value but its row, which records `by` and when.
+   * Nothing records the value but its row, which records `by` and when. `by` is admitted as
+   * `start`'s `startedBy` is (`not_admitted`).
    */
   async setCredential(name: string, value: string, options: { by: string }): Promise<void> {
+    const setBy = await this.admittedBy(options);
     // Checked against every declaration of the name, as the worker checks it.
     const statuses = this.declared(name, (n) => (n === name ? value : undefined));
-    const setBy = actorOf(options);
     const refused = statuses.find((c) => c.status !== "set");
     if (refused) {
       const problem = refused.problem ?? "it is empty; clear it to unset it";
@@ -694,11 +694,11 @@ export class SanomaClient {
   /**
    * Deletes the stored value of a declared variable, and tells the workers, which unset it unless
    * their environment sets it. `by` is who asks; nothing records it once the row is gone.
-   * Refuses (`invalid_input`) a name no driver declares.
+   * Refuses (`invalid_input`) a name no driver declares, and `by` as `setCredential` does.
    */
   async clearCredential(name: string, options: { by: string }): Promise<void> {
+    await this.admittedBy(options);
     this.declared(name, () => undefined);
-    actorOf(options);
     await deleteCredential(await this.credentialsDb(), name);
   }
 
@@ -712,7 +712,7 @@ export class SanomaClient {
     if ([...credentialsOf(this.drivers, () => undefined).values()].flat().some((c) => c.name === name)) {
       return this.setCredential(name, value, options);
     }
-    const setBy = actorOf(options);
+    const setBy = await this.admittedBy(options);
     const problem = !VARIABLE.test(name) ? "That is not a variable name" : !value ? "Enter a value" : undefined;
     if (problem) {
       const path = VARIABLE.test(name) ? "value" : "name";
@@ -798,9 +798,13 @@ export class SanomaClient {
    * a caller gives, and an id nobody declares is `not_admitted`.
    */
   private async admitted(principal: Principal): Promise<Principal> {
-    // Loaded when asked, not with the client: the reader parses with oxc-parser.
-    const { admit, readPeople } = await import("./resources.ts");
     return admit(principal, readPeople(this.config.root));
+  }
+
+  /** `options.by`, who sets or clears a credential, admitted (`admitted`): their id. */
+  private async admittedBy(options: { by: string }): Promise<string> {
+    const by = parseOrThrow(z.string().min(1), options?.by, '`by` must name who is asking, such as "alice"');
+    return (await this.admitted({ id: by })).id;
   }
 
   /** Refuses a run id whose run, as stored, was started with another input, by someone else, or in another sandbox. */
@@ -917,10 +921,6 @@ export interface StoredSecret {
 
 /** What an environment variable's name looks like. */
 const VARIABLE = /^[A-Z_][A-Z0-9_]*$/;
-
-/** `options.by`, who sets or clears a credential: a name, or `invalid_input`. */
-const actorOf = (options: { by: string }): string =>
-  parseOrThrow(z.string().min(1), options?.by, '`by` must name who is asking, such as "alice"');
 
 const alreadyDecided = (runId: string, a: ApprovalState) =>
   new SanomaError("already_decided", `${a.id} on run ${runId} was already ${a.status} by ${a.decidedBy}`, {

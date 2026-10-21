@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
-import { allowAll, defineConfig, memoryLedger, SanomaClient, startWorker, type Worker } from "@sanoma-ai/workflows";
+import { defineConfig, memoryLedger, SanomaClient, startWorker, type Worker } from "@sanoma-ai/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { companyFakes } from "../../workflows/test/fixtures/company/fakes.ts";
 import { type App, startApp } from "../src/index.ts";
@@ -67,7 +67,6 @@ describe("the change view in the app", () => {
   const config = defineConfig({
     workflows: [reviewPlan],
     connectors: company.connectors,
-    policy: allowAll,
     ledger: memoryLedger(),
     databaseUrl: testDatabaseUrl("app_plan"),
     root,

@@ -1,7 +1,7 @@
 import type { z } from "zod";
 import { type LintProblem, readSource, type SourceFile } from "./ast.ts";
 import { type Field, recordSchemaOf } from "./collection.ts";
-import { connectorsOf, resolveConfig, type SanomaConfig } from "./config.ts";
+import { connectorsOf, resolveConfig, rootOf, type SanomaConfig } from "./config.ts";
 import { type Builtin, jsonSchemaOf, opIdsOf, type Use } from "./define.ts";
 import { isDirect } from "./direct.ts";
 import { lintWorkflow } from "./lint.ts";
@@ -17,7 +17,7 @@ import {
   type ResourceProblem,
 } from "./resources.ts";
 import { apiNameProblem } from "./sdk.ts";
-import { apiNameOf, BUILT_IN_WORKFLOWS, DATA_VENDOR } from "./shared.ts";
+import { apiNameOf, BUILT_IN_WORKFLOWS, DATA_VENDOR, problemLine } from "./shared.ts";
 import { readSites, type SiteEntry } from "./sites.ts";
 
 // `@sanoma-ai/workflows/describe`: what a UI renders from, apart from the main entry.
@@ -28,7 +28,6 @@ export {
   admit,
   readDataFiles,
   readPeople,
-  readResources,
   type DataFiles,
   type DeclaredCollection,
   type DeclaredPeople,
@@ -38,6 +37,20 @@ export {
 // The writer: setting a resource's fields in its data file, and rendering a new one.
 export { formatOptions, renderDataFile, setFields, type DataFileContent } from "./writer.ts";
 export { Reference, type DataValue } from "./datafile.ts";
+
+/**
+ * The resources the config's data files declare, read without importing or running them; throws
+ * one error listing every problem, each at `file:line:column`, for a test or CI to fail on.
+ * `describeConfig` lists the same, with the problems beside them instead.
+ */
+export function readResources(config: SanomaConfig): DeclaredResource[] {
+  const { resources, problems } = readDataFiles(rootOf(config), connectorsOf(config));
+  if (problems.length) {
+    const lines = problems.map((p) => `  ${problemLine(p)}`);
+    throw new Error(`The resources' data files have problems:\n${lines.join("\n")}`);
+  }
+  return resources;
+}
 export {
   LOCKFILE,
   readLockfile,
@@ -188,8 +201,11 @@ export interface ConfigDescription {
   orphans: DataFiles["orphans"];
   /** What is wrong in the data files (`readDataFiles`), each at its file, relative to the root, line and column. A workflow's are on its entry. */
   problems: ResourceProblem[];
-  /** `defined` is false for `allowAll`; `kind` is `cedar` for `policies/*.cedar` (`cedarPolicy`), else `function`. */
-  policy: { defined: boolean; kind: "cedar" | "function"; version?: string };
+  /**
+   * `defined` when the root has `policies/**\/*.cedar` (else the policy is `allowAll`), with their
+   * `version`, or while they have `problems` (`policyProblems`), none: then every call and start is refused.
+   */
+  policy: { defined: boolean; version?: string; problems?: string[] };
   /**
    * The sites under `sites/`, by name, with what each calls (`readSites`), and its calls to what
    * the config does not have as its problems; none when the root has no `sites/`.
@@ -301,8 +317,8 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     problems: dataFiles.problems,
     policy: {
       defined: resolved.policy !== allowAll,
-      kind: resolved.policy.kind ?? "function",
       ...(resolved.policy.version === undefined ? {} : { version: resolved.policy.version }),
+      ...(resolved.policyProblems.length ? { problems: resolved.policyProblems } : {}),
     },
     sites: readSites(resolved.root, { workflows, collections, ops }),
   };

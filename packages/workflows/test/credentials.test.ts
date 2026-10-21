@@ -10,7 +10,6 @@ import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
-  allowAll,
   defineConnector,
   defineDriver,
   defineWorkflow,
@@ -64,7 +63,6 @@ const databaseUrl = testDatabaseUrl("credentials");
 const config: SanomaConfig = {
   workflows: [getThing],
   connectors: [acmeOn(acmeDriver)],
-  policy: allowAll,
   ledger: memoryLedger(),
   databaseUrl,
 };
@@ -517,7 +515,6 @@ describe("encryption at rest", () => {
       root: appRoot("sanoma-test-vault"),
       workflows: [makePassword],
       connectors: [withSetup(vault, { driver: () => vaultDriver })],
-      policy: allowAll,
       ledger: memoryLedger(),
       databaseUrl,
     };

@@ -34,12 +34,11 @@ export const APPROVAL_TONE: Record<ApprovalState["status"], Tone> = {
 export const DECISION_TONE: Record<RecordedDecision["kind"], Tone> = { allow: "ok", deny: "bad", approve: "waiting" };
 
 /** A preview's answer (the Permissions grid's cells): a hold waits on someone, the input decides `depends`. */
-export const PREVIEW_TONE: Record<PreviewAnswer["answer"] | "custom", Tone> = {
+export const PREVIEW_TONE: Record<PreviewAnswer["answer"], Tone> = {
   allow: "off",
   hold: "waiting",
   deny: "bad",
   depends: "active",
-  custom: "idle",
 };
 
 /** A resource's verdict in a drift check: drifted wants a look, gone or unreadable is wrong, absent is not made (or bound) yet. */

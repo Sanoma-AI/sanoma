@@ -29,16 +29,17 @@ export function PermissionsPanel() {
   );
 }
 
-/** The policy's kind, Cedar or a function (or none), and its version when it has one: for `Facts`. */
+/** The policy, Cedar or none, and its version when it has one: for `Facts`. */
 export function PolicyFacts({ policy }: { policy: PermissionsResponse["policy"] }) {
-  const kind = !policy.defined
-    ? "None"
-    : policy.kind === "cedar"
-      ? "Cedar, policies/*.cedar"
-      : "A function, definePolicy";
   return (
     <>
-      <Fact label="Policy">{kind}</Fact>
+      <Fact label="Policy">
+        {policy.problems
+          ? "Cedar, policies/*.cedar, which do not hold: all refused"
+          : policy.defined
+            ? "Cedar, policies/*.cedar"
+            : "None"}
+      </Fact>
       {policy.version !== undefined && (
         <Fact label="Version">
           <code>{policy.version}</code>

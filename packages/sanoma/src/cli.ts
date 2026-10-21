@@ -110,20 +110,18 @@ const parse = (argv: string[]) =>
 const port = () => Number(process.env.SANOMA_APP_PORT ?? 3000);
 
 /**
- * The config, loaded and resolved, its policy made from `policies/*.cedar` when it names none
- * (`usePolicies`): a problem with them is a `UsageError`, so nothing starts on policies that do
- * not hold. Without `policies`, they are left to the caller (`check` reports them).
+ * The config, loaded and resolved, with its policy from `policies/**\/*.cedar` (`policyAt`): a
+ * problem with them is a `UsageError`, so nothing starts on policies that do not hold. Without
+ * `policies`, they are left to the caller (`check` reports them).
  */
 async function load({ policies = true } = {}): Promise<Loaded> {
   const loaded = await loadConfig();
   const { resolveConfig } = await import("@sanoma-ai/workflows");
-  const resolved = { ...loaded, resolved: resolveConfig(loaded.config) };
-  if (policies) {
-    const { usePolicies } = await import("./policies.ts");
-    const problems = await usePolicies(resolved);
-    if (problems.length) throw new UsageError(`The policies do not hold:\n${problems.join("\n")}`);
+  const resolved = resolveConfig(loaded.config);
+  if (policies && resolved.policyProblems.length) {
+    throw new UsageError(`The policies do not hold:\n${resolved.policyProblems.join("\n")}`);
   }
-  return resolved;
+  return { ...loaded, resolved };
 }
 
 /**

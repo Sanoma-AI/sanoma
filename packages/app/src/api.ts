@@ -321,14 +321,11 @@ export const PreviewQuery = z
   .max(200) satisfies z.ZodType<Omit<PreviewRequest, "principal">[]>;
 export type PreviewQuery = z.infer<typeof PreviewQuery>;
 
-/** The policy's answer to each, in order: `custom` for every one when it cannot be asked ahead (a `definePolicy` function). */
-export type PreviewResult = PreviewAnswer | { answer: "custom" };
-
 /** A row of the Permissions grid: a workflow (its start) or an operation, and the policy's answer for each column. */
 export interface PermissionsRow {
   id: string;
   title?: string;
-  cells: PreviewResult[];
+  cells: PreviewAnswer[];
 }
 
 /**
