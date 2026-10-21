@@ -3,7 +3,7 @@ import type { ApprovalState, Builtin, Effect, LedgerRecord, RecordedDecision } f
 import type { ResourceProblem } from "@sanoma-ai/workflows/describe";
 import { problemAt } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { useMatches } from "@tanstack/react-router";
+import { Link, useMatches } from "@tanstack/react-router";
 import { cva, type VariantProps } from "class-variance-authority";
 import {
   ChevronRightIcon,
@@ -35,7 +35,7 @@ import { ButtonGroup } from "#/components/ui/button-group.tsx";
 import { Card, CardTitle } from "#/components/ui/card.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
-import { Item, ItemContent, ItemDescription, ItemTitle } from "#/components/ui/item.tsx";
+import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
 import { shortId } from "#/lib/apply-plan.ts";
@@ -658,6 +658,32 @@ export function Section({ title, children }: { title: ReactNode; children: React
       <SubsectionTitle>{title}</SubsectionTitle>
       {children}
     </div>
+  );
+}
+
+/** "Used by": the workflows that may call what the page shows, each linking to its page. */
+export function UsedBy({ workflows }: { workflows: { name: string; title?: string | undefined }[] }) {
+  return (
+    <Region title="Used by">
+      {workflows.length === 0 ? (
+        <None />
+      ) : (
+        <ItemGroup>
+          {workflows.map((wf) => (
+            <LinkItem key={wf.name} variant="outline" size="xs">
+              <Link to="/workflows/$name" params={{ name: wf.name }}>
+                <ItemContent>
+                  <ItemTitle>{wf.title ?? wf.name}</ItemTitle>
+                </ItemContent>
+                <ItemActions>
+                  <ChevronRightIcon className="size-4" />
+                </ItemActions>
+              </Link>
+            </LinkItem>
+          ))}
+        </ItemGroup>
+      )}
+    </Region>
   );
 }
 

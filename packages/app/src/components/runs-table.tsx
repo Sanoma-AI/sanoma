@@ -11,10 +11,23 @@ import { plural, SandboxBadge, Tip, ToneBadge, When } from "./common.tsx";
  * A table row that opens `link` wherever it is clicked. Its first cell holds the same link, for
  * the keyboard and a new tab, which stops its click from reaching the row.
  */
-export function LinkRow({ link, children }: { link: NavigateOptions; children: ReactNode }) {
+export function LinkRow({
+  link,
+  selected,
+  children,
+}: {
+  link: NavigateOptions;
+  /** Marks the row as the one open. */
+  selected?: boolean;
+  children: ReactNode;
+}) {
   const navigate = useNavigate();
   return (
-    <TableRow className="cursor-pointer" onClick={() => void navigate(link)}>
+    <TableRow
+      className="cursor-pointer"
+      data-state={selected ? "selected" : undefined}
+      onClick={() => void navigate(link)}
+    >
       {children}
     </TableRow>
   );

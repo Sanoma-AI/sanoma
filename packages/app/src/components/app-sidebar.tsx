@@ -9,6 +9,7 @@ import {
   PlugIcon,
   RocketIcon,
   ShieldCheckIcon,
+  TableIcon,
   WorkflowIcon,
 } from "lucide-react";
 import { type CSSProperties, type MouseEvent, type ReactNode, type RefObject, Suspense, useRef, useState } from "react";
@@ -40,6 +41,7 @@ import {
   usePageSection,
   usePanel,
 } from "./panels/panel.tsx";
+import { DataPanel } from "./panels/data-panel.tsx";
 import { SitesPanel } from "./panels/sites-panel.tsx";
 import { WorkflowPanel } from "./panels/workflow-panel.tsx";
 import { WorkflowsPanel } from "./panels/workflows-panel.tsx";
@@ -61,6 +63,8 @@ const SECTIONS = [
   // The company's sites, shown only when it has some: its link is the first site's home, which
   // only the build knows (`useSites`).
   { to: undefined, label: "Sites", icon: AppWindowIcon, panel: "sites" },
+  // The company's collections, shown only when it has some.
+  { to: "/data", label: "Data", icon: TableIcon, panel: "data" },
 ] as const satisfies readonly { to: string | undefined; label: string; icon: LucideIcon; panel: string | undefined }[];
 
 type Section = (typeof SECTIONS)[number];
@@ -152,6 +156,8 @@ function PanelView({ panel }: { panel: Panel }) {
       return <WorkflowPanel name={panel.name} />;
     case "sites":
       return <SitesPanel />;
+    case "data":
+      return <DataPanel />;
   }
 }
 
@@ -167,6 +173,7 @@ function SectionBar({
   peek: PopoverPrimitive.Handle<PanelSection> | undefined;
 }) {
   const { data: appName } = useSuspenseQuery({ ...configQuery(), select: (config) => config.appName });
+  const { data: hasData } = useSuspenseQuery({ ...configQuery(), select: (config) => config.collections.length > 0 });
   // Sites, when there are sites: its link, the first page a site lists, and whether the page is
   // a site's, which lights it.
   const sites = useSites();
@@ -195,7 +202,9 @@ function SectionBar({
         <SidebarGroup className="px-1.5">
           <nav aria-label="Sections">
             <SidebarMenu className="gap-1">
-              {SECTIONS.filter((section) => section.panel !== "sites" || sites.length > 0).map((section) => (
+              {SECTIONS.filter((section) =>
+                section.panel === "sites" ? sites.length > 0 : section.panel === "data" ? hasData : true,
+              ).map((section) => (
                 <SidebarMenuItem key={section.label}>
                   <SectionLink section={section} peek={section.panel && peek} sites={{ home: sitesHome, lit: onSite }}>
                     {/* After hydration only: the root loader starts this query without waiting for it,

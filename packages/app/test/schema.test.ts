@@ -9,7 +9,10 @@ import {
   issueTarget,
   toLocalInput,
 } from "../src/form/schema.ts";
+import { allowAll } from "../../workflows/src/index.ts";
+import { describeConfig } from "../../workflows/src/describe.ts";
 import { jsonSchemaOf } from "../../workflows/src/define.ts";
+import { outbound } from "../../workflows/test/fixtures/outbound/resources/data.ts";
 
 // The start form's logic, on the JSON Schema describeConfig sends. No database, no build.
 
@@ -30,6 +33,36 @@ const fields = fieldsOf(jsonSchemaOf(input))!;
 const field = (key: string) => fields.find((f) => f.key === key)!;
 
 describe("fieldsOf", () => {
+  it("reads a collection's record: a person, a date (a date or a date and time), an enum, optional fields", () => {
+    const [entry] = describeConfig({
+      workflows: [],
+      connectors: [],
+      collections: [outbound],
+      policy: allowAll,
+    }).collections;
+    const record = fieldsOf(entry!.record)!;
+    expect(record.map((f) => [f.key, f.kind, f.required])).toEqual([
+      ["company", "string", true],
+      ["contact", "string", true],
+      ["stage", "enum", true],
+      ["owner", "person", true],
+      ["lastTouched", "date", false],
+      ["seats", "number", false],
+    ]);
+    const values = initialValues(record, { company: "Acme", owner: "ada", lastTouched: "2027-05-01" });
+    expect(values).toMatchObject({ owner: "ada", lastTouched: "2027-05-01", seats: "" });
+    // An empty optional date is left out; a person is sent as typed, "" when required and empty.
+    expect(buildInput(record, { ...values, owner: "" }).input).toEqual({
+      company: "Acme",
+      contact: "",
+      owner: "",
+      lastTouched: "2027-05-01",
+    });
+    expect(buildInput(record, { ...values, lastTouched: "" }).input).not.toHaveProperty("lastTouched");
+    // A workflow's input with a date alone gets a date's control too.
+    expect(fieldsOf(jsonSchemaOf(z.object({ on: z.iso.date() })))![0]!.kind).toBe("date");
+  });
+
   it("gives each property a control by its type, with whether it is required and its default", () => {
     expect(fields.map((f) => [f.key, f.kind, f.required])).toEqual([
       ["title", "string", true],

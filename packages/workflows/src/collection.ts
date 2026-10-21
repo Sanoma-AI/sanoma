@@ -109,11 +109,17 @@ export function collection<
 /** A date or a date and time with its offset, as ISO 8601 writes them. */
 const DATE = z.union([z.iso.date(), z.iso.datetime({ offset: true })]);
 
+/**
+ * A person's id: text that is not empty, marked `format: "person"` in its JSON Schema, which a form
+ * reads to draw a person's input.
+ */
+const PERSON = z.string().min(1).meta({ format: "person" });
+
 /** The schema of a field's value, required. */
 function valueSchema(kind: Field): z.ZodType {
   if (typeof kind === "object" && "enum" in kind) return z.enum(kind.enum);
   const type = typeof kind === "string" ? kind : kind.type;
-  return { text: z.string(), person: z.string().min(1), date: DATE, number: z.number(), boolean: z.boolean() }[type];
+  return { text: z.string(), person: PERSON, date: DATE, number: z.number(), boolean: z.boolean() }[type];
 }
 
 /**

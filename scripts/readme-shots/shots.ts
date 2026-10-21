@@ -54,6 +54,34 @@ const SITE_TS = `import { defineSite } from "sanoma/site";
 export default defineSite({ title: "Launch desk" });
 `;
 
+// The data still's collection, in resources/data.ts (which the launcher imports), and its records,
+// saved through the runtime's client as dana and marketing-lead.
+const DATA_TS = `import { collection } from "sanoma/data";
+
+/** The outbound pipeline: which lead is at which stage, and who owns it. */
+export const outbound = collection({
+  name: "outbound",
+  title: "Outbound",
+  key: "company",
+  fields: {
+    company: "text",
+    contact: "text",
+    stage: { enum: ["researched", "contacted", "replied", "meeting", "won", "lost"] },
+    owner: "person",
+    lastTouched: { type: "date", optional: true },
+    seats: { type: "number", optional: true },
+  },
+});
+`;
+const LEADS = [
+  ["Acme Corp", "ada@acme.test", "meeting", "dana", "2027-05-28", 40],
+  ["Globex", "hank@globex.test", "contacted", "dana", "2027-05-20", 12],
+  ["Hooli", "gavin@hooli.test", "won", "marketing-lead", "2027-05-30", 120],
+  ["Initech", "peter@initech.test", "replied", "marketing-lead", "2027-05-26", 25],
+  ["Stark Industries", "pepper@stark.test", "researched", "marketing-lead", undefined, undefined],
+  ["Umbrella", "alice@umbrella.test", "researched", "dana", undefined, undefined],
+] as const;
+
 const started = Date.now();
 const say = (line: string) => console.log(`readme:shots ${((Date.now() - started) / 1000).toFixed(0)}s: ${line}`);
 
@@ -123,8 +151,9 @@ try {
 
   const frames = join(work, "frames");
   const runPath = await recordDemo(browser, base, frames);
-  say("demo recorded; seeding two more runs that wait on marketing-lead");
+  say("demo recorded; seeding two more runs that wait on marketing-lead, and the outbound leads");
   await seedPendingRuns(acme);
+  await seedLeads(acme);
 
   const captured = join(work, "assets");
   mkdirSync(captured);
@@ -142,12 +171,18 @@ try {
     fullPage: true,
   });
   await still(browser, base, "/sites/launches", join(captured, "site.png"), { sidebar: true, fullPage: true });
+  // The grid sorted by stage, a record open in the form beside it.
+  await still(browser, base, "/data/outbound?order=stage&record=Initech", join(captured, "data.png"), {
+    sidebar: true,
+    height: 720,
+  });
   say("stills taken; making demo.gif");
   stopIfInterrupted();
   await makeGif(frames, join(captured, "demo.gif"));
   stopIfInterrupted();
-  replaceAssets(captured, ["demo.gif", "workflow.png", "inbox.png", "run.png", "site.png"]);
-  say("wrote .github/assets: demo.gif, workflow.png, inbox.png, run.png, site.png");
+  const files = ["demo.gif", "workflow.png", "inbox.png", "run.png", "site.png", "data.png"];
+  replaceAssets(captured, files);
+  say(`wrote .github/assets: ${files.join(", ")}`);
 } catch (err) {
   // A signal's handler runs on the event loop: let one that came during a blocking call (a build)
   // run before telling a failure from an interruption. One setImmediate can fire in the same turn,
@@ -259,7 +294,35 @@ async function seedPendingRuns(acme: string): Promise<void> {
   }
 }
 
-/** A company repo named acme: the README's workflow, the config above, the packages/app README's site page, and `node_modules` reaching this checkout. */
+/**
+ * The outbound leads for the data still, through the runtime's client with acme's config and the
+ * collection its resources/data.ts declares (as the launcher adds it), each saved as its owner.
+ */
+async function seedLeads(acme: string): Promise<void> {
+  const { SanomaClient } = (await import(pathToFileURL(fromSanoma.resolve("@sanoma-ai/workflows")).href)) as Workflows;
+  const { default: config } = (await import(pathToFileURL(join(acme, "sanoma.config.ts")).href)) as {
+    default: SanomaConfig;
+  };
+  const { outbound } = (await import(pathToFileURL(join(acme, "resources/data.ts")).href)) as {
+    outbound: NonNullable<SanomaConfig["collections"]>[number];
+  };
+  const client = await SanomaClient.connect({
+    ...config,
+    collections: [outbound],
+    root: acme,
+    databaseUrl: databaseUrl.href,
+  });
+  try {
+    for (const [company, contact, stage, owner, lastTouched, seats] of LEADS) {
+      const record = { company, contact, stage, owner, ...(lastTouched && { lastTouched }), ...(seats && { seats }) };
+      await client.call("data.outbound.save", { record }, { actor: { id: owner }, id: crypto.randomUUID() });
+    }
+  } finally {
+    await client.close();
+  }
+}
+
+/** A company repo named acme: the README's workflow, the config above, the packages/app README's site page, the outbound collection, and `node_modules` reaching this checkout. */
 function writeRepo(dir: string): void {
   const readme = readFileSync(join(repo, "README.md"), "utf8").replaceAll("\r\n", "\n");
   const block = /^```ts\n\/\/ workflows\/announce\.ts\n([\s\S]*?)^```$/m.exec(readme);
@@ -274,6 +337,8 @@ function writeRepo(dir: string): void {
   mkdirSync(join(dir, "sites/launches/routes"), { recursive: true });
   writeFileSync(join(dir, "sites/launches/site.ts"), SITE_TS);
   writeFileSync(join(dir, "sites/launches/routes/index.tsx"), page[1]);
+  mkdirSync(join(dir, "resources"));
+  writeFileSync(join(dir, "resources/data.ts"), DATA_TS);
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "acme", private: true, type: "module" }));
   for (const [name, target] of [
     ["sanoma", "packages/sanoma"],
