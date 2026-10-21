@@ -22,7 +22,7 @@ import { setupStatusQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/setup/connect")({
   // `github` says how creating the App went, as its callback comes back here.
-  validateSearch: z.object({ github: z.enum(["connected", "expired", "failed", "bad-org"]).optional() }),
+  validateSearch: z.object({ github: z.enum(["connected", "expired", "failed", "bad-org", "nobody"]).optional() }),
   staticData: { crumb: "Connect GitHub and Supabase" },
   head: ({ match }) => pageTitle(match.staticData.crumb),
   loader: ({ context: { queryClient } }) => queryClient.query({ ...setupStatusQuery(), staleTime: "static" }),
@@ -32,11 +32,12 @@ export const Route = createFileRoute("/setup/connect")({
 /** What the callback came back with, said on the page. */
 const OUTCOME = {
   connected:
-    "The GitHub App is created and its keys are stored. Install it on the account that will hold the repository; sign-in uses it once the app restarts.",
+    "The GitHub App is created and its keys are stored. Install it on the account that will hold the repository; sign-in uses it once the app restarts on a host beyond this machine.",
   expired: "That link from GitHub has expired or did not start here: create the App again.",
   failed:
     "The App's keys were not stored (the app's log says why): delete the App on GitHub if it was created, then create it again.",
   "bad-org": "That is not an organization's login.",
+  nobody: "Say who you are first: the App's keys are stored as you.",
 } as const;
 
 /** The pasted tokens' rows store through the setup function, which takes these names only; nothing clears them here. */

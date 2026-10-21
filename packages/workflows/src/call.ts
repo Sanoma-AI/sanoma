@@ -321,9 +321,7 @@ const callOf = (op: Op, input: unknown, actor: Principal, run: PolicyCall["run"]
 /**
  * For a collection's `save` or `delete`, the record it replaces or removes, read once with the
  * collection's `get` (`read`): `{ before }` when there is one, else nothing, and nothing read
- * under `allowAll`, which reads no call. A record saved under fields that no longer accept it
- * (`issues`) is none: the Cedar schema types `before` by the fields, so it could not be asked
- * about, and could then be neither fixed nor deleted. A failed read is named, keeping its error's code.
+ * under `allowAll`, which reads no call. A failed read is named, keeping its error's code.
  */
 export async function beforeOf(
   policy: Policy,
@@ -345,7 +343,7 @@ export async function beforeOf(
     if (takenByDbos(err)) throw err;
     throw keepCode(new Error(`Reading the record ${op.id} replaces failed: ${errorMessage(err)}`, { cause: err }), err);
   }
-  return saved && !saved.issues?.length ? { before: saved.record } : {};
+  return saved ? { before: saved.record } : {};
 }
 
 /**

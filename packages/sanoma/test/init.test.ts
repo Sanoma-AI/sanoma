@@ -23,6 +23,7 @@ import {
   packageName,
   startCompany,
   TEMPLATE,
+  whoIsStarting,
 } from "../src/init.ts";
 import { copyFixture, ensureBuilt, runCli } from "./fixture.ts";
 import { gitIdentity } from "./git.ts";
@@ -133,6 +134,25 @@ describe("declareFounder", () => {
       'export const founder = sanoma.person({ id: "ann", name: "Ann $\' Co" });',
     );
     expect(() => declareFounder("export {};\n", { id: "ann" })).toThrow("declares no `founder`");
+  });
+});
+
+/** A `gh` signed in as `login`, first on the PATH. */
+const signedIn = (login: string) => {
+  const bin = mkdtempSync(join(tmpdir(), "sanoma-gh-"));
+  writeFileSync(join(bin, "gh"), `#!/bin/sh\necho ${login}\n`);
+  chmodSync(join(bin, "gh"), 0o755);
+  vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+};
+
+describe("whoIsStarting", () => {
+  it("takes the GitHub login as the id, unless the template's people or the runtime's agents have it", async () => {
+    signedIn("ada-ortiz");
+    expect(await whoIsStarting()).toMatchObject({ id: "ada-ortiz", github: "ada-ortiz" });
+    for (const taken of ["reviewer", "editor", "admin", "scenarios"]) {
+      signedIn(taken);
+      expect(await whoIsStarting()).toMatchObject({ id: "founder", github: taken });
+    }
   });
 });
 

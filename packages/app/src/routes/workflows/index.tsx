@@ -130,7 +130,13 @@ function ConfigFacts() {
           <Fact label="Policy">
             {config.policy.defined ? (
               <>
-                policies/*.cedar check every operation call and run start (version <code>{config.policy.version}</code>)
+                policies/*.cedar check every operation call and run start
+                {config.policy.version && (
+                  <>
+                    {" "}
+                    (version <code>{config.policy.version}</code>)
+                  </>
+                )}
               </>
             ) : (
               "none: every operation call is allowed"

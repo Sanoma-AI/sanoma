@@ -100,13 +100,18 @@ export function githubManifest(origin: string, name: string) {
 /**
  * `GET /setup/github/manifest[?org=<login>]`: a page that posts the App's manifest to GitHub at
  * once (to the organization's settings with `org`), and the signed state cookie the callback
- * checks. The person names and creates the App on GitHub's page.
+ * checks, which carries who asked: GitHub's redirect back does not bring the loopback login's
+ * name, and the App's keys are stored as that person. The person names and creates the App on
+ * GitHub's page. Nobody asking goes back to the connect page, which says so.
  */
-export function manifestPage({ description }: AppContext, request: Request): Response {
+export async function manifestPage({ description, login }: AppContext, request: Request): Promise<Response> {
   const url = new URL(request.url);
   const org = url.searchParams.get("org")?.trim();
   if (org && !/^[\w-]+$/.test(org)) return toConnect("bad-org");
+  const actor = await login.resolveActor(request);
+  if (!actor) return toConnect("nobody");
   const state = randomBytes(16).toString("base64url");
+  const signed = `${state}.${Buffer.from(actor.id).toString("base64url")}`;
   const to = new URL(
     org ? `https://github.com/organizations/${org}/settings/apps/new` : "https://github.com/settings/apps/new",
   );
@@ -123,7 +128,7 @@ export function manifestPage({ description }: AppContext, request: Request): Res
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
-      "set-cookie": cookie(request, STATE, `${state}.${stateSigner().sign(state)}`, STATE_PATH, 600),
+      "set-cookie": cookie(request, STATE, `${signed}.${stateSigner().sign(signed)}`, STATE_PATH, 600),
     },
   });
 }
@@ -137,18 +142,20 @@ export async function githubCallback(app: AppContext, request: Request): Promise
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  const [sent, signature] = (cookies(request)[STATE] ?? "").split(".");
-  if (!code || !state || !sent || !signature || sent !== state || !stateSigner().verify(sent, signature)) {
+  const [sent, who, signature] = (cookies(request)[STATE] ?? "").split(".");
+  const signed = `${sent}.${who}`;
+  if (!code || !state || !sent || !who || !signature || sent !== state || !stateSigner().verify(signed, signature)) {
     return toConnect("expired", request);
   }
+  // Who started the flow, as the manifest page admitted them.
+  const by = Buffer.from(who, "base64url").toString();
   try {
     const res = await fetch(`${API}/app-manifests/${encodeURIComponent(code)}/conversions`, {
       method: "POST",
       headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "sanoma" },
     });
     if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
-    const keys = (await res.json()) as Record<keyof typeof GITHUB_APP, unknown> & { owner?: { login?: string } };
-    const by = (await app.login.resolveActor(request))?.id ?? keys.owner?.login ?? "github";
+    const keys = (await res.json()) as Record<keyof typeof GITHUB_APP, unknown>;
     await Promise.all(
       Object.entries(GITHUB_APP).map(([field, name]) => {
         const value = keys[field as keyof typeof GITHUB_APP];
@@ -164,7 +171,7 @@ export async function githubCallback(app: AppContext, request: Request): Promise
 }
 
 /** Back to the connect page, saying how the App's creation went; the state cookie cleared. */
-function toConnect(github: "connected" | "expired" | "failed" | "bad-org", request?: Request): Response {
+function toConnect(github: "connected" | "expired" | "failed" | "bad-org" | "nobody", request?: Request): Response {
   const headers = new Headers({ location: `${CONNECT}?github=${github}` });
   if (request) headers.append("set-cookie", cookie(request, STATE, "", STATE_PATH, 0));
   return new Response(null, { status: 303, headers });

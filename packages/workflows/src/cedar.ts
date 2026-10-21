@@ -195,8 +195,8 @@ export function validatePolicies(
 }
 
 /**
- * The policy a repo's Cedar files make, the runtime's `permit` added; `kind` is `cedar`, and its
- * `version` a hash of the policies' ids and text. It decides each call with `statefulIsAuthorized`
+ * The policy a repo's Cedar files make, the runtime's `permit` added; its `version` a hash of the
+ * policies' ids and text. It decides each call with `statefulIsAuthorized`
  * over the policy set and the schema of `resolved` (`schemaOf`), each parsed once:
  *
  * - allow: `allow`, with the policies that allowed as `reasons`;
@@ -207,7 +207,9 @@ export function validatePolicies(
  *
  * An approver is a declared group (`{ group }`), a declared person's id, or the principal's
  * `onBehalfOf`; a principal acting for no one makes `on-behalf-of` a deny, "cannot resolve
- * approver". A policy that fails to evaluate is a deny naming it (Cedar would skip it).
+ * approver". A policy that fails to evaluate is a deny naming it (Cedar would skip it), as is one
+ * reading a field a `before` lacks: a record saved under fields since changed is asked about
+ * without the schema, so it can still be fixed or deleted.
  * `preview` asks the same ahead of a call, its context unknown; `start`, about a run's start.
  */
 export function cedarPolicy(
@@ -276,12 +278,16 @@ export function cedarPolicy(
     approvals: PolicyCall["run"]["approvals"],
   ): Decision => {
     const principal = directory.principal(actor);
-    const answer = cedar.statefulIsAuthorized({
-      ...requestOf(principal, action, target, () => context),
-      preparsedSchemaName: set,
-      preparsedPolicySetId: set,
-      validateRequest: true,
-    });
+    const ask = (checked: boolean) =>
+      cedar.statefulIsAuthorized({
+        ...requestOf(principal, action, target, () => context),
+        ...(checked && { preparsedSchemaName: set, validateRequest: true }),
+        preparsedPolicySetId: set,
+      });
+    let answer = ask(true);
+    // A record saved under fields since changed does not fit the schema as `before`: asked again
+    // without it (the context is plain values), a policy reading a field it lacks fails, so denies.
+    if (answer.type === "failure" && "before" in context) answer = ask(false);
     // A request the schema refuses (an input Cedar cannot hold) is denied, not an error of the call.
     if (answer.type === "failure")
       return deny(`The call does not fit the Cedar schema: ${answer.errors.map(messageOf).join("; ")}`);

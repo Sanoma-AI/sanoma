@@ -146,6 +146,9 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     await warnAboutStrandedRuns(resolved);
     const summary = unconfiguredSummary(worker.unconfigured, resolved.driversByVendor.size);
     if (summary && !options.quiet) warn(summary);
+    if (resolved.policyProblems.length) {
+      warn(`the policies do not hold, so every call and start is refused:\n  ${resolved.policyProblems.join("\n  ")}`);
+    }
   } catch (err) {
     // Once DBOS is launched, the caller gets no worker to stop: stop it here, so no run goes on
     // in a worker nobody holds, and the next startWorker launches afresh.

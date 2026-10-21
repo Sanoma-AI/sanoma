@@ -183,6 +183,11 @@ describe("the Permissions page", () => {
     expect(html).toContain('aria-label="hold · group finance: the rule for refund for someone in no group"');
     expect(html).toContain('aria-label="deny: the rule for shop.refunds.list for someone in agents"');
     expect(html.match(/>allow</g)).toHaveLength(3);
+    // The Workflows page says the policy checks every call, at its version.
+    const workflows = (await (await fetch(new URL("/workflows", app.url))).text()).replaceAll("<!-- -->", "");
+    expect(workflows).toContain(
+      `policies/*.cedar check every operation call and run start (version <code>${cedar.version}</code>)`,
+    );
   });
 
   it("picks a declared person, shows their groups, a cell's rule in a sheet, and the New run panel's will-ask line, in Chrome", async (ctx) => {

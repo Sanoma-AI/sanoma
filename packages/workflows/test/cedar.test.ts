@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { testDatabaseUrl, withFake } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { decideCall } from "../src/call.ts";
 import { sanoma } from "../src/constructors.ts";
@@ -27,6 +27,7 @@ import {
   resolveConfig,
   validatePolicies,
 } from "../src/index.ts";
+import { startWorker } from "../src/worker.ts";
 import { failure, rootWith, waitFor } from "./harness.ts";
 
 // The two policies of the Cedar investigation, against made-up operations: refunds over 10,000
@@ -583,8 +584,8 @@ when { context.input.key == "refused" };
     ).toMatchObject({ code: "policy_denied" });
   });
 
-  it("gives no record before for one saved under fields since changed, so it can be fixed and deleted", async () => {
-    // The collection as it was: no stage. The schema, which requires one, could not hold such a record as `before`.
+  it("gives a record saved under fields since changed as it was: fixed and deleted, unless a policy reads what it lacks", async () => {
+    // The collection as it was: no stage. The schema, which requires one, cannot hold such a record as `before`.
     const older = collection({ name: "leads", key: "id", fields: { id: "text" } });
     const client = await SanomaClient.connect({
       workflows: [],
@@ -594,7 +595,7 @@ when { context.input.key == "refused" };
       databaseUrl,
     });
     try {
-      for (const id of ["l8", "l9"]) {
+      for (const id of ["l8", "l9", "l10"]) {
         await client.call("data.leads.save", { record: { id } }, { actor: "ada" });
       }
     } finally {
@@ -604,6 +605,12 @@ when { context.input.key == "refused" };
     expect(await app.client.call("data.leads.save", fixed, { actor: "ada" })).toMatchObject({ key: "l9" });
     await app.client.call("data.leads.delete", { key: "l8" }, { actor: "ada" });
     expect(await app.client.call("data.leads.get", { key: "l8" }, { actor: "ada" })).toBeNull();
+    // Marking it won asks leads-won for its stage before, which it lacks: denied, not let through.
+    const won = { record: { id: "l10", stage: "won" } };
+    expect(await failure(app.client.call("data.leads.save", won, { actor: "ada" }))).toMatchObject({
+      code: "policy_denied",
+      message: expect.stringMatching(/^data\.leads\.save was denied by policy: leads-won failed: /),
+    });
   });
 });
 
@@ -648,5 +655,15 @@ when { context.input.amont > 5 };
     expect(refusing.start({ id: "ada" }, "refund", { amount: 5 })).toEqual({ kind: "deny", reason });
     expect(refusing.preview([ask("ada", "shop.refunds.create")])).toEqual([{ answer: "deny" }]);
     expect(describeConfig(at(root)).policy).toEqual({ defined: true });
+    // A worker on it starts, and says why it refuses everything.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await (await startWorker({ ...at(root), databaseUrl: testDatabaseUrl("cedar_mounts") })).stop();
+      expect(warn.mock.calls.flat().join("\n")).toContain(
+        `the policies do not hold, so every call and start is refused:\n  ${policyProblems[0]}`,
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

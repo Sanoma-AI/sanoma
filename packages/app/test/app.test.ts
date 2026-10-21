@@ -1587,6 +1587,23 @@ describe("an app configured otherwise", () => {
     ]);
   });
 
+  it("boots with policies that do not hold, and says so, as they refuse everything", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sanoma-app-policy-"));
+    mkdirSync(join(root, "policies"));
+    writeFileSync(join(root, "policies", "bad.cedar"), "forbid (principal, action, resource) when { context.nope };\n");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const refusing = await startApp({ ...config, root });
+      // It has a policy, but no version: the one it has refuses.
+      const { text } = await page("/workflows", refusing.url).finally(() => refusing.close());
+      expect(text).toContain("policies/*.cedar check every operation call and run start</");
+      expect(warn.mock.calls.flat().join("\n")).toMatch(/files have problems.*\n {2}policies\/bad\.cedar:1:\d+: /s);
+    } finally {
+      warn.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("shows the data files' problems on the resources page, and the resources it could read", async () => {
     const resources = await page("/resources", other.url);
     expect(resources.status).toBe(200);
