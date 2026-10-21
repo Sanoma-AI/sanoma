@@ -112,6 +112,20 @@ describe("the collections' driver on Postgres", () => {
     expect(await keys({ order: "stage", where: { seats: { lt: 100 } } })).toEqual(["Globex", "Initech", "Acme"]);
   });
 
+  it("orders text by its bytes whatever the database's collation, and a value of another type as missing", async () => {
+    for (const company of ["apple", "Banana"]) await call(leads.save, { record: { company, stage: "new", seats: 2 } });
+    await (
+      await pool.db()
+    ).query(`INSERT INTO ${DATA_TABLE} (collection, key, record, updated_by) VALUES ('leads', 'Acme', $1, 'leon')`, [
+      JSON.stringify({ company: "Acme", stage: "new", seats: "many" }),
+    ]);
+    expect(await keys({})).toEqual(["Acme", "Banana", "apple"]);
+    expect(await keys({ where: { company: { gte: "B" } } })).toEqual(["Banana", "apple"]);
+    expect(await keys({ where: { company: { gte: "a" } } })).toEqual(["apple"]);
+    expect(await keys({ where: { seats: { gte: 0 } } })).toEqual(["Banana", "apple"]);
+    expect(await keys({ order: "-seats" })).toEqual(["Banana", "apple", "Acme"]);
+  });
+
   it("deletes a record by its key, saying whether there was one", async () => {
     await call(leads.save, { record: { company: "Acme", stage: "new" } });
     expect(await call(leads.delete, { key: "Acme" })).toEqual({ deleted: true });

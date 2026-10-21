@@ -1,7 +1,12 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { collection, collectionsFake, recordIssues } from "../src/collection.ts";
 import { describeConfig } from "../src/describe.ts";
 import { allowAll, defineConnector, memorySecrets, type Op, resolveConfig } from "../src/index.ts";
+import { loadScenarios } from "../src/scenario.ts";
 import config from "./fixtures/outbound/sanoma.config.ts";
 import { outbound } from "./fixtures/outbound/resources/data.ts";
 import outboundNext from "./fixtures/outbound/workflows/outbound-next.ts";
@@ -160,6 +165,30 @@ describe("the collections' fake", () => {
     expect(await call(outbound.get, { key: "constructor" })).toBeNull();
   });
 
+  it('orders text by its bytes, as Postgres under COLLATE "C", and takes any key, __proto__ too', async () => {
+    fake.reset();
+    for (const company of ["apple", "Banana", "__proto__"]) await call(outbound.save, { record: { ...lead, company } });
+    expect(await keys({})).toEqual(["Banana", "__proto__", "apple"]);
+    expect(await keys({ where: { company: { gte: "_" } } })).toEqual(["__proto__", "apple"]);
+    expect(await call(outbound.get, { key: "__proto__" })).toMatchObject({ key: "__proto__" });
+    expect(await call(outbound.delete, { key: "__proto__" })).toEqual({ deleted: true });
+  });
+
+  it("takes a value of another type than its field's as missing: it matches no filter and sorts last", async () => {
+    fake.reset();
+    await call(outbound.save, { record: { ...lead, company: "Globex", seats: 3 } });
+    fake.update((state) => {
+      state.outbound!.Acme = {
+        key: "Acme",
+        record: { ...lead, seats: "many" },
+        updatedAt: "2026-10-01T00:00:00.000Z",
+        updatedBy: "leon",
+      };
+    });
+    expect(await keys({ where: { seats: { gte: 0 } } })).toEqual(["Globex"]);
+    expect(await keys({ order: "-seats" })).toEqual(["Globex", "Acme"]);
+  });
+
   it("gives back a record that no longer fits as it is, with its issues", async () => {
     fake.reset();
     fake.update((state) => {
@@ -221,6 +250,23 @@ describe("a config's collections", () => {
     expect(() => resolveConfig({ ...base, collections: outbound as never })).toThrow(
       "The config's `collections` must be an array",
     );
+  });
+
+  it("are seeded by a scenario's step, which refuses a key field other than the quoted key", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sanoma-data-feature-"));
+    try {
+      writeFileSync(
+        join(dir, "a.feature"),
+        'Feature: A\n  Scenario: B\n    Given data.outbound "Acme" has\n      | company | Globex |\n    When outbound-next runs with\n      | company | Acme |\n',
+      );
+      const resolved = resolveConfig({ ...base, workflows: [outboundNext], collections: [outbound] });
+      const { errors } = await loadScenarios({ ...resolved, scenarios: pathToFileURL(`${dir}/`) });
+      expect(errors.map((e) => e.message).join("\n")).toContain(
+        'company in data.outbound "Acme" is "Globex": it is the key, "Acme"',
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("are described: name, key, fields, the record's JSON Schema and the operations", () => {

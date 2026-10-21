@@ -301,7 +301,7 @@ export function collectionsDriver(list: readonly Collection[], pool: LazyPool): 
         const [row] = (await query(sql, [c.name, key])).rows;
         return row ? saved(row) : null;
       },
-      list: async (listing: Listing) => (await query(...listSql(c.name, listing))).rows.map(saved),
+      list: async (listing: Listing) => (await query(...listSql(c, listing))).rows.map(saved),
       save: async ({ record }: { record: Record<string, unknown> }, call) => {
         const sql =
           `INSERT INTO ${DATA_TABLE} (collection, key, record, updated_by) VALUES ($1, $2, $3, $4) ` +
@@ -320,42 +320,77 @@ export function collectionsDriver(list: readonly Collection[], pool: LazyPool): 
   return defineDriver(collectionsConnector(list), Object.fromEntries(impl) as DriverImpl<DataOps>);
 }
 
-/** The `list` query on Postgres, and its parameters. A missing field is SQL's null: it matches no filter and sorts last. */
-function listSql(of: string, { where = {}, order, limit }: Listing): [string, unknown[]] {
-  const params: unknown[] = [of];
+/** What a field's values are in JSON: `number`, `boolean`, or a `string` (text, a date, a person, an enum value). */
+type JsonType = "string" | "number" | "boolean";
+
+/** Each field's `JsonType`, by name: what `list` compares its values as. */
+const jsonTypesOf = (c: Collection): Record<string, JsonType> =>
+  Object.fromEntries(
+    Object.entries(c.fields).map(([name, kind]) => {
+      const type = typeof kind === "string" ? kind : "type" in kind ? kind.type : "text";
+      return [name, type === "number" || type === "boolean" ? type : "string"];
+    }),
+  );
+
+const SQL_TYPE = { string: "text", number: "numeric", boolean: "boolean" } as const;
+
+/**
+ * The `list` query on Postgres, and its parameters. A field's value is compared as its declared
+ * type, text byte by byte (`COLLATE "C"`, whatever the database's collation, as the fake
+ * compares it); a missing value, or one of another type, is SQL's null: it matches no filter and
+ * sorts last.
+ */
+function listSql(c: Collection, { where = {}, order, limit }: Listing): [string, unknown[]] {
+  const types = jsonTypesOf(c);
+  const params: unknown[] = [c.name];
   const param = (value: unknown) => `$${params.push(value)}`;
-  const field = (name: string) => `record -> ${param(name)}::text`;
+  const field = (name: string) => {
+    const type = types[name]!;
+    const json = `record -> ${param(name)}::text`;
+    const typed = `CASE WHEN jsonb_typeof(${json}) = '${type}' THEN (${json} #>> '{}')::${SQL_TYPE[type]} END`;
+    return type === "string" ? `(${typed}) COLLATE "C"` : typed;
+  };
+  const value = (name: string, v: unknown) => `${param(v)}::${SQL_TYPE[types[name]!]}`;
   const conditions = ["collection = $1"];
   for (const [name, condition] of Object.entries(where)) {
     if (condition === undefined) continue;
-    if (!isObject(condition)) conditions.push(`${field(name)} = ${param(JSON.stringify(condition))}::jsonb`);
+    if (!isObject(condition)) conditions.push(`${field(name)} = ${value(name, condition)}`);
     else {
-      for (const [op, value] of Object.entries(condition)) {
+      for (const [op, v] of Object.entries(condition)) {
         const sign = RANGE[op as keyof typeof RANGE];
-        if (value !== undefined) conditions.push(`${field(name)} ${sign} ${param(JSON.stringify(value))}::jsonb`);
+        if (v !== undefined) conditions.push(`${field(name)} ${sign} ${value(name, v)}`);
       }
     }
   }
+  const byKey = `key COLLATE "C"`;
   const by =
     order === undefined
-      ? "key"
-      : `${field(order.replace(/^-/, ""))} ${order.startsWith("-") ? "DESC" : "ASC"} NULLS LAST, key`;
+      ? byKey
+      : `${field(order.replace(/^-/, ""))} ${order.startsWith("-") ? "DESC" : "ASC"} NULLS LAST, ${byKey}`;
   const sql = `SELECT ${COLUMNS} FROM ${DATA_TABLE} WHERE ${conditions.join(" AND ")} ORDER BY ${by} LIMIT ${param(limit)}`;
   return [sql, params];
 }
 
-/** The fake's order of values of different types, as Postgres orders `jsonb`: strings, numbers, then booleans. */
-const rank = (v: unknown) => ({ string: 1, number: 2, boolean: 3 })[typeof v as string] ?? 4;
-
+/** Orders two values of one type as Postgres does under `COLLATE "C"`: strings by their UTF-8 bytes. */
 const compare = (a: unknown, b: unknown): number =>
-  rank(a) !== rank(b) ? rank(a) - rank(b) : (a as string) < (b as string) ? -1 : (a as string) > (b as string) ? 1 : 0;
+  typeof a === "string" && typeof b === "string"
+    ? Buffer.compare(Buffer.from(a), Buffer.from(b))
+    : (a as number) < (b as number)
+      ? -1
+      : (a as number) > (b as number)
+        ? 1
+        : 0;
+
+/** The record's value of a field when it is of the field's type; none otherwise, as for a missing one. */
+const valueIn = (record: Record<string, unknown>, name: string, type: JsonType | undefined) =>
+  typeof record[name] === type ? record[name] : undefined;
 
 /** Whether the record meets each condition of `where`, as the driver's SQL decides it. */
-function matches(record: Record<string, unknown>, where: Record<string, unknown>): boolean {
+function matches(record: Record<string, unknown>, where: Record<string, unknown>, types: Record<string, JsonType>) {
   return Object.entries(where).every(([name, condition]) => {
     if (condition === undefined) return true;
-    const value = record[name];
-    if (value === undefined || value === null) return false;
+    const value = valueIn(record, name, types[name]);
+    if (value === undefined) return false;
     if (!isObject(condition)) return compare(value, condition) === 0;
     const { gt, gte, lt, lte } = condition;
     return (
@@ -370,13 +405,13 @@ function matches(record: Record<string, unknown>, where: Record<string, unknown>
 const byKey = (a: Stored, b: Stored) => compare(a.key, b.key);
 
 /** Sorts as the driver's SQL does: by the field (missing last), then by key; by key alone without one. */
-function byOrder(order: string | undefined): (a: Stored, b: Stored) => number {
+function byOrder(order: string | undefined, types: Record<string, JsonType>): (a: Stored, b: Stored) => number {
   if (order === undefined) return byKey;
   const name = order.replace(/^-/, "");
   const sign = order.startsWith("-") ? -1 : 1;
   return (a, b) => {
-    const x = a.record[name];
-    const y = b.record[name];
+    const x = valueIn(a.record, name, types[name]);
+    const y = valueIn(b.record, name, types[name]);
     if ((x === undefined) !== (y === undefined)) return x === undefined ? 1 : -1;
     return (x === undefined ? 0 : sign * compare(x, y)) || byKey(a, b);
   };
@@ -391,18 +426,20 @@ export type CollectionsState = Record<string, Record<string, Stored>>;
  */
 export function collectionsFake(list: readonly Collection[]): Fake<CollectionsState> {
   return defineFake(collectionsConnector(list), {
-    initial: (): CollectionsState => Object.fromEntries(list.map((c) => [c.name, {}])),
+    // Null-prototype records, so any key is a record's own, `__proto__` too, as it is in Postgres.
+    initial: (): CollectionsState => Object.fromEntries(list.map((c) => [c.name, Object.create(null)])),
     ops: (state) =>
       Object.fromEntries(
         list.map((c) => {
           const records = () => state[c.name]!;
+          const types = jsonTypesOf(c);
           const saved = (stored: Stored) => answer(c, structuredClone(stored));
           const ops: Record<string, (input: any, call: CallContext) => Promise<unknown>> = {
             get: async ({ key }: { key: string }) => (Object.hasOwn(records(), key) ? saved(records()[key]!) : null),
             list: async ({ where = {}, order, limit }: Listing) =>
               Object.values(records())
-                .filter((s) => matches(s.record, where))
-                .toSorted(byOrder(order))
+                .filter((s) => matches(s.record, where, types))
+                .toSorted(byOrder(order, types))
                 .slice(0, limit)
                 .map(saved),
             save: async ({ record }: { record: Record<string, unknown> }, call) => {

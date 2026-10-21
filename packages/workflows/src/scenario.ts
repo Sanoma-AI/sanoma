@@ -385,9 +385,13 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
         if (c) {
           // The record with its key, the fields the step gives, and the rest made up.
           const record = shapeOf(opOf(c.save.id).input).record!;
-          return [
-            { op: c.save.id, input: { record: fill(record, { ...fieldsFrom(pickle, record, owner), [c.key]: name }) } },
-          ];
+          const fields = fieldsFrom(pickle, record, owner);
+          if (Object.hasOwn(fields, c.key) && fields[c.key] !== name) {
+            throw new Error(
+              `${c.key} in ${owner} is ${JSON.stringify(fields[c.key])}: it is the key, "${name as string}"`,
+            );
+          }
+          return [{ op: c.save.id, input: { record: fill(record, { ...fields, [c.key]: name }) } }];
         }
         return [
           { ...object(resource, name), fields: fieldsFrom(pickle, types.get(resource as string)!.schema, owner) },
