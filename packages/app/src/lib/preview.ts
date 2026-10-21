@@ -4,7 +4,8 @@ import { WORKFLOW_ACTION } from "@sanoma-ai/workflows/shared";
 import type { PreviewQuery } from "../api.ts";
 
 // The run form's "will ask" line: what the policy would answer the person for a workflow's start
-// and every operation it may call, before the run starts (`previewFn`).
+// and every operation it may call, before the run starts (`previewFn`). The Permissions grid
+// (`gridOf`) asks the same for each group, a row per request.
 
 /** What to ask ahead of a run of `workflow`: its start, then each operation it may call, with its effect. */
 export function previewRequests(workflow: WorkflowEntry, ops: ReadonlyMap<string, OpEntry>): PreviewQuery {

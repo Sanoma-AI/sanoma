@@ -32,8 +32,8 @@ const someoneIn = (group: Group) => `someone in ${group ?? "no group"}`;
 /**
  * What the policy answers someone in no group and in each group (the declared ones and `agents`),
  * across, for each workflow's start with each operation it uses under it, and each operation a
- * person may call directly, down, the input unknown. A cell with a rule behind it opens the rule in a sheet. Nothing here is edited:
- * the policy is `policies/*.cedar`, written by the agent.
+ * person may call directly, down, the input unknown. A cell with a rule behind it opens the rule
+ * in a sheet. Nothing here is edited: the policy is `policies/*.cedar`, written by the agent.
  */
 function PermissionsPage() {
   const { data } = useSuspenseQuery(permissionsQuery());

@@ -399,10 +399,8 @@ function gridOf(app: Pick<AppContext, "resolved" | "description">): PermissionsR
   const direct = description.ops.filter((op) => op.direct).toSorted((a, b) => a.id.localeCompare(b.id));
   // Every row's question, in the grid's order: each workflow's start, then the operations it may
   // call, as the run form asks them (`previewRequests`); then each direct operation.
-  const requests: PreviewQuery = [
-    ...workflows.flatMap((w) => previewRequests(w, opsById)),
-    ...direct.map(({ id, effect }) => ({ action: { id, effect } })),
-  ];
+  const asked = workflows.map((w) => previewRequests(w, opsById));
+  const requests: PreviewQuery = [...asked.flat(), ...direct.map(({ id, effect }) => ({ action: { id, effect } }))];
   const columns = groups.map((group) =>
     preview(
       app,
@@ -416,13 +414,13 @@ function gridOf(app: Pick<AppContext, "resolved" | "description">): PermissionsR
     id,
     cells: columns.map((answers) => answers[i]!),
   }));
-  // Each workflow's rows: its start, then one per operation it may call.
+  // Each workflow's rows, as many as it asked: its start, then one per operation it may call.
   let at = 0;
   return {
     policy: description.policy,
     groups,
-    workflows: workflows.map(({ name, title, ops }) => {
-      const [start, ...called] = rows.slice(at, (at += 1 + ops.length));
+    workflows: workflows.map(({ name, title }, i) => {
+      const [start, ...called] = rows.slice(at, (at += asked[i]!.length));
       return { ...start!, id: name, ...(title !== undefined && { title }), ops: called };
     }),
     ops: rows.slice(at),
