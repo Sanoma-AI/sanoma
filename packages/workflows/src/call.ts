@@ -291,10 +291,11 @@ function targetOf(op: Op, input: unknown): { target?: string } {
 export async function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecision> {
   const seen = { id: run.id, workflow: run.workflow, approvals: structuredClone(run.approvals) };
   const { policy } = run.state;
+  // Keyed by the call (`seq` was taken for it), so a fake answers each read afresh.
   const before = await beforeOf(policy, op, input, run.state.collections, (get, key) =>
     driverOf(run, get)?.(
       { key },
-      { idempotencyKey: `${run.id}:${get}`, runId: run.id, opId: get, attempt: 1, secrets: secretsOf(run) },
+      { idempotencyKey: `${run.id}:${run.seq}:before`, runId: run.id, opId: get, attempt: 1, secrets: secretsOf(run) },
     ),
   );
   const call = { ...callOf(op, input, run.actor, seen), ...before };
@@ -339,6 +340,7 @@ export async function beforeOf(
   try {
     saved = (await read(`${DATA_VENDOR}.${op.resource}.get`, key)) as Saved | null | undefined;
   } catch (err) {
+    if (takenByDbos(err)) throw err;
     throw keepCode(new Error(`Reading the record ${op.id} replaces failed: ${errorMessage(err)}`, { cause: err }), err);
   }
   return saved ? { before: saved.record } : {};

@@ -6,7 +6,7 @@ import { entry, write } from "./ledger.ts";
 import { warn } from "./log.ts";
 import type { Placed } from "./call.ts";
 import type { Run } from "./run.ts";
-import { approverLabel, refusalOf } from "./shared.ts";
+import { approverLabel, mayDecide, refusalOf } from "./shared.ts";
 
 // The wire contract between a run waiting on approvals and whoever decides them. The client
 // imports this file and never the worker's.
@@ -118,23 +118,21 @@ export async function awaitApproval(
     const at = await DBOS.now();
     const parsed = ApprovalMessage.safeParse(raw);
     const msg = parsed.success ? parsed.data : undefined;
-    // Why the run refuses it: anything but a decision `mayDecide` lets through.
-    const reason = msg ? refusalOf(state, msg.by, run) : "not a valid decision message";
-    if (reason !== undefined || !msg) {
+    if (!msg || !mayDecide(state, msg.by, run)) {
       const by = msg?.by.id ?? senderOf(raw);
-      const why = reason ?? "";
+      const reason = (msg && refusalOf(state, msg.by, run)) ?? "not a valid decision message";
       state.refused.push({
         ...(by === undefined ? {} : { by }),
         ...(msg?.id === undefined ? {} : { id: msg.id }),
         at,
-        reason: why,
+        reason,
       });
       await DBOS.setEvent(APPROVALS_EVENT, all);
       await write(
         run,
         entry(
           run,
-          { type: "approval.refused", approval: state.id, ...(by === undefined ? {} : { by }), reason: why },
+          { type: "approval.refused", approval: state.id, ...(by === undefined ? {} : { by }), reason },
           { key: `${state.id}:refused:${state.refused.length}`, at },
         ),
       );

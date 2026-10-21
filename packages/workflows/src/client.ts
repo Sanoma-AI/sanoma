@@ -270,9 +270,11 @@ export class SanomaClient {
     startedBy: Principal,
     runId: string | undefined,
   ): Promise<StartHold | undefined> {
-    if (BUILT_IN_WORKFLOWS.has(workflow)) return undefined;
-    const decision = await decideStart(this.config.policy, workflow, input, startedBy);
-    if (decision.kind === "allow" || (runId !== undefined && (await this.row(runId)))) return undefined;
+    const { policy } = this.config;
+    if (BUILT_IN_WORKFLOWS.has(workflow) || !policy.start) return undefined;
+    if (runId !== undefined && (await this.row(runId))) return undefined;
+    const decision = await decideStart(policy, workflow, input, startedBy);
+    if (decision.kind === "allow") return undefined;
     const action = `${WORKFLOW_ACTION}${workflow}`;
     if (decision.kind === "deny") throw new PolicyDeniedError(action, decision.reason);
     const { approver, title = `${action} needs ${approverLabel(approver)}`, reasons } = decision;
