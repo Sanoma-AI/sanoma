@@ -180,7 +180,7 @@ describe("the Permissions grid", () => {
     const text = readFileSync(
       fileURLToPath(new URL(`../../workflows/test/fixtures/people/${file}`, import.meta.url)),
       "utf8",
-    );
+    ).replaceAll("\r\n", "\n");
     expect(files).toEqual([{ file, text, policies: [expect.anything(), expect.anything()] }]);
     // Written with `\r\n`, served with `\n`, as the Code view counts offsets: the same answer.
     expect(filesOf(read.map((f) => ({ ...f, text: f.text.replaceAll("\n", "\r\n") })))).toEqual(files);

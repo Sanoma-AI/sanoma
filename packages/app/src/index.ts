@@ -80,7 +80,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     throw new Error(`The dev server listens on this machine only, not ${host}: serve a build there`);
   }
   const resolved = resolveConfig(config);
-  // Read beside the policy made from them, so the Permissions page's source is what decides.
+  // Read right after the policy made from them, so the Permissions page shows what decides.
   const policyFiles = resolved.root === undefined ? [] : readPolicyFiles(resolved.root);
   const login = admitting(given, () => readPeople(resolved.root));
   const description = describeConfig(config);

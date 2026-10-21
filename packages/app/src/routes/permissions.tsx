@@ -9,7 +9,6 @@ import { Card, CardHeader } from "#/components/ui/card.tsx";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "#/components/ui/sheet.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { PREVIEW_TONE } from "#/lib/tone.ts";
-import { useReducedMotion } from "#/lib/motion.ts";
 import { cn } from "#/lib/utils.ts";
 import type { PermissionsResponse, PermissionsRow } from "../api.ts";
 import {
@@ -61,21 +60,19 @@ function PermissionsPage() {
   // The rule whose lines the code marks, by id; `showing` while the sheet closes to show it.
   const [shown, setShown] = useState<string>();
   const showing = useRef(false);
-  const reducedMotion = useReducedMotion();
   const choose = (cell: Chosen) => {
     setChosen(cell);
     setOpen(true);
   };
-  const rule = chosen?.cell.rule?.id;
-  // The file the chosen cell's rule is written in: none for a rule with no file.
-  const ruleFile = data.files.find((f) => f.policies.some((p) => p.id === rule))?.file;
-  // Once the sheet has closed: before, its closing would put the page back where it was.
+  const rule = chosen?.cell.rule;
+  // The chosen cell's rule, when its file is shown: Show the rule.
+  const showable = rule && data.files.some((f) => f.file === rule.file) ? rule : undefined;
+  // Once the sheet has closed: before, its closing would put the page back where it was. The card
+  // comes into view, then the code centres the rule's lines (`Code`'s highlight).
   const showRule = () => {
     showing.current = false;
-    setShown(rule);
-    document
-      .getElementById(ruleFile!)
-      ?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "nearest" });
+    setShown(showable!.id);
+    document.getElementById(showable!.file)?.scrollIntoView({ block: "nearest" });
   };
   return (
     <>
@@ -124,7 +121,7 @@ function PermissionsPage() {
             <Rule
               {...chosen}
               show={
-                ruleFile === undefined
+                showable === undefined
                   ? undefined
                   : () => {
                       showing.current = true;
@@ -240,11 +237,11 @@ function PolicyCode({ file, text, span }: { file: string; text: string; span: Sp
       <CardHeader className="border-b py-2 compact:py-1 [.border-b]:pb-2 compact:[.border-b]:pb-1">
         <CardHeading className="font-mono text-sm">{file}</CardHeading>
       </CardHeader>
-      {/* Its lines at the Code view's 1.6 line height, one more for its padding, at most the
+      {/* Its lines at the Code view's 1.6 line height, and the view's padding, at most the
           workflow Code card's height. */}
       <div
         className="max-h-[420px] text-xs sm:max-h-[480px] compact:max-h-[360px]"
-        style={{ height: `${(text.split("\n").length + 1) * 1.6}em` }}
+        style={{ height: `calc(${text.split("\n").length * 1.6}em + 0.5rem)` }}
       >
         <CodePanel source={text} highlight={span && [span]} plain />
       </div>
