@@ -3,7 +3,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { type CredentialStatus, credentialReady } from "@sanoma-ai/workflows/shared";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { PlugIcon } from "@phosphor-icons/react/dist/csr/Plug";
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import { z } from "zod";
 import { Badge } from "#/components/ui/badge.tsx";
 import { ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from "#/components/ui/item.tsx";
@@ -161,7 +161,7 @@ function AddSteps({ connector: c }: { connector: AvailableConnector }) {
             the import.
           </li>
           <li>
-            Restart <code>sanoma</code>, then set its credentials on its page here.
+            Restart <code>sanoma</code>, then set its credentials on its page under Installed.
           </li>
         </ol>
       </div>
@@ -169,10 +169,11 @@ function AddSteps({ connector: c }: { connector: AvailableConnector }) {
   );
 }
 
-/** An available connector's logo, decorative beside its title; a plug when it has none. */
+/** An available connector's logo, decorative beside its title; a plug when it has none, or it does not load. */
 function ConnectorLogo({ connector: { logo } }: { connector: AvailableConnector }) {
-  return logo ? (
-    <Logo {...logo} alt="" className="size-6" />
+  const [failed, setFailed] = useState(false);
+  return logo && !failed ? (
+    <Logo {...logo} alt="" className="size-6" onError={() => setFailed(true)} />
   ) : (
     <PlugIcon aria-hidden="true" className="size-6 text-muted-foreground" />
   );
