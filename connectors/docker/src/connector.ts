@@ -42,7 +42,7 @@ const container = z.object({
     .string()
     .regex(/^[^\s@]+(:[\w][\w.-]{0,127}|@sha256:[0-9a-f]{64})$/, "pin the image to a tag or a digest")
     .refine((image) => !image.endsWith(":latest"), "pin the image to a version, not `latest`")
-    .describe("The Sanoma runtime image, pinned: `sanoma-runtime:0.2.0`, never `latest`"),
+    .describe("The Sanoma runtime image, pinned: `sanoma-runtime:0.3.0`, never `latest`"),
   source: z.string().min(1).describe("The company repository's clone URL, or a declared GitHub repository"),
   ref: z.string().min(1).describe("The branch it runs, such as `main`, never a commit"),
   revision: z.string().nullish().describe("The commit it runs, which apply sets from `ref`"),
