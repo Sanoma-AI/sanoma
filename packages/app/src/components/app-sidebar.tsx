@@ -167,7 +167,11 @@ function SectionBar({
   peek: PopoverPrimitive.Handle<PanelSection> | undefined;
 }) {
   const { data: appName } = useSuspenseQuery({ ...configQuery(), select: (config) => config.appName });
-  const hasSites = useSites().length > 0;
+  // Sites, when there are sites: its link, the first page a site lists, and whether the page is
+  // a site's, which lights it.
+  const sites = useSites();
+  const sitesHome = sites.find((site) => site.pages.length > 0)?.pages[0]?.to;
+  const onSite = usePageSection() === "sites";
   // The Inbox page's query (its costliest read), polled every 30 s for the badge. Each watcher
   // polls at its own interval, so while the Inbox page shows, its 5 s poll keeps the badge
   // fresh too; and a decision refreshes it at once.
@@ -191,9 +195,9 @@ function SectionBar({
         <SidebarGroup className="px-1.5">
           <nav aria-label="Sections">
             <SidebarMenu className="gap-1">
-              {SECTIONS.filter((section) => section.panel !== "sites" || hasSites).map((section) => (
-                <SidebarMenuItem key={section.to}>
-                  <SectionLink section={section} peek={section.panel && peek}>
+              {SECTIONS.filter((section) => section.panel !== "sites" || sites.length > 0).map((section) => (
+                <SidebarMenuItem key={section.label}>
+                  <SectionLink section={section} peek={section.panel && peek} sites={{ home: sitesHome, lit: onSite }}>
                     {/* After hydration only: the root loader starts this query without waiting for it,
                         so the server may render before it answers and the browser after. */}
                     {section.panel === "inbox" && (
@@ -229,19 +233,20 @@ function SectionBar({
  * A section's link: its icon, then `children` (its badge), then its label. With `peek`, it is also
  * the peek's trigger: the pointer resting on it, or the keyboard focusing it, opens its panel
  * beside the bar. Still a link: a click follows it (and closes the peek) rather than toggling the
- * peek, and the trigger's `role="button"` is left off.
+ * peek, and the trigger's `role="button"` is left off. Sites, which has no `to`, links to
+ * `sites.home` and is lit while `sites.lit`.
  */
 function SectionLink({
   section: { label, icon: Icon, panel, to },
   peek,
+  sites,
   children,
 }: {
   section: Section;
   peek: PopoverPrimitive.Handle<PanelSection> | undefined;
+  sites: { home: string | undefined; lit: boolean };
   children: ReactNode;
 }) {
-  const sitesHome = useSites()[0]?.pages[0]?.to;
-  const onSite = usePageSection() === "sites";
   const content = (
     <>
       <Icon />
@@ -249,10 +254,9 @@ function SectionLink({
       <span>{label}</span>
     </>
   );
-  // Sites (no `to`) links to the first site's home, and is lit on any site's page.
   const link = (props: object) =>
     to === undefined ? (
-      <Link {...props} to={sitesHome} {...(onSite && ACTIVE)} className={BAR_ITEM} />
+      <Link {...props} to={sites.home} {...(sites.lit && ACTIVE)} className={BAR_ITEM} />
     ) : (
       <Link {...props} to={to} activeProps={ACTIVE} className={BAR_ITEM} />
     );

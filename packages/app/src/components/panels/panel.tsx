@@ -26,7 +26,7 @@ export type Panel = { kind: PanelSection } | { kind: "workflow"; name: string };
  */
 const sectionOfMatches = (matches: { fullPath: string; staticData: { section?: PanelSection } }[]) =>
   matches.findLast((match) => match.staticData.section)?.staticData.section ??
-  (siteOf(matches.at(-1)?.fullPath ?? "") === undefined ? undefined : "sites");
+  (siteOf(matches.at(-1)?.fullPath) === undefined ? undefined : "sites");
 
 /** The page's section, if it has a panel. */
 export const usePageSection = () => useMatches({ select: sectionOfMatches });

@@ -39,7 +39,7 @@ import { Item, ItemContent, ItemDescription, ItemTitle } from "#/components/ui/i
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
 import { shortId } from "#/lib/apply-plan.ts";
-import { siteOf, siteTitle } from "#/lib/sites.ts";
+import { siteOf, useSites } from "#/lib/sites.ts";
 import { utcText } from "#/lib/time.ts";
 import { cn } from "#/lib/utils.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone, TONE_FILL } from "#/lib/tone.ts";
@@ -67,22 +67,25 @@ declare module "@tanstack/react-router" {
  * The names of the pages the location matches, outermost first, each with where it is. A route
  * names its page in `staticData.crumb`, or, when the name is something it loaded, in its loader
  * data's `crumb`; a route that names nothing (the root, an index) is left out. A site's page
- * starts with the site's title, linking to its home.
+ * starts with the site's title, linking to the first page it lists.
  */
-export const useCrumbs = () =>
-  useMatches({
+export const useCrumbs = () => {
+  const sites = useSites();
+  return useMatches({
     select: (matches) => {
       const crumbs = matches.flatMap(({ id, pathname, staticData, loaderData }) => {
         const label = (loaderData && "crumb" in loaderData ? loaderData.crumb : undefined) ?? staticData.crumb;
         return label ? [{ id, pathname, label }] : [];
       });
-      const site = siteOf(matches.at(-1)?.fullPath ?? "");
-      return site === undefined
-        ? crumbs
-        : [{ id: `site:${site}`, pathname: `/sites/${site}`, label: siteTitle(site) }, ...crumbs];
+      const page = matches.at(-1);
+      const site = sites.find(({ name }) => name === siteOf(page?.fullPath));
+      if (!page || !site) return crumbs;
+      const pathname = site.pages[0]?.to ?? page.pathname;
+      return [{ id: `site:${site.name}`, pathname, label: site.title }, ...crumbs];
     },
     structuralSharing: true,
   });
+};
 
 /** A page's <title>, from its crumb: `head: ({ match }) => pageTitle(match.staticData.crumb)`. */
 export const pageTitle = (crumb: string | undefined) => ({

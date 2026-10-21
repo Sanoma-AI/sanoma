@@ -86,8 +86,13 @@ describe("a company's app with its sites", () => {
   const repo = company({
     "sites/hello/routes/styled.tsx": sitePage("/sites/hello/styled", "", `<span className="${siteClass}" />`),
   });
-  const untouched = { src: join(appDir, "src"), modules: join(appDir, "node_modules") };
-  const before = { src: [] as string[], modules: [] as string[] };
+  // And sanoma, which the company's node_modules links to.
+  const untouched = {
+    src: join(appDir, "src"),
+    modules: join(appDir, "node_modules"),
+    sanoma: join(appDir, "..", "sanoma"),
+  };
+  const before = { src: [] as string[], modules: [] as string[], sanoma: [] as string[] };
   let result: { distDir: string; built: boolean };
   let worker: Worker;
   let app: App;
@@ -95,6 +100,7 @@ describe("a company's app with its sites", () => {
   beforeAll(async () => {
     before.src = entries(untouched.src);
     before.modules = entries(untouched.modules);
+    before.sanoma = entries(untouched.sanoma);
     result = await buildApp(repo);
     worker = await startWorker(config);
     app = await startApp(config, { port: 0, distDir: result.distDir });
@@ -114,6 +120,7 @@ describe("a company's app with its sites", () => {
     expect(tree).toContain("id: '/workflows'");
     expect(entries(untouched.src)).toEqual(before.src);
     expect(entries(untouched.modules)).toEqual(before.modules);
+    expect(entries(untouched.sanoma)).toEqual(before.sanoma);
     expect(readdirSync(join(repo, "node_modules"))).toEqual(["sanoma"]);
   });
 
@@ -149,8 +156,8 @@ describe("a company's app with its sites", () => {
 
   it("gives a site's `sanoma/site` imports the app's one router and React", async () => {
     // Each copy's markers, counted in the browser's bundle: as many as a build with no sites has.
-    const [router, ...react] = ["__TSR_ROUTER__", "react.transitional.element", "react.portal"];
-    const markers = [router!, ...react];
+    const router = "__TSR_ROUTER__";
+    const markers = [router, "react.transitional.element", "react.portal"];
     const count = (distDir: string) => {
       const dir = join(distDir, "client", "assets");
       const code = readdirSync(dir)
@@ -162,7 +169,7 @@ describe("a company's app with its sites", () => {
     const bare = company();
     rmSync(join(bare, "sites"), { recursive: true });
     const withoutSites = count((await buildApp(bare)).distDir);
-    expect(withoutSites[router!]).toBe(1);
+    expect(withoutSites[router]).toBe(1);
     expect(count(result.distDir)).toEqual(withoutSites);
   });
 
@@ -247,6 +254,11 @@ describe("a build that fails, or leaves a site out", () => {
       "sites/hello/routes/index.tsx": sitePage("/sites/hello/", `import * as runtime from ${from};`, "String(runtime)"),
     });
     await expect(buildApp(repo)).rejects.toThrow(/Import denied in client environment/);
+  });
+
+  it("builds a site whose site.ts has no default export, named by its folder", async () => {
+    const repo = company({ "sites/hello/site.ts": "export const title = 'Not this';\n" });
+    expect((await buildApp(repo)).built).toBe(true);
   });
 
   it("refuses a site that imports a .server.ts file", async () => {
