@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-ghost",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Ghost Admin API operations for Sanoma workflows",
   "keywords": [
     "blog",
@@ -58,7 +58,7 @@
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@sanoma-ai/workflows": "^0.3.0",
+    "@sanoma-ai/workflows": "^0.4.0",
     "zod": "^4"
   },
   "engines": {
