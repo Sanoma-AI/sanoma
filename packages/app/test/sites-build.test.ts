@@ -21,6 +21,7 @@ import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { defineConfig, SanomaClient, startWorker, type Worker } from "@sanoma-ai/workflows";
 import { executablePath, launch } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ACTOR_COOKIE, ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import fixture from "./fixtures/company-sites/sanoma.config.ts";
 
@@ -193,6 +194,31 @@ describe("a company's app with its sites", () => {
     }
   });
 
+  it("renders a page whose loader calls api as the person asking: the loopback login's header, else its cookie", async () => {
+    const client = await SanomaClient.connect(config);
+    try {
+      /** What /sites/hello/started's loader answered, and who started the run it started. */
+      const started = async (headers: Record<string, string>) => {
+        const html = (await (await fetch(new URL("/sites/hello/started", app.url), { headers })).text()).replaceAll(
+          "<!-- -->",
+          "",
+        );
+        const said = html.match(/<p>((?:Started|Refused:) [^<]+)<\/p>/)?.[1];
+        const runId = said?.match(/^Started (.+)$/)?.[1];
+        return { said, by: runId && (await client.run(runId))?.startedBy };
+      };
+      const cookie = `${ACTOR_COOKIE}=${encodeURIComponent("Ada Lovelace")}`;
+      expect(await started({ cookie })).toEqual({
+        said: expect.stringMatching(/^Started /),
+        by: { id: "Ada Lovelace" },
+      });
+      expect((await started({ cookie, [ACTOR_HEADER]: "grace" })).by).toEqual({ id: "grace" });
+      expect(await started({})).toEqual({ said: "Refused: invalid_input", by: undefined });
+    } finally {
+      await client.close();
+    }
+  });
+
   it("lists the sites in the Sites panel, each under its title with its pages, and names the site in the crumbs", async () => {
     const html = (await (await fetch(new URL("/sites/hello/", app.url))).text()).replaceAll("<!-- -->", "");
     // The bar's Sites, lit on a site's page, linking to the site's home (a typed path has no
@@ -287,6 +313,24 @@ describe("a company's app with its sites", () => {
     const refused = check();
     expect(refused.status).not.toBe(0);
     expect(refused.stdout).toMatch(/^sites\/hello\/routes\/styled\.tsx\(\d+,\d+\): error TS\d+: [^\n]*"\/sites\/nope"/);
+    // `api` is untyped until .sanoma/api.ts types it (the fixture's started.tsx, above), as A5's
+    // generated file does: through Register, with the types sanoma/site re-exports.
+    writeFileSync(
+      join(repo, ".sanoma", "api.ts"),
+      `import type { WorkflowFn } from "sanoma/site";
+declare module "sanoma/site" {
+  interface Register {
+    api: { hello: WorkflowFn<{ who: string }, { greeting: string }> };
+  }
+}
+`,
+    );
+    const call = (who: string) =>
+      sitePage("/sites/hello/styled", 'import { api } from "sanoma/site";', `void api.hello.start({ who: ${who} })`);
+    writeFileSync(join(repo, "sites", "hello", "routes", "styled.tsx"), call('"Ada"'));
+    expect(check()).toMatchObject({ status: 0, stdout: "" });
+    writeFileSync(join(repo, "sites", "hello", "routes", "styled.tsx"), call("1"));
+    expect(check().stdout).toMatch(/^sites\/hello\/routes\/styled\.tsx\(\d+,\d+\): error TS2322: [^\n]*'number'/);
   });
 });
 

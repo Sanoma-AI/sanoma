@@ -1,6 +1,6 @@
 import type { RunStatus, RunSummary } from "@sanoma-ai/workflows";
 import type { ConfigDescription, OpEntry, WorkflowEntry } from "@sanoma-ai/workflows/describe";
-import { isEnded } from "@sanoma-ai/workflows/shared";
+import { apiNameOf, isEnded } from "@sanoma-ai/workflows/shared";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { linkOptions, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -13,6 +13,7 @@ import {
   type RunsQuery,
   type ScenariosResponse,
   type StartRunRequest,
+  type StartRunResponse,
 } from "./api.ts";
 import {
   getActor,
@@ -29,6 +30,8 @@ import {
   getSource,
   startRunFn,
 } from "./functions.ts";
+import type { UntypedApi } from "./api-client.ts";
+import { api } from "./site.ts";
 
 /** How often the runs and a run's detail refresh while a page shows them. */
 export const POLL_MS = 2_000;
@@ -335,15 +338,24 @@ export const runLink = (run: Pick<RunSummary, "runId" | "workflow">) =>
 
 /**
  * Starts a run (or a scenario's sandbox run), then says so, refreshes the lists of runs and,
- * unless `navigate` is false, opens the run's page. A failure is the caller's to show: the start
- * form puts it on its fields. The one place the browser starts a run.
+ * unless `navigate` is false, opens the run's page. A live run starts as a site's does, through
+ * `api.<workflow>.start` (`callFn`, a new id per attempt); a sandbox run through `startRunFn`. A
+ * failure is the caller's to show: the start form puts it on its fields. The one place the
+ * browser starts a run.
  */
 export function useStartRun({ navigate = true }: { navigate?: boolean } = {}) {
   const start = useServerFn(startRunFn);
   const go = useNavigate();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (request: StartRunRequest) => start({ data: request }),
+    mutationFn: async (request: StartRunRequest): Promise<StartRunResponse> => {
+      if ("scenario" in request) return start({ data: request });
+      // Untyped: a company's `.sanoma/api.ts` types `api` for its sites, never for the app.
+      const { runId } = (await (api as UntypedApi)[apiNameOf(request.workflow)].start(request.input)) as {
+        runId: string;
+      };
+      return { runId, workflow: request.workflow };
+    },
     onSuccess: async (started, request) => {
       toast.success(
         "scenario" in request ? `Started a sandbox run of “${request.scenario}”` : `Started ${started.workflow}`,

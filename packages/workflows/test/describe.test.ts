@@ -22,7 +22,7 @@ import {
 import { describeConfig, outlineWorkflow } from "../src/describe.ts";
 import { defineFake } from "../src/fake.ts";
 import { VENDOR } from "../src/op.ts";
-import { problemLine } from "../src/shared.ts";
+import { apiNameOf, problemLine } from "../src/shared.ts";
 import announce from "./fixtures/announce.ts";
 
 // On the connectors as their packages export them, with their own drivers and fakes.
@@ -301,6 +301,52 @@ export default defineWorkflow({
     const description = describeConfig({ ...base, root: dir });
     expect(description.problems).toEqual([]);
     expect(description.workflows.flatMap((wf) => wf.problems)).toEqual([]);
+  });
+});
+
+/** `announce`, under another name. */
+const renamed = (name: string) => ({ ...announce, name }) as typeof announce;
+
+describe("a workflow's name in a site's api", () => {
+  it("is its name in camelCase (apiNameOf)", () => {
+    expect(["noop", "outbound-next", "send-2-leads", "a-b-c"].map(apiNameOf)).toEqual([
+      "noop",
+      "outboundNext",
+      "send2Leads",
+      "aBC",
+    ]);
+  });
+
+  it("is a problem on a workflow when another workflow, a vendor or the collections have it", () => {
+    const { workflows } = describeConfig({
+      ...base,
+      workflows: [
+        announce,
+        renamed("outbound-next"),
+        renamed("outboundNext"),
+        renamed("ghost"),
+        renamed("data"),
+        renamed("then"),
+      ],
+    });
+    const apiProblems = workflows.map((wf) => [
+      wf.name,
+      wf.problems.filter((p) => p.message.includes("api.")).map((p) => [p.line, p.column, p.message]),
+    ]);
+    expect(apiProblems).toEqual([
+      ["announce", []],
+      ["data", [[1, 1, "A site calls this workflow api.data, which is the collections': rename it"]]],
+      ["ghost", [[1, 1, "A site calls this workflow api.ghost, which is the vendor ghost's operations: rename it"]]],
+      [
+        "outbound-next",
+        [[1, 1, 'A site calls this workflow api.outboundNext, as workflow "outboundNext" is: rename it']],
+      ],
+      [
+        "outboundNext",
+        [[1, 1, 'A site calls this workflow api.outboundNext, as workflow "outbound-next" is: rename it']],
+      ],
+      ["then", [[1, 1, "A site calls this workflow api.then, which a promise would take for its own: rename it"]]],
+    ]);
   });
 });
 

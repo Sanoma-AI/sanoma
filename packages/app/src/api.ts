@@ -27,6 +27,12 @@ import { z } from "zod";
 export const ACTOR_HEADER = "x-sanoma-actor";
 
 /**
+ * The same name, kept in a cookie by the page as well (URI-encoded), so the loopback login knows
+ * who is asking while the server renders a page, whose loader may call `api`. The header wins.
+ */
+export const ACTOR_COOKIE = "sanoma_actor";
+
+/**
  * Who the server says is asking. With a login provider (`fromServer`), it is whoever signed in,
  * which the page shows and cannot change; with the default loopback login, it is whatever name
  * the page sends, so the page asks for one and keeps it.
@@ -281,6 +287,23 @@ export interface AdoptResponse {
   revision?: string;
 }
 
+/**
+ * What `callFn` takes, as a site's `api` sends it: an operation's id (`data.outbound.list`), a
+ * workflow's api name (`outboundNext`, which starts it) or one of its methods
+ * (`outboundNext.start`, `.result`, `.latest`, `.runs`, `.approvals`, `.ledger`); the input; and,
+ * for a call or a start, a new id per attempt, so a retried request is made once.
+ */
+export const CallRequest = z.object({
+  name: z.string().min(1, "Name an operation or a workflow"),
+  input: z.unknown().optional(),
+  // Letters, digits, _ and -: never one of the runtime's own run ids (`call:<actor>:<id>`, `direct:…`).
+  id: z
+    .string()
+    .regex(/^[\w-]{1,200}$/, "An id is letters, digits, _ and -")
+    .optional(),
+});
+export type CallRequest = z.infer<typeof CallRequest>;
+
 /** The `body` of the error a server function fails with. */
 export interface ErrorResponse {
   error: string;
@@ -290,6 +313,8 @@ export interface ErrorResponse {
   issues?: InputIssue[];
   /** For `not_approver`: who may decide. */
   approver?: ApprovalState["approver"];
+  /** For `approval_pending`: the run of the built-in `call` workflow the call waits in; for `run_running`, the run. */
+  runId?: string;
 }
 
 /**

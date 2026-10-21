@@ -1,6 +1,7 @@
 import type { Principal } from "@sanoma-ai/workflows";
+import { parse } from "cookie-es";
 import { isLoopback } from "@sanoma-ai/workflows/shared";
-import { ACTOR_HEADER } from "./api.ts";
+import { ACTOR_COOKIE, ACTOR_HEADER } from "./api.ts";
 import type { LoginProvider } from "./context.ts";
 
 // The loopback login, and the Host names a loopback-only app answers to. Which addresses count
@@ -12,7 +13,8 @@ export const LOOPBACK = "loopback";
 
 /**
  * The default login: none. Whoever reaches the app acts as the name the page sends
- * (`actorFromHeader`), so it refuses to listen anywhere but this machine. Even there, a page
+ * (`actorFromHeader`), or, with no header, the one it keeps in its cookie (`ACTOR_COOKIE`), which
+ * a page's server render has; so it refuses to listen anywhere but this machine. Even there, a page
  * elsewhere could reach the app by pointing its own host name at 127.0.0.1 (DNS rebinding); its
  * requests then carry that name in Host, so any request not addressed to a loopback name is refused.
  */
@@ -26,7 +28,7 @@ export function loopbackLogin(): LoginProvider {
           "anyone who could reach it would act as any name. Pass a login provider (githubLogin) to listen there.",
       );
     },
-    resolveActor: actorFromHeader,
+    resolveActor: (request) => actorFromHeader(request) ?? actorFromCookie(request),
     handle(request) {
       const host = request.headers.get("host") ?? "";
       return isLoopback(hostName(host)) ? undefined : refuseHost(host);
@@ -34,7 +36,7 @@ export function loopbackLogin(): LoginProvider {
   };
 }
 
-/** The loopback login's `resolveActor`: the URI-encoded name in the `x-sanoma-actor` header, as `{ id }`. */
+/** The URI-encoded name in the `x-sanoma-actor` header, as `{ id }`: whom the loopback login takes first. */
 export function actorFromHeader(request: Request): Principal | undefined {
   let id = request.headers.get(ACTOR_HEADER) ?? "";
   try {
@@ -42,9 +44,14 @@ export function actorFromHeader(request: Request): Principal | undefined {
   } catch {
     // Not URI-encoded: take it as sent.
   }
-  id = id.trim();
-  return id ? { id } : undefined;
+  return named(id);
 }
+
+/** The name in the page's `sanoma_actor` cookie (decoded as it is parsed), as `{ id }`: whom the loopback login takes without a header. */
+export const actorFromCookie = (request: Request): Principal | undefined =>
+  named(parse(request.headers.get("cookie") ?? "")[ACTOR_COOKIE] ?? "");
+
+const named = (name: string): Principal | undefined => (name.trim() ? { id: name.trim() } : undefined);
 
 /** The host name in a Host header (`name`, `name:port`, `[v6]:port`), lowercased. */
 export function hostName(header: string): string {
