@@ -1,0 +1,20 @@
+{
+  // The app's compiler options (Start routes, React, server functions; DOM types and JSX), shipped:
+  // tsconfig.json extends them, and so does a company repo's generated .sanoma/app/tsconfig.json,
+  // which checks its sites with the app's routes.
+  "compilerOptions": {
+    "target": "es2024",
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "types": ["node", "vite/client"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true
+  }
+}

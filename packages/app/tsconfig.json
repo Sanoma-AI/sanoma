@@ -1,20 +1,7 @@
 {
-  // The app (Start routes, React, server functions), checked on its own with DOM types and JSX.
-  // The root tsconfig covers src/index.ts and the tests, for Node.
+  // The app, checked on its own. The root tsconfig covers src/index.ts and the tests, for Node.
+  "extends": "./tsconfig.site.json",
   "compilerOptions": {
-    "target": "es2024",
-    "lib": ["es2024", "dom", "dom.iterable"],
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "jsx": "react-jsx",
-    "types": ["node", "vite/client"],
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noEmit": true,
-    "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true,
-    "erasableSyntaxOnly": true,
-    "skipLibCheck": true,
     // Source, as in the root tsconfig. Keep in sync with its `paths`. (`#/*` is package.json's
     // `imports`, which TypeScript, Vite and the shadcn CLI all read.)
     "paths": {

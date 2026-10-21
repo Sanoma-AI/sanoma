@@ -2,6 +2,8 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+/* The app's own classes, also when a company repo is the root (it is then installed, where Tailwind does not look). */
+@source "./";
 
 @custom-variant dark (&:is(.dark *));
 /* Compact density: `data-density="compact"` on #app, which DensityProvider (density.tsx) sets. */
