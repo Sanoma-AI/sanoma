@@ -162,6 +162,7 @@ export const LedgerRow = memo(function LedgerRow({
       body = (
         <p>
           {record.by} {record.decision === "approve" ? "approved" : "rejected"} “{title(record.approval)}”
+          {record.alone ? " (nobody else could)" : null}
           {record.note ? <DecisionNote note={record.note} /> : null}
         </p>
       );
