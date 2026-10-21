@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-supabase",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Supabase projects for Sanoma, through the OpenTofu provider and the Management API",
   "keywords": [
     "connector",
@@ -64,8 +64,8 @@
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@sanoma-ai/bridge": "^0.4.0",
-    "@sanoma-ai/workflows": "^0.4.0",
+    "@sanoma-ai/bridge": "^0.4.1",
+    "@sanoma-ai/workflows": "^0.4.1",
     "zod": "^4"
   },
   "engines": {
