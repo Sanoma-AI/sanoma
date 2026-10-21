@@ -2,7 +2,7 @@ import type { ErrorInfo, LedgerRecord } from "@sanoma-ai/workflows";
 import type { ConfigDescription, OpEntry } from "@sanoma-ai/workflows/describe";
 import { approverLabel } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { LocateIcon } from "lucide-react";
+import { CrosshairIcon } from "@phosphor-icons/react/dist/csr/Crosshair";
 import { memo, type ReactNode } from "react";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "#/components/ui/item.tsx";
 import { utcText } from "#/lib/time.ts";
@@ -225,7 +225,7 @@ export const LedgerRow = memo(function LedgerRow({
       {onShow && (
         <ItemActions className="self-start">
           <TipButton tip="Show in graph" size="icon-xs" onClick={() => onShow(record.id)}>
-            <LocateIcon />
+            <CrosshairIcon aria-hidden="true" />
           </TipButton>
         </ItemActions>
       )}

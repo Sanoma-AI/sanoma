@@ -2,7 +2,7 @@ import type { RunSummary } from "@sanoma-ai/workflows";
 import type { WorkflowEntry } from "@sanoma-ai/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { SearchIcon } from "lucide-react";
+import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { useState } from "react";
 import {
   SidebarContent,
@@ -49,7 +49,10 @@ export function WorkflowsPanel() {
     <>
       <PanelHeader section="workflows" title="Workflows" actions={<NewWorkflowIconButton />}>
         <div className="relative">
-          <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          <MagnifyingGlassIcon
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+          />
           <SidebarInput
             type="search"
             aria-label="Find a workflow"

@@ -1,6 +1,7 @@
 import { useQueryErrorResetBoundary } from "@tanstack/react-query";
 import { type ErrorComponentProps, useRouter } from "@tanstack/react-router";
-import { CircleAlertIcon, RotateCwIcon } from "lucide-react";
+import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle";
+import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { useEffect } from "react";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "#/components/ui/alert.tsx";
 import { Button } from "#/components/ui/button.tsx";
@@ -18,13 +19,13 @@ export function RouteError({ error }: ErrorComponentProps) {
   useEffect(() => reset(), [reset]);
   return (
     <Alert variant="destructive">
-      <CircleAlertIcon />
+      <WarningCircleIcon aria-hidden="true" />
       <AlertTitle>This page could not load</AlertTitle>
       {/* The router types a boundary's error as unknown: anything can be thrown. */}
       <AlertDescription>{error instanceof Error ? error.message : String(error)}</AlertDescription>
       <AlertAction>
         <Button variant="outline" size="xs" onClick={() => void router.invalidate()}>
-          <RotateCwIcon data-icon="inline-start" />
+          <ArrowClockwiseIcon aria-hidden="true" data-icon="inline-start" />
           Try again
         </Button>
       </AlertAction>

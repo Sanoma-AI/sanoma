@@ -1,5 +1,7 @@
 import { type FitViewOptions, Panel, type PanelProps, useReactFlow, useStore } from "@xyflow/react";
-import { MaximizeIcon, MinusIcon, PlusIcon } from "lucide-react";
+import { CornersOutIcon } from "@phosphor-icons/react/dist/csr/CornersOut";
+import { MinusIcon } from "@phosphor-icons/react/dist/csr/Minus";
+import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { useId } from "react";
 import { Slider } from "#/components/ui/slider.tsx";
 import { TipButton } from "./common.tsx";
@@ -29,7 +31,7 @@ export function ZoomSlider({
   return (
     <Panel className="flex gap-1 rounded-md border bg-card p-1 text-card-foreground" {...props}>
       <TipButton tip="Zoom out" onClick={() => zoomOut({ duration })}>
-        <MinusIcon />
+        <MinusIcon aria-hidden="true" />
       </TipButton>
       {/* The Slider's thumb takes its name from the root's aria-labelledby, a hidden label. */}
       <div className="flex w-[100px] items-center">
@@ -46,7 +48,7 @@ export function ZoomSlider({
         />
       </div>
       <TipButton tip="Zoom in" onClick={() => zoomIn({ duration })}>
-        <PlusIcon />
+        <PlusIcon aria-hidden="true" />
       </TipButton>
       {/* Named by what it shows, then what it does. A minimum width, not a fixed one: Compact's
           smaller unit would leave "150%" too little room. */}
@@ -60,7 +62,7 @@ export function ZoomSlider({
         {percent}
       </TipButton>
       <TipButton tip="Fit the graph" onClick={() => fitView({ ...fitViewOptions, duration })}>
-        <MaximizeIcon />
+        <CornersOutIcon aria-hidden="true" />
       </TipButton>
     </Panel>
   );

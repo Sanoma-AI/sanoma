@@ -2,7 +2,10 @@ import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tansta
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { APPLY_WORKFLOW, isEnded } from "@sanoma-ai/workflows/shared";
-import { ExternalLinkIcon, PlayIcon, RocketIcon, UploadIcon } from "lucide-react";
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
+import { PlayIcon } from "@phosphor-icons/react/dist/csr/Play";
+import { RocketIcon } from "@phosphor-icons/react/dist/csr/Rocket";
+import { UploadIcon } from "@phosphor-icons/react/dist/csr/Upload";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
@@ -241,7 +244,11 @@ function ChooseFields({ choices }: { choices: GoLiveChoices }) {
       {error && <Notice variant="destructive">{error}</Notice>}
       <div>
         <Button type="submit" disabled={mutation.isPending || choices.missing.length > 0}>
-          {mutation.isPending ? <Spinner data-icon="inline-start" /> : <RocketIcon data-icon="inline-start" />}
+          {mutation.isPending ? (
+            <Spinner data-icon="inline-start" />
+          ) : (
+            <RocketIcon aria-hidden="true" data-icon="inline-start" />
+          )}
           Write infra.ts and apply
         </Button>
       </div>
@@ -291,7 +298,11 @@ function ApplyAgain() {
         onClick={() => start.mutate({ workflow: APPLY_WORKFLOW, input: { only } })}
         disabled={start.isPending}
       >
-        {start.isPending ? <Spinner data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}
+        {start.isPending ? (
+          <Spinner data-icon="inline-start" />
+        ) : (
+          <PlayIcon aria-hidden="true" data-icon="inline-start" />
+        )}
         Apply again
       </Button>
     </div>
@@ -318,7 +329,11 @@ function PushButton() {
       </p>
       <div>
         <Button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
-          {mutation.isPending ? <Spinner data-icon="inline-start" /> : <UploadIcon data-icon="inline-start" />}
+          {mutation.isPending ? (
+            <Spinner data-icon="inline-start" />
+          ) : (
+            <UploadIcon aria-hidden="true" data-icon="inline-start" />
+          )}
           Push and start the host
         </Button>
       </div>
@@ -345,7 +360,7 @@ function HostAnswer({ host }: { host: { url: string; healthy: boolean } }) {
             <ButtonLink variant="outline" size="sm">
               <a href={host.url} target="_blank" rel="noreferrer">
                 Open
-                <ExternalLinkIcon data-icon="inline-end" />
+                <ArrowSquareOutIcon aria-hidden="true" data-icon="inline-end" />
               </a>
             </ButtonLink>
           </ItemActions>

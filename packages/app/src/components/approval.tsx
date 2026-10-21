@@ -2,7 +2,9 @@ import type { ApprovalState, RunStatus, RunSummary } from "@sanoma-ai/workflows"
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { CheckIcon, ExternalLinkIcon, XIcon } from "lucide-react";
+import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
+import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
@@ -154,7 +156,7 @@ export function ApprovalDetails({
                   <ItemTitle className="block truncate">{href}</ItemTitle>
                 </ItemContent>
                 <ItemActions>
-                  <ExternalLinkIcon className="size-4" />
+                  <ArrowSquareOutIcon aria-hidden="true" className="size-4" />
                 </ItemActions>
               </a>
             </LinkItem>
@@ -212,11 +214,11 @@ export function ApprovalDecision({ run, approval }: { run: ApprovalRun; approval
   return (
     <>
       <Button disabled={waiting !== undefined} onClick={() => decide("approve")}>
-        <CheckIcon data-icon="inline-start" />
+        <CheckIcon aria-hidden="true" data-icon="inline-start" />
         Approve
       </Button>
       <Button variant="destructive" disabled={waiting !== undefined} onClick={() => decide("reject")}>
-        <XIcon data-icon="inline-start" />
+        <XIcon aria-hidden="true" data-icon="inline-start" />
         Reject
       </Button>
       {waiting && (

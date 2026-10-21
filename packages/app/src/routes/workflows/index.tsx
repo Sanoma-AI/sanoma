@@ -3,7 +3,7 @@ import type { WorkflowEntry } from "@sanoma-ai/workflows/describe";
 import { RUN_STATUSES } from "@sanoma-ai/workflows/shared";
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { XIcon } from "lucide-react";
+import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { memo } from "react";
 import { z } from "zod";
 import { Badge } from "#/components/ui/badge.tsx";
@@ -326,7 +326,7 @@ function AllRuns({ status, workflow }: { status: RunStatus | undefined; workflow
             Workflow: <code>{workflow}</code>
             <ButtonLink variant="ghost" size="icon-xs" className="size-5">
               <Link to="." search={(prev) => ({ ...prev, workflow: undefined })} replace>
-                <XIcon />
+                <XIcon aria-hidden="true" />
                 <span className="sr-only">Any workflow</span>
               </Link>
             </ButtonLink>

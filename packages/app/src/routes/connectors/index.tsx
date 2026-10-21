@@ -1,7 +1,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { type CredentialStatus, credentialReady } from "@sanoma-ai/workflows/shared";
-import { ChevronRightIcon } from "lucide-react";
+import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from "#/components/ui/item.tsx";
 import { LinkItem, Nothing, PageHeader, plural, VendorLogo } from "../../components/common.tsx";
 import { configQuery, connectorsOf, credentialsQuery } from "../../queries.ts";
@@ -43,7 +43,7 @@ function ConnectorsPage() {
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
-                  <ChevronRightIcon className="size-4" />
+                  <CaretRightIcon aria-hidden="true" className="size-4" />
                 </ItemActions>
               </Link>
             </LinkItem>

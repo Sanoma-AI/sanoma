@@ -1,7 +1,9 @@
 import type { WorkflowEntry } from "@sanoma-ai/workflows/describe";
 import { useForm } from "@tanstack/react-form";
 import { useHydrated } from "@tanstack/react-router";
-import { PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { PlayIcon } from "@phosphor-icons/react/dist/csr/Play";
+import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
+import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { type ComponentProps, type ReactNode, useMemo } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Checkbox } from "#/components/ui/checkbox.tsx";
@@ -83,7 +85,11 @@ export function StartForm({
         <FormFoot form={form}>
           {(submitting) => (
             <Button type="submit" disabled={submitting}>
-              {submitting ? <Spinner data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}
+              {submitting ? (
+                <Spinner data-icon="inline-start" />
+              ) : (
+                <PlayIcon aria-hidden="true" data-icon="inline-start" />
+              )}
               {submitting ? "Starting…" : scenario ? "Start sandbox run" : "Start run"}
             </Button>
           )}
@@ -247,14 +253,14 @@ export function FieldView({
                       className="group-disabled/ro:hidden"
                       onClick={() => f.removeValue(i)}
                     >
-                      <Trash2Icon />
+                      <TrashIcon aria-hidden="true" />
                     </TipButton>
                   </Field>
                 );
               })}
               <Field orientation="horizontal" className="group-disabled/ro:hidden">
                 <Button type="button" variant="outline" onClick={() => f.pushValue(initialValue(item, item.default))}>
-                  <PlusIcon data-icon="inline-start" />
+                  <PlusIcon aria-hidden="true" data-icon="inline-start" />
                   Add {item.kind === "object" ? "an item" : "a value"}
                 </Button>
               </Field>

@@ -1,7 +1,8 @@
 import type { RunSummary } from "@sanoma-ai/workflows";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { ArrowLeftIcon, WorkflowIcon } from "lucide-react";
+import { ArrowLeftIcon } from "@phosphor-icons/react/dist/csr/ArrowLeft";
+import { TreeStructureIcon } from "@phosphor-icons/react/dist/csr/TreeStructure";
 import { memo } from "react";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import {
@@ -67,7 +68,7 @@ export function WorkflowPanel({ name }: { name: string }) {
             activeOptions={{ exact: true, includeSearch: false }}
             className="-ml-1 flex flex-1 items-center gap-1 rounded-md px-1 py-1 text-sm font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-hidden"
           >
-            <ArrowLeftIcon className="size-4" />
+            <ArrowLeftIcon aria-hidden="true" className="size-4" />
             Workflows
           </Link>
         }
@@ -91,7 +92,7 @@ export function WorkflowPanel({ name }: { name: string }) {
                 />
               }
             >
-              <WorkflowIcon />
+              <TreeStructureIcon aria-hidden="true" />
               <span>Workflow</span>
             </SidebarMenuButton>
           </SidebarMenuItem>

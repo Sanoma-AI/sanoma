@@ -1,7 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound, Outlet } from "@tanstack/react-router";
-import { PlayIcon } from "lucide-react";
+import { PlayIcon } from "@phosphor-icons/react/dist/csr/Play";
 import { Badge } from "#/components/ui/badge.tsx";
 import { ButtonLink, loadCode, loadGraph, Notice, PageHeader, pageTitle } from "#/components/common.tsx";
 import {
@@ -80,7 +80,7 @@ function WorkflowLayout() {
           workflow && (
             <ButtonLink size="sm">
               <Link to="." search={(prev) => ({ ...prev, new: true })}>
-                <PlayIcon data-icon="inline-start" />
+                <PlayIcon aria-hidden="true" data-icon="inline-start" />
                 New run
               </Link>
             </ButtonLink>

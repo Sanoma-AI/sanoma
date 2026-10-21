@@ -1,5 +1,5 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
-import { PlusIcon } from "lucide-react";
+import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { Button } from "#/components/ui/button.tsx";
 import {
   Dialog,
@@ -53,7 +53,7 @@ export function NewWorkflowDialog() {
 export function NewWorkflowButton() {
   return (
     <DialogTrigger handle={handle} render={<Button size="sm" />}>
-      <PlusIcon data-icon="inline-start" />
+      <PlusIcon aria-hidden="true" data-icon="inline-start" />
       New workflow
     </DialogTrigger>
   );
@@ -63,7 +63,7 @@ export function NewWorkflowButton() {
 export function NewWorkflowIconButton() {
   return (
     <DialogTrigger handle={handle} render={<TipButton tip="New workflow" size="icon-sm" />}>
-      <PlusIcon />
+      <PlusIcon aria-hidden="true" />
     </DialogTrigger>
   );
 }

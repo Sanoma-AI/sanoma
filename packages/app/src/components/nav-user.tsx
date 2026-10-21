@@ -1,14 +1,12 @@
-import {
-  LogOutIcon,
-  type LucideIcon,
-  Maximize2Icon,
-  Minimize2Icon,
-  MonitorIcon,
-  MoonIcon,
-  SunIcon,
-  UserIcon,
-  UserPenIcon,
-} from "lucide-react";
+import { SignOutIcon } from "@phosphor-icons/react/dist/csr/SignOut";
+import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
+import { ArrowsOutSimpleIcon } from "@phosphor-icons/react/dist/csr/ArrowsOutSimple";
+import { ArrowsInSimpleIcon } from "@phosphor-icons/react/dist/csr/ArrowsInSimple";
+import { DesktopIcon } from "@phosphor-icons/react/dist/csr/Desktop";
+import { MoonIcon } from "@phosphor-icons/react/dist/csr/Moon";
+import { SunIcon } from "@phosphor-icons/react/dist/csr/Sun";
+import { UserIcon } from "@phosphor-icons/react/dist/csr/User";
+import { UserCircleGearIcon } from "@phosphor-icons/react/dist/csr/UserCircleGear";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import { cn } from "#/lib/utils.ts";
@@ -63,7 +61,7 @@ export function NavUser() {
       <DropdownMenuTrigger className="flex size-10 items-center justify-center rounded-md outline-hidden transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring data-popup-open:bg-sidebar-accent">
         <Avatar className="size-8 rounded-lg">
           <AvatarFallback className="rounded-lg">
-            {actor ? actor.slice(0, 2).toUpperCase() : <UserIcon />}
+            {actor ? actor.slice(0, 2).toUpperCase() : <UserIcon aria-hidden="true" className="size-6" />}
           </AvatarFallback>
         </Avatar>
         <span className="sr-only">
@@ -85,7 +83,7 @@ export function NavUser() {
         {!fromServer && (
           <>
             <DropdownMenuItem onClick={() => setActor(null)}>
-              <UserPenIcon />
+              <UserCircleGearIcon aria-hidden="true" />
               Change name
             </DropdownMenuItem>
             <DropdownMenuSeparator />
@@ -94,7 +92,7 @@ export function NavUser() {
         {signOut && (
           <>
             <DropdownMenuItem onClick={() => void signOutAt(signOut)}>
-              <LogOutIcon />
+              <SignOutIcon aria-hidden="true" />
               Sign out
             </DropdownMenuItem>
             <DropdownMenuSeparator />
@@ -120,17 +118,17 @@ async function signOutAt(url: string) {
   else toast.error("Could not sign out");
 }
 
-type Choice = { value: string; icon: LucideIcon; label: string };
+type Choice = { value: string; icon: PhosphorIcon; label: string };
 
 const THEMES: Choice[] = [
   { value: "light", icon: SunIcon, label: "Light" },
   { value: "dark", icon: MoonIcon, label: "Dark" },
-  { value: "system", icon: MonitorIcon, label: "System" },
+  { value: "system", icon: DesktopIcon, label: "System" },
 ];
 
 const DENSITIES: Choice[] = [
-  { value: "comfortable", icon: Maximize2Icon, label: "Comfortable" },
-  { value: "compact", icon: Minimize2Icon, label: "Compact" },
+  { value: "comfortable", icon: ArrowsOutSimpleIcon, label: "Comfortable" },
+  { value: "compact", icon: ArrowsInSimpleIcon, label: "Compact" },
 ];
 
 /**
@@ -153,7 +151,7 @@ function Choices({
       <DropdownMenuLabel>{label}</DropdownMenuLabel>
       {choices.map((choice) => (
         <DropdownMenuRadioItem key={choice.value} closeOnClick value={choice.value}>
-          <choice.icon />
+          <choice.icon aria-hidden="true" />
           {choice.label}
         </DropdownMenuRadioItem>
       ))}

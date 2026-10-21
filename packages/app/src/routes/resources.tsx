@@ -9,7 +9,8 @@ import { APPLY_WORKFLOW, DRIFT_WORKFLOW, isEnded, problemAt } from "@sanoma-ai/w
 import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { PlayIcon, ScanSearchIcon } from "lucide-react";
+import { PlayIcon } from "@phosphor-icons/react/dist/csr/Play";
+import { ScanIcon } from "@phosphor-icons/react/dist/csr/Scan";
 import { type ReactNode, useMemo } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -277,7 +278,7 @@ function RunDriftButton({ drift, checking }: { drift: string; checking: boolean 
   const busy = checking || mutation.isPending;
   return (
     <Button onClick={() => mutation.mutate()} disabled={busy}>
-      {busy ? <Spinner data-icon="inline-start" /> : <ScanSearchIcon data-icon="inline-start" />}
+      {busy ? <Spinner data-icon="inline-start" /> : <ScanIcon aria-hidden="true" data-icon="inline-start" />}
       Run drift
     </Button>
   );
@@ -295,7 +296,11 @@ function ApplyButton() {
       onClick={() => start.mutate({ workflow: APPLY_WORKFLOW, input: {} })}
       disabled={start.isPending}
     >
-      {start.isPending ? <Spinner data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}
+      {start.isPending ? (
+        <Spinner data-icon="inline-start" />
+      ) : (
+        <PlayIcon aria-hidden="true" data-icon="inline-start" />
+      )}
       Apply
     </Button>
   );

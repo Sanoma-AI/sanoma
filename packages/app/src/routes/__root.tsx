@@ -22,7 +22,7 @@ import { TooltipProvider } from "#/components/ui/tooltip.tsx";
 import { ActorContext, useActorState } from "../actor.ts";
 import { useCrumbs } from "../components/common.tsx";
 import { actorQuery, configQuery, waitingRunsQuery } from "../queries.ts";
-// lucide's shield-check, the sidebar's brand icon.
+// Phosphor's regular shield-check, the sidebar's brand icon.
 import favicon from "../favicon.svg?url";
 import css from "../style.css?url";
 
