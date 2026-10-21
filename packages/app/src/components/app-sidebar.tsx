@@ -2,6 +2,7 @@ import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { ClientOnly, Link } from "@tanstack/react-router";
 import {
+  AppWindowIcon,
   BoxesIcon,
   InboxIcon,
   type LucideIcon,
@@ -25,11 +26,21 @@ import {
   SidebarRail,
   useSidebar,
 } from "#/components/ui/sidebar.tsx";
+import { useSites } from "#/lib/sites.ts";
 import { cn } from "#/lib/utils.ts";
 import { configQuery, OVERVIEW, pendingOf, waitingRunsQuery } from "../queries.ts";
 import { toneBadge } from "./common.tsx";
 import { InboxPanel } from "./panels/inbox-panel.tsx";
-import { ACTIVE, type Panel, PanelSkeleton, sectionOf, useHasPanel, usePanel } from "./panels/panel.tsx";
+import {
+  ACTIVE,
+  type Panel,
+  PanelSkeleton,
+  sectionOf,
+  useHasPanel,
+  usePageSection,
+  usePanel,
+} from "./panels/panel.tsx";
+import { SitesPanel } from "./panels/sites-panel.tsx";
 import { WorkflowPanel } from "./panels/workflow-panel.tsx";
 import { WorkflowsPanel } from "./panels/workflows-panel.tsx";
 
@@ -47,7 +58,10 @@ const SECTIONS = [
   { to: "/resources", label: "Resources", icon: BoxesIcon, panel: undefined },
   { to: "/connectors", label: "Connectors", icon: PlugIcon, panel: undefined },
   { to: "/setup", label: "Go live", icon: RocketIcon, panel: undefined },
-] as const satisfies readonly { to: string; label: string; icon: LucideIcon; panel: string | undefined }[];
+  // The company's sites, shown only when it has some: its link is the first site's home, which
+  // only the build knows (`useSites`).
+  { to: undefined, label: "Sites", icon: AppWindowIcon, panel: "sites" },
+] as const satisfies readonly { to: string | undefined; label: string; icon: LucideIcon; panel: string | undefined }[];
 
 type Section = (typeof SECTIONS)[number];
 
@@ -136,6 +150,8 @@ function PanelView({ panel }: { panel: Panel }) {
       return <WorkflowsPanel />;
     case "workflow":
       return <WorkflowPanel name={panel.name} />;
+    case "sites":
+      return <SitesPanel />;
   }
 }
 
@@ -151,6 +167,7 @@ function SectionBar({
   peek: PopoverPrimitive.Handle<PanelSection> | undefined;
 }) {
   const { data: appName } = useSuspenseQuery({ ...configQuery(), select: (config) => config.appName });
+  const hasSites = useSites().length > 0;
   // The Inbox page's query (its costliest read), polled every 30 s for the badge. Each watcher
   // polls at its own interval, so while the Inbox page shows, its 5 s poll keeps the badge
   // fresh too; and a decision refreshes it at once.
@@ -174,7 +191,7 @@ function SectionBar({
         <SidebarGroup className="px-1.5">
           <nav aria-label="Sections">
             <SidebarMenu className="gap-1">
-              {SECTIONS.map((section) => (
+              {SECTIONS.filter((section) => section.panel !== "sites" || hasSites).map((section) => (
                 <SidebarMenuItem key={section.to}>
                   <SectionLink section={section} peek={section.panel && peek}>
                     {/* After hydration only: the root loader starts this query without waiting for it,
@@ -215,7 +232,7 @@ function SectionBar({
  * peek, and the trigger's `role="button"` is left off.
  */
 function SectionLink({
-  section: { label, icon: Icon, panel, ...link },
+  section: { label, icon: Icon, panel, to },
   peek,
   children,
 }: {
@@ -223,6 +240,8 @@ function SectionLink({
   peek: PopoverPrimitive.Handle<PanelSection> | undefined;
   children: ReactNode;
 }) {
+  const sitesHome = useSites()[0]?.pages[0]?.to;
+  const onSite = usePageSection() === "sites";
   const content = (
     <>
       <Icon />
@@ -230,13 +249,14 @@ function SectionLink({
       <span>{label}</span>
     </>
   );
-  if (!peek || !panel) {
-    return (
-      <Link {...link} activeProps={ACTIVE} className={BAR_ITEM}>
-        {content}
-      </Link>
+  // Sites (no `to`) links to the first site's home, and is lit on any site's page.
+  const link = (props: object) =>
+    to === undefined ? (
+      <Link {...props} to={sitesHome} {...(onSite && ACTIVE)} className={BAR_ITEM} />
+    ) : (
+      <Link {...props} to={to} activeProps={ACTIVE} className={BAR_ITEM} />
     );
-  }
+  if (!peek || !panel) return link({ children: content });
   return (
     <PopoverTrigger
       handle={peek}
@@ -251,9 +271,7 @@ function SectionLink({
       onFocus={(event) => {
         if (event.currentTarget.matches(":focus-visible")) peek.open(event.currentTarget.id);
       }}
-      render={({ role: _button, ...props }) => (
-        <Link {...(props as object)} {...link} activeProps={ACTIVE} className={BAR_ITEM} />
-      )}
+      render={({ role: _button, ...props }) => link(props)}
     >
       {content}
     </PopoverTrigger>

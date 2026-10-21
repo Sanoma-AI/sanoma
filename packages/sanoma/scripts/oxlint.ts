@@ -70,7 +70,7 @@ const sites = {
           { name: "@sanoma-ai/app", message: APP },
           {
             name: "@tanstack/react-start",
-            message: `${SERVER} Its route APIs (\`createFileRoute\`, \`Link\`, …) come from \`sanoma/site\` too.`,
+            message: `${SERVER} Its route APIs (\`Link\`, \`useNavigate\`, …) come from \`sanoma/site\`, and \`createFileRoute\` from \`@tanstack/react-router\`.`,
           },
         ].map((path) => ({ ...path, allowTypeImports: true })),
         patterns: [

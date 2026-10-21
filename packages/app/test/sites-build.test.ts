@@ -6,9 +6,13 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,11 +34,17 @@ afterAll(() => {
   for (const repo of repos) rmSync(repo, { recursive: true, force: true });
 });
 
-/** A copy of the fixture company, outside this checkout, with `files` written over it. */
+/**
+ * A copy of the fixture company, outside this checkout, with `files` written over it. Its
+ * `node_modules` holds `sanoma` alone, as a company's install does: this checkout's, whose
+ * dependencies are linked beside it.
+ */
 function company(files: Record<string, string> = {}): string {
   const repo = mkdtempSync(join(tmpdir(), "sanoma-sites-"));
   repos.push(repo);
   cpSync(fixtureDir, repo, { recursive: true });
+  mkdirSync(join(repo, "node_modules"));
+  symlinkSync(join(appDir, "..", "sanoma"), join(repo, "node_modules", "sanoma"));
   for (const [path, text] of Object.entries(files)) {
     mkdirSync(dirname(join(repo, path)), { recursive: true });
     writeFileSync(join(repo, path), text);
@@ -59,6 +69,12 @@ ${line}
 
 export const Route = createFileRoute("${path}")({ component: () => <p>{${shown}}</p> });
 `;
+
+/** The opening tag of the link around the first `text`. */
+function linkTag(html: string, text: string) {
+  const start = html.lastIndexOf("<a ", html.indexOf(text));
+  return start < 0 ? undefined : html.slice(start, html.indexOf(">", start) + 1);
+}
 
 /**
  * A class only a site uses, put together here so that Tailwind, scanning this package for the
@@ -98,7 +114,7 @@ describe("a company's app with its sites", () => {
     expect(tree).toContain("id: '/workflows'");
     expect(entries(untouched.src)).toEqual(before.src);
     expect(entries(untouched.modules)).toEqual(before.modules);
-    expect(existsSync(join(repo, "node_modules"))).toBe(false);
+    expect(readdirSync(join(repo, "node_modules"))).toEqual(["sanoma"]);
   });
 
   it("serves a site's page inside the app's shell, and the app's own pages", async () => {
@@ -111,6 +127,43 @@ describe("a company's app with its sites", () => {
     const workflows = await fetch(new URL("/workflows", app.url));
     expect(workflows.status).toBe(200);
     expect(await workflows.text()).toContain("Say hello");
+  });
+
+  it("lists the sites in the Sites panel, each under its title with its pages, and names the site in the crumbs", async () => {
+    const html = (await (await fetch(new URL("/sites/hello/", app.url))).text()).replaceAll("<!-- -->", "");
+    // The bar's Sites, lit on a site's page, linking to the site's home (a typed path has no
+    // trailing slash), and its panel docked beside it.
+    expect(linkTag(html, "<span>Sites</span>")).toMatch(/^<a [^>]*data-active="true"[^>]*href="\/sites\/hello"/);
+    expect(html).toContain(">Sites</h2>");
+    expect(html).toContain(">Hello desk</h3>");
+    // The site's pages, its home first and marked while open.
+    expect(linkTag(html, ">Home</span>")).toMatch(/href="\/sites\/hello"[^>]*aria-current="page"/);
+    expect(linkTag(html, ">/styled</span>")).toContain('href="/sites/hello/styled"');
+    expect(html.indexOf(">Home</span>")).toBeLessThan(html.indexOf(">/styled</span>"));
+    expect(html).toMatch(/data-slot="breadcrumb-page"[^>]*>Hello desk</);
+    // An app page has Sites in its bar, and its own panel.
+    const workflows = (await (await fetch(new URL("/workflows", app.url))).text()).replaceAll("<!-- -->", "");
+    expect(linkTag(workflows, "<span>Sites</span>")).toContain('href="/sites/hello"');
+    expect(workflows).not.toContain(">Hello desk</h3>");
+  });
+
+  it("gives a site's `sanoma/site` imports the app's one router and React", async () => {
+    // Each copy's markers, counted in the browser's bundle: as many as a build with no sites has.
+    const [router, ...react] = ["__TSR_ROUTER__", "react.transitional.element", "react.portal"];
+    const markers = [router!, ...react];
+    const count = (distDir: string) => {
+      const dir = join(distDir, "client", "assets");
+      const code = readdirSync(dir)
+        .filter((file) => file.endsWith(".js"))
+        .map((file) => readFileSync(join(dir, file), "utf8"))
+        .join("\n");
+      return Object.fromEntries(markers.map((marker) => [marker, code.split(marker).length - 1]));
+    };
+    const bare = company();
+    rmSync(join(bare, "sites"), { recursive: true });
+    const withoutSites = count((await buildApp(bare)).distDir);
+    expect(withoutSites[router!]).toBe(1);
+    expect(count(result.distDir)).toEqual(withoutSites);
   });
 
   it("imports the runtime by URL from the server bundle, and keeps it out of the browser's", () => {
@@ -144,6 +197,26 @@ describe("a company's app with its sites", () => {
     expect(changed.distDir).not.toBe(result.distDir);
     // The first is still there, for an app that serves it.
     expect(existsSync(join(result.distDir, "server", "server.js"))).toBe(true);
+  });
+
+  it("type-checks a site's links against the app's pages and the sites', and refuses a path that is neither", () => {
+    // The tsc a company runs: sanoma's.
+    const sanoma = createRequire(join(realpathSync(join(repo, "node_modules", "sanoma")), "package.json"));
+    const tsc = join(dirname(sanoma.resolve("typescript/package.json")), "bin", "tsc");
+    const check = () =>
+      spawnSync(process.execPath, [tsc, "-p", "sites/tsconfig.json", "--pretty", "false"], {
+        cwd: repo,
+        encoding: "utf8",
+      });
+    // The fixture's links: to /workflows, an app page, and back to the site's home.
+    expect(check()).toMatchObject({ status: 0, stdout: "" });
+    writeFileSync(
+      join(repo, "sites", "hello", "routes", "styled.tsx"),
+      sitePage("/sites/hello/styled", 'import { Link } from "sanoma/site";', '<Link to="/sites/nope">Nope</Link>'),
+    );
+    const refused = check();
+    expect(refused.status).not.toBe(0);
+    expect(refused.stdout).toMatch(/^sites\/hello\/routes\/styled\.tsx\(\d+,\d+\): error TS\d+: [^\n]*"\/sites\/nope"/);
   });
 });
 

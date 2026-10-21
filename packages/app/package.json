@@ -40,6 +40,10 @@
     "./build": {
       "types": "./dist/build.d.ts",
       "default": "./dist/build.js"
+    },
+    "./site": {
+      "types": "./src/site.ts",
+      "default": "./src/site.ts"
     }
   },
   "publishConfig": {

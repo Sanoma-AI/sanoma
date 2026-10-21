@@ -1,6 +1,6 @@
 # packages/sanoma/src
 
-The source of `sanoma`: the bin (`cli.ts`, `dist/cli.js` once built) and the modules it is made of, and the package's entries, `index.ts` and `resources.ts` (`sanoma/resources`).
+The source of `sanoma`: the bin (`cli.ts`, `dist/cli.js` once built) and the modules it is made of, and the package's entries, `index.ts` and `resources.ts` (`sanoma/resources`); `sanoma/site` is `../site.js`, outside `src/` (see the [package's guide](../AGENTS.md)).
 
 ## Contents
 

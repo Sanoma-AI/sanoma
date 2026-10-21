@@ -1,5 +1,6 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { Link } from "sanoma/site";
 
 export const Route = createFileRoute("/sites/hello/")({ component: Hello });
 

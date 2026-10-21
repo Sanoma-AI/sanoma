@@ -31,4 +31,5 @@ npm run env         # rewrites .env.example from the connectors' variables
 - Define each workflow's `name` as a string literal: the app finds the workflow in its file by it.
 - Every operation a workflow calls is listed in its `uses`; add the connector to `sanoma.config.ts` and to `package.json`.
 - Describe each workflow's expected runs in `scenarios/<workflow>/<name>.feature`, and run the `check` script after every change.
+- A site, `sites/<name>/routes/` (pages the app serves under `/sites/<name>/`, with an optional `sites/<name>/site.ts` naming it with `defineSite`), is browser code: its route files import `createFileRoute` from `@tanstack/react-router`, and the rest (`Link`, `Outlet`, `useNavigate`, `defineSite`, …) from `sanoma/site`.
 - Never put credentials in a file here. They live in `.env` or on the app's connector pages, which store them encrypted in the database.

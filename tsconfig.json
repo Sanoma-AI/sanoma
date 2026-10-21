@@ -33,6 +33,8 @@
       "@sanoma-ai/bridge/tfschema": ["./packages/bridge/src/tfschema.ts"],
       "sanoma": ["./packages/sanoma/src/index.ts"],
       "sanoma/resources": ["./packages/sanoma/src/resources.ts"],
+      "@sanoma-ai/app/site": ["./packages/app/src/site.ts"],
+      "sanoma/site": ["./packages/app/src/site.ts"],
       // Before the bare pattern: TypeScript takes the first of two patterns with equal prefixes.
       "@sanoma-ai/connector-*/fake": ["./connectors/*/src/fake.ts"],
       "@sanoma-ai/connector-*/driver": ["./connectors/*/src/driver.ts"],

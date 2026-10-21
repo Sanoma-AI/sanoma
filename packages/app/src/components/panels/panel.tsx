@@ -10,18 +10,23 @@ import {
   useSidebar,
 } from "#/components/ui/sidebar.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
+import { siteOf } from "#/lib/sites.ts";
 import type { Tone } from "#/lib/tone.ts";
 import type { PanelSection } from "../app-sidebar.tsx";
 import { StatusDot, TipButton, When } from "../common.tsx";
 
 // What the sidebar's panel lists, and the pieces every panel shares.
 
-/** A section's panel: the Inbox's approvals, the workflows, or one workflow's runs (drilled in). */
+/** A section's panel: the Inbox's approvals, the workflows, one workflow's runs (drilled in), or the sites. */
 export type Panel = { kind: PanelSection } | { kind: "workflow"; name: string };
 
-/** The section the page is under: its deepest route's `staticData.section`, if any route names one. */
-const sectionOfMatches = (matches: { staticData: { section?: PanelSection } }[]) =>
-  matches.findLast((match) => match.staticData.section)?.staticData.section;
+/**
+ * The section the page is under: its deepest route's `staticData.section`, if any route names one;
+ * Sites for a site's page.
+ */
+const sectionOfMatches = (matches: { fullPath: string; staticData: { section?: PanelSection } }[]) =>
+  matches.findLast((match) => match.staticData.section)?.staticData.section ??
+  (siteOf(matches.at(-1)?.fullPath ?? "") === undefined ? undefined : "sites");
 
 /** The page's section, if it has a panel. */
 export const usePageSection = () => useMatches({ select: sectionOfMatches });

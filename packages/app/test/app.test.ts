@@ -1447,6 +1447,9 @@ describe("resources and drift", () => {
     expect(resources.html).not.toContain('data-slot="sidebar-rail"');
     for (const to of ["/inbox", "/workflows"])
       expect(section(resources.html, to), to).toContain('aria-haspopup="dialog"');
+    // The package's own build has no sites, so no Sites in the bar.
+    expect(text).toContain("<span>Workflows</span>");
+    expect(text).not.toContain("<span>Sites</span>");
   });
 
   it("lists every run under All runs, linking each to its page, sandbox runs badged, and filters them by ?status= as getRuns does", async () => {
