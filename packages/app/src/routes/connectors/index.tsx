@@ -1,3 +1,4 @@
+import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { type CredentialStatus, credentialReady } from "@sanoma-ai/workflows/shared";
@@ -87,17 +88,19 @@ function Installed() {
 
 /** The connectors on npm the config does not install; the chosen one's steps to add it in a sheet. */
 function Available() {
+  const { data: installed } = useSuspenseQuery({ ...configQuery(), select: installedPackages });
   const { data } = useSuspenseQuery(availableConnectorsQuery());
+  const connectors = data.connectors.filter((c) => !installed.has(c.package));
   const { add } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
-  const chosen = data.connectors.find((c) => c.package === add);
+  const chosen = connectors.find((c) => c.package === add);
   return (
     <>
       {data.error && <Notice>npm could not be reached, so only the installed connectors show. {data.error}</Notice>}
-      {!data.error && data.connectors.length === 0 && <Nothing title="No other connectors found on npm" />}
-      {data.connectors.length > 0 && (
+      {!data.error && connectors.length === 0 && <Nothing title="No other connectors found on npm" />}
+      {connectors.length > 0 && (
         <ItemGroup>
-          {data.connectors.map((c) => (
+          {connectors.map((c) => (
             <LinkItem key={c.package} variant="outline">
               <Link to="." search={{ add: c.package }} aria-current={c.package === add ? "page" : undefined}>
                 <ItemMedia>
@@ -169,11 +172,24 @@ function AddSteps({ connector: c }: { connector: AvailableConnector }) {
   );
 }
 
-/** An available connector's logo, decorative beside its title; a plug when it has none, or it does not load. */
+/** The npm packages the config's connectors are from. */
+const installedPackages = (config: ConfigDescription) =>
+  new Set(Object.values(config.vendors).flatMap((v) => (v.package ? [v.package] : [])));
+
+/**
+ * An available connector's logo, decorative beside its title, without a variant that does not
+ * load; a plug when it has none, or its light one does not load.
+ */
 function ConnectorLogo({ connector: { logo } }: { connector: AvailableConnector }) {
-  const [failed, setFailed] = useState(false);
-  return logo && !failed ? (
-    <Logo {...logo} alt="" className="size-6" onError={() => setFailed(true)} />
+  const [broken, setBroken] = useState<string[]>([]);
+  return logo && !broken.includes(logo.src) ? (
+    <Logo
+      src={logo.src}
+      dark={logo.dark && !broken.includes(logo.dark) ? logo.dark : undefined}
+      alt=""
+      className="size-6"
+      onError={(url) => setBroken((urls) => (urls.includes(url) ? urls : [...urls, url]))}
+    />
   ) : (
     <PlugIcon aria-hidden="true" className="size-6 text-muted-foreground" />
   );

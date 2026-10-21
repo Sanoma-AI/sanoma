@@ -340,8 +340,8 @@ const input = (title: string) => ({
 });
 
 describe("the server functions", () => {
-  it("lists the connectors on npm that the config does not install, from each one's latest version", async () => {
-    const { connectors, error } = await availableConnectors(ctx);
+  it("lists the connector packages on npm, from each one's latest version, Sanoma's first", async () => {
+    const { connectors, error } = await availableConnectors();
     expect(error).toBeUndefined();
     expect(connectors).toEqual([
       {
@@ -356,6 +356,8 @@ describe("the server functions", () => {
         },
         homepage: "https://acme.example/code",
       },
+      // Installed too: the page leaves it out, against the config it shows.
+      { package: "@sanoma-ai/connector-ghost", title: "Ghost", version: "9.9.9", tier: "official" },
       // A logo outside the package, and a homepage that is not https, are left out.
       { package: "sanoma-connector-widgets", title: "Widgets", version: "0.1.0", tier: "community" },
     ]);
@@ -363,7 +365,7 @@ describe("the server functions", () => {
 
   it("says why when npm cannot be searched, and lists nothing", async () => {
     npmSearchFails(() => new HttpResponse(null, { status: 503 }));
-    expect(await availableConnectors(ctx)).toEqual({
+    expect(await availableConnectors()).toEqual({
       connectors: [],
       error: "Could not search npm: npm answered 503 to /-/v1/search",
     });
@@ -1003,6 +1005,8 @@ describe("the page", () => {
       await tab.goto(new URL("/connectors", app.url).href);
       await tab.evaluate((key) => localStorage.setItem(key, "tester"), ACTOR_KEY);
       await tab.goto(new URL("/connectors", app.url).href, { waitUntil: "networkidle0" });
+      // Acme's logos are not on jsDelivr (no such package): a plug draws instead of a broken image.
+      await tab.waitForFunction(`!document.querySelector('img[src*="connector-acme"]')`);
       await tab.click('a[href="/connectors?add=%40sanoma-ai%2Fconnector-acme"]');
       await tab.waitForSelector('[data-slot="sheet-content"] ::-p-text(pnpm add @sanoma-ai/connector-acme)');
       const readme = await tab.$eval('[data-slot="sheet-content"] a[href^="https://www.npmjs.com/"]', (a) => a.href);

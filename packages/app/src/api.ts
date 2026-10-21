@@ -203,7 +203,7 @@ export type Tier = "official" | "community";
 
 export const tierOf = (pkg: string): Tier => (pkg.startsWith("@sanoma-ai/") ? "official" : "community");
 
-/** A connector package on npm that the config does not install (`getAvailableConnectors`). */
+/** A connector package on npm (`getAvailableConnectors`). */
 export interface AvailableConnector {
   /** The npm package name, what `pnpm add` takes. */
   package: string;
@@ -219,7 +219,7 @@ export interface AvailableConnector {
   homepage?: string;
 }
 
-/** The connectors npm lists that the config does not install; `error` when npm could not be searched. */
+/** The connectors npm lists; `error` when npm could not be searched. */
 export interface AvailableConnectors {
   connectors: AvailableConnector[];
   error?: string;

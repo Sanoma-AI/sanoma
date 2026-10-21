@@ -157,7 +157,7 @@ export const effectBadge = cva("", {
 /**
  * A logo, 16 px unless `className` sizes it: `src`, and `dark` instead under the dark theme. Only
  * ever an `<img>`, where an SVG's scripts and external references never run or load. `onError`
- * hears of an image that does not load.
+ * hears of an image that does not load, by its URL, also one that failed before the page hydrated.
  */
 export function Logo({
   src,
@@ -170,14 +170,18 @@ export function Logo({
   dark?: string | undefined;
   alt: string;
   className?: string | undefined;
-  onError?: () => void;
+  onError?: (url: string) => void;
 }) {
+  // decode() rejects for an image that does not load, also one that failed before React listened.
+  const failed = (url: string) => ({
+    ref: onError && ((img: HTMLImageElement | null) => void img?.decode().catch(() => onError(url))),
+  });
   // A hidden <img> is out of the accessibility tree: one name is read either way.
   return (
     <>
-      <img src={src} alt={alt} onError={onError} className={cn("size-4 shrink-0", dark && "dark:hidden", className)} />
+      <img src={src} alt={alt} {...failed(src)} className={cn("size-4 shrink-0", dark && "dark:hidden", className)} />
       {dark && (
-        <img src={dark} alt={alt} onError={onError} className={cn("hidden size-4 shrink-0 dark:block", className)} />
+        <img src={dark} alt={alt} {...failed(dark)} className={cn("hidden size-4 shrink-0 dark:block", className)} />
       )}
     </>
   );

@@ -2,8 +2,11 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import type { VendorInfo } from "./op.ts";
 
-/** The `sanoma` field of a connector's package.json: the vendor's name and its logo files, beside package.json. */
-const SanomaField = z.object({
+/**
+ * The `sanoma` field of a connector's package.json: the vendor's name and its logo files, beside
+ * package.json. The app reads the same field from npm to list connectors not installed.
+ */
+export const SanomaPackageField = z.object({
   title: z.string().min(1),
   logo: z.string().optional(),
   logoDark: z.string().optional(),
@@ -20,7 +23,7 @@ export function vendorInfo(moduleUrl: string | URL): VendorInfo {
   const root = new URL("../", moduleUrl);
   const read = (path: string) => readFileSync(new URL(path, root), "utf8").trim();
   const pkg = JSON.parse(read("package.json")) as { name: string; homepage?: string; sanoma?: unknown };
-  const field = SanomaField.safeParse(pkg.sanoma);
+  const field = SanomaPackageField.safeParse(pkg.sanoma);
   if (!field.success) throw new Error(`${pkg.name}: package.json needs a "sanoma" field with a title`);
   const { title, logo, logoDark } = field.data;
   return {

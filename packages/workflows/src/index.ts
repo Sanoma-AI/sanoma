@@ -17,7 +17,7 @@ export {
   type VendorInfo,
   withSetup,
 } from "./op.ts";
-export { vendorInfo } from "./vendor-info.ts";
+export { SanomaPackageField, vendorInfo } from "./vendor-info.ts";
 export {
   defineWorkflow,
   Principal,

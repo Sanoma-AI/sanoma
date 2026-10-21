@@ -1,9 +1,8 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
-import { errorMessage } from "@sanoma-ai/workflows";
+import { errorMessage, SanomaPackageField } from "@sanoma-ai/workflows";
 import { z } from "zod";
 import { type AvailableConnector, type AvailableConnectors, tierOf } from "../api.ts";
-import type { AppContext } from "../context.ts";
 
 /** npm's registry: the search, and each package's latest version. */
 export const NPM_REGISTRY = "https://registry.npmjs.org";
@@ -20,11 +19,7 @@ const Latest = z.object({
   version: z.string(),
   description: z.string().optional().catch(undefined),
   homepage: z.string().optional().catch(undefined),
-  sanoma: z.object({
-    title: z.string().min(1),
-    logo: z.string().optional().catch(undefined),
-    logoDark: z.string().optional().catch(undefined),
-  }),
+  sanoma: SanomaPackageField,
 });
 
 /** A logo's path in the package: relative, inside it, an SVG. Any other path shows no logo. */
@@ -61,11 +56,11 @@ async function listed(name: string): Promise<AvailableConnector | undefined> {
 }
 
 /**
- * The connector packages on npm that the config does not install: found by their keyword, each
- * described by the `sanoma` field of its latest version, official ones first. Read on every call, never stored. When
- * npm cannot be searched the list is empty, and says why.
+ * The connector packages on npm: found by their keyword, each described by the `sanoma` field of
+ * its latest version, official ones first. The page leaves out those the config installs. Read on
+ * every call, never stored. When npm cannot be searched the list is empty, and says why.
  */
-export async function availableConnectors(app: AppContext): Promise<AvailableConnectors> {
+export async function availableConnectors(): Promise<AvailableConnectors> {
   let names: string[];
   try {
     const found = Search.parse(await npmJson(`/-/v1/search?text=keywords:${KEYWORD}&size=250`));
@@ -73,8 +68,7 @@ export async function availableConnectors(app: AppContext): Promise<AvailableCon
   } catch (err) {
     return { connectors: [], error: `Could not search npm: ${errorMessage(err)}` };
   }
-  const installed = new Set(Object.values(app.description.vendors).map((v) => v.package));
-  const connectors = await Promise.all(names.filter((name) => !installed.has(name)).map(listed));
+  const connectors = await Promise.all(names.map(listed));
   return {
     connectors: connectors
       .filter((c) => c !== undefined)

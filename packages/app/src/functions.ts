@@ -141,8 +141,8 @@ export const setSetupTokenFn = createServerFn(CHANGE)
   .validator(validate(SetCredentialRequest))
   .handler(({ data, context }) => setSetupToken(context.app, context.principal, data));
 
-/** The connector packages on npm that the config does not install. */
-export const getAvailableConnectors = createServerFn(READ).handler(({ context }) => availableConnectors(context.app));
+/** The connector packages on npm. */
+export const getAvailableConnectors = createServerFn(READ).handler(() => availableConnectors());
 
 /** What going live can choose from: GitHub accounts, Supabase organizations and regions, the host. */
 export const getGoLiveChoices = createServerFn(READ).handler(({ context }) => goLiveChoices(context.app));
