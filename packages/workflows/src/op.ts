@@ -239,8 +239,9 @@ export interface CallContext {
   /** The secrets store, for the values `secret()` markers name: `resolveSecrets(input, call.secrets)`. In memory for a fake. */
   secrets: Secrets;
   /**
-   * Who the call is made as: `run:<runId>` for a call in a run. A collection's save records it
-   * as the record's `updatedBy`.
+   * Who the call is made as: `run:<runId>` for a call in a run; the person's id for a direct call
+   * (`SanomaClient.call`) and in a run of the built-in `call` workflow. A collection's save
+   * records it as the record's `updatedBy`.
    */
   by?: string;
 }

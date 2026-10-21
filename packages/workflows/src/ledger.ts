@@ -3,7 +3,7 @@ import { appendFile, mkdir, readFile, truncate } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { isDeepStrictEqual } from "node:util";
-import { LEDGER_TABLE as TABLE, lazyPool, pgCode } from "./db.ts";
+import { type Db, LEDGER_TABLE as TABLE, lazyPool, pgCode } from "./db.ts";
 import type { Approver, Principal } from "./define.ts";
 import { type ErrorInfo, isFinal, keepCode } from "./errors.ts";
 import { shown, warn } from "./log.ts";
@@ -292,25 +292,13 @@ export function postgresLedger(databaseUrl: string): LedgerStore & { close(): Pr
 
   return {
     async append(record) {
-      const line = lineOf(record);
       const conn = await pool.db();
-      const inserted = await conn
-        .query(
-          `INSERT INTO ${TABLE} (id, run_id, seq, record) VALUES ($1, $2, $3, $4::jsonb) ON CONFLICT (id) DO NOTHING RETURNING n`,
-          [record.id, record.runId, record.seq, line],
-        )
-        .catch((err: unknown) => {
-          if (DATA_EXCEPTION.test(pgCode(err))) {
-            throw final(`Ledger record ${record.id} can't be stored: ${errorMessage(err)}`, err);
-          }
-          throw err;
-        });
-      if (inserted.rows.length) return;
+      if (await insertRecord(conn, record)) return;
       // Another write of the id was first: the record it stored stands.
       const { rows } = await conn.query<{ record: LedgerRecord }>(`SELECT record FROM ${TABLE} WHERE id = $1`, [
         record.id,
       ]);
-      if (rows[0]) warnIfDifferent(rows[0].record, line);
+      if (rows[0]) warnIfDifferent(rows[0].record, lineOf(record));
     },
     async read(runId) {
       const { rows } = await (
@@ -321,6 +309,26 @@ export function postgresLedger(databaseUrl: string): LedgerStore & { close(): Pr
     },
     close: pool.close,
   };
+}
+
+/**
+ * Stores the record in the Postgres ledger's table through `db`, unless one with its id is
+ * stored: true when this one was. What `postgresLedger` appends with, and a direct write
+ * (`SanomaClient.call`) inside the transaction that saves its record.
+ */
+export async function insertRecord(db: Db, record: LedgerRecord): Promise<boolean> {
+  const inserted = await db
+    .query(
+      `INSERT INTO ${TABLE} (id, run_id, seq, record) VALUES ($1, $2, $3, $4::jsonb) ON CONFLICT (id) DO NOTHING RETURNING n`,
+      [record.id, record.runId, record.seq, lineOf(record)],
+    )
+    .catch((err: unknown) => {
+      if (DATA_EXCEPTION.test(pgCode(err))) {
+        throw final(`Ledger record ${record.id} can't be stored: ${errorMessage(err)}`, err);
+      }
+      throw err;
+    });
+  return inserted.rows.length > 0;
 }
 
 /** Keeps records in memory, for tests. */

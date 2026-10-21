@@ -4,6 +4,7 @@ import { offsetOf } from "./ast.ts";
 import {
   AllMembers,
   type ApprovalRequest,
+  type Principal,
   ApprovalRequestSchema,
   SleepFor,
   type SleepRequest,
@@ -26,10 +27,10 @@ import { currentGroup, entry, skipped, write, writeFailure } from "./ledger.ts";
 import { shown } from "./log.ts";
 import { type CallContext, isOp, type Op } from "./op.ts";
 import { callAt, callName, type CallNode } from "./outline.ts";
-import { DecisionSchema, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
+import { DecisionSchema, type Policy, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
 import type { Run, WorkerState } from "./run.ts";
 import { isChangeOp } from "./resource.ts";
-import { APPLY_WORKFLOW, approverLabel, errorMessage, fitsOp } from "./shared.ts";
+import { APPLY_WORKFLOW, approverLabel, CALL_WORKFLOW, errorMessage, fitsOp } from "./shared.ts";
 
 /** DBOS took the run from this execution: it cancelled the run, or another process took it over. */
 const takenByDbos = (err: unknown) =>
@@ -51,7 +52,7 @@ export function isInfrastructureError(err: unknown, state: Pick<WorkerState, "st
 }
 
 /** The value as the ledger records it: each of the operation's `opaque` fields as `"<name>"`. */
-function recorded(op: Op, value: unknown): unknown {
+export function recorded(op: Op, value: unknown): unknown {
   if (!op.opaque?.length || typeof value !== "object" || value === null || Array.isArray(value)) return value;
   const out: Record<string, unknown> = { ...value };
   for (const name of op.opaque) if (out[name] !== undefined) out[name] = `<${name}>`;
@@ -273,27 +274,36 @@ function targetOf(op: Op, input: unknown): { target?: string } {
 }
 
 /** Asks the policy about one call, and checks its answer. Runs inside a step, so it must have no side effects of its own. */
-export async function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecision> {
-  const call: PolicyCall = {
-    op: policyOpOf(op),
-    effect: op.effect,
-    ...targetOf(op, input),
-    input,
-    actor: run.actor,
-    run: { id: run.id, workflow: run.workflow, approvals: structuredClone(run.approvals) },
-  };
+export function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecision> {
+  const seen = { id: run.id, workflow: run.workflow, approvals: structuredClone(run.approvals) };
+  return decideCall(run.state.policy, op, input, run.actor, seen, run.state);
+}
+
+/**
+ * Asks `policy` about one call of `op` as `actor` in `run`, and checks its answer: a run's
+ * policy step (`decide`) and a direct call (`SanomaClient.call`) both. A policy that fails is
+ * named in the error, with its error's code, unless the worker is stopping (`state`).
+ */
+export async function decideCall(
+  policy: Policy,
+  op: Op,
+  input: unknown,
+  actor: Principal,
+  run: PolicyCall["run"],
+  state: Pick<WorkerState, "stopped"> = { stopped: false },
+): Promise<RecordedDecision> {
+  const call: PolicyCall = { op: policyOpOf(op), effect: op.effect, ...targetOf(op, input), input, actor, run };
   let answer: unknown;
   try {
-    answer = await run.state.policy(call);
+    answer = await policy(call);
   } catch (err) {
     // Named here, so the run's error and the ledger say which call the policy failed on, with
     // the code the policy's error had.
-    if (isInfrastructureError(err, run.state)) throw err;
+    if (isInfrastructureError(err, state)) throw err;
     throw keepCode(new Error(`The policy failed deciding ${op.id}: ${errorMessage(err)}`, { cause: err }), err);
   }
   const decision = checkDecision(answer, op.id);
-  const policyVersion = run.state.policy.version;
-  return policyVersion === undefined ? decision : { ...decision, policyVersion };
+  return policy.version === undefined ? decision : { ...decision, policyVersion: policy.version };
 }
 
 async function callOp(run: Run, id: string, input: unknown, place: Placed) {
@@ -370,7 +380,8 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed) {
           opId: op.id,
           attempt,
           secrets,
-          by: `run:${run.id}`,
+          // A call run is the person's direct call held for an approval: made as them, as it would have been.
+          by: run.workflow === CALL_WORKFLOW ? run.actor.id : `run:${run.id}`,
         };
         // A live driver's `env` is checked here, inside the step, by the guard `indexDrivers` put
         // on its function: the refusal is the call's failure, recorded and never retried.

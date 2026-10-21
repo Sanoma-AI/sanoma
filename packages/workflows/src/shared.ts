@@ -128,8 +128,14 @@ function checkField(where: string, field: string, kind: unknown): void {
   }
 }
 
-/** The workflows the runtime adds itself, which a config's own may not be named: drift and apply. */
-export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([DRIFT_WORKFLOW, APPLY_WORKFLOW]);
+/**
+ * The built-in call workflow's name: one operation that may be called directly (`isDirect`),
+ * made a run when the policy holds a direct call for an approval.
+ */
+export const CALL_WORKFLOW = "call";
+
+/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply and call. */
+export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([DRIFT_WORKFLOW, APPLY_WORKFLOW, CALL_WORKFLOW]);
 
 /**
  * Every run status, in the order a run may pass through them: waiting on the queue, running,

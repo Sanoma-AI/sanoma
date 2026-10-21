@@ -1423,20 +1423,21 @@ describe("resources and drift", () => {
     const chips = workflows.text.match(
       /<div role="group" data-slot="button-group"[^>]*aria-label="Show"[^>]*>(.*?)<\/div>/,
     )?.[1];
-    expect(chips).toMatch(/<a[^>]*href="\/workflows"[^>]*aria-current="page"[^>]*>All · 3<\/a>/);
+    expect(chips).toMatch(/<a[^>]*href="\/workflows"[^>]*aria-current="page"[^>]*>All · 4<\/a>/);
     for (const [filter, label] of [
       ["waiting", "Waiting on you"],
       ["failed", "Failed last run"],
-      ["builtin", "Built-in · 2"],
+      ["builtin", "Built-in · 3"],
     ] as const) {
       expect(chips).toMatch(new RegExp(`<a[^>]*href="/workflows\\?filter=${filter}"[^>]*>${label}`));
     }
-    // ?filter=builtin keeps drift and apply alone.
+    // ?filter=builtin keeps drift, apply and call (the config has a collection) alone.
     const builtin = await page("/workflows?filter=builtin");
     expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/drift"/);
     expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/apply"/);
+    expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/call"/);
     expect(builtin.html).not.toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/announce"/);
-    expect(linkTag(builtin.text, "Built-in · 2")).toContain('aria-current="page"');
+    expect(linkTag(builtin.text, "Built-in · 3")).toContain('aria-current="page"');
   });
 
   it("lists the workflows in the Workflows panel by their last run, and See all; with no panel, the bar alone, peeking", async () => {
@@ -1452,7 +1453,7 @@ describe("resources and drift", () => {
       .map((name) => recent.indexOf(`href="/workflows/${name}"`));
     expect(first).toBeGreaterThan(0);
     expect(second).toBeGreaterThan(first!);
-    expect(text).toMatch(/<a[^>]*href="\/workflows"[^>]*><span>See all 3 workflows<\/span>/);
+    expect(text).toMatch(/<a[^>]*href="\/workflows"[^>]*><span>See all 4 workflows<\/span>/);
     expect(html).toContain("--sidebar-width:calc(var(--sidebar-bar-width) + var(--sidebar-panel-width))");
     expect(html).toContain('data-slot="sidebar-rail"');
     // No panel for Resources: the bar alone, open or not, and no rail to fold it; Inbox and

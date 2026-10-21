@@ -240,6 +240,15 @@ export function isChangeOp(
 }
 
 /**
+ * True for an operation of a declared resource type (`read`, `import`, and a writable type's
+ * `plan` and change operations), which only drift and apply call: by its vendor and resource.
+ */
+export const isResourceOp = (
+  op: { readonly vendor: string; readonly resource: string },
+  types: ReadonlyMap<string, unknown>,
+): boolean => types.has(`${op.vendor}.${op.resource}`);
+
+/**
  * A resource type: call it to declare a resource in a data file, and give it to
  * `defineConnector` as a group, under its `type`: `defineConnector("github", { repository })`.
  */
