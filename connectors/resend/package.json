@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-resend",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Resend Broadcasts and email operations for Sanoma workflows",
   "keywords": [
     "connector",
@@ -57,7 +57,7 @@
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@sanoma-ai/workflows": "^0.4.0",
+    "@sanoma-ai/workflows": "^0.4.1",
     "zod": "^4"
   },
   "engines": {
