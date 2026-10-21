@@ -174,8 +174,8 @@ async function prepare(databaseUrl: string): Promise<void> {
     for (const [what, ddl] of TABLES) await createTable(conn, ddl, what);
     await guardIdleTransactions(conn);
   } finally {
-    // Ending the session releases the lock.
-    await conn.end();
+    // Ending the session releases the lock; a failure to end it must not hide the preparation's.
+    await conn.end().catch(() => undefined);
   }
 }
 
@@ -204,7 +204,7 @@ async function lockPreparation(databaseUrl: string): Promise<Client> {
 }
 
 async function connect(databaseUrl: string): Promise<Client> {
-  const conn = new Client({ connectionString: databaseUrl });
+  const conn = new Client({ connectionString: databaseUrl, connectionTimeoutMillis: 10_000 });
   // An error nobody listens for ends the process; the query in flight fails with it.
   conn.on("error", (err) => warn(`a preparation connection failed: ${errorMessage(err)}`));
   await conn.connect();
