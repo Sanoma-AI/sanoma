@@ -1,6 +1,6 @@
 // What a site imports, as `sanoma/site` (`@sanoma-ai/app/site`): `defineSite`, the route APIs of
-// the app's own TanStack Router, so a site and the app share one router, and `api`, which calls
-// the app's server function. Source, loaded only by Vite in a company's build; browser code,
+// the app's own TanStack Router, so a site and the app share one router, `api`, which calls
+// the app's server function, and `ApiError` and `errorBodyOf`, how a refusal reads. Source, loaded only by Vite in a company's build; browser code,
 // nothing server-side. A route file still imports `createFileRoute` from `@tanstack/react-router`
 // itself: the route generator rewrites its path there, and only there.
 import type { ComponentType } from "react";
@@ -30,6 +30,9 @@ export type {
 } from "@tanstack/react-router";
 
 export type { Api, Register } from "./api-client.ts";
+// A refusal of `api`: an `ApiError`, whose `body` (`errorBodyOf(err)`) has the stable `code`.
+export { ApiError, errorBodyOf } from "./api.ts";
+export type { ErrorResponse } from "./api.ts";
 // What `.sanoma/api.ts` types the company's `api` with: a company resolves `sanoma/site`, not the runtime.
 export type { CollectionApi, ListQuery, OpFn, Saved, WorkflowFn } from "@sanoma-ai/workflows/shared";
 
