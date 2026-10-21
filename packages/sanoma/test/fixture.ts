@@ -111,6 +111,6 @@ export async function serving(cwd: string, args: string[], env: NodeJS.ProcessEn
     return { url: stdout.match(listening)![1]!, stop, output };
   } catch (err) {
     child.kill("SIGINT");
-    throw new Error(`${output().stderr}`, { cause: err });
+    throw new Error(output().stderr, { cause: err });
   }
 }

@@ -9,21 +9,13 @@ import { ensureBuilt, repo as checkout, serving } from "./fixture.ts";
 
 // Needs Postgres (`pnpm db:up`), the packages' builds, and pnpm with the registry or a warm store
 // (`--prefer-offline`): with no lockfile, the company's third-party dependencies resolve as a
-// customer's do, to the newest each range allows. The fixture's site with a `site.ts` and a page
-// importing `sanoma/site` and the kit, installed from this checkout's packages packed into
-// tarballs, under pnpm's strict layout, so the app's source sits under node_modules as it does
-// from npm (a linked checkout does not, and hides what Node refuses there: issue #220). The
-// installed bin serves it from Vite's dev server.
+// customer's do. This checkout's packages install as tarballs, under node_modules as from npm,
+// where a linked checkout would hide issue #220; the installed bin runs the dev server.
 const env = { SANOMA_DATABASE_URL: testDatabaseUrl("sanoma-packed"), SANOMA_APP_PORT: "0" };
 const fixture = fileURLToPath(new URL("./fixtures/sites/", import.meta.url));
 
-/** The packages `sanoma` installs from this checkout, by their directories: each packed into `vendor/<dir>.tgz`. */
-const PACKED = {
-  sanoma: "sanoma",
-  "@sanoma-ai/app": "app",
-  "@sanoma-ai/workflows": "workflows",
-  "@sanoma-ai/bridge": "bridge",
-};
+/** `sanoma`'s dependencies from this checkout, by their directories: each packed, as `sanoma` is, into `vendor/<dir>.tgz`. */
+const OVERRIDES = { "@sanoma-ai/app": "app", "@sanoma-ai/workflows": "workflows", "@sanoma-ai/bridge": "bridge" };
 
 const { optionalDependencies: bridgeBinaries } = JSON.parse(
   readFileSync(join(checkout, "packages/bridge/package.json"), "utf8"),
@@ -38,14 +30,12 @@ const files: Record<string, string> = {
   }),
   // sanoma's dependencies on the others are by version: these tarballs instead of npm's. The
   // bridge's binaries stay out (the dev server does not start it).
-  "pnpm-workspace.yaml": `overrides:\n${[
-    ...Object.entries(PACKED)
-      .filter(([name]) => name !== "sanoma")
-      .map(([name, dir]) => [name, `file:vendor/${dir}.tgz`]),
-    ...Object.keys(bridgeBinaries).map((name) => [name, "-"]),
-  ]
-    .map(([name, to]) => `  "${name}": "${to}"\n`)
-    .join("")}`,
+  "pnpm-workspace.yaml": JSON.stringify({
+    overrides: {
+      ...Object.fromEntries(Object.entries(OVERRIDES).map(([name, dir]) => [name, `file:vendor/${dir}.tgz`])),
+      ...Object.fromEntries(Object.keys(bridgeBinaries).map((name) => [name, "-"])),
+    },
+  }),
   // Imported by the Sites panel on every page.
   "sites/hello/site.ts": `import { defineSite } from "sanoma/site";\n\nexport default defineSite({ title: "Hello desk" });\n`,
   "sites/hello/routes/run.tsx": `import { createFileRoute } from "@tanstack/react-router";
@@ -77,7 +67,7 @@ describe("sanoma from packed tarballs: the dev server", () => {
     for (const [path, text] of Object.entries(files)) writeFileSync(join(dir, path), text);
     mkdirSync(join(dir, "vendor"));
     // Piped, so a failure's error carries pnpm's message.
-    for (const pkg of Object.values(PACKED)) {
+    for (const pkg of ["sanoma", ...Object.values(OVERRIDES)]) {
       // Built above: prepack's clean and build would only repeat it.
       execFileSync("pnpm", ["pack", "--config.ignore-scripts=true", "--out", join(dir, "vendor", `${pkg}.tgz`)], {
         cwd: join(checkout, "packages", pkg),
