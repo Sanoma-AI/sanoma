@@ -4,6 +4,7 @@
 // Node's modules load with this file; Vite and its plugins load when a config or build needs them.
 import { createHash } from "node:crypto";
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -79,9 +80,10 @@ export function sitesOf(repo: string): { sites: string[]; refused: string[] } {
 }
 
 /**
- * Writes the sites' generated files: `sites/__virtual.ts` when missing or different,
- * `sites/tsconfig.json` when missing, and `.sanoma/app/tsconfig.json` always (the route generator
- * reads `sites/tsconfig.json`, and so the file it extends, when it loads the listing).
+ * Writes the sites' generated files: `sites/__virtual.ts` and `.sanoma/app/tsconfig.json` when
+ * missing or different (the route generator reads `sites/tsconfig.json`, and so the file it
+ * extends, when it loads the listing), `sites/tsconfig.json` when missing. An unchanged file is
+ * not rewritten: a running dev server reloads every page when one does.
  */
 export function writeSiteFiles(repo: string): void {
   const root = realpathSync(repo);
@@ -89,11 +91,14 @@ export function writeSiteFiles(repo: string): void {
   const out = join(root, ".sanoma", "app");
   mkdirSync(sites, { recursive: true });
   mkdirSync(out, { recursive: true });
-  const virtual = join(sites, "__virtual.ts");
-  if (!existsSync(virtual) || readFileSync(virtual, "utf8") !== SITES_VIRTUAL) writeFileSync(virtual, SITES_VIRTUAL);
+  writeChanged(join(sites, "__virtual.ts"), SITES_VIRTUAL);
   const sitesTsconfig = join(sites, "tsconfig.json");
   if (!existsSync(sitesTsconfig)) writeFileSync(sitesTsconfig, '{ "extends": "../.sanoma/app/tsconfig.json" }\n');
-  writeFileSync(join(out, "tsconfig.json"), `${JSON.stringify(siteTsconfig(root), null, 2)}\n`);
+  writeChanged(join(out, "tsconfig.json"), `${JSON.stringify(siteTsconfig(root), null, 2)}\n`);
+}
+
+function writeChanged(file: string, text: string): void {
+  if (!existsSync(file) || readFileSync(file, "utf8") !== text) writeFileSync(file, text);
 }
 
 /**
@@ -233,6 +238,8 @@ function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom): InlineConfi
         srcDirectory,
         router: {
           generatedRouteTree: routeTree,
+          // The generator's temporary files, otherwise under `.tanstack/tmp` in the process's cwd.
+          tmpDir: join(out, "tmp"),
           // The app's routes at the root, and the sites' listing at /sites. The app's __root.tsx
           // is the tree's root, not a route of the "." mount.
           virtualRouteConfig: {
@@ -350,8 +357,9 @@ export interface BuildAppOptions {
 /**
  * Builds a company repo's app with its sites into `.sanoma/app/build/<key>` (`client/` and
  * `server/server.js`, for `startApp`'s `distDir`), after writing the sites' generated files. A
- * build with the same key is reused (`built: false`); a new one is built beside it and moved into
- * place, so a directory a running app serves is never overwritten.
+ * build with the same key is reused (`built: false`), its route tree put back in `.sanoma/app` for
+ * the sites' tsc; a new one is built beside it and moved into place, so a directory a running app
+ * serves is never overwritten.
  */
 export async function buildApp(
   repo: string,
@@ -365,7 +373,13 @@ export async function buildApp(
   }
   const runtimeFrom = options.runtimeFrom ?? defaultRuntimeFrom;
   const distDir = join(root, ".sanoma", "app", "build", buildKey(root, runtimeFrom));
-  if (existsSync(distDir)) return { distDir, built: false };
+  const routeTree = join(root, ".sanoma", "app", "routeTree.gen.ts");
+  const reused = () => {
+    const saved = join(distDir, "routeTree.gen.ts");
+    if (existsSync(saved)) writeChanged(routeTree, readFileSync(saved, "utf8"));
+    return { distDir, built: false };
+  };
+  if (existsSync(distDir)) return reused();
   const outDir = `${distDir}.${process.pid}.tmp`;
   const vite = await import("vite");
   const logger = vite.createLogger("warn", { allowClearScreen: false });
@@ -388,11 +402,12 @@ export async function buildApp(
         `The app's server entry was not built as server/server.js: is ${root}/package.json "type": "module"?`,
       );
     }
+    copyFileSync(routeTree, join(outDir, "routeTree.gen.ts"));
     renameSync(outDir, distDir);
   } catch (err) {
     rmSync(outDir, { recursive: true, force: true });
     // Another build of the same key finished first: use it.
-    if (existsSync(distDir)) return { distDir, built: false };
+    if (existsSync(distDir)) return reused();
     throw conflictOf(root, err) ?? err;
   }
   return { distDir, built: true };

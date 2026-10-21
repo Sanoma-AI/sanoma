@@ -2,6 +2,7 @@
 # Starts the company in the runtime image: clones SANOMA_SOURCE at SANOMA_REVISION (signed in
 # with SANOMA_SOURCE_TOKEN when set), installs it from its lockfile and runs `sanoma serve` on
 # SANOMA_APP_HOST (0.0.0.0, so the host passes the SANOMA_GITHUB_* sign-in variables) and PORT.
+# `sanoma serve` builds a repo with sites/ there, at start, into the clone's .sanoma/app/.
 set -eu
 
 : "${SANOMA_SOURCE:?set SANOMA_SOURCE to the clone URL of the company repository}"

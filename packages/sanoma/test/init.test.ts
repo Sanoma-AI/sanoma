@@ -161,7 +161,7 @@ describe("sanoma in an empty directory", () => {
 describe("the template", () => {
   beforeAll(ensureBuilt, 600_000);
 
-  it("passes sanoma check, and its .env.example is current", async () => {
+  it("passes sanoma check without building the app (it has no sites), and its .env.example is current", async () => {
     dir = copyFixture(fileURLToPath(TEMPLATE));
     const env = {
       SANOMA_DATABASE_URL: testDatabaseUrl("sanoma-template"),
@@ -170,6 +170,7 @@ describe("the template", () => {
     };
     const checked = await runCli(dir, ["check"], env);
     expect(checked.code, `${checked.stdout}${checked.stderr}`).toBe(0);
+    expect(existsSync(join(dir, ".sanoma"))).toBe(false);
     const current = await runCli(dir, ["env", "--check"], env);
     expect(current.code, current.stderr).toBe(0);
   }, 120_000);

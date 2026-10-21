@@ -122,6 +122,8 @@ describe("a company's app with its sites", () => {
     expect(entries(untouched.modules)).toEqual(before.modules);
     expect(entries(untouched.sanoma)).toEqual(before.sanoma);
     expect(readdirSync(join(repo, "node_modules"))).toEqual(["sanoma"]);
+    // The route generator's temporary files, too, are under .sanoma/app, not in the cwd.
+    expect(existsSync(join(repo, ".sanoma", "app", "tmp"))).toBe(true);
   });
 
   it("serves a site's page inside the app's shell, and the app's own pages", async () => {
@@ -204,6 +206,12 @@ describe("a company's app with its sites", () => {
     expect(changed.distDir).not.toBe(result.distDir);
     // The first is still there, for an app that serves it.
     expect(existsSync(join(result.distDir, "server", "server.js"))).toBe(true);
+    // Back to the first sites, the first build and its route tree, which the sites' tsc reads.
+    const tree = join(repo, ".sanoma", "app", "routeTree.gen.ts");
+    expect(readFileSync(tree, "utf8")).toContain("/sites/hello/about");
+    rmSync(join(repo, "sites", "hello", "routes", "about.tsx"));
+    expect(await buildApp(repo)).toEqual({ distDir: result.distDir, built: false });
+    expect(readFileSync(tree, "utf8")).not.toContain("/sites/hello/about");
   });
 
   it("type-checks a site's links against the app's pages and the sites', and refuses a path that is neither", () => {
@@ -228,7 +236,7 @@ describe("a company's app with its sites", () => {
 });
 
 describe("the sites' generated files", () => {
-  it("are the fixture's committed ones, and the tsconfig the sites extend is written every time", () => {
+  it("are the fixture's committed ones, and the tsconfig the sites extend is written when it changes", () => {
     const repo = company();
     rmSync(join(repo, "sites", "__virtual.ts"));
     rmSync(join(repo, "sites", "tsconfig.json"));
@@ -241,6 +249,11 @@ describe("the sites' generated files", () => {
     const tsconfig = JSON.parse(readFileSync(join(repo, ".sanoma", "app", "tsconfig.json"), "utf8"));
     expect(tsconfig.extends).toBe(join(appDir, "tsconfig.site.json"));
     expect(tsconfig.include).toContain("../api.ts");
+    // Written again unchanged, nothing is rewritten: a dev server would reload every page.
+    const written = [join(repo, "sites", "__virtual.ts"), join(repo, ".sanoma", "app", "tsconfig.json")];
+    const mtimes = written.map((file) => lstatSync(file).mtimeMs);
+    writeSiteFiles(repo);
+    expect(written.map((file) => lstatSync(file).mtimeMs)).toEqual(mtimes);
   });
 });
 

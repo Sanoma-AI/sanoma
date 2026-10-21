@@ -11,10 +11,11 @@ policies/policy.ts   which calls need whose approval (definePolicy)
 resources/           data files: the vendor objects this company declares, by area
 resources/data.ts    collections: the company's own records (collection, from sanoma/data)
 scenarios/           Gherkin: how each workflow should go against the connectors' fakes
+sites/               pages the app serves under /sites/<name>: sites/<name>/routes/ holds TanStack Router file routes (none yet)
 .env                 this machine's settings and secrets, never committed (SANOMA_SECRETS_KEY encrypts stored credentials)
 ```
 
-The app's name is `package.json`'s `name`. `.env.example` (written by `sanoma env`) and `.oxlintrc.json` (written by `sanoma check` when missing) are generated.
+The app's name is `package.json`'s `name`. `.env.example` (written by `sanoma env`) and `.oxlintrc.json` (written by `sanoma check` when missing) are generated, and so are `sites/__virtual.ts` and `sites/tsconfig.json` once there is a site: commit them, never edit them. `.sanoma/` holds what `sanoma` builds (ignored).
 
 ## Run
 
@@ -22,7 +23,7 @@ With the package manager whose lockfile is here (`npm run <script>`, `pnpm <scri
 
 ```sh
 npm run dev         # Postgres (in Docker when nothing answers), the worker and the app; the app at the printed address
-npm run check       # tsc, the lint, what the worker would refuse, and every scenario
+npm run check       # tsc, the lint, what the worker would refuse, the sites' build and types, and every scenario
 npm run env         # rewrites .env.example from the connectors' variables
 ```
 
@@ -33,5 +34,5 @@ npm run env         # rewrites .env.example from the connectors' variables
 - Every operation a workflow calls is listed in its `uses`; add the connector to `sanoma.config.ts` and to `package.json`.
 - Declare the company's own records as collections in `resources/data.ts`, which imports only `collection` from `sanoma/data` and holds nothing else: the runtime imports it, and so does a workflow that names a collection's operations (`import { outbound } from "../resources/data.ts"`, the one file outside `workflows/` a workflow may import). Every other data file is read, never run.
 - Describe each workflow's expected runs in `scenarios/<workflow>/<name>.feature`, and run the `check` script after every change.
-- A site, `sites/<name>/routes/` (pages the app serves under `/sites/<name>/`, with an optional `sites/<name>/site.ts` naming it with `defineSite`), is browser code: its route files import `createFileRoute` from `@tanstack/react-router`, and the rest (`Link`, `Outlet`, `useNavigate`, `defineSite`, …) from `sanoma/site`.
+- A site, `sites/<name>/routes/` (pages the app serves under `/sites/<name>/`, with an optional `sites/<name>/site.ts` naming it with `defineSite`), is browser code: no server code, credential or `process.env` under `sites/`, which the `check` script holds it to, and the folder's name is its URL segment (lowercase letters, digits and dashes). Its route files import `createFileRoute` from `@tanstack/react-router`, and the rest (`Link`, `Outlet`, `useNavigate`, `defineSite`, …) from `sanoma/site`.
 - Never put credentials in a file here. They live in `.env` or on the app's connector pages, which store them encrypted in the database.

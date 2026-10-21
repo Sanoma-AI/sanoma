@@ -3,11 +3,12 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import type { SanomaConfig } from "@sanoma-ai/workflows";
+import { errorMessage, type SanomaConfig } from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { problemLine } from "@sanoma-ai/workflows/shared";
 import { runScenarios } from "@sanoma-ai/workflows/scenarios";
 import type { Loaded } from "./config.ts";
+import { runtimeFrom, siteBuild } from "./sites.ts";
 
 export interface CheckResult {
   ok: boolean;
@@ -35,9 +36,11 @@ const LINTED = ["workflows", "policies", "resources", "sites"];
  * its root; oxlint in the root, with the repo's `.oxlintrc.json` (written when missing, to extend
  * this package's `oxlint.json`), over `workflows/`, `policies/`, `resources/` and `sites/`; every problem
  * `describeConfig` finds in the data files and the workflows' files (the import rules and what
- * the outline cannot draw: what the worker refuses to start with); these three at once, their
- * problems in that order. Then every scenario against the fakes (`runScenarios`), each step that
- * did not hold a problem. `ok` when there are no problems.
+ * the outline cannot draw: what the worker refuses to start with); with sites, their generated
+ * files written first and, beside those three, the app built with them and `tsc -p
+ * sites/tsconfig.json` (`checkSites`). Their problems in the order tsc, the sites' tsc, oxlint,
+ * the config, the folders refused as sites, the sites' build. Then every scenario against the fakes (`runScenarios`), each step
+ * that did not hold a problem. `ok` when there are no problems.
  */
 export async function check(
   { config, root, resolved }: Loaded,
@@ -45,8 +48,20 @@ export async function check(
 ): Promise<CheckResult> {
   // Awaited below when there are scenarios; otherwise its failure is nobody's.
   ready.catch(() => {});
-  const found = await Promise.all([typecheck(root, log), lint(root, log), configProblems(config, root, log)]);
-  const problems = found.flat();
+  const build = await siteBuild(root);
+  const { sites, refused } = build?.sitesOf(root) ?? { sites: [], refused: [] };
+  // Before tsc and oxlint read sites/, as `sanoma` writes them: only when there is a site.
+  if (build && sites.length) build.writeSiteFiles(root);
+  const [tsc, checked, lints, read] = await Promise.all([
+    typecheck(root, log),
+    build && sites.length ? checkSites(build, sites, root, log) : { typed: [], built: [] },
+    lint(root, log),
+    configProblems(config, root, log),
+  ]);
+  const unmounted = refused.map(
+    (name) => `sites/${name}: a site's folder name is a URL segment (lowercase letters, digits and dashes)`,
+  );
+  const problems = [...tsc, ...checked.typed, ...lints, ...read, ...unmounted, ...checked.built];
 
   if (resolved.scenarios === undefined) {
     log("no scenarios: the config's root has no `scenarios/` directory");
@@ -59,10 +74,48 @@ export async function check(
   return { ok: problems.length === 0, problems };
 }
 
-/** `tsc -p tsconfig.json` in the root. */
-async function typecheck(root: string, log: (line: string) => void): Promise<string[]> {
-  log("tsc");
-  const tsc = await run(binOf("typescript"), ["-p", "tsconfig.json", "--pretty", "false"], root);
+/**
+ * The sites: the app built with them (`buildApp`, reused when nothing changed), so two pages
+ * claiming one path or a site importing server code is a problem; then `tsc -p
+ * sites/tsconfig.json`, which needs the route tree the build generates (it gives every `Link` its
+ * type), so it runs once there is one.
+ */
+async function checkSites(
+  build: typeof import("@sanoma-ai/app/build"),
+  sites: string[],
+  root: string,
+  log: (line: string) => void,
+): Promise<{ typed: string[]; built: string[] }> {
+  log(`build ${sites.join(" ")}`);
+  const built = await build.buildApp(root, { runtimeFrom: runtimeFrom() }).then(
+    () => [],
+    (err: unknown) => buildProblems(errorMessage(err), log),
+  );
+  if (!existsSync(join(root, ".sanoma", "app", "routeTree.gen.ts"))) return { typed: [], built };
+  return { typed: await typecheck(root, log, "sites/tsconfig.json"), built };
+}
+
+/**
+ * A failed build's problems, one line each: every import the browser may not make, at its
+ * importer's `file:line:col`; anything else as its first line, the whole message logged.
+ */
+function buildProblems(message: string, log: (line: string) => void): string[] {
+  const denied = [
+    ...message.matchAll(/Import denied in client environment[\s\S]*?Importer: (\S+)[\s\S]*?Import: ("[^"\n]*")/g),
+  ];
+  if (denied.length) return denied.map(([, at, what]) => `${at}: Import denied in client environment: ${what}`);
+  const lines = message
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !/^Build failed with \d+ errors?:$/.test(line));
+  if (lines.length > 1) log(message);
+  return [lines[0] ?? "the app's build failed"];
+}
+
+/** `tsc -p <project>` in the root (`tsconfig.json`, or the sites' `sites/tsconfig.json`). */
+async function typecheck(root: string, log: (line: string) => void, project = "tsconfig.json"): Promise<string[]> {
+  log(project === "tsconfig.json" ? "tsc" : `tsc ${project}`);
+  const tsc = await run(binOf("typescript"), ["-p", project, "--pretty", "false"], root);
   return tsc.code === 0 ? [] : tscProblems(tsc);
 }
 
