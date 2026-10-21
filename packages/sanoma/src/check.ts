@@ -60,7 +60,7 @@ export async function check(
   // Awaited below when there are scenarios; otherwise its failure is nobody's.
   ready.catch(() => {});
   log("config");
-  const policies = await usePolicies({ config, root }, NO_PEOPLE);
+  const policies = await usePolicies({ config, root, resolved });
   const description = describeConfig(config);
   const { wrote } = await writeGenerated(root, description, schemaOf(resolved, NO_PEOPLE));
   for (const file of wrote) log(`wrote ${file}`);

@@ -1,6 +1,13 @@
 import { createRequire } from "node:module";
 import { join } from "node:path";
-import type { EntityType, RecordType, SchemaJson, Type, TypeOfAttribute } from "@cedar-policy/cedar-wasm/nodejs";
+import type {
+  DetailedError,
+  EntityType,
+  RecordType,
+  SchemaJson,
+  Type,
+  TypeOfAttribute,
+} from "@cedar-policy/cedar-wasm/nodejs";
 import { recordSchemaOf } from "./collection.ts";
 import type { ResolvedConfig } from "./config.ts";
 import { jsonSchemaOf } from "./define.ts";
@@ -29,6 +36,9 @@ export const NAMESPACE = "Sanoma";
 
 /** Every effect, each an action group (`effect:<effect>`) its operations are in. */
 const EFFECTS: readonly Effect[] = ["read", "write", "publish", "send", "money", "access"];
+
+/** What a workflow start's action id starts with: `workflow:<name>`. */
+export const WORKFLOW_ACTION = "workflow:";
 
 /** The action group every workflow start (`workflow:<name>`) is in. */
 export const START = "start";
@@ -96,7 +106,7 @@ const WRITES = new Set(["save", "delete"]);
  * is a `String`; a field with no Cedar type (a union of types, a map, a recursive type) is left
  * out, so a policy naming it fails validation. Pure: the same config and people give the same schema.
  */
-export function schemaOf(
+function buildSchema(
   resolved: Pick<ResolvedConfig, "ops" | "workflows" | "collections">,
   people: PolicyPeople,
 ): CedarSchemaJson {
@@ -117,7 +127,7 @@ export function schemaOf(
     };
   }
   for (const name of [...resolved.workflows.keys()].toSorted()) {
-    actions[`workflow:${name}`] = {
+    actions[`${WORKFLOW_ACTION}${name}`] = {
       memberOf: [{ id: START }],
       appliesTo: applies("Workflow", input(resolved.workflows.get(name)!.input)),
     };
@@ -132,11 +142,28 @@ export function schemaOf(
   return { [NAMESPACE]: { entityTypes, actions } };
 }
 
+const schemas = new WeakMap<object, WeakMap<PolicyPeople, CedarSchemaJson>>();
+
+/**
+ * The Cedar schema for a resolved config and its people (`buildSchema`), made once for each pair:
+ * validating, deciding and writing it share one.
+ */
+export function schemaOf(
+  resolved: Pick<ResolvedConfig, "ops" | "workflows" | "collections">,
+  people: PolicyPeople,
+): CedarSchemaJson {
+  let byPeople = schemas.get(resolved.ops);
+  if (!byPeople) schemas.set(resolved.ops, (byPeople = new WeakMap()));
+  let schema = byPeople.get(people);
+  if (!schema) byPeople.set(people, (schema = buildSchema(resolved, people)));
+  return schema;
+}
+
 /** The schema as Cedar's text, through the package's own `schemaToText`: what `.sanoma/schema.cedarschema` holds. */
 export function schemaText(schema: CedarSchemaJson): string {
   const answer = cedarWasm().schemaToText(schema);
   if (answer.type === "failure") {
-    throw new Error(`The Cedar schema does not print: ${answer.errors.map((e) => e.message).join("; ")}`);
+    throw new Error(`The Cedar schema does not print: ${answer.errors.map(messageOf).join("; ")}`);
   }
   return answer.text;
 }
@@ -216,3 +243,45 @@ const allowsNull = (schema: unknown): boolean =>
   (isNull(schema) ||
     (Array.isArray(schema.type) && schema.type.includes("null")) ||
     [schema.anyOf, schema.oneOf].some((v) => Array.isArray(v) && v.some(isNull)));
+
+/** Cedar's message, with its help when it has one. */
+export const messageOf = (e: DetailedError) => (e.help ? `${e.message} (${e.help})` : e.message);
+
+/** An action's context type in the schema: a record, when the action is there. */
+export const contextTypeOf = (schema: CedarSchemaJson, action: string) =>
+  schema[NAMESPACE]?.actions[action]?.appliesTo?.context as (RecordType<string> & { type: "Record" }) | undefined;
+
+/**
+ * A value as Cedar takes it for a type `schemaOf` wrote (`cedarType`'s other side): a record's
+ * fields it declares only, a set's elements, a number where it is a `String` as text. An unknown
+ * (`{ __extn: unknown }`) passes as it is; what does not fit is left out (undefined), as `null` is.
+ */
+export function cedarValue(value: unknown, type: Type<string>): unknown {
+  if (value === null || value === undefined) return undefined;
+  if (isObject(value) && "__extn" in value) return value;
+  const t = type as { type: string; name?: string; element?: Type<string>; attributes?: Record<string, Type<string>> };
+  if (t.attributes) {
+    if (!isObject(value)) return undefined;
+    return Object.fromEntries(
+      Object.entries(t.attributes).flatMap(([name, field]) => {
+        const shaped = cedarValue(value[name], field);
+        return shaped === undefined ? [] : [[name, shaped]];
+      }),
+    );
+  }
+  if (t.type === "Set") {
+    return Array.isArray(value)
+      ? value.map((v) => cedarValue(v, t.element!)).filter((v) => v !== undefined)
+      : undefined;
+  }
+  switch (t.name) {
+    case STRING.name:
+      return typeof value === "string" ? value : typeof value === "number" ? String(value) : undefined;
+    case LONG.name:
+      return Number.isSafeInteger(value) ? value : undefined;
+    case BOOL.name:
+      return typeof value === "boolean" ? value : undefined;
+    default:
+      return undefined;
+  }
+}

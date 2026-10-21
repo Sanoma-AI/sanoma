@@ -6,6 +6,7 @@ import { type AppOptions, githubLogin, startApp } from "@sanoma-ai/app";
 import {
   errorMessage,
   isLoopback,
+  type ResolvedConfig,
   resolveConfig,
   SanomaClient,
   type SanomaConfig,
@@ -44,6 +45,8 @@ export interface ServeOptions {
   log: (line: string) => void;
   /** With sites, serve them from Vite's dev server, edits showing as they are saved, instead of building them. */
   dev?: boolean;
+  /** The config, resolved, when the caller has it: the Cedar schema is made from it. */
+  resolved?: ResolvedConfig;
 }
 
 /** Starts the app on `port`, with the host and login `appOptions` reads, and the sites built; `url` says where. */
@@ -56,11 +59,14 @@ export async function runApp(config: SanomaConfig, options: ServeOptions): Promi
  * (`appSites`); the generated files written first (`writeGenerated`: `.sanoma/api.ts` and the
  * Cedar schema), for an editor, the sites and the policies' author.
  */
-async function appStart(config: SanomaConfig, { port, log, dev = false }: ServeOptions): Promise<AppOptions> {
+async function appStart(
+  config: SanomaConfig,
+  { port, log, dev = false, resolved = resolveConfig(config) }: ServeOptions,
+): Promise<AppOptions> {
   const options = { port, ...(await appOptions(secretsOf(config))) };
   // For an editor and the sites' types only: a checkout it cannot write still serves.
-  await writeGenerated(rootOf(config), describeConfig(config), schemaOf(resolveConfig(config), NO_PEOPLE)).catch(
-    (err: unknown) => log(`could not write .sanoma/: ${errorMessage(err)}`),
+  await writeGenerated(rootOf(config), describeConfig(config), schemaOf(resolved, NO_PEOPLE)).catch((err: unknown) =>
+    log(`could not write .sanoma/: ${errorMessage(err)}`),
   );
   const sites = await appSites(rootOf(config), log, dev ? options.host : false);
   return { ...options, ...sites, ...(sites.dev && { dev: { ...sites.dev, onFileChange: apiWriter(config, log) } }) };

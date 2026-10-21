@@ -75,7 +75,7 @@ export async function main(argv: string[]): Promise<number> {
     }
     case "app": {
       const { runApp } = await import("./serve.ts");
-      return keep(await load(), (config) => runApp(config, { port: port(), log }));
+      return keep(await load(), (config, resolved) => runApp(config, { port: port(), log, resolved }));
     }
     case "check":
       return runCheck();
@@ -116,16 +116,14 @@ const port = () => Number(process.env.SANOMA_APP_PORT ?? 3000);
  */
 async function load({ policies = true } = {}): Promise<Loaded> {
   const loaded = await loadConfig();
+  const { resolveConfig } = await import("@sanoma-ai/workflows");
+  const resolved = { ...loaded, resolved: resolveConfig(loaded.config) };
   if (policies) {
-    const [{ usePolicies }, { NO_PEOPLE }] = await Promise.all([
-      import("./policies.ts"),
-      import("@sanoma-ai/workflows/describe"),
-    ]);
-    const problems = await usePolicies(loaded, NO_PEOPLE);
+    const { usePolicies } = await import("./policies.ts");
+    const problems = await usePolicies(resolved);
     if (problems.length) throw new UsageError(`The policies do not hold:\n${problems.join("\n")}`);
   }
-  const { resolveConfig } = await import("@sanoma-ai/workflows");
-  return { ...loaded, resolved: resolveConfig(loaded.config) };
+  return resolved;
 }
 
 /**
@@ -135,9 +133,9 @@ async function load({ policies = true } = {}): Promise<Loaded> {
  */
 async function keep(
   { config, resolved }: Loaded,
-  start: (config: SanomaConfig) => Promise<{ stop(): Promise<void>; url?: string }>,
+  start: (config: SanomaConfig, resolved: Loaded["resolved"]) => Promise<{ stop(): Promise<void>; url?: string }>,
 ): Promise<never> {
-  const started = await start(config);
+  const started = await start(config, resolved);
   const running = `${resolved.appName} running ${[...resolved.workflows.keys()].join(", ")}`;
   if (started.url === undefined) {
     console.log(`${running}; ctrl-c to stop`);
@@ -160,7 +158,7 @@ async function serveCommand(devServer: boolean): Promise<never> {
   const { ensurePostgres } = await import("./postgres.ts");
   await ensurePostgres(databaseUrl, { appName, log });
   const { serve } = await import("./serve.ts");
-  return keep(loaded, (config) => serve(config, { port: port(), log, dev: devServer }));
+  return keep(loaded, (config, resolved) => serve(config, { port: port(), log, dev: devServer, resolved }));
 }
 
 /**
