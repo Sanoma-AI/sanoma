@@ -58,7 +58,20 @@ export default defineWorkflow({
 });
 ```
 
-A workflow or policy imports from `sanoma` what the lint lets it (`defineWorkflow`, `definePolicy`, `allow`, `deny`, `approve`, `approvedFor`, `allowAll`, `mayDecide`, `errorCode`, `z`, and types); `zod` itself and `@sanoma-ai/workflows` are accepted too. The config file imports `defineConfig` (and a ledger store, `jsonlLedger`, `memoryLedger` or `postgresLedger`, when it names one) from `sanoma`, and its connectors from their packages. A site, `sites/<name>/` (pages the app serves under `/sites/<name>/`), imports `defineSite` and the app's route APIs (`Link`, `Outlet`, `useNavigate`, …) from `sanoma/site`, and `createFileRoute` from `@tanstack/react-router`; the [app's README](https://www.npmjs.com/package/@sanoma-ai/app#a-sites-imports) has the whole list.
+A workflow or policy imports from `sanoma` what the lint lets it (`defineWorkflow`, `definePolicy`, `allow`, `deny`, `approve`, `approvedFor`, `allowAll`, `mayDecide`, `errorCode`, `z`, and types); `zod` itself and `@sanoma-ai/workflows` are accepted too. The config file imports `defineConfig` (and a ledger store, `jsonlLedger`, `memoryLedger` or `postgresLedger`, when it names one) from `sanoma`, and its connectors from their packages. A site, `sites/<name>/` (pages the app serves under `/sites/<name>/`), imports `defineSite` and the app's route APIs (`Link`, `Outlet`, `useNavigate`, …) from `sanoma/site`, and `createFileRoute` from `@tanstack/react-router`; the [app's README](https://www.npmjs.com/package/@sanoma-ai/app#a-sites-imports) has the whole list. A data file under `resources/` imports `secret` from `sanoma/resources`, and `resources/data.ts`, the company's [collections](../workflows/README.md#collections), imports `collection` from `sanoma/data` and nothing else:
+
+```ts
+// resources/data.ts
+import { collection } from "sanoma/data";
+
+export const outbound = collection({
+  name: "outbound",
+  key: "company",
+  fields: { company: "text", stage: { enum: ["researched", "contacted", "won", "lost"] }, owner: "person" },
+});
+```
+
+Every command that loads the config imports `resources/data.ts` too, when there is one, and adds its collections to the config's `collections` (each of its exports must be one), so `sanoma.config.ts` does not list them. A workflow that calls `ctx.data.outbound.get` imports `outbound` from `../resources/data.ts` to name it in `uses`: the one file outside `workflows/` the lint lets it import.
 
 ## Commands
 

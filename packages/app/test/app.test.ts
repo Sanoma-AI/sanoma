@@ -31,6 +31,7 @@ import { isNotFound } from "@tanstack/react-router";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
 import { companyFakes } from "../../workflows/test/fixtures/company/fakes.ts";
+import { outbound } from "../../workflows/test/fixtures/outbound/resources/data.ts";
 import { marketingFakes } from "../../workflows/test/harness.ts";
 import { z } from "zod";
 import { type App, startApp } from "../src/index.ts";
@@ -103,12 +104,17 @@ const company = companyFakes();
 const companyDir = fileURLToPath(new URL("../../workflows/test/fixtures/company/", import.meta.url));
 /**
  * The app's root, with no package.json (so the app is "sanoma"): its scenarios/ is a copy of the
- * fixtures' feature files (which a test breaks to see the app say so), its resources/ the company's.
+ * fixtures' feature files (which a test breaks to see the app say so), its resources/ the company's
+ * and the outbound fixture's collections.
  */
 const appRoot = mkdtempSync(join(tmpdir(), "sanoma-app-"));
 const scenariosDir = join(appRoot, "scenarios");
 cpSync(fileURLToPath(new URL("./fixtures/scenarios/", import.meta.url)), scenariosDir, { recursive: true });
 cpSync(join(companyDir, "resources"), join(appRoot, "resources"), { recursive: true });
+cpSync(
+  fileURLToPath(new URL("../../workflows/test/fixtures/outbound/resources/data.ts", import.meta.url)),
+  join(appRoot, "resources/data.ts"),
+);
 const featureFile = join(scenariosDir, "announce.feature");
 /** A vendor with a workflow operation and no setup, so no fake: its connector page says so. */
 const chat = defineConnector("chat", {
@@ -118,6 +124,7 @@ const chat = defineConnector("chat", {
 const config = defineConfig({
   workflows: [announce],
   connectors: [...vendors.connectors, ...company.connectors, chat],
+  collections: [outbound],
   policy,
   ledger: memoryLedger(),
   databaseUrl: testDatabaseUrl("app"),
@@ -316,6 +323,8 @@ describe("the server functions", () => {
     // The data files under the config's root, without problems, passed through as they are.
     expect(body.resources.map((r) => r.id)).toEqual(company.declared.map((r) => r.id));
     expect(body.problems).toEqual([]);
+    // Its collections, with where resources/data.ts declares each.
+    expect(body.collections.map((c) => [c.name, c.declared?.id])).toEqual([["outbound", "resources/data.ts#outbound"]]);
     // And the built-in drift workflow, since the connectors declare resource types.
     expect(body.workflows.find((w) => w.name === "drift")).toMatchObject({ builtin: true });
   });
@@ -655,7 +664,7 @@ describe("errors the app answers with", () => {
 });
 
 describe("a file's source", () => {
-  it("is served for a file the description names, a workflow's or a data file, apart from the config", async () => {
+  it("is served for a file the description names, a workflow's or a data file, a collection's too, apart from the config", async () => {
     const description = describeConfig(config);
     const context = { resolved: { root: companyDir } as never, description };
     expect(await fileSource(context, announce.file!)).toEqual({
@@ -663,6 +672,10 @@ describe("a file's source", () => {
     });
     expect(await fileSource(context, "resources/identity/rules.ts")).toEqual({
       source: readFileSync(join(companyDir, "resources/identity/rules.ts"), "utf8"),
+    });
+    // A collection's, resources/data.ts, which declares no resource.
+    expect(await fileSource({ ...context, resolved: { root: appRoot } as never }, "resources/data.ts")).toEqual({
+      source: readFileSync(join(appRoot, "resources/data.ts"), "utf8"),
     });
     expect(withoutSources(description).workflows.find((wf) => wf.name === "announce")).not.toHaveProperty("source");
     // Nothing else, and not a 404: the page asking would take it for its own not-found.
@@ -1352,6 +1365,9 @@ describe("resources and drift", () => {
     expect(resources.text.match(/>absent</g)).toHaveLength(1);
     expect(resources.text.match(/>absent: found unbound</g)).toHaveLength(1);
     expect(resources.text).toContain("2 drifted");
+    // The collections, each linked to its declaration.
+    expect(resources.text).toContain(">Collections<");
+    expect(resources.text).toContain('href="/resources?resource=resources%2Fdata.ts%23outbound"');
     // A button to adopt each drifted field.
     expect(resources.text.match(/>Adopt</g)).toHaveLength(2);
     // Each drifted field, as declared and as the vendor holds it.

@@ -35,6 +35,7 @@
       "sanoma/resources": ["./packages/sanoma/src/resources.ts"],
       "@sanoma-ai/app/site": ["./packages/app/src/site.ts"],
       "sanoma/site": ["./packages/app/src/site.ts"],
+      "sanoma/data": ["./packages/sanoma/src/data.ts"],
       // Before the bare pattern: TypeScript takes the first of two patterns with equal prefixes.
       "@sanoma-ai/connector-*/fake": ["./connectors/*/src/fake.ts"],
       "@sanoma-ai/connector-*/driver": ["./connectors/*/src/driver.ts"],

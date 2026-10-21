@@ -1,7 +1,8 @@
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import type { Node } from "./ast.ts";
 import { inside, nearestDir, RELATIVE } from "./paths.ts";
 import { type Secret, SECRET_NAME } from "./secret.ts";
+import { checkCollection, errorMessage } from "./shared.ts";
 
 // The one definition of what a data file may hold, over an ESTree program from oxc: the reader
 // (`resources.ts`), `lintResources` (`lint.ts`) and the oxlint plugin (`plugin.ts`) all
@@ -68,11 +69,24 @@ export interface DataFileExport {
   end: number;
 }
 
+/** An `export const name = collection({ … })` in `resources/data.ts`, its declaration one `collection()` takes. */
+export interface DataFileCollection {
+  /** The `export const`'s name. */
+  export: string;
+  /** The collection's name. */
+  name: string;
+  /** The `export const` statement. */
+  start: number;
+  end: number;
+}
+
 export interface DataFile {
   imports: DataFileImport[];
   /** Each `export const` whose value is in the subset. */
   exports: DataFileExport[];
-  /** Every name an `export const` declares, its value in the subset or not. */
+  /** Each collection `resources/data.ts` declares (`COLLECTIONS_FILE`); none in any other data file. */
+  collections: DataFileCollection[];
+  /** Every name an `export const` declares as a resource, its value in the subset or not: none in `resources/data.ts`. */
   declared: string[];
   problems: DataFileProblem[];
 }
@@ -82,6 +96,17 @@ const CONSTRUCTORS = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*\/res
 
 /** Where a data file imports `secret` from; checked before `CONSTRUCTORS`, which they match too. */
 export const SECRET_ENTRIES: ReadonlySet<string> = new Set(["sanoma/resources", "@sanoma-ai/workflows/resources"]);
+/** Where `resources/data.ts` imports `collection` from, and the only imports it may make. */
+export const DATA_ENTRIES: ReadonlySet<string> = new Set(["sanoma/data", "@sanoma-ai/workflows/data"]);
+/**
+ * The one data file that holds collections, relative to `resources/`. Workflows and the runtime
+ * import it, so it imports only `collection` from "sanoma/data" and holds nothing else.
+ */
+export const COLLECTIONS_FILE = "data.ts";
+const COLLECTION_CALL = '`export const <name> = collection({ name: "…", key: "…", fields: { … } })`';
+const COLLECTIONS_ONLY =
+  "resources/data.ts holds collections only, since workflows and the runtime import it: " +
+  `\`import { collection } from "sanoma/data"\` and ${COLLECTION_CALL}; declare a connector's resources in another data file`;
 const SECRET_CALL = '`secret("NAME")` or `secret("NAME", { generate: true })`, NAME upper case (A-Z, 0-9 and _)';
 
 const SHAPE =
@@ -101,6 +126,10 @@ const VALUES = "write a string, number, boolean, null, object or array, or name 
  * `export const <name> = <vendor>.<type>({ … })`, one per statement, its argument built of
  * strings (template literals without `${}` too), numbers, booleans, null, objects and arrays,
  * and names of resources this file declares or imports; and `export default [a, b]`.
+ * `resources/data.ts` (`COLLECTIONS_FILE`) is the exception, the one data file workflows and the
+ * runtime import: it imports only `collection` from "sanoma/data", and each `export const` is
+ * `collection({ … })` with its values written out (`DataFile.collections`). No other data file
+ * declares a collection, and none imports one.
  *
  * `root` is the directory relative imports must stay in: by default the nearest `resources/`
  * directory above `filename`, else the file's own.
@@ -115,10 +144,15 @@ export function readDataFile(
     problems.push({ start: node.start, end: node.end, message });
   const imports: DataFileImport[] = [];
   const exports: DataFileExport[] = [];
+  const collections: DataFileCollection[] = [];
+  const collectionsFile = relative(root, filename) === COLLECTIONS_FILE;
+  // What the file may hold, for the problems that say so.
+  const shape = collectionsFile ? COLLECTIONS_ONLY : SHAPE;
   // Names a refused import or declaration binds: reported once, where they are bound.
   const refused = new Set<string>();
-  // The local names of `secret`.
+  // The local names of `secret`, and of `collection`.
   const secrets = new Set<string>();
+  const collectionCalls = new Set<string>();
 
   // Imports and top-level names first, each once: imports are hoisted, and a reference may name
   // a resource declared further down. An unexported const is refused where it is declared, not
@@ -155,20 +189,20 @@ export function readDataFile(
         readDefault(s);
         break;
       case "ExportAllDeclaration":
-        fail(s, `export * is not allowed in a data file: ${SHAPE}`);
+        fail(s, `export * is not allowed in a data file: ${shape}`);
         break;
       case "VariableDeclaration": {
         const name = s.declarations[0]?.id?.name;
         fail(
           s,
           name === undefined
-            ? `an unexported declaration is not allowed in a data file: ${SHAPE}`
-            : `\`${s.kind} ${name}\` is not allowed in a data file: export it as a resource, \`export const ${name} = <vendor>.<type>({ … })\`, or write its value where it is used`,
+            ? `an unexported declaration is not allowed in a data file: ${shape}`
+            : `\`${s.kind} ${name}\` is not allowed in a data file: export it as ${collectionsFile ? `a collection, \`export const ${name} = collection({ … })\`` : `a resource, \`export const ${name} = <vendor>.<type>({ … })\``}, or write its value where it is used`,
         );
         break;
       }
       default:
-        fail(s, `${describe(s)} is not allowed in a data file: ${SHAPE}`);
+        fail(s, `${describe(s)} is not allowed in a data file: ${shape}`);
     }
   }
 
@@ -176,6 +210,16 @@ export function readDataFile(
     const spec: string = s.source.value;
     if (s.importKind === "type") {
       fail(s, "`import type` is not allowed in a data file: it holds values only, and the constructors type them");
+      return;
+    }
+    if (collectionsFile !== DATA_ENTRIES.has(spec)) {
+      fail(
+        s.source,
+        collectionsFile
+          ? `import "${spec}" is not allowed in resources/data.ts: ${COLLECTIONS_ONLY}`
+          : `import "${spec}" is not allowed here: collections are declared in resources/data.ts, the one data file workflows and the runtime import; move it there`,
+      );
+      for (const sp of s.specifiers) refused.add(sp.local.name);
       return;
     }
     const refusal = whyRefused(spec);
@@ -188,16 +232,22 @@ export function readDataFile(
       fail(s, `import "${spec}" is not allowed in a data file: it imports nothing, and a data file runs no code`);
       return;
     }
-    if (SECRET_ENTRIES.has(spec)) {
+    // The one name each of these entries gives a data file.
+    const [only, locals] = SECRET_ENTRIES.has(spec)
+      ? ["secret", secrets]
+      : DATA_ENTRIES.has(spec)
+        ? ["collection", collectionCalls]
+        : [];
+    if (locals) {
       for (const sp of s.specifiers) {
         if (
           sp.type === "ImportSpecifier" &&
           sp.importKind !== "type" &&
-          (sp.imported.name ?? sp.imported.value) === "secret"
+          (sp.imported.name ?? sp.imported.value) === only
         ) {
-          secrets.add(sp.local.name);
+          locals.add(sp.local.name);
         } else {
-          fail(sp, `a data file imports only \`secret\` from "${spec}": \`import { secret } from "${spec}"\``);
+          fail(sp, `a data file imports only \`${only}\` from "${spec}": \`import { ${only} } from "${spec}"\``);
           refused.add(sp.local.name);
         }
       }
@@ -221,8 +271,11 @@ export function readDataFile(
 
   /** Why an import's specifier is not allowed in a data file, or undefined when it is. */
   function whyRefused(spec: string): string | undefined {
-    if (!RELATIVE.test(spec)) return CONSTRUCTORS.test(spec) ? undefined : IMPORTS;
+    if (!RELATIVE.test(spec)) return CONSTRUCTORS.test(spec) || DATA_ENTRIES.has(spec) ? undefined : IMPORTS;
     if (!spec.endsWith(".ts")) return "name the data file with its `.ts` extension";
+    if (join(dirname(filename), spec) === join(root, COLLECTIONS_FILE)) {
+      return "resources/data.ts holds collections, which no resource names; import resources from other data files";
+    }
     if (!inside(root, join(dirname(filename), spec))) {
       return `it reaches outside ${basename(root)}/; import only other data files`;
     }
@@ -241,7 +294,7 @@ export function readDataFile(
       return;
     }
     if (decl.type !== "VariableDeclaration") {
-      fail(s, `${describe(decl)} is not allowed in a data file: ${SHAPE}`);
+      fail(s, `${describe(decl)} is not allowed in a data file: ${shape}`);
       return;
     }
     if (decl.kind !== "const") {
@@ -259,9 +312,16 @@ export function readDataFile(
     }
     const name: string = d.id.name;
     // A second declaration of the name was reported where it is bound.
-    if (exports.some((e) => e.name === name)) return;
+    if (exports.some((e) => e.name === name) || collections.some((c) => c.export === name)) return;
     const init = d.init;
     const callee = init?.type === "CallExpression" ? init.callee : undefined;
+    // A name a refused import binds was reported with the import.
+    const head = callee?.type === "MemberExpression" ? callee.object : callee;
+    if (head?.type === "Identifier" && refused.has(head.name)) return;
+    if (collectionsFile) {
+      readCollection(s, init, name);
+      return;
+    }
     if (
       callee?.type !== "MemberExpression" ||
       callee.computed ||
@@ -276,7 +336,6 @@ export function readDataFile(
     }
     const vendor: string = callee.object.name;
     const type: string = callee.property.name;
-    if (refused.has(vendor)) return;
     if (imports.find((i) => i.local === vendor)?.kind !== "constructors") {
       fail(
         callee.object,
@@ -295,7 +354,51 @@ export function readDataFile(
     }
   }
 
+  /** An `export const` in resources/data.ts: a collection, its declaration plain values `collection()` takes. */
+  function readCollection(s: Node, init: Node | undefined, name: string) {
+    if (
+      init?.type !== "CallExpression" ||
+      init.callee.type !== "Identifier" ||
+      !collectionCalls.has(init.callee.name)
+    ) {
+      fail(init ?? s, `export const ${name} must be a collection: ${COLLECTIONS_ONLY}`);
+      return;
+    }
+    const [arg] = init.arguments;
+    if (init.arguments.length !== 1 || arg.type !== "ObjectExpression") {
+      fail(init, `collection() takes one object literal: ${COLLECTION_CALL}`);
+      return;
+    }
+    const declaration = value(arg) as { [field: string]: DataValue } | undefined;
+    if (declaration === undefined) {
+      // What value() refused it reported; the collection is still declared here, which the
+      // runtime runs, when its name is written out.
+      const named = arg.properties.find(
+        (p: Node) => p.type === "Property" && !p.computed && keyName(p.key) === "name",
+      )?.value;
+      if (named?.type === "Literal" && typeof named.value === "string") {
+        collections.push({ export: name, name: named.value, start: s.start, end: s.end });
+      }
+      return;
+    }
+    if (Object.keys(declaration).some((k) => !DECLARATION_KEYS.has(k)) || namesDeclaration(declaration)) {
+      fail(arg, `collection() takes \`{ name, key, fields, title? }\`, its values written out: ${COLLECTION_CALL}`);
+      return;
+    }
+    try {
+      checkCollection(declaration);
+    } catch (err) {
+      fail(arg, errorMessage(err));
+      return;
+    }
+    collections.push({ export: name, name: declaration.name as string, start: s.start, end: s.end });
+  }
+
   function readDefault(s: Node) {
+    if (collectionsFile) {
+      fail(s, `export default is not allowed in resources/data.ts: ${COLLECTIONS_ONLY}`);
+      return;
+    }
     const list = s.declaration;
     if (list.type !== "ArrayExpression") {
       fail(list, "export default must list this file's resources: `export default [a, b]`");
@@ -373,6 +476,9 @@ export function readDataFile(
       }
       case "CallExpression":
         if (node.callee.type === "Identifier" && secrets.has(node.callee.name)) return readSecret(node);
+        if (node.callee.type === "Identifier" && collectionCalls.has(node.callee.name)) {
+          return refuse(node, `a collection is declared at the top of resources/data.ts: ${COLLECTION_CALL}`);
+        }
         if (node.callee.type === "Identifier" && node.callee.name === "secret" && !bound.has("secret")) {
           return refuse(node, `import secret to name one: \`import { secret } from "sanoma/resources"\``);
         }
@@ -464,8 +570,15 @@ export function readDataFile(
     return undefined;
   }
 
-  return { imports, exports, declared: [...declared], problems };
+  return { imports, exports, collections, declared: collectionsFile ? [] : [...declared], problems };
 }
+
+/** What `collection()` reads of its declaration. */
+const DECLARATION_KEYS: ReadonlySet<string> = new Set(["name", "key", "fields", "title"]);
+
+/** True when a value names a declaration: a collection's declaration is plain values only. */
+const namesDeclaration = (v: DataValue): boolean =>
+  v instanceof Reference || (typeof v === "object" && v !== null && Object.values(v).some(namesDeclaration));
 
 /** A property's name: an identifier's, or a literal's as a string; undefined for any other key. */
 export const keyName = (key: Node): string | undefined =>

@@ -1,6 +1,7 @@
+import { realpathSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { byPosition, childrenOf, type LintProblem, type Node, parsed, type SourceFile } from "./ast.ts";
-import { readDataFile } from "./datafile.ts";
+import { COLLECTIONS_FILE, readDataFile } from "./datafile.ts";
 import { constsOf, outlineBody, workflowLiterals } from "./outline.ts";
 import { inside, nearestDir, RELATIVE } from "./paths.ts";
 // From src/ and from dist/ alike, the package's own oxlint.json: the one list of allowed names.
@@ -60,8 +61,9 @@ const ERROR_CLASSES = new Set(["DriverError", "SanomaError", "PolicyDeniedError"
  * Checks a workflow or policy file. Imports allowed: the names in `WORKFLOW_IMPORTS` and any
  * type from `@sanoma-ai/workflows` or `sanoma`, `@sanoma-ai/connector-<vendor>`, `zod`, and relative files. With
  * `filename`, a relative import must stay inside the file's nearest `workflows/` or `policies/`
- * directory, or its own directory when it has neither. No `instanceof` against the runtime's
- * error classes: read `errorCode(err)`.
+ * directory, or its own directory when it has neither; the one file outside it a workflow or
+ * policy may import is the company's `resources/data.ts`, its collections (by real path). No
+ * `instanceof` against the runtime's error classes: read `errorCode(err)`.
  *
  * In each workflow's `run` (the literal `defineWorkflow` is called with), it reports what the
  * outline cannot draw, as the worker refuses to start with (`outlineBody`): `ctx` used other
@@ -197,12 +199,27 @@ type RestrictedPath = { name: string; allowImportNames?: string[] };
 
 function whyRefused(spec: string, filename: string | undefined, root: string | undefined): string | undefined {
   if (RELATIVE.test(spec)) {
-    if (filename === undefined || root === undefined || inside(root, join(dirname(filename), spec))) return undefined;
-    const where =
-      basename(root) === "workflows" || basename(root) === "policies" ? `${basename(root)}/` : "this directory";
-    return `it reaches outside ${where}, toward the config and its drivers; ${THROUGH_CTX}`;
+    if (filename === undefined || root === undefined) return undefined;
+    const target = join(dirname(filename), spec);
+    if (inside(root, target)) return undefined;
+    const tree = basename(root) === "workflows" || basename(root) === "policies";
+    // The collections, which a workflow names in `uses`: the one data file the runtime imports too.
+    if (tree && realPath(target) === realPath(join(dirname(root), "resources", COLLECTIONS_FILE))) return undefined;
+    return (
+      `it reaches outside ${tree ? `${basename(root)}/` : "this directory"}, toward the config and its drivers; ${THROUGH_CTX}` +
+      (tree ? "; of the files outside it, only resources/data.ts (the collections) may be imported" : "")
+    );
   }
   for (const [pattern, reason] of REFUSED_PACKAGES) if (pattern.test(spec)) return reason;
   if (ALLOWED_PACKAGE.test(spec)) return undefined;
   return "import only from `sanoma` (or `@sanoma-ai/workflows`), a `@sanoma-ai/connector-*` package, zod, or a file beside this one";
+}
+
+/** A path's real path, or the path itself when it does not exist. */
+function realPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
 }

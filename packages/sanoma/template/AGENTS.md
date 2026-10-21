@@ -9,6 +9,7 @@ sanoma.config.ts     the workflows, the connectors and the policy
 workflows/           one workflow per file (defineWorkflow)
 policies/policy.ts   which calls need whose approval (definePolicy)
 resources/           data files: the vendor objects this company declares, by area
+resources/data.ts    collections: the company's own records (collection, from sanoma/data)
 scenarios/           Gherkin: how each workflow should go against the connectors' fakes
 .env                 this machine's settings and secrets, never committed (SANOMA_SECRETS_KEY encrypts stored credentials)
 ```
@@ -30,6 +31,7 @@ npm run env         # rewrites .env.example from the connectors' variables
 - A workflow imports only from `sanoma`, its connectors and relative files, and does the same thing every time it is replayed: `ctx.now()` and `ctx.sleep()`, never `Date` or timers; configuration comes in as input, never from `process.env`. The `check` script holds workflows, policies and data files to this.
 - Define each workflow's `name` as a string literal: the app finds the workflow in its file by it.
 - Every operation a workflow calls is listed in its `uses`; add the connector to `sanoma.config.ts` and to `package.json`.
+- Declare the company's own records as collections in `resources/data.ts`, which imports only `collection` from `sanoma/data` and holds nothing else: the runtime imports it, and so does a workflow that names a collection's operations (`import { outbound } from "../resources/data.ts"`, the one file outside `workflows/` a workflow may import). Every other data file is read, never run.
 - Describe each workflow's expected runs in `scenarios/<workflow>/<name>.feature`, and run the `check` script after every change.
 - A site, `sites/<name>/routes/` (pages the app serves under `/sites/<name>/`, with an optional `sites/<name>/site.ts` naming it with `defineSite`), is browser code: its route files import `createFileRoute` from `@tanstack/react-router`, and the rest (`Link`, `Outlet`, `useNavigate`, `defineSite`, …) from `sanoma/site`.
 - Never put credentials in a file here. They live in `.env` or on the app's connector pages, which store them encrypted in the database.

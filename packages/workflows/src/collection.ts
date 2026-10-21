@@ -12,15 +12,12 @@ import {
   type Op,
   type OpSpec,
 } from "./op.ts";
-import { DATA_VENDOR, type ListQuery, type Saved } from "./shared.ts";
+import { checkCollection, DATA_VENDOR, type FIELD_TYPES, type ListQuery, type Saved } from "./shared.ts";
 
 // A company's own records: a collection is declared with plain values (a name, a key and typed
 // fields), and its `get`, `list`, `save` and `delete` are operations of the vendor `data`, under
 // the policy and in the ledger like any connector's. The records are JSON rows of one table the
 // runtime owns (`DATA_TABLE`), in the config's database; a sandbox run keeps them in memory.
-
-/** The kinds of value a field holds: text, a number, true or false, a date (ISO 8601) or a person's id. */
-export const FIELD_TYPES = ["text", "number", "boolean", "date", "person"] as const;
 
 export type FieldType = (typeof FIELD_TYPES)[number];
 
@@ -75,10 +72,6 @@ export interface Collection<
   readonly delete: Op<typeof DATA_VENDOR, N, "delete", { key: string }, { deleted: boolean }>;
 }
 
-const NAME = /^[a-z][a-zA-Z0-9]*$/;
-const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const KINDS = `${FIELD_TYPES.map((t) => `"${t}"`).join(", ")}, { type, optional: true } or { enum: [...] }`;
-
 /**
  * Declares a collection of records, in `resources/data.ts`:
  * `collection({ name: "outbound", key: "company", fields: { company: "text", stage: { enum: ["new", "won"] } } })`.
@@ -91,20 +84,8 @@ export function collection<
   const F extends Record<string, Field>,
   const K extends RequiredTextKeys<F>,
 >(declaration: { name: N; key: K; fields: F; title?: string }): Collection<N, F, K> {
+  checkCollection(declaration);
   const { name, key, fields, title } = declaration;
-  const where = `collection("${String(name)}")`;
-  if (typeof name !== "string" || !NAME.test(name)) {
-    throw new Error(`${where}: the name must be a lowercase letter, then letters and digits, such as "outbound"`);
-  }
-  if (typeof fields !== "object" || fields === null || Array.isArray(fields) || !Object.keys(fields).length) {
-    throw new Error(`${where}: it needs fields, by name: each one of ${KINDS}`);
-  }
-  for (const [field, kind] of Object.entries(fields)) checkField(where, field, kind);
-  const keyKind: unknown = typeof key === "string" && Object.hasOwn(fields, key) ? fields[key] : undefined;
-  if (!(keyKind === "text" || (isObject(keyKind) && keyKind.type === "text" && keyKind.optional === undefined))) {
-    throw new Error(`${where}: the key "${String(key)}" must be one of its fields, a required "text" one`);
-  }
-  if (title !== undefined && typeof title !== "string") throw new Error(`${where}: the title must be a string`);
   const record = z.strictObject(
     Object.fromEntries(
       Object.entries(fields).map(([field, kind]) => {
@@ -123,32 +104,6 @@ export function collection<
     ...(title !== undefined && { title }),
     ...ops,
   }) as unknown as Collection<N, F, K>;
-}
-
-/** Throws unless `kind` is a field `collection()` takes: a type, the type marked optional, or an enum of distinct strings. */
-function checkField(where: string, field: string, kind: unknown): void {
-  const refused = (why: string) => new Error(`${where}: the field "${field}" ${why}`);
-  if (!FIELD_NAME.test(field)) throw refused("must be named with letters, digits and _, not a digit first");
-  const types: readonly unknown[] = FIELD_TYPES;
-  const kinds = `is ${JSON.stringify(kind)}; a field is one of ${KINDS}`;
-  if (typeof kind === "string") {
-    if (!types.includes(kind)) throw refused(kinds);
-    return;
-  }
-  if (!isObject(kind)) throw refused(kinds);
-  const { type, enum: values, optional, ...rest } = kind;
-  if (Object.keys(rest).length || (type === undefined) === (values === undefined)) throw refused(kinds);
-  if (optional !== undefined && optional !== true) throw refused("may only be marked `optional: true`");
-  if (type !== undefined && !types.includes(type)) throw refused(kinds);
-  if (
-    values !== undefined &&
-    (!Array.isArray(values) ||
-      !values.length ||
-      values.some((v) => typeof v !== "string") ||
-      new Set(values).size < values.length)
-  ) {
-    throw refused("needs an enum of distinct strings, at least one");
-  }
 }
 
 /** A date or a date and time with its offset, as ISO 8601 writes them. */
