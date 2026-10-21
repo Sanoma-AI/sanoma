@@ -94,20 +94,16 @@ const STRING_KINDS = new Map<unknown, Scalar>([
   ["date-time", "datetime"],
 ]);
 
-/** True for a collection's `date` field, `anyOf` a date and a date and time: a date's control, which keeps a time it holds. */
-const isDateOrTime = (prop: Schema) =>
-  Array.isArray(prop.anyOf) &&
-  prop.anyOf.length === 2 &&
-  prop.anyOf.every((p) => isRecord(p) && p.type === "string" && (p.format === "date" || p.format === "date-time"));
-
 function scalarKind(prop: Schema): Scalar {
   if (Array.isArray(prop.enum) && prop.enum.length && prop.enum.every((v) => v === null || typeof v !== "object")) {
     return "enum";
   }
-  if (isDateOrTime(prop)) return "date";
+  // By its format first: a collection's date, a date or a date and time, is a union marked a date.
+  const kind = STRING_KINDS.get(prop.format);
+  if (kind && (prop.type === "string" || Array.isArray(prop.anyOf))) return kind;
   switch (prop.type) {
     case "string":
-      return STRING_KINDS.get(prop.format) ?? "string";
+      return "string";
     case "number":
       return "number";
     case "integer":

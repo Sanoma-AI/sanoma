@@ -9,6 +9,7 @@ import {
   SidebarMenuItem,
 } from "#/components/ui/sidebar.tsx";
 import { configQuery } from "../../queries.ts";
+import { plural } from "../common.tsx";
 import { ACTIVE, PanelFooterLink, PanelHeader } from "./panel.tsx";
 
 // The Data section's panel: the config's collections, each linking to its grid.
@@ -44,9 +45,7 @@ export function DataPanel() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <PanelFooterLink link={<Link to="/data" />}>
-        All {collections.length} collection{collections.length === 1 ? "" : "s"}
-      </PanelFooterLink>
+      <PanelFooterLink link={<Link to="/data" />}>All {plural(collections.length, "collection")}</PanelFooterLink>
     </>
   );
 }

@@ -23,12 +23,13 @@ import { ACTOR_COOKIE, ApiError, CallRequest, type ErrorResponse } from "../src/
 import { type App, startApp } from "../src/index.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { callApi, serverFnFailure, validate } from "../src/server/core.ts";
-import { listQueryOf, usedBy } from "../src/queries.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it when dist/server/server.js
 // is missing or older than a file under src/. The Data section: `/data`, a collection's grid and
 // record form, its calls as the person (`callFn`), and Used by. The one test in a browser needs
 // Google Chrome, or `CHROME_PATH` naming a Chrome or Chromium binary, and skips without either.
+// It reads the grid through its pages, not `queries.ts`: a test importing a module that defines
+// server functions makes TypeScript read Start's `Register` in another order, and lose its types.
 
 const appDir = fileURLToPath(new URL("..", import.meta.url));
 
@@ -173,16 +174,12 @@ describe("the Data section", () => {
     );
   });
 
-  it("asks list for what the search says, and leaves out what names nothing", () => {
-    expect(listQueryOf(outbound, {})).toEqual({ limit: 100 });
-    expect(
-      listQueryOf(outbound, { order: "-seats", limit: 5, key: "Ac", where: { stage: "won", owner: "ada", nope: "x" } }),
-    ).toEqual({
-      order: "-seats",
-      limit: 5,
-      where: { stage: "won", company: { gte: "Ac", lt: "Ac\u{10FFFF}" } },
-    });
-    expect(listQueryOf(outbound, { order: "nope", where: { stage: "archived" } })).toEqual({ limit: 100 });
+  it("leaves out of the query what names nothing: a field it lacks, a value its enum lacks", async () => {
+    const all = rowKeys((await page("/data/outbound")).html);
+    const ignored = await page(`/data/outbound${searchOf({ order: "nope", where: { stage: "archived", nope: "x" } })}`);
+    expect(rowKeys(ignored.html)).toEqual(all);
+    // A where on a field that is no enum is no filter of the grid's.
+    expect(rowKeys((await page(`/data/outbound${searchOf({ where: { owner: "bo" } })}`)).html)).toEqual(all);
   });
 
   it("refuses the records to nobody, and says so", async () => {
@@ -280,9 +277,6 @@ describe("the Data section", () => {
   });
 
   it("lists the workflows that use the collection, never the built-in call, and keeps data off Connectors", async () => {
-    expect(usedBy("outbound")(describeConfig(testApp.config))).toEqual({
-      workflows: [{ name: "outbound-next", title: "Move a lead on" }],
-    });
     const { html } = await page("/data/outbound");
     expect(html).toContain(">Used by</h2>");
     expect(html).toMatch(/<a [^>]*href="\/workflows\/outbound-next"[^>]*>(?:(?!<\/a>)[\s\S])*Move a lead on/);

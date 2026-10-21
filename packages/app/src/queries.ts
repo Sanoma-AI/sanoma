@@ -1,6 +1,6 @@
 import type { RunStatus, RunSummary } from "@sanoma-ai/workflows";
 import type { CollectionEntry, ConfigDescription, OpEntry, WorkflowEntry } from "@sanoma-ai/workflows/describe";
-import { apiNameOf, isEnded, type ListQuery, type Saved } from "@sanoma-ai/workflows/shared";
+import { apiNameOf, isEnded, LIST_LIMIT, type ListQuery, type Saved } from "@sanoma-ai/workflows/shared";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { linkOptions, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -125,10 +125,15 @@ export const usedBy = (collection: string) => (config: ConfigDescription) => {
   const ops = new Set(collectionNamed(collection)(config)?.ops);
   const workflows = config.workflows
     .filter((wf) => !wf.builtin && wf.ops.some((op) => ops.has(op)))
-    .map(({ name, title }) => ({ name, title: title ?? name }))
-    .toSorted((a, b) => byTitle(a.title, b.title));
+    .toSorted((a, b) => byTitle(a.title ?? a.name, b.title ?? b.name));
   return { workflows };
 };
+
+/** A collection's enum fields, each with its values, in the collection's order. */
+export const enumFields = (fields: CollectionEntry["fields"]) =>
+  Object.entries(fields).flatMap(([name, kind]) =>
+    typeof kind === "object" && "enum" in kind ? [{ name, values: kind.enum as readonly string[] }] : [],
+  );
 
 /** Each workflow's title (its name when it has none), by name: for `select`. */
 export const workflowTitles = (config: ConfigDescription) =>
@@ -417,8 +422,8 @@ export const recordsQuery = (name: string, query: ListQuery<Record<string, unkno
     staleTime: 5_000,
   });
 
-/** How many records the grid lists at first, and the choices of its limit, up to `list`'s most. */
-export const RECORDS_LIMIT = { default: 100, choices: [25, 100, 250, 1000] } as const;
+/** The choices of the grid's limit, up to `list`'s most; it lists `LIST_LIMIT.default` at first. */
+export const LIMIT_CHOICES = [25, LIST_LIMIT.default, 250, LIST_LIMIT.max] as const;
 
 /**
  * The grid's search (`/data/<name>`): `?order=` (a field, or `-field` for descending), `?limit=`,
@@ -427,13 +432,16 @@ export const RECORDS_LIMIT = { default: 100, choices: [25, 100, 250, 1000] } as 
  */
 export const DataSearch = z.object({
   order: z.string().min(1).optional().catch(undefined),
-  limit: z.coerce.number().int().min(1).max(1000).optional().catch(undefined),
+  limit: z.coerce.number().int().min(1).max(LIST_LIMIT.max).optional().catch(undefined),
   key: z.string().min(1).optional().catch(undefined),
   where: z.record(z.string(), z.string()).optional().catch(undefined),
   record: z.string().min(1).optional().catch(undefined),
   new: WorkflowSearch.shape.new,
 });
 export type DataSearch = z.infer<typeof DataSearch>;
+
+/** The grid's search with no record open in the form: for a link's or `navigate`'s `search`. */
+export const closeRecord = (prev: DataSearch): DataSearch => ({ ...prev, record: undefined, new: undefined });
 
 /** The highest code point: after every string that starts with a prefix, under `list`'s byte order. */
 const LAST = "\u{10FFFF}";
@@ -446,18 +454,18 @@ const LAST = "\u{10FFFF}";
 export function listQueryOf(
   { key, fields }: Pick<CollectionEntry, "key" | "fields">,
   search: Pick<DataSearch, "order" | "limit" | "key" | "where">,
-): ListQuery<Record<string, unknown>> {
+): ListQuery<Record<string, unknown>> & { limit: number } {
   const where: Record<string, unknown> = {};
-  for (const [field, value] of Object.entries(search.where ?? {})) {
-    const kind = fields[field];
-    if (typeof kind === "object" && "enum" in kind && kind.enum.includes(value)) where[field] = value;
+  for (const { name, values } of enumFields(fields)) {
+    const value = search.where?.[name];
+    if (value !== undefined && values.includes(value)) where[name] = value;
   }
   if (search.key) where[key] = { gte: search.key, lt: search.key + LAST };
   const order = search.order && Object.hasOwn(fields, search.order.replace(/^-/, "")) ? search.order : undefined;
   return {
     ...(Object.keys(where).length > 0 && { where }),
     ...(order && { order }),
-    limit: search.limit ?? RECORDS_LIMIT.default,
+    limit: search.limit ?? LIST_LIMIT.default,
   };
 }
 

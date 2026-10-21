@@ -73,6 +73,9 @@ export type ListQuery<R> = {
 
 type Range<V> = { gt?: V; gte?: V; lt?: V; lte?: V };
 
+/** How many records a collection's `list` answers: `default` when the query names no `limit`, `max` at most. */
+export const LIST_LIMIT = { default: 100, max: 1000 } as const;
+
 /** The kinds of value a field holds: text, a number, true or false, a date (ISO 8601) or a person's id. */
 export const FIELD_TYPES = ["text", "number", "boolean", "date", "person"] as const;
 

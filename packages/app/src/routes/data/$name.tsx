@@ -1,3 +1,4 @@
+import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 import { errorMessage } from "@sanoma-ai/workflows/shared";
 import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
@@ -9,13 +10,21 @@ import { useActor } from "../../actor.ts";
 import { ButtonLink, CardHeading, Notice, PageHeader, pageTitle, UsedBy } from "../../components/common.tsx";
 import { DataGrid, GridFilters } from "../../components/data-grid.tsx";
 import { RecordForm } from "../../components/record-form.tsx";
-import { collectionNamed, configQuery, DataSearch, listQueryOf, recordsQuery, usedBy } from "../../queries.ts";
+import {
+  closeRecord,
+  collectionNamed,
+  configQuery,
+  DataSearch,
+  listQueryOf,
+  recordsQuery,
+  usedBy,
+} from "../../queries.ts";
 
 export const Route = createFileRoute("/data/$name")({
   validateSearch: DataSearch,
   // The grid's width is the window's: a collection may have many fields.
   staticData: { wide: true },
-  // What `list` is asked: the record open in the form reads no records again.
+  // What `list` is asked: opening a record in the form reads no records again.
   loaderDeps: ({ search: { order, limit, key, where } }) => ({ order, limit, key, where }),
   // The page reads the config and the records from the query client; the loader returns only its
   // name, the collection's title. The records are read as the person asking (while the server
@@ -39,12 +48,14 @@ export const Route = createFileRoute("/data/$name")({
 function CollectionPage() {
   const { name } = Route.useParams();
   const search = Route.useSearch();
-  const deps = Route.useLoaderDeps();
-  const navigate = Route.useNavigate();
-  const { data: collection } = useSuspenseQuery({ ...configQuery(), select: (c) => collectionNamed(name)(c)! });
-  const selectUsedBy = useMemo(() => usedBy(name), [name]);
-  const { data: used } = useSuspenseQuery({ ...configQuery(), select: selectUsedBy });
-  const query = useMemo(() => listQueryOf(collection, deps), [collection, deps]);
+  const select = useMemo(
+    () => (config: ConfigDescription) => ({ collection: collectionNamed(name)(config)!, ...usedBy(name)(config) }),
+    [name],
+  );
+  const {
+    data: { collection, workflows },
+  } = useSuspenseQuery({ ...configQuery(), select });
+  const query = listQueryOf(collection, search);
   // Every read is the policy's to decide as someone: none until the page knows who you are.
   const { actor } = useActor();
   const records = useQuery({
@@ -53,9 +64,8 @@ function CollectionPage() {
     // The rows stay while a filter's are read.
     placeholderData: keepPreviousData,
   });
-  const close = () =>
-    void navigate({ search: (prev) => ({ ...prev, record: undefined, new: undefined }), resetScroll: false });
-  const open = search.new ? "new" : search.record;
+  const navigate = Route.useNavigate();
+  const close = () => void navigate({ search: closeRecord, resetScroll: false });
   const saved = search.record === undefined ? undefined : records.data?.find((r) => r.key === search.record);
 
   return (
@@ -63,7 +73,7 @@ function CollectionPage() {
       <PageHeader
         action={
           <ButtonLink>
-            <Link to="." search={(prev) => ({ ...prev, new: true, record: undefined })} resetScroll={false}>
+            <Link to="." search={(prev) => ({ ...closeRecord(prev), new: true })} resetScroll={false}>
               <PlusIcon data-icon="inline-start" />
               Add record
             </Link>
@@ -89,24 +99,27 @@ function CollectionPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
           <div className="min-w-0 flex-1">
             {records.data ? (
-              <DataGrid collection={collection} records={records.data} search={search} limit={query.limit ?? 0} />
+              <DataGrid
+                collection={collection}
+                records={records.data}
+                order={query.order}
+                open={search.record}
+                filtered={query.where !== undefined}
+                limit={query.limit}
+              />
             ) : records.isError ? (
               <Notice variant="destructive">{errorMessage(records.error)}</Notice>
             ) : (
               <Skeleton role="status" aria-label="Loading the records" className="h-40 w-full" />
             )}
           </div>
-          {open && (
+          {(search.new || search.record !== undefined) && (
             <Card aria-label="Record" role="region" className="lg:sticky lg:top-4 lg:w-96 lg:shrink-0">
               <CardHeader>
-                <CardHeading className="self-center">{open === "new" ? "New record" : `Edit ${open}`}</CardHeading>
+                <CardHeading className="self-center">{search.new ? "New record" : `Edit ${search.record}`}</CardHeading>
                 <CardAction>
                   <ButtonLink variant="ghost" size="icon-sm">
-                    <Link
-                      to="."
-                      search={(prev) => ({ ...prev, record: undefined, new: undefined })}
-                      resetScroll={false}
-                    >
+                    <Link to="." search={closeRecord} resetScroll={false}>
                       <XIcon />
                       <span className="sr-only">Close</span>
                     </Link>
@@ -114,11 +127,19 @@ function CollectionPage() {
                 </CardAction>
               </CardHeader>
               <CardContent>
-                {open === "new" || saved ? (
-                  <RecordForm key={open} collection={collection} saved={saved} onDone={close} />
+                {search.new || saved ? (
+                  <RecordForm
+                    // A new record's people start as whoever is asking: drawn again once the
+                    // browser has read who (none while the server renders).
+                    key={search.new ? `new:${actor ?? ""}` : search.record}
+                    collection={collection}
+                    saved={saved}
+                    actor={actor}
+                    onDone={close}
+                  />
                 ) : records.data ? (
                   <Notice>
-                    No record <code>{open}</code> among those listed: it may be filtered out, or gone.
+                    No record <code>{search.record}</code> among those listed: it may be filtered out, or gone.
                   </Notice>
                 ) : (
                   <Skeleton className="h-40 w-full" />
@@ -128,7 +149,7 @@ function CollectionPage() {
           )}
         </div>
       </section>
-      <UsedBy workflows={used.workflows} />
+      <UsedBy workflows={workflows} />
     </>
   );
 }

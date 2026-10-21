@@ -1,4 +1,5 @@
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
+import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { ClientOnly, Link } from "@tanstack/react-router";
 import {
@@ -161,6 +162,12 @@ function PanelView({ panel }: { panel: Panel }) {
   }
 }
 
+/** What the bar reads from the config: the app's name, and whether it has collections. */
+const selectBar = (config: ConfigDescription) => ({
+  appName: config.appName,
+  hasData: config.collections.length > 0,
+});
+
 /**
  * The brand, linking home; each section, the current one marked; who you are at the foot. While
  * no panel is docked (`peek` given), a section with a panel peeks it.
@@ -172,13 +179,16 @@ function SectionBar({
   ref: RefObject<HTMLDivElement | null>;
   peek: PopoverPrimitive.Handle<PanelSection> | undefined;
 }) {
-  const { data: appName } = useSuspenseQuery({ ...configQuery(), select: (config) => config.appName });
-  const { data: hasData } = useSuspenseQuery({ ...configQuery(), select: (config) => config.collections.length > 0 });
+  const {
+    data: { appName, hasData },
+  } = useSuspenseQuery({ ...configQuery(), select: selectBar });
   // Sites, when there are sites: its link, the first page a site lists, and whether the page is
   // a site's, which lights it.
   const sites = useSites();
   const sitesHome = sites.find((site) => site.pages.length > 0)?.pages[0]?.to;
   const onSite = usePageSection() === "sites";
+  // Sites and Data, only when there is something to list.
+  const shown: Partial<Record<string, boolean>> = { sites: sites.length > 0, data: hasData };
   // The Inbox page's query (its costliest read), polled every 30 s for the badge. Each watcher
   // polls at its own interval, so while the Inbox page shows, its 5 s poll keeps the badge
   // fresh too; and a decision refreshes it at once.
@@ -202,9 +212,7 @@ function SectionBar({
         <SidebarGroup className="px-1.5">
           <nav aria-label="Sections">
             <SidebarMenu className="gap-1">
-              {SECTIONS.filter((section) =>
-                section.panel === "sites" ? sites.length > 0 : section.panel === "data" ? hasData : true,
-              ).map((section) => (
+              {SECTIONS.filter((section) => shown[section.panel ?? ""] ?? true).map((section) => (
                 <SidebarMenuItem key={section.label}>
                   <SectionLink section={section} peek={section.panel && peek} sites={{ home: sitesHome, lit: onSite }}>
                     {/* After hydration only: the root loader starts this query without waiting for it,

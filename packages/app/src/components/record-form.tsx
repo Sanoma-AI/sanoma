@@ -17,7 +17,6 @@ import {
 } from "#/components/ui/dialog.tsx";
 import { FieldGroup } from "#/components/ui/field.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
-import { useActor } from "../actor.ts";
 import { errorBodyOf } from "../api.ts";
 import type { UntypedApi } from "../api-client.ts";
 import { buildInput, fieldsOf, initialValues } from "../form/schema.ts";
@@ -35,21 +34,21 @@ type RecordCall = { op: "save" | "delete"; input: unknown };
 
 /**
  * Calls the collection's `save` or `delete` through `api` (a new id each), as the person asking,
- * and refreshes the collection's records whatever the answer. A failure is the caller's to show.
+ * and refreshes the collection's records once it is made. A failure is the caller's to show.
  */
 function useRecordCall(name: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ op, input }: RecordCall) => (api as UntypedApi).data[name][op](input) as Promise<unknown>,
-    onSettled: () => queryClient.invalidateQueries({ queryKey: [...DATA_KEY, name] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [...DATA_KEY, name] }),
   });
 }
 
 /**
- * True when `err` is a call the policy holds for an approval, which it then says, with a link to
- * the run of the built-in `call` workflow that makes it once approved.
+ * When `err` is a call the policy holds for an approval, says so with a toast linking to the run
+ * of the built-in `call` workflow that makes it once approved, and answers true.
  */
-function heldForApproval(err: unknown): boolean {
+function toastIfHeld(err: unknown): boolean {
   const body = errorBodyOf(err);
   if (body?.code !== "approval_pending" || !body.runId) return false;
   toast.info("Held for approval", {
@@ -66,28 +65,21 @@ function heldForApproval(err: unknown): boolean {
 const inRecord = (path: (string | number)[]) => (path[0] === "record" ? path.slice(1) : path);
 
 /**
- * The record form: a new record's (`saved` none), its people filled in with whoever is asking; or
- * `saved`'s, its key read-only, with Delete. Save answers by `onDone` once saved or held for an
- * approval (said with a toast linking to its run); a denial and what the fields refuse show on
- * the form.
+ * The record form: a new record's (`saved` none), its people filled in with `actor`, whoever is
+ * asking; or `saved`'s, its key read-only, with Delete. Save answers by `onDone` once saved or
+ * held for an approval (said with a toast linking to its run); a denial and what the fields
+ * refuse show on the form.
  */
-export function RecordForm(props: { collection: CollectionEntry; saved?: Saved | undefined; onDone: () => void }) {
-  // Drawn again once the browser has read who is asking (none while the server renders), so a
-  // new record's people start as them.
-  const { actor } = useActor();
-  return <RecordFormFor key={actor ?? ""} actor={actor} {...props} />;
-}
-
-function RecordFormFor({
+export function RecordForm({
   collection: { name, key, record },
   saved,
-  onDone,
   actor,
+  onDone,
 }: {
   collection: CollectionEntry;
   saved?: Saved | undefined;
-  onDone: () => void;
   actor: string | null | undefined;
+  onDone: () => void;
 }) {
   const fields = useMemo(() => fieldsOf(record) ?? [], [record]);
   const call = useRecordCall(name);
@@ -99,12 +91,11 @@ function RecordFormFor({
   const form = useSchemaForm(defaultValues, async (values) => {
     const built = buildInput(fields, values);
     if (Object.keys(built.errors).length) return { fields: built.errors };
-    // An edit saves under the record's own key, which its field shows but cannot change.
-    const input = { record: saved ? { ...built.input, [key]: saved.key } : built.input };
+    const input = { record: built.input };
     try {
       await call.mutateAsync({ op: "save", input });
     } catch (err) {
-      if (heldForApproval(err)) {
+      if (toastIfHeld(err)) {
         onDone();
         return undefined;
       }
@@ -164,7 +155,7 @@ function DeleteRecord({ name, recordKey, onDeleted }: { name: string; recordKey:
       toast.success(`Deleted ${recordKey}`);
     } catch (err) {
       // A denial, or any other failure, stays in the dialog.
-      if (!heldForApproval(err)) return;
+      if (!toastIfHeld(err)) return;
       call.reset();
     }
     setOpen(false);

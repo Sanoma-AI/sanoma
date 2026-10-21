@@ -54,25 +54,9 @@ const SITE_TS = `import { defineSite } from "sanoma/site";
 export default defineSite({ title: "Launch desk" });
 `;
 
-// The data still's collection, in resources/data.ts (which the launcher imports), and its records,
-// saved through the runtime's client as dana and marketing-lead.
-const DATA_TS = `import { collection } from "sanoma/data";
-
-/** The outbound pipeline: which lead is at which stage, and who owns it. */
-export const outbound = collection({
-  name: "outbound",
-  title: "Outbound",
-  key: "company",
-  fields: {
-    company: "text",
-    contact: "text",
-    stage: { enum: ["researched", "contacted", "replied", "meeting", "won", "lost"] },
-    owner: "person",
-    lastTouched: { type: "date", optional: true },
-    seats: { type: "number", optional: true },
-  },
-});
-`;
+// The data still's collection: the outbound fixture's resources/data.ts (which the launcher
+// imports), importing from sanoma as a company's does; and its records, saved as their owners.
+const DATA_TS = join(repo, "packages/workflows/test/fixtures/outbound/resources/data.ts");
 const LEADS = [
   ["Acme Corp", "ada@acme.test", "meeting", "dana", "2027-05-28", 40],
   ["Globex", "hank@globex.test", "contacted", "dana", "2027-05-20", 12],
@@ -152,8 +136,7 @@ try {
   const frames = join(work, "frames");
   const runPath = await recordDemo(browser, base, frames);
   say("demo recorded; seeding two more runs that wait on marketing-lead, and the outbound leads");
-  await seedPendingRuns(acme);
-  await seedLeads(acme);
+  await seed(acme);
 
   const captured = join(work, "assets");
   mkdirSync(captured);
@@ -266,39 +249,12 @@ function replaceAssets(dir: string, files: string[]): void {
 }
 
 /**
- * Two more runs of announce from dana, waiting on marketing-lead, for the Inbox still: started
- * through the runtime's client, as the app starts a run, with acme's config.
+ * Two more runs of announce from dana, waiting on marketing-lead, for the Inbox still, and the
+ * outbound leads for the data still: through the runtime's client, as the app starts a run and
+ * saves a record, with acme's config and the collection its resources/data.ts declares (as the
+ * launcher adds it).
  */
-async function seedPendingRuns(acme: string): Promise<void> {
-  const { SanomaClient } = (await import(pathToFileURL(fromSanoma.resolve("@sanoma-ai/workflows")).href)) as Workflows;
-  const { default: config } = (await import(pathToFileURL(join(acme, "sanoma.config.ts")).href)) as {
-    default: SanomaConfig;
-  };
-  const client = await SanomaClient.connect({ ...config, root: acme, databaseUrl: databaseUrl.href });
-  try {
-    for (const [title, body, launchAt] of SEEDED) {
-      const input = { title, body, launchAt: launchAt.toISOString() };
-      const runId = await client.start("announce", input, { startedBy: { id: "dana" } });
-      await waitFor(
-        async () => (await client.run(runId))?.status,
-        (status) => status === "waiting",
-        30_000,
-      ).catch((err: unknown) => {
-        throw new ServerFailure(`readme:shots: seeded run ${runId} did not come to wait on its approval`, {
-          cause: err,
-        });
-      });
-    }
-  } finally {
-    await client.close();
-  }
-}
-
-/**
- * The outbound leads for the data still, through the runtime's client with acme's config and the
- * collection its resources/data.ts declares (as the launcher adds it), each saved as its owner.
- */
-async function seedLeads(acme: string): Promise<void> {
+async function seed(acme: string): Promise<void> {
   const { SanomaClient } = (await import(pathToFileURL(fromSanoma.resolve("@sanoma-ai/workflows")).href)) as Workflows;
   const { default: config } = (await import(pathToFileURL(join(acme, "sanoma.config.ts")).href)) as {
     default: SanomaConfig;
@@ -316,6 +272,19 @@ async function seedLeads(acme: string): Promise<void> {
     for (const [company, contact, stage, owner, lastTouched, seats] of LEADS) {
       const record = { company, contact, stage, owner, ...(lastTouched && { lastTouched }), ...(seats && { seats }) };
       await client.call("data.outbound.save", { record }, { actor: { id: owner }, id: crypto.randomUUID() });
+    }
+    for (const [title, body, launchAt] of SEEDED) {
+      const input = { title, body, launchAt: launchAt.toISOString() };
+      const runId = await client.start("announce", input, { startedBy: { id: "dana" } });
+      await waitFor(
+        async () => (await client.run(runId))?.status,
+        (status) => status === "waiting",
+        30_000,
+      ).catch((err: unknown) => {
+        throw new ServerFailure(`readme:shots: seeded run ${runId} did not come to wait on its approval`, {
+          cause: err,
+        });
+      });
     }
   } finally {
     await client.close();
@@ -338,7 +307,10 @@ function writeRepo(dir: string): void {
   writeFileSync(join(dir, "sites/launches/site.ts"), SITE_TS);
   writeFileSync(join(dir, "sites/launches/routes/index.tsx"), page[1]);
   mkdirSync(join(dir, "resources"));
-  writeFileSync(join(dir, "resources/data.ts"), DATA_TS);
+  writeFileSync(
+    join(dir, "resources/data.ts"),
+    readFileSync(DATA_TS, "utf8").replace('"@sanoma-ai/workflows/data"', '"sanoma/data"'),
+  );
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "acme", private: true, type: "module" }));
   for (const [name, target] of [
     ["sanoma", "packages/sanoma"],
