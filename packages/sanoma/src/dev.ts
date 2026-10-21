@@ -94,6 +94,8 @@ export interface SuperviseOptions {
   spawn: () => ChildProcess;
   /** Directories to watch, recursively; each is created when missing. */
   watch: string[];
+  /** Directories under them whose changes restart nothing. */
+  ignore?: string[];
   /** How long after the last change to wait before restarting. Default 750 ms. */
   debounceMs?: number;
   log?: (line: string) => void;
@@ -105,7 +107,13 @@ export interface SuperviseOptions {
  * in order. A child that exits on its own is reported and started again on the next change.
  * `stop` stops watching, waits for a restart under way, and ends the child.
  */
-export function supervise({ spawn: start, watch: dirs, debounceMs = 750, log = () => {} }: SuperviseOptions): {
+export function supervise({
+  spawn: start,
+  watch: dirs,
+  ignore = [],
+  debounceMs = 750,
+  log = () => {},
+}: SuperviseOptions): {
   stop(): Promise<void>;
 } {
   const ending = new WeakSet<ChildProcess>();
@@ -126,7 +134,9 @@ export function supervise({ spawn: start, watch: dirs, debounceMs = 750, log = (
   let timer: NodeJS.Timeout | undefined;
   const watchers = dirs.map((dir) => {
     mkdirSync(dir, { recursive: true });
-    return watch(dir, { recursive: true }, () => {
+    return watch(dir, { recursive: true }, (_event, name) => {
+      const changed = name === null ? dir : join(dir, name);
+      if (ignore.some((skip) => changed === skip || changed.startsWith(skip + sep))) return;
       clearTimeout(timer);
       timer = setTimeout(() => {
         turn = turn

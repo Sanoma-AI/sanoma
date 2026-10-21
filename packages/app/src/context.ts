@@ -42,3 +42,8 @@ export interface AppContext {
   /** The company's repository, which Adopt commits a data file's change to; without one, it only writes the file. */
   source?: Source;
 }
+
+/** Start's server entry, which `startApp` hands each request with the context: the build's `server.js`, or the dev server's. */
+export interface ServerEntry {
+  fetch(request: Request, opts?: { context?: { app: AppContext } }): Response | Promise<Response>;
+}

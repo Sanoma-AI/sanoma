@@ -14,10 +14,12 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { InlineConfig, Logger, Plugin } from "vite";
+import type { ServerEntry } from "./context.ts";
 
 /** The app package's directory, by its real path (not the symlink pnpm makes): from `src/` or `dist/`. */
 const pkgDir = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
@@ -154,6 +156,12 @@ const inside = (file: string, dir: string) => {
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 };
 
+/** A company's own file (a module id's path): in the repo, not in a dependency. */
+const companyFile = (id: string, repo: string) => {
+  const file = id.split("?")[0]!;
+  return inside(file, repo) && !file.includes(`${sep}node_modules${sep}`);
+};
+
 export interface AppViteOptions {
   /** A company repo: build it, the app's routes and its sites, as one Start build. Without one, the package's own build. */
   repo?: string;
@@ -284,9 +292,7 @@ function sharedDeps(repo: string, src: string): Plugin {
     name: "sanoma:shared-deps",
     enforce: "pre",
     async resolveId(source, importer, options) {
-      if (!importer || !SHARED.test(source)) return;
-      const file = importer.split("?")[0]!;
-      if (!inside(file, repo) || file.includes(`${sep}node_modules${sep}`)) return;
+      if (!importer || !SHARED.test(source) || !companyFile(importer, repo)) return;
       return this.resolve(source, router, { ...options, skipSelf: true });
     },
   };
@@ -316,6 +322,153 @@ function runtimeExternal(runtimeFrom: string): Plugin {
       return { id: pathToFileURL(resolved.id).href, external: "absolute" };
     },
   };
+}
+
+/** What `startApp` serves a company repo's app from in dev: Vite's dev server over the app's source and the sites. */
+export interface AppDevServer {
+  /** Vite's own answers (modules, the HMR client, files); `next` for the rest, the pages and server functions. */
+  middlewares(req: IncomingMessage, res: ServerResponse, next: (err?: unknown) => void): void;
+  /** Start's server entry, imported for each request: the module runner drops what a change touched. */
+  serverEntry(): Promise<ServerEntry>;
+  close(): Promise<void>;
+}
+
+/**
+ * Vite's dev server for a company repo's app with its sites, in middleware mode, for `startApp`
+ * to put behind its own login: the build's config (`appViteConfig`, so the route generator's
+ * options are the build's and `sanoma check` beside it never rewrites the tree) with the
+ * dev-only plugins (`devPlugins`), and hot updates over `http`'s upgrade. Writes the sites'
+ * generated files first. A new site folder is live once its first route file is written.
+ */
+export async function appDevServer(repo: string, http: Server): Promise<AppDevServer> {
+  const root = realpathSync(repo);
+  writeSiteFiles(root);
+  const { src } = appSources();
+  const vite = await import("vite");
+  const base = appViteConfig({ repo: root });
+  const server = await vite.createServer({
+    ...base,
+    appType: "custom",
+    clearScreen: false,
+    plugins: [...(base.plugins ?? []), ...devPlugins(root, src)],
+    server: {
+      middlewareMode: true,
+      hmr: { server: http },
+      // The repo's workspace and the app's (its install, or the checkout it is linked from), where
+      // its static files (fonts) are; Vite's default is the repo's alone.
+      fs: { allow: [vite.searchForWorkspaceRoot(root), vite.searchForWorkspaceRoot(src)] },
+    },
+    // The runtime as Node loads it, the copy startApp's context holds, wherever it is installed
+    // (Vite would run a linked checkout's copy itself).
+    environments: { ssr: { resolve: { external: RUNTIME } } },
+    optimizeDeps: {
+      // Shipped as source, compiled with the pages.
+      exclude: ["sanoma", "@sanoma-ai/app"],
+      // Every page, so the first visit finds the dependencies optimized, not a reload to do it.
+      entries: [`${src}/routes/**/*.tsx`, "sites/**/*.tsx"],
+    },
+  });
+  const ssr = server.environments.ssr;
+  if (!ssr || !vite.isRunnableDevEnvironment(ssr)) {
+    await server.close();
+    throw new Error("Vite's ssr environment does not run modules in this process");
+  }
+  return {
+    middlewares: (req, res, next) => server.middlewares(req, res, next),
+    serverEntry: async () =>
+      ((await ssr.runner.import("virtual:tanstack-start-server-entry")) as { default: ServerEntry }).default,
+    close: () => server.close(),
+  };
+}
+
+/**
+ * The dev server's additions to the build's plugins (spike S3, E16 in the sites investigation).
+ * The app and its React, TanStack and Tailwind are installed beside `sanoma`, not in the repo, and
+ * a site must reach the app's copies, in the browser and on the server, as the build's
+ * `sanoma:shared-deps` makes it.
+ */
+function devPlugins(repo: string, src: string): Plugin[] {
+  const sitesDir = join(repo, "sites") + sep;
+  const css = join(src, "style.css");
+  // A file in the app's source whose id, with the specifier in its query, stands in for a
+  // company file's shared import on the server: the module runner resolves it from the app.
+  const proxy = `${join(src, "dev-imports.ts")}?sanoma-shared=`;
+  // How Vite's nested include reaches the app from the repo: through sanoma, which a company
+  // installs, or directly.
+  const viaApp = moduleDir("sanoma", repo) ? "sanoma > @sanoma-ai/app" : "@sanoma-ai/app";
+  // (#163 A5: the watcher that regenerates .sanoma/api.ts as workflows and collections change goes here.)
+  return [
+    {
+      // The root's dedupe resolves from the repo, where pnpm installs no React.
+      name: "sanoma:dev-server-dedupe",
+      apply: "serve",
+      configResolved(config) {
+        for (const env of Object.values(config.environments)) {
+          if (env.consumer === "server") env.resolve.dedupe = [];
+        }
+      },
+    },
+    {
+      // The browser's pre-bundled dependencies are named from the root, where pnpm installs none of
+      // them: name them through sanoma and the app (Vite's nested form), else CJS React is served
+      // raw and the page does not hydrate.
+      name: "sanoma:dev-include-via-app",
+      apply: "serve",
+      configResolved(config) {
+        for (const env of Object.values(config.environments)) {
+          if (env.consumer !== "client") continue;
+          env.optimizeDeps.include = (env.optimizeDeps.include ?? []).map((id) =>
+            SHARED.test(id) ? `${viaApp} > ${id}` : id,
+          );
+        }
+      },
+    },
+    {
+      // Tailwind's dev stylesheet watches the files it last scanned, so a class in a file added
+      // under sites/ would not show until a restart: on an add or removal there, rebuild it.
+      name: "sanoma:dev-sites-css",
+      apply: "serve",
+      configureServer(server) {
+        const refresh = (file: string) => {
+          if (!file.startsWith(sitesDir)) return;
+          for (const env of Object.values(server.environments)) {
+            for (const mod of env.moduleGraph.getModulesByFile(css) ?? []) void env.reloadModule(mod);
+          }
+        };
+        server.watcher.on("add", refresh);
+        server.watcher.on("unlink", refresh);
+      },
+    },
+    {
+      name: "sanoma:dev-shared-proxy",
+      apply: "serve",
+      enforce: "pre",
+      resolveId: (source) => (source.startsWith(proxy) ? source : undefined),
+      load(id) {
+        if (!id.startsWith(proxy)) return;
+        const spec = JSON.stringify(decodeURIComponent(id.slice(proxy.length)));
+        // React is CommonJS: its default export is named too.
+        const cjs = /^"react(-dom)?(\/|")/.test(spec);
+        return `export * from ${spec};${cjs ? ` export { default } from ${spec};` : ""}`;
+      },
+    },
+    {
+      // On the server, a company file's import of React, TanStack or the app goes through the proxy.
+      name: "sanoma:dev-shared-imports",
+      apply: "serve",
+      enforce: "post",
+      applyToEnvironment: (env) => env.name === "ssr",
+      transform(code, id) {
+        if (!companyFile(id, repo) || !/\.[jt]sx?$/.test(id.split("?")[0]!)) return;
+        return code.replace(
+          // A static import or re-export, from the start of its statement: never a string's text.
+          /^(\s*(?:import\s*|(?:import|export)\b[^"']*?\bfrom\s*))(["'])([^"']+)\2/gm,
+          (match, before: string, quote: string, spec: string) =>
+            SHARED.test(spec) ? `${before}${quote}${proxy}${encodeURIComponent(spec)}${quote}` : match,
+        );
+      },
+    },
+  ];
 }
 
 /**

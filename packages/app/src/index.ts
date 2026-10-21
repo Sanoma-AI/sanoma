@@ -1,12 +1,13 @@
 import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   errorMessage,
+  isLoopback,
   problemLine,
   resolveConfig,
   SanomaClient,
@@ -15,7 +16,7 @@ import {
 } from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
-import type { AppContext, LoginProvider } from "./context.ts";
+import type { AppContext, LoginProvider, ServerEntry } from "./context.ts";
 import { loopbackLogin } from "./loopback.ts";
 
 export { ACTOR_HEADER } from "./api.ts";
@@ -40,6 +41,12 @@ export interface AppOptions {
   source?: Source;
   /** The built app (`client/` and `server/`). Defaults to the one this package ships. */
   distDir?: string;
+  /**
+   * Serves a company repo's app with its sites from Vite's dev server instead of a build: edits
+   * to a site or to the app's source show without a restart, and a new site folder is live once
+   * it has a route file. On this machine only (the hot updates' websocket bypasses the login).
+   */
+  dev?: { repo: string };
 }
 
 export interface App {
@@ -48,8 +55,11 @@ export interface App {
   close(): Promise<void>;
 }
 
-interface ServerEntry {
-  fetch(request: Request, opts?: { context?: { app: AppContext } }): Response | Promise<Response>;
+/** Answers a request the login let through, a file's or the server entry's. */
+interface Responder {
+  respond(req: IncomingMessage, res: ServerResponse, request: Request, app: AppContext): Promise<void>;
+  /** Closes what it opened, logging a failure rather than throwing it, as `closeQuietly`. */
+  close(): Promise<void>;
 }
 
 /**
@@ -63,6 +73,9 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   const host = options.host ?? "127.0.0.1";
   const login = options.login ?? loopbackLogin();
   login.check(host);
+  if (options.dev && !isLoopback(host)) {
+    throw new Error(`The dev server listens on this machine only, not ${host}: serve a build there`);
+  }
   const resolved = resolveConfig(config);
   const description = describeConfig(config);
   // Problems in the files do not stop the app: a data file's resources are left out (the Resources
@@ -75,29 +88,6 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     const list = [...lines].map((line) => `  ${line}`).join("\n");
     console.warn(`sanoma app: the config's files have problems (\`sanoma check\` lists them):\n${list}`);
   }
-  const distDir = resolve(options.distDir ?? defaultDistDir());
-
-  // The build first, importing nothing and connecting to nothing: a missing or half build is
-  // refused before anything is opened.
-  const files = await staticFiles(join(distDir, "client"));
-  const serverEntry = join(distDir, "server", "server.js");
-  await mustBeFile(serverEntry);
-  const [loaded, connected] = await Promise.allSettled([loadServerEntry(serverEntry), SanomaClient.connect(config)]);
-  if (loaded.status === "rejected" && connected.status === "rejected") {
-    throw new AggregateError(
-      [loaded.reason, connected.reason],
-      `The app could not start: ${errorMessage(loaded.reason)}; and ${errorMessage(connected.reason)}`,
-    );
-  }
-  if (loaded.status === "rejected") {
-    if (connected.status === "fulfilled") await closeQuietly(connected.value);
-    throw loaded.reason;
-  }
-  if (connected.status === "rejected") throw connected.reason;
-  const entry = loaded.value;
-  const client = connected.value;
-  const app: AppContext = { resolved, description, client, login, source: options.source };
-
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => {
       console.error("sanoma app: request failed:", err);
@@ -120,10 +110,40 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     // own routes, and any it will not let through.
     const answer = await login.handle?.(request);
     if (answer) return sendNodeResponse(res, answer);
-    const file = staticFile(files, req);
-    if (file) return sendFile(file, req, res);
-    await sendNodeResponse(res, await entry.fetch(request, { context: { app } }));
+    await responder.respond(req, res, request, app);
   }
+
+  // The build first, importing nothing and connecting to nothing: a missing or half build is
+  // refused before anything is opened. The dev server has nothing built to check.
+  let load: () => Promise<Responder>;
+  if (options.dev) {
+    const { repo } = options.dev;
+    load = () => devResponder(repo, server);
+  } else {
+    const distDir = resolve(options.distDir ?? defaultDistDir());
+    const files = await staticFiles(join(distDir, "client"));
+    const serverEntry = join(distDir, "server", "server.js");
+    await mustBeFile(serverEntry);
+    load = async () => builtResponder(files, await loadServerEntry(serverEntry));
+  }
+  const [loaded, connected] = await Promise.allSettled([load(), SanomaClient.connect(config)]);
+  if (loaded.status === "rejected" && connected.status === "rejected") {
+    throw new AggregateError(
+      [loaded.reason, connected.reason],
+      `The app could not start: ${errorMessage(loaded.reason)}; and ${errorMessage(connected.reason)}`,
+    );
+  }
+  if (loaded.status === "rejected") {
+    if (connected.status === "fulfilled") await closeQuietly(connected.value);
+    throw loaded.reason;
+  }
+  if (connected.status === "rejected") {
+    await loaded.value.close();
+    throw connected.reason;
+  }
+  const responder = loaded.value;
+  const client = connected.value;
+  const app: AppContext = { resolved, description, client, login, source: options.source };
 
   try {
     await new Promise<void>((done, fail) => {
@@ -134,6 +154,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       });
     });
   } catch (err) {
+    await responder.close();
     await closeQuietly(client);
     throw err;
   }
@@ -145,10 +166,15 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     close() {
       closing ??= (async () => {
         try {
-          await new Promise<void>((done, fail) => {
-            server.close((err) => (err ? fail(err) : done()));
-            server.closeAllConnections();
-          });
+          // Together: the server waits for upgraded sockets (the dev server's websocket), which
+          // only the responder's close ends.
+          await Promise.all([
+            new Promise<void>((done, fail) => {
+              server.close((err) => (err ? fail(err) : done()));
+              server.closeAllConnections();
+            }),
+            responder.close(),
+          ]);
         } finally {
           await closeQuietly(client);
         }
@@ -190,6 +216,38 @@ async function mustBeFile(path: string) {
     },
   );
   if (!found) throw notBuilt(path);
+}
+
+/** The build's files, then its server entry. */
+const builtResponder = (files: Map<string, StaticFile>, entry: ServerEntry): Responder => ({
+  async respond(req, res, request, app) {
+    const file = staticFile(files, req);
+    if (file) return sendFile(file, req, res);
+    await sendNodeResponse(res, await entry.fetch(request, { context: { app } }));
+  },
+  close: async () => {},
+});
+
+/** Vite's dev server (`appDevServer`, loaded only here), then Start's entry as it imports it now. */
+async function devResponder(repo: string, server: Server): Promise<Responder> {
+  const { appDevServer } = await import("./build.ts");
+  const dev = await appDevServer(repo, server);
+  return {
+    respond: (req, res, request, app) =>
+      new Promise((done, fail) => {
+        // Vite answers what it serves itself without calling next.
+        res.once("close", done);
+        dev.middlewares(req, res, (err) => {
+          if (err) return fail(err);
+          dev
+            .serverEntry()
+            .then(async (entry) => sendNodeResponse(res, await entry.fetch(request, { context: { app } })))
+            .then(done, fail);
+        });
+      }),
+    close: () =>
+      dev.close().catch((err: unknown) => console.error("sanoma app: closing the dev server also failed:", err)),
+  };
 }
 
 async function loadServerEntry(path: string): Promise<ServerEntry> {
