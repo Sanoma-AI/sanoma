@@ -175,10 +175,12 @@ export function validatePolicies(
     const cedar = answer.validationErrors
       .filter(({ policyId }) => policyId === p.id)
       .map(({ error }) => ({ ...problemOf(error, p.file, p.text, p), policy: p.id }))
-      .filter(
-        (problem) =>
-          !places.has(`${problem.line}:${problem.column}`) && places.add(`${problem.line}:${problem.column}`),
-      )
+      .filter(({ line, column }) => {
+        // Cedar's errors without a place are each their own.
+        if (column === undefined) return true;
+        const at = `${line}:${column}`;
+        return !places.has(at) && Boolean(places.add(at));
+      })
       .toSorted((a, b) => a.line! - b.line! || (a.column ?? 0) - (b.column ?? 0));
     const ours: PolicyProblem[] = [];
     if (p.effect === "permit") {
@@ -272,7 +274,9 @@ export function cedarPolicy(
       preparsedPolicySetId: set,
       validateRequest: true,
     });
-    if (answer.type === "failure") throw new Error(answer.errors.map(messageOf).join("; "));
+    // A request the schema refuses (an input Cedar cannot hold) is denied, not an error of the call.
+    if (answer.type === "failure")
+      return deny(`The call does not fit the Cedar schema: ${answer.errors.map(messageOf).join("; ")}`);
     const { decision, diagnostics } = answer.response;
     const failed = diagnostics.errors[0];
     if (failed) return deny(`${failed.policyId} failed: ${messageOf(failed.error)}`, [failed.policyId]);

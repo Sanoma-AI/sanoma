@@ -384,6 +384,20 @@ describe("cedarPolicy", () => {
     expect(await policy(call)).toMatchObject({ kind: "allow" });
   });
 
+  it("denies a call whose input Cedar cannot hold, rather than failing it", async () => {
+    const call = {
+      op: policyOpOf(shop.refunds.create),
+      effect: "money",
+      input: { amount: Number.MAX_SAFE_INTEGER + 2, customer: "c" },
+      actor: { id: "bo" },
+      run: run(),
+    } as const;
+    expect(await policy(call)).toMatchObject({
+      kind: "deny",
+      reason: expect.stringMatching(/^The call does not fit the Cedar schema: .*amount/),
+    });
+  });
+
   it("is of kind cedar, versioned by its text", () => {
     expect(policy.kind).toBe("cedar");
     expect(policy.version).toMatch(/^[0-9a-f]{12}$/);
