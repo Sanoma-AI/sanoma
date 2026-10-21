@@ -3,7 +3,6 @@ import type {
   ApplyResult,
   ApprovalState,
   CredentialStatus,
-  Effect,
   ErrorCode,
   InputIssue,
   LedgerRecord,
@@ -12,7 +11,7 @@ import type {
   RunSummary,
 } from "@sanoma-ai/workflows";
 import type { Check, Scenario } from "@sanoma-ai/workflows/scenario";
-import { RUN_STATUSES } from "@sanoma-ai/workflows/shared";
+import { EFFECTS, RUN_STATUSES } from "@sanoma-ai/workflows/shared";
 import { z } from "zod";
 
 /**
@@ -308,8 +307,6 @@ export const CallRequest = z.object({
     .optional(),
 });
 export type CallRequest = z.infer<typeof CallRequest>;
-
-const EFFECTS = ["read", "write", "publish", "send", "money", "access"] as const satisfies readonly Effect[];
 
 /**
  * What `previewFn` asks the policy, as the session's actor: at most 200 actions, each an

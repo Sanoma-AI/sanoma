@@ -571,7 +571,7 @@ when { context.input.key == "refused" };
     expect(await app.client.result(runId)).toEqual({ paid: 7, run: runId });
   });
 
-  it("gives the policy a saved record as it was, so remarking a won lead is no change", async () => {
+  it("gives the policy a saved record as it was, in a run or directly, so remarking a won lead is no change", async () => {
     await app.client.call("data.leads.save", { record: { id: "l1", stage: "won" } }, { actor: "cy" });
     const again = await app.client.start(mark, { key: "l1" }, { startedBy: "ada" });
     expect(await app.client.result(again)).toMatchObject({ key: "l1", record: { stage: "won" } });
@@ -580,5 +580,11 @@ when { context.input.key == "refused" };
       code: "policy_denied",
       message: "data.leads.save was denied by policy: Only sales may mark a lead won",
     });
+    // A direct save, as the grid makes one, is given the record before too.
+    const won = { record: { id: "l1", stage: "won" } };
+    expect(await app.client.call("data.leads.save", won, { actor: "ada" })).toMatchObject({ key: "l1" });
+    expect(
+      await failure(app.client.call("data.leads.save", { record: { id: "l3", stage: "won" } }, { actor: "ada" })),
+    ).toMatchObject({ code: "policy_denied" });
   });
 });

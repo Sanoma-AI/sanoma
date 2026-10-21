@@ -23,6 +23,7 @@ import {
   PolicyDeniedError,
   SanomaError,
 } from "./errors.ts";
+import type { Collection } from "./collection.ts";
 import { currentGroup, entry, skipped, write, writeFailure } from "./ledger.ts";
 import { shown } from "./log.ts";
 import { type CallContext, isOp, type Op } from "./op.ts";
@@ -37,7 +38,6 @@ import {
 } from "./policy.ts";
 import type { Run, WorkerState } from "./run.ts";
 import { isChangeOp } from "./resource.ts";
-import { WORKFLOW_ACTION } from "./schema.ts";
 import {
   APPLY_WORKFLOW,
   approverLabel,
@@ -46,6 +46,7 @@ import {
   errorMessage,
   fitsOp,
   type Saved,
+  WORKFLOW_ACTION,
 } from "./shared.ts";
 
 /** DBOS took the run from this execution: it cancelled the run, or another process took it over. */
@@ -296,8 +297,20 @@ function targetOf(op: Op, input: unknown): { target?: string } {
  */
 export async function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecision> {
   const seen = { id: run.id, workflow: run.workflow, approvals: structuredClone(run.approvals) };
-  const call = { ...callOf(op, input, run.actor, seen), ...(await beforeOf(run, op, input)) };
-  return ask(run.state.policy, call, run.state);
+  const live = run.sandbox === undefined;
+  const before = await beforeOf(op, input, run.state.collections, (get, key) =>
+    (live ? run.state.drivers : run.fakeDrivers)?.get(get)?.(
+      { key },
+      {
+        idempotencyKey: `${run.id}:${get}:${String(key)}`,
+        runId: run.id,
+        opId: get,
+        attempt: 1,
+        secrets: live ? run.state.secrets : run.fakeSecrets!,
+      },
+    ),
+  );
+  return ask(run.state.policy, { ...callOf(op, input, run.actor, seen), ...before }, run.state);
 }
 
 /** One call of `op` as `actor` in `run`, as a policy sees it. */
@@ -311,36 +324,35 @@ const callOf = (op: Op, input: unknown, actor: Principal, run: PolicyCall["run"]
 });
 
 /**
- * For a collection's `save` or `delete`, the record it replaces or removes, read with the
- * collection's `get` (one read, through the run's driver or its fake): `{ before }` when there is
- * one, else nothing.
+ * For a collection's `save` or `delete`, the record it replaces or removes, read once with the
+ * collection's `get` (`read`, the run's driver or fake, or a direct call's): `{ before }` when
+ * there is one, else nothing. A failed read is named, keeping its error's code.
  */
-async function beforeOf(run: Run, op: Op, input: unknown): Promise<{ before?: unknown }> {
-  const collection = op.vendor === DATA_VENDOR && run.state.collections.get(op.resource);
+export async function beforeOf(
+  op: Op,
+  input: unknown,
+  collections: ReadonlyMap<string, Collection>,
+  read: (get: string, key: unknown) => Promise<unknown> | undefined,
+): Promise<{ before?: unknown }> {
+  const collection = op.vendor === DATA_VENDOR ? collections.get(op.resource) : undefined;
   if (!collection || (op.name !== "save" && op.name !== "delete")) return {};
   const key =
     op.name === "save"
       ? (input as { record: Record<string, unknown> }).record[collection.key]
       : (input as { key: unknown }).key;
-  const opId = `${DATA_VENDOR}.${op.resource}.get`;
-  const live = run.sandbox === undefined;
-  const get = (live ? run.state.drivers : run.fakeDrivers)?.get(opId);
-  if (!get) return {};
-  const context: CallContext = {
-    idempotencyKey: `${run.id}:before`,
-    runId: run.id,
-    opId,
-    attempt: 1,
-    secrets: live ? run.state.secrets : run.fakeSecrets!,
-  };
-  const saved = (await get({ key }, context)) as Saved | null;
+  let saved: Saved | null | undefined;
+  try {
+    saved = (await read(`${DATA_VENDOR}.${op.resource}.get`, key)) as Saved | null | undefined;
+  } catch (err) {
+    throw keepCode(new Error(`Reading the record ${op.id} replaces failed: ${errorMessage(err)}`, { cause: err }), err);
+  }
   return saved ? { before: saved.record } : {};
 }
 
 /**
- * Asks `policy` about one call of `op` as `actor` in `run`, and checks its answer: a run's
- * policy step (`decide`) and a direct call (`SanomaClient.call`) both. A policy that fails is
- * named in the error, with its error's code, unless the worker is stopping (`state`).
+ * Asks `policy` about one call of `op` as `actor` in `run`, and checks its answer: a direct call
+ * (`SanomaClient.call`), with the record a collection's write replaces as `before` (`beforeOf`).
+ * A policy that fails is named in the error, with its error's code.
  */
 export function decideCall(
   policy: Policy,
@@ -348,9 +360,9 @@ export function decideCall(
   input: unknown,
   actor: Principal,
   run: PolicyCall["run"],
-  state: Pick<WorkerState, "stopped"> = { stopped: false },
+  { before }: Pick<PolicyCall, "before"> = {},
 ): Promise<RecordedDecision> {
-  return ask(policy, callOf(op, input, actor, run), state);
+  return ask(policy, { ...callOf(op, input, actor, run), ...(before !== undefined && { before }) });
 }
 
 /**
@@ -373,7 +385,10 @@ export function decideStart(
   return ask(policy, { op, effect: op.effect, input, actor, run: { id: runId, workflow, approvals: [] } });
 }
 
-/** Asks `policy` about `call`, and checks its answer, naming a policy that fails as `decideCall` says. */
+/**
+ * Asks `policy` about `call`, and checks its answer. A policy that fails is named in the error,
+ * with its error's code, unless the worker is stopping (`state`).
+ */
 async function ask(
   policy: Policy,
   call: PolicyCall,

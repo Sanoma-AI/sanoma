@@ -13,9 +13,8 @@ import { dbosLogger, quietIfSandbox, setLogLevel, warn } from "./log.ts";
 import { lineStartsOf, readSource } from "./ast.ts";
 import { callsOf, outlineWithSource } from "./outline.ts";
 import { currentRun, type Run, type RunArgs, type WorkerState, type WorkflowOutline } from "./run.ts";
-import { WORKFLOW_ACTION } from "./schema.ts";
 import type { Source } from "./source.ts";
-import { errorMessage } from "./shared.ts";
+import { errorMessage, WORKFLOW_ACTION } from "./shared.ts";
 
 export interface Worker {
   /**

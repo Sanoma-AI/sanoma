@@ -1,4 +1,5 @@
 import type { ConfigDescription, OpEntry } from "@sanoma-ai/workflows/describe";
+import { WORKFLOW_ACTION } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { RUNS_LIMIT } from "../api.ts";
@@ -93,7 +94,7 @@ const AND = new Intl.ListFormat("en", { type: "conjunction" });
  * has it. "an" before a, e, i or o only: a resource starting with u is more often "a user".
  */
 function doing(id: string, op: OpEntry | undefined, config: ConfigDescription) {
-  if (id.startsWith("workflow:")) return "start";
+  if (id.startsWith(WORKFLOW_ACTION)) return "start";
   if (!op) return `call ${id}`;
   const resource = op.resource.replaceAll("_", " ");
   return `${op.name} ${/^[aeio]/i.test(resource) ? "an" : "a"} ${resource} in ${config.vendors[op.vendor]?.title ?? op.vendor}`;

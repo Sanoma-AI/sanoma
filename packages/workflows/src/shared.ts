@@ -2,6 +2,7 @@ import type { RunSummary } from "./client.ts";
 import type { CredentialStatus } from "./env.ts";
 import type { ApprovalState, Approver, Principal } from "./define.ts";
 import type { LedgerRecord } from "./ledger.ts";
+import type { Effect } from "./op.ts";
 import type { DeclaredResource, ResourceProblem } from "./resources.ts";
 import type { OutlineNode } from "./outline.ts";
 
@@ -44,6 +45,12 @@ export const APPLY_WORKFLOW = "apply";
  * `list`, `save` and `delete`. No connector may take it.
  */
 export const DATA_VENDOR = "data";
+
+/** Every effect an operation may have, each an action group (`effect:<effect>`) of the Cedar schema. */
+export const EFFECTS = ["read", "write", "publish", "send", "money", "access"] as const satisfies readonly Effect[];
+
+/** What a workflow start's action id starts with, as a policy names it: `workflow:<name>`. */
+export const WORKFLOW_ACTION = "workflow:";
 
 /** A site's folder name under `sites/`, its URL segment: what the app mounts and `readSites` reads. */
 export const SITE_NAME = /^[a-z][a-z0-9-]*$/;

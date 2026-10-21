@@ -4,7 +4,7 @@ import { type DBOSClient, Error as DBOSErrors, type WorkflowStatusString } from 
 import type { Pool } from "pg";
 import { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, messageKeyOf, topicOf } from "./approvals.ts";
-import { decideCall, decideStart, recorded } from "./call.ts";
+import { beforeOf, decideCall, decideStart, recorded } from "./call.ts";
 import { collectionsDriver } from "./collection.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { deleteCredential, storeCredential, storedCredentials, storedSecrets } from "./credentials.ts";
@@ -27,7 +27,6 @@ import { insertRecord, type LedgerRecord, type OwnedLedger, ownedLedger } from "
 import type { CallContext, Driver, Op } from "./op.ts";
 import type { RecordedDecision } from "./policy.ts";
 import type { RunArgs, StartHold } from "./run.ts";
-import { WORKFLOW_ACTION } from "./schema.ts";
 import type { Secrets } from "./secret.ts";
 import {
   approverLabel,
@@ -38,6 +37,7 @@ import {
   isEnded,
   mayDecide,
   type RunStatus,
+  WORKFLOW_ACTION,
 } from "./shared.ts";
 
 /** A principal, or its id alone. */
@@ -225,7 +225,11 @@ export class SanomaClient {
       "`sandbox` must be the name of a scenario in the config's `scenarios/`",
     );
     const id = runId ?? randomUUID();
-    const hold = await this.startHold(workflow.name, input, startedBy, id);
+    // A run the id names already is returned as it is (below), whatever the policy says now.
+    const hold =
+      runId !== undefined && (await this.exists(runId))
+        ? undefined
+        : await this.startHold(workflow.name, input, startedBy, id);
     const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }), ...(hold && { hold }) };
     const { onBehalfOf } = startedBy;
     // An id DBOS has already returns that run, unless it is another workflow's, which DBOS refuses.
@@ -317,7 +321,14 @@ export class SanomaClient {
       const first = (await this.recordedCall(runId, op.id, logged)) ?? (await this.heldCall(op.id, heldId, held));
       if (first) return first.output;
     }
-    const decision = await decideCall(policy, op, parsed, actor, { id: runId, workflow: CALL_WORKFLOW, approvals: [] });
+    const before = await beforeOf(op, parsed, this.config.collections, (get, key) =>
+      drivers.get(get)?.(
+        { key },
+        { idempotencyKey: `${runId}:before`, runId, opId: get, attempt: 1, secrets: this.storedSecrets, by: actor.id },
+      ),
+    );
+    const run = { id: runId, workflow: CALL_WORKFLOW, approvals: [] };
+    const decision = await decideCall(policy, op, parsed, actor, run, before);
     if (decision.kind === "deny") throw new PolicyDeniedError(op.id, decision.reason);
     if (decision.kind === "approve") {
       await this.start(CALL_WORKFLOW, held.input, { startedBy: actor, runId: heldId });
@@ -808,6 +819,11 @@ export class SanomaClient {
         { runId, differs },
       );
     }
+  }
+
+  /** True when a run has this id. */
+  private async exists(runId: string): Promise<boolean> {
+    return (await this.dbos.listWorkflows({ workflowIDs: [runId], loadInput: false, loadOutput: false })).length > 0;
   }
 
   /** The run's status row, read without its input (and its output, unless asked), or `run_not_found`. */
