@@ -3,7 +3,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt as ensure } from "@sanoma-ai/testing";
+import { ensureBuilt as ensure, waitFor } from "@sanoma-ai/testing";
 
 /** The repo's root. */
 export const repo = fileURLToPath(new URL("../../../", import.meta.url));
@@ -18,6 +18,7 @@ export const cli = join(repo, "packages/sanoma/src/cli.ts");
  */
 const BUILT: [dir: string, outputs: string[]][] = [
   ["packages/workflows", ["dist/index.js"]],
+  ["packages/bridge", ["dist/index.js"]],
   ["connectors/ghost", ["dist/index.js"]],
   ["packages/app", ["dist/server/server.js"]],
   ["packages/sanoma", ["dist/index.js", "dist/oxlint-plugin.js", "oxlint.json"]],
@@ -85,4 +86,31 @@ export function startCli(cwd: string, args: string[], env: NodeJS.ProcessEnv, bi
     child.on("exit", (code, signal) => resolve({ code, signal, stdout, stderr }));
   });
   return { child, finished, output: () => ({ stdout, stderr }) };
+}
+
+/**
+ * The bin (this checkout's, or `bin`) with `args` in `cwd` until it listens: where, its output so
+ * far, and `stop` (SIGINT), which resolves to what it printed on stderr, or throws on an exit code
+ * but 0.
+ */
+export async function serving(cwd: string, args: string[], env: NodeJS.ProcessEnv, bin = cli) {
+  const { child, finished, output } = startCli(cwd, args, env, bin);
+  const listening = / at (http:\/\/127\.0\.0\.1:\d+); ctrl-c to stop/;
+  const stop = async () => {
+    child.kill("SIGINT");
+    const done = await finished;
+    if (done.code !== 0) throw new Error(`sanoma exited with ${done.code}: ${done.stderr}`);
+    return done.stderr;
+  };
+  try {
+    const stdout = await waitFor(
+      () => output().stdout,
+      (out) => listening.test(out),
+      60_000,
+    );
+    return { url: stdout.match(listening)![1]!, stop, output };
+  } catch (err) {
+    child.kill("SIGINT");
+    throw new Error(`${output().stderr}`, { cause: err });
+  }
 }
