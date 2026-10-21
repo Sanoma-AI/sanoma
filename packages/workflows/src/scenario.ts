@@ -32,16 +32,22 @@ import { fill, isBug, seedFrom, shapeOf } from "./fill.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { Driver, Op } from "./op.ts";
 import { type OutlineNode, outlineWorkflow } from "./outline.ts";
+import { readPeople } from "./resources.ts";
 import { memorySecrets } from "./secret.ts";
 import {
   APPLY_WORKFLOW,
   BUILT_IN_WORKFLOWS,
   DATA_VENDOR,
+  declaresPeople,
   DRIFT_WORKFLOW,
   errorMessage,
   fitsOp,
   flatten,
+  groupNamesOf,
   isEnded,
+  principalIdsOf,
+  principalOf,
+  RUNTIME_AGENTS,
 } from "./shared.ts";
 import type { Call, RunView, Seed } from "./steps.ts";
 
@@ -99,9 +105,11 @@ export interface Decision {
 /**
  * What the run should do: call an operation (with at least this input) or not, run the step
  * `name`d in the workflow's outline or not, or a number of `times`, have the policy deny an
- * operation (`denied`) or hold one for an approver (`held`), end a certain way, for a drift
- * run, report the resource `declared` (`<file>#<export>`) clean, gone, absent, or drifted in a
- * field, or for an apply run, create it, or leave it bound to an object (`bound`, its vendor's id).
+ * operation (`denied`, for a `reason` when the step names one) or hold one for an approver
+ * (`held`: a person's id or a group's name, or with `group` a group's alone), end a certain way,
+ * for a drift run, report the resource `declared` (`<file>#<export>`) clean, gone, absent, or
+ * drifted in a field, or for an apply run, create it, or leave it bound to an object (`bound`,
+ * its vendor's id).
  * A step whose own code checks the run (a connector's or the company's, or an operation's own
  * test's) is `custom`, with what it is about.
  */
@@ -109,8 +117,8 @@ export type Expectation =
   | { step: string; op: string; input?: unknown; called: boolean }
   | { step: string; name: string; input?: unknown; called: boolean }
   | { step: string; name: string; times: number }
-  | { step: string; op: string; decision: "denied" }
-  | { step: string; op: string; decision: "held"; approver: string }
+  | { step: string; op: string; decision: "denied"; reason?: string }
+  | { step: string; op: string; decision: "held"; approver: string; group?: true }
   | { step: string; outcome: "finished" | "failed"; code?: string }
   | { step: string; declared: string; status: "clean" | "gone" | "absent" }
   | { step: string; declared: string; status: "drifted"; field: string }
@@ -133,6 +141,8 @@ export interface Scenario {
   text: string;
   /** Every step in order, for a list and for marking graph nodes. */
   steps: ScenarioStep[];
+  /** Who starts the run, by id, when a `Given <who> is acting` says: a declared person or agent. */
+  startedBy?: string;
   given: Given[];
   input: unknown;
   decisions: Decision[];
@@ -154,9 +164,13 @@ export interface Check {
 
 /**
  * What steps can name: the config's operations, workflows, resource types and collections by id,
- * the steps its connectors (and the company) ship, and where the feature files are.
+ * the steps its connectors (and the company) ship, where the feature files are, and the root
+ * whose data files declare its people.
  */
-export type Scope = Pick<ResolvedConfig, "ops" | "workflows" | "scenarios" | "types" | "collections" | "steps">;
+export type Scope = Pick<
+  ResolvedConfig,
+  "ops" | "workflows" | "scenarios" | "types" | "collections" | "steps" | "root"
+>;
 
 type Kind = ScenarioStep["kind"];
 type Fault = Extract<Seed, { fault: unknown }>["fault"];
@@ -171,9 +185,12 @@ interface Then {
   verify(run: RunView): string | undefined;
 }
 
-/** What a step of each kind reads into; `any` is a decision, which a step of any keyword may make. */
+/**
+ * What a step of each kind reads into; `any` is a decision, which a step of any keyword may make.
+ * A `Given` seeds, or says who acts (`{who} is acting`).
+ */
 interface Items {
-  given: Unstepped<Given>[];
+  given: Unstepped<Given>[] | { actor: string };
   when: When;
   then: Then;
   any: Unstepped<Decision>;
@@ -356,12 +373,29 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
   ];
   const opOf = (id: unknown) => scope.ops.get(id as string)!;
   const workflowOf = (name: unknown) => scope.workflows.get(name as string)!;
+  // The people as the root's data files declare them when a step names one (`readPeople`, read
+  // again only once a file changed). While they declare no one, any id goes, as a run's start admits.
+  /** `who`, a declared person or agent. */
+  const actorNamed = (who: string) => {
+    const { people } = readPeople(scope.root);
+    if (!declaresPeople(people) || principalOf(who, people)) return who;
+    const ids = [...principalIdsOf(people), ...RUNTIME_AGENTS].join(", ");
+    throw new Error(`${who} is not a declared person or agent; resources/ declares ${ids}`);
+  };
+  /** `group`, a declared group or `agents`. */
+  const groupNamed = (group: string) => {
+    const { people } = readPeople(scope.root);
+    const groups = groupNamesOf(people);
+    if (!declaresPeople(people) || groups.includes(group)) return group;
+    throw new Error(`no group "${group}"; resources/ declares ${groups.join(", ")}`);
+  };
   /** A resource step's object: its type's id, vendor and type, and its import id. */
   const object = (id: unknown, name: unknown) => {
     const { vendor, type } = types.get(id as string)!;
     return { resource: id as string, vendor, type, name: name as string };
   };
   const rules: Rule[] = [
+    { kind: "given", source: "{who} is acting", read: ([who]) => ({ actor: actorNamed(who as string) }) },
     {
       kind: "given",
       source: "{op} was called with",
@@ -472,8 +506,19 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
     },
     {
       kind: "then",
+      source: "{op} was denied with {string}",
+      read: ([op, reason]) => expecting({ op: op as string, decision: "denied", reason: reason as string }),
+    },
+    {
+      kind: "then",
       source: "{op} was held for {who}",
       read: ([op, who]) => expecting({ op: op as string, decision: "held", approver: who as string }),
+    },
+    {
+      kind: "then",
+      source: "{op} was held for group {string}",
+      read: ([op, group]) =>
+        expecting({ op: op as string, decision: "held", approver: groupNamed(group as string), group: true }),
     },
     {
       kind: "then",
@@ -861,6 +906,12 @@ function compileWorld(built: Built, specs: Map<string, Spec>) {
         switch (rule.kind) {
           case "given": {
             const items = rule.read(args, pickle);
+            if (!Array.isArray(items)) {
+              if (spec.startedBy !== undefined)
+                throw new Error(`${spec.startedBy} is acting already: a run has one actor`);
+              spec.startedBy = items.actor;
+              break;
+            }
             spec.given.push(...items.map((item) => ({ step: text, ...item }) as Given));
             const [first] = items;
             if (first && "op" in first) step.op = first.op;
@@ -962,7 +1013,10 @@ function testWorld(built: Built, { driver, fake }: FeatureTarget) {
         switch (rule.kind) {
           case "given": {
             const seeds: { op: string; input: unknown; output: unknown }[] = [];
-            for (const item of rule.read(args, pickle)) {
+            const items = rule.read(args, pickle);
+            if (!Array.isArray(items))
+              throw new Error(`"${text}" says who starts a run: a step for a scenario in scenarios/`);
+            for (const item of items) {
               if ("resource" in item) throw new Error(`"${text}" seeds a resource: a step for a sandbox run`);
               if ("fault" in item) {
                 if (!fake) throw new Error(`"${text}" injects a fault, which only a fake can`);

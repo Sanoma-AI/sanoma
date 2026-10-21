@@ -17,13 +17,14 @@ export { runScenario, type RunScenarioOptions } from "@sanoma-ai/workflows/scena
  * `describe` per feature file, that runs it (`runScenario`) and expects every check to pass; and
  * a failing test for each file that does not load. Starts one test app (`useTestApp`) for the
  * scenarios, before them, and stops it after. `config` and `options` are `startTestWorker`'s;
- * `startedBy` starts the runs, and `timeoutMs` is how long each may take (`drive`'s). Cucumber
- * compiles the feature files first, so the test file awaits it at its top level:
+ * `startedBy` (an id, or a principal) starts the runs whose scenario does not say who is acting,
+ * and `timeoutMs` is how long each may take (`drive`'s). Cucumber compiles the feature files
+ * first, so the test file awaits it at its top level:
  * `await describeScenarios(config, { databaseUrl })`.
  */
 export async function describeScenarios(
   config: SanomaConfig,
-  { startedBy, timeoutMs, ...options }: TestWorkerOptions & { startedBy?: Principal; timeoutMs?: number },
+  { startedBy, timeoutMs, ...options }: TestWorkerOptions & { startedBy?: Principal | string; timeoutMs?: number },
 ): Promise<void> {
   // Only to read the scenarios: the test app resolves the config the worker runs.
   const resolved = resolveConfig({ ...config, ledger: config.ledger ?? memoryLedger() });
