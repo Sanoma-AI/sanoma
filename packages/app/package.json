@@ -44,6 +44,10 @@
     "./site": {
       "types": "./src/site.ts",
       "default": "./src/site.ts"
+    },
+    "./ui": {
+      "types": "./src/ui.ts",
+      "default": "./src/ui.ts"
     }
   },
   "publishConfig": {

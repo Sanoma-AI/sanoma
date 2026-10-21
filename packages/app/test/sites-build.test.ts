@@ -18,13 +18,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApp, sitesOf, writeSiteFiles } from "@sanoma-ai/app/build";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { defineConfig, startWorker, type Worker } from "@sanoma-ai/workflows";
+import { defineConfig, SanomaClient, startWorker, type Worker } from "@sanoma-ai/workflows";
+import { launch } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type App, startApp } from "../src/index.ts";
 import fixture from "./fixtures/company-sites/sanoma.config.ts";
 
-// Needs Postgres (`pnpm db:up`) and the built workflows package: the server bundle imports the
-// runtime from its dist/.
+// Needs Postgres (`pnpm db:up`), the built workflows package (the server bundle imports the
+// runtime from its dist/) and Google Chrome, or `CHROME_PATH` naming a Chrome or Chromium binary.
 const appDir = fileURLToPath(new URL("..", import.meta.url));
 const fixtureDir = fileURLToPath(new URL("./fixtures/company-sites/", import.meta.url));
 const config = defineConfig({ ...fixture, databaseUrl: testDatabaseUrl("sites_build") });
@@ -85,6 +86,11 @@ const siteClass = ["tracking", "[0.37em]"].join("-");
 describe("a company's app with its sites", () => {
   const repo = company({
     "sites/hello/routes/styled.tsx": sitePage("/sites/hello/styled", "", `<span className="${siteClass}" />`),
+    "sites/hello/routes/missing.tsx": sitePage(
+      "/sites/hello/missing",
+      'import { RunForm } from "@sanoma-ai/app/ui";',
+      '<RunForm workflow="missing" />',
+    ),
   });
   // And sanoma, which the company's node_modules links to.
   const untouched = {
@@ -136,6 +142,51 @@ describe("a company's app with its sites", () => {
     const workflows = await fetch(new URL("/workflows", app.url));
     expect(workflows.status).toBe(200);
     expect(await workflows.text()).toContain("Say hello");
+  });
+
+  it("serves a site's RunForm: the workflow's fields under a link to its page, live only, or a notice naming a workflow the config lacks", async () => {
+    const site = await fetch(new URL("/sites/hello/run", app.url));
+    expect(site.status).toBe(200);
+    const html = (await site.text()).replaceAll("<!-- -->", "");
+    // The hello workflow's input, `{ who: string }`, as one required text field.
+    expect(html).toMatch(/<label[^>]*for="field-who"[^>]*>who<span[^>]*>\*<\/span>/);
+    expect(html).toMatch(/<input[^>]*id="field-who"[^>]*type="text"/);
+    expect(linkTag(html, "Say hello")).toContain('href="/workflows/hello"');
+    expect(html).toContain("Start run");
+    expect(html).not.toContain("Sandbox");
+    const missing = (await (await fetch(new URL("/sites/hello/missing", app.url))).text()).replaceAll("<!-- -->", "");
+    expect(missing).toContain("This company has no workflow named “missing”.");
+    expect(missing).not.toContain("field-");
+  });
+
+  it("starts a run from a site's RunForm and links to it there, while the app's New run opens the run's page", async () => {
+    const browser = await launch({ channel: "chrome", executablePath: process.env.CHROME_PATH, headless: true });
+    const client = await SanomaClient.connect(config);
+    try {
+      const page = await browser.newPage();
+      // A desktop window, where the New run panel shows beside the graph.
+      await page.setViewport({ width: 1440, height: 900 });
+      // The name the app asks for once, kept in the browser, sent with every change.
+      await page.evaluateOnNewDocument(() => localStorage.setItem("sanoma.actor", "tester"));
+      const site = new URL("/sites/hello/run", app.url).href;
+      await page.goto(site, { waitUntil: "networkidle0" });
+      await page.type("#field-who", "Ada");
+      await page.click('button[type="submit"]');
+      const link = await page.waitForSelector('a[href^="/workflows/hello/runs/"]::-p-text(Open the run)');
+      const runId = (await link!.evaluate((a) => a.getAttribute("href")!)).split("/").at(-1)!;
+      expect(page.url()).toBe(site);
+      expect(await client.result(runId)).toEqual({ greeting: "hello Ada" });
+      expect(await client.run(runId)).toMatchObject({ workflow: "hello", startedBy: { id: "tester" } });
+
+      await page.goto(new URL("/workflows/hello?new=true", app.url).href, { waitUntil: "networkidle0" });
+      await page.type("#field-who", "Grace");
+      await page.click('button[type="submit"]');
+      // A string, run in the page: this file is typed for Node, without the DOM's `location`.
+      await page.waitForFunction(String.raw`/^\/workflows\/hello\/runs\/[^/]+$/.test(location.pathname)`);
+    } finally {
+      await client.close();
+      await browser.close();
+    }
   });
 
   it("lists the sites in the Sites panel, each under its title with its pages, and names the site in the crumbs", async () => {
@@ -232,6 +283,154 @@ describe("a company's app with its sites", () => {
     const refused = check();
     expect(refused.status).not.toBe(0);
     expect(refused.stdout).toMatch(/^sites\/hello\/routes\/styled\.tsx\(\d+,\d+\): error TS\d+: [^\n]*"\/sites\/nope"/);
+  });
+});
+
+describe("@sanoma-ai/app/ui", () => {
+  it("exports the kit's list and nothing else, so each addition is deliberate", async () => {
+    // By a path TypeScript does not follow: the kit is JSX and DOM, checked by typecheck:ui.
+    const kit = fileURLToPath(new URL("../src/ui.ts", import.meta.url));
+    const ui = (await import(kit)) as Record<string, unknown>;
+    expect(Object.keys(ui).toSorted()).toMatchInlineSnapshot(`
+      [
+        "Alert",
+        "AlertAction",
+        "AlertDescription",
+        "AlertTitle",
+        "Avatar",
+        "AvatarBadge",
+        "AvatarFallback",
+        "AvatarGroup",
+        "AvatarGroupCount",
+        "AvatarImage",
+        "Badge",
+        "Breadcrumb",
+        "BreadcrumbEllipsis",
+        "BreadcrumbItem",
+        "BreadcrumbLink",
+        "BreadcrumbList",
+        "BreadcrumbPage",
+        "BreadcrumbSeparator",
+        "Button",
+        "ButtonGroup",
+        "ButtonGroupSeparator",
+        "ButtonGroupText",
+        "ButtonLink",
+        "Card",
+        "CardAction",
+        "CardContent",
+        "CardDescription",
+        "CardFooter",
+        "CardHeader",
+        "CardTitle",
+        "Checkbox",
+        "Collapsible",
+        "CollapsibleContent",
+        "CollapsibleTrigger",
+        "Dialog",
+        "DialogClose",
+        "DialogContent",
+        "DialogDescription",
+        "DialogFooter",
+        "DialogHeader",
+        "DialogTitle",
+        "DialogTrigger",
+        "DropdownMenu",
+        "DropdownMenuCheckboxItem",
+        "DropdownMenuContent",
+        "DropdownMenuGroup",
+        "DropdownMenuItem",
+        "DropdownMenuLabel",
+        "DropdownMenuRadioGroup",
+        "DropdownMenuRadioItem",
+        "DropdownMenuSeparator",
+        "DropdownMenuShortcut",
+        "DropdownMenuSub",
+        "DropdownMenuSubContent",
+        "DropdownMenuSubTrigger",
+        "DropdownMenuTrigger",
+        "Empty",
+        "EmptyContent",
+        "EmptyDescription",
+        "EmptyHeader",
+        "EmptyMedia",
+        "EmptyTitle",
+        "Fact",
+        "Facts",
+        "Field",
+        "FieldContent",
+        "FieldDescription",
+        "FieldError",
+        "FieldGroup",
+        "FieldLabel",
+        "FieldLegend",
+        "FieldSeparator",
+        "FieldSet",
+        "FieldTitle",
+        "Input",
+        "Item",
+        "ItemActions",
+        "ItemContent",
+        "ItemDescription",
+        "ItemFooter",
+        "ItemGroup",
+        "ItemHeader",
+        "ItemMedia",
+        "ItemSeparator",
+        "ItemTitle",
+        "Label",
+        "NativeSelect",
+        "NativeSelectOptGroup",
+        "NativeSelectOption",
+        "Nothing",
+        "Notice",
+        "PageHeader",
+        "Popover",
+        "PopoverContent",
+        "PopoverDescription",
+        "PopoverHeader",
+        "PopoverTitle",
+        "PopoverTrigger",
+        "Region",
+        "RunForm",
+        "Separator",
+        "Sheet",
+        "SheetClose",
+        "SheetContent",
+        "SheetDescription",
+        "SheetFooter",
+        "SheetHeader",
+        "SheetTitle",
+        "SheetTrigger",
+        "Skeleton",
+        "Slider",
+        "Spinner",
+        "StatusDot",
+        "Table",
+        "TableBody",
+        "TableCaption",
+        "TableCell",
+        "TableFooter",
+        "TableHead",
+        "TableHeader",
+        "TableRow",
+        "Tabs",
+        "TabsContent",
+        "TabsList",
+        "TabsTrigger",
+        "Textarea",
+        "Tip",
+        "ToneBadge",
+        "Tooltip",
+        "TooltipContent",
+        "TooltipTrigger",
+        "effectBadge",
+        "toast",
+        "toneBadge",
+        "useActor",
+        "useDensity",
+      ]
+    `);
   });
 });
 

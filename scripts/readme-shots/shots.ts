@@ -48,6 +48,37 @@ import announce from "./workflows/announce.ts";
 export default defineConfig({ workflows: [announce], connectors: [withFake(ghost, fakeGhost())], policy: allowAll });
 `;
 
+// A small site for the site still: a page of the app's kit with the announce workflow's RunForm.
+const SITE: Record<string, string> = {
+  "sites/launches/site.ts": `import { defineSite } from "sanoma/site";
+
+export default defineSite({ title: "Launch desk" });
+`,
+  "sites/launches/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+import { Fact, Facts, PageHeader, Region, RunForm } from "@sanoma-ai/app/ui";
+
+export const Route = createFileRoute("/sites/launches/")({ component: LaunchDesk });
+
+function LaunchDesk() {
+  return (
+    <>
+      <PageHeader title="Launch desk" />
+      <Region title="How a launch goes">
+        <Facts>
+          <Fact label="Draft">A Ghost post, written from the form below</Fact>
+          <Fact label="Review">marketing-lead approves the launch copy in the Inbox</Fact>
+          <Fact label="Launch">Published at the launch time</Fact>
+        </Facts>
+      </Region>
+      <Region title="Announce a launch">
+        <RunForm workflow="announce" />
+      </Region>
+    </>
+  );
+}
+`,
+};
+
 const started = Date.now();
 const say = (line: string) => console.log(`readme:shots ${((Date.now() - started) / 1000).toFixed(0)}s: ${line}`);
 
@@ -135,12 +166,13 @@ try {
     tab: "Ledger",
     fullPage: true,
   });
+  await still(browser, base, "/sites/launches", join(captured, "site.png"), { sidebar: true, fullPage: true });
   say("stills taken; making demo.gif");
   stopIfInterrupted();
   await makeGif(frames, join(captured, "demo.gif"));
   stopIfInterrupted();
-  replaceAssets(captured, ["demo.gif", "workflow.png", "inbox.png", "run.png"]);
-  say("wrote .github/assets: demo.gif, workflow.png, inbox.png, run.png");
+  replaceAssets(captured, ["demo.gif", "workflow.png", "inbox.png", "run.png", "site.png"]);
+  say("wrote .github/assets: demo.gif, workflow.png, inbox.png, run.png, site.png");
 } catch (err) {
   // A signal's handler runs on the event loop: let one that came during a blocking call (a build)
   // run before telling a failure from an interruption. One setImmediate can fire in the same turn,
@@ -252,7 +284,7 @@ async function seedPendingRuns(acme: string): Promise<void> {
   }
 }
 
-/** A company repo named acme: the README's workflow, the config above, and `node_modules` reaching this checkout. */
+/** A company repo named acme: the README's workflow, the config and site above, and `node_modules` reaching this checkout. */
 function writeRepo(dir: string): void {
   const readme = readFileSync(join(repo, "README.md"), "utf8").replaceAll("\r\n", "\n");
   const block = /^```ts\n\/\/ workflows\/announce\.ts\n([\s\S]*?)^```$/m.exec(readme);
@@ -260,6 +292,10 @@ function writeRepo(dir: string): void {
   mkdirSync(join(dir, "workflows"), { recursive: true });
   writeFileSync(join(dir, "workflows/announce.ts"), block[1]);
   writeFileSync(join(dir, "sanoma.config.ts"), CONFIG);
+  for (const [path, text] of Object.entries(SITE)) {
+    mkdirSync(dirname(join(dir, path)), { recursive: true });
+    writeFileSync(join(dir, path), text);
+  }
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "acme", private: true, type: "module" }));
   for (const [name, target] of [
     ["sanoma", "packages/sanoma"],
