@@ -1,6 +1,7 @@
 import { dirname } from "node:path";
 import { type AppOptions, githubLogin, startApp } from "@sanoma-ai/app";
 import { errorMessage, isLoopback, SanomaClient, type SanomaConfig, startWorker } from "@sanoma-ai/workflows";
+import { describeConfig, writeApi } from "@sanoma-ai/workflows/describe";
 import { UsageError } from "./config.ts";
 import { runtimeFrom, siteBuild } from "./sites.ts";
 import { localGitSource } from "./source.ts";
@@ -40,9 +41,16 @@ export async function runApp(config: SanomaConfig, options: ServeOptions): Promi
   return served(config, await appStart(config, options));
 }
 
-/** What the app starts with: the port, the host and login `appOptions` reads, and what it serves (`appSites`). */
+/**
+ * What the app starts with: the port, the host and login `appOptions` reads, and what it serves
+ * (`appSites`); `.sanoma/api.ts` written first (`writeApi`), for an editor and the sites.
+ */
 async function appStart(config: SanomaConfig, { port, log, dev = false }: ServeOptions): Promise<AppOptions> {
   const options = { port, ...(await appOptions(secretsOf(config))) };
+  // For an editor and the sites' types only: a checkout it cannot write still serves.
+  await writeApi(rootOf(config), describeConfig(config)).catch((err: unknown) =>
+    log(`could not write .sanoma/api.ts: ${errorMessage(err)}`),
+  );
   return { ...options, ...(await appSites(rootOf(config), log, dev ? options.host : false)) };
 }
 

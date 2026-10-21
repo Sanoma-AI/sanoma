@@ -16,6 +16,7 @@ import {
   readDataFiles,
   type ResourceProblem,
 } from "./resources.ts";
+import { apiNameProblem } from "./sdk.ts";
 import { apiNameOf, BUILT_IN_WORKFLOWS, DATA_VENDOR } from "./shared.ts";
 
 // `@sanoma-ai/workflows/describe`: what a UI renders from, apart from the main entry.
@@ -43,6 +44,8 @@ export {
   type Bindings,
   type Rebind,
 } from "./lockfile.ts";
+// The generated SDK, `.sanoma/api.ts`: a site's `api` typed from this description.
+export { API_FILE, generateApi, writeApi } from "./sdk.ts";
 // The apply workflow's plan and report, which the app renders.
 export type { ApplyInput, ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanStep } from "./apply.ts";
 
@@ -308,8 +311,7 @@ function addApiNameProblems(workflows: WorkflowEntry[], vendors: ReadonlySet<str
           : api === "then"
             ? "which a promise would take for its own"
             : undefined;
-    if (taken)
-      wf.problems.push({ line: 1, column: 1, message: `A site calls this workflow api.${api}, ${taken}: rename it` });
+    if (taken) wf.problems.push({ line: 1, column: 1, message: apiNameProblem(api, taken) });
   }
 }
 

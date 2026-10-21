@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -160,7 +160,7 @@ export const Route = createFileRoute("/sites/hello/runtime")({ component: () => 
     ]);
     expect(found.stderr).not.toMatch(/^build /m);
     expect(existsSync(join(dir, "sites/__virtual.ts"))).toBe(false);
-    expect(existsSync(join(dir, ".sanoma"))).toBe(false);
+    expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts"]);
   }, 180_000);
 
   it("reports two pages claiming one path", async () => {
@@ -270,13 +270,13 @@ export const Route = createFileRoute("/sites/second/")({ component: () => <p>The
 });
 
 describe("sanoma without sites", () => {
-  it("serves the app's own build, as before: no dev server, nothing written", async () => {
+  it("serves the app's own build, as before: no dev server, nothing written but the generated SDK", async () => {
     dir = installedCopy();
     rmSync(join(dir, "sites"), { recursive: true });
     const stderr = await serveOnce(async (url) => {
       expect((await fetch(`${url}/workflows`)).status).toBe(200);
     }, []);
     expect(stderr).not.toContain("dev server");
-    expect(existsSync(join(dir, ".sanoma"))).toBe(false);
+    expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts"]);
   }, 120_000);
 });

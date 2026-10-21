@@ -3,8 +3,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { errorMessage, type SanomaConfig } from "@sanoma-ai/workflows";
-import { describeConfig } from "@sanoma-ai/workflows/describe";
+import { errorMessage } from "@sanoma-ai/workflows";
+import { API_FILE, type ConfigDescription, describeConfig, writeApi } from "@sanoma-ai/workflows/describe";
 import { problemLine } from "@sanoma-ai/workflows/shared";
 import { runScenarios } from "@sanoma-ai/workflows/scenarios";
 import type { Loaded } from "./config.ts";
@@ -32,7 +32,8 @@ export interface CheckOptions {
 const LINTED = ["workflows", "policies", "resources", "sites"];
 
 /**
- * Checks a repo the way its tests would, without a test framework: `tsc -p tsconfig.json` in
+ * Checks a repo the way its tests would, without a test framework: `.sanoma/api.ts` written first
+ * (`writeApi`, when it changed), from the config's description; `tsc -p tsconfig.json` in
  * its root; oxlint in the root, with the repo's `.oxlintrc.json` (written when missing, to extend
  * this package's `oxlint.json`), over `workflows/`, `policies/`, `resources/` and `sites/`; every problem
  * `describeConfig` finds in the data files and the workflows' files (the import rules and what
@@ -48,16 +49,19 @@ export async function check(
 ): Promise<CheckResult> {
   // Awaited below when there are scenarios; otherwise its failure is nobody's.
   ready.catch(() => {});
+  log("config");
+  const description = describeConfig(config);
+  if ((await writeApi(root, description)).wrote) log(`wrote ${API_FILE}`);
   const build = await siteBuild(root);
   const { sites, refused } = build?.sitesOf(root) ?? { sites: [], refused: [] };
   // Before tsc and oxlint read sites/, as `sanoma` writes them: only when there is a site.
   if (build && sites.length) build.writeSiteFiles(root);
-  const [tsc, checked, lints, read] = await Promise.all([
+  const [tsc, checked, lints] = await Promise.all([
     typecheck(root, log),
     build && sites.length ? checkSites(build, sites, root, log) : { typed: [], built: [] },
     lint(root, log),
-    configProblems(config, root, log),
   ]);
+  const read = configProblems(description, root);
   const unmounted = refused.map(
     (name) => `sites/${name}: a site's folder name is a URL segment (lowercase letters, digits and dashes)`,
   );
@@ -132,9 +136,7 @@ async function lint(root: string, log: (line: string) => void): Promise<string[]
  * `describeConfig`'s problems: the data files', then each workflow's, its file relative to the
  * root. A file defining several workflows gives each its problems: one line each here.
  */
-async function configProblems(config: SanomaConfig, root: string, log: (line: string) => void): Promise<string[]> {
-  log("config");
-  const { problems, workflows } = describeConfig(config);
+function configProblems({ problems, workflows }: ConfigDescription, root: string): string[] {
   const lines = new Set([
     ...problems.map(problemLine),
     ...workflows.flatMap((wf) => wf.problems.map((p) => problemLine({ file: relative(root, wf.file), ...p }))),

@@ -15,7 +15,7 @@ sites/               pages the app serves under /sites/<name>: sites/<name>/rout
 .env                 this machine's settings and secrets, never committed (SANOMA_SECRETS_KEY encrypts stored credentials)
 ```
 
-The app's name is `package.json`'s `name`. `.env.example` (written by `sanoma env`) and `.oxlintrc.json` (written by `sanoma check` when missing) are generated, and so are `sites/__virtual.ts` and `sites/tsconfig.json` once there is a site: commit them, never edit them. `.sanoma/` holds what `sanoma` builds (ignored).
+The app's name is `package.json`'s `name`. `.env.example` (written by `sanoma env`) and `.oxlintrc.json` (written by `sanoma check` when missing) are generated, and so are `sites/__virtual.ts` and `sites/tsconfig.json` once there is a site: commit them, never edit them. `.sanoma/` holds what `sanoma` builds (ignored), `.sanoma/api.ts` among it: the typed `api` for sites, generated from the config by `sanoma check` and at start, never edited.
 
 ## Run
 

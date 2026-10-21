@@ -29,13 +29,16 @@ describe("check", () => {
       ok: true,
       problems: [],
     });
-    expect(log.slice(0, 5)).toEqual([
+    // The generated SDK first, before tsc: the sites' tsc reads it.
+    expect(log.slice(0, 6)).toEqual([
+      "config",
+      "wrote .sanoma/api.ts",
       "tsc",
       "wrote .oxlintrc.json",
       "oxlint workflows policies",
-      "config",
       "scenarios",
     ]);
+    expect(readFileSync(join(dir, ".sanoma/api.ts"), "utf8")).toContain("hello: WorkflowFn<");
     expect(log).toContain("passed hello/hello.feature › A post goes out");
     expect(readFileSync(join(dir, ".oxlintrc.json"), "utf8")).toBe(
       `{\n  "extends": [\n    "./node_modules/sanoma/oxlint.json"\n  ]\n}\n`,
@@ -52,7 +55,10 @@ describe("check", () => {
       join(dir, "resources/shop.ts"),
       'import { ghost } from "@sanoma-ai/connector-ghost/resources";\nexport const p = ghost.post({ title: "x" });\n',
     );
-    const { ok, problems } = await check(await load(), { databaseUrl, log: () => {} });
+    const again: string[] = [];
+    const { ok, problems } = await check(await load(), { databaseUrl, log: (l) => again.push(l) });
+    // The workflow's input is as it was: nothing to write.
+    expect(again).not.toContain("wrote .sanoma/api.ts");
     expect(ok).toBe(false);
     expect(problems).toEqual([
       // tsc: the entry does not exist.
