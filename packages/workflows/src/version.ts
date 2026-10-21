@@ -13,8 +13,9 @@ export const RUNTIME_VERSION = "0.3.0";
  * events and messages, the driver step. Bump it whenever that sequence changes, even without a
  * package release, so a run in flight on the old layout is not replayed against the new one.
  * 2: calls run in program order; a decision event per approval (2026-10-07).
+ * 3: a start the policy holds waits on its approval before the body (2026-10-21).
  */
-export const STEP_LAYOUT = 2;
+export const STEP_LAYOUT = 3;
 
 let dbosVersion: string | undefined;
 

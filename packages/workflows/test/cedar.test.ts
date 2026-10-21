@@ -1,14 +1,16 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { withFake } from "@sanoma-ai/testing";
-import { describe, expect, it } from "vitest";
+import { testDatabaseUrl, withFake } from "@sanoma-ai/testing";
+import { useTestApp } from "@sanoma-ai/testing/harness";
+import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { decideCall } from "../src/call.ts";
 import { sanoma } from "../src/constructors.ts";
 import { collection } from "../src/data.ts";
 import type { ApprovalState } from "../src/define.ts";
-import { describeConfig, SCHEMA_FILE, schemaOf, schemaText, writeGenerated } from "../src/describe.ts";
+import { describeConfig, readPeople, SCHEMA_FILE, schemaOf, schemaText, writeGenerated } from "../src/describe.ts";
 import { defineFake } from "../src/fake.ts";
 import {
   allow,
@@ -26,6 +28,7 @@ import {
   resolveConfig,
   validatePolicies,
 } from "../src/index.ts";
+import { failure, waitFor } from "./harness.ts";
 
 // The two policies of the Cedar investigation, against made-up operations: refunds over 10,000
 // held for finance, and only sales may mark a lead won; and agents held for whom they act for.
@@ -314,11 +317,12 @@ describe("cedarPolicy", () => {
     expect(await policy(refundCall(2_000_000, "ada"))).toMatchObject({ kind: "allow" });
   });
 
-  it("holds a refund over 10,000 for finance, with the policy's title", async () => {
+  it("holds a refund over 10,000 for finance, with the policy's title and id", async () => {
     expect(await policy(refundCall(2_000_000, "bo"))).toEqual({
       kind: "approve",
       approver: { group: "finance" },
       title: "Refund over 10,000",
+      reasons: ["policies/money.cedar#1"],
     });
   });
 
@@ -337,6 +341,7 @@ describe("cedarPolicy", () => {
       kind: "approve",
       approver: "bo",
       title: "shop.refunds.create needs bo",
+      reasons: ["policies/leads.cedar#2"],
     });
     expect(await policy(refundCall(5, "refund-bot", [approved("bo", "bo")]))).toMatchObject({ kind: "allow" });
   });
@@ -419,6 +424,7 @@ describe("cedarPolicy", () => {
       kind: "approve",
       approver: { group: "finance" },
       title: "Refund over 10,000",
+      reasons: ["policies/money.cedar#1"],
       policyVersion: policy.version,
     });
   });
@@ -456,5 +462,123 @@ describe("preview", () => {
   it("is allow for allowAll, and none for a policy written as a function", () => {
     expect(allowAll.preview!([ask("bo", "shop.refunds.create")])).toEqual([{ answer: "allow" }]);
     expect(definePolicy(() => allow()).preview).toBeUndefined();
+  });
+});
+
+describe("the policy on a run's start, who may decide its hold, and a save's record before", () => {
+  const databaseUrl = testDatabaseUrl("cedar_mounts");
+  const root = mkdtempSync(join(tmpdir(), "sanoma-cedar-mounts-"));
+  mkdirSync(join(root, "resources"));
+  writeFileSync(
+    join(root, "resources", "people.ts"),
+    `import { sanoma } from "sanoma/resources";
+
+export const ada = sanoma.person({ id: "ada" });
+export const bo = sanoma.person({ id: "bo" });
+export const cy = sanoma.person({ id: "cy" });
+export const finance = sanoma.group({ name: "finance", members: [ada, bo] });
+export const sales = sanoma.group({ name: "sales", members: [cy] });
+`,
+  );
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+  const payout = defineWorkflow({
+    name: "payout",
+    trigger: "manual",
+    input: z.object({ amount: z.number().int() }),
+    uses: [],
+    run: async (ctx, { amount }) => ({ paid: amount, run: ctx.runId }),
+  });
+  const mark = defineWorkflow({
+    name: "mark",
+    trigger: "manual",
+    input: z.object({ key: z.string() }),
+    uses: [leads.save],
+    run: async (ctx, { key }) => ctx.data.leads.save({ record: { id: key, stage: "won" } }),
+  });
+  const files = [
+    {
+      file: "policies/payouts.cedar",
+      text: `@id("payout-hold")
+@hold("finance")
+@title("Payouts need finance")
+forbid (principal, action == Sanoma::Action::"workflow:payout", resource);
+
+@id("mark-refused")
+@reason("Nobody marks leads by hand")
+forbid (principal, action == Sanoma::Action::"workflow:mark", resource)
+when { context.input.key == "refused" };
+`,
+    },
+    FILES[1]!,
+  ];
+  const shared = { workflows: [payout, mark], collections: [leads], connectors: [], root, databaseUrl };
+  const declared = readPeople(root).people;
+  const app = useTestApp(
+    { ...shared, policy: cedarPolicy(resolveConfig(shared), loadPolicies(files).policies, declared) },
+    { databaseUrl },
+  );
+
+  it("holds a start for finance before the body runs, until someone in finance approves", async () => {
+    const runId = await app.client.start(payout, { amount: 5 }, { startedBy: "cy" });
+    await waitFor(async () => (await app.client.run(runId))?.status === "waiting");
+    const records = await app.client.ledger(runId);
+    expect(records.map((r) => r.type)).toEqual(["run.started", "approval.requested"]);
+    expect(records.filter((r) => r.type === "approval.requested")).toEqual([
+      expect.objectContaining({
+        approval: "approval-1",
+        title: "Payouts need finance",
+        approver: { group: "finance" },
+        requestedBy: "policy",
+        covers: ["workflow:payout"],
+        op: "workflow:payout",
+        reasons: ["payout-hold"],
+      }),
+    ]);
+    expect(await app.client.decide(runId, { decision: "approve", by: { id: "bo" } })).toMatchObject({
+      status: "approved",
+      decidedBy: "bo",
+      reasons: ["payout-hold"],
+    });
+    expect(await app.client.result(runId)).toEqual({ paid: 5, run: runId });
+  });
+
+  it("refuses a start the policy denies, and starts nothing", async () => {
+    const runId = randomUUID();
+    expect(await failure(app.client.start(mark, { key: "refused" }, { startedBy: "cy", runId }))).toMatchObject({
+      code: "policy_denied",
+      message: "workflow:mark was denied by policy: Nobody marks leads by hand",
+    });
+    expect(await app.client.run(runId)).toBeUndefined();
+  });
+
+  it("refuses the run's own actor as its decider, in the client and in the run", async () => {
+    const runId = await app.client.start(payout, { amount: 7 }, { startedBy: "ada" });
+    await waitFor(async () => (await app.client.run(runId))?.status === "waiting");
+    expect(await failure(app.client.decide(runId, { decision: "approve", by: { id: "ada" } }))).toMatchObject({
+      code: "not_approver",
+      message: "own change (approval-1)",
+      data: { reason: "own change" },
+    });
+    // Sent past the client, the run refuses it too, and says why in the ledger.
+    await app.raw.send(runId, { decision: "approve", by: { id: "ada", groups: ["finance"] } }, "approval-1");
+    await waitFor(async () => (await app.client.approvals(runId))[0]!.refused.length > 0);
+    expect((await app.client.ledger(runId)).filter((r) => r.type === "approval.refused")).toEqual([
+      expect.objectContaining({ by: "ada", reason: "own change" }),
+    ]);
+    expect(await app.client.decide(runId, { decision: "approve", by: { id: "bo" } })).toMatchObject({
+      status: "approved",
+    });
+    expect(await app.client.result(runId)).toEqual({ paid: 7, run: runId });
+  });
+
+  it("gives the policy a saved record as it was, so remarking a won lead is no change", async () => {
+    await app.client.call("data.leads.save", { record: { id: "l1", stage: "won" } }, { actor: "cy" });
+    const again = await app.client.start(mark, { key: "l1" }, { startedBy: "ada" });
+    expect(await app.client.result(again)).toMatchObject({ key: "l1", record: { stage: "won" } });
+    const fresh = await app.client.start(mark, { key: "l2" }, { startedBy: "ada" });
+    expect(await failure(app.client.result(fresh))).toMatchObject({
+      code: "policy_denied",
+      message: "data.leads.save was denied by policy: Only sales may mark a lead won",
+    });
   });
 });

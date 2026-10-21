@@ -3,6 +3,7 @@ import { bluesky } from "@sanoma-ai/connector-bluesky";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { messageKeyOf, topicOf } from "../src/approvals.ts";
+import { notApprover } from "../src/define.ts";
 import {
   allow,
   approve,
@@ -16,6 +17,7 @@ import {
   mayDecide,
   type Policy,
 } from "../src/index.ts";
+import { OWN_CHANGE } from "../src/shared.ts";
 import announce from "./fixtures/announce.ts";
 import { inSeconds, pending, useApp, waitFor } from "./harness.ts";
 
@@ -103,12 +105,25 @@ describe("approvedFor", () => {
 });
 
 describe("mayDecide", () => {
+  const run = { actor: { id: "ada" } };
   it("matches a named approver by id, and a group approver by the principal's groups", () => {
-    expect(mayDecide({ approver: "lead" }, { id: "lead" })).toBe(true);
-    expect(mayDecide({ approver: "lead" }, { id: "intern", groups: ["lead"] })).toBe(false);
-    expect(mayDecide({ approver: { group: "marketing" } }, { id: "carol", groups: ["ops", "marketing"] })).toBe(true);
-    expect(mayDecide({ approver: { group: "marketing" } }, { id: "marketing" })).toBe(false);
-    expect(mayDecide({ approver: { group: "marketing" } }, { id: "bob", groups: [] })).toBe(false);
+    expect(mayDecide({ approver: "lead" }, { id: "lead" }, run)).toBe(true);
+    expect(mayDecide({ approver: "lead" }, { id: "intern", groups: ["lead"] }, run)).toBe(false);
+    expect(mayDecide({ approver: { group: "marketing" } }, { id: "carol", groups: ["ops", "marketing"] }, run)).toBe(
+      true,
+    );
+    expect(mayDecide({ approver: { group: "marketing" } }, { id: "marketing" }, run)).toBe(false);
+    expect(mayDecide({ approver: { group: "marketing" } }, { id: "bob", groups: [] }, run)).toBe(false);
+  });
+
+  it("refuses the run's own actor, in the group or named, and says why; an agent's person may decide", () => {
+    const own = { approver: { group: "marketing" } };
+    expect(mayDecide(own, { id: "ada", groups: ["marketing"] }, run)).toBe(false);
+    expect(notApprover(own, { id: "ada", groups: ["marketing"] })).toBe(OWN_CHANGE);
+    expect(mayDecide({ approver: "ada" }, { id: "ada" }, run)).toBe(false);
+    expect(notApprover(own, { id: "ada" })).toBe("ada is not in group marketing");
+    expect(mayDecide({ approver: "bo" }, { id: "bo" }, { actor: { id: "refund-bot" } })).toBe(true);
+    expect(mayDecide({ approver: "bo" }, { id: "bo" }, {})).toBe(true);
   });
 });
 

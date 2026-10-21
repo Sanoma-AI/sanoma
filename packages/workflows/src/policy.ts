@@ -56,6 +56,7 @@ interface ApproveDecision {
   approver: Approver;
   title?: string;
   covers?: Op[];
+  reasons?: string[];
 }
 
 const ReasonList = z.array(z.string(), { error: "reasons must be a list of strings" }).optional();
@@ -74,6 +75,7 @@ export const DecisionSchema = z.discriminatedUnion(
       approver: Approver,
       title: z.string({ error: "the title must be a string" }).optional(),
       covers: Covers,
+      reasons: ReasonList,
     }),
   ],
   { error: "not a decision" },
@@ -90,13 +92,20 @@ export const allow = (reasons?: string[]): Decision =>
 export const deny = (reason: string, reasons?: string[]): Decision =>
   reasons === undefined ? { kind: "deny", reason } : { kind: "deny", reason, reasons };
 
-/** Holds the call for `approver`. `covers` lists other operations the approval also stands for. */
-export function approve(approver: Approver, { title, covers }: { title?: string; covers?: Op[] } = {}): Decision {
+/**
+ * Holds the call for `approver`. `covers` lists other operations the approval also stands for;
+ * `reasons`, the rules that held it, as `allow` and `deny` take them.
+ */
+export function approve(
+  approver: Approver,
+  { title, covers, reasons }: { title?: string; covers?: Op[]; reasons?: string[] } = {},
+): Decision {
   return {
     kind: "approve",
     approver,
     ...(title === undefined ? {} : { title }),
     ...(covers === undefined ? {} : { covers }),
+    ...(reasons === undefined ? {} : { reasons }),
   };
 }
 

@@ -199,7 +199,7 @@ export function validatePolicies(
  * - deny, a determining `forbid` without `@hold`: `deny` with its `@reason`, or "Refused by <id>";
  * - deny by `@hold` forbids only: each lifted once an approval addressed to its approver and
  *   covering the operation is approved (`approvedFor`); allowed when all are, else `approve` for
- *   the first, in the order written, with its `@title`.
+ *   the first, in the order written, with its `@title` and its id as `reasons`.
  *
  * An approver is a declared group (`{ group }`), a declared person's id, or the principal's
  * `onBehalfOf`; a principal acting for no one makes `on-behalf-of` a deny, "cannot resolve
@@ -290,7 +290,8 @@ export function cedarPolicy(
     const waiting = holds.find(({ approver }) => !approvedFor(call.run.approvals, call.op.id, approver!));
     if (!waiting) return allow(reasons);
     const approver = waiting.approver!;
-    return approve(approver, { title: waiting.p.title ?? `${call.op.id} needs ${approverLabel(approver)}` });
+    const title = waiting.p.title ?? `${call.op.id} needs ${approverLabel(approver)}`;
+    return approve(approver, { title, reasons: [waiting.p.id] });
   };
 
   const preview = (requests: readonly PreviewRequest[]): PreviewAnswer[] =>

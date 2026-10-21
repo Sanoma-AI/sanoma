@@ -160,13 +160,23 @@ export const ENDED_STATUSES = ["finished", "failed", "cancelled"] as const satis
 /** True when the run has finished, failed or been cancelled. */
 export const isEnded = (status: RunStatus): boolean => (ENDED_STATUSES as readonly RunStatus[]).includes(status);
 
+/** Why the run's own actor may not decide an approval on it: separation of duties (`mayDecide`). */
+export const OWN_CHANGE = "own change";
+
 /**
- * True when `by` may decide the approval: `by.id` is the approver, or `by.groups` holds the
- * approver group. Pure: everything it reads is already recorded.
+ * True when `by` may decide the approval on `run`: `by.id` is the approver, or `by.groups` holds
+ * the approver group, and `by` is not the run's own actor (who started it), who may never
+ * decide on their own change, whatever group they are in. An agent's person is not its actor: Bo
+ * may decide on a run refund-bot started for him. Pure: everything it reads is already recorded.
  */
-export function mayDecide(approval: Pick<ApprovalState, "approver">, by: Principal): boolean {
+export function mayDecide(
+  approval: Pick<ApprovalState, "approver">,
+  by: Principal,
+  run: { actor?: Pick<Principal, "id"> | undefined },
+): boolean {
   const { approver } = approval;
-  return typeof approver === "string" ? approver === by.id : (by.groups?.includes(approver.group) ?? false);
+  const addressed = typeof approver === "string" ? approver === by.id : (by.groups?.includes(approver.group) ?? false);
+  return addressed && by.id !== run.actor?.id;
 }
 
 /** A declared resource as the people functions read it: only the runtime's people types count. */

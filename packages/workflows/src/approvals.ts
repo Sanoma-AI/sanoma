@@ -50,23 +50,28 @@ export interface CheckedApproval extends Omit<ApprovalRequest, "covers"> {
   covers: string[];
 }
 
-/** A policy's hold: the call held, and the ledger `seq` its `op.called` record takes. */
+/**
+ * A policy's hold: the call held (an operation, or `workflow:<name>` for a run's start), the
+ * ledger `seq` its `op.called` record takes (a start has none), and the rules that held it.
+ */
 export interface HeldCall {
   op: string;
-  seq: number;
+  seq?: number;
   input: unknown;
+  reasons?: string[] | undefined;
 }
 
 /**
- * Waits, durably, for a decision from someone who may make it. Throws `RejectedError` on a
- * rejection. Without `held`, the workflow asked (`ctx.approval`); with it, the policy did, and
- * `place` is the held call's outline node and name.
+ * Waits, durably, for a decision from someone who may make it (`mayDecide`: never the run's own
+ * actor). Throws `RejectedError` on a rejection. Without `held`, the workflow asked
+ * (`ctx.approval`); with it, the policy did, and `place` is the held call's outline node and name
+ * (none for a run's start, which is no call in the outline).
  */
 export async function awaitApproval(
   run: Run,
   title: string,
   req: CheckedApproval,
-  place: Placed,
+  place: Placed | Record<string, never>,
   held?: HeldCall,
 ): Promise<ApprovalResult> {
   const { covers } = req;
@@ -79,7 +84,7 @@ export async function awaitApproval(
     ...(req.details === undefined ? {} : { details: req.details }),
     requestedBy: held ? "policy" : "workflow",
     covers,
-    ...(held ? { op: held.op, opSeq: held.seq, input: held.input } : {}),
+    ...(held && { op: held.op, ...heldOf(held), input: held.input }),
     status: "pending",
     requestedAt: 0,
     refused: [],
@@ -99,7 +104,7 @@ export async function awaitApproval(
         approver: state.approver,
         requestedBy: state.requestedBy,
         covers,
-        ...(held ? { op: held.op, opSeq: held.seq } : {}),
+        ...(held && { op: held.op, ...heldOf(held) }),
       },
       { key: state.id, at: state.requestedAt },
     ),
@@ -113,7 +118,7 @@ export async function awaitApproval(
     const at = await DBOS.now();
     const parsed = ApprovalMessage.safeParse(raw);
     const msg = parsed.success ? parsed.data : undefined;
-    if (!msg || !mayDecide(state, msg.by)) {
+    if (!msg || !mayDecide(state, msg.by, run)) {
       const by = msg?.by.id ?? senderOf(raw);
       const reason = msg ? notApprover(state, msg.by) : "not a valid decision message";
       state.refused.push({
@@ -155,3 +160,9 @@ export async function awaitApproval(
     return { approvedBy: msg.by.id, at, note: msg.note };
   }
 }
+
+/** What an approval and its request record keep of a hold besides the operation: its `seq` and rules, when it has them. */
+const heldOf = ({ seq, reasons }: HeldCall) => ({
+  ...(seq !== undefined && { opSeq: seq }),
+  ...(reasons !== undefined && { reasons }),
+});

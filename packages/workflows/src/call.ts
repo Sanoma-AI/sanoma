@@ -27,10 +27,26 @@ import { currentGroup, entry, skipped, write, writeFailure } from "./ledger.ts";
 import { shown } from "./log.ts";
 import { type CallContext, isOp, type Op } from "./op.ts";
 import { callAt, callName, type CallNode } from "./outline.ts";
-import { DecisionSchema, type Policy, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
+import {
+  DecisionSchema,
+  type Policy,
+  type PolicyCall,
+  type PolicyOp,
+  policyOpOf,
+  type RecordedDecision,
+} from "./policy.ts";
 import type { Run, WorkerState } from "./run.ts";
 import { isChangeOp } from "./resource.ts";
-import { APPLY_WORKFLOW, approverLabel, CALL_WORKFLOW, errorMessage, fitsOp } from "./shared.ts";
+import { WORKFLOW_ACTION } from "./schema.ts";
+import {
+  APPLY_WORKFLOW,
+  approverLabel,
+  CALL_WORKFLOW,
+  DATA_VENDOR,
+  errorMessage,
+  fitsOp,
+  type Saved,
+} from "./shared.ts";
 
 /** DBOS took the run from this execution: it cancelled the run, or another process took it over. */
 const takenByDbos = (err: unknown) =>
@@ -273,10 +289,52 @@ function targetOf(op: Op, input: unknown): { target?: string } {
   return { target };
 }
 
-/** Asks the policy about one call, and checks its answer. Runs inside a step, so it must have no side effects of its own. */
-export function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecision> {
+/**
+ * Asks the policy about one call, and checks its answer, with the record a collection's `save` or
+ * `delete` replaces as `before` (`beforeOf`). Runs inside a step, so it must have no side effects
+ * of its own.
+ */
+export async function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecision> {
   const seen = { id: run.id, workflow: run.workflow, approvals: structuredClone(run.approvals) };
-  return decideCall(run.state.policy, op, input, run.actor, seen, run.state);
+  const call = { ...callOf(op, input, run.actor, seen), ...(await beforeOf(run, op, input)) };
+  return ask(run.state.policy, call, run.state);
+}
+
+/** One call of `op` as `actor` in `run`, as a policy sees it. */
+const callOf = (op: Op, input: unknown, actor: Principal, run: PolicyCall["run"]): PolicyCall => ({
+  op: policyOpOf(op),
+  effect: op.effect,
+  ...targetOf(op, input),
+  input,
+  actor,
+  run,
+});
+
+/**
+ * For a collection's `save` or `delete`, the record it replaces or removes, read with the
+ * collection's `get` (one read, through the run's driver or its fake): `{ before }` when there is
+ * one, else nothing.
+ */
+async function beforeOf(run: Run, op: Op, input: unknown): Promise<{ before?: unknown }> {
+  const collection = op.vendor === DATA_VENDOR && run.state.collections.get(op.resource);
+  if (!collection || (op.name !== "save" && op.name !== "delete")) return {};
+  const key =
+    op.name === "save"
+      ? (input as { record: Record<string, unknown> }).record[collection.key]
+      : (input as { key: unknown }).key;
+  const opId = `${DATA_VENDOR}.${op.resource}.get`;
+  const live = run.sandbox === undefined;
+  const get = (live ? run.state.drivers : run.fakeDrivers)?.get(opId);
+  if (!get) return {};
+  const context: CallContext = {
+    idempotencyKey: `${run.id}:before`,
+    runId: run.id,
+    opId,
+    attempt: 1,
+    secrets: live ? run.state.secrets : run.fakeSecrets!,
+  };
+  const saved = (await get({ key }, context)) as Saved | null;
+  return saved ? { before: saved.record } : {};
 }
 
 /**
@@ -284,7 +342,7 @@ export function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecisi
  * policy step (`decide`) and a direct call (`SanomaClient.call`) both. A policy that fails is
  * named in the error, with its error's code, unless the worker is stopping (`state`).
  */
-export async function decideCall(
+export function decideCall(
   policy: Policy,
   op: Op,
   input: unknown,
@@ -292,7 +350,36 @@ export async function decideCall(
   run: PolicyCall["run"],
   state: Pick<WorkerState, "stopped"> = { stopped: false },
 ): Promise<RecordedDecision> {
-  const call: PolicyCall = { op: policyOpOf(op), effect: op.effect, ...targetOf(op, input), input, actor, run };
+  return ask(policy, callOf(op, input, actor, run), state);
+}
+
+/**
+ * Asks a Cedar policy whether `actor` may start a run of `workflow` with `input`, as
+ * `SanomaClient.start` does before it queues one: the action `workflow:<name>` on the
+ * workflow, its input the context. A function policy (`definePolicy`) is written for operation
+ * calls, and is not asked: the start is allowed, as it always was.
+ */
+export function decideStart(
+  policy: Policy,
+  workflow: string,
+  input: unknown,
+  actor: Principal,
+  runId: string,
+): Promise<RecordedDecision> {
+  if (policy.kind !== "cedar") return Promise.resolve({ kind: "allow" });
+  // A start is no operation: Cedar reads the action's id alone, so the rest only fills the shape.
+  const id = `${WORKFLOW_ACTION}${workflow}` as PolicyOp["id"];
+  const op: PolicyOp = { id, vendor: "workflow", resource: workflow, name: "start", effect: "write" };
+  return ask(policy, { op, effect: op.effect, input, actor, run: { id: runId, workflow, approvals: [] } });
+}
+
+/** Asks `policy` about `call`, and checks its answer, naming a policy that fails as `decideCall` says. */
+async function ask(
+  policy: Policy,
+  call: PolicyCall,
+  state: Pick<WorkerState, "stopped"> = { stopped: false },
+): Promise<RecordedDecision> {
+  const { id } = call.op;
   let answer: unknown;
   try {
     answer = await policy(call);
@@ -300,9 +387,9 @@ export async function decideCall(
     // Named here, so the run's error and the ledger say which call the policy failed on, with
     // the code the policy's error had.
     if (isInfrastructureError(err, state)) throw err;
-    throw keepCode(new Error(`The policy failed deciding ${op.id}: ${errorMessage(err)}`, { cause: err }), err);
+    throw keepCode(new Error(`The policy failed deciding ${id}: ${errorMessage(err)}`, { cause: err }), err);
   }
-  const decision = checkDecision(answer, op.id);
+  const decision = checkDecision(answer, id);
   return policy.version === undefined ? decision : { ...decision, policyVersion: policy.version };
 }
 
@@ -352,6 +439,7 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed) {
         op: op.id,
         seq,
         input: logged,
+        reasons: decision.reasons,
       });
     } catch (err) {
       if (errorCode(err) === "approval_rejected") {

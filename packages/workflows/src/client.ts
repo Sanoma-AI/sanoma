@@ -4,7 +4,7 @@ import { type DBOSClient, Error as DBOSErrors, type WorkflowStatusString } from 
 import type { Pool } from "pg";
 import { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, messageKeyOf, topicOf } from "./approvals.ts";
-import { decideCall, recorded } from "./call.ts";
+import { decideCall, decideStart, recorded } from "./call.ts";
 import { collectionsDriver } from "./collection.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { deleteCredential, storeCredential, storedCredentials, storedSecrets } from "./credentials.ts";
@@ -26,9 +26,19 @@ import {
 import { insertRecord, type LedgerRecord, type OwnedLedger, ownedLedger } from "./ledger.ts";
 import type { CallContext, Driver, Op } from "./op.ts";
 import type { RecordedDecision } from "./policy.ts";
-import type { RunArgs } from "./run.ts";
+import type { RunArgs, StartHold } from "./run.ts";
+import { WORKFLOW_ACTION } from "./schema.ts";
 import type { Secrets } from "./secret.ts";
-import { CALL_WORKFLOW, DATA_VENDOR, errorMessage, isEnded, mayDecide, type RunStatus } from "./shared.ts";
+import {
+  approverLabel,
+  BUILT_IN_WORKFLOWS,
+  CALL_WORKFLOW,
+  DATA_VENDOR,
+  errorMessage,
+  isEnded,
+  mayDecide,
+  type RunStatus,
+} from "./shared.ts";
 
 /** A principal, or its id alone. */
 const PrincipalOrId = z.union([
@@ -214,7 +224,9 @@ export class SanomaClient {
       options.sandbox,
       "`sandbox` must be the name of a scenario in the config's `scenarios/`",
     );
-    const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }) };
+    const id = runId ?? randomUUID();
+    const hold = await this.startHold(workflow.name, input, startedBy, id);
+    const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }), ...(hold && { hold }) };
     const { onBehalfOf } = startedBy;
     // An id DBOS has already returns that run, unless it is another workflow's, which DBOS refuses.
     const handle = await this.dbos
@@ -222,7 +234,7 @@ export class SanomaClient {
         {
           queueName: this.config.queueName,
           workflowName: workflow.name,
-          workflowID: runId,
+          workflowID: id,
           applicationName: this.config.appName,
           authenticatedUser: startedBy.id,
           authenticatedRoles: startedBy.groups ?? [],
@@ -246,6 +258,25 @@ export class SanomaClient {
     // After the enqueue, not before: of two starts racing with one new id, the first's run stands.
     if (runId !== undefined) await this.mustMatch(runId, args);
     return handle.workflowID;
+  }
+
+  /**
+   * The policy's answer to starting a run of `workflow` as `startedBy` (`decideStart`), for a
+   * workflow of the config's own: a deny throws `policy_denied`; a hold is what the run waits on
+   * before its body. The built-in workflows' starts are not asked: their calls are.
+   */
+  private async startHold(
+    workflow: string,
+    input: unknown,
+    startedBy: Principal,
+    runId: string,
+  ): Promise<StartHold | undefined> {
+    if (BUILT_IN_WORKFLOWS.has(workflow)) return undefined;
+    const decision = await decideStart(this.config.policy, workflow, input, startedBy, runId);
+    if (decision.kind === "deny") throw new PolicyDeniedError(`${WORKFLOW_ACTION}${workflow}`, decision.reason);
+    if (decision.kind !== "approve") return undefined;
+    const { approver, title = `${workflow} needs ${approverLabel(approver)}`, reasons } = decision;
+    return { approver, title, ...(reasons && { reasons }) };
   }
 
   /**
@@ -520,11 +551,13 @@ export class SanomaClient {
         { runId, ...(approvalId ? { approvalId } : {}) },
       );
     }
-    if (!mayDecide(target, msg.by)) {
-      throw new SanomaError("not_approver", `${notApprover(target, msg.by)} (${target.id})`, {
+    if (!mayDecide(target, msg.by, { actor: row.authenticatedUser ? { id: row.authenticatedUser } : undefined })) {
+      const reason = notApprover(target, msg.by);
+      throw new SanomaError("not_approver", `${reason} (${target.id})`, {
         runId,
         approvalId: target.id,
         approver: target.approver,
+        reason,
       });
     }
     // The id names this message, so the run's answer says whether it decided with it, and is
@@ -552,6 +585,7 @@ export class SanomaClient {
         runId,
         approvalId: target.id,
         approver: target.approver,
+        reason: refused.reason,
       });
     }
     if (now.status !== "pending" && now.decidedWith !== id) throw alreadyDecided(runId, now);
