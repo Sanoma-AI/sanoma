@@ -330,13 +330,14 @@ export interface PermissionsRow {
 
 /**
  * The Permissions page's grid (`getPermissions`): the policy, its columns (`null` for someone in
- * no group, then the declared groups and `agents`, sorted), and a row for each workflow's start
- * and for each operation a person may call directly, each with a cell per column.
+ * no group, then the declared groups and `agents`, sorted), and a row for each workflow's start,
+ * with a row for each operation it uses (`ops`, in its order), and for each operation a person
+ * may call directly, each with a cell per column.
  */
 export interface PermissionsResponse {
   policy: ConfigDescription["policy"];
   groups: (string | null)[];
-  workflows: PermissionsRow[];
+  workflows: (PermissionsRow & { ops: PermissionsRow[] })[];
   ops: PermissionsRow[];
 }
 

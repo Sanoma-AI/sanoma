@@ -64,7 +64,8 @@ export const finance = sanoma.group({ name: "finance", members: [ada] });
 );
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-// A hold on a start and a deny on a direct read, each for those outside a group.
+// A hold on a start, a deny on a direct read and a hold on an operation only a run calls, each
+// for those outside a group.
 const POLICIES = `@hold("finance")
 @title("Refunds need finance")
 forbid (principal, action == Sanoma::Action::"workflow:refund", resource)
@@ -73,6 +74,11 @@ unless { principal in Sanoma::Group::"finance" };
 @id("no-agent-reads")
 @reason("Agents read no refunds")
 forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"shop.refunds.list", resource);
+
+@id("agent-refunds")
+@hold("finance")
+@title("Agent refunds need finance")
+forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"shop.refunds.create", resource);
 `;
 
 mkdirSync(join(root, "policies"));
@@ -95,14 +101,35 @@ describe("the Permissions grid", () => {
     approver: { group: "finance" },
   };
 
-  it("asks the policy for someone in no group and in each group, the start of each workflow and each direct operation", () => {
+  it("asks the policy for someone in no group and in each group, the start of each workflow, the operations it uses and each direct operation", () => {
     const grid = gridOf(cedar);
     expect(grid).toMatchObject({ policy: { defined: true }, groups: [null, "agents", "finance"] });
-    // Someone in finance is not held: the hold's own approver.
-    expect(grid.workflows).toEqual([{ id: "refund", title: "Refund", cells: [hold, hold, { answer: "allow" }] }]);
+    expect(grid.workflows).toEqual([
+      {
+        id: "refund",
+        title: "Refund",
+        // Someone in finance is not held: the hold's own approver.
+        cells: [hold, hold, { answer: "allow" }],
+        // The money operation, called only in a run, under the workflow that uses it.
+        ops: [
+          {
+            id: "shop.refunds.create",
+            cells: [
+              { answer: "allow" },
+              {
+                answer: "hold",
+                rule: { id: "agent-refunds", file: "policies/refunds.cedar", title: "Agent refunds need finance" },
+                approver: { group: "finance" },
+              },
+              { answer: "allow" },
+            ],
+          },
+        ],
+      },
+    ]);
     expect(grid.ops).toEqual([
       {
-        // A money operation is called only in a run: not a row.
+        // A money operation is called only in a run: not a direct row.
         id: "shop.refunds.list",
         cells: [
           { answer: "allow" },
@@ -138,9 +165,9 @@ describe("the Permissions grid", () => {
   it("is every cell allow with no policy", () => {
     const none = gridOf(allowAll, { defined: false });
     expect(none.policy.defined).toBe(false);
-    expect([...none.workflows, ...none.ops].flatMap((row) => row.cells)).toEqual(
-      Array.from({ length: 6 }, () => ({ answer: "allow" })),
-    );
+    expect(
+      [...none.workflows, ...none.workflows.flatMap((w) => w.ops), ...none.ops].flatMap((row) => row.cells),
+    ).toEqual(Array.from({ length: 9 }, () => ({ answer: "allow" })));
   });
 });
 
@@ -182,7 +209,10 @@ describe("the Permissions page", () => {
     ]);
     expect(html).toContain('aria-label="hold · group finance: the rule for refund for someone in no group"');
     expect(html).toContain('aria-label="deny: the rule for shop.refunds.list for someone in agents"');
-    expect(html.match(/>allow</g)).toHaveLength(3);
+    expect(html).toContain(
+      'aria-label="hold · group finance: the rule for shop.refunds.create in refund for someone in agents"',
+    );
+    expect(html.match(/>allow</g)).toHaveLength(5);
     // The Workflows page says the policy checks every call, at its version.
     const workflows = (await (await fetch(new URL("/workflows", app.url))).text()).replaceAll("<!-- -->", "");
     expect(workflows).toContain(
@@ -225,6 +255,15 @@ describe("the Permissions page", () => {
 
       await tab.click('button[aria-label="hold · group finance: the rule for refund for someone in agents"]');
       expect(await sheet("Refunds need finance")).toContain("group finance");
+      await tab.keyboard.press("Escape");
+      await tab.waitForFunction(`!document.querySelector('[data-slot="sheet-content"]')`);
+
+      await tab.click(
+        'button[aria-label="hold · group finance: the rule for shop.refunds.create in refund for someone in agents"]',
+      );
+      expect(await sheet("Agent refunds need finance")).toContain(
+        "Holds shop.refunds.create in Refund for someone in agents.",
+      );
 
       // The New run panel says what the policy will ask, for bo and not for ada, who is in finance.
       const newRun = async (who: string) => {
