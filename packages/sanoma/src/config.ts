@@ -54,7 +54,8 @@ export async function loadConfig(cwd = process.cwd()): Promise<LoadedConfig> {
 /** Adds the collections `<root>/resources/data.ts` exports to the config's, when the file exists. */
 async function addCollections(config: SanomaConfig, root: string): Promise<void> {
   const path = join(root, "resources", "data.ts");
-  if (!existsSync(path)) return;
+  // A `collections` that is no list is resolveConfig's to explain.
+  if (!existsSync(path) || (config.collections !== undefined && !Array.isArray(config.collections))) return;
   const file = realpathSync(path);
   // Imported here, not at the top: `cli.ts` loads this module before any command needs the runtime.
   const { isCollection } = await import("@sanoma-ai/workflows");

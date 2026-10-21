@@ -359,7 +359,7 @@ export const leads = collection({
 });
 `;
 
-  it("are read as their declarations' plain values, never as resources", () => {
+  it("are read where they are declared, their declarations plain values collection() takes, never as resources", () => {
     const filename = "/repo/resources/data.ts";
     const { program } = parsed(DATA, filename);
     expect(readDataFile(program, filename)).toEqual({
@@ -369,9 +369,6 @@ export const leads = collection({
         {
           export: "leads",
           name: "outbound",
-          title: "Outbound",
-          key: "company",
-          fields: { company: "text", stage: { enum: ["new", "won"] }, seats: { type: "number", optional: true } },
           start: DATA.indexOf("export const"),
           end: DATA.length - 1,
         },
@@ -379,6 +376,16 @@ export const leads = collection({
       declared: [],
       problems: [],
     });
+  });
+
+  it("are still where they are declared, by a name written out, when the rest cannot be read", () => {
+    const filename = "/repo/resources/data.ts";
+    const source = `import { collection } from "sanoma/data";
+export const leads = collection({ name: "leads", key: "id", title: \`Leads \${"x"}\`, fields: { id: "text" } });
+`;
+    const read = readDataFile(parsed(source, filename).program, filename);
+    expect(read.collections.map((c) => [c.export, c.name])).toEqual([["leads", "leads"]]);
+    expect(read.problems).toHaveLength(1);
   });
 
   it("are listed where they are declared, beside the resources, matched to no connector, type or lockfile", () => {

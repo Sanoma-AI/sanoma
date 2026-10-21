@@ -664,7 +664,7 @@ describe("errors the app answers with", () => {
 });
 
 describe("a file's source", () => {
-  it("is served for a file the description names, a workflow's or a data file, apart from the config", async () => {
+  it("is served for a file the description names, a workflow's or a data file, a collection's too, apart from the config", async () => {
     const description = describeConfig(config);
     const context = { resolved: { root: companyDir } as never, description };
     expect(await fileSource(context, announce.file!)).toEqual({
@@ -672,6 +672,10 @@ describe("a file's source", () => {
     });
     expect(await fileSource(context, "resources/identity/rules.ts")).toEqual({
       source: readFileSync(join(companyDir, "resources/identity/rules.ts"), "utf8"),
+    });
+    // A collection's, resources/data.ts, which declares no resource.
+    expect(await fileSource({ ...context, resolved: { root: appRoot } as never }, "resources/data.ts")).toEqual({
+      source: readFileSync(join(appRoot, "resources/data.ts"), "utf8"),
     });
     expect(withoutSources(description).workflows.find((wf) => wf.name === "announce")).not.toHaveProperty("source");
     // Nothing else, and not a 404: the page asking would take it for its own not-found.

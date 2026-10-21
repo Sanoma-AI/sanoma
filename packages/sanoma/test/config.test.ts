@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { resolveConfig } from "@sanoma-ai/workflows";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadConfig, UsageError } from "../src/config.ts";
 
@@ -36,6 +37,13 @@ describe("loadConfig", () => {
       company({ "sanoma.config.ts": CONFIG(", collections: [leads]"), "resources/data.ts": DATA }),
     );
     expect(config.collections?.map((c) => c.name)).toEqual(["leads", "deals"]);
+  });
+
+  it("leaves a `collections` that is no list for resolveConfig to explain", async () => {
+    const { config } = await loadConfig(
+      company({ "sanoma.config.ts": CONFIG(", collections: leads as never"), "resources/data.ts": DATA }),
+    );
+    expect(() => resolveConfig(config)).toThrow(/^The config's `collections` must be an array/);
   });
 
   it("leaves a config without resources/data.ts as it is", async () => {

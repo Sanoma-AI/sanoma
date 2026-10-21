@@ -71,6 +71,63 @@ export type ListQuery<R> = {
 
 type Range<V> = { gt?: V; gte?: V; lt?: V; lte?: V };
 
+/** The kinds of value a field holds: text, a number, true or false, a date (ISO 8601) or a person's id. */
+export const FIELD_TYPES = ["text", "number", "boolean", "date", "person"] as const;
+
+const COLLECTION_NAME = /^[a-z][a-zA-Z0-9]*$/;
+const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const KINDS = `${FIELD_TYPES.map((t) => `"${t}"`).join(", ")}, { type, optional: true } or { enum: [...] }`;
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * Throws unless `collection()` takes this declaration: the name a lowercase letter then letters
+ * and digits, at least one field, each a type, the type marked optional or an enum of distinct
+ * strings, the key a required text field, the title a string. `collection()` and the reader of
+ * `resources/data.ts` both ask it, so `sanoma check` refuses what the runtime would.
+ */
+export function checkCollection(declaration: { name?: unknown; key?: unknown; fields?: unknown; title?: unknown }) {
+  const { name, key, fields, title } = declaration;
+  const where = `collection("${String(name)}")`;
+  if (typeof name !== "string" || !COLLECTION_NAME.test(name)) {
+    throw new Error(`${where}: the name must be a lowercase letter, then letters and digits, such as "outbound"`);
+  }
+  if (!isRecord(fields) || !Object.keys(fields).length) {
+    throw new Error(`${where}: it needs fields, by name: each one of ${KINDS}`);
+  }
+  for (const [field, kind] of Object.entries(fields)) checkField(where, field, kind);
+  const keyKind: unknown = typeof key === "string" && Object.hasOwn(fields, key) ? fields[key] : undefined;
+  if (!(keyKind === "text" || (isRecord(keyKind) && keyKind.type === "text" && keyKind.optional === undefined))) {
+    throw new Error(`${where}: the key "${String(key)}" must be one of its fields, a required "text" one`);
+  }
+  if (title !== undefined && typeof title !== "string") throw new Error(`${where}: the title must be a string`);
+}
+
+/** Throws unless `kind` is a field `collection()` takes: a type, the type marked optional, or an enum of distinct strings. */
+function checkField(where: string, field: string, kind: unknown): void {
+  const refused = (why: string) => new Error(`${where}: the field "${field}" ${why}`);
+  if (!FIELD_NAME.test(field)) throw refused("must be named with letters, digits and _, not a digit first");
+  const types: readonly unknown[] = FIELD_TYPES;
+  const kinds = `is ${JSON.stringify(kind)}; a field is one of ${KINDS}`;
+  if (typeof kind === "string") {
+    if (!types.includes(kind)) throw refused(kinds);
+    return;
+  }
+  if (!isRecord(kind)) throw refused(kinds);
+  const { type, enum: values, optional, ...rest } = kind;
+  if (Object.keys(rest).length || (type === undefined) === (values === undefined)) throw refused(kinds);
+  if (optional !== undefined && optional !== true) throw refused("may only be marked `optional: true`");
+  if (type !== undefined && !types.includes(type)) throw refused(kinds);
+  if (
+    values !== undefined &&
+    (!Array.isArray(values) ||
+      !values.length ||
+      values.some((v) => typeof v !== "string") ||
+      new Set(values).size < values.length)
+  ) {
+    throw refused("needs an enum of distinct strings, at least one");
+  }
+}
+
 /** The workflows the runtime adds itself, which a config's own may not be named: drift and apply. */
 export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([DRIFT_WORKFLOW, APPLY_WORKFLOW]);
 

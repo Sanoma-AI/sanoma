@@ -2,6 +2,7 @@ import { basename, dirname, join, relative } from "node:path";
 import type { Node } from "./ast.ts";
 import { inside, nearestDir, RELATIVE } from "./paths.ts";
 import { type Secret, SECRET_NAME } from "./secret.ts";
+import { checkCollection, errorMessage } from "./shared.ts";
 
 // The one definition of what a data file may hold, over an ESTree program from oxc: the reader
 // (`resources.ts`), `lintResources` (`lint.ts`) and the oxlint plugin (`plugin.ts`) all
@@ -68,14 +69,12 @@ export interface DataFileExport {
   end: number;
 }
 
-/** An `export const name = collection({ … })` in `resources/data.ts`: its declaration's plain values, as written. */
+/** An `export const name = collection({ … })` in `resources/data.ts`, its declaration one `collection()` takes. */
 export interface DataFileCollection {
   /** The `export const`'s name. */
   export: string;
+  /** The collection's name. */
   name: string;
-  key: string;
-  fields: { [field: string]: DataValue };
-  title?: string;
   /** The `export const` statement. */
   start: number;
   end: number;
@@ -147,6 +146,8 @@ export function readDataFile(
   const exports: DataFileExport[] = [];
   const collections: DataFileCollection[] = [];
   const collectionsFile = relative(root, filename) === COLLECTIONS_FILE;
+  // What the file may hold, for the problems that say so.
+  const shape = collectionsFile ? COLLECTIONS_ONLY : SHAPE;
   // Names a refused import or declaration binds: reported once, where they are bound.
   const refused = new Set<string>();
   // The local names of `secret`, and of `collection`.
@@ -188,20 +189,20 @@ export function readDataFile(
         readDefault(s);
         break;
       case "ExportAllDeclaration":
-        fail(s, `export * is not allowed in a data file: ${SHAPE}`);
+        fail(s, `export * is not allowed in a data file: ${shape}`);
         break;
       case "VariableDeclaration": {
         const name = s.declarations[0]?.id?.name;
         fail(
           s,
           name === undefined
-            ? `an unexported declaration is not allowed in a data file: ${SHAPE}`
-            : `\`${s.kind} ${name}\` is not allowed in a data file: export it as a resource, \`export const ${name} = <vendor>.<type>({ … })\`, or write its value where it is used`,
+            ? `an unexported declaration is not allowed in a data file: ${shape}`
+            : `\`${s.kind} ${name}\` is not allowed in a data file: export it as ${collectionsFile ? `a collection, \`export const ${name} = collection({ … })\`` : `a resource, \`export const ${name} = <vendor>.<type>({ … })\``}, or write its value where it is used`,
         );
         break;
       }
       default:
-        fail(s, `${describe(s)} is not allowed in a data file: ${SHAPE}`);
+        fail(s, `${describe(s)} is not allowed in a data file: ${shape}`);
     }
   }
 
@@ -293,7 +294,7 @@ export function readDataFile(
       return;
     }
     if (decl.type !== "VariableDeclaration") {
-      fail(s, `${describe(decl)} is not allowed in a data file: ${SHAPE}`);
+      fail(s, `${describe(decl)} is not allowed in a data file: ${shape}`);
       return;
     }
     if (decl.kind !== "const") {
@@ -353,7 +354,7 @@ export function readDataFile(
     }
   }
 
-  /** An `export const` in resources/data.ts: a collection, its declaration read as plain values. */
+  /** An `export const` in resources/data.ts: a collection, its declaration plain values `collection()` takes. */
   function readCollection(s: Node, init: Node | undefined, name: string) {
     if (
       init?.type !== "CallExpression" ||
@@ -369,34 +370,28 @@ export function readDataFile(
       return;
     }
     const declaration = value(arg) as { [field: string]: DataValue } | undefined;
-    // What value() refused it reported.
-    if (declaration === undefined) return;
-    const { name: named, key, fields, title, ...rest } = declaration;
-    if (
-      typeof named !== "string" ||
-      typeof key !== "string" ||
-      (title !== undefined && typeof title !== "string") ||
-      typeof fields !== "object" ||
-      fields === null ||
-      Array.isArray(fields) ||
-      Object.keys(rest).length ||
-      namesDeclaration(declaration)
-    ) {
-      fail(
-        arg,
-        `collection() takes \`{ name, key, fields, title? }\` written out: name, key and title strings, and each field a type ("text", "number", "boolean", "date" or "person"), \`{ type, optional: true }\` or \`{ enum: [ … ] }\``,
-      );
+    if (declaration === undefined) {
+      // What value() refused it reported; the collection is still declared here, which the
+      // runtime runs, when its name is written out.
+      const named = arg.properties.find(
+        (p: Node) => p.type === "Property" && !p.computed && keyName(p.key) === "name",
+      )?.value;
+      if (named?.type === "Literal" && typeof named.value === "string") {
+        collections.push({ export: name, name: named.value, start: s.start, end: s.end });
+      }
       return;
     }
-    collections.push({
-      export: name,
-      name: named,
-      key,
-      fields: fields as { [field: string]: DataValue },
-      ...(title !== undefined && { title }),
-      start: s.start,
-      end: s.end,
-    });
+    if (Object.keys(declaration).some((k) => !DECLARATION_KEYS.has(k)) || namesDeclaration(declaration)) {
+      fail(arg, `collection() takes \`{ name, key, fields, title? }\`, its values written out: ${COLLECTION_CALL}`);
+      return;
+    }
+    try {
+      checkCollection(declaration);
+    } catch (err) {
+      fail(arg, errorMessage(err));
+      return;
+    }
+    collections.push({ export: name, name: declaration.name as string, start: s.start, end: s.end });
   }
 
   function readDefault(s: Node) {
@@ -577,6 +572,9 @@ export function readDataFile(
 
   return { imports, exports, collections, declared: collectionsFile ? [] : [...declared], problems };
 }
+
+/** What `collection()` reads of its declaration. */
+const DECLARATION_KEYS: ReadonlySet<string> = new Set(["name", "key", "fields", "title"]);
 
 /** True when a value names a declaration: a collection's declaration is plain values only. */
 const namesDeclaration = (v: DataValue): boolean =>

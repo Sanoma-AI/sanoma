@@ -498,10 +498,27 @@ export default [leads];
       `2:24 import "@sanoma-ai/connector-github/resources" is not allowed in resources/data.ts: ${ONLY}`,
       `3:24 import "sanoma/resources" is not allowed in resources/data.ts: ${ONLY}`,
       `4:22 import "./people/team.ts" is not allowed in resources/data.ts: ${ONLY}`,
-      expect.stringMatching(/^7:31 collection\(\) takes `\{ name, key, fields, title\? \}` written out/),
+      expect.stringMatching(/^7:31 collection\(\) takes `\{ name, key, fields, title\? \}`, its values written out: /),
       `8:1 export default is not allowed in resources/data.ts: ${ONLY}`,
     ]);
     expect(dataFile(`export const n = 1;\n`, data)).toEqual([`1:18 export const n must be a collection: ${ONLY}`]);
+    // What collection() refuses, as it says it; and the advice for an unexported const is a collection's.
+    expect(
+      dataFile(
+        `import { collection } from "sanoma/data";
+export const leads = collection({ name: "Leads", key: "id", fields: { id: "text" } });
+export const deals = collection({ name: "deals", key: "won", fields: { id: "string", won: "boolean" } });
+export const owners = collection({ name: "owners", key: "won", fields: { id: "text", won: "boolean" } });
+const stages = ["new", "won"];
+`,
+        data,
+      ),
+    ).toEqual([
+      '2:33 collection("Leads"): the name must be a lowercase letter, then letters and digits, such as "outbound"',
+      '3:33 collection("deals"): the field "id" is "string"; a field is one of "text", "number", "boolean", "date", "person", { type, optional: true } or { enum: [...] }',
+      '4:34 collection("owners"): the key "won" must be one of its fields, a required "text" one',
+      "5:1 `const stages` is not allowed in a data file: export it as a collection, `export const stages = collection({ … })`, or write its value where it is used",
+    ]);
     // Anywhere else, a collection is refused where it is imported, and resources/data.ts is no data file to import from.
     expect(
       dataFile(`import { collection } from "sanoma/data";
