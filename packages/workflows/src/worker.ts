@@ -1,13 +1,13 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { awaitApproval } from "./approvals.ts";
-import { buildCtx, isInfrastructureError } from "./call.ts";
+import { buildCtx, decideStart, isInfrastructureError, startHoldOf } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { storedSecrets, watchCredentials } from "./credentials.ts";
 import { DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase } from "./db.ts";
 import type { WorkflowDefinition } from "./define.ts";
 import { credentialsOf, unconfigured, unconfiguredSummary } from "./env.ts";
-import { errorInfo, parseOrThrow } from "./errors.ts";
+import { errorInfo, parseOrThrow, PolicyDeniedError } from "./errors.ts";
 import { entry, ownedLedger, skipped, write, writeFailure } from "./ledger.ts";
 import { dbosLogger, quietIfSandbox, setLogLevel, warn } from "./log.ts";
 import { lineStartsOf, readSource } from "./ast.ts";
@@ -250,11 +250,20 @@ async function runWorkflow(name: string, { input, startedBy, sandbox, hold }: Ru
     try {
       // The one parse of the input: the client checked it, but sent it as given.
       const parsed = parseOrThrow(wf.input, input, `The input does not match ${wf.name}'s schema`);
-      if (hold) {
-        // The policy held the start: the body waits for the approval, and a rejection fails the run.
-        const action = `${WORKFLOW_ACTION}${wf.name}`;
-        const held = { op: action, input, reasons: hold.reasons };
-        await awaitApproval(run, hold.title, { approver: hold.approver, covers: [action] }, undefined, held);
+      // The policy held the start: the body waits for each hold's approval in turn, the policy
+      // asked again once one is approved, and a rejection or a deny fails the run.
+      const action = `${WORKFLOW_ACTION}${wf.name}`;
+      for (let next = hold; next;) {
+        const held = { op: action, input, reasons: next.reasons };
+        await awaitApproval(run, next.title, { approver: next.approver, covers: [action] }, undefined, held);
+        const decision = await DBOS.runStep(
+          async () => decideStart(state.policy, wf.name, parsed, startedBy, run.approvals),
+          {
+            name: `policy:${action}`,
+          },
+        );
+        if (decision.kind === "deny") throw new PolicyDeniedError(action, decision.reason);
+        next = decision.kind === "approve" ? startHoldOf(wf.name, decision) : undefined;
       }
       if (sandbox !== undefined) {
         // Imported here, so a live worker never loads the Gherkin parser or faker.

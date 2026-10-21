@@ -500,6 +500,24 @@ forbid (principal, action == Sanoma::Action::"workflow:payout", resource);
 @reason("Nobody marks leads by hand")
 forbid (principal, action == Sanoma::Action::"workflow:mark", resource)
 when { context.input.key == "refused" };
+
+@id("payout-sales")
+@hold("sales")
+@title("Big payouts need sales too")
+forbid (principal, action == Sanoma::Action::"workflow:payout", resource)
+when { context.input.amount > 100 };
+
+@id("l20-finance")
+@hold("finance")
+forbid (principal, action == Sanoma::Action::"data.leads.save", resource == Sanoma::Target::"data:leads/l20");
+
+@id("l20-ada")
+@hold("ada")
+forbid (principal, action == Sanoma::Action::"data.leads.save", resource == Sanoma::Target::"data:leads/l20");
+
+@id("l11-kept")
+@reason("That lead stays")
+forbid (principal, action in Sanoma::Action::"effect:write", resource == Sanoma::Target::"data:leads/l11");
 `,
     },
     FILES[1]!,
@@ -534,6 +552,26 @@ when { context.input.key == "refused" };
       reasons: ["payout-hold"],
     });
     expect(await app.client.result(runId)).toEqual({ paid: 5, run: runId });
+  });
+
+  it("lifts each of a start's holds in turn, and a call's, before going on", async () => {
+    const pending = async (runId: string, count: number) => {
+      await waitFor(async () => (await app.client.approvals(runId)).length === count);
+      return (await app.client.approvals(runId)).at(-1)!;
+    };
+    const big = await app.client.start(payout, { amount: 500 }, { startedBy: "ada" });
+    expect(await pending(big, 1)).toMatchObject({ approver: { group: "finance" }, status: "pending" });
+    await app.client.decide(big, { decision: "approve", by: { id: "bo" } });
+    expect(await pending(big, 2)).toMatchObject({ title: "Big payouts need sales too", status: "pending" });
+    await app.client.decide(big, { decision: "approve", by: { id: "cy" } });
+    expect(await app.client.result(big)).toEqual({ paid: 500, run: big });
+
+    const held = await app.client.start(mark, { key: "l20" }, { startedBy: "cy" });
+    expect(await pending(held, 1)).toMatchObject({ approver: { group: "finance" }, reasons: ["l20-finance"] });
+    await app.client.decide(held, { decision: "approve", by: { id: "bo" } });
+    expect(await pending(held, 2)).toMatchObject({ approver: "ada", reasons: ["l20-ada"] });
+    await app.client.decide(held, { decision: "approve", by: { id: "ada" } });
+    expect(await app.client.result(held)).toMatchObject({ key: "l20" });
   });
 
   it("refuses a start the policy denies, and starts nothing", async () => {
@@ -593,7 +631,7 @@ when { context.input.key == "refused" };
       databaseUrl,
     });
     try {
-      for (const id of ["l8", "l9", "l10"]) {
+      for (const id of ["l8", "l9", "l10", "l11"]) {
         await client.call("data.leads.save", { record: { id } }, { actor: "ada" });
       }
     } finally {
@@ -608,6 +646,11 @@ when { context.input.key == "refused" };
     expect(await failure(app.client.call("data.leads.save", won, { actor: "ada" }))).toMatchObject({
       code: "policy_denied",
       message: expect.stringMatching(/^data\.leads\.save was denied by policy: leads-won failed: /),
+    });
+    // A policy on the action's group still holds for such a record.
+    expect(await failure(app.client.call("data.leads.delete", { key: "l11" }, { actor: "ada" }))).toMatchObject({
+      code: "policy_denied",
+      message: "data.leads.delete was denied by policy: That lead stays",
     });
   });
 });
@@ -652,7 +695,7 @@ when { context.input.amont > 5 };
     expect(await refusing(refundCall(5, "ada"))).toEqual({ kind: "deny", reason });
     expect(refusing.start({ id: "ada" }, "refund", { amount: 5 })).toEqual({ kind: "deny", reason });
     expect(refusing.preview([ask("ada", "shop.refunds.create")])).toEqual([{ answer: "deny" }]);
-    expect(describeConfig(at(root)).policy).toEqual({ defined: true });
+    expect(describeConfig(at(root)).policy).toEqual({ defined: true, problems: policyProblems });
     // A worker on it starts, and says why it refuses everything.
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {

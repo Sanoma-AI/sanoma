@@ -1594,9 +1594,16 @@ describe("an app configured otherwise", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const refusing = await startApp({ ...config, root });
-      // It has a policy, but no version: the one it has refuses.
-      const { text } = await page("/workflows", refusing.url).finally(() => refusing.close());
-      expect(text).toContain("policies/*.cedar check every operation call and run start</");
+      // The policy it has refuses, and the page says so.
+      const pages = Promise.all([
+        page("/workflows", refusing.url),
+        page("/permissions", refusing.url, { headers: { cookie: "sanoma_actor=ada" } }),
+      ]);
+      const [workflows, permissions] = await pages.finally(() => refusing.close());
+      expect(workflows.text).toContain(
+        "policies/*.cedar do not hold, so every operation call and run start is refused",
+      );
+      expect(permissions.text).toContain("Cedar, policies/*.cedar, which do not hold: all refused");
       expect(warn.mock.calls.flat().join("\n")).toMatch(/files have problems.*\n {2}policies\/bad\.cedar:1:\d+: /s);
     } finally {
       warn.mockRestore();

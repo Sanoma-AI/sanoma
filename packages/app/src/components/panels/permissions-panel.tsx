@@ -33,7 +33,13 @@ export function PermissionsPanel() {
 export function PolicyFacts({ policy }: { policy: PermissionsResponse["policy"] }) {
   return (
     <>
-      <Fact label="Policy">{policy.defined ? "Cedar, policies/*.cedar" : "None"}</Fact>
+      <Fact label="Policy">
+        {policy.problems
+          ? "Cedar, policies/*.cedar, which do not hold: all refused"
+          : policy.defined
+            ? "Cedar, policies/*.cedar"
+            : "None"}
+      </Fact>
       {policy.version !== undefined && (
         <Fact label="Version">
           <code>{policy.version}</code>

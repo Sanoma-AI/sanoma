@@ -8,7 +8,10 @@ import { sanoma } from "sanoma/resources";
 /** Who started the company: `sanoma init` wrote them here. */
 export const founder = sanoma.person({ id: "founder" });
 
-/** Who reviews a post the scenarios publish. */
+/**
+ * Who reviews a post the scenarios publish: a stand-in, who can sign in and approve like anyone
+ * declared. Replace them with a real colleague, here and in the scenarios.
+ */
 export const reviewer = sanoma.person({ id: "reviewer", name: "Reviewer" });
 
 export const admin = sanoma.group({ name: "admin", members: [founder] });

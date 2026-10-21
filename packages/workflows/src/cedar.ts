@@ -4,7 +4,7 @@ import { join, relative, sep } from "node:path";
 import type { CedarValueJson, DetailedError, EntityJson, Expr, PolicyJson } from "@cedar-policy/cedar-wasm/nodejs";
 import { locator } from "./ast.ts";
 import type { ResolvedConfig } from "./config.ts";
-import type { Approver, Principal } from "./define.ts";
+import type { ApprovalState, Approver, Principal } from "./define.ts";
 import { filesUnder } from "./paths.ts";
 import {
   allow,
@@ -279,16 +279,24 @@ export function cedarPolicy(
     approvals: PolicyCall["run"]["approvals"],
   ): Decision => {
     const principal = directory.principal(actor);
-    const ask = (checked: boolean) =>
+    const check = (asked: Record<string, unknown>) =>
       cedar.statefulIsAuthorized({
-        ...requestOf(principal, action, target, () => context),
-        ...(checked && { preparsedSchemaName: set, validateRequest: true }),
+        ...requestOf(principal, action, target, () => asked),
+        preparsedSchemaName: set,
+        validateRequest: true,
         preparsedPolicySetId: set,
       });
-    let answer = ask(true);
-    // A record saved under fields since changed does not fit the schema as `before`: asked again
-    // without it (the context is plain values), a policy reading a field it lacks fails, so denies.
-    if (answer.type === "failure" && "before" in context) answer = ask(false);
+    let answer = check(context);
+    // A record saved under fields since changed does not fit the schema as `before`. When the rest
+    // of the call does, it is asked again without the schema (the context is plain values), the
+    // action's groups given as entities: a policy reading a field the record lacks fails, so denies.
+    const { before, ...rest } = context;
+    if (answer.type === "failure" && before !== undefined && check(rest).type === "success") {
+      const request = requestOf(principal, action, target, () => context);
+      const groups = schema[NAMESPACE]?.actions[action]?.memberOf ?? [];
+      request.entities.push({ uid: request.action, attrs: {}, parents: groups.map((g) => uid("Action", g.id)) });
+      answer = cedar.statefulIsAuthorized({ ...request, preparsedPolicySetId: set });
+    }
     // A request the schema refuses (an input Cedar cannot hold) is denied, not an error of the call.
     if (answer.type === "failure")
       return deny(`The call does not fit the Cedar schema: ${answer.errors.map(messageOf).join("; ")}`);
@@ -320,8 +328,8 @@ export function cedarPolicy(
       call.run.approvals,
     );
 
-  const start = (actor: Principal, workflow: string, input: unknown): Decision =>
-    authorize(actor, `${WORKFLOW_ACTION}${workflow}`, undefined, { input }, []);
+  const start = (actor: Principal, workflow: string, input: unknown, approvals: readonly ApprovalState[] = []) =>
+    authorize(actor, `${WORKFLOW_ACTION}${workflow}`, undefined, { input }, approvals);
 
   const preview = (requests: readonly PreviewRequest[]): PreviewAnswer[] =>
     requests.map(({ principal: actor, action, resource }) => {

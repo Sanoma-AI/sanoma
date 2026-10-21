@@ -3,6 +3,7 @@ import { awaitApproval, type CheckedApproval } from "./approvals.ts";
 import { offsetOf } from "./ast.ts";
 import {
   AllMembers,
+  type ApprovalState,
   type ApprovalRequest,
   type Principal,
   ApprovalRequestSchema,
@@ -29,7 +30,7 @@ import { shown } from "./log.ts";
 import { type CallContext, isOp, type Op } from "./op.ts";
 import { callAt, callName, type CallNode } from "./outline.ts";
 import { allowAll, type Decision, type Policy, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
-import type { Run, WorkerState } from "./run.ts";
+import type { Run, StartHold, WorkerState } from "./run.ts";
 import { isChangeOp } from "./resource.ts";
 import {
   APPLY_WORKFLOW,
@@ -356,8 +357,26 @@ export function decideCall(
  * Asks the policy whether `actor` may start a run of `workflow` with `input` (`Policy.start`, the
  * action `workflow:<name>`), as `SanomaClient.start` does before it queues one.
  */
-export function decideStart(policy: Policy, workflow: string, input: unknown, actor: Principal) {
-  return ask(policy, `${WORKFLOW_ACTION}${workflow}`, () => policy.start(actor, workflow, input));
+export function decideStart(
+  policy: Policy,
+  workflow: string,
+  input: unknown,
+  actor: Principal,
+  approvals: readonly ApprovalState[] = [],
+) {
+  return ask(policy, `${WORKFLOW_ACTION}${workflow}`, () => policy.start(actor, workflow, input, approvals));
+}
+
+/** The approval a start's `approve` answer waits on: whom it asks, its title, and the rules that held it. */
+export function startHoldOf(
+  workflow: string,
+  { approver, title, reasons }: Extract<Decision, { kind: "approve" }>,
+): StartHold {
+  return {
+    approver,
+    title: title ?? `${WORKFLOW_ACTION}${workflow} needs ${approverLabel(approver)}`,
+    ...(reasons && { reasons }),
+  };
 }
 
 /**
@@ -410,21 +429,23 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed) {
   // The decision is recorded as a step, so a replay reuses it instead of asking a policy
   // that may have changed since. The policy must still be deterministic: a run that fails
   // before the step is recorded asks again.
-  const decision = await DBOS.runStep(() => decide(run, op, parsed), { name: `policy:${op.id}` });
+  const decideStep = () => DBOS.runStep(() => decide(run, op, parsed), { name: `policy:${op.id}` });
+  let decision = await decideStep();
   const logged = recorded(op, parsed);
   const call = { type: "op.called", op: op.id, ...place, effect: op.effect, input: logged, decision } as const;
 
-  if (decision.kind === "deny") {
-    const err = new PolicyDeniedError(op.id, decision.reason);
-    await writeFailure(run, entry(run, { ...call, error: errorInfo(err), durationMs: 0 }, { seq }), err);
-    throw err;
-  }
-  if (decision.kind === "approve") {
+  // Each hold is lifted in turn: once one is approved, the policy is asked again, with it.
+  for (;;) {
+    if (decision.kind === "deny") {
+      const err = new PolicyDeniedError(op.id, decision.reason);
+      await writeFailure(run, entry(run, { ...call, decision, error: errorInfo(err), durationMs: 0 }, { seq }), err);
+      throw err;
+    }
+    if (decision.kind !== "approve") break;
     const title = decision.title ?? `${op.id} needs ${approverLabel(decision.approver)}`;
-    // A hold covers the call it held.
-    const covers = [op.id];
     try {
-      await awaitApproval(run, title, { approver: decision.approver, covers }, place, {
+      // A hold covers the call it held.
+      await awaitApproval(run, title, { approver: decision.approver, covers: [op.id] }, place, {
         op: op.id,
         seq,
         input: logged,
@@ -438,6 +459,7 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed) {
       }
       throw err;
     }
+    decision = await decideStep();
   }
 
   const started = Date.now();

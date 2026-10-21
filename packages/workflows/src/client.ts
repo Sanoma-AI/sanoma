@@ -4,7 +4,7 @@ import { type DBOSClient, Error as DBOSErrors, type WorkflowStatusString } from 
 import type { Pool } from "pg";
 import { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, messageKeyOf, topicOf } from "./approvals.ts";
-import { beforeOf, decideCall, decideStart, recorded } from "./call.ts";
+import { beforeOf, decideCall, decideStart, recorded, startHoldOf } from "./call.ts";
 import { collectionsDriver } from "./collection.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { deleteCredential, storeCredential, storedCredentials, storedSecrets } from "./credentials.ts";
@@ -26,10 +26,10 @@ import {
 import { insertRecord, type LedgerRecord, type OwnedLedger, ownedLedger } from "./ledger.ts";
 import type { CallContext, Driver, Op } from "./op.ts";
 import { allowAll, type RecordedDecision } from "./policy.ts";
+import { admit, readPeople } from "./resources.ts";
 import type { RunArgs, StartHold } from "./run.ts";
 import type { Secrets } from "./secret.ts";
 import {
-  approverLabel,
   BUILT_IN_WORKFLOWS,
   CALL_WORKFLOW,
   DATA_VENDOR,
@@ -276,10 +276,8 @@ export class SanomaClient {
     if (runId !== undefined && (await this.row(runId))) return undefined;
     const decision = decideStart(policy, workflow, input, startedBy);
     if (decision.kind === "allow") return undefined;
-    const action = `${WORKFLOW_ACTION}${workflow}`;
-    if (decision.kind === "deny") throw new PolicyDeniedError(action, decision.reason);
-    const { approver, title = `${action} needs ${approverLabel(approver)}`, reasons } = decision;
-    return { approver, title, ...(reasons && { reasons }) };
+    if (decision.kind === "deny") throw new PolicyDeniedError(`${WORKFLOW_ACTION}${workflow}`, decision.reason);
+    return startHoldOf(workflow, decision);
   }
 
   /**
@@ -800,8 +798,6 @@ export class SanomaClient {
    * a caller gives, and an id nobody declares is `not_admitted`.
    */
   private async admitted(principal: Principal): Promise<Principal> {
-    // Loaded when asked, not with the client: the reader parses with oxc-parser.
-    const { admit, readPeople } = await import("./resources.ts");
     return admit(principal, readPeople(this.config.root));
   }
 
@@ -926,7 +922,6 @@ export interface StoredSecret {
 /** What an environment variable's name looks like. */
 const VARIABLE = /^[A-Z_][A-Z0-9_]*$/;
 
-/** `options.by`, who sets or clears a credential: a name, or `invalid_input`. */
 const alreadyDecided = (runId: string, a: ApprovalState) =>
   new SanomaError("already_decided", `${a.id} on run ${runId} was already ${a.status} by ${a.decidedBy}`, {
     runId,

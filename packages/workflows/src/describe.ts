@@ -201,8 +201,11 @@ export interface ConfigDescription {
   orphans: DataFiles["orphans"];
   /** What is wrong in the data files (`readDataFiles`), each at its file, relative to the root, line and column. A workflow's are on its entry. */
   problems: ResourceProblem[];
-  /** `defined` when the root has `policies/**\/*.cedar` (else the policy is `allowAll`), with their `version`. */
-  policy: { defined: boolean; version?: string };
+  /**
+   * `defined` when the root has `policies/**\/*.cedar` (else the policy is `allowAll`), with their
+   * `version`, or while they have `problems` (`policyProblems`), none: then every call and start is refused.
+   */
+  policy: { defined: boolean; version?: string; problems?: string[] };
   /**
    * The sites under `sites/`, by name, with what each calls (`readSites`), and its calls to what
    * the config does not have as its problems; none when the root has no `sites/`.
@@ -315,6 +318,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     policy: {
       defined: resolved.policy !== allowAll,
       ...(resolved.policy.version === undefined ? {} : { version: resolved.policy.version }),
+      ...(resolved.policyProblems.length ? { problems: resolved.policyProblems } : {}),
     },
     sites: readSites(resolved.root, { workflows, collections, ops }),
   };

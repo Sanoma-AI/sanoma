@@ -79,8 +79,16 @@ export type Policy = ((call: PolicyCall) => Decision) & {
   readonly version?: string;
   /** What the policy would answer for each request ahead of the call, its input unknown. */
   readonly preview: (requests: readonly PreviewRequest[]) => PreviewAnswer[];
-  /** May `actor` start a run of `workflow` with `input` (the action `workflow:<name>`)? */
-  readonly start: (actor: Principal, workflow: string, input: unknown) => Decision;
+  /**
+   * May `actor` start a run of `workflow` with `input` (the action `workflow:<name>`), given the
+   * run's `approvals` so far (none before it starts)?
+   */
+  readonly start: (
+    actor: Principal,
+    workflow: string,
+    input: unknown,
+    approvals?: readonly ApprovalState[],
+  ) => Decision;
 };
 
 /** A question asked ahead of a call: may `principal` take `action` (an operation, or `workflow:<name>` to start one) on `resource` (an operation's target)? */
