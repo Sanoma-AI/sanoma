@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { type ApplyDeclared, applyWorkflow } from "./apply.ts";
 import { applySteps } from "./apply-steps.ts";
+import { callWorkflow } from "./call-workflow.ts";
 import {
   type Collection,
   collectionsConnector,
@@ -32,7 +33,7 @@ import {
 } from "./op.ts";
 import type { Policy } from "./policy.ts";
 import { isChangeOp, type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
-import { APPLY_WORKFLOW, BUILT_IN_WORKFLOWS, DATA_VENDOR } from "./shared.ts";
+import { APPLY_WORKFLOW, BUILT_IN_WORKFLOWS, CALL_WORKFLOW, DATA_VENDOR } from "./shared.ts";
 import { sourceDriver, sourceOps } from "./source.ts";
 import type { Steps } from "./steps.ts";
 import { computeVersion } from "./version.ts";
@@ -127,12 +128,14 @@ export interface ResolvedConfig {
   collections: ReadonlyMap<string, Collection>;
   /**
    * The pool the collections' driver keeps their records through, when there are any: opened on
-   * its first call, and closed by whoever calls the driver (the worker, when it stops).
+   * its first call, and closed by whoever calls the driver (the worker, and the client, which
+   * calls it directly, when each stops).
    */
   dataStore?: LazyPool;
   /**
-   * By name; each checked against `ops` and `drivers`. The config's, and the built-ins `drift`
-   * (`DRIFT_WORKFLOW`) and `apply` (`APPLY_WORKFLOW`) when its connectors declare resource types.
+   * By name; each checked against `ops` and `drivers`. The config's, the built-ins `drift`
+   * (`DRIFT_WORKFLOW`) and `apply` (`APPLY_WORKFLOW`) when its connectors declare resource types,
+   * and `call` (`CALL_WORKFLOW`) when an operation may be called directly (`isDirect`).
    */
   workflows: Map<string, WorkflowDefinition<any, any>>;
   policy: Policy;
@@ -259,6 +262,9 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     );
     names.set(APPLY_WORKFLOW, applyWorkflow(types, ops, drivers, applySteps(appName, root, read)));
   }
+  // Built-in: a direct call the policy holds for an approval, made a run, when any operation may be called directly.
+  const call = callWorkflow(ops, drivers, types);
+  if (call.uses.length) names.set(CALL_WORKFLOW, call);
   return {
     appName,
     databaseUrl,

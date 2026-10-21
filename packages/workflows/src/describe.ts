@@ -3,6 +3,7 @@ import { type LintProblem, readSource, type SourceFile } from "./ast.ts";
 import { type Field, recordSchemaOf } from "./collection.ts";
 import { resolveConfig, type SanomaConfig } from "./config.ts";
 import { type Builtin, jsonSchemaOf, opIdsOf, type Use } from "./define.ts";
+import { isDirect } from "./direct.ts";
 import { lintWorkflow } from "./lint.ts";
 import { type Effect, VENDOR, type VendorInfo } from "./op.ts";
 import { type Outline, outlineWithSource } from "./outline.ts";
@@ -51,7 +52,7 @@ export interface WorkflowEntry {
   title?: string;
   trigger: "manual";
   /**
-   * Set for a workflow the runtime adds itself, `drift` or `apply`, rather than the config: a label. It
+   * Set for a workflow the runtime adds itself, `drift`, `apply` or `call`, rather than the config: a label. It
    * starts like any other.
    */
   builtin?: true;
@@ -92,6 +93,8 @@ export interface OpEntry {
   description?: string;
   /** How a scenario's steps name it: Cucumber expressions over its input's fields. */
   phrases?: { given?: string; expect?: string };
+  /** Whether it may be called directly, outside a run (`isDirect`): the one rule, read here, never derived again. */
+  direct: boolean;
   /** What a call sends, as JSON Schema (`io: "input"`: fields with defaults are optional). */
   input: Record<string, unknown>;
   /** What a call returns once its schema has parsed the vendor's reply (`io: "output"`). */
@@ -231,6 +234,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     idempotent: op.idempotent,
     description: op.description,
     ...(op.phrases && { phrases: op.phrases }),
+    direct: isDirect(op, resolved.types),
     input: toJsonSchema(op.input, `${op.id} input`, "input", refs),
     output: toJsonSchema(op.output, `${op.id} output`, "output", refs),
   }));

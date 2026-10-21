@@ -1,7 +1,7 @@
 import { Error as DBOSErrors } from "@dbos-inc/dbos-sdk";
 import type { z } from "zod";
 import type { Principal } from "./define.ts";
-import { errorMessage } from "./shared.ts";
+import { CALL_WORKFLOW, errorMessage } from "./shared.ts";
 
 const CODES = [
   "policy_denied",
@@ -15,6 +15,7 @@ const CODES = [
   "run_ended",
   "run_running",
   "call_not_in_outline",
+  "approval_pending",
 ] as const;
 
 /**
@@ -76,6 +77,21 @@ export class PolicyDeniedError extends SanomaError {
   constructor(op: string, reason: string) {
     super("policy_denied", `${op} was denied by policy: ${reason}`, { op, reason });
     this.name = "PolicyDeniedError";
+  }
+}
+
+/**
+ * Thrown by a direct call (`SanomaClient.call`) the policy holds for an approval: the call is now
+ * run `runId` of the built-in `call` workflow, which makes it once approved.
+ */
+export class ApprovalPendingError extends SanomaError {
+  constructor(op: string, runId: string) {
+    super("approval_pending", `${op} needs an approval: it waits in run ${runId}`, {
+      runId,
+      workflow: CALL_WORKFLOW,
+      op,
+    });
+    this.name = "ApprovalPendingError";
   }
 }
 

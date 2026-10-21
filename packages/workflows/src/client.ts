@@ -4,18 +4,30 @@ import { type DBOSClient, Error as DBOSErrors, type WorkflowStatusString } from 
 import type { Pool } from "pg";
 import { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, messageKeyOf, topicOf } from "./approvals.ts";
+import { decideCall, recorded } from "./call.ts";
+import { collectionsDriver } from "./collection.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
-import { deleteCredential, storeCredential, storedCredentials } from "./credentials.ts";
+import { deleteCredential, storeCredential, storedCredentials, storedSecrets } from "./credentials.ts";
 import { dbosClient, lazyPool, type LazyPool } from "./db.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { type ApprovalState, notApprover, Principal, type WorkflowDefinition } from "./define.ts";
 import { APPLY_WORKFLOW, type ApplyInput, type ApplyReport } from "./apply.ts";
 import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
-import { parseOrThrow, SanomaError } from "./errors.ts";
-import { type LedgerRecord, type OwnedLedger, ownedLedger } from "./ledger.ts";
-import type { Driver } from "./op.ts";
+import { isDirect } from "./direct.ts";
+import {
+  ApprovalPendingError,
+  type ErrorInfo,
+  errorCode,
+  errorInfo,
+  parseOrThrow,
+  PolicyDeniedError,
+  SanomaError,
+} from "./errors.ts";
+import { insertRecord, type LedgerRecord, type OwnedLedger, ownedLedger } from "./ledger.ts";
+import type { CallContext, Driver, Op } from "./op.ts";
+import type { RecordedDecision } from "./policy.ts";
 import type { RunArgs } from "./run.ts";
-import { isEnded, mayDecide, type RunStatus } from "./shared.ts";
+import { CALL_WORKFLOW, DATA_VENDOR, errorMessage, isEnded, mayDecide, type RunStatus } from "./shared.ts";
 
 /**
  * The run status each DBOS status maps to. `waiting` is PENDING with an approval pending, so
@@ -103,6 +115,17 @@ export interface StartOptions {
    * Sandbox runs go on the app's queue like any run, so several run at once.
    */
   sandbox?: string;
+}
+
+/** What `SanomaClient.call` takes besides the operation's id and its input. */
+export interface CallOptions {
+  /** Who calls: the policy decides as them, a write's record names them, and a save's `updatedBy` is their id. */
+  actor: Principal;
+  /**
+   * The call's id, so a retried write is made once: the same id with the same input returns what
+   * the first call returned, with another input is refused (`invalid_input`). A new one by default.
+   */
+  id?: string;
 }
 
 /** Talks to the runtime from another process (the app, a script), through the shared Postgres. */
@@ -198,6 +221,175 @@ export class SanomaClient {
     // After the enqueue, not before: of two starts racing with one new id, the first's run stands.
     if (runId !== undefined) await this.mustMatch(runId, args);
     return handle.workflowID;
+  }
+
+  /**
+   * Calls an operation directly, outside a run, as `actor`: one that may be (`isDirect`), a
+   * collection's or a vendor's read, never a vendor's write, the runtime's own or a resource
+   * type's (`invalid_input`, as is an unknown id or input its schema refuses). The policy decides
+   * it as the person, in a run `direct:<actor>:<id>` of the workflow `call` with no approvals. A
+   * deny throws `policy_denied` and writes nothing. An allowed call runs the driver once, without
+   * DBOS and without a retry (a driver's failure is `driver_failed`). A read returns its output
+   * and records nothing. A write is recorded as one `op.called` (seq 0) in that run, and with the
+   * default ledger in one transaction with the record it saves, so both are written or neither;
+   * a write with the same id and input returns the output recorded. When the policy asks for an
+   * approval, the call becomes run `call:<actor>:<id>` of the built-in `call` workflow, started
+   * as the person, which makes it once approved, and this throws `approval_pending` with its id.
+   */
+  async call(opId: string, input: unknown, options: CallOptions): Promise<unknown> {
+    const actor = parseOrThrow(Principal, options?.actor, '`actor` must be a principal, such as { id: "alice" }');
+    const id =
+      parseOrThrow(z.string().min(1).optional(), options.id, "`id` must be a non-empty string") ?? randomUUID();
+    const { ops, types, drivers, policy } = this.config;
+    const op = ops.get(opId);
+    if (!op || !isDirect(op, types)) {
+      const why = op ? "it is a workflow's to call: start one that uses it" : "no connector or collection declares it";
+      throw new SanomaError("invalid_input", `${opId} cannot be called directly: ${why}`, { op: opId });
+    }
+    const fn = drivers.get(op.id);
+    if (!fn) throw new SanomaError("invalid_input", `${op.id} has no driver: the connector package must attach one`);
+    const parsed = parseOrThrow(op.input, input, `The input to ${op.id} does not match its schema`, { op: op.id });
+    const runId = `direct:${actor.id}:${id}`;
+    const logged = recorded(op, parsed);
+    const write = op.effect !== "read";
+    if (write) {
+      const first = await this.recordedCall(runId, op.id, logged);
+      if (first) return first.output;
+    }
+    const decision = await decideCall(policy, op, parsed, actor, { id: runId, workflow: CALL_WORKFLOW, approvals: [] });
+    if (decision.kind === "deny") throw new PolicyDeniedError(op.id, decision.reason);
+    if (decision.kind === "approve") {
+      const held = await this.start(
+        CALL_WORKFLOW,
+        { op: op.id, input },
+        { startedBy: actor, runId: `call:${actor.id}:${id}` },
+      );
+      throw new ApprovalPendingError(op.id, held);
+    }
+    const context: CallContext = {
+      idempotencyKey: runId,
+      runId,
+      opId: op.id,
+      attempt: 1,
+      secrets: storedSecrets(() => this.credentialsDb(), "sanoma"),
+      by: actor.id,
+    };
+    if (!write) return outputOf(op, () => fn(parsed, context));
+    return this.directWrite({ op, fn, parsed, logged, actor, decision, context });
+  }
+
+  /**
+   * A direct write, made once and recorded once: with the default ledger, a collection's write
+   * and its record in one transaction on the database both are in, so both are kept or neither;
+   * otherwise the driver's call, then the record in the config's ledger. The first record of the
+   * call's id stands: a write that finds one already there (two calls with one id at once) is
+   * undone, and answers as `recordedCall` does.
+   */
+  private async directWrite(call: {
+    op: Op;
+    fn: (input: unknown, context: CallContext) => Promise<unknown>;
+    parsed: unknown;
+    logged: unknown;
+    actor: Principal;
+    decision: RecordedDecision;
+    context: CallContext;
+  }): Promise<unknown> {
+    const { op, parsed, logged, actor, decision, context } = call;
+    const { runId } = context;
+    const { dataStore, collections, ledger } = this.config;
+    const conn = op.vendor === DATA_VENDOR && !ledger && dataStore ? await (await dataStore.db()).connect() : undefined;
+    let broken: Error | undefined;
+    try {
+      await conn?.query("BEGIN");
+      // On the transaction's connection, the collection's own driver: it has no `env` to guard.
+      const fn = conn
+        ? collectionsDriver([collections.get(op.resource)!], { db: async () => conn }).ops[`${op.resource}.${op.name}`]!
+        : call.fn;
+      const at = Date.now();
+      const record = (outcome: { output: unknown } | { error: ErrorInfo }): LedgerRecord => ({
+        v: 1,
+        app: this.config.appName,
+        id: `${runId}:op.called:0`,
+        runId,
+        seq: 0,
+        at,
+        actor,
+        workflow: CALL_WORKFLOW,
+        type: "op.called",
+        op: op.id,
+        effect: op.effect,
+        input: logged,
+        decision,
+        ...outcome,
+        durationMs: Date.now() - at,
+      });
+      let output: unknown;
+      try {
+        output = await outputOf(op, () => fn(parsed, context));
+      } catch (err) {
+        await conn?.query("ROLLBACK");
+        await this.audit.store.append(record({ error: errorInfo(err) }));
+        throw err;
+      }
+      const done = record({ output: recorded(op, output) });
+      if (!conn) {
+        await this.audit.store.append(done);
+        return output;
+      }
+      if (await insertRecord(conn, done)) {
+        await conn.query("COMMIT");
+        return output;
+      }
+      await conn.query("ROLLBACK");
+      return (await this.recordedCall(runId, op.id, logged))!.output;
+    } catch (err) {
+      await conn?.query("ROLLBACK").catch((e: Error) => (broken = e));
+      throw err;
+    } finally {
+      conn?.release(broken);
+    }
+  }
+
+  /**
+   * What the direct write recorded as `runId` returned, when one did: refused (`invalid_input`)
+   * when it was of another operation or input, and its failure again (`driver_failed`) when it failed.
+   */
+  private async recordedCall(runId: string, opId: string, input: unknown): Promise<{ output: unknown } | undefined> {
+    const first = (await this.audit.store.read(runId)).find((r) => r.type === "op.called");
+    if (!first) return undefined;
+    const differs = [...(first.op === opId ? [] : ["op"]), ...(sameJson(first.input, input) ? [] : ["input"])];
+    if (differs.length) {
+      throw new SanomaError(
+        "invalid_input",
+        `Call ${runId} was made already with a different ${differs.join(" and ")}; use another id`,
+        { runId, differs },
+      );
+    }
+    if (first.error) {
+      throw new SanomaError("driver_failed", `${opId} failed when first called as ${runId}: ${first.error.message}`, {
+        runId,
+        op: opId,
+        error: first.error,
+      });
+    }
+    return { output: first.output };
+  }
+
+  /**
+   * The newest finished run of the workflow, with its output and when it finished; null when it
+   * has none. One query, whatever the app's runs.
+   */
+  async latest(workflow: string): Promise<{ runId: string; output: unknown; at: number } | null> {
+    const [row] = await this.dbos.listWorkflows({
+      workflowName: workflow,
+      applicationName: this.config.appName,
+      status: "SUCCESS",
+      sortDesc: true,
+      limit: 1,
+      loadInput: false,
+      loadOutput: true,
+    });
+    return row ? { runId: row.workflowID, output: row.output, at: row.updatedAt ?? row.createdAt } : null;
   }
 
   /** The run's audit record, in order, from the ledger store. */
@@ -478,7 +670,12 @@ export class SanomaClient {
   }
 
   async close() {
-    await Promise.all([this.dbos.destroy(), this.credentialsPool.close(), this.audit.close()]);
+    await Promise.all([
+      this.dbos.destroy(),
+      this.credentialsPool.close(),
+      this.audit.close(),
+      this.config.dataStore?.close(),
+    ]);
   }
 
   /**
@@ -570,6 +767,20 @@ export class SanomaClient {
       error: r.error ? String((r.error as Error).message ?? r.error) : undefined,
       ...(typeof r.attributes?.sandbox === "string" && { sandbox: r.attributes.sandbox }),
     };
+  }
+}
+
+/**
+ * What a direct call's driver returned, as the operation's output schema parses it; a failure
+ * with none of the runtime's codes (a reply the schema refuses, an error the driver let escape)
+ * is `driver_failed`, naming the operation.
+ */
+async function outputOf(op: Op, call: () => Promise<unknown>): Promise<unknown> {
+  try {
+    return op.output.parse(await call());
+  } catch (err) {
+    if (errorCode(err) !== undefined) throw err;
+    throw new SanomaError("driver_failed", `${op.id} failed: ${errorMessage(err)}`, { op: op.id }, { cause: err });
   }
 }
 

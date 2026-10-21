@@ -59,6 +59,8 @@ export {
   type PlanAnswer,
   type PlanStep,
 } from "./apply.ts";
+export { CALL_WORKFLOW, CallInput } from "./call-workflow.ts";
+export { isDirect } from "./direct.ts";
 export {
   DRIFT_WORKFLOW,
   type DriftDeclared,
@@ -84,6 +86,7 @@ export {
   type RecordedDecision,
 } from "./policy.ts";
 export {
+  ApprovalPendingError,
   errorCode,
   type ErrorCode,
   type ErrorInfo,
@@ -118,7 +121,14 @@ export {
 } from "./secret.ts";
 export { resolveRevision, SOURCE_RESOLVE, type Source } from "./source.ts";
 export type { HostCapabilities, HostLifetime, HostOutputs, HostSpec } from "./host.ts";
-export { SanomaClient, type RunsFilter, type RunSummary, type StartOptions, type StoredSecret } from "./client.ts";
+export {
+  type CallOptions,
+  SanomaClient,
+  type RunsFilter,
+  type RunSummary,
+  type StartOptions,
+  type StoredSecret,
+} from "./client.ts";
 // A raw DBOS client on the runtime's database, for tests and tools that read DBOS directly.
 export { dbosClient } from "./db.ts";
 // Also at `@sanoma-ai/workflows/shared`, which a browser bundle can import.

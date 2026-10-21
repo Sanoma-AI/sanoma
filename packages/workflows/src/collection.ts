@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DATA_TABLE, type LazyPool } from "./db.ts";
+import { DATA_TABLE, type Db } from "./db.ts";
 import { defineFake, type Fake } from "./fake.ts";
 import { isObject } from "./resource.ts";
 import {
@@ -236,12 +236,13 @@ interface Listing {
 }
 
 /**
- * The collections' driver: their records in `DATA_TABLE` of the database `pool` is on. Every
- * value reaches Postgres as a parameter, field names included; the field names and operators
- * are the ones the input's schema accepts.
+ * The collections' driver: their records in `DATA_TABLE` of the database `store` is on, through
+ * the pool a run's calls share, or one connection in a transaction (a direct write, with its
+ * ledger record). Every value reaches Postgres as a parameter, field names included; the field
+ * names and operators are the ones the input's schema accepts.
  */
-export function collectionsDriver(list: readonly Collection[], pool: LazyPool): Driver {
-  const query = async (sql: string, params: unknown[]) => (await pool.db()).query<Row>(sql, params);
+export function collectionsDriver(list: readonly Collection[], store: { db(): Promise<Db> }): Driver {
+  const query = async (sql: string, params: unknown[]) => (await store.db()).query<Row>(sql, params);
   const impl = list.map((c) => {
     const saved = (row: Row) =>
       answer(c, {

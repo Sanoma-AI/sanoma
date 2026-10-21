@@ -16,10 +16,13 @@ describe("lintWorkflow", () => {
     expect(lintWorkflow(src)).toEqual([]);
   });
 
-  it.each(["drift", "apply"])("passes the built-in %s workflow, which is held to the same rules", (name) => {
-    const path = fileURLToPath(new URL(`../src/${name}.ts`, import.meta.url));
-    expect(lintWorkflow(readFileSync(path, "utf8"), path)).toEqual([]);
-  });
+  it.each(["drift", "apply", "call-workflow"])(
+    "passes the built-in %s workflow, which is held to the same rules",
+    (name) => {
+      const path = fileURLToPath(new URL(`../src/${name}.ts`, import.meta.url));
+      expect(lintWorkflow(readFileSync(path, "utf8"), path)).toEqual([]);
+    },
+  );
 
   it("passes a policy file", () => {
     expect(
