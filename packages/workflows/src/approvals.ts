@@ -119,12 +119,15 @@ export async function awaitApproval(
     const at = await DBOS.now();
     const parsed = ApprovalMessage.safeParse(raw);
     const msg = parsed.success ? parsed.data : undefined;
-    // Checked against the people the data files declare now, in a step: a replay decides the same.
-    const refusal = msg
-      ? await DBOS.runStep(async () => refusalOf(state, msg.by, run, readPeople(run.state.root).people) ?? null, {
-          name: `decider:${state.id}`,
-        })
-      : "not a valid decision message";
+    // The people matter only when the run's own actor decides (`refusalOf`): then they are read as
+    // the data files declare them now, in a step, so a replay decides the same.
+    const refusal = !msg
+      ? null
+      : msg.by.id === run.actor.id
+        ? await DBOS.runStep(async () => refusalOf(state, msg.by, run, readPeople(run.state.root).people) ?? null, {
+            name: `decider:${state.id}`,
+          })
+        : (refusalOf(state, msg.by, run, []) ?? null);
     if (!msg || refusal !== null) {
       const by = msg?.by.id ?? senderOf(raw);
       const reason = refusal ?? "not a valid decision message";

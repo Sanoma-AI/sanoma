@@ -35,6 +35,7 @@ import { decideFn } from "../functions.ts";
 import { configQuery, opsById, RUNS_KEY, runLink, runQuery } from "../queries.ts";
 import { ApplyPlanView } from "./apply-plan.tsx";
 import {
+  ALONE,
   ApprovalStatusBadge,
   DecisionNote,
   Disclosure,
@@ -132,7 +133,7 @@ export function ApprovalDetails({
         {approval.decidedBy && (
           <Fact label="Decided">
             {approval.status} by {approval.decidedBy}
-            {approval.alone ? " (nobody else could)" : null}
+            {approval.alone ? ALONE : null}
             {approval.decidedAt ? (
               <>
                 , <When at={approval.decidedAt} />

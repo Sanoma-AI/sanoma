@@ -200,8 +200,11 @@ export function refusalOf(
     return approver === by.id ? undefined : `${by.id} is not the approver; ${approverLabel(approver)} is`;
   }
   if (!by.groups?.includes(approver.group)) return `${by.id} is not in ${approverLabel(approver)}`;
-  const someoneElse = membersOf(approver.group, people).some((id) => id !== by.id);
-  return by.id === run.actor?.id && someoneElse ? OWN_CHANGE : undefined;
+  if (by.id !== run.actor?.id) return undefined;
+  const someoneElse = principalIdsOf(people).some(
+    (id) => id !== by.id && principalOf(id, people)?.groups?.includes(approver.group),
+  );
+  return someoneElse ? OWN_CHANGE : undefined;
 }
 
 /** A declared resource as the people functions read it: only the runtime's people types count. */
@@ -220,12 +223,6 @@ const peopleOfType = <T>(resources: readonly PeopleResource[], type: "person" | 
 type PersonFields = { id: string; name?: string; email?: string; github?: string };
 type AgentFields = { id: string; onBehalfOf?: string };
 type GroupFields = { name: string; members: string[] };
-
-/** The ids of a group's declared members: the declared agents', for `agents` (not the runtime's own). */
-const membersOf = (group: string, people: readonly PeopleResource[]): string[] =>
-  group === AGENTS
-    ? peopleOfType<AgentFields>(people, "agent").map((a) => a.id)
-    : peopleOfType<GroupFields>(people, "group").flatMap((g) => (g.name === group ? g.members : []));
 
 /** The groups a policy may name and a principal may be in: the declared ones and `agents`, sorted. */
 export const groupNamesOf = (resources: readonly PeopleResource[]): string[] =>

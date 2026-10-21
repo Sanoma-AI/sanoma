@@ -14,6 +14,7 @@ import {
   type LedgerRecord,
   mayDecide,
 } from "../src/index.ts";
+import { sanoma } from "../src/constructors.ts";
 import { OWN_CHANGE, type PeopleResource, refusalOf } from "../src/shared.ts";
 import announce from "./fixtures/announce.ts";
 import { inSeconds, pending, rootWith, useApp, waitFor } from "./harness.ts";
@@ -101,14 +102,11 @@ describe("approvedFor", () => {
   });
 });
 
-/** The people resources as the data files declare them: each group by name, with its members' ids. */
+/** The people as the data files declare them: ada, carol and dave, these agents, and each group by name, of its members' ids. */
 const declared = (groups: Record<string, string[]>, agents: string[] = []): PeopleResource[] => [
-  ...Object.entries(groups).map(([name, members]) => ({
-    vendor: "sanoma",
-    type: "group",
-    desired: { name, members },
-  })),
-  ...agents.map((id) => ({ vendor: "sanoma", type: "agent", desired: { id } })),
+  ...["ada", "carol", "dave"].map((id) => sanoma.person({ id })),
+  ...agents.map((id) => sanoma.agent({ id })),
+  ...Object.entries(groups).map(([name, members]) => sanoma.group({ name, members })),
 ];
 
 describe("mayDecide", () => {

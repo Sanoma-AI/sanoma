@@ -765,6 +765,9 @@ export function RequestedBy({ requestedBy, op, reasons }: Pick<ApprovalState, "r
   );
 }
 
+/** After a decision the run's starter made because nobody else could (`alone`). */
+export const ALONE = " (nobody else could)";
+
 /** The note a decider left, quoted on its own line. */
 export function DecisionNote({ note }: { note: string }) {
   return <q className="block text-muted-foreground italic">{note}</q>;

@@ -1,4 +1,5 @@
 import type { ApprovalState, RunSummary } from "@sanoma-ai/workflows";
+import { sanoma } from "@sanoma-ai/workflows/resources";
 import type { PeopleResource } from "@sanoma-ai/workflows/shared";
 import { describe, expect, it } from "vitest";
 import { decidableBy } from "../src/lib/decidable.ts";
@@ -26,10 +27,15 @@ const entry = (startedBy: string) => ({
   } satisfies ApprovalState,
 });
 
-/** The description's resources: a finance group of these members. */
-const finance = (...members: string[]): PeopleResource[] => [
-  { vendor: "sanoma", type: "group", desired: { name: "finance", members } },
-];
+/** The description's resources: ada, bo and cy, and a finance group of these of them. */
+const finance = (...members: ("ada" | "bo")[]): PeopleResource[] => {
+  const people = {
+    ada: sanoma.person({ id: "ada" }),
+    bo: sanoma.person({ id: "bo" }),
+    cy: sanoma.person({ id: "cy" }),
+  };
+  return [...Object.values(people), sanoma.group({ name: "finance", members: members.map((id) => people[id]) })];
+};
 
 describe("decidableBy", () => {
   const entries = [entry("ada"), entry("cy")];
