@@ -19,10 +19,7 @@ import { fileURLToPath } from "node:url";
 import { buildApp, sitesOf, writeSiteFiles } from "@sanoma-ai/app/build";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { defineConfig, SanomaClient, startWorker, type Worker } from "@sanoma-ai/workflows";
-<<<<<<< HEAD
 import { executablePath, launch } from "puppeteer-core";
-=======
->>>>>>> 3923f63 (A4: callFn and the api client from sanoma/site, the loopback actor cookie for SSR)
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ACTOR_COOKIE, ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
@@ -149,7 +146,6 @@ describe("a company's app with its sites", () => {
     expect(await workflows.text()).toContain("Say hello");
   });
 
-<<<<<<< HEAD
   it("serves a site's RunForm: the workflow's fields under a link to its page, live only, or a notice naming a workflow the config lacks", async () => {
     const site = await fetch(new URL("/sites/hello/run", app.url));
     expect(site.status).toBe(200);
@@ -195,7 +191,9 @@ describe("a company's app with its sites", () => {
     } finally {
       await client?.close();
       await browser.close();
-=======
+    }
+  });
+
   it("renders a page whose loader calls api as the person asking: the loopback login's header, else its cookie", async () => {
     const client = await SanomaClient.connect(config);
     try {
@@ -218,7 +216,6 @@ describe("a company's app with its sites", () => {
       expect(await started({})).toEqual({ said: "Refused: invalid_input", by: undefined });
     } finally {
       await client.close();
->>>>>>> 3923f63 (A4: callFn and the api client from sanoma/site, the loopback actor cookie for SSR)
     }
   });
 
