@@ -91,7 +91,7 @@ describe("resendDriver", () => {
 
   describe("emails.send", () => {
     it("sends one email with the call's idempotency key, and returns its id", async () => {
-      play("send-email");
+      play("send-an-email");
       const reply = await email({ to, from, subject: "Following up", html: "<p>Hello</p>" });
       expect(reply).toEqual({ id: expect.any(String) });
       expect(sent.map((r) => `${r.method} ${r.path}`)).toEqual(["POST /emails"]);
@@ -101,7 +101,7 @@ describe("resendDriver", () => {
     });
 
     it("sends to a list, as text, from RESEND_FROM when the input has no sender", async () => {
-      play("send-email");
+      play("send-an-email");
       vi.stubEnv("RESEND_FROM", from);
       await email({ to: [to, to], subject: "s", text: "Hello" });
       expect(sent[0]!.body).toEqual({ to: [to, to], from, subject: "s", text: "Hello" });

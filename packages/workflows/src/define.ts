@@ -197,7 +197,8 @@ interface AllCtx {
 interface BaseCtx {
   /**
    * The current time in epoch milliseconds, recorded so replays see the same value. Use instead
-   * of `Date.now()`; a date is `new Date(await ctx.now()).toISOString()`, the one `Date` the lint allows.
+   * of `Date.now()`; a date is `new Date(await ctx.now()).toISOString()` (or of a `const` holding
+   * the read), the one `Date` the lint allows.
    */
   now(): Promise<number>;
   readonly runId: string;

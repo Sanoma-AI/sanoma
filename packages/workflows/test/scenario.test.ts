@@ -439,6 +439,7 @@ describe("parseFeature", () => {
               }),
             }),
             output: z.object({}),
+            phrases: { expect: "a contact {record} is saved" },
           },
         },
       });
@@ -453,6 +454,17 @@ describe("parseFeature", () => {
             expect.objectContaining({ op: "crm.contact.save", input: { record: { stage: "won", owner: {} } } }),
           ]);
         }
+      });
+
+      it("takes some fields of an object in an expect phrase too", async () => {
+        const [scenario] = await parseFeature(
+          `Feature: A\n  Scenario: S\n    When announce runs\n    Then a contact '{ "stage": "won" }' is saved\n`,
+          "x.feature",
+          crmScope,
+        );
+        expect(scenario?.expect).toEqual([
+          expect.objectContaining({ op: "crm.contact.save", input: { record: { stage: "won" } } }),
+        ]);
       });
 
       it("checks the fields given against their schemas, naming the nested field", async () => {

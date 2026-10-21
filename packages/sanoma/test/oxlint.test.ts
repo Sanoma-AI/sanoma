@@ -134,7 +134,9 @@ describe("the shipped oxlint.json", () => {
         file: "workflows/via-sanoma.ts",
         line: 4,
         rule: "sanoma(date)",
-        text: expect.stringMatching(/`await ctx\.now\(\)` for the time, `new Date\(await ctx\.now\(\)\)` for a date/),
+        text: expect.stringMatching(
+          /`await ctx\.now\(\)` for the time, `new Date\(await ctx\.now\(\)\)` \(or of a `const` holding it\) for a date/,
+        ),
       },
     ]);
   });

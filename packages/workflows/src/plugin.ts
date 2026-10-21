@@ -7,7 +7,7 @@ import { readDataFile } from "./datafile.ts";
 
 interface Context {
   filename: string;
-  sourceCode: { isGlobalReference(node: Node): boolean };
+  sourceCode: { isGlobalReference(node: Node): boolean; getScope(node: Node): Scope };
   report(diagnostic: { message: string; node: { range: [number, number] } }): void;
 }
 
@@ -19,8 +19,14 @@ interface Node {
   [key: string]: unknown;
 }
 
+/** A scope of oxlint's scope manager, by the little the `date` rule reads. */
+interface Scope {
+  upper: Scope | null;
+  set: Map<string, { defs: { type: string; node: Node; parent: Node | null }[] }>;
+}
+
 const DATE_MESSAGE =
-  "Workflows are replayed: use `await ctx.now()` for the time, `new Date(await ctx.now())` for a date, and `ctx.sleep({ until })` to wait for a date.";
+  "Workflows are replayed: use `await ctx.now()` for the time, `new Date(await ctx.now())` (or of a `const` holding it) for a date, and `ctx.sleep({ until })` to wait for a date.";
 
 /** Where `Date` names the type, which the build erases: `d: Date`, `typeof Date`, `implements Date`. */
 const TYPE_PARENTS = new Set([
@@ -51,15 +57,39 @@ const isNow = (node: Node): boolean => {
   );
 };
 
-/** Whether `node` reads `await ctx.now()` as it is evaluated: not inside a function it defines. */
-const readsNow = (node: Node): boolean =>
+/**
+ * Whether `node` reads `await ctx.now()` as it is evaluated, not inside a function it defines,
+ * itself or through a `const` initialised so (`const now = await ctx.now()`), which
+ * `isConstNow` says of an identifier.
+ */
+const readsNow = (node: Node, isConstNow: (id: Node) => boolean): boolean =>
   isNow(node) ||
+  (node.type === "Identifier" && isConstNow(node)) ||
   (!/Function/.test(node.type) &&
     Object.entries(node).some(
       ([key, value]) =>
         key !== "parent" &&
-        (Array.isArray(value) ? value.some((v) => isNode(v) && readsNow(v)) : isNode(value) && readsNow(value)),
+        (Array.isArray(value)
+          ? value.some((v) => isNode(v) && readsNow(v, isConstNow))
+          : isNode(value) && readsNow(value, isConstNow)),
     ));
+
+/** For `readsNow`: whether `id` names a `const` whose initialiser reads `await ctx.now()`. */
+function constNow(context: Context, seen = new Set<Node>()) {
+  return (id: Node): boolean => {
+    for (let scope: Scope | null = context.sourceCode.getScope(id); scope; scope = scope.upper) {
+      const variable = scope.set.get(id.name as string);
+      if (!variable) continue;
+      const [def, ...more] = variable.defs;
+      const init = def?.node.init;
+      if (more.length || def?.type !== "Variable" || def.parent?.kind !== "const" || !isNode(init)) return false;
+      if (seen.has(init)) return false;
+      seen.add(init);
+      return readsNow(init, constNow(context, seen));
+    }
+    return false;
+  };
+}
 
 const plugin = {
   meta: { name: "sanoma" },
@@ -83,8 +113,8 @@ const plugin = {
       },
     },
     // A workflow reads the time from `ctx.now()`, which a replay reads back as it was. `Date`
-    // itself is refused, but for `new Date(…)` of a value read from `await ctx.now()` in its
-    // argument: a date as ISO text (`.toISOString()`), the same on every replay.
+    // itself is refused, but for `new Date(…)` of a value read from `await ctx.now()`, in its
+    // argument or a `const` it names: a date as ISO text (`.toISOString()`), the same on every replay.
     date: {
       meta: {
         type: "problem",
@@ -102,7 +132,7 @@ const plugin = {
               parent?.type === "NewExpression" &&
               parent.callee === node &&
               (parent.arguments as Node[]).length === 1 &&
-              readsNow((parent.arguments as Node[])[0]!);
+              readsNow((parent.arguments as Node[])[0]!, constNow(context));
             if (!stamp) context.report({ message: DATE_MESSAGE, node });
           },
         };

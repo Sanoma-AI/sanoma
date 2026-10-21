@@ -33,6 +33,7 @@ import { fill, isBug, objectUnder, seedFrom, shapeOf } from "./fill.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { Driver, Op } from "./op.ts";
 import { type OutlineNode, outlineWorkflow } from "./outline.ts";
+import { isObject } from "./resource.ts";
 import { admit, type DeclaredPeople, readPeople } from "./resources.ts";
 import { memorySecrets } from "./secret.ts";
 import {
@@ -239,9 +240,6 @@ function fieldOf(schema: z.ZodType, name: string, owner: string): z.ZodType {
 }
 
 const issues = (error: z.ZodError) => error.issues.map((i) => i.message).join("; ");
-
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
  * Why `field` refuses `value`, or undefined when it takes it. `partial`, for what a `Then` expects
@@ -730,9 +728,13 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
           transformer: (...g) => field(g),
         });
       }
+      // An `expect` phrase, like `was called with`, may give some of an object's fields.
       const given = (values: unknown[]) =>
         Object.fromEntries(
-          fields.map((name, i) => [name, valueFor(schemas[i]!, values[i] as string, `${name} in ${inputOf(op.id)}`)]),
+          fields.map((name, i) => [
+            name,
+            valueFor(schemas[i]!, values[i] as string, `${name} in ${inputOf(op.id)}`, kind === "then"),
+          ]),
         );
       const common = { source: template, group: op.id, expression: template.replaceAll(/\{([^}]*)\}/g, "{field_$1}") };
       rules.push(
