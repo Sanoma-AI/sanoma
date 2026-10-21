@@ -1,6 +1,6 @@
 {
-  // The library entry only: startApp and its types. `vite build` builds the app itself
-  // into dist/client and dist/server.
+  // The Node entries only: startApp and its types, and the build (`./build`). `vite build` builds
+  // the app itself into dist/client and dist/server.
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "rootDir": "src",
@@ -12,5 +12,5 @@
     "paths": {}
   },
   "include": [],
-  "files": ["src/index.ts"]
+  "files": ["src/index.ts", "src/build.ts"]
 }

@@ -1,6 +1,6 @@
 # packages/app/src/routes
 
-The TanStack Router file routes of the app: its pages. Each file is served at the URL its path implies; any other path gets the not-found page.
+The TanStack Router file routes of the app: its pages. Each file is served at the URL its path implies; any other path gets the not-found page. In a company's build with sites, these routes are mounted at the root and the repo's `sites/` at `/sites` ([Sites](../../README.md#sites)): `__root.tsx` is the root of both, so a site's pages render inside the app's shell, and no route here may claim a path under `/sites`.
 
 ## Contents
 

@@ -26,6 +26,7 @@
       "@sanoma-ai/testing/replay": ["./packages/testing/src/replay.ts"],
       "@sanoma-ai/testing/scenarios": ["./packages/testing/src/scenarios.ts"],
       "@sanoma-ai/app": ["./packages/app/src/index.ts"],
+      "@sanoma-ai/app/build": ["./packages/app/src/build.ts"],
       "@sanoma-ai/bridge": ["./packages/bridge/src/index.ts"],
       "@sanoma-ai/bridge/fake": ["./packages/bridge/src/fake.ts"],
       "@sanoma-ai/bridge/connector": ["./packages/bridge/src/connector.ts"],
@@ -49,5 +50,6 @@
   ],
   // The app's routes and components (JSX, DOM) are checked by packages/app/tsconfig.json
   // (`typecheck:ui`). Its Node entry, src/index.ts, is still checked here through its tests.
-  "exclude": ["packages/app/src"]
+  // A fixture's sites are checked as a company's are, by the tsconfig sanoma writes beside them.
+  "exclude": ["packages/app/src", "packages/app/test/fixtures/company-sites/sites"]
 }

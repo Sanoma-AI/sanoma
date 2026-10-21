@@ -22,6 +22,28 @@ console.log(app.url); // http://127.0.0.1:3000
 
 `startApp` checks the config first and throws what the worker would refuse (missing credentials refuse nothing: the connector pages show and set them). The worker and the app share the config's Postgres (`databaseUrl`, else `SANOMA_DATABASE_URL`): the runs, the credentials and, by default, the ledger, which `postgresLedger` keeps in a table there, so the app reads what a worker in any process records. A config with a `jsonlLedger` shares its directory instead, and a `memoryLedger` is visible only in the process that wrote it. A run that has started but has no records in the app's ledger says so on its page, since the likeliest cause is an app on another ledger than the worker's (another database, or a `jsonlLedger` directory relative to another working directory). Without `port`, the app takes any free port and reports it in `app.url`. `app.close()` stops it.
 
+## Sites
+
+A company repo's `sites/<name>/routes/` are TanStack Router file routes the app serves under `/sites/<name>/`, inside its shell. The package ships its source for that, and a Node-only entry, `@sanoma-ai/app/build`, which the `sanoma` bin calls:
+
+```ts
+import { buildApp } from "@sanoma-ai/app/build";
+import { startApp } from "@sanoma-ai/app";
+
+const { distDir, built } = await buildApp(repo, { log: console.log });
+const app = await startApp(config, { distDir });
+```
+
+`buildApp(repo)` builds the app's routes and every site as one TanStack Start build with the repo as Vite's root, and writes only under the repo: `.sanoma/app/routeTree.gen.ts`, Vite's cache in `.sanoma/app/vite/`, and the build in `.sanoma/app/build/<key>/` (`client/` and `server/server.js`), where the key covers the app's version and source directory and every file under `sites/`. A build with the same key is reused (`built: false`), and a new one is built beside it and moved into place, so an app serving the old one keeps it. The server bundle holds everything but the runtime (`@sanoma-ai/workflows`, `@sanoma-ai/bridge`, DBOS, `pg`, `zod`), which it imports by file URL, resolved from `runtimeFrom` (by default this package's own `package.json`), so the worker and the app share one copy.
+
+- A site is client code: a site importing the runtime, a connector, DBOS, `pg` or a `*.server.*` file fails the build with "Import denied".
+- A site imports React, TanStack's packages and this app as the app does, from the app's own install: the company repo depends only on `sanoma`.
+- A folder is a site when it has `routes/` and its name is one URL segment (`/^[a-z][a-z0-9-]*$/`); `sitesOf(repo)` lists the sites and the refused folders, which the build logs and leaves out. Two pages claiming one path fail the build, naming the path and both files.
+- `writeSiteFiles(repo)`, which `buildApp` calls first, writes `sites/__virtual.ts` (the listing the route generator reads; committed, never edited), `sites/tsconfig.json` when missing, and `.sanoma/app/tsconfig.json` every time: the app's compiler options (`tsconfig.site.json`, shipped) with its React, TanStack and route tree, so `tsc -p sites/tsconfig.json` checks a site's links against every page.
+- `appViteConfig({ repo, runtimeFrom })` is the build's Vite config; `appViteConfig()` is this package's own (its `vite.config.ts`), the same pipeline with no sites. `appSources()` gives the app's `src` and `tsconfig.site.json` by real path.
+
+A company repo is an ES module package (`"type": "module"`, as `sanoma init` writes it): Vite names the server entry `server.mjs` otherwise.
+
 ## Screens
 
 Five sections, in the sidebar's section bar: Inbox, Workflows, Resources, Connectors and Go live. The app opens on Workflows, its home, which lists each workflow and how its last run went. Old links still work: `/` redirects to `/workflows`, `/runs` to its All runs view, `/runs/<id>` to the run's page under its workflow, and `/start?workflow=<name>` to that workflow's page with its New run panel open, which says if the workflow is unknown (`/start` naming none, to `/workflows`).
@@ -96,7 +118,7 @@ With a login provider, the page never asks for a name: it shows who the login sa
 
 ## Developing
 
-In the repo, `pnpm --filter @sanoma-ai/app build` builds the app (`vite build` into `dist/client` and `dist/server`, and the `startApp` entry). `startApp` serves that build even when run from source, so rebuild after changing anything under `src/` except `index.ts`.
+In the repo, `pnpm --filter @sanoma-ai/app build` builds the app (`vite build` into `dist/client` and `dist/server`, and the `startApp` and `./build` entries). `startApp` serves that build even when run from source, so rebuild after changing anything under `src/` except `index.ts`.
 
 Status: early (0.x). The API may change between minor versions.
 
