@@ -19,6 +19,12 @@ export function fill(schema: z.ZodType, given: Record<string, unknown>): unknown
 export const shapeOf = (schema: z.ZodType): Record<string, z.ZodType> =>
   schema instanceof z.ZodObject ? schema.shape : {};
 
+/** The schema of a field an object schema does not name, when it takes such fields (`z.looseObject`, `.catchall`). */
+export function restOf(schema: z.ZodType): z.ZodType | undefined {
+  const rest = schema instanceof z.ZodObject ? (schema.def.catchall as z.ZodType | undefined) : undefined;
+  return rest instanceof z.ZodNever ? undefined : rest;
+}
+
 /** The object schema under `schema`'s optional, nullable and default wrappers, if it is one. */
 export function objectUnder(schema: z.ZodType): z.ZodObject | undefined {
   let inner = schema;

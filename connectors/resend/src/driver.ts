@@ -76,9 +76,9 @@ function replied<T extends { id?: string }>(op: string, reply: { data: T; respon
   throw new DriverError(`resend: ${op} replied ${status} without an id`, { retryable: false, status });
 }
 
-/** The sender: the input's `from`, else `RESEND_FROM`, read at the call; Resend requires one. */
+/** The sender: the input's `from` (unless empty), else `RESEND_FROM`, read at the call; Resend requires one. */
 function senderOf(op: string, from: string | undefined): string {
-  const sender = from ?? process.env.RESEND_FROM;
+  const sender = from || process.env.RESEND_FROM;
   if (sender) return sender;
   throw new DriverError(`resend: ${op} needs \`from\` in its input, or RESEND_FROM set`, { retryable: false });
 }

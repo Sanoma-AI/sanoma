@@ -47,8 +47,8 @@ export const resendOps = defineConnector(
             html: z.string().optional(),
             text: z.string().optional(),
           })
-          .refine((email) => email.html !== undefined || email.text !== undefined, {
-            message: "an email needs `html`, `text` or both",
+          .refine((email) => Boolean(email.html || email.text), {
+            message: "an email needs `html`, `text` or both, not empty",
           }),
         output: z.object({ id: z.string() }),
       },

@@ -22,6 +22,8 @@ interface Node {
   property?: Node;
   computed?: boolean;
   arguments?: Node[];
+  operator?: string;
+  right?: Node;
 }
 
 const DATE_MESSAGE =
@@ -39,10 +41,15 @@ const TYPE_PARENTS = new Set([
 /** `Date`'s functions that read no clock. */
 const PURE = new Set(["parse", "UTC"]);
 
-/** Whether `Date` (`node`) reads no clock where it is: `new Date(value)`, `Date.parse(…)`, `Date.UTC(…)`, or a type. */
+/**
+ * Whether `Date` (`node`) reads no clock where it is: `new Date(value)`, `Date.parse(…)`,
+ * `Date.UTC(…)`, `x instanceof Date`, or a type. A node without its parent is reported.
+ */
 function readsNoClock(node: Node): boolean {
   const { parent } = node;
-  if (!parent || TYPE_PARENTS.has(parent.type)) return true;
+  if (!parent) return false;
+  if (TYPE_PARENTS.has(parent.type)) return true;
+  if (parent.type === "BinaryExpression") return parent.operator === "instanceof" && parent.right === node;
   if (parent.type === "NewExpression" && parent.callee === node) {
     const [first] = parent.arguments ?? [];
     return first !== undefined && first.type !== "SpreadElement";

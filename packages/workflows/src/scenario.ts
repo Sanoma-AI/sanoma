@@ -29,7 +29,7 @@ import {
 import { errorCode, errorInfo, SanomaError } from "./errors.ts";
 import { type CallRecord, contains, type CoreExpectation, detailOf, isCall } from "./expectations.ts";
 import type { Fake } from "./fake.ts";
-import { fill, isBug, objectUnder, seedFrom, shapeOf } from "./fill.ts";
+import { fill, isBug, objectUnder, restOf, seedFrom, shapeOf } from "./fill.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { Driver, Op } from "./op.ts";
 import { type OutlineNode, outlineWorkflow } from "./outline.ts";
@@ -230,13 +230,16 @@ const FAULTS = {
   "loses its reply once": "loseReply",
 } as const;
 
-/** The schema of the field `name` of an object schema (`owner`, for the error); throws naming the fields it has. */
+/**
+ * The schema of the field `name` of an object schema (`owner`, for the error), or of the fields it
+ * takes besides its own (`restOf`); throws naming the fields it has.
+ */
 function fieldOf(schema: z.ZodType, name: string, owner: string): z.ZodType {
   const shape = shapeOf(schema);
-  if (!Object.hasOwn(shape, name)) {
-    throw new Error(`no field "${name}" in ${owner}; it has ${Object.keys(shape).join(", ") || "none"}`);
-  }
-  return shape[name]!;
+  if (Object.hasOwn(shape, name)) return shape[name]!;
+  const rest = restOf(schema);
+  if (rest) return rest;
+  throw new Error(`no field "${name}" in ${owner}; it has ${Object.keys(shape).join(", ") || "none"}`);
 }
 
 const issues = (error: z.ZodError) => error.issues.map((i) => i.message).join("; ");

@@ -436,6 +436,7 @@ describe("parseFeature", () => {
                 name: z.string(),
                 stage: z.enum(["lead", "won"]),
                 owner: z.object({ id: z.string() }),
+                meta: z.looseObject({ source: z.string() }),
               }),
             }),
             output: z.object({}),
@@ -464,6 +465,14 @@ describe("parseFeature", () => {
         );
         expect(scenario?.expect).toEqual([
           expect.objectContaining({ op: "crm.contact.save", input: { record: { stage: "won" } } }),
+        ]);
+      });
+
+      it("takes a field a loose object does not name", async () => {
+        const given = doc('{ "record": { "meta": { "campaign": "fall" } } }');
+        const [scenario] = await parseFeature(saving(given), "x.feature", crmScope);
+        expect(scenario?.expect).toEqual([
+          expect.objectContaining({ input: { record: { meta: { campaign: "fall" } } } }),
         ]);
       });
 

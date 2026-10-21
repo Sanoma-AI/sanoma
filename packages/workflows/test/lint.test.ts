@@ -670,6 +670,7 @@ export default defineWorkflow({
       new Date(await ctx.now()).toISOString(),
       new Date(now + 86_400_000).toISOString().slice(0, 10),
       new Date("2026-10-21").getTime() + Date.parse("2026-10-21") + Date.UTC(2026, 9, 21),
+      n instanceof Date,
     ];
   },
 });
