@@ -7,7 +7,7 @@ import { warn } from "./log.ts";
 import type { Placed } from "./call.ts";
 import type { Run } from "./run.ts";
 import { readPeople } from "./resources.ts";
-import { approverLabel, refusalOf } from "./shared.ts";
+import { approverLabel, OWN_CHANGE, refusalOf } from "./shared.ts";
 
 // The wire contract between a run waiting on approvals and whoever decides them. The client
 // imports this file and never the worker's.
@@ -120,13 +120,18 @@ export async function awaitApproval(
     const parsed = ApprovalMessage.safeParse(raw);
     const msg = parsed.success ? parsed.data : undefined;
     // The people matter only when the run's own actor decides (`refusalOf`): then they are read as
-    // the data files declare them now, in a step, so a replay decides the same.
+    // the data files declare them now, in a step, so a replay decides the same. While those files
+    // have problems, someone else may be missing from them, so the starter is refused.
     const refusal = !msg
       ? null
       : msg.by.id === run.actor.id
-        ? await DBOS.runStep(async () => refusalOf(state, msg.by, run, readPeople(run.state.root).people) ?? null, {
-            name: `decider:${state.id}`,
-          })
+        ? await DBOS.runStep(
+            async () => {
+              const { people, problems } = readPeople(run.state.root);
+              return refusalOf(state, msg.by, run, people) ?? (problems.length ? OWN_CHANGE : null);
+            },
+            { name: `decider:${state.id}` },
+          )
         : (refusalOf(state, msg.by, run, []) ?? null);
     if (!msg || refusal !== null) {
       const by = msg?.by.id ?? senderOf(raw);
