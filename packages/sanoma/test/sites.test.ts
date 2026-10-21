@@ -72,10 +72,18 @@ describe("sanoma check with sites", () => {
     expect(ok.stderr.trimEnd().split("\n").at(-1)).toBe("ok");
   }, 180_000);
 
-  it("reports a link to a page that does not exist at its line, and a folder whose name is not a URL segment", async () => {
+  it("reports a link to a page that does not exist and an import the browser may not make at their lines, and a folder whose name is not a URL segment", async () => {
     dir = copyFixture(fixture);
     const index = join(dir, "sites/hello/routes/index.tsx");
     writeFileSync(index, readFileSync(index, "utf8").replace('to="/workflows"', 'to="/sites/hello/nope"'));
+    writeFileSync(
+      join(dir, "sites/hello/routes/runtime.tsx"),
+      `import { createFileRoute } from "@tanstack/react-router";
+import * as runtime from "@sanoma-ai/workflows";
+
+export const Route = createFileRoute("/sites/hello/runtime")({ component: () => <p>{String(runtime)}</p> });
+`,
+    );
     mkdirSync(join(dir, "sites/Bad_Name/routes"), { recursive: true });
     const found = await runCli(dir, ["check"], env);
     expect(found.code, found.stderr).toBe(1);
@@ -83,9 +91,31 @@ describe("sanoma check with sites", () => {
     expect(problems).toContainEqual(
       expect.stringMatching(/^sites\/hello\/routes\/index\.tsx:9:\d+: error TS\d+: .*"\/sites\/hello\/nope"/),
     );
+    expect(problems).toContainEqual(
+      expect.stringMatching(
+        /^sites\/hello\/routes\/runtime\.tsx:4:\d+: Import denied in client environment: "@sanoma-ai\/workflows"$/,
+      ),
+    );
     expect(problems).toContain(
       "sites/Bad_Name: a site's folder name is a URL segment (lowercase letters, digits and dashes)",
     );
+    // One line each: none of the build error's trace or stack.
+    expect(found.stdout).not.toContain("Trace:");
+    expect(found.stdout).not.toMatch(/^\s+at /m);
+  }, 180_000);
+
+  it("writes nothing for a sites/ with no site, and reports a folder refused for its name", async () => {
+    dir = copyFixture(fixture);
+    rmSync(join(dir, "sites"), { recursive: true });
+    mkdirSync(join(dir, "sites/Bad_Name/routes"), { recursive: true });
+    const found = await runCli(dir, ["check"], env);
+    expect(found.code, found.stderr).toBe(1);
+    expect(found.stdout.trimEnd().split("\n")).toEqual([
+      "sites/Bad_Name: a site's folder name is a URL segment (lowercase letters, digits and dashes)",
+    ]);
+    expect(found.stderr).not.toMatch(/^build /m);
+    expect(existsSync(join(dir, "sites/__virtual.ts"))).toBe(false);
+    expect(existsSync(join(dir, ".sanoma"))).toBe(false);
   }, 180_000);
 
   it("reports two pages claiming one path", async () => {

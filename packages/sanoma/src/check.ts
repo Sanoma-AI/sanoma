@@ -39,7 +39,7 @@ const LINTED = ["workflows", "policies", "resources", "sites"];
  * the outline cannot draw: what the worker refuses to start with); with sites, their generated
  * files written first and, beside those three, the app built with them and `tsc -p
  * sites/tsconfig.json` (`checkSites`). Their problems in the order tsc, the sites' tsc, oxlint,
- * the config, the sites' build. Then every scenario against the fakes (`runScenarios`), each step
+ * the config, the folders refused as sites, the sites' build. Then every scenario against the fakes (`runScenarios`), each step
  * that did not hold a problem. `ok` when there are no problems.
  */
 export async function check(
@@ -48,16 +48,20 @@ export async function check(
 ): Promise<CheckResult> {
   // Awaited below when there are scenarios; otherwise its failure is nobody's.
   ready.catch(() => {});
-  // (.sanoma/api.ts is written here, first, once there is one.)
   const build = await siteBuild(root);
-  build?.writeSiteFiles(root);
-  const [tsc, sites, lints, read] = await Promise.all([
+  const { sites, refused } = build?.sitesOf(root) ?? { sites: [], refused: [] };
+  // Before tsc and oxlint read sites/, as `sanoma` writes them: only when there is a site.
+  if (build && sites.length) build.writeSiteFiles(root);
+  const [tsc, checked, lints, read] = await Promise.all([
     typecheck(root, log),
-    build ? checkSites(build, root, log) : { typed: [], built: [] },
+    build && sites.length ? checkSites(build, sites, root, log) : { typed: [], built: [] },
     lint(root, log),
     configProblems(config, root, log),
   ]);
-  const problems = [...tsc, ...sites.typed, ...lints, ...read, ...sites.built];
+  const unmounted = refused.map(
+    (name) => `sites/${name}: a site's folder name is a URL segment (lowercase letters, digits and dashes)`,
+  );
+  const problems = [...tsc, ...checked.typed, ...lints, ...read, ...unmounted, ...checked.built];
 
   if (resolved.scenarios === undefined) {
     log("no scenarios: the config's root has no `scenarios/` directory");
@@ -71,27 +75,41 @@ export async function check(
 }
 
 /**
- * The sites: each folder refused for its name, then the app built with the others (`buildApp`,
- * reused when nothing changed), so two pages claiming one path or a site importing server code is
- * a problem; then `tsc -p sites/tsconfig.json`, which needs the route tree the build generates
- * (it gives every `Link` its type), so it runs once there is one.
+ * The sites: the app built with them (`buildApp`, reused when nothing changed), so two pages
+ * claiming one path or a site importing server code is a problem; then `tsc -p
+ * sites/tsconfig.json`, which needs the route tree the build generates (it gives every `Link` its
+ * type), so it runs once there is one.
  */
 async function checkSites(
   build: typeof import("@sanoma-ai/app/build"),
+  sites: string[],
   root: string,
   log: (line: string) => void,
 ): Promise<{ typed: string[]; built: string[] }> {
-  const { sites, refused } = build.sitesOf(root);
-  const built = refused.map(
-    (name) => `sites/${name}: a site's folder name is a URL segment (lowercase letters, digits and dashes)`,
-  );
-  if (!sites.length) return { typed: [], built };
   log(`build ${sites.join(" ")}`);
-  await build.buildApp(root, { runtimeFrom: runtimeFrom() }).catch((err: unknown) => {
-    built.push(errorMessage(err));
-  });
+  const built = await build.buildApp(root, { runtimeFrom: runtimeFrom() }).then(
+    () => [],
+    (err: unknown) => buildProblems(errorMessage(err), log),
+  );
   if (!existsSync(join(root, ".sanoma", "app", "routeTree.gen.ts"))) return { typed: [], built };
   return { typed: await typecheck(root, log, "sites/tsconfig.json"), built };
+}
+
+/**
+ * A failed build's problems, one line each: every import the browser may not make, at its
+ * importer's `file:line:col`; anything else as its first line, the whole message logged.
+ */
+function buildProblems(message: string, log: (line: string) => void): string[] {
+  const denied = [
+    ...message.matchAll(/Import denied in client environment[\s\S]*?Importer: (\S+)[\s\S]*?Import: ("[^"\n]*")/g),
+  ];
+  if (denied.length) return denied.map(([, at, what]) => `${at}: Import denied in client environment: ${what}`);
+  const lines = message
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !/^Build failed with \d+ errors?:$/.test(line));
+  if (lines.length > 1) log(message);
+  return [lines[0] ?? "the app's build failed"];
 }
 
 /** `tsc -p <project>` in the root (`tsconfig.json`, or the sites' `sites/tsconfig.json`). */

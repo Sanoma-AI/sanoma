@@ -206,6 +206,12 @@ describe("a company's app with its sites", () => {
     expect(changed.distDir).not.toBe(result.distDir);
     // The first is still there, for an app that serves it.
     expect(existsSync(join(result.distDir, "server", "server.js"))).toBe(true);
+    // Back to the first sites, the first build and its route tree, which the sites' tsc reads.
+    const tree = join(repo, ".sanoma", "app", "routeTree.gen.ts");
+    expect(readFileSync(tree, "utf8")).toContain("/sites/hello/about");
+    rmSync(join(repo, "sites", "hello", "routes", "about.tsx"));
+    expect(await buildApp(repo)).toEqual({ distDir: result.distDir, built: false });
+    expect(readFileSync(tree, "utf8")).not.toContain("/sites/hello/about");
   });
 
   it("type-checks a site's links against the app's pages and the sites', and refuses a path that is neither", () => {

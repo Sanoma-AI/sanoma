@@ -4,6 +4,7 @@
 // Node's modules load with this file; Vite and its plugins load when a config or build needs them.
 import { createHash } from "node:crypto";
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -356,8 +357,9 @@ export interface BuildAppOptions {
 /**
  * Builds a company repo's app with its sites into `.sanoma/app/build/<key>` (`client/` and
  * `server/server.js`, for `startApp`'s `distDir`), after writing the sites' generated files. A
- * build with the same key is reused (`built: false`); a new one is built beside it and moved into
- * place, so a directory a running app serves is never overwritten.
+ * build with the same key is reused (`built: false`), its route tree put back in `.sanoma/app` for
+ * the sites' tsc; a new one is built beside it and moved into place, so a directory a running app
+ * serves is never overwritten.
  */
 export async function buildApp(
   repo: string,
@@ -371,7 +373,13 @@ export async function buildApp(
   }
   const runtimeFrom = options.runtimeFrom ?? defaultRuntimeFrom;
   const distDir = join(root, ".sanoma", "app", "build", buildKey(root, runtimeFrom));
-  if (existsSync(distDir)) return { distDir, built: false };
+  const routeTree = join(root, ".sanoma", "app", "routeTree.gen.ts");
+  const reused = () => {
+    const saved = join(distDir, "routeTree.gen.ts");
+    if (existsSync(saved)) writeChanged(routeTree, readFileSync(saved, "utf8"));
+    return { distDir, built: false };
+  };
+  if (existsSync(distDir)) return reused();
   const outDir = `${distDir}.${process.pid}.tmp`;
   const vite = await import("vite");
   const logger = vite.createLogger("warn", { allowClearScreen: false });
@@ -394,11 +402,12 @@ export async function buildApp(
         `The app's server entry was not built as server/server.js: is ${root}/package.json "type": "module"?`,
       );
     }
+    copyFileSync(routeTree, join(outDir, "routeTree.gen.ts"));
     renameSync(outDir, distDir);
   } catch (err) {
     rmSync(outDir, { recursive: true, force: true });
     // Another build of the same key finished first: use it.
-    if (existsSync(distDir)) return { distDir, built: false };
+    if (existsSync(distDir)) return reused();
     throw conflictOf(root, err) ?? err;
   }
   return { distDir, built: true };
