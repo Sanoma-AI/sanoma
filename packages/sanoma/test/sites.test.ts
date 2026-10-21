@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -160,7 +160,7 @@ export const Route = createFileRoute("/sites/hello/runtime")({ component: () => 
     ]);
     expect(found.stderr).not.toMatch(/^build /m);
     expect(existsSync(join(dir, "sites/__virtual.ts"))).toBe(false);
-    expect(existsSync(join(dir, ".sanoma"))).toBe(false);
+    expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts"]);
   }, 180_000);
 
   it("reports two pages claiming one path", async () => {
@@ -214,6 +214,22 @@ describe("sanoma with sites: the dev server", () => {
     expect([health.status, await health.text()]).toEqual([200, "ok\n"]);
     expect(await rawStatus(`${url}/sites/hello`, { host: "attacker.example:80" })).toBe(403);
     expect(existsSync(join(repo, ".sanoma/app/build"))).toBe(false);
+  }, 60_000);
+
+  it("writes .sanoma/api.ts at start, and again when a workflow changes", async () => {
+    const api = join(repo, ".sanoma/api.ts");
+    expect(readFileSync(api, "utf8")).toContain("hello: WorkflowFn<{\n    who: string;\n  }, unknown>;");
+    const workflow = join(repo, "workflows/hello.ts");
+    writeFileSync(
+      workflow,
+      readFileSync(workflow, "utf8").replace("{ who: z.string() }", "{ who: z.string(), times: z.number() }"),
+    );
+    // The file, and the child's line, which crosses a pipe after it.
+    await waitFor(
+      () => ({ text: readFileSync(api, "utf8"), stderr: running!.output().stderr }),
+      ({ text, stderr }) => text.includes("times: number;") && stderr.includes("wrote .sanoma/api.ts"),
+      20_000,
+    );
   }, 60_000);
 
   it("serves a new site folder without a restart", async () => {
@@ -270,13 +286,13 @@ export const Route = createFileRoute("/sites/second/")({ component: () => <p>The
 });
 
 describe("sanoma without sites", () => {
-  it("serves the app's own build, as before: no dev server, nothing written", async () => {
+  it("serves the app's own build, as before: no dev server, nothing written but the generated SDK", async () => {
     dir = installedCopy();
     rmSync(join(dir, "sites"), { recursive: true });
     const stderr = await serveOnce(async (url) => {
       expect((await fetch(`${url}/workflows`)).status).toBe(200);
     }, []);
     expect(stderr).not.toContain("dev server");
-    expect(existsSync(join(dir, ".sanoma"))).toBe(false);
+    expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts"]);
   }, 120_000);
 });

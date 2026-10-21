@@ -45,8 +45,9 @@ export interface AppOptions {
    * Serves a company repo's app with its sites from Vite's dev server instead of a build: edits
    * to a site or to the app's source show without a restart, and a new site folder is live once
    * it has a route file. On this machine only (the hot updates' websocket bypasses the login).
+   * `onFileChange` is called with each file added, changed or removed in the repo (`appDevServer`).
    */
-  dev?: { repo: string };
+  dev?: { repo: string; onFileChange?: (file: string) => void };
 }
 
 export interface App {
@@ -117,8 +118,8 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   // refused before anything is opened. The dev server has nothing built to check.
   let load: () => Promise<Responder>;
   if (options.dev) {
-    const { repo } = options.dev;
-    load = () => devResponder(repo, server);
+    const { repo, onFileChange } = options.dev;
+    load = () => devResponder(repo, server, onFileChange);
   } else {
     const distDir = resolve(options.distDir ?? defaultDistDir());
     const files = await staticFiles(join(distDir, "client"));
@@ -229,9 +230,9 @@ const builtResponder = (files: Map<string, StaticFile>, entry: ServerEntry): Res
 });
 
 /** Vite's dev server (`appDevServer`, loaded only here), then Start's entry as it imports it now. */
-async function devResponder(repo: string, server: Server): Promise<Responder> {
+async function devResponder(repo: string, server: Server, onFileChange?: (file: string) => void): Promise<Responder> {
   const { appDevServer } = await import("./build.ts");
-  const dev = await appDevServer(repo, server);
+  const dev = await appDevServer(repo, server, onFileChange);
   return {
     respond: (req, res, request, app) =>
       new Promise((done, fail) => {

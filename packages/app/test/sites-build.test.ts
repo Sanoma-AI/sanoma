@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { buildApp, sitesOf, writeSiteFiles } from "@sanoma-ai/app/build";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { defineConfig, SanomaClient, startWorker, type Worker } from "@sanoma-ai/workflows";
+import { describeConfig, writeApi } from "@sanoma-ai/workflows/describe";
 import { executablePath, launch } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ACTOR_COOKIE, ACTOR_HEADER } from "../src/api.ts";
@@ -295,7 +296,7 @@ describe("a company's app with its sites", () => {
     expect(readFileSync(tree, "utf8")).not.toContain("/sites/hello/about");
   });
 
-  it("type-checks a site's links against the app's pages and the sites', and refuses a path that is neither", () => {
+  it("type-checks a site's links against the app's pages and the sites', and refuses a path that is neither", async () => {
     // The tsc a company runs: sanoma's.
     const sanoma = createRequire(join(realpathSync(join(repo, "node_modules", "sanoma")), "package.json"));
     const tsc = join(dirname(sanoma.resolve("typescript/package.json")), "bin", "tsc");
@@ -313,18 +314,9 @@ describe("a company's app with its sites", () => {
     const refused = check();
     expect(refused.status).not.toBe(0);
     expect(refused.stdout).toMatch(/^sites\/hello\/routes\/styled\.tsx\(\d+,\d+\): error TS\d+: [^\n]*"\/sites\/nope"/);
-    // `api` is untyped until .sanoma/api.ts types it (the fixture's started.tsx, above), as A5's
+    // `api` is untyped until .sanoma/api.ts types it (the fixture's started.tsx, above), as the
     // generated file does: through Register, with the types sanoma/site re-exports.
-    writeFileSync(
-      join(repo, ".sanoma", "api.ts"),
-      `import type { WorkflowFn } from "sanoma/site";
-declare module "sanoma/site" {
-  interface Register {
-    api: { hello: WorkflowFn<{ who: string }, { greeting: string }> };
-  }
-}
-`,
-    );
+    expect((await writeApi(repo, describeConfig(config))).wrote).toBe(true);
     const call = (who: string) =>
       sitePage("/sites/hello/styled", 'import { api } from "sanoma/site";', `void api.hello.start({ who: ${who} })`);
     writeFileSync(join(repo, "sites", "hello", "routes", "styled.tsx"), call('"Ada"'));

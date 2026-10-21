@@ -1,5 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -170,7 +179,12 @@ describe("the template", () => {
     };
     const checked = await runCli(dir, ["check"], env);
     expect(checked.code, `${checked.stdout}${checked.stderr}`).toBe(0);
-    expect(existsSync(join(dir, ".sanoma"))).toBe(false);
+    // The generated SDK, written before tsc, and nothing else: no app built.
+    const logged = checked.stderr.split("\n");
+    expect(logged.indexOf("wrote .sanoma/api.ts")).toBeGreaterThan(-1);
+    expect(logged.indexOf("wrote .sanoma/api.ts")).toBeLessThan(logged.indexOf("tsc"));
+    expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts"]);
+    expect(readFileSync(join(dir, ".sanoma/api.ts"), "utf8")).toContain("publishPost: WorkflowFn<");
     const current = await runCli(dir, ["env", "--check"], env);
     expect(current.code, current.stderr).toBe(0);
   }, 120_000);
