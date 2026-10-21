@@ -55,9 +55,10 @@ export interface App {
   close(): Promise<void>;
 }
 
-/** Answers a request the login let through, a file's or the server entry's, and closes what it opened. */
+/** Answers a request the login let through, a file's or the server entry's. */
 interface Responder {
   respond(req: IncomingMessage, res: ServerResponse, request: Request, app: AppContext): Promise<void>;
+  /** Closes what it opened, logging a failure rather than throwing it, as `closeQuietly`. */
   close(): Promise<void>;
 }
 
@@ -165,12 +166,16 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     close() {
       closing ??= (async () => {
         try {
-          await new Promise<void>((done, fail) => {
-            server.close((err) => (err ? fail(err) : done()));
-            server.closeAllConnections();
-          });
+          // Together: the server waits for upgraded sockets (the dev server's websocket), which
+          // only the responder's close ends.
+          await Promise.all([
+            new Promise<void>((done, fail) => {
+              server.close((err) => (err ? fail(err) : done()));
+              server.closeAllConnections();
+            }),
+            responder.close(),
+          ]);
         } finally {
-          await responder.close();
           await closeQuietly(client);
         }
       })();
@@ -240,7 +245,8 @@ async function devResponder(repo: string, server: Server): Promise<Responder> {
             .then(done, fail);
         });
       }),
-    close: () => dev.close(),
+    close: () =>
+      dev.close().catch((err: unknown) => console.error("sanoma app: closing the dev server also failed:", err)),
   };
 }
 

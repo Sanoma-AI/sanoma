@@ -43,9 +43,7 @@ export async function runApp(config: SanomaConfig, options: ServeOptions): Promi
 /** What the app starts with: the port, the host and login `appOptions` reads, and what it serves (`appSites`). */
 async function appStart(config: SanomaConfig, { port, log, dev = false }: ServeOptions): Promise<AppOptions> {
   const options = { port, ...(await appOptions(secretsOf(config))) };
-  // The dev server listens on this machine only: for another host, the sites are built.
-  const hot = dev && isLoopback(options.host ?? "127.0.0.1");
-  return { ...options, ...(await appSites(rootOf(config), log, hot)) };
+  return { ...options, ...(await appSites(rootOf(config), log, dev ? options.host : false)) };
 }
 
 async function served(config: SanomaConfig, options: AppOptions): Promise<Served> {
@@ -55,20 +53,23 @@ async function served(config: SanomaConfig, options: AppOptions): Promise<Served
 
 /**
  * What the app serves: with sites, its own build of the app and every site, built into
- * `.sanoma/app/build/<key>` or reused when the key matches, or with `dev` the app and the sites
- * on Vite's dev server; with none, the build the app ships. A folder that is not a site for its
- * name is logged and left out.
+ * `.sanoma/app/build/<key>` or reused when the key matches, or with `dev` (the app's host, when
+ * it is this machine's) the app and the sites on Vite's dev server; with none, the build the app
+ * ships. A folder that is not a site for its name is logged and left out.
  */
 async function appSites(
   root: string,
   log: (line: string) => void,
-  dev: boolean,
+  dev: string | undefined | false,
 ): Promise<Pick<AppOptions, "distDir" | "dev">> {
   const build = await siteBuild(root);
   if (!build) return {};
   const { sites, refused } = build.sitesOf(root);
   const named = `${sites.length} site${sites.length === 1 ? "" : "s"} (${sites.join(", ")})`;
-  if (sites.length && !dev) {
+  // The dev server listens on this machine only.
+  const hot = dev !== false && (dev === undefined || isLoopback(dev));
+  if (sites.length && !hot) {
+    if (dev) log(`SANOMA_APP_HOST=${dev} is not this machine: the sites are built, not served hot`);
     log(`building the app with ${named}`);
     const { distDir, built } = await build.buildApp(root, { log, runtimeFrom: runtimeFrom() });
     if (!built) log("app build up to date");

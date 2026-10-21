@@ -3,7 +3,7 @@ import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
-import { executablePath, launch } from "puppeteer-core";
+import { type Browser, executablePath, launch } from "puppeteer-core";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { copyFixture, ensureBuilt, runCli, startCli } from "./fixture.ts";
 
@@ -185,6 +185,8 @@ describe("sanoma with sites: the dev server", () => {
   let repo = "";
   let url = "";
   let running: Awaited<ReturnType<typeof started>> | undefined;
+  // Closed after the server stops, so stopping is checked with a tab open on its hot updates.
+  let browser: Browser | undefined;
   beforeAll(async () => {
     repo = installedCopy();
     running = await started(repo, []);
@@ -194,6 +196,7 @@ describe("sanoma with sites: the dev server", () => {
     try {
       await running?.stop();
     } finally {
+      await browser?.close();
       rmSync(repo, { recursive: true, force: true });
     }
   }, 60_000);
@@ -233,40 +236,36 @@ export const Route = createFileRoute("/sites/second/")({ component: () => <p>The
   it("hydrates a site with one React, updates it in place on an edit, and navigates to the app in the same document", async (ctx) => {
     const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
     if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
-    const browser = await launch({ executablePath: chrome, headless: true });
-    try {
-      const tab = await browser.newPage();
-      await tab.setViewport({ width: 1440, height: 900 });
-      const errors: string[] = [];
-      tab.on("console", (message) => void (message.type() === "error" && errors.push(message.text())));
-      tab.on("pageerror", (err) => void errors.push(String(err)));
-      // Strings, run in the page: this file is typed for Node, without the DOM's globals.
-      // The name the app asks for once, and a stand-in for React's devtools, which every React
-      // renderer that loads registers with.
-      await tab.evaluateOnNewDocument(`
-        localStorage.setItem("sanoma.actor", "tester");
-        const renderers = new Map();
-        window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
-          renderers, supportsFiber: true, checkDCE() {}, onCommitFiberRoot() {}, onCommitFiberUnmount() {}, onPostCommitFiberRoot() {},
-          inject(renderer) { renderers.set(renderers.size + 1, renderer); return renderers.size; },
-        };
-      `);
-      await tab.goto(`${url}/sites/hello`, { waitUntil: "networkidle0" });
-      await tab.evaluate("window.marker = 'kept'");
+    browser = await launch({ executablePath: chrome, headless: true });
+    const tab = await browser.newPage();
+    await tab.setViewport({ width: 1440, height: 900 });
+    const errors: string[] = [];
+    tab.on("console", (message) => void (message.type() === "error" && errors.push(message.text())));
+    tab.on("pageerror", (err) => void errors.push(String(err)));
+    // Strings, run in the page: this file is typed for Node, without the DOM's globals.
+    // The name the app asks for once, and a stand-in for React's devtools, which every React
+    // renderer that loads registers with.
+    await tab.evaluateOnNewDocument(`
+      localStorage.setItem("sanoma.actor", "tester");
+      const renderers = new Map();
+      window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+        renderers, supportsFiber: true, checkDCE() {}, onCommitFiberRoot() {}, onCommitFiberUnmount() {}, onPostCommitFiberRoot() {},
+        inject(renderer) { renderers.set(renderers.size + 1, renderer); return renderers.size; },
+      };
+    `);
+    await tab.goto(`${url}/sites/hello`, { waitUntil: "networkidle0" });
+    await tab.evaluate("window.marker = 'kept'");
 
-      const file = join(repo, "sites/hello/routes/index.tsx");
-      writeFileSync(file, readFileSync(file, "utf8").replace("Hello from the hello site", "Hello, edited"));
-      await tab.waitForFunction(`document.body.innerText.includes("Hello, edited")`);
-      expect(await tab.evaluate("window.marker")).toBe("kept");
+    const file = join(repo, "sites/hello/routes/index.tsx");
+    writeFileSync(file, readFileSync(file, "utf8").replace("Hello from the hello site", "Hello, edited"));
+    await tab.waitForFunction(`document.body.innerText.includes("Hello, edited")`);
+    expect(await tab.evaluate("window.marker")).toBe("kept");
 
-      await tab.click('section a[href="/workflows"]');
-      await tab.waitForFunction(`location.pathname === "/workflows"`);
-      expect(await tab.evaluate("window.marker")).toBe("kept");
-      expect(await tab.evaluate("window.__REACT_DEVTOOLS_GLOBAL_HOOK__.renderers.size")).toBe(1);
-      expect(errors).toEqual([]);
-    } finally {
-      await browser.close();
-    }
+    await tab.click('section a[href="/workflows"]');
+    await tab.waitForFunction(`location.pathname === "/workflows"`);
+    expect(await tab.evaluate("window.marker")).toBe("kept");
+    expect(await tab.evaluate("window.__REACT_DEVTOOLS_GLOBAL_HOOK__.renderers.size")).toBe(1);
+    expect(errors).toEqual([]);
   }, 60_000);
 });
 

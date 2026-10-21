@@ -180,7 +180,8 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
   const cli = fileURLToPath(import.meta.url);
   const app = packages.find((p) => p.name === "@sanoma-ai/app");
   const { siteBuild } = await import("./sites.ts");
-  const hot = app && (await siteBuild(cwd))?.sitesOf(cwd).sites.length;
+  // A linked app with no build yet is not hot: every change restarts the child until it builds.
+  const hot = app && (await siteBuild(cwd).catch(() => undefined))?.sitesOf(cwd).sites.length;
   const child = supervise({
     spawn: () =>
       spawn(process.execPath, [cli, "serve", "--dev"], { cwd, env: process.env, stdio: "inherit", detached: true }),

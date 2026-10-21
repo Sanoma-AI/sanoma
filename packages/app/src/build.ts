@@ -358,6 +358,9 @@ export async function appDevServer(repo: string, http: Server): Promise<AppDevSe
       // its static files (fonts) are; Vite's default is the repo's alone.
       fs: { allow: [vite.searchForWorkspaceRoot(root), vite.searchForWorkspaceRoot(src)] },
     },
+    // The runtime as Node loads it, the copy startApp's context holds, wherever it is installed
+    // (Vite would run a linked checkout's copy itself).
+    environments: { ssr: { resolve: { external: RUNTIME } } },
     optimizeDeps: {
       // Shipped as source, compiled with the pages.
       exclude: ["sanoma", "@sanoma-ai/app"],
@@ -390,6 +393,9 @@ function devPlugins(repo: string, src: string): Plugin[] {
   // A file in the app's source whose id, with the specifier in its query, stands in for a
   // company file's shared import on the server: the module runner resolves it from the app.
   const proxy = `${join(src, "dev-imports.ts")}?sanoma-shared=`;
+  // How Vite's nested include reaches the app from the repo: through sanoma, which a company
+  // installs, or directly.
+  const viaApp = moduleDir("sanoma", repo) ? "sanoma > @sanoma-ai/app" : "@sanoma-ai/app";
   // (#163 A5: the watcher that regenerates .sanoma/api.ts as workflows and collections change goes here.)
   return [
     {
@@ -412,7 +418,7 @@ function devPlugins(repo: string, src: string): Plugin[] {
         for (const env of Object.values(config.environments)) {
           if (env.consumer !== "client") continue;
           env.optimizeDeps.include = (env.optimizeDeps.include ?? []).map((id) =>
-            SHARED.test(id) ? `sanoma > @sanoma-ai/app > ${id}` : id,
+            SHARED.test(id) ? `${viaApp} > ${id}` : id,
           );
         }
       },
@@ -455,7 +461,8 @@ function devPlugins(repo: string, src: string): Plugin[] {
       transform(code, id) {
         if (!companyFile(id, repo) || !/\.[jt]sx?$/.test(id.split("?")[0]!)) return;
         return code.replace(
-          /((?:from|import)\s*\(?\s*)(["'])([^"']+)\2/g,
+          // A static import or re-export, from the start of its statement: never a string's text.
+          /^(\s*(?:import\s*|(?:import|export)\b[^"']*?\bfrom\s*))(["'])([^"']+)\2/gm,
           (match, before: string, quote: string, spec: string) =>
             SHARED.test(spec) ? `${before}${quote}${proxy}${encodeURIComponent(spec)}${quote}` : match,
         );
