@@ -4,6 +4,112 @@ export type ClientOptions = {
   baseUrl: "https://api.resend.com" | (string & {});
 };
 
+export type SendEmailRequest = {
+  /**
+   * Sender email address. To include a friendly name, use the format "Your Name <sender@domain.com>".
+   */
+  from: string;
+  /**
+   * Recipient email address. For multiple addresses, send as an array of strings. Max 50.
+   */
+  to: string | Array<string>;
+  /**
+   * Email subject.
+   */
+  subject: string;
+  /**
+   * Bcc recipient email address. For multiple addresses, send as an array of strings.
+   */
+  bcc?: string | Array<string>;
+  /**
+   * Cc recipient email address. For multiple addresses, send as an array of strings.
+   */
+  cc?: string | Array<string>;
+  /**
+   * Reply-to email address. For multiple addresses, send as an array of strings.
+   */
+  reply_to?: string | Array<string>;
+  /**
+   * The HTML version of the message.
+   */
+  html?: string;
+  /**
+   * The plain text version of the message.
+   */
+  text?: string;
+  template?: EmailTemplateInput & unknown;
+  /**
+   * Custom headers to add to the email.
+   */
+  headers?: {
+    [key: string]: unknown;
+  };
+  /**
+   * Schedule email to be sent later. The date should be in ISO 8601 format.
+   */
+  scheduled_at?: string;
+  attachments?: Array<Attachment>;
+  tags?: Array<Tag>;
+  /**
+   * The topic ID to scope the email to. If the recipient is a contact and opted-in to the topic, the email is sent. If opted-out, the email is not sent. If the recipient is not a contact, the email is sent if the topic's default subscription is opt_in.
+   */
+  topic_id?: string;
+};
+
+export type Attachment = {
+  /**
+   * Content of an attached file.
+   */
+  content?: Blob | File;
+  /**
+   * Name of attached file.
+   */
+  filename?: string;
+  /**
+   * Path where the attachment file is hosted
+   */
+  path?: string;
+  /**
+   * Optional content type for the attachment, if not set it will be derived from the filename property
+   */
+  content_type?: string;
+  /**
+   * Content ID for embedding inline images using cid references (e.g., cid:image001).
+   */
+  content_id?: string;
+};
+
+export type Tag = {
+  /**
+   * The name of the email tag. It can only contain ASCII letters (a–z, A–Z), numbers (0–9), underscores (_), or dashes (-). It can contain no more than 256 characters.
+   */
+  name?: string;
+  /**
+   * The value of the email tag.It can only contain ASCII letters (a–z, A–Z), numbers (0–9), underscores (_), or dashes (-). It can contain no more than 256 characters.
+   */
+  value?: string;
+};
+
+export type EmailTemplateInput = {
+  /**
+   * The id of the published email template.
+   */
+  id: string;
+  /**
+   * Template variables object with key/value pairs.
+   */
+  variables?: {
+    [key: string]: string | number;
+  };
+};
+
+export type SendEmailResponse = {
+  /**
+   * The ID of the sent email.
+   */
+  id?: string;
+};
+
 export type CreateBroadcastOptions = {
   /**
    * Name of the broadcast.
@@ -148,6 +254,28 @@ export type SendBroadcastResponseSuccess = {
    */
   id?: string;
 };
+
+export type EmailsSendData = {
+  body?: SendEmailRequest;
+  headers?: {
+    /**
+     * A unique identifier for the request to ensure emails are only sent once. [Learn more](https://resend.com/docs/dashboard/emails/idempotency-keys)
+     */
+    "Idempotency-Key"?: string;
+  };
+  path?: never;
+  query?: never;
+  url: "/emails";
+};
+
+export type EmailsSendResponses = {
+  /**
+   * OK
+   */
+  200: SendEmailResponse;
+};
+
+export type EmailsSendResponse = EmailsSendResponses[keyof EmailsSendResponses];
 
 export type BroadcastsCreateData = {
   body?: CreateBroadcastOptions;

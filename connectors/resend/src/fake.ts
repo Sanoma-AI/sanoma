@@ -11,20 +11,31 @@ export interface FakeResendBroadcast {
   status: "draft" | "sent";
 }
 
+export interface FakeResendEmail {
+  id: string;
+  to: string | string[];
+  from?: string;
+  subject: string;
+  html?: string;
+  text?: string;
+}
+
 export interface FakeResendState extends Record<string, unknown> {
   seq: number;
   broadcasts: Record<string, FakeResendBroadcast>;
+  /** The emails `emails.send` sent, by id. */
+  emails: Record<string, FakeResendEmail>;
 }
 
 /**
- * An in-memory Resend for tests: broadcasts live in `state.broadcasts`, and nothing is
- * emailed.
+ * An in-memory Resend for tests: broadcasts live in `state.broadcasts`, the emails sent in
+ * `state.emails`, and nothing is emailed.
  */
 export function fakeResend(options: FakeOptions = {}) {
   return defineFake(
     resendOps,
     {
-      initial: (): FakeResendState => ({ seq: 0, broadcasts: {} }),
+      initial: (): FakeResendState => ({ seq: 0, broadcasts: {}, emails: {} }),
       ops: (state) => ({
         broadcast: {
           create: async (input) => {
@@ -40,6 +51,13 @@ export function fakeResend(options: FakeOptions = {}) {
             }
             bc.status = "sent";
             return { id, status: "queued" as const };
+          },
+        },
+        emails: {
+          send: async (input) => {
+            const id = `em_${String(++state.seq).padStart(4, "0")}`;
+            state.emails[id] = { id, ...input };
+            return { id };
           },
         },
       }),

@@ -27,6 +27,10 @@ const sendCall: CallContext = {
 const driver = resendDriver({ timeoutMs: live ? 15_000 : 200 });
 const create = (input: Record<string, unknown>) => driver.ops["broadcast.create"]!(input, call);
 const send = (id: string) => driver.ops["broadcast.send"]!({ id }, sendCall);
+const email = (input: Record<string, unknown>) =>
+  driver.ops["emails.send"]!(input, { ...call, opId: "resend.emails.send" });
+/** Resend's test inbox: it accepts the email and delivers it nowhere. */
+const to = "delivered@resend.dev";
 /** A draft to send, as Resend reads it, then `then`'s replies. */
 const sending = (...then: Exchange[]) => [...fixture("get-draft"), ...then];
 const read = (status: string): Exchange[] => [
@@ -82,6 +86,46 @@ describe("resendDriver", () => {
       status: 422,
       vendorCode: invalid.body.name,
       message: expect.stringContaining("resend: broadcast.create failed (422)"),
+    });
+  });
+
+  describe("emails.send", () => {
+    it("sends one email with the call's idempotency key, and returns its id", async () => {
+      play("send-email");
+      const reply = await email({ to, from, subject: "Following up", html: "<p>Hello</p>" });
+      expect(reply).toEqual({ id: expect.any(String) });
+      expect(sent.map((r) => `${r.method} ${r.path}`)).toEqual(["POST /emails"]);
+      // No `text`: Resend makes it from the HTML.
+      expect(sent[0]!.body).toEqual({ to, from, subject: "Following up", html: "<p>Hello</p>" });
+      expect(sent[0]!.headers.get("idempotency-key")).toBe("run-1:3");
+    });
+
+    it("sends to a list, as text, from RESEND_FROM when the input has no sender", async () => {
+      play("send-email");
+      vi.stubEnv("RESEND_FROM", from);
+      await email({ to: [to, to], subject: "s", text: "Hello" });
+      expect(sent[0]!.body).toEqual({ to: [to, to], from, subject: "s", text: "Hello" });
+    });
+
+    it("refuses an email with no sender without calling Resend", async () => {
+      await expect(email({ to, subject: "s", text: "" })).rejects.toMatchObject({
+        name: "DriverError",
+        retryable: false,
+        message: "resend: emails.send needs `from` in its input, or RESEND_FROM set",
+      });
+      expect(sent).toEqual([]);
+    });
+
+    it.skipIf(live)("fails for good when the key was used for another email", async () => {
+      const body = { statusCode: 409, name: "invalid_idempotent_request", message: "Same key, other payload" };
+      play("other-payload", [{ method: "POST", path: "/emails", status: 409, body }]);
+      await expect(email({ to, from, subject: "s", text: "" })).rejects.toMatchObject({
+        name: "DriverError",
+        retryable: false,
+        status: 409,
+        vendorCode: "invalid_idempotent_request",
+        message: "resend: emails.send failed (409): Same key, other payload",
+      });
     });
   });
 

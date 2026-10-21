@@ -8,7 +8,9 @@ export default {
     // The driver handles no webhooks, and the filters below drop the schemas they point to.
     patch: { input: (spec: { webhooks?: unknown }) => void delete spec.webhooks },
     filters: {
-      operations: { include: ["POST /broadcasts", "GET /broadcasts/{id}", "POST /broadcasts/{id}/send"] },
+      operations: {
+        include: ["POST /broadcasts", "GET /broadcasts/{id}", "POST /broadcasts/{id}/send", "POST /emails"],
+      },
     },
   },
   // `throwOnError` here types the SDK's replies as data only; the driver's client throws at run time.

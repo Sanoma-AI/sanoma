@@ -8,7 +8,10 @@ import { z } from "zod";
 const lettermark = (fill: string) =>
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="450 450 900 900"><path fill="${fill}" d="M1000.46 450C1174.77 450 1278.43 553.669 1278.43 691.282C1278.43 828.896 1174.77 932.563 1000.46 932.563H912.382L1350 1350H1040.82L707.794 1033.48C683.944 1011.47 672.936 985.781 672.935 963.765C672.935 932.572 694.959 905.049 737.161 893.122L908.712 847.244C973.85 829.812 1018.81 779.353 1018.81 713.298C1018.8 632.567 952.745 585.78 871.095 585.78H450V450H1000.46Z"/></svg>`;
 
-/** Resend Broadcasts API: https://resend.com/docs/api-reference/broadcasts */
+/**
+ * Resend's Broadcasts API (https://resend.com/docs/api-reference/broadcasts) and its one-email send
+ * (https://resend.com/docs/api-reference/emails/send-email).
+ */
 export const resendOps = defineConnector(
   "resend",
   {
@@ -30,6 +33,24 @@ export const resendOps = defineConnector(
         phrases: { expect: "broadcast {id} is sent" },
         input: z.object({ id: z.string() }),
         output: z.object({ id: z.string(), status: z.enum(["queued", "sent"]) }),
+      },
+    },
+    emails: {
+      send: {
+        effect: "send",
+        description: "Send one email to an address, or to a list of up to 50. Cannot be undone.",
+        input: z
+          .object({
+            to: z.union([z.string().min(1), z.array(z.string().min(1)).min(1).max(50)]),
+            from: z.string().optional(),
+            subject: z.string().min(1),
+            html: z.string().optional(),
+            text: z.string().optional(),
+          })
+          .refine((email) => email.html !== undefined || email.text !== undefined, {
+            message: "an email needs `html`, `text` or both",
+          }),
+        output: z.object({ id: z.string() }),
       },
     },
   },
