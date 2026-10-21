@@ -118,18 +118,25 @@ async function distDir(): Promise<string> {
 }
 
 describe("supervise", () => {
-  it("restarts the child after a write into a watched directory, and stops it", async () => {
+  it("restarts the child after a write into a watched directory, not an ignored one, and stops it", async () => {
     const watched = await distDir();
+    const ignored = join(watched, "client");
+    mkdirSync(ignored);
+    await new Promise((r) => setTimeout(r, 300));
     const pids: number[] = [];
     const log: string[] = [];
     const supervised = supervise({
       spawn: () => child(pids),
       watch: [watched],
+      ignore: [ignored],
       debounceMs: 100,
       log: (line) => log.push(line),
     });
     try {
       await waitFor(() => pids.length === 1);
+      writeFileSync(join(ignored, "main.js"), "");
+      await new Promise((r) => setTimeout(r, 400));
+      expect(pids).toHaveLength(1);
       writeFileSync(join(watched, "index.js"), "");
       await waitFor(() => pids.length === 2);
       expect(pids[1]).not.toBe(pids[0]);

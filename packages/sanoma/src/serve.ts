@@ -31,6 +31,8 @@ export interface ServeOptions {
   port: number;
   /** Receives what the sites' build has to say. */
   log: (line: string) => void;
+  /** With sites, serve them from Vite's dev server, edits showing as they are saved, instead of building them. */
+  dev?: boolean;
 }
 
 /** Starts the app on `port`, with the host and login `appOptions` reads, and the sites built; `url` says where. */
@@ -38,10 +40,12 @@ export async function runApp(config: SanomaConfig, options: ServeOptions): Promi
   return served(config, await appStart(config, options));
 }
 
-/** What the app starts with: the port, the host and login `appOptions` reads, and the build it serves (`appBuilt`). */
-async function appStart(config: SanomaConfig, { port, log }: ServeOptions): Promise<AppOptions> {
+/** What the app starts with: the port, the host and login `appOptions` reads, and what it serves (`appSites`). */
+async function appStart(config: SanomaConfig, { port, log, dev = false }: ServeOptions): Promise<AppOptions> {
   const options = { port, ...(await appOptions(secretsOf(config))) };
-  return { ...options, distDir: await appBuilt(rootOf(config), log) };
+  // The dev server listens on this machine only: for another host, the sites are built.
+  const hot = dev && isLoopback(options.host ?? "127.0.0.1");
+  return { ...options, ...(await appSites(rootOf(config), log, hot)) };
 }
 
 async function served(config: SanomaConfig, options: AppOptions): Promise<Served> {
@@ -50,26 +54,33 @@ async function served(config: SanomaConfig, options: AppOptions): Promise<Served
 }
 
 /**
- * The app the repo serves: with sites, its own build of the app and every site, built into
- * `.sanoma/app/build/<key>` or reused when the key matches; with none, `undefined`, the build the
- * app ships. A folder that is not a site for its name is logged and left out.
+ * What the app serves: with sites, its own build of the app and every site, built into
+ * `.sanoma/app/build/<key>` or reused when the key matches, or with `dev` the app and the sites
+ * on Vite's dev server; with none, the build the app ships. A folder that is not a site for its
+ * name is logged and left out.
  */
-async function appBuilt(root: string, log: (line: string) => void): Promise<string | undefined> {
+async function appSites(
+  root: string,
+  log: (line: string) => void,
+  dev: boolean,
+): Promise<Pick<AppOptions, "distDir" | "dev">> {
   const build = await siteBuild(root);
-  if (!build) return undefined;
+  if (!build) return {};
   const { sites, refused } = build.sitesOf(root);
-  if (!sites.length) {
-    // buildApp says the same of each when there is a build to run.
-    for (const name of refused) {
-      log(`sites/${name} is not mounted: a site's folder name is a URL segment (lowercase letters, digits and dashes)`);
-    }
-    return undefined;
-  }
   const named = `${sites.length} site${sites.length === 1 ? "" : "s"} (${sites.join(", ")})`;
-  log(`building the app with ${named}`);
-  const { distDir, built } = await build.buildApp(root, { log, runtimeFrom: runtimeFrom() });
-  if (!built) log("app build up to date");
-  return distDir;
+  if (sites.length && !dev) {
+    log(`building the app with ${named}`);
+    const { distDir, built } = await build.buildApp(root, { log, runtimeFrom: runtimeFrom() });
+    if (!built) log("app build up to date");
+    return { distDir };
+  }
+  // buildApp says the same of each when there is a build to run.
+  for (const name of refused) {
+    log(`sites/${name} is not mounted: a site's folder name is a URL segment (lowercase letters, digits and dashes)`);
+  }
+  if (!sites.length) return {};
+  log(`serving the app with ${named} from Vite's dev server: edits show as they are saved`);
+  return { dev: { repo: root } };
 }
 
 const GITHUB = ["SANOMA_GITHUB_CLIENT_ID", "SANOMA_GITHUB_CLIENT_SECRET", "SANOMA_GITHUB_REPO"] as const;
