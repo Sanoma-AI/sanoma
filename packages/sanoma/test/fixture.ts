@@ -102,15 +102,21 @@ export async function serving(cwd: string, args: string[], env: NodeJS.ProcessEn
     if (done.code !== 0) throw new Error(`sanoma exited with ${done.code}: ${done.stderr}`);
     return done.stderr;
   };
+  // Until it listens, or exits first (a crash at startup reported at once, not after the wait).
+  let exited = false;
+  void finished.then(() => (exited = true));
   try {
     const stdout = await waitFor(
       () => output().stdout,
-      (out) => listening.test(out),
+      (out) => exited || listening.test(out),
       60_000,
     );
-    return { url: stdout.match(listening)![1]!, stop, output };
+    const url = stdout.match(listening)?.[1];
+    if (url === undefined) throw new Error("sanoma exited before it listened");
+    return { url, stop, output };
   } catch (err) {
     child.kill("SIGINT");
+    await finished;
     throw new Error(output().stderr, { cause: err });
   }
 }

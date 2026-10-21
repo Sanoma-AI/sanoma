@@ -1,8 +1,9 @@
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ensureBuilt, repo as checkout, serving } from "./fixture.ts";
@@ -11,15 +12,17 @@ import { ensureBuilt, repo as checkout, serving } from "./fixture.ts";
 // (`--prefer-offline`): with no lockfile, the company's third-party dependencies resolve as a
 // customer's do. This checkout's packages install as tarballs, under node_modules as from npm,
 // where a linked checkout would hide issue #220; the installed bin runs the dev server.
-const env = { SANOMA_DATABASE_URL: testDatabaseUrl("sanoma-packed"), SANOMA_APP_PORT: "0" };
+// No SANOMA_DEV_REPO from the shell: the bin as installed, not in dev mode.
+const env = { SANOMA_DATABASE_URL: testDatabaseUrl("sanoma-packed"), SANOMA_APP_PORT: "0", SANOMA_DEV_REPO: "" };
+const run = promisify(execFile);
 const fixture = fileURLToPath(new URL("./fixtures/sites/", import.meta.url));
 
-/** `sanoma`'s dependencies from this checkout, by their directories: each packed, as `sanoma` is, into `vendor/<dir>.tgz`. */
-const OVERRIDES = { "@sanoma-ai/app": "app", "@sanoma-ai/workflows": "workflows", "@sanoma-ai/bridge": "bridge" };
+const manifest = (dir: string) => JSON.parse(readFileSync(join(checkout, "packages", dir, "package.json"), "utf8"));
 
-const { optionalDependencies: bridgeBinaries } = JSON.parse(
-  readFileSync(join(checkout, "packages/bridge/package.json"), "utf8"),
-) as { optionalDependencies: Record<string, string> };
+/** `sanoma`'s dependencies in this workspace, `@sanoma-ai/<dir>` each: packed, as `sanoma` is, into `vendor/<dir>.tgz`. */
+const workspace = Object.entries(manifest("sanoma").dependencies as Record<string, string>)
+  .filter(([, range]) => range.startsWith("workspace:"))
+  .map(([name]) => name.replace("@sanoma-ai/", ""));
 
 const files: Record<string, string> = {
   "package.json": JSON.stringify({
@@ -27,13 +30,15 @@ const files: Record<string, string> = {
     private: true,
     type: "module",
     dependencies: { sanoma: "file:vendor/sanoma.tgz" },
+    // The checkout's pnpm, whose pnpm-workspace.yaml overrides (and "-") these rely on.
+    packageManager: JSON.parse(readFileSync(join(checkout, "package.json"), "utf8")).packageManager,
   }),
   // sanoma's dependencies on the others are by version: these tarballs instead of npm's. The
   // bridge's binaries stay out (the dev server does not start it).
   "pnpm-workspace.yaml": JSON.stringify({
     overrides: {
-      ...Object.fromEntries(Object.entries(OVERRIDES).map(([name, dir]) => [name, `file:vendor/${dir}.tgz`])),
-      ...Object.fromEntries(Object.keys(bridgeBinaries).map((name) => [name, "-"])),
+      ...Object.fromEntries(workspace.map((dir) => [`@sanoma-ai/${dir}`, `file:vendor/${dir}.tgz`])),
+      ...Object.fromEntries(Object.keys(manifest("bridge").optionalDependencies).map((name) => [name, "-"])),
     },
   }),
   // Imported by the Sites panel on every page.
@@ -66,16 +71,16 @@ describe("sanoma from packed tarballs: the dev server", () => {
     cpSync(fixture, dir, { recursive: true });
     for (const [path, text] of Object.entries(files)) writeFileSync(join(dir, path), text);
     mkdirSync(join(dir, "vendor"));
-    // Piped, so a failure's error carries pnpm's message.
-    for (const pkg of ["sanoma", ...Object.values(OVERRIDES)]) {
-      // Built above: prepack's clean and build would only repeat it.
-      execFileSync("pnpm", ["pack", "--config.ignore-scripts=true", "--out", join(dir, "vendor", `${pkg}.tgz`)], {
-        cwd: join(checkout, "packages", pkg),
-        stdio: "pipe",
-      });
-    }
+    // Built above: prepack's clean and build would only repeat it. A failure's error carries pnpm's message.
+    await Promise.all(
+      ["sanoma", ...workspace].map((pkg) =>
+        run("pnpm", ["pack", "--config.ignore-scripts=true", "--out", join(dir, "vendor", `${pkg}.tgz`)], {
+          cwd: join(checkout, "packages", pkg),
+        }),
+      ),
+    );
     // No lockfile to freeze (CI sets it by default).
-    execFileSync("pnpm", ["install", "--prefer-offline", "--no-frozen-lockfile"], { cwd: dir, stdio: "pipe" });
+    await run("pnpm", ["install", "--prefer-offline", "--no-frozen-lockfile"], { cwd: dir });
     server = await serving(dir, [], env, join(dir, "node_modules/sanoma/dist/cli.js"));
   }, 600_000);
 
