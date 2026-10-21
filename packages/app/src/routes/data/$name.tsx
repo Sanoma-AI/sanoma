@@ -57,7 +57,7 @@ function CollectionPage() {
     [name],
   );
   const {
-    data: { collection, workflows },
+    data: { collection, workflows, sites },
   } = useSuspenseQuery({ ...configQuery(), select });
   // The loader found it; a config that no longer has it reads as not found.
   if (!collection) throw notFound();
@@ -160,7 +160,7 @@ function CollectionPage() {
           )}
         </div>
       </section>
-      <UsedBy workflows={workflows} />
+      <UsedBy workflows={workflows} sites={sites} />
     </>
   );
 }

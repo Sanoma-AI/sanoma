@@ -318,6 +318,16 @@ describe("a company's app with its sites", () => {
     expect(usedBy).not.toContain("/sites/hello/leads");
   });
 
+  it("lists under a collection's Used by the site's page that reads it, linking to the page", async () => {
+    const html = (await (await fetch(new URL("/data/leads", app.url))).text()).replaceAll("<!-- -->", "");
+    const usedBy = html.slice(html.indexOf(">Used by</h2>"), html.indexOf("<script", html.indexOf(">Used by</h2>")));
+    expect(usedBy).toMatch(/Hello desk<code[^>]*>\/sites\/hello\/leads<\/code>.*?through api</);
+    expect(linkTag(usedBy, "/sites/hello/leads</code>")).toContain('href="/sites/hello/leads"');
+    // No workflow uses leads, and the pages that call only hello are not listed.
+    expect(usedBy).not.toContain("/workflows/");
+    expect(usedBy).not.toContain("/sites/hello/run");
+  });
+
   it("type-checks a site's links against the app's pages and the sites', and refuses a path that is neither", async () => {
     // The tsc a company runs: sanoma's.
     const sanoma = createRequire(join(realpathSync(join(repo, "node_modules", "sanoma")), "package.json"));

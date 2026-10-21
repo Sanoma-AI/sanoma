@@ -45,7 +45,7 @@ import { cn } from "#/lib/utils.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone, TONE_FILL } from "#/lib/tone.ts";
 import type { OpEntry } from "@sanoma-ai/workflows/describe";
 import { approverLabel } from "@sanoma-ai/workflows/shared";
-import { configQuery } from "../queries.ts";
+import { configQuery, type SiteCaller } from "../queries.ts";
 import type { PanelSection } from "./app-sidebar.tsx";
 import type { CodeProps } from "./code.tsx";
 import type { GraphProps } from "./graph.tsx";
@@ -661,29 +661,67 @@ export function Section({ title, children }: { title: ReactNode; children: React
   );
 }
 
-/** "Used by": the workflows that may call what the page shows, each linking to its page. */
-export function UsedBy({ workflows }: { workflows: { name: string; title?: string | undefined }[] }) {
+/** "Used by" as a page's region: the workflows that may call what the page shows, then the sites' files that call it. */
+export function UsedBy(props: UsedByProps) {
   return (
     <Region title="Used by">
-      {workflows.length === 0 ? (
-        <None />
-      ) : (
-        <ItemGroup>
-          {workflows.map((wf) => (
-            <LinkItem key={wf.name} variant="outline" size="xs">
-              <Link to="/workflows/$name" params={{ name: wf.name }}>
-                <ItemContent>
-                  <ItemTitle>{wf.title ?? wf.name}</ItemTitle>
-                </ItemContent>
-                <ItemActions>
-                  <ChevronRightIcon className="size-4" />
-                </ItemActions>
-              </Link>
-            </LinkItem>
-          ))}
-        </ItemGroup>
-      )}
+      <UsedByList {...props} />
     </Region>
+  );
+}
+
+interface UsedByProps {
+  workflows?: { name: string; title?: string | undefined }[];
+  sites?: SiteCaller[];
+}
+
+/**
+ * What calls something: each workflow, linking to its page, then each site's file under the
+ * site's title and how it calls (a page links to itself, but one with a path parameter, which has
+ * no one URL; a component's file names the file).
+ */
+export function UsedByList({ workflows = [], sites = [] }: UsedByProps) {
+  if (!workflows.length && !sites.length) return <None />;
+  return (
+    <ItemGroup>
+      {workflows.map((wf) => (
+        <LinkItem key={wf.name} variant="outline" size="xs">
+          <Link to="/workflows/$name" params={{ name: wf.name }}>
+            <ItemContent>
+              <ItemTitle>{wf.title ?? wf.name}</ItemTitle>
+            </ItemContent>
+            <ItemActions>
+              <ChevronRightIcon className="size-4" />
+            </ItemActions>
+          </Link>
+        </LinkItem>
+      ))}
+      {sites.map(({ site, file, page, via }) => {
+        const content = (
+          <ItemContent>
+            <ItemTitle>
+              {site}
+              <code className="font-normal text-muted-foreground">{page ?? file}</code>
+            </ItemTitle>
+            <ItemDescription>through {via.join(" and ")}</ItemDescription>
+          </ItemContent>
+        );
+        return page && !page.includes("$") ? (
+          <LinkItem key={file} variant="outline" size="xs">
+            <Link to={page}>
+              {content}
+              <ItemActions>
+                <ChevronRightIcon className="size-4" />
+              </ItemActions>
+            </Link>
+          </LinkItem>
+        ) : (
+          <Item key={file} role="listitem" variant="outline" size="xs">
+            {content}
+          </Item>
+        );
+      })}
+    </ItemGroup>
   );
 }
 

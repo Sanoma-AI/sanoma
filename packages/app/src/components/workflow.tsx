@@ -1,14 +1,12 @@
-import type { ConfigDescription, SiteCall, WorkflowEntry } from "@sanoma-ai/workflows/describe";
+import type { WorkflowEntry } from "@sanoma-ai/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
-import { ChevronRightIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
-import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
+import { Item, ItemContent, ItemDescription, ItemGroup } from "#/components/ui/item.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
 import { type Field, fieldsOf } from "../form/schema.ts";
-import { configQuery, opsById } from "../queries.ts";
-import { BUILTIN_ICON, ItemHeading, Json, LinkItem, None, Notice, OpItem, Section } from "./common.tsx";
+import { configQuery, opsById, siteCallers } from "../queries.ts";
+import { BUILTIN_ICON, ItemHeading, Json, None, Notice, OpItem, Section, UsedByList } from "./common.tsx";
 
 // A workflow's pieces, as a workflow's own page shows them.
 
@@ -24,7 +22,7 @@ export function Retired({ name }: { name: string }) {
 /** What a workflow may call, the built-ins it uses, its input and the sites' pages that call it, one section each. */
 export const WorkflowSections = memo(function WorkflowSections({ workflow }: { workflow: WorkflowEntry }) {
   const { data: ops } = useSuspenseQuery({ ...configQuery(), select: opsById });
-  const { data: callers } = useSuspenseQuery({
+  const { data: sites } = useSuspenseQuery({
     ...configQuery(),
     select: (config) => siteCallers(config, "workflow", workflow.name),
   });
@@ -74,71 +72,11 @@ export const WorkflowSections = memo(function WorkflowSections({ workflow }: { w
       </Section>
       <Separator />
       <Section title="Used by">
-        <SiteCallers callers={callers} />
+        <UsedByList sites={sites} />
       </Section>
     </>
   );
 });
-
-/** A site's file that calls something, and how: its page, when the file is one. */
-export interface SiteCaller {
-  /** The site's title, else its name. */
-  site: string;
-  file: string;
-  page?: string;
-  via: SiteCall["via"][];
-}
-
-/** The sites' files that call the workflow, collection or operation, each once, in the sites' order. */
-export function siteCallers(config: ConfigDescription, kind: SiteCall["kind"], target: string): SiteCaller[] {
-  const byFile = new Map<string, SiteCaller>();
-  for (const site of config.sites) {
-    for (const { kind: k, target: t, via, file, page } of site.calls) {
-      if (k !== kind || t !== target) continue;
-      const caller = byFile.get(file) ?? { site: site.title ?? site.name, file, ...(page && { page }), via: [] };
-      if (!caller.via.includes(via)) caller.via.push(via);
-      byFile.set(file, caller);
-    }
-  }
-  return [...byFile.values()];
-}
-
-/**
- * Each site's file that calls something, under the site's title: a page links to itself (but one
- * with a path parameter, which has no one URL); a component's file names the file.
- */
-export function SiteCallers({ callers }: { callers: SiteCaller[] }) {
-  if (!callers.length) return <None>No site calls it.</None>;
-  return (
-    <ItemGroup>
-      {callers.map(({ site, file, page, via }) => {
-        const content = (
-          <ItemContent>
-            <ItemTitle>
-              {site}
-              <code className="font-normal text-muted-foreground">{page ?? file}</code>
-            </ItemTitle>
-            <ItemDescription>through {via.join(" and ")}</ItemDescription>
-          </ItemContent>
-        );
-        return page && !page.includes("$") ? (
-          <LinkItem key={file} variant="outline" size="xs">
-            <Link to={page}>
-              {content}
-              <ItemActions>
-                <ChevronRightIcon className="size-4" />
-              </ItemActions>
-            </Link>
-          </LinkItem>
-        ) : (
-          <Item key={file} role="listitem" variant="outline" size="xs">
-            {content}
-          </Item>
-        );
-      })}
-    </ItemGroup>
-  );
-}
 
 const kindName = (f: Field): string =>
   f.kind === "array" ? `list of ${kindName(f.item)}` : f.kind === "json" ? "JSON" : f.kind;
