@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { type Browser, executablePath, launch } from "puppeteer-core";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { copyFixture, ensureBuilt, runCli, startCli } from "./fixture.ts";
+import { copyFixture, ensureBuilt, runCli, serving } from "./fixture.ts";
 
 // Needs Postgres (`pnpm db:up`) and the packages' builds, as cli.test.ts. The fixture is a company
 // with one site, sites/hello, which `sanoma serve` builds into the app from the app's shipped
@@ -18,28 +18,8 @@ let dir = "";
 beforeAll(ensureBuilt, 600_000);
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-/** The bin with `args` (`sanoma serve`) in `cwd` until it listens: where, and `stop` (SIGINT), which resolves to what it printed. */
-async function started(cwd: string, args = ["serve"]) {
-  const { child, finished, output } = startCli(cwd, args, env);
-  const listening = / at (http:\/\/127\.0\.0\.1:\d+); ctrl-c to stop/;
-  const stop = async () => {
-    child.kill("SIGINT");
-    const done = await finished;
-    expect(done.code, done.stderr).toBe(0);
-    return done.stderr;
-  };
-  try {
-    const stdout = await waitFor(
-      () => output().stdout,
-      (out) => listening.test(out),
-      60_000,
-    );
-    return { url: stdout.match(listening)![1]!, stop, output };
-  } catch (err) {
-    child.kill("SIGINT");
-    throw new Error(`${output().stderr}`, { cause: err });
-  }
-}
+/** The bin with `args` (`sanoma serve`) in `cwd` until it listens (`serving`). */
+const started = (cwd: string, args = ["serve"]) => serving(cwd, args, env);
 
 /** The bin with `args` in the fixture copy until it listens, `probe` on its address, then SIGINT: what it printed. */
 async function serveOnce(probe: (url: string) => Promise<void>, args?: string[]): Promise<string> {

@@ -24,4 +24,4 @@ This package owns the `sanoma` bin a company repo runs, checks and exports itsel
 
 ## Checks
 
-`pnpm vitest run packages/sanoma` needs Postgres (`pnpm db:up`) and builds the packages the fixture loads when they are stale (`packages/workflows`, `connectors/ghost`, `packages/app`, this one). The Docker cases of `postgres.test.ts` run only where `docker` is installed. Run the gate with `SANOMA_TEST_DATABASE_URL` naming a database of your own.
+`pnpm vitest run packages/sanoma` needs Postgres (`pnpm db:up`) and builds the packages the fixture loads when they are stale (`packages/workflows`, `packages/bridge`, `connectors/ghost`, `packages/app`, this one); `packed.test.ts` installs them as tarballs with pnpm, which needs the registry or a warm store for their third-party dependencies. The Docker cases of `postgres.test.ts` run only where `docker` is installed. Run the gate with `SANOMA_TEST_DATABASE_URL` naming a database of your own.

@@ -3,7 +3,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt as ensure } from "@sanoma-ai/testing";
+import { ensureBuilt as ensure, waitFor } from "@sanoma-ai/testing";
 
 /** The repo's root. */
 export const repo = fileURLToPath(new URL("../../../", import.meta.url));
@@ -18,6 +18,7 @@ export const cli = join(repo, "packages/sanoma/src/cli.ts");
  */
 const BUILT: [dir: string, outputs: string[]][] = [
   ["packages/workflows", ["dist/index.js"]],
+  ["packages/bridge", ["dist/index.js"]],
   ["connectors/ghost", ["dist/index.js"]],
   ["packages/app", ["dist/server/server.js"]],
   ["packages/sanoma", ["dist/index.js", "dist/oxlint-plugin.js", "oxlint.json"]],
@@ -72,10 +73,10 @@ export function runCli(cwd: string, args: string[], env: NodeJS.ProcessEnv): Pro
   return child.finished;
 }
 
-/** Starts the bin with `args` in `cwd`; `finished` resolves when it exits, with what it printed. */
-export function startCli(cwd: string, args: string[], env: NodeJS.ProcessEnv) {
+/** Starts the bin (this checkout's, or `bin`) with `args` in `cwd`; `finished` resolves when it exits, with what it printed. */
+export function startCli(cwd: string, args: string[], env: NodeJS.ProcessEnv, bin = cli) {
   const options: SpawnOptions = { cwd, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] };
-  const child = spawn(process.execPath, [cli, ...args], options);
+  const child = spawn(process.execPath, [bin, ...args], options);
   let stdout = "";
   let stderr = "";
   child.stdout!.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
@@ -85,4 +86,37 @@ export function startCli(cwd: string, args: string[], env: NodeJS.ProcessEnv) {
     child.on("exit", (code, signal) => resolve({ code, signal, stdout, stderr }));
   });
   return { child, finished, output: () => ({ stdout, stderr }) };
+}
+
+/**
+ * The bin (this checkout's, or `bin`) with `args` in `cwd` until it listens: where, its output so
+ * far, and `stop` (SIGINT), which resolves to what it printed on stderr, or throws on an exit code
+ * but 0.
+ */
+export async function serving(cwd: string, args: string[], env: NodeJS.ProcessEnv, bin = cli) {
+  const { child, finished, output } = startCli(cwd, args, env, bin);
+  const listening = / at (http:\/\/127\.0\.0\.1:\d+); ctrl-c to stop/;
+  const stop = async () => {
+    child.kill("SIGINT");
+    const done = await finished;
+    if (done.code !== 0) throw new Error(`sanoma exited with ${done.code}: ${done.stderr}`);
+    return done.stderr;
+  };
+  // Until it listens, or exits first (a crash at startup reported at once, not after the wait).
+  let exited = false;
+  void finished.then(() => (exited = true));
+  try {
+    const stdout = await waitFor(
+      () => output().stdout,
+      (out) => exited || listening.test(out),
+      60_000,
+    );
+    const url = stdout.match(listening)?.[1];
+    if (url === undefined) throw new Error("sanoma exited before it listened");
+    return { url, stop, output };
+  } catch (err) {
+    child.kill("SIGINT");
+    await finished;
+    throw new Error(output().stderr, { cause: err });
+  }
 }
