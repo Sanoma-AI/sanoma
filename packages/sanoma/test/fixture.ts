@@ -72,10 +72,10 @@ export function runCli(cwd: string, args: string[], env: NodeJS.ProcessEnv): Pro
   return child.finished;
 }
 
-/** Starts the bin with `args` in `cwd`; `finished` resolves when it exits, with what it printed. */
-export function startCli(cwd: string, args: string[], env: NodeJS.ProcessEnv) {
+/** Starts the bin (this checkout's, or `bin`) with `args` in `cwd`; `finished` resolves when it exits, with what it printed. */
+export function startCli(cwd: string, args: string[], env: NodeJS.ProcessEnv, bin = cli) {
   const options: SpawnOptions = { cwd, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] };
-  const child = spawn(process.execPath, [cli, ...args], options);
+  const child = spawn(process.execPath, [bin, ...args], options);
   let stdout = "";
   let stderr = "";
   child.stdout!.on("data", (chunk: Buffer) => (stdout += chunk.toString()));

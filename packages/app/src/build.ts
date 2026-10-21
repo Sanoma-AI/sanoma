@@ -32,6 +32,9 @@ const pkgDir = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
 const RUNTIME = ["@sanoma-ai/workflows", "@sanoma-ai/bridge", "@dbos-inc/dbos-sdk", "pg", "zod"];
 const isRuntime = (id: string) => RUNTIME.some((name) => id === name || id.startsWith(`${name}/`));
 
+/** The packages a site imports that ship TypeScript source (`sanoma/site`, `@sanoma-ai/app/site` and `/ui`): Vite compiles them. */
+const SOURCE = ["sanoma", "@sanoma-ai/app"];
+
 // The browser bundle may import only types from the runtime (DBOS, Postgres), and the values of
 // `@sanoma-ai/workflows/shared`. `import type` is erased before resolution, so anything else of
 // these reaching the client is a mistake: fail, in dev as in the build. (Start adds these to its
@@ -364,11 +367,13 @@ export async function appDevServer(
       fs: { allow: [vite.searchForWorkspaceRoot(root), vite.searchForWorkspaceRoot(src)] },
     },
     // The runtime as Node loads it, the copy startApp's context holds, wherever it is installed
-    // (Vite would run a linked checkout's copy itself).
-    environments: { ssr: { resolve: { external: RUNTIME } } },
+    // (Vite would run a linked checkout's copy itself). What ships as source Vite compiles, as the
+    // build does (`runtimeExternal`): Node refuses to strip types under node_modules, so a site's
+    // `sanoma/site` left to it fails every page from an npm install (a linked checkout hides it).
+    environments: { ssr: { resolve: { external: RUNTIME, noExternal: SOURCE } } },
     optimizeDeps: {
       // Shipped as source, compiled with the pages.
-      exclude: ["sanoma", "@sanoma-ai/app"],
+      exclude: SOURCE,
       // Every page, so the first visit finds the dependencies optimized, not a reload to do it.
       entries: [`${src}/routes/**/*.tsx`, "sites/**/*.tsx"],
     },
