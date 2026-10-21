@@ -6,6 +6,7 @@ import {
   AppWindowIcon,
   BoxesIcon,
   InboxIcon,
+  KeyRoundIcon,
   type LucideIcon,
   PlugIcon,
   RocketIcon,
@@ -43,6 +44,7 @@ import {
   usePanel,
 } from "./panels/panel.tsx";
 import { DataPanel } from "./panels/data-panel.tsx";
+import { PermissionsPanel } from "./panels/permissions-panel.tsx";
 import { SitesPanel } from "./panels/sites-panel.tsx";
 import { WorkflowPanel } from "./panels/workflow-panel.tsx";
 import { WorkflowsPanel } from "./panels/workflows-panel.tsx";
@@ -66,6 +68,8 @@ const SECTIONS = [
   { to: undefined, label: "Sites", icon: AppWindowIcon, panel: "sites" },
   // The company's collections, shown only when it has some.
   { to: "/data", label: "Data", icon: TableIcon, panel: "data" },
+  // What the policy answers each group, shown only when the config has a policy.
+  { to: "/permissions", label: "Permissions", icon: KeyRoundIcon, panel: "permissions" },
 ] as const satisfies readonly { to: string | undefined; label: string; icon: LucideIcon; panel: string | undefined }[];
 
 type Section = (typeof SECTIONS)[number];
@@ -159,13 +163,16 @@ function PanelView({ panel }: { panel: Panel }) {
       return <SitesPanel />;
     case "data":
       return <DataPanel />;
+    case "permissions":
+      return <PermissionsPanel />;
   }
 }
 
-/** What the bar reads from the config: the app's name, and whether it has collections. */
+/** What the bar reads from the config: the app's name, and whether it has collections and a policy. */
 const selectBar = (config: ConfigDescription) => ({
   appName: config.appName,
   hasData: config.collections.length > 0,
+  hasPolicy: config.policy.defined,
 });
 
 /**
@@ -180,15 +187,15 @@ function SectionBar({
   peek: PopoverPrimitive.Handle<PanelSection> | undefined;
 }) {
   const {
-    data: { appName, hasData },
+    data: { appName, hasData, hasPolicy },
   } = useSuspenseQuery({ ...configQuery(), select: selectBar });
   // Sites, when there are sites: its link, the first page a site lists, and whether the page is
   // a site's, which lights it.
   const sites = useSites();
   const sitesHome = sites.find((site) => site.pages.length > 0)?.pages[0]?.to;
   const onSite = usePageSection() === "sites";
-  // Sites and Data, only when there is something to list.
-  const shown: Partial<Record<string, boolean>> = { sites: sites.length > 0, data: hasData };
+  // Sites, Data and Permissions, only when there is something to list.
+  const shown: Partial<Record<string, boolean>> = { sites: sites.length > 0, data: hasData, permissions: hasPolicy };
   // The Inbox page's query (its costliest read), polled every 30 s for the badge. Each watcher
   // polls at its own interval, so while the Inbox page shows, its 5 s poll keeps the badge
   // fresh too; and a decision refreshes it at once.

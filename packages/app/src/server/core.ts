@@ -16,7 +16,7 @@ import {
   type RunSummary,
   type SanomaError,
 } from "@sanoma-ai/workflows";
-import { apiNameOf } from "@sanoma-ai/workflows/shared";
+import { apiNameOf, groupNamesOf, WORKFLOW_ACTION } from "@sanoma-ai/workflows/shared";
 import { type ConfigDescription, type DataValue, formatOptions, setFields } from "@sanoma-ai/workflows/describe";
 import { check, loadScenarios } from "@sanoma-ai/workflows/scenario";
 import { isNotFound, isRedirect, notFound } from "@tanstack/react-router";
@@ -31,6 +31,7 @@ import {
   type CredentialsResponse,
   type DecideCall,
   type ErrorResponse,
+  type PermissionsResponse,
   type PreviewQuery,
   type PreviewResult,
   type RunDetail,
@@ -361,12 +362,45 @@ export function decide({ client }: AppContext, actor: Principal, call: DecideCal
  * `custom` for every one when the policy cannot be asked ahead (a `definePolicy` function).
  */
 export function preview(
-  { resolved: { policy } }: AppContext,
+  { resolved: { policy } }: Pick<AppContext, "resolved">,
   actor: Principal,
   requests: PreviewQuery,
 ): PreviewResult[] {
   if (!policy.preview) return requests.map(() => ({ answer: "custom" }));
   return policy.preview(requests.map((request) => ({ ...request, principal: actor })));
+}
+
+/**
+ * The Permissions page's grid (`getPermissions`): for each group, the declared ones and `agents`,
+ * what the policy would answer someone in it alone (`{ id: "group:<name>", groups: [name] }`), the
+ * input unknown (`preview`), for the start of each of the config's own workflows, in its order,
+ * then each operation a person may call directly, by id. Nobody's own answer: the actor asking
+ * is not used.
+ */
+export function permissions(app: Pick<AppContext, "resolved" | "description">): PermissionsResponse {
+  const { description } = app;
+  const groups = groupNamesOf(description.resources);
+  const workflows = description.workflows.filter((w) => !w.builtin);
+  const ops = description.ops.filter((op) => op.direct).toSorted((a, b) => a.id.localeCompare(b.id));
+  const requests: PreviewQuery = [
+    ...workflows.map(({ name }) => ({ action: { id: `${WORKFLOW_ACTION}${name}` } })),
+    ...ops.map(({ id, effect }) => ({ action: { id, effect } })),
+  ];
+  const columns = groups.map((group) => preview(app, { id: `group:${group}`, groups: [group] }, requests));
+  const cells = (row: number) => columns.map((answers) => answers[row]!);
+  return {
+    policy: description.policy,
+    groups,
+    rows: [
+      ...workflows.map(({ name, title }, i) => ({
+        kind: "workflow" as const,
+        id: name,
+        ...(title !== undefined && { title }),
+        cells: cells(i),
+      })),
+      ...ops.map(({ id }, i) => ({ kind: "op" as const, id, cells: cells(workflows.length + i) })),
+    ],
+  };
 }
 
 /** Each vendor's credential statuses now, from the app's environment and the stored credentials. */

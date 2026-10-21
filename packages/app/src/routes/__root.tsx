@@ -98,7 +98,8 @@ const WhoAreYou = lazy(() => import("../components/who-are-you.tsx"));
 
 function Root() {
   const { data: server } = useSuspenseQuery(actorQuery());
-  const actor = useActorState(server);
+  const { data: people } = useSuspenseQuery({ ...configQuery(), select: (config) => config.resources });
+  const actor = useActorState(server, people);
   // Only these fields: the root's loader data is new on every navigation, a field is not.
   const sidebarOpen = Route.useLoaderData({ select: (data) => data.sidebarOpen });
   const compact = Route.useLoaderData({ select: (data) => data.compact });

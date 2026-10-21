@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ConnectorsRouteRouteImport } from './routes/connectors/route'
 import { Route as DataRouteRouteImport } from './routes/data/route'
 import { Route as InboxRouteImport } from './routes/inbox'
+import { Route as PermissionsRouteImport } from './routes/permissions'
 import { Route as ResourcesRouteImport } from './routes/resources'
 import { Route as StartRouteImport } from './routes/start'
 import { Route as WorkflowsRouteRouteImport } from './routes/workflows/route'
@@ -51,6 +52,11 @@ const DataRouteRoute = DataRouteRouteImport.update({
 const InboxRoute = InboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PermissionsRoute = PermissionsRouteImport.update({
+  id: '/permissions',
+  path: '/permissions',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ResourcesRoute = ResourcesRouteImport.update({
@@ -155,6 +161,7 @@ export interface FileRoutesByFullPath {
   '/data': typeof DataRouteRouteWithChildren
   '/workflows': typeof WorkflowsRouteRouteWithChildren
   '/inbox': typeof InboxRoute
+  '/permissions': typeof PermissionsRoute
   '/resources': typeof ResourcesRoute
   '/start': typeof StartRoute
   '/workflows/$name': typeof WorkflowsNameRouteRouteWithChildren
@@ -177,6 +184,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/inbox': typeof InboxRoute
+  '/permissions': typeof PermissionsRoute
   '/resources': typeof ResourcesRoute
   '/start': typeof StartRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
@@ -202,6 +210,7 @@ export interface FileRoutesById {
   '/data': typeof DataRouteRouteWithChildren
   '/workflows': typeof WorkflowsRouteRouteWithChildren
   '/inbox': typeof InboxRoute
+  '/permissions': typeof PermissionsRoute
   '/resources': typeof ResourcesRoute
   '/start': typeof StartRoute
   '/workflows/$name': typeof WorkflowsNameRouteRouteWithChildren
@@ -229,6 +238,7 @@ export interface FileRouteTypes {
     | '/data'
     | '/workflows'
     | '/inbox'
+    | '/permissions'
     | '/resources'
     | '/start'
     | '/workflows/$name'
@@ -251,6 +261,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/inbox'
+    | '/permissions'
     | '/resources'
     | '/start'
     | '/connectors/$vendor'
@@ -275,6 +286,7 @@ export interface FileRouteTypes {
     | '/data'
     | '/workflows'
     | '/inbox'
+    | '/permissions'
     | '/resources'
     | '/start'
     | '/workflows/$name'
@@ -301,6 +313,7 @@ export interface RootRouteChildren {
   DataRouteRoute: typeof DataRouteRouteWithChildren
   WorkflowsRouteRoute: typeof WorkflowsRouteRouteWithChildren
   InboxRoute: typeof InboxRoute
+  PermissionsRoute: typeof PermissionsRoute
   ResourcesRoute: typeof ResourcesRoute
   StartRoute: typeof StartRoute
   RunsIdRoute: typeof RunsIdRoute
@@ -340,6 +353,13 @@ declare module '@tanstack/react-router' {
       path: '/inbox'
       fullPath: '/inbox'
       preLoaderRoute: typeof InboxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/permissions': {
+      id: '/permissions'
+      path: '/permissions'
+      fullPath: '/permissions'
+      preLoaderRoute: typeof PermissionsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/resources': {
@@ -541,6 +561,7 @@ const rootRouteChildren: RootRouteChildren = {
   DataRouteRoute: DataRouteRouteWithChildren,
   WorkflowsRouteRoute: WorkflowsRouteRouteWithChildren,
   InboxRoute: InboxRoute,
+  PermissionsRoute: PermissionsRoute,
   ResourcesRoute: ResourcesRoute,
   StartRoute: StartRoute,
   RunsIdRoute: RunsIdRoute,

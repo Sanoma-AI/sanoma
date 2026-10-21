@@ -1,3 +1,4 @@
+import { type PeopleResource, principalOf } from "@sanoma-ai/workflows/shared";
 import { createContext, useContext, useEffect, useSyncExternalStore } from "react";
 import { ACTOR_COOKIE, ACTOR_KEY, type ActorInfo } from "./api.ts";
 
@@ -67,8 +68,13 @@ const notRead = () => undefined;
 export interface ActorState {
   /** The name, or null for none; undefined only until the page has read the browser's storage. */
   actor: string | null | undefined;
-  /** The groups the deployment vouches for. None with the default resolver: a typed name has none. */
+  /**
+   * The groups you are in: those the deployment vouches for, or with the default resolver those
+   * the data files put the name in (none for a name they do not declare).
+   */
   groups: readonly string[];
+  /** Whom you act for, when you are a declared agent acting for someone (`onBehalfOf`). */
+  onBehalfOf?: string;
   /** True when the deployment says who you are: the page shows it and cannot change it. */
   fromServer: boolean;
   /** Set when the deployment could not say who you are. */
@@ -89,9 +95,10 @@ export const useActor = () => useContext(ActorContext);
 
 /**
  * The actor state for the root. With a deployment's own resolver, who the server says; else the
- * name in this browser's storage, read once hydrated so hydration matches the server.
+ * name in this browser's storage, read once hydrated so hydration matches the server, as the
+ * data files' `people` declare it (`principalOf`), which is how the server admits it.
  */
-export function useActorState(server: ActorInfo): ActorState {
+export function useActorState(server: ActorInfo, people: readonly PeopleResource[]): ActorState {
   const stored = useSyncExternalStore(watchActor, loadActor, notRead);
   // The cookie follows the stored name, as this page or another tab changes it.
   useEffect(() => {
@@ -102,15 +109,18 @@ export function useActorState(server: ActorInfo): ActorState {
     return {
       actor: actor?.id ?? null,
       groups: actor?.groups ?? [],
+      ...(actor?.onBehalfOf !== undefined && { onBehalfOf: actor.onBehalfOf }),
       fromServer: true,
       ...(error === undefined ? {} : { error }),
       signOut,
       setActor() {},
     };
   }
+  const declared = stored ? principalOf(stored, people) : undefined;
   return {
     actor: stored,
-    groups: [],
+    groups: declared?.groups ?? [],
+    ...(declared?.onBehalfOf !== undefined && { onBehalfOf: declared.onBehalfOf }),
     fromServer: false,
     setActor: saveActor,
   };
