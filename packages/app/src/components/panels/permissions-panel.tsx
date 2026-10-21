@@ -8,7 +8,10 @@ import { PanelFooterLink, PanelHeader } from "./panel.tsx";
 
 // The Permissions section's panel: the policy, and what its grid holds.
 
-/** The policy's kind and version, how many groups, workflows and operations the grid has, and the grid at its foot. */
+/**
+ * The policy's kind and version, how many groups, workflows and operations (each once, in a
+ * workflow or called directly) the grid has, and the grid at its foot.
+ */
 export function PermissionsPanel() {
   const { data } = useSuspenseQuery(permissionsQuery());
   return (
@@ -20,7 +23,9 @@ export function PermissionsPanel() {
             <PolicyFacts policy={data.policy} />
             <Fact label="Groups">{data.groups.filter((group) => group !== null).length}</Fact>
             <Fact label="Workflows">{data.workflows.length}</Fact>
-            <Fact label="Operations">{data.ops.length}</Fact>
+            <Fact label="Operations">
+              {new Set([...data.workflows.flatMap((w) => w.ops), ...data.ops].map((op) => op.id)).size}
+            </Fact>
           </Facts>
         </SidebarGroup>
       </SidebarContent>

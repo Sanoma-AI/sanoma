@@ -17,7 +17,7 @@ import {
   type RunSummary,
   type SanomaError,
 } from "@sanoma-ai/workflows";
-import { AGENTS, apiNameOf, groupNamesOf, WORKFLOW_ACTION } from "@sanoma-ai/workflows/shared";
+import { AGENTS, apiNameOf, groupNamesOf } from "@sanoma-ai/workflows/shared";
 import { type ConfigDescription, type DataValue, formatOptions, setFields } from "@sanoma-ai/workflows/describe";
 import { check, loadScenarios } from "@sanoma-ai/workflows/scenario";
 import { isNotFound, isRedirect, notFound } from "@tanstack/react-router";
@@ -33,6 +33,7 @@ import {
   type DecideCall,
   type ErrorResponse,
   type PermissionsResponse,
+  type PermissionsRow,
   type PreviewQuery,
   type RunDetail,
   RunsQuery,
@@ -43,6 +44,7 @@ import {
   startRunSchema,
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
+import { previewRequests } from "../lib/preview.ts";
 import { LOOPBACK } from "../loopback.ts";
 
 // What the server functions do. Server-only: each takes the app context that startApp passes
@@ -379,8 +381,9 @@ const grids = new WeakMap<object, PermissionsResponse>();
  * The Permissions page's grid (`getPermissions`): for someone in no group, then for each group,
  * the declared ones and `agents`, what the policy would answer someone in it alone
  * (`{ id: "group:<name>", groups: [name] }`, an agent acting for `ACTS_FOR`), the input unknown
- * (`preview`), for the start of each of the config's own workflows, in its order, then each
- * operation a person may call directly, by id. Nobody's own answer: the actor asking is not used.
+ * (`preview`), for the start of each of the config's own workflows, by name, each with the
+ * operations it uses, in the order it declares them, then each operation a person may call
+ * directly, by id. Nobody's own answer: the actor asking is not used.
  */
 export function permissions(app: Pick<AppContext, "resolved" | "description">): PermissionsResponse {
   let grid = grids.get(app.resolved);
@@ -391,12 +394,13 @@ export function permissions(app: Pick<AppContext, "resolved" | "description">): 
 function gridOf(app: Pick<AppContext, "resolved" | "description">): PermissionsResponse {
   const { description } = app;
   const groups = [null, ...groupNamesOf(description.resources)];
+  const opsById = new Map(description.ops.map((op) => [op.id, op]));
   const workflows = description.workflows.filter((w) => !w.builtin);
-  const ops = description.ops.filter((op) => op.direct).toSorted((a, b) => a.id.localeCompare(b.id));
-  const requests: PreviewQuery = [
-    ...workflows.map(({ name }) => ({ action: { id: `${WORKFLOW_ACTION}${name}` } })),
-    ...ops.map(({ id, effect }) => ({ action: { id, effect } })),
-  ];
+  const direct = description.ops.filter((op) => op.direct).toSorted((a, b) => a.id.localeCompare(b.id));
+  // Every row's question, in the grid's order: each workflow's start, then the operations it may
+  // call, as the run form asks them (`previewRequests`); then each direct operation.
+  const asked = workflows.map((w) => previewRequests(w, opsById));
+  const requests: PreviewQuery = [...asked.flat(), ...direct.map(({ id, effect }) => ({ action: { id, effect } }))];
   const columns = groups.map((group) =>
     preview(
       app,
@@ -406,16 +410,20 @@ function gridOf(app: Pick<AppContext, "resolved" | "description">): PermissionsR
       requests,
     ),
   );
-  const cells = (row: number) => columns.map((answers) => answers[row]!);
+  const rows = requests.map(({ action: { id } }, i): PermissionsRow => ({
+    id,
+    cells: columns.map((answers) => answers[i]!),
+  }));
+  // Each workflow's rows, as many as it asked: its start, then one per operation it may call.
+  let at = 0;
   return {
     policy: description.policy,
     groups,
-    workflows: workflows.map(({ name, title }, i) => ({
-      id: name,
-      ...(title !== undefined && { title }),
-      cells: cells(i),
-    })),
-    ops: ops.map(({ id }, i) => ({ id, cells: cells(workflows.length + i) })),
+    workflows: workflows.map(({ name, title }, i) => {
+      const [start, ...called] = rows.slice(at, (at += asked[i]!.length));
+      return { ...start!, id: name, ...(title !== undefined && { title }), ops: called };
+    }),
+    ops: rows.slice(at),
   };
 }
 
