@@ -27,6 +27,7 @@ import { insertRecord, type LedgerRecord, type OwnedLedger, ownedLedger } from "
 import type { CallContext, Driver, Op } from "./op.ts";
 import type { RecordedDecision } from "./policy.ts";
 import type { RunArgs } from "./run.ts";
+import type { Secrets } from "./secret.ts";
 import { CALL_WORKFLOW, DATA_VENDOR, errorMessage, isEnded, mayDecide, type RunStatus } from "./shared.ts";
 
 /**
@@ -137,6 +138,8 @@ export class SanomaClient {
   private readonly audit: OwnedLedger;
   /** On the config's database, for the credentials table: opened on first use. */
   private readonly credentialsPool: LazyPool;
+  /** What a direct call's driver reads secrets from, as a worker's live driver does. */
+  private readonly storedSecrets: Secrets;
 
   private constructor(dbos: DBOSClient, config: ResolvedConfig, drivers: ReadonlyMap<string, Driver>) {
     this.dbos = dbos;
@@ -144,6 +147,7 @@ export class SanomaClient {
     this.drivers = drivers;
     this.audit = ownedLedger(config);
     this.credentialsPool = lazyPool(config.databaseUrl, "credentials");
+    this.storedSecrets = storedSecrets(() => this.credentialsDb(), "sanoma");
   }
 
   /**
@@ -271,7 +275,7 @@ export class SanomaClient {
       runId,
       opId: op.id,
       attempt: 1,
-      secrets: storedSecrets(() => this.credentialsDb(), "sanoma"),
+      secrets: this.storedSecrets,
       by: actor.id,
     };
     if (!write) return outputOf(op, () => fn(parsed, context));
@@ -327,7 +331,7 @@ export class SanomaClient {
       try {
         output = await outputOf(op, () => fn(parsed, context));
       } catch (err) {
-        await conn?.query("ROLLBACK");
+        // Recorded on the store's own connection; the transaction is rolled back below.
         await this.audit.store.append(record({ error: errorInfo(err) }));
         throw err;
       }
