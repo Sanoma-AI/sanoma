@@ -42,8 +42,32 @@ jobs:
             exit 1
           fi
       # Packages already on npm are skipped without running prepack, so their dependents need this
-      # build; the packages that do publish rebuild in their prepack, which keeps the hand path safe.
+      # build; the packages being staged rebuild in their prepack, which keeps the hand path safe.
       - run: pnpm build
+      # Staged, not published: the trusted publishers allow `npm stage publish` only, and a
+      # maintainer releases the staged versions with one `pnpm stage approve` (README "Release").
       # --no-git-checks: a tag checkout is a detached HEAD, not the publish branch. The prepack of
       # each @sanoma-ai/bridge-<platform> downloads the provider-bridge release RELEASE pins.
-      - run: pnpm -r publish --no-git-checks
+      # --report-summary writes each staged version, with its stage id, to pnpm-publish-summary.json.
+      - run: pnpm stage publish -r --no-git-checks --report-summary
+      - name: Staged versions
+        run: |
+          jq -r '.publishedPackages[] | "\(.name)@\(.version) \(.stageId // error("no stage id for \(.name)"))"' pnpm-publish-summary.json > staged.txt
+          cat staged.txt
+          if [ ! -s staged.txt ]; then
+            echo "Nothing staged: every public version is already on npm." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "## Staged versions"
+            echo
+            echo '```'
+            cat staged.txt
+            echo '```'
+            echo
+            echo "Release them all with one 2FA code, with the repo's pnpm and logged in to npm:"
+            echo
+            echo '```sh'
+            echo "pnpm stage approve $(jq -r '[.publishedPackages[].stageId] | join(" ")' pnpm-publish-summary.json)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

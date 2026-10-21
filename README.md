@@ -101,22 +101,28 @@ Inside the repo, `@sanoma-ai/*` imports resolve to each package's `src/` (via `p
 
 ## Release
 
-[`release.yml`](.github/workflows/release.yml) publishes `sanoma` and the `@sanoma-ai/*` packages to npm with [trusted publishing](https://docs.npmjs.com/trusted-publishers), so there is no npm token. To release, bump the shared `version` in every public package's `package.json` (not the private `@sanoma-ai/testing`), the `^` peer ranges on `@sanoma-ai/workflows` and `@sanoma-ai/bridge` and `RUNTIME_VERSION` in `packages/workflows/src/version.ts` (a test checks it), merge, wait for CI on `main` to pass, then tag `main` and push the tag:
+[`release.yml`](.github/workflows/release.yml) stages `sanoma` and the `@sanoma-ai/*` packages on npm with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (no npm token) and a maintainer releases them with one command. To release, bump the shared `version` in every public package's `package.json` (not the private `@sanoma-ai/testing`), the `^` peer ranges on `@sanoma-ai/workflows` and `@sanoma-ai/bridge` and `RUNTIME_VERSION` in `packages/workflows/src/version.ts` (a test checks it), merge, wait for CI on `main` to pass, then tag `main` and push the tag:
 
 ```sh
 git fetch origin && git tag vX.Y.Z origin/main && git push origin vX.Y.Z
 ```
 
-The workflow fails if the tagged commit is not on `main` or its CI did not pass, or if the tag doesn't match that version. It skips any package whose version is already on npm, so rerunning a failed run after a partial publish completes the rest.
+The workflow fails if the tagged commit is not on `main` or its CI did not pass, or if the tag doesn't match that version. It [stages](https://docs.npmjs.com/staged-publishing) each package (`pnpm stage publish -r`): the versions exist on npm but are not public until approved. Its job summary lists every staged version with its stage id and the command that releases them, all with one 2FA code, from a machine logged in to npm (`pnpm login`) with the repo's pnpm (`pnpm stage approve` takes several ids from pnpm 11.25):
 
-Each package needs a trusted publisher on npmjs.com, added once by an owner of the `sanoma-ai` organization under the package's Settings → Trusted publishing → GitHub Actions: owner `Sanoma-AI`, repository `sanoma`, workflow `release.yml`. npm adds one only to a package that already exists, so a new package is first published once by hand.
+```sh
+pnpm stage approve <stage-id>...   # or no ids, to pick from a list
+```
+
+pnpm releases them in dependency order, so a package whose workspace dependency failed to release is skipped; rerun the command for those. If the workflow fails after staging some packages, its summary has no stage ids, so approve those with `pnpm stage approve` and no ids, then rerun the workflow: it skips any version already on npm and stages the rest. Only an approval releases a staged version; a rerun before it stages that version again, and `pnpm stage reject <stage-id>` removes the extra stage.
+
+Each package needs a trusted publisher on npmjs.com, added once by an owner of the `sanoma-ai` organization under the package's Settings → Trusted publishing → GitHub Actions: owner `Sanoma-AI`, repository `sanoma`, workflow `release.yml`, with its allowed actions left at stage only (neither direct `npm publish` nor "Allow npm dist-tag", as npm recommends), and the package's Publishing access set to "Require two-factor authentication and disallow tokens". npm adds a trusted publisher only to a package that already exists, so a new package is first published once by hand, and a new configuration expires unless it is first used within two days.
 
 By hand, as that first publish or as a fallback, from a clean checkout of `main` and logged in to npm as a member of the organization (the workflow's steps, run locally):
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm build        # packages already on npm skip prepack, and their dependents build against them
-pnpm -r publish   # --dry-run first to see each tarball
+pnpm build                  # packages already on npm skip prepack, and their dependents build against them
+pnpm stage publish -r       # --dry-run first to see each tarball; then pnpm stage approve
 ```
 
 ## License
