@@ -177,7 +177,7 @@ describe("describeConfig", () => {
 
   it("says whether a policy other than allowAll is configured, and its version, and names the app and version", () => {
     const plain = describeConfig(base);
-    const none = { kind: "function", rules: [] };
+    const none = { kind: "function" };
     expect(plain.policy).toEqual({ defined: false, ...none });
     // No package.json in the directory of this file, which defined the config: the app is "sanoma".
     expect(plain.appName).toBe("sanoma");

@@ -1,44 +1,44 @@
 import { createHash } from "node:crypto";
 import { globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type {
-  CedarValueJson,
-  Clause,
-  DetailedError,
-  EntityJson,
-  Expr,
-  PolicyJson,
-  SchemaJson,
-} from "@cedar-policy/cedar-wasm/nodejs";
+import type { CedarValueJson, DetailedError, EntityJson, Expr, PolicyJson } from "@cedar-policy/cedar-wasm/nodejs";
+import type { ResolvedConfig } from "./config.ts";
 import type { Approver, Principal } from "./define.ts";
 import {
   approvedFor,
   type Decision,
   type Policy,
   type PolicyCall,
-  type PolicyRule,
-  type Preview,
+  type PreviewAnswer,
   type PreviewRequest,
 } from "./policy.ts";
-import { cedarWasm, groupNamesOf, NAMESPACE, type PolicyPeople } from "./schema.ts";
-import { DATA_VENDOR } from "./shared.ts";
+import { AGENTS, type CedarSchemaJson, cedarWasm, NAMESPACE, type PolicyPeople, schemaOf } from "./schema.ts";
+import { approverLabel, DATA_VENDOR } from "./shared.ts";
 
 // A company's policies in Cedar (`policies/**/*.cedar`), decided with `@cedar-policy/cedar-wasm`
-// against the generated schema (`schema.ts`). Allow is the default: the runtime adds a blanket
-// `permit`, so a company's policies are `forbid`s, each a hold when it carries `@hold(...)` and a
-// deny otherwise.
+// against the schema of its resolved config (`schemaOf`). Allow is the default: the runtime adds
+// the one `permit`, so a company's policies are `forbid`s, each a hold when it carries
+// `@hold(...)` and a deny otherwise.
 
 /** Where a company's policies are, under its root. */
 export const POLICIES_DIR = "policies";
 
-/** One policy: its id (`<file>#<n>`, or its `@id`), its text, and where it is written. */
-export interface PolicySource {
+/** One policy, as loaded: its id, its text and where it is written, and the annotations Sanoma reads. */
+export interface CedarPolicySource {
+  /** Its `@id`, else `<file>#<n>`, counting from 1 in the order written. */
   id: string;
   text: string;
   /** Relative to the root, such as `policies/money.cedar`. */
-  file?: string;
+  file: string;
   /** The line its text starts on in `file`, from 1. */
-  line?: number;
+  line: number;
+  effect: "permit" | "forbid";
+  /** `@hold(...)`: a declared group, a declared person's id, or `on-behalf-of`. */
+  hold?: string;
+  /** `@title(...)`: the Inbox title of its hold. */
+  title?: string;
+  /** `@reason(...)`: the message of its deny. */
+  reason?: string;
 }
 
 /** What is wrong in the policies, at a file, line and column when Cedar says where. */
@@ -64,16 +64,17 @@ export function readPolicyFiles(root: string): { file: string; text: string }[] 
 }
 
 /**
- * Splits each file into its policies (`policySetTextToParts`), each with its id: its `@id`, else
- * `<file>#<n>` counting from 1. A file that does not parse, a template (`?principal`), and two
- * policies with one id are problems.
+ * Each file's policies, in the order written (`policySetTextToParts`, which sorts them, then
+ * their places in the text), each with its id and annotations (`policyToJson`): built once, the
+ * map from a policy's id to what decides its answer. A file that does not parse, a template and
+ * two policies with one id are problems.
  */
-export function policiesOf(files: readonly { file: string; text: string }[]): {
-  policies: PolicySource[];
+export function loadPolicies(files: readonly { file: string; text: string }[]): {
+  policies: CedarPolicySource[];
   problems: PolicyProblem[];
 } {
   const cedar = cedarWasm();
-  const policies: PolicySource[] = [];
+  const policies: CedarPolicySource[] = [];
   const problems: PolicyProblem[] = [];
   for (const { file, text } of files) {
     const parts = cedar.policySetTextToParts(text);
@@ -83,104 +84,133 @@ export function policiesOf(files: readonly { file: string; text: string }[]): {
     }
     for (const template of parts.policy_templates) {
       problems.push({
-        ...at(text, text.indexOf(template)),
         file,
+        ...at(text, text.indexOf(template)),
         message: "a template (`?principal`, `?resource`) is not a policy: name the principal or resource",
       });
     }
-    let from = 0;
-    parts.policies.forEach((part, n) => {
-      const offset = text.indexOf(part, from);
-      from = offset + part.length;
-      const json = cedar.policyToJson(part);
-      const id = (json.type === "success" && json.json.annotations?.id) || `${file}#${n + 1}`;
-      if (policies.some((p) => p.id === id) || id === ALLOW_ID) {
-        problems.push({ ...at(text, offset), file, message: `two policies have the id "${id}": give one another @id` });
+    const placed = new Set<number>();
+    const inOrder = parts.policies
+      .map((part) => {
+        let offset = text.indexOf(part);
+        while (placed.has(offset)) offset = text.indexOf(part, offset + 1);
+        placed.add(offset);
+        return { part, offset };
+      })
+      .toSorted((a, b) => a.offset - b.offset);
+    inOrder.forEach(({ part, offset }, n) => {
+      const answer = cedar.policyToJson(part);
+      if (answer.type === "failure") {
+        problems.push(...answer.errors.map((e) => problemOf(e, { file, text: part, at: at(text, offset).line })));
         return;
       }
-      policies.push({ id, text: part, file, line: at(text, offset).line });
+      const { effect, annotations = {} } = answer.json;
+      const id = annotations.id ?? `${file}#${n + 1}`;
+      const line = at(text, offset).line;
+      if (id === ALLOW_ID || policies.some((p) => p.id === id)) {
+        const why = id === ALLOW_ID ? "is the runtime's own policy's" : "is another policy's";
+        problems.push({ file, line, column: 1, message: `the id "${id}" ${why}: give this one another @id` });
+        return;
+      }
+      policies.push({
+        id,
+        text: part,
+        file,
+        line,
+        effect,
+        ...(annotations.hold !== undefined && { hold: annotations.hold }),
+        ...(annotations.title !== undefined && { title: annotations.title }),
+        ...(annotations.reason !== undefined && { reason: annotations.reason }),
+      });
     });
   }
   return { policies, problems };
 }
 
-/** The policies, validated against the schema (`validate`, strict): each error at its policy's file, line and column. */
-export function validatePolicies(policies: readonly PolicySource[], schema: SchemaJson<string>): PolicyProblem[] {
+/**
+ * The policies checked against the schema of the resolved config (`validate`, strict), and what
+ * Cedar cannot check: a `permit` (the runtime's is the only one), and a `@hold` naming neither a
+ * declared group, nor a declared person, nor `on-behalf-of`. In the order written, each at its
+ * file, line and column.
+ */
+export function validatePolicies(
+  resolved: Pick<ResolvedConfig, "ops" | "workflows" | "collections">,
+  policies: readonly CedarPolicySource[],
+  people: PolicyPeople,
+): PolicyProblem[] {
   const answer = cedarWasm().validate({
-    schema,
+    schema: schemaOf(resolved, people),
     policies: { staticPolicies: Object.fromEntries(policies.map((p) => [p.id, p.text])) },
     validationSettings: { mode: "strict" },
   });
   if (answer.type === "failure") return answer.errors.map((e) => ({ message: messageOf(e) }));
+  const byId = new Map(policies.map((p) => [p.id, p]));
+  const cedar = answer.validationErrors.map(({ policyId, error }) => {
+    const p = byId.get(policyId)!;
+    return { ...problemOf(error, { file: p.file, text: p.text, at: p.line }), policy: policyId };
+  });
+  const ours = policies.flatMap((p): PolicyProblem[] => {
+    const place = { file: p.file, line: p.line, column: 1, policy: p.id };
+    if (p.effect === "permit") {
+      return [{ ...place, message: "a permit changes nothing: every call no forbid refuses is allowed already" }];
+    }
+    if (p.hold !== undefined && p.hold !== ON_BEHALF_OF && approverOf(p.hold, people) === undefined) {
+      return [{ ...place, message: `@hold("${p.hold}") names no declared group or person, nor "${ON_BEHALF_OF}"` }];
+    }
+    return [];
+  });
   const order = new Map(policies.map((p, n) => [p.id, n]));
-  // In the order the policies are written, each one's from its start.
-  return answer.validationErrors
-    .map(({ policyId, error }) => {
-      const policy = policies[order.get(policyId)!];
-      const where = policy?.file === undefined ? {} : { file: policy.file, text: policy.text, at: policy.line ?? 1 };
-      return { ...problemOf(error, where), policy: policyId };
-    })
-    .toSorted(
-      (a, b) =>
-        order.get(a.policy)! - order.get(b.policy)! ||
-        (a.line ?? 0) - (b.line ?? 0) ||
-        (a.column ?? 0) - (b.column ?? 0),
-    );
+  return [...cedar, ...ours].toSorted(
+    (a, b) =>
+      order.get(a.policy!)! - order.get(b.policy!)! ||
+      (a.line ?? 0) - (b.line ?? 0) ||
+      (a.column ?? 0) - (b.column ?? 0),
+  );
 }
 
-/** `cedarPolicy`'s input: the policies (`policiesOf`), the generated schema's JSON (`generateSchema`) and the declared people. */
-export interface CedarPolicyOptions {
-  policies: readonly PolicySource[];
-  schema: SchemaJson<string>;
-  people: PolicyPeople;
-}
+/** The `@hold` that addresses the principal's `onBehalfOf`. */
+const ON_BEHALF_OF = "on-behalf-of";
 
 /**
- * The policy a repo's Cedar files make, the runtime's `permit` added. Its `version` is a hash of
- * the policies' ids and text. It decides each call with `statefulIsAuthorized` over the policy set
- * and schema parsed once:
+ * The policy a repo's Cedar files make, the runtime's `permit` added; `kind` is `cedar`, and its
+ * `version` a hash of the policies' ids and text. It decides each call with `statefulIsAuthorized`
+ * over the policy set and the schema of `resolved` (`schemaOf`), each parsed once:
  *
  * - allow: `allow`, with the policies that allowed as `reasons`;
- * - a deny one of whose `forbid`s has no `@hold`: `deny` with its `@reason`, or "Refused by <id>";
- * - a deny by `forbid`s with `@hold(x)` only: each lifted once an approval addressed to `x` and
- *   covering the operation is approved (`approvedFor`); allowed when all are, else `approve`,
- *   addressed to the first one's `x`, with its `@title`.
+ * - deny, a determining `forbid` without `@hold`: `deny` with its `@reason`, or "Refused by <id>";
+ * - deny by `@hold` forbids only: each lifted once an approval addressed to its approver and
+ *   covering the operation is approved (`approvedFor`); allowed when all are, else `approve` for
+ *   the first, in the order written, with its `@title`.
  *
- * `x` is a declared group (`{ group }`), a declared person's id, or `on-behalf-of` (the
- * principal's `onBehalfOf`); one that names no one denies, "cannot resolve approver". A policy that fails to evaluate denies, naming it: Cedar would skip it.
- * Every decision names its policy as `rule`, and its `@title` as `title`.
+ * An approver is a declared group (`{ group }`), a declared person's id, or the principal's
+ * `onBehalfOf`; a principal acting for no one makes `on-behalf-of` a deny, "cannot resolve
+ * approver". A policy that fails to evaluate is a deny naming it (Cedar would skip it).
+ * `preview` asks the same ahead of a call, its context unknown.
  */
-export function cedarPolicy({ policies, schema, people }: CedarPolicyOptions): Policy {
+export function cedarPolicy(
+  resolved: Pick<ResolvedConfig, "ops" | "workflows" | "collections">,
+  policies: readonly CedarPolicySource[],
+  people: PolicyPeople,
+): Policy {
   const cedar = cedarWasm();
-  const rules = policies.map(ruleOf);
-  const byId = new Map(rules.map((r) => [r.id, r]));
+  const schema = schemaOf(resolved, people);
   const staticPolicies = { ...Object.fromEntries(policies.map((p) => [p.id, p.text])), [ALLOW_ID]: ALLOW };
-  const version = createHash("sha256")
-    .update(JSON.stringify(Object.entries(staticPolicies)))
-    .digest("hex")
-    .slice(0, 12);
-  // Cedar caches both per thread, by name: the version names this policy's.
-  const set = `sanoma-${version}`;
+  const version = hash(staticPolicies);
+  // Cedar caches both per thread, by name: one for these policies over this schema.
+  const set = `sanoma-${hash({ staticPolicies, schema })}`;
   for (const answer of [cedar.preparsePolicySet(set, { staticPolicies }), cedar.preparseSchema(set, schema)]) {
     if (answer.type === "failure")
       throw new Error(`The Cedar policies do not parse: ${answer.errors.map(messageOf).join("; ")}`);
   }
-  const directory = directoryOf(people, schema);
-
-  const isHold = (id: string) => byId.get(id)?.hold !== undefined;
+  const directory = directoryOf(people);
 
   const decide = (call: PolicyCall): Decision => {
     const principal = directory.principal(call.actor);
-    const request = requestOf(directory, principal, call.op.id, call.target, {
-      input: call.input,
-      ...(call.before !== undefined && { before: call.before }),
-      run: { id: call.run.id, workflow: call.run.workflow },
-      approverGroups: approverGroupsOf(call, directory),
-      approvedBy: approvedByOf(call),
-      mount: call.mount ?? "node",
-    });
     const answer = cedar.statefulIsAuthorized({
-      ...request,
+      ...requestOf(schema, directory, principal, call.op.id, call.target, {
+        input: call.input,
+        ...(call.before !== undefined && { before: call.before }),
+      }),
       preparsedSchemaName: set,
       preparsedPolicySetId: set,
       validateRequest: true,
@@ -188,147 +218,138 @@ export function cedarPolicy({ policies, schema, people }: CedarPolicyOptions): P
     if (answer.type === "failure") throw new Error(answer.errors.map(messageOf).join("; "));
     const { decision, diagnostics } = answer.response;
     const failed = diagnostics.errors[0];
-    if (failed) {
-      const rule = byId.get(failed.policyId);
+    if (failed)
       return {
         kind: "deny",
         reason: `${failed.policyId} failed: ${messageOf(failed.error)}`,
-        rule: failed.policyId,
-        ...(rule?.title && { title: rule.title }),
+        reasons: [failed.policyId],
       };
-    }
     const reasons = diagnostics.reason;
     if (decision === "allow") return { kind: "allow", reasons };
-    // In the order they are written, so the first hold asked for is the same every time.
-    const forbids = rules.filter((r) => reasons.includes(r.id));
-    const refusing = forbids.find((r) => r.hold === undefined);
-    if (refusing) return refused(refusing, refusing.reason ?? `Refused by ${refusing.id}`, reasons);
-    for (const rule of forbids) {
-      const approver = approverOf(rule.hold!, principal, directory);
-      if (approver === undefined) return refused(rule, "cannot resolve approver", reasons);
+    // In the order written, so the first hold asked for is the same every time.
+    const forbids = policies.filter((p) => reasons.includes(p.id));
+    const refusing = forbids.find((p) => p.hold === undefined);
+    if (refusing) return { kind: "deny", reason: refusing.reason ?? `Refused by ${refusing.id}`, reasons };
+    for (const p of forbids) {
+      const approver = holdOf(p, principal, directory);
+      if (approver === undefined) return { kind: "deny", reason: "cannot resolve approver", reasons };
       if (approvedFor(call.run.approvals, call.op.id, approver)) continue;
-      return { kind: "approve", approver, rule: rule.id, ...(rule.title !== undefined && { title: rule.title }) };
+      return { kind: "approve", approver, title: p.title ?? `${call.op.id} needs ${approverLabel(approver)}` };
     }
-    return { kind: "allow", reasons, rule: forbids[0]!.id };
+    return { kind: "allow", reasons };
   };
 
-  const preview = ({ principal, action, resource, context = {} }: PreviewRequest): Preview => {
-    const contextType = contextOf(schema, action);
-    const { approverGroups, approvedBy, ...rest } = context;
-    const known: Record<string, unknown> = {
-      ...rest,
-      ...(approverGroups && { approverGroups: approverGroups.map((g) => uid("Group", g)) }),
-      ...(approvedBy && { approvedBy: approvedBy.map((id) => uid("Principal", id)) }),
-    };
-    // Every field not given is unknown, for partial evaluation; one the action does not have is not sent.
-    for (const name of Object.keys(contextType?.attributes ?? {})) {
-      known[name] ??= UNKNOWN(name);
-    }
-    const request = requestOf(directory, directory.principal(principal), action, resource, known);
-    const answer = cedar.isAuthorizedPartial({
-      ...request,
-      schema,
-      validateRequest: false,
-      policies: { staticPolicies },
+  const preview = (requests: readonly PreviewRequest[]): PreviewAnswer[] =>
+    requests.map(({ principal: actor, action, resource }) => {
+      const principal = directory.principal(actor);
+      // Every field of the context is unknown: partial evaluation leaves what depends on it.
+      const unknown = Object.fromEntries(
+        Object.keys(contextOf(schema, action.id)?.attributes ?? {}).map((name) => [name, UNKNOWN(name)]),
+      );
+      const request = requestOf(schema, directory, principal, action.id, resource, unknown);
+      const answer = cedar.isAuthorizedPartial({
+        ...request,
+        schema,
+        validateRequest: false,
+        policies: { staticPolicies },
+      });
+      if (answer.type === "failure") throw new Error(answer.errors.map(messageOf).join("; "));
+      const { decision, mustBeDetermining, nontrivialResiduals, residuals } = answer.response;
+      if (decision === "allow") return { answer: "allow" };
+      if (decision === "deny") {
+        const forbids = policies.filter((p) => mustBeDetermining.includes(p.id));
+        const refusing =
+          forbids.find((p) => p.hold === undefined) ?? forbids.find((p) => !holdOf(p, principal, directory));
+        if (refusing || !forbids.length) return { answer: "deny", ...(refusing && { rule: ruleOf(refusing) }) };
+        return { answer: "hold", rule: ruleOf(forbids[0]!), approver: holdOf(forbids[0]!, principal, directory)! };
+      }
+      // Undecided: a residual forbid whose conditions fold to false cannot apply.
+      const open = policies.find((p) => nontrivialResiduals.includes(p.id) && mayApply(residuals[p.id]!));
+      return open ? { answer: "depends", rule: ruleOf(open) } : { answer: "allow" };
     });
-    if (answer.type === "failure") throw new Error(answer.errors.map(messageOf).join("; "));
-    const { decision, mustBeDetermining, nontrivialResiduals, residuals } = answer.response;
-    if (decision === "allow") return "allow";
-    if (decision === "deny") {
-      const forbids = mustBeDetermining.filter((id) => byId.get(id)?.effect === "forbid");
-      return forbids.length && forbids.every(isHold) ? "hold" : "deny";
-    }
-    // Undecided: a residual forbid whose conditions fold to false cannot apply.
-    const open = nontrivialResiduals.filter((id) => residuals[id]?.effect === "forbid" && mayApply(residuals[id]!));
-    return open.length ? "depends" : "allow";
-  };
 
-  return Object.freeze(Object.assign(decide, { version, rules, preview }));
+  return Object.freeze(Object.assign(decide, { kind: "cedar" as const, version, preview }));
 }
 
-/** A policy's rule, as `describeConfig` lists it: its effect and annotations, read with `policyToJson`. */
-function ruleOf({ id, text, file }: PolicySource): PolicyRule {
-  const answer = cedarWasm().policyToJson(text);
-  if (answer.type === "failure")
-    throw new Error(`Policy ${id} does not parse: ${answer.errors.map(messageOf).join("; ")}`);
-  const { effect, annotations = {} } = answer.json;
-  return {
-    id,
-    ...(file !== undefined && { file }),
-    effect,
-    ...(annotations.hold !== undefined && { hold: annotations.hold }),
-    ...(annotations.title !== undefined && { title: annotations.title }),
-    ...(annotations.reason !== undefined && { reason: annotations.reason }),
-  };
-}
-
-const refused = (rule: PolicyRule, reason: string, reasons: string[]): Decision => ({
-  kind: "deny",
-  reason,
-  reasons,
-  rule: rule.id,
-  ...(rule.title !== undefined && { title: rule.title }),
+/** A policy as a preview names it. */
+const ruleOf = (p: CedarPolicySource) => ({
+  id: p.id,
+  file: p.file,
+  ...(p.title !== undefined && { title: p.title }),
+  ...(p.reason !== undefined && { reason: p.reason }),
 });
 
-/** A principal as the policy sees it (C1): its groups and whom it acts for, which the runtime fills from the people. */
+/** The first 12 hex digits of a SHA-256 of `value` as JSON. */
+const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 12);
+
+/** A principal as the policy sees it: its groups and whom it acts for. */
 type Actor = Principal & { onBehalfOf?: string };
 
 const uid = (type: string, id: string) => ({ type: `${NAMESPACE}::${type}`, id });
 const UNKNOWN = (name: string) => ({ __extn: { fn: "unknown", arg: name } });
 
-interface Directory {
-  /** The principal with the groups it is a member of and the `onBehalfOf` it is declared with added. */
-  principal(actor: Principal): Actor;
-  /** The entities of every declared person, and of `actor`, as it is. */
-  entities(actor: Actor): EntityJson[];
-  /** True for a group the schema has: a declared one, or any when none is declared (the schema then enumerates none). */
-  hasGroup(name: string): boolean;
-  /** True for a declared group and for a declared person's id: whom a hold may name. */
-  isGroup(name: string): boolean;
-  isPerson(id: string): boolean;
-  /** The declared groups `id` is a member of. */
-  groupsOf(id: string): string[];
-  schema: SchemaJson<string>;
+// Stand-ins for P1's `principalOf(id, resources)` and `approverOf(name, resources)` in
+// `shared.ts` (#197), with their signatures: replaced by those once they land.
+
+/** The declared principal `id`, with the groups it is a member of (an agent's among them, `agents`), or undefined. */
+function principalOf(id: string, resources: PolicyPeople): Actor | undefined {
+  const declared = resources.people.find((p) => p.id === id);
+  if (!declared) return undefined;
+  const groups = resources.groups.filter((g) => g.members.includes(id)).map((g) => g.name);
+  return { id, groups, ...(declared.onBehalfOf !== undefined && { onBehalfOf: declared.onBehalfOf }) };
 }
 
-/** The people, as entities: each a `Principal` in its groups, with `onBehalfOf` when it acts for someone. */
-function directoryOf(people: PolicyPeople, schema: SchemaJson<string>): Directory {
-  const groups = new Set(groupNamesOf(people));
-  const declared = new Map(people.people.map((p) => [p.id, p]));
-  const hasGroup = (name: string) => !groups.size || groups.has(name);
-  const groupsOf = (id: string) => people.groups.filter((g) => g.members.includes(id)).map((g) => g.name);
+/** Who `name` addresses as an approver: a declared group (`agents` among them), else a declared person, else undefined. */
+function approverOf(name: string, resources: PolicyPeople): Approver | undefined {
+  if (name === AGENTS || resources.groups.some((g) => g.name === name)) return { group: name };
+  return resources.people.some((p) => p.id === name) ? name : undefined;
+}
+
+interface Directory {
+  /** The principal with the groups and `onBehalfOf` it is declared with added. */
+  principal(actor: Principal): Actor;
+  /** The entities of every declared principal, and of `actor`, as it is. */
+  entities(actor: Actor): EntityJson[];
+  approver(name: string): Approver | undefined;
+}
+
+/** The people as Cedar entities: each a `Principal` in its groups, with `onBehalfOf` when it acts for someone. */
+function directoryOf(people: PolicyPeople): Directory {
+  const groups = new Set([...people.groups.map((g) => g.name), AGENTS]);
   const principal = (actor: Principal): Actor => {
-    const onBehalfOf = (actor as Actor).onBehalfOf ?? declared.get(actor.id)?.onBehalfOf;
+    const declared = principalOf(actor.id, people);
+    const onBehalfOf = (actor as Actor).onBehalfOf ?? declared?.onBehalfOf;
     return {
       ...actor,
-      groups: [...new Set([...(actor.groups ?? []), ...groupsOf(actor.id)])],
+      groups: [...new Set([...(actor.groups ?? []), ...(declared?.groups ?? [])])],
       ...(onBehalfOf !== undefined && { onBehalfOf }),
     };
   };
   const entityOf = (p: Actor): EntityJson => ({
     uid: uid("Principal", p.id),
     attrs: p.onBehalfOf === undefined ? {} : { onBehalfOf: { __entity: uid("Principal", p.onBehalfOf) } },
-    // Only the groups the schema has: it enumerates the declared ones, and Cedar refuses any other.
-    parents: (p.groups ?? []).filter(hasGroup).map((g) => uid("Group", g)),
+    // Only the groups the schema enumerates: Cedar refuses any other.
+    parents: (p.groups ?? []).filter((g) => groups.has(g)).map((g) => uid("Group", g)),
   });
-  const everyone = [...declared.keys()].map((id) => entityOf(principal({ id })));
+  const everyone = people.people.map((p) => entityOf(principal({ id: p.id })));
   return {
     principal,
     entities: (actor) => [...everyone.filter((e) => (e.uid as { id: string }).id !== actor.id), entityOf(actor)],
-    hasGroup,
-    isGroup: (name) => groups.has(name),
-    isPerson: (id) => declared.has(id),
-    groupsOf,
-    schema,
+    approver: (name) => approverOf(name, people),
   };
 }
 
+/** Whom a `@hold` policy holds the call for, resolved for `principal`: undefined when it names no one. */
+const holdOf = (p: CedarPolicySource, principal: Actor, directory: Directory): Approver | undefined =>
+  p.hold === ON_BEHALF_OF ? principal.onBehalfOf : directory.approver(p.hold!);
+
 /**
- * The request for `action` as `principal`: the resource its kind of action applies to (a
- * workflow, a site, a collection, or an operation's target, in its collection for `data`), and
- * the context shaped to the action's context type (`shape`).
+ * The request for `action` as `principal`: a workflow start on its `Workflow`, an operation on
+ * its target (the operation's id when it has none), in its collection for `data`; the context
+ * shaped to the action's context type (`shape`).
  */
 function requestOf(
+  schema: CedarSchemaJson,
   directory: Directory,
   principal: Actor,
   action: string,
@@ -336,17 +357,16 @@ function requestOf(
   context: Record<string, unknown>,
 ) {
   const entities = directory.entities(principal);
-  const kind = kindOf(action);
   let resource;
-  if (kind === undefined) {
+  if (action.startsWith("workflow:")) {
+    resource = uid("Workflow", action.slice("workflow:".length));
+  } else {
     resource = uid("Target", target ?? action);
     const [vendor, collection] = action.split(".");
     const parents = vendor === DATA_VENDOR && collection ? [uid("Collection", collection)] : [];
     entities.push({ uid: resource, attrs: {}, parents });
-  } else {
-    resource = uid(kind, action.slice(action.indexOf(":") + 1));
   }
-  const type = contextOf(directory.schema, action);
+  const type = contextOf(schema, action);
   return {
     principal: uid("Principal", principal.id),
     action: uid("Action", action),
@@ -356,12 +376,7 @@ function requestOf(
   };
 }
 
-const KINDS: Record<string, string> = { workflow: "Workflow", site: "Site", collection: "Collection" };
-
-/** The entity type `workflow:<name>`, `site:<name>` and `collection:<name>` act on; none for an operation's id. */
-const kindOf = (action: string): string | undefined => KINDS[action.split(":", 1)[0]!];
-
-/** A Cedar type, as the generated schema writes them. */
+/** A Cedar type, as `schemaOf` writes them. */
 interface CedarType {
   type: string;
   name?: string;
@@ -370,13 +385,13 @@ interface CedarType {
 }
 
 /** The action's context type in the schema, when it is there. */
-const contextOf = (schema: SchemaJson<string>, action: string) =>
+const contextOf = (schema: CedarSchemaJson, action: string) =>
   schema[NAMESPACE]?.actions[action]?.appliesTo?.context as CedarType | undefined;
 
 /**
  * A value as Cedar takes it for `type`: a record's fields it declares only, a set's elements, a
- * number where it is a `String` as text. An unknown (`{ __extn: unknown }`) and an entity
- * reference pass as they are; what does not fit is left out (undefined), as `null` is.
+ * number where it is a `String` as text. An unknown (`{ __extn: unknown }`) passes as it is; what
+ * does not fit is left out (undefined), as `null` is.
  */
 function shape(value: unknown, type: CedarType): unknown {
   if (value === null || value === undefined) return undefined;
@@ -391,60 +406,24 @@ function shape(value: unknown, type: CedarType): unknown {
       }),
     );
   }
-  switch (type.type) {
-    case "Set":
-      return Array.isArray(value)
-        ? value.map((v) => shape(v, type.element!)).filter((v) => v !== undefined)
-        : undefined;
-    case "Entity":
-      return value;
-    case "EntityOrCommon":
-      if (type.name === "String")
-        return typeof value === "string"
-          ? value
-          : typeof value === "number" || typeof value === "boolean"
-            ? String(value)
-            : undefined;
-      if (type.name === "Long") return Number.isSafeInteger(value) ? value : undefined;
-      if (type.name === "Bool") return typeof value === "boolean" ? value : undefined;
-      return undefined;
+  if (type.type === "Set") {
+    return Array.isArray(value) ? value.map((v) => shape(v, type.element!)).filter((v) => v !== undefined) : undefined;
+  }
+  switch (type.name) {
+    case "String":
+      return typeof value === "string" ? value : typeof value === "number" ? String(value) : undefined;
+    case "Long":
+      return Number.isSafeInteger(value) ? value : undefined;
+    case "Bool":
+      return typeof value === "boolean" ? value : undefined;
     default:
       return undefined;
   }
 }
 
-/**
- * The groups of the approvers of the run's approved approvals that cover the call: a group an
- * approval was addressed to, and the declared groups of whoever decided it.
- */
-function approverGroupsOf(call: PolicyCall, directory: Directory) {
-  const groups = covering(call).flatMap((a) => [
-    ...(typeof a.approver === "string" ? [] : [a.approver.group]),
-    ...(a.decidedBy === undefined ? [] : directory.groupsOf(a.decidedBy)),
-  ]);
-  return [...new Set(groups)].filter(directory.hasGroup).map((g) => uid("Group", g));
-}
-
-/** Who decided the run's approved approvals that cover the call. */
-const approvedByOf = (call: PolicyCall) =>
-  [...new Set(covering(call).flatMap((a) => (a.decidedBy === undefined ? [] : [a.decidedBy])))].map((id) =>
-    uid("Principal", id),
-  );
-
-const covering = (call: PolicyCall) =>
-  call.run.approvals.filter((a) => a.status === "approved" && a.covers.includes(call.op.id));
-
-/** Who a hold is for: `@hold("<group>" | "<person id>" | "on-behalf-of")`, resolved for `principal`. */
-function approverOf(hold: string, principal: Actor, directory: Directory): Approver | undefined {
-  if (hold === "on-behalf-of") return principal.onBehalfOf;
-  if (directory.isGroup(hold)) return { group: hold };
-  return directory.isPerson(hold) ? hold : undefined;
-}
-
 /** False when one of a residual policy's conditions is already decided against it. */
-function mayApply({ conditions }: PolicyJson): boolean {
-  return !conditions.some((c: Clause) => folded(c.body) === (c.kind === "unless"));
-}
+const mayApply = ({ conditions }: PolicyJson): boolean =>
+  !conditions.some((c) => folded(c.body) === (c.kind === "unless"));
 
 type Pair = { left: Expr; right: Expr };
 
@@ -465,8 +444,7 @@ function folded(expr: Expr): boolean | undefined {
   const pair = e["&&"] ?? e["||"];
   if (pair) {
     const and = e["&&"] !== undefined;
-    const { left, right } = pair;
-    const [l, r] = [folded(left), folded(right)];
+    const [l, r] = [folded(pair.left), folded(pair.right)];
     // `and`: false decides it, true twice makes it; `or`: the other way round.
     if (l === !and || r === !and) return !and;
     return l === and && r === and ? and : undefined;
@@ -483,15 +461,14 @@ function folded(expr: Expr): boolean | undefined {
 const messageOf = (e: DetailedError) => (e.help ? `${e.message} (${e.help})` : e.message);
 
 /** A Cedar error as a problem at its place in `text`, which starts on line `at` of `file`. */
-function problemOf(error: DetailedError, where: { file?: string; text?: string; at?: number }): PolicyProblem {
+function problemOf(error: DetailedError, where: { file: string; text: string; at?: number }): PolicyProblem {
   const start = error.sourceLocations?.[0]?.start;
+  // Cedar counts bytes; a line and column count characters.
   const place =
-    where.text !== undefined && start !== undefined
-      ? at(where.text, Buffer.from(where.text).subarray(0, start).toString().length, where.at)
-      : where.at === undefined
-        ? {}
-        : { line: where.at };
-  return { ...(where.file !== undefined && { file: where.file }), ...place, message: messageOf(error) };
+    start === undefined
+      ? { line: where.at ?? 1 }
+      : at(where.text, Buffer.from(where.text).subarray(0, start).toString().length, where.at);
+  return { file: where.file, ...place, message: messageOf(error) };
 }
 
 /** The line and column of `offset` in `text`, which starts on line `first`. */

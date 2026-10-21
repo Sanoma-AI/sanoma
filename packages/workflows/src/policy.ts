@@ -33,46 +33,32 @@ export interface PolicyCall {
    * A policy request has `requestedBy: "policy"` and the `op` it held.
    */
   run: { id: string; workflow: string; approvals: readonly ApprovalState[] };
-  /** Where the call is decided: a run's start, an operation node (the default), a direct call, an approval's decision, a view. */
-  mount?: Mount;
   /** For a collection's `save` or `delete`: the record as it was, when there was one. */
   before?: unknown;
 }
-
-/** Where a principal's intent is decided: the places the one authorization step is mounted. */
-export type Mount = "start" | "node" | "direct" | "decide" | "view";
 
 /**
  * A policy's answer. `reasons` say why, for whoever reads the ledger; they change nothing
  * about what happens to the call.
  */
 export type Decision =
-  | ({ kind: "allow"; reasons?: string[] } & DecidingRule)
-  | ({ kind: "deny"; reason: string; reasons?: string[] } & DecidingRule)
+  | { kind: "allow"; reasons?: string[] }
+  | { kind: "deny"; reason: string; reasons?: string[] }
   | ApproveDecision;
-
-/** The rule that decided, for whoever reads the ledger or the Inbox: a Cedar policy's id, and its `@title`. */
-interface DecidingRule {
-  rule?: string;
-  title?: string;
-}
 
 /**
  * Hold the call until the approver decides: a person's id, or `{ group }` for anyone in it.
  * The approval covers the held operation, and `covers` adds others, so a policy can let their
  * later calls through once it is approved.
  */
-interface ApproveDecision extends DecidingRule {
+interface ApproveDecision {
   kind: "approve";
   approver: Approver;
+  title?: string;
   covers?: Op[];
 }
 
 const ReasonList = z.array(z.string(), { error: "reasons must be a list of strings" }).optional();
-const RuleFields = {
-  rule: z.string({ error: "the rule must be a string" }).optional(),
-  title: z.string({ error: "the title must be a string" }).optional(),
-};
 
 /**
  * Checks a policy's answer. Parsing also copies it, so nothing else the policy returned is kept,
@@ -81,22 +67,21 @@ const RuleFields = {
 export const DecisionSchema = z.discriminatedUnion(
   "kind",
   [
-    z.object({ kind: z.literal("allow"), reasons: ReasonList, ...RuleFields }),
+    z.object({ kind: z.literal("allow"), reasons: ReasonList }),
+    z.object({ kind: z.literal("deny"), reason: z.string({ error: "deny needs a reason" }), reasons: ReasonList }),
     z.object({
-      kind: z.literal("deny"),
-      reason: z.string({ error: "deny needs a reason" }),
-      reasons: ReasonList,
-      ...RuleFields,
+      kind: z.literal("approve"),
+      approver: Approver,
+      title: z.string({ error: "the title must be a string" }).optional(),
+      covers: Covers,
     }),
-    z.object({ kind: z.literal("approve"), approver: Approver, covers: Covers, ...RuleFields }),
   ],
   { error: "not a decision" },
 );
 
 /**
- * A decision as checked and as the ledger records it: `covers` by op id, the `rule` that decided
- * and its `title` when the policy names them (a Cedar policy's id and `@title`), and the
- * `version` of the policy that made it, when it has one.
+ * A decision as checked and as the ledger records it: `covers` by op id, and the `version` of
+ * the policy that made it, when it has one.
  */
 export type RecordedDecision = z.output<typeof DecisionSchema> & { policyVersion?: string };
 
@@ -126,50 +111,31 @@ export function approve(approver: Approver, { title, covers }: { title?: string;
 export type Policy = ((call: PolicyCall) => Decision | Promise<Decision>) & {
   /** Names this version of the policy, from `definePolicy(fn, { version })`. */
   readonly version?: string;
-  /** A Cedar policy's rules (`cedarPolicy`), for the app to show; none for a function. */
-  readonly rules?: readonly PolicyRule[];
-  /** What the policy would answer before the call is made, with parts of it unknown (`PreviewRequest`). */
-  readonly preview?: (request: PreviewRequest) => Preview;
+  /** `cedar` for a policy made from `policies/*.cedar` (`cedarPolicy`); a function has none. */
+  readonly kind?: "cedar";
+  /**
+   * What the policy would answer for each request ahead of the call, its input unknown. A
+   * function cannot be asked ahead: `definePolicy`'s have no `preview`.
+   */
+  readonly preview?: (requests: readonly PreviewRequest[]) => PreviewAnswer[];
 };
 
-/** One rule of a Cedar policy, read from its text: a `forbid` with `@hold` holds, one without denies. */
-export interface PolicyRule {
-  id: string;
-  /** Where it is written, relative to the repo's root, such as `policies/money.cedar`. */
-  file?: string;
-  effect: "permit" | "forbid";
-  /** `@hold(...)`: a group, a person's id, or `on-behalf-of`. */
-  hold?: string;
-  /** `@title(...)`: the Inbox title of its hold. */
-  title?: string;
-  /** `@reason(...)`: the message of its deny. */
-  reason?: string;
-}
-
-/**
- * A question asked ahead of a call: may `principal` take `action` (an operation's id,
- * `workflow:<name>`, `site:<name>` or `collection:<name>`) on `resource` (an operation's target),
- * with the parts of the context given, the rest unknown.
- */
+/** A question asked ahead of a call: may `principal` take `action` (an operation, or `workflow:<name>` to start one) on `resource` (an operation's target)? */
 export interface PreviewRequest {
   principal: Principal;
-  action: string;
+  action: { id: string; effect?: Effect };
   resource?: string;
-  context?: Partial<{
-    input: unknown;
-    before: unknown;
-    run: { id: string; workflow: string };
-    approverGroups: string[];
-    approvedBy: string[];
-    mount: Mount;
-  }>;
 }
 
 /**
- * A preview's answer: `depends` when the unknown parts decide it, `custom` for a policy written as
- * a function, which cannot be asked ahead.
+ * A preview's answer: `depends` when the unknown input decides it. `rule` is the Cedar policy
+ * behind a hold, a deny or a dependence; `approver`, a hold's.
  */
-export type Preview = "allow" | "deny" | "hold" | "depends" | "custom";
+export interface PreviewAnswer {
+  answer: "allow" | "hold" | "deny" | "depends";
+  rule?: { id: string; file: string; title?: string; reason?: string };
+  approver?: Approver;
+}
 
 /** A policy, optionally named with a version so a reader can tell which rules decided a call. */
 export function definePolicy(
@@ -180,12 +146,16 @@ export function definePolicy(
   if (options.version !== undefined && (typeof options.version !== "string" || !options.version.trim())) {
     throw new Error("definePolicy: `version` must be a non-empty string");
   }
-  const defined = Object.assign((call: PolicyCall) => policy(call), { preview: (): Preview => "custom" });
+  const defined = (call: PolicyCall) => policy(call);
   return Object.freeze(options.version === undefined ? defined : Object.assign(defined, { version: options.version }));
 }
 
 /** Allows every operation call: the policy of a config that names none and has no `policies/*.cedar`. */
-export const allowAll: Policy = Object.freeze(Object.assign(() => allow(), { preview: (): Preview => "allow" }));
+export const allowAll: Policy = Object.freeze(
+  Object.assign(() => allow(), {
+    preview: (requests: readonly PreviewRequest[]): PreviewAnswer[] => requests.map(() => ({ answer: "allow" })),
+  }),
+);
 
 /**
  * True when an approval in the run was approved, covers the operation, and was addressed to

@@ -1,14 +1,16 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import type { EntityType, RecordType, SchemaJson, Type, TypeOfAttribute } from "@cedar-policy/cedar-wasm/nodejs";
-import type { ConfigDescription } from "./describe.ts";
+import { recordSchemaOf } from "./collection.ts";
+import type { ResolvedConfig } from "./config.ts";
+import { jsonSchemaOf } from "./define.ts";
 import type { Effect } from "./op.ts";
 import { isObject } from "./resource.ts";
 import { DATA_VENDOR } from "./shared.ts";
 
-// The Cedar schema a company's policies are validated and decided against, `.sanoma/schema.cedarschema`:
-// generated from `describeConfig` and the declared people, never written by hand.
+// The Cedar schema a company's policies are validated and decided against: made from the
+// resolved config and the people, in memory for the evaluator, and written as text to
+// `.sanoma/schema.cedarschema` for the policies' author.
 
 const require = createRequire(import.meta.url);
 let wasm: typeof import("@cedar-policy/cedar-wasm/nodejs") | undefined;
@@ -16,42 +18,39 @@ let wasm: typeof import("@cedar-policy/cedar-wasm/nodejs") | undefined;
 /** `@cedar-policy/cedar-wasm`'s Node build, loaded (synchronously, once) on first use, so a process that never decides with Cedar never loads it. */
 export const cedarWasm = () => (wasm ??= require("@cedar-policy/cedar-wasm/nodejs") as typeof wasm)!;
 
-/** Where `writeSchema` writes the schema's text, under a company's root. */
+/** The schema as Cedar's JSON format has it. */
+export type CedarSchemaJson = SchemaJson<string>;
+
+/** Where the schema's text is written, under a company's root. */
 export const SCHEMA_FILE = join(".sanoma", "schema.cedarschema");
 
 /** The schema's namespace: policies name `Sanoma::Group::"finance"`, `Sanoma::Action::"effect:money"`. */
 export const NAMESPACE = "Sanoma";
 
 /** Every effect, each an action group (`effect:<effect>`) its operations are in. */
-export const EFFECTS: readonly Effect[] = ["read", "write", "publish", "send", "money", "access"];
+const EFFECTS: readonly Effect[] = ["read", "write", "publish", "send", "money", "access"];
 
-/** The action group of every site and collection view. */
-export const VIEW = "view";
+/** The action group every workflow start (`workflow:<name>`) is in. */
+export const START = "start";
+
+/** The built-in group every agent is in: a rule about agents is `principal in Sanoma::Group::"agents"`. */
+export const AGENTS = "agents";
 
 /**
- * The people and agents a policy decides over, and the groups they are in: `resources/people.ts`,
- * read. Membership is the groups' (`members`); an agent is a member of `agents`.
+ * The people and agents a policy decides over, and their groups: the resolved resources of the
+ * built-in `sanoma.person`, `sanoma.agent` and `sanoma.group`. Membership is the groups'.
  */
 export interface PolicyPeople {
   people: readonly { id: string; onBehalfOf?: string }[];
   groups: readonly { name: string; members: readonly string[] }[];
 }
 
-/** The built-in group every agent is in: a rule about agents is `principal in Sanoma::Group::"agents"`. */
-export const AGENTS = "agents";
-
+/** No one declared: the launcher's people until the people file is read. */
 export const NO_PEOPLE: PolicyPeople = { people: [], groups: [] };
 
-/** The schema: Cedar's text (what `writeSchema` writes), the same as JSON (what `cedarPolicy` takes), and what could not be typed (each a warning). */
-export interface GeneratedSchema {
-  text: string;
-  json: SchemaJson<string>;
-  /** One line each, `<action>: <path> …`: a field left out of the schema, or typed `String` where it is a decimal number. */
-  problems: string[];
-}
-
-/** What `generateSchema` reads of a description. */
-export type SchemaSource = Pick<ConfigDescription, "ops" | "workflows" | "collections" | "sites" | "resourceTypes">;
+/** The groups a policy may name: the declared ones and `agents`, sorted. */
+export const groupNamesOf = (people: PolicyPeople): string[] =>
+  [...new Set([...people.groups.map((g) => g.name), AGENTS])].toSorted();
 
 const STRING = { type: "EntityOrCommon", name: "String" } as const;
 const LONG = { type: "EntityOrCommon", name: "Long" } as const;
@@ -63,168 +62,136 @@ const record = (attributes: Record<string, TypeOfAttribute<string>>): RecordType
 });
 const optional = (type: Type<string>): TypeOfAttribute<string> => ({ ...type, required: false });
 
-/** The groups a policy may name: the declared ones, with `agents`; none when none is declared, and then any name is a group. */
-export const groupNamesOf = (people: PolicyPeople): string[] =>
-  people.groups.length ? [...new Set([...people.groups.map((g) => g.name), AGENTS])] : [];
+/** The Cedar type of a zod schema, through its JSON Schema; undefined when it has none. */
+const typeOf = (schema: Parameters<typeof jsonSchemaOf>[0]) => {
+  const json = jsonSchemaOf(schema, "input");
+  return cedarType(json, { root: json, seen: new Set() });
+};
+
+/** A context's `input`, typed from a zod schema: none when it has no Cedar type. */
+const input = (schema: Parameters<typeof jsonSchemaOf>[0]): Record<string, TypeOfAttribute<string>> => {
+  const type = typeOf(schema);
+  return type ? { input: type } : {};
+};
+
+/** A collection's operations that change a record, whose context has the record as it was (`before`). */
+const WRITES = new Set(["save", "delete"]);
 
 /**
- * The Cedar schema for a description and the people: namespace `Sanoma`, with
+ * The Cedar schema for a resolved config and its people, namespace `Sanoma`:
  *
- * - entity types `Principal` (in `Group`, with `onBehalfOf?`), `Group`, `Collection`, `Site`,
- *   `Workflow` (each an enumeration of the declared names, `agents` among the groups, when there
- *   is one) and `Target` (in `Collection`);
+ * - `entity Group enum [...]`, the declared groups and `agents`, so a policy naming another fails
+ *   validation; `entity Principal in [Group] { onBehalfOf?: Principal }`; `Collection`;
+ *   `Target in [Collection]`; `Workflow`;
  * - an action per operation id, in its effect's group (`effect:money`), on a `Target`, with
- *   `context` `{ input, before? (a collection's save and delete), run, approverGroups,
- *   approvedBy, mount }`, `input` typed from the operation's input schema;
- * - `workflow:<name>` (a start, on a `Workflow`, with the workflow's `input`), and `site:<name>`
- *   and `collection:<name>` (views, in `view`), each with `mount`.
+ *   `context` `{ input, before? }`: `input` from the operation's input schema, `before` the record
+ *   as it was for a collection's `save` and `delete`;
+ * - `workflow:<name>` per workflow, in the group `start`, on a `Workflow`, with its `input`.
  *
- * JSON Schema to Cedar: string and enum `String`, integer `Long`, boolean `Bool`, object a record
- * (its optional fields optional), array a `Set`. A decimal number is a `String`, and a field
- * with no Cedar type (a union of types, a map, a recursive type) is left out: each a line in
- * `problems`. Pure: the same description and people give the same schema.
+ * Zod to Cedar, through JSON Schema: string and enum `String`, integer `Long`, boolean `Bool`,
+ * object a record (its optional and nullable fields optional), array a `Set`; a decimal number
+ * is a `String`; a field with no Cedar type (a union of types, a map, a recursive type) is left
+ * out, so a policy naming it fails validation. Pure: the same config and people give the same schema.
  */
-export function generateSchema(description: SchemaSource, people: PolicyPeople): GeneratedSchema {
-  const problems: string[] = [];
-  const types = new Map(description.resourceTypes.map((t) => [t.schema.$id as string, t.schema]));
-  const typed = (action: string, schema: Record<string, unknown>, path = "input") =>
-    cedarType(schema, { root: schema, types, seen: new Set(), warn: (p) => problems.push(`${action}: ${p}`) }, path);
-
-  const entityTypes: SchemaJson<string>[string]["entityTypes"] = {
-    Principal: { memberOfTypes: ["Group"], shape: record({ onBehalfOf: optional(entity("Principal")) }) },
-    Group: enumeration(groupNamesOf(people)),
-    Collection: enumeration(description.collections.map((c) => c.name)),
-    Target: { memberOfTypes: ["Collection"] },
-    Site: enumeration(description.sites.map((s) => s.name)),
-    Workflow: enumeration(description.workflows.map((w) => w.name)),
-  };
-
+export function schemaOf(
+  resolved: Pick<ResolvedConfig, "ops" | "workflows" | "collections">,
+  people: PolicyPeople,
+): CedarSchemaJson {
   const applies = (resource: string, context: Record<string, TypeOfAttribute<string>>) => ({
     principalTypes: ["Principal"],
     resourceTypes: [resource],
     context: record(context),
   });
-  const actions: SchemaJson<string>[string]["actions"] = { [VIEW]: {} };
+  const actions: CedarSchemaJson[string]["actions"] = { [START]: {} };
   for (const effect of EFFECTS) actions[`effect:${effect}`] = {};
-  const befores = new Map(
-    description.collections.map((c) => [c.name, typed(`collection:${c.name}`, c.record, "before")] as const),
-  );
-  for (const op of description.ops) {
-    const input = typed(op.id, op.input);
-    const before = op.vendor === DATA_VENDOR && WRITES.has(op.name) ? befores.get(op.resource) : undefined;
+  for (const op of [...resolved.ops.values()].toSorted((a, b) => a.id.localeCompare(b.id))) {
+    const collection =
+      op.vendor === DATA_VENDOR && WRITES.has(op.name) ? resolved.collections.get(op.resource) : undefined;
+    const before = collection && typeOf(recordSchemaOf(collection));
     actions[op.id] = {
       memberOf: [{ id: `effect:${op.effect}` }],
-      appliesTo: applies("Target", {
-        ...(input && { input }),
-        ...(before && { before: optional(before) }),
-        run: record({ id: STRING, workflow: STRING }),
-        approverGroups: { type: "Set", element: entity("Group") },
-        approvedBy: { type: "Set", element: entity("Principal") },
-        mount: STRING,
-      }),
+      appliesTo: applies("Target", { ...input(op.input), ...(before && { before: optional(before) }) }),
     };
   }
-  for (const wf of description.workflows) {
-    const input = typed(`workflow:${wf.name}`, wf.input);
-    actions[`workflow:${wf.name}`] = { appliesTo: applies("Workflow", { ...(input && { input }), mount: STRING }) };
+  for (const name of [...resolved.workflows.keys()].toSorted()) {
+    actions[`workflow:${name}`] = {
+      memberOf: [{ id: START }],
+      appliesTo: applies("Workflow", input(resolved.workflows.get(name)!.input)),
+    };
   }
-  for (const [prefix, resource, names] of [
-    ["site", "Site", description.sites.map((s) => s.name)],
-    ["collection", "Collection", description.collections.map((c) => c.name)],
-  ] as const) {
-    for (const name of names) {
-      actions[`${prefix}:${name}`] = { memberOf: [{ id: VIEW }], appliesTo: applies(resource, { mount: STRING }) };
-    }
-  }
-
-  const json: SchemaJson<string> = { [NAMESPACE]: { entityTypes, actions } };
-  const answer = cedarWasm().schemaToText(json);
-  if (answer.type === "failure") {
-    throw new Error(`The generated Cedar schema does not parse: ${answer.errors.map((e) => e.message).join("; ")}`);
-  }
-  return { text: answer.text, json, problems: [...new Set(problems)] };
+  const entityTypes: Record<string, EntityType<string>> = {
+    Group: { enum: groupNamesOf(people) },
+    Principal: { memberOfTypes: ["Group"], shape: record({ onBehalfOf: optional(entity("Principal")) }) },
+    Collection: {},
+    Target: { memberOfTypes: ["Collection"] },
+    Workflow: {},
+  };
+  return { [NAMESPACE]: { entityTypes, actions } };
 }
 
-/** An entity type enumerating `names`, so a policy naming another fails validation; any id when there are none. */
-const enumeration = (names: readonly string[]): EntityType<string> =>
-  names.length ? { enum: [...names].toSorted() } : {};
-
-/** A collection's operations that change a record, whose context has the record as it was (`before`). */
-const WRITES = new Set(["save", "delete"]);
+/** The schema as Cedar's text, through the package's own `schemaToText`: what `.sanoma/schema.cedarschema` holds. */
+export function schemaText(schema: CedarSchemaJson): string {
+  const answer = cedarWasm().schemaToText(schema);
+  if (answer.type === "failure") {
+    throw new Error(`The Cedar schema does not print: ${answer.errors.map((e) => e.message).join("; ")}`);
+  }
+  return answer.text;
+}
 
 interface Typing {
   root: Record<string, unknown>;
-  /** The resource types' state schemas, by `$id`, which an operation's schema `$ref`s. */
-  types: ReadonlyMap<string, Record<string, unknown>>;
   /** The schemas being typed, to leave a recursive one out. */
   seen: Set<unknown>;
-  warn: (problem: string) => void;
 }
 
-/** The Cedar type of a JSON Schema (`describeConfig`'s, draft 2020-12), or undefined when it has none, with a warning naming `path`. */
-function cedarType(schema: unknown, typing: Typing, path: string): Type<string> | undefined {
-  const none = (why: string) => {
-    typing.warn(`${path} is left out: ${why}`);
-    return undefined;
-  };
-  if (!isObject(schema)) return none("it has no schema");
-  if (typing.seen.has(schema)) return none("its type refers to itself");
+/** The Cedar type of a JSON Schema (`jsonSchemaOf`'s, draft 2020-12), or undefined when it has none. */
+function cedarType(schema: unknown, typing: Typing): Type<string> | undefined {
+  if (!isObject(schema) || typing.seen.has(schema)) return undefined;
   if (typeof schema.$ref === "string") {
-    const ref = schema.$ref;
-    const target = ref.startsWith("#/$defs/")
-      ? (typing.root.$defs as Record<string, unknown> | undefined)?.[ref.slice("#/$defs/".length)]
-      : typing.types.get(ref);
-    return within(schema, typing, () => cedarType(target, typing, path));
+    const defs = typing.root.$defs as Record<string, unknown> | undefined;
+    const target = schema.$ref.startsWith("#/$defs/") ? defs?.[schema.$ref.slice("#/$defs/".length)] : undefined;
+    return within(schema, typing, () => cedarType(target, typing));
   }
-  const variants = (schema.anyOf ?? schema.oneOf) as unknown[] | undefined;
+  const variants = schema.anyOf ?? schema.oneOf;
   if (Array.isArray(variants)) {
-    const some = variants.filter((v) => !isNull(v));
-    const each = within(schema, typing, () => some.map((v) => cedarType(v, { ...typing, warn: () => {} }, path)));
+    const each = within(schema, typing, () => variants.filter((v) => !isNull(v)).map((v) => cedarType(v, typing)));
     const first = each[0];
-    if (first && each.every((t) => t && JSON.stringify(t) === JSON.stringify(first))) return first;
-    return none("its value is one of several types");
+    return first && each.every((t) => t && JSON.stringify(t) === JSON.stringify(first)) ? first : undefined;
   }
   const values = Array.isArray(schema.enum) ? schema.enum : "const" in schema ? [schema.const] : undefined;
   if (values) {
     if (values.every((v) => typeof v === "string")) return STRING;
     if (values.every((v) => Number.isSafeInteger(v))) return LONG;
-    if (values.every((v) => typeof v === "boolean")) return BOOL;
-    return none("its values are of several types");
+    return values.every((v) => typeof v === "boolean") ? BOOL : undefined;
   }
-  const type = Array.isArray(schema.type) ? schema.type.filter((t) => t !== "null") : [schema.type];
-  if (type.length !== 1) return none(type.length ? "its value is one of several types" : "it has no type");
-  switch (type[0]) {
+  const types = Array.isArray(schema.type) ? schema.type.filter((t) => t !== "null") : [schema.type];
+  if (types.length !== 1) return undefined;
+  switch (types[0]) {
     case "string":
+    case "number":
+      // Cedar has no decimal number: one is compared as text.
       return STRING;
     case "integer":
       return LONG;
     case "boolean":
       return BOOL;
-    case "number":
-      typing.warn(`${path} is a decimal number, a String in the schema: z.number().int() makes it a Long`);
-      return STRING;
     case "array": {
-      if (!isObject(schema.items)) return none("an array of more than one type");
-      const element = within(schema, typing, () => cedarType(schema.items, typing, `${path}[]`));
+      const element = within(schema, typing, () => cedarType(schema.items, typing));
       return element && { type: "Set", element };
     }
     case "object": {
-      if (!isObject(schema.properties) || !Object.keys(schema.properties).length) {
-        return schema.additionalProperties === false || schema.additionalProperties === undefined
-          ? record({})
-          : none("a map, whose keys are not known");
-      }
+      // A map's keys are not known: it has no Cedar type.
+      if (!isObject(schema.properties)) return schema.additionalProperties ? undefined : record({});
       const required = new Set(Array.isArray(schema.required) ? schema.required : []);
       const attributes: Record<string, TypeOfAttribute<string>> = {};
       for (const [name, property] of Object.entries(schema.properties)) {
-        const typed = within(schema, typing, () => cedarType(property, typing, `${path}.${name}`));
-        if (!typed) continue;
-        attributes[name] = required.has(name) && !allowsNull(property) ? typed : optional(typed);
+        const type = within(schema, typing, () => cedarType(property, typing));
+        if (type) attributes[name] = required.has(name) && !allowsNull(property) ? type : optional(type);
       }
       return record(attributes);
     }
     default:
-      return none(`no Cedar type for ${JSON.stringify(type[0])}`);
+      return undefined;
   }
 }
 
@@ -246,20 +213,3 @@ const allowsNull = (schema: unknown): boolean =>
   (isNull(schema) ||
     (Array.isArray(schema.type) && schema.type.includes("null")) ||
     [schema.anyOf, schema.oneOf].some((v) => Array.isArray(v) && v.some(isNull)));
-
-/**
- * Writes `<root>/.sanoma/schema.cedarschema` (`generateSchema`'s text) when it differs from the
- * file's, so an editor sees no change when there is none; `wrote` says whether it did.
- */
-export async function writeSchema(
-  root: string,
-  description: SchemaSource,
-  people: PolicyPeople,
-): Promise<{ wrote: boolean; file: string; problems: string[] }> {
-  const file = join(root, SCHEMA_FILE);
-  const { text, problems } = generateSchema(description, people);
-  if ((await readFile(file, "utf8").catch(() => undefined)) === text) return { wrote: false, file, problems };
-  await mkdir(dirname(file), { recursive: true });
-  await writeFile(file, text);
-  return { wrote: true, file, problems };
-}

@@ -111,15 +111,17 @@ const port = () => Number(process.env.SANOMA_APP_PORT ?? 3000);
 
 /**
  * The config, loaded and resolved, its policy made from `policies/*.cedar` when it names none
- * (`loadPolicies`): a problem with them is a `UsageError`, so nothing starts on policies that do
+ * (`usePolicies`): a problem with them is a `UsageError`, so nothing starts on policies that do
  * not hold. Without `policies`, they are left to the caller (`check` reports them).
  */
 async function load({ policies = true } = {}): Promise<Loaded> {
   const loaded = await loadConfig();
   if (policies) {
-    const { loadPolicies } = await import("./policies.ts");
-    const { NO_PEOPLE } = await import("@sanoma-ai/workflows/describe");
-    const problems = await loadPolicies(loaded, NO_PEOPLE);
+    const [{ usePolicies }, { NO_PEOPLE }] = await Promise.all([
+      import("./policies.ts"),
+      import("@sanoma-ai/workflows/describe"),
+    ]);
+    const problems = await usePolicies(loaded, NO_PEOPLE);
     if (problems.length) throw new UsageError(`The policies do not hold:\n${problems.join("\n")}`);
   }
   const { resolveConfig } = await import("@sanoma-ai/workflows");
@@ -210,14 +212,12 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
   return new Promise(() => {});
 }
 
-/** `sanoma api` (hidden): writes `.sanoma/api.ts` and the Cedar schema from the config, as `check` and `serve` do. */
+/** `sanoma api` (hidden): writes the generated files from the config, as `check` and `serve` do. */
 async function writeApiCommand(): Promise<number> {
-  const { config, root } = await loadConfig();
-  const { API_FILE, describeConfig, NO_PEOPLE, SCHEMA_FILE, writeApi, writeSchema } =
-    await import("@sanoma-ai/workflows/describe");
-  const description = describeConfig(config);
-  if ((await writeApi(root, description)).wrote) log(`wrote ${API_FILE}`);
-  if ((await writeSchema(root, description, NO_PEOPLE)).wrote) log(`wrote ${SCHEMA_FILE}`);
+  const { config, root, resolved } = await load({ policies: false });
+  const { describeConfig, NO_PEOPLE, schemaOf, writeGenerated } = await import("@sanoma-ai/workflows/describe");
+  const { wrote } = await writeGenerated(root, describeConfig(config), schemaOf(resolved, NO_PEOPLE));
+  for (const file of wrote) log(`wrote ${file}`);
   return 0;
 }
 

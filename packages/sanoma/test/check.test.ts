@@ -165,9 +165,7 @@ export default defineWorkflow({
       writeFileSync(cedar, readFileSync(cedar, "utf8").replace("input.idd", "input.id"));
       const loaded = await loadIn(own);
       expect(await check(loaded, { databaseUrl, log: () => {} })).toEqual({ ok: true, problems: [] });
-      expect(loaded.config.policy?.rules).toEqual([
-        { id: "policies/publish.cedar#1", file: "policies/publish.cedar", effect: "forbid", reason: "Not that post" },
-      ]);
+      expect(loaded.config.policy?.kind).toBe("cedar");
     } finally {
       for (const copy of [both, own]) rmSync(copy, { recursive: true, force: true });
     }

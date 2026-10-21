@@ -1,27 +1,30 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { withFake } from "@sanoma-ai/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { decideCall } from "../src/call.ts";
-import { defineFake } from "../src/fake.ts";
 import { collection } from "../src/data.ts";
 import type { ApprovalState } from "../src/define.ts";
-import { describeConfig, generateSchema, SCHEMA_FILE, writeSchema } from "../src/describe.ts";
+import { describeConfig, SCHEMA_FILE, schemaOf, schemaText, writeGenerated } from "../src/describe.ts";
+import { defineFake } from "../src/fake.ts";
 import {
+  allow,
+  allowAll,
   cedarPolicy,
   defineConfig,
   defineConnector,
+  definePolicy,
   defineWorkflow,
+  loadPolicies,
   memoryLedger,
-  type Policy,
   type PolicyCall,
-  policiesOf,
   policyOpOf,
   readPolicyFiles,
+  resolveConfig,
   validatePolicies,
 } from "../src/index.ts";
-import { withFake } from "@sanoma-ai/testing";
 
 // The two policies of the Cedar investigation, against made-up operations: refunds over 10,000
 // held for finance, and only sales may mark a lead won; and agents held for whom they act for.
@@ -34,7 +37,11 @@ const shop = defineConnector("shop", {
     },
   },
   notes: {
-    add: { effect: "write", input: z.object({ text: z.string() }), output: z.object({}) },
+    add: {
+      effect: "write",
+      input: z.object({ text: z.string(), tags: z.record(z.string(), z.string()) }),
+      output: z.object({}),
+    },
   },
 });
 const leads = collection({
@@ -49,20 +56,17 @@ const refund = defineWorkflow({
   uses: [shop.refunds.create],
   run: async (ctx, { amount }) => ctx.shop.refunds.create({ amount, customer: "c" }),
 });
+const fake = defineFake(shop, {
+  initial: () => ({}),
+  ops: () => ({ refunds: { create: async () => ({ id: "re_1" }) }, notes: { add: async () => ({}) } }),
+});
 const config = defineConfig({
   workflows: [refund],
-  connectors: [
-    withFake(
-      shop,
-      defineFake(shop, {
-        initial: () => ({}),
-        ops: () => ({ refunds: { create: async () => ({ id: "re_1" }) }, notes: { add: async () => ({}) } }),
-      }),
-    ),
-  ],
+  connectors: [withFake(shop, fake)],
   collections: [leads],
   ledger: memoryLedger(),
 });
+const resolved = resolveConfig(config);
 
 const people = {
   people: [{ id: "ada" }, { id: "bo" }, { id: "cy" }, { id: "refund-bot", onBehalfOf: "bo" }],
@@ -98,9 +102,10 @@ forbid (principal in Sanoma::Group::"agents", action in Sanoma::Action::"effect:
   },
 ];
 
-const schema = generateSchema(describeConfig(config), people);
-const made = policiesOf(FILES);
-const policy = cedarPolicy({ policies: made.policies, schema: schema.json, people });
+const schema = schemaOf(resolved, people);
+const text = schemaText(schema);
+const loaded = loadPolicies(FILES);
+const policy = cedarPolicy(resolved, loaded.policies, people);
 
 const run = (approvals: ApprovalState[] = []) => ({ id: "r1", workflow: "refund", approvals });
 const refundCall = (amount: number, actor: string, approvals?: ApprovalState[]): PolicyCall => ({
@@ -117,7 +122,6 @@ const saveCall = (actor: string, stage: string, before?: { id: string; stage: st
   input: { record: { id: "l1", stage } },
   actor: { id: actor },
   run: { id: "direct:x", workflow: "call", approvals: [] },
-  mount: "direct",
   ...(before && { before }),
 });
 const approved = (approver: ApprovalState["approver"], by: string): ApprovalState => ({
@@ -132,64 +136,94 @@ const approved = (approver: ApprovalState["approver"], by: string): ApprovalStat
   refused: [],
 });
 
-describe("generateSchema", () => {
-  it("has every operation in its effect's group, workflow starts, collection views, and the declared groups", () => {
-    expect(schema.text).toContain('entity Group enum ["agents", "finance", "sales"];');
-    expect(schema.text).toContain("entity Principal in [Group] = {\n    onBehalfOf?: Principal\n  };");
-    expect(schema.text).toContain('action "shop.refunds.create" in [Action::"effect:money"] appliesTo {');
-    expect(schema.text).toContain('action "data.leads.save" in [Action::"effect:write"] appliesTo {');
-    expect(schema.text).toContain('action "workflow:refund" appliesTo {');
-    expect(schema.text).toContain('action "collection:leads" in [Action::"view"] appliesTo {');
-    expect(schema.text).toContain("amount: Long");
-    expect(schema.text).toMatch(/before\?: \{\n\s+id: String,\n\s+owner\?: String,\n\s+stage: String\n\s+\}/);
+describe("schemaOf", () => {
+  it("has the declared groups and agents, every operation in its effect's group and every workflow in start", () => {
+    expect(text).toContain('entity Group enum ["agents", "finance", "sales"];');
+    expect(text).toContain("entity Principal in [Group] = {\n    onBehalfOf?: Principal\n  };");
+    expect(text).toContain("entity Target in [Collection];");
+    expect(text).toContain('action "shop.refunds.create" in [Action::"effect:money"] appliesTo {');
+    expect(text).toContain('action "data.leads.save" in [Action::"effect:write"] appliesTo {');
+    expect(text).toContain('action "workflow:refund" in [Action::"start"] appliesTo {');
+    expect(text).not.toMatch(/\bmount\b|approverGroups|"site:|"collection:/);
   });
 
-  it("types a decimal as a String and leaves out what Cedar cannot type, each a problem", () => {
-    expect(schema.problems).toContain(
-      "shop.refunds.create: input.rate is a decimal number, a String in the schema: z.number().int() makes it a Long",
-    );
-    expect(schema.problems).toContainEqual(
-      expect.stringMatching(/^data\.leads\.list: input\.where\.stage is left out/),
-    );
-    expect(schema.text).toContain("rate?: String");
+  it("types the input from its zod schema, a collection's save with the record as it was", () => {
+    expect(text).toMatch(/amount: Long,\s+customer: String,\s+rate\?: String/);
+    expect(text).toMatch(/before\?: \{\n\s+id: String,\n\s+owner\?: String,\n\s+stage: String\n\s+\}/);
+    // A map has no Cedar type: left out.
+    expect(text).toMatch(/action "shop\.notes\.add"[^;]*input: \{\n\s+text: String\n\s+\}/);
   });
 
-  it("enumerates no group when none is declared, so a policy may name any", () => {
-    expect(generateSchema(describeConfig(config), { people: [], groups: [] }).text).toContain("entity Group;");
-  });
-
-  it("is written to .sanoma/schema.cedarschema only when it changed", async () => {
+  it("is written with api.ts as the generated files, each only when it changed", async () => {
     const root = mkdtempSync(join(tmpdir(), "sanoma-schema-"));
     try {
       const description = describeConfig(config);
-      expect((await writeSchema(root, description, people)).wrote).toBe(true);
-      expect(readFileSync(join(root, SCHEMA_FILE), "utf8")).toBe(schema.text);
-      expect((await writeSchema(root, description, people)).wrote).toBe(false);
+      expect((await writeGenerated(root, description, schema)).wrote).toEqual([".sanoma/api.ts", SCHEMA_FILE]);
+      expect(readFileSync(join(root, SCHEMA_FILE), "utf8")).toBe(text);
+      expect((await writeGenerated(root, description, schema)).wrote).toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
 });
 
-describe("policiesOf and validatePolicies", () => {
-  it("names each policy <file>#<n>, or by its @id, at the line it starts on", () => {
-    expect(made.problems).toEqual([]);
-    expect(made.policies.map(({ id, file, line }) => ({ id, file, line }))).toEqual([
-      { id: "policies/money.cedar#1", file: "policies/money.cedar", line: 2 },
-      { id: "leads-won", file: "policies/leads.cedar", line: 1 },
-      { id: "policies/leads.cedar#2", file: "policies/leads.cedar", line: 7 },
+describe("loadPolicies and validatePolicies", () => {
+  it("reads each policy in the order written, named <file>#<n> or by its @id, with its annotations", () => {
+    expect(loaded.problems).toEqual([]);
+    expect(
+      loaded.policies.map(({ id, file, line, effect, hold, title, reason }) => ({
+        id,
+        file,
+        line,
+        effect,
+        hold,
+        title,
+        reason,
+      })),
+    ).toEqual([
+      {
+        id: "policies/money.cedar#1",
+        file: "policies/money.cedar",
+        line: 2,
+        effect: "forbid",
+        hold: "finance",
+        title: "Refund over 10,000",
+      },
+      {
+        id: "leads-won",
+        file: "policies/leads.cedar",
+        line: 1,
+        effect: "forbid",
+        reason: "Only sales may mark a lead won",
+      },
+      { id: "policies/leads.cedar#2", file: "policies/leads.cedar", line: 7, effect: "forbid", hold: "on-behalf-of" },
     ]);
-    expect(validatePolicies(made.policies, schema.json)).toEqual([]);
+    expect(validatePolicies(resolved, loaded.policies, people)).toEqual([]);
   });
 
-  it("reports a misspelled field and an undeclared group at their file, line and column", () => {
-    const { policies } = policiesOf([
+  it("keeps the order written past ten policies, which Cedar's parts sort as text", () => {
+    const many = Array.from({ length: 12 }, (_, n) => `forbid (principal, action, resource) when { ${n} == 1 };`);
+    const { policies } = loadPolicies([{ file: "policies/many.cedar", text: many.join("\n") }]);
+    expect(policies.map((p) => [p.id, p.line])).toEqual(many.map((_, n) => [`policies/many.cedar#${n + 1}`, n + 1]));
+    expect(policies[10]!.text).toContain("10 == 1");
+  });
+
+  it("reports a misspelled field, an undeclared group, a permit and a hold for no one, each at its place", () => {
+    const { policies } = loadPolicies([
       {
         file: "policies/bad.cedar",
-        text: `\nforbid (principal, action == Sanoma::Action::"data.leads.save", resource)\nwhen { context.input.record.stag == "won" };\n\nforbid (principal in Sanoma::Group::"finanse", action, resource);\n`,
+        text: [
+          "",
+          'forbid (principal, action == Sanoma::Action::"data.leads.save", resource)',
+          'when { context.input.record.stag == "won" };',
+          "",
+          'forbid (principal in Sanoma::Group::"finanse", action, resource);',
+          "permit (principal, action, resource);",
+          '@hold("nobody") forbid (principal, action, resource);',
+        ].join("\n"),
       },
     ]);
-    expect(validatePolicies(policies, schema.json)).toEqual([
+    expect(validatePolicies(resolved, policies, people)).toEqual([
       expect.objectContaining({
         file: "policies/bad.cedar",
         line: 3,
@@ -202,20 +236,32 @@ describe("policiesOf and validatePolicies", () => {
         policy: "policies/bad.cedar#2",
         message: expect.stringContaining('`"finanse"` is not declared as a valid eid'),
       }),
+      expect.objectContaining({ line: 6, message: expect.stringContaining("a permit changes nothing") }),
+      expect.objectContaining({
+        line: 7,
+        message: '@hold("nobody") names no declared group or person, nor "on-behalf-of"',
+      }),
     ]);
   });
 
   it("reports a file that does not parse, a template and two policies with one id", () => {
-    const { problems } = policiesOf([
+    const { problems } = loadPolicies([
       { file: "policies/a.cedar", text: '@id("x") forbid (principal, action, resource);\n' },
       { file: "policies/b.cedar", text: '\n@id("x") forbid (principal, action, resource);\n' },
       { file: "policies/c.cedar", text: "forbid (principal == ?principal, action, resource);\n" },
       { file: "policies/d.cedar", text: "\nforbid (principal, action, resource) when { ;\n" },
+      { file: "policies/e.cedar", text: '@id("allow-by-default") forbid (principal, action, resource);\n' },
     ]);
     expect(problems).toEqual([
-      { file: "policies/b.cedar", line: 2, column: 1, message: 'two policies have the id "x": give one another @id' },
+      {
+        file: "policies/b.cedar",
+        line: 2,
+        column: 1,
+        message: 'the id "x" is another policy\'s: give this one another @id',
+      },
       expect.objectContaining({ file: "policies/c.cedar", line: 1, message: expect.stringContaining("template") }),
       expect.objectContaining({ file: "policies/d.cedar", line: 2 }),
+      expect.objectContaining({ file: "policies/e.cedar", message: expect.stringContaining("the runtime's own") }),
     ]);
   });
 
@@ -242,11 +288,10 @@ describe("cedarPolicy", () => {
     expect(await policy(refundCall(2_000_000, "ada"))).toMatchObject({ kind: "allow" });
   });
 
-  it("holds a refund over 10,000 for finance, with the policy's title and id", async () => {
+  it("holds a refund over 10,000 for finance, with the policy's title", async () => {
     expect(await policy(refundCall(2_000_000, "bo"))).toEqual({
       kind: "approve",
       approver: { group: "finance" },
-      rule: "policies/money.cedar#1",
       title: "Refund over 10,000",
     });
   });
@@ -255,19 +300,19 @@ describe("cedarPolicy", () => {
     expect(await policy(refundCall(2_000_000, "bo", [approved({ group: "finance" }, "ada")]))).toEqual({
       kind: "allow",
       reasons: ["policies/money.cedar#1"],
-      rule: "policies/money.cedar#1",
     });
     // An approval addressed to someone else lifts nothing.
     expect(await policy(refundCall(2_000_000, "bo", [approved("cy", "cy")]))).toMatchObject({ kind: "approve" });
   });
 
-  it("holds an agent's refund for whom it acts for, then for finance", async () => {
-    expect(await policy(refundCall(2_000_000, "refund-bot"))).toMatchObject({
+  it("holds an agent's refund for finance first, then for whom it acts for, by default title", async () => {
+    expect(await policy(refundCall(2_000_000, "refund-bot"))).toMatchObject({ approver: { group: "finance" } });
+    expect(await policy(refundCall(5, "refund-bot"))).toEqual({
       kind: "approve",
-      approver: { group: "finance" },
+      approver: "bo",
+      title: "shop.refunds.create needs bo",
     });
-    expect(await policy(refundCall(5, "refund-bot"))).toMatchObject({ kind: "approve", approver: "bo" });
-    expect(await policy(refundCall(5, "refund-bot", [{ ...approved("bo", "bo") }]))).toMatchObject({ kind: "allow" });
+    expect(await policy(refundCall(5, "refund-bot", [approved("bo", "bo")]))).toMatchObject({ kind: "allow" });
   });
 
   it("denies a lead marked won by someone not in sales, with the policy's reason", async () => {
@@ -275,96 +320,88 @@ describe("cedarPolicy", () => {
       kind: "deny",
       reason: "Only sales may mark a lead won",
       reasons: ["leads-won"],
-      rule: "leads-won",
     });
     expect(await policy(saveCall("bo", "won"))).toMatchObject({ kind: "allow" });
     expect(await policy(saveCall("ada", "won", { id: "l1", stage: "won" }))).toMatchObject({ kind: "allow" });
     expect(await policy(saveCall("ada", "open"))).toMatchObject({ kind: "allow" });
   });
 
-  it("denies a hold whose approver names no one", async () => {
-    const { policies } = policiesOf([
+  it("denies an on-behalf-of hold for a principal acting for no one", async () => {
+    const { policies } = loadPolicies([
       {
         file: "policies/x.cedar",
-        text: '@hold("nobody") forbid (principal, action == Sanoma::Action::"shop.notes.add", resource);',
+        text: '@hold("on-behalf-of") forbid (principal, action in Sanoma::Action::"effect:write", resource);',
       },
     ]);
-    const odd = cedarPolicy({ policies, schema: schema.json, people });
-    expect(
-      await odd({
-        op: policyOpOf(shop.notes.add),
-        effect: "write",
-        input: { text: "t" },
-        actor: { id: "bo" },
-        run: run(),
-      }),
-    ).toMatchObject({ kind: "deny", reason: "cannot resolve approver", rule: "policies/x.cedar#1" });
+    const odd = cedarPolicy(resolved, policies, people);
+    const call = {
+      op: policyOpOf(shop.notes.add),
+      effect: "write",
+      input: { text: "t", tags: {} },
+      actor: { id: "bo" },
+      run: run(),
+    } as const;
+    expect(await odd(call)).toEqual({
+      kind: "deny",
+      reason: "cannot resolve approver",
+      reasons: ["policies/x.cedar#1"],
+    });
   });
 
-  it("is versioned by its text and lists its rules", () => {
+  it("is of kind cedar, versioned by its text", () => {
+    expect(policy.kind).toBe("cedar");
     expect(policy.version).toMatch(/^[0-9a-f]{12}$/);
-    expect(cedarPolicy({ policies: made.policies.slice(1), schema: schema.json, people }).version).not.toBe(
-      policy.version,
-    );
-    expect(policy.rules).toEqual([
-      {
-        id: "policies/money.cedar#1",
-        file: "policies/money.cedar",
-        effect: "forbid",
-        hold: "finance",
-        title: "Refund over 10,000",
-      },
-      { id: "leads-won", file: "policies/leads.cedar", effect: "forbid", reason: "Only sales may mark a lead won" },
-      { id: "policies/leads.cedar#2", file: "policies/leads.cedar", effect: "forbid", hold: "on-behalf-of" },
-    ]);
+    expect(cedarPolicy(resolved, loaded.policies.slice(1), people).version).not.toBe(policy.version);
     expect(describeConfig({ ...config, policy }).policy).toEqual({
       defined: true,
       kind: "cedar",
-      rules: policy.rules,
       version: policy.version,
     });
   });
 
-  it("records the rule and title through decideCall", async () => {
-    const decided = await decideCall(
-      policy,
-      shop.refunds.create,
-      { amount: 2_000_000, customer: "c" },
-      { id: "bo" },
-      run(),
-    );
-    expect(decided).toEqual({
+  it("decides through decideCall, stamped with its version", async () => {
+    expect(
+      await decideCall(policy, shop.refunds.create, { amount: 2_000_000, customer: "c" }, { id: "bo" }, run()),
+    ).toEqual({
       kind: "approve",
       approver: { group: "finance" },
-      rule: "policies/money.cedar#1",
       title: "Refund over 10,000",
       policyVersion: policy.version,
     });
   });
 });
 
-const preview = (principal: string, action: string, context = {}) =>
-  policy.preview!({ principal: { id: principal }, action, context });
+const ask = (principal: string, id: string) => ({ principal: { id: principal }, action: { id } });
 
 describe("preview", () => {
-  it("says hold, deny or allow when the known parts decide it, and depends when the unknown ones do", () => {
-    expect(preview("bo", "shop.refunds.create", { input: { amount: 2_000_000, customer: "c" } })).toBe("hold");
-    expect(preview("bo", "shop.refunds.create", { input: { amount: 5, customer: "c" } })).toBe("allow");
-    expect(preview("bo", "shop.refunds.create")).toBe("depends");
-    expect(preview("ada", "shop.refunds.create")).toBe("allow");
-    expect(preview("refund-bot", "shop.refunds.create")).toBe("hold");
-    const won = { input: { record: { id: "l1", stage: "won" } } };
-    // Whether it was won before decides it.
-    expect(preview("ada", "data.leads.save", won)).toBe("depends");
-    expect(preview("ada", "data.leads.save", { ...won, before: { id: "l1", stage: "open" } })).toBe("deny");
-    expect(preview("bo", "collection:leads", { mount: "view" })).toBe("allow");
-    expect(preview("bo", "workflow:refund")).toBe("allow");
+  it("answers allow, hold, deny or depends with the input unknown, naming the policy and approver", () => {
+    expect(
+      policy.preview!([
+        ask("bo", "shop.refunds.create"),
+        ask("ada", "shop.refunds.create"),
+        ask("refund-bot", "shop.refunds.create"),
+        ask("ada", "data.leads.save"),
+        ask("bo", "data.leads.save"),
+        ask("bo", "workflow:refund"),
+      ]),
+    ).toEqual([
+      {
+        answer: "depends",
+        rule: { id: "policies/money.cedar#1", file: "policies/money.cedar", title: "Refund over 10,000" },
+      },
+      { answer: "allow" },
+      { answer: "hold", rule: { id: "policies/leads.cedar#2", file: "policies/leads.cedar" }, approver: "bo" },
+      {
+        answer: "depends",
+        rule: { id: "leads-won", file: "policies/leads.cedar", reason: "Only sales may mark a lead won" },
+      },
+      { answer: "allow" },
+      { answer: "allow" },
+    ]);
   });
 
-  it("is custom for a policy written as a function", async () => {
-    const { definePolicy, allow, allowAll } = await import("../src/index.ts");
-    const fn: Policy = definePolicy(() => allow());
-    expect(fn.preview!({ principal: { id: "bo" }, action: "shop.refunds.create" })).toBe("custom");
-    expect(allowAll.preview!({ principal: { id: "bo" }, action: "shop.refunds.create" })).toBe("allow");
+  it("is allow for allowAll, and none for a policy written as a function", () => {
+    expect(allowAll.preview!([ask("bo", "shop.refunds.create")])).toEqual([{ answer: "allow" }]);
+    expect(definePolicy(() => allow()).preview).toBeUndefined();
   });
 });
