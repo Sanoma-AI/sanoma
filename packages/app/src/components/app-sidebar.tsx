@@ -2,18 +2,16 @@ import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { ClientOnly, Link } from "@tanstack/react-router";
-import {
-  AppWindowIcon,
-  BoxesIcon,
-  InboxIcon,
-  KeyRoundIcon,
-  type LucideIcon,
-  PlugIcon,
-  RocketIcon,
-  ShieldCheckIcon,
-  TableIcon,
-  WorkflowIcon,
-} from "lucide-react";
+import { BrowserIcon } from "@phosphor-icons/react/dist/csr/Browser";
+import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
+import { TrayIcon } from "@phosphor-icons/react/dist/csr/Tray";
+import { KeyIcon } from "@phosphor-icons/react/dist/csr/Key";
+import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
+import { PlugIcon } from "@phosphor-icons/react/dist/csr/Plug";
+import { RocketIcon } from "@phosphor-icons/react/dist/csr/Rocket";
+import { ShieldCheckIcon } from "@phosphor-icons/react/dist/csr/ShieldCheck";
+import { TableIcon } from "@phosphor-icons/react/dist/csr/Table";
+import { TreeStructureIcon } from "@phosphor-icons/react/dist/csr/TreeStructure";
 import { type CSSProperties, type MouseEvent, type ReactNode, type RefObject, Suspense, useRef, useState } from "react";
 import { NavUser } from "#/components/nav-user.tsx";
 import { Badge } from "#/components/ui/badge.tsx";
@@ -58,19 +56,24 @@ import { WorkflowsPanel } from "./panels/workflows-panel.tsx";
  * plain list, as `linkOptions` would type it from the routes.)
  */
 const SECTIONS = [
-  { to: "/inbox", label: "Inbox", icon: InboxIcon, panel: "inbox" },
-  { to: "/workflows", label: "Workflows", icon: WorkflowIcon, panel: "workflows" },
-  { to: "/resources", label: "Resources", icon: BoxesIcon, panel: undefined },
+  { to: "/inbox", label: "Inbox", icon: TrayIcon, panel: "inbox" },
+  { to: "/workflows", label: "Workflows", icon: TreeStructureIcon, panel: "workflows" },
+  { to: "/resources", label: "Resources", icon: CubeIcon, panel: undefined },
   { to: "/connectors", label: "Connectors", icon: PlugIcon, panel: undefined },
   { to: "/setup", label: "Go live", icon: RocketIcon, panel: undefined },
   // The company's sites, shown only when it has some: its link is the first site's home, which
   // only the build knows (`useSites`).
-  { to: undefined, label: "Sites", icon: AppWindowIcon, panel: "sites" },
+  { to: undefined, label: "Sites", icon: BrowserIcon, panel: "sites" },
   // The company's collections, shown only when it has some.
   { to: "/data", label: "Data", icon: TableIcon, panel: "data" },
   // What the policy answers each group, shown only when the config has a policy.
-  { to: "/permissions", label: "Permissions", icon: KeyRoundIcon, panel: "permissions" },
-] as const satisfies readonly { to: string | undefined; label: string; icon: LucideIcon; panel: string | undefined }[];
+  { to: "/permissions", label: "Permissions", icon: KeyIcon, panel: "permissions" },
+] as const satisfies readonly {
+  to: string | undefined;
+  label: string;
+  icon: PhosphorIcon;
+  panel: string | undefined;
+}[];
 
 type Section = (typeof SECTIONS)[number];
 
@@ -211,7 +214,7 @@ function SectionBar({
           {...OVERVIEW}
           className="flex size-9 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring"
         >
-          <ShieldCheckIcon className="size-5" />
+          <ShieldCheckIcon aria-hidden="true" className="size-5" />
           <span className="sr-only">Sanoma, {appName}</span>
         </Link>
       </SidebarHeader>
@@ -273,7 +276,7 @@ function SectionLink({
 }) {
   const content = (
     <>
-      <Icon />
+      <Icon aria-hidden="true" />
       {children}
       <span>{label}</span>
     </>

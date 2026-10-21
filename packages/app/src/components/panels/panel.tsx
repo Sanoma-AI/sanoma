@@ -1,5 +1,7 @@
 import { useMatch, useMatches } from "@tanstack/react-router";
-import { ArrowRightIcon, PanelLeftCloseIcon, PinIcon } from "lucide-react";
+import { ArrowRightIcon } from "@phosphor-icons/react/dist/csr/ArrowRight";
+import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/csr/SidebarSimple";
+import { PushPinIcon } from "@phosphor-icons/react/dist/csr/PushPin";
 import type { ReactElement, ReactNode } from "react";
 import {
   SidebarFooter,
@@ -78,13 +80,13 @@ export function PanelHeader({
         {actions}
         {place === "docked" && (
           <TipButton tip="Collapse the panel" size="icon-sm" onClick={() => setOpen(false)}>
-            <PanelLeftCloseIcon />
+            <SidebarSimpleIcon aria-hidden="true" />
           </TipButton>
         )}
         {/* Opening the sidebar docks the page's panel, which closes the peek. */}
         {place === "peek" && section === pageSection && (
           <TipButton tip="Pin the panel" size="icon-sm" onClick={() => setOpen(true)}>
-            <PinIcon />
+            <PushPinIcon aria-hidden="true" />
           </TipButton>
         )}
       </div>
@@ -144,7 +146,7 @@ export function PanelFooterLink({ link, children }: { link: ReactElement; childr
         <SidebarMenuItem>
           <SidebarMenuButton render={link} className="text-muted-foreground">
             <span>{children}</span>
-            <ArrowRightIcon className="ml-auto" />
+            <ArrowRightIcon aria-hidden="true" className="ml-auto" />
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>

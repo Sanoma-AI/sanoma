@@ -1,7 +1,10 @@
 import type { CollectionEntry } from "@sanoma-ai/workflows/describe";
 import { LIST_LIMIT, type Saved } from "@sanoma-ai/workflows/shared";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, SearchIcon } from "lucide-react";
+import { ArrowDownIcon } from "@phosphor-icons/react/dist/csr/ArrowDown";
+import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/csr/ArrowsDownUp";
+import { ArrowUpIcon } from "@phosphor-icons/react/dist/csr/ArrowUp";
+import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { memo, useEffect, useRef, useState } from "react";
 import { Field, FieldLabel } from "#/components/ui/field.tsx";
 import { Input } from "#/components/ui/input.tsx";
@@ -51,7 +54,10 @@ export function GridFilters({ collection, search }: { collection: CollectionEntr
       <Field className="w-56">
         <FieldLabel htmlFor="grid-key">{collection.key} starts with</FieldLabel>
         <div className="relative">
-          <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          <MagnifyingGlassIcon
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+          />
           <Input
             id="grid-key"
             type="search"
@@ -209,7 +215,7 @@ const GridRow = memo(function GridRow({
 function SortHead({ field, order }: { field: string; order: string | undefined }) {
   const sort = order === field ? "ascending" : order === `-${field}` ? "descending" : undefined;
   const next = sort === undefined ? field : sort === "ascending" ? `-${field}` : undefined;
-  const Icon = sort === "ascending" ? ArrowUpIcon : sort === "descending" ? ArrowDownIcon : ArrowUpDownIcon;
+  const Icon = sort === "ascending" ? ArrowUpIcon : sort === "descending" ? ArrowDownIcon : ArrowsDownUpIcon;
   return (
     <TableHead aria-sort={sort}>
       <Link

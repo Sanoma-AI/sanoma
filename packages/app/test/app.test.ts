@@ -1399,12 +1399,8 @@ describe("resources and drift", () => {
     const seeAll = /<a[^>]*href="\/workflows"[^>]*><span>See all/;
     expect(overview.html.match(seeAll)?.[0]).toContain('aria-current="page"');
     expect(runs.html.match(seeAll)?.[0]).not.toContain("aria-current");
-    expect(runs.html).not.toMatch(
-      /<a[^>]*href="\/workflows"[^>]*aria-current="page"[^>]*><svg[^>]*lucide-shield-check/,
-    );
-    expect(overview.html).toMatch(
-      /<a[^>]*href="\/workflows"[^>]*aria-current="page"[^>]*><svg[^>]*lucide-shield-check/,
-    );
+    expect(linkTag(runs.text, "Sanoma, sanoma")).not.toContain('aria-current="page"');
+    expect(linkTag(overview.text, "Sanoma, sanoma")).toContain('aria-current="page"');
     expect(runs.html).toContain('aria-label="Status"');
   });
 

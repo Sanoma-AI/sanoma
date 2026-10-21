@@ -272,7 +272,7 @@ function ApprovalNode(props: Props<"approval">) {
     <Frame {...props}>
       <Line>
         <Dot tone={node.state?.tone} />
-        <BUILTIN_ICON.approval className="size-4 shrink-0" />
+        <BUILTIN_ICON.approval aria-hidden="true" className="size-4 shrink-0" />
         <span className="truncate">{node.label}</span>
       </Line>
       {approval && (
@@ -293,7 +293,7 @@ function SleepNode(props: Props<"sleep">) {
   const { node } = props.data;
   const clock = (
     <>
-      <BUILTIN_ICON.sleep className="size-4 shrink-0" />
+      <BUILTIN_ICON.sleep aria-hidden="true" className="size-4 shrink-0" />
       <span className={cn("truncate", node.name && "text-muted-foreground")}>{node.label}</span>
     </>
   );

@@ -50,7 +50,7 @@ export const WorkflowSections = memo(function WorkflowSections({ workflow }: { w
               const Icon = BUILTIN_ICON[b];
               return (
                 <Badge key={b} variant="outline">
-                  <Icon data-icon="inline-start" />
+                  <Icon aria-hidden="true" data-icon="inline-start" />
                   {b}
                 </Badge>
               );

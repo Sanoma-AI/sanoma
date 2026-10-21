@@ -1,7 +1,8 @@
 import type { WorkflowEntry } from "@sanoma-ai/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { FlaskConicalIcon, GlobeIcon } from "lucide-react";
+import { FlaskIcon } from "@phosphor-icons/react/dist/csr/Flask";
+import { GlobeIcon } from "@phosphor-icons/react/dist/csr/Globe";
 import { useMemo } from "react";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { StartForm } from "../form/start-form.tsx";
@@ -35,7 +36,7 @@ export function NewRun({ workflow }: { workflow: WorkflowEntry }) {
         <Segmented label="Mode">
           <Segment>
             <Link to="." search={(prev) => ({ ...prev, scenario: undefined })} activeOptions={{ exact: true }} replace>
-              <GlobeIcon data-icon="inline-start" />
+              <GlobeIcon aria-hidden="true" data-icon="inline-start" />
               Live vendors
             </Link>
           </Segment>
@@ -47,7 +48,7 @@ export function NewRun({ workflow }: { workflow: WorkflowEntry }) {
               disabled={none}
               replace
             >
-              <FlaskConicalIcon data-icon="inline-start" />
+              <FlaskIcon aria-hidden="true" data-icon="inline-start" />
               Sandbox
             </Link>
           </Segment>

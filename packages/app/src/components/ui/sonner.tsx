@@ -1,6 +1,10 @@
 import { useTheme } from "next-themes";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
-import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react";
+import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
+import { InfoIcon } from "@phosphor-icons/react/dist/csr/Info";
+import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
+import { WarningOctagonIcon } from "@phosphor-icons/react/dist/csr/WarningOctagon";
+import { CircleNotchIcon } from "@phosphor-icons/react/dist/csr/CircleNotch";
 
 const Toaster = ({ ...props }: ToasterProps) => {
   const { theme = "system" } = useTheme();
@@ -10,11 +14,11 @@ const Toaster = ({ ...props }: ToasterProps) => {
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
       icons={{
-        success: <CircleCheckIcon className="size-4" />,
-        info: <InfoIcon className="size-4" />,
-        warning: <TriangleAlertIcon className="size-4" />,
-        error: <OctagonXIcon className="size-4" />,
-        loading: <Loader2Icon className="size-4 animate-spin" />,
+        success: <CheckCircleIcon aria-hidden="true" className="size-4" />,
+        info: <InfoIcon aria-hidden="true" className="size-4" />,
+        warning: <WarningIcon aria-hidden="true" className="size-4" />,
+        error: <WarningOctagonIcon aria-hidden="true" className="size-4" />,
+        loading: <CircleNotchIcon aria-hidden="true" className="size-4 animate-spin" />,
       }}
       style={
         {

@@ -5,15 +5,13 @@ import { problemAt } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useMatches, useRouter } from "@tanstack/react-router";
 import { cva, type VariantProps } from "class-variance-authority";
-import {
-  ChevronRightIcon,
-  CircleAlertIcon,
-  ClockIcon,
-  InfoIcon,
-  type LucideIcon,
-  SplitIcon,
-  UserCheckIcon,
-} from "lucide-react";
+import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
+import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle";
+import { ClockIcon } from "@phosphor-icons/react/dist/csr/Clock";
+import { InfoIcon } from "@phosphor-icons/react/dist/csr/Info";
+import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
+import { GitForkIcon } from "@phosphor-icons/react/dist/csr/GitFork";
+import { UserCheckIcon } from "@phosphor-icons/react/dist/csr/UserCheck";
 import {
   type ComponentProps,
   lazy,
@@ -244,7 +242,7 @@ export function OpItem({ id, op, children }: { id: string; op: OpEntry | undefin
 /**
  * A link as a list item, inside an `ItemGroup`: `children` is the link (a `<Link>` or an `<a>`),
  * drawn as an Item with `props`, and marked (`CURRENT_LINK`) while it is the page open. A link to
- * another page ends with `<ItemActions><ChevronRightIcon /></ItemActions>` inside the link.
+ * another page ends with `<ItemActions><CaretRightIcon aria-hidden="true" /></ItemActions>` inside the link.
  * shadcn's docs put `role="listitem"` on the Item, but on the link it renders that role would
  * replace the link's: a listitem holds the link instead, so it stays a link. Its content and title may
  * shrink (min-w-0, max-w-full), so a long title in a narrow list is cut where a caller's `truncate`
@@ -287,8 +285,8 @@ export function CardHeading({ className, children }: { className?: string; child
 export const BUILTIN_ICON = {
   approval: UserCheckIcon,
   sleep: ClockIcon,
-  all: SplitIcon,
-} satisfies Record<Builtin, LucideIcon>;
+  all: GitForkIcon,
+} satisfies Record<Builtin, PhosphorIcon>;
 
 /** A tone as a dot, where a badge would be too much. */
 export function StatusDot({ tone }: { tone: Tone }) {
@@ -445,7 +443,8 @@ export function Disclosure({ label, children }: { label: ReactNode; children: Re
   return (
     <Collapsible className="group/disclosure">
       <CollapsibleTrigger render={<Button variant="ghost" size="xs" className="-ml-2 text-muted-foreground" />}>
-        <ChevronRightIcon
+        <CaretRightIcon
+          aria-hidden="true"
           data-icon="inline-start"
           className="transition-transform group-data-open/disclosure:rotate-90"
         />
@@ -512,7 +511,7 @@ export function Notice({
 }) {
   return (
     <Alert variant={variant}>
-      {variant === "destructive" ? <CircleAlertIcon /> : <InfoIcon />}
+      {variant === "destructive" ? <WarningCircleIcon aria-hidden="true" /> : <InfoIcon aria-hidden="true" />}
       <AlertDescription>{children}</AlertDescription>
     </Alert>
   );
@@ -725,7 +724,7 @@ export function UsedByList({ workflows = [], sites = [] }: UsedByProps) {
 /** The end of a row that links elsewhere. */
 const CHEVRON = (
   <ItemActions>
-    <ChevronRightIcon className="size-4" />
+    <CaretRightIcon aria-hidden="true" className="size-4" />
   </ItemActions>
 );
 
@@ -779,7 +778,7 @@ export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" :
 export function Problems({ problems }: { problems: ResourceProblem[] }) {
   return (
     <Alert variant="destructive">
-      <CircleAlertIcon />
+      <WarningCircleIcon aria-hidden="true" />
       <AlertTitle>{plural(problems.length, "problem")} in the data files: their resources are left out</AlertTitle>
       <AlertDescription>
         <ul className="flex flex-col gap-1">

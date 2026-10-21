@@ -2,7 +2,8 @@ import type { CollectionEntry } from "@sanoma-ai/workflows/describe";
 import { CALL_WORKFLOW, errorMessage, type Saved } from "@sanoma-ai/workflows/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { SaveIcon, Trash2Icon } from "lucide-react";
+import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
+import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
@@ -138,7 +139,11 @@ export function RecordForm({
           {(submitting) => (
             <>
               <Button type="submit" disabled={submitting}>
-                {submitting ? <Spinner data-icon="inline-start" /> : <SaveIcon data-icon="inline-start" />}
+                {submitting ? (
+                  <Spinner data-icon="inline-start" />
+                ) : (
+                  <FloppyDiskIcon aria-hidden="true" data-icon="inline-start" />
+                )}
                 {submitting ? "Saving…" : "Save"}
               </Button>
               {saved && <DeleteRecord name={name} recordKey={saved.key} disabled={submitting} onDeleted={onDone} />}
@@ -180,7 +185,7 @@ function DeleteRecord({
   return (
     <>
       <Button type="button" variant="outline" className="ml-auto" disabled={disabled} onClick={() => setOpen(true)}>
-        <Trash2Icon data-icon="inline-start" />
+        <TrashIcon aria-hidden="true" data-icon="inline-start" />
         Delete
       </Button>
       <Dialog

@@ -2,7 +2,7 @@ import type { ApprovalState, LedgerRecord, RunSummary } from "@sanoma-ai/workflo
 import type { Span, WorkflowEntry } from "@sanoma-ai/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { XIcon } from "lucide-react";
+import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { Children, Fragment, isValidElement, type ReactNode, Suspense } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardAction, CardContent, CardDescription, CardHeader } from "#/components/ui/card.tsx";
@@ -89,7 +89,7 @@ export function Inspector({
           // Drops `?new` and keeps the rest: the mode chosen stays for the next time.
           <ButtonLink variant="ghost" size="icon-sm">
             <Link to="." search={(prev) => ({ ...prev, new: undefined })}>
-              <XIcon />
+              <XIcon aria-hidden="true" />
               <span className="sr-only">Close</span>
             </Link>
           </ButtonLink>
@@ -108,7 +108,7 @@ export function Inspector({
         description={describe(node)}
         action={
           <TipButton tip="Show the overview" label="Close" size="icon-sm" onClick={onClose}>
-            <XIcon />
+            <XIcon aria-hidden="true" />
           </TipButton>
         }
       >

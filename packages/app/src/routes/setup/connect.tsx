@@ -1,6 +1,6 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ExternalLinkIcon } from "lucide-react";
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { z } from "zod";
 import { Button } from "#/components/ui/button.tsx";
 import { Field, FieldDescription, FieldLabel } from "#/components/ui/field.tsx";
@@ -112,7 +112,7 @@ function GithubApp({ app }: { app: { slug: string; setBy?: string; setAt?: strin
           <ButtonLink variant="outline" size="sm">
             <a href={`https://github.com/apps/${app.slug}/installations/new`} target="_blank" rel="noreferrer">
               Install
-              <ExternalLinkIcon data-icon="inline-end" />
+              <ArrowSquareOutIcon aria-hidden="true" data-icon="inline-end" />
             </a>
           </ButtonLink>
         </ItemActions>

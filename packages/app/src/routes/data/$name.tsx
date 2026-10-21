@@ -2,7 +2,8 @@ import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 import { errorMessage } from "@sanoma-ai/workflows/shared";
 import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { PlusIcon, XIcon } from "lucide-react";
+import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
+import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { useMemo } from "react";
 import { Card, CardAction, CardContent, CardHeader } from "#/components/ui/card.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
@@ -81,7 +82,7 @@ function CollectionPage() {
         action={
           <ButtonLink>
             <Link to="." search={(prev) => ({ ...closeRecord(prev), new: true })} resetScroll={false}>
-              <PlusIcon data-icon="inline-start" />
+              <PlusIcon aria-hidden="true" data-icon="inline-start" />
               Add record
             </Link>
           </ButtonLink>
@@ -131,7 +132,7 @@ function CollectionPage() {
                 <CardAction>
                   <ButtonLink variant="ghost" size="icon-sm">
                     <Link to="." search={closeRecord} resetScroll={false}>
-                      <XIcon />
+                      <XIcon aria-hidden="true" />
                       <span className="sr-only">Close</span>
                     </Link>
                   </ButtonLink>

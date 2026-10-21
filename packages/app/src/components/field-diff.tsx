@@ -2,7 +2,7 @@ import type { DriftField } from "@sanoma-ai/workflows";
 import { errorMessage } from "@sanoma-ai/workflows/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { FilePenLineIcon } from "lucide-react";
+import { NotePencilIcon } from "@phosphor-icons/react/dist/csr/NotePencil";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
@@ -81,7 +81,11 @@ function AdoptButton({ adopt: { runId, drift }, id, path }: { adopt: Adopt; id: 
       onClick={() => mutation.mutate()}
       disabled={mutation.isPending}
     >
-      {mutation.isPending ? <Spinner data-icon="inline-start" /> : <FilePenLineIcon data-icon="inline-start" />}
+      {mutation.isPending ? (
+        <Spinner data-icon="inline-start" />
+      ) : (
+        <NotePencilIcon aria-hidden="true" data-icon="inline-start" />
+      )}
       Adopt
     </Button>
   );

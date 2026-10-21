@@ -1,6 +1,6 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronRightIcon } from "lucide-react";
+import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { LinkItem, Nothing, PageHeader, plural } from "../../components/common.tsx";
 import { configQuery } from "../../queries.ts";
@@ -33,7 +33,7 @@ function DataPage() {
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
-                  <ChevronRightIcon className="size-4" />
+                  <CaretRightIcon aria-hidden="true" className="size-4" />
                 </ItemActions>
               </Link>
             </LinkItem>

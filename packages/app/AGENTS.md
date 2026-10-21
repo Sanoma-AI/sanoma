@@ -11,6 +11,7 @@ This package owns the local web UI over a Sanoma config. Its server functions ar
 
 ## Maintenance boundaries
 
+- Use `@phosphor-icons/react` for interface icons, with the default regular weight and per-icon imports from `@phosphor-icons/react/dist/csr/<Name>`. Keep `components.json`'s `iconLibrary` set to `phosphor` so shadcn additions use the same library.
 - Keep server-only config, credentials, and runtime code out of browser modules. Server functions (`src/functions.ts`) parse their argument and call `src/server/core.ts`, where their behavior lives and where the tests call it.
 - Browser modules import values from `@sanoma-ai/workflows` only through `/shared`, and types from the rest; `@sanoma-ai/workflows/scenario` values (`loadScenarios`, `check`) only in `src/server/core.ts`.
 - `callFn` is a site's one way in: it calls only what `callApi` (`src/server/core.ts`) dispatches, an operation through `SanomaClient.call` (which keeps the one rule, `isDirect`) or a workflow by `apiNameOf`, always as the person asking. A new kind of call is a new name form there, in `createApi` and in `readSites` (`@sanoma-ai/workflows`' `src/sites.ts`, which reads a site's calls for Used by), never another server function for sites.
