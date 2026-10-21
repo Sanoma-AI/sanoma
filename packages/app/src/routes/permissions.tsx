@@ -2,13 +2,25 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import type { PreviewAnswer } from "@sanoma-ai/workflows";
 import { approverLabel } from "@sanoma-ai/workflows/shared";
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { Button } from "#/components/ui/button.tsx";
+import { Card, CardHeader } from "#/components/ui/card.tsx";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "#/components/ui/sheet.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { PREVIEW_TONE } from "#/lib/tone.ts";
+import { useReducedMotion } from "#/lib/motion.ts";
 import { cn } from "#/lib/utils.ts";
 import type { PermissionsResponse, PermissionsRow } from "../api.ts";
-import { Fact, Facts, Nothing, PageHeader, pageTitle, ToneBadge } from "../components/common.tsx";
+import {
+  CardHeading,
+  CodePanel,
+  Fact,
+  Facts,
+  Nothing,
+  PageHeader,
+  pageTitle,
+  ToneBadge,
+} from "../components/common.tsx";
 import { PolicyFacts } from "../components/panels/permissions-panel.tsx";
 import { permissionsQuery } from "../queries.ts";
 
@@ -23,6 +35,8 @@ export const Route = createFileRoute("/permissions")({
 type Group = PermissionsResponse["groups"][number];
 /** What a row is about: a workflow's start, or an operation, called in a workflow or directly. */
 type Kind = "workflow" | "op";
+/** A policy file: its path, its text, and where each of its policies is. */
+type PolicyFile = PermissionsResponse["files"][number];
 /** A cell the policy answered with a rule behind it, and the workflow its operation is called in: what the sheet shows. */
 type Chosen = { kind: Kind; row: PermissionsRow; under?: PermissionsRow; group: Group; cell: PreviewAnswer };
 
@@ -33,17 +47,29 @@ const someoneIn = (group: Group) => `someone in ${group ?? "no group"}`;
  * What the policy answers someone in no group and in each group (the declared ones and `agents`),
  * across, for each workflow's start with each operation it uses under it, and each operation a
  * person may call directly, down, the input unknown. A cell with a rule behind it opens the rule
- * in a sheet. Nothing here is edited: the policy is `policies/*.cedar`, written by the agent.
+ * in a sheet, whose Show the rule marks its lines in the policy's files, shown read-only under the
+ * grid. Nothing here is edited: the policy is `policies/*.cedar`, written by the agent.
  */
 function PermissionsPage() {
   const { data } = useSuspenseQuery(permissionsQuery());
   // The cell shown, kept while the sheet closes so its content stays through the animation.
   const [chosen, setChosen] = useState<Chosen>();
   const [open, setOpen] = useState(false);
+  // The rule whose lines the code marks: a new object each time it is shown, so its card comes
+  // into view again.
+  const [shown, setShown] = useState<{ rule: string }>();
   const choose = (cell: Chosen) => {
     setChosen(cell);
     setOpen(true);
   };
+  const rule = chosen?.cell.rule?.id;
+  const show =
+    rule !== undefined && data.files.some((f) => f.policies.some((p) => p.id === rule))
+      ? () => {
+          setShown({ rule });
+          setOpen(false);
+        }
+      : undefined;
   return (
     <>
       <PageHeader />
@@ -74,10 +100,13 @@ function PermissionsPage() {
               <Rows kind="op" rows={data.ops} groups={data.groups} choose={choose} />
             </Table>
           </div>
+          {data.files.map((file) => (
+            <PolicyCode key={file.file} file={file} shown={shown} />
+          ))}
         </>
       )}
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent>{chosen && <Rule {...chosen} />}</SheetContent>
+        <SheetContent>{chosen && <Rule {...chosen} show={show} />}</SheetContent>
       </Sheet>
     </>
   );
@@ -173,8 +202,43 @@ function Mark({ cell, what, open }: { cell: PreviewAnswer; what: string; open: (
   );
 }
 
-/** The rule behind a cell: its title (else its id), its id and file, its reason, and for a hold whom it asks. */
-function Rule({ kind, row, under, group, cell }: Chosen) {
+/**
+ * A policy file, read-only and plain (the app has no Cedar grammar), titled by its path, as high
+ * as its lines up to the workflow Code card's height. The `shown` rule's lines are marked, and
+ * the card comes into view when it is shown.
+ */
+function PolicyCode({
+  file: { file, text, policies },
+  shown,
+}: {
+  file: PolicyFile;
+  shown: { rule: string } | undefined;
+}) {
+  const span = policies.find((p) => p.id === shown?.rule)?.span;
+  const card = useRef<HTMLDivElement>(null);
+  const reducedMotion = useReducedMotion();
+  useEffect(() => {
+    if (span) card.current?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "nearest" });
+    // `shown` too: each time a rule is shown, even the same one again.
+  }, [shown, span, reducedMotion]);
+  return (
+    <Card ref={card} className="scroll-mt-4 gap-0 overflow-hidden py-0">
+      <CardHeader className="border-b py-2 compact:py-1 [.border-b]:pb-2 compact:[.border-b]:pb-1">
+        <CardHeading className="font-mono text-sm">{file}</CardHeading>
+      </CardHeader>
+      {/* Its lines at the Code view's 1.6 line height, one more for its padding, at most 480 px. */}
+      <div className="max-h-[480px] text-xs" style={{ height: `${(text.split("\n").length + 1) * 1.6}em` }}>
+        <CodePanel source={text} highlight={span && [span]} plain />
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * The rule behind a cell: its title (else its id), its id and file, its reason, for a hold whom
+ * it asks, and Show the rule when its file is shown (`show`).
+ */
+function Rule({ kind, row, under, group, cell, show }: Chosen & { show: (() => void) | undefined }) {
   const rule = cell.rule!;
   const verb =
     cell.answer === "hold"
@@ -202,6 +266,11 @@ function Rule({ kind, row, under, group, cell }: Chosen) {
           {rule.reason !== undefined && <Fact label="Reason">{rule.reason}</Fact>}
           {cell.answer === "hold" && cell.approver && <Fact label="Asks">{approverLabel(cell.approver)}</Fact>}
         </Facts>
+        {show && (
+          <Button variant="outline" size="sm" className="mt-4" onClick={show}>
+            Show the rule
+          </Button>
+        )}
       </div>
     </>
   );

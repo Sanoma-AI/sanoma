@@ -12,8 +12,10 @@ import {
   invalidInput,
   isEnded,
   type LedgerRecord,
+  loadPolicies,
   type PreviewAnswer,
   Principal,
+  readPolicyFiles,
   type RunSummary,
   type SanomaError,
 } from "@sanoma-ai/workflows";
@@ -383,7 +385,8 @@ const grids = new WeakMap<object, PermissionsResponse>();
  * (`{ id: "group:<name>", groups: [name] }`, an agent acting for `ACTS_FOR`), the input unknown
  * (`preview`), for the start of each of the config's own workflows, by name, each with the
  * operations it uses, in the order it declares them, then each operation a person may call
- * directly, by id. Nobody's own answer: the actor asking is not used.
+ * directly, by id. Nobody's own answer: the actor asking is not used. Then the policy's files
+ * (`policyFiles`).
  */
 export function permissions(app: Pick<AppContext, "resolved" | "description">): PermissionsResponse {
   let grid = grids.get(app.resolved);
@@ -424,7 +427,29 @@ function gridOf(app: Pick<AppContext, "resolved" | "description">): PermissionsR
       return { ...start!, id: name, ...(title !== undefined && { title }), ops: called };
     }),
     ops: rows.slice(at),
+    files: policyFiles(app.resolved.root),
   };
+}
+
+/**
+ * The root's `policies/**\/*.cedar` (`readPolicyFiles`), each with `\n` line endings, as the Code
+ * view counts offsets, and the span of each of its policies (`loadPolicies`) in that text.
+ */
+function policyFiles(root: string | undefined): PermissionsResponse["files"] {
+  if (root === undefined) return [];
+  const files = readPolicyFiles(root).map(({ file, text }) => ({ file, text: text.replaceAll("\r\n", "\n") }));
+  const { policies } = loadPolicies(files);
+  return files.map(({ file, text }) => ({
+    file,
+    text,
+    policies: policies
+      .filter((p) => p.file === file)
+      .map(({ id, line, column, text: policy }) => {
+        // The offset of its line's start (the lines before it, each with its "\n"), then its column's.
+        const start = text.split("\n", line - 1).reduce((at, before) => at + before.length + 1, column - 1);
+        return { id, span: [start, start + policy.length] as const };
+      }),
+  }));
 }
 
 /** Each vendor's credential statuses now, from the app's environment and the stored credentials. */
