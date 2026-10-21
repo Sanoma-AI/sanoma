@@ -204,6 +204,7 @@ async function contextOf(cfg: SanomaConfig, login = loopbackLogin()): Promise<Ap
   return {
     resolved: resolveConfig(cfg),
     description: describeConfig(cfg),
+    policyFiles: [],
     client,
     login: admitting(login, () => ({ people: [], problems: [] })),
   };

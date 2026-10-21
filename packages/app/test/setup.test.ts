@@ -72,6 +72,7 @@ beforeAll(async () => {
   ctx = {
     resolved: resolveConfig(config),
     description: describeConfig(config),
+    policyFiles: [],
     client,
     login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
   };

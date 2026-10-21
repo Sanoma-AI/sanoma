@@ -93,6 +93,7 @@ async function call(data: unknown, actor: string | null = "ada") {
   const app = (context ??= {
     resolved: resolveConfig(testApp.config),
     description: describeConfig(testApp.config),
+    policyFiles: [],
     client: testApp.client,
     login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
   });

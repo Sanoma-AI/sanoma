@@ -15,7 +15,6 @@ import {
   loadPolicies,
   type PreviewAnswer,
   Principal,
-  readPolicyFiles,
   type RunSummary,
   type SanomaError,
 } from "@sanoma-ai/workflows";
@@ -386,15 +385,15 @@ const grids = new WeakMap<object, PermissionsResponse>();
  * (`preview`), for the start of each of the config's own workflows, by name, each with the
  * operations it uses, in the order it declares them, then each operation a person may call
  * directly, by id. Nobody's own answer: the actor asking is not used. Then the policy's files
- * (`policyFiles`).
+ * as the app read them when it started (`sourcesOf`).
  */
-export function permissions(app: Pick<AppContext, "resolved" | "description">): PermissionsResponse {
+export function permissions(app: Pick<AppContext, "resolved" | "description" | "policyFiles">): PermissionsResponse {
   let grid = grids.get(app.resolved);
   if (!grid) grids.set(app.resolved, (grid = gridOf(app)));
   return grid;
 }
 
-function gridOf(app: Pick<AppContext, "resolved" | "description">): PermissionsResponse {
+function gridOf(app: Pick<AppContext, "resolved" | "description" | "policyFiles">): PermissionsResponse {
   const { description } = app;
   const groups = [null, ...groupNamesOf(description.resources)];
   const opsById = new Map(description.ops.map((op) => [op.id, op]));
@@ -427,29 +426,31 @@ function gridOf(app: Pick<AppContext, "resolved" | "description">): PermissionsR
       return { ...start!, id: name, ...(title !== undefined && { title }), ops: called };
     }),
     ops: rows.slice(at),
-    files: policyFiles(app.resolved.root),
+    files: sourcesOf(app.policyFiles),
   };
 }
 
 /**
- * The root's `policies/**\/*.cedar` (`readPolicyFiles`), each with `\n` line endings, as the Code
- * view counts offsets, and the span of each of its policies (`loadPolicies`) in that text.
+ * The policy files, each with `\n` line endings, as the Code view counts offsets, and the span
+ * of each of its policies (`loadPolicies`) in that text.
  */
-function policyFiles(root: string | undefined): PermissionsResponse["files"] {
-  if (root === undefined) return [];
-  const files = readPolicyFiles(root).map(({ file, text }) => ({ file, text: text.replaceAll("\r\n", "\n") }));
+function sourcesOf(read: AppContext["policyFiles"]): PermissionsResponse["files"] {
+  const files = read.map(({ file, text }) => ({ file, text: text.replaceAll("\r\n", "\n") }));
   const { policies } = loadPolicies(files);
-  return files.map(({ file, text }) => ({
-    file,
-    text,
-    policies: policies
-      .filter((p) => p.file === file)
-      .map(({ id, line, column, text: policy }) => {
-        // The offset of its line's start (the lines before it, each with its "\n"), then its column's.
-        const start = text.split("\n", line - 1).reduce((at, before) => at + before.length + 1, column - 1);
-        return { id, span: [start, start + policy.length] as const };
-      }),
-  }));
+  return files.map(({ file, text }) => {
+    // Where each line starts: a policy's line and column, from 1, back to an offset.
+    const starts = [0, ...[...text.matchAll(/\n/g)].map((m) => m.index + 1)];
+    return {
+      file,
+      text,
+      policies: policies
+        .filter((p) => p.file === file)
+        .map(({ id, line, column, text: policy }) => {
+          const start = starts[line - 1]! + column - 1;
+          return { id, span: [start, start + policy.length] as const };
+        }),
+    };
+  });
 }
 
 /** Each vendor's credential statuses now, from the app's environment and the stored credentials. */

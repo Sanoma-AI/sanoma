@@ -9,6 +9,7 @@ import {
   errorMessage,
   isLoopback,
   problemLine,
+  readPolicyFiles,
   resolveConfig,
   SanomaClient,
   type SanomaConfig,
@@ -79,6 +80,8 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     throw new Error(`The dev server listens on this machine only, not ${host}: serve a build there`);
   }
   const resolved = resolveConfig(config);
+  // Read beside the policy made from them, so the Permissions page's source is what decides.
+  const policyFiles = resolved.root === undefined ? [] : readPolicyFiles(resolved.root);
   const login = admitting(given, () => readPeople(resolved.root));
   const description = describeConfig(config);
   // Problems in the files do not stop the app: a data file's resources are left out (the Resources
@@ -150,7 +153,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   }
   const responder = loaded.value;
   const client = connected.value;
-  const app: AppContext = { resolved, description, client, login, source: options.source };
+  const app: AppContext = { resolved, description, policyFiles, client, login, source: options.source };
 
   try {
     await new Promise<void>((done, fail) => {

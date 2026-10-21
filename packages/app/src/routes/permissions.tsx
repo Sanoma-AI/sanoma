@@ -14,6 +14,7 @@ import type { PermissionsResponse, PermissionsRow } from "../api.ts";
 import {
   CardHeading,
   CodePanel,
+  loadCode,
   Fact,
   Facts,
   Nothing,
@@ -27,7 +28,10 @@ import { permissionsQuery } from "../queries.ts";
 export const Route = createFileRoute("/permissions")({
   staticData: { crumb: "Permissions", section: "permissions" },
   head: ({ match }) => pageTitle(match.staticData.crumb),
-  loader: ({ context: { queryClient } }) => queryClient.query({ ...permissionsQuery(), staleTime: "static" }),
+  loader: ({ context: { queryClient } }) => {
+    if (!import.meta.env.SSR) void loadCode();
+    return queryClient.query({ ...permissionsQuery(), staleTime: "static" });
+  },
   component: PermissionsPage,
 });
 
@@ -56,8 +60,9 @@ function PermissionsPage() {
   const [chosen, setChosen] = useState<Chosen>();
   const [open, setOpen] = useState(false);
   // The rule whose lines the code marks: a new object each time it is shown, so its card comes
-  // into view again.
+  // into view again. Set once the sheet has closed, whose closing would otherwise undo the scroll.
   const [shown, setShown] = useState<{ rule: string }>();
+  const showing = useRef<string>(undefined);
   const choose = (cell: Chosen) => {
     setChosen(cell);
     setOpen(true);
@@ -66,7 +71,7 @@ function PermissionsPage() {
   const show =
     rule !== undefined && data.files.some((f) => f.policies.some((p) => p.id === rule))
       ? () => {
-          setShown({ rule });
+          showing.current = rule;
           setOpen(false);
         }
       : undefined;
@@ -105,7 +110,15 @@ function PermissionsPage() {
           ))}
         </>
       )}
-      <Sheet open={open} onOpenChange={setOpen}>
+      <Sheet
+        open={open}
+        onOpenChange={setOpen}
+        onOpenChangeComplete={(isOpen) => {
+          if (isOpen || showing.current === undefined) return;
+          setShown({ rule: showing.current });
+          showing.current = undefined;
+        }}
+      >
         <SheetContent>{chosen && <Rule {...chosen} show={show} />}</SheetContent>
       </Sheet>
     </>
@@ -226,8 +239,12 @@ function PolicyCode({
       <CardHeader className="border-b py-2 compact:py-1 [.border-b]:pb-2 compact:[.border-b]:pb-1">
         <CardHeading className="font-mono text-sm">{file}</CardHeading>
       </CardHeader>
-      {/* Its lines at the Code view's 1.6 line height, one more for its padding, at most 480 px. */}
-      <div className="max-h-[480px] text-xs" style={{ height: `${(text.split("\n").length + 1) * 1.6}em` }}>
+      {/* Its lines at the Code view's 1.6 line height, one more for its padding, at most the
+          workflow Code card's height. */}
+      <div
+        className="max-h-[420px] text-xs sm:max-h-[480px] compact:max-h-[360px]"
+        style={{ height: `${(text.split("\n").length + 1) * 1.6}em` }}
+      >
         <CodePanel source={text} highlight={span && [span]} plain />
       </div>
     </Card>

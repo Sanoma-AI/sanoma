@@ -10,6 +10,7 @@ import {
   defineConnector,
   defineWorkflow,
   loadPolicies,
+  readPolicyFiles,
   type Policy,
   resolveConfig,
   type SanomaConfig,
@@ -94,7 +95,11 @@ const description = describeConfig(config);
 
 /** The grid under `policy`, as `getPermissions` answers it, `described` as the description says it. */
 const gridOf = (policy: Policy, described = description.policy) =>
-  permissions({ resolved: { ...resolved, policy }, description: { ...description, policy: described } });
+  permissions({
+    resolved: { ...resolved, policy },
+    description: { ...description, policy: described },
+    policyFiles: readPolicyFiles(root),
+  });
 
 describe("the Permissions grid", () => {
   const hold = {
@@ -165,13 +170,19 @@ describe("the Permissions grid", () => {
   });
 
   it("serves each policy file's text, with each policy's id and where it is, from the people fixture", () => {
-    const { files } = permissions({ resolved: resolveConfig(people), description: describeConfig(people) });
+    const fixture = resolveConfig(people);
+    const filesOf = (policyFiles: { file: string; text: string }[]) =>
+      permissions({ resolved: { ...fixture }, description: describeConfig(people), policyFiles }).files;
+    const read = readPolicyFiles(fixture.root!);
+    const files = filesOf(read);
     const file = "policies/refunds.cedar";
     const text = readFileSync(
       fileURLToPath(new URL(`../../workflows/test/fixtures/people/${file}`, import.meta.url)),
       "utf8",
     );
     expect(files).toEqual([{ file, text, policies: [expect.anything(), expect.anything()] }]);
+    // Written with `\r\n`, served with `\n`, as the Code view counts offsets: the same answer.
+    expect(filesOf(read.map((f) => ({ ...f, text: f.text.replaceAll("\n", "\r\n") })))).toEqual(files);
     // Each from its first annotation to its `;`: the file's comment is no policy's.
     expect(files[0]!.policies.map(({ id, span }) => [id, spanLines(text, span)])).toEqual([
       [`${file}#1`, [2, 6]],
@@ -233,7 +244,8 @@ describe("the Permissions page", () => {
     expect(html.match(/>allow</g)).toHaveLength(5);
     // The policy file under the grid, titled by its path, its text plain until the code loads.
     expect(html).toContain(">policies/refunds.cedar</h2>");
-    expect(html).toContain(POLICIES.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("'", "&#x27;"));
+    expect(html).toContain("forbid (principal, action == Sanoma::Action::&quot;workflow:refund&quot;, resource)");
+    expect(html).toContain("unless { principal in Sanoma::Group::&quot;finance&quot; };");
     // The Workflows page says the policy checks every call, at its version.
     const workflows = (await (await fetch(new URL("/workflows", app.url))).text()).replaceAll("<!-- -->", "");
     expect(workflows).toContain(
@@ -260,7 +272,10 @@ describe("the Permissions page", () => {
       await tab.click('[role="dialog"] button[type="submit"]');
       await tab.waitForFunction(`!document.querySelector("select#who-name")`);
       // Your groups under your name.
-      await tab.waitForSelector('[data-slot="sidebar-footer"] .sr-only::-p-text(finance)');
+      // By its text, not `::-p-text`, which matches the deepest element only: here a span inside.
+      await tab.waitForFunction(
+        `document.querySelector('[data-slot="sidebar-footer"] .sr-only')?.textContent.includes("finance")`,
+      );
 
       // The sheet's text, once it shows the rule.
       const sheet = async (rule: string) => {
@@ -289,12 +304,9 @@ describe("the Permissions page", () => {
       await tab.click('[data-slot="sheet-content"] button::-p-text(Show the rule)');
       await tab.waitForFunction(`!document.querySelector('[data-slot="sheet-content"]')`);
       await tab.waitForSelector(".cm-hl-gutter");
-      expect(await tab.$$eval(".cm-hl-gutter", (marked) => marked.map((m) => m.textContent))).toEqual([
-        "10",
-        "11",
-        "12",
-        "13",
-      ]);
+      expect(
+        await tab.evaluate(`[...document.querySelectorAll(".cm-hl-gutter")].map((marked) => marked.textContent)`),
+      ).toEqual(["10", "11", "12", "13"]);
 
       // The New run panel says what the policy will ask, for bo and not for ada, who is in finance.
       const newRun = async (who: string) => {

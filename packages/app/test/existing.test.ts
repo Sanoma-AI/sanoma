@@ -41,6 +41,7 @@ const alice = { id: "alice" };
 const context = (): AppContext => ({
   resolved: resolveConfig(test.config),
   description: describeConfig(test.config),
+  policyFiles: [],
   client: test.client,
   login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
   source,

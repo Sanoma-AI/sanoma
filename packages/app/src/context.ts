@@ -51,6 +51,11 @@ export interface AppContext {
    * workflows' sources (`withoutSources`), which `getSource` serves one at a time.
    */
   description: ConfigDescription;
+  /**
+   * The root's `policies/**\/*.cedar` (`readPolicyFiles`), read as it starts, beside the policy
+   * `resolveConfig` made from them: the source the Permissions page shows with its grid.
+   */
+  policyFiles: { file: string; text: string }[];
   client: SanomaClient;
   /** `AppOptions.login`, or `loopbackLogin()`, admitting only a declared person (`admitting`). */
   login: AdmittingLogin;
