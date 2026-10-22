@@ -39,10 +39,17 @@ import {
   getSetupStatus,
   getSource,
   previewFn,
+  callFn,
   startRunFn,
 } from "./functions.ts";
-import type { UntypedApi } from "./api-client.ts";
-import { api } from "./site.ts";
+import { type Api, createApi, type UntypedApi } from "./api-client.ts";
+
+/**
+ * The company's operations and workflows, called as the person on the page (`callFn`): a loader's
+ * call runs in-process while the server renders the page, as the person whose request it is.
+ * A site's, from `sanoma/site`; the app's own calls through it are untyped.
+ */
+export const api: Api = createApi((request) => callFn({ data: request }));
 
 /** How often the runs and a run's detail refresh while a page shows them. */
 export const POLL_MS = 2_000;

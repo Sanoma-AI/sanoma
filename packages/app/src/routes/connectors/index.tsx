@@ -12,12 +12,12 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { type AvailableConnector, tierOf } from "../../api.ts";
 import {
+  CrumbHeader,
   ExternalLink,
   LinkItem,
   Logo,
   Nothing,
   Notice,
-  PageHeader,
   plural,
   Region,
   VendorLogo,
@@ -38,7 +38,7 @@ export const Route = createFileRoute("/connectors/")({
 function ConnectorsPage() {
   return (
     <>
-      <PageHeader />
+      <CrumbHeader />
       <Region title="Installed">
         <Installed />
       </Region>

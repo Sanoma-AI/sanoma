@@ -54,7 +54,7 @@ const overrides = (workflows.overrides as Json[]).map((given) => {
 
 const SERVER = `A site has no server code: ${REMEDY}`;
 const APP =
-  "A site imports the app's components from `sanoma/ui` and its route APIs from `sanoma/site`; the rest of the app is its server.";
+  "A site imports how a page looks from `sanoma/ui` and what talks to the app (its route APIs, `api`, `RunForm`, `useActor`) from `sanoma/site`; the rest of the app is its server.";
 const sites = {
   files: ["sites/**"],
   // The listing of the sites the build generates.

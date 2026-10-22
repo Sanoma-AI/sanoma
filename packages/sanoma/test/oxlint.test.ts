@@ -52,9 +52,9 @@ import { DBOS } from "@dbos-inc/dbos-sdk";
 import { readFileSync } from "node:fs";
 import { hello } from "../../../workflows/hello";
 import { handler } from "@sanoma-ai/app/server";
-import { RunForm } from "@sanoma-ai/app/ui";
+import { Badge } from "@sanoma-ai/app/ui";
 import kinds from "virtual:sanoma/content";
-export const all = [createFileRoute, Button, useState, Card, Client, ghost, createIsomorphicFn, serverOnly, defineWorkflow, main, startApp, startWorker, fake, DBOS, readFileSync, hello, handler, RunForm, kinds, process.env.KEY];
+export const all = [createFileRoute, Button, useState, Card, Client, ghost, createIsomorphicFn, serverOnly, defineWorkflow, main, startApp, startWorker, fake, DBOS, readFileSync, hello, handler, Badge, kinds, process.env.KEY];
 export const pg = require("pg");
 export type Types = [Ctx<[]>, typeof Hello];
 `,
@@ -201,7 +201,7 @@ describe("the shipped oxlint.json", () => {
         file: index,
         line: 20,
         rule: imports,
-        text: expect.stringMatching(/^'@sanoma-ai\/app\/ui'.*components from `sanoma\/ui`/),
+        text: expect.stringMatching(/^'@sanoma-ai\/app\/ui'.*looks from `sanoma\/ui`/),
       },
       {
         file: index,

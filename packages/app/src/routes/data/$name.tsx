@@ -9,7 +9,7 @@ import { Card, CardAction, CardContent, CardHeader } from "#/components/ui/card.
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { cn } from "#/lib/utils.ts";
 import { useActor } from "../../actor.ts";
-import { ButtonLink, CardHeading, Notice, PageHeader, pageTitle, UsedBy } from "../../components/common.tsx";
+import { ButtonLink, CardHeading, CrumbHeader, Notice, pageTitle, UsedBy } from "../../components/common.tsx";
 import { DataGrid, GridFilters } from "../../components/data-grid.tsx";
 import { RecordForm } from "../../components/record-form.tsx";
 import {
@@ -78,7 +78,7 @@ function CollectionPage() {
 
   return (
     <>
-      <PageHeader
+      <CrumbHeader
         action={
           <ButtonLink>
             <Link to="." search={(prev) => ({ ...closeRecord(prev), new: true })} resetScroll={false}>
@@ -101,7 +101,7 @@ function CollectionPage() {
             </Link>
           </span>
         )}
-      </PageHeader>
+      </CrumbHeader>
       <section aria-label="Records" className="flex flex-col gap-(--gap-section)">
         {/* Its own per collection: a filter typed on one never lands on another. */}
         <GridFilters key={name} collection={collection} search={search} />

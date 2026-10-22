@@ -44,17 +44,17 @@ const files: Record<string, string> = {
   // Imported by the Sites panel on every page.
   "sites/hello/site.ts": `import { defineSite } from "sanoma/site";\n\nexport default defineSite({ title: "Hello desk" });\n`,
   "sites/hello/routes/run.tsx": `import { createFileRoute } from "@tanstack/react-router";
-import { RunForm } from "sanoma/ui";
-import { Link } from "sanoma/site";
+import { Link, RunForm } from "sanoma/site";
+import { Region } from "sanoma/ui";
 
 export const Route = createFileRoute("/sites/hello/run")({ component: Run });
 
 function Run() {
   return (
-    <div>
+    <Region title="Greet someone">
       <RunForm workflow="hello" />
       <Link to="/sites/hello">Back to the hello site</Link>
-    </div>
+    </Region>
   );
 }
 `,
@@ -102,7 +102,8 @@ describe("sanoma from packed tarballs: the dev server", () => {
     expect(site.status, stderr()).toBe(200);
     const html = (await site.text()).replaceAll("<!-- -->", "");
     expect(html).toContain("The hello site");
-    // RunForm, from sanoma/ui as the tarball ships it.
+    // RunForm from sanoma/site, in a Region from sanoma/ui, as the tarball ships them.
+    expect(html).toContain("Greet someone");
     expect(html).toContain("Starts a live run of hello.");
     expect(html).toContain("Back to the hello site");
     // The fixture's content/, read and rendered by marked and yaml as installed from the tarballs.

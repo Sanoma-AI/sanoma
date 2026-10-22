@@ -22,10 +22,10 @@ import { DRIFT_TONE } from "#/lib/tone.ts";
 import { errorBodyOf } from "../api.ts";
 import {
   CodePanel,
+  CrumbHeader,
   loadCode,
   Nothing,
   Notice,
-  PageHeader,
   pageTitle,
   PanelCard,
   plural,
@@ -175,7 +175,7 @@ function Resources({
 
   return (
     <>
-      <PageHeader action={action} />
+      <CrumbHeader action={action} />
       {problems.length > 0 && <Problems problems={problems} />}
       {children}
       {rows.length === 0 ? (

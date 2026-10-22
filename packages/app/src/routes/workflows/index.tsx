@@ -15,11 +15,11 @@ import { RUN_TONE } from "#/lib/tone.ts";
 import { RUNS_LIMIT } from "../../api.ts";
 import {
   ButtonLink,
+  CrumbHeader,
   Fact,
   Facts,
   Nothing,
   Notice,
-  PageHeader,
   plural,
   Segment,
   Segmented,
@@ -92,7 +92,7 @@ function WorkflowsPage() {
   const runs = view === "runs";
   return (
     <>
-      <PageHeader
+      <CrumbHeader
         action={
           <div className="flex gap-2">
             <ButtonLink variant="outline" size="sm">
@@ -111,7 +111,7 @@ function WorkflowsPage() {
         <span className="text-muted-foreground">
           {plural(config.workflows.length, "workflow")} in {config.appName}
         </span>
-      </PageHeader>
+      </CrumbHeader>
       <ConfigFacts />
       {runs ? <AllRuns status={status} workflow={workflow} /> : <Overview filter={filter ?? "all"} />}
     </>

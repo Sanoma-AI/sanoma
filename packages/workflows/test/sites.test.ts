@@ -135,7 +135,7 @@ describe("readSites", () => {
             target: "hello",
             via: "RunForm",
             file: "sites/hello/routes/run.tsx",
-            line: 9,
+            line: 10,
             column: 7,
             page: "/sites/hello/run",
           },
@@ -171,7 +171,7 @@ describe("readSites", () => {
         'import { defineSite } from "sanoma/site";\n\nexport default defineSite({ title: "Front desk" });\n',
       "sites/desk/routes/index.tsx": page(
         "/sites/desk/",
-        'import { RunForm } from "@sanoma-ai/app/ui";\nimport { api as sanoma } from "@sanoma-ai/app/site";',
+        'import { RunForm } from "sanoma/site";\nimport { api as sanoma } from "@sanoma-ai/app/site";',
         [
           "void sanoma.outboundNext({});",
           "void sanoma.acme.customer.get({ id: '1' });",
@@ -195,7 +195,7 @@ describe("readSites", () => {
         'import * as site from "sanoma/site";',
         'import type { api as typed } from "sanoma/site";',
         'import { api } from "sanoma/site";',
-        'import { RunForm } from "sanoma/ui";',
+        'import { RunForm } from "sanoma/site";',
         "export const call = (name: string, form: string) => [",
         "  api[name].start({}),",
         "  api.data[name].list(),",

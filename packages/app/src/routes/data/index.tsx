@@ -2,7 +2,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
-import { LinkItem, Nothing, PageHeader, plural } from "../../components/common.tsx";
+import { CrumbHeader, LinkItem, Nothing, plural } from "../../components/common.tsx";
 import { configQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/data/")({ component: DataPage });
@@ -12,7 +12,7 @@ function DataPage() {
   const { data: collections } = useSuspenseQuery({ ...configQuery(), select: (config) => config.collections });
   return (
     <>
-      <PageHeader />
+      <CrumbHeader />
       {collections.length === 0 ? (
         <Nothing title="This config has no collections">
           Declare them in <code>resources/data.ts</code>, each with <code>collection()</code> from{" "}

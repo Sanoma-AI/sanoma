@@ -5,12 +5,12 @@ import { Badge } from "#/components/ui/badge.tsx";
 import { ItemGroup } from "#/components/ui/item.tsx";
 import type { ScenarioEntry } from "../../api.ts";
 import {
+  CrumbHeader,
   Expandable,
   ExternalLink,
   None,
   Notice,
   OpItem,
-  PageHeader,
   pageTitle,
   Region,
   Section,
@@ -53,7 +53,7 @@ function ConnectorPage() {
   return (
     <>
       {/* Decorative: the title beside it names the heading. */}
-      <PageHeader icon={<VendorLogo vendor={id} alt="" className="size-7" />}>
+      <CrumbHeader icon={<VendorLogo vendor={id} alt="" className="size-7" />}>
         <code className="text-muted-foreground">{id}</code>
         {(vendor.package || vendor.homepage) && (
           <div className="flex flex-wrap">
@@ -63,7 +63,7 @@ function ConnectorPage() {
             {vendor.homepage && <ExternalLink href={vendor.homepage}>Source</ExternalLink>}
           </div>
         )}
-      </PageHeader>
+      </CrumbHeader>
       {resourceTypes.length > 0 && (
         <p>
           <span className="text-muted-foreground">Resources: </span>

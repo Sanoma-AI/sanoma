@@ -4,7 +4,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { RUNS_LIMIT } from "../api.ts";
 import { ApprovalCard } from "../components/approval.tsx";
-import { ButtonLink, Nothing, Notice, PageHeader, pageTitle, plural } from "../components/common.tsx";
+import { ButtonLink, CrumbHeader, Nothing, Notice, pageTitle, plural } from "../components/common.tsx";
 import { type Entry, useDecided, useInbox } from "../lib/inbox.ts";
 import {
   approvalKey,
@@ -41,7 +41,7 @@ function InboxPage() {
   const { pending, filter, open, error } = useInbox(show, wanted);
   return (
     <>
-      <PageHeader />
+      <CrumbHeader />
       {error && <Notice variant="destructive">Could not refresh approvals: {error.message}</Notice>}
       {filter === "decided" ? (
         <Decided wanted={wanted} />

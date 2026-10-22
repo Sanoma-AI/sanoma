@@ -1,12 +1,9 @@
-// What a site imports, as `sanoma/site` (`@sanoma-ai/app/site`): `defineSite`, the route APIs of
-// the app's own TanStack Router, so a site and the app share one router, `api`, which calls the
-// app's server function, `ApiError` and `errorBodyOf`, how a refusal reads, and `content`, the
-// repo's Markdown. Source, loaded only by Vite in a company's build; browser code, nothing
-// server-side. A route file still imports `createFileRoute` from `@tanstack/react-router` itself:
-// the route generator rewrites its path there, and only there.
+// What a site imports that talks to the running app, as `sanoma/site` (`@sanoma-ai/app/site`); how
+// a page looks is `sanoma/ui`'s. The app's own router's APIs, so a site and the app share one
+// router. Source, loaded only by Vite in a company's build; browser code, nothing server-side. A
+// route file still imports `createFileRoute` from `@tanstack/react-router` itself: the route
+// generator rewrites its path there, and only there.
 import type { ComponentType } from "react";
-import { type Api, createApi } from "./api-client.ts";
-import { callFn } from "./functions.ts";
 
 export {
   getRouteApi,
@@ -39,12 +36,10 @@ export { ApiError, errorBodyOf } from "./api.ts";
 export type { ErrorResponse } from "./api.ts";
 // What `.sanoma/api.ts` types the company's `api` with: a company resolves `sanoma/site`, not the runtime.
 export type { CollectionApi, ListQuery, OpFn, Saved, WorkflowFn } from "@sanoma-ai/workflows/shared";
-
-/**
- * The company's operations and workflows, called as the person on the page (`callFn`): a loader's
- * call runs in-process while the server renders the page, as the person whose request it is.
- */
-export const api: Api = createApi((request) => callFn({ data: request }));
+// A workflow's start form (`<RunForm workflow="hello" />`), and who is on the page.
+export { RunForm } from "./form/run-form.tsx";
+export { type ActorState, useActor } from "./actor.ts";
+export { api } from "./queries.ts";
 
 /**
  * A site's `sites/<name>/site.ts` (optional): how the app's Sites panel names it, and whether it

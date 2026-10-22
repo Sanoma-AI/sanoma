@@ -22,8 +22,7 @@ import { errorBodyOf } from "../api.ts";
 import type { UntypedApi } from "../api-client.ts";
 import { buildInput, fieldsOf, initialValues } from "../form/schema.ts";
 import { errorsOf, FieldView, FormFoot, useSchemaForm } from "../form/start-form.tsx";
-import { DATA_KEY, runLink } from "../queries.ts";
-import { api } from "../site.ts";
+import { api, DATA_KEY, runLink } from "../queries.ts";
 import { Notice } from "./common.tsx";
 
 // A collection's record form: one form, drawn from the record's JSON Schema as the start form is

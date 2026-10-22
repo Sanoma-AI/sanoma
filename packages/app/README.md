@@ -48,7 +48,7 @@ A company repo is an ES module package (`"type": "module"`, as `sanoma init` wri
 
 ### A site's imports
 
-A site's route file imports `createFileRoute` from `@tanstack/react-router` (the route generator rewrites the path there, and only there) and the rest from `sanoma/site`, which is this package's `@sanoma-ai/app/site`: the app's own router's `Link`, `Outlet`, `useNavigate`, `useParams`, `useSearch`, `useRouter`, `useRouterState`, `getRouteApi`, `linkOptions`, `redirect` and `notFound` (and their types), `defineSite`, `api` with `ApiError` and `errorBodyOf` ([Calling operations and workflows](#calling-operations-and-workflows)), and `content`, the repo's Markdown ([Content](#content)). `sites/<name>/site.ts`, optional, names the site:
+A site's route file imports `createFileRoute` from `@tanstack/react-router` (the route generator rewrites the path there, and only there) and the rest from `sanoma/site`, which is this package's `@sanoma-ai/app/site`: the app's own router's `Link`, `Outlet`, `useNavigate`, `useParams`, `useSearch`, `useRouter`, `useRouterState`, `getRouteApi`, `linkOptions`, `redirect` and `notFound` (and their types), `defineSite`, `api` with `ApiError` and `errorBodyOf` ([Calling operations and workflows](#calling-operations-and-workflows)), `content`, the repo's Markdown ([Content](#content)), and the pieces that talk to the app, `RunForm` and `useActor` ([The kit and RunForm](#the-kit-and-runform)). How a page looks comes from `sanoma/ui`. `sites/<name>/site.ts`, optional, names the site:
 
 ```ts
 // sites/help/site.ts
@@ -71,21 +71,26 @@ function Home() {
 
 A site for visitors rather than people says so in `site.ts`: `defineSite({ title: "Website", public: true, login: "auth0" })`. `public: true` makes it a public site, served at the root of its own host to visitors; `login`, for a public site only, names the connector in `sanoma.config.ts` whose login half signs a visitor in (`withSetup`'s `login`, in [the workflows README](https://www.npmjs.com/package/@sanoma-ai/workflows#usage)), and without it every page runs as `anonymous`. `sanoma` reads both without running `site.ts`, so the file's default export must be `defineSite({ … })` written out, each a literal; `sanoma check` names what it cannot read or check. A public site is served at the root of its own host too ([Public sites](#public-sites)).
 
-### The kit
+### The kit and RunForm
 
-A site imports its UI from `sanoma/ui`, which is this package's `@sanoma-ai/app/ui`: the app's own components, so its pages look like the app's (Tailwind's classes and the theme's tokens apply to a site's files too). It is an explicit list, and nothing else of the app is public:
+A site imports how its pages look from `sanoma/ui`, which is this package's `@sanoma-ai/app/ui`: the app's own components, so its pages look like the app's (Tailwind's classes and the theme's tokens apply to a site's files too). It is presentational only: nothing in it talks to the running app (its queries, server functions, actor or config), so it could ship as a package of its own. It is an explicit list, and nothing else of the app is public:
 
 - the shadcn components the app is built from: `Button`, `Input`, `Label`, `Textarea`, `Checkbox`, `NativeSelect`, `Slider`, `Badge`, `Separator`, `Skeleton`, `Spinner`, and the parts of `Field`, `Card`, `Alert`, `Table`, `Tabs`, `Dialog`, `Sheet`, `Popover`, `Tooltip`, `DropdownMenu`, `Empty`, `Item`, `ButtonGroup`, `Collapsible`, `Breadcrumb` and `Avatar`; and sonner's `toast`, shown by the app's toaster;
-- the app's own pieces: `PageHeader`, `Region`, `Facts` and `Fact`, `Tip`, `ButtonLink`, `ToneBadge`, `toneBadge`, `effectBadge`, `StatusDot` (and the `Tone` type), `Notice` and `Nothing`;
-- the hooks `useActor` (who is signed in) and `useDensity` (Compact or not);
-- `RunForm({ workflow })`, the app's start form for a workflow, its fields drawn from the workflow's input schema.
+- the app's own pieces: `PageHeader` (a page's `<h1>`, its `title`), `Region`, `Facts` and `Fact`, `Tip`, `ButtonLink`, `ToneBadge`, `toneBadge`, `effectBadge`, `StatusDot` (and the `Tone` type), `Notice` and `Nothing`;
+- the hook `useDensity` (Compact or not).
+
+What talks to the app comes from `sanoma/site`, beside `api`:
+
+- `RunForm({ workflow })`, the app's start form for a workflow, its fields drawn from the workflow's input schema;
+- the hook `useActor()`, who is signed in (`actor`, `groups`, and `signOut` when the login has its own routes; the `ActorState` type).
 
 `RunForm` names the workflow with a link to its page, starts a live run, with the server's complaints shown on the fields they name, and once the run starts stays on the page and links to the run, where its graph, ledger and approvals are. A name the config does not have renders a notice saying so.
 
 ```tsx
 // sites/launches/routes/index.tsx
 import { createFileRoute } from "@tanstack/react-router";
-import { Fact, Facts, PageHeader, Region, RunForm } from "sanoma/ui";
+import { RunForm } from "sanoma/site";
+import { Fact, Facts, PageHeader, Region } from "sanoma/ui";
 
 export const Route = createFileRoute("/sites/launches/")({ component: LaunchDesk });
 
@@ -110,7 +115,7 @@ function LaunchDesk() {
 
 ![A site's page in the app: the Sites panel, a Region of Facts and the announce workflow's RunForm](https://github.com/Sanoma-AI/sanoma/raw/main/.github/assets/site.png)
 
-A site's page inside the app's shell: the kit's `Region` and `Facts`, and `RunForm` drawing announce's fields from its schema.
+A site's page inside the app's shell: the kit's `Region` and `Facts`, and `RunForm`, from `sanoma/site`, drawing announce's fields from its schema.
 
 With sites, the sidebar's bar has Sites, linking to the first site's home. Its panel lists each site under its title (its folder's name without one) with its pages, each named by its route's `staticData.crumb` or its path under the site (a page with a path parameter is left out), and a site's page starts its crumbs with the site's title. `@sanoma-ai/app/site` and `@sanoma-ai/app/ui` ship as source (`src/site.ts`, `src/ui.ts`), compiled by Vite in the company's build; they hold nothing server-side (a server function is a fetch in the browser).
 

@@ -7,7 +7,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "#/c
 import { Input } from "#/components/ui/input.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { type ConnectExistingRequest, errorBodyOf, PASSWORD_NOTE } from "../../api.ts";
-import { Notice, PageHeader, pageTitle, Region } from "../../components/common.tsx";
+import { CrumbHeader, Notice, pageTitle, Region } from "../../components/common.tsx";
 import { connectExistingFn } from "../../functions.ts";
 
 export const Route = createFileRoute("/setup/existing")({
@@ -34,7 +34,7 @@ function ExistingPage() {
   const done = mutation.data;
   return (
     <>
-      <PageHeader />
+      <CrumbHeader />
       <p className="max-w-prose text-sm text-muted-foreground">
         Sanoma reads each one, declares it in <code>resources/sanoma/infra.ts</code> as it is now, and binds it in the
         lockfile through an apply that creates and changes nothing. In a repository with a remote, the file waits on a

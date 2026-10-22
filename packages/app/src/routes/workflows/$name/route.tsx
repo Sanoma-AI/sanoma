@@ -69,7 +69,7 @@ function WorkflowLayout() {
   const { name } = Route.useParams();
   const { runs } = Route.useSearch();
   const workflow = useWorkflow(name);
-  // Titled by the workflow (on a run's pane the last crumb, PageHeader's default, is the run), or
+  // Titled by the workflow (on a run's pane the last crumb, CrumbHeader's title, is the run), or
   // only its name when it is retired. New run opens in the inspector of the pane that shows: none
   // for a retired workflow, which has nothing to start.
   return (
