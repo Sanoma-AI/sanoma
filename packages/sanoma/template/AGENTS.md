@@ -63,4 +63,4 @@ export default defineConfig({ workflows, connectors: [betterAuth] });
 permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"workflow:hello", resource);
 ```
 
-There is no secret to set: the login signs its cookies with a key derived from `SANOMA_SECRETS_KEY`. The site's sign-in and sign-up pages are forms from `sanoma/ui` that `fetch` POST JSON to `/auth/better-auth/sign-in/email` and `/auth/better-auth/sign-up/email`; `useActor()` says who signed in (`visitor:better-auth:<id>`, in `visitors`). The connector's README has the routes.
+There is no secret to set: the login signs its cookies with a key derived from `SANOMA_SECRETS_KEY`. The site's sign-in and sign-up pages are forms from `sanoma/ui` that `fetch` POST JSON to `/auth/better-auth/sign-in/email` and `/auth/better-auth/sign-up/email`; `useActor()`, from `sanoma/site`, says who signed in (`visitor:better-auth:<id>`, in `visitors`). The connector's README has the routes.
