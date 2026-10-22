@@ -173,8 +173,9 @@ async function serveStarted(cwd: string): Promise<number> {
 
 /**
  * Dev mode: `sanoma serve --dev` in a child it restarts on a new build, and the `watch` of each
- * package reached in the checkout (`linkedPackages`). With sites, the child serves the app's source from Vite's dev server, which updates it
- * in place: a new build of the app's pages (its `dist/client` and `dist/server`) restarts nothing.
+ * package reached in the checkout (`linkedPackages`). With sites, the child serves the app's
+ * source from Vite's dev server, which updates it in place: a new build of the app's pages (its
+ * `dist/client` and `dist/server`) restarts nothing.
  * Each runs in a process group of its own, so a terminal's ctrl-c reaches this process alone, and
  * its `stop` is the one path that ends them.
  */
@@ -185,8 +186,8 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
   const fromTarballs = partialLink(cwd);
   if (fromTarballs.length) {
     log(
-      `dev mode: ${fromTarballs.join(", ")} still come from their tarballs: ` +
-        "edits to them in the checkout will not show until sanoma, and each of them the repo declares, is linked too",
+      `dev mode: ${fromTarballs.join(", ")} still come from their tarballs, ` +
+        "so edits to them in the checkout will not show",
     );
   }
   const watchers = startWatchers(packages, log);

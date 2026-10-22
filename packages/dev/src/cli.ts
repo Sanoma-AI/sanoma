@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { declared, isCheckout, leftoverLinks, linkSet, repoRoot, UsageError } from "./links.ts";
+import { checkRepo, declared, isCheckout, leftoverLinks, linkSet, UsageError } from "./links.ts";
 
 const USAGE = `usage: sanoma-dev <command>
 
@@ -13,8 +13,7 @@ Develops sanoma from the Sanoma repo in the working directory (the one holding s
                                  checkout (default ../sanoma beside the repo), installing and building it first
                                  when it has no build; \`pnpm dev\` then runs the checkout in dev mode
   sanoma-dev unlink              undo the link, and fail when package.json or pnpm-workspace.yaml still hold a link:
-  sanoma-dev update              pnpm update --latest sanoma and @sanoma-ai/*, then sanoma check; refused while linked
-`;
+  sanoma-dev update              pnpm update --latest sanoma and @sanoma-ai/*, then sanoma check; refused while linked`;
 
 /** Exit codes: 2 for how the bin was called or what it found, 1 for a failure while running. */
 const USAGE_EXIT = 2;
@@ -32,42 +31,30 @@ const mustPnpm = (cwd: string, args: string[]) => {
   if (pnpm(cwd, args) !== 0) throw new Error(`pnpm ${args.join(" ")} failed in ${cwd}`);
 };
 
-/** Runs the command line; returns the exit code. */
-export function main(argv: string[], cwd = process.cwd()): number {
-  let args: ReturnType<typeof parse>;
+const COMMANDS = ["link", "unlink", "update"];
+
+/** Runs the command line in the working directory; returns the exit code. */
+function main(argv: string[]): number {
+  let parsed;
   try {
-    args = parse(argv);
+    parsed = parseArgs({ args: argv, allowPositionals: true, options: { help: { type: "boolean", short: "h" } } });
   } catch (err) {
-    throw new UsageError(`${messageOf(err)}\n\n${USAGE.trimEnd()}`);
+    throw new UsageError(`${messageOf(err)}\n\n${USAGE}`);
   }
-  const { positionals, values } = args;
-  if (values.help) {
-    console.log(USAGE.trimEnd());
+  if (parsed.values.help) {
+    console.log(USAGE);
     return 0;
   }
-  const [command, ...rest] = positionals;
-  const extra = (max: number) => {
-    if (rest.length > max) throw new UsageError(`too many arguments\n\n${USAGE.trimEnd()}`);
-  };
-  switch (command) {
-    case "link":
-      extra(1);
-      return link(repoRoot(cwd), rest[0] === undefined ? undefined : resolve(cwd, rest[0]));
-    case "unlink":
-      extra(0);
-      return unlink(repoRoot(cwd));
-    case "update":
-      extra(0);
-      return update(repoRoot(cwd));
-    case undefined:
-      throw new UsageError(USAGE.trimEnd());
-    default:
-      throw new UsageError(`unknown command "${command}"\n\n${USAGE.trimEnd()}`);
-  }
+  const [command, ...rest] = parsed.positionals;
+  if (command === undefined) throw new UsageError(USAGE);
+  if (!COMMANDS.includes(command)) throw new UsageError(`unknown command "${command}"\n\n${USAGE}`);
+  if (rest.length > (command === "link" ? 1 : 0)) throw new UsageError(`too many arguments\n\n${USAGE}`);
+  const cwd = process.cwd();
+  checkRepo(cwd);
+  if (command === "unlink") return unlink(cwd);
+  if (command === "update") return update(cwd);
+  return link(cwd, rest[0] === undefined ? undefined : resolve(cwd, rest[0]));
 }
-
-const parse = (argv: string[]) =>
-  parseArgs({ args: argv, allowPositionals: true, options: { help: { type: "boolean", short: "h" } } });
 
 function link(root: string, given: string | undefined): number {
   const checkout = given ?? resolve(root, "../sanoma");

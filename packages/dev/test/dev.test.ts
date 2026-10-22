@@ -1,10 +1,19 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { declared, leftoverLinks, linkSet } from "../src/links.ts";
+import { declared, dirIn, leftoverLinks, linkSet } from "../src/links.ts";
 
 const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 
@@ -19,7 +28,7 @@ const manifest = (at: string, json: object) => write(join(at, "package.json"), J
 
 /**
  * A temporary directory with a Sanoma repo in `repo/` declaring `dependencies` and `devDependencies`,
- * and a sanoma checkout in `sanoma/` (its default place) holding `packages`.
+ * and a sanoma checkout in `sanoma/` (its default place) holding `sanoma` and the packages named.
  */
 function layout({
   dependencies = {},
@@ -35,16 +44,7 @@ function layout({
   const checkout = join(dir, "sanoma");
   manifest(repo, { name: "company", dependencies, devDependencies });
   write(join(repo, "sanoma.config.ts"), "");
-  for (const path of ["packages/sanoma", ...packages]) {
-    const short = path.split("/")[1]!;
-    const name =
-      short === "sanoma"
-        ? "sanoma"
-        : path.startsWith("connectors/")
-          ? `@sanoma-ai/connector-${short}`
-          : `@sanoma-ai/${short}`;
-    manifest(join(checkout, path), { name });
-  }
+  for (const name of ["sanoma", ...packages]) manifest(dirIn(checkout, name), { name });
   return { repo, checkout };
 }
 
@@ -58,7 +58,7 @@ describe("declared and linkSet", () => {
         zod: "^4",
       },
       devDependencies: { "@sanoma-ai/dev": "^0.4.2", "@sanoma-ai/testing": "^0.4.2" },
-      packages: ["connectors/ghost", "packages/testing", "packages/workflows"],
+      packages: ["@sanoma-ai/connector-ghost", "@sanoma-ai/testing", "@sanoma-ai/workflows"],
     });
     expect(declared(repo)).toEqual([
       "sanoma",
@@ -100,7 +100,7 @@ describe("leftoverLinks", () => {
 });
 
 /**
- * Runs the bin in `cwd` with a `pnpm` on PATH that records each call's directory and arguments,
+ * Runs the bin in `cwd` with a `pnpm` on PATH that records each of this run's calls, directory and arguments,
  * and exits 3 for `pnpm exec` (a failing `sanoma check`).
  */
 function sanomaDev(cwd: string, args: string[]) {
@@ -108,18 +108,13 @@ function sanomaDev(cwd: string, args: string[]) {
   const bin = join(dir, "bin");
   write(join(bin, "pnpm"), `#!/bin/sh\necho "$(pwd -P) $*" >> "${calls}"\n[ "$1" = exec ] && exit 3\nexit 0\n`);
   chmodSync(join(bin, "pnpm"), 0o755);
+  rmSync(calls, { force: true });
   const run = spawnSync(process.execPath, [cli, ...args], {
     cwd,
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
   });
-  const recorded = (() => {
-    try {
-      return readFileSync(calls, "utf8").trim().split("\n");
-    } catch {
-      return [];
-    }
-  })();
+  const recorded = existsSync(calls) ? readFileSync(calls, "utf8").trim().split("\n") : [];
   return { status: run.status, stdout: run.stdout, stderr: run.stderr, calls: recorded };
 }
 
@@ -128,7 +123,7 @@ describe("sanoma-dev", () => {
     const { repo, checkout } = layout({
       dependencies: { sanoma: "^0.4.2", "@sanoma-ai/connector-ghost": "^0.4.2", "@sanoma-ai/connector-acme": "^1.0.0" },
       devDependencies: { "@sanoma-ai/dev": "^0.4.2" },
-      packages: ["connectors/ghost"],
+      packages: ["@sanoma-ai/connector-ghost"],
     });
     const { status, stdout, calls } = sanomaDev(repo, ["link"]);
     expect(status).toBe(0);
@@ -171,15 +166,12 @@ describe("sanoma-dev", () => {
 
     const refused = sanomaDev(repo, ["update"]);
     expect(refused.status).toBe(1);
-    expect(refused.calls).toEqual([`${repo} unlink sanoma`]);
+    expect(refused.calls).toEqual([]);
 
     write(join(repo, "pnpm-workspace.yaml"), "");
     expect(sanomaDev(repo, ["unlink"]).status).toBe(0);
     const updated = sanomaDev(repo, ["update"]);
     expect(updated.status).toBe(3);
-    expect(updated.calls.slice(-2)).toEqual([
-      `${repo} update --latest sanoma @sanoma-ai/*`,
-      `${repo} exec sanoma check`,
-    ]);
+    expect(updated.calls).toEqual([`${repo} update --latest sanoma @sanoma-ai/*`, `${repo} exec sanoma check`]);
   });
 });

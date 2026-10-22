@@ -62,9 +62,9 @@ describe("linkedPackages", () => {
   it("adds the core packages sanoma reaches in the checkout when sanoma alone is linked, after a linked connector", () => {
     // The checkout's workspace links: packages/sanoma/node_modules/@sanoma-ai/<name> -> packages/<name>.
     const { repo, checkout } = repoWith({ sanoma: "linked", "connector-ghost": "linked" });
+    mkdirSync(join(checkout, "packages/sanoma/node_modules/@sanoma-ai"), { recursive: true });
     for (const name of ["workflows", "app", "bridge"]) {
       mkdirSync(join(checkout, "packages", name));
-      mkdirSync(join(checkout, "packages/sanoma/node_modules/@sanoma-ai"), { recursive: true });
       symlinkSync(join(checkout, "packages", name), join(checkout, "packages/sanoma/node_modules/@sanoma-ai", name));
     }
     expect(linkedPackages(repo)).toEqual([
