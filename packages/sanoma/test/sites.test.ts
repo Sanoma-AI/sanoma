@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { type Browser, executablePath, launch } from "puppeteer-core";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { copyFixture, ensureBuilt, runCli, serving } from "./fixture.ts";
+import { copyFixture, ensureBuilt, linkConnector, runCli, serving } from "./fixture.ts";
 
 // Needs Postgres (`pnpm db:up`) and the packages' builds, as cli.test.ts. The fixture is a company
 // with one site, sites/hello, which `sanoma serve` builds into the app from the app's shipped
@@ -101,7 +101,7 @@ describe("sanoma check with sites", () => {
     expect(ok.stderr.trimEnd().split("\n").at(-1)).toBe("ok");
   }, 180_000);
 
-  it("reports a link to a page that does not exist, an import the browser may not make and a call to a workflow that does not exist at their lines, and a folder whose name is not a URL segment", async () => {
+  it("reports a link to a page that does not exist, an import the browser may not make, a call to a workflow that does not exist and one no policy lets a visitor make at their lines, a domain given two sites, and a folder whose name is not a URL segment", async () => {
     dir = copyFixture(fixture);
     const index = join(dir, "sites/hello/routes/index.tsx");
     writeFileSync(index, readFileSync(index, "utf8").replace('to="/workflows"', 'to="/sites/hello/nope"'));
@@ -121,6 +121,42 @@ import { RunForm } from "sanoma/ui";
 export const Route = createFileRoute("/sites/hello/gone")({ component: () => <RunForm workflow="gone" /> });
 `,
     );
+    // The site is public, and no policy lets a visitor start hello.
+    writeFileSync(
+      join(dir, "sites/hello/routes/greet.tsx"),
+      `import { createFileRoute } from "@tanstack/react-router";
+import { api } from "sanoma/site";
+
+export const Route = createFileRoute("/sites/hello/greet")({ loader: () => api.hello.start({ who: "you" }) });
+`,
+    );
+    // A host giving one domain two sites.
+    linkConnector(dir, "docker");
+    const config = join(dir, "sanoma.config.ts");
+    writeFileSync(
+      config,
+      readFileSync(config, "utf8")
+        .replace(
+          'import { defineConfig } from "sanoma";',
+          'import { docker } from "@sanoma-ai/connector-docker";\nimport { defineConfig } from "sanoma";',
+        )
+        .replace("connectors: []", "connectors: [docker]"),
+    );
+    mkdirSync(join(dir, "resources"));
+    writeFileSync(
+      join(dir, "resources/infra.ts"),
+      `import { docker } from "@sanoma-ai/connector-docker/resources";
+
+export const host = docker.container({
+  name: "sanoma-hello",
+  image: "sanoma-runtime:1",
+  source: "https://example.com/hello.git",
+  ref: "main",
+  port: 3000,
+  domains: { hello: "hello.example", www: "hello.example" },
+});
+`,
+    );
     mkdirSync(join(dir, "sites/Bad_Name/routes"), { recursive: true });
     writeFileSync(join(dir, "content/posts/bad.md"), "---\n\ttitle: Tabbed\n---\n");
     const found = await runCli(dir, ["check"], env);
@@ -128,6 +164,11 @@ export const Route = createFileRoute("/sites/hello/gone")({ component: () => <Ru
     const problems = found.stdout.trimEnd().split("\n");
     expect(problems).toContain("content/posts/bad.md:2:1: front matter: Tabs are not allowed as indentation");
     expect(problems).toContain('sites/hello/routes/gone.tsx:4:78: calls workflow "gone", which does not exist');
+    expect(problems).toContain(
+      'sites/hello/routes/greet.tsx:4:76: a visitor\'s call to workflow "hello" is refused: no permit in policies/ names anonymous for workflow:hello. ' +
+        'Add: permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"workflow:hello", resource);',
+    );
+    expect(problems).toContain("resources/infra.ts:3:1: hello.example is the domain of both hello and www");
     expect(problems).toContainEqual(
       expect.stringMatching(/^sites\/hello\/routes\/index\.tsx:9:\d+: error TS\d+: .*"\/sites\/hello\/nope"/),
     );

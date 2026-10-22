@@ -32,7 +32,7 @@ import {
   setupOf,
   VENDOR,
 } from "./op.ts";
-import { policyAt } from "./cedar.ts";
+import { type CedarPolicySource, policyAt } from "./cedar.ts";
 import type { Policy } from "./policy.ts";
 import { isChangeOp, type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
 import { APPLY_WORKFLOW, BUILT_IN_WORKFLOWS, CALL_WORKFLOW, DATA_VENDOR } from "./shared.ts";
@@ -147,6 +147,8 @@ export interface ResolvedConfig {
    * (`policyAt`), `allowAll` without any, and one that refuses everything while they have problems.
    */
   policy: Policy;
+  /** The policies `policy` is made from (`loadPolicies`), none without any; undefined while they have problems. */
+  policies?: readonly CedarPolicySource[];
   /** What is wrong in the policies, one printable line each (`file:line:col: <policy id>: <message>`). */
   policyProblems: string[];
   /** The config's `ledger`, when it gives one; the worker and the client otherwise make `postgresLedger` on `databaseUrl` (`ownedLedger`). */
@@ -280,7 +282,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   // Built-in: a direct call the policy holds for an approval, made a run, when any operation may be called directly.
   const call = callWorkflow(ops, drivers, types);
   if (call.uses.length) names.set(CALL_WORKFLOW, call);
-  const { policy, problems: policyProblems } = policyAt(root, { ops, workflows: names, collections });
+  const { policy, policies, problems: policyProblems } = policyAt(root, { ops, workflows: names, collections });
   return {
     appName,
     databaseUrl,
@@ -299,6 +301,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     ...(dataStore && { dataStore }),
     workflows: names,
     policy,
+    ...(policies && { policies }),
     policyProblems,
     ...(ledger !== undefined && { ledger }),
     ...(root !== undefined && { root }),

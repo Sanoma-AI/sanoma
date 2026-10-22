@@ -431,22 +431,58 @@ export function cedarPolicy(
 }
 
 /**
+ * Whether a company `permit` could let a visitor take `action`, in its action group `group`
+ * (`start`, or its operation's `effect:<effect>`): asked of the permits whose `scope` is in
+ * `scopes`, each with its principal taken as its scope says and its `when` and `unless` left out,
+ * on the workflow a start names, or on any target. False means none can apply, so a visitor's
+ * start or direct call of it is refused whatever its input (`VISITOR_DENIED`).
+ */
+export function visitorPermits(
+  policies: readonly CedarPolicySource[],
+): (scopes: ReadonlySet<string>, action: string, group: string) => boolean {
+  const cedar = cedarWasm();
+  const permits = policies.flatMap(({ id, effect, scope, text }) => {
+    if (effect !== "permit" || scope === undefined) return [];
+    const answer = cedar.policyToJson(text);
+    if (answer.type !== "success") return [];
+    const json: PolicyJson = { ...answer.json, principal: { op: "All" }, conditions: [] };
+    return [{ id, scope, json }];
+  });
+  return (scopes, action, group) => {
+    const asked = permits.filter((p) => scopes.has(p.scope));
+    if (!asked.length) return false;
+    const uidOf = uid("Action", action);
+    const answer = cedar.isAuthorizedPartial({
+      principal: uid("Principal", ANONYMOUS),
+      action: uidOf,
+      // An operation's target is the call's: unknown, so a permit naming one may apply.
+      resource: action.startsWith(WORKFLOW_ACTION) ? uid("Workflow", action.slice(WORKFLOW_ACTION.length)) : null,
+      context: {},
+      entities: [{ uid: uidOf, attrs: {}, parents: [uid("Action", group)] }],
+      policies: { staticPolicies: Object.fromEntries(asked.map((p) => [p.id, p.json])) },
+    });
+    // A request Cedar cannot evaluate is not a refusal this can be sure of.
+    return answer.type === "failure" || answer.response.decision !== "deny";
+  };
+}
+
+/**
  * The policy of the repo at `root`: its `policies/**\/*.cedar` over `resolved` and the people its
  * data files declare (`readPeople`, `cedarPolicy`), or `allowAll` when it has none. With problems
  * (`loadPolicies`, `validatePolicies`), each a printable line (`file:line:col: <policy id>:
  * <message>`), a policy that refuses every call, start and preview naming the first: a repo never
- * runs on part of its rules.
+ * runs on part of its rules. `policies` are what it is made from: undefined while they have problems.
  */
 export function policyAt(
   root: string | undefined,
   resolved: Pick<ResolvedConfig, "ops" | "workflows" | "collections">,
-): { policy: Policy; problems: string[] } {
+): { policy: Policy; policies?: CedarPolicySource[]; problems: string[] } {
   const files = root === undefined ? [] : readPolicyFiles(root);
-  if (!files.length) return { policy: allowAll, problems: [] };
+  if (!files.length) return { policy: allowAll, policies: [], problems: [] };
   const { people } = readPeople(root);
   const { policies, problems } = loadPolicies(files);
   problems.push(...validatePolicies(resolved, policies, people));
-  if (!problems.length) return { policy: cedarPolicy(resolved, policies, people), problems: [] };
+  if (!problems.length) return { policy: cedarPolicy(resolved, policies, people), policies, problems: [] };
   const lines = problems.map(({ policy, ...p }) =>
     problemLine({ ...p, message: policy ? `${policy}: ${p.message}` : p.message }),
   );

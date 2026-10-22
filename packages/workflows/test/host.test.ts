@@ -121,6 +121,34 @@ describe("a host type", () => {
     expect(describeConfig({ workflows: [], connectors: [acme], root: fine }).problems).toEqual([]);
   });
 
+  it("is described with a problem at its declaration for each domain it gives more than one site", () => {
+    const service = hostOf({ inputs: { ...host.inputs, domains: "sites" } });
+    const acme = defineConnector("acme", { service }, { title: "Acme", package: "@acme/connector" });
+    const site = 'import { defineSite } from "sanoma/site";\n\nexport default defineSite({ public: true });\n';
+    const route = 'import { createFileRoute } from "@tanstack/react-router";\n';
+    const root = tree("domains-twice", {
+      "resources/infra.ts": [
+        'import { acme } from "@acme/connector/resources";',
+        "",
+        "export const host = acme.service({",
+        '  name: "app",',
+        '  repo: { url: "https://example.com/a.git", branch: "main" },',
+        '  sites: { www: "sanoma.example", docs: "sanoma.example", blog: "blog.example" },',
+        "});",
+        "",
+      ].join("\n"),
+      ...Object.fromEntries(
+        ["www", "docs", "blog"].flatMap((name) => [
+          [`sites/${name}/site.ts`, site],
+          [`sites/${name}/routes/index.tsx`, route],
+        ]),
+      ),
+    });
+    expect(describeConfig({ workflows: [], connectors: [acme], root }).problems).toEqual([
+      { file: "resources/infra.ts", line: 3, column: 1, message: "sanoma.example is the domain of both www and docs" },
+    ]);
+  });
+
   it("takes sanoma's own secrets in its secrets map, and no other type does", () => {
     const service = hostOf({});
     const env = { SANOMA_DATABASE_URL: secret("SANOMA_DATABASE_URL_STORE"), TOKEN: secret("TOKEN") };

@@ -20,6 +20,7 @@ const BUILT: [dir: string, outputs: string[]][] = [
   ["packages/workflows", ["dist/index.js"]],
   ["packages/bridge", ["dist/index.js"]],
   ["connectors/ghost", ["dist/index.js"]],
+  ["connectors/docker", ["dist/index.js"]],
   ["packages/app", ["dist/server/server.js"]],
   ["packages/sanoma", ["dist/index.js", "dist/oxlint-plugin.js", "oxlint.json"]],
 ];
@@ -38,7 +39,7 @@ export function copyFixture(from = fileURLToPath(new URL("./fixtures/project/", 
   const dir = mkdtempSync(join(tmpdir(), "sanoma-fixture-"));
   cpSync(from, dir, { recursive: true });
   const modules = join(dir, "node_modules");
-  link(join(repo, "connectors/ghost"), join(modules, "@sanoma-ai/connector-ghost"));
+  linkConnector(dir, "ghost");
 
   const sanoma = join(repo, "packages/sanoma");
   const manifest = JSON.parse(readFileSync(join(sanoma, "package.json"), "utf8")) as {
@@ -53,6 +54,10 @@ export function copyFixture(from = fileURLToPath(new URL("./fixtures/project/", 
   symlinkSync(join(store, "sanoma"), join(modules, "sanoma"));
   return dir;
 }
+
+/** This checkout's `connectors/<name>` installed in the copy at `dir` as `@sanoma-ai/connector-<name>`. */
+export const linkConnector = (dir: string, name: string) =>
+  link(join(repo, "connectors", name), join(dir, "node_modules", `@sanoma-ai/connector-${name}`));
 
 /** A symlink at `at` to `target`'s real path, its directory made first. */
 function link(target: string, at: string): void {

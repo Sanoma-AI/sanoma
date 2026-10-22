@@ -1,3 +1,5 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -79,6 +81,24 @@ const problemAt = (name: string, line: number, message: string) => ({
   message,
 });
 
+/** Site `name` with `site.ts` passing `options` and one page making `calls`, one a line from line 7, column 8. */
+const calling = (name: string, options: string[], calls: string[]) => ({
+  ...site(name, ...options),
+  [`sites/${name}/routes/index.tsx`]: page(
+    `/sites/${name}/`,
+    'import { api } from "sanoma/site";',
+    calls.map((call) => `void ${call};`).join("\n  "),
+  ),
+});
+
+/** A problem in site `name`'s page (`calling`), at the call on `line`. */
+const pageProblem = (name: string, line: number, message: string) => ({
+  file: `sites/${name}/routes/index.tsx`,
+  line,
+  column: 8,
+  message,
+});
+
 describe("readSites", () => {
   it("reads the fixture's hello site: its title, that it is public, and each RunForm and api call with its file, place and page", () => {
     const root = fileURLToPath(new URL("../../app/test/fixtures/company-sites/", import.meta.url));
@@ -94,6 +114,7 @@ describe("readSites", () => {
           {
             kind: "workflow",
             target: "hello",
+            method: "start",
             via: "api",
             file: "sites/hello/components/greet.tsx",
             line: 8,
@@ -102,6 +123,7 @@ describe("readSites", () => {
           {
             kind: "collection",
             target: "leads",
+            method: "list",
             via: "api",
             file: "sites/hello/routes/leads.tsx",
             line: 7,
@@ -120,6 +142,7 @@ describe("readSites", () => {
           {
             kind: "workflow",
             target: "hello",
+            method: "start",
             via: "api",
             file: "sites/hello/routes/started.tsx",
             line: 8,
@@ -127,7 +150,17 @@ describe("readSites", () => {
             page: "/sites/hello/started",
           },
         ],
-        problems: [],
+        // Its policy lets anonymous start hello, and nothing else.
+        problems: [
+          {
+            file: "sites/hello/routes/leads.tsx",
+            line: 7,
+            column: 17,
+            message:
+              'a visitor\'s call to collection "leads" is refused: no permit in policies/ names anonymous for data.leads.list. ' +
+              'Add: permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"data.leads.list", resource);',
+          },
+        ],
       },
     ]);
   });
@@ -201,6 +234,7 @@ describe("readSites", () => {
           {
             kind: "collection",
             target: "leads",
+            method: "list",
             via: "api",
             file: "sites/desk/components/dynamic.tsx",
             line: 14,
@@ -209,6 +243,7 @@ describe("readSites", () => {
           {
             kind: "collection",
             target: "leads",
+            method: "save",
             via: "api",
             file: "sites/desk/routes/(admin)/_auth/settings.tsx",
             line: 7,
@@ -217,9 +252,9 @@ describe("readSites", () => {
           },
           { kind: "workflow", target: "outbound-next", via: "api", ...at(8, 8) },
           { kind: "op", target: "acme.customer.get", via: "api", ...at(9, 8) },
-          { kind: "workflow", target: "hello", via: "api", ...at(10, 8) },
-          { kind: "workflow", target: "gone", via: "api", ...at(11, 8) },
-          { kind: "collection", target: "nope", via: "api", ...at(12, 8) },
+          { kind: "workflow", target: "hello", method: "latest", via: "api", ...at(10, 8) },
+          { kind: "workflow", target: "gone", method: "start", via: "api", ...at(11, 8) },
+          { kind: "collection", target: "nope", method: "list", via: "api", ...at(12, 8) },
           { kind: "op", target: "acme.customer.nope", via: "api", ...at(13, 8) },
           { kind: "op", target: "acme.customer.rename", via: "api", ...at(14, 8) },
           // A workflow by its name, not its api name: `callApi` would not find it.
@@ -228,6 +263,7 @@ describe("readSites", () => {
           {
             kind: "workflow",
             target: "hello",
+            method: "latest",
             via: "api",
             file: "sites/desk/routes/later.lazy.tsx",
             line: 4,
@@ -350,6 +386,89 @@ describe("readSites", () => {
       },
       { name: "www", title: "Website", public: true, login: "auth0", calls: [], problems: [] },
     ]);
+  });
+
+  it("makes a problem of a public site's start or direct call that no permit could let a visitor make, its conditions aside", () => {
+    const root = tree("visitors", {
+      "policies/visitors.cedar": [
+        // Conditions are left out: a call this may permit is fine.
+        'permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"workflow:hello", resource)',
+        '  when { context.input.who == "world" };',
+        // An action group: every read, a direct operation's and a collection's.
+        'permit (principal == Sanoma::Principal::"anonymous", action in Sanoma::Action::"effect:read", resource);',
+        'permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"workflow:outbound-next", resource);',
+        "",
+      ].join("\n"),
+      // No login: anonymous only.
+      ...calling(
+        "www",
+        ["public: true"],
+        [
+          'api.hello({ who: "world" })',
+          "api.acme.customer.get({ id: '1' })",
+          "api.data.leads.list()",
+          "api.outboundNext.start({})",
+          "api.data.leads.save({ company: 'Acme', stage: 'new' })",
+          // Whatever the policy says: a read of runs but a result, and a built-in workflow.
+          'api.outboundNext.result("run")',
+          "api.outboundNext.latest()",
+          "api.call.start({})",
+        ],
+      ),
+      // With a login: anonymous or the visitors.
+      ...calling(
+        "members",
+        ["public: true", 'login: "auth0"'],
+        ["api.outboundNext.start({})", "api.data.leads.save({ company: 'Acme', stage: 'new' })"],
+      ),
+      // Never a visitor's.
+      ...calling("desk", ['title: "Desk"'], ["api.outboundNext.start({})"]),
+    });
+    const readsAndBuiltIns = [
+      pageProblem(
+        "www",
+        13,
+        'a visitor\'s call to workflow "outbound-next" is refused: a visitor reads only the result of a run it started',
+      ),
+      pageProblem(
+        "www",
+        14,
+        "a visitor's call to workflow \"call\" is refused: a visitor may not start the runtime's own workflows",
+      ),
+    ];
+    const configured = config(root, { workflows: [hello, outboundNext], connectors: [acme, auth0] });
+    const problems = () => Object.fromEntries(describeConfig(configured).sites.map((s) => [s.name, s.problems]));
+    expect(problems()).toEqual({
+      desk: [],
+      members: [
+        pageProblem(
+          "members",
+          8,
+          'a visitor\'s call to collection "leads" is refused: no permit in policies/ names anonymous or visitors for data.leads.save. ' +
+            'Add: permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"data.leads.save", resource);',
+        ),
+      ],
+      www: [
+        pageProblem(
+          "www",
+          10,
+          'a visitor\'s call to workflow "outbound-next" is refused: no permit in policies/ names anonymous for workflow:outbound-next. ' +
+            'Add: permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"workflow:outbound-next", resource);',
+        ),
+        pageProblem(
+          "www",
+          11,
+          'a visitor\'s call to collection "leads" is refused: no permit in policies/ names anonymous for data.leads.save. ' +
+            'Add: permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"data.leads.save", resource);',
+        ),
+        ...readsAndBuiltIns,
+      ],
+    });
+
+    // While the policies have problems, every call is refused, and they say why: none is checked against them.
+    writeFileSync(join(root, "policies/typo.cedar"), "permit (principal, action, resource)\n");
+    expect(describeConfig(configured).policy.problems).not.toEqual([]);
+    expect(problems()).toEqual({ desk: [], members: [], www: readsAndBuiltIns });
   });
 
   it("finds no sites in a root without sites/, or a config without a root", () => {
