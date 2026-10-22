@@ -60,8 +60,8 @@ export interface SiteEntry {
 const SITE_DIRS = ["routes", "components"];
 /** Where `api` and `defineSite` come from: `sanoma/site`, which re-exports the app's. */
 const SITE_SOURCES: ReadonlySet<string> = new Set(["sanoma/site", "@sanoma-ai/app/site"]);
-/** Where `RunForm` comes from: `sanoma/ui`, the kit's one path (the lint refuses the app's own). */
-const UI_SOURCES: ReadonlySet<string> = new Set(["sanoma/ui"]);
+/** Where `RunForm` comes from: `sanoma/ui`, which re-exports the app's. */
+const UI_SOURCES: ReadonlySet<string> = new Set(["sanoma/ui", "@sanoma-ai/app/ui"]);
 const KIND_NAMES = { workflow: "workflow", collection: "collection", op: "operation" } as const;
 /** What makes a route from its id, whose first argument is the id. */
 const ROUTE_MAKERS: ReadonlySet<string> = new Set(["createFileRoute", "createLazyFileRoute"]);
