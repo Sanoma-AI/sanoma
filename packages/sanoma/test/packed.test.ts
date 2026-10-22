@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,18 +29,23 @@ const files: Record<string, string> = {
     name: "packed-company",
     private: true,
     type: "module",
-    dependencies: { sanoma: "file:vendor/sanoma.tgz" },
+    // A Tailwind plugin, whose peer is `tailwindcss`: the company installs no Tailwind of its own.
+    dependencies: { sanoma: "file:vendor/sanoma.tgz", "@tailwindcss/typography": "0.5.20" },
     // The checkout's pnpm, whose pnpm-workspace.yaml overrides (and "-") these rely on.
     packageManager: JSON.parse(readFileSync(join(checkout, "package.json"), "utf8")).packageManager,
   }),
   // sanoma's dependencies on the others are by version: these tarballs instead of npm's. The
   // bridge's binaries stay out (the dev server does not start it).
   "pnpm-workspace.yaml": JSON.stringify({
+    // The plugin's peer is the company's to install, as by default: none here.
+    autoInstallPeers: false,
     overrides: {
       ...Object.fromEntries(workspace.map((dir) => [`@sanoma-ai/${dir}`, `file:vendor/${dir}.tgz`])),
       ...Object.fromEntries(Object.keys(manifest("bridge").optionalDependencies).map((name) => [name, "-"])),
     },
   }),
+  // The site's stylesheet with a plugin, as the README's recipe has it.
+  "sites/hello/style.css": `${readFileSync(join(fixture, "sites/hello/style.css"), "utf8")}@plugin "@tailwindcss/typography";\n`,
   // Imported by the Sites panel on every page.
   "sites/hello/site.ts": `import { defineSite } from "sanoma/site";\n\nexport default defineSite({ title: "Hello desk" });\n`,
   "sites/hello/routes/run.tsx": `import { createFileRoute } from "@tanstack/react-router";
@@ -52,6 +57,7 @@ export const Route = createFileRoute("/sites/hello/run")({ component: Run });
 function Run() {
   return (
     <Region title="Greet someone">
+      <p className="prose">Fill in the form.</p>
       <RunForm workflow="hello" />
       <Link to="/sites/hello">Back to the hello site</Link>
     </Region>
@@ -81,6 +87,8 @@ describe("sanoma from packed tarballs: the dev server", () => {
     );
     // No lockfile to freeze (CI sets it by default).
     await run("pnpm", ["install", "--prefer-offline", "--no-frozen-lockfile"], { cwd: dir });
+    // pnpm's hidden hoist, where Node would find the plugin's peer by chance: without it, nowhere.
+    rmSync(join(dir, "node_modules/.pnpm/node_modules/tailwindcss"), { recursive: true, force: true });
     server = await serving(dir, [], env, join(dir, "node_modules/sanoma/dist/cli.js"));
   }, 600_000);
 
@@ -111,5 +119,22 @@ describe("sanoma from packed tarballs: the dev server", () => {
     expect(post).toContain("<h3>The first post</h3>");
     expect(post).toContain("Read from <strong>content/posts/hello.md</strong>.");
     expect(stderr()).not.toContain("ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING");
+  }, 60_000);
+
+  it("builds a site's stylesheet whose @plugin imports tailwindcss/plugin, from the app's Tailwind", async () => {
+    // Node, as the bin runs (no NODE_PATH), finds no tailwindcss from the plugin.
+    const resolving = run(process.execPath, ["-e", 'require.resolve("tailwindcss/plugin")'], {
+      cwd: realpathSync(join(dir, "node_modules/@tailwindcss/typography")),
+      env: { ...process.env, NODE_PATH: "" },
+    });
+    await expect(resolving).rejects.toThrow(/Cannot find module 'tailwindcss\/plugin'/);
+    const { url } = server!;
+    const html = await (await fetch(`${url}/sites/hello/run`)).text();
+    const href = html.match(/<link[^>]*href="(\/sites\/hello\/style\.css[^"]*)"/)?.[1];
+    expect(href).toBeDefined();
+    const css = await fetch(`${url}${href}`, { headers: { accept: "text/css" } });
+    expect(css.status, stderr()).toBe(200);
+    // The typography plugin's class, in the site's own layer.
+    expect(await css.text()).toMatch(/@layer utilities\.hello\b[\s\S]*\.prose \{/);
   }, 60_000);
 });

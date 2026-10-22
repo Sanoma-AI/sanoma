@@ -37,6 +37,22 @@ export function NotFound() {
   return <Notice variant="destructive">There is no page here.</Notice>;
 }
 
+// On a public site's host, where the app's stylesheet is not, plain pages: the site's own
+// notFoundComponent and errorComponent replace them.
+
+const Plain = ({ title, text }: { title: string; text: string }) => (
+  <main>
+    <h1>{title}</h1>
+    <p>{text}</p>
+  </main>
+);
+
+/** A path no page has, or a loader's notFound() that no route of the site draws; titled so by the root's head. */
+export const SiteNotFound = () => <Plain title="Page not found" text="There is no page here." />;
+
+/** A page that failed: what failed stays in the server's log, not on a visitor's page. */
+export const SiteError = () => <Plain title="This page could not load" text="Try again later." />;
+
 /** A page still loading, after a second: the router waits that long before showing it. */
 export function PagePending() {
   return (

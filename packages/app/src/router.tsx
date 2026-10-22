@@ -2,7 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { createRouter } from "@tanstack/react-router";
 import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query";
 import { createIsomorphicFn, getGlobalStartContext } from "@tanstack/react-start";
-import { NotFound, PagePending, RouteError } from "./components/boundaries.tsx";
+import { NotFound, PagePending, RouteError, SiteError, SiteNotFound } from "./components/boundaries.tsx";
 import { routeTree } from "#/routeTree.gen.ts";
 
 /**
@@ -52,9 +52,10 @@ export function getRouter() {
     // The query client decides what is fresh: a preload runs the loaders, which load only what it lacks.
     defaultPreloadStaleTime: 0,
     scrollRestoration: true,
-    // Every route gets these, inside the root's layout: a page that fails or is missing keeps the sidebar.
-    defaultErrorComponent: RouteError,
-    defaultNotFoundComponent: NotFound,
+    // Every route gets these, inside the root's layout: a page that fails or is missing keeps the
+    // sidebar. On a public site's host, plain ones.
+    defaultErrorComponent: site ? SiteError : RouteError,
+    defaultNotFoundComponent: site ? SiteNotFound : NotFound,
     defaultPendingComponent: PagePending,
   });
   setupRouterSsrQueryIntegration({ router, queryClient });
