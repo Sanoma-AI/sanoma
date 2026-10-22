@@ -19,7 +19,7 @@ export interface SiteCall {
    * `api` gives; that name itself when none is), the collection's name, or the operation's id.
    */
   target: string;
-  /** `<RunForm workflow="…" />` from `@sanoma-ai/app/ui`, or a call on `api` from `sanoma/site`. */
+  /** `<RunForm workflow="…" />` from `sanoma/ui`, or a call on `api` from `sanoma/site`. */
   via: "RunForm" | "api";
   /** The file, relative to the config's root, with `/`: `sites/sales/routes/index.tsx`. */
   file: string;
@@ -60,7 +60,8 @@ export interface SiteEntry {
 const SITE_DIRS = ["routes", "components"];
 /** Where `api` and `defineSite` come from: `sanoma/site`, which re-exports the app's. */
 const SITE_SOURCES: ReadonlySet<string> = new Set(["sanoma/site", "@sanoma-ai/app/site"]);
-const UI_SOURCES: ReadonlySet<string> = new Set(["@sanoma-ai/app/ui"]);
+/** Where `RunForm` comes from: `sanoma/ui`, which re-exports the app's. */
+const UI_SOURCES: ReadonlySet<string> = new Set(["sanoma/ui", "@sanoma-ai/app/ui"]);
 const KIND_NAMES = { workflow: "workflow", collection: "collection", op: "operation" } as const;
 /** What makes a route from its id, whose first argument is the id. */
 const ROUTE_MAKERS: ReadonlySet<string> = new Set(["createFileRoute", "createLazyFileRoute"]);
@@ -69,7 +70,7 @@ const ROUTE_MAKERS: ReadonlySet<string> = new Set(["createFileRoute", "createLaz
  * The sites under `root`: each folder of `sites/` with a `routes/` whose name is a URL segment,
  * by name (as `@sanoma-ai/app/build`'s `sitesOf` mounts them). Reads `routes/**` and
  * `components/**` (`.ts` and `.tsx`, less tests and declarations) of each with oxc, never running
- * them: each `<RunForm workflow="…" />` whose `RunForm` is imported from `@sanoma-ai/app/ui`, and
+ * them: each `<RunForm workflow="…" />` whose `RunForm` is imported from `sanoma/ui`, and
  * each use of `api` imported from `sanoma/site`, called or passed on (`queryFn: api.data.leads.list`):
  * `api.<name>` and `api.<name>.<method>` are a workflow, `api.data.<collection>.<op>` a collection,
  * and `api.<vendor>.<resource>.<op>` an operation. A name that is not written out (a variable, a

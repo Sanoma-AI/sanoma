@@ -3,8 +3,9 @@
 // installer lays out), made of:
 // - `@sanoma-ai/workflows`'s `oxlint.json` (its overrides for `workflows/**` and `resources/**`), with an entry for `sanoma` derived from `@sanoma-ai/workflows`'s (the same
 //   names), `sanoma/**` refused, and the plugin (`data-file`, `date`) loaded from this package's `dist/`;
-// - an override for `sites/**`: a site is client code, with no server, runtime, connector or
-//   environment of its own (the plugin's `site-file` says the rest);
+// - an override for `sites/**`: a site is client code, reaching the app through `sanoma/site` and
+//   `sanoma/ui` alone, with no server, runtime, connector or environment of its own (the plugin's
+//   `site-file` says the rest);
 // - the rules this checkout holds its own code to (the root `.oxlintrc.json`), without its test
 //   framework's and its own paths.
 import { readFileSync, writeFileSync } from "node:fs";
@@ -52,7 +53,8 @@ const overrides = (workflows.overrides as Json[]).map((given) => {
 });
 
 const SERVER = `A site has no server code: ${REMEDY}`;
-const APP = "A site imports the app's components from `@sanoma-ai/app/ui`; the rest of the app is its server.";
+const APP =
+  "A site imports the app's components from `sanoma/ui` and its route APIs from `sanoma/site`; the rest of the app is its server.";
 const sites = {
   files: ["sites/**"],
   // The listing of the sites the build generates.
@@ -76,6 +78,7 @@ const sites = {
             group: [
               `${own}/**`,
               `!${own}/site`,
+              `!${own}/ui`,
               "@sanoma-ai/workflows/**",
               "@sanoma-ai/bridge/**",
               "@dbos-inc/**",
@@ -84,7 +87,7 @@ const sites = {
             ],
             message: SERVER,
           },
-          { group: ["@sanoma-ai/app/**", "!@sanoma-ai/app/ui"], message: APP },
+          { group: ["@sanoma-ai/app/**"], message: APP },
           {
             group: ["@sanoma-ai/testing", "@sanoma-ai/testing/**"],
             message: `Fakes and test helpers belong in tests. ${SERVER}`,

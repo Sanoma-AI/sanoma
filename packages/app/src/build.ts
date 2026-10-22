@@ -442,9 +442,10 @@ export async function appDevServer(
     },
     // The runtime as Node loads it, the copy startApp's context holds, wherever it is installed
     // (Vite would run a linked checkout's copy itself). Vite leaves a dependency's `.js` to Node,
-    // never its `.ts`: `sanoma/site.js` re-exports the app's `src/site.ts`, whose types Node
-    // refuses to strip under node_modules, so from an npm install every page would fail (a linked
-    // checkout hides it). `sanoma` is compiled, as the build compiles everything.
+    // never its `.ts`: `sanoma/site.js` and `sanoma/ui.js` re-export the app's `src/site.ts` and
+    // `src/ui.ts`, whose types Node refuses to strip under node_modules, so from an npm install
+    // every page would fail (a linked checkout hides it). `sanoma` is compiled, as the build
+    // compiles everything.
     environments: { ssr: { resolve: { external: RUNTIME, noExternal: ["sanoma"] } } },
     optimizeDeps: {
       // Shipped as source, compiled with the pages.
