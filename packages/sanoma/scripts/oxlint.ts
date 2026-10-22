@@ -94,6 +94,10 @@ const sites = {
             message: `A site calls no vendor itself, so the policy sees every call: ${REMEDY}`,
           },
           { group: ["node:*"], message: `A site runs in the browser: ${REMEDY}` },
+          {
+            group: ["virtual:*", "virtual:*/**"],
+            message: "A site reads content through `content` from `sanoma/site`.",
+          },
         ].map((pattern) => ({ ...pattern, allowTypeImports: true })),
       },
     ],

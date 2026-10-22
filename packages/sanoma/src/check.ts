@@ -46,9 +46,9 @@ const LINTED = ["workflows", "resources", "sites"];
  * `describeConfig` finds in the data files and the workflows' files (the import rules and what
  * the outline cannot draw: what the worker refuses to start with), and each site's call to what
  * the config does not have; with sites, their generated files written first and, beside those
- * three, the app built with them and `tsc -p sites/tsconfig.json` (`checkSites`). Their problems
- * in the order tsc, the sites' tsc, oxlint, the policies, the config, the folders refused as
- * sites, the sites' build. Then, unless the policies do not hold, every scenario against the fakes (`runScenarios`), each step that did not hold a
+ * three, the app built with them and `tsc -p sites/tsconfig.json` (`checkSites`), and what is
+ * wrong under `content/` (as `writeSiteFiles` reads it). Their problems in the order tsc, the sites' tsc, oxlint,
+ * the policies, the config, the folders refused as sites, the content's problems, the sites' build. Then, unless the policies do not hold, every scenario against the fakes (`runScenarios`), each step that did not hold a
  * problem. `ok` when there are no problems.
  */
 export async function check(
@@ -65,7 +65,7 @@ export async function check(
   const build = await siteBuild(root);
   const { sites, refused } = build?.sitesOf(root) ?? { sites: [], refused: [] };
   // Before tsc and oxlint read sites/, as `sanoma` writes them: only when there is a site.
-  if (build && sites.length) build.writeSiteFiles(root);
+  const content = build && sites.length ? build.writeSiteFiles(root).problems.map(problemLine) : [];
   const [tsc, checked, lints] = await Promise.all([
     typecheck(root, log),
     build && sites.length ? checkSites(build, sites, root, log) : { typed: [], built: [] },
@@ -75,7 +75,16 @@ export async function check(
   const unmounted = refused.map(
     (name) => `sites/${name}: a site's folder name is a URL segment (lowercase letters, digits and dashes)`,
   );
-  const problems = [...tsc, ...checked.typed, ...lints, ...policies, ...read, ...unmounted, ...checked.built];
+  const problems = [
+    ...tsc,
+    ...checked.typed,
+    ...lints,
+    ...policies,
+    ...read,
+    ...unmounted,
+    ...content,
+    ...checked.built,
+  ];
 
   if (resolved.scenarios === undefined) {
     log("no scenarios: the config's root has no `scenarios/` directory");

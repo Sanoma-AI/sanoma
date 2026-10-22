@@ -309,6 +309,28 @@ describe("a company's app with its sites", () => {
     }
   });
 
+  it("renders content from content/: the list and a post's HTML, from a chunk of its own, and never a draft", async () => {
+    const list = await fetch(new URL("/sites/hello/posts/", app.url));
+    expect(list.status).toBe(200);
+    const html = (await list.text()).replaceAll("<!-- -->", "");
+    expect(linkTag(html, "Hello, content")).toContain('href="/sites/hello/posts/hello"');
+    expect(html).toContain("The first post, from content/posts.");
+    const post = (await (await fetch(new URL("/sites/hello/posts/hello", app.url))).text()).replaceAll("<!-- -->", "");
+    expect(post).toContain("<h1>Hello, content</h1>");
+    expect(post).toMatch(/<article class="prose"><p>A post from <strong>content\/<\/strong>, rendered at build\.<\/p>/);
+    expect(post).toContain("<td>Free</td>");
+    // A draft is in no page and no file the browser is sent.
+    expect(html).not.toContain("Not yet");
+    expect((await fetch(new URL("/sites/hello/posts/draft", app.url))).status).toBe(404);
+    const client = join(result.distDir, "client");
+    const files = readdirSync(client, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile());
+    const holding = (text: string) =>
+      files.filter((entry) => readFileSync(join(entry.parentPath, entry.name), "utf8").includes(text));
+    expect(holding("unpublished-draft-words")).toEqual([]);
+    // The posts are one chunk, which only content's import loads.
+    expect(holding("rendered at build").map((entry) => entry.name)).toEqual([expect.stringMatching(/content.*\.js$/)]);
+  });
+
   it("reuses a build of the same sites, and builds again when a site changes", async () => {
     expect(await buildApp(repo)).toEqual({ distDir: result.distDir, built: false });
     writeFileSync(join(repo, "sites", "hello", "routes", "about.tsx"), sitePage("/sites/hello/about", "", '"About"'));
@@ -323,6 +345,13 @@ describe("a company's app with its sites", () => {
     rmSync(join(repo, "sites", "hello", "routes", "about.tsx"));
     expect(await buildApp(repo)).toEqual({ distDir: result.distDir, built: false });
     expect(readFileSync(tree, "utf8")).not.toContain("/sites/hello/about");
+    // And when content changes.
+    const post = join(repo, "content", "posts", "hello.md");
+    const text = readFileSync(post, "utf8");
+    writeFileSync(post, text.replace("rendered at build", "edited"));
+    expect((await buildApp(repo)).built).toBe(true);
+    writeFileSync(post, text);
+    expect(await buildApp(repo)).toEqual({ distDir: result.distDir, built: false });
   });
 
   it("lists under a workflow's Used by the site's pages that call it, each linking to its page, and a component's file", async () => {
@@ -546,8 +575,17 @@ describe("the sites' generated files", () => {
     const tsconfig = JSON.parse(readFileSync(join(repo, ".sanoma", "app", "tsconfig.json"), "utf8"));
     expect(tsconfig.extends).toBe(join(appDir, "tsconfig.site.json"));
     expect(tsconfig.include).toContain("../api.ts");
+    expect(tsconfig.include).toContain("../content.ts");
+    // The content's types, drafts among them.
+    expect(readFileSync(join(repo, ".sanoma", "content.ts"), "utf8")).toContain(
+      "posts: ContentKind<{ title: string; description: string; draft?: boolean; publishedAt?: string }>;",
+    );
     // Written again unchanged, nothing is rewritten: a dev server would reload every page.
-    const written = [join(repo, "sites", "__virtual.ts"), join(repo, ".sanoma", "app", "tsconfig.json")];
+    const written = [
+      join(repo, "sites", "__virtual.ts"),
+      join(repo, ".sanoma", "app", "tsconfig.json"),
+      join(repo, ".sanoma", "content.ts"),
+    ];
     const mtimes = written.map((file) => lstatSync(file).mtimeMs);
     writeSiteFiles(repo);
     expect(written.map((file) => lstatSync(file).mtimeMs)).toEqual(mtimes);

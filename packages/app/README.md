@@ -34,12 +34,12 @@ const { distDir, built } = await buildApp(repo, { log: console.log });
 const app = await startApp(config, { distDir });
 ```
 
-`buildApp(repo)` builds the app's routes and every site as one TanStack Start build with the repo as Vite's root, and writes only under the repo: `.sanoma/app/routeTree.gen.ts`, Vite's cache in `.sanoma/app/vite/`, and the build in `.sanoma/app/build/<key>/` (`client/` and `server/server.js`), where the key covers the app's version and source directory and every file under `sites/`. A build with the same key is reused (`built: false`), and a new one is built beside it and moved into place, so an app serving the old one keeps it. The server bundle holds everything but the runtime (`@sanoma-ai/workflows`, `@sanoma-ai/bridge`, DBOS, `pg`, `zod`), which it imports by file URL, resolved from `runtimeFrom` (by default this package's own `package.json`), so the worker and the app share one copy.
+`buildApp(repo)` builds the app's routes and every site as one TanStack Start build with the repo as Vite's root, and writes only under the repo: `.sanoma/app/routeTree.gen.ts`, Vite's cache in `.sanoma/app/vite/`, and the build in `.sanoma/app/build/<key>/` (`client/` and `server/server.js`), where the key covers the app's version and source directory and every file under `sites/` and `content/`. A build with the same key is reused (`built: false`), and a new one is built beside it and moved into place, so an app serving the old one keeps it. The server bundle holds everything but the runtime (`@sanoma-ai/workflows`, `@sanoma-ai/bridge`, DBOS, `pg`, `zod`), which it imports by file URL, resolved from `runtimeFrom` (by default this package's own `package.json`), so the worker and the app share one copy.
 
 - A site is client code: a site importing the runtime, a connector, DBOS, `pg` or a `*.server.*` file fails the build with "Import denied".
 - A site imports React, TanStack's packages and this app as the app does, from the app's own install: the company repo depends only on `sanoma`.
 - A folder is a site when it has `routes/` and its name is one URL segment (`/^[a-z][a-z0-9-]*$/`); `sitesOf(repo)` lists the sites and the refused folders, which the build logs and leaves out. Two pages claiming one path fail the build, naming the path and both files.
-- `writeSiteFiles(repo)`, which `buildApp` calls first, writes `sites/__virtual.ts` (the listing the route generator reads; committed, never edited), `sites/tsconfig.json` when missing, and `.sanoma/app/tsconfig.json` every time: the app's compiler options (`tsconfig.site.json`, shipped) with its React, TanStack and route tree, so `tsc -p sites/tsconfig.json` checks a site's links against every page.
+- `writeSiteFiles(repo)`, which `buildApp` calls first, writes `sites/__virtual.ts` (the listing the route generator reads; committed, never edited), `sites/tsconfig.json` when missing, `.sanoma/app/tsconfig.json` every time: the app's compiler options (`tsconfig.site.json`, shipped) with its React, TanStack and route tree, so `tsc -p sites/tsconfig.json` checks a site's links against every page; and `.sanoma/content.ts`, the types of [`content`](#content).
 - `appViteConfig({ repo, runtimeFrom })` is the build's Vite config; `appViteConfig()` is this package's own (its `vite.config.ts`), the same pipeline with no sites. `appSources()` gives the app's `src` and `tsconfig.site.json` by real path.
 
 `startApp(config, { dev: { repo } })` serves the app and the repo's sites from Vite's dev server instead of a build, behind the same `/healthz` and login: `appDevServer(repo, http)` from `@sanoma-ai/app/build` is the build's Vite config (`appViteConfig({ repo })`, so the route generator's options are the build's) in middleware mode, with hot updates over the app's own HTTP server, and Start's server entry imported for each request and handed the same context. On the server, Vite compiles the app's source and `sanoma` (whose `sanoma/site` is that source), and leaves the runtime to Node, the copy `startApp`'s context holds. An edit to a site or to the app's source shows without a reload, and a new site folder is live once it has a route file; a change to `sites/__virtual.ts` itself needs a restart. It writes the sites' generated files and Vite's cache under `.sanoma/app/`, and no build. It listens on this machine only: the hot updates' websocket does not pass the login, so `startApp` refuses `dev` with any other `host`. `dev.onFileChange`, when given, is called with each file the dev server's watcher sees added, changed or removed (`sanoma` writes `.sanoma/api.ts` again on a change to what the config is read from).
@@ -48,7 +48,7 @@ A company repo is an ES module package (`"type": "module"`, as `sanoma init` wri
 
 ### A site's imports
 
-A site's route file imports `createFileRoute` from `@tanstack/react-router` (the route generator rewrites the path there, and only there) and the rest from `sanoma/site`, which is this package's `@sanoma-ai/app/site`: the app's own router's `Link`, `Outlet`, `useNavigate`, `useParams`, `useSearch`, `useRouter`, `useRouterState`, `getRouteApi`, `linkOptions`, `redirect` and `notFound` (and their types), `defineSite`, and `api` with `ApiError` and `errorBodyOf` ([Calling operations and workflows](#calling-operations-and-workflows)). `sites/<name>/site.ts`, optional, names the site:
+A site's route file imports `createFileRoute` from `@tanstack/react-router` (the route generator rewrites the path there, and only there) and the rest from `sanoma/site`, which is this package's `@sanoma-ai/app/site`: the app's own router's `Link`, `Outlet`, `useNavigate`, `useParams`, `useSearch`, `useRouter`, `useRouterState`, `getRouteApi`, `linkOptions`, `redirect` and `notFound` (and their types), `defineSite`, `api` with `ApiError` and `errorBodyOf` ([Calling operations and workflows](#calling-operations-and-workflows)), and `content`, the repo's Markdown ([Content](#content)). `sites/<name>/site.ts`, optional, names the site:
 
 ```ts
 // sites/help/site.ts
@@ -157,6 +157,54 @@ async function markWon(company: string): Promise<string> {
 ```
 
 `describeConfig` reads what each site calls from its source, never running it (`readSites`, in `@sanoma-ai/workflows/describe`): a workflow's page and a collection's list the sites' pages that call them under **Used by**, and a call to a workflow, collection or operation the config does not have, or to an operation a page may not call directly, fails `sanoma check`. A page links there only when this build serves it. Name what a site calls in its code (`<RunForm workflow="announce" />`, `api.announce.start(…)`, `api.data.outbound.list()`): a name held in a variable or built at run time is not read, so its page is not listed.
+
+### Content
+
+`content`, from `sanoma/site`, is the Markdown under the company repo's `content/`, as of the build: each folder directly under `content/` is a kind, and each `*.md` directly in it an entry, its slug the file's name. Both names are URL segments (`/^[a-z][a-z0-9-]*$/`); subfolders, `.mdx` and other files are left alone. A post, `content/posts/zapier-and-sanoma.md`, and the page that shows it:
+
+```md
+---
+title: Zapier and Sanoma
+description: How they differ.
+publishedAt: 2026-10-01
+---
+
+What a visitor reads, in **Markdown** (GFM: tables, task lists, strikethrough).
+```
+
+```tsx
+// sites/www/routes/blog.$slug.tsx
+import { createFileRoute } from "@tanstack/react-router";
+import { content, notFound } from "sanoma/site";
+
+export const Route = createFileRoute("/sites/www/blog/$slug")({
+  loader: async ({ params }) => {
+    const post = await content.posts.get(params.slug);
+    if (!post) throw notFound();
+    return post;
+  },
+  component: Post,
+});
+
+function Post() {
+  const post = Route.useLoaderData();
+  return <article className="prose" dangerouslySetInnerHTML={{ __html: post.html }} />;
+}
+```
+
+| Call                            | What it gives                                                                                                                                                      |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `content.posts.list()`          | Every file of `content/posts/`, sorted by slug, as `{ slug, data }`: `data` is the front matter (`{}` with none)                                                   |
+| `content.posts.get(slug)`       | One file, `{ slug, data, body, html }`: `body` the Markdown after the front matter as written, `html` it rendered at build; `undefined` when there is no such file |
+| `content.<kind>` with no folder | `list()` gives `[]` and `get()` `undefined`; once `.sanoma/content.ts` types `content`, it does not type-check                                                     |
+
+- **Front matter** is YAML between a first line `---` and the next `---` line, read as YAML 1.2, so an unquoted date stays a string. A file whose front matter is not a mapping is left out, and `sanoma check` reports it at its line.
+- **HTML** is rendered at build with `marked` (GFM), so no Markdown library ships to the browser. Raw HTML in a file passes through: content is reviewed as code is. The kit has no styles for it; give the `article` your own classes.
+- **Drafts:** an entry whose front matter has `draft: true` is there while `sanoma` serves the sites from its dev server, and never in a build: not on a page, not in any file sent to the browser.
+- **Loading:** the content is one chunk of the browser's bundle, loaded on the first call, and part of the server's render, so a loader's `await content.posts.list()` adds no request. A change under `content/` is a new build (the build's key covers it). On the dev server, a file saved under `content/` shows on the next render of an open page, with no restart.
+- **Types:** `.sanoma/content.ts`, written with the sites' generated files (and again on the dev server when a file under `content/` changes), types `content` by augmenting `Register`, as `.sanoma/api.ts` types `api`: each kind's `data` is the union of its files' front matter, drafts included, a key in every file required and `?` otherwise; strings, numbers, booleans and `null` as themselves, a list as an array of its items' types, a mapping as an object merged the same way (so rows of a table in the front matter share one type). Values are never types: `status: draft` is a `string`. Until it is written, `content` is untyped.
+
+`readContent(repo, { drafts })` and `contentTypes(kinds)`, from `@sanoma-ai/app/build`, are what the build and `sanoma check` read with: the kinds and the problems, each `{ file, line, column, message }`, and the text of `.sanoma/content.ts` (`CONTENT_TYPES`).
 
 ## Screens
 

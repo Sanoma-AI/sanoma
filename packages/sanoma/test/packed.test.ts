@@ -92,7 +92,7 @@ describe("sanoma from packed tarballs: the dev server", () => {
     }
   }, 60_000);
 
-  it("serves a site's pages and the app's, compiling the app's shipped source from node_modules", async () => {
+  it("serves a site's pages and the app's, compiling the app's shipped source from node_modules, and its content", async () => {
     const { url } = server!;
     expect(stderr()).toContain("serving the app with 1 site (hello) from Vite's dev server");
     const app = await fetch(`${url}/workflows`);
@@ -103,6 +103,10 @@ describe("sanoma from packed tarballs: the dev server", () => {
     const html = (await site.text()).replaceAll("<!-- -->", "");
     expect(html).toContain("The hello site");
     expect(html).toContain("Back to the hello site");
+    // The fixture's content/, read and rendered by marked and yaml as installed from the tarballs.
+    const post = (await (await fetch(`${url}/sites/hello/post`)).text()).replaceAll("<!-- -->", "");
+    expect(post).toContain("<h3>The first post</h3>");
+    expect(post).toContain("Read from <strong>content/posts/hello.md</strong>.");
     expect(stderr()).not.toContain("ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING");
   }, 60_000);
 });
