@@ -9,8 +9,8 @@ const USAGE = `usage: sanoma-dev <command>
 Develops sanoma from the Sanoma repo in the working directory (the one holding sanoma.config.ts).
 
   sanoma-dev link [<checkout>]   install and build a sanoma checkout (default ../sanoma beside the repo), then
-                                 pnpm link from it sanoma and each @sanoma-ai package the repo declares, one at a
-                                 time, and check each link; \`pnpm dev\` then runs the checkout in dev mode
+                                 pnpm link from it, one by one and checked, sanoma and each @sanoma-ai package the
+                                 repo declares; \`pnpm dev\` then runs the checkout in dev mode
   sanoma-dev unlink              undo the link, and fail when package.json or pnpm-workspace.yaml still hold a link:
   sanoma-dev update              pnpm update --latest sanoma and @sanoma-ai/*, then sanoma check; refused while linked`;
 
