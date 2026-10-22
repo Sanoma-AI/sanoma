@@ -102,25 +102,38 @@ describe("leftoverLinks", () => {
 
 /**
  * Runs the bin in `cwd` with a `pnpm` on PATH that records each of this run's calls, directory and arguments,
- * and exits 3 for `pnpm exec` (a failing `sanoma check`).
+ * and exits 3 for `pnpm exec` (a failing `sanoma check`). Its `pnpm link <dir>` does what pnpm's does: adds a
+ * `link:` override to `pnpm-workspace.yaml` and points `node_modules/<name>` at the directory, but not for the
+ * package `SKIP_LINK` names, as a racing pnpm may.
  */
-function sanomaDev(cwd: string, args: string[]) {
+function sanomaDev(cwd: string, args: string[], env: Record<string, string> = {}) {
   const calls = join(dir, "pnpm-calls");
   const bin = join(dir, "bin");
-  write(join(bin, "pnpm"), `#!/bin/sh\necho "$(pwd -P) $*" >> "${calls}"\n[ "$1" = exec ] && exit 3\nexit 0\n`);
+  write(
+    join(bin, "pnpm"),
+    `#!/bin/sh
+echo "$(pwd -P) $*" >> "${calls}"
+[ "$1" = exec ] && exit 3
+[ "$1" = link ] || exit 0
+name=$(sed -E 's/.*"name":"([^"]*)".*/\\1/' "$2/package.json")
+[ "$name" = "$SKIP_LINK" ] && exit 0
+echo "  '$name': link:$2" >> pnpm-workspace.yaml
+mkdir -p "node_modules/$(dirname "$name")" && ln -sfn "$2" "node_modules/$name"
+`,
+  );
   chmodSync(join(bin, "pnpm"), 0o755);
   rmSync(calls, { force: true });
   const run = spawnSync(process.execPath, [cli, ...args], {
     cwd,
     encoding: "utf8",
-    env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
+    env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, ...env },
   });
   const recorded = existsSync(calls) ? readFileSync(calls, "utf8").trim().split("\n") : [];
   return { status: run.status, stdout: run.stdout, stderr: run.stderr, calls: recorded };
 }
 
 describe("sanoma-dev", () => {
-  it("link builds a checkout with no build, then links what the repo declares and the checkout has, in one pnpm link", () => {
+  it("link builds the checkout, then links what the repo declares and the checkout has, one pnpm link each", () => {
     const { repo, checkout } = layout({
       dependencies: { sanoma: "^0.4.2", "@sanoma-ai/connector-ghost": "^0.4.2", "@sanoma-ai/connector-acme": "^1.0.0" },
       devDependencies: { "@sanoma-ai/dev": "^0.4.2" },
@@ -131,20 +144,40 @@ describe("sanoma-dev", () => {
     expect(calls).toEqual([
       `${checkout} install --frozen-lockfile`,
       `${checkout} build`,
-      `${repo} link ${join(checkout, "packages/sanoma")} ${join(checkout, "connectors/ghost")}`,
+      `${repo} link ${join(checkout, "packages/sanoma")}`,
+      `${repo} link ${join(checkout, "connectors/ghost")}`,
     ]);
     expect(stdout).toContain(`not in ${checkout}, so not linked: @sanoma-ai/connector-acme`);
+    expect(stdout).toContain(`building ${checkout}`);
     expect(stdout).toContain(`linked sanoma, @sanoma-ai/connector-ghost from ${checkout}`);
   });
 
-  it("link skips the build when sanoma and the core packages have one, and takes a checkout's path", () => {
+  it("link builds a checkout that has a build, and takes a checkout's path", () => {
     const { repo, checkout } = layout({ dependencies: { sanoma: "^0.4.2" } });
-    for (const name of ["sanoma", "workflows", "app", "bridge"]) {
-      mkdirSync(join(checkout, "packages", name, "dist"), { recursive: true });
-    }
+    mkdirSync(join(checkout, "packages/sanoma/dist"));
     const { status, calls } = sanomaDev(repo, ["link", "../sanoma"]);
     expect(status).toBe(0);
-    expect(calls).toEqual([`${repo} link ${join(checkout, "packages/sanoma")}`]);
+    expect(calls).toEqual([
+      `${checkout} install --frozen-lockfile`,
+      `${checkout} build`,
+      `${repo} link ${join(checkout, "packages/sanoma")}`,
+    ]);
+  });
+
+  it("link retries a package pnpm did not link, then fails with exit 1 naming it", () => {
+    const { repo, checkout } = layout({
+      dependencies: { sanoma: "^0.4.2", "@sanoma-ai/connector-ghost": "^0.4.2" },
+      packages: ["@sanoma-ai/connector-ghost"],
+    });
+    const { status, stdout, stderr, calls } = sanomaDev(repo, ["link"], { SKIP_LINK: "@sanoma-ai/connector-ghost" });
+    expect(status).toBe(1);
+    expect(calls.slice(2)).toEqual([
+      `${repo} link ${join(checkout, "packages/sanoma")}`,
+      `${repo} link ${join(checkout, "connectors/ghost")}`,
+      `${repo} link ${join(checkout, "connectors/ghost")}`,
+    ]);
+    expect(stderr).toContain("not linked: @sanoma-ai/connector-ghost: pnpm-workspace.yaml has no link: override");
+    expect(stdout).not.toContain("linked sanoma");
   });
 
   it("refuses what is not a checkout, a directory with no sanoma.config.ts, and extra arguments, with exit 2", () => {
