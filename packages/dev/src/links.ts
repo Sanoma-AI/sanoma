@@ -41,12 +41,11 @@ export function checkRepo(cwd: string): void {
 export const isCheckout = (dir: string) => readManifest(join(dir, "packages/sanoma"))?.name === "sanoma";
 
 /**
- * The packages `sanoma-dev` links: `sanoma` and each `@sanoma-ai/*` the repo's `package.json`
- * declares (`dependencies` or `devDependencies`), but `@sanoma-ai/dev` itself. Only declared ones:
- * linking a package the repo does not declare makes pnpm add a `link:` dependency.
+ * The packages `sanoma-dev unlink` unlinks: `sanoma` and each `@sanoma-ai/*` the repo's
+ * `package.json` declares (`dependencies` or `devDependencies`). Only declared ones: linking a
+ * package the repo does not declare makes pnpm add a `link:` dependency.
  */
-export const declared = (root: string): string[] =>
-  Object.keys(deps(root)).filter((name) => ours(name) && name !== "@sanoma-ai/dev");
+export const declared = (root: string): string[] => Object.keys(deps(root)).filter(ours);
 
 /** Where package `name` is in a sanoma checkout: `connectors/<short name>` or `packages/<short name>`. */
 export function dirIn(checkout: string, name: string): string {
@@ -56,11 +55,15 @@ export function dirIn(checkout: string, name: string): string {
     : join(checkout, "packages", short);
 }
 
-/** The repo's declared packages (`declared`) split by whether the checkout has them. */
+/**
+ * The packages `sanoma-dev link` links: the declared ones (`declared`) but this kit, split by
+ * whether the checkout has them.
+ */
 export function linkSet(root: string, checkout: string): { found: Package[]; missing: string[] } {
   const found: Package[] = [];
   const missing: string[] = [];
   for (const name of declared(root)) {
+    if (name === "@sanoma-ai/dev") continue;
     const dir = dirIn(checkout, name);
     if (readManifest(dir)?.name === name) found.push({ name, dir });
     else missing.push(name);

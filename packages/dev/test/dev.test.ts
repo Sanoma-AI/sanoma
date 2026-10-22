@@ -49,7 +49,7 @@ function layout({
 }
 
 describe("declared and linkSet", () => {
-  it("are sanoma and the declared @sanoma-ai packages but this one, split by whether the checkout has them", () => {
+  it("are sanoma and the declared @sanoma-ai packages, linked but this one when the checkout has them", () => {
     const { repo, checkout } = layout({
       dependencies: {
         sanoma: "^0.4.2",
@@ -64,6 +64,7 @@ describe("declared and linkSet", () => {
       "sanoma",
       "@sanoma-ai/connector-ghost",
       "@sanoma-ai/connector-acme",
+      "@sanoma-ai/dev",
       "@sanoma-ai/testing",
     ]);
     expect(linkSet(repo, checkout)).toEqual({
@@ -136,9 +137,11 @@ describe("sanoma-dev", () => {
     expect(stdout).toContain(`linked sanoma, @sanoma-ai/connector-ghost from ${checkout}`);
   });
 
-  it("link skips the build when there is one, and takes a checkout's path", () => {
+  it("link skips the build when sanoma and the core packages have one, and takes a checkout's path", () => {
     const { repo, checkout } = layout({ dependencies: { sanoma: "^0.4.2" } });
-    mkdirSync(join(checkout, "packages/sanoma/dist"));
+    for (const name of ["sanoma", "workflows", "app", "bridge"]) {
+      mkdirSync(join(checkout, "packages", name, "dist"), { recursive: true });
+    }
     const { status, calls } = sanomaDev(repo, ["link", "../sanoma"]);
     expect(status).toBe(0);
     expect(calls).toEqual([`${repo} link ${join(checkout, "packages/sanoma")}`]);
@@ -161,11 +164,11 @@ describe("sanoma-dev", () => {
     write(join(repo, "pnpm-workspace.yaml"), "overrides:\n  sanoma: link:../sanoma/packages/sanoma\n");
     const left = sanomaDev(repo, ["unlink"]);
     expect(left.status).toBe(1);
-    expect(left.calls).toEqual([`${repo} unlink sanoma`]);
+    expect(left.calls).toEqual([`${repo} unlink sanoma @sanoma-ai/dev`]);
     expect(left.stderr).toContain("pnpm-workspace.yaml: sanoma: link:../sanoma/packages/sanoma");
 
     const refused = sanomaDev(repo, ["update"]);
-    expect(refused.status).toBe(1);
+    expect(refused.status).toBe(2);
     expect(refused.calls).toEqual([]);
 
     write(join(repo, "pnpm-workspace.yaml"), "");

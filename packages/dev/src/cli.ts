@@ -62,7 +62,12 @@ function link(root: string, given: string | undefined): number {
   const { found, missing } = linkSet(root, checkout);
   if (missing.length) console.log(`not in ${checkout}, so not linked: ${missing.join(", ")}`);
   if (!found.length) throw new UsageError("nothing to link: package.json declares no sanoma package the checkout has");
-  if (found.some((p) => !existsSync(join(p.dir, "dist")))) {
+  // The linked packages and the core packages the linked sanoma loads from the checkout.
+  const built = [
+    ...found.map((p) => p.dir),
+    ...["workflows", "app", "bridge"].map((n) => join(checkout, "packages", n)),
+  ];
+  if (built.some((dir) => !existsSync(join(dir, "dist")))) {
     console.log(`${checkout} is not built: installing and building it`);
     mustPnpm(checkout, ["install", "--frozen-lockfile"]);
     mustPnpm(checkout, ["build"]);
@@ -79,13 +84,13 @@ function unlink(root: string): number {
   const left = leftoverLinks(root);
   if (left.length) throw new Error(`still linked, do not commit:\n${left.join("\n")}`);
   console.log(`unlinked ${names.join(", ") || "nothing"}: package.json and pnpm-workspace.yaml hold no link:`);
-  console.log("the repo is ready to commit");
+  console.log("commit once git status shows only your own changes");
   return 0;
 }
 
 function update(root: string): number {
   const left = leftoverLinks(root);
-  if (left.length) throw new Error(`linked to a checkout: run sanoma-dev unlink first\n${left.join("\n")}`);
+  if (left.length) throw new UsageError(`linked to a checkout: run sanoma-dev unlink first\n${left.join("\n")}`);
   mustPnpm(root, ["update", "--latest", "sanoma", "@sanoma-ai/*"]);
   console.log("updated sanoma and @sanoma-ai/* to their latest releases; running sanoma check");
   const status = pnpm(root, ["exec", "sanoma", "check"]);
