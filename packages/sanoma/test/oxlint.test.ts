@@ -52,7 +52,8 @@ import { DBOS } from "@dbos-inc/dbos-sdk";
 import { readFileSync } from "node:fs";
 import { hello } from "../../../workflows/hello";
 import { handler } from "@sanoma-ai/app/server";
-export const all = [createFileRoute, Button, useState, Card, Client, ghost, createIsomorphicFn, serverOnly, defineWorkflow, main, startApp, startWorker, fake, DBOS, readFileSync, hello, handler, process.env.KEY];
+import kinds from "virtual:sanoma/content";
+export const all = [createFileRoute, Button, useState, Card, Client, ghost, createIsomorphicFn, serverOnly, defineWorkflow, main, startApp, startWorker, fake, DBOS, readFileSync, hello, handler, kinds, process.env.KEY];
 export const pg = require("pg");
 export type Types = [Ctx<[]>, typeof Hello];
 `,
@@ -194,8 +195,14 @@ describe("the shipped oxlint.json", () => {
         rule: imports,
         text: expect.stringMatching(/^'@sanoma-ai\/app\/server'.*`@sanoma-ai\/app\/ui`/),
       },
-      { file: index, line: 20, rule: globals, text: expect.stringMatching(/'process'.*no credentials/) },
-      { file: index, line: 21, rule: globals, text: expect.stringMatching(/'require'.*imports with `import`/) },
+      {
+        file: index,
+        line: 20,
+        rule: imports,
+        text: expect.stringMatching(/^'virtual:sanoma\/content'.*through `content` from `sanoma\/site`/),
+      },
+      { file: index, line: 21, rule: globals, text: expect.stringMatching(/'process'.*no credentials/) },
+      { file: index, line: 22, rule: globals, text: expect.stringMatching(/'require'.*imports with `import`/) },
     ]);
   });
 });

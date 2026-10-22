@@ -1,8 +1,9 @@
 // What a site imports, as `sanoma/site` (`@sanoma-ai/app/site`): `defineSite`, the route APIs of
-// the app's own TanStack Router, so a site and the app share one router, `api`, which calls
-// the app's server function, and `ApiError` and `errorBodyOf`, how a refusal reads. Source, loaded only by Vite in a company's build; browser code,
-// nothing server-side. A route file still imports `createFileRoute` from `@tanstack/react-router`
-// itself: the route generator rewrites its path there, and only there.
+// the app's own TanStack Router, so a site and the app share one router, `api`, which calls the
+// app's server function, `ApiError` and `errorBodyOf`, how a refusal reads, and `content`, the
+// repo's Markdown. Source, loaded only by Vite in a company's build; browser code, nothing
+// server-side. A route file still imports `createFileRoute` from `@tanstack/react-router` itself:
+// the route generator rewrites its path there, and only there.
 import type { ComponentType } from "react";
 import { type Api, createApi } from "./api-client.ts";
 import { callFn } from "./functions.ts";
@@ -30,6 +31,9 @@ export type {
 } from "@tanstack/react-router";
 
 export type { Api, Register } from "./api-client.ts";
+// The repo's `content/`, typed by `.sanoma/content.ts` through `Register` as `api` is by `.sanoma/api.ts`.
+export { content } from "./content.ts";
+export type { Content, ContentEntry, ContentKind, ContentSummary } from "./content.ts";
 // A refusal of `api`: an `ApiError`, whose `body` (`errorBodyOf(err)`) has the stable `code`.
 export { ApiError, errorBodyOf } from "./api.ts";
 export type { ErrorResponse } from "./api.ts";

@@ -19,9 +19,12 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { SITE_NAME } from "@sanoma-ai/workflows/shared";
+import { problemLine, SITE_NAME } from "@sanoma-ai/workflows/shared";
 import type { InlineConfig, Logger, Plugin } from "vite";
+import { CONTENT_TYPES, contentTypes, readContent } from "./content-files.ts";
 import type { ServerEntry } from "./context.ts";
+
+export { CONTENT_TYPES, type ContentProblem, contentTypes, readContent } from "./content-files.ts";
 
 /** The app package's directory, by its real path (not the symlink pnpm makes): from `src/` or `dist/`. */
 const pkgDir = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
@@ -81,10 +84,11 @@ export function sitesOf(repo: string): { sites: string[]; refused: string[] } {
 }
 
 /**
- * Writes the sites' generated files: `sites/__virtual.ts` and `.sanoma/app/tsconfig.json` when
- * missing or different (the route generator reads `sites/tsconfig.json`, and so the file it
- * extends, when it loads the listing), `sites/tsconfig.json` when missing. An unchanged file is
- * not rewritten: a running dev server reloads every page when one does.
+ * Writes the sites' generated files: `sites/__virtual.ts`, `.sanoma/app/tsconfig.json` (the route
+ * generator reads `sites/tsconfig.json`, and so the file it extends, when it loads the listing)
+ * and `.sanoma/content.ts` (`contentTypes`, drafts included) when missing or different,
+ * `sites/tsconfig.json` when missing. An unchanged file is not rewritten: a running dev server
+ * reloads every page when one does.
  */
 export function writeSiteFiles(repo: string): void {
   const root = realpathSync(repo);
@@ -96,7 +100,11 @@ export function writeSiteFiles(repo: string): void {
   const sitesTsconfig = join(sites, "tsconfig.json");
   if (!existsSync(sitesTsconfig)) writeFileSync(sitesTsconfig, '{ "extends": "../.sanoma/app/tsconfig.json" }\n');
   writeChanged(join(out, "tsconfig.json"), `${JSON.stringify(siteTsconfig(root), null, 2)}\n`);
+  writeContentTypes(root);
 }
+
+const writeContentTypes = (root: string) =>
+  writeChanged(join(root, CONTENT_TYPES), contentTypes(readContent(root, { drafts: true }).kinds));
 
 function writeChanged(file: string, text: string): void {
   if (!existsSync(file) || readFileSync(file, "utf8") !== text) writeFileSync(file, text);
@@ -128,7 +136,7 @@ function siteTsconfig(root: string) {
         "@sanoma-ai/app/*": [`${src}/*.ts`],
       },
     },
-    include: ["../../sites", "./routeTree.gen.ts", "../api.ts", join(src, "env.d.ts")],
+    include: ["../../sites", "./routeTree.gen.ts", "../api.ts", "../content.ts", join(src, "env.d.ts")],
   };
 }
 
@@ -191,6 +199,7 @@ function packageConfig(): InlineConfig {
         cn({ content: ["src/**/*.tsx"], css: "src/style.css", out: "src/lib/cn-tables.ts" }),
       ),
       tailwindcss(),
+      contentPlugin(),
       tanstackStart({ importProtection: { behavior: "error", client: { specifiers: [CLIENT_DENIED] } } }),
       react(),
     ],
@@ -240,6 +249,7 @@ function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom): InlineConfi
       },
       sharedDeps(repo, src),
       runtimeExternal(runtimeFrom),
+      contentPlugin(repo),
       tailwindcss(),
       tanstackStart({
         srcDirectory,
@@ -280,6 +290,46 @@ function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom): InlineConfi
         { find: /^cn$/, replacement: join(src, "lib", "utils.ts") },
         { find: /^clsx$/, replacement: fromApp.resolve("cn/engine") },
       ],
+    },
+  };
+}
+
+const CONTENT = "virtual:sanoma/content";
+
+/**
+ * `virtual:sanoma/content`, which a site's `content` imports: the repo's content (`readContent`) as
+ * JSON, drafts only on the dev server; without a repo (the package's own build), none. A problem
+ * in a file is a warning, never a failed build: `sanoma check` reports it. On the dev server, a
+ * file added, changed or removed under `content/` writes `.sanoma/content.ts` again and reloads
+ * the module, so an open page shows it with no restart.
+ */
+function contentPlugin(repo?: string): Plugin {
+  const id = `\0${CONTENT}`;
+  let drafts = false;
+  return {
+    name: "sanoma:content",
+    configResolved(config) {
+      drafts = config.command === "serve";
+    },
+    resolveId: (source) => (source === CONTENT ? id : undefined),
+    load(loaded) {
+      if (loaded !== id) return;
+      if (repo === undefined) return "export default {};";
+      const { kinds, problems } = readContent(repo, { drafts });
+      for (const problem of problems) this.warn(problemLine(problem));
+      return `export default ${JSON.stringify(kinds)};`;
+    },
+    configureServer(server) {
+      if (repo === undefined) return;
+      const dir = join(repo, "content") + sep;
+      const refresh = (file: string) => {
+        if (!file.startsWith(dir)) return;
+        writeContentTypes(repo);
+        for (const env of Object.values(server.environments)) {
+          for (const mod of env.moduleGraph.getModulesByFile(id) ?? []) void env.reloadModule(mod);
+        }
+      };
+      for (const event of ["add", "change", "unlink"] as const) server.watcher.on(event, refresh);
     },
   };
 }
@@ -488,8 +538,8 @@ function devPlugins(repo: string, src: string, onFileChange?: (file: string) => 
 }
 
 /**
- * The build's key: the app's version and source directory, every file under `sites/` (dotfiles
- * aside), and where the runtime the server bundle imports by URL is installed (a real path names
+ * The build's key: the app's version and source directory, every file under `sites/` and
+ * `content/` (dotfiles aside), and where the runtime the server bundle imports by URL is installed (a real path names
  * its version under pnpm), so an upgrade of the runtime is a new build.
  */
 function buildKey(repo: string, runtimeFrom: string): string {
@@ -502,8 +552,9 @@ function buildKey(repo: string, runtimeFrom: string): string {
     const dir = moduleDir(name, dirname(runtimeFrom)) ?? (workflows && moduleDir(name, realpathSync(workflows)));
     hash.update(`${name}=${dir === undefined ? "" : realpathSync(dir)}\0`);
   }
-  const sites = join(repo, "sites");
-  const files = existsSync(sites) ? readdirSync(sites, { recursive: true, withFileTypes: true }) : [];
+  const files = ["sites", "content"].flatMap((dir) =>
+    existsSync(join(repo, dir)) ? readdirSync(join(repo, dir), { recursive: true, withFileTypes: true }) : [],
+  );
   for (const file of files
     .filter((entry) => entry.isFile() && !entry.name.startsWith("."))
     .map((entry) => join(entry.parentPath, entry.name))

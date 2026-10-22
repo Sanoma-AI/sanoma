@@ -118,9 +118,11 @@ export const Route = createFileRoute("/sites/hello/gone")({ component: () => <Ru
 `,
     );
     mkdirSync(join(dir, "sites/Bad_Name/routes"), { recursive: true });
+    writeFileSync(join(dir, "content/posts/bad.md"), "---\n\ttitle: Tabbed\n---\n");
     const found = await runCli(dir, ["check"], env);
     expect(found.code, found.stderr).toBe(1);
     const problems = found.stdout.trimEnd().split("\n");
+    expect(problems).toContain("content/posts/bad.md:2:1: front matter: Tabs are not allowed as indentation");
     expect(problems).toContain('sites/hello/routes/gone.tsx:4:78: calls workflow "gone", which does not exist');
     expect(problems).toContainEqual(
       expect.stringMatching(/^sites\/hello\/routes\/index\.tsx:9:\d+: error TS\d+: .*"\/sites\/hello\/nope"/),
@@ -190,6 +192,9 @@ describe("sanoma with sites: the dev server", () => {
     }
   }, 60_000);
 
+  /** The page that reads content/posts/hello.md, as the server renders it. */
+  const page = async () => (await (await fetch(`${url}/sites/hello/post`)).text()).replaceAll("<!-- -->", "");
+
   it("serves a site in the app's shell, the app's pages and /healthz, refuses another Host, and builds nothing", async () => {
     expect(running!.output().stderr).toContain("serving the app with 1 site (hello) from Vite's dev server");
     const site = await fetch(`${url}/sites/hello`);
@@ -219,6 +224,21 @@ describe("sanoma with sites: the dev server", () => {
       ({ text, stderr }) => text.includes("times: number;") && stderr.includes("wrote .sanoma/api.ts"),
       20_000,
     );
+  }, 60_000);
+
+  it("shows an edit to content/ on the next render, and types it again in .sanoma/content.ts", async () => {
+    expect(await page()).toContain("Read from <strong>content/posts/hello.md</strong>.");
+    const types = join(repo, ".sanoma/content.ts");
+    expect(readFileSync(types, "utf8")).toContain("posts: ContentKind<{ title: string }>;");
+    const post = join(repo, "content/posts/hello.md");
+    writeFileSync(
+      post,
+      readFileSync(post, "utf8")
+        .replace("title: The first post", "title: The first post\nsummary: Edited")
+        .replace("Read from", "Edited in"),
+    );
+    await waitFor(page, (html) => html.includes("Edited in <strong>"), 20_000);
+    expect(readFileSync(types, "utf8")).toContain("posts: ContentKind<{ title: string; summary: string }>;");
   }, 60_000);
 
   it("serves a new site folder without a restart", async () => {
