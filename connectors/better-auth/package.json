@@ -50,14 +50,13 @@
     "pg": "^8.23.1"
   },
   "devDependencies": {
+    "@sanoma-ai/app": "workspace:*",
     "@sanoma-ai/testing": "workspace:*",
     "@sanoma-ai/workflows": "workspace:*",
-    "@types/pg": "^8.23.1",
-    "zod": "^4.6.5"
+    "@types/pg": "^8.23.1"
   },
   "peerDependencies": {
-    "@sanoma-ai/workflows": "workspace:^",
-    "zod": "^4"
+    "@sanoma-ai/workflows": "workspace:^"
   },
   "engines": {
     "node": ">=24"

@@ -1,6 +1,6 @@
 # @sanoma-ai/connector-better-auth
 
-[Better Auth](https://www.better-auth.com) as a visitor login for a [Sanoma](https://github.com/Sanoma-AI/sanoma) public site: visitors sign up and sign in with an email and a password, and their accounts live on the company's own database. It has no operations; it attaches a login half (`withSetup({ login })`, see [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows#usage)), which the app calls once for each public site that names it.
+[Better Auth](https://www.better-auth.com) as a visitor login for a [Sanoma](https://github.com/Sanoma-AI/sanoma) public site: visitors sign up and sign in with an email and a password, and their accounts live on the company's own database. It has no operations and no credential; it attaches a login half (`withSetup({ login })`, see [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows#usage)), which the app calls once for each public site that names it.
 
 ## Usage
 
@@ -29,13 +29,9 @@ A visitor who signs in is the principal `visitor:better-auth:<id>`, in the group
 permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"workflow:hello", resource);
 ```
 
-### The secret
+### No secret to set
 
-| Variable             | What it is                                                                                 |
-| -------------------- | ------------------------------------------------------------------------------------------ |
-| `BETTER_AUTH_SECRET` | Signs visitors' session cookies: 32 random characters or more (`openssl rand -base64 32`). |
-
-Set it on the app's connector page, or in the environment, which wins. The login refuses to start without it or with a shorter one. Changing it signs every visitor out.
+It has no credential. Better Auth signs its cookies with a key the app derives for this login from the deployment's `SANOMA_SECRETS_KEY` (HKDF-SHA256, purpose `login better-auth`), which `sanoma` already sets up; changing that key signs every visitor out.
 
 ### The schema
 
@@ -43,7 +39,7 @@ The tables (`user`, `session`, `account`, `verification`) are in the schema `bet
 
 ### The routes
 
-The login answers under `/auth/better-auth/` on the site's own host, and nothing else. A site's pages are its sign-in forms, drawn from the kit (`@sanoma-ai/app/ui`), that `fetch` JSON with a POST (the browser adds `Origin`, which Better Auth checks):
+The login answers under `/auth/better-auth/` on the site's own host, and nothing else. A site's pages are its sign-in forms, drawn from the kit (`sanoma/ui`), that `fetch` JSON with a POST (the browser adds `Origin`, which Better Auth checks):
 
 | Route                                  | Body                          | What it does                                                             |
 | -------------------------------------- | ----------------------------- | ------------------------------------------------------------------------ |

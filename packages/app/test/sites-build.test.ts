@@ -510,6 +510,8 @@ describe("a company's app with its sites", () => {
     expect(loginContexts[0]).toMatchObject({
       origins: ["http://members.localhost:*"],
       databaseUrl: config.databaseUrl,
+      // Its own key, from SANOMA_SECRETS_KEY for "login fixture-login".
+      key: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
   });
 

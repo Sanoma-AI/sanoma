@@ -22,6 +22,7 @@ import { type ConfigDescription, describeConfig, readPeople, type SiteEntry } fr
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import type { AppContext, LoginProvider, RequestContext, ServerEntry } from "./context.ts";
 import { admitting } from "./login/admission.ts";
+import { loginKey } from "./login/keys.ts";
 import { publicFront } from "./login/public.ts";
 import { hostName, loopbackLogin } from "./loopback.ts";
 
@@ -283,7 +284,8 @@ function publicHosts(description: ConfigDescription, domains: Record<string, str
 /**
  * Makes each public site's login half (`ConnectorSetup.login`), all at once, settling the promise
  * its front door waits on: the ones made, by site name. One that fails is logged, and its site is
- * then served on no host (503): the app starts, so the connector's page can set what it lacks.
+ * then served on no host (503): the app starts, so the connector's page, or the environment
+ * (`SANOMA_SECRETS_KEY`, which each login's key is derived from), can give what it lacks.
  */
 async function openLogins(
   resolved: ResolvedConfig,
@@ -297,7 +299,13 @@ async function openLogins(
     [...halves].map(async ([{ name, login, domain }, half]) => {
       const origins = [`http://${localHost(name)}:*`, ...(domain ? [`https://${domain}`] : [])];
       half.resolve(
-        (async () => resolved.logins.get(login!)!({ databaseUrl: resolved.databaseUrl, secrets, origins }))(),
+        (async () =>
+          resolved.logins.get(login!)!({
+            databaseUrl: resolved.databaseUrl,
+            key: loginKey(login!),
+            secrets,
+            origins,
+          }))(),
       );
       try {
         opened.set(name, await half.promise);

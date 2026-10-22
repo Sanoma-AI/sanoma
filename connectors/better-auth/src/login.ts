@@ -18,17 +18,13 @@ const migrated = new Map<string, Promise<void>>();
 
 /**
  * Better Auth's login half for one public site: email and password, its tables in schema
- * `better_auth` on the company's database, migrated here before the first site starts. Refuses a
- * `BETTER_AUTH_SECRET` under 32 characters. The site's origins are its allowed hosts (a request
- * for another host is refused) and set the cookie's `Secure` flag: an `https` origin's is.
+ * `better_auth` on the company's database, migrated here before the first site starts, its cookies
+ * signed with the app's key for it (`context.key`). The site's origins are its allowed hosts (a
+ * request for another host is refused) and set the cookie's `Secure` flag: an `https` origin's is.
  */
-export async function betterAuthLogin({ databaseUrl, secrets, origins }: LoginContext): Promise<LoginHalf> {
-  const secret = (await secrets(["BETTER_AUTH_SECRET"])).get("BETTER_AUTH_SECRET");
-  if (!secret || secret.length < 32) {
-    throw new Error(
-      "better-auth: BETTER_AUTH_SECRET must be set, 32 characters or more (`openssl rand -base64 32`), on the connector page or in the environment",
-    );
-  }
+export async function betterAuthLogin({ databaseUrl, key, origins }: LoginContext): Promise<LoginHalf> {
+  // Never Better Auth's own fallback (an environment variable, or its default secret).
+  if (!/^[0-9a-f]{64}$/.test(key ?? "")) throw new Error("better-auth: the app gives no key to sign cookies with");
   const sites = sitesOf(origins);
   const pool = new Pool({ connectionString: databaseUrl });
   pool.on("error", (err) => console.warn(`better-auth: a database connection failed: ${err.message}`));
@@ -37,7 +33,9 @@ export async function betterAuthLogin({ databaseUrl, secrets, origins }: LoginCo
     ({
       // Schema-qualified queries, not a search_path, which the URL's own `options` could undo.
       database: { dialect: new PostgresDialect({ pool }), type: "postgres", schemaName: SCHEMA, transaction: true },
-      secret,
+      // `secrets` over `secret`, else BETTER_AUTH_SECRETS in the environment would win.
+      secrets: [{ version: 1, value: key }],
+      secret: key,
       basePath: BASE_PATH,
       // A request's Host must be one of these, and its origin is trusted.
       baseURL: { allowedHosts: sites.filter((site) => site.protocol === protocol).map((site) => site.host), protocol },

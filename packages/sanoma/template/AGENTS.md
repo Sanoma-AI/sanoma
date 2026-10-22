@@ -63,4 +63,4 @@ export default defineConfig({ workflows, connectors: [betterAuth] });
 permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"workflow:hello", resource);
 ```
 
-Set `BETTER_AUTH_SECRET` (32 random characters or more) on the Better Auth connector page. The site's sign-in and sign-up pages are forms from `@sanoma-ai/app/ui` that `fetch` POST JSON to `/auth/better-auth/sign-in/email` and `/auth/better-auth/sign-up/email`; `useActor()` says who signed in (`visitor:better-auth:<id>`, in `visitors`). The connector's README has the routes. The app serves a public site to visitors from the next release.
+There is no secret to set: the login signs its cookies with a key derived from `SANOMA_SECRETS_KEY`. The site's sign-in and sign-up pages are forms from `sanoma/ui` that `fetch` POST JSON to `/auth/better-auth/sign-in/email` and `/auth/better-auth/sign-up/email`; `useActor()` says who signed in (`visitor:better-auth:<id>`, in `visitors`). The connector's README has the routes.

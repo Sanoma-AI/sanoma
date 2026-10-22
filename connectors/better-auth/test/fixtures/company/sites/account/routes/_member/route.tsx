@@ -1,4 +1,4 @@
-import { useActor } from "@sanoma-ai/app/ui";
+import { useActor } from "sanoma/ui";
 import { createFileRoute } from "@tanstack/react-router";
 import { Link, Outlet } from "sanoma/site";
 

@@ -1,4 +1,4 @@
-import { Region } from "@sanoma-ai/app/ui";
+import { Region } from "sanoma/ui";
 import { createFileRoute } from "@tanstack/react-router";
 import { Outlet } from "sanoma/site";
 

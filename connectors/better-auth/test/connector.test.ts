@@ -4,7 +4,7 @@ import { expect, it } from "vitest";
 import { betterAuthLogin } from "../src/login.ts";
 import company from "./fixtures/company/sanoma.config.ts";
 
-it("is a connector with no operations, its secret and its login half, as the app and the SDK read it", () => {
+it("is a connector with no operations, no driver and a login half, as the app and the SDK read it", () => {
   const description = describeConfig(company);
   expect(description.vendors["better-auth"]).toMatchObject({
     title: "Better Auth",
@@ -22,6 +22,7 @@ it("is a connector with no operations, its secret and its login half, as the app
   expect(source).not.toContain("better-auth");
 
   const resolved = resolveConfig(company);
-  expect(Object.keys(resolved.driversByVendor.get("better-auth")?.env?.shape ?? {})).toEqual(["BETTER_AUTH_SECRET"]);
+  // No driver, so no credential: the login's key comes from the app.
+  expect(resolved.driversByVendor.has("better-auth")).toBe(false);
   expect(resolved.logins.get("better-auth")).toBe(betterAuthLogin);
 });

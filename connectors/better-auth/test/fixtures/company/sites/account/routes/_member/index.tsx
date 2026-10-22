@@ -1,4 +1,4 @@
-import { Button, Fact, Facts, toast, useActor } from "@sanoma-ai/app/ui";
+import { Button, Fact, Facts, toast, useActor } from "sanoma/ui";
 import { createFileRoute } from "@tanstack/react-router";
 import { api } from "sanoma/site";
 

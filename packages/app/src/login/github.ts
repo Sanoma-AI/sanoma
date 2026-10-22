@@ -1,6 +1,7 @@
-import { createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { parse, serialize } from "cookie-es";
 import type { LoginProvider } from "../context.ts";
+import { signer } from "./keys.ts";
 import { smallPage, wantsJson } from "./page.ts";
 
 // Sign-in with GitHub: GitHub's OAuth web flow, then a signed session cookie. GitHub says who is
@@ -144,20 +145,6 @@ async function api(token: string, path: string): Promise<unknown> {
   });
   if (!res.ok) throw new Error(`GitHub answered ${res.status} for GET ${path}`);
   return res.json();
-}
-
-/**
- * Signs short values (a session, a state) with a key derived from `SANOMA_SECRETS_KEY` for
- * `purpose`, so each use has a key of its own; `verify` compares in constant time.
- */
-export function signer(secretsKey: string, purpose: string) {
-  const key = Buffer.from(hkdfSync("sha256", secretsKey, "", purpose, 32));
-  const sign = (payload: string) => createHmac("sha256", key).update(payload).digest("base64url");
-  const verify = (payload: string, signature: string) => {
-    const [expected, given] = [Buffer.from(sign(payload)), Buffer.from(signature)];
-    return given.length === expected.length && timingSafeEqual(given, expected);
-  };
-  return { sign, verify };
 }
 
 export const cookies = (request: Request) => parse(request.headers.get("cookie") ?? "");

@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { hkdfSync, randomBytes, randomUUID } from "node:crypto";
 import { CLIENT_IP_HEADER, type LoginContext, type LoginHalf } from "@sanoma-ai/workflows";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { Client } from "pg";
@@ -6,11 +6,14 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { betterAuthLogin } from "../src/login.ts";
 
 const databaseUrl = testDatabaseUrl("better_auth");
-const secret = randomBytes(32).toString("base64");
+/** The key the app derives for a login named `purpose` from `SANOMA_SECRETS_KEY` (vitest sets one for the run). */
+const keyFor = (purpose: string) =>
+  Buffer.from(hkdfSync("sha256", process.env.SANOMA_SECRETS_KEY!, "", purpose, 32)).toString("hex");
 const SITE = "http://account.localhost:5173";
 const context: LoginContext = {
   databaseUrl,
-  secrets: async () => new Map([["BETTER_AUTH_SECRET", secret]]),
+  key: keyFor("login better-auth"),
+  secrets: async () => new Map(),
   // Locally and hosted at once: one Better Auth for each scheme.
   origins: ["http://account.localhost:*", "https://account.example"],
 };
@@ -105,11 +108,8 @@ describe("login", () => {
     expect(await tables()).toEqual(["account", "session", "user", "verification"]);
   });
 
-  it("refuses a secret under 32 characters, and an origin that is more than a scheme and a host", async () => {
-    await expect(
-      betterAuthLogin({ ...context, secrets: async () => new Map([["BETTER_AUTH_SECRET", "short"]]) }),
-    ).rejects.toThrow(/32 characters or more/);
-    await expect(betterAuthLogin({ ...context, secrets: async () => new Map() })).rejects.toThrow(/BETTER_AUTH_SECRET/);
+  it("refuses a context without the app's key, and an origin that is more than a scheme and a host", async () => {
+    await expect(betterAuthLogin({ ...context, key: undefined as unknown as string })).rejects.toThrow(/no key/);
     await expect(betterAuthLogin({ ...context, origins: ["https://account.example/sign-in"] })).rejects.toThrow(
       /a scheme and a host alone/,
     );
@@ -173,6 +173,17 @@ describe("the login half", () => {
     expect(response.headers.getSetCookie()[0]).toMatch(/^__Secure-better-auth\.session_token=.*; Secure/i);
     expect(await half.verify(request("/", { cookie, host }))).not.toBeNull();
     expect(await half.verify(request("/", { cookie }))).toBeNull();
+  });
+
+  it("takes a session as its own only under the key it signed it with", async () => {
+    const { cookie } = await signUp(half);
+    const other = await betterAuthLogin({ ...context, key: keyFor("login another") });
+    try {
+      expect(await other.verify(request("/", { cookie }))).toBeNull();
+    } finally {
+      await other.close?.();
+    }
+    expect(await half.verify(request("/", { cookie }))).not.toBeNull();
   });
 
   it("refuses a request with a cookie from another origin", async () => {

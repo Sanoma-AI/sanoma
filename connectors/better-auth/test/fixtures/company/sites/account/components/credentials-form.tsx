@@ -1,4 +1,4 @@
-import { Button, Field, FieldError, FieldGroup, FieldLabel, Input } from "@sanoma-ai/app/ui";
+import { Button, Field, FieldError, FieldGroup, FieldLabel, Input } from "sanoma/ui";
 import { type FormEvent, useState } from "react";
 import { useRouter } from "sanoma/site";
 

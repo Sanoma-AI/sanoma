@@ -327,7 +327,15 @@ export interface ConnectorSetup {
 export interface LoginContext {
   /** The company's database (`resolved.databaseUrl`), where a login like Better Auth keeps its users. */
   databaseUrl: string;
-  /** Secrets' values by name: the environment's first, then the stored credentials (the values `SanomaClient.secrets` reads). */
+  /**
+   * A 32-byte key derived from the deployment's `SANOMA_SECRETS_KEY` for this login (HKDF-SHA256,
+   * purpose `login <connector>`), hex; a login signs its cookies with it and never asks a person for a secret.
+   */
+  key: string;
+  /**
+   * Secrets' values by name, for a login that holds a vendor's credentials (an Auth0 client
+   * secret): the environment's first, then the stored credentials (the values `SanomaClient.secrets` reads).
+   */
   secrets(names: readonly string[]): Promise<Map<string, string>>;
   /**
    * The origins the site answers on, scheme included and `:*` for any port:
