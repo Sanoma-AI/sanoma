@@ -58,6 +58,41 @@ describe("linkedPackages", () => {
     ]);
     expect(linkedPackages(repoWith({}).repo)).toEqual([]);
   });
+
+  it("adds the core packages sanoma reaches in the checkout when sanoma alone is linked, after a linked connector", () => {
+    // The checkout's workspace links: packages/sanoma/node_modules/@sanoma-ai/<name> -> packages/<name>.
+    const { repo, checkout } = repoWith({ sanoma: "linked", "connector-ghost": "linked" });
+    mkdirSync(join(checkout, "packages/sanoma/node_modules/@sanoma-ai"), { recursive: true });
+    for (const name of ["workflows", "app", "bridge"]) {
+      mkdirSync(join(checkout, "packages", name));
+      symlinkSync(join(checkout, "packages", name), join(checkout, "packages/sanoma/node_modules/@sanoma-ai", name));
+    }
+    expect(linkedPackages(repo)).toEqual([
+      { name: "@sanoma-ai/connector-ghost", dir: join(checkout, "packages/connector-ghost") },
+      { name: "sanoma", dir: join(checkout, "packages/sanoma") },
+      { name: "@sanoma-ai/workflows", dir: join(checkout, "packages/workflows") },
+      { name: "@sanoma-ai/app", dir: join(checkout, "packages/app") },
+      { name: "@sanoma-ai/bridge", dir: join(checkout, "packages/bridge") },
+    ]);
+    expect(partialLink(repo)).toEqual([]);
+  });
+
+  it("is nothing when nothing is linked, though an installed sanoma's dependencies resolve into a checkout", () => {
+    const { repo, checkout } = repoWith({});
+    const store = join(repo, "node_modules/.pnpm/sanoma@0.1.0/node_modules");
+    mkdirSync(join(store, "sanoma"), { recursive: true });
+    mkdirSync(join(store, "@sanoma-ai"));
+    mkdirSync(join(checkout, "packages/app"), { recursive: true });
+    symlinkSync(join(checkout, "packages/app"), join(store, "@sanoma-ai/app"));
+    symlinkSync(join(store, "sanoma"), join(repo, "node_modules/sanoma"));
+    expect(linkedPackages(repo)).toEqual([]);
+  });
+
+  it("leaves out a core package the repo has installed, which partialLink names", () => {
+    const { repo, checkout } = repoWith({ sanoma: "linked", app: "installed" });
+    expect(linkedPackages(repo)).toEqual([{ name: "sanoma", dir: join(checkout, "packages/sanoma") }]);
+    expect(partialLink(repo)).toEqual(["@sanoma-ai/app"]);
+  });
 });
 
 describe("partialLink", () => {

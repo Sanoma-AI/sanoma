@@ -31,7 +31,8 @@ Runs the repo in the working directory, from its sanoma.config.ts (after its .en
 SANOMA_DATABASE_URL names Postgres (default postgresql://postgres:dbos@localhost:5433/sanoma); SANOMA_APP_PORT the
 app's port (default 3000; 0 for any free port); SANOMA_APP_HOST its address (default 127.0.0.1; any other needs
 GitHub sign-in, see .env.example). With sanoma or a @sanoma-ai package linked from a sanoma checkout,
-or SANOMA_DEV_REPO set, \`sanoma\` also runs each linked package's watch build and restarts on a new build.
+or SANOMA_DEV_REPO set, \`sanoma\` also runs the watch build of each package it reaches in the checkout and
+restarts on a new build.
 `;
 
 /** Exit codes: 2 for how the bin was called or what it found, 1 for failed checks and failures while running. */
@@ -176,9 +177,10 @@ async function serveStarted(cwd: string): Promise<number> {
 }
 
 /**
- * Dev mode: `sanoma serve --dev` in a child it restarts on a new build, and each linked package's
- * `watch`. With sites, the child serves the app's source from Vite's dev server, which updates it
- * in place: a new build of the app's pages (its `dist/client` and `dist/server`) restarts nothing.
+ * Dev mode: `sanoma serve --dev` in a child it restarts on a new build, and the `watch` of each
+ * package reached in the checkout (`linkedPackages`). With sites, the child serves the app's
+ * source from Vite's dev server, which updates it in place: a new build of the app's pages (its
+ * `dist/client` and `dist/server`) restarts nothing.
  * Each runs in a process group of its own, so a terminal's ctrl-c reaches this process alone, and
  * its `stop` is the one path that ends them.
  */
@@ -189,8 +191,8 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
   const fromTarballs = partialLink(cwd);
   if (fromTarballs.length) {
     log(
-      `dev mode: ${fromTarballs.join(", ")} still come from their tarballs: ` +
-        "edits to them in the checkout will not show until you pnpm link them too",
+      `dev mode: ${fromTarballs.join(", ")} still come from their tarballs, ` +
+        "so edits to them in the checkout will not show",
     );
   }
   const watchers = startWatchers(packages, log);

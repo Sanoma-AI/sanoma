@@ -269,6 +269,25 @@ export const Route = createFileRoute("/sites/second/")({ component: () => <p>The
     expect(await second.text()).toContain("The second site");
   }, 60_000);
 
+  it("styles a class in a new site file in the site's own stylesheet, without a restart", async () => {
+    const html = await (await fetch(`${url}/sites/hello`)).text();
+    // The layout links it: Tailwind's theme and utilities, from the app's install.
+    const href = html.match(/<link[^>]*href="(\/sites\/hello\/style\.css[^"]*)"/)?.[1];
+    expect(href).toBeDefined();
+    const css = async () => (await fetch(`${url}${href}`, { headers: { accept: "text/css" } })).text();
+    const before = await css();
+    expect(before).toMatch(/^\/\*! tailwindcss v4/);
+    expect(before).not.toContain("0.29em");
+    writeFileSync(
+      join(repo, "sites/hello/routes/tracked.tsx"),
+      `import { createFileRoute } from "@tanstack/react-router";
+
+export const Route = createFileRoute("/sites/hello/tracked")({ component: () => <p className="tracking-[0.29em]">Tracked</p> });
+`,
+    );
+    await waitFor(css, (text) => text.includes("letter-spacing: 0.29em"), 20_000);
+  }, 60_000);
+
   it("hydrates a site with one React, updates it in place on an edit, and navigates to the app in the same document", async (ctx) => {
     const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
     if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");

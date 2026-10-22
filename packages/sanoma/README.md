@@ -144,7 +144,7 @@ A folder under `sites/` with a `routes/` directory is a site: TanStack Router fi
 
 - An edit to a site's file shows in the open page as it is saved, without a reload, the page's state kept (hot module replacement); the server's render of the page follows on the next request.
 - A file saved under `content/` shows on the next render of a page that reads it, drafts included, with no restart, and `.sanoma/content.ts` is written again.
-- A new page, or a new site folder, is live once its first route file is written: the route tree is regenerated and open pages reload, with no restart. A Tailwind class in a new file is styled too.
+- A new page, or a new site folder, is live once its first route file is written: the route tree is regenerated and open pages reload, with no restart. A Tailwind class in a new file is styled too, by the app's stylesheet and by a site's own ([`@sanoma-ai/app`'s A site's own stylesheet](../app/README.md#a-sites-own-stylesheet)).
 - A change to `sites/__virtual.ts` itself needs a restart: the route generator loads that file once. `sanoma` writes it; never edit it.
 - `sanoma check` beside it builds the app with the same route options, so it leaves the dev server's route tree alone.
 - The dev server listens on this machine only: with `SANOMA_APP_HOST` naming another, `sanoma` builds the sites and serves the build, as `sanoma app` does.
@@ -152,21 +152,21 @@ A folder under `sites/` with a `routes/` directory is a site: TanStack Router fi
 
 ## Generated files
 
-| File                                                  | Written by                                | Commit it       |
-| ----------------------------------------------------- | ----------------------------------------- | --------------- |
-| `.env.example`                                        | `sanoma env`                              | yes             |
-| `.oxlintrc.json`                                      | `sanoma check`, when missing              | yes             |
-| `sites/__virtual.ts`                                  | `sanoma` and `sanoma check`, with sites   | yes             |
-| `sites/tsconfig.json`                                 | `sanoma` and `sanoma check`, when missing | yes             |
-| `.sanoma/api.ts` (the sites' typed `api`)             | `sanoma` and `sanoma check`               | no (`.sanoma/`) |
-| `.sanoma/content.ts` (the sites' typed `content`)     | `sanoma` and `sanoma check`, with sites   | no (`.sanoma/`) |
-| `.sanoma/app/` (the route tree, its tsconfig, builds) | `sanoma` and `sanoma check`, with sites   | no (`.sanoma/`) |
+| File                                                  | Written by                                | Commit it                                 |
+| ----------------------------------------------------- | ----------------------------------------- | ----------------------------------------- |
+| `.env.example`                                        | `sanoma env`                              | yes                                       |
+| `.oxlintrc.json`                                      | `sanoma check`, when missing              | yes                                       |
+| `sites/__virtual.ts`                                  | `sanoma` and `sanoma check`, with sites   | yes                                       |
+| `sites/tsconfig.json`                                 | `sanoma` and `sanoma check`, when missing | yes                                       |
+| `.sanoma/api.ts` (the sites' typed `api`)             | `sanoma` and `sanoma check`               | no (`.sanoma/`)                           |
+| `.sanoma/content.ts` (the sites' typed `content`)     | `sanoma` and `sanoma check`, with sites   | no (`.sanoma/`)                           |
+| `.sanoma/app/` (the route tree, its tsconfig, builds) | `sanoma` and `sanoma check`, with sites   | no (`.sanoma/`, and its own `.gitignore`) |
 
 ## Dev mode
 
-When the repo's `node_modules/sanoma` or any `node_modules/@sanoma-ai/*` is a link into a sanoma checkout (`pnpm link`), or `SANOMA_DEV_REPO` names one, `sanoma` runs `sanoma serve --dev` in a child process (serving the [sites](#developing-a-site) as `sanoma` does) and, in every linked package's directory, its `pnpm run watch` (each package's own watch build: `tsc --watch`, and `vite build --watch` too for the app). A change under any linked package's `dist/` restarts the child, after three quarters of a second of quiet (with sites, except the app's own pages in `dist/client` and `dist/server`: the dev server serves the app's source from the checkout and hot-updates it), one restart at a time; a child that exits on its own is reported and started again on the next change. The child and each watch run in a process group of their own, so a terminal's ctrl-c reaches `sanoma` alone, which then ends each group (SIGTERM, SIGKILL after 5 seconds) and exits.
+When the repo's `node_modules/sanoma` or any `node_modules/@sanoma-ai/*` is a link into a sanoma checkout (`pnpm link`), or `SANOMA_DEV_REPO` names one, `sanoma` runs `sanoma serve --dev` in a child process (serving the [sites](#developing-a-site) as `sanoma` does) and, in the directory of every package it reaches in the checkout, its `pnpm run watch` (each package's own watch build: `tsc --watch`, and `vite build --watch` too for the app). Those are the linked packages and each of `sanoma`, `@sanoma-ai/workflows`, `@sanoma-ai/app` and `@sanoma-ai/bridge` that Node resolves into the checkout through them, so a link of `sanoma` alone builds all four. A change under any of their `dist/` restarts the child, after three quarters of a second of quiet (with sites, except the app's own pages in `dist/client` and `dist/server`: the dev server serves the app's source from the checkout and hot-updates it), one restart at a time; a child that exits on its own is reported and started again on the next change. The child and each watch run in a process group of their own, so a terminal's ctrl-c reaches `sanoma` alone, which then ends each group (SIGTERM, SIGKILL after 5 seconds) and exits.
 
-Linking some of `sanoma`, `@sanoma-ai/workflows`, `@sanoma-ai/app` and `@sanoma-ai/bridge` and not the others works, with two copies of a package in one process (the linked one, and the one an installed package depends on), and `sanoma` says which still come from their tarballs before it starts the child: `dev mode: sanoma, @sanoma-ai/app, @sanoma-ai/bridge still come from their tarballs: edits to them in the checkout will not show until you pnpm link them too`. Link all four to run the checkout alone.
+Linking a core package while another still comes from a tarball (`@sanoma-ai/workflows` linked and `sanoma` not, or a declared `@sanoma-ai/app` left installed beside a linked `sanoma`) works, with two copies of a package in one process (the linked one, and the one an installed package depends on), and `sanoma` says which still come from their tarballs before it starts the child: `dev mode: sanoma, @sanoma-ai/app, @sanoma-ai/bridge still come from their tarballs, so edits to them in the checkout will not show`. [`@sanoma-ai/dev`](../dev/README.md)'s `sanoma-dev link` links `sanoma` and every declared `@sanoma-ai/*` package at once.
 
 ## Hosting it yourself
 
