@@ -101,19 +101,29 @@ Inside the repo, `@sanoma-ai/*` imports resolve to each package's `src/` (via `p
 
 ## Release
 
-[`release.yml`](.github/workflows/release.yml) stages `sanoma` and the `@sanoma-ai/*` packages on npm with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (no npm token) and a maintainer releases them with one command. To release, bump the shared `version` in every public package's `package.json` (not the private `@sanoma-ai/testing`), the `^` peer ranges on `@sanoma-ai/workflows` and `@sanoma-ai/bridge` and `RUNTIME_VERSION` in `packages/workflows/src/version.ts` (a test checks it), merge, wait for CI on `main` to pass, then tag `main` and push the tag:
+[`release.yml`](.github/workflows/release.yml) stages `sanoma` and the `@sanoma-ai/*` packages on npm with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (no npm token) and a maintainer releases them with one command. Each package has its own version, and a release ships only the packages whose version changed. To release:
+
+1. In a pull request, bump `version` in the `package.json` of each public package that changed since its last release (not the private `@sanoma-ai/testing`), and of each package that pins one of those exactly: `sanoma` pins `@sanoma-ai/app`, `@sanoma-ai/bridge` and `@sanoma-ai/workflows`, and `@sanoma-ai/bridge` pins the `@sanoma-ai/bridge-<platform>` packages (their `workspace:*` dependencies, published as that exact version). A breaking change in a 0.x package is a minor bump. The peer ranges on `@sanoma-ai/workflows` and `@sanoma-ai/bridge` are `workspace:^`, published as `^` on the version at that time, so after a minor bump of either, release every package that peers on it too. The pull request's description carries the release notes. What changed in a package since the commit that last set its version:
+
+   ```sh
+   dir=connectors/ghost; git log --oneline "$(git log -1 --format=%H -G'"version":' -- $dir/package.json)".. -- $dir
+   ```
+
+2. Merge, wait for CI on `main` to pass, then run the workflow on `main`:
 
 ```sh
-git fetch origin && git tag vX.Y.Z origin/main && git push origin vX.Y.Z
+gh workflow run release.yml --ref main   # or Actions → Release → Run workflow
 ```
 
-The workflow fails if the tagged commit is not on `main` or its CI did not pass, or if the tag doesn't match that version. It [stages](https://docs.npmjs.com/staged-publishing) each package (`pnpm stage publish -r`): the versions exist on npm but are not public until approved. Its job summary lists every staged version with its stage id and the command that releases them, all with one 2FA code, from a machine logged in to npm (`pnpm login`) with the repo's pnpm (`pnpm stage approve` takes several ids from pnpm 11.25):
+The workflow fails if the commit is not on `main` or its CI did not pass. It [stages](https://docs.npmjs.com/staged-publishing) each package whose version is not yet on npm (`pnpm stage publish -r`): the versions exist on npm but are not public until approved. Its job summary lists every staged version with its stage id and the command that releases them, all with one 2FA code, from a machine logged in to npm (`pnpm login`) with the repo's pnpm (`pnpm stage approve` takes several ids from pnpm 11.25):
 
 ```sh
 pnpm stage approve <stage-id>...   # or no ids, to pick from a list
 ```
 
-pnpm releases them in dependency order, so a package whose workspace dependency failed to release is skipped; rerun the command for those. If the workflow fails after staging some packages, its summary has no stage ids, so approve the versions it staged with `pnpm stage approve` and no ids, fix what failed, then rerun the workflow, which skips versions already public and stages the rest (a fix in the repo needs a new version and tag instead, since a rerun builds the same commit). A rerun while any version is still staged fails at it (`E409 409 Conflict - Cannot stage previously published version`): npm does not stage a version again while its stage is pending.
+pnpm releases them in dependency order, so a package whose workspace dependency failed to release is skipped; rerun the command for those. If the workflow fails after staging some packages, its summary has no stage ids, so approve the versions it staged with `pnpm stage approve` and no ids, fix what failed, then run the workflow again, which skips versions already public and stages the rest (a fix in a package already staged needs a new version). A run while any version is still staged fails at it (`E409 409 Conflict - Cannot stage previously published version`): npm does not stage a version again while its stage is pending.
+
+A new package, such as a connector under `connectors/`, needs no change to `release.yml` or any list: `pnpm stage publish -r` takes every workspace package that is not `private`. It starts at a version of its own (`0.1.0`), names the `@sanoma-ai/*` packages it peers on as `workspace:^`, like its siblings, and is first published by hand, then given a trusted publisher, as below.
 
 Each package needs a trusted publisher on npmjs.com, added once by an owner of the `sanoma-ai` organization under the package's Settings → Trusted publishing → GitHub Actions: owner `Sanoma-AI`, repository `sanoma`, workflow `release.yml`, with its allowed actions left at stage only (neither direct `npm publish` nor "Allow npm dist-tag", as npm recommends), and the package's Publishing access set to "Require two-factor authentication and disallow tokens". npm adds a trusted publisher only to a package that already exists, so a new package is first published once by hand, and a new configuration expires unless it is first used within two days.
 

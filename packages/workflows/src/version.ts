@@ -5,8 +5,10 @@ import { dirname, join } from "node:path";
 import { jsonSchemaOf, opIdsOf, type WorkflowDefinition } from "./define.ts";
 import { upFrom } from "./paths.ts";
 
-/** This package's version. A unit test keeps it equal to package.json. */
-export const RUNTIME_VERSION = "0.4.2";
+/** This package's version, from its package.json: one level above `src/` and `dist/` alike. */
+export const RUNTIME_VERSION = (
+  JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }
+).version;
 
 /**
  * The sequence of DBOS calls the runtime makes around each `ctx` call: policy step, approval

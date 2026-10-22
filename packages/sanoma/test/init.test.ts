@@ -28,9 +28,6 @@ import {
 import { copyFixture, ensureBuilt, runCli } from "./fixture.ts";
 import { gitIdentity } from "./git.ts";
 
-const version = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string })
-  .version;
-
 let dir = "";
 const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
 const read = (file: string) => readFileSync(join(dir, file), "utf8");
@@ -69,7 +66,8 @@ describe("startCompany", () => {
     }
     const pkg = JSON.parse(read("package.json")) as { name: string; dependencies: Record<string, string> };
     expect(pkg.name).toBe("acme-ops");
-    expect(pkg.dependencies).toEqual({ "@sanoma-ai/connector-ghost": `^${version}`, sanoma: `^${version}` });
+    // Versioned separately, so each at its latest; the lockfile pins them.
+    expect(pkg.dependencies).toEqual({ "@sanoma-ai/connector-ghost": "latest", sanoma: "latest" });
     expect(existsSync(join(dir, "gitignore"))).toBe(false);
     // pnpm's alone.
     expect(existsSync(join(dir, "pnpm-workspace.yaml"))).toBe(false);

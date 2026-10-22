@@ -71,7 +71,7 @@
   },
   "peerDependencies": {
     "@dbos-inc/dbos-sdk": "^5.2.11",
-    "@sanoma-ai/workflows": "^0.4.2",
+    "@sanoma-ai/workflows": "workspace:^",
     "msw": "^3",
     "vitest": "^5",
     "zod": "^4"
