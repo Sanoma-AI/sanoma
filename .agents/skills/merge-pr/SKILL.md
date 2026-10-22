@@ -10,3 +10,4 @@ description: Verify the linked issue, current review evidence, and checks before
 3. Verify [review evidence](../create-pr/references/review.md) for the current head and base; complete missing or stale reviews.
 4. Require mergeability, required approvals, and successful applicable CI for the current head. Resolve conflicts and repeat review/checks; never bypass branch rules.
 5. Run `gh pr merge <number> --squash --match-head-commit <reviewed-head-sha>`; recheck if the head changes. Verify the merge and report PR/issue status; close the issue only if complete.
+6. After confirming the merge, fast-forward the shared main checkout and remove only this task's clean worktree with `git worktree remove <path>`. Preserve uncommitted or ignored work and other sessions' worktrees; never force removal.
