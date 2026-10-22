@@ -50,7 +50,8 @@
     "packages/*/test",
     "packages/*/scripts",
     "connectors/*/src",
-    "connectors/*/test"
+    "connectors/*/test",
+    "scripts/*.ts"
   ],
   // The app's routes and components (JSX, DOM) are checked by packages/app/tsconfig.json
   // (`typecheck:ui`). Its Node entry, src/index.ts, is still checked here through its tests.

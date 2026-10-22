@@ -34,22 +34,8 @@ jobs:
         with:
           node-version: 24
       - run: pnpm install --frozen-lockfile
-      # A package left at a public version must take each new version it depends on: an exact pin
-      # (`workspace:*`, as `sanoma` pins the runtime) or a `^` peer range after a 0.x minor bump does not.
-      - name: Every package that needs a new version has one
-        run: |
-          specs=$(pnpm -r ls --depth -1 --json | jq -r '.[] | select(.private | not) | "\(.name)@\(.version)"')
-          new=$(for spec in $specs; do [ -n "$(npm view "$spec" version 2>/dev/null)" ] || echo "$spec"; done)
-          [ -n "$new" ] || exit 0
-          stale=$(for spec in $(grep -vxF "$new" <<<"$specs"); do
-            npm view "$spec" --json | jq -r --arg new "$new" '(.dependencies + .peerDependencies + .optionalDependencies) as $deps
-              | $new | split("\n")[] | capture("^(?<name>.+)@(?<version>[^@]+)$") | select($deps[.name])
-              | [.name, .version, $deps[.name]] | @tsv' |
-            while IFS=$'\t' read -r name version range; do
-              npx -y semver@7.7.2 -r "$range" "$version" >/dev/null || echo "$spec takes $name $range, not $version: give it a new version too"
-            done
-          done)
-          [ -z "$stale" ] || { echo "$stale" | sed 's/^/::error::/'; exit 1; }
+      # Each package left at its public version takes the new versions it depends on.
+      - run: node scripts/release-check.ts
       # Packages already public are skipped without running prepack, so their dependents need this
       # build; the packages being staged rebuild in their prepack, which keeps the hand path safe.
       - run: pnpm build
@@ -69,6 +55,8 @@ jobs:
           fi
           {
             echo "## Staged versions"
+            echo
+            echo "From $GITHUB_SHA:"
             echo
             echo '```'
             cat staged.txt

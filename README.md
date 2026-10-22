@@ -103,7 +103,7 @@ Inside the repo, `@sanoma-ai/*` imports resolve to each package's `src/` (via `p
 
 [`release.yml`](.github/workflows/release.yml) stages `sanoma` and the `@sanoma-ai/*` packages on npm with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (no npm token) and a maintainer releases them with one command. Each package has its own version, and a release ships only the packages whose version changed. To release:
 
-1. In a pull request, bump `version` in the `package.json` of each public package that changed since its last release (not the private `@sanoma-ai/testing`); a breaking change in a 0.x package is a minor bump, and a provider-bridge release (`RELEASE` in `packages/bridge/scripts/download-bridge.ts`) is a change to the `@sanoma-ai/bridge-<platform>` packages. Packages that depend on one you bumped need a new version too when their published range leaves the new one out: an exact pin (`workspace:*`, as `sanoma` pins the runtime and `@sanoma-ai/bridge` its binaries), or a peer range (`workspace:^`, published as `^` on the version at that time) after a minor bump. The workflow names each one it finds and fails until it has one. The pull request's description carries the release notes. What changed in a package since the commit that last set its version:
+1. In a pull request, bump `version` in the `package.json` of each public package that changed since its last release (not the private `@sanoma-ai/testing`); a breaking change in a 0.x package is a minor bump, and a provider-bridge release (`RELEASE` in `packages/bridge/scripts/download-bridge.ts`) is a change to the `@sanoma-ai/bridge-<platform>` packages. Packages that depend on one you bumped need a new version too when their published range leaves the new one out: an exact pin (`workspace:*`, as `sanoma` pins the runtime and `@sanoma-ai/bridge` its binaries), or a peer range (`workspace:^`, published as `^` on the version at that time) after a minor bump. `node scripts/release-check.ts` names each one it finds, counting the ones that pin those in turn, and the workflow runs it first. The pull request's description carries the release notes. What changed in a package since the commit that last set its version:
 
    ```sh
    dir=connectors/ghost; git log --oneline "$(git log -1 --format=%H -G'"version":' -- "$dir/package.json")".. -- "$dir"
@@ -115,7 +115,7 @@ Inside the repo, `@sanoma-ai/*` imports resolve to each package's `src/` (via `p
 gh workflow run release.yml --ref main   # or Actions → Release → Run workflow
 ```
 
-The workflow fails if the commit is not on `main` or its CI did not pass, or if a package left at its public version does not take a new version it depends on. It [stages](https://docs.npmjs.com/staged-publishing) each package whose version is not yet on npm (`pnpm stage publish -r`): the versions exist on npm but are not public until approved. Its job summary lists every staged version with its stage id and the command that releases them, all with one 2FA code, from a machine logged in to npm (`pnpm login`) with the repo's pnpm (`pnpm stage approve` takes several ids from pnpm 11.25):
+The workflow fails if the commit is not on `main` or its CI did not pass, or if the check above names a package. It [stages](https://docs.npmjs.com/staged-publishing) each package whose version is not yet on npm (`pnpm stage publish -r`): the versions exist on npm but are not public until approved. Its job summary lists every staged version with its stage id and the command that releases them, all with one 2FA code, from a machine logged in to npm (`pnpm login`) with the repo's pnpm (`pnpm stage approve` takes several ids from pnpm 11.25):
 
 ```sh
 pnpm stage approve <stage-id>...   # or no ids, to pick from a list
@@ -129,6 +129,7 @@ By hand, as that first publish or as a fallback, from a clean checkout of `main`
 
 ```sh
 pnpm install --frozen-lockfile
+node scripts/release-check.ts
 pnpm build                  # packages already public skip prepack, and their dependents build against them
 pnpm stage publish -r       # --dry-run first to see each tarball; then pnpm stage approve
 ```
