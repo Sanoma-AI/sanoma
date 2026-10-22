@@ -196,6 +196,7 @@ export function refusalOf(
   run: DecidedRun,
   people: readonly PeopleResource[],
 ): string | undefined {
+  if (isVisitor(by)) return "a visitor decides no approval";
   if (typeof approver === "string") {
     return approver === by.id ? undefined : `${by.id} is not the approver; ${approverLabel(approver)} is`;
   }
@@ -213,6 +214,34 @@ export type PeopleResource = Pick<DeclaredResource, "vendor" | "type" | "desired
 /** The group every agent is in, the runtime's own among them: no data file declares it. */
 export const AGENTS = "agents";
 
+/** The group every visitor of a public site is in: no data file declares it. */
+export const VISITORS = "visitors";
+
+/** The principal a public page runs as when nobody is signed in: no groups. */
+export const ANONYMOUS = "anonymous";
+
+/** `visitor:<login connector's vendor>:<provider subject>`: the only form a visitor's id takes. */
+const VISITOR_ID = /^visitor:[^\s:]+:\S+$/;
+
+/**
+ * True for `anonymous` and for a visitor's id: a principal no data file declares and the staff
+ * logins never admit. Marked by the id alone, since a principal crosses to the worker as JSON.
+ */
+export const isVisitor = (p: Pick<Principal, "id">): boolean => p.id === ANONYMOUS || VISITOR_ID.test(p.id);
+
+/**
+ * The visitor a public site's login vouches for: `subject` from the provider behind the `login`
+ * connector, in `visitors`. Throws for a login or subject that would make an id `isVisitor` does not tell.
+ */
+export function visitorPrincipal(login: string, subject: string): Principal {
+  const id = `visitor:${login}:${subject}`;
+  if (!VISITOR_ID.test(id)) throw new Error(`"${id}" is not a visitor's id: visitor:<login connector>:<subject>`);
+  return { id, groups: [VISITORS] };
+}
+
+/** Who a public page runs as when nobody is signed in. */
+export const ANONYMOUS_PRINCIPAL: Principal = Object.freeze({ id: ANONYMOUS, groups: [] });
+
 /** The runtime's own agents (scenarios, the host check, scheduled runs), declared whether a data file names them or not. */
 export const RUNTIME_AGENTS: readonly string[] = ["scenarios", "host-check", "schedule"];
 
@@ -224,9 +253,9 @@ type PersonFields = { id: string; name?: string; email?: string; github?: string
 type AgentFields = { id: string; onBehalfOf?: string };
 type GroupFields = { name: string; members: string[] };
 
-/** The groups a policy may name and a principal may be in: the declared ones and `agents`, sorted. */
+/** The groups a policy may name and a principal may be in: the declared ones, `agents` and `visitors`, sorted. */
 export const groupNamesOf = (resources: readonly PeopleResource[]): string[] =>
-  [...new Set([...peopleOfType<GroupFields>(resources, "group").map((g) => g.name), AGENTS])].toSorted();
+  [...new Set([...peopleOfType<GroupFields>(resources, "group").map((g) => g.name), AGENTS, VISITORS])].toSorted();
 
 /** The declared people (`sanoma.person`), in the order declared: not agents, who never sign in. */
 export const personsOf = (resources: readonly PeopleResource[]): PersonFields[] =>
@@ -261,9 +290,10 @@ export function principalOf(id: string, resources: readonly PeopleResource[]): P
 
 /**
  * Who `name` is as an approver: a declared group's name (or `agents`) as `{ group }`, else a
- * declared person's or agent's id; undefined when it is neither.
+ * declared person's or agent's id; undefined when it is neither, and for `visitors`, who decide nothing.
  */
 export function approverOf(name: string, resources: readonly PeopleResource[]): Approver | undefined {
+  if (name === VISITORS) return undefined;
   if (groupNamesOf(resources).includes(name)) return { group: name };
   return principalOf(name, resources) && name;
 }

@@ -1,3 +1,4 @@
+import { ANONYMOUS } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { SidebarContent, SidebarGroup } from "#/components/ui/sidebar.tsx";
@@ -21,7 +22,7 @@ export function PermissionsPanel() {
         <SidebarGroup className="text-sm">
           <Facts>
             <PolicyFacts policy={data.policy} />
-            <Fact label="Groups">{data.groups.filter((group) => group !== null).length}</Fact>
+            <Fact label="Groups">{data.groups.filter((group) => group !== null && group !== ANONYMOUS).length}</Fact>
             <Fact label="Workflows">{data.workflows.length}</Fact>
             <Fact label="Operations">
               {new Set([...data.workflows.flatMap((w) => w.ops), ...data.ops].map((op) => op.id)).size}

@@ -4,7 +4,16 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
-import { defineConnector, defineDriver, resolveConfig, type SanomaConfig, withSetup } from "@sanoma-ai/workflows";
+import {
+  ANONYMOUS_PRINCIPAL,
+  defineConnector,
+  defineDriver,
+  type Principal,
+  resolveConfig,
+  type SanomaConfig,
+  visitorPrincipal,
+  withSetup,
+} from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -42,7 +51,7 @@ const acmeDriver = defineDriver(acme, {
 
 // The outbound fixture, copied to a root of its own: its collection, and its workflow, which imports
 // it from there, with its people and a policy that allows, but denies a lead `lost` and holds one
-// `won` for `lead`.
+// `won` for `lead`, and lets visitors start the workflow.
 const root = mkdtempSync(join(tmpdir(), "sanoma-api-"));
 cpSync(fileURLToPath(new URL("../../workflows/test/fixtures/outbound/", import.meta.url)), root, { recursive: true });
 writeFileSync(
@@ -63,6 +72,8 @@ when { context.input.record.stage == "lost" };
 @hold("lead")
 forbid (principal, action == Sanoma::Action::"data.outbound.save", resource)
 when { context.input.record.stage == "won" };
+
+permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"workflow:outbound-next", resource);
 `,
 );
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -84,23 +95,33 @@ const lead = (company: string, stage = "researched") => ({
 
 /** The app's context, as startApp builds it, on the test app's client: made at the first call. */
 let context: AppContext | undefined;
+const appContext = () =>
+  (context ??= {
+    resolved: resolveConfig(testApp.config),
+    description: describeConfig(testApp.config),
+    client: testApp.client,
+    login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
+  });
 
 /**
  * `callFn` with this argument, as the loopback login reads `actor` (none for null) from the header: its answer as
  * the page receives it, or the ApiError's status and body (`serverFnFailure`).
  */
 async function call(data: unknown, actor: string | null = "ada") {
-  const app = (context ??= {
-    resolved: resolveConfig(testApp.config),
-    description: describeConfig(testApp.config),
-    client: testApp.client,
-    login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
-  });
+  const app = appContext();
   const headers = actor === null ? {} : { [ACTOR_HEADER]: actor };
   const request = { app, actor: actorOf(app, new Request("http://127.0.0.1/", { headers })) };
+  return answered(async () => callApi(app, await requireActor(request), validate(CallRequest)(data as CallRequest)));
+}
+
+/** `callFn` as `principal`, as a public site's front door would ask it: the staff login admits no visitor. */
+const visit = (data: unknown, principal: Principal) =>
+  answered(() => callApi(appContext(), principal, validate(CallRequest)(data as CallRequest)));
+
+/** What `callApi` answered, or the ApiError's status and body (`serverFnFailure`). */
+async function answered(asked: () => Promise<unknown>) {
   try {
-    const principal = await requireActor(request);
-    return { body: (await callApi(app, principal, validate(CallRequest)(data as CallRequest))) as any };
+    return { body: (await asked()) as any };
   } catch (err) {
     const failure = serverFnFailure(err, "POST");
     if (!(failure instanceof ApiError)) throw failure;
@@ -210,6 +231,46 @@ describe("callFn", () => {
     expect(await call({ name: "outboundNext.result", input: {} })).toMatchObject({
       status: 400,
       body: { code: "invalid_input" },
+    });
+  });
+});
+
+describe("callFn for a visitor", () => {
+  const visitor = visitorPrincipal("auth0", "u1");
+
+  it("starts a workflow a policy permits it, and reads only the result of its own run", async () => {
+    const started = await visit({ name: "outboundNext", input: { company: "Nobody Co" } }, visitor);
+    const { runId } = started.body as { runId: string };
+    expect((await testApp.client.run(runId))?.startedBy).toEqual(visitor);
+    expect(await visit({ name: "outboundNext.result", input: { runId } }, visitor)).toEqual({ body: null });
+    const other = (await call({ name: "outboundNext", input: { company: "Nobody Co" } })).body.runId;
+    expect(await visit({ name: "outboundNext.result", input: { runId: other } }, visitor)).toMatchObject({
+      status: 404,
+      body: { code: "run_not_found" },
+    });
+    for (const name of ["outboundNext.latest", "outboundNext.runs", "outboundNext.approvals", "outboundNext.ledger"]) {
+      expect(await visit({ name, input: { runId } }, visitor), name).toMatchObject({
+        status: 403,
+        body: {
+          code: "policy_denied",
+          error: expect.stringContaining("a visitor reads only the result of a run it started"),
+        },
+      });
+    }
+  });
+
+  it("calls no built-in workflow, nor what no policy permits it", async () => {
+    expect(await visit({ name: "call.approvals", input: { runId: "x" } }, visitor)).toMatchObject({
+      status: 400,
+      body: { code: "invalid_input" },
+    });
+    expect(await visit({ name: "data.outbound.list" }, visitor)).toMatchObject({
+      status: 403,
+      body: { code: "policy_denied" },
+    });
+    expect(await visit({ name: "outboundNext", input: { company: "Nobody Co" } }, ANONYMOUS_PRINCIPAL)).toMatchObject({
+      status: 403,
+      body: { code: "policy_denied" },
     });
   });
 });

@@ -22,6 +22,7 @@ import {
 import { defineFake } from "../src/fake.ts";
 import { companyConfig, companyDir, companyFakes, nodeIdOf } from "./fixtures/company/fakes.ts";
 import company from "./fixtures/company/sanoma.config.ts";
+import { visitorPrincipal } from "../src/shared.ts";
 import { rootWith, useApp, withoutSetup } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. The company fixture's data files, checked against the GitHub
@@ -61,6 +62,11 @@ describe("the drift workflow", () => {
     const runId = await app.client.drift({ startedBy });
     return { runId, report: await app.client.driftReport(runId) };
   }
+
+  it("is no visitor's to start", async () => {
+    const err = await app.client.drift({ startedBy: visitorPrincipal("auth0", "u1") }).catch((e: unknown) => e);
+    expect(errorCode(err)).toBe("policy_denied");
+  });
 
   it("reports every bound resource clean when the vendors hold what is declared, and the rest absent", async () => {
     // The vendor reorders a set and sets a field nobody declared: neither is drift. And GitHub

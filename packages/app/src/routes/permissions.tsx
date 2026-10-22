@@ -2,7 +2,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import type { PreviewAnswer } from "@sanoma-ai/workflows";
 import type { Span } from "@sanoma-ai/workflows/describe";
-import { approverLabel } from "@sanoma-ai/workflows/shared";
+import { ANONYMOUS, approverLabel } from "@sanoma-ai/workflows/shared";
 import { Fragment, useRef, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardHeader } from "#/components/ui/card.tsx";
@@ -35,7 +35,7 @@ export const Route = createFileRoute("/permissions")({
   component: PermissionsPage,
 });
 
-/** A column: a group's name, or `null` for someone in no group. */
+/** A column: a group's name, `null` for someone in no group, or `anonymous`, who is in none either. */
 type Group = PermissionsResponse["groups"][number];
 /** What a row is about: a workflow's start, or an operation, called in a workflow or directly. */
 type Kind = "workflow" | "op";
@@ -43,11 +43,14 @@ type Kind = "workflow" | "op";
 type Chosen = { kind: Kind; row: PermissionsRow; under?: PermissionsRow; group: Group; cell: PreviewAnswer };
 
 /** Whom a column is about, in words. */
-const someoneIn = (group: Group) => `someone in ${group ?? "no group"}`;
+const someoneIn = (group: Group) => (group === ANONYMOUS ? "anonymous" : `someone in ${group ?? "no group"}`);
+
+/** A column's heading: the group's name, or what the two columns of no group are. */
+const columnLabel = (group: Group) => (group === null ? "No group" : group === ANONYMOUS ? "Anonymous" : group);
 
 /**
- * What the policy answers someone in no group and in each group (the declared ones and `agents`),
- * across, for each workflow's start with each operation it uses under it, and each operation a
+ * What the policy answers someone in no group, in each group (the declared ones, `agents` and
+ * `visitors`) and `anonymous`, across, for each workflow's start with each operation it uses under it, and each operation a
  * person may call directly, down, the input unknown. A cell with a rule behind it opens the rule
  * in a sheet, whose Show the rule marks its lines in the policy's files, shown read-only under the
  * grid. Nothing here is edited: the policy is `policies/*.cedar`, written by the agent.
@@ -95,7 +98,7 @@ function PermissionsPage() {
                   </TableHead>
                   {data.groups.map((group) => (
                     <TableHead key={group ?? ""} scope="col">
-                      {group ?? "No group"}
+                      {columnLabel(group)}
                     </TableHead>
                   ))}
                 </TableRow>

@@ -15,6 +15,7 @@ import {
   principalOf,
   resolveConfig,
   type SanomaConfig,
+  visitorPrincipal,
 } from "../src/index.ts";
 import { failure, waitFor } from "./harness.ts";
 
@@ -83,6 +84,8 @@ describe("approverOf", () => {
     expect(approverOf("ada", people)).toBe("ada");
     expect(approverOf("refund-bot", people)).toBe("refund-bot");
     expect(approverOf("cy", people)).toBeUndefined();
+    // Visitors decide nothing.
+    expect(approverOf("visitors", people)).toBeUndefined();
   });
 });
 
@@ -181,6 +184,50 @@ describe("people in a data file", () => {
   });
 });
 
+describe("visitors and anonymous", () => {
+  const read = { people, problems: [] };
+  const visitor = visitorPrincipal("auth0", "u1");
+
+  it("are admitted by their id alone, with the groups stamped, whatever the files say, but never at a sign-in", () => {
+    expect(admit({ id: visitor.id, groups: ["finance"] }, read)).toEqual({ id: visitor.id, groups: ["visitors"] });
+    expect(admit({ id: "anonymous", groups: ["finance"] }, read)).toEqual({ id: "anonymous", groups: [] });
+    expect(admit({ id: visitor.id }, { people, problems: [{ file: "resources/people.ts", message: "x" }] })).toEqual(
+      visitor,
+    );
+    expect(() => admit({ id: visitor.id }, read, true)).toThrow("is not declared");
+    expect(() => admit({ id: "anonymous" }, { people: [], problems: [] }, true)).toThrow("is not declared");
+    // An id of another form is nobody's, and no visitor is made with one.
+    expect(() => admit({ id: "visitor:auth0" }, read)).toThrow("is not declared");
+    expect(() => visitorPrincipal("auth 0", "u1")).toThrow("is not a visitor's id");
+    expect(() => visitorPrincipal("auth0", "two words")).toThrow("is not a visitor's id");
+  });
+
+  it("take names no data file may give a group, a person or an agent", () => {
+    const root = mkdtempSync(join(tmpdir(), "sanoma-people-visitors-"));
+    mkdirSync(join(root, "resources"));
+    writeFileSync(
+      join(root, "resources", "people.ts"),
+      `import { sanoma } from "sanoma/resources";
+export const anon = sanoma.person({ id: "anonymous" });
+export const bot = sanoma.agent({ id: "visitor:auth0:bot" });
+export const ada = sanoma.person({ id: "ada" });
+export const visitors = sanoma.group({ name: "visitors", members: [ada] });
+export const anyone = sanoma.group({ name: "anonymous", members: [ada] });
+`,
+    );
+    try {
+      expect(readPeople(root).problems.map((p) => p.message)).toEqual([
+        expect.stringContaining(`"anonymous", a visitor's`),
+        expect.stringContaining(`"visitor:auth0:bot", a visitor's`),
+        expect.stringContaining("the group every visitor is in"),
+        expect.stringContaining("who a public page runs as"),
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("the client, with people declared", () => {
   const databaseUrl = testDatabaseUrl("people");
   const root = mkdtempSync(join(tmpdir(), "sanoma-people-client-"));
@@ -226,6 +273,18 @@ describe("the client, with people declared", () => {
     expect(
       await failure(app.client.decide(runId, { decision: "approve", by: { id: "bo", groups: ["finance"] } })),
     ).toMatchObject({ code: "not_approver" });
+    // A visitor neither decides it, nor sets a credential, nor starts a run no policy permits.
+    const visitor = visitorPrincipal("auth0", "u1");
+    expect(await failure(app.client.decide(runId, { decision: "approve", by: visitor }))).toMatchObject({
+      code: "not_approver",
+      data: { reason: "a visitor decides no approval" },
+    });
+    expect(await failure(app.client.setCredential("SHOP_KEY", "key", { by: visitor.id }))).toMatchObject({
+      code: "not_admitted",
+    });
+    expect(await failure(app.client.start(held, {}, { startedBy: visitor }))).toMatchObject({
+      code: "policy_denied",
+    });
     expect(await app.client.decide(runId, { decision: "approve", by: { id: "ada" } })).toMatchObject({
       status: "approved",
       decidedBy: "ada",

@@ -18,25 +18,30 @@ import {
   type PolicyCall,
   type PreviewAnswer,
   type PreviewRequest,
+  VISITOR_DENIED,
 } from "./policy.ts";
-import { readPeople } from "./resources.ts";
+import { admit, readPeople } from "./resources.ts";
 import { cedarValue, cedarWasm, contextTypeOf, messageOf, NAMESPACE, schemaOf } from "./schema.ts";
 import {
+  ANONYMOUS,
   approverLabel,
   approverOf,
+  CALL_WORKFLOW,
   DATA_VENDOR,
   groupNamesOf,
+  isVisitor,
   type PeopleResource,
   principalIdsOf,
   principalOf,
   problemLine,
+  VISITORS,
   WORKFLOW_ACTION,
 } from "./shared.ts";
 
 // A company's policies in Cedar (`policies/**/*.cedar`), decided with `@cedar-policy/cedar-wasm`
 // against the schema of its resolved config (`schemaOf`). Allow is the default: the runtime adds
-// the one `permit`, so a company's policies are `forbid`s, each a hold when it carries
-// `@hold(...)` and a deny otherwise.
+// the one `permit` for people and agents, so a company's policies are `forbid`s, each a hold when
+// it carries `@hold(...)` and a deny otherwise, and the `permit`s that let visitors in.
 
 /** Where a company's policies are, under its root. */
 export const POLICIES_DIR = "policies";
@@ -58,6 +63,8 @@ export interface CedarPolicySource {
   title?: string;
   /** `@reason(...)`: the message of its deny. */
   reason?: string;
+  /** Whom a `permit` is for, when its principal is exactly `in Sanoma::Group::"visitors"` or `== Sanoma::Principal::"anonymous"`. */
+  scope?: typeof VISITORS | typeof ANONYMOUS;
 }
 
 /** What is wrong in the policies, at a file, line and column when Cedar says where. */
@@ -70,7 +77,10 @@ export interface PolicyProblem {
   message: string;
 }
 
-/** The runtime's own policy: allow whatever no `forbid` refuses. */
+/**
+ * The runtime's own policy: allow whatever no `forbid` refuses. A visitor's start or direct call
+ * is asked of the company's permits first (`cedarPolicy`): the runtime's permit leaves visitors out there.
+ */
 const ALLOW_ID = "allow-by-default";
 const ALLOW = "permit (principal, action, resource);";
 
@@ -132,7 +142,7 @@ export function loadPolicies(files: readonly { file: string; text: string }[]): 
         problems.push(...answer.errors.map((e) => problemOf(e, file, part, start)));
         return;
       }
-      const { effect, annotations = {} } = answer.json;
+      const { effect, principal, annotations = {} } = answer.json;
       const id = annotations.id ?? `${file}#${n + 1}`;
       if (ids.has(id)) {
         const whose = id === ALLOW_ID ? "the runtime's own policy's" : "another policy's";
@@ -149,16 +159,28 @@ export function loadPolicies(files: readonly { file: string; text: string }[]): 
         ...(annotations.hold !== undefined && { hold: annotations.hold }),
         ...(annotations.title !== undefined && { title: annotations.title }),
         ...(annotations.reason !== undefined && { reason: annotations.reason }),
+        ...scopeOf(principal),
       });
     });
   }
   return { policies, problems };
 }
 
+/** A permit's `scope`: whom its principal names, when that is exactly the visitors or `anonymous`. */
+function scopeOf(principal: PolicyJson["principal"]): Pick<CedarPolicySource, "scope"> {
+  if (!("entity" in principal) || !("id" in principal.entity)) return {};
+  const { op, entity } = principal;
+  const is = ({ type, id }: { type: string; id: string }) => entity.type === type && entity.id === id;
+  if (op === "in" && is(uid("Group", VISITORS))) return { scope: VISITORS };
+  if (op === "==" && is(uid("Principal", ANONYMOUS))) return { scope: ANONYMOUS };
+  return {};
+}
+
 /**
  * The policies checked against the schema of the resolved config (`validate`, strict), and what
- * Cedar cannot check: a `permit` (the runtime's is the only one), and a `@hold` naming neither a
- * declared group, nor a declared person, nor `on-behalf-of`. In the order written, each at its
+ * Cedar cannot check: a `permit` for anyone but the visitors or `anonymous` (the runtime's is the
+ * only one for people and agents), and a `@hold` naming neither a declared group, nor a declared
+ * person, nor `on-behalf-of`. In the order written, each at its
  * file, line and column, once per place: a policy scoped to every action fails the same way for each.
  */
 export function validatePolicies(
@@ -187,7 +209,16 @@ export function validatePolicies(
       .toSorted((a, b) => a.line! - b.line! || (a.column ?? 0) - (b.column ?? 0));
     const ours: PolicyProblem[] = [];
     if (p.effect === "permit") {
-      ours.push({ ...place, message: "a permit changes nothing: every call no forbid refuses is allowed already" });
+      if (p.scope === undefined) {
+        ours.push({
+          ...place,
+          message:
+            'a permit is allowed only for visitors: its principal must be `in Sanoma::Group::"visitors"` or ' +
+            '`== Sanoma::Principal::"anonymous"`; for people and agents every call no forbid refuses is allowed already',
+        });
+      } else if (p.hold !== undefined) {
+        ours.push({ ...place, message: "a permit holds nothing: write the @hold on a forbid" });
+      }
     } else if (p.hold !== undefined && p.hold !== ON_BEHALF_OF && approverOf(p.hold, people) === undefined) {
       ours.push({ ...place, message: `@hold("${p.hold}") names no declared group or person, nor "${ON_BEHALF_OF}"` });
     }
@@ -197,9 +228,14 @@ export function validatePolicies(
 
 /**
  * The policy a repo's Cedar files make, the runtime's `permit` added; its `version` a hash of the
- * policies' ids and text. It decides each call with `statefulIsAuthorized`
- * over the policy set and the schema of `resolved` (`schemaOf`), each parsed once:
+ * policies' ids and text. The runtime's permit leaves visitors out (`isVisitor`) of a run's start,
+ * a direct call (a call of the `call` workflow) and a preview not `inRun`: those are asked of the
+ * company's permits alone first. Any other call in a run is decided as anyone's, so a visitor let
+ * start a run makes its calls, forbids holding still. It decides each call with
+ * `statefulIsAuthorized` over the policy set and the schema of `resolved` (`schemaOf`), each parsed once:
  *
+ * - a visitor's start or direct call no company `permit` allows: `deny`, `VISITOR_DENIED`, never
+ *   held, so a visitor cannot ask anyone for what no policy lets it do;
  * - allow: `allow`, with the policies that allowed as `reasons`;
  * - deny, a determining `forbid` without `@hold`: `deny` with its `@reason`, or "Refused by <id>";
  * - deny by `@hold` forbids only: each lifted once an approval addressed to its approver and
@@ -221,14 +257,22 @@ export function cedarPolicy(
   const cedar = cedarWasm();
   const schema = schemaOf(resolved, people);
   const staticPolicies = { ...Object.fromEntries(policies.map((p) => [p.id, p.text])), [ALLOW_ID]: ALLOW };
+  // What lets a visitor in at a start or a direct call: the company's permits alone, the forbids aside.
+  const permits = Object.fromEntries(policies.filter((p) => p.effect === "permit").map((p) => [p.id, p.text]));
   const version = hash(staticPolicies);
-  // Cedar caches both per thread, by name: one for these policies over this schema.
+  // Cedar caches both per thread, by name: one for these policies over this schema, and its permits.
   const set = `sanoma-${hash({ staticPolicies, schema })}`;
-  for (const answer of [cedar.preparsePolicySet(set, { staticPolicies }), cedar.preparseSchema(set, schema)]) {
+  const permitsSet = `${set}-permits`;
+  for (const answer of [
+    cedar.preparsePolicySet(set, { staticPolicies }),
+    cedar.preparsePolicySet(permitsSet, { staticPolicies: permits }),
+    cedar.preparseSchema(set, schema),
+  ]) {
     if (answer.type === "failure") {
       throw new Error(`The Cedar policies do not parse: ${answer.errors.map(messageOf).join("; ")}`);
     }
   }
+  const hasPermits = Object.keys(permits).length > 0;
   const directory = directoryOf(people);
 
   /**
@@ -270,33 +314,50 @@ export function cedarPolicy(
     };
   };
 
-  /** May `actor` take `action` on `target` with `context`, given the run's `approvals` so far. */
+  /**
+   * May `actor` take `action` on `target` with `context`, given the run's `approvals` so far; at a
+   * start or a direct call (`atStart`), a visitor only where a company permit lets it in.
+   */
   const authorize = (
     actor: Principal,
     action: string,
     target: string | undefined,
     context: Record<string, unknown>,
     approvals: PolicyCall["run"]["approvals"],
+    atStart: boolean,
   ): Decision => {
     const principal = directory.principal(actor);
-    const check = (asked: Record<string, unknown>) =>
-      cedar.statefulIsAuthorized({
-        ...requestOf(principal, action, target, () => asked),
-        preparsedSchemaName: set,
-        validateRequest: true,
-        preparsedPolicySetId: set,
-      });
-    let answer = check(context);
-    // A record saved under fields since changed does not fit the schema as `before`. When the rest
-    // of the call does, it is asked again without the schema (the context is plain values), the
-    // action's groups given as entities: a policy reading a field the record lacks fails, so denies.
-    const { before, ...rest } = context;
-    if (answer.type === "failure" && before !== undefined && check(rest).type === "success") {
+    /** The answer of the policy set `id`. */
+    const ask = (id: string) => {
+      const check = (asked: Record<string, unknown>) =>
+        cedar.statefulIsAuthorized({
+          ...requestOf(principal, action, target, () => asked),
+          preparsedSchemaName: set,
+          validateRequest: true,
+          preparsedPolicySetId: id,
+        });
+      const answer = check(context);
+      // A record saved under fields since changed does not fit the schema as `before`. When the rest
+      // of the call does, it is asked again without the schema (the context is plain values), the
+      // action's groups given as entities: a policy reading a field the record lacks fails, so denies.
+      const { before, ...rest } = context;
+      if (answer.type === "success" || before === undefined || check(rest).type === "failure") return answer;
       const request = requestOf(principal, action, target, () => context);
       const groups = schema[NAMESPACE]?.actions[action]?.memberOf ?? [];
       request.entities.push({ uid: request.action, attrs: {}, parents: groups.map((g) => uid("Action", g.id)) });
-      answer = cedar.statefulIsAuthorized({ ...request, preparsedPolicySetId: set });
+      return cedar.statefulIsAuthorized({ ...request, preparsedPolicySetId: id });
+    };
+    // Refused, never held: a visitor cannot ask anyone for what no policy lets it do.
+    if (atStart && isVisitor(principal)) {
+      const permitted = hasPermits ? ask(permitsSet) : undefined;
+      // A request the schema refuses is told below, as anyone's; a permit that fails, by its id.
+      if (permitted?.type !== "failure" && permitted?.response.decision !== "allow") {
+        const failed = permitted?.response.diagnostics.errors[0];
+        if (failed) return deny(`${failed.policyId} failed: ${messageOf(failed.error)}`, [failed.policyId]);
+        return deny(VISITOR_DENIED);
+      }
     }
+    const answer = ask(set);
     // A request the schema refuses (an input Cedar cannot hold) is denied, not an error of the call.
     if (answer.type === "failure")
       return deny(`The call does not fit the Cedar schema: ${answer.errors.map(messageOf).join("; ")}`);
@@ -326,22 +387,34 @@ export function cedarPolicy(
       call.target,
       { input: call.input, ...(call.before !== undefined && { before: call.before }) },
       call.run.approvals,
+      call.run.workflow === CALL_WORKFLOW,
     );
 
   const start = (actor: Principal, workflow: string, input: unknown, approvals: readonly ApprovalState[] = []) =>
-    authorize(actor, `${WORKFLOW_ACTION}${workflow}`, undefined, { input }, approvals);
+    authorize(actor, `${WORKFLOW_ACTION}${workflow}`, undefined, { input }, approvals, true);
 
   const preview = (requests: readonly PreviewRequest[]): PreviewAnswer[] =>
-    requests.map(({ principal: actor, action, resource }) => {
+    requests.map(({ principal: actor, action, resource, inRun }) => {
       const principal = directory.principal(actor);
-      const answer = cedar.isAuthorizedPartial({
-        ...requestOf(principal, action.id, resource, unknown),
-        schema,
-        validateRequest: false,
-        policies: { staticPolicies },
-      });
-      if (answer.type === "failure") throw new Error(answer.errors.map(messageOf).join("; "));
-      const { decision, mustBeDetermining, nontrivialResiduals, residuals } = answer.response;
+      const partial = (asked: Record<string, string>) => {
+        const answer = cedar.isAuthorizedPartial({
+          ...requestOf(principal, action.id, resource, unknown),
+          schema,
+          validateRequest: false,
+          policies: { staticPolicies: asked },
+        });
+        if (answer.type === "failure") throw new Error(answer.errors.map(messageOf).join("; "));
+        return answer.response;
+      };
+      if (!inRun && isVisitor(principal)) {
+        const gate = hasPermits ? partial(permits) : undefined;
+        if (gate?.decision !== "allow") {
+          // A permit the input decides: the answer depends on it, whatever the rest says.
+          const open = policies.find((p) => gate?.nontrivialResiduals.includes(p.id));
+          return open ? { answer: "depends", rule: ruleOf(open) } : { answer: "deny" };
+        }
+      }
+      const { decision, mustBeDetermining, nontrivialResiduals, residuals } = partial(staticPolicies);
       if (decision === "allow") return { answer: "allow" };
       if (decision === "deny") {
         const { refusing, holds } = forbidsOf(mustBeDetermining, principal);
@@ -411,6 +484,8 @@ interface Directory {
 function directoryOf(people: readonly PeopleResource[]): Directory {
   const groups = new Set(groupNamesOf(people));
   const principal = (actor: Principal): Principal => {
+    // A visitor is told by its id, as `admit` takes it: never in a declared group.
+    if (isVisitor(actor)) return admit(actor, { people, problems: [] });
     // An admitted principal (`admit`) carries its groups as the files say now: those are taken as
     // they are. One without groups is given those declared when the policy was made.
     const declared = actor.groups === undefined ? principalOf(actor.id, people) : undefined;

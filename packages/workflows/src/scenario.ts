@@ -50,6 +50,7 @@ import {
   principalIdsOf,
   problemLine,
   RUNTIME_AGENTS,
+  visitorPrincipal,
 } from "./shared.ts";
 import type { Call, RunView, Seed } from "./steps.ts";
 
@@ -143,7 +144,7 @@ export interface Scenario {
   text: string;
   /** Every step in order, for a list and for marking graph nodes. */
   steps: ScenarioStep[];
-  /** Who starts the run, by id, when a `Given <who> is acting` says: a declared person or agent. */
+  /** Who starts the run, by id, when a `Given <who> is acting` says: a declared person or agent, `anonymous` or a visitor. */
   startedBy?: string;
   given: Given[];
   input: unknown;
@@ -404,7 +405,7 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
   const workflowOf = (name: unknown) => scope.workflows.get(name as string)!;
   // The people as the root's data files declare them when a step names one (`readPeople`, read
   // again only once a file changed): while they declare no one, any id and any group go.
-  /** `who`, as a run's start admits them (`admit`): a declared person or agent. */
+  /** `who`, as a run's start admits them (`admit`): a declared person or agent, or `anonymous`. */
   const actorNamed = (who: string) => {
     const declared = readPeople(scope.root);
     try {
@@ -434,6 +435,8 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
   };
   const rules: Rule[] = [
     { kind: "actor", source: "{who} is acting", read: ([who]) => actorNamed(who as string) },
+    // A visitor of a public site, as a login would vouch for one; `anonymous` is a `{who}`.
+    { kind: "actor", source: "a visitor is acting", read: () => visitorPrincipal("scenario", "visitor").id },
     {
       kind: "given",
       source: "{op} was called with",

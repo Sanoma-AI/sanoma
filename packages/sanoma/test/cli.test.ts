@@ -129,7 +129,7 @@ describe("sanoma --help and mistakes", () => {
     const policies = await runCli(dir, ["worker"], env);
     expect(policies.code).toBe(2);
     expect(policies.stderr).toMatch(
-      /^The policies do not hold:\npolicies\/x\.cedar:1:1: policies\/x\.cedar#1: a permit changes nothing/,
+      /^The policies do not hold:\npolicies\/x\.cedar:1:1: policies\/x\.cedar#1: a permit is allowed only for visitors/,
     );
     rmSync(join(dir, "sanoma.config.ts"));
     const missing = await runCli(dir, ["env"], env);

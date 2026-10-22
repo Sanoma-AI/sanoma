@@ -9,7 +9,7 @@ import { z } from "zod";
 import { decideCall } from "../src/call.ts";
 import { sanoma } from "../src/constructors.ts";
 import { collection } from "../src/data.ts";
-import type { ApprovalState } from "../src/define.ts";
+import type { ApprovalState, Principal } from "../src/define.ts";
 import { describeConfig, SCHEMA_FILE, schemaOf, schemaText, writeGenerated } from "../src/describe.ts";
 import { defineFake } from "../src/fake.ts";
 import {
@@ -26,7 +26,9 @@ import {
   readPolicyFiles,
   resolveConfig,
   validatePolicies,
+  VISITOR_DENIED,
 } from "../src/index.ts";
+import { ANONYMOUS_PRINCIPAL, visitorPrincipal } from "../src/shared.ts";
 import { startWorker } from "../src/worker.ts";
 import { failure, rootWith, waitFor } from "./harness.ts";
 
@@ -154,8 +156,8 @@ const approved = (approver: ApprovalState["approver"], by: string): ApprovalStat
 });
 
 describe("schemaOf", () => {
-  it("has the declared groups and agents, every operation in its effect's group and every workflow in start", () => {
-    expect(text).toContain('entity Group enum ["agents", "finance", "sales"];');
+  it("has the declared groups, agents and visitors, every operation in its effect's group and every workflow in start", () => {
+    expect(text).toContain('entity Group enum ["agents", "finance", "sales", "visitors"];');
     expect(text).toContain("entity Principal in [Group] = {\n    onBehalfOf?: Principal\n  };");
     expect(text).toContain("entity Target in [Collection];");
     expect(text).toContain('action "shop.refunds.create" in [Action::"effect:money"] appliesTo {');
@@ -253,7 +255,7 @@ describe("loadPolicies and validatePolicies", () => {
         policy: "policies/bad.cedar#2",
         message: expect.stringContaining('`"finanse"` is not declared as a valid eid'),
       }),
-      expect.objectContaining({ line: 6, message: expect.stringContaining("a permit changes nothing") }),
+      expect.objectContaining({ line: 6, message: expect.stringContaining("a permit is allowed only for visitors") }),
       expect.objectContaining({
         line: 7,
         message: '@hold("nobody") names no declared group or person, nor "on-behalf-of"',
@@ -454,6 +456,131 @@ describe("preview", () => {
   it("is allow for allowAll, as is its start", () => {
     expect(allowAll.preview([ask("bo", "shop.refunds.create")])).toEqual([{ answer: "allow" }]);
     expect(allowAll.start({ id: "bo" }, "refund", {})).toEqual({ kind: "allow" });
+  });
+
+  it("is a deny for a visitor under allowAll, at a start and a direct call, but not in a run", () => {
+    const visitor = visitorPrincipal("auth0", "u1");
+    expect(allowAll.start(visitor, "refund", {})).toEqual({ kind: "deny", reason: VISITOR_DENIED });
+    expect(allowAll.start(ANONYMOUS_PRINCIPAL, "refund", {})).toMatchObject({ kind: "deny" });
+    expect(allowAll({ ...refundCall(1, "x"), actor: visitor })).toEqual({ kind: "allow" });
+    expect(allowAll({ ...saveCall("x", "open"), actor: visitor })).toEqual({ kind: "deny", reason: VISITOR_DENIED });
+    expect(allowAll(saveCall("bo", "open"))).toEqual({ kind: "allow" });
+    const request = { principal: visitor, action: { id: "shop.refunds.create" } };
+    expect(allowAll.preview([request, { ...request, inRun: true }])).toEqual([{ answer: "deny" }, { answer: "allow" }]);
+  });
+});
+
+describe("visitors", () => {
+  const VISITOR_FILE = {
+    file: "policies/visitors.cedar",
+    text: `permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"workflow:refund", resource);
+permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"data.leads.save", resource);
+`,
+  };
+  const withVisitors = loadPolicies([...FILES, VISITOR_FILE]);
+  const permitting = cedarPolicy(resolved, withVisitors.policies, people);
+  const visitor = visitorPrincipal("auth0", "u1");
+  const direct = { id: "direct:x", workflow: "call", approvals: [] };
+  const asVisitor = (call: PolicyCall, actor: Principal = visitor) => ({ ...call, actor });
+
+  it("permits only the visitors or anonymous, scoped as written; a hold for visitors is no one", () => {
+    expect(withVisitors.policies.slice(-2).map((p) => p.scope)).toEqual(["visitors", "anonymous"]);
+    expect(validatePolicies(resolved, withVisitors.policies, people)).toEqual([]);
+    const { policies } = loadPolicies([
+      {
+        file: "policies/bad.cedar",
+        text: [
+          'permit (principal in Sanoma::Group::"finance", action, resource);',
+          'permit (principal == Sanoma::Principal::"ada", action, resource);',
+          '@hold("visitors") forbid (principal, action, resource);',
+          '@hold("finance") permit (principal in Sanoma::Group::"visitors", action, resource);',
+        ].join("\n"),
+      },
+    ]);
+    expect(validatePolicies(resolved, policies, people).map((p) => [p.line, p.message])).toEqual([
+      [1, expect.stringContaining("a permit is allowed only for visitors")],
+      [2, expect.stringContaining("a permit is allowed only for visitors")],
+      [3, '@hold("visitors") names no declared group or person, nor "on-behalf-of"'],
+      [4, "a permit holds nothing: write the @hold on a forbid"],
+    ]);
+  });
+
+  it("refuses a visitor's start and direct call no permit names, and anonymous's", () => {
+    expect(policy.start(visitor, "refund", { amount: 1 })).toMatchObject({ kind: "deny" });
+    expect(policy(asVisitor(saveCall("x", "open")))).toMatchObject({ kind: "deny" });
+    expect(permitting.start(visitor, "refund", { amount: 1 })).toMatchObject({ kind: "allow" });
+    expect(permitting.start(ANONYMOUS_PRINCIPAL, "refund", { amount: 1 })).toMatchObject({ kind: "deny" });
+    expect(permitting(asVisitor(saveCall("x", "open"), ANONYMOUS_PRINCIPAL))).toMatchObject({ kind: "allow" });
+    expect(permitting(asVisitor(saveCall("x", "open")))).toMatchObject({ kind: "deny" });
+    // Told by its id, whatever groups it is given or not.
+    expect(policy.start({ id: visitor.id, groups: ["finance"] }, "refund", { amount: 1 })).toMatchObject({
+      kind: "deny",
+    });
+    expect(policy.start({ id: visitor.id }, "refund", { amount: 1 })).toMatchObject({ kind: "deny" });
+    // People and agents are as they were.
+    expect(permitting.start({ id: "bo" }, "refund", { amount: 1 })).toEqual({
+      kind: "allow",
+      reasons: ["allow-by-default"],
+    });
+  });
+
+  it("allows a visitor's calls inside a run as anyone's, forbids still holding", () => {
+    expect(policy(asVisitor(refundCall(100, "x")))).toMatchObject({ kind: "allow" });
+    expect(policy(asVisitor(refundCall(2_000_000, "x")))).toMatchObject({
+      kind: "approve",
+      approver: { group: "finance" },
+    });
+    // Directly, no permit lets it in: refused, not held for anyone to let in.
+    expect(policy(asVisitor({ ...refundCall(2_000_000, "x"), run: direct }))).toEqual({
+      kind: "deny",
+      reason: VISITOR_DENIED,
+    });
+  });
+
+  it("previews a visitor's start and direct call as the permits say, a call in a run as allowed", () => {
+    // Asked by id alone, as a visitor is told by its id.
+    const inRun = (request: ReturnType<typeof ask>) => ({ ...request, inRun: true });
+    expect(
+      permitting
+        .preview([
+          ask(visitor.id, "workflow:refund"),
+          ask("anonymous", "workflow:refund"),
+          ask(visitor.id, "data.leads.save"),
+          inRun(ask(visitor.id, "data.leads.save")),
+          ask("anonymous", "data.leads.save"),
+          ask(visitor.id, "shop.refunds.create"),
+          inRun(ask(visitor.id, "shop.refunds.create")),
+        ])
+        .map((a) => a.answer),
+    ).toEqual(["allow", "deny", "deny", "depends", "depends", "deny", "depends"]);
+  });
+
+  it("previews a visitor's start as depending on the input when its permit does", () => {
+    const { policies } = loadPolicies([
+      ...FILES,
+      {
+        file: "policies/visitors.cedar",
+        text: 'permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"workflow:refund", resource)\nwhen { context.input.amount < 100 };\n',
+      },
+    ]);
+    const small = cedarPolicy(resolved, policies, people);
+    expect(small.preview([ask("anonymous", "workflow:refund")])).toEqual([
+      { answer: "depends", rule: { id: "policies/visitors.cedar#1", file: "policies/visitors.cedar" } },
+    ]);
+    expect(small.start(ANONYMOUS_PRINCIPAL, "refund", { amount: 50 })).toMatchObject({ kind: "allow" });
+    expect(small.start(ANONYMOUS_PRINCIPAL, "refund", { amount: 500 })).toEqual({
+      kind: "deny",
+      reason: VISITOR_DENIED,
+    });
+  });
+
+  it("is versioned by the permits too", () => {
+    expect(permitting.version).not.toBe(policy.version);
+    const other = loadPolicies([
+      ...FILES,
+      { ...VISITOR_FILE, text: VISITOR_FILE.text.replace('"workflow:refund"', '"data.leads.save"') },
+    ]);
+    expect(cedarPolicy(resolved, other.policies, people).version).not.toBe(permitting.version);
   });
 });
 

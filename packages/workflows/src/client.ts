@@ -19,6 +19,7 @@ import {
   type ErrorInfo,
   errorCode,
   errorInfo,
+  NotAdmittedError,
   parseOrThrow,
   PolicyDeniedError,
   SanomaError,
@@ -35,6 +36,7 @@ import {
   DATA_VENDOR,
   errorMessage,
   isEnded,
+  isVisitor,
   refusalOf,
   type RunStatus,
   WORKFLOW_ACTION,
@@ -263,7 +265,8 @@ export class SanomaClient {
   /**
    * The policy's answer to starting a run of `workflow` as `startedBy` (`decideStart`), for a
    * workflow of the config's own: a deny throws `policy_denied`; a hold is what the run waits on
-   * before its body. A run `runId` names already is returned as it is, whatever the policy says now.
+   * before its body. A run `runId` names already is returned as it is, whatever the policy says now, but to a visitor.
+   * A visitor (`isVisitor`) starts no built-in but `call`, whose calls the policy decides as direct ones.
    */
   private async startHold(
     workflow: string,
@@ -272,8 +275,17 @@ export class SanomaClient {
     runId: string | undefined,
   ): Promise<StartHold | undefined> {
     const { policy } = this.config;
-    if (BUILT_IN_WORKFLOWS.has(workflow) || policy === allowAll) return undefined;
-    if (runId !== undefined && (await this.row(runId))) return undefined;
+    const visitor = isVisitor(startedBy);
+    const builtIn = BUILT_IN_WORKFLOWS.has(workflow);
+    if (visitor && builtIn && workflow !== CALL_WORKFLOW) {
+      throw new PolicyDeniedError(
+        `${WORKFLOW_ACTION}${workflow}`,
+        "A visitor may not start the runtime's own workflows",
+      );
+    }
+    if (builtIn || (policy === allowAll && !visitor)) return undefined;
+    // A visitor's start is decided whatever run its id names: a visitor shares an id (`anonymous`) with others.
+    if (!visitor && runId !== undefined && (await this.row(runId))) return undefined;
     const decision = decideStart(policy, workflow, input, startedBy);
     if (decision.kind === "allow") return undefined;
     if (decision.kind === "deny") throw new PolicyDeniedError(`${WORKFLOW_ACTION}${workflow}`, decision.reason);
@@ -805,9 +817,10 @@ export class SanomaClient {
     return admit(principal, readPeople(this.config.root));
   }
 
-  /** `options.by`, who sets or clears a credential, admitted (`admitted`): their id. */
+  /** `options.by`, who sets or clears a credential, admitted (`admitted`): their id; never a visitor's. */
   private async admittedBy(options: { by: string }): Promise<string> {
     const by = parseOrThrow(z.string().min(1), options?.by, '`by` must name who is asking, such as "alice"');
+    if (isVisitor({ id: by })) throw new NotAdmittedError(by);
     return (await this.admitted({ id: by })).id;
   }
 

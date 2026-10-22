@@ -13,12 +13,22 @@ import {
   isEnded,
   type LedgerRecord,
   loadPolicies,
+  PolicyDeniedError,
   type PreviewAnswer,
   Principal,
   type RunSummary,
   type SanomaError,
 } from "@sanoma-ai/workflows";
-import { AGENTS, apiNameOf, groupNamesOf } from "@sanoma-ai/workflows/shared";
+import {
+  AGENTS,
+  ANONYMOUS,
+  ANONYMOUS_PRINCIPAL,
+  apiNameOf,
+  groupNamesOf,
+  isVisitor,
+  VISITORS,
+  visitorPrincipal,
+} from "@sanoma-ai/workflows/shared";
 import { type ConfigDescription, type DataValue, formatOptions, setFields } from "@sanoma-ai/workflows/describe";
 import { check, loadScenarios } from "@sanoma-ai/workflows/scenario";
 import { isNotFound, isRedirect, notFound } from "@tanstack/react-router";
@@ -375,13 +385,22 @@ export function preview(
  */
 const ACTS_FOR = "whom it acts for";
 
+/** Whom a column of the grid asks about: someone in the group alone, a visitor, or `anonymous`. */
+const columnPrincipal = (group: string | null): Principal => {
+  if (group === null) return { id: "group:", groups: [] };
+  if (group === ANONYMOUS) return ANONYMOUS_PRINCIPAL;
+  if (group === VISITORS) return visitorPrincipal("grid", "visitor");
+  return { id: `group:${group}`, groups: [group], ...(group === AGENTS && { onBehalfOf: ACTS_FOR }) };
+};
+
 /** Each app's grid, by its resolved config: built from the policy and the description, both read once as the app starts. */
 const grids = new WeakMap<object, PermissionsResponse>();
 
 /**
  * The Permissions page's grid (`getPermissions`): for someone in no group, then for each group,
- * the declared ones and `agents`, what the policy would answer someone in it alone
- * (`{ id: "group:<name>", groups: [name] }`, an agent acting for `ACTS_FOR`), the input unknown
+ * the declared ones, `agents` and `visitors`, then for `anonymous`, what the policy would answer
+ * someone in it alone (`{ id: "group:<name>", groups: [name] }`, an agent acting for `ACTS_FOR`, a
+ * visitor as a login would make one, `anonymous` itself), the input unknown
  * (`preview`), for the start of each of the config's own workflows, by name, each with the
  * operations it uses, in the order it declares them, then each operation a person may call
  * directly, by id. Nobody's own answer: the actor asking is not used. Then the policy's files
@@ -395,7 +414,7 @@ export function permissions(app: Pick<AppContext, "resolved" | "description" | "
 
 function gridOf(app: Pick<AppContext, "resolved" | "description" | "policyFiles">): PermissionsResponse {
   const { description } = app;
-  const groups = [null, ...groupNamesOf(description.resources)];
+  const groups = [null, ...groupNamesOf(description.resources), ANONYMOUS];
   const opsById = new Map(description.ops.map((op) => [op.id, op]));
   const workflows = description.workflows.filter((w) => !w.builtin);
   const direct = description.ops.filter((op) => op.direct).toSorted((a, b) => a.id.localeCompare(b.id));
@@ -403,15 +422,7 @@ function gridOf(app: Pick<AppContext, "resolved" | "description" | "policyFiles"
   // call, as the run form asks them (`previewRequests`); then each direct operation.
   const asked = workflows.map((w) => previewRequests(w, opsById));
   const requests: PreviewQuery = [...asked.flat(), ...direct.map(({ id, effect }) => ({ action: { id, effect } }))];
-  const columns = groups.map((group) =>
-    preview(
-      app,
-      group === null
-        ? { id: "group:", groups: [] }
-        : { id: `group:${group}`, groups: [group], ...(group === AGENTS && { onBehalfOf: ACTS_FOR }) },
-      requests,
-    ),
-  );
+  const columns = groups.map((group) => preview(app, columnPrincipal(group), requests));
   const rows = requests.map(({ action: { id } }, i): PermissionsRow => ({
     id,
     cells: columns.map((answers) => answers[i]!),
@@ -479,7 +490,8 @@ const RunsLimit = RunsQuery.pick({ limit: true });
  * workflow's api name (`apiNameOf`) starts it, as does `<name>.start`, answering `{ runId }`;
  * `<name>.result` (`{ runId, waitMs? }`, at most 20 s), `.latest`, `.runs` (`{ limit? }`),
  * `.approvals` and `.ledger` (`{ runId }`) read its runs, a run of another workflow being none.
- * Anything else is `invalid_input`.
+ * Anything else is `invalid_input`. A visitor (`isVisitor`) calls no built-in workflow and reads
+ * only the result of a run it started: its other reads are `policy_denied`.
  */
 export async function callApi(app: AppContext, actor: Principal, { name, input, id }: CallRequest): Promise<unknown> {
   const { client, description, resolved } = app;
@@ -489,8 +501,13 @@ export async function callApi(app: AppContext, actor: Principal, { name, input, 
   const [api, method = "start", ...rest] = name.split(".");
   // Two workflows of one api name (a problem describeConfig reports) are neither.
   const named = rest.length ? [] : description.workflows.filter((wf) => apiNameOf(wf.name) === api);
-  const workflow = named.length === 1 ? named[0]!.name : undefined;
-  if (!workflow) throw notCallable(name);
+  const entry = named.length === 1 ? named[0] : undefined;
+  const visitor = isVisitor(actor);
+  if (!entry || (visitor && entry.builtin)) throw notCallable(name);
+  const workflow = entry.name;
+  if (visitor && method !== "start" && method !== "result") {
+    throw new PolicyDeniedError(name, "a visitor reads only the result of a run it started");
+  }
   const read = <T extends z.ZodType>(schema: T) => parse(schema, input ?? {}, "The input");
   switch (method) {
     case "start": {
@@ -502,7 +519,7 @@ export async function callApi(app: AppContext, actor: Principal, { name, input, 
       const until = Date.now() + Math.min(waitMs, RESULT_WAIT_MS);
       // Its status polled here rather than `client.result`'s wait, whose DBOS poller outlives
       // the timeout: a page asks again every 20 s while a run waits for days.
-      while (!isEnded((await runOf(app, workflow, runId)).status)) {
+      while (!isEnded((await runOf(app, workflow, runId, visitor ? actor : undefined)).status)) {
         if (Date.now() >= until) {
           throw new ApiError(409, { error: `Run ${runId} is still running`, code: "run_running", runId });
         }
@@ -535,10 +552,15 @@ const notCallable = (name: string) =>
     code: "invalid_input",
   });
 
-/** The run, when it is one of the workflow's; a 404 otherwise. */
-async function runOf({ client }: AppContext, workflow: string, runId: string): Promise<RunSummary> {
+/** The run, when it is one of the workflow's (and `startedBy`'s, when given); a 404 otherwise. */
+async function runOf(
+  { client }: AppContext,
+  workflow: string,
+  runId: string,
+  startedBy?: Principal,
+): Promise<RunSummary> {
   const run = await client.run(runId);
-  if (run?.workflow !== workflow)
+  if (run?.workflow !== workflow || (startedBy && run.startedBy?.id !== startedBy.id))
     throw new ApiError(404, { error: `No run ${runId} of ${workflow}`, code: "run_not_found" });
   return run;
 }

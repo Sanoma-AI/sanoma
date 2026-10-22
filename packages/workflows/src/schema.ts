@@ -67,7 +67,7 @@ const WRITES = new Set(["save", "delete"]);
 /**
  * The Cedar schema for a resolved config and its people, namespace `Sanoma`:
  *
- * - `entity Group enum [...]`, the declared groups and `agents`, so a policy naming another fails
+ * - `entity Group enum [...]`, the declared groups, `agents` and `visitors`, so a policy naming another fails
  *   validation; `entity Principal in [Group] { onBehalfOf?: Principal }`; `Collection`;
  *   `Target in [Collection]`; `Workflow`;
  * - an action per operation id, in its effect's group (`effect:money`), on a `Target`, with
