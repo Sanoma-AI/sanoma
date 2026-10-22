@@ -8,7 +8,7 @@ import { type Driver, memorySecrets } from "@sanoma-ai/workflows";
 import { secret } from "@sanoma-ai/workflows/resources";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fakeBridge } from "../../../packages/bridge/test/fake-bridge.ts";
-import { dockerTf } from "../src/connector.ts";
+import { containerType, dockerTf } from "../src/connector.ts";
 import { dockerDriver, dockerHost, type Inspected, inspectContainer, observed } from "../src/driver.ts";
 import { fakeDocker } from "../src/fake.ts";
 
@@ -53,6 +53,41 @@ describe("docker.container", () => {
     expect(() => container({ ...declared, image: "sanoma-runtime:latest" })).toThrow(/not `latest`/);
     expect(() => container({ ...declared, image: "sanoma-runtime" })).toThrow(/pin the image/);
     expect(() => container(desired)).toThrow(/leave out revision: apply sets it from ref/);
+  });
+
+  it("gives the runtime a public site's domains in SANOMA_DOMAINS, sorted by site, and reads them back from its label", () => {
+    const { secrets: _, ...plain } = desired;
+    const domains = { www: "sanoma.example", docs: "docs.sanoma.example" };
+    const state = containerType.toProvider({ ...plain, domains });
+    const served = "docs=docs.sanoma.example,www=sanoma.example";
+    expect(state.env).toContain(`SANOMA_DOMAINS=${served}`);
+    expect(state.labels).toContainEqual({ label: "sanoma.domains", value: served });
+    expect(state.labels).toContainEqual({
+      label: "sanoma.env",
+      value: "PORT,SANOMA_DOMAINS,SANOMA_REVISION,SANOMA_SOURCE",
+    });
+    expect(containerType.fromProvider(state)).toMatchObject({
+      domains: { docs: "docs.sanoma.example", www: "sanoma.example" },
+    });
+    // None, or an empty map: no variable, no label, nothing read back.
+    for (const none of [{}, { domains: {} }, { domains: null }]) {
+      const without = containerType.toProvider({ ...plain, ...none });
+      expect(JSON.stringify(without)).not.toContain("DOMAINS");
+      expect(JSON.stringify(without)).not.toContain("sanoma.domains");
+      expect(containerType.fromProvider(without)).not.toHaveProperty("domains");
+    }
+    const { revision: __, ...declared } = desired;
+    expect(container({ ...declared, domains }).desired.domains).toEqual(domains);
+    const wrong: Record<string, string>[] = [
+      { Www: "sanoma.example" },
+      { www: "https://sanoma.example" },
+      { www: "localhost" },
+      {},
+    ];
+    for (const refused of wrong) {
+      expect(() => container({ ...declared, domains: refused }), JSON.stringify(refused)).toThrow(/domains/);
+    }
+    expect(container.host?.inputs.domains).toBe("domains");
   });
 
   it("keeps from Docker's inspect the env its label names, its sanoma labels and its ports", () => {

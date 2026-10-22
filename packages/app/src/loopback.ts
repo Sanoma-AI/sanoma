@@ -31,7 +31,9 @@ export function loopbackLogin(): LoginProvider {
     resolveActor: (request) => actorFromHeader(request) ?? actorFromCookie(request),
     handle(request) {
       const host = request.headers.get("host") ?? "";
-      return isLoopback(hostName(host)) ? undefined : refuseHost(host);
+      const name = hostName(host);
+      // `*.localhost` is this machine too (RFC 6761): a public site's host, `<name>.localhost`.
+      return isLoopback(name) || name.endsWith(".localhost") ? undefined : refuseHost(host);
     },
   };
 }

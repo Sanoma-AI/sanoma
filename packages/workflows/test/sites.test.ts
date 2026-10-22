@@ -80,10 +80,11 @@ const problemAt = (name: string, line: number, message: string) => ({
 });
 
 describe("readSites", () => {
-  it("reads the fixture's site: its title, that it is public, and each RunForm and api call with its file, place and page", () => {
+  it("reads the fixture's hello site: its title, that it is public, and each RunForm and api call with its file, place and page", () => {
     const root = fileURLToPath(new URL("../../app/test/fixtures/company-sites/", import.meta.url));
     const { sites } = describeConfig(config(root));
-    expect(sites).toEqual([
+    // Its other site, members, is the app's tests'.
+    expect(sites.filter((entry) => entry.name === "hello")).toEqual([
       {
         name: "hello",
         title: "Hello desk",

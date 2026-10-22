@@ -1,5 +1,6 @@
 import { tfConnector, type TfMapped } from "@sanoma-ai/bridge/connector";
 import { DriverError, vendorInfo } from "@sanoma-ai/workflows";
+import { DOMAIN_NAME, domainsOf, domainsText, SITE_NAME } from "@sanoma-ai/workflows/shared";
 import { z } from "zod";
 import { docker_container, provider } from "./resources.gen.ts";
 
@@ -12,6 +13,7 @@ export const LABELS = {
   source: "sanoma.source",
   ref: "sanoma.ref",
   env: "sanoma.env",
+  domains: "sanoma.domains",
 } as const;
 
 /**
@@ -45,6 +47,12 @@ const container = z.object({
     .nullish()
     .describe("Environment variables holding secrets, each a `secret(...)`: SANOMA_DATABASE_URL, SANOMA_SECRETS_KEY"),
   port: z.number().int().min(1).max(65_535).describe("The port on 127.0.0.1 the app answers on"),
+  domains: z
+    .record(z.string().regex(SITE_NAME), z.string().regex(DOMAIN_NAME))
+    // Empty, it would read back as none, a change on every plan.
+    .refine((domains) => Object.keys(domains).length > 0, "leave `domains` out rather than empty")
+    .nullish()
+    .describe("A public site's domain, by site name"),
   running: z.boolean().nullish().describe("Whether the container runs, which Docker says"),
 });
 
@@ -61,19 +69,27 @@ export const containerType: TfMapped<typeof container> = {
   over: docker_container,
   schema: container,
   fields: { immutable: [], vendorOwned: ["id", "running"], writeOnly: ["secrets"] },
-  toProvider: ({ name, image, source, ref, revision, secrets, port }: Container) => {
+  toProvider: ({ name, image, source, ref, revision, secrets, port, domains }: Container) => {
     if (!revision) {
       throw new DriverError(
         `docker: container ${name}: no revision: apply sets it from ${ref} once its source exists (apply again after a repository it creates)`,
         { retryable: false },
       );
     }
-    const env = { ...secrets, SANOMA_SOURCE: source, SANOMA_REVISION: revision, PORT: String(INTERNAL_PORT) };
+    const served = domains ? domainsText(domains) : undefined;
+    const env = {
+      ...secrets,
+      SANOMA_SOURCE: source,
+      SANOMA_REVISION: revision,
+      PORT: String(INTERNAL_PORT),
+      ...(served && { SANOMA_DOMAINS: served }),
+    };
     const labels: Record<string, string> = {
       [LABELS.revision]: revision,
       [LABELS.source]: source,
       [LABELS.ref]: ref,
       [LABELS.env]: Object.keys(env).toSorted().join(","),
+      ...(served && { [LABELS.domains]: served }),
     };
     return {
       ...CREATE_ONLY,
@@ -103,6 +119,7 @@ export const containerType: TfMapped<typeof container> = {
     const labels = (state.labels as Label[] | null) ?? [];
     const label = (name: string) => labels.find((l) => l.label === name)?.value ?? null;
     const [published] = (state.ports as { external?: number | null }[] | null) ?? [];
+    const domains = label(LABELS.domains);
     return {
       id: (state.id as string | null) ?? null,
       name: String(state.name ?? ""),
@@ -111,6 +128,7 @@ export const containerType: TfMapped<typeof container> = {
       ref: label(LABELS.ref) ?? "",
       revision: label(LABELS.revision),
       port: published?.external ?? 0,
+      ...(domains && { domains: domainsOf(domains) }),
       running: state.must_run === true && state.exit_code == null,
     };
   },
@@ -137,7 +155,7 @@ export const dockerTf = tfConnector({
       writeOnly: ["env"],
       host: {
         capabilities: { lifetime: "long-lived", publicUrl: false, buildsFromGit: false, staticEgress: false },
-        inputs: { source: "source", ref: "ref", secrets: "secrets", port: "port" },
+        inputs: { source: "source", ref: "ref", secrets: "secrets", port: "port", domains: "domains" },
         revision: "revision",
         outputs: (state) => ({
           url: `http://127.0.0.1:${String(state.port)}`,

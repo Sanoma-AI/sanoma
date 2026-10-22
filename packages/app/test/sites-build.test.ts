@@ -12,18 +12,28 @@ import {
   writeFileSync,
 } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { request as httpRequest } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApp, sitesOf, writeSiteFiles } from "@sanoma-ai/app/build";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { defineConfig, SanomaClient, startWorker, type Worker } from "@sanoma-ai/workflows";
+import {
+  defineConfig,
+  defineConnector,
+  SanomaClient,
+  startWorker,
+  VISITOR_DENIED,
+  type Worker,
+  withSetup,
+} from "@sanoma-ai/workflows";
 import { describeConfig, writeApi } from "@sanoma-ai/workflows/describe";
 import { executablePath, launch } from "puppeteer-core";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ACTOR_COOKIE, ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
+import { loginContexts } from "./fixtures/company-sites/login.ts";
 import fixture from "./fixtures/company-sites/sanoma.config.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built workflows package (the server bundle imports the
@@ -94,6 +104,43 @@ async function start(): Promise<string> {
 
 export const Route = createFileRoute("/sites/hello/styled")({ loader: start, component: () => <div /> });
 `;
+
+/**
+ * A request to the app with `host` as its Host, which fetch does not let a caller set, and so with
+ * no need for `*.localhost` to resolve (it does not on every Linux).
+ */
+function rawGet(
+  url: string,
+  host: string,
+  init: { method?: string; headers?: Record<string, string>; body?: string } = {},
+): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }> {
+  const { hostname, port, pathname, search } = new URL(url);
+  return new Promise((done, fail) => {
+    httpRequest(
+      { host: hostname, port, path: pathname + search, method: init.method, headers: { ...init.headers, host } },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () =>
+          done({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString() }),
+        );
+      },
+    )
+      .on("error", fail)
+      .end(init.body);
+  });
+}
+
+/** What a browser says of a server function's request from its own page, which Start's CSRF check asks for. */
+const SAME_ORIGIN = { "sec-fetch-site": "same-origin" };
+
+/** The id of the server function `name` in a build, from its server entry's table of them. */
+function serverFnId(distDir: string, name: string): string {
+  const server = readFileSync(join(distDir, "server", "server.js"), "utf8");
+  const id = new RegExp(`"([0-9a-f]{64})": \\{\\s*functionName: "${name}_createServerFn_handler"`).exec(server)?.[1];
+  if (!id) throw new Error(`no server function ${name} in ${distDir}`);
+  return id;
+}
 
 /** The opening tag of the link around the first `text`. */
 function linkTag(html: string, text: string) {
@@ -329,6 +376,164 @@ describe("a company's app with its sites", () => {
     expect(holding("unpublished-draft-words")).toEqual([]);
     // The posts are one chunk, which only content's import loads.
     expect(holding("rendered at build").map((entry) => entry.name)).toEqual([expect.stringMatching(/content.*\.js$/)]);
+  });
+
+  /** `path` on the app, as `host` (on the app's port) asks for it. */
+  const at = (path: string, host: string, init?: Parameters<typeof rawGet>[2]) =>
+    rawGet(new URL(path, app.url).href, `${host}:${new URL(app.url).port}`, init);
+
+  it("serves a public site at the root of <name>.localhost: its own document, with no app stylesheet, chrome or cookie", async () => {
+    const home = await at("/", "hello.localhost");
+    expect(home.status).toBe(200);
+    const html = home.body.replaceAll("<!-- -->", "");
+    expect(html).toMatch(/^<!DOCTYPE html><html lang="en" data-site="hello">/);
+    expect(html).toContain("Hello from the hello site");
+    expect(html).not.toContain("sidebar-wrapper");
+    expect(html).not.toMatch(/<link[^>]*rel="stylesheet"/);
+    expect(home.headers["set-cookie"]).toBeUndefined();
+    // Its links are to its pages at the root, and its other pages answer there.
+    expect(linkTag(html, "Greet someone")).toContain('href="/run"');
+    expect((await at("/posts/hello", "hello.localhost")).body).toContain("<h1>Hello, content</h1>");
+    expect(app.sites).toEqual({
+      hello: `http://hello.localhost:${new URL(app.url).port}`,
+      members: `http://members.localhost:${new URL(app.url).port}`,
+    });
+  });
+
+  it("answers a public host's request for the app's pages, routes, a staff login's routes or a staff server function with a 404", async () => {
+    for (const path of [
+      "/workflows",
+      "/sites/hello",
+      "/setup/github/manifest",
+      "/auth/github/start",
+      "/auth/loopback",
+    ]) {
+      expect((await at(path, "hello.localhost")).status, path).toBe(404);
+    }
+    expect((await at("/", "hello.localhost", { method: "PUT" })).status).toBe(405);
+    // The config, a read on the app's host; on the public host not there, nor is any change.
+    const getConfig = `/_serverFn/${serverFnId(result.distDir, "getConfig")}`;
+    expect((await at(getConfig, "127.0.0.1", { headers: SAME_ORIGIN })).status).toBe(200);
+    // A read that is not there is the router's not-found, as for any read that finds nothing.
+    const read = await at(getConfig, "hello.localhost", { headers: SAME_ORIGIN });
+    expect(read.body).toContain('"isNotFound"');
+    expect(read.body).not.toContain("hello");
+    const startRun = `/_serverFn/${serverFnId(result.distDir, "startRunFn")}`;
+    expect((await at(startRun, "hello.localhost", { method: "POST", headers: SAME_ORIGIN })).status).toBe(404);
+  });
+
+  it("runs a public page's loader as anonymous whatever the staff login's cookie or header says, and as the visitor its login verifies", async () => {
+    const client = await SanomaClient.connect(config);
+    try {
+      /** What the `started` page on `host` answered, and who started the run it started. */
+      const started = async (host: string, headers: Record<string, string> = {}) => {
+        const html = (await at("/started", host, { headers })).body.replaceAll("<!-- -->", "");
+        const said = html.match(/<p>((?:Started|Refused:) [^<]+)<\/p>/)?.[1];
+        const runId = said?.match(/^Started (.+)$/)?.[1];
+        return { said, by: runId && (await client.run(runId))?.startedBy };
+      };
+      const anonymous = { said: expect.stringMatching(/^Started /), by: { id: "anonymous" } };
+      // The fixture's policy permits anonymous to start hello.
+      expect(await started("hello.localhost", { cookie: `${ACTOR_COOKIE}=ada`, [ACTOR_HEADER]: "ada" })).toEqual(
+        anonymous,
+      );
+      expect(await started("members.localhost")).toEqual(anonymous);
+      // And no permit names the visitors.
+      expect(await started("members.localhost", { cookie: "x-fixture-visitor=ada" })).toEqual({
+        said: `Refused: workflow:hello was denied by policy: ${VISITOR_DENIED}`,
+        by: undefined,
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("says who is on a public page: the visitor its login verifies, with its sign-out, or nobody", async () => {
+    const getActor = `/_serverFn/${serverFnId(result.distDir, "getActor")}`;
+    const visitor = await at(getActor, "members.localhost", {
+      headers: { ...SAME_ORIGIN, cookie: "x-fixture-visitor=ada" },
+    });
+    expect(visitor.status).toBe(200);
+    expect(visitor.body).toContain('"visitor:fixture-login:ada"');
+    expect(visitor.body).toContain('"visitors"');
+    expect(visitor.body).toContain('"/auth/fixture-login/sign-out"');
+    const nobody = await at(getActor, "hello.localhost", {
+      headers: { ...SAME_ORIGIN, cookie: `${ACTOR_COOKIE}=ada` },
+    });
+    expect(nobody.status).toBe(200);
+    expect(nobody.body).not.toContain("anonymous");
+    expect(nobody.body).not.toContain("ada");
+    // The login's own routes, and its sign-out, on its site's host alone.
+    const signOut = await at("/auth/fixture-login/sign-out", "members.localhost", { method: "POST" });
+    expect([signOut.status, signOut.headers["set-cookie"]]).toEqual([204, ["x-fixture-visitor=; Max-Age=0; Path=/"]]);
+    expect((await at("/auth/fixture-login/sign-out", "hello.localhost", { method: "POST" })).status).toBe(404);
+    expect(loginContexts[0]).toMatchObject({
+      origins: ["http://members.localhost:*"],
+      databaseUrl: config.databaseUrl,
+    });
+  });
+
+  it("serves a public site at its domain too and links to it from the Sites panel, but no domain of a site that is not public", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const domains = { hello: "hello.example", members: "members.example", leads: "leads.example" };
+    const second = await startApp(config, { port: 0, distDir: result.distDir, domains });
+    try {
+      const home = await rawGet(new URL("/", second.url).href, "hello.example");
+      expect(home.body).toContain('data-site="hello"');
+      expect((await rawGet(new URL("/", second.url).href, "leads.example")).status).toBe(403);
+      expect(warn).toHaveBeenCalledWith(
+        "sanoma app: the domain leads.example names sites/leads, which is not a public site: not served",
+      );
+      // The site's own address, beside its pages in the app's Sites panel.
+      const panel = (await (await fetch(new URL("/sites/hello", second.url))).text()).replaceAll("<!-- -->", "");
+      expect(panel).toContain('data-slot="sidebar-wrapper"');
+      expect(linkTag(panel, ">hello.example</span>")).toMatch(/href="https:\/\/hello\.example\/"[^>]*target="_blank"/);
+      expect(loginContexts.at(-1)?.origins).toEqual(["http://members.localhost:*", "https://members.example"]);
+    } finally {
+      warn.mockRestore();
+      await second.close();
+    }
+  });
+
+  it("serves a public site whose site.ts has a problem, or whose login fails to start, on no host", async () => {
+    const broken = company({
+      "sites/hello/site.ts":
+        'import { defineSite } from "sanoma/site";\n\nexport default defineSite({ public: true, login: "nope" });\n',
+    });
+    const failing = withSetup(defineConnector("fixture-login", {}), {
+      login: () => {
+        throw new Error("no secret");
+      },
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const third = await startApp(defineConfig({ ...config, root: broken, connectors: [failing] }), {
+      port: 0,
+      distDir: result.distDir,
+      // Another site's host: one site per host.
+      domains: { members: "hello.localhost" },
+    });
+    try {
+      expect(third.sites).toEqual({});
+      for (const host of ["hello.localhost", "members.localhost"]) {
+        expect((await rawGet(new URL("/", third.url).href, host)).status, host).toBe(503);
+      }
+      expect(warn).toHaveBeenCalledWith(
+        "sanoma app: sites/hello/site.ts has a problem: the site is served on no host until it is fixed",
+      );
+      expect(warn).toHaveBeenCalledWith(
+        "sanoma app: hello.localhost is another public site's host: sites/members is not served there",
+      );
+      expect(error).toHaveBeenCalledWith(
+        "sanoma app: sites/members's login (fixture-login) could not start, so the site is not served: no secret",
+      );
+      // The app itself answers.
+      expect((await fetch(new URL("/workflows", third.url))).status).toBe(200);
+    } finally {
+      error.mockRestore();
+      warn.mockRestore();
+      await third.close();
+    }
   });
 
   it("reuses a build of the same sites, and builds again when a site changes", async () => {
@@ -637,7 +842,7 @@ describe("a build that fails, or leaves a site out", () => {
     const repo = company({
       "sites/Not_A_Segment/routes/index.tsx": sitePage("/sites/Not_A_Segment/", "", '"Refused"'),
     });
-    expect(sitesOf(repo)).toEqual({ sites: ["hello"], refused: ["Not_A_Segment"] });
+    expect(sitesOf(repo)).toEqual({ sites: ["hello", "members"], refused: ["Not_A_Segment"] });
     const lines: string[] = [];
     const { distDir } = await buildApp(repo, { log: (line) => lines.push(line) });
     expect(lines).toContain(

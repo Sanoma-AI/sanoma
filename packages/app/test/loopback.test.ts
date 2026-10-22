@@ -31,6 +31,21 @@ describe("the loopback rule", () => {
   });
 });
 
+/** What the loopback login answers a request addressed to `host`: undefined lets it through. */
+const handled = (host: string) =>
+  loopbackLogin().handle!(new Request("http://127.0.0.1/", { headers: { host } })) as Response | undefined;
+
+describe("the loopback login's hosts", () => {
+  it("lets this machine's names through, `*.localhost` too (a public site's host), and refuses any other with a 403", () => {
+    for (const host of ["localhost:3000", "127.0.0.1", "www.localhost:3000", "a.b.localhost"]) {
+      expect(handled(host), host).toBeUndefined();
+    }
+    for (const host of ["attacker.example", "localhost.attacker.example", "wwwlocalhost", ""]) {
+      expect(handled(host)?.status, host).toBe(403);
+    }
+  });
+});
+
 /** Whom the loopback login takes a request with these headers to be from. */
 const who = (headers: Record<string, string>) =>
   loopbackLogin().resolveActor(new Request("http://127.0.0.1/", { headers }));

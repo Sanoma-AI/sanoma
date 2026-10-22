@@ -1,6 +1,8 @@
 import { fakeHost, fakeHostType, testRepository } from "@sanoma-ai/testing/host";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { describeConfig } from "../src/describe.ts";
+import { tree } from "./tree.ts";
 import { secret } from "../src/secret.ts";
 import {
   defineConnector,
@@ -18,6 +20,7 @@ const schema = z.object({
   env: z.record(z.string(), z.string()).optional(),
   port: z.number().optional(),
   commit: z.string().optional(),
+  sites: z.record(z.string(), z.string()).optional(),
 });
 const host: HostSpec = {
   capabilities: { lifetime: "long-lived", publicUrl: true, buildsFromGit: true, staticEgress: false },
@@ -54,6 +57,11 @@ describe("a host type", () => {
       { inputs: { ...host.inputs, ref: "repo.tag" } },
       /ref names no field \(repo\.tag\)/,
     ],
+    [
+      "domains that name no field",
+      { inputs: { ...host.inputs, domains: "domains" } },
+      /domains names no field \(domains\)/,
+    ],
     ["secrets that are not write-only", { writeOnly: [] }, /inputs\.secrets must be a write-only field/],
     ["a revision that is write-only", { writeOnly: ["env", "commit"] }, /revision must not be write-only/],
     [
@@ -63,6 +71,54 @@ describe("a host type", () => {
     ],
   ])("is refused with %s", (_, overrides, message) => {
     expect(() => hostOf(overrides)).toThrow(message);
+  });
+
+  it("may take a public site's domains in a field of its own", () => {
+    expect(hostOf({ inputs: { ...host.inputs, domains: "sites" } }).host?.inputs.domains).toBe("sites");
+  });
+
+  it("is described with a problem at its declaration for each of its domains that names no public site", () => {
+    const service = hostOf({ inputs: { ...host.inputs, domains: "sites" } });
+    const acme = defineConnector("acme", { service }, { title: "Acme", package: "@acme/connector" });
+    const route = 'import { createFileRoute } from "@tanstack/react-router";\n';
+    const root = tree("domains", {
+      "resources/infra.ts": [
+        'import { acme } from "@acme/connector/resources";',
+        "",
+        "export const host = acme.service({",
+        '  name: "app",',
+        '  repo: { url: "https://example.com/a.git", branch: "main" },',
+        '  sites: { www: "sanoma.example", cms: "cms.sanoma.example", gone: "gone.example" },',
+        "});",
+        "",
+      ].join("\n"),
+      "sites/www/site.ts":
+        'import { defineSite } from "sanoma/site";\n\nexport default defineSite({ public: true });\n',
+      "sites/www/routes/index.tsx": route,
+      "sites/cms/routes/index.tsx": route,
+    });
+    const { problems, resources } = describeConfig({ workflows: [], connectors: [acme], root });
+    expect(resources.map((r) => r.id)).toEqual(["resources/infra.ts#host"]);
+    expect(problems).toEqual(
+      ["cms", "gone"].map((name) => ({
+        file: "resources/infra.ts",
+        line: 3,
+        column: 1,
+        message: `domains names "${name}", which is not a public site (defineSite({ public: true }))`,
+      })),
+    );
+    // Without the names that are not, none.
+    const fine = tree("domains-fine", {
+      "resources/infra.ts": [
+        'import { acme } from "@acme/connector/resources";',
+        'export const host = acme.service({ name: "app", repo: { url: "u", branch: "main" }, sites: { www: "sanoma.example" } });',
+        "",
+      ].join("\n"),
+      "sites/www/site.ts":
+        'import { defineSite } from "sanoma/site";\n\nexport default defineSite({ public: true });\n',
+      "sites/www/routes/index.tsx": route,
+    });
+    expect(describeConfig({ workflows: [], connectors: [acme], root: fine }).problems).toEqual([]);
   });
 
   it("takes sanoma's own secrets in its secrets map, and no other type does", () => {

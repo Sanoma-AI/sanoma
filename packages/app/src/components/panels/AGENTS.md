@@ -12,7 +12,7 @@ The panels of the sidebar ([`app-sidebar.tsx`](../app-sidebar.tsx)): each lists 
 | [`inbox-panel.tsx`](inbox-panel.tsx)             | The Inbox: For you or Everyone (`?show=`), their approvals (the open one marked), Decided today, and All decided, read with `lib/inbox.ts` as the Inbox page is                                |
 | [`data-panel.tsx`](data-panel.tsx)               | The Data section: each collection by its title (the open one marked), and all of them at its foot                                                                                              |
 | [`permissions-panel.tsx`](permissions-panel.tsx) | The Permissions section: the policy (`PolicyFacts`, which the page shows too) and how many groups, workflows and operations its grid has                                                       |
-| [`sites-panel.tsx`](sites-panel.tsx)             | The Sites: each of the company's sites under its title (and icon) with its pages (`useSites`), the open one marked                                                                             |
+| [`sites-panel.tsx`](sites-panel.tsx)             | The Sites: each of the company's sites under its title (and icon) with its pages (`useSites`), the open one marked, and a public site's own address first                                      |
 
 ## Maintenance
 

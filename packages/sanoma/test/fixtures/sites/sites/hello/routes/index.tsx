@@ -7,6 +7,7 @@ function Hello() {
     <div>
       <p>Hello from the hello site</p>
       <Link to="/workflows">Workflows</Link>
+      <Link to="/sites/hello/post">The post</Link>
     </div>
   );
 }

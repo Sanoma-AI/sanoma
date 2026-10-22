@@ -26,6 +26,7 @@ export const host = docker.container({
   source: repo, // a declared github.repository, or a clone URL
   ref: "main",
   port: 3000,
+  domains: { www: "sanoma.example" }, // a public site's domain, by site name
   secrets: {
     SANOMA_DATABASE_URL: secret("DATABASE_URL"),
     SANOMA_SECRETS_KEY: secret("SECRETS_KEY"),
@@ -41,11 +42,12 @@ export const host = docker.container({
 | `ref`           | The branch it runs, never a commit: apply resolves it and sets the hidden `revision`, so a merge is drift on the container                  |
 | `port`          | The port on `127.0.0.1` the app answers on, never on other interfaces                                                                       |
 | `secrets`       | Environment variables, each a `secret(...)`: write-only, never in an output, the ledger or a checkpoint                                     |
+| `domains`       | Optional: a public site's domain, by site name (`{ www: "sanoma.example" }`): the app serves each site at the root of its domain            |
 | `id`, `running` | Docker's: its id, and whether it runs                                                                                                       |
 
 The host's outputs are `{ url: "http://127.0.0.1:<port>", revision, healthy }`, `healthy` while it runs. Its capabilities: long-lived, no public URL, it runs an image rather than building one, no fixed egress.
 
-The container runs the image with `SANOMA_SOURCE`, `SANOMA_REVISION`, `PORT` (3000) and the secrets as its environment, the image's entrypoint clones the source at the revision and serves it, its port is published on `127.0.0.1` only, it restarts unless stopped, and apply waits for its healthcheck (`/healthz`, up to ten minutes, the clone and install included) before it is created. Labels say what it runs (`sanoma.revision`, `sanoma.source`, `sanoma.ref`) and the names of the variables it was given (`sanoma.env`).
+The container runs the image with `SANOMA_SOURCE`, `SANOMA_REVISION`, `PORT` (3000), `SANOMA_DOMAINS` (`docs=docs.sanoma.example,www=sanoma.example`, sorted by site, when it has `domains`) and the secrets as its environment, the image's entrypoint clones the source at the revision and serves it, its port is published on `127.0.0.1` only, it restarts unless stopped, and apply waits for its healthcheck (`/healthz`, up to ten minutes, the clone and install included) before it is created. Labels say what it runs (`sanoma.revision`, `sanoma.source`, `sanoma.ref`, `sanoma.domains`) and the names of the variables it was given (`sanoma.env`). The container answers on `127.0.0.1` only: a domain reaches it through whatever proxy the machine runs in front of it, which passes the `Host` on.
 
 Every change replaces the container: the provider forces a new one for any change of its name, image, environment, labels or ports. So a deploy (a new revision) or a secret's rotation is a replace, a few seconds of downtime plus the runtime's start. A stopped container plans a replace too.
 

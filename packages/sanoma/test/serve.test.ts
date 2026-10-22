@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UsageError } from "../src/config.ts";
-import { appOptions } from "../src/serve.ts";
+import { appOptions, parseDomains } from "../src/serve.ts";
 
 /** Sets these variables for the test, and unsets the other launcher variables appOptions reads. */
 function environment(values: Record<string, string>) {
-  const names = ["SANOMA_APP_HOST", "SANOMA_GITHUB_CLIENT_ID", "SANOMA_GITHUB_CLIENT_SECRET"];
+  const names = ["SANOMA_APP_HOST", "SANOMA_GITHUB_CLIENT_ID", "SANOMA_GITHUB_CLIENT_SECRET", "SANOMA_DOMAINS"];
   for (const name of names) vi.stubEnv(name, "");
   for (const [name, value] of Object.entries(values)) vi.stubEnv(name, value);
 }
@@ -14,8 +14,49 @@ const GITHUB = {
   SANOMA_GITHUB_CLIENT_SECRET: "secret",
 };
 
+describe("parseDomains", () => {
+  it("reads each public site's domain by its name, and none from nothing", () => {
+    expect(parseDomains("www=sanoma.example")).toEqual({ www: "sanoma.example" });
+    expect(parseDomains("constructor=sanoma.example")).toEqual({ constructor: "sanoma.example" });
+    expect(parseDomains("www=sanoma.example, docs=docs.sanoma.example")).toEqual({
+      www: "sanoma.example",
+      docs: "docs.sanoma.example",
+    });
+    expect(parseDomains(undefined)).toBeUndefined();
+    expect(parseDomains("")).toBeUndefined();
+  });
+
+  it("refuses a pair that is not <site>=<hostname>, and a site named twice", () => {
+    for (const value of [
+      "www",
+      "www=",
+      "=sanoma.example",
+      "www=sanoma",
+      "www=Sanoma.example",
+      "www=https://sanoma.example",
+      "www=sanoma.example:443",
+      "Www=sanoma.example",
+      "www=a.example=b",
+      "www=sanoma.example,",
+      "www=a.example,www=b.example",
+    ]) {
+      expect(() => parseDomains(value), value).toThrow(UsageError);
+    }
+    expect(() => parseDomains("www=sanoma")).toThrow(
+      'SANOMA_DOMAINS has "www=sanoma": write <site>=<hostname>, each site once, such as www=sanoma.example',
+    );
+  });
+});
+
 describe("appOptions", () => {
   afterEach(() => vi.unstubAllEnvs());
+
+  it("takes the public sites' domains from SANOMA_DOMAINS", async () => {
+    environment({ SANOMA_DOMAINS: "www=sanoma.example" });
+    expect(await appOptions()).toEqual({ host: undefined, domains: { www: "sanoma.example" } });
+    environment({ SANOMA_DOMAINS: "www" });
+    await expect(appOptions()).rejects.toThrow(UsageError);
+  });
 
   it("takes the host, and no login, from an environment without GitHub's variables", async () => {
     environment({});
