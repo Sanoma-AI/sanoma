@@ -69,7 +69,7 @@ describe("startCompany", () => {
     }
     const pkg = JSON.parse(read("package.json")) as { name: string; dependencies: Record<string, string> };
     expect(pkg.name).toBe("acme-ops");
-    expect(pkg.dependencies).toEqual({ "@sanoma-ai/connector-ghost": `^${version}`, sanoma: `^${version}` });
+    expect(pkg.dependencies).toEqual({ "@sanoma-ai/connector-ghost": "latest", sanoma: `^${version}` });
     expect(existsSync(join(dir, "gitignore"))).toBe(false);
     // pnpm's alone.
     expect(existsSync(join(dir, "pnpm-workspace.yaml"))).toBe(false);

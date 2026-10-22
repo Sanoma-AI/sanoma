@@ -84,8 +84,8 @@ export async function startCompany(
   const name = packageName(basename(cwd));
   // npm refuses to install a package into one of the same name (`sanoma` in `sanoma/`).
   pkg.name = name in pkg.dependencies ? `${name}-company` : name;
-  // The template's packages at this launcher's version: Sanoma releases them together.
-  for (const dep of Object.keys(pkg.dependencies)) pkg.dependencies[dep] = `^${own.version}`;
+  // The template is this launcher's, so `sanoma` at its version; the rest (each versioned on its own) at `latest`.
+  pkg.dependencies.sanoma = `^${own.version}`;
   writeFileSync(manifest, `${JSON.stringify(pkg, null, 2)}\n`);
 
   const people = join(cwd, "resources", "people.ts");

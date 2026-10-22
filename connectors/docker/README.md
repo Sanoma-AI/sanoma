@@ -22,7 +22,7 @@ import { secret } from "sanoma/resources";
 
 export const host = docker.container({
   name: "sanoma-acme",
-  image: "sanoma-runtime:0.4.2",
+  image: "sanoma-runtime:dev", // docker build -t sanoma-runtime:dev packages/sanoma/runtime
   source: repo, // a declared github.repository, or a clone URL
   ref: "main",
   port: 3000,

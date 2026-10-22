@@ -66,8 +66,8 @@
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@sanoma-ai/bridge": "^0.4.2",
-    "@sanoma-ai/workflows": "^0.4.2",
+    "@sanoma-ai/bridge": "workspace:^",
+    "@sanoma-ai/workflows": "workspace:^",
     "zod": "^4"
   },
   "engines": {
