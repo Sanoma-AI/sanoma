@@ -34,7 +34,7 @@ const { distDir, built } = await buildApp(repo, { log: console.log });
 const app = await startApp(config, { distDir });
 ```
 
-`buildApp(repo)` builds the app's routes and every site as one TanStack Start build with the repo as Vite's root, and writes only under the repo: `.sanoma/app/routeTree.gen.ts`, Vite's cache in `.sanoma/app/vite/`, and the build in `.sanoma/app/build/<key>/` (`client/` and `server/server.js`), where the key covers the app's version and source directory and every file under `sites/` and `content/`. A build with the same key is reused (`built: false`), and a new one is built beside it and moved into place, so an app serving the old one keeps it. The server bundle holds everything but the runtime (`@sanoma-ai/workflows`, `@sanoma-ai/bridge`, DBOS, `pg`, `zod`), which it imports by file URL, resolved from `runtimeFrom` (by default this package's own `package.json`), so the worker and the app share one copy.
+`buildApp(repo)` builds the app's routes and every site as one TanStack Start build with the repo as Vite's root, and writes only under the repo: `.sanoma/app/routeTree.gen.ts`, Vite's cache in `.sanoma/app/vite/`, and the build in `.sanoma/app/build/<key>/` (`client/` and `server/server.js`), where the key covers the app's version and source directory and every file under `sites/` and `content/`. All of `.sanoma/app/` is ignored by its own `.gitignore` (`*`), which Tailwind's scan of the repo honours too, so a build never reads its own output, whatever the repo's `.gitignore` says. A build with the same key is reused (`built: false`), and a new one is built beside it and moved into place, so an app serving the old one keeps it. The server bundle holds everything but the runtime (`@sanoma-ai/workflows`, `@sanoma-ai/bridge`, DBOS, `pg`, `zod`), which it imports by file URL, resolved from `runtimeFrom` (by default this package's own `package.json`), so the worker and the app share one copy.
 
 - A site is client code: a site importing the runtime, a connector, DBOS, `pg` or a `*.server.*` file fails the build with "Import denied".
 - A site imports React, TanStack's packages and this app as the app does, from the app's own install: the company repo depends only on `sanoma`.
@@ -42,7 +42,7 @@ const app = await startApp(config, { distDir });
 - `writeSiteFiles(repo)`, which `buildApp` calls first, writes `sites/__virtual.ts` (the listing the route generator reads; committed, never edited), `sites/tsconfig.json` when missing, `.sanoma/app/tsconfig.json` every time: the app's compiler options (`tsconfig.site.json`, shipped) with its React, TanStack and route tree, so `tsc -p sites/tsconfig.json` checks a site's links against every page; and `.sanoma/content.ts`, the types of [`content`](#content).
 - `appViteConfig({ repo, runtimeFrom })` is the build's Vite config; `appViteConfig()` is this package's own (its `vite.config.ts`), the same pipeline with no sites. `appSources()` gives the app's `src` and `tsconfig.site.json` by real path.
 
-`startApp(config, { dev: { repo } })` serves the app and the repo's sites from Vite's dev server instead of a build, behind the same `/healthz` and login: `appDevServer(repo, http)` from `@sanoma-ai/app/build` is the build's Vite config (`appViteConfig({ repo })`, so the route generator's options are the build's) in middleware mode, with hot updates over the app's own HTTP server, and Start's server entry imported for each request and handed the same context. On the server, Vite compiles the app's source and `sanoma` (whose `sanoma/site` is that source), and leaves the runtime to Node, the copy `startApp`'s context holds. An edit to a site or to the app's source shows without a reload, and a new site folder is live once it has a route file; a change to `sites/__virtual.ts` itself needs a restart. It writes the sites' generated files and Vite's cache under `.sanoma/app/`, and no build. It listens on this machine only: the hot updates' websocket does not pass the login, so `startApp` refuses `dev` with any other `host`. `dev.onFileChange`, when given, is called with each file the dev server's watcher sees added, changed or removed (`sanoma` writes `.sanoma/api.ts` again on a change to what the config is read from).
+`startApp(config, { dev: { repo } })` serves the app and the repo's sites from Vite's dev server instead of a build, behind the same `/healthz` and login: `appDevServer(repo, http)` from `@sanoma-ai/app/build` is the build's Vite config (`appViteConfig({ repo })`, so the route generator's options are the build's) in middleware mode, with hot updates over the app's own HTTP server, and Start's server entry imported for each request and handed the same context. On the server, Vite compiles the app's source and `sanoma` (whose `sanoma/site` is that source), and leaves the runtime to Node, the copy `startApp`'s context holds. An edit to a site or to the app's source shows without a reload, a Tailwind class in a new file under `sites/` is in the app's stylesheet and each site's own, and a new site folder is live once it has a route file; a change to `sites/__virtual.ts` itself needs a restart. It writes the sites' generated files and Vite's cache under `.sanoma/app/`, and no build. It listens on this machine only: the hot updates' websocket does not pass the login, so `startApp` refuses `dev` with any other `host`. `dev.onFileChange`, when given, is called with each file the dev server's watcher sees added, changed or removed (`sanoma` writes `.sanoma/api.ts` again on a change to what the config is read from).
 
 A company repo is an ES module package (`"type": "module"`, as `sanoma init` writes it): Vite names the server entry `server.mjs` otherwise.
 
@@ -113,6 +113,41 @@ function LaunchDesk() {
 A site's page inside the app's shell: the kit's `Region` and `Facts`, and `RunForm` drawing announce's fields from its schema.
 
 With sites, the sidebar's bar has Sites, linking to the first site's home. Its panel lists each site under its title (its folder's name without one) with its pages, each named by its route's `staticData.crumb` or its path under the site (a page with a path parameter is left out), and a site's page starts its crumbs with the site's title. `@sanoma-ai/app/site` and `@sanoma-ai/app/ui` ship as source (`src/site.ts`, `src/ui.ts`), compiled by Vite in the company's build; they hold nothing server-side (a server function is a fetch in the browser).
+
+### A site's own stylesheet
+
+A site styles its pages with Tailwind's classes and the app's tokens, which the app's stylesheet carries (it scans the whole repo, so a site's classes are in it). A site with a look of its own, such as a public site, adds a stylesheet beside its routes and links it from its layout's `head`:
+
+```css
+/* sites/www/style.css */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme" layer(theme);
+@import "tailwindcss/utilities" layer(utilities);
+
+.www {
+  font-family: Georgia, serif;
+  line-height: 1.6;
+}
+```
+
+```tsx
+// sites/www/routes/route.tsx
+import { createFileRoute, Outlet } from "@tanstack/react-router";
+import css from "../style.css?url";
+
+export const Route = createFileRoute("/sites/www")({
+  head: () => ({ links: [{ rel: "stylesheet", href: css }] }),
+  component: () => (
+    <div className="www">
+      <Outlet />
+    </div>
+  ),
+});
+```
+
+- It imports `tailwindcss/theme` and `tailwindcss/utilities`, not `tailwindcss`: a site's pages are also shown inside the app at `/sites/<name>`, and Tailwind's preflight would restyle the app around them. The site writes its base rules under a class of its own (`.www` above) instead.
+- `tailwindcss` and its `theme`, `utilities` and `preflight` resolve to the app's install, as the app's own stylesheet does: the repo installs nothing for them. A `@plugin` is a package the repo installs itself.
+- Its theme is Tailwind's default, not the app's: while the site's page is shown inside the app, a class both use where the app's theme differs (`rounded-lg`, `font-sans`) takes the site's value, in the app's chrome too. A site keeps its own tokens under names the app does not use.
 
 ### Calling operations and workflows
 
