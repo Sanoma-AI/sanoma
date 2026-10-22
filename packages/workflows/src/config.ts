@@ -120,6 +120,8 @@ export interface ResolvedConfig {
   driversByVendor: Map<string, Driver>;
   /** The makers of the fakes the connectors attach, by vendor id in `connectors` order: each sandbox run makes its own. */
   fakes: Map<string, () => Fake<any, any>>;
+  /** The makers of the login halves the connectors attach, by vendor id in `connectors` order: the app makes one per public site that names it. */
+  logins: ReadonlyMap<string, NonNullable<ConnectorSetup["login"]>>;
   /** `scenarios/` in `root`, as a `file:` URL, when that directory exists. */
   scenarios?: URL;
   /** The resource types the connectors declare, by `<vendor>.<type>`: what the drift workflow checks and scenarios seed. */
@@ -289,6 +291,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     drivers,
     driversByVendor,
     fakes,
+    logins: makersOf(config.connectors, "login"),
     ...(scenarios && { scenarios }),
     types,
     steps: [...new Set([...config.connectors.flatMap((c) => setupOf(c).steps ?? []), ...(config.steps ?? [])])],

@@ -320,7 +320,11 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       ...(resolved.policy.version === undefined ? {} : { version: resolved.policy.version }),
       ...(resolved.policyProblems.length ? { problems: resolved.policyProblems } : {}),
     },
-    sites: readSites(resolved.root, { workflows, collections, ops }),
+    sites: readSites(
+      resolved.root,
+      { workflows, collections, ops },
+      { vendors: new Set(Object.keys(vendors)), logins: new Set(resolved.logins.keys()) },
+    ),
   };
 }
 

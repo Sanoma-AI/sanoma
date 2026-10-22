@@ -304,9 +304,10 @@ export interface Driver {
 
 /**
  * What a connector package attaches to its connector (`withSetup`), for the config's resolver
- * to call: the config then names the connector alone, and never a driver, a fake or steps. Any may
- * be missing: a workflow using an operation of a connector with no driver is refused, and a
- * connector with no fake has none for sandbox runs.
+ * to call: the config then names the connector alone, and never a driver, a fake, steps or a
+ * login. Any may be missing: a workflow using an operation of a connector with no driver is
+ * refused, a connector with no fake has none for sandbox runs, and one with no login half signs
+ * no visitor in.
  */
 export interface ConnectorSetup {
   /** Makes the live driver, which reads its credentials from the environment when called: once per resolved config. */
@@ -315,6 +316,50 @@ export interface ConnectorSetup {
   fake?: () => Fake<any, any>;
   /** The connector's steps for Gherkin tests (`defineSteps`): a config's scenarios and the connector's own features can use them. */
   steps?: Steps;
+  /**
+   * Makes the connector's login half for one public site: once per site, by the app, when it
+   * starts; a login that needs tables migrates them here (serialized, idempotent).
+   */
+  login?: (context: LoginContext) => LoginHalf | Promise<LoginHalf>;
+}
+
+/** What the app gives a connector's login half (`ConnectorSetup.login`) when it makes it for a public site. */
+export interface LoginContext {
+  /** The company's database (`resolved.databaseUrl`), where a login like Better Auth keeps its users. */
+  databaseUrl: string;
+  /** Secrets' values by name: the environment's first, then the stored credentials (the values `SanomaClient.secrets` reads). */
+  secrets(names: readonly string[]): Promise<Map<string, string>>;
+  /**
+   * The origins the site answers on, scheme included and `:*` for any port:
+   * `["http://www.localhost:*", "https://sanoma.example"]`; a login needs the protocol for its
+   * cookies and allowed hosts.
+   */
+  origins: readonly string[];
+}
+
+/**
+ * The app sets this header on every request to a public site from the socket's address,
+ * overwriting any copy a client sent; a login reads a visitor's address from it (for rate
+ * limits), never from `X-Forwarded-For`.
+ */
+export const CLIENT_IP_HEADER = "x-sanoma-client-ip";
+
+/**
+ * A connector's login half: how a public site tells who a visitor is. The app makes one with
+ * `login(context)` once per public site, when it starts; a login that keeps tables in the
+ * database migrates them itself there, serialized and idempotent. It answers the provider's
+ * subject only; the app makes the principal from it (`visitor:<connector>:<subject>`, in
+ * `visitors`), so a connector never sets a visitor's groups. A visitor's address, for rate
+ * limits, is the `CLIENT_IP_HEADER` header.
+ */
+export interface LoginHalf {
+  /** Who signed in, as the provider's stable subject, or null; never throws for a missing or bad cookie. */
+  verify(request: Request): Promise<{ subject: string } | null>;
+  /** Answers its own routes, `/auth/<vendor>/*`; undefined for any other request. */
+  handle(request: Request): Promise<Response | undefined>;
+  /** The path a page POSTs to sign out, which `handle` serves. */
+  signOut?: string;
+  close?(): Promise<void>;
 }
 
 /**

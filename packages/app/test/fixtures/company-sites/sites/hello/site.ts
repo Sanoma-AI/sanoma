@@ -1,3 +1,3 @@
 import { defineSite } from "sanoma/site";
 
-export default defineSite({ title: "Hello desk" });
+export default defineSite({ title: "Hello desk", public: true });
