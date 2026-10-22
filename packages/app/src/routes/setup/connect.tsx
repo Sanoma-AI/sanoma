@@ -8,9 +8,9 @@ import { Input } from "#/components/ui/input.tsx";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup } from "#/components/ui/item.tsx";
 import {
   ButtonLink,
+  CrumbHeader,
   ItemHeading,
   Notice,
-  PageHeader,
   pageTitle,
   Region,
   ToneBadge,
@@ -52,7 +52,7 @@ function ConnectPage() {
   const supabaseToken = token("SUPABASE_ACCESS_TOKEN");
   return (
     <>
-      <PageHeader />
+      <CrumbHeader />
       {github && <Notice variant={github === "connected" ? "default" : "destructive"}>{OUTCOME[github]}</Notice>}
       <Region title="GitHub">
         <ItemGroup>

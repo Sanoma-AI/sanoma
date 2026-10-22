@@ -1,6 +1,5 @@
-import { useActor } from "sanoma/ui";
 import { createFileRoute } from "@tanstack/react-router";
-import { Link, Outlet } from "sanoma/site";
+import { Link, Outlet, useActor } from "sanoma/site";
 
 /** The pages for a signed-in visitor: anyone else is asked to sign in. */
 export const Route = createFileRoute("/sites/account/_member")({ component: Member });

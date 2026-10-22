@@ -1,7 +1,7 @@
 import { type CallRequest, errorBodyOf } from "./api.ts";
 
-// A site's `api`, from `sanoma/site` (which binds it to `callFn`, the app's one server function
-// for it): one generic client. A path names what to call (`api.data.outbound.list`,
+// A site's `api`, from `sanoma/site` (bound to `callFn`, the app's one server function for it, in
+// queries.ts): one generic client. A path names what to call (`api.data.outbound.list`,
 // `api.outboundNext.start`) and the server decides what it is; the types come from the company's
 // generated `.sanoma/api.ts`, which augments `Register`, so a stale file can fail a check but never
 // change a call. Browser code, importing no server function, so a Node test can import it.

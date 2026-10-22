@@ -16,7 +16,15 @@ import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { errorBodyOf, INFRA, type GoLiveChoices, type GoLiveRequest, type GoLiveRun } from "../../api.ts";
 import { ApplyPlanView } from "../../components/apply-plan.tsx";
-import { ButtonLink, ItemHeading, Notice, PageHeader, pageTitle, Region, ToneBadge } from "../../components/common.tsx";
+import {
+  ButtonLink,
+  CrumbHeader,
+  ItemHeading,
+  Notice,
+  pageTitle,
+  Region,
+  ToneBadge,
+} from "../../components/common.tsx";
 import { goLiveFn, goLiveHostFn } from "../../functions.ts";
 import { RUN_TONE } from "../../lib/tone.ts";
 import {
@@ -57,7 +65,7 @@ function GoLivePage() {
   const hostRun = run && data && (!isEnded(run.status) || run.results?.some((r) => r.id === `${INFRA}#host`));
   return (
     <>
-      <PageHeader />
+      <CrumbHeader />
       <Region title="1. Connect GitHub and Supabase">
         <ItemGroup>
           <Item role="listitem" variant="outline" size="xs">

@@ -35,7 +35,7 @@ export interface SiteCall {
    * `RunForm`, which starts it, and for an operation.
    */
   method?: string;
-  /** `<RunForm workflow="…" />` from `sanoma/ui`, or a call on `api` from `sanoma/site`. */
+  /** `<RunForm workflow="…" />` or a call on `api`, from `sanoma/site`. */
   via: "RunForm" | "api";
   /** The file, relative to the config's root, with `/`: `sites/sales/routes/index.tsx`. */
   file: string;
@@ -75,10 +75,8 @@ export interface SiteEntry {
 
 /** Where a site's code is: its pages and its components. */
 const SITE_DIRS = ["routes", "components"];
-/** Where `api` and `defineSite` come from: `sanoma/site`, which re-exports the app's. */
+/** Where `api`, `RunForm` and `defineSite` come from: `sanoma/site`, which re-exports the app's. */
 const SITE_SOURCES: ReadonlySet<string> = new Set(["sanoma/site", "@sanoma-ai/app/site"]);
-/** Where `RunForm` comes from: `sanoma/ui`, which re-exports the app's. */
-const UI_SOURCES: ReadonlySet<string> = new Set(["sanoma/ui", "@sanoma-ai/app/ui"]);
 const KIND_NAMES = { workflow: "workflow", collection: "collection", op: "operation" } as const;
 /** What makes a route from its id, whose first argument is the id. */
 const ROUTE_MAKERS: ReadonlySet<string> = new Set(["createFileRoute", "createLazyFileRoute"]);
@@ -87,8 +85,8 @@ const ROUTE_MAKERS: ReadonlySet<string> = new Set(["createFileRoute", "createLaz
  * The sites under `root`: each folder of `sites/` with a `routes/` whose name is a URL segment,
  * by name (as `@sanoma-ai/app/build`'s `sitesOf` mounts them). Reads `routes/**` and
  * `components/**` (`.ts` and `.tsx`, less tests and declarations) of each with oxc, never running
- * them: each `<RunForm workflow="…" />` whose `RunForm` is imported from `sanoma/ui`, and
- * each use of `api` imported from `sanoma/site`, called or passed on (`queryFn: api.data.leads.list`):
+ * them: each `<RunForm workflow="…" />` and each use of `api`, both imported from `sanoma/site`,
+ * called or passed on (`queryFn: api.data.leads.list`):
  * `api.<name>` and `api.<name>.<method>` are a workflow, `api.data.<collection>.<op>` a collection,
  * and `api.<vendor>.<resource>.<op>` an operation. A name that is not written out (a variable, a
  * template with holes, a computed member) is skipped, as is a use through a namespace import or a
@@ -199,7 +197,7 @@ type Written = Omit<SiteCall, "target"> & { name: string };
 /** The uses in one file, in its order. */
 function usesIn({ program, at }: SourceFile, file: string): Written[] {
   const api = importedAs(program, SITE_SOURCES, "api");
-  const runForm = importedAs(program, UI_SOURCES, "RunForm");
+  const runForm = importedAs(program, SITE_SOURCES, "RunForm");
   if (!api.size && !runForm.size) return [];
   const found: Omit<Written, "page">[] = [];
   let page: string | undefined;

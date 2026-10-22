@@ -14,11 +14,11 @@ import type { PermissionsResponse, PermissionsRow } from "../api.ts";
 import {
   CardHeading,
   CodePanel,
-  loadCode,
+  CrumbHeader,
   Fact,
   Facts,
+  loadCode,
   Nothing,
-  PageHeader,
   pageTitle,
   ToneBadge,
 } from "../components/common.tsx";
@@ -79,7 +79,7 @@ function PermissionsPage() {
   };
   return (
     <>
-      <PageHeader />
+      <CrumbHeader />
       {!data.policy.defined ? (
         <Nothing title="This config has no policy">
           Every call is allowed. Write rules in <code>policies/*.cedar</code>, beside the config.

@@ -23,7 +23,7 @@ import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import { errorMessage } from "@sanoma-ai/workflows/shared";
 import { errorBodyOf, type ScenarioEntry, type StartRunRequest, type StartRunResponse } from "../api.ts";
-import { Notice, TipButton } from "../components/common.tsx";
+import { Notice, TipButton } from "../components/kit.tsx";
 import { useStartRun } from "../queries.ts";
 import {
   buildInput,

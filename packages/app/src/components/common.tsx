@@ -1,15 +1,12 @@
-import { useRender } from "@base-ui/react/use-render";
 import type { ApprovalState, Builtin, Effect, LedgerRecord, RecordedDecision } from "@sanoma-ai/workflows";
 import type { ResourceProblem } from "@sanoma-ai/workflows/describe";
 import { problemAt } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useMatches, useRouter } from "@tanstack/react-router";
-import { cva, type VariantProps } from "class-variance-authority";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle";
 import { ClockIcon } from "@phosphor-icons/react/dist/csr/Clock";
-import { InfoIcon } from "@phosphor-icons/react/dist/csr/Info";
 import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
 import { GitForkIcon } from "@phosphor-icons/react/dist/csr/GitFork";
 import { UserCheckIcon } from "@phosphor-icons/react/dist/csr/UserCheck";
@@ -21,7 +18,6 @@ import {
   type RefObject,
   Suspense,
   useEffect,
-  useId,
   useMemo,
   useRef,
   useState,
@@ -29,31 +25,33 @@ import {
 } from "react";
 import { Alert, AlertDescription, AlertTitle } from "#/components/ui/alert.tsx";
 import { Badge } from "#/components/ui/badge.tsx";
-import { Button, buttonVariants } from "#/components/ui/button.tsx";
+import { Button } from "#/components/ui/button.tsx";
 import { ButtonGroup } from "#/components/ui/button-group.tsx";
-import { Card, CardTitle } from "#/components/ui/card.tsx";
+import { Card } from "#/components/ui/card.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
-import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
 import { shortId } from "#/lib/apply-plan.ts";
 import { siteOf, useSites } from "#/lib/sites.ts";
 import { utcText } from "#/lib/time.ts";
 import { cn } from "#/lib/utils.ts";
-import { APPROVAL_TONE, DECISION_TONE, type Tone, TONE_FILL } from "#/lib/tone.ts";
+import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import type { OpEntry } from "@sanoma-ai/workflows/describe";
 import { approverLabel } from "@sanoma-ai/workflows/shared";
 import { configQuery, type SiteCaller } from "../queries.ts";
 import type { PanelSection } from "./app-sidebar.tsx";
 import type { CodeProps } from "./code.tsx";
 import type { GraphProps } from "./graph.tsx";
+import { ButtonLink, effectBadge, PageHeader, type PageHeaderProps, Region, Tip, ToneBadge } from "./kit.tsx";
 
-// Small pieces shared by the screens, composed from the shadcn components in ./ui.
+// Small pieces shared by the screens, composed from the shadcn components in ./ui: the kit's, which
+// `sanoma/ui` exports (./kit.tsx, re-exported so a screen imports both from here), then the app's
+// private ones, some of which read the app (its config, its router's crumbs and sites).
+export * from "./kit.tsx";
 
 declare module "@tanstack/react-router" {
   interface StaticDataRouteOption {
-    /** The page's name: its breadcrumb, its <h1> (PageHeader) and its <title> (pageTitle). */
+    /** The page's name: its breadcrumb, its <h1> (CrumbHeader) and its <title> (pageTitle). */
     crumb?: string;
     /** The page takes the page column's full width, not the reading width the root caps others at. */
     wide?: true;
@@ -113,46 +111,10 @@ export function ledgerTone(record: LedgerRecord): Tone {
   }
 }
 
-/** Badge colours by tone, over Badge's default variant. */
-export const toneBadge = cva("", {
-  variants: {
-    tone: {
-      ok: "bg-tone-ok text-tone-ok-foreground",
-      bad: "bg-tone-bad text-tone-bad-foreground",
-      waiting: "bg-tone-waiting text-tone-waiting-foreground",
-      active: "bg-tone-active text-tone-active-foreground",
-      idle: "bg-tone-idle text-tone-idle-foreground",
-      off: "bg-tone-off text-tone-off-foreground",
-    } satisfies Record<Tone, string>,
-  },
-});
-
-/** A badge in a tone's colours: what a status means, the same everywhere (the --tone-* tokens). */
-export function ToneBadge({
-  tone,
-  ...props
-}: Omit<ComponentProps<typeof Badge>, "className" | "variant"> & { tone: Tone }) {
-  return <Badge {...props} className={toneBadge({ tone })} />;
-}
-
 /** Marks a sandbox run: one seeded from the scenario named, calling fakes, not the vendors. */
 export function SandboxBadge({ name }: { name: string }) {
   return <ToneBadge tone="idle">sandbox · {name}</ToneBadge>;
 }
-
-/** Badge colours by operation effect, one each, the same everywhere (the --effect-* tokens). */
-export const effectBadge = cva("", {
-  variants: {
-    effect: {
-      read: "bg-effect-read text-effect-read-foreground",
-      write: "bg-effect-write text-effect-write-foreground",
-      publish: "bg-effect-publish text-effect-publish-foreground",
-      send: "bg-effect-send text-effect-send-foreground",
-      money: "bg-effect-money text-effect-money-foreground",
-      access: "bg-effect-access text-effect-access-foreground",
-    } satisfies Record<Effect, string>,
-  },
-});
 
 /**
  * A logo, 16 px unless `className` sizes it: `src`, and `dark` instead under the dark theme. Only
@@ -283,18 +245,6 @@ export function LinkItem({
 const CURRENT_LINK = "aria-[current=page]:bg-muted";
 
 /**
- * A card's title as a heading: an `<h2>` in CardTitle, whose type it inherits (Tailwind's preflight
- * leaves a heading's size and weight to its parent). CardTitle is a `<div>` with no `render`.
- */
-export function CardHeading({ className, children }: { className?: string; children: ReactNode }) {
-  return (
-    <CardTitle className={className}>
-      <h2>{children}</h2>
-    </CardTitle>
-  );
-}
-
-/**
  * Each built-in as a thing, where an operation shows its vendor's logo: an approval, a person who
  * decides; a sleep, a clock; `ctx.all`, calls that run in parallel.
  */
@@ -304,63 +254,8 @@ export const BUILTIN_ICON = {
   all: GitForkIcon,
 } satisfies Record<Builtin, PhosphorIcon>;
 
-/** A tone as a dot, where a badge would be too much. */
-export function StatusDot({ tone }: { tone: Tone }) {
-  return <span aria-hidden className={cn("size-2.5 shrink-0 rounded-full", TONE_FILL[tone])} />;
-}
-
 export function ApprovalStatusBadge({ status }: { status: ApprovalState["status"] }) {
   return <ToneBadge tone={APPROVAL_TONE[status]}>{status}</ToneBadge>;
-}
-
-/**
- * A tooltip on a control. Only on what takes focus (a button, a link, or a badge given
- * `tabIndex={0}` because its tooltip says something it does not), so a keyboard reaches it too.
- * Passive detail on many items, such as a time's exact value, is a native `title` instead.
- * Base UI's tooltip describes nothing, so the tip is also the trigger's `aria-describedby`
- * through a hidden copy; `describe={false}` when the trigger's name already says it.
- */
-export function Tip({
-  tip,
-  describe = true,
-  children,
-}: {
-  tip: ReactNode;
-  describe?: boolean;
-  children: ReactElement;
-}) {
-  const id = useId();
-  return (
-    <Tooltip>
-      <TooltipTrigger render={children} aria-describedby={describe ? id : undefined} />
-      {describe && (
-        <span id={id} hidden>
-          {tip}
-        </span>
-      )}
-      <TooltipContent>{tip}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-/**
- * An icon button with a tooltip: ghost and icon-sized unless props say otherwise, named `label`
- * (its `aria-label`; `tip` unless given) and showing `tip`, which describes it unless the name
- * already says it (`describe` overrides).
- */
-export function TipButton({
-  tip,
-  label = tip,
-  describe = !label.toLowerCase().includes(tip.toLowerCase()),
-  variant = "ghost",
-  size = "icon",
-  ...props
-}: { tip: string; label?: string; describe?: boolean } & Omit<ComponentProps<typeof Button>, "aria-label">) {
-  return (
-    <Tip tip={tip} describe={describe}>
-      <Button variant={variant} size={size} aria-label={label} {...props} />
-    </Tip>
-  );
 }
 
 /**
@@ -491,23 +386,6 @@ export function Segment({ children }: { children: ReactElement }) {
   );
 }
 
-/**
- * A link drawn as a Button: `children` is the `<Link>` or `<a>`, given Button's classes and slot.
- * Not Button with `render`: Base UI's Button makes what it renders `role="button"`, and this is
- * still a link.
- */
-export function ButtonLink({
-  variant,
-  size,
-  className,
-  children,
-}: VariantProps<typeof buttonVariants> & { className?: string; children: ReactElement }) {
-  return useRender({
-    render: children,
-    props: { "data-slot": "button", className: cn(buttonVariants({ variant, size }), className) },
-  });
-}
-
 /** A link off the app, in a new tab, which its icon says. */
 export function ExternalLink({ href, children }: { href: string; children: ReactNode }) {
   return (
@@ -526,35 +404,6 @@ export function Expandable({ label, value }: { label: string; value: unknown }) 
     <Disclosure label={label}>
       <Json value={value} />
     </Disclosure>
-  );
-}
-
-/** A callout: a fact about the page, or (`destructive`) something that went wrong. */
-export function Notice({
-  variant = "default",
-  children,
-}: {
-  variant?: "default" | "destructive";
-  children: ReactNode;
-}) {
-  return (
-    <Alert variant={variant}>
-      {variant === "destructive" ? <WarningCircleIcon aria-hidden="true" /> : <InfoIcon aria-hidden="true" />}
-      <AlertDescription>{children}</AlertDescription>
-    </Alert>
-  );
-}
-
-/** An empty state: nothing to show yet, and what would fill it. */
-export function Nothing({ title, children, action }: { title: string; children?: ReactNode; action?: ReactNode }) {
-  return (
-    <Empty className="border">
-      <EmptyHeader>
-        <EmptyTitle>{title}</EmptyTitle>
-        {children && <EmptyDescription>{children}</EmptyDescription>}
-      </EmptyHeader>
-      {action && <EmptyContent>{action}</EmptyContent>}
-    </Empty>
   );
 }
 
@@ -630,52 +479,15 @@ export const CodePanel = (props: CodeProps) => (
   </LazyPanel>
 );
 
-/**
- * A page's heading row: its <h1>, which is `title` or else its crumb, after `icon` when given,
- * whatever sits beside it, and the page's `action` at the far end.
- */
-export function PageHeader({
-  title,
-  icon,
-  children,
-  action,
-}: {
-  title?: string;
-  icon?: ReactNode;
-  children?: ReactNode;
-  action?: ReactNode;
-}) {
+/** An app screen's heading row: a `PageHeader` titled by the page's crumb. */
+export function CrumbHeader(props: Omit<PageHeaderProps, "title">) {
   const crumb = useCrumbs().at(-1)?.label;
-  return (
-    <header className="flex flex-wrap items-center gap-x-4 gap-y-2">
-      <h1 className="flex items-center gap-2 font-heading text-2xl font-semibold tracking-tight">
-        {icon}
-        {title ?? crumb}
-      </h1>
-      {children}
-      {action && <div className="ml-auto">{action}</div>}
-    </header>
-  );
-}
-
-/** A section's heading, under the page's. */
-export function SectionTitle({ children }: { children: ReactNode }) {
-  return <h2 className="font-heading text-lg font-semibold tracking-tight">{children}</h2>;
+  return <PageHeader {...props} title={crumb} />;
 }
 
 /** A heading inside a card's section. */
 export function SubsectionTitle({ children }: { children: ReactNode }) {
   return <h3 className="text-sm font-medium">{children}</h3>;
-}
-
-/** A titled region of a page: its <h2>, and what it holds. */
-export function Region({ title, children }: { title: ReactNode; children: ReactNode }) {
-  return (
-    <section className="flex flex-col gap-(--gap-section)">
-      <SectionTitle>{title}</SectionTitle>
-      {children}
-    </section>
-  );
 }
 
 /** A card's section: its heading, and what it holds. */
@@ -759,20 +571,6 @@ const CHEVRON = (
 /** What a section says when it has nothing to list. */
 export function None({ children = "None." }: { children?: ReactNode }) {
   return <p className="text-muted-foreground">{children}</p>;
-}
-
-/** Label and value pairs, as a description list of `Fact`s: labels in one column, values in the other. */
-export function Facts({ children }: { children: ReactNode }) {
-  return <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 compact:gap-y-0.5">{children}</dl>;
-}
-
-export function Fact({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <>
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="wrap-anywhere">{children}</dd>
-    </>
-  );
 }
 
 /** Who asked for an approval: "the policy (<its rules' ids>), holding <op>" or "the workflow". */

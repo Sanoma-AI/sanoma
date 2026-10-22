@@ -1,6 +1,6 @@
-import { Button, Fact, Facts, toast, useActor } from "sanoma/ui";
+import { Button, Fact, Facts, toast } from "sanoma/ui";
 import { createFileRoute } from "@tanstack/react-router";
-import { api } from "sanoma/site";
+import { api, useActor } from "sanoma/site";
 
 /** Who the visitor is, as the app says: `visitor:better-auth:<id>`, in `visitors`. */
 export const Route = createFileRoute("/sites/account/_member/")({ component: Account });

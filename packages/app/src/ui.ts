@@ -1,7 +1,8 @@
-// What a site imports for its UI, as `sanoma/ui`: the app's own components, so a site looks like
-// the app. An explicit list, nothing else of the app is public: the shadcn primitives the app is
-// built from, its shared pieces, two hooks and `RunForm`. Source, loaded only by Vite in a
-// company's build; browser code, nothing server-side (a server function is a fetch here).
+// What a site imports for its UI, as `sanoma/ui`: how a page looks, so a site looks like the app.
+// An explicit list, nothing else of the app is public: the shadcn primitives the app is built
+// from, the kit's own pieces (./components/kit.tsx), `toast` and `useDensity`. Presentational
+// only: nothing here reaches the running app (test/ui.test.ts); what talks to it is
+// `sanoma/site`'s. Source, loaded only by Vite in a company's build; browser code.
 
 export { Alert, AlertAction, AlertDescription, AlertTitle } from "./components/ui/alert.tsx";
 export {
@@ -140,8 +141,6 @@ export {
   Tip,
   ToneBadge,
   toneBadge,
-} from "./components/common.tsx";
+} from "./components/kit.tsx";
 export type { Tone } from "./lib/tone.ts";
-export { type ActorState, useActor } from "./actor.ts";
 export { useDensity } from "./components/density.tsx";
-export { RunForm } from "./form/run-form.tsx";

@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader } from "#/components/ui/card.tsx";
 import type { StartRunResponse } from "../api.ts";
-import { CardHeading, Notice } from "../components/common.tsx";
+import { CardHeading, Notice } from "../components/kit.tsx";
 import { runLink, useWorkflow } from "../queries.ts";
 import { StartForm } from "./start-form.tsx";
 import { WillAsk } from "./will-ask.tsx";
