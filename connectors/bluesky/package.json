@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-bluesky",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Bluesky (AT Protocol) operations for Sanoma workflows",
   "keywords": [
     "atproto",
@@ -64,7 +64,7 @@
     "zod": "^4.6.5"
   },
   "peerDependencies": {
-    "@sanoma-ai/workflows": "^0.4.1",
+    "@sanoma-ai/workflows": "^0.4.2",
     "zod": "^4"
   },
   "engines": {
