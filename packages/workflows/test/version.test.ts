@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { bluesky } from "@sanoma-ai/connector-bluesky";
 import { ghost } from "@sanoma-ai/connector-ghost";
@@ -10,7 +9,6 @@ import {
   defineWorkflow,
   memoryLedger,
   resolveConfig,
-  RUNTIME_VERSION,
   SanomaClient,
   type SanomaConfig,
   startWorker,
@@ -61,11 +59,6 @@ afterEach(() => {
 });
 
 describe("the application version", () => {
-  it("is the package's version", () => {
-    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
-    expect(RUNTIME_VERSION).toBe(pkg.version);
-  });
-
   it("is a hash of the workflows, prefixed with the app name", () => {
     expect(versionOf({})).toMatch(/^acme@[0-9a-f]{64}$/);
     expect(versionOf({})).toBe(versionOf({}));

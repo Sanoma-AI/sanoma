@@ -34,6 +34,18 @@ jobs:
         with:
           node-version: 24
       - run: pnpm install --frozen-lockfile
+      # A package that pins another exactly (`workspace:*`: `sanoma` pins the runtime, the bridge its
+      # binaries) ships that version, so it needs a new version whenever one it pins has one.
+      - name: Every package pinning a new version has a new version
+        run: |
+          manifests=$(pnpm -r ls --depth -1 --json | jq -r '.[] | select(.private | not) | "\(.path)/package.json"')
+          new=$(jq -r '"\(.name)@\(.version)"' $manifests | while read -r spec; do
+            [ -n "$(npm view "$spec" version 2>/dev/null)" ] || echo "${spec%@*}"
+          done)
+          stale=$(jq -rs --arg new "$new" '($new | split("\n")) as $new | .[] | select(.name | IN($new[]) | not) | .name as $pkg
+            | (.dependencies + .optionalDependencies) // {} | to_entries[] | select(.value == "workspace:*" and (.key | IN($new[])))
+            | "\($pkg) pins \(.key) exactly, which has a new version, so it needs one too"' $manifests)
+          [ -z "$stale" ] || { echo "$stale" | sed 's/^/::error::/'; exit 1; }
       # Packages already public are skipped without running prepack, so their dependents need this
       # build; the packages being staged rebuild in their prepack, which keeps the hand path safe.
       - run: pnpm build

@@ -78,11 +78,14 @@ export async function startCompany(
     rmSync(carried);
   }
 
+  const own = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
   const manifest = join(cwd, "package.json");
   const pkg = JSON.parse(readFileSync(manifest, "utf8")) as { name: string; dependencies: Record<string, string> };
   const name = packageName(basename(cwd));
   // npm refuses to install a package into one of the same name (`sanoma` in `sanoma/`).
   pkg.name = name in pkg.dependencies ? `${name}-company` : name;
+  // The template is this launcher's, so `sanoma` at its version; the rest (each versioned on its own) at `latest`.
+  pkg.dependencies.sanoma = `^${own.version}`;
   writeFileSync(manifest, `${JSON.stringify(pkg, null, 2)}\n`);
 
   const people = join(cwd, "resources", "people.ts");
