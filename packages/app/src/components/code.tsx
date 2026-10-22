@@ -8,10 +8,10 @@ import { useEffect, useRef } from "react";
 import { highlightedLines } from "#/lib/lines.ts";
 import { cn } from "#/lib/utils.ts";
 
-// A workflow's source, read-only, drawn with CodeMirror. It needs the DOM, so the pages load
-// this module only in the browser (CodePanel in common.tsx: React.lazy, once seen); the server
-// renders the source as plain text instead. Colours come from the --code-* tokens in style.css,
-// so `.dark` flips the view with the rest of the page.
+// A workflow's source (or a policy file's, plain), read-only, drawn with CodeMirror. It needs the
+// DOM, so the pages load this module only in the browser (CodePanel in common.tsx: React.lazy,
+// once seen); the server renders the source as plain text instead. Colours come from the
+// --code-* tokens in style.css, so `.dark` flips the view with the rest of the page.
 
 export interface CodeProps {
   source: string;
@@ -19,6 +19,8 @@ export interface CodeProps {
   highlight?: Span[];
   /** Called with the offset nearest a click: in the text, or the start of a clicked line number's line. */
   onSelect?: (offset: number) => void;
+  /** Without colours: a file in a language the app has no grammar for, such as Cedar. */
+  plain?: boolean;
   className?: string;
 }
 
@@ -58,16 +60,10 @@ const highlightStyle = HighlightStyle.define([
 ]);
 
 // Read-only for now: an editing switch becomes a prop then.
-const extensions = [
-  EditorView.editable.of(false),
-  lineNumbers(),
-  javascript({ typescript: true }),
-  syntaxHighlighting(highlightStyle),
-  theme,
-  marks.of([]),
-];
+const base = [EditorView.editable.of(false), lineNumbers(), theme, marks.of([])];
+const typescript = [...base, javascript({ typescript: true }), syntaxHighlighting(highlightStyle)];
 
-export default function Code({ source, highlight, onSelect, className }: CodeProps) {
+export default function Code({ source, highlight, onSelect, plain, className }: CodeProps) {
   const parent = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>(null);
   /** The first highlighted line the view was last scrolled to. */
@@ -75,6 +71,7 @@ export default function Code({ source, highlight, onSelect, className }: CodePro
 
   // A view per source: sources change rarely.
   useEffect(() => {
+    const extensions = plain ? base : typescript;
     const created = new EditorView({ parent: parent.current!, state: EditorState.create({ doc: source, extensions }) });
     view.current = created;
     return () => {
@@ -82,10 +79,10 @@ export default function Code({ source, highlight, onSelect, className }: CodePro
       view.current = null;
       scrolledTo.current = undefined;
     };
-  }, [source]);
+  }, [source, plain]);
 
-  // After the view: a new one has no marks, so `source` is a dependency here too. `highlight` is
-  // one by value (highlightKey), so a new array of the same spans changes nothing.
+  // After the view: a new one has no marks, so `source` and `plain` are dependencies here too.
+  // `highlight` is one by value (highlightKey), so a new array of the same spans changes nothing.
   const highlightKey = (highlight ?? []).map((span) => span.join(":")).join(",");
   useEffect(() => {
     const current = view.current!;
@@ -103,7 +100,7 @@ export default function Code({ source, highlight, onSelect, className }: CodePro
         ...(scroll ? [EditorView.scrollIntoView(doc.line(first).from, { y: "center" })] : []),
       ],
     });
-  }, [source, highlightKey]);
+  }, [source, plain, highlightKey]);
 
   // The nearest position: a line number gives its line's start, a click past a line's end or
   // below the last line the nearest line's.

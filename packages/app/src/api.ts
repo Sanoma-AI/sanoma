@@ -11,7 +11,7 @@ import type {
   Principal,
   RunSummary,
 } from "@sanoma-ai/workflows";
-import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
+import type { ConfigDescription, Span } from "@sanoma-ai/workflows/describe";
 import type { Check, Scenario } from "@sanoma-ai/workflows/scenario";
 import { EFFECTS, RUN_STATUSES } from "@sanoma-ai/workflows/shared";
 import { z } from "zod";
@@ -361,13 +361,18 @@ export interface PermissionsRow {
  * The Permissions page's grid (`getPermissions`): the policy, its columns (`null` for someone in
  * no group, then the declared groups and `agents`, sorted), and a row for each workflow's start,
  * with a row for each operation it uses (`ops`, in its order), and for each operation a person
- * may call directly, each with a cell per column.
+ * may call directly, each with a cell per column; then the policy's files, its source.
  */
 export interface PermissionsResponse {
   policy: ConfigDescription["policy"];
   groups: (string | null)[];
   workflows: (PermissionsRow & { ops: PermissionsRow[] })[];
   ops: PermissionsRow[];
+  /**
+   * Each `policies/**\/*.cedar` file by path, its text with `\n` line endings, and each policy in
+   * it (a rule's `id`) with its `span` in that text; none when the root has no policies.
+   */
+  files: { file: string; text: string; policies: { id: string; span: Span }[] }[];
 }
 
 /** The `body` of the error a server function fails with. */

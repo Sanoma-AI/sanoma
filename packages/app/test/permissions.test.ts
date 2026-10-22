@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,7 @@ import {
   defineConnector,
   defineWorkflow,
   loadPolicies,
+  readPolicyFiles,
   type Policy,
   resolveConfig,
   type SanomaConfig,
@@ -20,14 +21,17 @@ import { defineFake } from "@sanoma-ai/workflows/fake";
 import { executablePath, launch } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import people from "../../workflows/test/fixtures/people/sanoma.config.ts";
 import { ACTOR_COOKIE, ACTOR_KEY } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
+import { spanLines } from "../src/lib/lines.ts";
 import { permissions } from "../src/server/core.ts";
 
-// The Permissions page: its grid through the server core (`getPermissions`), the page as the
-// server renders it, and in Chrome the who-are-you picker, the groups under your name and a
-// cell's rule in its sheet. The page needs Postgres (`pnpm db:up`) and the built app; the test in
-// a browser needs Google Chrome, or `CHROME_PATH`, and skips without either.
+// The Permissions page: its grid and the policy files through the server core
+// (`getPermissions`), the page as the server renders it, and in Chrome the who-are-you picker,
+// the groups under your name, a cell's rule in its sheet and its lines in the code. The page
+// needs Postgres (`pnpm db:up`) and the built app; the test in a browser needs Google Chrome, or
+// `CHROME_PATH`, and skips without either.
 
 const appDir = fileURLToPath(new URL("..", import.meta.url));
 
@@ -92,7 +96,11 @@ const description = describeConfig(config);
 
 /** The grid under `policy`, as `getPermissions` answers it, `described` as the description says it. */
 const gridOf = (policy: Policy, described = description.policy) =>
-  permissions({ resolved: { ...resolved, policy }, description: { ...description, policy: described } });
+  permissions({
+    resolved: { ...resolved, policy },
+    description: { ...description, policy: described },
+    policyFiles: readPolicyFiles(root),
+  });
 
 describe("the Permissions grid", () => {
   const hold = {
@@ -162,6 +170,28 @@ describe("the Permissions grid", () => {
     ]);
   });
 
+  it("serves each policy file's text, with each policy's id and where it is, from the people fixture", () => {
+    const fixture = resolveConfig(people);
+    const filesOf = (policyFiles: { file: string; text: string }[]) =>
+      permissions({ resolved: { ...fixture }, description: describeConfig(people), policyFiles }).files;
+    const read = readPolicyFiles(fixture.root!);
+    const files = filesOf(read);
+    const file = "policies/refunds.cedar";
+    const text = readFileSync(
+      fileURLToPath(new URL(`../../workflows/test/fixtures/people/${file}`, import.meta.url)),
+      "utf8",
+    ).replaceAll("\r\n", "\n");
+    expect(files).toEqual([{ file, text, policies: [expect.anything(), expect.anything()] }]);
+    // Written with `\r\n`, served with `\n`, as the Code view counts offsets: the same answer.
+    expect(filesOf(read.map((f) => ({ ...f, text: f.text.replaceAll("\n", "\r\n") })))).toEqual(files);
+    // Each from its first annotation to its `;`: the file's comment is no policy's.
+    expect(files[0]!.policies.map(({ id, span }) => [id, spanLines(text, span)])).toEqual([
+      [`${file}#1`, [2, 6]],
+      ["no-agent-refunds", [8, 10]],
+    ]);
+    expect(text.slice(...files[0]!.policies[1]!.span)).toMatch(/^@id\("no-agent-refunds"\)[\s\S]*resource\);$/);
+  });
+
   it("is every cell allow with no policy", () => {
     const none = gridOf(allowAll, { defined: false });
     expect(none.policy.defined).toBe(false);
@@ -213,6 +243,10 @@ describe("the Permissions page", () => {
       'aria-label="hold · group finance: the rule for shop.refunds.create in refund for someone in agents"',
     );
     expect(html.match(/>allow</g)).toHaveLength(5);
+    // The policy file under the grid, titled by its path, its text plain until the code loads.
+    expect(html).toContain(">policies/refunds.cedar</h2>");
+    expect(html).toContain("forbid (principal, action == Sanoma::Action::&quot;workflow:refund&quot;, resource)");
+    expect(html).toContain("unless { principal in Sanoma::Group::&quot;finance&quot; };");
     // The Workflows page says the policy checks every call, at its version.
     const workflows = (await (await fetch(new URL("/workflows", app.url))).text()).replaceAll("<!-- -->", "");
     expect(workflows).toContain(
@@ -239,7 +273,10 @@ describe("the Permissions page", () => {
       await tab.click('[role="dialog"] button[type="submit"]');
       await tab.waitForFunction(`!document.querySelector("select#who-name")`);
       // Your groups under your name.
-      await tab.waitForSelector('[data-slot="sidebar-footer"] .sr-only::-p-text(finance)');
+      // By its text, not `::-p-text`, which matches the deepest element only: here a span inside.
+      await tab.waitForFunction(
+        `document.querySelector('[data-slot="sidebar-footer"] .sr-only')?.textContent.includes("finance")`,
+      );
 
       // The sheet's text, once it shows the rule.
       const sheet = async (rule: string) => {
@@ -264,6 +301,13 @@ describe("the Permissions page", () => {
       expect(await sheet("Agent refunds need finance")).toContain(
         "Holds shop.refunds.create in Refund for someone in agents.",
       );
+      // Show the rule: the sheet closes and the code marks the rule's lines, its annotations too.
+      await tab.click('[data-slot="sheet-content"] button::-p-text(Show the rule)');
+      await tab.waitForFunction(`!document.querySelector('[data-slot="sheet-content"]')`);
+      await tab.waitForSelector(".cm-hl-gutter");
+      expect(
+        await tab.evaluate(`[...document.querySelectorAll(".cm-hl-gutter")].map((marked) => marked.textContent)`),
+      ).toEqual(["10", "11", "12", "13"]);
 
       // The New run panel says what the policy will ask, for bo and not for ada, who is in finance.
       const newRun = async (who: string) => {

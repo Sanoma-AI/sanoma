@@ -12,6 +12,7 @@ import {
   invalidInput,
   isEnded,
   type LedgerRecord,
+  loadPolicies,
   type PreviewAnswer,
   Principal,
   type RunSummary,
@@ -383,15 +384,16 @@ const grids = new WeakMap<object, PermissionsResponse>();
  * (`{ id: "group:<name>", groups: [name] }`, an agent acting for `ACTS_FOR`), the input unknown
  * (`preview`), for the start of each of the config's own workflows, by name, each with the
  * operations it uses, in the order it declares them, then each operation a person may call
- * directly, by id. Nobody's own answer: the actor asking is not used.
+ * directly, by id. Nobody's own answer: the actor asking is not used. Then the policy's files
+ * as the app read them when it started (`sourcesOf`).
  */
-export function permissions(app: Pick<AppContext, "resolved" | "description">): PermissionsResponse {
+export function permissions(app: Pick<AppContext, "resolved" | "description" | "policyFiles">): PermissionsResponse {
   let grid = grids.get(app.resolved);
   if (!grid) grids.set(app.resolved, (grid = gridOf(app)));
   return grid;
 }
 
-function gridOf(app: Pick<AppContext, "resolved" | "description">): PermissionsResponse {
+function gridOf(app: Pick<AppContext, "resolved" | "description" | "policyFiles">): PermissionsResponse {
   const { description } = app;
   const groups = [null, ...groupNamesOf(description.resources)];
   const opsById = new Map(description.ops.map((op) => [op.id, op]));
@@ -424,7 +426,31 @@ function gridOf(app: Pick<AppContext, "resolved" | "description">): PermissionsR
       return { ...start!, id: name, ...(title !== undefined && { title }), ops: called };
     }),
     ops: rows.slice(at),
+    files: sourcesOf(app.policyFiles ?? []),
   };
+}
+
+/**
+ * The policy files, each with `\n` line endings, as the Code view counts offsets, and the span
+ * of each of its policies (`loadPolicies`) in that text.
+ */
+function sourcesOf(read: { file: string; text: string }[]): PermissionsResponse["files"] {
+  const files = read.map(({ file, text }) => ({ file, text: text.replaceAll("\r\n", "\n") }));
+  const { policies } = loadPolicies(files);
+  return files.map(({ file, text }) => {
+    // Where each line starts: a policy's line and column, from 1, back to an offset.
+    const starts = [0, ...[...text.matchAll(/\n/g)].map((m) => m.index + 1)];
+    return {
+      file,
+      text,
+      policies: policies
+        .filter((p) => p.file === file)
+        .map(({ id, line, column, text: policy }) => {
+          const start = starts[line - 1]! + column - 1;
+          return { id, span: [start, start + policy.length] as const };
+        }),
+    };
+  });
 }
 
 /** Each vendor's credential statuses now, from the app's environment and the stored credentials. */
