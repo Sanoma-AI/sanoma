@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/dev",
-  "version": "0.4.2",
+  "version": "0.1.0",
   "description": "Link a Sanoma repo to a sanoma checkout, unlink it, and update it to the latest release: the kit for developing sanoma",
   "keywords": [
     "cli",
