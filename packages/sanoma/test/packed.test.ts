@@ -103,7 +103,7 @@ describe("sanoma from packed tarballs: the dev server", () => {
     const html = (await site.text()).replaceAll("<!-- -->", "");
     expect(html).toContain("The hello site");
     // RunForm, from sanoma/ui as the tarball ships it.
-    expect(html).toContain("Start run");
+    expect(html).toContain("Starts a live run of hello.");
     expect(html).toContain("Back to the hello site");
     // The fixture's content/, read and rendered by marked and yaml as installed from the tarballs.
     const post = (await (await fetch(`${url}/sites/hello/post`)).text()).replaceAll("<!-- -->", "");

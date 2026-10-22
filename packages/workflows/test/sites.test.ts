@@ -137,7 +137,7 @@ describe("readSites", () => {
         'import { defineSite } from "sanoma/site";\n\nexport default defineSite({ title: "Front desk" });\n',
       "sites/desk/routes/index.tsx": page(
         "/sites/desk/",
-        'import { RunForm } from "@sanoma-ai/app/ui";\nimport { api as sanoma } from "@sanoma-ai/app/site";',
+        'import { RunForm } from "sanoma/ui";\nimport { api as sanoma } from "@sanoma-ai/app/site";',
         [
           "void sanoma.outboundNext({});",
           "void sanoma.acme.customer.get({ id: '1' });",
