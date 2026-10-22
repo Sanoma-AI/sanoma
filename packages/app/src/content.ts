@@ -49,9 +49,9 @@ const kinds = async () => (await import("virtual:sanoma/content")).default;
 export const content = new Proxy(
   {},
   {
-    // Never a thenable, so `content` can be returned from an async function as itself.
+    // A kind is an object, never a function, so `content` is no thenable even with a `content/then/`.
     get: (_, kind): ContentKind<unknown> | undefined =>
-      typeof kind !== "string" || kind === "then"
+      typeof kind !== "string"
         ? undefined
         : {
             list: async () => ((await kinds())[kind] ?? []).map(({ slug, data }) => ({ slug, data })),

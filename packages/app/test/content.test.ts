@@ -79,7 +79,7 @@ describe("readContent", () => {
     expect(readContent(repo, { drafts: false }).kinds.posts!.map((p) => p.slug)).toEqual(["zapier"]);
   });
 
-  it("reads a file with no front matter as {}, and ignores subfolders and other files", () => {
+  it("reads a file with no front matter as {}, and ignores subfolders, dotfiles and other files", () => {
     const repo = tree("plain", {
       "content/notes/plain.md": "# Just Markdown\n",
       "content/notes/empty.md": "---\n---\nNothing above.\n",
@@ -87,10 +87,15 @@ describe("readContent", () => {
       "content/notes/image.png": "",
       "content/notes/nested/deep.md": "---\ntitle: Deep\n---\n",
       "content/README.md": "Not a kind.\n",
+      "content/.obsidian/workspace.md": "An editor's.\n",
+      "content/notes/.draft.md": "A dotfile.\n",
+      // A byte order mark, as some editors save one.
+      "content/notes/bom.md": "\uFEFF---\ntitle: Marked\n---\nAfter a BOM.\n",
     });
     const { kinds, problems } = readContent(repo, { drafts: false });
     expect(problems).toEqual([]);
     expect(kinds.notes!.map(({ slug, data, html }) => ({ slug, data, html }))).toEqual([
+      { slug: "bom", data: { title: "Marked" }, html: "<p>After a BOM.</p>\n" },
       { slug: "empty", data: {}, html: "<p>Nothing above.</p>\n" },
       { slug: "plain", data: {}, html: "<h1>Just Markdown</h1>\n" },
     ]);
@@ -105,6 +110,7 @@ describe("readContent", () => {
       "content/posts/good.md": "---\ntitle: Good\n---\n",
       "content/posts/bad.md": "---\ntitle: ok\ndescription: [unclosed\n---\nBody.\n",
       "content/posts/list.md": "---\n- a\n- b\n---\n",
+      "content/posts/open.md": "---\ntitle: Never closed\n\nBody.\n",
       "content/posts/Not_A_Slug.md": "---\ntitle: X\n---\n",
       "content/Blog/post.md": "---\ntitle: X\n---\n",
     });
@@ -130,6 +136,7 @@ describe("readContent", () => {
         message: "front matter: Flow sequence in block collection must be sufficiently indented and end with a ]",
       },
       { file: "content/posts/list.md", line: 2, column: 1, message: "front matter is a mapping of names to values" },
+      { file: "content/posts/open.md", line: 1, column: 1, message: "front matter: no closing `---` line" },
     ]);
   });
 });

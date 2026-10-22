@@ -28,12 +28,15 @@ const SEGMENT = "(lowercase letters, digits and dashes)";
 /** The front matter: an opening `---` line through the next `---` line; group 1 is the YAML between. */
 const FRONT_MATTER = /^---\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
 
+/** An opening `---` line, with or without the rest. */
+const OPENING = /^---[ \t]*\r?\n/;
+
 /**
  * The repo's content: each folder directly under `content/` whose name is a URL segment is a kind,
  * and each `*.md` directly in it an entry, its slug the file's name (a URL segment too), its
  * `data` the front matter (`{}` without one), its `html` the body rendered (GFM; raw HTML kept, as
- * content is reviewed as code is). Subfolders and other files are left alone. A file whose
- * front matter is not a YAML mapping is left out, with a problem at the YAML's error. Without
+ * content is reviewed as code is). Subfolders, other files and dot-folders are left alone. A file
+ * whose front matter is not closed or not a YAML mapping is left out, with a problem at its line. Without
  * `drafts`, an entry whose `draft` is `true` is left out. Entries are sorted by slug.
  */
 export function readContent(
@@ -58,8 +61,13 @@ export function readContent(
         problem(file, `a content file's name is a URL segment ${SEGMENT}`);
         continue;
       }
-      const text = readFileSync(join(root, kind, name), "utf8");
+      // A byte order mark, as some editors write one, is not the file's text.
+      const text = readFileSync(join(root, kind, name), "utf8").replace(/^\uFEFF/, "");
       const front = FRONT_MATTER.exec(text);
+      if (!front && OPENING.test(text)) {
+        problem(file, "front matter: no closing `---` line");
+        continue;
+      }
       const body = front ? text.slice(front[0].length) : text;
       const lineCounter = new LineCounter();
       const doc = parseDocument(front?.[1] ?? "", { lineCounter, prettyErrors: false });
@@ -83,11 +91,11 @@ export function readContent(
   return { kinds, problems };
 }
 
-/** The names of `dir`'s entries that `keep` keeps, sorted; none when it does not exist. */
+/** The names of `dir`'s entries that `keep` keeps, dotfiles aside (an editor's `.obsidian/`), sorted; none when it does not exist. */
 function folder(dir: string, keep: (entry: Dirent) => boolean): string[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir, { withFileTypes: true })
-    .filter(keep)
+    .filter((entry) => !entry.name.startsWith(".") && keep(entry))
     .map((entry) => entry.name)
     .toSorted();
 }

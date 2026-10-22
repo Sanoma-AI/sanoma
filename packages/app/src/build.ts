@@ -323,7 +323,8 @@ function contentPlugin(repo?: string): Plugin {
       if (repo === undefined) return;
       const dir = join(repo, "content") + sep;
       const refresh = (file: string) => {
-        if (!file.startsWith(dir)) return;
+        // A Markdown file: not an editor's swap file, nor an image beside a post.
+        if (!file.startsWith(dir) || !file.endsWith(".md")) return;
         writeContentTypes(repo);
         for (const env of Object.values(server.environments)) {
           for (const mod of env.moduleGraph.getModulesByFile(id) ?? []) void env.reloadModule(mod);
