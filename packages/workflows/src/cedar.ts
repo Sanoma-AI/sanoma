@@ -350,7 +350,12 @@ export function cedarPolicy(
     // Refused, never held: a visitor cannot ask anyone for what no policy lets it do.
     if (atStart && isVisitor(principal)) {
       const permitted = hasPermits ? ask(permitsSet) : undefined;
-      if (permitted?.type !== "success" || permitted.response.decision !== "allow") return deny(VISITOR_DENIED);
+      // A request the schema refuses is told below, as anyone's; a permit that fails, by its id.
+      if (permitted?.type !== "failure" && permitted?.response.decision !== "allow") {
+        const failed = permitted?.response.diagnostics.errors[0];
+        if (failed) return deny(`${failed.policyId} failed: ${messageOf(failed.error)}`, [failed.policyId]);
+        return deny(VISITOR_DENIED);
+      }
     }
     const answer = ask(set);
     // A request the schema refuses (an input Cedar cannot hold) is denied, not an error of the call.
@@ -401,8 +406,13 @@ export function cedarPolicy(
         if (answer.type === "failure") throw new Error(answer.errors.map(messageOf).join("; "));
         return answer.response;
       };
-      if (!inRun && isVisitor(principal) && (!hasPermits || partial(permits).decision === "deny")) {
-        return { answer: "deny" };
+      if (!inRun && isVisitor(principal)) {
+        const gate = hasPermits ? partial(permits) : undefined;
+        if (gate?.decision !== "allow") {
+          // A permit the input decides: the answer depends on it, whatever the rest says.
+          const open = policies.find((p) => gate?.nontrivialResiduals.includes(p.id));
+          return open ? { answer: "depends", rule: ruleOf(open) } : { answer: "deny" };
+        }
       }
       const { decision, mustBeDetermining, nontrivialResiduals, residuals } = partial(staticPolicies);
       if (decision === "allow") return { answer: "allow" };

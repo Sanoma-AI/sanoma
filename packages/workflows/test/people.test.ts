@@ -197,8 +197,8 @@ describe("visitors and anonymous", () => {
     expect(() => admit({ id: visitor.id }, read, true)).toThrow("is not declared");
     expect(() => admit({ id: "anonymous" }, { people: [], problems: [] }, true)).toThrow("is not declared");
     // An id of another form is nobody's, and no visitor is made with one.
-    expect(() => admit({ id: "visitor:Auth0:u1" }, read)).toThrow("is not declared");
-    expect(() => visitorPrincipal("Auth0", "u1")).toThrow("is not a visitor's id");
+    expect(() => admit({ id: "visitor:auth0" }, read)).toThrow("is not declared");
+    expect(() => visitorPrincipal("auth 0", "u1")).toThrow("is not a visitor's id");
     expect(() => visitorPrincipal("auth0", "two words")).toThrow("is not a visitor's id");
   });
 

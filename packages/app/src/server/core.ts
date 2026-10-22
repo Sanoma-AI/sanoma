@@ -400,7 +400,7 @@ const grids = new WeakMap<object, PermissionsResponse>();
  * The Permissions page's grid (`getPermissions`): for someone in no group, then for each group,
  * the declared ones, `agents` and `visitors`, then for `anonymous`, what the policy would answer
  * someone in it alone (`{ id: "group:<name>", groups: [name] }`, an agent acting for `ACTS_FOR`, a
- * visitor `GRID_VISITOR`, `anonymous` itself), the input unknown
+ * visitor as a login would make one, `anonymous` itself), the input unknown
  * (`preview`), for the start of each of the config's own workflows, by name, each with the
  * operations it uses, in the order it declares them, then each operation a person may call
  * directly, by id. Nobody's own answer: the actor asking is not used. Then the policy's files

@@ -555,6 +555,25 @@ permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"
     ).toEqual(["allow", "deny", "deny", "depends", "depends", "deny", "depends"]);
   });
 
+  it("previews a visitor's start as depending on the input when its permit does", () => {
+    const { policies } = loadPolicies([
+      ...FILES,
+      {
+        file: "policies/visitors.cedar",
+        text: 'permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"workflow:refund", resource)\nwhen { context.input.amount < 100 };\n',
+      },
+    ]);
+    const small = cedarPolicy(resolved, policies, people);
+    expect(small.preview([ask("anonymous", "workflow:refund")])).toEqual([
+      { answer: "depends", rule: { id: "policies/visitors.cedar#1", file: "policies/visitors.cedar" } },
+    ]);
+    expect(small.start(ANONYMOUS_PRINCIPAL, "refund", { amount: 50 })).toMatchObject({ kind: "allow" });
+    expect(small.start(ANONYMOUS_PRINCIPAL, "refund", { amount: 500 })).toEqual({
+      kind: "deny",
+      reason: VISITOR_DENIED,
+    });
+  });
+
   it("is versioned by the permits too", () => {
     expect(permitting.version).not.toBe(policy.version);
     const other = loadPolicies([

@@ -265,7 +265,7 @@ export class SanomaClient {
   /**
    * The policy's answer to starting a run of `workflow` as `startedBy` (`decideStart`), for a
    * workflow of the config's own: a deny throws `policy_denied`; a hold is what the run waits on
-   * before its body. A run `runId` names already is returned as it is, whatever the policy says now.
+   * before its body. A run `runId` names already is returned as it is, whatever the policy says now, but to a visitor.
    * A visitor (`isVisitor`) starts no built-in but `call`, whose calls the policy decides as direct ones.
    */
   private async startHold(
@@ -284,7 +284,8 @@ export class SanomaClient {
       );
     }
     if (builtIn || (policy === allowAll && !visitor)) return undefined;
-    if (runId !== undefined && (await this.row(runId))) return undefined;
+    // A visitor's start is decided whatever run its id names: a visitor shares an id (`anonymous`) with others.
+    if (!visitor && runId !== undefined && (await this.row(runId))) return undefined;
     const decision = decideStart(policy, workflow, input, startedBy);
     if (decision.kind === "allow") return undefined;
     if (decision.kind === "deny") throw new PolicyDeniedError(`${WORKFLOW_ACTION}${workflow}`, decision.reason);

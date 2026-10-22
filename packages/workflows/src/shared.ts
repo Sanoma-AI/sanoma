@@ -220,8 +220,8 @@ export const VISITORS = "visitors";
 /** The principal a public page runs as when nobody is signed in: no groups. */
 export const ANONYMOUS = "anonymous";
 
-/** `visitor:<login connector>:<provider subject>`: the only form a visitor's id takes. */
-const VISITOR_ID = /^visitor:[a-z][a-z0-9-]*:\S+$/;
+/** `visitor:<login connector's vendor>:<provider subject>`: the only form a visitor's id takes. */
+const VISITOR_ID = /^visitor:[^\s:]+:\S+$/;
 
 /**
  * True for `anonymous` and for a visitor's id: a principal no data file declares and the staff
@@ -293,7 +293,8 @@ export function principalOf(id: string, resources: readonly PeopleResource[]): P
  * declared person's or agent's id; undefined when it is neither, and for `visitors`, who decide nothing.
  */
 export function approverOf(name: string, resources: readonly PeopleResource[]): Approver | undefined {
-  if (name !== VISITORS && groupNamesOf(resources).includes(name)) return { group: name };
+  if (name === VISITORS) return undefined;
+  if (groupNamesOf(resources).includes(name)) return { group: name };
   return principalOf(name, resources) && name;
 }
 
