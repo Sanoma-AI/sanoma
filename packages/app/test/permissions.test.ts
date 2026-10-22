@@ -109,15 +109,21 @@ describe("the Permissions grid", () => {
     approver: { group: "finance" },
   };
 
+  // A visitor, signed in or not, whom no permit lets start a run or call directly.
+  const visitorDenied = [{ answer: "deny" }, { answer: "deny" }];
+
   it("asks the policy for someone in no group and in each group, the start of each workflow, the operations it uses and each direct operation", () => {
     const grid = gridOf(cedar);
-    expect(grid).toMatchObject({ policy: { defined: true }, groups: [null, "agents", "finance"] });
+    expect(grid).toMatchObject({
+      policy: { defined: true },
+      groups: [null, "agents", "finance", "visitors", "anonymous"],
+    });
     expect(grid.workflows).toEqual([
       {
         id: "refund",
         title: "Refund",
         // Someone in finance is not held: the hold's own approver.
-        cells: [hold, hold, { answer: "allow" }],
+        cells: [hold, hold, { answer: "allow" }, ...visitorDenied],
         // The money operation, called only in a run, under the workflow that uses it.
         ops: [
           {
@@ -129,6 +135,9 @@ describe("the Permissions grid", () => {
                 rule: { id: "agent-refunds", file: "policies/refunds.cedar", title: "Agent refunds need finance" },
                 approver: { group: "finance" },
               },
+              { answer: "allow" },
+              // In a run a visitor was let start, its calls are anyone's.
+              { answer: "allow" },
               { answer: "allow" },
             ],
           },
@@ -146,6 +155,7 @@ describe("the Permissions grid", () => {
             rule: { id: "no-agent-reads", file: "policies/refunds.cedar", reason: "Agents read no refunds" },
           },
           { answer: "allow" },
+          ...visitorDenied,
         ],
       },
     ]);
@@ -167,6 +177,7 @@ describe("the Permissions grid", () => {
       { answer: "deny", rule },
       { answer: "hold", rule, approver: "whom it acts for" },
       { answer: "deny", rule },
+      ...visitorDenied,
     ]);
   });
 
@@ -181,7 +192,10 @@ describe("the Permissions grid", () => {
       fileURLToPath(new URL(`../../workflows/test/fixtures/people/${file}`, import.meta.url)),
       "utf8",
     ).replaceAll("\r\n", "\n");
-    expect(files).toEqual([{ file, text, policies: [expect.anything(), expect.anything()] }]);
+    expect(files).toEqual([
+      { file, text, policies: [expect.anything(), expect.anything()] },
+      expect.objectContaining({ file: "policies/visitors.cedar" }),
+    ]);
     // Written with `\r\n`, served with `\n`, as the Code view counts offsets: the same answer.
     expect(filesOf(read.map((f) => ({ ...f, text: f.text.replaceAll("\n", "\r\n") })))).toEqual(files);
     // Each from its first annotation to its `;`: the file's comment is no policy's.
@@ -192,12 +206,15 @@ describe("the Permissions grid", () => {
     expect(text.slice(...files[0]!.policies[1]!.span)).toMatch(/^@id\("no-agent-refunds"\)[\s\S]*resource\);$/);
   });
 
-  it("is every cell allow with no policy", () => {
+  it("is every cell allow with no policy, but a visitor's start and direct call", () => {
     const none = gridOf(allowAll, { defined: false });
     expect(none.policy.defined).toBe(false);
-    expect(
-      [...none.workflows, ...none.workflows.flatMap((w) => w.ops), ...none.ops].flatMap((row) => row.cells),
-    ).toEqual(Array.from({ length: 9 }, () => ({ answer: "allow" })));
+    const allowed = Array.from({ length: 3 }, () => ({ answer: "allow" }));
+    expect([...none.workflows, ...none.workflows.flatMap((w) => w.ops), ...none.ops].map((row) => row.cells)).toEqual([
+      [...allowed, ...visitorDenied],
+      [...allowed, { answer: "allow" }, { answer: "allow" }],
+      [...allowed, ...visitorDenied],
+    ]);
   });
 });
 
@@ -236,13 +253,15 @@ describe("the Permissions page", () => {
       "No group",
       "agents",
       "finance",
+      "visitors",
+      "Anonymous",
     ]);
     expect(html).toContain('aria-label="hold · group finance: the rule for refund for someone in no group"');
     expect(html).toContain('aria-label="deny: the rule for shop.refunds.list for someone in agents"');
     expect(html).toContain(
       'aria-label="hold · group finance: the rule for shop.refunds.create in refund for someone in agents"',
     );
-    expect(html.match(/>allow</g)).toHaveLength(5);
+    expect(html.match(/>allow</g)).toHaveLength(7);
     // The policy file under the grid, titled by its path, its text plain until the code loads.
     expect(html).toContain(">policies/refunds.cedar</h2>");
     expect(html).toContain("forbid (principal, action == Sanoma::Action::&quot;workflow:refund&quot;, resource)");

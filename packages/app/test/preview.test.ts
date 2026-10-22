@@ -80,10 +80,10 @@ async function lineFor(policy: Policy, who: string) {
 }
 
 describe("the will-ask line", () => {
-  it("asks the start and each operation the outline calls, with its effect", () => {
+  it("asks the start and each operation the outline calls, with its effect, in the run", () => {
     expect(requests).toEqual([
       { action: { id: "workflow:refund" } },
-      { action: { id: "shop.refunds.create", effect: "money" } },
+      { action: { id: "shop.refunds.create", effect: "money" }, inRun: true },
     ]);
   });
 

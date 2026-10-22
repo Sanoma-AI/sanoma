@@ -1472,6 +1472,14 @@ describe("people in a scenario: who is acting, held for a group, denied with a r
     expect(denied!.steps[2]).toMatchObject({ op: "shop.refunds.create", decision: "denied" });
   });
 
+  it("reads a visitor, and anonymous, as who starts the run", async () => {
+    const text = readFileSync(new URL("./fixtures/people/scenarios/refund.feature", import.meta.url), "utf8");
+    const [, , visitor, anonymous] = await parsePeople(text);
+    expect(visitor).toMatchObject({ startedBy: "visitor:scenario:visitor" });
+    expect(visitor!.steps[0]).toEqual({ text: "a visitor is acting", kind: "given" });
+    expect(anonymous).toMatchObject({ startedBy: "anonymous" });
+  });
+
   it("refuses someone, or a group, the data files do not declare, and a second actor", async () => {
     const thrownBy = async (steps: string) => {
       try {
@@ -1485,7 +1493,7 @@ describe("people in a scenario: who is acting, held for a group, denied with a r
       "people.feature:3: cy is not a declared person or agent; resources/ declares ada, bo, refund-bot, scenarios, host-check, schedule",
     );
     expect(await thrownBy('    When refund runs\n    Then shop.refunds.create was held for group "sales"\n')).toBe(
-      'people.feature:4: no group "sales"; resources/ declares agents, finance',
+      'people.feature:4: no group "sales"; resources/ declares agents, finance, visitors',
     );
     expect(await thrownBy("    Given ada is acting\n    And bo is acting\n    When refund runs\n")).toBe(
       "people.feature:4: ada is acting already: a run has one actor",

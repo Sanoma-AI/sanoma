@@ -7,13 +7,13 @@ import type { PreviewQuery } from "../api.ts";
 // and every operation it may call, before the run starts (`previewFn`). The Permissions grid
 // (`gridOf`) asks the same for each group, a row per request.
 
-/** What to ask ahead of a run of `workflow`: its start, then each operation it may call, with its effect. */
+/** What to ask ahead of a run of `workflow`: its start, then each operation it may call, with its effect, in the run (`inRun`). */
 export function previewRequests(workflow: WorkflowEntry, ops: ReadonlyMap<string, OpEntry>): PreviewQuery {
   return [
     { action: { id: `${WORKFLOW_ACTION}${workflow.name}` } },
     ...workflow.ops.map((id) => {
       const effect = ops.get(id)?.effect;
-      return { action: effect === undefined ? { id } : { id, effect } };
+      return { action: effect === undefined ? { id } : { id, effect }, inRun: true };
     }),
   ];
 }

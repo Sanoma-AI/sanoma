@@ -146,10 +146,10 @@ const signedIn = (login: string) => {
 };
 
 describe("whoIsStarting", () => {
-  it("takes the GitHub login as the id, unless the template's people or the runtime's agents have it", async () => {
+  it("takes the GitHub login as the id, unless the template's people, the runtime's agents or the visitors have it", async () => {
     signedIn("ada-ortiz");
     expect(await whoIsStarting()).toMatchObject({ id: "ada-ortiz", github: "ada-ortiz" });
-    for (const taken of ["reviewer", "editor", "admin", "agents", "scenarios"]) {
+    for (const taken of ["reviewer", "editor", "admin", "agents", "scenarios", "visitors", "anonymous"]) {
       signedIn(taken);
       expect(await whoIsStarting()).toMatchObject({ id: "founder", github: taken });
     }

@@ -1,5 +1,6 @@
 import { type ApprovalState, type Approver, type Principal, sameApprover } from "./define.ts";
 import type { Effect, Op } from "./op.ts";
+import { CALL_WORKFLOW, isVisitor } from "./shared.ts";
 
 /** An operation as a policy sees it: plain data, without its schemas. */
 export type PolicyOp = Pick<Op, "id" | "vendor" | "resource" | "name" | "effect">;
@@ -96,6 +97,8 @@ export interface PreviewRequest {
   principal: Principal;
   action: { id: string; effect?: Effect };
   resource?: string;
+  /** Asked of an operation inside a run the principal started, not of a direct call: a visitor's permit is at the start. */
+  inRun?: boolean;
 }
 
 /**
@@ -108,20 +111,36 @@ export interface PreviewAnswer {
   approver?: Approver;
 }
 
-/** A policy that decides every call and start as `decide` does, and previews each as `answer`. */
-const decidingAll = (decide: () => Decision, answer: "allow" | "deny"): Policy =>
-  Object.freeze(
-    Object.assign(decide, {
-      start: decide,
-      preview: (requests: readonly PreviewRequest[]): PreviewAnswer[] => requests.map(() => ({ answer })),
-    }),
-  );
+/** Why a visitor is refused what no policy permits it: the runtime's own permit leaves visitors out. */
+export const VISITOR_DENIED = "A visitor may do nothing until a policy permits it";
 
-/** Allows every operation call and run start: the policy of a repo with no `policies/**\/*.cedar`. */
-export const allowAll: Policy = decidingAll(() => allow(), "allow");
+/**
+ * Allows every operation call and run start but a visitor's (`isVisitor`): the policy of a repo
+ * with no `policies/**\/*.cedar`. A visitor is refused a start and a direct call (a call of the
+ * `call` workflow), as the runtime's permit refuses them, and allowed every call inside a run.
+ */
+export const allowAll: Policy = Object.freeze(
+  Object.assign(
+    (call: PolicyCall): Decision =>
+      isVisitor(call.actor) && call.run.workflow === CALL_WORKFLOW ? deny(VISITOR_DENIED) : allow(),
+    {
+      start: (actor: Principal): Decision => (isVisitor(actor) ? deny(VISITOR_DENIED) : allow()),
+      preview: (requests: readonly PreviewRequest[]): PreviewAnswer[] =>
+        requests.map(({ principal, inRun }) => ({ answer: isVisitor(principal) && !inRun ? "deny" : "allow" })),
+    },
+  ),
+);
 
 /** Refuses every operation call and run start, and previews each as a deny, saying `reason`. */
-export const denyAll = (reason: string): Policy => decidingAll(() => deny(reason), "deny");
+export const denyAll = (reason: string): Policy => {
+  const decide = () => deny(reason);
+  return Object.freeze(
+    Object.assign(decide, {
+      start: decide,
+      preview: (requests: readonly PreviewRequest[]): PreviewAnswer[] => requests.map(() => ({ answer: "deny" })),
+    }),
+  );
+};
 
 /**
  * True when an approval in the run was approved, covers the operation, and was addressed to

@@ -345,6 +345,7 @@ export const PreviewQuery = z
     z.object({
       action: z.object({ id: z.string().min(1), effect: z.enum(EFFECTS).optional() }),
       resource: z.string().min(1).optional(),
+      inRun: z.boolean().optional(),
     }),
   )
   .max(200) satisfies z.ZodType<Omit<PreviewRequest, "principal">[]>;
@@ -359,7 +360,7 @@ export interface PermissionsRow {
 
 /**
  * The Permissions page's grid (`getPermissions`): the policy, its columns (`null` for someone in
- * no group, then the declared groups and `agents`, sorted), and a row for each workflow's start,
+ * no group, then the declared groups, `agents` and `visitors`, sorted, then `anonymous`), and a row for each workflow's start,
  * with a row for each operation it uses (`ops`, in its order), and for each operation a person
  * may call directly, each with a cell per column; then the policy's files, its source.
  */

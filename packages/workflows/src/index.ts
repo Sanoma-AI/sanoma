@@ -91,6 +91,7 @@ export {
   type PreviewAnswer,
   type PreviewRequest,
   type RecordedDecision,
+  VISITOR_DENIED,
 } from "./policy.ts";
 export {
   cedarPolicy,
@@ -151,6 +152,8 @@ export { dbosClient } from "./db.ts";
 // Also at `@sanoma-ai/workflows/shared`, which a browser bundle can import.
 export {
   AGENTS,
+  ANONYMOUS,
+  ANONYMOUS_PRINCIPAL,
   approverLabel,
   approverOf,
   declaresPeople,
@@ -164,11 +167,14 @@ export {
   errorMessage,
   isEnded,
   isLoopback,
+  isVisitor,
   mayDecide,
   problemAt,
   problemLine,
   RUN_STATUSES,
   type RunStatus,
+  VISITORS,
+  visitorPrincipal,
 } from "./shared.ts";
 // describeConfig, with the outline and every problem lintWorkflow finds, lives at
 // `@sanoma-ai/workflows/describe`: what a UI renders from, apart from what runs. The worker reads

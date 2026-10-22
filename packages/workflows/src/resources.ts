@@ -19,12 +19,16 @@ import { Principal } from "./define.ts";
 import { NotAdmittedError } from "./errors.ts";
 import {
   AGENTS,
+  ANONYMOUS,
+  ANONYMOUS_PRINCIPAL,
   declaresPeople,
+  isVisitor,
   type PeopleResource,
   personOf,
   principalOf,
   problemLine,
   RUNTIME_AGENTS,
+  VISITORS,
 } from "./shared.ts";
 
 /** A resource a data file declares, as read from the file without running it. */
@@ -122,6 +126,13 @@ const filesStamp = (root: string) =>
     })
     .join("\n");
 
+/** The names no data file may give a group: what each is already. */
+const RESERVED_GROUPS: ReadonlyMap<string, string> = new Map([
+  [AGENTS, "the group every agent is in"],
+  [VISITORS, "the group every visitor is in"],
+  [ANONYMOUS, "who a public page runs as when nobody is signed in"],
+]);
+
 /**
  * The people, agents and groups the data files under `root` declare (`sanoma.person`, `.agent`,
  * `.group`), read without running them, as `principalOf` takes them, with what is wrong in their
@@ -140,22 +151,21 @@ export function readPeople(root: string | undefined): DeclaredPeople {
   const ids = new Map<string, DeclaredResource>();
   for (const r of people) {
     if (r.type === "group") {
-      if (r.name === AGENTS) {
-        own.push({
-          file: r.file,
-          message: `${r.id} is named "${AGENTS}", the group every agent is in: give it another name`,
-        });
-      }
+      const reserved = RESERVED_GROUPS.get(r.name);
+      if (reserved)
+        own.push({ file: r.file, message: `${r.id} is named "${r.name}", ${reserved}: give it another name` });
       continue;
     }
     const id = r.name;
     const other = ids.get(id);
-    if (other || RUNTIME_AGENTS.includes(id)) {
+    if (other || RUNTIME_AGENTS.includes(id) || isVisitor({ id })) {
       own.push({
         file: r.file,
         message: other
           ? `${r.id} has the id "${id}", which ${other.id} has: give each person and agent their own`
-          : `${r.id} has the id "${id}", one of the runtime's own agents': give it another`,
+          : isVisitor({ id })
+            ? `${r.id} has the id "${id}", a visitor's (\`anonymous\` or \`visitor:<login>:<subject>\`): give it another`
+            : `${r.id} has the id "${id}", one of the runtime's own agents': give it another`,
       });
     }
     ids.set(id, r);
@@ -169,8 +179,10 @@ export function readPeople(root: string | undefined): DeclaredPeople {
  * Who `asking` is admitted as, by the people the data files declare (`readPeople`): the declared
  * principal (`principalOf`) of the id it names, a person's or an agent's; for a sign-in
  * (`signIn`), of the person it matches (`personOf`: email, GitHub login, then id), never an agent.
- * While no person is declared, whoever names an id is taken as given. Throws `NotAdmittedError`
- * for anyone else, and for everyone while the people's files have problems.
+ * While no person is declared, whoever names an id is taken as given. A visitor's id (`isVisitor`)
+ * is taken whatever the files say, with the groups stamped here (`visitors`, or none for
+ * `anonymous`), never through a sign-in: the staff logins admit no visitor. Throws
+ * `NotAdmittedError` for anyone else, and for everyone while the people's files have problems.
  */
 export function admit(
   asking: { id?: string; email?: string; github?: string; groups?: string[]; onBehalfOf?: string },
@@ -178,6 +190,10 @@ export function admit(
   signIn = false,
 ): Principal {
   const who = asking.github ?? asking.id ?? asking.email ?? "This sign-in";
+  if (asking.id !== undefined && isVisitor({ id: asking.id })) {
+    if (signIn) throw new NotAdmittedError(who);
+    return asking.id === ANONYMOUS ? ANONYMOUS_PRINCIPAL : { id: asking.id, groups: [VISITORS] };
+  }
   if (problems.length) {
     // The runtime's own agents are declared by no file, so a broken one does not stop them (`check`'s scenarios).
     if (!signIn && asking.id !== undefined && RUNTIME_AGENTS.includes(asking.id)) {
