@@ -99,6 +99,8 @@ pnpm build          # compiles each package to dist/ for publishing
 
 Inside the repo, `@sanoma-ai/*` imports resolve to each package's `src/` (via `paths` in `tsconfig.json` and aliases in `vitest.config.ts`), so tests and typechecks need no build. Published packages ship the compiled `dist/`, not the sources (`@sanoma-ai/workflows` also ships `src/`, which its source maps point at).
 
+To dogfood a change from a Sanoma repo of your own before it is published, list [`@sanoma-ai/dev`](packages/dev/README.md) in that repo's devDependencies: `sanoma-dev link` links the repo to this checkout (`../sanoma` beside it by default) so its `pnpm dev` runs and rebuilds the checkout, `sanoma-dev unlink` undoes it before a commit, and `sanoma-dev update` moves the repo to the latest release.
+
 ## Release
 
 [`release.yml`](.github/workflows/release.yml) stages `sanoma` and the `@sanoma-ai/*` packages on npm with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (no npm token) and a maintainer releases them with one command. Each package has its own version, and a release ships only the packages whose version changed. To release:
