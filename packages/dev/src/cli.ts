@@ -21,7 +21,7 @@ const USAGE_EXIT = 2;
 
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** Runs pnpm in `cwd`, its output passed through; its exit code, or 1 when it could not start. */
+/** Runs pnpm in `cwd`, its output passed through; its exit code (1 for a signal). Throws when pnpm cannot start. */
 function pnpm(cwd: string, args: string[]): number {
   const { status, error } = spawnSync("pnpm", args, { cwd, stdio: "inherit" });
   if (error) throw new Error(`could not run pnpm: ${error.message}`);
@@ -72,14 +72,14 @@ const parse = (argv: string[]) =>
 function link(root: string, given: string | undefined): number {
   const checkout = given ?? resolve(root, "../sanoma");
   if (!isCheckout(checkout)) throw new UsageError(`${checkout} is not a sanoma checkout (no packages/sanoma)`);
-  if (!existsSync(join(checkout, "packages/sanoma/dist"))) {
-    console.log(`${checkout} has no build: installing and building it`);
+  const { found, missing } = linkSet(root, checkout);
+  if (missing.length) console.log(`not in ${checkout}, so not linked: ${missing.join(", ")}`);
+  if (!found.length) throw new UsageError("nothing to link: package.json declares no sanoma package the checkout has");
+  if (found.some((p) => !existsSync(join(p.dir, "dist")))) {
+    console.log(`${checkout} is not built: installing and building it`);
     mustPnpm(checkout, ["install", "--frozen-lockfile"]);
     mustPnpm(checkout, ["build"]);
   }
-  const { found, missing } = linkSet(root, checkout);
-  if (missing.length) console.log(`not in ${checkout}, so not linked: ${missing.join(", ")}`);
-  if (!found.length) throw new Error("nothing to link: package.json declares no sanoma package the checkout has");
   mustPnpm(root, ["link", ...found.map((p) => p.dir)]);
   console.log(`linked ${found.map((p) => p.name).join(", ")} from ${checkout}`);
   console.log("pnpm dev now runs the checkout in dev mode; sanoma-dev unlink before you commit");

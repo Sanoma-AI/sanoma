@@ -24,8 +24,9 @@ export interface LinkedPackage {
 /**
  * The packages dev mode builds: `node_modules/sanoma` and every package under
  * `node_modules/@sanoma-ai/` whose real path is outside any `node_modules` (the ones a `pnpm link`
- * points into a checkout), then each core package (`corePackages`) that resolves into the checkout
- * through them, such as `sanoma`'s own dependencies when `sanoma` alone is linked.
+ * points into a checkout), then, when there is one, each core package (`corePackages`) that
+ * resolves into the checkout through them, such as `sanoma`'s own dependencies when `sanoma` alone
+ * is linked. Nothing when nothing is linked, wherever an installed package's dependencies resolve.
  */
 export function linkedPackages(cwd: string): LinkedPackage[] {
   const modules = join(cwd, "node_modules");
@@ -40,6 +41,7 @@ export function linkedPackages(cwd: string): LinkedPackage[] {
     const dir = realpathSync(path);
     if (!installed(dir)) linked.push({ name, dir });
   }
+  if (!linked.length) return linked;
   for (const core of corePackages(cwd)) {
     if (!installed(core.dir) && !linked.some((p) => p.name === core.name)) linked.push(core);
   }

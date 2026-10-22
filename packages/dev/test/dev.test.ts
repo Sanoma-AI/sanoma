@@ -78,16 +78,23 @@ describe("declared and linkSet", () => {
 });
 
 describe("leftoverLinks", () => {
-  it("names each link: dependency and workspace line, and nothing in a clean repo", () => {
+  it("names each link: of a sanoma package in package.json and the workspace, not the repo's own links", () => {
     const { repo } = layout({ dependencies: { sanoma: "^0.4.2" } });
     write(join(repo, "pnpm-workspace.yaml"), "minimumReleaseAgeExclude:\n  - sanoma\n");
     expect(leftoverLinks(repo)).toEqual([]);
 
-    manifest(repo, { dependencies: { sanoma: "^0.4.2" }, devDependencies: { extra: "link:../sanoma/packages/extra" } });
-    write(join(repo, "pnpm-workspace.yaml"), "overrides:\n  sanoma: link:../sanoma/packages/sanoma\n");
+    manifest(repo, {
+      dependencies: { sanoma: "^0.4.2", mine: "link:./lib" },
+      devDependencies: { "@sanoma-ai/testing": "link:../sanoma/packages/testing" },
+    });
+    write(
+      join(repo, "pnpm-workspace.yaml"),
+      "overrides:\n  mine: link:./lib\n  sanoma: link:../sanoma/packages/sanoma\n  '@sanoma-ai/connector-ghost': link:../sanoma/connectors/ghost\n",
+    );
     expect(leftoverLinks(repo)).toEqual([
-      'package.json: "extra": "link:../sanoma/packages/extra"',
+      'package.json: "@sanoma-ai/testing": "link:../sanoma/packages/testing"',
       "pnpm-workspace.yaml: sanoma: link:../sanoma/packages/sanoma",
+      "pnpm-workspace.yaml: '@sanoma-ai/connector-ghost': link:../sanoma/connectors/ghost",
     ]);
   });
 });

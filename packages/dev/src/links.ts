@@ -23,6 +23,9 @@ export function repoRoot(cwd: string): string {
   return cwd;
 }
 
+/** Whether `name` is `sanoma` or a `@sanoma-ai/*` package. */
+const ours = (name: string) => name === "sanoma" || name.startsWith("@sanoma-ai/");
+
 /** Whether `dir` is a sanoma checkout: its `packages/sanoma/package.json` is named `sanoma`. */
 export const isCheckout = (dir: string) => readManifest(join(dir, "packages/sanoma"))?.name === "sanoma";
 
@@ -34,9 +37,7 @@ export const isCheckout = (dir: string) => readManifest(join(dir, "packages/sano
 export function declared(root: string): string[] {
   const manifest = readManifest(root) ?? {};
   const names = new Set([...Object.keys(manifest.dependencies ?? {}), ...Object.keys(manifest.devDependencies ?? {})]);
-  return [...names].filter(
-    (name) => name === "sanoma" || (name.startsWith("@sanoma-ai/") && name !== "@sanoma-ai/dev"),
-  );
+  return [...names].filter((name) => ours(name) && name !== "@sanoma-ai/dev");
 }
 
 /** Where package `name` is in a sanoma checkout: `connectors/<short name>` or `packages/<short name>`. */
@@ -62,9 +63,13 @@ export function linkSet(root: string, checkout: string): { found: { name: string
   return { found, missing };
 }
 
+/** An `overrides` line of `pnpm-workspace.yaml` linking `sanoma` or a `@sanoma-ai/*` package. */
+const OUR_OVERRIDE = /^\s*['"]?(?:sanoma|@sanoma-ai\/[^'":\s]+)['"]?\s*:\s*['"]?link:/;
+
 /**
- * What a link leaves behind that must not be committed: each `link:` dependency in `package.json`,
- * and each line of `pnpm-workspace.yaml` holding `link:` (the `overrides` a `pnpm link` adds).
+ * What a link of `sanoma` or a `@sanoma-ai/*` package leaves behind that must not be committed:
+ * each such `link:` dependency in `package.json`, and each such line of `pnpm-workspace.yaml` (the
+ * `overrides` a `pnpm link` adds). Links of other packages are the repo's own business.
  */
 export function leftoverLinks(root: string): string[] {
   const manifest = readManifest(root) ?? {};
@@ -72,10 +77,10 @@ export function leftoverLinks(root: string): string[] {
   const workspace = join(root, "pnpm-workspace.yaml");
   return [
     ...Object.entries(deps)
-      .filter(([, spec]) => spec.startsWith("link:"))
+      .filter(([name, spec]) => ours(name) && spec.startsWith("link:"))
       .map(([name, spec]) => `package.json: "${name}": "${spec}"`),
     ...(existsSync(workspace) ? readFileSync(workspace, "utf8").split("\n") : [])
-      .filter((line) => line.includes("link:"))
+      .filter((line) => OUR_OVERRIDE.test(line))
       .map((line) => `pnpm-workspace.yaml: ${line.trim()}`),
   ];
 }

@@ -14,7 +14,7 @@ Run each command from the repo's root, the directory holding `sanoma.config.ts`.
 
 ## `sanoma-dev link [<checkout>]`
 
-Links the repo to a sanoma checkout, `../sanoma` beside the repo unless you name one. It checks that the directory is a checkout (`packages/sanoma/package.json` named `sanoma`), runs `pnpm install --frozen-lockfile` and `pnpm build` there when `packages/sanoma` has no `dist/`, then runs one `pnpm link` of `sanoma` and every `@sanoma-ai/*` package the repo's `package.json` declares (`dependencies` or `devDependencies`, but this kit) that the checkout has: `packages/<name>`, or `connectors/<name>` for `@sanoma-ai/connector-<name>`. A declared package the checkout lacks, such as a connector of your own, is named and left installed.
+Links the repo to a sanoma checkout, `../sanoma` beside the repo unless you name one. It checks that the directory is a checkout (`packages/sanoma/package.json` named `sanoma`), then links, in one `pnpm link`, `sanoma` and every `@sanoma-ai/*` package the repo's `package.json` declares (`dependencies` or `devDependencies`, but this kit) that the checkout has: `packages/<name>`, or `connectors/<name>` for `@sanoma-ai/connector-<name>`. A declared package the checkout lacks, such as a connector of your own, is named and left installed. When one of them has no `dist/`, it first runs `pnpm install --frozen-lockfile` and `pnpm build` in the checkout.
 
 `pnpm dev` (`sanoma`) is then [the launcher's dev mode](../sanoma/README.md#dev-mode): it runs the watch build of the linked packages and of the runtime, the app and the bridge they reach in the checkout, and restarts on a new build.
 
@@ -22,11 +22,11 @@ Links the repo to a sanoma checkout, `../sanoma` beside the repo unless you name
 
 ## `sanoma-dev unlink`
 
-Runs `pnpm unlink` for the same packages, then fails, naming each line, when `package.json` or `pnpm-workspace.yaml` still holds a `link:`. When it passes, the repo is ready to commit.
+Runs `pnpm unlink` for the same packages, then fails, naming each line, when `package.json` or `pnpm-workspace.yaml` still holds a `link:` of `sanoma` or a `@sanoma-ai/*` package (the repo's links of its own packages are left alone). When it passes, the repo is ready to commit.
 
 ## `sanoma-dev update`
 
-Refuses while the repo is linked. Otherwise runs `pnpm update --latest sanoma "@sanoma-ai/*"`, then `sanoma check` (`pnpm exec sanoma check`), and exits with its code.
+Refuses while the repo is linked (a `link:` of `sanoma` or a `@sanoma-ai/*` package). Otherwise runs `pnpm update --latest sanoma "@sanoma-ai/*"`, then `sanoma check` (`pnpm exec sanoma check`), and exits with its code.
 
 A fresh release is younger than pnpm's minimum release age; let the update take it with the bare patterns in the repo's `pnpm-workspace.yaml`:
 

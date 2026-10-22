@@ -77,6 +77,17 @@ describe("linkedPackages", () => {
     expect(partialLink(repo)).toEqual([]);
   });
 
+  it("is nothing when nothing is linked, though an installed sanoma's dependencies resolve into a checkout", () => {
+    const { repo, checkout } = repoWith({});
+    const store = join(repo, "node_modules/.pnpm/sanoma@0.1.0/node_modules");
+    mkdirSync(join(store, "sanoma"), { recursive: true });
+    mkdirSync(join(store, "@sanoma-ai"));
+    mkdirSync(join(checkout, "packages/app"), { recursive: true });
+    symlinkSync(join(checkout, "packages/app"), join(store, "@sanoma-ai/app"));
+    symlinkSync(join(store, "sanoma"), join(repo, "node_modules/sanoma"));
+    expect(linkedPackages(repo)).toEqual([]);
+  });
+
   it("leaves out a core package the repo has installed, which partialLink names", () => {
     const { repo, checkout } = repoWith({ sanoma: "linked", app: "installed" });
     expect(linkedPackages(repo)).toEqual([{ name: "sanoma", dir: join(checkout, "packages/sanoma") }]);
