@@ -7,8 +7,8 @@ import { pathToFileURL } from "node:url";
 
 /*
  * Dev mode: when the repo's `sanoma` or a `@sanoma-ai/*` package resolves into a sanoma checkout (a
- * `pnpm link`), or `SANOMA_DEV_REPO` is set, `sanoma` runs each linked package's `watch` script
- * and restarts `sanoma serve` when one's `dist/` changes.
+ * `pnpm link`), or `SANOMA_DEV_REPO` is set, `sanoma` runs the `watch` script of each package it
+ * reaches in the checkout and restarts `sanoma serve` when one's `dist/` changes.
  */
 
 /** Whether a path is inside some `node_modules` directory. */
@@ -22,8 +22,10 @@ export interface LinkedPackage {
 }
 
 /**
- * `node_modules/sanoma` and every package under `node_modules/@sanoma-ai/` whose real path is
- * outside any `node_modules`: the ones a `pnpm link` points into a checkout.
+ * The packages dev mode builds: `node_modules/sanoma` and every package under
+ * `node_modules/@sanoma-ai/` whose real path is outside any `node_modules` (the ones a `pnpm link`
+ * points into a checkout), then each core package (`corePackages`) that resolves into the checkout
+ * through them, such as `sanoma`'s own dependencies when `sanoma` alone is linked.
  */
 export function linkedPackages(cwd: string): LinkedPackage[] {
   const modules = join(cwd, "node_modules");
@@ -38,6 +40,9 @@ export function linkedPackages(cwd: string): LinkedPackage[] {
     const dir = realpathSync(path);
     if (!installed(dir)) linked.push({ name, dir });
   }
+  for (const core of corePackages(cwd)) {
+    if (!installed(core.dir) && !linked.some((p) => p.name === core.name)) linked.push(core);
+  }
   return linked;
 }
 
@@ -45,26 +50,31 @@ export function linkedPackages(cwd: string): LinkedPackage[] {
 const CORE = ["sanoma", "@sanoma-ai/workflows", "@sanoma-ai/app", "@sanoma-ai/bridge"];
 
 /**
- * Of `sanoma`, `@sanoma-ai/workflows`, `@sanoma-ai/app` and `@sanoma-ai/bridge`, those installed (from a
- * tarball or a registry) while another of them resolves into a checkout: a partial link, under
- * which two copies of a package run in one process. Empty when none is linked, or all are. Each
- * is found as Node finds it, from the repo's root, else from where `sanoma` really is (where pnpm
- * puts sanoma's own dependencies, `@sanoma-ai/app` among them).
+ * Where `sanoma`, `@sanoma-ai/workflows`, `@sanoma-ai/app` and `@sanoma-ai/bridge` really are, those
+ * Node finds: each from the repo's root, else from where `sanoma` really is (where pnpm puts
+ * sanoma's own dependencies, `@sanoma-ai/app` among them, or the checkout's workspace links).
  */
-export function partialLink(cwd: string): string[] {
+function corePackages(cwd: string): LinkedPackage[] {
   const sanoma = findPackage("sanoma", cwd);
-  const fromTarballs: string[] = [];
-  let linked = false;
+  const found: LinkedPackage[] = [];
   for (const name of CORE) {
     const dir =
       name === "sanoma"
         ? sanoma
         : (findPackage(name, cwd) ?? (sanoma === undefined ? undefined : findPackage(name, sanoma)));
-    if (dir === undefined) continue;
-    if (installed(dir)) fromTarballs.push(name);
-    else linked = true;
+    if (dir !== undefined) found.push({ name, dir });
   }
-  return linked ? fromTarballs : [];
+  return found;
+}
+
+/**
+ * Of the core packages (`corePackages`), those installed (from a tarball or a registry) while
+ * another of them resolves into a checkout: a partial link, under which two copies of a package
+ * run in one process. Empty when none is linked, or all are.
+ */
+export function partialLink(cwd: string): string[] {
+  const core = corePackages(cwd);
+  return core.some((p) => !installed(p.dir)) ? core.filter((p) => installed(p.dir)).map((p) => p.name) : [];
 }
 
 /** The real directory of package `name` as Node resolves it from the directory `from`, if it does. */
