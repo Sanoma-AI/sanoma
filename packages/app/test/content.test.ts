@@ -215,7 +215,8 @@ export async function page() {
             "@sanoma-ai/workflows/*": [join(checkout, "packages/workflows/src/*.ts")],
           },
         },
-        include: ["page.ts", CONTENT_TYPES],
+        // As a company's sites tsconfig: the app's ambient types, which declare the virtual module.
+        include: ["page.ts", CONTENT_TYPES, join(src, "env.d.ts")],
         exclude: [],
       }),
     );

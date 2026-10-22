@@ -1,36 +1,13 @@
-// oxlint-disable-next-line typescript/triple-slash-reference -- the Node build compiles this file too (content-files.ts imports its types), and env.d.ts, which declares virtual:sanoma/content, is not in that program
-/// <reference path="./env.d.ts" />
 import type { Register } from "./api-client.ts";
+import type { ContentKind } from "./content-types.ts";
+
+export type { ContentEntry, ContentKind, ContentSummary } from "./content-types.ts";
 
 // A site's `content`, from `sanoma/site`: the Markdown files under the repo's `content/`, as the
 // build read them (`readContent` in `content-files.ts`, through the `sanoma:content` plugin's
 // virtual module). The module is imported on the first call, so content is a chunk of its own and
 // no page's chunk holds it. Browser code; the types come from the company's generated
 // `.sanoma/content.ts`, which augments `Register` as `.sanoma/api.ts` does.
-
-/** A file under `content/<kind>/`, as `list()` gives it: its name and its front matter. */
-export interface ContentSummary<D> {
-  /** The file's name without `.md`. */
-  slug: string;
-  /** The front matter: `{}` when the file has none. */
-  data: D;
-}
-
-/** A file under `content/<kind>/`, as `get(slug)` gives it. */
-export interface ContentEntry<D> extends ContentSummary<D> {
-  /** The Markdown after the front matter, as written. */
-  body: string;
-  /** `body` rendered at build (GFM), for `dangerouslySetInnerHTML`. */
-  html: string;
-}
-
-/** One kind of content, `content/<kind>/*.md`. */
-export interface ContentKind<D> {
-  /** Every file's slug and front matter, sorted by slug. */
-  list(): Promise<ContentSummary<D>[]>;
-  /** One file, with its body; `undefined` when there is no such file. */
-  get(slug: string): Promise<ContentEntry<D> | undefined>;
-}
 
 /** `content` before `.sanoma/content.ts` types it: any kind. */
 // oxlint-disable-next-line typescript/no-explicit-any -- untyped until .sanoma/content.ts

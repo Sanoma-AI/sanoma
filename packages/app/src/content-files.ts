@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { SITE_NAME } from "@sanoma-ai/workflows/shared";
 import { marked } from "marked";
 import { LineCounter, parseDocument } from "yaml";
-import type { ContentEntry } from "./content.ts";
+import type { ContentEntry } from "./content-types.ts";
 
 /** Where `contentTypes` is written, under a company's root. */
 export const CONTENT_TYPES = join(".sanoma", "content.ts");
@@ -26,18 +26,13 @@ type Data = Record<string, unknown>;
 const SEGMENT = "(lowercase letters, digits and dashes)";
 
 /** The front matter: an opening `---` line through the next `---` line; group 1 is the YAML between. */
-const FRONT_MATTER = /^---\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
-
-/** An opening `---` line, with or without the rest. */
-const OPENING = /^---[ \t]*\r?\n/;
+const FRONT_MATTER = /^---[ \t]*\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
 
 /**
  * The repo's content: each folder directly under `content/` whose name is a URL segment is a kind,
- * and each `*.md` directly in it an entry, its slug the file's name (a URL segment too), its
- * `data` the front matter (`{}` without one), its `html` the body rendered (GFM; raw HTML kept, as
- * content is reviewed as code is). Subfolders, other files and dot-folders are left alone. A file
- * whose front matter is not closed or not a YAML mapping is left out, with a problem at its line. Without
- * `drafts`, an entry whose `draft` is `true` is left out. Entries are sorted by slug.
+ * and each `*.md` directly in it an entry, its slug the file's name (a URL segment too), read by
+ * `parseFile`. Subfolders, other files and dotfiles are left alone. Without `drafts`, an entry
+ * whose `draft` is `true` is left out. Entries are sorted by slug.
  */
 export function readContent(
   repo: string,
@@ -45,50 +40,52 @@ export function readContent(
 ): { kinds: Record<string, ContentEntry<Data>[]>; problems: ContentProblem[] } {
   const kinds: Record<string, ContentEntry<Data>[]> = {};
   const problems: ContentProblem[] = [];
-  const problem = (file: string, message: string, line = 1, column = 1) =>
-    problems.push({ file, line, column, message });
   const root = join(repo, "content");
   for (const kind of folder(root, (entry) => entry.isDirectory())) {
     if (!SITE_NAME.test(kind)) {
-      problem(`content/${kind}`, `a content folder's name is a URL segment ${SEGMENT}`);
+      problems.push(at(`content/${kind}`, `a content folder's name is a URL segment ${SEGMENT}`));
       continue;
     }
-    const entries: ContentEntry<Data>[] = [];
+    kinds[kind] = [];
     for (const name of folder(join(root, kind), (entry) => entry.isFile() && entry.name.endsWith(".md"))) {
       const file = `content/${kind}/${name}`;
       const slug = name.slice(0, -".md".length);
-      if (!SITE_NAME.test(slug)) {
-        problem(file, `a content file's name is a URL segment ${SEGMENT}`);
-        continue;
-      }
-      // A byte order mark, as some editors write one, is not the file's text.
-      const text = readFileSync(join(root, kind, name), "utf8").replace(/^\uFEFF/, "");
-      const front = FRONT_MATTER.exec(text);
-      if (!front && OPENING.test(text)) {
-        problem(file, "front matter: no closing `---` line");
-        continue;
-      }
-      const body = front ? text.slice(front[0].length) : text;
-      const lineCounter = new LineCounter();
-      const doc = parseDocument(front?.[1] ?? "", { lineCounter, prettyErrors: false });
-      const [error] = doc.errors;
-      if (error) {
-        const { line, col } = lineCounter.linePos(error.pos[0]);
-        // The YAML starts on the file's second line.
-        problem(file, `front matter: ${error.message}`, line + 1, col);
-        continue;
-      }
-      const data: unknown = doc.toJS() ?? {};
-      if (!isData(data)) {
-        problem(file, "front matter is a mapping of names to values", 2);
-        continue;
-      }
-      if (!options.drafts && data.draft === true) continue;
-      entries.push({ slug, data, body, html: marked.parse(body, { async: false, gfm: true }) });
+      const read = SITE_NAME.test(slug)
+        ? parseFile(readFileSync(join(root, kind, name), "utf8"))
+        : { message: `a content file's name is a URL segment ${SEGMENT}` };
+      if ("message" in read) problems.push(at(file, read.message, read.line, read.column));
+      else if (options.drafts || read.data.draft !== true) kinds[kind].push({ slug, ...read });
     }
-    kinds[kind] = entries;
   }
   return { kinds, problems };
+}
+
+const at = (file: string, message: string, line = 1, column = 1): ContentProblem => ({ file, line, column, message });
+
+/**
+ * A file's text as an entry: `data` the front matter (`{}` without one), `body` the rest, `html` it
+ * rendered (GFM; raw HTML kept, as content is reviewed as code is). Front matter that is not
+ * closed, or not a YAML mapping, is a problem at its line instead.
+ */
+function parseFile(
+  text: string,
+): Omit<ContentEntry<Data>, "slug"> | { message: string; line?: number; column?: number } {
+  // A byte order mark, as some editors write one, is not the file's text.
+  const unmarked = text.replace(/^\uFEFF/, "");
+  const front = FRONT_MATTER.exec(unmarked);
+  if (!front && /^---[ \t]*\r?\n/.test(unmarked)) return { message: "front matter: no closing `---` line" };
+  const lineCounter = new LineCounter();
+  const doc = parseDocument(front?.[1] ?? "", { lineCounter, prettyErrors: false });
+  const [error] = doc.errors;
+  if (error) {
+    const { line, col } = lineCounter.linePos(error.pos[0]);
+    // The YAML starts on the file's second line.
+    return { message: `front matter: ${error.message}`, line: line + 1, column: col };
+  }
+  const data: unknown = doc.toJS() ?? {};
+  if (!isData(data)) return { message: "front matter is a mapping of names to values", line: 2 };
+  const body = front ? unmarked.slice(front[0].length) : unmarked;
+  return { data, body, html: marked.parse(body, { async: false, gfm: true }) };
 }
 
 /** The names of `dir`'s entries that `keep` keeps, dotfiles aside (an editor's `.obsidian/`), sorted; none when it does not exist. */
@@ -139,7 +136,8 @@ function alternatives(values: unknown[]): string[] {
     if (value === null) types.add("null");
     else if (Array.isArray(value)) arrays.push(value);
     else if (isData(value)) objects.push(value);
-    else types.add(["string", "number", "boolean"].includes(typeof value) ? typeof value : "unknown");
+    // A string, a number or a boolean: YAML's core schema has nothing else.
+    else types.add(typeof value);
   }
   if (arrays.length) {
     const items = alternatives(arrays.flat());

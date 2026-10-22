@@ -20,8 +20,8 @@ import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { problemLine, SITE_NAME } from "@sanoma-ai/workflows/shared";
-import type { InlineConfig, Logger, Plugin } from "vite";
-import { CONTENT_TYPES, contentTypes, readContent } from "./content-files.ts";
+import type { InlineConfig, Logger, Plugin, ViteDevServer } from "vite";
+import { CONTENT_TYPES, type ContentProblem, contentTypes, readContent } from "./content-files.ts";
 import type { ServerEntry } from "./context.ts";
 
 export { CONTENT_TYPES, type ContentProblem, contentTypes, readContent } from "./content-files.ts";
@@ -88,9 +88,9 @@ export function sitesOf(repo: string): { sites: string[]; refused: string[] } {
  * generator reads `sites/tsconfig.json`, and so the file it extends, when it loads the listing)
  * and `.sanoma/content.ts` (`contentTypes`, drafts included) when missing or different,
  * `sites/tsconfig.json` when missing. An unchanged file is not rewritten: a running dev server
- * reloads every page when one does.
+ * reloads every page when one does. `problems`: what is wrong under `content/`.
  */
-export function writeSiteFiles(repo: string): void {
+export function writeSiteFiles(repo: string): { problems: ContentProblem[] } {
   const root = realpathSync(repo);
   const sites = join(root, "sites");
   const out = join(root, ".sanoma", "app");
@@ -100,11 +100,15 @@ export function writeSiteFiles(repo: string): void {
   const sitesTsconfig = join(sites, "tsconfig.json");
   if (!existsSync(sitesTsconfig)) writeFileSync(sitesTsconfig, '{ "extends": "../.sanoma/app/tsconfig.json" }\n');
   writeChanged(join(out, "tsconfig.json"), `${JSON.stringify(siteTsconfig(root), null, 2)}\n`);
-  writeContentTypes(root);
+  return { problems: writeContentTypes(root).problems };
 }
 
-const writeContentTypes = (root: string) =>
-  writeChanged(join(root, CONTENT_TYPES), contentTypes(readContent(root, { drafts: true }).kinds));
+/** Writes `.sanoma/content.ts` from the content, drafts included, when it changed; the content as read. */
+function writeContentTypes(root: string): ReturnType<typeof readContent> {
+  const read = readContent(root, { drafts: true });
+  writeChanged(join(root, CONTENT_TYPES), contentTypes(read.kinds));
+  return read;
+}
 
 function writeChanged(file: string, text: string): void {
   if (!existsSync(file) || readFileSync(file, "utf8") !== text) writeFileSync(file, text);
@@ -296,6 +300,12 @@ function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom): InlineConfi
 
 const CONTENT = "virtual:sanoma/content";
 
+/** The content as `virtual:sanoma/content`'s text, each problem given to `warn`. */
+function contentModule(read: ReturnType<typeof readContent>, warn: (line: string) => void): string {
+  for (const problem of read.problems) warn(problemLine(problem));
+  return `export default ${JSON.stringify(read.kinds)};`;
+}
+
 /**
  * `virtual:sanoma/content`, which a site's `content` imports: the repo's content (`readContent`) as
  * JSON, drafts only on the dev server; without a repo (the package's own build), none. A problem
@@ -306,6 +316,8 @@ const CONTENT = "virtual:sanoma/content";
 function contentPlugin(repo?: string): Plugin {
   const id = `\0${CONTENT}`;
   let drafts = false;
+  // The module's text, read once for every environment, and again on a change in dev.
+  let text: string | undefined;
   return {
     name: "sanoma:content",
     configResolved(config) {
@@ -315,9 +327,8 @@ function contentPlugin(repo?: string): Plugin {
     load(loaded) {
       if (loaded !== id) return;
       if (repo === undefined) return "export default {};";
-      const { kinds, problems } = readContent(repo, { drafts });
-      for (const problem of problems) this.warn(problemLine(problem));
-      return `export default ${JSON.stringify(kinds)};`;
+      text ??= contentModule(readContent(repo, { drafts }), (line) => this.warn(line));
+      return text;
     },
     configureServer(server) {
       if (repo === undefined) return;
@@ -325,14 +336,20 @@ function contentPlugin(repo?: string): Plugin {
       const refresh = (file: string) => {
         // A Markdown file: not an editor's swap file, nor an image beside a post.
         if (!file.startsWith(dir) || !file.endsWith(".md")) return;
-        writeContentTypes(repo);
-        for (const env of Object.values(server.environments)) {
-          for (const mod of env.moduleGraph.getModulesByFile(id) ?? []) void env.reloadModule(mod);
-        }
+        // One read for the types and the module: the dev server's has the drafts too.
+        text = contentModule(writeContentTypes(repo), (line) => server.config.logger.warn(line));
+        reloadFile(server, id);
       };
       for (const event of ["add", "change", "unlink"] as const) server.watcher.on(event, refresh);
     },
   };
+}
+
+/** Reloads the modules of `file` (a path, or a virtual module's id) in each of the dev server's environments. */
+function reloadFile(server: ViteDevServer, file: string): void {
+  for (const env of Object.values(server.environments)) {
+    for (const mod of env.moduleGraph.getModulesByFile(file) ?? []) void env.reloadModule(mod);
+  }
 }
 
 /** A company file's (not the app's, nor a dependency's) import of React, TanStack or the app resolves as the app's own source does. */
@@ -497,10 +514,7 @@ function devPlugins(repo: string, src: string, onFileChange?: (file: string) => 
       apply: "serve",
       configureServer(server) {
         const refresh = (file: string) => {
-          if (!file.startsWith(sitesDir)) return;
-          for (const env of Object.values(server.environments)) {
-            for (const mod of env.moduleGraph.getModulesByFile(css) ?? []) void env.reloadModule(mod);
-          }
+          if (file.startsWith(sitesDir)) reloadFile(server, css);
         };
         server.watcher.on("add", refresh);
         server.watcher.on("unlink", refresh);
@@ -540,7 +554,7 @@ function devPlugins(repo: string, src: string, onFileChange?: (file: string) => 
 
 /**
  * The build's key: the app's version and source directory, every file under `sites/` and
- * `content/` (dotfiles aside), and where the runtime the server bundle imports by URL is installed (a real path names
+ * `content/` (dotfiles and dot-folders aside), and where the runtime the server bundle imports by URL is installed (a real path names
  * its version under pnpm), so an upgrade of the runtime is a new build.
  */
 function buildKey(repo: string, runtimeFrom: string): string {
@@ -553,18 +567,20 @@ function buildKey(repo: string, runtimeFrom: string): string {
     const dir = moduleDir(name, dirname(runtimeFrom)) ?? (workflows && moduleDir(name, realpathSync(workflows)));
     hash.update(`${name}=${dir === undefined ? "" : realpathSync(dir)}\0`);
   }
-  const files = ["sites", "content"].flatMap((dir) =>
-    existsSync(join(repo, dir)) ? readdirSync(join(repo, dir), { recursive: true, withFileTypes: true }) : [],
-  );
-  for (const file of files
-    .filter((entry) => entry.isFile() && !entry.name.startsWith("."))
-    .map((entry) => join(entry.parentPath, entry.name))
-    .toSorted()) {
+  const files = ["sites", "content"]
+    .flatMap((dir) =>
+      existsSync(join(repo, dir)) ? readdirSync(join(repo, dir), { recursive: true, withFileTypes: true }) : [],
+    )
+    .filter((entry) => entry.isFile())
+    .map((entry) => relative(repo, join(entry.parentPath, entry.name)))
+    // Dotfiles and dot-folders aside (an editor's `.obsidian/`).
+    .filter((path) => !path.split(sep).some((part) => part.startsWith(".")))
+    .toSorted();
+  for (const path of files)
     hash
-      .update(`${relative(repo, file)}\0`)
-      .update(readFileSync(file))
+      .update(`${path}\0`)
+      .update(readFileSync(join(repo, path)))
       .update("\0");
-  }
   return hash.digest("hex").slice(0, 16);
 }
 

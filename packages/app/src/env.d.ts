@@ -5,6 +5,6 @@
 
 /** The repo's content, by kind, as the `sanoma:content` plugin reads it (`readContent`): `content.ts` imports it. */
 declare module "virtual:sanoma/content" {
-  const kinds: Record<string, import("./content.ts").ContentEntry<Record<string, unknown>>[]>;
+  const kinds: Record<string, import("./content-types.ts").ContentEntry<Record<string, unknown>>[]>;
   export default kinds;
 }
