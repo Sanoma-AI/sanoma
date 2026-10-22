@@ -19,6 +19,12 @@ export type Content = Register extends { content: infer C } ? C : UntypedContent
 /** The kinds, by name: the module's own cache holds them once imported. */
 const kinds = async () => (await import("virtual:sanoma/content")).default;
 
+/** A kind's entries; none for a kind with no folder (`constructor` among them: only the module's own keys). */
+const entriesOf = async (kind: string) => {
+  const all = await kinds();
+  return Object.hasOwn(all, kind) ? all[kind]! : [];
+};
+
 /**
  * The repo's content, `content.<kind>.list()` and `.get(slug)`: a kind with no folder has no files.
  * Drafts (`draft: true`) are there while `sanoma` serves the sites from its dev server, never in a build.
@@ -31,8 +37,8 @@ export const content = new Proxy(
       typeof kind !== "string"
         ? undefined
         : {
-            list: async () => ((await kinds())[kind] ?? []).map(({ slug, data }) => ({ slug, data })),
-            get: async (slug) => (await kinds())[kind]?.find((entry) => entry.slug === slug),
+            list: async () => (await entriesOf(kind)).map(({ slug, data }) => ({ slug, data })),
+            get: async (slug) => (await entriesOf(kind)).find((entry) => entry.slug === slug),
           },
   },
 ) as Content;

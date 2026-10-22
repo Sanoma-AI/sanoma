@@ -333,14 +333,13 @@ function contentPlugin(repo?: string): Plugin {
     configureServer(server) {
       if (repo === undefined) return;
       const dir = join(repo, "content") + sep;
-      const refresh = (file: string) => {
-        // A Markdown file: not an editor's swap file, nor an image beside a post.
-        if (!file.startsWith(dir) || !file.endsWith(".md")) return;
+      server.watcher.on("all", (event, file) => {
+        // A folder (a kind), or a Markdown file: not an editor's swap file, nor an image beside a post.
+        if (!file.startsWith(dir) || !(event.endsWith("Dir") || file.endsWith(".md"))) return;
         // One read for the types and the module: the dev server's has the drafts too.
         text = contentModule(writeContentTypes(repo), (line) => server.config.logger.warn(line));
         reloadFile(server, id);
-      };
-      for (const event of ["add", "change", "unlink"] as const) server.watcher.on(event, refresh);
+      });
     },
   };
 }

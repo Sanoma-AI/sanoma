@@ -111,6 +111,8 @@ describe("readContent", () => {
       "content/posts/bad.md": "---\ntitle: ok\ndescription: [unclosed\n---\nBody.\n",
       "content/posts/list.md": "---\n- a\n- b\n---\n",
       "content/posts/open.md": "---\ntitle: Never closed\n\nBody.\n",
+      // Aliases that would expand past what yaml allows.
+      "content/posts/aliases.md": `---\na: &a [x,x,x,x,x,x,x,x,x,x]\nb: &b [${"*a,".repeat(9)}*a]\nc: &c [${"*b,".repeat(9)}*b]\nd: [${"*c,".repeat(9)}*c]\n---\n`,
       "content/posts/Not_A_Slug.md": "---\ntitle: X\n---\n",
       "content/Blog/post.md": "---\ntitle: X\n---\n",
     });
@@ -121,13 +123,21 @@ describe("readContent", () => {
         file: "content/Blog",
         line: 1,
         column: 1,
-        message: "a content folder's name is a URL segment (lowercase letters, digits and dashes)",
+        message:
+          "a content folder's name is a URL segment (a lowercase letter, then lowercase letters, digits and dashes)",
       },
       {
         file: "content/posts/Not_A_Slug.md",
         line: 1,
         column: 1,
-        message: "a content file's name is a URL segment (lowercase letters, digits and dashes)",
+        message:
+          "a content file's name is a URL segment (a lowercase letter, then lowercase letters, digits and dashes)",
+      },
+      {
+        file: "content/posts/aliases.md",
+        line: 2,
+        column: 1,
+        message: "front matter: Excessive alias count indicates a resource exhaustion attack",
       },
       {
         file: "content/posts/bad.md",

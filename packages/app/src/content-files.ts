@@ -23,7 +23,7 @@ export interface ContentProblem {
 
 type Data = Record<string, unknown>;
 
-const SEGMENT = "(lowercase letters, digits and dashes)";
+const SEGMENT = "(a lowercase letter, then lowercase letters, digits and dashes)";
 
 /** The front matter: an opening `---` line through the next `---` line; group 1 is the YAML between. */
 const FRONT_MATTER = /^---[ \t]*\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
@@ -82,7 +82,13 @@ function parseFile(
     // The YAML starts on the file's second line.
     return { message: `front matter: ${error.message}`, line: line + 1, column: col };
   }
-  const data: unknown = doc.toJS() ?? {};
+  let data: unknown;
+  try {
+    data = doc.toJS() ?? {};
+  } catch (err) {
+    // Too many aliases, say.
+    return { message: `front matter: ${err instanceof Error ? err.message : String(err)}`, line: 2 };
+  }
   if (!isData(data)) return { message: "front matter is a mapping of names to values", line: 2 };
   const body = front ? unmarked.slice(front[0].length) : unmarked;
   return { data, body, html: marked.parse(body, { async: false, gfm: true }) };
