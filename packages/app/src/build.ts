@@ -100,6 +100,10 @@ export function writeSiteFiles(repo: string): { problems: ContentProblem[] } {
   const sitesTsconfig = join(sites, "tsconfig.json");
   if (!existsSync(sitesTsconfig)) writeFileSync(sitesTsconfig, '{ "extends": "../.sanoma/app/tsconfig.json" }\n');
   writeChanged(join(out, "tsconfig.json"), `${JSON.stringify(siteTsconfig(root), null, 2)}\n`);
+  // Everything under .sanoma/app is generated. Tailwind's scan of the repo honours a .gitignore
+  // inside or outside git, so it never reads a build's own output (the server pass would see the
+  // client's and make a stylesheet of another hash), whatever the repo's .gitignore says.
+  writeChanged(join(out, ".gitignore"), "*\n");
   return { problems: writeContentTypes(root).problems };
 }
 
@@ -235,6 +239,7 @@ function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom): InlineConfi
   // Start joins srcDirectory to the root for its entries, so it must be relative.
   const srcDirectory = relative(repo, src);
   const fromApp = createRequire(join(src, "router.tsx"));
+  const tailwind = installed("tailwindcss");
   return {
     configFile: false,
     root: repo,
@@ -293,6 +298,11 @@ function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom): InlineConfi
         // app's install): the tables it ships are used.
         { find: /^cn$/, replacement: join(src, "lib", "utils.ts") },
         { find: /^clsx$/, replacement: fromApp.resolve("cn/engine") },
+        // A site's own stylesheet imports Tailwind from the app's install, as the app's does: the
+        // company installs only sanoma. Tailwind resolves a CSS import through Vite's aliases,
+        // never its plugins (so not sanoma:shared-deps).
+        { find: /^tailwindcss$/, replacement: join(tailwind, "index.css") },
+        { find: /^tailwindcss\/(index|theme|preflight|utilities)(\.css)?$/, replacement: join(tailwind, "$1.css") },
       ],
     },
   };
@@ -508,13 +518,21 @@ function devPlugins(repo: string, src: string, onFileChange?: (file: string) => 
       },
     },
     {
-      // Tailwind's dev stylesheet watches the files it last scanned, so a class in a file added
-      // under sites/ would not show until a restart: on an add or removal there, rebuild it.
+      // Tailwind's dev stylesheets watch the files they last scanned, so a class in a file added
+      // under sites/ would not show until a restart: on an add or removal there, rebuild the
+      // app's stylesheet and every site's own.
       name: "sanoma:dev-sites-css",
       apply: "serve",
       configureServer(server) {
         const refresh = (file: string) => {
-          if (file.startsWith(sitesDir)) reloadFile(server, css);
+          if (!file.startsWith(sitesDir)) return;
+          for (const env of Object.values(server.environments)) {
+            for (const [id, mod] of env.moduleGraph.idToModuleMap) {
+              // The stylesheet itself, not a `?url` import of it, whose importer would update for nothing.
+              const sheet = /\.css(\?(?!url\b)|$)/.test(id) && (mod.file === css || id.startsWith(sitesDir));
+              if (sheet) void env.reloadModule(mod);
+            }
+          }
         };
         server.watcher.on("add", refresh);
         server.watcher.on("unlink", refresh);

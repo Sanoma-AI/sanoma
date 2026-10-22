@@ -33,6 +33,10 @@ const appDir = fileURLToPath(new URL("..", import.meta.url));
 const fixtureDir = fileURLToPath(new URL("./fixtures/company-sites/", import.meta.url));
 const config = defineConfig({ ...fixture, databaseUrl: testDatabaseUrl("sites_build") });
 
+// A company's install has no NODE_PATH, which pnpm's vitest shim sets to its hoisted packages:
+// Tailwind would find `tailwindcss` there, where a company's build does not.
+delete process.env.NODE_PATH;
+
 const repos: string[] = [];
 afterAll(() => {
   for (const repo of repos) rmSync(repo, { recursive: true, force: true });
@@ -115,9 +119,30 @@ function sectionAfter(html: string, title: string) {
  */
 const siteClass = ["tracking", "[0.37em]"].join("-");
 
+/** `/sites/hello/styled`: the site's class, and its `sites/hello/style.css` linked from its head. */
+const styledPage = `import { createFileRoute } from "@tanstack/react-router";
+import css from "../style.css?url";
+
+export const Route = createFileRoute("/sites/hello/styled")({
+  head: () => ({ links: [{ rel: "stylesheet", href: css }] }),
+  component: () => <span className="${siteClass}" />,
+});
+`;
+
+/** The hrefs of the stylesheets a page links. */
+const stylesheets = (html: string) =>
+  [...html.matchAll(/<link\b[^>]*>/g)]
+    .map(([tag]) => tag)
+    .filter((tag) => tag.includes('rel="stylesheet"'))
+    .map((tag) => tag.match(/href="([^"]+)"/)![1]!);
+
 describe("a company's app with its sites", () => {
+  // The fixture has no .gitignore, and nor has its copy: nothing tells Tailwind to skip `.sanoma/`.
   const repo = company({
-    "sites/hello/routes/styled.tsx": sitePage("/sites/hello/styled", "", `<span className="${siteClass}" />`),
+    // A site's own stylesheet, without Tailwind's preflight, linked by the page using its class.
+    "sites/hello/style.css":
+      '@import "tailwindcss/theme" layer(theme);\n@import "tailwindcss/utilities" layer(utilities);\n',
+    "sites/hello/routes/styled.tsx": styledPage,
     "sites/hello/routes/missing.tsx": sitePage(
       "/sites/hello/missing",
       'import { RunForm } from "sanoma/ui";',
@@ -307,6 +332,21 @@ describe("a company's app with its sites", () => {
       const code = readFileSync(join(client, file), "utf8");
       expect(code, file).not.toMatch(/DBOSClient|systemDatabaseUrl|@cucumber|faker|pg-protocol|pg-pool|pg_notify/);
     }
+  });
+
+  it("links a site's own stylesheet, Tailwind's theme and utilities with the site's classes, and every stylesheet the server links is one the build wrote", async () => {
+    const html = await (await fetch(new URL("/sites/hello/styled", app.url))).text();
+    const hrefs = stylesheets(html);
+    // The app's and the site's: the server's render and the client's build agree on each file's
+    // hash, so the first paint is styled.
+    expect(hrefs).toHaveLength(2);
+    const css = hrefs.map((href) => {
+      const file = join(result.distDir, "client", href);
+      expect(existsSync(file), href).toBe(true);
+      return readFileSync(file, "utf8");
+    });
+    const site = css.find((text) => !text.includes("--sidebar"));
+    expect(site).toContain("letter-spacing:.37em");
   });
 
   it("renders content from content/: the list and a post's HTML, from a chunk of its own, and never a draft", async () => {
@@ -604,8 +644,13 @@ describe("a build that fails, or leaves a site out", () => {
     await expect(buildApp(repo)).rejects.toThrow(/Import denied in client environment/);
   });
 
-  it("builds a site whose site.ts has no default export, named by its folder", async () => {
-    const repo = company({ "sites/hello/site.ts": "export const title = 'Not this';\n" });
+  it("builds a site whose site.ts has no default export, named by its folder, and whose stylesheet imports all of Tailwind", async () => {
+    const repo = company({
+      "sites/hello/site.ts": "export const title = 'Not this';\n",
+      // From the app's install, preflight and all.
+      "sites/hello/style.css": '@import "tailwindcss";\n',
+      "sites/hello/routes/styled.tsx": styledPage,
+    });
     expect((await buildApp(repo)).built).toBe(true);
   });
 
