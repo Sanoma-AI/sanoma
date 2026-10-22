@@ -37,9 +37,16 @@ export function vendorInfo(moduleUrl: string | URL): VendorInfo {
     );
   }
   const { title, logo, logoDark } = field.data;
+  const svg = (path: string) => {
+    try {
+      return read(path);
+    } catch {
+      throw new Error(`${pkg.name}: the "sanoma" field's logo ${path} is not in the package`);
+    }
+  };
   return {
     title,
-    ...(logo && { logo: { svg: read(logo), ...(logoDark && { dark: read(logoDark) }) } }),
+    ...(logo && { logo: { svg: svg(logo), ...(logoDark && { dark: svg(logoDark) }) } }),
     package: pkg.name,
     ...(pkg.homepage && { homepage: pkg.homepage }),
   };

@@ -219,15 +219,16 @@ export const setupStatusQuery = () =>
   queryOptions({ queryKey: ["credentials", "setup"], queryFn: () => getSetupStatus(), staleTime: 5_000 });
 
 /**
- * The connectors on npm: read every 10 minutes at most, as npm's list changes rarely. A call that
- * fails is a list saying why, as one that cannot search npm is, so the page around it still shows.
+ * The connectors on npm: read every 10 minutes at most, as npm's list changes rarely, and again
+ * on the next visit after npm could not be reached. A call that fails is a list saying why, as one
+ * that cannot search npm is, so the page around it still shows.
  */
 export const availableConnectorsQuery = () =>
   queryOptions({
     queryKey: ["available-connectors"],
     queryFn: (): Promise<AvailableConnectors> =>
       getAvailableConnectors().catch((err: unknown) => ({ connectors: [], error: errorMessage(err) })),
-    staleTime: 10 * 60_000,
+    staleTime: (query) => (query.state.data?.error ? 0 : 10 * 60_000),
   });
 
 /** What going live can choose from: read once a minute at most, as each list asks GitHub or Supabase. */

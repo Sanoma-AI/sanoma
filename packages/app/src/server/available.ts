@@ -14,7 +14,7 @@ const KEYWORD = "sanoma-connector";
 /** How long npm and jsDelivr get to answer each request, so a slow or absent network only empties the list. */
 const TIMEOUT_MS = 5_000;
 /** The most of a logo file read: a mark, not a picture. */
-const MAX_LOGO = 64 * 1024;
+const MAX_LOGO = 16 * 1024;
 
 const Search = z.object({ objects: z.array(z.object({ package: z.object({ name: z.string() }) })) });
 
@@ -37,7 +37,8 @@ async function fetched(url: string): Promise<Response> {
 async function logoOf(name: string, version: string, path: string | undefined): Promise<string | undefined> {
   if (!path) return undefined;
   const svg = await fetched(`${JSDELIVR}/${name}@${version}/${path}`)
-    .then((res) => res.text())
+    // A file that says it is larger is not read.
+    .then((res) => (Number(res.headers.get("content-length")) > MAX_LOGO ? undefined : res.text()))
     .catch(() => undefined);
   return svg && svg.length <= MAX_LOGO && isSvgElement(svg) ? svgDataUrl(svg) : undefined;
 }

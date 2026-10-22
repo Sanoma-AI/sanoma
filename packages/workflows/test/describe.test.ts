@@ -161,6 +161,13 @@ describe("describeConfig", () => {
         JSON.stringify({ name: "sanoma-connector-acme", sanoma: { title: "Acme" } }),
       );
       expect(vendorInfo(moduleUrl)).toEqual({ title: "Acme", package: "sanoma-connector-acme" });
+      writeFileSync(
+        join(root, "package.json"),
+        JSON.stringify({ name: "sanoma-connector-acme", sanoma: { title: "Acme", logo: "logo.svg" } }),
+      );
+      expect(() => vendorInfo(moduleUrl)).toThrow(
+        'sanoma-connector-acme: the "sanoma" field\'s logo logo.svg is not in the package',
+      );
     } finally {
       rmSync(root, { recursive: true });
     }
