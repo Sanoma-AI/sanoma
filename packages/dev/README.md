@@ -16,7 +16,7 @@ Run each command from the repo's root, the directory holding `sanoma.config.ts`.
 
 Links the repo to a sanoma checkout, `../sanoma` beside the repo unless you name one. It checks that the directory is a checkout (`packages/sanoma/package.json` named `sanoma`) and runs `pnpm install --frozen-lockfile` and `pnpm build` in it, every time (about a minute), so the link never runs a stale build. It then links `sanoma` and every `@sanoma-ai/*` package the repo's `package.json` declares (`dependencies` or `devDependencies`, but this kit) that the checkout has: `packages/<name>`, or `connectors/<name>` for `@sanoma-ai/connector-<name>`, one `pnpm link` per package, since one call with several directories can leave some unlinked. A declared package the checkout lacks, such as a connector of your own, is named and left installed.
 
-Before it reports them linked, it checks each package: a `link:` override for it in `pnpm-workspace.yaml`, and `node_modules/<name>` resolving to its directory in the checkout. It links a package that fails the check once more, then exits 1 naming each one still unlinked.
+Before it reports them linked, it checks each package: a `link:` override for it in `pnpm-workspace.yaml`, and `node_modules/<name>` resolving to its directory in the checkout. It links a package that fails the check once more, then exits 1 naming each one still unlinked; `sanoma-dev unlink` undoes the links that did take.
 
 `pnpm dev` (`sanoma`) is then [the launcher's dev mode](../sanoma/README.md#dev-mode): it runs the watch build of the linked packages and of the runtime, the app and the bridge they reach in the checkout, and restarts on a new build.
 

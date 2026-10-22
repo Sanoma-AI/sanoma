@@ -103,8 +103,8 @@ describe("leftoverLinks", () => {
 /**
  * Runs the bin in `cwd` with a `pnpm` on PATH that records each of this run's calls, directory and arguments,
  * and exits 3 for `pnpm exec` (a failing `sanoma check`). Its `pnpm link <dir>` does what pnpm's does: adds a
- * `link:` override to `pnpm-workspace.yaml` and points `node_modules/<name>` at the directory, but not for the
- * package `SKIP_LINK` names, as a racing pnpm may.
+ * `link:` override to `pnpm-workspace.yaml` and points `node_modules/<name>` at the directory, but not, as a racing
+ * pnpm may, for the package `SKIP_LINK` names, nor on the first link of the one `SKIP_LINK_ONCE` names.
  */
 function sanomaDev(cwd: string, args: string[], env: Record<string, string> = {}) {
   const calls = join(dir, "pnpm-calls");
@@ -117,6 +117,7 @@ echo "$(pwd -P) $*" >> "${calls}"
 [ "$1" = link ] || exit 0
 name=$(sed -E 's/.*"name":"([^"]*)".*/\\1/' "$2/package.json")
 [ "$name" = "$SKIP_LINK" ] && exit 0
+[ "$name" = "$SKIP_LINK_ONCE" ] && [ "$(grep -c " link $2$" "${calls}")" = 1 ] && exit 0
 echo "  '$name': link:$2" >> pnpm-workspace.yaml
 mkdir -p "node_modules/$(dirname "$name")" && ln -sfn "$2" "node_modules/$name"
 `,
@@ -178,6 +179,17 @@ describe("sanoma-dev", () => {
     ]);
     expect(stderr).toContain("not linked: @sanoma-ai/connector-ghost: pnpm-workspace.yaml has no link: override");
     expect(stdout).not.toContain("linked sanoma");
+  });
+
+  it("link succeeds when the retry links what the first pnpm link did not", () => {
+    const { repo, checkout } = layout({ dependencies: { sanoma: "^0.4.2" } });
+    const { status, stdout, calls } = sanomaDev(repo, ["link"], { SKIP_LINK_ONCE: "sanoma" });
+    expect(status).toBe(0);
+    expect(calls.slice(2)).toEqual([
+      `${repo} link ${join(checkout, "packages/sanoma")}`,
+      `${repo} link ${join(checkout, "packages/sanoma")}`,
+    ]);
+    expect(stdout).toContain(`linked sanoma from ${checkout}`);
   });
 
   it("refuses what is not a checkout, a directory with no sanoma.config.ts, and extra arguments, with exit 2", () => {

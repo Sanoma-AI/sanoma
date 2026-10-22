@@ -71,7 +71,7 @@ function link(root: string, given: string | undefined): number {
   if (failed.length) {
     throw new Error(
       `not linked: ${failed.map((p) => p.name).join(", ")}: pnpm-workspace.yaml has no link: override for it, ` +
-        "or node_modules/<name> is not its directory in the checkout",
+        "or node_modules/<name> is not its directory in the checkout; sanoma-dev unlink undoes the links that took",
     );
   }
   console.log(`linked ${found.map((p) => p.name).join(", ")} from ${checkout}`);
