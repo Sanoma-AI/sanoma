@@ -29,6 +29,8 @@ const config = (options: Partial<SanomaConfig> = {}): SanomaConfig => ({
 
 /** A driver maker other than the package's. */
 const driver = () => ({ vendor: "ghost", ops: {} });
+/** A login half's maker, which signs no one in. */
+const login = () => ({ verify: async () => null, handle: async () => undefined });
 
 describe("each connector package's root", () => {
   it.each([
@@ -114,6 +116,17 @@ describe("resolveConfig on the connectors' setups", () => {
     expect(() => resolveConfig(config({ connectors: [ghost, withSetup(ghost, { fake: () => fakeGhost() })] }))).toThrow(
       'Two connectors in `connectors` attach a fake for "ghost"; keep one per vendor',
     );
+  });
+
+  it("keeps the makers of the login halves by vendor, one per vendor", () => {
+    const signsIn = withSetup(resend, { login });
+    expect([...resolveConfig(config({ connectors: [ghost, signsIn, { ...signsIn }, bluesky] })).logins]).toEqual([
+      ["resend", login],
+    ]);
+    expect(resolveConfig(config()).logins.size).toBe(0);
+    expect(() =>
+      resolveConfig(config({ connectors: [ghost, signsIn, withSetup(resend, { login: () => login() }), bluesky] })),
+    ).toThrow('Two connectors in `connectors` attach a login for "resend"; keep one per vendor');
   });
 
   it("refuses a workflow using an operation whose connector attaches no driver", () => {

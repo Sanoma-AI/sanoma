@@ -1,5 +1,6 @@
 export {
   type CallContext,
+  CLIENT_IP_HEADER,
   type Connector,
   type ConnectorSetup,
   type ConnectorVendor,
@@ -11,6 +12,8 @@ export {
   type Effect,
   isOp,
   isSvgElement,
+  type LoginContext,
+  type LoginHalf,
   type Op,
   type OpSpec,
   type ResourceGroup,

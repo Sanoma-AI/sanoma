@@ -42,15 +42,25 @@ export type { CollectionApi, ListQuery, OpFn, Saved, WorkflowFn } from "@sanoma-
  */
 export const api: Api = createApi((request) => callFn({ data: request }));
 
-/** A site's `sites/<name>/site.ts` (optional): how the app's Sites panel names it. */
+/**
+ * A site's `sites/<name>/site.ts` (optional): how the app's Sites panel names it, and whether it
+ * is public. `sanoma` reads `title`, `public` and `login` without running the file.
+ */
 export interface SiteDefinition {
   /** The site's name in the Sites panel and its crumb; the folder's name when not given. */
   title?: string;
   /** An icon beside its title: a component that takes a `className`. */
   icon?: ComponentType<{ className?: string }>;
+  /** Served at the root of its own domain to visitors, not people (a literal: read without running site.ts). */
+  public?: boolean;
+  /** The connector in sanoma.config.ts whose login half signs visitors in; left out, every page runs as `anonymous`. */
+  login?: string;
 }
 
-/** A site's definition, the default export of `sites/<name>/site.ts`: `export default defineSite({ title: "Help desk" })`. */
+/**
+ * A site's definition, the default export of `sites/<name>/site.ts`: `export default defineSite({ title: "Help desk" })`,
+ * or for visitors `defineSite({ title: "Website", public: true, login: "auth0" })`.
+ */
 export function defineSite(site: SiteDefinition): Readonly<SiteDefinition> {
   return Object.freeze({ ...site });
 }

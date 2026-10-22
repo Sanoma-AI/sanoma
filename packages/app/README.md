@@ -69,6 +69,8 @@ function Home() {
 }
 ```
 
+A site for visitors rather than people says so in `site.ts`: `defineSite({ title: "Website", public: true, login: "auth0" })`. `public: true` makes it a public site, served at the root of its own host to visitors; `login`, for a public site only, names the connector in `sanoma.config.ts` whose login half signs a visitor in (`withSetup`'s `login`, in [the workflows README](https://www.npmjs.com/package/@sanoma-ai/workflows#usage)), and without it every page runs as `anonymous`. `sanoma` reads both without running `site.ts`, so the file's default export must be `defineSite({ … })` written out, each a literal; `sanoma check` names what it cannot read or check. Both are read and checked now; a public site is served to visitors in the next release, and until then it is served like any other site.
+
 ### The kit
 
 A site imports its UI from `@sanoma-ai/app/ui`, the app's own components, so its pages look like the app's (Tailwind's classes and the theme's tokens apply to a site's files too). It is an explicit list, and nothing else of the app is public:

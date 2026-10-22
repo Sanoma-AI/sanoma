@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { describeConfig } from "../src/describe.ts";
-import { defineConnector, defineWorkflow, type SanomaConfig } from "../src/index.ts";
+import { defineConnector, defineWorkflow, type SanomaConfig, withSetup } from "../src/index.ts";
 import { leads } from "../../app/test/fixtures/company-sites/resources/data.ts";
 import { tree } from "./tree.ts";
 
@@ -41,6 +41,11 @@ const acme = defineConnector("acme", {
   },
 });
 
+/** A vendor with a login half and no operations. */
+const auth0 = withSetup(defineConnector("auth0", {}), {
+  login: () => ({ verify: async () => null, handle: async () => undefined }),
+});
+
 const config = (root: string, more: Partial<SanomaConfig> = {}): SanomaConfig => ({
   root,
   workflows: [hello],
@@ -60,14 +65,29 @@ function Page() {
 }
 `;
 
+/** Site `name`, a page and a site.ts passing `options` to `defineSite`, one property a line from line 4. */
+const site = (name: string, ...options: string[]) => ({
+  [`sites/${name}/routes/index.tsx`]: page(`/sites/${name}/`, "", "return null;"),
+  [`sites/${name}/site.ts`]: `import { defineSite } from "sanoma/site";\n\nexport default defineSite({\n  ${options.join(",\n  ")},\n});\n`,
+});
+
+/** A problem in site `name`'s site.ts, at the property on `line`. */
+const problemAt = (name: string, line: number, message: string) => ({
+  file: `sites/${name}/site.ts`,
+  line,
+  column: 3,
+  message,
+});
+
 describe("readSites", () => {
-  it("reads the fixture's site: its title, and each RunForm and api call with its file, place and page", () => {
+  it("reads the fixture's site: its title, that it is public, and each RunForm and api call with its file, place and page", () => {
     const root = fileURLToPath(new URL("../../app/test/fixtures/company-sites/", import.meta.url));
     const { sites } = describeConfig(config(root));
     expect(sites).toEqual([
       {
         name: "hello",
         title: "Hello desk",
+        public: true,
         calls: [
           // A component's, which is no page; its call by a name not written out is skipped.
           {
@@ -230,6 +250,104 @@ describe("readSites", () => {
         ],
       },
       { name: "quiet", calls: [], problems: [] },
+    ]);
+  });
+
+  it("reads public and login from site.ts, and makes a problem of each it cannot keep, at its property", () => {
+    const root = tree("public", {
+      ...site("www", 'title: "Website"', "public: true", 'login: "auth0"'),
+      ...site("open", "public: true as const"),
+      ...site("off", "public: false"),
+      ...site("dynamic", 'title: "Dynamic"', "public: process.env.PUBLIC === '1'", "login: `${process.env.LOGIN}`"),
+      ...site("staff", 'title: "Staff"', "public: false", 'login: "auth0"'),
+      ...site("missing", 'title: "Missing"', "public: true", 'login: "okta"'),
+      ...site("loginless", 'title: "Loginless"', "public: true", 'login: "acme"'),
+      ...site("quoted", 'public: "yes"', 'login: "auth0"'),
+      ...site("spread", 'title: "Spread"', "...{ public: true }"),
+      // A site.ts that does not parse.
+      "sites/broken/routes/index.tsx": page("/sites/broken/", "", "return null;"),
+      "sites/broken/site.ts":
+        'import { defineSite } from "sanoma/site";\n\nexport default defineSite({ public: true \n',
+      // Options not written out: a variable.
+      "sites/hidden/routes/index.tsx": page("/sites/hidden/", "", "return null;"),
+      "sites/hidden/site.ts":
+        'import { defineSite } from "sanoma/site";\n\nconst options = { public: true };\nexport default defineSite(options);\n',
+    });
+    const sites = describeConfig(config(root, { connectors: [acme, auth0] })).sites;
+    expect(sites).toEqual([
+      {
+        name: "broken",
+        calls: [],
+        problems: [expect.objectContaining({ file: "sites/broken/site.ts", line: 4 })],
+      },
+      {
+        name: "dynamic",
+        calls: [],
+        title: "Dynamic",
+        problems: [
+          problemAt("dynamic", 5, "`public` is read without running site.ts: write it as `true` or `false`"),
+          problemAt("dynamic", 6, "`login` is read without running site.ts: write it as a string"),
+        ],
+      },
+      {
+        name: "hidden",
+        calls: [],
+        problems: [
+          {
+            file: "sites/hidden/site.ts",
+            line: 4,
+            column: 1,
+            message:
+              'its default export is read without running site.ts: write it as `defineSite({ … })` from "sanoma/site", its options an object literal',
+          },
+        ],
+      },
+      {
+        name: "loginless",
+        calls: [],
+        title: "Loginless",
+        public: true,
+        login: "acme",
+        problems: [problemAt("loginless", 6, 'login names "acme", whose connector has no login half')],
+      },
+      {
+        name: "missing",
+        calls: [],
+        title: "Missing",
+        public: true,
+        login: "okta",
+        problems: [problemAt("missing", 6, 'login names "okta", which is not a connector in sanoma.config.ts')],
+      },
+      { name: "off", calls: [], problems: [] },
+      { name: "open", public: true, calls: [], problems: [] },
+      // Its login, a connector with a login half, is fine; what is wrong is `public`.
+      {
+        name: "quoted",
+        calls: [],
+        login: "auth0",
+        problems: [problemAt("quoted", 4, "`public` is read without running site.ts: write it as `true` or `false`")],
+      },
+      // What is written is read; a spread could make it public.
+      {
+        name: "spread",
+        calls: [],
+        title: "Spread",
+        problems: [
+          problemAt(
+            "spread",
+            5,
+            "each of `defineSite`'s options is read without running site.ts: write it as a property with its name",
+          ),
+        ],
+      },
+      {
+        name: "staff",
+        calls: [],
+        title: "Staff",
+        login: "auth0",
+        problems: [problemAt("staff", 6, "a login is for a public site: add `public: true`, or remove `login`")],
+      },
+      { name: "www", title: "Website", public: true, login: "auth0", calls: [], problems: [] },
     ]);
   });
 

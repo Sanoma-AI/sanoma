@@ -41,9 +41,18 @@ export interface SiteEntry {
   name: string;
   /** `defineSite({ title })` in its `site.ts`, when that is a string literal. */
   title?: string;
+  /** `defineSite({ public: true })`: served to visitors, not people. */
+  public?: true;
+  /** `defineSite({ login })`, the connector whose login half signs visitors in, as written: one that names none is among `problems`. */
+  login?: string;
+  /** The host a public site answers on: set by `startApp` from its `domains`, never by `readSites`. */
+  domain?: string;
   /** Its calls, by file and then in the file's order. */
   calls: SiteCall[];
-  /** Each call to a workflow, a collection or an operation the config does not have, or to an operation a page may not call directly, at its file. */
+  /**
+   * Each call to a workflow, a collection or an operation the config does not have, or to an
+   * operation a page may not call directly, at its file; then what is wrong in its `site.ts`.
+   */
   problems: (LintProblem & { file: string })[];
 }
 
@@ -66,11 +75,13 @@ const ROUTE_MAKERS: ReadonlySet<string> = new Set(["createFileRoute", "createLaz
  * and `api.<vendor>.<resource>.<op>` an operation. A name that is not written out (a variable, a
  * template with holes, a computed member) is skipped, as is a use through a namespace import or a
  * destructured `api`. A call to what `description` does not have, or to an operation a page may
- * not call directly, is a problem.
+ * not call directly, is a problem. So is a `login` in `site.ts` that does not name one of
+ * `connectors.logins` (the vendors whose connector has a login half) on a public site.
  */
 export function readSites(
   root: string | undefined,
   description: Pick<ConfigDescription, "workflows" | "collections" | "ops">,
+  connectors: SiteConnectors,
 ): SiteEntry[] {
   if (root === undefined) return [];
   const dir = join(root, "sites");
@@ -110,12 +121,16 @@ export function readSites(
         const file = readSource(path);
         return typeof file === "string" ? [] : usesIn(file, relative(root, path).split(sep).join("/")).map(resolve);
       });
-      const title = titleOf(join(dir, name, "site.ts"));
+      const siteFile = `sites/${name}/site.ts`;
+      const { problems: optionProblems, ...options } = siteOptionsOf(join(root, siteFile), connectors);
       const calls = resolved.map((r) => r.call);
-      const problems = resolved.flatMap(({ call: { file, line, column }, problem }) =>
-        problem === undefined ? [] : [{ file, line, column, message: problem }],
-      );
-      return { name, ...(title !== undefined && { title }), calls, problems };
+      const problems = [
+        ...resolved.flatMap(({ call: { file, line, column }, problem }) =>
+          problem === undefined ? [] : [{ file, line, column, message: problem }],
+        ),
+        ...optionProblems.map((p) => ({ file: siteFile, ...p })),
+      ];
+      return { name, ...options, calls, problems };
     });
 }
 
@@ -187,22 +202,80 @@ function importedAs(program: Node, sources: ReadonlySet<string>, imported: strin
   return names;
 }
 
-/** A site's title: the string `title` its `site.ts` exports by default through `defineSite`. */
-function titleOf(path: string): string | undefined {
+/** The connectors a site's `login` is checked against: the config's vendors, and those with a login half. */
+type SiteConnectors = { vendors: ReadonlySet<string>; logins: ReadonlySet<string> };
+
+/** A property of an object literal that is written out: not a spread, its name not computed. */
+const isWritten = (p: Node) => p.type === "Property" && !p.computed;
+
+/** What `site.ts` that `sanoma` cannot read without running it is told. */
+const unread = (what: string, as: string) => `${what} is read without running site.ts: write it as ${as}`;
+
+/**
+ * What `site.ts` says of its site, read without running it, and what is wrong there: its default
+ * export must be `defineSite({ … })` written out, so it can be read at all; then `title` when it is
+ * a string, `public` and `login`, which must be literals. `login` is kept as written; one on a
+ * site that is not public, or naming no connector of the config with a login half, is a problem.
+ */
+function siteOptionsOf(
+  path: string,
+  connectors: SiteConnectors,
+): Pick<SiteEntry, "title" | "public" | "login"> & { problems: LintProblem[] } {
   const file = readSource(path);
-  if (typeof file === "string") return undefined;
-  const defineSite = importedAs(file.program, SITE_SOURCES, "defineSite");
-  const exported = file.program.body.find((s: Node) => s.type === "ExportDefaultDeclaration")?.declaration;
-  const call = unwrap(exported);
+  if (typeof file === "string") return { problems: [] };
+  const problems: LintProblem[] = [...file.problems];
+  const problem = (at: Node, message: string) => void problems.push({ ...file.at(at.start), message });
+  const exported = file.program.body.find((s: Node) => s.type === "ExportDefaultDeclaration");
+  if (!exported) return { problems };
+  const call = unwrap(exported.declaration);
   const callee = unwrap(call?.callee);
   const options = unwrap(call?.arguments?.[0]);
-  if (call?.type !== "CallExpression" || callee?.type !== "Identifier" || !defineSite.has(callee.name))
+  const defineSite = importedAs(file.program, SITE_SOURCES, "defineSite");
+  // Anything not written out (a variable, a spread, a computed key) could make the site public unseen.
+  const written =
+    call?.type === "CallExpression" &&
+    callee?.type === "Identifier" &&
+    defineSite.has(callee.name) &&
+    (options === undefined || options.type === "ObjectExpression");
+  if (!written) {
+    problem(
+      exported,
+      unread("its default export", '`defineSite({ … })` from "sanoma/site", its options an object literal'),
+    );
+    return { problems };
+  }
+  for (const p of options?.properties ?? []) {
+    if (!isWritten(p)) problem(p, unread("each of `defineSite`'s options", "a property with its name"));
+  }
+  // The last of a name, as the object it makes has.
+  const property = (name: string): Node =>
+    options?.properties.findLast((p: Node) => isWritten(p) && keyName(p.key) === name);
+
+  const title = stringValue(property("title")?.value);
+  const publicAt = property("public");
+  const flag = unwrap(publicAt?.value);
+  const isPublic = flag?.type === "Literal" && flag.value === true;
+  const publicUnread = publicAt !== undefined && !(flag?.type === "Literal" && typeof flag.value === "boolean");
+  if (publicUnread) problem(publicAt, unread("`public`", "`true` or `false`"));
+
+  const loginAt = property("login");
+  const login = stringValue(loginAt?.value);
+  const loginProblem = (): string | undefined => {
+    if (login === undefined) return unread("`login`", "a string");
+    // When `public` is what is wrong, it is said there.
+    if (!isPublic && !publicUnread) return "a login is for a public site: add `public: true`, or remove `login`";
+    if (!connectors.vendors.has(login)) return `login names "${login}", which is not a connector in sanoma.config.ts`;
+    if (!connectors.logins.has(login)) return `login names "${login}", whose connector has no login half`;
     return undefined;
-  if (options?.type !== "ObjectExpression") return undefined;
-  const title = options.properties.find(
-    (p: Node) => p.type === "Property" && !p.computed && keyName(p.key) === "title",
-  );
-  return stringValue(title?.value);
+  };
+  const message = loginAt && loginProblem();
+  if (message) problem(loginAt, message);
+  return {
+    ...(title !== undefined && { title }),
+    ...(isPublic && { public: true as const }),
+    ...(login !== undefined && { login }),
+    problems,
+  };
 }
 
 /**
