@@ -20,7 +20,8 @@ import {
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import type { ActorContext } from "./core.ts";
-import { cookie, cookies, signer } from "../login/github.ts";
+import { cookie, cookies } from "../login/github.ts";
+import { signer } from "../login/keys.ts";
 import { escapeHtml } from "../login/page.ts";
 
 // Going live, step 1: connect GitHub and Supabase. GitHub through an App the company creates
