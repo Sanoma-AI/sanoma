@@ -180,6 +180,15 @@ describe("sanoma-dev", () => {
     expect(stdout).not.toContain("linked sanoma");
   });
 
+  it("link fails when node_modules/<name> is not the checkout's, even with an override", () => {
+    const { repo } = layout({ dependencies: { sanoma: "^0.4.2" } });
+    write(join(repo, "pnpm-workspace.yaml"), "overrides:\n  sanoma: link:../sanoma/packages/sanoma\n");
+    mkdirSync(join(repo, "node_modules/sanoma"), { recursive: true });
+    const { status, stderr } = sanomaDev(repo, ["link"], { SKIP_LINK: "sanoma" });
+    expect(status).toBe(1);
+    expect(stderr).toContain("not linked: sanoma:");
+  });
+
   it("link succeeds when the retry links what the first pnpm link did not", () => {
     const { repo, checkout } = layout({ dependencies: { sanoma: "^0.4.2" } });
     const { status, stdout, calls } = sanomaDev(repo, ["link"], { SKIP_LINK: "sanoma", SKIP_TIMES: "1" });

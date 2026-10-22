@@ -65,8 +65,9 @@ function link(root: string, given: string | undefined): number {
   mustPnpm(checkout, ["install", "--frozen-lockfile"]);
   mustPnpm(checkout, ["build"]);
   // One directory per pnpm link: one call with several can leave some unlinked, and still exit 0 (#255).
-  for (const p of found) mustPnpm(root, ["link", p.dir]);
-  for (const p of notLinked(root, found)) mustPnpm(root, ["link", p.dir]);
+  // The check below, not pnpm's exit code, decides, so a failure part way still points to unlink.
+  for (const p of found) pnpm(root, ["link", p.dir]);
+  for (const p of notLinked(root, found)) pnpm(root, ["link", p.dir]);
   const failed = notLinked(root, found);
   if (failed.length) {
     throw new Error(
