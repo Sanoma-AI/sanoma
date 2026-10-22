@@ -1,0 +1,41 @@
+{
+  "name": "@sanoma-ai/dev",
+  "version": "0.4.2",
+  "description": "Link a Sanoma repo to a sanoma checkout, unlink it, and update it to the latest release: the kit for developing sanoma",
+  "keywords": [
+    "cli",
+    "development",
+    "pnpm-link",
+    "sanoma"
+  ],
+  "homepage": "https://github.com/Sanoma-AI/sanoma/tree/main/packages/dev#readme",
+  "bugs": "https://github.com/Sanoma-AI/sanoma/issues",
+  "license": "FSL-1.1-ALv2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sanoma-AI/sanoma.git",
+    "directory": "packages/dev"
+  },
+  "bin": {
+    "sanoma-dev": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "prepack": "pnpm run clean && pnpm run build",
+    "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
+  },
+  "engines": {
+    "node": "^24.2 || >=26"
+  }
+}

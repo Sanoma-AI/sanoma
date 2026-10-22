@@ -319,6 +319,8 @@ importers:
 
   packages/bridge-bin/linux-x64: {}
 
+  packages/dev: {}
+
   packages/sanoma:
     dependencies:
       '@sanoma-ai/app':
