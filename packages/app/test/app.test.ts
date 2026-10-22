@@ -20,7 +20,7 @@ import {
   type Worker,
   withSetup,
 } from "@sanoma-ai/workflows";
-import { describeConfig, outlineWorkflow } from "@sanoma-ai/workflows/describe";
+import { describeConfig, outlineWorkflow, svgDataUrl } from "@sanoma-ai/workflows/describe";
 import { isNotFound } from "@tanstack/react-router";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -44,7 +44,7 @@ import {
   SetCredentialRequest,
 } from "../src/api.ts";
 import type { AppContext, LoginProvider } from "../src/context.ts";
-import { availableConnectors, NPM_REGISTRY } from "../src/server/available.ts";
+import { availableConnectors, JSDELIVR, NPM_REGISTRY } from "../src/server/available.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
 import {
@@ -94,8 +94,9 @@ const appRoot = mkdtempSync(join(tmpdir(), "sanoma-app-"));
 
 /**
  * npm, as the Connectors page reads it: the search for the keyword, and each package's latest
- * version by name. Ghost is installed; Acme is Sanoma's; Widgets is the community's, its logo
- * path outside its package; the plain one has no `sanoma` field, and the gone one no version.
+ * version by name; and jsDelivr's copies of their logo files. Ghost is installed; Acme is Sanoma's;
+ * Widgets is the community's, its logo no SVG; the plain one has no `sanoma` field, the escaping
+ * one a logo outside its package, and the gone one no version.
  */
 const NPM_PACKAGES: Record<string, object> = {
   "@sanoma-ai/connector-ghost": { name: "@sanoma-ai/connector-ghost", version: "9.9.9", sanoma: { title: "Ghost" } },
@@ -103,7 +104,12 @@ const NPM_PACKAGES: Record<string, object> = {
     name: "sanoma-connector-widgets",
     version: "0.1.0",
     homepage: "http://widgets.example/code",
-    sanoma: { title: "Widgets", logo: "../../logo.svg" },
+    sanoma: { title: "Widgets", logo: "logo.svg" },
+  },
+  "sanoma-connector-escaping": {
+    name: "sanoma-connector-escaping",
+    version: "1.0.0",
+    sanoma: { title: "Escaping", logo: "../../logo.svg" },
   },
   "@sanoma-ai/connector-acme": {
     name: "@sanoma-ai/connector-acme",
@@ -124,7 +130,18 @@ const npm = setupServer(
     const pkg = NPM_PACKAGES[decodeURIComponent(pathname.slice(1, -"/latest".length))];
     return pkg ? HttpResponse.json(pkg) : new HttpResponse(null, { status: 404 });
   }),
+  http.get(`${JSDELIVR}/*`, ({ request }) => {
+    const logo = NPM_LOGOS[new URL(request.url).pathname.slice("/npm/".length)];
+    return logo ? HttpResponse.text(logo) : new HttpResponse(null, { status: 404 });
+  }),
 );
+const ACME_LOGO = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="1"/></svg>';
+/** The logo files on jsDelivr, by `<package>@<version>/<path>`. */
+const NPM_LOGOS: Record<string, string> = {
+  "@sanoma-ai/connector-acme@1.2.0/logo.svg": ACME_LOGO,
+  "@sanoma-ai/connector-acme@1.2.0/logo-dark.svg": ACME_LOGO.replace("<circle", '<circle fill="white"'),
+  "sanoma-connector-widgets@0.1.0/logo.svg": "<img src=x onerror=alert(1)>",
+};
 /** npm's search failing with `reply`, for the rest of a test. */
 const npmSearchFails = (reply: () => Response) => npm.use(http.get(`${NPM_REGISTRY}/-/v1/search`, reply));
 const scenariosDir = join(appRoot, "scenarios");
@@ -349,17 +366,18 @@ describe("the server functions", () => {
         title: "Acme",
         description: "Acme's orders",
         version: "1.2.0",
-        tier: "official",
+        // Read from jsDelivr, as data: URLs, as installed vendors' are.
         logo: {
-          src: "https://cdn.jsdelivr.net/npm/@sanoma-ai/connector-acme@1.2.0/logo.svg",
-          dark: "https://cdn.jsdelivr.net/npm/@sanoma-ai/connector-acme@1.2.0/logo-dark.svg",
+          src: svgDataUrl(NPM_LOGOS["@sanoma-ai/connector-acme@1.2.0/logo.svg"]!),
+          dark: svgDataUrl(NPM_LOGOS["@sanoma-ai/connector-acme@1.2.0/logo-dark.svg"]!),
         },
         homepage: "https://acme.example/code",
       },
       // Installed too: the page leaves it out, against the config it shows.
-      { package: "@sanoma-ai/connector-ghost", title: "Ghost", version: "9.9.9", tier: "official" },
-      // A logo outside the package, and a homepage that is not https, are left out.
-      { package: "sanoma-connector-widgets", title: "Widgets", version: "0.1.0", tier: "community" },
+      { package: "@sanoma-ai/connector-ghost", title: "Ghost", version: "9.9.9" },
+      // A logo that is no <svg> element, and a homepage that is not https, are left out; a
+      // package whose logo is outside it, as one with no `sanoma` field, is not listed.
+      { package: "sanoma-connector-widgets", title: "Widgets", version: "0.1.0" },
     ]);
   });
 
@@ -367,7 +385,7 @@ describe("the server functions", () => {
     npmSearchFails(() => new HttpResponse(null, { status: 503 }));
     expect(await availableConnectors()).toEqual({
       connectors: [],
-      error: "Could not search npm: npm answered 503 to /-/v1/search",
+      error: "Could not search npm: registry.npmjs.org answered 503 to /-/v1/search",
     });
   });
 
@@ -983,15 +1001,13 @@ describe("the page", () => {
     const { html, text } = await page("/connectors");
     const shown = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, "");
     expect(shown).toMatch(/<h2[^>]*>Installed<\/h2>[\s\S]*<h2[^>]*>Available<\/h2>/);
-    // Sanoma's first, then the community's; the installed one and those npm cannot describe are not listed.
-    expect(text.indexOf(">Acme<")).toBeLessThan(text.indexOf(">Widgets<"));
-    for (const name of ["@sanoma-ai/connector-ghost", "sanoma-connector-plain", "sanoma-connector-gone"]) {
-      expect(shown).not.toContain(`>${name}<`);
-    }
+    // The installed one is left out.
+    expect(shown).toContain(">@sanoma-ai/connector-acme<");
+    expect(shown).not.toContain(">@sanoma-ai/connector-ghost<");
     expect(text).toContain("Acme&#x27;s orders · v1.2.0");
-    expect(shown).toContain('src="https://cdn.jsdelivr.net/npm/@sanoma-ai/connector-acme@1.2.0/logo.svg"');
-    expect(shown).toContain('src="https://cdn.jsdelivr.net/npm/@sanoma-ai/connector-acme@1.2.0/logo-dark.svg"');
-    expect(shown).not.toContain("cdn.jsdelivr.net/npm/sanoma-connector-widgets");
+    expect(shown).toMatch(
+      /<img src="data:image\/svg\+xml,[^"]+" alt=""[^>]*><img src="data:image\/svg\+xml,[^"]+"[^>]*>[\s\S]*Acme</,
+    );
     expect(shown).toMatch(/>Official<[\s\S]*>Community</);
     expect(shown).toContain('href="/connectors?add=%40sanoma-ai%2Fconnector-acme"');
   });
@@ -1005,8 +1021,6 @@ describe("the page", () => {
       await tab.goto(new URL("/connectors", app.url).href);
       await tab.evaluate((key) => localStorage.setItem(key, "tester"), ACTOR_KEY);
       await tab.goto(new URL("/connectors", app.url).href, { waitUntil: "networkidle0" });
-      // Acme's logos are not on jsDelivr (no such package): a plug draws instead of a broken image.
-      await tab.waitForFunction(`!document.querySelector('img[src*="connector-acme"]')`);
       await tab.click('a[href="/connectors?add=%40sanoma-ai%2Fconnector-acme"]');
       await tab.waitForSelector('[data-slot="sheet-content"] ::-p-text(pnpm add @sanoma-ai/connector-acme)');
       const readme = await tab.$eval('[data-slot="sheet-content"] a[href^="https://www.npmjs.com/"]', (a) => a.href);

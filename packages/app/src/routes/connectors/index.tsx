@@ -4,13 +4,13 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { type CredentialStatus, credentialReady } from "@sanoma-ai/workflows/shared";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { PlugIcon } from "@phosphor-icons/react/dist/csr/Plug";
-import { Suspense, useState } from "react";
+import { Suspense } from "react";
 import { z } from "zod";
 import { Badge } from "#/components/ui/badge.tsx";
 import { ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from "#/components/ui/item.tsx";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "#/components/ui/sheet.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
-import { type AvailableConnector, type Tier, tierOf } from "../../api.ts";
+import { type AvailableConnector, tierOf } from "../../api.ts";
 import {
   ExternalLink,
   LinkItem,
@@ -69,7 +69,7 @@ function Installed() {
               <ItemTitle>
                 {vendor.title}
                 <code className="font-normal text-muted-foreground">{id}</code>
-                {vendor.package && <TierBadge tier={tierOf(vendor.package)} />}
+                {vendor.package && <TierBadge pkg={vendor.package} />}
               </ItemTitle>
               <ItemDescription>
                 {plural(ops.length, "operation")} · used by {plural(workflows.length, "workflow")}
@@ -110,7 +110,7 @@ function Available() {
                   <ItemTitle>
                     {c.title}
                     <code className="font-normal text-muted-foreground">{c.package}</code>
-                    <TierBadge tier={c.tier} />
+                    <TierBadge pkg={c.package} />
                   </ItemTitle>
                   <ItemDescription>
                     {c.description ? `${c.description} · ` : ""}v{c.version}
@@ -140,7 +140,7 @@ function AddSteps({ connector: c }: { connector: AvailableConnector }) {
         <SheetTitle className="flex items-center gap-2">
           <ConnectorLogo connector={c} />
           {c.title}
-          <TierBadge tier={c.tier} />
+          <TierBadge pkg={c.package} />
         </SheetTitle>
         <SheetDescription>
           <code>{c.package}</code> v{c.version}
@@ -176,27 +176,18 @@ function AddSteps({ connector: c }: { connector: AvailableConnector }) {
 const installedPackages = (config: ConfigDescription) =>
   new Set(Object.values(config.vendors).flatMap((v) => (v.package ? [v.package] : [])));
 
-/**
- * An available connector's logo, decorative beside its title, without a variant that does not
- * load; a plug when it has none, or its light one does not load.
- */
+/** An available connector's logo, decorative beside its title; a plug when it has none. */
 function ConnectorLogo({ connector: { logo } }: { connector: AvailableConnector }) {
-  const [broken, setBroken] = useState<string[]>([]);
-  return logo && !broken.includes(logo.src) ? (
-    <Logo
-      src={logo.src}
-      dark={logo.dark && !broken.includes(logo.dark) ? logo.dark : undefined}
-      alt=""
-      className="size-6"
-      onError={(url) => setBroken((urls) => (urls.includes(url) ? urls : [...urls, url]))}
-    />
+  return logo ? (
+    <Logo {...logo} alt="" className="size-6" />
   ) : (
     <PlugIcon aria-hidden="true" className="size-6 text-muted-foreground" />
   );
 }
 
-/** Whose a connector is: Sanoma's own, or the community's. */
-function TierBadge({ tier }: { tier: Tier }) {
+/** Whose a connector package is: Sanoma's own, or the community's. */
+function TierBadge({ pkg }: { pkg: string }) {
+  const tier = tierOf(pkg);
   return (
     <Badge variant={tier === "official" ? "secondary" : "outline"}>
       {tier === "official" ? "Official" : "Community"}

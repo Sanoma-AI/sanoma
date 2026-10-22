@@ -10,6 +10,7 @@ export {
   DriverError,
   type Effect,
   isOp,
+  isSvgElement,
   type Op,
   type OpSpec,
   type ResourceGroup,

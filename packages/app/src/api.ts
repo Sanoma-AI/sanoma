@@ -212,8 +212,7 @@ export interface AvailableConnector {
   description?: string;
   /** Its latest version. */
   version: string;
-  tier: Tier;
-  /** Its logos as https URLs of the published files, for an `<img>` only. */
+  /** Its logos as `data:` URLs, as installed vendors' are: an `<img>`'s only. */
   logo?: { src: string; dark?: string };
   /** Where its code and README are, as an https URL. */
   homepage?: string;
