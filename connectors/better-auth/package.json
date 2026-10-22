@@ -1,0 +1,70 @@
+{
+  "name": "@sanoma-ai/connector-better-auth",
+  "version": "0.1.0",
+  "description": "Better Auth as a visitor login for Sanoma's public sites: email and password, on the company's own database",
+  "keywords": [
+    "auth",
+    "better-auth",
+    "connector",
+    "login",
+    "sanoma",
+    "sanoma-connector"
+  ],
+  "homepage": "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/better-auth#readme",
+  "bugs": "https://github.com/Sanoma-AI/sanoma/issues",
+  "license": "FSL-1.1-ALv2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sanoma-AI/sanoma.git",
+    "directory": "connectors/better-auth"
+  },
+  "files": [
+    "dist",
+    "logo.svg",
+    "logo-dark.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "prepack": "pnpm run clean && pnpm run build",
+    "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
+  },
+  "dependencies": {
+    "better-auth": "~1.7.12",
+    "kysely": "^0.29.7",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@sanoma-ai/testing": "workspace:*",
+    "@sanoma-ai/workflows": "workspace:*",
+    "@types/pg": "^8.23.1",
+    "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "@sanoma-ai/workflows": "workspace:^",
+    "zod": "^4"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "sanoma": {
+    "title": "Better Auth",
+    "logo": "logo.svg",
+    "logoDark": "logo-dark.svg"
+  }
+}

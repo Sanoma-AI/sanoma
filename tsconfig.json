@@ -56,10 +56,7 @@
   ],
   // The app's routes and components (JSX, DOM) are checked by packages/app/tsconfig.json
   // (`typecheck:ui`). Its Node entry, src/index.ts, is still checked here through its tests.
-  // A fixture's sites are checked as a company's are, by the tsconfig sanoma writes beside them.
-  "exclude": [
-    "packages/app/src",
-    "packages/app/test/fixtures/company-sites/sites",
-    "packages/sanoma/test/fixtures/sites/sites"
-  ]
+  // A fixture's sites are checked as a company's are, by the tsconfig sanoma writes beside them
+  // when a test builds them.
+  "exclude": ["packages/app/src", "**/test/fixtures/*/sites"]
 }

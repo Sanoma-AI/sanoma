@@ -357,7 +357,7 @@ export interface LoginHalf {
   verify(request: Request): Promise<{ subject: string } | null>;
   /** Answers its own routes, `/auth/<vendor>/*`; undefined for any other request. */
   handle(request: Request): Promise<Response | undefined>;
-  /** The path a page POSTs to sign out, which `handle` serves. */
+  /** The path a page POSTs to sign out, which `handle` serves; the app's own Sign out POSTs it with no body. */
   signOut?: string;
   close?(): Promise<void>;
 }
