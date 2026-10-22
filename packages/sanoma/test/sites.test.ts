@@ -112,7 +112,7 @@ export const Route = createFileRoute("/sites/hello/runtime")({ component: () => 
     writeFileSync(
       join(dir, "sites/hello/routes/gone.tsx"),
       `import { createFileRoute } from "@tanstack/react-router";
-import { RunForm } from "@sanoma-ai/app/ui";
+import { RunForm } from "sanoma/ui";
 
 export const Route = createFileRoute("/sites/hello/gone")({ component: () => <RunForm workflow="gone" /> });
 `,

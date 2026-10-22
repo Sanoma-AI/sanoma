@@ -73,7 +73,7 @@ A site for visitors rather than people says so in `site.ts`: `defineSite({ title
 
 ### The kit
 
-A site imports its UI from `@sanoma-ai/app/ui`, the app's own components, so its pages look like the app's (Tailwind's classes and the theme's tokens apply to a site's files too). It is an explicit list, and nothing else of the app is public:
+A site imports its UI from `sanoma/ui`, which is this package's `@sanoma-ai/app/ui`: the app's own components, so its pages look like the app's (Tailwind's classes and the theme's tokens apply to a site's files too). It is an explicit list, and nothing else of the app is public:
 
 - the shadcn components the app is built from: `Button`, `Input`, `Label`, `Textarea`, `Checkbox`, `NativeSelect`, `Slider`, `Badge`, `Separator`, `Skeleton`, `Spinner`, and the parts of `Field`, `Card`, `Alert`, `Table`, `Tabs`, `Dialog`, `Sheet`, `Popover`, `Tooltip`, `DropdownMenu`, `Empty`, `Item`, `ButtonGroup`, `Collapsible`, `Breadcrumb` and `Avatar`; and sonner's `toast`, shown by the app's toaster;
 - the app's own pieces: `PageHeader`, `Region`, `Facts` and `Fact`, `Tip`, `ButtonLink`, `ToneBadge`, `toneBadge`, `effectBadge`, `StatusDot` (and the `Tone` type), `Notice` and `Nothing`;
@@ -85,7 +85,7 @@ A site imports its UI from `@sanoma-ai/app/ui`, the app's own components, so its
 ```tsx
 // sites/launches/routes/index.tsx
 import { createFileRoute } from "@tanstack/react-router";
-import { Fact, Facts, PageHeader, Region, RunForm } from "@sanoma-ai/app/ui";
+import { Fact, Facts, PageHeader, Region, RunForm } from "sanoma/ui";
 
 export const Route = createFileRoute("/sites/launches/")({ component: LaunchDesk });
 
@@ -112,7 +112,7 @@ function LaunchDesk() {
 
 A site's page inside the app's shell: the kit's `Region` and `Facts`, and `RunForm` drawing announce's fields from its schema.
 
-With sites, the sidebar's bar has Sites, linking to the first site's home. Its panel lists each site under its title (its folder's name without one) with its pages, each named by its route's `staticData.crumb` or its path under the site (a page with a path parameter is left out), and a site's page starts its crumbs with the site's title. `@sanoma-ai/app/site` and `@sanoma-ai/app/ui` ship as source (`src/site.ts`, `src/ui.ts`), compiled by Vite in the company's build; they hold nothing server-side (a server function is a fetch in the browser).
+With sites, the sidebar's bar has Sites, linking to the first site's home. Its panel lists each site under its title (its folder's name without one) with its pages, each named by its route's `staticData.crumb` or its path under the site (a page with a path parameter is left out), and a site's page starts its crumbs with the site's title. `@sanoma-ai/app/site` and `@sanoma-ai/app/ui` (`sanoma/site` and `sanoma/ui`) ship as source (`src/site.ts`, `src/ui.ts`), compiled by Vite in the company's build; they hold nothing server-side (a server function is a fetch in the browser).
 
 ### Calling operations and workflows
 

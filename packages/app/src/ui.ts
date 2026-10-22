@@ -1,7 +1,8 @@
-// What a site imports for its UI, as `@sanoma-ai/app/ui`: the app's own components, so a site
-// looks like the app. An explicit list, nothing else of the app is public: the shadcn primitives
-// the app is built from, its shared pieces, two hooks and `RunForm`. Source, loaded only by Vite
-// in a company's build; browser code, nothing server-side (a server function is a fetch here).
+// What a site imports for its UI, as `sanoma/ui` (`@sanoma-ai/app/ui`): the app's own components,
+// so a site looks like the app. An explicit list, nothing else of the app is public: the shadcn
+// primitives the app is built from, its shared pieces, two hooks and `RunForm`. Source, loaded
+// only by Vite in a company's build; browser code, nothing server-side (a server function is a
+// fetch here).
 
 export { Alert, AlertAction, AlertDescription, AlertTitle } from "./components/ui/alert.tsx";
 export {

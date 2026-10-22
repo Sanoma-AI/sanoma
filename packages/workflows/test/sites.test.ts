@@ -161,7 +161,7 @@ describe("readSites", () => {
         'import * as site from "sanoma/site";',
         'import type { api as typed } from "sanoma/site";',
         'import { api } from "sanoma/site";',
-        'import { RunForm } from "@sanoma-ai/app/ui";',
+        'import { RunForm } from "sanoma/ui";',
         "export const call = (name: string, form: string) => [",
         "  api[name].start({}),",
         "  api.data[name].list(),",
