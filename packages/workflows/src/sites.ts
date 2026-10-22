@@ -1,11 +1,21 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { childrenOf, type LintProblem, type Node, readSource, type SourceFile } from "./ast.ts";
+import { type CedarPolicySource, visitorPermits } from "./cedar.ts";
 import { keyName } from "./datafile.ts";
 import type { ConfigDescription } from "./describe.ts";
 import { stringValue, unwrap } from "./outline.ts";
 import { filesUnder, isDirectory } from "./paths.ts";
-import { apiNameOf, DATA_VENDOR, SITE_NAME } from "./shared.ts";
+import { START } from "./schema.ts";
+import {
+  ANONYMOUS,
+  apiNameOf,
+  BUILT_IN_WORKFLOWS,
+  DATA_VENDOR,
+  SITE_NAME,
+  VISITORS,
+  WORKFLOW_ACTION,
+} from "./shared.ts";
 
 // What a company's sites call, read from their source with oxc and never run: the reverse index
 // a workflow's page shows as Used by, and the names `sanoma check` holds to the config.
@@ -19,6 +29,12 @@ export interface SiteCall {
    * `api` gives; that name itself when none is), the collection's name, or the operation's id.
    */
   target: string;
+  /**
+   * What it calls of the workflow (`start`, or a read of its runs: `result`, `latest`, …) or the
+   * collection (`list`, `save`, …), as written; absent for a workflow called as itself or by
+   * `RunForm`, which starts it, and for an operation.
+   */
+  method?: string;
   /** `<RunForm workflow="…" />` from `sanoma/ui`, or a call on `api` from `sanoma/site`. */
   via: "RunForm" | "api";
   /** The file, relative to the config's root, with `/`: `sites/sales/routes/index.tsx`. */
@@ -51,7 +67,8 @@ export interface SiteEntry {
   calls: SiteCall[];
   /**
    * Each call to a workflow, a collection or an operation the config does not have, or to an
-   * operation a page may not call directly, at its file; then what is wrong in its `site.ts`.
+   * operation a page may not call directly, or, on a public site, that no policy lets a visitor
+   * make, at its file; then what is wrong in its `site.ts`.
    */
   problems: (LintProblem & { file: string })[];
 }
@@ -77,12 +94,18 @@ const ROUTE_MAKERS: ReadonlySet<string> = new Set(["createFileRoute", "createLaz
  * template with holes, a computed member) is skipped, as is a use through a namespace import or a
  * destructured `api`. A call to what `description` does not have, or to an operation a page may
  * not call directly, is a problem. So is a `login` in `site.ts` that does not name one of
- * `connectors.logins` (the vendors whose connector has a login half) on a public site.
+ * `connectors.logins` (the vendors whose connector has a login half) on a public site. Given the
+ * company's `policies` (undefined while they have problems, which refuse every call), so is a
+ * public site's start or direct call that no company `permit` could let a visitor make
+ * (`visitorPermits`): one for `anonymous`, or on a site with a login, one for `anonymous` or the
+ * `visitors`, whatever its conditions. Whatever the policies, so is a public site's call of a
+ * built-in workflow, and its read of a workflow's runs but `.result`, which `callApi` refuses a visitor.
  */
 export function readSites(
   root: string | undefined,
   description: Pick<ConfigDescription, "workflows" | "collections" | "ops">,
   connectors: SiteConnectors,
+  policies?: readonly CedarPolicySource[],
 ): SiteEntry[] {
   if (root === undefined) return [];
   const dir = join(root, "sites");
@@ -92,6 +115,40 @@ export function readSites(
   const ops = new Map(description.ops.map((op) => [op.id, op]));
   // A workflow's api name to its name: two of one api name are a problem on the workflows.
   const byApiName = new Map(description.workflows.map((wf) => [apiNameOf(wf.name), wf.name]));
+  const permits = policies && visitorPermits(policies);
+
+  /**
+   * Why a visitor's `call`, which exists, is certainly refused on a public site that has `login`:
+   * as `callApi` refuses it whatever the policy says, or as no permit could allow it.
+   */
+  const refused = (call: SiteCall, login: string | undefined): string | undefined => {
+    const why = `a visitor's call to ${KIND_NAMES[call.kind]} "${call.target}" is refused`;
+    let action: string;
+    let group: string;
+    if (call.kind === "workflow") {
+      if (BUILT_IN_WORKFLOWS.has(call.target)) return `${why}: a visitor may not start the runtime's own workflows`;
+      if (call.method === "result") return undefined;
+      if (call.method !== undefined && call.method !== "start") {
+        return `${why}: a visitor reads only the result of a run it started`;
+      }
+      [action, group] = [`${WORKFLOW_ACTION}${call.target}`, START];
+    } else {
+      action = call.kind === "op" ? call.target : `${DATA_VENDOR}.${call.target}.${call.method}`;
+      const op = ops.get(action);
+      if (!op) return undefined;
+      group = `effect:${op.effect}`;
+    }
+    if (!permits) return undefined;
+    const [scopes, principal] =
+      login === undefined
+        ? [[ANONYMOUS], `== Sanoma::Principal::"${ANONYMOUS}"`]
+        : [[ANONYMOUS, VISITORS], `in Sanoma::Group::"${VISITORS}"`];
+    if (permits(new Set(scopes), action, group)) return undefined;
+    return (
+      `${why}: no permit in policies/ names ${scopes.join(" or ")} for ${action}. ` +
+      `Add: permit (principal ${principal}, action == Sanoma::Action::"${action}", resource);`
+    );
+  };
 
   /** A call as written, resolved as the app's `callApi` resolves it, with why it would fail. */
   const resolve = ({ kind, name, via, ...at }: Written): { call: SiteCall; problem?: string } => {
@@ -126,9 +183,10 @@ export function readSites(
       const { problems: optionProblems, ...options } = siteOptionsOf(join(root, siteFile), connectors);
       const calls = resolved.map((r) => r.call);
       const problems = [
-        ...resolved.flatMap(({ call: { file, line, column }, problem }) =>
-          problem === undefined ? [] : [{ file, line, column, message: problem }],
-        ),
+        ...resolved.flatMap(({ call, problem }) => {
+          const message = problem ?? (options.public ? refused(call, options.login) : undefined);
+          return message === undefined ? [] : [{ file: call.file, line: call.line, column: call.column, message }];
+        }),
         ...optionProblems.map((p) => ({ file: siteFile, ...p })),
       ];
       return { name, ...options, calls, problems };
@@ -172,7 +230,7 @@ function usesIn({ program, at }: SourceFile, file: string): Written[] {
 }
 
 /** What a member path on `api` names; undefined for a path on anything else, a name not written out, or no name. */
-function apiPath(member: Node, api: ReadonlySet<string>): Pick<Written, "kind" | "name"> | undefined {
+function apiPath(member: Node, api: ReadonlySet<string>): Pick<Written, "kind" | "name" | "method"> | undefined {
   const path: string[] = [];
   let node = member;
   while (node?.type === "MemberExpression") {
@@ -182,10 +240,12 @@ function apiPath(member: Node, api: ReadonlySet<string>): Pick<Written, "kind" |
     node = unwrap(node.object);
   }
   if (node?.type !== "Identifier" || !api.has(node.name)) return undefined;
-  const [first, second] = path as [string, ...string[]];
-  if (first === DATA_VENDOR) return path.length === 3 ? { kind: "collection", name: second! } : undefined;
+  const [first, second, third] = path as [string, ...string[]];
+  if (first === DATA_VENDOR)
+    return path.length === 3 ? { kind: "collection", name: second!, method: third } : undefined;
   if (path.length === 3) return { kind: "op", name: path.join(".") };
-  return path.length <= 2 ? { kind: "workflow", name: first } : undefined;
+  if (path.length > 2) return undefined;
+  return { kind: "workflow", name: first, ...(second !== undefined && { method: second }) };
 }
 
 /** The local names `imported` has in the file, imported as a value from one of `sources`. */

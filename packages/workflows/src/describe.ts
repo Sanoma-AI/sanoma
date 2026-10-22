@@ -308,6 +308,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     resolved.root,
     { workflows, collections, ops },
     { vendors: new Set(Object.keys(vendors)), logins: new Set(resolved.logins.keys()) },
+    resolved.policies,
   );
 
   return {
@@ -332,7 +333,8 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
 
 /**
  * Each site a host's `domains` (its type's `host.inputs.domains`) names that is not a public
- * site, at the host's declaration: the app serves only a public site at a domain.
+ * site, and each domain it gives more than one site, at the host's declaration: the app serves
+ * only a public site at a domain, and one site at each.
  */
 function domainProblems(
   root: string | undefined,
@@ -345,15 +347,22 @@ function domainProblems(
   const problems: ResourceProblem[] = [];
   for (const resource of declared) {
     const path = types.get(`${resource.vendor}.${resource.type}`)?.host?.inputs.domains;
-    const domains = path === undefined ? undefined : valueAt(resource.desired, path);
-    const wrong = Object.keys(domains ?? {}).filter((name) => !isPublic.has(name));
-    if (!wrong.length || root === undefined) continue;
+    const domains = (path === undefined ? {} : (valueAt(resource.desired, path) ?? {})) as Record<string, unknown>;
+    const messages = Object.keys(domains)
+      .filter((name) => !isPublic.has(name))
+      .map((name) => `domains names "${name}", which is not a public site (defineSite({ public: true }))`);
+    const named = Object.entries(domains).filter(([, value]) => typeof value === "string");
+    // A host name's case is not its own: `publicHosts` compares them lowercased.
+    for (const [domain, entries] of Map.groupBy(named, ([, value]) => (value as string).toLowerCase())) {
+      const names = entries.map(([name]) => name);
+      if (names.length < 2) continue;
+      const others = `${names.length === 2 ? "both " : ""}${names.slice(0, -1).join(", ")}`;
+      messages.push(`${domain} is the domain of ${others} and ${names.at(-1)}`);
+    }
+    if (!messages.length || root === undefined) continue;
     const file = read(join(root, resource.file));
     const at = typeof file === "string" ? {} : file.at(resource.span[0]);
-    for (const name of wrong) {
-      const message = `domains names "${name}", which is not a public site (defineSite({ public: true }))`;
-      problems.push({ file: resource.file, ...at, message });
-    }
+    for (const message of messages) problems.push({ file: resource.file, ...at, message });
   }
   return problems;
 }
