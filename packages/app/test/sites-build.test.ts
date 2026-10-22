@@ -145,7 +145,7 @@ describe("a company's app with its sites", () => {
     "sites/hello/routes/styled.tsx": styledPage,
     "sites/hello/routes/missing.tsx": sitePage(
       "/sites/hello/missing",
-      'import { RunForm } from "@sanoma-ai/app/ui";',
+      'import { RunForm } from "sanoma/ui";',
       '<RunForm workflow="missing" />',
     ),
   });
@@ -454,7 +454,7 @@ describe("a company's app with its sites", () => {
   });
 });
 
-describe("@sanoma-ai/app/ui", () => {
+describe("sanoma/ui", () => {
   it("exports the kit's list and nothing else, so each addition is deliberate", async () => {
     // By a path TypeScript does not follow: the kit is JSX and DOM, checked by typecheck:ui.
     const ui = (await import(new URL("../src/ui.ts", import.meta.url).href)) as Record<string, unknown>;

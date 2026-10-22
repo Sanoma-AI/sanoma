@@ -28,7 +28,9 @@
     "README.md",
     "LICENSE",
     "site.js",
-    "site.d.ts"
+    "site.d.ts",
+    "ui.js",
+    "ui.d.ts"
   ],
   "type": "module",
   "sideEffects": false,
@@ -46,6 +48,10 @@
     "./site": {
       "types": "./site.d.ts",
       "default": "./site.js"
+    },
+    "./ui": {
+      "types": "./ui.d.ts",
+      "default": "./ui.js"
     },
     "./data": {
       "types": "./dist/data.d.ts",

@@ -34,7 +34,7 @@ export const all = [defineWorkflow, z, defineConfig, main, Date.now()] as [unkno
   writeFileSync(
     join(dir, "sites/x/routes/index.tsx"),
     `import { createFileRoute } from "sanoma/site";
-import { Button } from "@sanoma-ai/app/ui";
+import { Button } from "sanoma/ui";
 import { useState } from "react";
 import { Card } from "../components/card";
 import type { Ctx } from "sanoma";
@@ -52,8 +52,9 @@ import { DBOS } from "@dbos-inc/dbos-sdk";
 import { readFileSync } from "node:fs";
 import { hello } from "../../../workflows/hello";
 import { handler } from "@sanoma-ai/app/server";
+import { RunForm } from "@sanoma-ai/app/ui";
 import kinds from "virtual:sanoma/content";
-export const all = [createFileRoute, Button, useState, Card, Client, ghost, createIsomorphicFn, serverOnly, defineWorkflow, main, startApp, startWorker, fake, DBOS, readFileSync, hello, handler, kinds, process.env.KEY];
+export const all = [createFileRoute, Button, useState, Card, Client, ghost, createIsomorphicFn, serverOnly, defineWorkflow, main, startApp, startWorker, fake, DBOS, readFileSync, hello, handler, RunForm, kinds, process.env.KEY];
 export const pg = require("pg");
 export type Types = [Ctx<[]>, typeof Hello];
 `,
@@ -178,7 +179,7 @@ describe("the shipped oxlint.json", () => {
       { file: index, line: 10, rule: imports, text: expect.stringMatching(server) },
       { file: index, line: 11, rule: imports, text: expect.stringMatching(/^'sanoma' /) },
       { file: index, line: 12, rule: imports, text: expect.stringMatching(/^'sanoma\/dist\/cli\.js'/) },
-      { file: index, line: 13, rule: imports, text: expect.stringMatching(/`@sanoma-ai\/app\/ui`/) },
+      { file: index, line: 13, rule: imports, text: expect.stringMatching(/`sanoma\/ui`/) },
       { file: index, line: 14, rule: imports, text: expect.stringMatching(server) },
       { file: index, line: 15, rule: imports, text: expect.stringMatching(/belong in tests/) },
       { file: index, line: 16, rule: imports, text: expect.stringMatching(/^'@dbos-inc\/dbos-sdk'/) },
@@ -193,16 +194,23 @@ describe("the shipped oxlint.json", () => {
         file: index,
         line: 19,
         rule: imports,
-        text: expect.stringMatching(/^'@sanoma-ai\/app\/server'.*`@sanoma-ai\/app\/ui`/),
+        text: expect.stringMatching(/^'@sanoma-ai\/app\/server'.*`sanoma\/ui`/),
       },
+      // The kit's one path is sanoma's.
       {
         file: index,
         line: 20,
         rule: imports,
+        text: expect.stringMatching(/^'@sanoma-ai\/app\/ui'.*components from `sanoma\/ui`/),
+      },
+      {
+        file: index,
+        line: 21,
+        rule: imports,
         text: expect.stringMatching(/^'virtual:sanoma\/content'.*through `content` from `sanoma\/site`/),
       },
-      { file: index, line: 21, rule: globals, text: expect.stringMatching(/'process'.*no credentials/) },
-      { file: index, line: 22, rule: globals, text: expect.stringMatching(/'require'.*imports with `import`/) },
+      { file: index, line: 22, rule: globals, text: expect.stringMatching(/'process'.*no credentials/) },
+      { file: index, line: 23, rule: globals, text: expect.stringMatching(/'require'.*imports with `import`/) },
     ]);
   });
 });

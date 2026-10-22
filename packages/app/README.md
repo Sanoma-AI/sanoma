@@ -42,7 +42,7 @@ const app = await startApp(config, { distDir });
 - `writeSiteFiles(repo)`, which `buildApp` calls first, writes `sites/__virtual.ts` (the listing the route generator reads; committed, never edited), `sites/tsconfig.json` when missing, `.sanoma/app/tsconfig.json` every time: the app's compiler options (`tsconfig.site.json`, shipped) with its React, TanStack and route tree, so `tsc -p sites/tsconfig.json` checks a site's links against every page; and `.sanoma/content.ts`, the types of [`content`](#content).
 - `appViteConfig({ repo, runtimeFrom })` is the build's Vite config; `appViteConfig()` is this package's own (its `vite.config.ts`), the same pipeline with no sites. `appSources()` gives the app's `src` and `tsconfig.site.json` by real path.
 
-`startApp(config, { dev: { repo } })` serves the app and the repo's sites from Vite's dev server instead of a build, behind the same `/healthz` and login: `appDevServer(repo, http)` from `@sanoma-ai/app/build` is the build's Vite config (`appViteConfig({ repo })`, so the route generator's options are the build's) in middleware mode, with hot updates over the app's own HTTP server, and Start's server entry imported for each request and handed the same context. On the server, Vite compiles the app's source and `sanoma` (whose `sanoma/site` is that source), and leaves the runtime to Node, the copy `startApp`'s context holds. An edit to a site or to the app's source shows without a reload, a Tailwind class in a new file under `sites/` is in the app's stylesheet and each site's own, and a new site folder is live once it has a route file; a change to `sites/__virtual.ts` itself needs a restart. It writes the sites' generated files and Vite's cache under `.sanoma/app/`, and no build. It listens on this machine only: the hot updates' websocket does not pass the login, so `startApp` refuses `dev` with any other `host`. `dev.onFileChange`, when given, is called with each file the dev server's watcher sees added, changed or removed (`sanoma` writes `.sanoma/api.ts` again on a change to what the config is read from).
+`startApp(config, { dev: { repo } })` serves the app and the repo's sites from Vite's dev server instead of a build, behind the same `/healthz` and login: `appDevServer(repo, http)` from `@sanoma-ai/app/build` is the build's Vite config (`appViteConfig({ repo })`, so the route generator's options are the build's) in middleware mode, with hot updates over the app's own HTTP server, and Start's server entry imported for each request and handed the same context. On the server, Vite compiles the app's source and `sanoma` (whose `sanoma/site` and `sanoma/ui` are that source), and leaves the runtime to Node, the copy `startApp`'s context holds. An edit to a site or to the app's source shows without a reload, a Tailwind class in a new file under `sites/` is in the app's stylesheet and each site's own, and a new site folder is live once it has a route file; a change to `sites/__virtual.ts` itself needs a restart. It writes the sites' generated files and Vite's cache under `.sanoma/app/`, and no build. It listens on this machine only: the hot updates' websocket does not pass the login, so `startApp` refuses `dev` with any other `host`. `dev.onFileChange`, when given, is called with each file the dev server's watcher sees added, changed or removed (`sanoma` writes `.sanoma/api.ts` again on a change to what the config is read from).
 
 A company repo is an ES module package (`"type": "module"`, as `sanoma init` writes it): Vite names the server entry `server.mjs` otherwise.
 
@@ -73,7 +73,7 @@ A site for visitors rather than people says so in `site.ts`: `defineSite({ title
 
 ### The kit
 
-A site imports its UI from `@sanoma-ai/app/ui`, the app's own components, so its pages look like the app's (Tailwind's classes and the theme's tokens apply to a site's files too). It is an explicit list, and nothing else of the app is public:
+A site imports its UI from `sanoma/ui`, which is this package's `@sanoma-ai/app/ui`: the app's own components, so its pages look like the app's (Tailwind's classes and the theme's tokens apply to a site's files too). It is an explicit list, and nothing else of the app is public:
 
 - the shadcn components the app is built from: `Button`, `Input`, `Label`, `Textarea`, `Checkbox`, `NativeSelect`, `Slider`, `Badge`, `Separator`, `Skeleton`, `Spinner`, and the parts of `Field`, `Card`, `Alert`, `Table`, `Tabs`, `Dialog`, `Sheet`, `Popover`, `Tooltip`, `DropdownMenu`, `Empty`, `Item`, `ButtonGroup`, `Collapsible`, `Breadcrumb` and `Avatar`; and sonner's `toast`, shown by the app's toaster;
 - the app's own pieces: `PageHeader`, `Region`, `Facts` and `Fact`, `Tip`, `ButtonLink`, `ToneBadge`, `toneBadge`, `effectBadge`, `StatusDot` (and the `Tone` type), `Notice` and `Nothing`;
@@ -85,7 +85,7 @@ A site imports its UI from `@sanoma-ai/app/ui`, the app's own components, so its
 ```tsx
 // sites/launches/routes/index.tsx
 import { createFileRoute } from "@tanstack/react-router";
-import { Fact, Facts, PageHeader, Region, RunForm } from "@sanoma-ai/app/ui";
+import { Fact, Facts, PageHeader, Region, RunForm } from "sanoma/ui";
 
 export const Route = createFileRoute("/sites/launches/")({ component: LaunchDesk });
 
