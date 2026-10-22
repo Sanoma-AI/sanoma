@@ -139,8 +139,11 @@ export interface VendorInfo {
   homepage?: string;
 }
 
-/** One `<svg>` element, with nothing but whitespace around it. */
+/** One `<svg>` element, with nothing but whitespace around it: what a logo must be. */
 const SVG_ELEMENT = /^\s*<svg[\s>][\s\S]*<\/svg>\s*$/;
+
+/** Whether `svg` is a logo as `VendorInfo` takes it: one `<svg>…</svg>` element. */
+export const isSvgElement = (svg: unknown): svg is string => typeof svg === "string" && SVG_ELEMENT.test(svg);
 
 const isResourceGroup = (group: unknown): group is ResourceGroup =>
   (typeof group === "function" || typeof group === "object") &&
@@ -165,7 +168,7 @@ export function defineConnector<const V extends string, const S extends Specs>(
   const logo =
     info?.logo && Object.freeze(Object.fromEntries(Object.entries(info.logo).filter(([, v]) => v !== undefined)));
   for (const [variant, svg] of Object.entries(logo ?? {})) {
-    if (typeof svg !== "string" || !SVG_ELEMENT.test(svg)) {
+    if (!isSvgElement(svg)) {
       throw new Error(
         `defineConnector("${vendor}"): logo.${variant} must be inline SVG markup, one <svg>…</svg> element`,
       );

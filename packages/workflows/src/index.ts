@@ -10,6 +10,7 @@ export {
   DriverError,
   type Effect,
   isOp,
+  isSvgElement,
   type Op,
   type OpSpec,
   type ResourceGroup,
@@ -17,6 +18,7 @@ export {
   type VendorInfo,
   withSetup,
 } from "./op.ts";
+export { SanomaPackageField, vendorInfo } from "./vendor-info.ts";
 export {
   defineWorkflow,
   Principal,

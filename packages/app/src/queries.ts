@@ -6,13 +6,14 @@ import type {
   SiteCall,
   WorkflowEntry,
 } from "@sanoma-ai/workflows/describe";
-import { apiNameOf, isEnded, LIST_LIMIT, type ListQuery, type Saved } from "@sanoma-ai/workflows/shared";
+import { apiNameOf, errorMessage, isEnded, LIST_LIMIT, type ListQuery, type Saved } from "@sanoma-ai/workflows/shared";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { linkOptions, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { z } from "zod";
 import {
+  type AvailableConnectors,
   type CredentialsResponse,
   pendingApprovals,
   type PreviewQuery,
@@ -24,6 +25,7 @@ import {
 } from "./api.ts";
 import {
   getActor,
+  getAvailableConnectors,
   getConfig,
   getCredentials,
   getDriftReport,
@@ -215,6 +217,19 @@ export const credentialsQuery = () =>
 /** What is connected for going live (the connect page): under the credentials' key, so setting one refreshes both. */
 export const setupStatusQuery = () =>
   queryOptions({ queryKey: ["credentials", "setup"], queryFn: () => getSetupStatus(), staleTime: 5_000 });
+
+/**
+ * The connectors on npm: read every 10 minutes at most, as npm's list changes rarely, and again
+ * on the next visit after npm could not be reached. A call that fails is a list saying why, as one
+ * that cannot search npm is, so the page around it still shows.
+ */
+export const availableConnectorsQuery = () =>
+  queryOptions({
+    queryKey: ["available-connectors"],
+    queryFn: (): Promise<AvailableConnectors> =>
+      getAvailableConnectors().catch((err: unknown) => ({ connectors: [], error: errorMessage(err) })),
+    staleTime: (query) => (query.state.data?.error ? 0 : 10 * 60_000),
+  });
 
 /** What going live can choose from: read once a minute at most, as each list asks GitHub or Supabase. */
 export const goLiveChoicesQuery = () =>

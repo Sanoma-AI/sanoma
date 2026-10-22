@@ -71,6 +71,7 @@ Under `SANOMA_LIVE=1` the helper sends its calls to a real bridge (`startBridge(
 
 ```ts
 import { tfConnector } from "@sanoma-ai/bridge/connector";
+import { vendorInfo } from "@sanoma-ai/workflows";
 import { github_repository, provider } from "./resources.gen.ts";
 
 export const githubTf = tfConnector({
@@ -82,7 +83,8 @@ export const githubTf = tfConnector({
   references: { branch_protection: { repository_id: { type: "github.repository", by: ["name", "node_id"] } } },
   // Which of the bridge's errors mean "no such object": default `not_found`.
   missing: (e) => e.code === "not_found" || e.diagnostics.some((d) => d.summary.startsWith("could not find ")),
-  info: { title: "GitHub", logo: { svg }, package: "@sanoma-ai/connector-github" },
+  // Who the vendor is: the `sanoma` field, `name` and `homepage` of the package.json.
+  info: vendorInfo(import.meta.url),
 });
 githubTf.connector; // the operations: github.repository.read, github.repository.import
 githubTf.resources; // the data-file constructors: githubTf.resources.repository({ name: "sanoma" })

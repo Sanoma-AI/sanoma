@@ -1,14 +1,12 @@
 import type { OpEntry } from "@sanoma-ai/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
-import type { ReactNode } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { ItemGroup } from "#/components/ui/item.tsx";
 import type { ScenarioEntry } from "../../api.ts";
 import {
-  ButtonLink,
   Expandable,
+  ExternalLink,
   None,
   Notice,
   OpItem,
@@ -169,15 +167,3 @@ const ROLE_LABELS: Record<keyof ScenarioRoles, string> = {
   denied: "must deny",
   held: "must hold",
 };
-
-/** A link off the app, in a new tab, which its icon says. */
-function ExternalLink({ href, children }: { href: string; children: ReactNode }) {
-  return (
-    <ButtonLink variant="link" size="sm">
-      <a href={href} target="_blank" rel="noreferrer">
-        {children}
-        <ArrowSquareOutIcon aria-hidden="true" data-icon="inline-end" />
-      </a>
-    </ButtonLink>
-  );
-}

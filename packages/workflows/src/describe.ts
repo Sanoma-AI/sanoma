@@ -356,7 +356,8 @@ function memoised<A, R>(fn: (arg: A) => R): (arg: A) => R {
   };
 }
 
-const svgDataUrl = (svg: string) => `data:image/svg+xml,${encodeURIComponent(svg.trim())}`;
+/** A logo's SVG markup as a `data:` URL, for an `<img>`. */
+export const svgDataUrl = (svg: string) => `data:image/svg+xml,${encodeURIComponent(svg.trim())}`;
 
 const vendorEntry = (id: string, info: VendorInfo | undefined, fake: boolean): VendorEntry => ({
   title: info?.title ?? id,

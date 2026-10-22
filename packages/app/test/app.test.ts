@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,9 +20,12 @@ import {
   type Worker,
   withSetup,
 } from "@sanoma-ai/workflows";
-import { describeConfig, outlineWorkflow } from "@sanoma-ai/workflows/describe";
+import { describeConfig, outlineWorkflow, svgDataUrl } from "@sanoma-ai/workflows/describe";
 import { isNotFound } from "@tanstack/react-router";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
+import { executablePath, launch as launchChrome } from "puppeteer-core";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import announce from "../../workflows/test/fixtures/announce.ts";
 import { companyFakes } from "../../workflows/test/fixtures/company/fakes.ts";
 import { outbound } from "../../workflows/test/fixtures/outbound/resources/data.ts";
@@ -31,6 +34,7 @@ import { z } from "zod";
 import { type App, startApp } from "../src/index.ts";
 import {
   ACTOR_HEADER,
+  ACTOR_KEY,
   ApiError,
   ClearCredentialRequest,
   DecideCall,
@@ -40,6 +44,7 @@ import {
   SetCredentialRequest,
 } from "../src/api.ts";
 import type { AppContext, LoginProvider } from "../src/context.ts";
+import { availableConnectors, JSDELIVR, NPM_REGISTRY } from "../src/server/available.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
 import {
@@ -86,6 +91,59 @@ const companyDir = fileURLToPath(new URL("../../workflows/test/fixtures/company/
  * and the outbound fixture's collections.
  */
 const appRoot = mkdtempSync(join(tmpdir(), "sanoma-app-"));
+
+/**
+ * npm, as the Connectors page reads it: the search for the keyword, and each package's latest
+ * version by name; and jsDelivr's copies of their logo files. Ghost is installed; Acme is Sanoma's;
+ * Widgets is the community's, its logo no SVG; the plain one has no `sanoma` field, the escaping
+ * one a logo outside its package, and the gone one no version.
+ */
+const NPM_PACKAGES: Record<string, object> = {
+  "@sanoma-ai/connector-ghost": { name: "@sanoma-ai/connector-ghost", version: "9.9.9", sanoma: { title: "Ghost" } },
+  "sanoma-connector-widgets": {
+    name: "sanoma-connector-widgets",
+    version: "0.1.0",
+    homepage: "http://widgets.example/code",
+    sanoma: { title: "Widgets", logo: "logo.svg" },
+  },
+  "sanoma-connector-escaping": {
+    name: "sanoma-connector-escaping",
+    version: "1.0.0",
+    sanoma: { title: "Escaping", logo: "../../logo.svg" },
+  },
+  "@sanoma-ai/connector-acme": {
+    name: "@sanoma-ai/connector-acme",
+    version: "1.2.0",
+    description: "Acme's orders",
+    homepage: "https://acme.example/code",
+    sanoma: { title: "Acme", logo: "logo.svg", logoDark: "logo-dark.svg" },
+  },
+  "sanoma-connector-plain": { name: "sanoma-connector-plain", version: "1.0.0" },
+};
+const npm = setupServer(
+  http.get(`${NPM_REGISTRY}/*`, ({ request }) => {
+    const { pathname } = new URL(request.url);
+    if (pathname === "/-/v1/search") {
+      const names = [...Object.keys(NPM_PACKAGES), "sanoma-connector-gone"];
+      return HttpResponse.json({ objects: names.map((name) => ({ package: { name } })) });
+    }
+    const pkg = NPM_PACKAGES[decodeURIComponent(pathname.slice(1, -"/latest".length))];
+    return pkg ? HttpResponse.json(pkg) : new HttpResponse(null, { status: 404 });
+  }),
+  http.get(`${JSDELIVR}/*`, ({ request }) => {
+    const logo = NPM_LOGOS[new URL(request.url).pathname.slice("/npm/".length)];
+    return logo ? HttpResponse.text(logo) : new HttpResponse(null, { status: 404 });
+  }),
+);
+const ACME_LOGO = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="1"/></svg>';
+/** The logo files on jsDelivr, by `<package>@<version>/<path>`. */
+const NPM_LOGOS: Record<string, string> = {
+  "@sanoma-ai/connector-acme@1.2.0/logo.svg": ACME_LOGO,
+  "@sanoma-ai/connector-acme@1.2.0/logo-dark.svg": ACME_LOGO.replace("<circle", '<circle fill="white"'),
+  "sanoma-connector-widgets@0.1.0/logo.svg": "<img src=x onerror=alert(1)>",
+};
+/** npm's search failing with `reply`, for the rest of a test. */
+const npmSearchFails = (reply: () => Response) => npm.use(http.get(`${NPM_REGISTRY}/-/v1/search`, reply));
 const scenariosDir = join(appRoot, "scenarios");
 cpSync(fileURLToPath(new URL("./fixtures/scenarios/", import.meta.url)), scenariosDir, { recursive: true });
 cpSync(join(companyDir, "resources"), join(appRoot, "resources"), { recursive: true });
@@ -152,13 +210,17 @@ async function contextOf(cfg: SanomaConfig, login = loopbackLogin()): Promise<Ap
 }
 
 beforeAll(async () => {
+  npm.listen({ onUnhandledFrame: "bypass" });
   ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
   worker = await startWorker(config);
   app = await startApp(config, { port: 0 });
   ctx = await contextOf(config);
 });
 
+afterEach(() => npm.resetHandlers());
+
 afterAll(async () => {
+  npm.close();
   await app?.close();
   await Promise.all(clients.map((client) => client.close()));
   await worker?.stop();
@@ -295,6 +357,38 @@ const input = (title: string) => ({
 });
 
 describe("the server functions", () => {
+  it("lists the connector packages on npm, from each one's latest version, Sanoma's first", async () => {
+    const { connectors, error } = await availableConnectors();
+    expect(error).toBeUndefined();
+    expect(connectors).toEqual([
+      {
+        package: "@sanoma-ai/connector-acme",
+        title: "Acme",
+        description: "Acme's orders",
+        version: "1.2.0",
+        // Read from jsDelivr, as data: URLs, as installed vendors' are.
+        logo: {
+          src: svgDataUrl(NPM_LOGOS["@sanoma-ai/connector-acme@1.2.0/logo.svg"]!),
+          dark: svgDataUrl(NPM_LOGOS["@sanoma-ai/connector-acme@1.2.0/logo-dark.svg"]!),
+        },
+        homepage: "https://acme.example/code",
+      },
+      // Installed too: the page leaves it out, against the config it shows.
+      { package: "@sanoma-ai/connector-ghost", title: "Ghost", version: "9.9.9" },
+      // A logo that is no <svg> element, and a homepage that is not https, are left out; a
+      // package whose logo is outside it, as one with no `sanoma` field, is not listed.
+      { package: "sanoma-connector-widgets", title: "Widgets", version: "0.1.0" },
+    ]);
+  });
+
+  it("says why when npm cannot be searched, and lists nothing", async () => {
+    npmSearchFails(() => new HttpResponse(null, { status: 503 }));
+    expect(await availableConnectors()).toEqual({
+      connectors: [],
+      error: "Could not search npm: registry.npmjs.org answered 503 to /-/v1/search",
+    });
+  });
+
   it("describe the config: workflows, ops, built-ins, the policy and the version, without the workflows' sources", async () => {
     const body = withoutSources(ctx.description);
     expect(body.appName).toBe("sanoma");
@@ -901,6 +995,51 @@ describe("the page", () => {
     expect(connectors.html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, "")).not.toMatch(/ghost\.post\.create/);
     // The sidebar, on every page, links to it.
     expect(connectors.html).toContain('href="/connectors"');
+  });
+
+  it("lists the connectors on npm not installed, each with how to add it", async () => {
+    const { html, text } = await page("/connectors");
+    const shown = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, "");
+    expect(shown).toMatch(/<h2[^>]*>Installed<\/h2>[\s\S]*<h2[^>]*>Available<\/h2>/);
+    // The installed one is left out.
+    expect(shown).toContain(">@sanoma-ai/connector-acme<");
+    expect(shown).not.toContain(">@sanoma-ai/connector-ghost<");
+    expect(text).toContain("Acme&#x27;s orders · v1.2.0");
+    expect(shown).toMatch(
+      /<img src="data:image\/svg\+xml,[^"]+" alt=""[^>]*><img src="data:image\/svg\+xml,[^"]+"[^>]*>[\s\S]*Acme</,
+    );
+    expect(shown).toMatch(/>Official<[\s\S]*>Community</);
+    expect(shown).toContain('href="/connectors?add=%40sanoma-ai%2Fconnector-acme"');
+  });
+
+  it("opens an available connector's steps to add it in a sheet, at its own URL, in Chrome", async (test) => {
+    const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
+    if (!existsSync(chrome)) test.skip("no Chrome: install Google Chrome or set CHROME_PATH");
+    const browser = await launchChrome({ executablePath: chrome, headless: true });
+    try {
+      const tab = await browser.newPage();
+      await tab.goto(new URL("/connectors", app.url).href);
+      await tab.evaluate((key) => localStorage.setItem(key, "tester"), ACTOR_KEY);
+      await tab.goto(new URL("/connectors", app.url).href, { waitUntil: "networkidle0" });
+      await tab.click('a[href="/connectors?add=%40sanoma-ai%2Fconnector-acme"]');
+      await tab.waitForSelector('[data-slot="sheet-content"] ::-p-text(pnpm add @sanoma-ai/connector-acme)');
+      const readme = await tab.$eval('[data-slot="sheet-content"] a[href^="https://www.npmjs.com/"]', (a) => a.href);
+      expect(readme).toBe("https://www.npmjs.com/package/@sanoma-ai/connector-acme");
+      expect(new URL(tab.url()).searchParams.get("add")).toBe("@sanoma-ai/connector-acme");
+      await tab.keyboard.press("Escape");
+      await tab.waitForFunction(`!document.querySelector('[data-slot="sheet-content"]')`);
+      expect(new URL(tab.url()).search).toBe("");
+    } finally {
+      await browser.close();
+    }
+  });
+
+  it("lists the installed connectors alone when npm cannot be searched, and says so", async () => {
+    npmSearchFails(() => HttpResponse.error());
+    const { text } = await page("/connectors");
+    expect(text).toContain(">Ghost<");
+    expect(text).toContain("npm could not be reached, so only the installed connectors show.");
+    expect(text).not.toContain(">Acme<");
   });
 
   it("renders a connector's page: its links, each operation's contract, phrases and scenarios, and who uses it", async () => {

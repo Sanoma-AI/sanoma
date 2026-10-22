@@ -9,6 +9,7 @@
     "postgres",
     "resources",
     "sanoma",
+    "sanoma-connector",
     "supabase"
   ],
   "homepage": "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/supabase#readme",
@@ -22,6 +23,7 @@
   "files": [
     "dist",
     "testdata/replies",
+    "logo.svg",
     "README.md",
     "LICENSE"
   ],
@@ -70,5 +72,9 @@
   },
   "engines": {
     "node": ">=24"
+  },
+  "sanoma": {
+    "title": "Supabase",
+    "logo": "logo.svg"
   }
 }
