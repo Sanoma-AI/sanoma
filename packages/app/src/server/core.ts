@@ -414,7 +414,13 @@ export function permissions(app: Pick<AppContext, "resolved" | "description" | "
 
 function gridOf(app: Pick<AppContext, "resolved" | "description" | "policyFiles">): PermissionsResponse {
   const { description } = app;
-  const groups = [null, ...groupNamesOf(description.resources), ANONYMOUS];
+  // A visitor's columns only beside a public site, where there are visitors.
+  const visitors = description.sites.some((site) => site.public);
+  const groups = [
+    null,
+    ...groupNamesOf(description.resources).filter((g) => visitors || g !== VISITORS),
+    ...(visitors ? [ANONYMOUS] : []),
+  ];
   const opsById = new Map(description.ops.map((op) => [op.id, op]));
   const workflows = description.workflows.filter((w) => !w.builtin);
   const direct = description.ops.filter((op) => op.direct).toSorted((a, b) => a.id.localeCompare(b.id));

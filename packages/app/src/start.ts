@@ -3,18 +3,22 @@ import { createCsrfMiddleware, createMiddleware, createStart } from "@tanstack/r
 import { setResponseStatus } from "@tanstack/react-start/server";
 import { loadActor } from "./actor.ts";
 import { ACTOR_HEADER, ApiError } from "./api.ts";
-import type { AppContext } from "./context.ts";
+import type { RequestContext } from "./context.ts";
+import { publicOnly } from "./middleware.ts";
 import { actorOf, serverFnFailure } from "./server/core.ts";
 
 declare module "@tanstack/react-router" {
   interface Register {
     // startApp passes this to every handler.fetch; middleware, server functions and loaders on
-    // the server all get it as `context.app`.
-    server: { requestContext: { app: AppContext } };
+    // the server all get it as `context.app` (and `context.site` on a public site's host).
+    server: { requestContext: RequestContext };
   }
 }
 
-/** Says who is asking, when asked: server functions call `context.actor()` (see `actorOf`). */
+/**
+ * Says who is asking, when asked: server functions call `context.actor()` (see `actorOf`). On a
+ * public site's host, the app is the site's (`AppContext.site`), whose login is its front door.
+ */
 const actor = createMiddleware().server(({ request, context, next }) =>
   next({ context: { actor: actorOf(context.app, request) } }),
 );
@@ -56,6 +60,7 @@ const apiErrors = createMiddleware({ type: "function" }).server(async ({ next, m
 export const startInstance = createStart(() => ({
   // Defining start.ts turns off Start's default CSRF protection for server functions, so it is added back here.
   requestMiddleware: [createCsrfMiddleware({ filter: (ctx) => ctx.handlerType === "serverFn" }), actor],
-  functionMiddleware: [actorHeader, apiErrors],
+  // `publicOnly` inside `apiErrors`, which answers its 404 as every 404 (a change's status, a read's not-found).
+  functionMiddleware: [actorHeader, apiErrors, publicOnly],
   serializationAdapters: [apiErrorTransport],
 }));

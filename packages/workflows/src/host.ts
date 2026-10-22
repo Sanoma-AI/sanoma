@@ -42,6 +42,8 @@ export interface HostSpec {
     secrets: string;
     /** The port the app listens on. */
     port: string;
+    /** A public site's domain, by site name: the app serves each site at the root of its domain (`SANOMA_DOMAINS`). */
+    domains?: string;
   };
   /**
    * The field apply fills with the commit `ref` resolves to, before it plans: hidden, as a data

@@ -13,6 +13,7 @@ import {
   startWorker,
 } from "@sanoma-ai/workflows";
 import { describeConfig, readPeople, schemaOf, writeGenerated } from "@sanoma-ai/workflows/describe";
+import { domainsOf } from "@sanoma-ai/workflows/shared";
 import { UsageError } from "./config.ts";
 import { runtimeFrom, siteBuild } from "./sites.ts";
 import { localGitSource } from "./source.ts";
@@ -24,6 +25,8 @@ export interface Stoppable {
 export interface Served extends Stoppable {
   /** Where the app listens, such as `http://127.0.0.1:3000`. */
   url: string;
+  /** Each public site, by name, at its own host on this machine: `http://www.localhost:3000` (`App.sites`). */
+  sites: Record<string, string>;
 }
 
 /** The checkout the config was loaded from (`loadConfig` sets its `file`). */
@@ -76,7 +79,7 @@ async function appStart(
 
 async function served(config: SanomaConfig, options: AppOptions): Promise<Served> {
   const app = await startApp(config, { ...options, source: sourceOf(config) });
-  return { url: app.url, stop: () => app.close() };
+  return { url: app.url, sites: app.sites, stop: () => app.close() };
 }
 
 /**
@@ -169,15 +172,32 @@ const secretsOf =
   };
 
 /**
- * The app's host (`SANOMA_APP_HOST`, default 127.0.0.1) and, when the `SANOMA_GITHUB_*` variables
- * are set, GitHub sign-in; both or neither, and any host but this machine needs it. An empty
- * value is the same as unset. On a host beyond this machine, or with one of them set, one the
- * environment leaves unset is read from the stored secrets (`readSecrets`), where creating the
- * GitHub App on the app's connect page put them. A mistake in them is a UsageError.
+ * `SANOMA_DOMAINS`, a public site's domain by its name: `<site>=<hostname>[,<site>=<hostname>…]`,
+ * as a host resource's `domains` sets it (`www=sanoma.example`); unset or empty, none. A
+ * malformed one is a UsageError.
  */
-export async function appOptions(readSecrets?: ReadSecrets): Promise<Pick<AppOptions, "host" | "login">> {
+export function parseDomains(value: string | undefined): Record<string, string> | undefined {
+  if (!value) return undefined;
+  try {
+    return domainsOf(value);
+  } catch (err) {
+    throw new UsageError(errorMessage(err));
+  }
+}
+
+/**
+ * The app's host (`SANOMA_APP_HOST`, default 127.0.0.1), the public sites' domains
+ * (`SANOMA_DOMAINS`, `parseDomains`) and, when the `SANOMA_GITHUB_*` variables are set, GitHub
+ * sign-in; both or neither, and any host but this machine needs it. An empty value is the same
+ * as unset. On a host beyond this machine, or with one of them set, one the environment leaves
+ * unset is read from the stored secrets (`readSecrets`), where creating the GitHub App on the
+ * app's connect page put them. A mistake in them is a UsageError.
+ */
+export async function appOptions(readSecrets?: ReadSecrets): Promise<Pick<AppOptions, "host" | "login" | "domains">> {
   const env = process.env;
+  const domains = parseDomains(env.SANOMA_DOMAINS);
   const host = env.SANOMA_APP_HOST || undefined;
+  const options = { host, ...(domains && { domains }) };
   const beyond = host !== undefined && !isLoopback(host);
   const found = new Map<string, string>(GITHUB.flatMap((name) => (env[name] ? [[name, env[name]]] : [])));
   if ((beyond || found.size) && readSecrets && found.size < GITHUB.length) {
@@ -189,14 +209,14 @@ export async function appOptions(readSecrets?: ReadSecrets): Promise<Pick<AppOpt
   const [clientId, clientSecret] = GITHUB.map((name) => found.get(name));
   if (!clientId && !clientSecret) {
     if (beyond) throw new UsageError(`SANOMA_APP_HOST=${host} needs GitHub sign-in: set ${GITHUB.join(", ")}`);
-    return { host };
+    return options;
   }
   if (!clientId || !clientSecret) {
     const missing = GITHUB.filter((name) => !found.has(name));
     throw new UsageError(`GitHub sign-in needs ${GITHUB.join(", ")}: ${missing.join(", ")} not set`);
   }
   try {
-    return { host, login: githubLogin({ clientId, clientSecret }) };
+    return { ...options, login: githubLogin({ clientId, clientSecret }) };
   } catch (err) {
     throw new UsageError(errorMessage(err));
   }
@@ -216,6 +236,7 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
   }
   return {
     url: app.url,
+    sites: app.sites,
     async stop() {
       try {
         await app.stop();

@@ -6,20 +6,24 @@ import { extname, join, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  CLIENT_IP_HEADER,
   errorMessage,
   isLoopback,
+  type LoginHalf,
   problemLine,
   readPolicyFiles,
+  type ResolvedConfig,
   resolveConfig,
   SanomaClient,
   type SanomaConfig,
   type Source,
 } from "@sanoma-ai/workflows";
-import { describeConfig, readPeople } from "@sanoma-ai/workflows/describe";
+import { type ConfigDescription, describeConfig, readPeople, type SiteEntry } from "@sanoma-ai/workflows/describe";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
-import type { AppContext, LoginProvider, ServerEntry } from "./context.ts";
+import type { AppContext, LoginProvider, RequestContext, ServerEntry } from "./context.ts";
 import { admitting } from "./login/admission.ts";
-import { loopbackLogin } from "./loopback.ts";
+import { publicFront } from "./login/public.ts";
+import { hostName, loopbackLogin } from "./loopback.ts";
 
 export { ACTOR_HEADER } from "./api.ts";
 export type { LoginProvider, ResolveActor } from "./context.ts";
@@ -50,17 +54,25 @@ export interface AppOptions {
    * `onFileChange` is called with each file added, changed or removed in the repo (`appDevServer`).
    */
   dev?: { repo: string; onFileChange?: (file: string) => void };
+  /**
+   * A public site's domain, by site name (`www: "sanoma.example"`): the app serves the site at the
+   * root of that host, as it does at `<name>.localhost`. One naming a site that is missing or not
+   * public is warned about and not served.
+   */
+  domains?: Record<string, string>;
 }
 
 export interface App {
   /** Where the app listens, such as `http://127.0.0.1:3000`. */
   url: string;
+  /** Each public site served, by name, at its own host on this machine: `http://<name>.localhost:<port>`. */
+  sites: Record<string, string>;
   close(): Promise<void>;
 }
 
 /** Answers a request the login let through, a file's or the server entry's. */
 interface Responder {
-  respond(req: IncomingMessage, res: ServerResponse, request: Request, app: AppContext): Promise<void>;
+  respond(req: IncomingMessage, res: ServerResponse, request: Request, context: RequestContext): Promise<void>;
   /** Closes what it opened, logging a failure rather than throwing it, as `closeQuietly`. */
   close(): Promise<void>;
 }
@@ -98,6 +110,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     const list = [...lines].map((line) => `  ${line}`).join("\n");
     console.warn(`sanoma app: the config's files have problems (\`sanoma check\` lists them):\n${list}`);
   }
+  const hosts = publicHosts(description, options.domains ?? {});
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => {
       console.error("sanoma app: request failed:", err);
@@ -115,12 +128,29 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
       return void res.end(req.method === "HEAD" ? undefined : "ok\n");
     }
+    // A public site's host, ahead of the staff login, which it never reaches: the site's front door.
+    const name = hosts.get(hostName(req.headers.host ?? ""));
+    if (name !== undefined) {
+      const site = sites.get(name);
+      if (!site) {
+        res.writeHead(503, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+        return void res.end(
+          "This site is not served: its site.ts or its login has a problem, which the app's log names.\n",
+        );
+      }
+      // The visitor's address, from the socket alone, for a login's rate limits: never a client's copy.
+      req.headers[CLIENT_IP_HEADER] = req.socket.remoteAddress ?? "";
+      const request = new NodeRequest({ req, res });
+      const answer = await site.login.handle?.(request);
+      if (answer) return sendNodeResponse(res, answer);
+      return responder.respond(req, res, request, { app: site, site: site.site });
+    }
     const request = new NodeRequest({ req, res });
     // Then the login sees every request (pages, server functions and static files alike): its
     // own routes, and any it will not let through.
     const answer = await login.handle?.(request);
     if (answer) return sendNodeResponse(res, answer);
-    await responder.respond(req, res, request, app);
+    await responder.respond(req, res, request, { app });
   }
 
   // The build first, importing nothing and connecting to nothing: a missing or half build is
@@ -154,6 +184,23 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   const responder = loaded.value;
   const client = connected.value;
   const app: AppContext = { resolved, description, policyFiles, client, login, source: options.source };
+  // Each public site served, by name, with its own context, whose login is its front door: its
+  // login half, if it has one, made once the app listens (`openLogins`). A public site whose
+  // site.ts has a problem is not served, as its login could be one not read.
+  const halves = new Map<SiteEntry, PromiseWithResolvers<LoginHalf>>();
+  const sites = new Map<string, AppContext>();
+  for (const site of description.sites) {
+    if (!site.public) continue;
+    if (site.problems.some((p) => p.file === `sites/${site.name}/site.ts`)) {
+      console.warn(
+        `sanoma app: sites/${site.name}/site.ts has a problem: the site is served on no host until it is fixed`,
+      );
+      continue;
+    }
+    const half = site.login === undefined ? undefined : Promise.withResolvers<LoginHalf>();
+    if (half) halves.set(site, half);
+    sites.set(site.name, { ...app, site: site.name, login: publicFront(site, half?.promise) });
+  }
 
   try {
     await new Promise<void>((done, fail) => {
@@ -169,10 +216,14 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     throw err;
   }
 
+  const opened = await openLogins(resolved, client, halves);
+  for (const { name } of halves.keys()) if (!opened.has(name)) sites.delete(name);
+
   const address = server.address() as AddressInfo;
   let closing: Promise<void> | undefined;
   return {
     url: `http://${urlHost(address)}:${address.port}`,
+    sites: Object.fromEntries([...sites.keys()].map((name) => [name, `http://${localHost(name)}:${address.port}`])),
     close() {
       closing ??= (async () => {
         try {
@@ -186,12 +237,78 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
             responder.close(),
           ]);
         } finally {
+          await Promise.all(
+            [...opened].map(([name, half]) =>
+              half
+                .close?.()
+                .catch((err: unknown) => console.error(`sanoma app: closing sites/${name}'s login also failed:`, err)),
+            ),
+          );
           await closeQuietly(client);
         }
       })();
       return closing;
     },
   };
+}
+
+/** A public site's host on this machine. */
+const localHost = (site: string) => `${site}.localhost`;
+
+/**
+ * Each public site's hosts, to its name: `<name>.localhost`, and the domain `domains` gives it
+ * (then set on its entry). A domain naming a site that is missing or not public is warned about
+ * and served nowhere; so is a host another site has first (one site per host).
+ */
+function publicHosts(description: ConfigDescription, domains: Record<string, string>): Map<string, string> {
+  const hosts = new Map<string, string>();
+  const claim = (host: string, site: string) => {
+    if (!hosts.has(host)) return void hosts.set(host, site);
+    console.warn(`sanoma app: ${host} is another public site's host: sites/${site} is not served there`);
+  };
+  for (const site of description.sites) if (site.public) claim(localHost(site.name), site.name);
+  for (const [name, domain] of Object.entries(domains)) {
+    const site = description.sites.find((s) => s.name === name);
+    if (!site?.public) {
+      console.warn(`sanoma app: the domain ${domain} names sites/${name}, which is not a public site: not served`);
+      continue;
+    }
+    const host = domain.toLowerCase();
+    claim(host, name);
+    if (hosts.get(host) === name) site.domain = host;
+  }
+  return hosts;
+}
+
+/**
+ * Makes each public site's login half (`ConnectorSetup.login`), all at once, settling the promise
+ * its front door waits on: the ones made, by site name. One that fails is logged, and its site is
+ * then served on no host (503): the app starts, so the connector's page can set what it lacks.
+ */
+async function openLogins(
+  resolved: ResolvedConfig,
+  client: SanomaClient,
+  halves: ReadonlyMap<SiteEntry, PromiseWithResolvers<LoginHalf>>,
+): Promise<Map<string, LoginHalf>> {
+  const secrets = async (names: readonly string[]) =>
+    new Map([...(await client.secrets(names))].map(([name, { value }]) => [name, value]));
+  const opened = new Map<string, LoginHalf>();
+  await Promise.all(
+    [...halves].map(async ([{ name, login, domain }, half]) => {
+      const origins = [`http://${localHost(name)}:*`, ...(domain ? [`https://${domain}`] : [])];
+      half.resolve(
+        (async () => resolved.logins.get(login!)!({ databaseUrl: resolved.databaseUrl, secrets, origins }))(),
+      );
+      try {
+        opened.set(name, await half.promise);
+      } catch (err) {
+        console.error(
+          `sanoma app: sites/${name}'s login (${login}) could not start, so the site is not served: ${errorMessage(err)}`,
+        );
+      }
+    }),
+  );
+  return opened;
 }
 
 /**
@@ -230,10 +347,10 @@ async function mustBeFile(path: string) {
 
 /** The build's files, then its server entry. */
 const builtResponder = (files: Map<string, StaticFile>, entry: ServerEntry): Responder => ({
-  async respond(req, res, request, app) {
+  async respond(req, res, request, context) {
     const file = staticFile(files, req);
     if (file) return sendFile(file, req, res);
-    await sendNodeResponse(res, await entry.fetch(request, { context: { app } }));
+    await sendNodeResponse(res, await entry.fetch(request, { context }));
   },
   close: async () => {},
 });
@@ -243,7 +360,7 @@ async function devResponder(repo: string, server: Server, onFileChange?: (file: 
   const { appDevServer } = await import("./build.ts");
   const dev = await appDevServer(repo, server, onFileChange);
   return {
-    respond: (req, res, request, app) =>
+    respond: (req, res, request, context) =>
       new Promise((done, fail) => {
         // Vite answers what it serves itself without calling next.
         res.once("close", done);
@@ -251,7 +368,7 @@ async function devResponder(repo: string, server: Server, onFileChange?: (file: 
           if (err) return fail(err);
           dev
             .serverEntry()
-            .then(async (entry) => sendNodeResponse(res, await entry.fetch(request, { context: { app } })))
+            .then(async (entry) => sendNodeResponse(res, await entry.fetch(request, { context })))
             .then(done, fail);
         });
       }),

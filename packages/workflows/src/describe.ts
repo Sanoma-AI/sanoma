@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { z } from "zod";
 import { type LintProblem, readSource, type SourceFile } from "./ast.ts";
 import { type Field, recordSchemaOf } from "./collection.ts";
@@ -8,7 +9,7 @@ import { lintWorkflow } from "./lint.ts";
 import { type Effect, VENDOR, type VendorInfo } from "./op.ts";
 import { type Outline, outlineWithSource } from "./outline.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
-import { type ResourceFields, resourceTypesOf } from "./resource.ts";
+import { type Resource, type ResourceFields, resourceTypesOf, valueAt } from "./resource.ts";
 import {
   type DataFiles,
   type DeclaredCollection,
@@ -303,6 +304,11 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
   });
   workflows.sort((a, b) => a.name.localeCompare(b.name));
   addApiNameProblems(workflows, new Set(ops.map((op) => op.vendor)));
+  const sites = readSites(
+    resolved.root,
+    { workflows, collections, ops },
+    { vendors: new Set(Object.keys(vendors)), logins: new Set(resolved.logins.keys()) },
+  );
 
   return {
     appName: resolved.appName,
@@ -314,18 +320,42 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     collections,
     resources: dataFiles.resources,
     orphans: dataFiles.orphans,
-    problems: dataFiles.problems,
+    problems: [...dataFiles.problems, ...domainProblems(resolved.root, dataFiles.resources, resources, sites, read)],
     policy: {
       defined: resolved.policy !== allowAll,
       ...(resolved.policy.version === undefined ? {} : { version: resolved.policy.version }),
       ...(resolved.policyProblems.length ? { problems: resolved.policyProblems } : {}),
     },
-    sites: readSites(
-      resolved.root,
-      { workflows, collections, ops },
-      { vendors: new Set(Object.keys(vendors)), logins: new Set(resolved.logins.keys()) },
-    ),
+    sites,
   };
+}
+
+/**
+ * Each site a host's `domains` (its type's `host.inputs.domains`) names that is not a public
+ * site, at the host's declaration: the app serves only a public site at a domain.
+ */
+function domainProblems(
+  root: string | undefined,
+  declared: readonly DeclaredResource[],
+  types: ReadonlyMap<string, Resource>,
+  sites: readonly SiteEntry[],
+  read: (path: string) => SourceFile | string,
+): ResourceProblem[] {
+  const isPublic = new Set(sites.filter((site) => site.public).map((site) => site.name));
+  const problems: ResourceProblem[] = [];
+  for (const resource of declared) {
+    const path = types.get(`${resource.vendor}.${resource.type}`)?.host?.inputs.domains;
+    const domains = path === undefined ? undefined : valueAt(resource.desired, path);
+    const wrong = Object.keys(domains ?? {}).filter((name) => !isPublic.has(name));
+    if (!wrong.length || root === undefined) continue;
+    const file = read(join(root, resource.file));
+    const at = typeof file === "string" ? {} : file.at(resource.span[0]);
+    for (const name of wrong) {
+      const message = `domains names "${name}", which is not a public site (defineSite({ public: true }))`;
+      problems.push({ file: resource.file, ...at, message });
+    }
+  }
+  return problems;
 }
 
 /**

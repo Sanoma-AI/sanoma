@@ -132,7 +132,10 @@ async function load({ policies = true } = {}): Promise<Loaded> {
  */
 async function keep(
   { config, resolved }: Loaded,
-  start: (config: SanomaConfig, resolved: Loaded["resolved"]) => Promise<{ stop(): Promise<void>; url?: string }>,
+  start: (
+    config: SanomaConfig,
+    resolved: Loaded["resolved"],
+  ) => Promise<{ stop(): Promise<void>; url?: string; sites?: Record<string, string> }>,
 ): Promise<never> {
   const started = await start(config, resolved);
   const running = `${resolved.appName} running ${[...resolved.workflows.keys()].join(", ")}`;
@@ -140,6 +143,8 @@ async function keep(
     console.log(`${running}; ctrl-c to stop`);
   } else {
     console.log(running);
+    // Each public site at its own host, before the line that says how to stop.
+    for (const [name, url] of Object.entries(started.sites ?? {})) console.log(`${name}: ${url}`);
     console.log(`${resolved.appName} at ${started.url}; ctrl-c to stop`);
   }
   onSignal(() => started.stop());

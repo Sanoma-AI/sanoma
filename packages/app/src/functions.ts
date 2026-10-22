@@ -1,3 +1,4 @@
+import { ANONYMOUS } from "@sanoma-ai/workflows/shared";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import {
@@ -58,13 +59,15 @@ export const getSource = createServerFn(READ)
   .handler(({ data, context }) => fileSource(context.app, data.file));
 
 /**
- * Who the server resolves this request to, and whether the deployment says so itself. A
- * resolver that fails is logged, and the nav says so without its detail.
+ * Who the server resolves this request to, and whether the deployment says so itself; nobody for
+ * `anonymous`, a public page's nobody (whose calls still run as `anonymous`). A resolver that
+ * fails is logged, and the nav says so without its detail.
  */
 export const getActor = createServerFn(READ).handler(async ({ context }): Promise<ActorInfo> => {
   const info = { fromServer: saysWho(context.app), signOut: signOutUrl(context.app) };
   try {
-    return { ...info, actor: (await context.actor()) ?? null };
+    const actor = await context.actor();
+    return { ...info, actor: actor && actor.id !== ANONYMOUS ? actor : null };
   } catch (err) {
     console.error("sanoma app: resolveActor failed:", err);
     return { ...info, actor: null, error: "Could not tell who you are" };

@@ -94,11 +94,14 @@ const resolved = resolveConfig(config);
 const cedar = resolved.policy;
 const description = describeConfig(config);
 
-/** The grid under `policy`, as `getPermissions` answers it, `described` as the description says it. */
+/** A public site, so the grid shows a visitor's columns. */
+const site = { name: "www", public: true as const, calls: [], problems: [] };
+
+/** The grid under `policy`, as `getPermissions` answers it, `described` as the description says it, beside a public site. */
 const gridOf = (policy: Policy, described = description.policy) =>
   permissions({
     resolved: { ...resolved, policy },
-    description: { ...description, policy: described },
+    description: { ...description, policy: described, sites: [site] },
     policyFiles: readPolicyFiles(root),
   });
 
@@ -159,6 +162,11 @@ describe("the Permissions grid", () => {
         ],
       },
     ]);
+  });
+
+  it("shows a visitor's columns only beside a public site", () => {
+    expect(permissions({ resolved: { ...resolved }, description }).groups).toEqual([null, "agents", "finance"]);
+    expect(gridOf(cedar).groups).toEqual([null, "agents", "finance", "visitors", "anonymous"]);
   });
 
   it("holds an agent for whom it acts for, and refuses everyone else that hold", () => {
@@ -253,15 +261,14 @@ describe("the Permissions page", () => {
       "No group",
       "agents",
       "finance",
-      "visitors",
-      "Anonymous",
     ]);
     expect(html).toContain('aria-label="hold · group finance: the rule for refund for someone in no group"');
     expect(html).toContain('aria-label="deny: the rule for shop.refunds.list for someone in agents"');
     expect(html).toContain(
       'aria-label="hold · group finance: the rule for shop.refunds.create in refund for someone in agents"',
     );
-    expect(html.match(/>allow</g)).toHaveLength(7);
+    // No public site, so no visitor's columns.
+    expect(html.match(/>allow</g)).toHaveLength(5);
     // The policy file under the grid, titled by its path, its text plain until the code loads.
     expect(html).toContain(">policies/refunds.cedar</h2>");
     expect(html).toContain("forbid (principal, action == Sanoma::Action::&quot;workflow:refund&quot;, resource)");

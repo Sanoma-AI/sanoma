@@ -1,5 +1,6 @@
+import { isLoopback } from "@sanoma-ai/workflows/shared";
 import { useRouter } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import type { SiteDefinition } from "../site.ts";
 
 // A company's sites, for the sidebar's Sites panel and the crumbs: each site the build mounts
@@ -56,3 +57,26 @@ export function useSites(): Site[] {
     return [...sites.values()];
   }, [routesByPath]);
 }
+
+/** The page's address, as much of `location` as a public site's address needs. */
+type PageAddress = Pick<Location, "protocol" | "hostname" | "port">;
+
+/**
+ * Where a public site answers at the root of its own host: its domain, when it has one; else, on a
+ * page of this machine, `<name>.localhost` on the page's port; else nowhere this page can link to.
+ */
+export function publicAddress(site: { name: string; domain?: string }, page?: PageAddress): string | undefined {
+  if (site.domain) return `https://${site.domain}/`;
+  if (!page || !isLoopback(page.hostname)) return undefined;
+  return `${page.protocol}//${site.name}.localhost${page.port ? `:${page.port}` : ""}/`;
+}
+
+const unchanging = () => () => {};
+
+/** `publicAddress` on this page: the server, and the browser while it hydrates, know only a domain. */
+export const usePublicAddress = (site: { name: string; domain?: string }): string | undefined =>
+  useSyncExternalStore(
+    unchanging,
+    () => publicAddress(site, location),
+    () => publicAddress(site),
+  );

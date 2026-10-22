@@ -62,9 +62,23 @@ export interface AppContext {
   login: AdmittingLogin;
   /** The company's repository, which Adopt commits a data file's change to; without one, it only writes the file. */
   source?: Source;
+  /**
+   * On a public site's own host, the site: its copy of the context, whose `login` is the site's
+   * front door (`publicFront`), so only `callFn` and `getActor` answer there, as a visitor.
+   */
+  site?: string;
+}
+
+/**
+ * What `startApp` hands each request: the app, and the public site whose host the request came
+ * to, when it came to one; the router then mounts that site's routes at `/`.
+ */
+export interface RequestContext {
+  app: AppContext;
+  site?: string;
 }
 
 /** Start's server entry, which `startApp` hands each request with the context: the build's `server.js`, or the dev server's. */
 export interface ServerEntry {
-  fetch(request: Request, opts?: { context?: { app: AppContext } }): Response | Promise<Response>;
+  fetch(request: Request, opts?: { context?: RequestContext }): Response | Promise<Response>;
 }

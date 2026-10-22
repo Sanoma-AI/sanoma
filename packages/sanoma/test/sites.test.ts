@@ -44,13 +44,17 @@ function installedCopy(): string {
   return copy;
 }
 
-/** The status of a GET sent with `headers`, Host among them, which fetch does not let a caller set. */
-function rawStatus(url: string, headers: Record<string, string>) {
+/**
+ * A GET to `url` with `host` as its Host, which fetch does not let a caller set, and so with no
+ * need for `*.localhost` to resolve (it does not on every Linux).
+ */
+function rawGet(url: string, host: string): Promise<{ status: number; body: string }> {
   const { hostname, port, pathname } = new URL(url);
-  return new Promise<number>((done, fail) => {
-    httpRequest({ host: hostname, port, path: pathname, headers }, (res) => {
-      res.resume();
-      done(res.statusCode ?? 0);
+  return new Promise((done, fail) => {
+    httpRequest({ host: hostname, port, path: pathname, headers: { host, accept: "text/html" } }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () => done({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString() }));
     })
       .on("error", fail)
       .end();
@@ -197,6 +201,7 @@ describe("sanoma with sites: the dev server", () => {
 
   it("serves a site in the app's shell, the app's pages and /healthz, refuses another Host, and builds nothing", async () => {
     expect(running!.output().stderr).toContain("serving the app with 1 site (hello) from Vite's dev server");
+    expect(running!.output().stdout).toContain(`hello: http://hello.localhost:${new URL(url).port}\n`);
     const site = await fetch(`${url}/sites/hello`);
     expect(site.status).toBe(200);
     const html = (await site.text()).replaceAll("<!-- -->", "");
@@ -206,7 +211,13 @@ describe("sanoma with sites: the dev server", () => {
     expect((await fetch(`${url}/workflows`)).status).toBe(200);
     const health = await fetch(`${url}/healthz`);
     expect([health.status, await health.text()]).toEqual([200, "ok\n"]);
-    expect(await rawStatus(`${url}/sites/hello`, { host: "attacker.example:80" })).toBe(403);
+    expect((await rawGet(`${url}/sites/hello`, "attacker.example:80")).status).toBe(403);
+    // The public site at the root of its own host, with hot updates.
+    const own = await rawGet(`${url}/`, `hello.localhost:${new URL(url).port}`);
+    expect(own.status).toBe(200);
+    expect(own.body).toContain('data-site="hello"');
+    expect(own.body.replaceAll("<!-- -->", "")).toContain("Hello from the hello site");
+    expect(own.body).not.toContain("sidebar-wrapper");
     expect(existsSync(join(repo, ".sanoma/app/build"))).toBe(false);
   }, 60_000);
 
@@ -311,6 +322,37 @@ export const Route = createFileRoute("/sites/hello/tracked")({ component: () => 
     expect(await tab.evaluate("window.__REACT_DEVTOOLS_GLOBAL_HOOK__.renderers.size")).toBe(1);
     expect(errors).toEqual([]);
   }, 60_000);
+});
+
+describe("sanoma with a public site: its own host in a browser", () => {
+  it("links to its pages at the root, hydrates with no error, and navigates in the same document", async (ctx) => {
+    const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
+    if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
+    dir = installedCopy();
+    const { url, stop } = await started(dir, []);
+    const browser = await launch({ executablePath: chrome, headless: true });
+    try {
+      const tab = await browser.newPage();
+      const errors: string[] = [];
+      tab.on("console", (message) => void (message.type() === "error" && errors.push(message.text())));
+      tab.on("pageerror", (err) => void errors.push(String(err)));
+      tab.on("response", (res) => void (res.status() >= 400 && errors.push(`${res.status()} ${res.url()}`)));
+      // Chrome resolves `*.localhost` to this machine itself.
+      await tab.goto(`http://hello.localhost:${new URL(url).port}/`, { waitUntil: "networkidle0" });
+      // Strings, run in the page: this file is typed for Node, without the DOM's globals.
+      expect(await tab.evaluate(`document.documentElement.dataset.site`)).toBe("hello");
+      expect(await tab.evaluate(`document.querySelector("a[href='/post']")?.textContent`)).toBe("The post");
+      expect(await tab.evaluate(`document.querySelector("a[href^='/sites/']")`)).toBeNull();
+      await tab.evaluate("window.marker = 'kept'");
+      await tab.click("a[href='/post']");
+      await tab.waitForFunction(`location.pathname === "/post" && document.body.innerText.includes("The first post")`);
+      expect(await tab.evaluate("window.marker")).toBe("kept");
+      expect(errors).toEqual([]);
+    } finally {
+      await browser.close();
+      await stop();
+    }
+  }, 120_000);
 });
 
 describe("sanoma without sites", () => {

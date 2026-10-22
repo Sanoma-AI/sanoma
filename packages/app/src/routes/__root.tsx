@@ -1,66 +1,91 @@
-import { type QueryClient, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createRootRouteWithContext, HeadContent, Link, Outlet, Scripts, useMatches } from "@tanstack/react-router";
+import { type QueryClient, useQuery } from "@tanstack/react-query";
+import { createRootRouteWithContext, HeadContent, Outlet, Scripts, useRouter } from "@tanstack/react-router";
 import { createIsomorphicFn } from "@tanstack/react-start";
 import { getCookie } from "@tanstack/react-start/server";
 import { ThemeProvider } from "next-themes";
-import { Fragment, lazy, type ReactNode, Suspense, useEffect } from "react";
-import { AppSidebar, useSidebarWidths } from "#/components/app-sidebar.tsx";
-import { DENSITY_COOKIE, DensityProvider } from "#/components/density.tsx";
-import { NewWorkflowDialog } from "#/components/new-workflow.tsx";
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "#/components/ui/breadcrumb.tsx";
-import { Separator } from "#/components/ui/separator.tsx";
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "#/components/ui/sidebar.tsx";
-import { Toaster } from "#/components/ui/sonner.tsx";
-import { TooltipProvider } from "#/components/ui/tooltip.tsx";
+import { lazy, type ReactNode } from "react";
+import { DENSITY_COOKIE } from "#/components/density.tsx";
 import { ActorContext, useActorState } from "../actor.ts";
-import { useCrumbs } from "../components/common.tsx";
 import { actorQuery, configQuery, waitingRunsQuery } from "../queries.ts";
 // Phosphor's regular shield-check, the sidebar's brand icon.
 import favicon from "../favicon.svg?url";
 import css from "../style.css?url";
 
-export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
-  head: () => ({
-    meta: [
-      { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { name: "color-scheme", content: "light dark" },
-      { title: "Sanoma" },
-    ],
-    links: [
-      { rel: "stylesheet", href: css },
-      // Without an icon the browser asks for /favicon.ico, and gets a 404.
-      { rel: "icon", type: "image/svg+xml", href: favicon },
-    ],
-  }),
+/** The app's chrome, in a chunk of its own that a public site's host never loads. */
+const Root = lazy(() => import("#/components/app-chrome.tsx"));
+
+// One root for both hosts (a route tree has one): on a public site's host (`context.site`), a
+// bare document around the site's own pages, with nothing of the app's but its scripts; on the
+// app's, the app's head, loader and chrome.
+export const Route = createRootRouteWithContext<{ queryClient: QueryClient; site?: string }>()({
+  // Annotated: without it, tsc infers the match's context as `never`.
+  head: ({ match }: { match: { context: { site?: string } } }) => (match.context.site ? BARE_HEAD : APP_HEAD),
   // Pages show what is happening now: never cache them.
   headers: () => ({ "cache-control": "no-store" }),
-  // Who the server says is asking, in the first render: a deployment's login shows at once.
-  // And the config, which every page reads and which cannot change while the app runs.
-  // Both stay in the query client, where the page reads them: a loader returns only what no
-  // query holds (here, whether the sidebar was left open, and the density), since the page
-  // carries loader data too.
-  loader: async ({ context: { queryClient } }) => {
-    // The inbox badge's count, started here and not awaited: it streams in with the page, and a
-    // slow or failed read never holds the page up (the badge shows nothing until it comes).
-    void queryClient.query(waitingRunsQuery()).catch(() => {});
-    await Promise.all([
-      queryClient.query({ ...actorQuery(), staleTime: "static" }),
-      queryClient.query({ ...configQuery(), staleTime: "static" }),
-    ]);
-    return readPrefs();
-  },
+  loader: async ({ context }): Promise<Prefs | null> => (context.site ? null : appLoader(context.queryClient)),
   // The document, around everything the root renders: its page, error or not-found included.
   shellComponent: Document,
-  component: Root,
+  component: RootSwitch,
 });
+
+/** A public site's head: the site's layout sets its own title, icon and stylesheet. */
+const BARE_HEAD = {
+  meta: [{ charSet: "utf-8" }, { name: "viewport", content: "width=device-width, initial-scale=1" }],
+};
+
+const APP_HEAD = {
+  meta: [...BARE_HEAD.meta, { name: "color-scheme", content: "light dark" }, { title: "Sanoma" }],
+  links: [
+    { rel: "stylesheet", href: css },
+    // Without an icon the browser asks for /favicon.ico, and gets a 404.
+    { rel: "icon", type: "image/svg+xml", href: favicon },
+  ],
+};
+
+/** What the app's root loader returns: whether the sidebar was left open, and the density. */
+interface Prefs {
+  sidebarOpen: boolean;
+  compact: boolean;
+}
+
+/**
+ * Who the server says is asking, in the first render: a deployment's login shows at once. And
+ * the config, which every page reads and which cannot change while the app runs. Both stay in
+ * the query client, where the page reads them: a loader returns only what no query holds (here,
+ * the `Prefs`), since the page carries loader data too.
+ */
+async function appLoader(queryClient: QueryClient): Promise<Prefs> {
+  // The inbox badge's count, started here and not awaited: it streams in with the page, and a
+  // slow or failed read never holds the page up (the badge shows nothing until it comes).
+  void queryClient.query(waitingRunsQuery()).catch(() => {});
+  await Promise.all([
+    queryClient.query({ ...actorQuery(), staleTime: "static" }),
+    queryClient.query({ ...configQuery(), staleTime: "static" }),
+  ]);
+  return readPrefs();
+}
+
+/** A public site's pages alone, on its host; else the app's chrome around the page. */
+function RootSwitch() {
+  return useRouter().options.context.site ? (
+    <SiteActor>
+      <Outlet />
+    </SiteActor>
+  ) : (
+    <Root />
+  );
+}
+
+/**
+ * On a public site's host, who the page is for, as `useActor()` reads it: the visitor the site's
+ * login verifies, or nobody (`anonymous`), asked once the page is in the browser; not read
+ * (`actor` undefined) until then. One provider throughout, so the page never remounts.
+ */
+function SiteActor({ children }: { children: ReactNode }) {
+  const { data } = useQuery(actorQuery());
+  const actor = useActorState(data ?? { fromServer: true, actor: null });
+  return <ActorContext value={data ? actor : { ...actor, actor: undefined }}>{children}</ActorContext>;
+}
 
 /**
  * The cookie the sidebar writes as it opens and closes: SIDEBAR_COOKIE_NAME in ui/sidebar.tsx,
@@ -93,111 +118,34 @@ function cookieValue(name: string) {
     ?.slice(name.length + 1);
 }
 
-/** Asked once per browser, so loaded only when no name is stored. */
-const WhoAreYou = lazy(() => import("../components/who-are-you.tsx"));
-
-function Root() {
-  const { data: server } = useSuspenseQuery(actorQuery());
-  const actor = useActorState(server);
-  // With the default login, a name chosen here is asked about again: who the server admits it as.
-  const queryClient = useQueryClient();
-  const said = server.actor?.id ?? null;
-  useEffect(() => {
-    if (!actor.fromServer && actor.actor && actor.actor !== said)
-      void queryClient.invalidateQueries({ queryKey: actorQuery().queryKey });
-  }, [actor.fromServer, actor.actor, said, queryClient]);
-  // Only these fields: the root's loader data is new on every navigation, a field is not.
-  const sidebarOpen = Route.useLoaderData({ select: (data) => data.sidebarOpen });
-  const compact = Route.useLoaderData({ select: (data) => data.compact });
-  // A page that asks for it (a workflow's, for its graph) takes the full width.
-  const wide = useMatches({ select: (matches) => matches.some((match) => match.staticData.wide) });
-  // The section bar, and beside it the section's panel when it has one.
-  const widths = useSidebarWidths();
-  return (
-    <ActorContext value={actor}>
-      {/* One provider for every tooltip: the sidebar's, and any a page shows. */}
-      <TooltipProvider>
-        <DensityProvider defaultCompact={compact}>
-          <SidebarProvider defaultOpen={sidebarOpen} style={widths}>
-            <AppSidebar />
-            <SidebarInset>
-              <header className="flex h-12 shrink-0 items-center gap-2 px-4">
-                {/* On a phone the sidebar is a sheet: this opens it. Elsewhere its panel's button, its
-                    rail or Ctrl+B folds the panel. */}
-                <div className="contents md:hidden">
-                  <SidebarTrigger className="-ml-1" />
-                  <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
-                </div>
-                <Crumbs />
-              </header>
-              {/* The page column: a page's regions are its children, the region gap apart. */}
-              <div
-                data-wide={wide || undefined}
-                className="mx-auto flex w-full max-w-6xl flex-col gap-(--gap-region) p-4 pt-0 data-wide:max-w-none sm:px-6"
-              >
-                <Outlet />
-              </div>
-            </SidebarInset>
-          </SidebarProvider>
-          <NewWorkflowDialog />
-          {!actor.fromServer && actor.actor === null && (
-            <Suspense fallback={null}>
-              <WhoAreYou />
-            </Suspense>
-          )}
-          <Toaster />
-        </DensityProvider>
-      </TooltipProvider>
-    </ActorContext>
-  );
-}
-
 function Document({ children }: { children: ReactNode }) {
+  // On a public site's host, `data-site` tells the browser's router which site this is, and the
+  // site brings its own look: no theme.
+  const site = useRouter().options.context.site;
   return (
     // next-themes' script sets the class on <html> before the body paints, so React finds it changed.
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" data-site={site} suppressHydrationWarning={!site}>
       <head>
         <HeadContent />
       </head>
       <body>
-        {/* Light, dark or the system's, kept in localStorage. style.css sets color-scheme with the class. */}
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          enableColorScheme={false}
-          storageKey="sanoma.theme"
-          disableTransitionOnChange
-        >
-          {children}
-        </ThemeProvider>
+        {site ? (
+          children
+        ) : (
+          /* Light, dark or the system's, kept in localStorage. style.css sets color-scheme with the class. */
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="system"
+            enableSystem
+            enableColorScheme={false}
+            storageKey="sanoma.theme"
+            disableTransitionOnChange
+          >
+            {children}
+          </ThemeProvider>
+        )}
         <Scripts />
       </body>
     </html>
-  );
-}
-
-/** Where you are: the crumbs of the pages matched, each but the last a link to its page. */
-function Crumbs() {
-  const crumbs = useCrumbs();
-  return (
-    <Breadcrumb>
-      <BreadcrumbList>
-        {crumbs.map(({ id, pathname, label }, i) =>
-          i < crumbs.length - 1 ? (
-            <Fragment key={id}>
-              <BreadcrumbItem>
-                <BreadcrumbLink render={<Link to={pathname} />}>{label}</BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator />
-            </Fragment>
-          ) : (
-            <BreadcrumbItem key={id}>
-              <BreadcrumbPage>{label}</BreadcrumbPage>
-            </BreadcrumbItem>
-          ),
-        )}
-      </BreadcrumbList>
-    </Breadcrumb>
   );
 }

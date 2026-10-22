@@ -55,6 +55,34 @@ export const WORKFLOW_ACTION = "workflow:";
 /** A site's folder name under `sites/`, its URL segment: what the app mounts and `readSites` reads. */
 export const SITE_NAME = /^[a-z][a-z0-9-]*$/;
 
+/** A public site's domain: a host name of two labels or more, lowercase (`sanoma.example`). */
+export const DOMAIN_NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+
+/**
+ * The public sites' domains as a host hands them to the app in `SANOMA_DOMAINS` (`HostSpec`'s
+ * `domains`): `<site>=<hostname>`, comma-separated, by site name.
+ */
+export const domainsText = (domains: Readonly<Record<string, string>>): string =>
+  Object.keys(domains)
+    .toSorted()
+    .map((site) => `${site}=${domains[site]}`)
+    .join(",");
+
+/** The domains `domainsText` wrote, by site name; throws for a pair that is not `<site>=<hostname>`, or a site named twice. */
+export function domainsOf(text: string): Record<string, string> {
+  const domains: Record<string, string> = {};
+  for (const pair of text.split(",")) {
+    const [site = "", domain = "", ...rest] = pair.trim().split("=");
+    if (!SITE_NAME.test(site) || !DOMAIN_NAME.test(domain) || rest.length || Object.hasOwn(domains, site)) {
+      throw new Error(
+        `SANOMA_DOMAINS has "${pair}": write <site>=<hostname>, each site once, such as www=sanoma.example`,
+      );
+    }
+    domains[site] = domain;
+  }
+  return domains;
+}
+
 /**
  * A record of a collection as `get`, `list` and `save` answer it: its key, the record, and when
  * and by whom it was last saved (`updatedBy`: a person's id, or `run:<id>` for a run). A record
