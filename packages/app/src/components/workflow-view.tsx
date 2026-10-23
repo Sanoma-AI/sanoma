@@ -2,12 +2,14 @@ import type { WorkflowEntry } from "@sanoma-ai/workflows/describe";
 import { approverLabel } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { type ReactNode, Suspense, useCallback, useMemo, useRef, useState } from "react";
+import { InfoIcon } from "@phosphor-icons/react/dist/csr/Info";
+import { Suspense, useCallback, useMemo, useRef, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
-import { Card, CardHeader } from "#/components/ui/card.tsx";
+import { Card } from "#/components/ui/card.tsx";
 import { ItemGroup } from "#/components/ui/item.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs.tsx";
+import { cn } from "#/lib/utils.ts";
 import { pendingApprovals, type RunDetail, type ScenarioEntry } from "../api.ts";
 import { outlineGraph } from "../graph/outline-graph.ts";
 import { runGraph } from "../graph/run-graph.ts";
@@ -17,51 +19,54 @@ import { useReducedMotion } from "../lib/motion.ts";
 import { nodesByRecord } from "../lib/records.ts";
 import { sourceQuery, workflowFile } from "../queries.ts";
 import type { CodeProps } from "./code.tsx";
-import { CardHeading, CodePanel, GraphPanel, Nothing, Notice, Region } from "./common.tsx";
+import { CodePanel, FLOAT, FLOAT_CARD, FLOAT_ROOM, GraphPanel, Nothing, Notice, Region, TipButton } from "./common.tsx";
 import { type InspectedRun, Inspector, type SourceText } from "./inspector.tsx";
 import { CheckRow, LedgerRow, show } from "./ledger.tsx";
 
-// One view for a workflow and its runs: the graph beside an inspector, then Code and Ledger tabs.
+// One view for a workflow and its runs: the graph, with the inspector floating over its card.
 
 type Tab = "code" | "ledger";
 
 /**
- * A workflow's graph, or a run's (`run`, read at `at`), as either pane of the workflow's page
- * shows it, inside the pane's container (`@container/pane`):
- * - `children` (the pane's notices), then for a run waiting on someone a banner naming who and
- *   for what, which selects the approval's node, or a failed run's error;
- * - the graph card beside the inspector, 20rem wide, or above it while the pane is narrower than
- *   `@3xl` (by the pane's own width: with the sidebar's bar and panel open, a 1280 px screen
- *   leaves the pane about 890 px, a 1024 px one about 630). The graph card sets the row's height;
- *   the inspector scrolls inside it;
- * - Code and, for a run, Ledger tabs under them.
+ * A workflow's graph, or a run's (`run`, read at `at`), as the workflow's page and a run's page
+ * show it:
+ * - for a run waiting on someone, a banner naming who and for what, which selects the
+ *   approval's node, or a failed run's error;
+ * - on the workflow's page, the card `view` names: the graph, or the code at full width;
+ * - on a run's page, the graph's card, then Ledger and Code tabs under it;
+ * - over the right of the graph's card (or the code's, for a node or New run, the code then
+ *   leaving it room), the inspector as a floating card, in the flow under the graph while the
+ *   card is narrower than `@3xl`. It shows
+ *   the overview (About, or the run's facts and approvals) until closed, and a selected node or
+ *   New run (`?new`) whenever there is one.
  *
  * A click on a node, in the code, or a ledger row's "Show in graph" selects the node: the graph
  * rings it, the code marks its lines, the inspector shows it, and while the Ledger tab is open
  * the ledger scrolls to its record. A workflow's graph marks what `scenario`, when given, seeds
  * and expects. Without an outline (it could not be read, or the config has no such workflow) the
- * code tab says why; with no run either, there is nothing to draw, and that says why instead.
+ * code says why; with no run either, there is nothing to draw, and that says why instead.
  */
 export function WorkflowView({
   name,
   workflow,
   run,
   scenario,
-  children,
+  view = "graph",
 }: {
   name: string;
   /** The config's entry; none for a retired workflow, whose runs still draw a graph. */
   workflow: WorkflowEntry | undefined;
   run?: (RunDetail & { at: number }) | undefined;
   scenario?: Pick<ScenarioEntry, "steps"> | undefined;
-  children?: ReactNode;
+  /** On the workflow's page, its tab (`?view=`): the graph, or the code. */
+  view?: "graph" | "code";
 }) {
   const outline = workflow?.outline;
   const steps = outline && "nodes" in outline ? outline.nodes : undefined;
   const ledger = run?.ledger;
   const summary = run?.run;
   const at = run?.at ?? 0;
-  // The page's one graph: the panel draws it, a click in the code finds its node in it, and a
+  // The page's one graph: GraphPanel draws it, a click in the code finds its node in it, and a
   // ledger row its node. A poll that changed nothing keeps the ledger and summary, so the graph.
   const graph = useMemo(() => {
     if (ledger && summary) return runGraph(ledger, summary, at, steps);
@@ -76,29 +81,36 @@ export function WorkflowView({
   );
   const newRun = useSearch({ from: "/workflows/$name", select: (search) => search.new === true });
 
-  const [tab, setTab] = useState<Tab>(run ? "ledger" : "code");
+  // A run page's tab under its graph.
+  const [tab, setTab] = useState<Tab>("ledger");
   // By id, so a poll's new graph cannot leave an old node selected.
   const [selected, setSelected] = useState<string>();
+  // The inspector's overview shows until its close; a node picked opens the inspector again.
+  const [closed, setClosed] = useState(false);
   const node = graph?.nodes.find((n) => n.id === selected);
   const navigate = useNavigate();
   // A node picked while New run is open takes its place in the inspector: `?new` goes, in place.
   const pick = useCallback(
     (id: string | undefined) => {
       setSelected(id);
-      if (id !== undefined && newRun) {
-        void navigate({ to: ".", search: (prev) => ({ ...prev, new: undefined }), replace: true });
-      }
+      if (id === undefined) return;
+      setClosed(false);
+      if (newRun) void navigate({ to: ".", search: (prev) => ({ ...prev, new: undefined }), replace: true });
     },
     [newRun, navigate],
   );
+  const close = useCallback(() => {
+    setSelected(undefined);
+    setClosed(true);
+  }, []);
   const reducedMotion = useReducedMotion();
   const select = useCallback(
     (picked: GraphNode | undefined) => {
       pick(picked?.id);
       const recordId = picked && "state" in picked ? picked.state?.recordId : undefined;
-      if (recordId && tab === "ledger") show(recordId, reducedMotion);
+      if (run && recordId && tab === "ledger") show(recordId, reducedMotion);
     },
-    [pick, tab, reducedMotion],
+    [pick, run, tab, reducedMotion],
   );
   const selectAt = useCallback((offset: number) => select(graph && nodeAt(graph.nodes, offset)), [graph, select]);
   // From the ledger: the graph comes into view with its node ringed, and the ledger stays put.
@@ -110,6 +122,11 @@ export function WorkflowView({
     },
     [pick, nodeOf, reducedMotion],
   );
+  // A node's lines: the run page's Code tab, or the workflow page's (`?view=code`).
+  const showLines = useCallback(() => {
+    if (run) setTab("code");
+    else void navigate({ to: ".", search: (prev) => ({ ...prev, view: "code" }) });
+  }, [run, navigate]);
   const highlight = useMemo(() => node?.span && [node.span], [node]);
 
   const unread =
@@ -127,9 +144,36 @@ export function WorkflowView({
     waiting &&
     graph.nodes.find((n) => "state" in n && n.state && "approval" in n.state && n.state.approval?.id === waiting.id);
 
+  const code = (
+    // Its own boundary: the source's query may have been collected while nothing read it, and
+    // its refetch then replaces only the code's card.
+    <Suspense fallback={<Skeleton role="status" aria-label="Loading the source" className="size-full rounded-none" />}>
+      {noSource ||
+        (file !== undefined ? (
+          <FileSourcePanel file={file} highlight={highlight} onSelect={selectAt} />
+        ) : (
+          <SourcePanel source={workflow?.source} highlight={highlight} onSelect={selectAt} />
+        ))}
+    </Suspense>
+  );
+  const onCode = !run && view === "code";
+  // Over the code, the inspector shows a node or New run only: the overview is the graph's.
+  const floating = (newRun && workflow !== undefined) || node !== undefined || (!onCode && !closed);
+  const inspector = floating && (
+    <Inspector
+      workflow={workflow}
+      run={inspected}
+      newRun={newRun}
+      node={node}
+      text={text}
+      onClose={close}
+      onLines={showLines}
+      className={FLOAT}
+    />
+  );
+
   return (
-    <div className="@container/pane flex flex-col gap-(--gap-region)">
-      {children}
+    <div className="flex flex-col gap-(--gap-region)">
       {waiting && (
         <Notice>
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -143,58 +187,44 @@ export function WorkflowView({
         </Notice>
       )}
       {summary?.error && <Notice variant="destructive">{summary.error}</Notice>}
-      <div className="grid gap-(--gap-region) @3xl/pane:grid-cols-[minmax(0,1fr)_20rem]">
-        <Card ref={graphCard} className="scroll-mt-4 gap-0 overflow-hidden py-0">
-          <CardHeader className="border-b py-2 compact:py-1 [.border-b]:pb-2 compact:[.border-b]:pb-1">
-            <CardHeading className="text-sm">Graph</CardHeading>
-          </CardHeader>
+      {onCode ? (
+        <Card role="region" aria-label="Code" className={cn(FLOAT_CARD, "gap-0 py-0")}>
+          <div className={cn("h-(--pane)", floating && FLOAT_ROOM)}>{code}</div>
+          {inspector}
+        </Card>
+      ) : (
+        <Card ref={graphCard} role="region" aria-label="Graph" className={cn(FLOAT_CARD, "scroll-mt-4 gap-0 py-0")}>
+          {/* The whole card: the inspector floats over the graph, which pans from under it. */}
           <div className="h-(--pane-tall)">
             <GraphPanel graph={graph} show={run ? "end" : "start"} selected={selected} onSelect={select} />
           </div>
-        </Card>
-        {/* Beside the graph, the inspector takes the graph's height and scrolls inside it; above it,
-            its own. */}
-        <div className="min-w-0 @3xl/pane:relative">
-          <div className="@3xl/pane:absolute @3xl/pane:inset-0">
-            <Inspector
-              workflow={workflow}
-              run={inspected}
-              newRun={newRun}
-              node={node}
-              text={text}
-              onClose={() => setSelected(undefined)}
-              onLines={() => setTab("code")}
-            />
-          </div>
-        </div>
-      </div>
-      <Tabs value={tab} onValueChange={(value) => setTab(value as Tab)} className="gap-(--gap-section)">
-        <TabsList>
-          <TabsTrigger value="code">Code</TabsTrigger>
-          {run && <TabsTrigger value="ledger">Ledger</TabsTrigger>}
-        </TabsList>
-        <TabsContent value="code">
-          <Card className="h-(--pane) gap-0 overflow-hidden py-0">
-            {/* Its own boundary: the source's query may have been collected while nothing read
-                it, and its refetch then replaces only this card's content. */}
-            <Suspense
-              fallback={<Skeleton role="status" aria-label="Loading the source" className="size-full rounded-none" />}
+          {inspector || (
+            <TipButton
+              tip={run ? "Show the run" : "About this workflow"}
+              variant="outline"
+              size="icon-sm"
+              className="absolute top-3 right-3"
+              onClick={() => setClosed(false)}
             >
-              {noSource ||
-                (file !== undefined ? (
-                  <FileSourcePanel file={file} highlight={highlight} onSelect={selectAt} />
-                ) : (
-                  <SourcePanel source={workflow?.source} highlight={highlight} onSelect={selectAt} />
-                ))}
-            </Suspense>
-          </Card>
-        </TabsContent>
-        {run && (
+              <InfoIcon aria-hidden="true" />
+            </TipButton>
+          )}
+        </Card>
+      )}
+      {run && (
+        <Tabs value={tab} onValueChange={(value) => setTab(value as Tab)} className="gap-(--gap-section)">
+          <TabsList>
+            <TabsTrigger value="ledger">Ledger</TabsTrigger>
+            <TabsTrigger value="code">Code</TabsTrigger>
+          </TabsList>
           <TabsContent value="ledger" className="flex flex-col gap-(--gap-region)">
             <RunLedger run={run} titles={titles} nodeOf={nodeOf} onShow={showInGraph} />
           </TabsContent>
-        )}
-      </Tabs>
+          <TabsContent value="code">
+            <Card className="h-(--pane) gap-0 py-0">{code}</Card>
+          </TabsContent>
+        </Tabs>
+      )}
     </div>
   );
 }

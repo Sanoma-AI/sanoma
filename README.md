@@ -37,13 +37,13 @@ export default defineWorkflow({
 
 The app draws this file as a graph before it runs, lists the approval in its Inbox, and shows each run's calls, decisions and replies in its ledger. A developer changes the workflow by changing the file. [`@sanoma-ai/workflows`](packages/workflows/README.md) has the whole API.
 
-![The announce workflow's page: its graph, the ghost.post.publish step selected with its details beside it, and the source of workflows/announce.ts](.github/assets/workflow.png)
+![The announce workflow's page: its graph, with the ghost.post.create step selected and its details floating over the graph](.github/assets/workflow.png)
 
-The workflow's page: the graph is drawn from the file, and picking a step finds its line in the code.
+The workflow's page: the graph is drawn from the file, and picking a step says what it does and finds its lines under Code.
 
-![The Inbox with "Review launch copy" approvals waiting for marketing-lead](.github/assets/inbox.png)
+![The Inbox with "Review launch copy" approvals waiting for marketing-lead, the chat column beside it](.github/assets/inbox.png)
 
-The Inbox as marketing-lead: the approvals waiting for them, with the draft's link and what approving lets through.
+The Inbox as marketing-lead: the approvals waiting for them, with the draft's link and what approving lets through. Beside it, the chat column, where the agent will talk with you once it is built.
 
 ![A finished run of announce: its graph, the approval and its note, and its ledger](.github/assets/run.png)
 

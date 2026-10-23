@@ -5,9 +5,10 @@ import { getCookie } from "@tanstack/react-start/server";
 import { ThemeProvider } from "next-themes";
 import { lazy, type ReactNode } from "react";
 import { DENSITY_COOKIE } from "#/components/density.tsx";
+import { CHAT_COOKIE, chatPref, type ChatPref } from "#/components/shell/prefs.ts";
 import { ActorContext, useActorState } from "../actor.ts";
 import { actorQuery, configQuery, waitingRunsQuery } from "../queries.ts";
-// Phosphor's regular shield-check, the sidebar's brand icon.
+// Phosphor's regular shield-check, the app's icon.
 import favicon from "../favicon.svg?url";
 import css from "../style.css?url";
 
@@ -62,9 +63,12 @@ const APP_HEAD = {
   ],
 };
 
-/** What the app's root loader returns: whether the sidebar was left open, and the density. */
+/**
+ * What the app's root loader returns: whether the chat column was left open or folded (neither
+ * until Chat is first used), and the density.
+ */
 interface Prefs {
-  sidebarOpen: boolean;
+  chat: ChatPref;
   compact: boolean;
 }
 
@@ -108,13 +112,7 @@ function SiteActor({ children }: { children: ReactNode }) {
 }
 
 /**
- * The cookie the sidebar writes as it opens and closes: SIDEBAR_COOKIE_NAME in ui/sidebar.tsx,
- * which does not export it (and is generated, so not edited).
- */
-const SIDEBAR_COOKIE = "sidebar_state";
-
-/**
- * Whether the sidebar's panel was left open (open unless its cookie says closed) and whether the
+ * Whether the chat column was left open or folded (its cookie, unset until Chat is used) and whether the
  * page is Compact (DensityProvider says why a cookie), from the request's cookies on the server
  * and `document.cookie` in the browser. Each takes its value once, as it mounts: the first render
  * is hydration, which has the server's answer; reading it in the browser too keeps a later
@@ -122,11 +120,11 @@ const SIDEBAR_COOKIE = "sidebar_state";
  */
 const readPrefs = createIsomorphicFn()
   .server(() => ({
-    sidebarOpen: getCookie(SIDEBAR_COOKIE) !== "false",
+    chat: chatPref(getCookie(CHAT_COOKIE)),
     compact: getCookie(DENSITY_COOKIE) === "compact",
   }))
   .client(() => ({
-    sidebarOpen: cookieValue(SIDEBAR_COOKIE) !== "false",
+    chat: chatPref(cookieValue(CHAT_COOKIE)),
     compact: cookieValue(DENSITY_COOKIE) === "compact",
   }));
 

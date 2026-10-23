@@ -1,5 +1,6 @@
 import type { ConfigDescription, WorkflowEntry } from "@sanoma-ai/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { memo, useCallback, useMemo } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Item, ItemContent, ItemDescription, ItemGroup } from "#/components/ui/item.tsx";
@@ -10,11 +11,15 @@ import { BUILTIN_ICON, ItemHeading, Json, None, Notice, OpItem, Section, UsedByL
 
 // A workflow's pieces, as a workflow's own page shows them.
 
-/** Where a pane of a retired workflow's page would be: the config no longer has it, but its runs remain. */
+/** In place of a retired workflow's graph: the config no longer has it, but its runs remain, under Runs. */
 export function Retired({ name }: { name: string }) {
   return (
     <Notice>
-      This config has no workflow named <code>{name}</code>. Its past runs are in the panel.
+      This config has no workflow named <code>{name}</code>. Its past runs are under{" "}
+      <Link to="/workflows/$name" params={{ name }} search={{ view: "runs" }}>
+        Runs
+      </Link>
+      .
     </Notice>
   );
 }

@@ -1,12 +1,10 @@
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
+import { rememberPref } from "./shell/prefs.ts";
 
 // The page's density: comfortable, or Compact for people who live in the app (see DensityProvider).
 
 /** The cookie the density is kept in: `compact` or `comfortable` (and, never set, comfortable). */
 export const DENSITY_COOKIE = "sanoma_density";
-
-/** A year, in seconds. */
-const DENSITY_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
 type Density = { compact: boolean; setCompact: (compact: boolean) => void };
 
@@ -22,8 +20,8 @@ export function useDensity(): Density {
 /**
  * Holds the density and renders the app's box, `#app`, marked `data-density="compact"` while
  * Compact (unmarked otherwise): the `compact:` variant and style.css's spacing unit and tokens key on it,
- * as SidebarProvider renders its own wrapper. The density lives in a cookie, as the sidebar's
- * state does, so the server renders the chosen one from the first paint: the root's loader reads
+ * as the chrome renders no wrapper of its own. The density lives in a cookie, as the chat
+ * column's state does, so the server renders the chosen one from the first paint: the root's loader reads
  * it into `defaultCompact`, which the provider takes once, as it mounts (hydration has the
  * server's answer, so both render the same page); the setter writes it. On #app rather than
  * <html>, since the density is the root's state; Base UI's portals (menus, dialogs) land in <body>,
@@ -33,7 +31,7 @@ export function DensityProvider({ defaultCompact, children }: { defaultCompact: 
   const [compact, setState] = useState(defaultCompact);
   const setCompact = useCallback((value: boolean) => {
     setState(value);
-    document.cookie = `${DENSITY_COOKIE}=${value ? "compact" : "comfortable"}; path=/; max-age=${DENSITY_COOKIE_MAX_AGE}`;
+    rememberPref(DENSITY_COOKIE, value ? "compact" : "comfortable");
   }, []);
   const density = useMemo(() => ({ compact, setCompact }), [compact, setCompact]);
   return (

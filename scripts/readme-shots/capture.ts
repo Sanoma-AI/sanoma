@@ -31,20 +31,24 @@ export async function launchChrome(): Promise<Browser> {
 
 interface Scene {
   actor: string;
-  /** The sidebar's panel open, or folded to its section bar. */
-  sidebar: boolean;
+  /** The chat column open beside the bar, or folded. */
+  chat: boolean;
   width: number;
   height: number;
   scale: number;
 }
 
 /**
- * A page in a context of its own, with the actor, sidebar and viewport of `scene`, and the light
+ * A page in a context of its own, with the actor, chat column and viewport of `scene`, and the light
  * theme (the app follows the system's by default).
  */
 async function open(browser: Browser, base: string, scene: Scene): Promise<Page> {
   const context = await browser.createBrowserContext();
-  await context.setCookie({ name: "sidebar_state", value: String(scene.sidebar), domain: new URL(base).hostname });
+  await context.setCookie({
+    name: "sanoma_chat",
+    value: scene.chat ? "open" : "closed",
+    domain: new URL(base).hostname,
+  });
   const page = await context.newPage();
   await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
   // The app keeps the actor in localStorage; set only once, so a scene can switch it.
@@ -123,7 +127,7 @@ async function typeDateTime(page: Page, selector: string, when: Date, each: () =
  */
 export async function recordDemo(browser: Browser, base: string, dir: string): Promise<string> {
   mkdirSync(dir, { recursive: true });
-  const page = await open(browser, base, { actor: "dana", sidebar: false, width: 1200, height: 800, scale: 1 });
+  const page = await open(browser, base, { actor: "dana", chat: false, width: 1200, height: 800, scale: 1 });
   await page.evaluateOnNewDocument(() => {
     addEventListener("DOMContentLoaded", () => {
       const cursor = document.createElement("div");
@@ -228,7 +232,7 @@ export async function recordDemo(browser: Browser, base: string, dir: string): P
   await wait(1500);
   await shot(1.6);
   // 6. Back to the run: sleeping until the launch, then finished, then its ledger.
-  // The section bar's Workflows (the brand links there too).
+  // The bar's Workflows.
   await moveTo(await need(page, 'nav[aria-label="Sections"] a[href="/workflows"]'));
   await press();
   await page.goto(base + runPath, { waitUntil: "networkidle0" });
@@ -260,14 +264,15 @@ export async function recordDemo(browser: Browser, base: string, dir: string): P
 }
 
 export interface Still {
-  sidebar: boolean;
+  /** The chat column open beside the bar, or folded. */
+  chat: boolean;
   /** The viewport's height in CSS pixels (default 900); the width is 1440 and the scale 2. */
   height?: number;
-  /** All of the page: the viewport grown to its height, so the sidebar runs the whole length. */
+  /** All of the page: the viewport grown to its height, so the bar runs the whole length. */
   fullPage?: boolean;
   /** Open the tab of this name. */
   tab?: string;
-  /** Fit all of the graph to its pane, then select the node whose text includes this. */
+  /** Close the overview, fit all of the graph to its card, then select the node whose text includes this. */
   select?: string;
 }
 
@@ -276,7 +281,7 @@ export async function still(browser: Browser, base: string, path: string, out: s
   let height = options.height ?? 900;
   const page = await open(browser, base, {
     actor: "marketing-lead",
-    sidebar: options.sidebar,
+    chat: options.chat,
     width: 1440,
     height,
     scale: 2,
@@ -294,6 +299,9 @@ export async function still(browser: Browser, base: string, path: string, out: s
     await wait(500);
   }
   if (options.select) {
+    // The overview floats over the graph's right: closed first, so the fit uses the whole card.
+    await page.click('[aria-label="Inspector"] button[aria-label="Close"]');
+    await wait(300);
     // Fitting animates for 300 ms.
     await page.click('[aria-label="Fit the graph"]');
     await wait(800);

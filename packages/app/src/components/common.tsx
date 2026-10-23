@@ -31,6 +31,7 @@ import { Card } from "#/components/ui/card.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
+import { Tabs, TabsList, TabsTrigger } from "#/components/ui/tabs.tsx";
 import { shortId } from "#/lib/apply-plan.ts";
 import { siteOf, useSites } from "#/lib/sites.ts";
 import { utcText } from "#/lib/time.ts";
@@ -39,10 +40,9 @@ import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import type { OpEntry } from "@sanoma-ai/workflows/describe";
 import { approverLabel } from "@sanoma-ai/workflows/shared";
 import { configQuery, type SiteCaller } from "../queries.ts";
-import type { PanelSection } from "./app-sidebar.tsx";
 import type { CodeProps } from "./code.tsx";
 import type { GraphProps } from "./graph.tsx";
-import { ButtonLink, effectBadge, PageHeader, type PageHeaderProps, Region, Tip, ToneBadge } from "./kit.tsx";
+import { ButtonLink, effectBadge, Notice, PageHeader, type PageHeaderProps, Region, Tip, ToneBadge } from "./kit.tsx";
 
 // Small pieces shared by the screens, composed from the shadcn components in ./ui: the kit's, which
 // `sanoma/ui` exports (./kit.tsx, re-exported so a screen imports both from here), then the app's
@@ -55,8 +55,6 @@ declare module "@tanstack/react-router" {
     crumb?: string;
     /** The page takes the page column's full width, not the reading width the root caps others at. */
     wide?: true;
-    /** The sidebar's section the page is under, whose panel shows beside the bar (`usePanel`). */
-    section?: PanelSection;
   }
 }
 
@@ -366,6 +364,81 @@ export function Disclosure({ label, children }: { label: ReactNode; children: Re
   );
 }
 
+/**
+ * A page's views, as its pill tabs (shadcn's `Tabs`), each a `LinkTab`: `value` names the one
+ * showing. Each view is a URL (`?show=`, `?filter=`, …), so the tabs are links the server renders
+ * as the URL says, and a view opens in a new tab or is shared; arrow keys move between them as
+ * between tabs. Scrolled sideways rather than widening the page, on a phone.
+ */
+export function LinkTabs({ label, value, children }: { label: string; value: string; children: ReactNode }) {
+  return (
+    <Tabs value={value} className="min-w-0">
+      <TabsList aria-label={label} className="max-w-full justify-start overflow-x-auto">
+        {children}
+      </TabsList>
+    </Tabs>
+  );
+}
+
+/**
+ * A view in `LinkTabs`: its `link` (a `<Link>` with no children), labelled `children`, and how
+ * many it lists (`count`) in muted figures after the label.
+ */
+export function LinkTab({
+  value,
+  link,
+  count,
+  children,
+}: {
+  value: string;
+  link: ReactElement;
+  count?: number | undefined;
+  children: ReactNode;
+}) {
+  return (
+    <TabsTrigger value={value} nativeButton={false} render={link} className="flex-none px-2.5">
+      {children}
+      {count !== undefined && <span className="text-muted-foreground tabular-nums">{count}</span>}
+    </TabsTrigger>
+  );
+}
+
+/**
+ * A `FloatingCard` over a page's card: the card is `FLOAT_CARD` (a container, the float's
+ * positioning parent), the float `FLOAT`: over the card's right, `--float-width` wide and as tall
+ * as its content up to the card's height (scrolling inside beyond), from `@3xl`
+ * of the card's own width, and in the flow below that (`order-first` puts it above), so a narrow
+ * page (the chat open on a laptop, a phone) still reads. While it shows, the card's content takes
+ * `FLOAT_ROOM`, so nothing lies under it.
+ */
+export const FLOAT_CARD = "@container/float relative";
+export const FLOAT =
+  "m-3 @3xl/float:absolute @3xl/float:top-3 @3xl/float:right-3 @3xl/float:m-0 @3xl/float:max-h-[calc(100%-1.5rem)] @3xl/float:w-(--float-width)";
+export const FLOAT_ROOM = "@3xl/float:pr-[calc(var(--float-width)+1.5rem)]";
+
+/** The policies do not hold: said on Workflows and Permissions, as they then refuse everything. */
+export function PolicyProblems() {
+  return (
+    <Notice variant="destructive">
+      <code>policies/*.cedar</code> do not hold, so every operation call and run start is refused (
+      <code>sanoma check</code> says why).
+    </Notice>
+  );
+}
+
+/**
+ * A list page's one card (`FLOAT_CARD`), `--pane-tall` at least: the list (`children`), and the
+ * item open (`float`, a `FloatingCard` placed with `FLOAT`) over its right, the list left room.
+ */
+export function FloatHost({ float, children }: { float: ReactNode; children: ReactNode }) {
+  return (
+    <Card className={cn(FLOAT_CARD, "min-h-(--pane-tall) gap-0 py-0")}>
+      <div className={cn("flex flex-1 flex-col", float && FLOAT_ROOM)}>{children}</div>
+      {float}
+    </Card>
+  );
+}
+
 /** A segment while its URL shows, or while Link's `disabled` leaves it no href. */
 const SEGMENT = `${CURRENT_LINK} aria-[current=page]:font-semibold aria-disabled:pointer-events-none aria-disabled:opacity-50`;
 
@@ -479,10 +552,33 @@ export const CodePanel = (props: CodeProps) => (
   </LazyPanel>
 );
 
-/** An app screen's heading row: a `PageHeader` titled by the page's crumb. */
-export function CrumbHeader(props: Omit<PageHeaderProps, "title">) {
-  const crumb = useCrumbs().at(-1)?.label;
-  return <PageHeader {...props} title={crumb} />;
+/**
+ * An app screen's title row: a `PageHeader` titled by the page's crumb, under the crumbs of the
+ * pages above it, each a link.
+ */
+export function CrumbHeader(props: Omit<PageHeaderProps, "title" | "crumbs">) {
+  const crumbs = useCrumbs();
+  return (
+    <PageHeader
+      {...props}
+      title={crumbs.at(-1)?.label}
+      crumbs={crumbs.slice(0, -1).map(({ id, pathname, label }) => (
+        <CrumbLink key={id} to={pathname}>
+          {label}
+        </CrumbLink>
+      ))}
+    />
+  );
+}
+
+/** A page above this one, in a `PageHeader`'s crumbs. */
+export function CrumbLink({ to, children }: { to: string; children: ReactNode }) {
+  return (
+    // Exact: a page above this one is not the page open, so it never takes `aria-current`.
+    <Link to={to} activeOptions={{ exact: true }} className="text-muted-foreground hover:text-foreground">
+      {children}
+    </Link>
+  );
 }
 
 /** A heading inside a card's section. */

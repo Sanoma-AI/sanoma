@@ -9,7 +9,7 @@ import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Notice } from "./common.tsx";
 
 // What a route shows in place of its page: the router's defaults (router.tsx). They render
-// inside the sidebar's layout, so the rest of the app stays where it was.
+// inside the chrome, so the rest of the app stays where it was.
 
 /** A page that failed to load, and a retry that loads it again. */
 export function RouteError({ error }: ErrorComponentProps) {

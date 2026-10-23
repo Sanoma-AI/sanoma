@@ -1,6 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
-// A new run starts from the New run panel of the workflow's page (`?new`) now; this keeps old
+// A new run starts from New run on the workflow's page (`?new`) now; this keeps old
 // links and bookmarks working, with their scenario (Sandbox) and runs filter: the search goes
 // along as it is, and the target reads it.
 export const Route = createFileRoute("/workflows/$name/new")({

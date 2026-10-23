@@ -289,7 +289,7 @@ export const runsQuery = (query: RunsQuery = {}) =>
 
 /**
  * The runs waiting on an approval: every one, up to `getRuns`'s largest page. Under RUNS_KEY, so
- * a decision refreshes it; fresh as long as its poll, so a peek opening does not read it again.
+ * a decision refreshes it; fresh as long as its poll, so a page opening does not read it again.
  */
 export const waitingRunsQuery = () =>
   queryOptions({
@@ -308,8 +308,8 @@ export const pendingOf = (runs: RunSummary[]) =>
 /**
  * The latest runs, whatever their status, whose approvals the Inbox's Decided reads. Under
  * RUNS_KEY, so a decision refreshes it. Polled as `runsRefetchInterval` says (every 5 s while a
- * run can still change, else every 30 s), and fresh for 5 s, so a peek opening reads it at most
- * once in that time.
+ * run can still change, else every 30 s), and fresh for 5 s, so the Inbox's lists read it at
+ * most once in that time.
  */
 export const recentRunsQuery = () =>
   queryOptions({
@@ -320,7 +320,7 @@ export const recentRunsQuery = () =>
 
 /**
  * Each workflow's latest run, by name (none for a workflow never run): the Workflows overview's
- * Last run and its panel's order. One read per workflow, so polled every 5 s only while a last
+ * Last run and its order. One read per workflow, so polled every 5 s only while a last
  * run is queued or running, else every 30 s: one waiting on a person changes when someone
  * decides, which refreshes it at once from this tab. Under RUNS_KEY, and fresh for 5 s.
  */
@@ -360,7 +360,7 @@ export const InboxSearch = z.object({
 export const approvalKey = ({ run, approval }: { run: Pick<RunSummary, "runId">; approval: { id: string } }) =>
   `${run.runId}/${approval.id}`;
 
-/** What a workflow's panel may show (`?runs=`), the first (all) by default. */
+/** Which of a workflow's runs its page lists (`?runs=`), the first (all) by default. */
 export const RUN_FILTERS = ["all", "live", "sandbox", "waiting", "failed"] as const;
 export type RunFilter = (typeof RUN_FILTERS)[number];
 
@@ -377,10 +377,10 @@ const FILTERS: Record<RunFilter, { status?: RunStatus; match?: (run: RunSummary)
 };
 
 /**
- * A workflow page's search, on either pane: `?runs=`, its panel's filter (any other value reads as
- * all); `?new`, the New run panel in the inspector (the page's links write `?new=true`, and a bare
- * `?new` typed by hand opens it too); and `?scenario=`, Sandbox mode and the scenario it runs
- * (without it, Live), which also marks the workflow's graph.
+ * A workflow's search, on its page and its runs' pages: `?runs=`, the Runs tab's filter (any other
+ * value reads as all); `?new`, New run in the inspector (the page's links write `?new=true`, and a
+ * bare `?new` typed by hand opens it too); and `?scenario=`, the scenario open on the Scenarios
+ * tab, which marks the workflow's graph and is New run's Sandbox mode (without it, Live).
  */
 export const WorkflowSearch = z.object({
   runs: z.enum(RUN_FILTERS).optional().catch(undefined),
@@ -391,10 +391,22 @@ export const WorkflowSearch = z.object({
   scenario: z.string().optional().catch(undefined),
 });
 
-/** How many runs a workflow's panel lists: the latest. */
+/** A workflow page's tabs besides the Graph, which shows without `?view=`. */
+export const WORKFLOW_VIEWS = ["runs", "code", "scenarios"] as const;
+
+/**
+ * The workflow page's own search, beside `WorkflowSearch`: `?view=`, the tab showing (none, the
+ * Graph), and `?run=`, the run open over the Runs tab, by id.
+ */
+export const WorkflowPageSearch = z.object({
+  view: z.enum(WORKFLOW_VIEWS).optional().catch(undefined),
+  run: z.string().optional().catch(undefined),
+});
+
+/** How many runs a workflow's page lists: the latest. */
 export const WORKFLOW_RUNS_LIMIT = RUNS_LIMIT.default;
 
-/** A workflow's panel's runs for a filter: the workflow's latest, with the filter's status. */
+/** A workflow's runs for a filter: the workflow's latest, with the filter's status. */
 export const workflowRunsQuery = (name: string, filter: RunFilter = "all") =>
   queryOptions({
     ...runsQuery({ workflow: name, limit: WORKFLOW_RUNS_LIMIT, status: FILTERS[filter].status }),
@@ -409,12 +421,6 @@ export const workflowRuns = (filter: RunFilter, runs: RunSummary[]) => {
   const { match } = FILTERS[filter];
   return match ? runs.filter(match) : runs;
 };
-
-/**
- * The Workflows overview, all of it, for `<Link>`: lit there alone, not on All runs (`?view=runs`,
- * the same route) nor on a filter of it (`?filter=`, which the link would drop).
- */
-export const OVERVIEW = linkOptions({ to: "/workflows", search: {}, activeOptions: { exact: true } });
 
 /** A run's page, under its workflow's: for `<Link>`, `navigate` and `redirect`. */
 export const runLink = (run: Pick<RunSummary, "runId" | "workflow">) =>

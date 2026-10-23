@@ -53,7 +53,7 @@ export function getRouter() {
     defaultPreloadStaleTime: 0,
     scrollRestoration: true,
     // Every route gets these, inside the root's layout: a page that fails or is missing keeps the
-    // sidebar. On a public site's host, plain ones.
+    // chrome. On a public site's host, plain ones.
     defaultErrorComponent: site ? SiteError : RouteError,
     defaultNotFoundComponent: site ? SiteNotFound : NotFound,
     defaultPendingComponent: PagePending,

@@ -167,7 +167,7 @@ function sectionAfter(html: string, title: string) {
 const siteClass = ["tracking", "[0.37em]"].join("-");
 
 /**
- * `/sites/hello/styled`: the site's class, and `hidden`, which the app's sidebar overrides with
+ * `/sites/hello/styled`: the site's class, and `hidden`, which the app's bar overrides with
  * `md:flex`; its `sites/hello/style.css` linked from its head.
  */
 const styledPage = `import { createFileRoute } from "@tanstack/react-router";
@@ -248,7 +248,9 @@ describe("a company's app with its sites", () => {
     const html = (await site.text()).replaceAll("<!-- -->", "");
     expect(html).toContain("The hello site");
     expect(html).toContain("Hello from the hello site");
-    expect(html).toContain('data-slot="sidebar-wrapper"');
+    // The app's bar and chat column beside it.
+    expect(html).toContain('<nav aria-label="Sections"');
+    expect(html).toContain('<aside id="chat" aria-label="Chat"');
     const workflows = await fetch(new URL("/workflows", app.url));
     expect(workflows.status).toBe(200);
     expect(await workflows.text()).toContain("Say hello");
@@ -266,7 +268,7 @@ describe("a company's app with its sites", () => {
     expect(html).not.toContain("Sandbox");
     const missing = (await (await fetch(new URL("/sites/hello/missing", app.url))).text()).replaceAll("<!-- -->", "");
     expect(missing).toContain("This company has no workflow named “missing”.");
-    expect(missing).not.toContain("field-");
+    expect(missing).not.toContain('id="field-');
   });
 
   it("starts a run from a site's RunForm and links to it there, while the app's New run opens the run's page; keeps the app's utilities over a site's", async (ctx) => {
@@ -277,15 +279,15 @@ describe("a company's app with its sites", () => {
     try {
       client = await SanomaClient.connect(config);
       const page = await browser.newPage();
-      // A desktop window, where the New run panel shows beside the graph.
+      // A desktop window, where New run floats over the graph.
       await page.setViewport({ width: 1440, height: 900 });
       // The name the app asks for once, kept in the browser, sent with every change.
       await page.evaluateOnNewDocument(() => localStorage.setItem("sanoma.actor", "tester"));
-      // The site's `hidden`, in a layer inside the app's utilities, leaves the sidebar's `md:flex`.
+      // The site's `hidden`, in a layer inside the app's utilities, leaves the bar's `md:flex`.
       // A string, run in the page: this file is typed for Node, without the DOM's globals.
       await page.goto(new URL("/sites/hello/styled", app.url).href, { waitUntil: "networkidle0" });
-      const sidebar = `getComputedStyle(document.querySelector('[data-slot="sidebar-container"]')).display`;
-      expect(await page.evaluate(sidebar)).toBe("flex");
+      const bar = `getComputedStyle(document.querySelector('nav[aria-label="Sections"]').parentElement).display`;
+      expect(await page.evaluate(bar)).toBe("flex");
 
       const site = new URL("/sites/hello/run", app.url).href;
       await page.goto(site, { waitUntil: "networkidle0" });
@@ -333,22 +335,34 @@ describe("a company's app with its sites", () => {
     }
   });
 
-  it("lists the sites in the Sites panel, each under its title with its pages, and names the site in the crumbs", async () => {
-    const html = (await (await fetch(new URL("/sites/hello/", app.url))).text()).replaceAll("<!-- -->", "");
-    // The bar's Sites, lit on a site's page, linking to the site's home (a typed path has no
-    // trailing slash), and its panel docked beside it.
-    expect(linkTag(html, "<span>Sites</span>")).toMatch(/^<a [^>]*data-active="true"[^>]*href="\/sites\/hello"/);
-    expect(html).toContain(">Sites</h2>");
-    expect(html).toContain(">Hello desk</h3>");
-    // The site's pages, its home first and marked while open.
-    expect(linkTag(html, ">Home</span>")).toMatch(/href="\/sites\/hello"[^>]*aria-current="page"/);
-    expect(linkTag(html, ">/styled</span>")).toContain('href="/sites/hello/styled"');
-    expect(html.indexOf(">Home</span>")).toBeLessThan(html.indexOf(">/styled</span>"));
-    expect(html).toMatch(/data-slot="breadcrumb-page"[^>]*>Hello desk</);
-    // An app page has Sites in its bar, and its own panel.
+  it("lists the sites on the Sites page, each with its pages and where it is public, Sites lit in the bar there and on a site's page", async () => {
+    const html = (await (await fetch(new URL("/sites", app.url))).text()).replaceAll("<!-- -->", "");
+    expect(html).toMatch(/<h1[^>]*>Sites<span[^>]*>2<\/span><\/h1>/);
+    /** A site's row in the table, by its title. */
+    const row = (title: string) =>
+      html.match(new RegExp(`<tr[^>]*>(?:(?!</tr>)[\\s\\S])*>${title}</a>(?:(?!</tr>)[\\s\\S])*</tr>`))?.[0] ?? "";
+    const hello = row("Hello desk");
+    // Its title linking to its home (a typed path has no trailing slash), its folder.
+    expect(linkTag(hello, "Hello desk")).toContain('href="/sites/hello"');
+    expect(hello).toContain(">sites/hello</code>");
+    // Its pages, its home first.
+    const pages = [
+      ...(hello.match(/<ul aria-label="Hello desk&#x27;s pages"[^>]*>([\s\S]*?)<\/ul>/)?.[1] ?? "").matchAll(
+        /<a [^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g,
+      ),
+    ].map(([, href, label]) => [href, label]);
+    expect(pages[0]).toEqual(["/sites/hello", "Home"]);
+    expect(pages).toContainEqual(["/sites/hello/styled", "/styled"]);
+    // Public, though the server cannot know at what address on this machine (the browser can).
+    expect(hello).toMatch(/<td[^>]*><span[^>]*>Public<\/span><\/td>/);
+    expect(row("Members")).toContain(">sites/members</code>");
+    // The bar's Sites, linking here, lit here and on a site's page; not on the app's other pages.
+    const sites = /<a [^>]*href="\/sites"[^>]*>/;
+    expect(html.match(sites)?.[0]).toContain('aria-current="page"');
+    const site = (await (await fetch(new URL("/sites/hello/", app.url))).text()).replaceAll("<!-- -->", "");
+    expect(site.match(sites)?.[0]).toContain('aria-current="page"');
     const workflows = (await (await fetch(new URL("/workflows", app.url))).text()).replaceAll("<!-- -->", "");
-    expect(linkTag(workflows, "<span>Sites</span>")).toContain('href="/sites/hello"');
-    expect(workflows).not.toContain(">Hello desk</h3>");
+    expect(workflows.match(sites)?.[0]).not.toContain("aria-current");
   });
 
   it("gives a site's `sanoma/site` imports the app's one router and React", async () => {
@@ -404,7 +418,7 @@ describe("a company's app with its sites", () => {
       expect(existsSync(file), href).toBe(true);
       return readFileSync(file, "utf8");
     });
-    const site = css.find((text) => !text.includes("--sidebar"));
+    const site = css.find((text) => !text.includes("--bar-width"));
     expect(site).toContain("letter-spacing:.37em");
     // In a layer inside the app's utilities, which the app's own win over.
     expect(site).toMatch(/@layer utilities\.hello\{[^]*\.hidden\{display:none\}/);
@@ -442,7 +456,8 @@ describe("a company's app with its sites", () => {
     const html = home.body.replaceAll("<!-- -->", "");
     expect(html).toMatch(/^<!DOCTYPE html><html lang="en" data-site="hello">/);
     expect(html).toContain("Hello from the hello site");
-    expect(html).not.toContain("sidebar-wrapper");
+    expect(html).not.toContain('aria-label="Sections"');
+    expect(html).not.toContain('id="chat"');
     expect(html).not.toMatch(/<link[^>]*rel="stylesheet"/);
     expect(home.headers["set-cookie"]).toBeUndefined();
     // Its links are to its pages at the root, and its other pages answer there.
@@ -546,7 +561,7 @@ describe("a company's app with its sites", () => {
     });
   });
 
-  it("serves a public site at its domain too and links to it from the Sites panel, but no domain of a site that is not public", async () => {
+  it("serves a public site at its domain too and links to it from the Sites page, but no domain of a site that is not public", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const domains = { hello: "hello.example", members: "members.example", leads: "leads.example" };
     const second = await startApp(config, { port: 0, distDir: result.distDir, domains });
@@ -557,10 +572,9 @@ describe("a company's app with its sites", () => {
       expect(warn).toHaveBeenCalledWith(
         "sanoma app: the domain leads.example names sites/leads, which is not a public site: not served",
       );
-      // The site's own address, beside its pages in the app's Sites panel.
-      const panel = (await (await fetch(new URL("/sites/hello", second.url))).text()).replaceAll("<!-- -->", "");
-      expect(panel).toContain('data-slot="sidebar-wrapper"');
-      expect(linkTag(panel, ">hello.example</span>")).toMatch(/href="https:\/\/hello\.example\/"[^>]*target="_blank"/);
+      // The site's own address, on the app's Sites page.
+      const sites = (await (await fetch(new URL("/sites", second.url))).text()).replaceAll("<!-- -->", "");
+      expect(sites).toMatch(/<a [^>]*href="https:\/\/hello\.example\/"[^>]*target="_blank"[^>]*>hello\.example<svg/);
       expect(loginContexts.at(-1)?.origins).toEqual(["http://members.localhost:*", "https://members.example"]);
     } finally {
       warn.mockRestore();

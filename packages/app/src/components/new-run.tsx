@@ -12,12 +12,13 @@ import { Disclosure, Nothing, Notice, Segment, Segmented } from "./common.tsx";
 
 /**
  * A new run of the workflow, live or in the sandbox: its input from its schema, or a scenario's,
- * which the scenario's run takes from the scenario, and what the policy will ask (`WillAsk`). On either pane of the workflow's page, in the
- * inspector while `?new` is set; `?scenario=` picks Sandbox and the scenario.
+ * which the scenario's run takes from the scenario, and what the policy will ask (`WillAsk`). In
+ * the inspector over the workflow page's graph while `?new` is set; `?scenario=` picks Sandbox
+ * and the scenario.
  */
 export function NewRun({ workflow }: { workflow: WorkflowEntry }) {
   const { name } = workflow;
-  // Only `?scenario=`: a click on the panel's runs filter does not draw the form again.
+  // Only `?scenario=`: another runs filter does not draw the form again.
   const wanted = useSearch({ from: "/workflows/$name", select: (search) => search.scenario });
   const navigate = useNavigate();
   const forWorkflow = useMemo(() => scenariosFor(name), [name]);
@@ -31,8 +32,8 @@ export function NewRun({ workflow }: { workflow: WorkflowEntry }) {
   return (
     <>
       <div className="flex flex-wrap items-center gap-3">
-        {/* Each mode is a URL on the pane that shows. A choice replaces the page in the history
-            rather than adding one, and keeps `?new` and `?runs=`. */}
+        {/* Each mode is a URL. A choice replaces the page in the history rather than adding one,
+            and keeps the rest of the search (`?new`, `?runs=`). */}
         <Segmented label="Mode">
           <Segment>
             <Link to="." search={(prev) => ({ ...prev, scenario: undefined })} activeOptions={{ exact: true }} replace>

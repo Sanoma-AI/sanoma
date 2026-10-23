@@ -3,7 +3,7 @@ import { useRouter } from "@tanstack/react-router";
 import { useMemo, useSyncExternalStore } from "react";
 import type { SiteDefinition } from "../site.ts";
 
-// A company's sites, for the sidebar's Sites panel and the crumbs: each site the build mounts
+// A company's sites, for the Sites page, the bar and the crumbs: each site the build mounts
 // under /sites/<name>, named by its `site.ts`, with its pages from the router's tree.
 
 /**
@@ -21,7 +21,7 @@ const DEFINED: Record<string, SiteDefinition | undefined> = Object.fromEntries(
 export const siteOf = (path: string | undefined): string | undefined =>
   path === undefined ? undefined : /^\/sites\/([^/]+)/.exec(path)?.[1];
 
-/** A site in the Sites panel: its title and icon, and its pages, the site's home first. */
+/** A site on the Sites page: its title and icon, and its pages, the site's home first. */
 export interface Site {
   name: string;
   title: string;

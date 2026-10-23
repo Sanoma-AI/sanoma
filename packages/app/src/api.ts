@@ -411,6 +411,9 @@ export class ApiError extends Error {
 export const errorBodyOf = (err: unknown): ErrorResponse | undefined =>
   err instanceof ApiError ? err.body : undefined;
 
+/** A run's short name, for a title: "Run" and its id's first 8 characters (a UUID's first group). */
+export const runName = (runId: string) => `Run ${runId.slice(runId.lastIndexOf(":") + 1).slice(0, 8)}`;
+
 /** Who started a run, as text. */
 export const starterName = (run: Pick<RunSummary, "startedBy">): string => run.startedBy?.id ?? "unknown";
 

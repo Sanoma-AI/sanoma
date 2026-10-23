@@ -12,7 +12,7 @@ import {
   waitingRunsQuery,
 } from "../queries.ts";
 
-// The Inbox's approvals, as its page and its panel read them.
+// The Inbox's approvals, as its page reads them.
 
 /** An approval with its run, as the Inbox lists it. */
 export type Entry = { run: RunSummary; approval: ApprovalState };
@@ -40,8 +40,8 @@ export const countByWorkflow = (entries: Entry[]) => {
  * The approvals pending, those you may decide (`mine`), what `?show=` lists (`filter`: without
  * it, those for you while the page knows who you are, else every pending one) and the one open:
  * the one `wanted` names while it is still pending (here or under the other filter); else the
- * first for you, else the first. None on Decided, which opens its own. The Inbox page shows the
- * open one; its panel lists the rest beside it.
+ * first for you, else the first. None on Decided, which opens its own. The Inbox page lists them
+ * and shows the open one over the list.
  */
 export function useInbox(show: InboxFilter | undefined, wanted: string | undefined) {
   const { actor, pending, mine, error } = usePending();

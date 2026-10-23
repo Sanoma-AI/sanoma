@@ -9,15 +9,6 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
 import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "#/components/ui/card.tsx";
-import {
   Dialog,
   DialogClose,
   DialogContent,
@@ -31,14 +22,13 @@ import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle }
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import { approverLabel, isEnded, OWN_CHANGE } from "@sanoma-ai/workflows/shared";
-import { type DecideRequest, errorBodyOf, starterName } from "../api.ts";
+import { type DecideRequest, errorBodyOf } from "../api.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
 import { decideFn } from "../functions.ts";
 import { configQuery, opsById, RUNS_KEY, runLink, runQuery } from "../queries.ts";
 import { ApplyPlanView } from "./apply-plan.tsx";
 import {
   ALONE,
-  ApprovalStatusBadge,
   DecisionNote,
   Disclosure,
   Expandable,
@@ -57,46 +47,6 @@ type Decision = DecideRequest["decision"];
 
 /** The run an approval belongs to: an approval left pending by a run that ended gets no controls. */
 type ApprovalRun = Pick<RunSummary, "runId" | "status" | "workflow" | "startedBy">;
-
-/**
- * An approval as a card: its title and status, what it is for and who may decide
- * (`ApprovalDetails`), and the controls to decide (`ApprovalDecision`) while it is pending. Inside
- * another card (the inspector), compose those two under a heading instead.
- */
-export function ApprovalCard({
-  run,
-  approval,
-  showRun = false,
-}: {
-  run: ApprovalRun;
-  approval: ApprovalState;
-  /** For an approval shown away from its run: the run is named under the title, and linked. */
-  showRun?: boolean;
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{approval.title}</CardTitle>
-        {showRun && (
-          <CardDescription>
-            {run.workflow}, started by {starterName(run)}
-          </CardDescription>
-        )}
-        <CardAction>
-          <ApprovalStatusBadge status={approval.status} />
-        </CardAction>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <ApprovalDetails run={run} approval={approval} showRun={showRun} />
-      </CardContent>
-      {approval.status === "pending" && (
-        <CardFooter className="flex-wrap gap-2">
-          <ApprovalDecision run={run} approval={approval} />
-        </CardFooter>
-      )}
-    </Card>
-  );
-}
 
 /**
  * What an approval is for and who may decide, as siblings for a flex column: its facts, its

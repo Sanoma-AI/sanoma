@@ -247,16 +247,22 @@ describe("the Permissions page", () => {
     await app?.close();
   });
 
-  it("puts Permissions in the bar, the policy in its panel and header, and a cell per group", async () => {
+  it("puts Permissions in the bar, the policy beside its title, and a cell per group", async () => {
     const res = await fetch(new URL("/permissions", app.url), {
       headers: { cookie: `${ACTOR_COOKIE}=ada` },
     });
     expect(res.status).toBe(200);
     const html = (await res.text()).replaceAll("<!-- -->", "");
-    expect(html).toMatch(/<a [^>]*href="\/permissions"[^>]*>(?:(?!<\/a>)[\s\S])*<span>Permissions<\/span>/);
-    expect(html).toContain(">Permissions</h2>");
-    expect(html).toContain("Cedar, policies/*.cedar");
-    expect(html).toContain(`<code>${cedar.version}</code>`);
+    expect(html).toMatch(
+      /<nav aria-label="Sections"[^>]*>(?:(?!<\/nav>)[\s\S])*<a [^>]*href="\/permissions"[^>]*aria-current="page"[^>]*>(?:(?!<\/a>)[\s\S])*Permissions<\/a>/,
+    );
+    // The title, and beside it the policy: Cedar, its files, its version, and what the grid holds.
+    expect(html).toMatch(/<h1[^>]*>Permissions<\/h1>/);
+    expect(html).toMatch(
+      new RegExp(
+        `<p[^>]*>Cedar, <code>policies/\\*\\.cedar</code> · version <code>${cedar.version}</code> · 2 groups · \\d+ workflows? · \\d+ operations?</p>`,
+      ),
+    );
     expect([...html.matchAll(/<th [^>]*scope="col"[^>]*>([^<]*)<\/th>/g)].map(([, name]) => name)).toEqual([
       "No group",
       "agents",
@@ -273,14 +279,12 @@ describe("the Permissions page", () => {
     expect(html).toContain(">policies/refunds.cedar</h2>");
     expect(html).toContain("forbid (principal, action == Sanoma::Action::&quot;workflow:refund&quot;, resource)");
     expect(html).toContain("unless { principal in Sanoma::Group::&quot;finance&quot; };");
-    // The Workflows page says the policy checks every call, at its version.
+    // The policy is the Permissions page's: the Workflows page says nothing of it while it holds.
     const workflows = (await (await fetch(new URL("/workflows", app.url))).text()).replaceAll("<!-- -->", "");
-    expect(workflows).toContain(
-      `policies/*.cedar check every operation call and run start (version <code>${cedar.version}</code>)`,
-    );
+    expect(workflows).not.toContain("policies/*.cedar");
   });
 
-  it("picks a declared person, shows their groups, a cell's rule in a sheet, and the New run panel's will-ask line, in Chrome", async (ctx) => {
+  it("picks a declared person, shows their groups, a cell's rule in a sheet, and New run's will-ask line, in Chrome", async (ctx) => {
     const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
     if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
     const browser = await launch({ executablePath: chrome, headless: true });
@@ -298,10 +302,10 @@ describe("the Permissions page", () => {
       await tab.select("select#who-name", "ada");
       await tab.click('[role="dialog"] button[type="submit"]');
       await tab.waitForFunction(`!document.querySelector("select#who-name")`);
-      // Your groups under your name.
+      // Your groups under your name, on the user menu at the bar's foot.
       // By its text, not `::-p-text`, which matches the deepest element only: here a span inside.
       await tab.waitForFunction(
-        `document.querySelector('[data-slot="sidebar-footer"] .sr-only')?.textContent.includes("finance")`,
+        `document.querySelector('[data-slot="dropdown-menu-trigger"] .sr-only')?.textContent.includes("finance")`,
       );
 
       // The sheet's text, once it shows the rule.
@@ -335,7 +339,7 @@ describe("the Permissions page", () => {
         await tab.evaluate(`[...document.querySelectorAll(".cm-hl-gutter")].map((marked) => marked.textContent)`),
       ).toEqual(["10", "11", "12", "13"]);
 
-      // The New run panel says what the policy will ask, for bo and not for ada, who is in finance.
+      // New run says what the policy will ask, for bo and not for ada, who is in finance.
       const newRun = async (who: string) => {
         await tab.evaluate((key, name) => localStorage.setItem(key, name), ACTOR_KEY, who);
         await tab.goto(new URL("/workflows/refund?new", app.url).href, { waitUntil: "networkidle0" });

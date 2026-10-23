@@ -1,9 +1,21 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
+import { PlayIcon } from "@phosphor-icons/react/dist/csr/Play";
 import { useMemo } from "react";
-import { loadCode, loadGraph, Notice, pageTitle, SandboxBadge, ToneBadge } from "#/components/common.tsx";
+import {
+  ButtonLink,
+  CrumbHeader,
+  loadCode,
+  loadGraph,
+  Notice,
+  pageTitle,
+  SandboxBadge,
+  ToneBadge,
+  When,
+} from "#/components/common.tsx";
 import { WorkflowView } from "#/components/workflow-view.tsx";
 import { RUN_TONE } from "#/lib/tone.ts";
+import { runName, starterName } from "#/api.ts";
 import { runLink, runQuery, useWorkflow } from "#/queries.ts";
 
 export const Route = createFileRoute("/workflows/$name/runs/$id")({
@@ -14,20 +26,25 @@ export const Route = createFileRoute("/workflows/$name/runs/$id")({
     if (run.workflow !== params.name) throw redirect(runLink(run));
   },
   // The page reads the run from the query client, read above; the layout loads the workflow's
-  // source. The loader returns only the run's name: its id.
+  // source. The loader returns only the run's name: "Run" and its id's start.
   loader: ({ params }) => {
     if (!import.meta.env.SSR) {
       void loadGraph();
       void loadCode();
     }
-    return { crumb: params.id };
+    return { crumb: runName(params.id) };
   },
-  head: ({ params }) => pageTitle(params.id),
+  head: ({ params }) => pageTitle(runName(params.id)),
   component: RunPage,
   // getRun throws the router's not-found for a run that does not exist.
   notFoundComponent: () => <Notice variant="destructive">No run {Route.useParams().id}.</Notice>,
 });
 
+/**
+ * One run of the workflow: under the workflow's crumbs, its name, status and who started it when,
+ * New run (on the workflow's page), then its `WorkflowView`: the banner of a waiting or failed
+ * run, the graph with the run's facts and approvals floating over it, then Ledger and Code.
+ */
 function RunPage() {
   const { id } = Route.useParams();
   const { data, error, dataUpdatedAt } = useSuspenseQuery(runQuery(id));
@@ -41,15 +58,29 @@ function RunPage() {
   const at = last?.type === "sleep.started" && last.until <= dataUpdatedAt ? last.until : 0;
   const reading = useMemo(() => ({ ...data, at }), [data, at]);
   return (
-    <WorkflowView key={run.runId} name={run.workflow} workflow={workflow} run={reading}>
-      {/* The layout's <h1> is the workflow: the run's own heading is its status. */}
-      <div className="flex flex-wrap items-center gap-2">
-        <ToneBadge id="run-status" tone={RUN_TONE[run.status]}>
+    <>
+      <CrumbHeader
+        action={
+          workflow && (
+            <ButtonLink size="sm">
+              <Link to="/workflows/$name" params={{ name: run.workflow }} search={{ new: true }}>
+                <PlayIcon aria-hidden="true" data-icon="inline-start" />
+                New run
+              </Link>
+            </ButtonLink>
+          )
+        }
+      >
+        <ToneBadge id="run-status" dot tone={RUN_TONE[run.status]}>
           {run.status}
         </ToneBadge>
         {run.sandbox !== undefined && <SandboxBadge name={run.sandbox} />}
-      </div>
+        <span className="text-muted-foreground">
+          {starterName(run)} · <When at={run.createdAt} />
+        </span>
+      </CrumbHeader>
       {error && <Notice variant="destructive">Could not refresh: {error.message}</Notice>}
-    </WorkflowView>
+      <WorkflowView key={run.runId} name={run.workflow} workflow={workflow} run={reading} />
+    </>
   );
 }
