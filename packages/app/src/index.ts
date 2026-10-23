@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { extname, join, relative, resolve, sep } from "node:path";
@@ -25,6 +25,8 @@ import { admitting } from "./login/admission.ts";
 import { loginKey } from "./login/keys.ts";
 import { publicFront } from "./login/public.ts";
 import { hostName, loopbackLogin } from "./loopback.ts";
+import { type Published, PUBLISHED_FILE, publishedOf } from "./content-files.ts";
+import { seoFile } from "./seo.ts";
 
 export { ACTOR_HEADER } from "./api.ts";
 export type { LoginProvider, ResolveActor } from "./context.ts";
@@ -130,9 +132,10 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       return void res.end(req.method === "HEAD" ? undefined : "ok\n");
     }
     // A public site's host, ahead of the staff login, which it never reaches: the site's front door.
-    const name = hosts.get(hostName(req.headers.host ?? ""));
-    if (name !== undefined) {
-      const site = sites.get(name);
+    const asked = hostName(req.headers.host ?? "");
+    const entry = hosts.get(asked);
+    if (entry !== undefined) {
+      const site = sites.get(entry.name);
       if (!site) {
         res.writeHead(503, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
         return void res.end(
@@ -142,26 +145,45 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       // The visitor's address, from the socket alone, for a login's rate limits: never a client's copy.
       req.headers[CLIENT_IP_HEADER] = req.socket.remoteAddress ?? "";
       const request = new NodeRequest({ req, res });
-      const answer = await site.login.handle?.(request);
+      // Its URLs are at its domain, when it has one; only there may a crawler index it.
+      const origin = entry.domain ? `https://${entry.domain}` : new URL(request.url).origin;
+      if (asked !== entry.domain) res.setHeader("x-robots-tag", "noindex");
+      const answer = seoFile(request, entry, origin, published) ?? (await site.login.handle?.(request));
       if (answer) return sendNodeResponse(res, answer);
-      return responder.respond(req, res, request, { app: site, site: site.site });
+      return responder.respond(req, res, request, { app: site, site: entry.name, origin });
     }
     const request = new NodeRequest({ req, res });
     // Then the login sees every request (pages, server functions and static files alike): its
     // own routes, and any it will not let through.
     const answer = await login.handle?.(request);
     if (answer) return sendNodeResponse(res, answer);
-    await responder.respond(req, res, request, { app });
+    await responder.respond(req, res, request, { app, origin: new URL(request.url).origin });
   }
 
   // The build first, importing nothing and connecting to nothing: a missing or half build is
   // refused before anything is opened. The dev server has nothing built to check.
+  // What the sitemaps list of the content, drafts left out: `content/` as it is now on the dev
+  // server, read at each request; else what the build wrote of it.
   let load: () => Promise<Responder>;
+  let published: () => Published;
   if (options.dev) {
     const { repo, onFileChange } = options.dev;
     load = () => devResponder(repo, server, onFileChange);
+    published = () => publishedOf(repo);
   } else {
     const distDir = resolve(options.distDir ?? defaultDistDir());
+    const built = await readFile(join(distDir, PUBLISHED_FILE), "utf8").then(
+      (text) => JSON.parse(text) as Published,
+      (err: unknown) => {
+        if (!isMissing(err)) throw err;
+        // A build made before builds wrote it (the package's own has no content to list).
+        if (description.sites.some((site) => site.public && site.pages.some((page) => page.content))) {
+          console.warn(`sanoma app: ${distDir} has no ${PUBLISHED_FILE}: the sitemaps list no content; build again`);
+        }
+        return {};
+      },
+    );
+    published = () => built;
     const files = await staticFiles(join(distDir, "client"));
     const serverEntry = join(distDir, "server", "server.js");
     await mustBeFile(serverEntry);
@@ -257,17 +279,17 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
 const localHost = (site: string) => `${site}.localhost`;
 
 /**
- * Each public site's hosts, to its name: `<name>.localhost`, and the domain `domains` gives it
+ * Each public site's hosts, to its entry: `<name>.localhost`, and the domain `domains` gives it
  * (then set on its entry). A domain naming a site that is missing or not public is warned about
  * and served nowhere; so is a host another site has first (one site per host).
  */
-function publicHosts(description: ConfigDescription, domains: Record<string, string>): Map<string, string> {
-  const hosts = new Map<string, string>();
-  const claim = (host: string, site: string) => {
+function publicHosts(description: ConfigDescription, domains: Record<string, string>): Map<string, SiteEntry> {
+  const hosts = new Map<string, SiteEntry>();
+  const claim = (host: string, site: SiteEntry) => {
     if (!hosts.has(host)) return void hosts.set(host, site);
-    console.warn(`sanoma app: ${host} is another public site's host: sites/${site} is not served there`);
+    console.warn(`sanoma app: ${host} is another public site's host: sites/${site.name} is not served there`);
   };
-  for (const site of description.sites) if (site.public) claim(localHost(site.name), site.name);
+  for (const site of description.sites) if (site.public) claim(localHost(site.name), site);
   for (const [name, domain] of Object.entries(domains)) {
     const site = description.sites.find((s) => s.name === name);
     if (!site?.public) {
@@ -275,8 +297,8 @@ function publicHosts(description: ConfigDescription, domains: Record<string, str
       continue;
     }
     const host = domain.toLowerCase();
-    claim(host, name);
-    if (hosts.get(host) === name) site.domain = host;
+    claim(host, site);
+    if (hosts.get(host) === site) site.domain = host;
   }
   return hosts;
 }

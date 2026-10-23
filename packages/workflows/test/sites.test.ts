@@ -99,6 +99,10 @@ const pageProblem = (name: string, line: number, message: string) => ({
   message,
 });
 
+/** A page at `path` whose loader reads `reads`, with `content` imported from `from`. */
+const reading = (path: string, reads: string, from = "sanoma/site") =>
+  page(path, `import { content } from "${from}";`, `void (${reads});\n  return null;`);
+
 describe("readSites", () => {
   it("reads the fixture's hello site: its title, that it is public, and each RunForm and api call with its file, place and page", () => {
     const root = fileURLToPath(new URL("../../app/test/fixtures/company-sites/", import.meta.url));
@@ -109,6 +113,15 @@ describe("readSites", () => {
         name: "hello",
         title: "Hello desk",
         public: true,
+        // A layout and its index are one page; a page per post, the one kind its file reads.
+        pages: [
+          { path: "/sites/hello" },
+          { path: "/sites/hello/leads" },
+          { path: "/sites/hello/posts" },
+          { path: "/sites/hello/posts/$slug", content: "posts" },
+          { path: "/sites/hello/run" },
+          { path: "/sites/hello/started" },
+        ],
         calls: [
           // A component's, which is no page; its call by a name not written out is skipped.
           {
@@ -230,6 +243,7 @@ describe("readSites", () => {
       {
         name: "desk",
         title: "Front desk",
+        pages: [{ path: "/sites/desk" }, { path: "/sites/desk/later" }, { path: "/sites/desk/settings" }],
         calls: [
           {
             kind: "collection",
@@ -286,7 +300,7 @@ describe("readSites", () => {
           { file: index, line: 16, column: 10, message: 'calls workflow "gone", which does not exist' },
         ],
       },
-      { name: "quiet", calls: [], problems: [] },
+      { name: "quiet", pages: [{ path: "/sites/quiet" }], calls: [], problems: [] },
     ]);
   });
 
@@ -314,11 +328,13 @@ describe("readSites", () => {
     expect(sites).toEqual([
       {
         name: "broken",
+        pages: [{ path: "/sites/broken" }],
         calls: [],
         problems: [expect.objectContaining({ file: "sites/broken/site.ts", line: 4 })],
       },
       {
         name: "dynamic",
+        pages: [{ path: "/sites/dynamic" }],
         calls: [],
         title: "Dynamic",
         problems: [
@@ -328,6 +344,7 @@ describe("readSites", () => {
       },
       {
         name: "hidden",
+        pages: [{ path: "/sites/hidden" }],
         calls: [],
         problems: [
           {
@@ -341,6 +358,7 @@ describe("readSites", () => {
       },
       {
         name: "loginless",
+        pages: [{ path: "/sites/loginless" }],
         calls: [],
         title: "Loginless",
         public: true,
@@ -349,17 +367,19 @@ describe("readSites", () => {
       },
       {
         name: "missing",
+        pages: [{ path: "/sites/missing" }],
         calls: [],
         title: "Missing",
         public: true,
         login: "okta",
         problems: [problemAt("missing", 6, 'login names "okta", which is not a connector in sanoma.config.ts')],
       },
-      { name: "off", calls: [], problems: [] },
-      { name: "open", public: true, calls: [], problems: [] },
+      { name: "off", pages: [{ path: "/sites/off" }], calls: [], problems: [] },
+      { name: "open", public: true, pages: [{ path: "/sites/open" }], calls: [], problems: [] },
       // Its login, a connector with a login half, is fine; what is wrong is `public`.
       {
         name: "quoted",
+        pages: [{ path: "/sites/quoted" }],
         calls: [],
         login: "auth0",
         problems: [problemAt("quoted", 4, "`public` is read without running site.ts: write it as `true` or `false`")],
@@ -367,6 +387,7 @@ describe("readSites", () => {
       // What is written is read; a spread could make it public.
       {
         name: "spread",
+        pages: [{ path: "/sites/spread" }],
         calls: [],
         title: "Spread",
         problems: [
@@ -379,12 +400,62 @@ describe("readSites", () => {
       },
       {
         name: "staff",
+        pages: [{ path: "/sites/staff" }],
         calls: [],
         title: "Staff",
         login: "auth0",
         problems: [problemAt("staff", 6, "a login is for a public site: add `public: true`, or remove `login`")],
       },
-      { name: "www", title: "Website", public: true, login: "auth0", calls: [], problems: [] },
+      {
+        name: "www",
+        title: "Website",
+        public: true,
+        login: "auth0",
+        pages: [{ path: "/sites/www" }],
+        calls: [],
+        problems: [],
+      },
+    ]);
+  });
+
+  it("reads a page per content entry only from a path with one parameter that its file reads one kind's entry by", () => {
+    const root = tree("pages", {
+      "sites/www/routes/blog.$slug.tsx": reading("/sites/www/blog/$slug", "content.posts.get(params.slug)"),
+      // The parameter destructured.
+      "sites/www/routes/tags.$tag.tsx": reading("/sites/www/tags/$tag", "content.tags.get(tag)"),
+      // The parameter by a computed key; another kind read by another `slug` is no matter.
+      "sites/www/routes/guides.$slug.tsx": reading(
+        "/sites/www/guides/$slug",
+        'content.guides.get(params["slug"]).then((g) => content.authors.get(g.slug))',
+      ),
+      // Not by the parameter, or a list: no entry.
+      "sites/www/routes/notes.$id.tsx": reading(
+        "/sites/www/notes/$id",
+        "[content.notes.get('x'), content.notes.list()]",
+      ),
+      "sites/www/routes/two.$a.$b.tsx": reading("/sites/www/two/$a/$b", "content.posts.get(params.a)"),
+      "sites/www/routes/both.$slug.tsx": reading(
+        "/sites/www/both/$slug",
+        "[content.posts.get(params.slug), content.notes.get(params.slug)]",
+      ),
+      "sites/www/routes/docs.$.tsx": reading("/sites/www/docs/$", "content.docs.get(params._splat)"),
+      "sites/www/routes/other.$slug.tsx": reading(
+        "/sites/www/other/$slug",
+        "content.posts.get(params.slug)",
+        "./content.ts",
+      ),
+    });
+    expect(describeConfig(config(root)).sites.map(({ pages }) => pages)).toEqual([
+      [
+        { path: "/sites/www/blog/$slug", content: "posts" },
+        { path: "/sites/www/both/$slug" },
+        { path: "/sites/www/docs/$" },
+        { path: "/sites/www/guides/$slug", content: "guides" },
+        { path: "/sites/www/notes/$id" },
+        { path: "/sites/www/other/$slug" },
+        { path: "/sites/www/tags/$tag", content: "tags" },
+        { path: "/sites/www/two/$a/$b" },
+      ],
     ]);
   });
 

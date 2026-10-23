@@ -88,15 +88,23 @@ function SitesPage() {
   );
 }
 
-/** A public site's own address, in a new tab; its domain alone while the server renders (`usePublicAddress`). */
+/**
+ * A public site's own address and its sitemap, each in a new tab; its domain alone while the server
+ * renders (`usePublicAddress`).
+ */
 function PublicAddress({ site }: { site: SiteEntry }) {
   const href = usePublicAddress(site);
   if (!href) return <span className="text-muted-foreground">Public</span>;
   return (
-    <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1">
-      {new URL(href).host}
-      <ArrowSquareOutIcon aria-hidden="true" className="size-3.5" />
-    </a>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1">
+        {new URL(href).host}
+        <ArrowSquareOutIcon aria-hidden="true" className="size-3.5" />
+      </a>
+      <a href={new URL("sitemap.xml", href).href} target="_blank" rel="noreferrer" className="text-muted-foreground">
+        Sitemap
+      </a>
+    </div>
   );
 }
 

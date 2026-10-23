@@ -471,7 +471,9 @@ describe("a company's app with its sites", () => {
     const home = await at("/", "hello.localhost");
     expect(home.status).toBe(200);
     const html = home.body.replaceAll("<!-- -->", "");
-    expect(html).toMatch(/^<!DOCTYPE html><html lang="en" data-site="hello">/);
+    expect(html).toMatch(
+      /^<!DOCTYPE html><html lang="en" data-site="hello" data-origin="http:\/\/hello\.localhost:\d+">/,
+    );
     expect(html).toContain("Hello from the hello site");
     expect(html).not.toContain('aria-label="Sections"');
     expect(html).not.toContain('id="chat"');
@@ -562,6 +564,38 @@ describe("a company's app with its sites", () => {
     expect(inApp).toContain("<h1>Bonjour, contenu</h1>");
     expect(inApp).not.toContain('rel="alternate"');
     expect(inApp).toContain('<a href="/sites/intl/posts/hello" hrefLang="en">en</a>');
+  });
+
+  it("answers robots.txt and a sitemap of the site's pages and published posts on its host, which no crawler may index, and gives a page its absolute URL", async () => {
+    const origin = `http://hello.localhost:${new URL(app.url).port}`;
+    const robots = await at("/robots.txt", "hello.localhost");
+    expect([robots.status, robots.headers["content-type"], robots.body]).toEqual([
+      200,
+      "text/plain; charset=utf-8",
+      `User-agent: *\nDisallow:\n\nSitemap: ${origin}/sitemap.xml\n`,
+    ]);
+    const sitemap = await at("/sitemap.xml", "hello.localhost");
+    expect(sitemap.headers["content-type"]).toBe("application/xml; charset=utf-8");
+    // Each page with no parameter, and a post's page per published post: never the draft. (The
+    // config's root is the fixture's, which the pages are read from: this copy's own are not there.)
+    expect([...sitemap.body.matchAll(/<loc>([^<]+)<\/loc>/g)].map(([, loc]) => loc)).toEqual(
+      ["/", "/leads", "/posts", "/posts/hello", "/run", "/started"].map((path) => new URL(path, origin).toString()),
+    );
+    // Not its domain: no response there is to be indexed, its pages' neither.
+    for (const answer of [robots, sitemap, await at("/", "hello.localhost")]) {
+      expect(answer.headers["x-robots-tag"]).toBe("noindex");
+    }
+    expect((await at("/sitemap.xml", "hello.localhost", { method: "HEAD" })).body).toBe("");
+    // A post's canonical link and Open Graph tags: at the host's root there, under /sites/hello on the app's.
+    const post = (await at("/posts/hello", "hello.localhost")).body;
+    expect(post).toContain(`<link rel="canonical" href="${origin}/posts/hello"/>`);
+    expect(post).toContain(`<meta property="og:url" content="${origin}/posts/hello"/>`);
+    expect(post).toContain(`<meta property="og:image" content="${origin}/og.png"/>`);
+    expect(post).toMatch(new RegExp(`<html [^>]*data-origin="${origin}"`));
+    const inApp = await (await fetch(new URL("/sites/hello/posts/hello", app.url))).text();
+    expect(inApp).toContain(`<link rel="canonical" href="${app.url}/sites/hello/posts/hello"/>`);
+    // The app's host is not a site's: no robots of its own.
+    expect((await fetch(new URL("/robots.txt", app.url))).headers.get("x-robots-tag")).toBeNull();
   });
 
   it("answers a path no page has, or a post that is not there, on a public host with a plain page titled so, in a document reset for the site", async () => {
@@ -667,9 +701,20 @@ describe("a company's app with its sites", () => {
       expect(warn).toHaveBeenCalledWith(
         "sanoma app: the domain leads.example names sites/leads, which is not a public site: not served",
       );
-      // The site's own address, on the app's Sites page.
+      // There a crawler may index it, and its URLs are the domain's, on <name>.localhost too.
+      const robots = await rawGet(new URL("/robots.txt", second.url).href, "hello.example");
+      expect(robots.body).toBe("User-agent: *\nDisallow:\n\nSitemap: https://hello.example/sitemap.xml\n");
+      expect(robots.headers["x-robots-tag"]).toBeUndefined();
+      const sitemap = await rawGet(new URL("/sitemap.xml", second.url).href, "hello.example");
+      expect(sitemap.body).toContain("<url><loc>https://hello.example/posts/hello</loc></url>");
+      const local = `hello.localhost:${new URL(second.url).port}`;
+      const post = await rawGet(new URL("/posts/hello", second.url).href, local);
+      expect(post.body).toContain('<link rel="canonical" href="https://hello.example/posts/hello"/>');
+      expect(post.headers["x-robots-tag"]).toBe("noindex");
+      // The site's own address and its sitemap, on the app's Sites page.
       const sites = (await (await fetch(new URL("/sites", second.url))).text()).replaceAll("<!-- -->", "");
       expect(sites).toMatch(/<a [^>]*href="https:\/\/hello\.example\/"[^>]*target="_blank"[^>]*>hello\.example<svg/);
+      expect(sites).toMatch(/<a [^>]*href="https:\/\/hello\.example\/sitemap\.xml"[^>]*>Sitemap<\/a>/);
       expect(loginContexts.at(-1)?.origins).toEqual(["http://members.localhost:*", "https://members.example"]);
     } finally {
       warn.mockRestore();
