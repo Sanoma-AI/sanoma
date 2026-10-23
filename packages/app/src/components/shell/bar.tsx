@@ -1,6 +1,6 @@
 import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { ClientOnly, Link, useMatches } from "@tanstack/react-router";
+import { ClientOnly, Link } from "@tanstack/react-router";
 import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
 import { BrowserIcon } from "@phosphor-icons/react/dist/csr/Browser";
 import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
@@ -16,7 +16,7 @@ import { Fragment, type ReactNode, useState } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "#/components/ui/sheet.tsx";
-import { siteOf, useSites } from "#/lib/sites.ts";
+import { useSites } from "#/lib/sites.ts";
 import { cn } from "#/lib/utils.ts";
 import { configQuery, pendingOf, waitingRunsQuery } from "../../queries.ts";
 import { toneBadge } from "../kit.tsx";
@@ -25,8 +25,8 @@ import { NavUser } from "./nav-user.tsx";
 // The bar: Chat, then the app's sections in groups, then who you are. A section is a page; there
 // is nothing beside the bar but the chat column.
 
-/** A section in the bar. Sites has no `to`: its link is the first site's home, which only the build knows. */
-type Section = { to: string | undefined; label: string; icon: PhosphorIcon; when?: "sites" | "data" | "policy" };
+/** A section in the bar: its page, lit there and on the pages under it (a site's, for Sites). */
+type Section = { to: string; label: string; icon: PhosphorIcon; when?: "sites" | "data" | "policy" };
 
 /** The sections, in groups split by a short rule: what happens, what the company built, how it is set up. */
 const GROUPS: Section[][] = [
@@ -35,7 +35,7 @@ const GROUPS: Section[][] = [
     { to: "/workflows", label: "Workflows", icon: TreeStructureIcon },
   ],
   [
-    { to: undefined, label: "Sites", icon: BrowserIcon, when: "sites" },
+    { to: "/sites", label: "Sites", icon: BrowserIcon, when: "sites" },
     { to: "/data", label: "Data", icon: TableIcon, when: "data" },
   ],
   [
@@ -71,11 +71,7 @@ const ACTIVE = { "data-active": true } as const;
  */
 export function Bar({ chat, className }: { chat?: { open: boolean; toggle: () => void }; className?: string }) {
   const { data: has } = useSuspenseQuery({ ...configQuery(), select: selectBar });
-  // Sites: its link, the first page a site lists, and whether the page is a site's, which lights it.
-  const sites = useSites();
-  const sitesHome = sites.find((site) => site.pages.length > 0)?.pages[0]?.to;
-  const onSite = useMatches({ select: (matches) => siteOf(matches.at(-1)?.fullPath) !== undefined });
-  const shown = { sites: sites.length > 0, data: has.data, policy: has.policy };
+  const shown = { sites: useSites().length > 0, data: has.data, policy: has.policy };
   const groups = GROUPS.map((group) => group.filter((section) => !section.when || shown[section.when])).filter(
     (group) => group.length > 0,
   );
@@ -111,15 +107,9 @@ export function Bar({ chat, className }: { chat?: { open: boolean; toggle: () =>
             <ul className="flex w-full flex-col gap-1.5">
               {group.map((section) => (
                 <li key={section.label}>
-                  {section.to === undefined ? (
-                    <Link to={sitesHome} {...(onSite && ACTIVE)} className={ITEM}>
-                      <Item section={section} />
-                    </Link>
-                  ) : (
-                    <Link to={section.to} activeProps={ACTIVE} className={ITEM}>
-                      <Item section={section}>{section.to === "/inbox" && <InboxCount />}</Item>
-                    </Link>
-                  )}
+                  <Link to={section.to} activeProps={ACTIVE} className={ITEM}>
+                    <Item section={section}>{section.to === "/inbox" && <InboxCount />}</Item>
+                  </Link>
                 </li>
               ))}
             </ul>

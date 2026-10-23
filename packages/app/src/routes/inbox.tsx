@@ -1,14 +1,33 @@
 import type { ConfigDescription, OpEntry } from "@sanoma-ai/workflows/describe";
 import { WORKFLOW_ACTION } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { RUNS_LIMIT } from "../api.ts";
-import { ApprovalCard } from "../components/approval.tsx";
-import { ButtonLink, CrumbHeader, Nothing, Notice, pageTitle, plural } from "../components/common.tsx";
+import { ClientOnly, createFileRoute, Link } from "@tanstack/react-router";
+import { memo, type ReactNode, Suspense } from "react";
+import { Card, CardAction, CardContent, CardFooter, CardHeader } from "#/components/ui/card.tsx";
+import { cn } from "#/lib/utils.ts";
+import { APPROVAL_TONE } from "#/lib/tone.ts";
+import { RUNS_LIMIT, starterName } from "../api.ts";
+import { ApprovalDecision, ApprovalDetails } from "../components/approval.tsx";
+import {
+  ApprovalStatusBadge,
+  ButtonLink,
+  CardHeading,
+  CrumbHeader,
+  FloatingCard,
+  LinkTab,
+  LinkTabs,
+  Nothing,
+  Notice,
+  pageTitle,
+  plural,
+  StatusDot,
+  When,
+} from "../components/common.tsx";
 import { type Entry, useDecided, useInbox } from "../lib/inbox.ts";
 import {
   approvalKey,
   configQuery,
+  type InboxFilter,
   InboxSearch,
   opsById,
   recentRunsQuery,
@@ -26,64 +45,245 @@ export const Route = createFileRoute("/inbox")({
       deps.decided && queryClient.query({ ...recentRunsQuery(), staleTime: "static" }),
     ]);
   },
-  staticData: { crumb: "Inbox", section: "inbox" },
+  // The list beside the open approval takes the width there is.
+  staticData: { crumb: "Inbox", wide: true },
   head: ({ match }) => pageTitle(match.staticData.crumb),
   component: InboxPage,
 });
 
 /**
- * The approval open: the one `?approval=` names, else the first for you, else the first that
- * `?show=` lists (`useInbox`), or on Decided the one named, else the latest. Its panel lists them
- * all beside the page, the open one marked.
+ * The Inbox: how many approvals wait, the tabs For you, Everyone and Decided (`?show=`, each a
+ * link that drops `?approval=`, so its own first opens), then one card listing the approvals the
+ * tab shows, the one open marked, and over its right the open approval: the one `?approval=`
+ * names, else the first for you, else the first the tab lists (`useInbox`), or on Decided the one
+ * named, else the latest decided. For you and Everyone list those decided today under them.
  */
 function InboxPage() {
   const { show, approval: wanted } = Route.useSearch();
-  const { pending, filter, open, error } = useInbox(show, wanted);
+  const { actor, pending, mine, filter, shown, open, error } = useInbox(show, wanted);
+  const { data: titles } = useSuspenseQuery({ ...configQuery(), select: workflowTitles });
   return (
     <>
-      <CrumbHeader />
+      <CrumbHeader count={pending.length} />
       {error && <Notice variant="destructive">Could not refresh approvals: {error.message}</Notice>}
+      <LinkTabs label="Show" value={filter}>
+        <LinkTab
+          value="mine"
+          link={<Link to="/inbox" search={{ show: "mine" }} />}
+          count={actor ? mine.length : undefined}
+        >
+          For you
+        </LinkTab>
+        <LinkTab value="waiting" link={<Link to="/inbox" search={{ show: "waiting" }} />} count={pending.length}>
+          Everyone
+        </LinkTab>
+        <LinkTab value="decided" link={<Link to="/inbox" search={{ show: "decided" }} />}>
+          Decided
+        </LinkTab>
+      </LinkTabs>
       {filter === "decided" ? (
-        <Decided wanted={wanted} />
-      ) : open ? (
-        <Opened entry={open} />
+        <Decided wanted={wanted} titles={titles} />
       ) : (
-        <Nothing
-          title={pending.length === 0 ? "Nothing is waiting for a decision" : "Nothing is waiting for you"}
-          action={
-            pending.length > 0 && (
-              <ButtonLink variant="outline" size="sm">
-                <Link to="/inbox" search={{ show: "waiting" }}>
-                  Show the {plural(pending.length, "approval")} waiting on others
-                </Link>
-              </ButtonLink>
-            )
-          }
-        />
+        <ListCard open={open}>
+          {shown.length === 0 ? (
+            <Nothing
+              className="border-0"
+              title={
+                filter === "mine" && pending.length > 0
+                  ? "Nothing is waiting for you"
+                  : "Nothing is waiting for a decision"
+              }
+              action={
+                filter === "mine" &&
+                pending.length > 0 && (
+                  <ButtonLink variant="outline" size="sm">
+                    <Link to="/inbox" search={{ show: "waiting" }}>
+                      Show the {plural(pending.length, "approval")} waiting on others
+                    </Link>
+                  </ButtonLink>
+                )
+              }
+            />
+          ) : (
+            <Approvals
+              label={filter === "mine" ? "Waiting on you" : "Waiting"}
+              entries={shown}
+              show={filter}
+              openKey={open && approvalKey(open)}
+              titles={titles}
+            />
+          )}
+          {/* Today is the browser's: the server knows neither its clock nor its time zone. */}
+          <ClientOnly>
+            <Suspense fallback={null}>
+              <DecidedToday titles={titles} />
+            </Suspense>
+          </ClientOnly>
+        </ListCard>
       )}
     </>
   );
 }
 
-/** On Decided: the approval named, else the latest decided in the latest runs. */
-function Decided({ wanted }: { wanted: string | undefined }) {
-  const { open, error } = useDecided(wanted);
+/** On Decided: the approvals decided in the latest runs, and the one named, else the latest, open over them. */
+function Decided({ wanted, titles }: { wanted: string | undefined; titles: Record<string, string> }) {
+  const { decided, open, error } = useDecided(wanted);
   return (
     <>
       {error && <Notice variant="destructive">Could not refresh the decided approvals: {error.message}</Notice>}
-      {open ? <Opened entry={open} /> : <Nothing title={`No decisions in the latest ${RUNS_LIMIT.default} runs`} />}
+      <ListCard open={open}>
+        {decided.length === 0 ? (
+          <Nothing className="border-0" title={`No decisions in the latest ${RUNS_LIMIT.default} runs`} />
+        ) : (
+          <Approvals
+            label={`Decided in the latest ${RUNS_LIMIT.default} runs`}
+            entries={decided}
+            show="decided"
+            openKey={open && approvalKey(open)}
+            titles={titles}
+          />
+        )}
+      </ListCard>
     </>
   );
 }
 
-/** The approval open: what it asks, in a sentence, then its card. A decision drops it, so the next one opens. */
+/**
+ * The page's one card: the list (`children`), and the approval `open` floating over its right,
+ * where the card is wide enough (its own width, `@3xl`); above the list where it is not.
+ */
+function ListCard({ open, children }: { open: Entry | undefined; children: ReactNode }) {
+  return (
+    <Card className="@container/list relative min-h-(--pane-tall) gap-0 py-0">
+      <div className={cn("flex flex-1 flex-col", open && "@3xl/list:pr-[calc(var(--float-width)+1.5rem)]")}>
+        {children}
+      </div>
+      {open && <Opened key={approvalKey(open)} entry={open} />}
+    </Card>
+  );
+}
+
+/** Off Decided, in the browser: the approvals decided since midnight in the latest runs, each opening on Decided. */
+function DecidedToday({ titles }: { titles: Record<string, string> }) {
+  const { decided } = useDecided(undefined);
+  const midnight = new Date().setHours(0, 0, 0, 0);
+  const today = decided.filter(({ approval }) => (approval.decidedAt ?? approval.requestedAt) >= midnight);
+  if (today.length === 0) return null;
+  return <Approvals label="Decided today" entries={today} show="decided" titles={titles} />;
+}
+
+/** A group of approvals under `label`, each a row keeping `show`, the one `openKey` names marked. */
+function Approvals({
+  label,
+  entries,
+  show,
+  openKey,
+  titles,
+}: {
+  label: string;
+  entries: Entry[];
+  show: InboxFilter;
+  openKey?: string | undefined;
+  titles: Record<string, string>;
+}) {
+  return (
+    <section aria-label={label} className="flex flex-col">
+      <h2 className="px-4 pt-3 pb-2 text-xs font-medium text-muted-foreground">{label}</h2>
+      <ul className="divide-y border-y">
+        {entries.map((entry) => {
+          const key = approvalKey(entry);
+          return (
+            <InboxRow
+              key={key}
+              id={key}
+              entry={entry}
+              show={show}
+              workflow={titles[entry.run.workflow] ?? entry.run.workflow}
+              current={key === openKey}
+            />
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * An approval in the list: its status as a dot, its title, then its workflow (by title) and who
+ * started the run, and when it was asked or decided at the end. `current` marks the one open: the
+ * first opens with no `?approval=`, which the link cannot tell. Memoised: the query shares an
+ * unchanged entry's object across a poll, so only the rows that changed draw again.
+ */
+const InboxRow = memo(function InboxRow({
+  id,
+  entry,
+  show,
+  workflow,
+  current,
+}: {
+  /** Its `approvalKey`, as the list already has it. */
+  id: string;
+  entry: Entry;
+  /** The `?show=` its link keeps. */
+  show: InboxFilter;
+  workflow: string;
+  current: boolean;
+}) {
+  const { run, approval } = entry;
+  return (
+    <li>
+      <Link
+        to="/inbox"
+        search={{ show, approval: id }}
+        aria-current={current ? "page" : undefined}
+        className="flex items-start gap-3 px-4 py-2.5 outline-hidden hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset aria-[current=page]:bg-muted"
+      >
+        <StatusDot tone={APPROVAL_TONE[approval.status]} className="mt-1.5" />
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="truncate font-medium">{approval.title}</span>
+          <span className="truncate text-xs text-muted-foreground">
+            {approval.status === "pending" ? "" : `${approval.status} · `}
+            {workflow} · from {starterName(run)}
+          </span>
+        </span>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          <When at={approval.decidedAt ?? approval.requestedAt} />
+        </span>
+      </Link>
+    </li>
+  );
+});
+
+/**
+ * The approval open, floating over the right of the list's card: its title and status, what it
+ * asks in a sentence, its details, and Approve and Reject while it is pending. A decision drops
+ * it from the list, so the next one opens. Its body scrolls inside the card's height.
+ */
 function Opened({ entry }: { entry: Entry }) {
   const { data: titles } = useSuspenseQuery({ ...configQuery(), select: workflowTitles });
+  const { run, approval } = entry;
   return (
-    <section aria-label={entry.approval.title} className="flex min-w-0 flex-col gap-(--gap-section)">
-      <Asks {...entry} workflow={titles[entry.run.workflow] ?? entry.run.workflow} />
-      <ApprovalCard key={approvalKey(entry)} run={entry.run} approval={entry.approval} showRun />
-    </section>
+    <FloatingCard
+      role="region"
+      aria-label={approval.title}
+      className="order-first m-3 @3xl/list:absolute @3xl/list:inset-y-3 @3xl/list:right-3 @3xl/list:m-0 @3xl/list:w-(--float-width)"
+    >
+      <CardHeader className="border-b">
+        <CardHeading>{approval.title}</CardHeading>
+        <CardAction>
+          <ApprovalStatusBadge status={approval.status} />
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+        <Asks {...entry} workflow={titles[run.workflow] ?? run.workflow} />
+        <ApprovalDetails run={run} approval={approval} showRun />
+      </CardContent>
+      {approval.status === "pending" && (
+        <CardFooter className="flex-wrap gap-2">
+          <ApprovalDecision run={run} approval={approval} />
+        </CardFooter>
+      )}
+    </FloatingCard>
   );
 }
 

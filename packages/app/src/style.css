@@ -172,12 +172,15 @@
 }
 
 /*
- * The shell's widths (components/shell/): the bar of sections, and the chat column beside it. On
- * :root, since the phone's sheet holding the bar is portalled out of #app.
+ * The shell's widths (components/shell/): the bar of sections, and the chat column beside it; and
+ * a floating card's (kit's FloatingCard over a page's card: an open approval or run), which
+ * Compact does not narrow, as it does not the bar's. On :root, since the phone's sheet holding
+ * the bar is portalled out of #app.
  */
 :root {
   --bar-width: 4.25rem;
   --chat-width: 28.75rem;
+  --float-width: 25rem;
 }
 
 /*

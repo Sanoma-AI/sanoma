@@ -18,8 +18,8 @@ import {
 
 /**
  * One workflow's page: its header and the pane the URL picks (the workflow's own, or one run's),
- * each a WorkflowView; its runs are in the sidebar's panel (WorkflowPanel). The panes and the panel
- * read what this loader puts in the query client.
+ * each a WorkflowView; its runs (components/workflow-runs.tsx) are not listed yet. The panes read
+ * what this loader puts in the query client.
  */
 export const Route = createFileRoute("/workflows/$name")({
   // The graph and the inspector side by side: the graph gets what the screen has left.

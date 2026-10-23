@@ -320,7 +320,7 @@ export const recentRunsQuery = () =>
 
 /**
  * Each workflow's latest run, by name (none for a workflow never run): the Workflows overview's
- * Last run and its panel's order. One read per workflow, so polled every 5 s only while a last
+ * Last run and its order. One read per workflow, so polled every 5 s only while a last
  * run is queued or running, else every 30 s: one waiting on a person changes when someone
  * decides, which refreshes it at once from this tab. Under RUNS_KEY, and fresh for 5 s.
  */
@@ -360,7 +360,7 @@ export const InboxSearch = z.object({
 export const approvalKey = ({ run, approval }: { run: Pick<RunSummary, "runId">; approval: { id: string } }) =>
   `${run.runId}/${approval.id}`;
 
-/** What a workflow's panel may show (`?runs=`), the first (all) by default. */
+/** Which of a workflow's runs its page lists (`?runs=`), the first (all) by default. */
 export const RUN_FILTERS = ["all", "live", "sandbox", "waiting", "failed"] as const;
 export type RunFilter = (typeof RUN_FILTERS)[number];
 
@@ -377,7 +377,7 @@ const FILTERS: Record<RunFilter, { status?: RunStatus; match?: (run: RunSummary)
 };
 
 /**
- * A workflow page's search, on either pane: `?runs=`, its panel's filter (any other value reads as
+ * A workflow page's search, on either pane: `?runs=`, its runs' filter (any other value reads as
  * all); `?new`, the New run panel in the inspector (the page's links write `?new=true`, and a bare
  * `?new` typed by hand opens it too); and `?scenario=`, Sandbox mode and the scenario it runs
  * (without it, Live), which also marks the workflow's graph.
@@ -391,10 +391,10 @@ export const WorkflowSearch = z.object({
   scenario: z.string().optional().catch(undefined),
 });
 
-/** How many runs a workflow's panel lists: the latest. */
+/** How many runs a workflow's page lists: the latest. */
 export const WORKFLOW_RUNS_LIMIT = RUNS_LIMIT.default;
 
-/** A workflow's panel's runs for a filter: the workflow's latest, with the filter's status. */
+/** A workflow's runs for a filter: the workflow's latest, with the filter's status. */
 export const workflowRunsQuery = (name: string, filter: RunFilter = "all") =>
   queryOptions({
     ...runsQuery({ workflow: name, limit: WORKFLOW_RUNS_LIMIT, status: FILTERS[filter].status }),

@@ -42,11 +42,11 @@ export { type ActorState, useActor } from "./actor.ts";
 export { api } from "./queries.ts";
 
 /**
- * A site's `sites/<name>/site.ts` (optional): how the app's Sites panel names it, and whether it
+ * A site's `sites/<name>/site.ts` (optional): how the app's Sites page names it, and whether it
  * is public. `sanoma` reads `title`, `public` and `login` without running the file.
  */
 export interface SiteDefinition {
-  /** The site's name in the Sites panel and its crumb; the folder's name when not given. */
+  /** The site's name on the Sites page and in its crumb; the folder's name when not given. */
   title?: string;
   /** An icon beside its title: a component that takes a `className`. */
   icon?: ComponentType<{ className?: string }>;

@@ -19,14 +19,15 @@ import {
   Facts,
   loadCode,
   Nothing,
+  Notice,
   pageTitle,
+  plural,
   ToneBadge,
 } from "../components/common.tsx";
-import { PolicyFacts } from "../components/panels/permissions-panel.tsx";
 import { permissionsQuery } from "../queries.ts";
 
 export const Route = createFileRoute("/permissions")({
-  staticData: { crumb: "Permissions", section: "permissions" },
+  staticData: { crumb: "Permissions" },
   head: ({ match }) => pageTitle(match.staticData.crumb),
   loader: ({ context: { queryClient } }) => {
     if (!import.meta.env.SSR) void loadCode();
@@ -79,17 +80,19 @@ function PermissionsPage() {
   };
   return (
     <>
-      <CrumbHeader />
+      <CrumbHeader>{data.policy.defined && <PolicyLine data={data} />}</CrumbHeader>
       {!data.policy.defined ? (
         <Nothing title="This config has no policy">
           Every call is allowed. Write rules in <code>policies/*.cedar</code>, beside the config.
         </Nothing>
       ) : (
         <>
-          <Facts>
-            <PolicyFacts policy={data.policy} />
-          </Facts>
-          <div className="rounded-lg border">
+          {data.policy.problems && (
+            <Notice variant="destructive">
+              <code>policies/*.cedar</code> do not hold, so every call is refused (<code>sanoma check</code> says why).
+            </Notice>
+          )}
+          <Card className="gap-0 py-0">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -106,7 +109,7 @@ function PermissionsPage() {
               <Rows kind="workflow" rows={data.workflows} groups={data.groups} choose={choose} />
               <Rows kind="op" rows={data.ops} groups={data.groups} choose={choose} />
             </Table>
-          </div>
+          </Card>
           {data.files.map(({ file, text, policies }) => (
             <PolicyCode key={file} file={file} text={text} span={policies.find((p) => p.id === shown)?.span} />
           ))}
@@ -136,6 +139,27 @@ function PermissionsPage() {
         </SheetContent>
       </Sheet>
     </>
+  );
+}
+
+/**
+ * The policy beside the title, in one muted line: Cedar, its version, and how many groups,
+ * workflows and operations (each once, in a workflow or called directly) the grid has.
+ */
+function PolicyLine({ data }: { data: PermissionsResponse }) {
+  const groups = data.groups.filter((group) => group !== null && group !== ANONYMOUS).length;
+  const ops = new Set([...data.workflows.flatMap((w) => w.ops), ...data.ops].map((op) => op.id)).size;
+  return (
+    <p className="text-sm text-muted-foreground">
+      Cedar, <code>policies/*.cedar</code>
+      {data.policy.version !== undefined && (
+        <>
+          {" "}
+          · version <code>{data.policy.version}</code>
+        </>
+      )}{" "}
+      · {plural(groups, "group")} · {plural(data.workflows.length, "workflow")} · {plural(ops, "operation")}
+    </p>
   );
 }
 

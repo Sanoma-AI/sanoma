@@ -31,6 +31,7 @@ import { Card } from "#/components/ui/card.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "#/components/ui/collapsible.tsx";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
+import { Tabs, TabsList, TabsTrigger } from "#/components/ui/tabs.tsx";
 import { shortId } from "#/lib/apply-plan.ts";
 import { siteOf, useSites } from "#/lib/sites.ts";
 import { utcText } from "#/lib/time.ts";
@@ -48,17 +49,12 @@ import { ButtonLink, effectBadge, PageHeader, type PageHeaderProps, Region, Tip,
 // private ones, some of which read the app (its config, its router's crumbs and sites).
 export * from "./kit.tsx";
 
-/** The sections that had a panel: what a route's `staticData.section` names. */
-export type PanelSection = "inbox" | "workflows" | "sites" | "data" | "permissions";
-
 declare module "@tanstack/react-router" {
   interface StaticDataRouteOption {
     /** The page's name: its breadcrumb, its <h1> (CrumbHeader) and its <title> (pageTitle). */
     crumb?: string;
     /** The page takes the page column's full width, not the reading width the root caps others at. */
     wide?: true;
-    /** The section the page is under, whose panel it had (`usePanel`). */
-    section?: PanelSection;
   }
 }
 
@@ -365,6 +361,45 @@ export function Disclosure({ label, children }: { label: ReactNode; children: Re
       </CollapsibleTrigger>
       <CollapsibleContent>{children}</CollapsibleContent>
     </Collapsible>
+  );
+}
+
+/**
+ * A page's views, as its pill tabs (shadcn's `Tabs`), each a `LinkTab`: `value` names the one
+ * showing. Each view is a URL (`?show=`, `?filter=`, …), so the tabs are links the server renders
+ * as the URL says, and a view opens in a new tab or is shared; arrow keys move between them as
+ * between tabs. Scrolled sideways rather than widening the page, on a phone.
+ */
+export function LinkTabs({ label, value, children }: { label: string; value: string; children: ReactNode }) {
+  return (
+    <Tabs value={value} className="min-w-0">
+      <TabsList aria-label={label} className="max-w-full justify-start overflow-x-auto">
+        {children}
+      </TabsList>
+    </Tabs>
+  );
+}
+
+/**
+ * A view in `LinkTabs`: its `link` (a `<Link>` with no children), labelled `children`, and how
+ * many it lists (`count`) in muted figures after the label.
+ */
+export function LinkTab({
+  value,
+  link,
+  count,
+  children,
+}: {
+  value: string;
+  link: ReactElement;
+  count?: number | undefined;
+  children: ReactNode;
+}) {
+  return (
+    <TabsTrigger value={value} nativeButton={false} render={link} className="flex-none px-2.5">
+      {children}
+      {count !== undefined && <span className="text-muted-foreground tabular-nums">{count}</span>}
+    </TabsTrigger>
   );
 }
 

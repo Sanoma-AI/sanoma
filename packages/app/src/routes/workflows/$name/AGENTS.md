@@ -1,6 +1,6 @@
 # packages/app/src/routes/workflows/$name
 
-One workflow's page: a layout with its header, around the pane the URL picks; its runs are in the sidebar's panel ([`WorkflowPanel`](../../../components/panels/workflow-panel.tsx)). A retired workflow, one the config no longer has, keeps its page while it has runs; its Workflow pane says it is gone. Each pane is a `WorkflowView` (see [components](../../../components/AGENTS.md#layout-conventions)); the layout's search (`?runs=`, `?new`, `?scenario=`) holds on either.
+One workflow's page: a layout with its header, around the pane the URL picks; its runs' filter and list are [`workflow-runs.tsx`](../../../components/workflow-runs.tsx), not mounted yet (the Runs view is to list them). A retired workflow, one the config no longer has, keeps its page while it has runs; its Workflow pane says it is gone. Each pane is a `WorkflowView` (see [components](../../../components/AGENTS.md#layout-conventions)); the layout's search (`?runs=`, `?new`, `?scenario=`) holds on either.
 
 ## Contents
 
