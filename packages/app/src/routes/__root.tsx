@@ -1,20 +1,12 @@
 import { type QueryClient, useQuery } from "@tanstack/react-query";
-import {
-  createRootRouteWithContext,
-  HeadContent,
-  notFound,
-  Outlet,
-  Scripts,
-  useRouter,
-  useRouterState,
-} from "@tanstack/react-router";
+import { createRootRouteWithContext, HeadContent, notFound, Outlet, Scripts, useRouter } from "@tanstack/react-router";
 import { createIsomorphicFn } from "@tanstack/react-start";
 import { getCookie } from "@tanstack/react-start/server";
 import { ThemeProvider } from "next-themes";
 import { lazy, type ReactNode } from "react";
 import { DENSITY_COOKIE } from "#/components/density.tsx";
 import { CHAT_COOKIE, chatPref, type ChatPref } from "#/components/shell/prefs.ts";
-import { type LocaleMatch, localesOf, pageLocale } from "#/lib/locales.ts";
+import { type PageLanguages, pageLanguages, usePageLanguages } from "#/lib/locales.ts";
 import { ActorContext, useActorState } from "../actor.ts";
 import { actorQuery, configQuery, waitingRunsQuery } from "../queries.ts";
 // Phosphor's regular shield-check, the app's icon.
@@ -27,17 +19,27 @@ const Root = lazy(() => import("#/components/app-chrome.tsx"));
 // One root for both hosts (a route tree has one): on a public site's host (`context.site`), a
 // bare document around the site's own pages, with nothing of the app's but its scripts; on the
 // app's, the app's head, loader and chrome.
+/** What the router gives every route, and what the root's `beforeLoad` adds. */
+type RootContext = { queryClient: QueryClient; site?: string; origin?: string } & Partial<PageLanguages>;
+
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient; site?: string; origin?: string }>()({
-  // A URL naming a language its site does not have (or its default, which has no prefix) is no page.
-  beforeLoad: ({ matches }) => {
-    if (pageLocale(matches.at(-1))?.valid === false) throw notFound();
+  // The page's language and its URL in each of its site's: a URL naming a language its site does
+  // not have (or its default, which has no prefix) is no page.
+  beforeLoad: ({ matches, buildLocation }): PageLanguages => {
+    const languages = pageLanguages(
+      matches.at(-1),
+      // oxlint-disable-next-line typescript/no-explicit-any -- any page's path, typed by none
+      (to, params) => buildLocation({ to: to as any, params: params as any }).publicHref,
+    );
+    if (languages === "notFound") throw notFound();
+    return languages;
   },
   // Annotated: without it, tsc infers the match's context as `never`.
-  head: ({ match, matches }: { match: { context: { site?: string; origin?: string } }; matches: Match[] }) =>
+  head: ({ match, matches }: { match: { context: RootContext }; matches: Match[] }) =>
     match.context.site
       ? matches.some(isLost)
         ? LOST_HEAD
-        : { ...BARE_HEAD, links: alternates(matches.at(-1), match.context.origin) }
+        : { ...BARE_HEAD, links: alternates(match.context) }
       : APP_HEAD,
   // Pages show what is happening now: never cache them.
   headers: () => ({ "cache-control": "no-store" }),
@@ -62,7 +64,7 @@ const BARE_HEAD = { meta: META };
 const LOST_HEAD = { meta: [...META, { title: "Page not found" }] };
 
 // `_notFound` is TanStack's own field (its Match draws the not-found page by it): a rename shows in test/sites-build.test.ts.
-type Match = { status: string; _notFound?: boolean } & LocaleMatch;
+type Match = { status: string; _notFound?: boolean };
 const isLost = ({ status, _notFound }: Match) => _notFound === true || status === "notFound";
 
 /**
@@ -75,13 +77,12 @@ const BARE_RESET = "@layer sanoma{body{margin:0}}";
  * On a public site's own host, a page in more than one language links to itself in each, and to
  * its default as `x-default`: absolute, as search engines ask, on the page's own origin.
  */
-function alternates(leaf: LocaleMatch | undefined, origin = "") {
-  const pages = localesOf(leaf, true);
-  if (!pages.length) return [];
-  return [...pages, { locale: "x-default", path: pages[0]!.path }].map(({ locale, path }) => ({
+function alternates({ locales = [], origin = "" }: RootContext) {
+  if (!locales.length) return [];
+  return [...locales, { locale: "x-default", href: locales[0]!.href }].map(({ locale, href }) => ({
     rel: "alternate",
     hrefLang: locale,
-    href: origin + path,
+    href: origin + href,
   }));
 }
 
@@ -173,7 +174,7 @@ function Document({ children }: { children: ReactNode }) {
   const site = useRouter().options.context.site;
   // On a public site's host, the page's language, when its site has languages; else English, the
   // app's, whose chrome is around a site's page on the app's host.
-  const locale = useRouterState({ select: (state) => pageLocale(state.matches.at(-1))?.locale });
+  const { locale } = usePageLanguages();
   const lang = (site && locale) || "en";
   return (
     // next-themes' script sets the class on <html> before the body paints, so React finds it changed.

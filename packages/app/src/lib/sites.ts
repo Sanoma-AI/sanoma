@@ -2,9 +2,7 @@ import { isLoopback } from "@sanoma-ai/workflows/shared";
 import { useRouter } from "@tanstack/react-router";
 import { useMemo, useSyncExternalStore } from "react";
 import type { SiteDefinition } from "../site.ts";
-import { siteOf, withoutLocale } from "./locales.ts";
-
-export { siteOf } from "./locales.ts";
+import { hasOneUrl, siteOf } from "./locales.ts";
 
 // A company's sites, for the Sites page, the bar and the crumbs: each site the build mounts
 // under /sites/<name>, named by its `site.ts`, with its pages from the router's tree.
@@ -32,8 +30,8 @@ export interface Site {
  * The build's sites, by name, each with the pages under it (no trailing slash, as typed paths
  * are): a page's label is its route's `staticData.crumb`, else its path under the site. A page
  * with a path parameter is left out: it has no one URL to list (a site of only those lists none).
- * The language segment is not one: a page under `{-$locale}` is listed in the site's default
- * language, its label without it.
+ * An optional one is not: a page under `{-$locale}` is listed in the site's default language,
+ * its label without it.
  */
 export function useSites(): Site[] {
   const { routesByPath } = useRouter();
@@ -51,8 +49,8 @@ export function useSites(): Site[] {
         pages: [],
       };
       sites.set(name, site);
-      const rest = withoutLocale(to).slice(`/sites/${name}`.length);
-      if (rest.includes("$")) continue;
+      if (!hasOneUrl(to)) continue;
+      const rest = to.slice(`/sites/${name}`.length).replace(/\/\{-\$[^}]*\}/g, "");
       site.pages.push({ to, label: route.options.staticData?.crumb ?? (rest === "" ? "Home" : rest) });
     }
     return [...sites.values()];

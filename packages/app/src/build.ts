@@ -390,11 +390,17 @@ function contentPlugin(repo?: string): Plugin {
 
 const LOCALES = "virtual:sanoma/locales";
 
+/** `virtual:sanoma/locales`'s text: each site's languages (`siteLocales`). */
+async function localesModule(repo: string): Promise<string> {
+  const { siteLocales } = await import("@sanoma-ai/workflows/describe");
+  return `export default ${JSON.stringify(siteLocales(repo))};`;
+}
+
 /**
  * `virtual:sanoma/locales`, which the router's `lib/locales.ts` imports: each public site's
  * languages from its `site.ts` (`siteLocales`, read and never run), by name; without a repo, none.
- * Read once for every environment; on the dev server, again when a `site.ts` or a site's folder
- * (a `routes/` makes a site) is added, changed or removed.
+ * Read once for every environment; on the dev server, again when a `site.ts` or a folder of
+ * `sites/<name>/` or its `routes/` (which make a site) comes or goes, reloaded when they changed.
  */
 function localesPlugin(repo?: string): Plugin {
   const id = `\0${LOCALES}`;
@@ -405,16 +411,20 @@ function localesPlugin(repo?: string): Plugin {
     async load(loaded) {
       if (loaded !== id) return;
       if (repo === undefined) return "export default {};";
-      const { siteLocales } = await import("@sanoma-ai/workflows/describe");
-      text ??= `export default ${JSON.stringify(siteLocales(repo))};`;
+      text ??= await localesModule(repo);
       return text;
     },
     configureServer(server) {
       if (repo === undefined) return;
       const sites = join(repo, "sites") + sep;
-      server.watcher.on("all", (event, file) => {
-        if (!file.startsWith(sites) || !(event.endsWith("Dir") || file.endsWith(`${sep}site.ts`))) return;
-        text = undefined;
+      server.watcher.on("all", async (event, file) => {
+        if (!file.startsWith(sites)) return;
+        const [, routes, ...deeper] = file.slice(sites.length).split(sep);
+        const site = event.endsWith("Dir") && !deeper.length && (routes === undefined || routes === "routes");
+        if (!site && !(routes === "site.ts" && !deeper.length)) return;
+        const next = await localesModule(repo);
+        if (next === text) return;
+        text = next;
         reloadFile(server, id);
       });
     },

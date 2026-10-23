@@ -113,7 +113,6 @@ export function readSites(
 ): SiteEntry[] {
   if (root === undefined) return [];
   const dir = join(root, "sites");
-  if (!isDirectory(dir)) return [];
   const workflows = new Set(description.workflows.map((wf) => wf.name));
   const collections = new Set(description.collections.map((c) => c.name));
   const ops = new Map(description.ops.map((op) => [op.id, op]));

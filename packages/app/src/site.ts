@@ -3,9 +3,8 @@
 // router. Source, loaded only by Vite in a company's build; browser code, nothing server-side. A
 // route file still imports `createFileRoute` from `@tanstack/react-router` itself: the route
 // generator rewrites its path there, and only there.
-import { useRouter, useRouterState } from "@tanstack/react-router";
 import type { ComponentType } from "react";
-import { localesOf, pageLocale } from "./lib/locales.ts";
+import { usePageLanguages } from "./lib/locales.ts";
 
 export {
   getRouteApi,
@@ -49,7 +48,7 @@ export { api } from "./queries.ts";
  * `<html lang>` says. For `Intl`'s formats, say; a site's own strings are `defineMessages`'.
  */
 export function useLocale(): string {
-  return useRouterState({ select: (state) => pageLocale(state.matches.at(-1))?.locale }) ?? "en";
+  return usePageLanguages().locale ?? "en";
 }
 
 /**
@@ -59,18 +58,14 @@ export function useLocale(): string {
  * the app puts in the page's head do; none for a page not under `routes/{-$locale}/`.
  */
 export function useLocales(): { locale: string; href: string; current: boolean }[] {
-  const ownHost = useRouter().options.context.site !== undefined;
-  const leaf = useRouterState({ select: (state) => state.matches.at(-1) });
-  const current = pageLocale(leaf)?.locale;
-  return localesOf(leaf, ownHost).map(({ locale, path }) => ({ locale, href: path, current: locale === current }));
+  const { locale: current, locales } = usePageLanguages();
+  return locales.map(({ locale, href }) => ({ locale, href, current: locale === current }));
 }
 
 /** A site's strings in each of its languages, from `defineMessages`. */
-export interface Messages<L extends string, M> {
+export interface Messages<M> {
   /** The strings in `locale`: a URL's `params.locale`, in a loader or a `head`; the default's for none, or one the site lacks. */
   get(locale: string | undefined): M;
-  /** The site's languages, its default first. */
-  readonly locales: readonly L[];
 }
 
 /** Every language of `L`, each the default's strings exactly: no key the default lacks, and no other language. */
@@ -100,14 +95,14 @@ type Translations<L extends readonly [string, ...string[]], T extends { readonly
 export function defineMessages<
   const L extends readonly [string, ...string[]],
   T extends { readonly [K in L[number]]: object },
->(site: { readonly locales: L }, messages: T & Translations<L, T>): Messages<L[number], T[L[0]]> {
+>(site: { readonly locales: L }, messages: T & Translations<L, T>): Messages<T[L[0]]> {
   const get = (locale: string | undefined): T[L[0]] =>
     messages[locale !== undefined && Object.hasOwn(messages, locale) ? (locale as L[0]) : (site.locales[0] as L[0])];
-  return { get, locales: site.locales };
+  return { get };
 }
 
 /** A site's strings (`defineMessages`) in the language of the page on screen (`useLocale`). */
-export function useMessages<M>(messages: Messages<string, M>): M {
+export function useMessages<M>(messages: Messages<M>): M {
   return messages.get(useLocale());
 }
 
