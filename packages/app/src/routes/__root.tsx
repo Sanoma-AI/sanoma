@@ -83,10 +83,11 @@ const BARE_RESET = "@layer sanoma{body{margin:0}}";
  */
 function alternates({ locales = [] }: RootContext) {
   if (!locales.length) return [];
+  const origin = siteOrigin();
   return [...locales, { locale: "x-default", href: locales[0]!.href }].map(({ locale, href }) => ({
     rel: "alternate",
     hrefLang: locale,
-    href: new URL(href, siteOrigin()).href,
+    href: new URL(href, origin).href,
   }));
 }
 

@@ -3,7 +3,8 @@
 import type { SiteEntry } from "@sanoma-ai/workflows/describe";
 import type { Published } from "./content-files.ts";
 import { escapeHtml } from "./login/page.ts";
-import { hasOneUrl, sitePath, withoutOptional } from "./site-path.ts";
+import { inLocale } from "./content-types.ts";
+import { hasOneUrl, isLocalized, LOCALE_SEGMENT, sitePath, withoutOptional } from "./site-path.ts";
 
 /**
  * `/robots.txt` and `/sitemap.xml` on a public site's own host at `origin`, for a GET or HEAD;
@@ -44,9 +45,9 @@ export interface SitemapEntry {
  * The site's pages at `origin`, by path (`SiteEntry.pages`): each page with no parameter, and for a
  * page whose one parameter a content kind fills (`SitePage.content`), one per published entry of
  * that kind. A page under `{-$locale}` is there once per language of the site (`locales`, the
- * default unprefixed), each with its URL in every language it is in: a content page in a language
- * when its entry has a translation into it or a `<slug>.md` (the default's only the latter), as
- * `content.<kind>.get(slug, { locale })` reads it.
+ * default unprefixed), each with its URL in every language it is in and `x-default`: a content page
+ * in the languages its entry is in as the page reads it, `content.<kind>.get(slug, { locale })`
+ * with the URL's `params.locale` (`inLocale`; the default's URL names none).
  */
 export function sitemapEntries(
   site: Pick<SiteEntry, "name" | "pages" | "locales">,
@@ -54,41 +55,32 @@ export function sitemapEntries(
   published: Published,
 ): SitemapEntry[] {
   return site.pages.flatMap(({ path, content }) => {
-    const localized = path.includes(LOCALE_SEGMENT);
-    const locales = localized && site.locales?.length ? site.locales : [undefined];
-    const url = (locale: string | undefined, slug?: string) => {
-      let page = path.replace(LOCALE_SEGMENT, locale === undefined || locale === locales[0] ? "" : `/${locale}`);
+    const locales = site.locales?.length && isLocalized(site.name, path) ? site.locales : [];
+    const url = (slug: string | undefined, locale?: string) => {
+      let page = locale === undefined || locale === locales[0] ? path : path.replace(LOCALE_SEGMENT, `/${locale}`);
       page = withoutOptional(page);
       if (slug !== undefined) page = page.replace(/\$[^/]+/, slug);
       return new URL(sitePath(site.name, page), origin).href;
     };
-    // Each URL's slug, and the languages it is in.
-    let pages: { slug?: string; in: (string | undefined)[] }[];
-    if (content !== undefined) {
-      const entries = published[content] ?? [];
-      const slugs = [...new Set(entries.map(({ slug }) => slug))];
-      pages = slugs.map((slug) => ({
-        slug,
-        in: locales.filter((locale, i) =>
-          entries.some((e) => e.slug === slug && (e.locale === undefined || (i > 0 && e.locale === locale))),
-        ),
-      }));
-    } else pages = hasOneUrl(path) ? [{ in: locales }] : [];
-    return pages.flatMap(({ slug, in: found }) => {
+    const entries = content === undefined ? undefined : (published[content] ?? []);
+    const slugs = entries ? [...new Set(entries.map(({ slug }) => slug))] : hasOneUrl(path) ? [undefined] : [];
+    if (!locales.length) return slugs.map((slug) => ({ loc: url(slug), alternates: [] }));
+    // Each language's slugs: every slug for a page that reads no content.
+    const slugsIn = locales.map((locale, i) =>
+      entries ? new Set(inLocale(entries, i === 0 ? undefined : locale).map(({ slug }) => slug)) : undefined,
+    );
+    return slugs.flatMap((slug) => {
+      const found = locales.flatMap((locale, i) =>
+        slug === undefined || slugsIn[i]!.has(slug) ? [{ hreflang: locale, href: url(slug, locale) }] : [],
+      );
       const alternates =
         found.length > 1
-          ? [
-              ...found.map((locale) => ({ hreflang: locale!, href: url(locale, slug) })),
-              ...(found[0] === locales[0] ? [{ hreflang: "x-default", href: url(locales[0], slug) }] : []),
-            ]
+          ? [...found, ...(found[0]!.hreflang === locales[0] ? [{ hreflang: "x-default", href: found[0]!.href }] : [])]
           : [];
-      return found.map((locale) => ({ loc: url(locale, slug), alternates }));
+      return found.map(({ href }) => ({ loc: href, alternates }));
     });
   });
 }
-
-/** Where a site's pages take their language: TanStack's optional path parameter. */
-const LOCALE_SEGMENT = "/{-$locale}";
 
 /** A sitemap of `entries` (sitemaps.org's protocol, with `xhtml:link` for each page's languages). */
 export const sitemapXml = (entries: readonly SitemapEntry[]): string =>

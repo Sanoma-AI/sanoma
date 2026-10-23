@@ -174,12 +174,9 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     const distDir = resolve(options.distDir ?? defaultDistDir());
     const built = await readFile(join(distDir, PUBLISHED_FILE), "utf8").then(
       (text) => JSON.parse(text) as Published,
+      // The package's own build has no content to list.
       (err: unknown) => {
         if (!isMissing(err)) throw err;
-        // A build made before builds wrote it (the package's own has no content to list).
-        if (description.sites.some((site) => site.public && site.pages.some((page) => page.content))) {
-          console.warn(`sanoma app: ${distDir} has no ${PUBLISHED_FILE}: the sitemaps list no content; build again`);
-        }
         return {};
       },
     );

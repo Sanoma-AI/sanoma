@@ -1,5 +1,6 @@
 import { useRouterState } from "@tanstack/react-router";
 import LOCALES from "virtual:sanoma/locales";
+import { isLocalized } from "../site-path.ts";
 
 // A public site's languages (`defineSite({ locales })`), as its pages' URLs say them: a site puts
 // its pages under `routes/{-$locale}/`, TanStack's optional path parameter, so `/about` is in its
@@ -40,7 +41,7 @@ export function pageLanguages(
   const site = siteOf(leaf?.fullPath);
   if (!leaf || !site) return { locales: [] };
   const locales = Object.hasOwn(LOCALES, site) ? LOCALES[site] : undefined;
-  if (!leaf.fullPath.startsWith(`/sites/${site}/{-$locale}`)) return { locale: locales?.[0], locales: [] };
+  if (!isLocalized(site, leaf.fullPath)) return { locale: locales?.[0], locales: [] };
   // A site with no languages (or a problem in them) has no URL in one.
   const named = leaf.params.locale;
   if (named !== undefined && (!locales || named === locales[0] || !locales.includes(named as string)))

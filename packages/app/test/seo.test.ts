@@ -23,6 +23,23 @@ describe("sitemapEntries", () => {
     ]);
   });
 
+  it("lists an entry with a translation in each language, each with its URL in both and the default's as x-default", () => {
+    const site = {
+      name: "www",
+      locales: ["en", "fr"],
+      pages: [{ path: "/sites/www/{-$locale}/blog/$slug", content: "posts" }],
+    };
+    const alternates = [
+      { hreflang: "en", href: `${origin}/blog/hello` },
+      { hreflang: "fr", href: `${origin}/fr/blog/hello` },
+      { hreflang: "x-default", href: `${origin}/blog/hello` },
+    ];
+    expect(sitemapEntries(site, origin, { posts: [{ slug: "hello" }, { slug: "hello", locale: "fr" }] })).toEqual([
+      { loc: `${origin}/blog/hello`, alternates },
+      { loc: `${origin}/fr/blog/hello`, alternates },
+    ]);
+  });
+
   it("treats {-$locale} as no parameter on a site with no languages", () => {
     const site = { name: "www", pages: [{ path: "/sites/www/{-$locale}" }] };
     expect(sitemapEntries(site, origin, {})).toEqual([{ loc: `${origin}/`, alternates: [] }]);

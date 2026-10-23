@@ -2,7 +2,7 @@ import { isLoopback } from "@sanoma-ai/workflows/shared";
 import { useRouter } from "@tanstack/react-router";
 import { useMemo, useSyncExternalStore } from "react";
 import type { SiteDefinition } from "../site.ts";
-import { hasOneUrl, withoutOptional } from "../site-path.ts";
+import { hasOneUrl, sitePath, withoutOptional } from "../site-path.ts";
 import { siteOf } from "./locales.ts";
 
 // A company's sites, for the Sites page, the bar and the crumbs: each site the build mounts
@@ -52,8 +52,8 @@ export function useSites(): Site[] {
       };
       sites.set(name, site);
       if (!hasOneUrl(to)) continue;
-      const rest = withoutOptional(to).slice(`/sites/${name}`.length);
-      site.pages.push({ to, label: route.options.staticData?.crumb ?? (rest === "" ? "Home" : rest) });
+      const path = sitePath(name, withoutOptional(to));
+      site.pages.push({ to, label: route.options.staticData?.crumb ?? (path === "/" ? "Home" : path) });
     }
     return [...sites.values()];
   }, [routesByPath]);

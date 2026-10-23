@@ -11,3 +11,9 @@ export const withoutOptional = (path: string): string => path.replace(/\/\{-\$[^
 
 /** A route path with no required parameter (`$id`; an optional `{-$locale}` is none), so one URL to list or link. */
 export const hasOneUrl = (path: string): boolean => !withoutOptional(path).includes("$");
+
+/** Where a site's pages take their language: TanStack's optional path parameter, first in the site's routes. */
+export const LOCALE_SEGMENT = "/{-$locale}";
+
+/** Whether a route path is a page of `site` in its languages: under `/sites/<site>/{-$locale}`. */
+export const isLocalized = (site: string, path: string): boolean => path.startsWith(`/sites/${site}${LOCALE_SEGMENT}`);
