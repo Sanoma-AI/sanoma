@@ -455,12 +455,12 @@ describe("a company's app with its sites", () => {
   });
 
   it("answers a path no page has, or a post that is not there, on a public host with a plain page titled so, in a document reset for the site", async () => {
-    // The visitor's light or dark, and no margin, in a layer ahead of every stylesheet, so below the site's.
+    // No margin, in a layer ahead of every stylesheet, so below the site's; no color-scheme: the site's to say.
     const styled = (await at("/styled", "hello.localhost")).body;
     const reset = styled.search(/<style[^>]*>@layer sanoma\{body\{margin:0\}\}<\/style>/);
     expect(reset).toBeGreaterThan(0);
     expect(reset).toBeLessThan(styled.search(/<link[^>]*rel="stylesheet"/));
-    expect(styled).toContain('<meta name="color-scheme" content="light dark"/>');
+    expect(styled).not.toContain('name="color-scheme"');
     for (const path of ["/nope", "/posts/draft"]) {
       const lost = await at(path, "hello.localhost");
       expect(lost.status, path).toBe(404);

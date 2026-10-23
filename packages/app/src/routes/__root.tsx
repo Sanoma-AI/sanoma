@@ -29,13 +29,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient; site
   component: RootSwitch,
 });
 
-const META = [
-  { charSet: "utf-8" },
-  { name: "viewport", content: "width=device-width, initial-scale=1" },
-  { name: "color-scheme", content: "light dark" },
-];
+const META = [{ charSet: "utf-8" }, { name: "viewport", content: "width=device-width, initial-scale=1" }];
 
-/** A public site's head: the site's layout sets its own icon and stylesheet, and its pages their titles. */
+/**
+ * A public site's head: the site's layout sets its own icon and stylesheet, and its pages their
+ * titles. No color-scheme: the browser's light, unless the site's stylesheet declares its own.
+ */
 const BARE_HEAD = { meta: META };
 
 /**
@@ -55,7 +54,7 @@ const isLost = ({ status, _notFound }: Match) => _notFound === true || status ==
 const BARE_RESET = "@layer sanoma{body{margin:0}}";
 
 const APP_HEAD = {
-  meta: [...META, { title: "Sanoma" }],
+  meta: [...META, { name: "color-scheme", content: "light dark" }, { title: "Sanoma" }],
   links: [
     { rel: "stylesheet", href: css },
     // Without an icon the browser asks for /favicon.ico, and gets a 404.
