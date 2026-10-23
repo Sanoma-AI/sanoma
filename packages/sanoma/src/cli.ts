@@ -185,7 +185,7 @@ async function serveStarted(cwd: string): Promise<number> {
  * its `stop` is the one path that ends them.
  */
 async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<never> {
-  const { partialLink, startWatchers, supervise, whenUnlinked } = await import("./dev.ts");
+  const { devRepo, partialLink, startWatchers, supervise, whenUnlinked } = await import("./dev.ts");
   const cwd = process.cwd();
   log(`dev mode: ${repo}; building ${packages.map((p) => p.name).join(", ") || "nothing"} as it changes`);
   const fromTarballs = partialLink(cwd);
@@ -208,19 +208,17 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
     ignore: hot ? [join(app.dir, "dist", "client"), join(app.dir, "dist", "server")] : [],
     log,
   });
-  let unlinked = false;
   const shutdown = onSignal(async () => {
     unwatch();
     await child.stop();
     await watchers.stop();
-    // Written by the checkout's server, not the installed sanoma's, which writes its own.
-    if (unlinked) rmSync(join(cwd, ".sanoma", "app"), { recursive: true, force: true });
+    // Unlinked: what the checkout's server wrote there is not the installed sanoma's.
+    if (devRepo(cwd) !== repo) rmSync(join(cwd, ".sanoma", "app"), { recursive: true, force: true });
   });
   // Once the repo is unlinked (`sanoma-dev unlink`, an install), the checkout's server must not
   // keep running in it, nor start again on the checkout's next build: it would write its own
   // route tree and tsconfig into `.sanoma/app` beside the installed sanoma's.
   const unwatch = whenUnlinked(cwd, repo, () => {
-    unlinked = true;
     log(`dev mode: the repo no longer links ${repo}; stopping, and removing .sanoma/app`);
     shutdown();
   });

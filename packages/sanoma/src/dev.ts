@@ -95,9 +95,9 @@ function findPackage(name: string, from: string): string | undefined {
  * above a linked package (its `packages/<name>` or `connectors/<name>`). Undefined outside dev
  * mode: nothing linked, and the variable unset.
  */
-export function devRepo(cwd: string, linked: readonly LinkedPackage[] = linkedPackages(cwd)): string | undefined {
+export function devRepo(cwd: string, linked?: readonly LinkedPackage[]): string | undefined {
   if (process.env.SANOMA_DEV_REPO) return process.env.SANOMA_DEV_REPO;
-  const [first] = linked;
+  const [first] = linked ?? linkedPackages(cwd);
   return first && dirname(dirname(first.dir));
 }
 
