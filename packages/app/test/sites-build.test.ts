@@ -579,8 +579,28 @@ describe("a company's app with its sites", () => {
     // Each page with no parameter, and a post's page per published post: never the draft. (The
     // config's root is the fixture's, which the pages are read from: this copy's own are not there.)
     expect([...sitemap.body.matchAll(/<loc>([^<]+)<\/loc>/g)].map(([, loc]) => loc)).toEqual(
-      ["/", "/leads", "/posts", "/posts/hello", "/run", "/started"].map((path) => new URL(path, origin).toString()),
+      ["/", "/leads", "/posts", "/posts/hello", "/posts/untranslated", "/run", "/started"].map((path) =>
+        new URL(path, origin).toString(),
+      ),
     );
+    // A site with languages: each page once per language, the default unprefixed, with its URL in
+    // each it is in; a post in French where it has a translation or a `<slug>.md` (here, both).
+    const intl = `http://intl.localhost:${new URL(app.url).port}`;
+    const urls = [...(await at("/sitemap.xml", "intl.localhost")).body.matchAll(/<url>(.*?)<\/url>/g)].map(
+      ([, url]) => [
+        url!.match(/<loc>([^<]+)<\/loc>/)![1],
+        [...url!.matchAll(/hreflang="([^"]+)" href="([^"]+)"/g)].map(([, lang, href]) => `${lang} ${href}`),
+      ],
+    );
+    const languages = (en: string, fr: string) => [`en ${intl}${en}`, `fr ${intl}${fr}`, `x-default ${intl}${en}`];
+    expect(urls).toEqual([
+      [`${intl}/`, languages("/", "/fr")],
+      [`${intl}/fr`, languages("/", "/fr")],
+      [`${intl}/posts/hello`, languages("/posts/hello", "/fr/posts/hello")],
+      [`${intl}/fr/posts/hello`, languages("/posts/hello", "/fr/posts/hello")],
+      [`${intl}/posts/untranslated`, languages("/posts/untranslated", "/fr/posts/untranslated")],
+      [`${intl}/fr/posts/untranslated`, languages("/posts/untranslated", "/fr/posts/untranslated")],
+    ]);
     // Not its domain: no response there is to be indexed, its pages' neither.
     for (const answer of [robots, sitemap, await at("/", "hello.localhost")]) {
       expect(answer.headers["x-robots-tag"]).toBe("noindex");

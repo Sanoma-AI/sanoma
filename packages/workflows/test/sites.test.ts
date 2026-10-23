@@ -478,6 +478,7 @@ describe("readSites", () => {
       name: "www",
       public: true,
       locales: ["en", "fr", "pt-BR"],
+      pages: [{ path: "/sites/www" }],
       calls: [],
       problems: [],
     });
