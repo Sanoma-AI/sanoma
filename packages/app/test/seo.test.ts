@@ -40,6 +40,12 @@ describe("sitemapEntries", () => {
     ]);
   });
 
+  it("lists a page with no languages only for the entries its get(slug) finds, a translation alone not among them", () => {
+    const site = { name: "www", pages: [{ path: "/sites/www/blog/$slug", content: "posts" }] };
+    const published = { posts: [{ slug: "hello" }, { slug: "only-fr", locale: "fr" }] };
+    expect(sitemapEntries(site, origin, published)).toEqual([{ loc: `${origin}/blog/hello`, alternates: [] }]);
+  });
+
   it("treats {-$locale} as no parameter on a site with no languages", () => {
     const site = { name: "www", pages: [{ path: "/sites/www/{-$locale}" }] };
     expect(sitemapEntries(site, origin, {})).toEqual([{ loc: `${origin}/`, alternates: [] }]);

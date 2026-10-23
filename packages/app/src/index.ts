@@ -276,13 +276,13 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
 const localHost = (site: string) => `${site}.localhost`;
 
 /**
- * A request's origin, in the scheme a proxy that ends TLS says it came in (`x-forwarded-proto`), as
- * Start's `getRequestUrl({ xForwardedProto: true })`: only the absolute URLs a page writes take it.
+ * A request's origin, https when a proxy that ends TLS says so (`x-forwarded-proto: https`), as
+ * Start's `getRequestUrl({ xForwardedProto: true })` and the GitHub login's cookie read it: only
+ * the absolute URLs a page writes take it.
  */
 function requestOrigin(request: Request): string {
   const url = new URL(request.url);
-  const proto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
-  if (proto === "http" || proto === "https") url.protocol = proto;
+  if (request.headers.get("x-forwarded-proto") === "https") url.protocol = "https:";
   return url.origin;
 }
 

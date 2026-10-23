@@ -1,5 +1,5 @@
 import type { Register } from "./api-client.ts";
-import { type ContentEntry, type ContentKind, inLocale } from "./content-types.ts";
+import { type ContentKind, inLocale } from "./content-types.ts";
 
 export type { ContentEntry, ContentKind, ContentOptions, ContentSummary } from "./content-types.ts";
 
@@ -25,10 +25,6 @@ const entriesOf = async (kind: string) => {
   return Object.hasOwn(all, kind) ? all[kind]! : [];
 };
 
-/** A kind's entries in `locale` (`inLocale`), sorted by slug, as the build read them. */
-const entriesIn = async (kind: string, locale: string | undefined): Promise<ContentEntry<unknown>[]> =>
-  inLocale(await entriesOf(kind), locale);
-
 /**
  * The repo's content, `content.<kind>.list()` and `.get(slug)`, each in a language given
  * `{ locale }`: a kind with no folder has no files. Drafts (`draft: true`) are there while
@@ -43,10 +39,11 @@ export const content = new Proxy(
         ? undefined
         : {
             list: async (options) =>
-              (await entriesIn(kind, options?.locale)).map(({ slug, locale, data }) =>
+              inLocale(await entriesOf(kind), options?.locale).map(({ slug, locale, data }) =>
                 locale === undefined ? { slug, data } : { slug, locale, data },
               ),
-            get: async (slug, options) => (await entriesIn(kind, options?.locale)).find((entry) => entry.slug === slug),
+            get: async (slug, options) =>
+              inLocale(await entriesOf(kind), options?.locale).find((entry) => entry.slug === slug),
           },
   },
 ) as Content;

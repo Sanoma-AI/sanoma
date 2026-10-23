@@ -56,22 +56,20 @@ export function sitemapEntries(
 ): SitemapEntry[] {
   return site.pages.flatMap(({ path, content }) => {
     const locales = site.locales?.length && isLocalized(site.name, path) ? site.locales : [];
-    const url = (slug: string | undefined, locale?: string) => {
-      let page = locale === undefined || locale === locales[0] ? path : path.replace(LOCALE_SEGMENT, `/${locale}`);
-      page = withoutOptional(page);
+    // The URL's `params.locale` in each of the page's languages, the default's none; one, none, without.
+    const params = locales.length ? locales.map((locale, i) => (i === 0 ? undefined : locale)) : [undefined];
+    const url = (slug: string | undefined, param: string | undefined) => {
+      let page = withoutOptional(param === undefined ? path : path.replace(LOCALE_SEGMENT, `/${param}`));
       if (slug !== undefined) page = page.replace(/\$[^/]+/, slug);
       return new URL(sitePath(site.name, page), origin).href;
     };
     const entries = content === undefined ? undefined : (published[content] ?? []);
     const slugs = entries ? [...new Set(entries.map(({ slug }) => slug))] : hasOneUrl(path) ? [undefined] : [];
-    if (!locales.length) return slugs.map((slug) => ({ loc: url(slug), alternates: [] }));
-    // Each language's slugs: every slug for a page that reads no content.
-    const slugsIn = locales.map((locale, i) =>
-      entries ? new Set(inLocale(entries, i === 0 ? undefined : locale).map(({ slug }) => slug)) : undefined,
-    );
+    // The slugs the page finds in each language: every one for a page that reads no content.
+    const slugsIn = params.map((param) => entries && new Set(inLocale(entries, param).map(({ slug }) => slug)));
     return slugs.flatMap((slug) => {
-      const found = locales.flatMap((locale, i) =>
-        slug === undefined || slugsIn[i]!.has(slug) ? [{ hreflang: locale, href: url(slug, locale) }] : [],
+      const found = params.flatMap((param, i) =>
+        slug === undefined || slugsIn[i]!.has(slug) ? [{ hreflang: locales[i]!, href: url(slug, param) }] : [],
       );
       const alternates =
         found.length > 1

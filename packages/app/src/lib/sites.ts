@@ -41,7 +41,7 @@ export function useSites(): Site[] {
     // parameters left out: the sites by name, and each site's home before its other pages.
     const sites = new Map<string, Site>();
     const byPath = Object.entries(routesByPath).map(([to, route]) => [withoutOptional(to), to, route] as const);
-    for (const [, to, route] of byPath.toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    for (const [path, to, route] of byPath.toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
       const name = siteOf(to);
       if (name === undefined) continue;
       const site = sites.get(name) ?? {
@@ -52,8 +52,8 @@ export function useSites(): Site[] {
       };
       sites.set(name, site);
       if (!hasOneUrl(to)) continue;
-      const path = sitePath(name, withoutOptional(to));
-      site.pages.push({ to, label: route.options.staticData?.crumb ?? (path === "/" ? "Home" : path) });
+      const own = sitePath(name, path);
+      site.pages.push({ to, label: route.options.staticData?.crumb ?? (own === "/" ? "Home" : own) });
     }
     return [...sites.values()];
   }, [routesByPath]);
