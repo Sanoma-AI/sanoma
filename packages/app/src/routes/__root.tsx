@@ -171,8 +171,10 @@ function Document({ children }: { children: ReactNode }) {
   // On a public site's host, `data-site` tells the browser's router which site this is, and the
   // site brings its own look: no theme.
   const site = useRouter().options.context.site;
-  // The page's language, on a site that has more than one; else English, the app's.
-  const lang = useRouterState({ select: (state) => pageLocale(state.matches.at(-1))?.locale }) ?? "en";
+  // On a public site's host, the page's language, when its site has languages; else English, the
+  // app's, whose chrome is around a site's page on the app's host.
+  const locale = useRouterState({ select: (state) => pageLocale(state.matches.at(-1))?.locale });
+  const lang = (site && locale) || "en";
   return (
     // next-themes' script sets the class on <html> before the body paints, so React finds it changed.
     <html lang={lang} data-site={site} suppressHydrationWarning={!site}>

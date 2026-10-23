@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { content, Link, useLocale } from "sanoma/site";
+import { content, Link, useLocale, useMessages } from "sanoma/site";
 import { messages } from "../../messages.ts";
 
 /** The home page, in the URL's language, linking to each post in it. */
@@ -10,7 +10,7 @@ export const Route = createFileRoute("/sites/intl/{-$locale}/")({
 });
 
 function Home() {
-  const t = messages.use();
+  const t = useMessages(messages);
   const locale = useLocale();
   return (
     <main>

@@ -359,10 +359,12 @@ function siteOptionsOf(
 
   const localesAt = property("locales");
   const list = unwrap(localesAt?.value);
-  const locales: string[] | undefined =
-    list?.type === "ArrayExpression" ? list.elements.map((e: Node) => stringValue(e) ?? "") : undefined;
+  // A hole or a spread is no string.
+  const tags: (string | undefined)[] | undefined =
+    list?.type === "ArrayExpression" ? list.elements.map((e: Node) => stringValue(e)) : undefined;
+  const locales = tags?.every((tag): tag is string => tag !== undefined) ? tags : undefined;
   const localesProblem = (): string | undefined => {
-    if (locales === undefined || locales.includes("")) return unread("`locales`", "an array of strings");
+    if (locales === undefined) return unread("`locales`", "an array of strings");
     if (!locales.length) return "`locales` names a site's languages, its default first: give one or more, or remove it";
     const bad = locales.find((locale) => !LOCALE.test(locale));
     if (bad !== undefined) return `"${bad}" is not a language tag such as "en", "fr" or "pt-BR"`;

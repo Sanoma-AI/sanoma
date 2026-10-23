@@ -393,10 +393,12 @@ const LOCALES = "virtual:sanoma/locales";
 /**
  * `virtual:sanoma/locales`, which the router's `lib/locales.ts` imports: each public site's
  * languages from its `site.ts` (`siteLocales`, read and never run), by name; without a repo, none.
- * On the dev server, a `site.ts` saved reloads it.
+ * Read once for every environment; on the dev server, again when a `site.ts` or a site's folder
+ * (a `routes/` makes a site) is added, changed or removed.
  */
 function localesPlugin(repo?: string): Plugin {
   const id = `\0${LOCALES}`;
+  let text: string | undefined;
   return {
     name: "sanoma:locales",
     resolveId: (source) => (source === LOCALES ? id : undefined),
@@ -404,13 +406,16 @@ function localesPlugin(repo?: string): Plugin {
       if (loaded !== id) return;
       if (repo === undefined) return "export default {};";
       const { siteLocales } = await import("@sanoma-ai/workflows/describe");
-      return `export default ${JSON.stringify(siteLocales(repo))};`;
+      text ??= `export default ${JSON.stringify(siteLocales(repo))};`;
+      return text;
     },
     configureServer(server) {
       if (repo === undefined) return;
       const sites = join(repo, "sites") + sep;
-      server.watcher.on("all", (_event, file) => {
-        if (file.startsWith(sites) && file.endsWith(`${sep}site.ts`)) reloadFile(server, id);
+      server.watcher.on("all", (event, file) => {
+        if (!file.startsWith(sites) || !(event.endsWith("Dir") || file.endsWith(`${sep}site.ts`))) return;
+        text = undefined;
+        reloadFile(server, id);
       });
     },
   };

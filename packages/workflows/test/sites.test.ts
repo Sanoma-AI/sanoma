@@ -395,6 +395,7 @@ describe("readSites", () => {
       ...site("dynamic", "public: true", "locales: process.env.LOCALES"),
       ...site("held", "public: true", "locales: [LANG]"),
       ...site("bad", "public: true", 'locales: ["en", "French"]'),
+      ...site("blank", "public: true", 'locales: ["en", ""]'),
       ...site("twice", "public: true", 'locales: ["en", "fr", "en"]'),
       ...site("staff", 'locales: ["en", "fr"]'),
       ...site("members", "public: true", 'login: "auth0"', 'locales: ["en", "fr"]'),
@@ -414,6 +415,7 @@ describe("readSites", () => {
     const loginless = "`locales` are for a public site with no login: add `public: true`, or remove `locales`";
     expect(problems).toEqual({
       bad: [[5, '"French" is not a language tag such as "en", "fr" or "pt-BR"']],
+      blank: [[5, '"" is not a language tag such as "en", "fr" or "pt-BR"']],
       dynamic: [[5, unreadLocales]],
       empty: [[5, "`locales` names a site's languages, its default first: give one or more, or remove it"]],
       held: [[5, unreadLocales]],

@@ -553,17 +553,15 @@ describe("a company's app with its sites", () => {
     }
     // A translation is not a post of its own: a page reading content with no language never lists it.
     expect((await at("/posts", "hello.localhost")).body).not.toContain("Bonjour, contenu");
-    // On the app's host, the same pages under /sites/intl, in their language, with no hreflang.
+    // On the app's host, the same pages under /sites/intl, with no hreflang, in the app's English document.
     const inApp = (await (await fetch(new URL("/sites/intl/fr/posts/hello", app.url))).text()).replaceAll(
       "<!-- -->",
       "",
     );
-    expect(inApp).toMatch(/^<!DOCTYPE html><html lang="fr"/);
+    expect(inApp).toMatch(/^<!DOCTYPE html><html lang="en"/);
     expect(inApp).toContain("<h1>Bonjour, contenu</h1>");
     expect(inApp).not.toContain('rel="alternate"');
     expect(inApp).toContain('<a href="/sites/intl/posts/hello" hrefLang="en">en</a>');
-    // The app's own pages stay in English.
-    expect(await (await fetch(new URL("/workflows", app.url))).text()).toMatch(/^<!DOCTYPE html><html lang="en"/);
   });
 
   it("answers a path no page has, or a post that is not there, on a public host with a plain page titled so, in a document reset for the site", async () => {

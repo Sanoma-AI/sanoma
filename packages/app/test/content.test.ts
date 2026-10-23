@@ -83,22 +83,29 @@ describe("readContent", () => {
     expect(zapier!.html).toContain("<td>Free</td>");
   });
 
-  it("reads `<slug>.<locale>.md` as the slug's translation into that language, in file name order", () => {
+  it("reads `<slug>.<locale>.md` as the slug's translation, its front matter over the original's, in file name order", () => {
     const repo = tree("translated", {
       ...posts,
       "content/posts/zapier.fr.md": "---\ntitle: Sanoma et Zapier\n---\nUne comparaison.\n",
       "content/posts/zapier.pt-BR.md": "---\ntitle: Sanoma e Zapier\n---\n",
+      // hello.md is a draft: its translation is too, unless it says otherwise.
+      "content/posts/hello.fr.md": "---\ntitle: Bonjour\n---\n",
+      "content/posts/hello.de.md": "---\ntitle: Hallo\ndraft: false\n---\n",
     });
     const { kinds, problems } = readContent(repo, { drafts: false });
     expect(problems).toEqual([]);
     expect(kinds.posts!.map(({ slug, locale, data }) => ({ slug, locale, title: data.title }))).toEqual([
+      { slug: "hello", locale: "de", title: "Hallo" },
       { slug: "zapier", locale: "fr", title: "Sanoma et Zapier" },
       { slug: "zapier", locale: undefined, title: "Sanoma and Zapier" },
       { slug: "zapier", locale: "pt-BR", title: "Sanoma e Zapier" },
     ]);
-    expect(kinds.posts![0]!.html).toBe("<p>Une comparaison.</p>\n");
-    // The default's file has no `locale` at all, as before translations.
-    expect(Object.hasOwn(kinds.posts![1]!, "locale")).toBe(false);
+    const [, fr, original, ptBr] = kinds.posts!;
+    expect(fr!.html).toBe("<p>Une comparaison.</p>\n");
+    // What a translation does not repeat is the original's, so its type is too.
+    expect(ptBr!.data).toEqual({ ...original!.data, title: "Sanoma e Zapier" });
+    // The original's file has no `locale` at all, as before translations.
+    expect(Object.hasOwn(original!, "locale")).toBe(false);
   });
 
   it("leaves a draft out without drafts", () => {

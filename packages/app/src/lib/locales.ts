@@ -13,6 +13,9 @@ export const siteOf = (path: string | undefined): string | undefined =>
 /** The folder a site's pages go in to be in each of its languages: the optional parameter `locale`. */
 export const LOCALE_SEGMENT = "{-$locale}";
 
+/** A route path under a site, `/sites/<name>/{-$locale}/about`, without its language: `/sites/<name>/about`. */
+export const withoutLocale = (path: string): string => path.replace(`/${LOCALE_SEGMENT}`, "");
+
 /** As much of a route match as says its language. */
 export interface LocaleMatch {
   routeId: string;
@@ -31,17 +34,28 @@ export interface PageLocale {
   locale: string;
   /** Whether the page is under `{-$locale}`, so has a URL in each language. */
   localized: boolean;
-  /** False when the URL names a language the site does not have, or its default (which has no prefix). */
+  /** False when the URL names a language the site does not have (in its case), or its default (which has no prefix). */
   valid: boolean;
 }
+
+/**
+ * Whether a route id is under the site's `{-$locale}`: its first segment under `/sites/<name>`,
+ * groups and pathless layouts aside (`(marketing)`, `_layout`), as the URL's first segment.
+ */
+const isLocalized = (routeId: string, site: string): boolean =>
+  routeId
+    .slice(`/sites/${site}/`.length)
+    .split("/")
+    .find((segment) => !/^\(.*\)$/.test(segment) && !segment.startsWith("_")) === LOCALE_SEGMENT;
 
 /** The language of the page `leaf` is (the deepest match), or undefined when its site has none. */
 export function pageLocale(leaf: LocaleMatch | undefined): PageLocale | undefined {
   const site = siteOf(leaf?.routeId);
   const locales = site === undefined ? undefined : LOCALES[site];
   if (!leaf || !site || !locales) return undefined;
-  const localized = leaf.routeId.startsWith(`/sites/${site}/${LOCALE_SEGMENT}`);
+  const localized = isLocalized(leaf.routeId, site);
   const named = localized && typeof leaf.params.locale === "string" ? leaf.params.locale : undefined;
+  // As written: the router matches `/pt-br/` too, which is not `pt-BR`'s URL.
   const valid = named === undefined || (named !== locales[0] && locales.includes(named));
   return { site, locales, locale: valid && named ? named : locales[0]!, localized, valid };
 }

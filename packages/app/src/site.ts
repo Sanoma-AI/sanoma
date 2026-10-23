@@ -69,17 +69,20 @@ export function useLocales(): { locale: string; href: string; current: boolean }
 export interface Messages<L extends string, M> {
   /** The strings in `locale`: a URL's `params.locale`, in a loader or a `head`; the default's for none, or one the site lacks. */
   get(locale: string | undefined): M;
-  /** The strings in the language of the page on screen (`useLocale`). */
-  use(): M;
   /** The site's languages, its default first. */
   readonly locales: readonly L[];
 }
 
+/** Every language of `L`, each the default's strings exactly: no key the default lacks, and no other language. */
+type Translations<L extends readonly [string, ...string[]], T extends { readonly [K in L[number]]: object }> = {
+  readonly [K in L[number]]: T[L[0]] & { readonly [P in Exclude<keyof T[K], keyof T[L[0]]>]: never };
+} & { readonly [K in Exclude<keyof T, L[number]>]: never };
+
 /**
  * A site's own strings in each of its languages, typed: the default language's (the first of
- * `site.locales`) say what every other must have, the same keys with the same types, so a key
- * missing in one, or a language missing, fails the check. A string is a string; one with values
- * in it is a function of them, its parameters typed in each language.
+ * `site.locales`) say what every other has, the same keys with the same types, so a key missing
+ * or extra in one, or a language missing or extra, fails the check. A string is a string; one
+ * with values in it is a function of them, its parameters typed in each language.
  *
  * ```ts
  * // sites/www/messages.ts
@@ -91,16 +94,21 @@ export interface Messages<L extends string, M> {
  *   fr: { blog: "Blog", posted: (date: string) => `Publié le ${date}` },
  * });
  *
- * // in a page: const t = messages.use(); t.posted(post.data.publishedAt)
+ * // in a component: const t = useMessages(messages); t.posted(post.data.publishedAt)
  * ```
  */
 export function defineMessages<
   const L extends readonly [string, ...string[]],
   T extends { readonly [K in L[number]]: object },
->(site: { readonly locales: L }, messages: T & { readonly [K in L[number]]: T[L[0]] }): Messages<L[number], T[L[0]]> {
+>(site: { readonly locales: L }, messages: T & Translations<L, T>): Messages<L[number], T[L[0]]> {
   const get = (locale: string | undefined): T[L[0]] =>
     messages[locale !== undefined && Object.hasOwn(messages, locale) ? (locale as L[0]) : (site.locales[0] as L[0])];
-  return { get, use: () => get(useLocale()), locales: site.locales };
+  return { get, locales: site.locales };
+}
+
+/** A site's strings (`defineMessages`) in the language of the page on screen (`useLocale`). */
+export function useMessages<M>(messages: Messages<string, M>): M {
+  return messages.get(useLocale());
 }
 
 /**

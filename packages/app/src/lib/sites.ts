@@ -2,7 +2,7 @@ import { isLoopback } from "@sanoma-ai/workflows/shared";
 import { useRouter } from "@tanstack/react-router";
 import { useMemo, useSyncExternalStore } from "react";
 import type { SiteDefinition } from "../site.ts";
-import { LOCALE_SEGMENT, siteOf } from "./locales.ts";
+import { siteOf, withoutLocale } from "./locales.ts";
 
 export { siteOf } from "./locales.ts";
 
@@ -51,8 +51,7 @@ export function useSites(): Site[] {
         pages: [],
       };
       sites.set(name, site);
-      const under = to.slice(`/sites/${name}`.length);
-      const rest = under.startsWith(`/${LOCALE_SEGMENT}`) ? under.slice(LOCALE_SEGMENT.length + 1) : under;
+      const rest = withoutLocale(to).slice(`/sites/${name}`.length);
       if (rest.includes("$")) continue;
       site.pages.push({ to, label: route.options.staticData?.crumb ?? (rest === "" ? "Home" : rest) });
     }

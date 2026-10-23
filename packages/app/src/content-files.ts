@@ -32,8 +32,9 @@ const FRONT_MATTER = /^---[ \t]*\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
  * The repo's content: each folder directly under `content/` whose name is a URL segment is a kind,
  * and each `*.md` directly in it an entry, its slug the file's name (a URL segment too), read by
  * `parseFile`; `<slug>.<locale>.md` is the slug's translation into a language (`LOCALE`), its
- * `locale` set. Subfolders, other files and dotfiles are left alone. Without `drafts`, an entry
- * whose `draft` is `true` is left out. Entries are sorted by file name.
+ * `locale` set and its front matter laid over its `<slug>.md`'s, so a key it does not repeat (a
+ * date, an image, `draft`) is the original's. Subfolders, other files and dotfiles are left alone.
+ * Without `drafts`, an entry whose `draft` is `true` is left out. Entries are sorted by file name.
  */
 export function readContent(
   repo: string,
@@ -47,7 +48,7 @@ export function readContent(
       problems.push(at(`content/${kind}`, `a content folder's name is a URL segment ${SEGMENT}`));
       continue;
     }
-    kinds[kind] = [];
+    const entries: ContentEntry<Data>[] = [];
     for (const name of folder(join(root, kind), (entry) => entry.isFile() && entry.name.endsWith(".md"))) {
       const file = `content/${kind}/${name}`;
       const [slug = "", locale, ...rest] = name.slice(0, -".md".length).split(".");
@@ -58,10 +59,12 @@ export function readContent(
               message: `a content file's name is a URL segment ${SEGMENT}, then a language for a translation (\`hello.fr.md\`)`,
             };
       if ("message" in read) problems.push(at(file, read.message, read.line, read.column));
-      else if (options.drafts || read.data.draft !== true) {
-        kinds[kind].push({ slug, ...(locale !== undefined && { locale }), ...read });
-      }
+      else entries.push({ slug, ...(locale !== undefined && { locale }), ...read });
     }
+    const originals = new Map(entries.filter((e) => e.locale === undefined).map((e) => [e.slug, e.data]));
+    kinds[kind] = entries
+      .map((e) => (e.locale === undefined ? e : { ...e, data: { ...originals.get(e.slug), ...e.data } }))
+      .filter((e) => options.drafts || e.data.draft !== true);
   }
   return { kinds, problems };
 }
