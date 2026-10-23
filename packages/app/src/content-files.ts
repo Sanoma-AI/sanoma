@@ -4,7 +4,7 @@
 // reaches the browser: the build hands it the files as data.
 import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { SITE_NAME } from "@sanoma-ai/workflows/shared";
+import { LOCALE, SITE_NAME } from "@sanoma-ai/workflows/shared";
 import { marked } from "marked";
 import { LineCounter, parseDocument } from "yaml";
 import type { ContentEntry } from "./content-types.ts";
@@ -31,8 +31,9 @@ const FRONT_MATTER = /^---[ \t]*\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
 /**
  * The repo's content: each folder directly under `content/` whose name is a URL segment is a kind,
  * and each `*.md` directly in it an entry, its slug the file's name (a URL segment too), read by
- * `parseFile`. Subfolders, other files and dotfiles are left alone. Without `drafts`, an entry
- * whose `draft` is `true` is left out. Entries are sorted by slug.
+ * `parseFile`; `<slug>.<locale>.md` is the slug's translation into a language (`LOCALE`), its
+ * `locale` set. Subfolders, other files and dotfiles are left alone. Without `drafts`, an entry
+ * whose `draft` is `true` is left out. Entries are sorted by file name.
  */
 export function readContent(
   repo: string,
@@ -49,12 +50,17 @@ export function readContent(
     kinds[kind] = [];
     for (const name of folder(join(root, kind), (entry) => entry.isFile() && entry.name.endsWith(".md"))) {
       const file = `content/${kind}/${name}`;
-      const slug = name.slice(0, -".md".length);
-      const read = SITE_NAME.test(slug)
-        ? parseFile(readFileSync(join(root, kind, name), "utf8"))
-        : { message: `a content file's name is a URL segment ${SEGMENT}` };
+      const [slug = "", locale, ...rest] = name.slice(0, -".md".length).split(".");
+      const read =
+        SITE_NAME.test(slug) && (locale === undefined || LOCALE.test(locale)) && !rest.length
+          ? parseFile(readFileSync(join(root, kind, name), "utf8"))
+          : {
+              message: `a content file's name is a URL segment ${SEGMENT}, then a language for a translation (\`hello.fr.md\`)`,
+            };
       if ("message" in read) problems.push(at(file, read.message, read.line, read.column));
-      else if (options.drafts || read.data.draft !== true) kinds[kind].push({ slug, ...read });
+      else if (options.drafts || read.data.draft !== true) {
+        kinds[kind].push({ slug, ...(locale !== undefined && { locale }), ...read });
+      }
     }
   }
   return { kinds, problems };

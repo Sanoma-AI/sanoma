@@ -33,6 +33,7 @@ import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle }
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Tabs, TabsList, TabsTrigger } from "#/components/ui/tabs.tsx";
 import { shortId } from "#/lib/apply-plan.ts";
+import { LOCALE_SEGMENT } from "#/lib/locales.ts";
 import { siteOf, useSites } from "#/lib/sites.ts";
 import { utcText } from "#/lib/time.ts";
 import { cn } from "#/lib/utils.ts";
@@ -640,7 +641,8 @@ export function UsedByList({ workflows = [], sites = [] }: UsedByProps) {
             <ItemDescription>through {via.join(" and ")}</ItemDescription>
           </ItemContent>
         );
-        return page && !page.includes("$") && page in routesByPath ? (
+        // A page with a parameter has no one URL, but the language's: it links to the default's.
+        return page && !page.replace(`/${LOCALE_SEGMENT}`, "").includes("$") && page in routesByPath ? (
           <LinkItem key={file} variant="outline" size="xs">
             <Link to={page}>
               {content}

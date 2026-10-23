@@ -1,7 +1,7 @@
 import type { Register } from "./api-client.ts";
-import type { ContentKind } from "./content-types.ts";
+import type { ContentEntry, ContentKind } from "./content-types.ts";
 
-export type { ContentEntry, ContentKind, ContentSummary } from "./content-types.ts";
+export type { ContentEntry, ContentKind, ContentOptions, ContentSummary } from "./content-types.ts";
 
 // A site's `content`, from `sanoma/site`: the Markdown files under the repo's `content/`, as the
 // build read them (`readContent` in `content-files.ts`, through the `sanoma:content` plugin's
@@ -26,8 +26,22 @@ const entriesOf = async (kind: string) => {
 };
 
 /**
- * The repo's content, `content.<kind>.list()` and `.get(slug)`: a kind with no folder has no files.
- * Drafts (`draft: true`) are there while `sanoma` serves the sites from its dev server, never in a build.
+ * A kind's entries in `locale`: each slug's `<slug>.<locale>.md`, else its `<slug>.md`; without
+ * one, the `<slug>.md` files alone. Sorted by slug, as the build read them.
+ */
+async function inLocale(kind: string, locale: string | undefined): Promise<ContentEntry<unknown>[]> {
+  const entries = await entriesOf(kind);
+  const picked = new Map<string, ContentEntry<unknown>>();
+  for (const entry of entries) {
+    if (entry.locale === undefined ? !picked.has(entry.slug) : entry.locale === locale) picked.set(entry.slug, entry);
+  }
+  return [...picked.values()];
+}
+
+/**
+ * The repo's content, `content.<kind>.list()` and `.get(slug)`, each in a language given
+ * `{ locale }`: a kind with no folder has no files. Drafts (`draft: true`) are there while
+ * `sanoma` serves the sites from its dev server, never in a build.
  */
 export const content = new Proxy(
   {},
@@ -37,8 +51,13 @@ export const content = new Proxy(
       typeof kind !== "string"
         ? undefined
         : {
-            list: async () => (await entriesOf(kind)).map(({ slug, data }) => ({ slug, data })),
-            get: async (slug) => (await entriesOf(kind)).find((entry) => entry.slug === slug),
+            list: async (options) =>
+              (await inLocale(kind, options?.locale)).map(({ slug, locale, data }) => ({
+                slug,
+                ...(locale !== undefined && { locale }),
+                data,
+              })),
+            get: async (slug, options) => (await inLocale(kind, options?.locale)).find((entry) => entry.slug === slug),
           },
   },
 ) as Content;

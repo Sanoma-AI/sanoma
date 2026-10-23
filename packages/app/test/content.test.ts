@@ -47,6 +47,15 @@ Hi <b>there</b>.
 `,
 };
 
+/** The problem of a file in content/posts whose name is not a slug, or a slug and a language. */
+const badName = (name: string) => ({
+  file: `content/posts/${name}`,
+  line: 1,
+  column: 1,
+  message:
+    "a content file's name is a URL segment (a lowercase letter, then lowercase letters, digits and dashes), then a language for a translation (`hello.fr.md`)",
+});
+
 describe("readContent", () => {
   it("reads each kind's files, sorted by slug: front matter as data, the body as written and as HTML", () => {
     const repo = tree("posts", posts);
@@ -72,6 +81,24 @@ describe("readContent", () => {
     // A GFM table.
     expect(zapier!.html).toContain("<table>");
     expect(zapier!.html).toContain("<td>Free</td>");
+  });
+
+  it("reads `<slug>.<locale>.md` as the slug's translation into that language, in file name order", () => {
+    const repo = tree("translated", {
+      ...posts,
+      "content/posts/zapier.fr.md": "---\ntitle: Sanoma et Zapier\n---\nUne comparaison.\n",
+      "content/posts/zapier.pt-BR.md": "---\ntitle: Sanoma e Zapier\n---\n",
+    });
+    const { kinds, problems } = readContent(repo, { drafts: false });
+    expect(problems).toEqual([]);
+    expect(kinds.posts!.map(({ slug, locale, data }) => ({ slug, locale, title: data.title }))).toEqual([
+      { slug: "zapier", locale: "fr", title: "Sanoma et Zapier" },
+      { slug: "zapier", locale: undefined, title: "Sanoma and Zapier" },
+      { slug: "zapier", locale: "pt-BR", title: "Sanoma e Zapier" },
+    ]);
+    expect(kinds.posts![0]!.html).toBe("<p>Une comparaison.</p>\n");
+    // The default's file has no `locale` at all, as before translations.
+    expect(Object.hasOwn(kinds.posts![1]!, "locale")).toBe(false);
   });
 
   it("leaves a draft out without drafts", () => {
@@ -114,6 +141,8 @@ describe("readContent", () => {
       // Aliases that would expand past what yaml allows.
       "content/posts/aliases.md": `---\na: &a [x,x,x,x,x,x,x,x,x,x]\nb: &b [${"*a,".repeat(9)}*a]\nc: &c [${"*b,".repeat(9)}*b]\nd: [${"*c,".repeat(9)}*c]\n---\n`,
       "content/posts/Not_A_Slug.md": "---\ntitle: X\n---\n",
+      "content/posts/good.French.md": "---\ntitle: X\n---\n",
+      "content/posts/good.fr.old.md": "---\ntitle: X\n---\n",
       "content/Blog/post.md": "---\ntitle: X\n---\n",
     });
     const { kinds, problems } = readContent(repo, { drafts: true });
@@ -126,13 +155,7 @@ describe("readContent", () => {
         message:
           "a content folder's name is a URL segment (a lowercase letter, then lowercase letters, digits and dashes)",
       },
-      {
-        file: "content/posts/Not_A_Slug.md",
-        line: 1,
-        column: 1,
-        message:
-          "a content file's name is a URL segment (a lowercase letter, then lowercase letters, digits and dashes)",
-      },
+      badName("Not_A_Slug.md"),
       {
         file: "content/posts/aliases.md",
         line: 2,
@@ -145,6 +168,9 @@ describe("readContent", () => {
         column: 23,
         message: "front matter: Flow sequence in block collection must be sufficiently indented and end with a ]",
       },
+      // A language that is not a tag, or more than one.
+      badName("good.French.md"),
+      badName("good.fr.old.md"),
       { file: "content/posts/list.md", line: 2, column: 1, message: "front matter is a mapping of names to values" },
       { file: "content/posts/open.md", line: 1, column: 1, message: "front matter: no closing `---` line" },
     ]);
@@ -201,13 +227,16 @@ export async function page() {
   const html: string | undefined = post?.html;
   const rows = post?.data.comparison?.map((row) => row.competitor);
   const list = await content.posts.list();
+  const translated = await content.posts.get("zapier", { locale: "fr" });
+  const locale: string | undefined = translated?.locale;
+  const inFrench = await content.posts.list({ locale: undefined });
   const draft: Equal<(typeof list)[number]["data"]["draft"], boolean | undefined> = true;
   const summary: ContentSummary<unknown> = list[0]!;
   // @ts-expect-error: no post has nope
   const nope = post?.data.nope;
   // @ts-expect-error: no content/nope
   await content.nope.list();
-  return [title, html, rows, draft, summary, nope];
+  return [title, html, rows, draft, summary, nope, locale, inFrench];
 }
 `,
     });

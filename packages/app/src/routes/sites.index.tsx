@@ -18,8 +18,8 @@ export const Route = createFileRoute("/sites/")({
 
 /**
  * The company's sites, with how many, as a table in one card: each site under its title (and
- * icon) and folder, its pages (those with no path parameter, its home first), and a public
- * site's own address, where visitors see it at the root of its host.
+ * icon) and folder, its pages (those with no path parameter, its home first), a public site's own
+ * address, where visitors see it at the root of its host, and its languages.
  */
 /** The config's public sites, by name. */
 const publicSitesByName = (config: ConfigDescription) =>
@@ -46,6 +46,7 @@ function SitesPage() {
                 <TableHead>Site</TableHead>
                 <TableHead>Pages</TableHead>
                 <TableHead>Public at</TableHead>
+                <TableHead>Languages</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -74,6 +75,9 @@ function SitesPage() {
                       <span className="text-muted-foreground">In the app only</span>
                     )}
                   </TableCell>
+                  <TableCell className="align-top">
+                    <Languages locales={publicSites.get(name)?.locales} />
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -93,5 +97,23 @@ function PublicAddress({ site }: { site: SiteEntry }) {
       {new URL(href).host}
       <ArrowSquareOutIcon aria-hidden="true" className="size-3.5" />
     </a>
+  );
+}
+
+/**
+ * A public site's languages (`defineSite({ locales })`), its default first and so marked, each the
+ * prefix its pages answer under but the default's; one, unsaid, for a site that names none.
+ */
+function Languages({ locales }: { locales: string[] | undefined }) {
+  if (!locales) return <span className="text-muted-foreground">One</span>;
+  return (
+    <ul aria-label="Languages" className="flex flex-wrap gap-x-3 gap-y-1">
+      {locales.map((locale, i) => (
+        <li key={locale}>
+          <code>{locale}</code>
+          {i === 0 && <span className="text-muted-foreground"> default</span>}
+        </li>
+      ))}
+    </ul>
   );
 }

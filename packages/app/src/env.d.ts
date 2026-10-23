@@ -8,3 +8,9 @@ declare module "virtual:sanoma/content" {
   const kinds: Record<string, import("./content-types.ts").ContentEntry<Record<string, unknown>>[]>;
   export default kinds;
 }
+
+/** Each public site's languages, by name, the first its default, as the `sanoma:locales` plugin reads them (`siteLocales`). */
+declare module "virtual:sanoma/locales" {
+  const locales: Record<string, string[]>;
+  export default locales;
+}

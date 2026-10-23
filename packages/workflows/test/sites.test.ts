@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { describeConfig } from "../src/describe.ts";
+import { describeConfig, siteLocales } from "../src/describe.ts";
 import { defineConnector, defineWorkflow, type SanomaConfig, withSetup } from "../src/index.ts";
 import { leads } from "../../app/test/fixtures/company-sites/resources/data.ts";
 import { tree } from "./tree.ts";
@@ -386,6 +386,45 @@ describe("readSites", () => {
       },
       { name: "www", title: "Website", public: true, login: "auth0", calls: [], problems: [] },
     ]);
+  });
+
+  it("reads a public site's locales from site.ts, its default first, and makes a problem of what it cannot keep", () => {
+    const root = tree("locales", {
+      ...site("www", "public: true", 'locales: ["en", "fr", "pt-BR"]'),
+      ...site("empty", "public: true", "locales: []"),
+      ...site("dynamic", "public: true", "locales: process.env.LOCALES"),
+      ...site("held", "public: true", "locales: [LANG]"),
+      ...site("bad", "public: true", 'locales: ["en", "French"]'),
+      ...site("twice", "public: true", 'locales: ["en", "fr", "en"]'),
+      ...site("staff", 'locales: ["en", "fr"]'),
+      ...site("members", "public: true", 'login: "auth0"', 'locales: ["en", "fr"]'),
+    });
+    const sites = describeConfig(config(root, { connectors: [auth0] })).sites;
+    const languages = (name: string) => sites.find((s) => s.name === name);
+    expect(languages("www")).toEqual({
+      name: "www",
+      public: true,
+      locales: ["en", "fr", "pt-BR"],
+      calls: [],
+      problems: [],
+    });
+    // Each at its `locales`, the line after `public: true` (and `login`), or the first.
+    const problems = Object.fromEntries(sites.map((s) => [s.name, s.problems.map((p) => [p.line, p.message])]));
+    const unreadLocales = "`locales` is read without running site.ts: write it as an array of strings";
+    const loginless = "`locales` are for a public site with no login: add `public: true`, or remove `locales`";
+    expect(problems).toEqual({
+      bad: [[5, '"French" is not a language tag such as "en", "fr" or "pt-BR"']],
+      dynamic: [[5, unreadLocales]],
+      empty: [[5, "`locales` names a site's languages, its default first: give one or more, or remove it"]],
+      held: [[5, unreadLocales]],
+      members: [[6, loginless]],
+      staff: [[4, loginless]],
+      twice: [[5, '"en" is in `locales` twice']],
+      www: [],
+    });
+    // Kept only without a problem.
+    expect(sites.filter((s) => s.locales).map((s) => s.name)).toEqual(["www"]);
+    expect(siteLocales(root)).toEqual({ www: ["en", "fr", "pt-BR"] });
   });
 
   it("makes a problem of a public site's start or direct call that no permit could let a visitor make, its conditions aside", () => {

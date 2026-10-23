@@ -2,6 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { createRouter } from "@tanstack/react-router";
 import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query";
 import { createIsomorphicFn, getGlobalStartContext } from "@tanstack/react-start";
+import { getRequestUrl } from "@tanstack/react-start/server";
 import { NotFound, PagePending, RouteError, SiteError, SiteNotFound } from "./components/boundaries.tsx";
 import { routeTree } from "#/routeTree.gen.ts";
 
@@ -21,6 +22,21 @@ const publicSite = createIsomorphicFn()
     }
   })
   .client((): string | undefined => document.documentElement.dataset.site || undefined);
+
+/**
+ * The page's origin, as the browser asked for it: on the server, the request's (its scheme from
+ * `x-forwarded-proto` behind a proxy that ends TLS); in the browser, `location`'s. For the absolute
+ * links a page's head gives (`hreflang`).
+ */
+const pageOrigin = createIsomorphicFn()
+  .server((): string | undefined => {
+    try {
+      return getRequestUrl({ xForwardedProto: true }).origin;
+    } catch {
+      return undefined;
+    }
+  })
+  .client((): string => location.origin);
 
 /** `/…` on the site's host ↔ `/sites/<site>/…` in the route tree: the site's routes at the root of its host. */
 function siteRewrite(site: string) {
@@ -46,7 +62,7 @@ export function getRouter() {
   const site = publicSite();
   const router = createRouter({
     routeTree,
-    context: { queryClient, site },
+    context: { queryClient, site, ...(site && { origin: pageOrigin() }) },
     ...(site && { rewrite: siteRewrite(site) }),
     defaultPreload: "intent",
     // The query client decides what is fresh: a preload runs the loaders, which load only what it lacks.
