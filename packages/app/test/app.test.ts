@@ -1108,39 +1108,44 @@ describe("the page", () => {
       await tab.goto(inbox);
       await tab.evaluate((key) => localStorage.setItem(key, "tester"), ACTOR_KEY);
       await tab.goto(inbox, { waitUntil: "networkidle0" });
+      // In the page, as strings: this file is typed for Node, without the DOM's globals.
+      const run = <T>(code: string) => tab.evaluate(code) as Promise<T>;
       // The Inbox's tile counts every approval waiting, as the page's title does.
-      const badge = await tab.waitForSelector('nav[aria-label="Sections"] a[href="/inbox"] [data-slot="badge"]');
-      const pending = await tab.$eval("h1 span", (count) => count.textContent);
+      const badge = 'nav[aria-label="Sections"] a[href="/inbox"] [data-slot="badge"]';
+      await tab.waitForSelector(badge);
+      const pending = await run<string>(`document.querySelector("h1 span").textContent`);
       expect(Number(pending)).toBeGreaterThan(0);
-      expect(await badge!.evaluate((b) => b.textContent)).toBe(`${pending} waiting`);
+      expect(await run(`document.querySelector('${badge}').textContent`)).toBe(`${pending} waiting`);
       // The chat column, open by default, takes room beside the page: the approval sits above the list.
       const chatButton = 'button[aria-controls="chat"]';
-      expect(await tab.$("aside#chat")).not.toBeNull();
+      const expanded = () => run(`document.querySelector('${chatButton}').getAttribute("aria-expanded")`);
       const float = '[data-slot="card"].shadow-lg[role="region"]';
-      expect(await tab.$eval(float, (card) => getComputedStyle(card).position)).toBe("static");
+      const placed = () => run(`getComputedStyle(document.querySelector('${float}')).position`);
+      expect(await tab.$("aside#chat")).not.toBeNull();
+      expect(await placed()).toBe("static");
       // Chat folds it, and says so in a cookie the server reads: a reload renders it folded at
       // once, the page's own HTML without the column.
       await tab.click(chatButton);
       await tab.waitForFunction(`!document.getElementById("chat")`);
-      expect(await tab.$eval(chatButton, (b) => b.getAttribute("aria-expanded"))).toBe("false");
-      expect(await tab.evaluate(() => document.cookie)).toContain("sanoma_chat=closed");
+      expect(await expanded()).toBe("false");
+      expect(await run("document.cookie")).toContain("sanoma_chat=closed");
       const reloaded = await tab.reload({ waitUntil: "networkidle0" });
       expect(await reloaded!.text()).not.toContain('id="chat"');
       expect(await tab.$("aside#chat")).toBeNull();
-      expect(await tab.$eval(chatButton, (b) => b.getAttribute("aria-expanded"))).toBe("false");
+      expect(await expanded()).toBe("false");
       // With the room, the open approval floats over the list's right; a row opens its own.
-      expect(await tab.$eval(float, (card) => getComputedStyle(card).position)).toBe("absolute");
-      const second = await tab.$$eval('section[aria-label="Waiting"] li a', (rows) => {
-        const row = rows[1] as HTMLAnchorElement;
+      expect(await placed()).toBe("absolute");
+      const second = await run<{ href: string; title: string }>(`(() => {
+        const row = document.querySelectorAll('section[aria-label="Waiting"] li a')[1];
         row.click();
-        return { href: row.getAttribute("href")!, title: row.querySelector("span + span > span")!.textContent };
-      });
-      await tab.waitForFunction((href) => location.pathname + location.search === href, {}, second.href);
+        return { href: row.getAttribute("href"), title: row.querySelector("span + span > span").textContent };
+      })()`);
+      await tab.waitForFunction(`location.pathname + location.search === ${JSON.stringify(second.href)}`);
       await tab.waitForSelector(`${float}[aria-label="${second.title}"]`);
       // Chat unfolds it again.
       await tab.click(chatButton);
       await tab.waitForSelector("aside#chat");
-      expect(await tab.evaluate(() => document.cookie)).toContain("sanoma_chat=open");
+      expect(await run("document.cookie")).toContain("sanoma_chat=open");
     } finally {
       await browser.close();
     }
