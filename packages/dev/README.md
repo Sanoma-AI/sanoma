@@ -26,7 +26,7 @@ Runs `pnpm unlink` for the same packages (and this kit, should you have linked i
 
 ## Generated files
 
-Everything under the repo's `.sanoma/app` (the app's builds, its route tree, its `tsconfig.json`, the generator's and Vite's caches) is written by the sanoma that last built the repo's app, with paths into its own install or checkout. `link`, before it links, and `unlink`, after it unlinks, remove the directory and say so in one line, so a checkout never reuses what the installed sanoma wrote, nor the installed sanoma what the checkout wrote; the next `sanoma` or `sanoma check` writes it again. A running [dev mode](../sanoma/README.md#dev-mode) stops by itself once the repo no longer links the checkout, so its server does not write the directory again.
+Everything under the repo's `.sanoma/app` (the app's builds, its route tree, its `tsconfig.json`, the generator's and Vite's caches) is written by the sanoma that last built the repo's app, with paths into its own install or checkout. `link`, before it links, and `unlink`, after it unlinks, remove the directory and say so in one line, so a checkout never reuses what the installed sanoma wrote, nor the installed sanoma what the checkout wrote; the next `sanoma` or `sanoma check` writes it again. A running [dev mode](../sanoma/README.md#dev-mode) stops by itself within about two seconds once the repo no longer links the checkout, then removes the directory too, so what its server wrote in the meantime does not stay.
 
 ## `sanoma-dev update`
 

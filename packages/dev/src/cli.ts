@@ -98,8 +98,12 @@ function link(root: string, given: string | undefined): number {
 
 function unlink(root: string): number {
   const names = declared(root);
-  if (names.length) mustPnpm(root, ["unlink", ...names]);
-  clearGenerated(root);
+  try {
+    if (names.length) mustPnpm(root, ["unlink", ...names]);
+  } finally {
+    // Even when pnpm fails part way, some packages are the installed ones again.
+    clearGenerated(root);
+  }
   const left = leftoverLinks(root);
   if (left.length) throw new Error(`still linked, do not commit:\n${left.join("\n")}`);
   console.log(`unlinked ${names.join(", ") || "nothing"}: package.json and pnpm-workspace.yaml hold no link:`);

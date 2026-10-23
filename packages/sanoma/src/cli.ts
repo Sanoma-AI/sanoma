@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -208,19 +208,22 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
     ignore: hot ? [join(app.dir, "dist", "client"), join(app.dir, "dist", "server")] : [],
     log,
   });
-  const stop = async () => {
+  let unlinked = false;
+  const shutdown = onSignal(async () => {
     unwatch();
     await child.stop();
     await watchers.stop();
-  };
+    // Written by the checkout's server, not the installed sanoma's, which writes its own.
+    if (unlinked) rmSync(join(cwd, ".sanoma", "app"), { recursive: true, force: true });
+  });
   // Once the repo is unlinked (`sanoma-dev unlink`, an install), the checkout's server must not
   // keep running in it, nor start again on the checkout's next build: it would write its own
   // route tree and tsconfig into `.sanoma/app` beside the installed sanoma's.
   const unwatch = whenUnlinked(cwd, repo, () => {
-    log(`dev mode: the repo no longer links ${repo}; stopping`);
-    void stop().then(() => process.exit(0));
+    unlinked = true;
+    log(`dev mode: the repo no longer links ${repo}; stopping, and removing .sanoma/app`);
+    shutdown();
   });
-  onSignal(stop);
   return new Promise(() => {});
 }
 
@@ -272,8 +275,11 @@ async function ledgerExport(runId: string, out: string | undefined): Promise<num
   return 0;
 }
 
-/** On the first SIGINT or SIGTERM, stops what runs and exits 0; a second signal exits at once. */
-function onSignal(stop: () => Promise<void>): void {
+/**
+ * On the first SIGINT or SIGTERM, stops what runs and exits 0; a second signal exits at once.
+ * Returns the same handler, for a caller with a reason of its own to stop.
+ */
+function onSignal(stop: () => Promise<void>): () => void {
   let stopping = false;
   const handle = () => {
     if (stopping) process.exit(130);
@@ -288,6 +294,7 @@ function onSignal(stop: () => Promise<void>): void {
   };
   process.once("SIGINT", handle);
   process.once("SIGTERM", handle);
+  return handle;
 }
 
 if (import.meta.main) {

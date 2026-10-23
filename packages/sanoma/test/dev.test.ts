@@ -213,26 +213,34 @@ describe("supervise", () => {
 });
 
 describe("whenUnlinked", () => {
-  it("is called once the repo no longer links the checkout, not while it still does", async () => {
+  it("is called once the repo no longer links the checkout on two checks in a row, not while it does", () => {
+    vi.stubEnv("SANOMA_DEV_REPO", "");
+    vi.useFakeTimers();
     const { repo, checkout } = repoWith({ sanoma: "linked" });
-    // macOS's file events can report the directory's creation to a watch started right after it.
-    await new Promise((r) => setTimeout(r, 300));
+    const link = join(repo, "node_modules", "sanoma");
     let unlinked = 0;
     const stop = whenUnlinked(repo, checkout, () => unlinked++, 100);
     try {
-      // An install that keeps the link (pnpm writes its state file each time).
-      writeFileSync(join(repo, "node_modules", ".modules.yaml"), "");
-      await new Promise((r) => setTimeout(r, 400));
+      vi.advanceTimersByTime(300);
+      expect(unlinked).toBe(0);
+      // An install that swaps the link for a moment: one check sees it gone, the next back.
+      rmSync(link);
+      vi.advanceTimersByTime(100);
+      symlinkSync(join(checkout, "packages", "sanoma"), link);
+      vi.advanceTimersByTime(100);
       expect(unlinked).toBe(0);
       // `pnpm unlink`: the link is replaced by the installed package.
-      rmSync(join(repo, "node_modules", "sanoma"));
-      mkdirSync(join(repo, "node_modules", "sanoma"));
-      await waitFor(() => unlinked === 1);
-      writeFileSync(join(repo, "node_modules", ".modules.yaml"), "again");
-      await new Promise((r) => setTimeout(r, 400));
+      rmSync(link);
+      mkdirSync(link);
+      vi.advanceTimersByTime(100);
+      expect(unlinked).toBe(0);
+      vi.advanceTimersByTime(100);
+      expect(unlinked).toBe(1);
+      vi.advanceTimersByTime(500);
       expect(unlinked).toBe(1);
     } finally {
       stop();
+      vi.useRealTimers();
     }
   });
 });

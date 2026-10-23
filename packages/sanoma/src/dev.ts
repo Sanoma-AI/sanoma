@@ -103,26 +103,19 @@ export function devRepo(cwd: string, linked: readonly LinkedPackage[] = linkedPa
 
 /**
  * Calls `onUnlinked` once, when the repo in `cwd` no longer links the checkout `repo` (`devRepo`
- * says otherwise): checked after `debounceMs` of quiet following a change in its `node_modules`,
- * which every pnpm link, unlink and install rewrites. Returns what stops the watch.
+ * says otherwise) on two checks in a row, `intervalMs` apart: a look at `node_modules`, so a
+ * directory an install replaces or removes is seen as well as a link, and a link an install
+ * swaps for a moment is not. Returns what stops the checks.
  */
-export function whenUnlinked(cwd: string, repo: string, onUnlinked: () => void, debounceMs = 750): () => void {
-  let timer: NodeJS.Timeout | undefined;
-  const check = () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => {
-      if (devRepo(cwd) === repo) return;
-      stop();
-      onUnlinked();
-    }, debounceMs);
-  };
-  // A removed node_modules is a change too: its watch reports it, or fails.
-  const watcher = watch(join(cwd, "node_modules"), check).on("error", check);
-  const stop = () => {
-    clearTimeout(timer);
-    watcher.close();
-  };
-  return stop;
+export function whenUnlinked(cwd: string, repo: string, onUnlinked: () => void, intervalMs = 1000): () => void {
+  let misses = 0;
+  const timer = setInterval(() => {
+    misses = devRepo(cwd) === repo ? 0 : misses + 1;
+    if (misses < 2) return;
+    clearInterval(timer);
+    onUnlinked();
+  }, intervalMs);
+  return () => clearInterval(timer);
 }
 
 export interface SuperviseOptions {
