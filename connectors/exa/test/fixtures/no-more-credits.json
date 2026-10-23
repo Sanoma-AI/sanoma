@@ -1,0 +1,12 @@
+[
+  {
+    "method": "POST",
+    "path": "/search",
+    "status": 402,
+    "body": {
+      "requestId": "00000000000000000000000000000000",
+      "error": "You have run out of credits",
+      "tag": "NO_MORE_CREDITS"
+    }
+  }
+]

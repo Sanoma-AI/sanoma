@@ -1,0 +1,74 @@
+{
+  "name": "@sanoma-ai/connector-exa",
+  "version": "0.1.0",
+  "description": "Exa web search, page contents, similar pages and cited answers for Sanoma workflows",
+  "keywords": [
+    "connector",
+    "exa",
+    "sanoma",
+    "sanoma-connector",
+    "search",
+    "web-search"
+  ],
+  "homepage": "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/exa#readme",
+  "bugs": "https://github.com/Sanoma-AI/sanoma/issues",
+  "license": "FSL-1.1-ALv2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sanoma-AI/sanoma.git",
+    "directory": "connectors/exa"
+  },
+  "files": [
+    "dist",
+    "features",
+    "logo.svg",
+    "logo-dark.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./fake": {
+      "types": "./dist/fake.d.ts",
+      "default": "./dist/fake.js"
+    },
+    "./driver": {
+      "types": "./dist/driver.d.ts",
+      "default": "./dist/driver.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "generate": "pnpm --package=@hey-api/openapi-ts@0.99.0 --package=typescript@5.9.3 dlx openapi-ts",
+    "prepack": "pnpm run clean && pnpm run build",
+    "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
+  },
+  "devDependencies": {
+    "@sanoma-ai/workflows": "workspace:*",
+    "msw": "^3.0.2",
+    "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "@sanoma-ai/workflows": "workspace:^",
+    "zod": "^4"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "sanoma": {
+    "title": "Exa",
+    "logo": "logo.svg",
+    "logoDark": "logo-dark.svg"
+  }
+}

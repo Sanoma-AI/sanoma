@@ -9,6 +9,7 @@ One workspace package per vendor, each built on `@sanoma-ai/workflows`. A connec
 | [`better-auth/`](better-auth/AGENTS.md) | `@sanoma-ai/connector-better-auth`: Better Auth, a visitor login for public sites, on the company's database |
 | [`bluesky/`](bluesky/AGENTS.md)         | `@sanoma-ai/connector-bluesky`: Bluesky (AT Protocol) post operations and an in-memory fake                  |
 | [`docker/`](docker/AGENTS.md)           | `@sanoma-ai/connector-docker`: the local Docker host, a container that runs the company                      |
+| [`exa/`](exa/AGENTS.md)                 | `@sanoma-ai/connector-exa`: Exa web search, page contents, similar pages and answers, and an in-memory fake  |
 | [`ghost/`](ghost/AGENTS.md)             | `@sanoma-ai/connector-ghost`: Ghost Admin API post operations and an in-memory fake                          |
 | [`github/`](github/AGENTS.md)           | `@sanoma-ai/connector-github`: GitHub resources read through its OpenTofu provider                           |
 | [`resend/`](resend/AGENTS.md)           | `@sanoma-ai/connector-resend`: Resend broadcast and email operations and an in-memory fake                   |

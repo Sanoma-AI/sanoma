@@ -1,0 +1,22 @@
+[
+  {
+    "method": "POST",
+    "path": "/contents",
+    "status": 200,
+    "body": {
+      "requestId": "00000000000000000000000000000000",
+      "results": [
+        {
+          "id": "https://exa.ai/",
+          "url": "https://exa.ai/",
+          "title": "Exa | Web Search API, AI Search Engine, & Website Crawler",
+          "publishedDate": null,
+          "author": null,
+          "text": "Exa is a search engine made for AIs."
+        }
+      ],
+      "statuses": [{ "id": "https://exa.ai/", "status": "success" }],
+      "costDollars": { "total": 0.001 }
+    }
+  }
+]

@@ -1,0 +1,20 @@
+[
+  {
+    "method": "POST",
+    "path": "/answer",
+    "status": 200,
+    "body": {
+      "answer": "Exa is a web search API built for AI applications: it finds pages by meaning and returns their contents.",
+      "citations": [
+        {
+          "id": "https://exa.ai/",
+          "url": "https://exa.ai/",
+          "title": "Exa | Web Search API, AI Search Engine, & Website Crawler",
+          "author": null,
+          "publishedDate": null
+        }
+      ],
+      "costDollars": { "total": 0.005 }
+    }
+  }
+]

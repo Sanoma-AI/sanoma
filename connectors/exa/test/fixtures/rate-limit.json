@@ -1,0 +1,12 @@
+[
+  {
+    "method": "POST",
+    "path": "/search",
+    "status": 429,
+    "body": {
+      "requestId": "00000000000000000000000000000000",
+      "error": "Rate limit exceeded",
+      "tag": "RATE_LIMIT_EXCEEDED"
+    }
+  }
+]
