@@ -54,8 +54,9 @@ function WorkflowPage() {
     data: { scenarios, errors },
   } = useSuspenseQuery({ ...scenariosQuery(), select: forWorkflow });
   const scenario = scenarios.find((s) => s.name === wanted);
-  // A view whose tab is not there (no scenarios, no code for a retired workflow) is the Graph.
-  const view = (asked === "scenarios" && scenarios.length === 0) || (asked === "code" && !workflow) ? undefined : asked;
+  // The tabs a workflow has beside Graph and Runs; a view whose tab is not there is the Graph.
+  const has = { code: !!workflow, scenarios: scenarios.length > 0, runs: true };
+  const view = asked && has[asked] ? asked : undefined;
   return (
     <>
       <CrumbHeader
@@ -83,12 +84,12 @@ function WorkflowPage() {
           Graph
         </LinkTab>
         <RunsTab name={name} filter={runs} />
-        {workflow && (
+        {has.code && (
           <LinkTab value="code" link={viewLink("code")}>
             Code
           </LinkTab>
         )}
-        {scenarios.length > 0 && (
+        {has.scenarios && (
           <LinkTab value="scenarios" link={viewLink("scenarios")} count={scenarios.length}>
             Scenarios
           </LinkTab>
@@ -118,6 +119,8 @@ function viewLink(view: (typeof WORKFLOW_VIEWS)[number] | undefined) {
       from={Route.fullPath}
       to="."
       search={(prev) => ({ ...prev, view, run: view === "runs" ? prev.run : undefined })}
+      // Lit only on its own view: the Graph's `view: undefined` is not there on another.
+      activeOptions={{ explicitUndefined: true }}
     />
   );
 }

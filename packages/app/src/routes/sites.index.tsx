@@ -1,10 +1,11 @@
-import type { SiteEntry } from "@sanoma-ai/workflows/describe";
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
+import type { ConfigDescription, SiteEntry } from "@sanoma-ai/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Card } from "#/components/ui/card.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { usePublicAddress, useSites } from "#/lib/sites.ts";
-import { CrumbHeader, ExternalLink, Nothing, pageTitle } from "../components/common.tsx";
+import { CrumbHeader, Nothing, pageTitle } from "../components/common.tsx";
 import { configQuery } from "../queries.ts";
 
 // `/sites` itself, the one path there no site can take (a site's pages are `/sites/<name>/…`):
@@ -20,11 +21,15 @@ export const Route = createFileRoute("/sites/")({
  * icon) and folder, its pages (those with no path parameter, its home first), and a public
  * site's own address, where visitors see it at the root of its host.
  */
+/** The config's public sites, by name. */
+const publicSitesByName = (config: ConfigDescription) =>
+  new Map(config.sites.filter((site) => site.public).map((site) => [site.name, site]));
+
 function SitesPage() {
   const sites = useSites();
   const { data: publicSites } = useSuspenseQuery({
     ...configQuery(),
-    select: (config) => new Map(config.sites.filter((site) => site.public).map((site) => [site.name, site])),
+    select: publicSitesByName,
   });
   return (
     <>
@@ -83,5 +88,10 @@ function SitesPage() {
 function PublicAddress({ site }: { site: SiteEntry }) {
   const href = usePublicAddress(site);
   if (!href) return <span className="text-muted-foreground">Public</span>;
-  return <ExternalLink href={href}>{new URL(href).host}</ExternalLink>;
+  return (
+    <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1">
+      {new URL(href).host}
+      <ArrowSquareOutIcon aria-hidden="true" className="size-3.5" />
+    </a>
+  );
 }

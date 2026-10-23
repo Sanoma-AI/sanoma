@@ -37,11 +37,17 @@ export default function Root() {
   const chatPref = useLoaderData({ from: "__root__", select: (data) => data?.chat });
   const compact = useLoaderData({ from: "__root__", select: (data) => data?.compact ?? false });
   const [chat, setChat] = useState(chatPref !== "closed");
-  // Never set: open beside the page, and folded where it would lie over it (the server cannot
-  // know which, so the column hides there by CSS until this folds it).
+  // Never set: open beside the page, and folded where it would lie over it, following the
+  // window's width until Chat is used (the server cannot know it, so the column hides there by
+  // CSS until this folds it).
   const [unset, setUnset] = useState(chatPref === undefined);
   useEffect(() => {
-    if (unset && !matchMedia(BESIDE_PAGE).matches) setChat(false);
+    if (!unset) return;
+    const beside = matchMedia(BESIDE_PAGE);
+    const follow = () => setChat(beside.matches);
+    follow();
+    beside.addEventListener("change", follow);
+    return () => beside.removeEventListener("change", follow);
   }, [unset]);
   const toggleChat = () => {
     rememberPref(CHAT_COOKIE, chat ? "closed" : "open");

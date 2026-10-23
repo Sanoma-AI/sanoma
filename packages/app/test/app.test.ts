@@ -1162,6 +1162,10 @@ describe("the page", () => {
       await tab.waitForFunction(`!document.getElementById("chat")`);
       expect(await expanded()).toBe("false");
       expect(await run("document.cookie")).not.toContain("sanoma_chat");
+      // Still never set, it follows the window: wide enough again, it sits beside the page.
+      await tab.setViewport(LAPTOP);
+      await tab.waitForSelector("aside#chat");
+      expect(await expanded()).toBe("true");
     } finally {
       await browser.close();
     }
@@ -1444,6 +1448,8 @@ describe("the page", () => {
     const opened = await page(`/workflows/announce?view=runs&runs=sandbox&run=${sandboxId}`);
     const short = sandboxId.slice(0, 8);
     expect(floats(opened.html)).toEqual([`Run ${short}`]);
+    // Only the tab showing is the current page.
+    expect(opened.html).not.toMatch(/<a [^>]*role="tab"[^>]*aria-selected="false"[^>]*aria-current="page"/);
     // The other tabs keep the filter, not the run, which only Runs shows.
     expect(tabNamed(opened.html, "Graph")?.href).toBe("/workflows/announce?runs=sandbox");
     expect(opened.html).toMatch(new RegExp(`<tr[^>]*data-state="selected"[^>]*>(?:(?!</tr>)[\\s\\S])*${short}`));
@@ -1746,6 +1752,7 @@ describe("resources and drift", () => {
     expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/call"/);
     expect(builtin.html).not.toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/announce"/);
     expect(tabNamed(builtin.html, "Built-in")).toMatchObject({ count: 3, selected: true });
+    expect(builtin.html).not.toMatch(/<a [^>]*role="tab"[^>]*aria-selected="false"[^>]*aria-current="page"/);
   });
 
   it("orders the overview's workflows by their last run, under a box to find one by", async () => {

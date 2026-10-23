@@ -84,6 +84,9 @@ export const Route = createFileRoute("/workflows/")({
   component: WorkflowsPage,
 });
 
+/** A tab's link lit only while the URL lacks what its search leaves `undefined`. */
+const EXACT_SEARCH = { explicitUndefined: true } as const;
+
 const FILTER_LABEL: Record<WorkflowFilter, string> = {
   all: "All",
   waiting: "Waiting on you",
@@ -131,7 +134,14 @@ function WorkflowsPage() {
             key={f}
             value={f}
             // All leaves the URL without `?filter=`.
-            link={<Link to="/workflows" search={{ filter: f === "all" ? undefined : f }} />}
+            link={
+              <Link
+                to="/workflows"
+                search={{ filter: f === "all" ? undefined : f, view: undefined }}
+                // Lit only where the URL has no other filter, nor All runs' view.
+                activeOptions={EXACT_SEARCH}
+              />
+            }
             count={config.workflows.filter(picks[f]).length}
           >
             {FILTER_LABEL[f]}

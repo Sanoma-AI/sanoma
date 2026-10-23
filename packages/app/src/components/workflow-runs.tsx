@@ -50,7 +50,7 @@ const RUN_FILTER_LABEL: Record<RunFilter, string> = {
 };
 
 /**
- * A workflow's latest runs for a filter (`?runs=`, which its page validates and its layout's
+ * A workflow's latest runs for a filter (`?runs=`, which its layout validates and its page's
  * loader reads), newest first: `shown`, those the filter keeps; `fromLatest` when it picks from
  * the latest (live and sandbox), so what it shows is only of those; `capped` when the read hit
  * its limit; `empty`, what to say when it keeps none; and `error`, why a refresh failed.
