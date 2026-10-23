@@ -1171,6 +1171,7 @@ describe("the page", () => {
       /class="h-\(--pane-tall\)"><div class="size-full"><div data-slot="skeleton"[^>]*aria-label="Loading the graph"/,
     );
     const stylesheet = /href="(\/assets\/style-[^"]+\.css)"/.exec(compact.html)?.[1];
+    expect(stylesheet).toBeDefined();
     const css = await (await fetch(new URL(stylesheet!, app.url))).text();
     expect(css).toMatch(/#app\[data-density=compact\]\{[^}]*--pane-tall:440px/);
     expect(sidebarState(compact.html)).toBe("collapsed");
