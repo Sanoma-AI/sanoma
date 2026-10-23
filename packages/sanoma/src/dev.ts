@@ -95,22 +95,36 @@ function findPackage(name: string, from: string): string | undefined {
  * above a linked package (its `packages/<name>` or `connectors/<name>`). Undefined outside dev
  * mode: nothing linked, and the variable unset.
  */
-export function devRepo(cwd: string, linked?: readonly LinkedPackage[]): string | undefined {
+export function devRepo(cwd: string, linked: readonly LinkedPackage[] = linkedPackages(cwd)): string | undefined {
   if (process.env.SANOMA_DEV_REPO) return process.env.SANOMA_DEV_REPO;
-  const [first] = linked ?? linkedPackages(cwd);
+  const [first] = linked;
   return first && dirname(dirname(first.dir));
 }
 
 /**
- * Calls `onUnlinked` once, when the repo in `cwd` no longer links the checkout `repo` (`devRepo`
- * says otherwise) on two checks in a row, `intervalMs` apart: a look at `node_modules`, so a
- * directory an install replaces or removes is seen as well as a link, and a link an install
- * swaps for a moment is not. Returns what stops the checks.
+ * Calls `onUnlinked` once, when none of `packages` is linked into the repo in `cwd` any more: its
+ * `node_modules/<name>` no longer the package's directory on two looks in a row, `intervalMs`
+ * apart, so a link an install swaps for a moment is not taken for an unlink. Nothing when none is
+ * linked to begin with (`SANOMA_DEV_REPO`). Returns what stops the looks.
  */
-export function whenUnlinked(cwd: string, repo: string, onUnlinked: () => void, intervalMs = 1000): () => void {
+export function whenUnlinked(
+  cwd: string,
+  packages: readonly LinkedPackage[],
+  onUnlinked: () => void,
+  intervalMs = 1000,
+): () => void {
+  const linked = () =>
+    packages.some(({ name, dir }) => {
+      try {
+        return realpathSync(join(cwd, "node_modules", name)) === dir;
+      } catch {
+        return false;
+      }
+    });
+  if (!linked()) return () => {};
   let misses = 0;
   const timer = setInterval(() => {
-    misses = devRepo(cwd) === repo ? 0 : misses + 1;
+    misses = linked() ? 0 : misses + 1;
     if (misses < 2) return;
     clearInterval(timer);
     onUnlinked();

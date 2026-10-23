@@ -213,25 +213,27 @@ describe("supervise", () => {
 });
 
 describe("whenUnlinked", () => {
-  it("is called once the repo no longer links the checkout on two checks in a row, not while it does", () => {
-    vi.stubEnv("SANOMA_DEV_REPO", "");
+  it("is called once none of the packages is linked on two looks in a row, not while one is", () => {
     vi.useFakeTimers();
-    const { repo, checkout } = repoWith({ sanoma: "linked" });
-    const link = join(repo, "node_modules", "sanoma");
+    const { repo, checkout } = repoWith({ sanoma: "linked", workflows: "linked" });
+    const sanoma = join(repo, "node_modules", "sanoma");
+    const workflows = join(repo, "node_modules", "@sanoma-ai", "workflows");
     let unlinked = 0;
-    const stop = whenUnlinked(repo, checkout, () => unlinked++, 100);
+    const stop = whenUnlinked(repo, linkedPackages(repo), () => unlinked++, 100);
     try {
+      // One of the two unlinked: the other still is.
+      rmSync(workflows);
       vi.advanceTimersByTime(300);
       expect(unlinked).toBe(0);
-      // An install that swaps the link for a moment: one check sees it gone, the next back.
-      rmSync(link);
+      // An install that swaps the last link for a moment: one look sees it gone, the next back.
+      rmSync(sanoma);
       vi.advanceTimersByTime(100);
-      symlinkSync(join(checkout, "packages", "sanoma"), link);
+      symlinkSync(join(checkout, "packages", "sanoma"), sanoma);
       vi.advanceTimersByTime(100);
       expect(unlinked).toBe(0);
       // `pnpm unlink`: the link is replaced by the installed package.
-      rmSync(link);
-      mkdirSync(link);
+      rmSync(sanoma);
+      mkdirSync(sanoma);
       vi.advanceTimersByTime(100);
       expect(unlinked).toBe(0);
       vi.advanceTimersByTime(100);
@@ -242,6 +244,17 @@ describe("whenUnlinked", () => {
       stop();
       vi.useRealTimers();
     }
+  });
+
+  it("does nothing when nothing is linked to begin with, as under SANOMA_DEV_REPO", () => {
+    vi.useFakeTimers();
+    const { repo } = repoWith({ sanoma: "installed" });
+    let unlinked = 0;
+    const stop = whenUnlinked(repo, [], () => unlinked++, 100);
+    vi.advanceTimersByTime(500);
+    stop();
+    vi.useRealTimers();
+    expect(unlinked).toBe(0);
   });
 });
 

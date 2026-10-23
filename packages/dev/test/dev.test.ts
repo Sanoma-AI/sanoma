@@ -102,9 +102,10 @@ describe("leftoverLinks", () => {
 
 /**
  * Runs the bin in `cwd` with a `pnpm` on PATH that records each of this run's calls, directory and arguments,
- * and exits 3 for `pnpm exec` (a failing `sanoma check`). A `.sanoma/app` in the directory it runs in is recorded too. Its `pnpm link <dir>` does what pnpm's does: adds a
- * `link:` override to `pnpm-workspace.yaml` and points `node_modules/<name>` at the directory, but not, as a racing
- * pnpm may, for the first `SKIP_TIMES` (default every) links of the package `SKIP_LINK` names.
+ * and a `.sanoma/app` it finds where it runs, and exits 3 for `pnpm exec` (a failing `sanoma check`). Its
+ * `pnpm link <dir>` does what pnpm's does: adds a `link:` override to `pnpm-workspace.yaml` and points
+ * `node_modules/<name>` at the directory, but not, as a racing pnpm may, for the first `SKIP_TIMES` (default
+ * every) links of the package `SKIP_LINK` names.
  */
 function sanomaDev(cwd: string, args: string[], env: Record<string, string> = {}) {
   const calls = join(dir, "pnpm-calls");
