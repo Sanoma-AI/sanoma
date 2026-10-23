@@ -290,6 +290,12 @@ const detail = (id: string, context = ctx) => runDetail(context, id);
 /** `startRunFn` with this argument, as tester. */
 const postRun = (data: unknown) => startAs(data, { actor: "tester" });
 
+/**
+ * A laptop's window, for Chrome: the bar, the chat column and the page side by side, the page's
+ * card too narrow for a floating card beside its list until the column folds.
+ */
+const LAPTOP = { width: 1280, height: 800 };
+
 /** A page as the server renders it, and its text without the comments React puts between text parts. */
 async function page(path: string, base = app.url, init?: RequestInit) {
   const res = await fetch(new URL(path, base), init);
@@ -297,20 +303,53 @@ async function page(path: string, base = app.url, init?: RequestInit) {
   return { status: res.status, html, text: html.replaceAll("<!-- -->", "") };
 }
 
-/** The runs announce's panel links to, sorted, with `?runs=<filter>` kept on each link. */
-const panelRunIds = (html: string, filter: string) =>
-  [...html.matchAll(new RegExp(`href="/workflows/announce/runs/([^"?]+)\\?runs=${filter}"`, "g"))]
-    .map(([, id]) => id)
-    .toSorted();
+/** The bar's sections, in its groups: each group's labels, in order. */
+const barGroups = (html: string) =>
+  (html.match(/<nav aria-label="Sections"[^>]*>([\s\S]*?)<\/nav>/)?.[1] ?? "")
+    .split("</ul>")
+    .map((group) => [...group.matchAll(/>([^<>]+)<\/a>/g)].map(([, label]) => label))
+    .filter((labels) => labels.length > 0);
 
-/** The opening tag of a section's link in the bar: the one to `to` whose label follows. */
+/** The opening tag of a section's link in the bar: the one to `to`. */
 const section = (html: string, to: string) =>
-  html.match(new RegExp(`<a [^>]*href="${to}"[^>]*>(?=(?:(?!</a>)[\\s\\S])*<span>[A-Z])`))?.[0];
+  html
+    .match(/<nav aria-label="Sections"[^>]*>([\s\S]*?)<\/nav>/)?.[1]
+    ?.match(new RegExp(`<a [^>]*href="${to}"[^>]*>`))?.[0];
 
-/** The desktop sidebar's state: "expanded" or "collapsed". */
-const sidebarState = (html: string) => html.match(/data-state="(expanded|collapsed)"[^>]*data-slot="sidebar"/)?.[1];
+/** The bar's Chat button: whether the chat column is open (`aria-expanded`). */
+const chatOpen = (html: string) =>
+  html.match(/<button[^>]*aria-expanded="(true|false)"[^>]*aria-controls="chat"/)?.[1] === "true";
 
-/** The opening tag of the link whose text, after any icon, is `label`, or an Item's or a sidebar menu button's title. */
+/**
+ * A page's tabs (`LinkTabs`), in order: each one's label, link, count (when it shows one) and
+ * whether it is the view showing.
+ */
+const tabs = (html: string) =>
+  [
+    ...html.replaceAll("<!-- -->", "").matchAll(/<a ([^>]*role="tab"[^>]*)>([^<]+)(?:<span[^>]*>(\d+)<\/span>)?<\/a>/g),
+  ].map(([, tag, label, count]) => ({
+    label,
+    href: tag!.match(/href="([^"]*)"/)?.[1]?.replaceAll("&amp;", "&"),
+    count: count === undefined ? undefined : Number(count),
+    selected: tag!.includes('aria-selected="true"'),
+  }));
+
+/** The tab labelled `label`. */
+const tabNamed = (html: string, label: string) => tabs(html).find((t) => t.label === label);
+
+/** The floating cards over a page's card (`FloatingCard`, a shadowed card), each by its label. */
+const floats = (html: string) =>
+  [...html.matchAll(/<div data-slot="card"(?=[^>]*class="[^"]*\bshadow-lg\b)[^>]*aria-label="([^"]+)"/g)].map(
+    ([, label]) => label,
+  );
+
+/** The rows of a workflow's Runs tab: each run id its row opens (`?run=`), in order. */
+const runRows = (html: string) =>
+  [...html.matchAll(/<a [^>]*href="\/workflows\/announce\?([^"]*)"[^>]*>Run [0-9a-f]{8}<\/a>/g)].map(([, search]) =>
+    new URLSearchParams(search!.replaceAll("&amp;", "&")).get("run"),
+  );
+
+/** The opening tag of the link whose text, after any icon, is `label`, or an Item's title. */
 function linkTag(html: string, label: string) {
   const at = html.search(new RegExp(`>${label}(?:</(?:div|span)>)*</a>`));
   if (at < 0) return undefined;
@@ -328,15 +367,8 @@ const inboxRows = (html: string) =>
 /** The approval open beside the Inbox's list: the row marked current. */
 const currentRow = (html: string) => inboxRows(html).find((row) => row.current)?.approval;
 
-/** Whether the link whose text, after any icon, matches `label` is marked current. */
-const currentLink = (html: string, label: string) =>
-  html
-    .replaceAll("<!-- -->", "")
-    .match(new RegExp(`(<a [^>]*>)${label}</a>`))?.[1]
-    ?.includes('aria-current="page"');
-
-/** The open approval's title: its section's name. */
-const openTitle = (html: string) => html.match(/<section aria-label="([^"]+)"/)?.[1];
+/** The open approval's title: the floating card's name. */
+const openTitle = (html: string) => floats(html)[0];
 
 /** A request's status, sent as written: no normalising of the path, and any Host header. */
 function rawStatus(base: string, path: string, headers?: Record<string, string>) {
@@ -780,14 +812,32 @@ describe("a file's source", () => {
 });
 
 describe("the page", () => {
-  it("renders the workflows on the server, with the sidebar linking to each workflow and no runs or Start page, and the theme left to the browser", async () => {
+  it("renders the workflows on the server, in the shell: the bar's sections, the chat column open, and no runs or Start page, and the theme left to the browser", async () => {
     const res = await fetch(new URL("/workflows", app.url));
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toMatch(/text\/html/);
     const html = await res.text();
     expect(html).toContain('<div id="app">');
-    expect(html).toMatch(/<h1[^>]*>Workflows<\/h1>/);
-    expect(html).toContain('data-slot="sidebar-wrapper"');
+    expect(html).toMatch(/<h1[^>]*>Workflows<span[^>]*>4<\/span><\/h1>/);
+    // The bar: Chat, then the sections in their groups (Data and Permissions, as the config has
+    // collections and a policy; no Sites, as the package's own build has none), the current lit.
+    expect(barGroups(html)).toEqual([
+      ["Inbox", "Workflows"],
+      ["Data"],
+      ["Resources", "Connectors", "Permissions", "Go live"],
+    ]);
+    expect(section(html, "/workflows")).toMatch(/data-active="true"[^>]*aria-current="page"/);
+    expect(section(html, "/inbox")).not.toMatch(/data-active="true"|aria-current/);
+    // The chat column, open with no cookie: its empty state, and a composer that cannot send yet,
+    // carrying the page as a chip.
+    expect(chatOpen(html)).toBe(true);
+    const column = html.match(/<aside id="chat" aria-label="Chat"[^>]*>([\s\S]*?)<\/aside>/)?.[1];
+    expect(column).toContain(">What should change?<");
+    expect(column).toContain("The agent is coming");
+    expect(chat).toMatch(
+      /<span[^>]*><span[^>]*>Workflows<\/span><\/span><textarea[^>]*disabled=""[^>]*aria-label="Message the agent"/,
+    );
+    expect(column).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Send"/);
     expect(html).toContain('href="/workflows/announce"');
     expect(html).not.toContain('href="/runs"');
     expect(html).not.toContain('href="/start');
@@ -803,7 +853,7 @@ describe("the page", () => {
       ["/start", /\/workflows$/],
       ["/start?workflow=announce", /\/workflows\/announce\?new=true$/],
       ["/start?workflow=nope", /\/workflows\/nope\?new=true$/],
-      // The New run pane's old URL goes to the workflow's New run panel, keeping its scenario and filter.
+      // The New run pane's old URL goes to the workflow's New run, keeping its scenario and filter.
       ["/workflows/announce/new?scenario=Launch+on+time", /\/workflows\/announce\?scenario=Launch\+on\+time&new=true$/],
       ["/workflows/announce/new?runs=sandbox", /\/workflows\/announce\?runs=sandbox&new=true$/],
     ] as const) {
@@ -853,7 +903,13 @@ describe("the page", () => {
     expect(inbox.text).toContain(HOLD_TITLE);
     // `?approval=` opens the hold, the sentence above it saying what it lets through.
     const open = await page(`/inbox?approval=${id}/${hold.id}`);
-    expect(openTitle(open.html)).toBe(HOLD_TITLE);
+    // It floats over the list's card: a floating card named for it, Approve and Reject at its foot.
+    expect(floats(open.html)).toEqual([HOLD_TITLE]);
+    const float = open.html.slice(open.html.indexOf(`aria-label="${HOLD_TITLE}"`));
+    const footer = float.indexOf('data-slot="card-footer"');
+    expect(footer).toBeGreaterThan(0);
+    expect(float.indexOf(">Approve</button>")).toBeGreaterThan(footer);
+    expect(float.indexOf(">Reject</button>")).toBeGreaterThan(footer);
     expect(open.text).toContain(
       `held&#x27;s run</a> of <a href="/workflows/announce">Announce a launch</a> wants to publish a post in Ghost: “${HOLD_TITLE}”, by <code>policies/hold.cedar#1</code>.`,
     );
@@ -885,8 +941,8 @@ describe("the page", () => {
 
     // Decided lists it from the latest runs, and opens it with no controls.
     const decidedPage = await page(`/inbox?show=decided&approval=${id}/${hold.id}`);
-    // All decided, at the foot of the Inbox's panel, is marked.
-    expect(decidedPage.html).toMatch(/<a (?=[^>]*href="\/inbox\?show=decided")[^>]*aria-current="page"/);
+    // The Decided tab is the one showing.
+    expect(tabNamed(decidedPage.html, "Decided")).toMatchObject({ href: "/inbox?show=decided", selected: true });
     expect(openTitle(decidedPage.html)).toBe(HOLD_TITLE);
     expect(decidedPage.text).toContain("wanted to publish a post in Ghost");
     expect(decidedPage.text).toContain("approved by marketing-lead");
@@ -931,16 +987,23 @@ describe("the page", () => {
     expect(currentRow((await page("/inbox?approval=nothing/approval-1")).html)).toBe(rows[0]);
   });
 
-  it("links For you, Everyone and All decided in the Inbox's panel, each its own URL, and says when nothing waits for you", async () => {
+  it("tabs the Inbox For you, Everyone and Decided, each its own URL, counts what waits in its title, and says when nothing waits for you", async () => {
     const inbox = await page("/inbox?approval=x");
-    for (const show of ["mine", "waiting", "decided"]) expect(inbox.html).toContain(`href="/inbox?show=${show}"`);
-    // Without a name, Everyone is what shows, and it says how many.
-    expect(currentLink(inbox.html, "Everyone · \\d+")).toBe(true);
-    expect(currentLink(inbox.html, "For you")).toBe(false);
+    // Without a name, Everyone is what shows, and it says how many; For you has no count until
+    // the browser knows who you are.
+    const pending = tabNamed(inbox.html, "Everyone")?.count;
+    expect(pending).toBeGreaterThan(0);
+    expect(tabs(inbox.html)).toEqual([
+      { label: "For you", href: "/inbox?show=mine", count: undefined, selected: false },
+      { label: "Everyone", href: "/inbox?show=waiting", count: pending, selected: true },
+      { label: "Decided", href: "/inbox?show=decided", count: undefined, selected: false },
+    ]);
+    expect(inbox.text).toMatch(new RegExp(`<h1[^>]*>Inbox<span[^>]*>${pending}</span></h1>`));
     const mine = await page("/inbox?show=mine");
-    expect(currentLink(mine.html, "For you")).toBe(true);
+    expect(tabNamed(mine.html, "For you")?.selected).toBe(true);
     expect(mine.text).toContain("Nothing is waiting for you");
-    // A link to them, which works with the panel folded too.
+    expect(floats(mine.html)).toEqual([]);
+    // A link to them.
     expect(mine.text).toMatch(
       /<a[^>]*href="\/inbox\?show=waiting"[^>]*>Show the \d+ approvals? waiting on others<\/a>/,
     );
@@ -959,7 +1022,7 @@ describe("the page", () => {
     // The run's error is a notice above the graph, and not a fact again below it.
     const notice = run.html.search(/data-slot="alert-description"[^>]*>[^<]*ghost: the site is down/);
     expect(notice).toBeGreaterThan(-1);
-    expect(notice).toBeLessThan(run.html.search(/data-slot="card-title"[^>]*><h2>Graph</));
+    expect(notice).toBeLessThan(run.html.search(/role="region" aria-label="Graph"/));
     expect(run.html).not.toMatch(/<dt[^>]*>Error<\/dt>/);
   });
 
@@ -967,7 +1030,7 @@ describe("the page", () => {
     const { version } = ctx.description;
     const workflows = await page("/workflows");
     expect(workflows.status).toBe(200);
-    expect(workflows.text).toContain(`<code>${version}</code>`);
+    expect(workflows.text).toContain(`>${version}</code>`);
     // What it may call and its input are About's, not the overview's.
     expect(workflows.text).not.toMatch(/>safe to retry<\/span>/);
     const about = await page("/workflows/announce");
@@ -993,7 +1056,7 @@ describe("the page", () => {
     expect(connectors.text).toContain("2 operations · used by 1 workflow");
     // Only the hydration data, which carries the whole config, names an operation.
     expect(connectors.html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, "")).not.toMatch(/ghost\.post\.create/);
-    // The sidebar, on every page, links to it.
+    // The bar, on every page, links to it.
     expect(connectors.html).toContain('href="/connectors"');
   });
 
@@ -1015,7 +1078,8 @@ describe("the page", () => {
   it("opens an available connector's steps to add it in a sheet, at its own URL, in Chrome", async (test) => {
     const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
     if (!existsSync(chrome)) test.skip("no Chrome: install Google Chrome or set CHROME_PATH");
-    const browser = await launchChrome({ executablePath: chrome, headless: true });
+    // A laptop's width: narrower, the chat column lies over the page.
+    const browser = await launchChrome({ executablePath: chrome, headless: true, defaultViewport: LAPTOP });
     try {
       const tab = await browser.newPage();
       await tab.goto(new URL("/connectors", app.url).href);
@@ -1029,6 +1093,54 @@ describe("the page", () => {
       await tab.keyboard.press("Escape");
       await tab.waitForFunction(`!document.querySelector('[data-slot="sheet-content"]')`);
       expect(new URL(tab.url()).search).toBe("");
+    } finally {
+      await browser.close();
+    }
+  });
+
+  it("folds the chat column from the bar and keeps it folded across a reload, counts the Inbox on its tile, and floats the open approval over the list, in Chrome", async (test) => {
+    const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
+    if (!existsSync(chrome)) test.skip("no Chrome: install Google Chrome or set CHROME_PATH");
+    const browser = await launchChrome({ executablePath: chrome, headless: true, defaultViewport: LAPTOP });
+    try {
+      const tab = await browser.newPage();
+      const inbox = new URL("/inbox?show=waiting", app.url).href;
+      await tab.goto(inbox);
+      await tab.evaluate((key) => localStorage.setItem(key, "tester"), ACTOR_KEY);
+      await tab.goto(inbox, { waitUntil: "networkidle0" });
+      // The Inbox's tile counts every approval waiting, as the page's title does.
+      const badge = await tab.waitForSelector('nav[aria-label="Sections"] a[href="/inbox"] [data-slot="badge"]');
+      const pending = await tab.$eval("h1 span", (count) => count.textContent);
+      expect(Number(pending)).toBeGreaterThan(0);
+      expect(await badge!.evaluate((b) => b.textContent)).toBe(`${pending} waiting`);
+      // The chat column, open by default, takes room beside the page: the approval sits above the list.
+      const chatButton = 'button[aria-controls="chat"]';
+      expect(await tab.$("aside#chat")).not.toBeNull();
+      const float = '[data-slot="card"].shadow-lg[role="region"]';
+      expect(await tab.$eval(float, (card) => getComputedStyle(card).position)).toBe("static");
+      // Chat folds it, and says so in a cookie the server reads: a reload renders it folded at
+      // once, the page's own HTML without the column.
+      await tab.click(chatButton);
+      await tab.waitForFunction(`!document.getElementById("chat")`);
+      expect(await tab.$eval(chatButton, (b) => b.getAttribute("aria-expanded"))).toBe("false");
+      expect(await tab.evaluate(() => document.cookie)).toContain("sanoma_chat=closed");
+      const reloaded = await tab.reload({ waitUntil: "networkidle0" });
+      expect(await reloaded!.text()).not.toContain('id="chat"');
+      expect(await tab.$("aside#chat")).toBeNull();
+      expect(await tab.$eval(chatButton, (b) => b.getAttribute("aria-expanded"))).toBe("false");
+      // With the room, the open approval floats over the list's right; a row opens its own.
+      expect(await tab.$eval(float, (card) => getComputedStyle(card).position)).toBe("absolute");
+      const second = await tab.$$eval('section[aria-label="Waiting"] li a', (rows) => {
+        const row = rows[1] as HTMLAnchorElement;
+        row.click();
+        return { href: row.getAttribute("href")!, title: row.querySelector("span + span > span")!.textContent };
+      });
+      await tab.waitForFunction((href) => location.pathname + location.search === href, {}, second.href);
+      await tab.waitForSelector(`${float}[aria-label="${second.title}"]`);
+      // Chat unfolds it again.
+      await tab.click(chatButton);
+      await tab.waitForSelector("aside#chat");
+      expect(await tab.evaluate(() => document.cookie)).toContain("sanoma_chat=open");
     } finally {
       await browser.close();
     }
@@ -1073,68 +1185,88 @@ describe("the page", () => {
     expect(missing.text).toContain("No connector nope");
   });
 
-  it("renders a workflow's page: its graph beside About, its source under Code, New run behind ?new, and not-found for one that does not exist", async () => {
+  it("renders a workflow's page: its tabs, the graph with About floating over it, its source under Code, New run behind ?new, and not-found for one that does not exist", async () => {
     const found = await page("/workflows/announce");
     expect(found.status).toBe(200);
-    expect(found.html).toMatch(/<h1[^>]*>Announce a launch<\/h1>/);
+    // Its title under the Workflows crumb, its name beside it.
+    expect(found.html).toMatch(
+      /<nav aria-label="Breadcrumb"[^>]*><ol[^>]*><li[^>]*><a[^>]*href="\/workflows"[^>]*>Workflows<\/a>/,
+    );
+    expect(found.html).toMatch(/<h1[^>]*>Announce a launch<\/h1><\/div><code[^>]*>announce<\/code>/);
     expect(found.text).toContain("<title>Announce a launch · Sanoma</title>");
     // The page takes the column's full width (`staticData.wide`); other pages keep the reading width.
     expect(found.html).toContain('data-wide="true"');
-    expect((await page("/inbox")).html).not.toContain("data-wide=");
-    // The graph's card, drawn in the browser: its title and a skeleton.
-    expect(found.html).toMatch(/data-slot="card-title"[^>]*><h2>Graph</);
+    expect((await page("/connectors")).html).not.toContain("data-wide=");
+    // Its views are tabs, each a URL (`?view=`), with how many runs and scenarios; the Graph shows.
+    const { body: runs } = await runsOf({ workflow: "announce", limit: 50 });
+    expect(tabs(found.html)).toEqual([
+      { label: "Graph", href: "/workflows/announce", count: undefined, selected: true },
+      { label: "Runs", href: "/workflows/announce?view=runs", count: runs.length, selected: false },
+      { label: "Code", href: "/workflows/announce?view=code", count: undefined, selected: false },
+      { label: "Scenarios", href: "/workflows/announce?view=scenarios", count: 3, selected: false },
+    ]);
+    // The graph's card, drawn in the browser: a skeleton until then.
+    expect(found.html).toMatch(/role="region" aria-label="Graph"/);
     expect(found.html).toMatch(/<div data-slot="skeleton"[^>]*aria-label="Loading the graph"/);
-    // Beside it, the inspector, with nothing selected: About, what it may call.
-    expect(found.html).toMatch(/aria-label="Inspector"/);
+    // Over it, the inspector, with nothing selected: About, what it may call, which closes.
+    expect(floats(found.html)).toEqual(["Inspector"]);
     expect(found.html).toMatch(/<h2>About</);
     expect(found.html).toMatch(/<h3[^>]*>Operations it may call<\/h3>/);
-    // Under them, the Code tab, open: the source as plain text until its view loads. No Ledger
-    // tab: the workflow's pane has no run.
-    expect(found.html).toMatch(/role="tab"[^>]*aria-selected="true"[^>]*>Code</);
+    expect(found.html).toMatch(/<button[^>]*aria-label="Close"/);
+    // The source waits behind Code, and no tab is a Ledger: the workflow's page has no run.
+    expect(found.html).not.toMatch(/<pre[^>]*>[^<]*ctx\.ghost\.post\.create\(/);
     expect(found.html).not.toMatch(/role="tab"[^>]*>Ledger</);
-    expect(found.html).toMatch(/<pre[^>]*>[^<]*ctx\.ghost\.post\.create\(/);
-    // New run is a link in the header, to the panel; no form until then. No Run here: it would
-    // link to this page. Nothing here goes to the Start page.
+    const code = await page("/workflows/announce?view=code");
+    expect(tabNamed(code.html, "Code")?.selected).toBe(true);
+    expect(code.html).toMatch(/<pre[^>]*>[^<]*ctx\.ghost\.post\.create\(/);
+    // About floats over the graph alone: the code has the card to itself until a node is picked.
+    expect(floats(code.html)).toEqual([]);
+    // Each tab keeps the rest of the search.
+    expect(tabNamed((await page("/workflows/announce?runs=sandbox")).html, "Code")?.href).toBe(
+      "/workflows/announce?runs=sandbox&view=code",
+    );
+    // New run is a link in the header, to the Graph's inspector; no form until then. No Run here:
+    // it would link to this page. Nothing here goes to the Start page.
     expect(linkTag(found.html, "New run")).toMatch(/data-slot="button"[^>]*href="\/workflows\/announce\?new=true"/);
+    expect(linkTag(code.html, "New run")).toMatch(/href="\/workflows\/announce\?new=true"/);
     expect(found.html).not.toContain('id="field-title"');
     expect(linkTag(found.html, "Run")).toBeUndefined();
     expect(found.html).not.toContain('href="/start?workflow=');
-    // The panel drills into the workflow: back to the workflows, its Workflow link marking this
-    // pane, its runs, and all of the workflow's runs at its foot. The page has no rail.
-    expect(found.html).toMatch(/<a [^>]*href="\/workflows"[^>]*>(<svg.*?<\/svg>)?Workflows<\/a>/);
-    expect(linkTag(found.html, "Workflow")).toContain('aria-current="page"');
-    expect(found.html).toContain('aria-label="Runs"');
-    expect(found.html).toMatch(
-      /<a [^>]*href="\/workflows\?view=runs&amp;workflow=announce"[^>]*><span>All runs<\/span>/,
-    );
-    expect(found.html).not.toContain("Runs of this workflow");
 
-    // ?new: the New run panel in the inspector, live: Live vendors and Sandbox, and the vendors
+    // ?new: the New run card in the inspector, live: Live vendors and Sandbox, and the vendors
     // it calls for real; its Close drops ?new. A bare ?new, typed by hand, opens it too.
     for (const path of ["/workflows/announce?new=true", "/workflows/announce?new"]) {
-      const panel = await page(path);
-      expect(panel.status, path).toBe(200);
-      expect(panel.html, path).toMatch(/<h2>New run</);
-      expect(panel.html, path).toContain('id="field-title"');
+      const opened = await page(path);
+      expect(opened.status, path).toBe(200);
+      expect(opened.html, path).toMatch(/<h2>New run</);
+      expect(opened.html, path).toContain('id="field-title"');
     }
-    const panel = await page("/workflows/announce?new");
-    expect(panel.html).not.toMatch(/<h2>About</);
-    expect(panel.html).not.toMatch(/<fieldset[^>]*disabled/);
-    expect(panel.html).toMatch(
+    const newRun = await page("/workflows/announce?new");
+    expect(newRun.html).not.toMatch(/<h2>About</);
+    expect(newRun.html).not.toMatch(/<fieldset[^>]*disabled/);
+    expect(newRun.html).toMatch(
       /<a[^>]*href="\/workflows\/announce"[^>]*><svg[^>]*>(?:(?!<\/a>)[\s\S])*Close<\/span><\/a>/,
     );
     // A date-time is its ISO text until the browser shows it in its own time zone: empty here.
-    const launchAt = panel.html.match(/<input[^>]*id="field-launchAt"[^>]*>/)?.[0];
+    const launchAt = newRun.html.match(/<input[^>]*id="field-launchAt"[^>]*>/)?.[0];
     expect(launchAt).toContain('type="text"');
     expect(launchAt).toContain('value=""');
     // Each mode is a link; Sandbox opens the first scenario.
-    expect(linkTag(panel.html, "Live vendors")).toContain('aria-current="page"');
-    const sandboxLink = linkTag(panel.html, "Sandbox");
+    expect(linkTag(newRun.html, "Live vendors")).toContain('aria-current="page"');
+    const sandboxLink = linkTag(newRun.html, "Sandbox");
     expect(sandboxLink).toContain('href="/workflows/announce?new=true&amp;scenario=Launch+on+time"');
     expect(sandboxLink).not.toContain("aria-current");
-    expect(panel.text).toContain("Calls Bluesky, Ghost, Resend for real");
-    expect(panel.text).toContain(">Start run<");
-    expect(panel.text).not.toContain("Nothing leaves Sanoma");
+    expect(newRun.text).toContain("Calls Bluesky, Ghost, Resend for real");
+    expect(newRun.text).toContain(">Start run<");
+    expect(newRun.text).not.toContain("Nothing leaves Sanoma");
+
+    // Scenarios: a row each, the one `?scenario=` names floating with Sandbox run.
+    const scenarioTab = await page("/workflows/announce?view=scenarios&scenario=Launch+on+time");
+    expect(tabNamed(scenarioTab.html, "Scenarios")?.selected).toBe(true);
+    expect(floats(scenarioTab.html)).toEqual(["Launch on time"]);
+    expect(linkTag(scenarioTab.html, "Sandbox run")).toContain(
+      'href="/workflows/announce?scenario=Launch+on+time&amp;new=true"',
+    );
 
     const missing = await page("/workflows/nope");
     expect(missing.status).toBe(404);
@@ -1148,22 +1280,19 @@ describe("the page", () => {
     expect(run.html).toMatch(/<h2[^>]*>Checks<\/h2>/);
     expect(run.text).toContain("resend.broadcast.send was called");
     expect(run.text).toContain("Seeded 1 from scenario “Launch on time”");
-    const runs = await page("/workflows/announce");
+    const runs = await page("/workflows/announce?view=runs");
     expect(runs.text).toContain("sandbox · Launch on time");
   });
 
-  it("renders a page compact while its cookie says so: the graph lower and the sidebar as its own cookie says, folded from its panel's button", async () => {
-    // Comfortable without the cookie: #app unmarked. The panel folds from its button or the rail.
+  it("renders a page compact while its cookie says so: the graph lower, and the chat column as its own cookie says", async () => {
+    // Comfortable without the cookie: #app unmarked.
     const comfortable = await page("/workflows/announce");
     expect(comfortable.html).toContain('<div id="app">');
-    expect(sidebarState(comfortable.html)).toBe("expanded");
-    expect(comfortable.html).toContain('data-slot="sidebar-rail"');
-    expect(comfortable.html).toMatch(/<button[^>]*aria-label="Collapse the panel"/);
 
     // Compact: #app marked (style.css's `--pane-tall`, the graph box's height, is lower there).
-    // The sidebar follows its own cookie.
+    // The chat column follows its own cookie.
     const compact = await page("/workflows/announce", app.url, {
-      headers: { cookie: "sanoma_density=compact; sidebar_state=false" },
+      headers: { cookie: "sanoma_density=compact; sanoma_chat=closed" },
     });
     expect(compact.status).toBe(200);
     expect(compact.html).toContain('<div id="app" data-density="compact">');
@@ -1174,28 +1303,26 @@ describe("the page", () => {
     expect(stylesheet).toBeDefined();
     const css = await (await fetch(new URL(stylesheet!, app.url))).text();
     expect(css).toMatch(/#app\[data-density=compact\]\{[^}]*--pane-tall:440px/);
-    expect(sidebarState(compact.html)).toBe("collapsed");
+    expect(chatOpen(compact.html)).toBe(false);
   });
 
-  it("folds the panel while the sidebar's cookie says so: the bar alone, its sections peeking their panels", async () => {
+  it("renders the chat column folded while its cookie says so, from the first paint: the bar alone beside the page", async () => {
     const folded = await page(`/workflows/announce/runs/${runId}`, app.url, {
-      headers: { cookie: "sidebar_state=false" },
+      headers: { cookie: "sanoma_chat=closed" },
     });
     expect(folded.status).toBe(200);
-    expect(sidebarState(folded.html)).toBe("collapsed");
-    // No panel: neither its runs nor its header; the bar's sections remain, the current one marked.
-    expect(folded.html).not.toContain('aria-label="Show runs"');
-    expect(folded.html).not.toContain('aria-label="Collapse the panel"');
-    expect(panelRunIds(folded.html, "x")).toEqual([]);
-    // Inbox and Workflows peek their panels: links still (no button role), with a popup.
-    for (const to of ["/inbox", "/workflows"]) {
-      const tag = section(folded.html, to);
-      expect(tag, to).toContain('aria-haspopup="dialog"');
-      expect(tag, to).not.toContain('role="button"');
-    }
+    expect(chatOpen(folded.html)).toBe(false);
+    expect(folded.html).not.toContain('id="chat"');
+    expect(folded.html).not.toContain('aria-label="Message the agent"');
+    // The bar's sections remain, the current one lit.
     expect(section(folded.html, "/workflows")).toContain('aria-current="page"');
-    // Resources has no panel to peek.
-    expect(section(folded.html, "/resources")).not.toContain("aria-haspopup");
+    expect(section(folded.html, "/inbox")).not.toContain("aria-current");
+    // Open, said so or by default: anything else in the cookie reads as open.
+    for (const cookie of ["sanoma_chat=open", "sanoma_chat=nonsense"]) {
+      const open = await page("/resources", app.url, { headers: { cookie } });
+      expect(chatOpen(open.html), cookie).toBe(true);
+      expect(open.html, cookie).toContain('<aside id="chat" aria-label="Chat"');
+    }
   });
 
   it("answers any other path with the app's not-found page", async () => {
@@ -1212,18 +1339,26 @@ describe("the page", () => {
     }
   });
 
-  it("renders a run under its workflow's heading, marked in the panel, and answers a run that does not exist with not-found", async () => {
+  it("renders a run under its workflow's crumbs, named by its id's start, and answers a run that does not exist with not-found", async () => {
     const found = await page(`/workflows/announce/runs/${runId}`);
     expect(found.status).toBe(200);
-    expect(found.html).toMatch(/<h1[^>]*>Announce a launch<\/h1>/);
-    expect(found.text).toContain(`<title>${runId} · Sanoma</title>`);
-    expect(found.html).toContain('aria-label="Runs"');
-    const link = found.html.match(new RegExp(`<a[^>]*href="/workflows/announce/runs/${runId}"[^>]*>`))?.[0];
-    expect(link).toContain('aria-current="page"');
-    // React Flow draws the graph in the browser only: the server renders its heading and a
+    // Its header: the crumbs Workflows / the workflow, "Run" and its id's first 8 characters,
+    // its status with a dot, who started it and when.
+    const short = runId.slice(0, 8);
+    const header = found.text.match(/<header[^>]*>([\s\S]*?)<\/header>/)?.[1];
+    expect(header).toMatch(
+      /<nav aria-label="Breadcrumb"[^>]*><ol[^>]*><li[^>]*><a[^>]*href="\/workflows"[^>]*>Workflows<\/a>(?:(?!<\/li>)[\s\S])*<\/li><li[^>]*><a[^>]*href="\/workflows\/announce"[^>]*>Announce a launch<\/a>/,
+    );
+    expect(header).toMatch(new RegExp(`<h1[^>]*>Run ${short}</h1>`));
+    expect(header).toMatch(
+      /<span data-slot="badge"[^>]*id="run-status"[^>]*><span aria-hidden="true"[^>]*><\/span>finished<\/span>/,
+    );
+    expect(header).toContain("Ålice · <time");
+    expect(found.text).toContain(`<title>Run ${short} · Sanoma</title>`);
+    // React Flow draws the graph in the browser only: the server renders its card and a
     // skeleton. Under it the Ledger tab is open, each row it has a node for with Show in graph;
     // the source waits behind Code.
-    expect(found.html).toMatch(/data-slot="card-title"[^>]*><h2>Graph</);
+    expect(found.html).toMatch(/role="region" aria-label="Graph"/);
     expect(found.html).toMatch(/<div data-slot="skeleton"[^>]*aria-label="Loading the graph"/);
     expect(found.html).toMatch(/role="tab"[^>]*aria-selected="true"[^>]*>Ledger</);
     expect(found.html).toMatch(/role="tab"[^>]*aria-selected="false"[^>]*>Code</);
@@ -1232,22 +1367,19 @@ describe("the page", () => {
     expect(found.html).not.toMatch(/<pre[^>]*>[^<]*ctx\.ghost\.post\.create\(/);
     // A finished run has no banner.
     expect(found.text).not.toContain("Waiting on");
-    // The inspector, with nothing selected: the run's facts and its approvals.
+    // The inspector floating over the graph, with nothing selected: the run's facts and its approvals.
+    expect(floats(found.html)).toEqual(["Inspector"]);
     expect(found.html).toMatch(/<h2>Run</);
     expect(found.html).toMatch(/<dt[^>]*>Run id<\/dt><dd[^>]*><code[^>]*>/);
-    // The header's New run opens the panel on this pane; no Run. The panel's Workflow link is not
-    // the current page here.
-    expect(linkTag(found.html, "New run")).toMatch(
-      new RegExp(`data-slot="button"[^>]*href="/workflows/announce/runs/${runId}\\?new=true"`),
-    );
+    // The header's New run opens it on the workflow's page; no Run.
+    expect(linkTag(found.html, "New run")).toMatch(/data-slot="button"[^>]*href="\/workflows\/announce\?new=true"/);
     expect(linkTag(found.html, "Run")).toBeUndefined();
-    expect(linkTag(found.html, "Workflow")).not.toContain("aria-current");
     // The workflow's own approval covers no operation, and says so.
     expect(found.html).toMatch(/Lets through<\/dt><dd[^>]*><span[^>]*>no operation by itself/);
-    // ?new on a run's pane: the New run panel in place of the run's facts.
-    const panel = await page(`/workflows/announce/runs/${runId}?new`);
-    expect(panel.html).toContain('id="field-title"');
-    expect(panel.html).not.toMatch(/<h2>Run</);
+    // ?new on a run's page, an older link: New run in place of the run's facts.
+    const newRun = await page(`/workflows/announce/runs/${runId}?new`);
+    expect(newRun.html).toContain('id="field-title"');
+    expect(newRun.html).not.toMatch(/<h2>Run</);
 
     // A run waiting on its approval: the banner says on whom and for what, with a button to its node.
     const started = await postRun({ workflow: "announce", input: input("Banner") });
@@ -1257,7 +1389,7 @@ describe("the page", () => {
     );
     const waiting = await page(`/workflows/announce/runs/${started.body.runId}`);
     expect(waiting.text).toMatch(/Waiting on marketing-lead for “[^”]+”<button[^>]*>Show approval<\/button>/);
-    // The inspector, a card, sets out the approval with Approve and Reject, not in a card of its own.
+    // The inspector sets out the approval with Approve and Reject, not in a card of its own.
     expect(waiting.html).toMatch(/<button[^>]*>(<svg.*?<\/svg>)?Approve<\/button>/);
     expect(waiting.html).not.toContain('data-slot="card-footer"');
     const missing = await page("/workflows/announce/runs/does-not-exist");
@@ -1265,34 +1397,57 @@ describe("the page", () => {
     expect(missing.text).toContain("No run does-not-exist");
   });
 
-  it("filters the panel's runs by ?runs=, asking the server for a status, and keeps the filter on the panel's links", async () => {
+  it("lists a workflow's runs under its Runs tab, filtered by ?runs=, the one ?run= names floating over them", async () => {
     const { body: runs } = await runsOf({ workflow: "announce", limit: 50 });
     const sandbox = runs.filter((r) => r.sandbox !== undefined).map((r) => r.runId);
     expect(sandbox).toContain(sandboxId);
-    const filtered = await page("/workflows/announce?runs=sandbox");
+    // Every run, newest first, each row opening it over the list (`?run=`), the rest of the search kept.
+    const all = await page("/workflows/announce?view=runs");
+    expect(all.status).toBe(200);
+    expect(tabNamed(all.html, "Runs")).toMatchObject({ count: runs.length, selected: true });
+    expect(runRows(all.text)).toEqual(runs.map((r) => r.runId));
+    expect(all.html).toMatch(/<select[^>]*aria-label="Show runs"/);
+    expect(floats(all.html)).toEqual([]);
+    const filtered = await page("/workflows/announce?view=runs&runs=sandbox");
     expect(filtered.status).toBe(200);
-    expect(panelRunIds(filtered.html, "sandbox")).toEqual(sandbox.toSorted());
-    expect(filtered.html).not.toContain(`href="/workflows/announce/runs/${runId}`);
-    expect(filtered.html).toContain('href="/workflows/announce?runs=sandbox"');
-    // The filter is the panel's: the section bar's links and ← Workflows do not carry it.
-    expect(filtered.html).toContain('href="/workflows"');
+    expect(runRows(filtered.text).toSorted()).toEqual(sandbox.toSorted());
+    expect(filtered.html).toContain(`href="/workflows/announce?view=runs&amp;runs=sandbox&amp;run=${sandboxId}"`);
+    expect(tabNamed(filtered.html, "Runs")?.count).toBe(sandbox.length);
+    // The filter is the page's: the bar's links do not carry it.
+    expect(section(filtered.html, "/workflows")).toBeDefined();
     expect(filtered.html).not.toContain('href="/workflows?runs=');
     expect(filtered.html).not.toContain('href="/inbox?runs=');
-    // The panel's links keep only the filter: `?new` and `?scenario=` stay with the pane that shows.
-    const opened = await page("/workflows/announce?runs=sandbox&new&scenario=Launch+on+time");
-    expect(linkTag(opened.html, "Workflow")).toContain('href="/workflows/announce?runs=sandbox"');
-    expect(opened.html).toContain(`href="/workflows/announce/runs/${sandboxId}?runs=sandbox"`);
-    // Sandbox is a pick from the latest runs, so none there is all it can say.
-    expect((await page("/workflows/drift?runs=sandbox")).text).toContain("No sandbox runs among the latest 50");
 
+    // ?run=: the run over the list, marked in it: its status, who started it, its input and
+    // ledger, and Open run, its page. Its Close drops ?run= alone.
+    const opened = await page(`/workflows/announce?view=runs&runs=sandbox&run=${sandboxId}`);
+    const short = sandboxId.slice(0, 8);
+    expect(floats(opened.html)).toEqual([`Run ${short}`]);
+    expect(opened.html).toMatch(new RegExp(`<tr[^>]*data-state="selected"[^>]*>(?:(?!</tr>)[\\s\\S])*${short}`));
+    const float = opened.text.slice(opened.text.indexOf(`aria-label="Run ${short}"`));
+    expect(float).toContain(">sandbox · Launch on time<");
+    expect(float).toMatch(/<dt[^>]*>Started by<\/dt><dd[^>]*>tester<\/dd>/);
+    expect(float).toMatch(/<h3[^>]*>Input<\/h3>/);
+    expect(float).toMatch(/<h3[^>]*>Ledger<\/h3>/);
+    expect(linkTag(float, "Open run")).toContain(`href="/workflows/announce/runs/${sandboxId}"`);
+    expect(float).toContain('href="/workflows/announce?view=runs&amp;runs=sandbox"');
+    // One the server cannot read is the card's to say, once the browser has asked.
+    const nope = await page("/workflows/announce?view=runs&run=nope");
+    expect(floats(nope.html)).toEqual(["Run nope"]);
+    expect(nope.html).toContain('aria-label="Loading the run"');
+
+    // Sandbox is a pick from the latest runs, so none there is all it can say.
+    expect((await page("/workflows/drift?view=runs&runs=sandbox")).text).toContain(
+      "No sandbox runs among the latest 50",
+    );
     // Failed is the server's to pick (`status=failed`), not a pick from the latest 50, so an
     // older failed run is not lost behind them.
     const { body: failed } = await runsOf({ workflow: "announce", status: "failed", limit: 50 });
     expect(failed).not.toEqual([]);
-    const failedPage = await page("/workflows/announce?runs=failed");
+    const failedPage = await page("/workflows/announce?view=runs&runs=failed");
     expect(failedPage.status).toBe(200);
-    expect(panelRunIds(failedPage.html, "failed")).toEqual(failed.map((r) => r.runId).toSorted());
-    // The panel's query as the server hands it to the browser: its hash, keys sorted.
+    expect(runRows(failedPage.text)).toEqual(failed.map((r) => r.runId));
+    // The tab's query as the server hands it to the browser: its hash, keys sorted.
     expect(failedPage.html).toContain(String.raw`\"limit\":50,\"status\":\"failed\",\"workflow\":\"announce\"`);
   });
 
@@ -1532,22 +1687,25 @@ describe("resources and drift", () => {
     expect(start.status).toBe(200);
     expect(start.text).toContain(">Start run<");
   });
-  it("heads the overview with All runs and New workflow, and All runs with All workflows, each view its own link", async () => {
+  it("tabs the overview by filter, All runs last, and heads it with New workflow, each view its own link", async () => {
     const overview = await page("/workflows");
-    expect(linkTag(overview.html, "All runs")).toContain('href="/workflows?view=runs"');
+    expect(tabs(overview.html)).toEqual([
+      { label: "All", href: "/workflows", count: 4, selected: true },
+      { label: "Waiting on you", href: "/workflows?filter=waiting", count: 0, selected: false },
+      { label: "Failed last run", href: "/workflows?filter=failed", count: 0, selected: false },
+      { label: "Built-in", href: "/workflows?filter=builtin", count: 3, selected: false },
+      { label: "All runs", href: "/workflows?view=runs", count: undefined, selected: false },
+    ]);
     expect(overview.html).toMatch(/<button[^>]*aria-haspopup="dialog"[^>]*>(<svg.*?<\/svg>)?New workflow<\/button>/);
     const runs = await page("/workflows?view=runs&status=failed");
-    expect(linkTag(runs.html, "All workflows")).toContain('href="/workflows"');
-    // The panel's See all, and the brand, are lit on the whole overview alone: not on All runs.
-    const seeAll = /<a[^>]*href="\/workflows"[^>]*><span>See all/;
-    expect(overview.html.match(seeAll)?.[0]).toContain('aria-current="page"');
-    expect(runs.html.match(seeAll)?.[0]).not.toContain("aria-current");
-    expect(linkTag(runs.text, "Sanoma, sanoma")).not.toContain('aria-current="page"');
-    expect(linkTag(overview.text, "Sanoma, sanoma")).toContain('aria-current="page"');
+    expect(tabNamed(runs.html, "All runs")?.selected).toBe(true);
+    expect(tabNamed(runs.html, "All")).toMatchObject({ href: "/workflows", selected: false });
+    // The bar's Workflows is lit on both.
+    for (const shown of [overview, runs]) expect(section(shown.html, "/workflows")).toContain('aria-current="page"');
     expect(runs.html).toContain('aria-label="Status"');
   });
 
-  it("lists every workflow in a table: how it starts, the vendors it calls, its last run and what waits, with a chip per filter", async () => {
+  it("lists every workflow in a table: how it starts, the vendors it calls, its last run and what waits, and a tab per filter", async () => {
     const workflows = await page("/workflows");
     const row = (name: string) =>
       workflows.text.match(
@@ -1558,54 +1716,29 @@ describe("resources and drift", () => {
     for (const title of ["Ghost", "Resend", "Bluesky"]) expect(announceRow).toMatch(new RegExp(`/>${title}</span>`));
     // The tests before leave announce with runs, so it has a last run.
     expect(announceRow).toMatch(/>(finished|failed|waiting|running|sleeping)/);
-    // Each filter is a link (All without `?filter=`), with how many it holds, the one shown marked.
-    const chips = workflows.text.match(
-      /<div role="group" data-slot="button-group"[^>]*aria-label="Show"[^>]*>(.*?)<\/div>/,
-    )?.[1];
-    expect(chips).toMatch(/<a[^>]*href="\/workflows"[^>]*aria-current="page"[^>]*>All · 4<\/a>/);
-    for (const [filter, label] of [
-      ["waiting", "Waiting on you"],
-      ["failed", "Failed last run"],
-      ["builtin", "Built-in · 3"],
-    ] as const) {
-      expect(chips).toMatch(new RegExp(`<a[^>]*href="/workflows\\?filter=${filter}"[^>]*>${label}`));
-    }
     // ?filter=builtin keeps drift, apply and call (the config has a collection) alone.
     const builtin = await page("/workflows?filter=builtin");
     expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/drift"/);
     expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/apply"/);
     expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/call"/);
     expect(builtin.html).not.toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/announce"/);
-    expect(linkTag(builtin.text, "Built-in · 3")).toContain('aria-current="page"');
+    expect(tabNamed(builtin.html, "Built-in")).toMatchObject({ count: 3, selected: true });
   });
 
-  it("lists the workflows in the Workflows panel by their last run, and See all; with no panel, the bar alone, peeking", async () => {
+  it("orders the overview's workflows by their last run, under a box to find one by", async () => {
     const { text, html } = await page("/workflows");
-    expect(html).toMatch(/<input[^>]*aria-label="Find a workflow"/);
-    // No name on the server under the default resolver: nothing is waiting on you.
-    expect(text).not.toContain(">Waiting on you</h3>");
-    // Both under Recent, the one run last first.
-    const recent = text.slice(text.indexOf(">Recent</h3>"));
+    expect(html).toMatch(/<input[^>]*type="search"[^>]*aria-label="Find a workflow"/);
+    // No name on the server under the default resolver: nothing is waiting on you, so the one
+    // run last comes first, and those never run after both.
     const last = await lastRuns(ctx);
-    const [first, second] = ["announce", "drift"]
-      .toSorted((a, b) => last[b]!.createdAt - last[a]!.createdAt)
-      .map((name) => recent.indexOf(`href="/workflows/${name}"`));
-    expect(first).toBeGreaterThan(0);
-    expect(second).toBeGreaterThan(first!);
-    expect(text).toMatch(/<a[^>]*href="\/workflows"[^>]*><span>See all 4 workflows<\/span>/);
-    expect(html).toContain("--sidebar-width:calc(var(--sidebar-bar-width) + var(--sidebar-panel-width))");
-    expect(html).toContain('data-slot="sidebar-rail"');
-    // No panel for Resources: the bar alone, open or not, and no rail to fold it; Inbox and
-    // Workflows peek their panels from it.
-    const resources = await page("/resources", app.url, { headers: { cookie: "sidebar_state=true" } });
-    expect(resources.html).toContain("--sidebar-width:var(--sidebar-bar-width)");
-    expect(resources.html).not.toContain('aria-label="Find a workflow"');
-    expect(resources.html).not.toContain('data-slot="sidebar-rail"');
-    for (const to of ["/inbox", "/workflows"])
-      expect(section(resources.html, to), to).toContain('aria-haspopup="dialog"');
-    // The package's own build has no sites, so no Sites in the bar.
-    expect(text).toContain("<span>Workflows</span>");
-    expect(text).not.toContain("<span>Sites</span>");
+    const at = (name: string) => text.indexOf(`href="/workflows/${name}"`);
+    const [first, second] = ["announce", "drift"].toSorted((a, b) => last[b]!.createdAt - last[a]!.createdAt);
+    expect(at(first!)).toBeGreaterThan(0);
+    expect(at(second!)).toBeGreaterThan(at(first!));
+    for (const never of ["apply", "call"]) expect(at(never), never).toBeGreaterThan(at(second!));
+    expect(text).not.toContain("waiting on you</span>");
+    // Only the overview finds: not Resources.
+    expect((await page("/resources")).html).not.toContain('aria-label="Find a workflow"');
   });
 
   it("lists every run under All runs, linking each to its page, sandbox runs badged, and filters them by ?status= as getRuns does", async () => {
@@ -1635,7 +1768,7 @@ describe("resources and drift", () => {
     expect((await page("/workflows?view=runs&status=cancelled")).text).toContain("No runs with that status");
   });
 
-  it("filters All runs by ?workflow=, as a workflow's panel links there, and shows the filter with its removal", async () => {
+  it("filters All runs by ?workflow=, and shows the filter with its removal", async () => {
     const { body: announced } = await runsOf({ workflow: "announce" });
     const shown = await page("/workflows?view=runs&workflow=announce");
     expect(shown.status).toBe(200);
@@ -1739,10 +1872,12 @@ describe("an app configured otherwise", () => {
         page("/permissions", refusing.url, { headers: { cookie: "sanoma_actor=ada" } }),
       ]);
       const [workflows, permissions] = await pages.finally(() => refusing.close());
-      expect(workflows.text).toContain(
-        "policies/*.cedar do not hold, so every operation call and run start is refused",
+      expect(workflows.text).toMatch(
+        /data-slot="alert-description"[^>]*><code>policies\/\*\.cedar<\/code> do not hold, so every operation call and run start is refused/,
       );
-      expect(permissions.text).toContain("Cedar, policies/*.cedar, which do not hold: all refused");
+      expect(permissions.text).toMatch(
+        /data-slot="alert-description"[^>]*><code>policies\/\*\.cedar<\/code> do not hold, so every call is refused/,
+      );
       expect(warn.mock.calls.flat().join("\n")).toMatch(/files have problems.*\n {2}policies\/bad\.cedar:1:\d+: /s);
     } finally {
       warn.mockRestore();
@@ -1815,23 +1950,27 @@ describe("an app configured otherwise", () => {
     it("opens the Inbox on For you: the approvals the principal it resolves may decide", async () => {
       // The earlier tests leave announce's runs waiting on marketing-lead.
       const lead = await inboxAs("marketing-lead");
-      expect(currentLink(lead, "For you · [1-9]\\d*")).toBe(true);
+      expect(tabNamed(lead, "For you")).toMatchObject({ count: expect.any(Number), selected: true });
+      expect(tabNamed(lead, "For you")?.count).toBeGreaterThan(0);
       expect(inboxRows(lead).length).toBeGreaterThan(0);
       const someoneElse = await inboxAs("sso-user");
-      expect(currentLink(someoneElse, "For you · 0")).toBe(true);
+      expect(tabNamed(someoneElse, "For you")).toMatchObject({ count: 0, selected: true });
       expect(someoneElse).toContain("Nothing is waiting for you");
     });
 
-    it("puts the workflows waiting on the principal first in the Workflows panel, with their counts, and in the overview", async () => {
+    it("puts the workflows waiting on the principal first in the overview, with their counts", async () => {
       const lead = (await workflowsAs("marketing-lead")).replaceAll("<!-- -->", "");
-      const waiting = lead.slice(lead.indexOf(">Waiting on you</h3>"), lead.indexOf(">Recent</h3>"));
-      expect(waiting).toMatch(/href="\/workflows\/announce"[\s\S]*>\d+<span class="sr-only"> waiting on you<\/span>/);
-      expect(lead).toMatch(/>Waiting on you · 1<\/a>/);
-      expect(lead).toMatch(/>\d+ approvals?, \d+ for you<\/span>/);
+      expect(tabNamed(lead, "Waiting on you")?.count).toBe(1);
+      // Announce first, its count beside its title, though drift ran last.
+      const rows = lead.slice(lead.indexOf("<tbody"));
+      expect(rows.indexOf('href="/workflows/announce"')).toBeLessThan(rows.indexOf('href="/workflows/drift"'));
+      expect(rows).toMatch(/href="\/workflows\/announce"(?:(?!<\/tr>)[\s\S])*>\d+ waiting on you</);
+      // The Waiting column counts every approval waiting, on anyone.
+      expect(rows).toMatch(/href="\/workflows\/announce"(?:(?!<\/tr>)[\s\S])*>\d+ approvals?<\/span>/);
       // Nothing waits on sso-user.
       const someoneElse = (await workflowsAs("sso-user")).replaceAll("<!-- -->", "");
-      expect(someoneElse).not.toContain(">Waiting on you</h3>");
-      expect(someoneElse).toMatch(/>Waiting on you · 0<\/a>/);
+      expect(tabNamed(someoneElse, "Waiting on you")?.count).toBe(0);
+      expect(someoneElse).not.toContain(" waiting on you<");
     });
 
     it("answers a resolver that throws with a 500, and logs why", async () => {
@@ -1896,10 +2035,13 @@ describe("an app whose config no longer has a workflow", () => {
     const about = await page("/workflows/announce", retired.url);
     expect(about.status).toBe(200);
     expect(about.html).toMatch(/<h1[^>]*>announce<\/h1>/);
-    expect(about.text).toContain(
-      "This config has no workflow named <code>announce</code>. Its past runs are in the panel.",
+    expect(about.text).toMatch(
+      /This config has no workflow named <code>announce<\/code>\. Its past runs are under <a[^>]*href="\/workflows\/announce\?view=runs"[^>]*>Runs<\/a>\./,
     );
-    expect(about.html).toContain(`href="/workflows/announce/runs/${runId}"`);
+    // Its tabs: the Graph, which says so, and its Runs; no Code or Scenarios to show.
+    expect(tabs(about.html).map((t) => t.label)).toEqual(["Graph", "Runs"]);
+    const runs = await page("/workflows/announce?view=runs", retired.url);
+    expect(runs.html).toContain(`href="/workflows/announce?view=runs&amp;run=${runId}"`);
     expect((await page("/workflows/announce?new", retired.url)).html).not.toContain('id="field-title"');
     expect(linkTag(about.html, "New run")).toBeUndefined();
     // A run of it has no New run either: there is nothing to start.
@@ -1910,7 +2052,7 @@ describe("an app whose config no longer has a workflow", () => {
     const run = await page(`/workflows/announce/runs/${runId}`, retired.url);
     expect(run.status).toBe(200);
     // Its graph, from the ledger alone, and its ledger; the Code tab says why it has no source.
-    expect(run.html).toMatch(/data-slot="card-title"[^>]*><h2>Graph</);
+    expect(run.html).toMatch(/role="region" aria-label="Graph"/);
     expect(run.html).toMatch(/role="tab"[^>]*>Ledger</);
     expect(run.html).toContain('aria-label="Ledger"');
     const old = await fetch(new URL(`/runs/${runId}`, retired.url), { redirect: "manual" });

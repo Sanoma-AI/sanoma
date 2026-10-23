@@ -144,15 +144,22 @@ describe("the Data section", () => {
     await seed({ ...lead("Gizmo", "contacted"), seats: 12 }, "bo");
   });
 
-  it("puts Data in the bar, its panel listing the collections, and /data listing each with a link to its grid", async () => {
+  it("puts Data in the bar, and /data listing each collection in a table, a row linking to its grid", async () => {
     const { status, html } = await page("/data");
     expect(status).toBe(200);
-    expect(html).toMatch(/<a [^>]*href="\/data"[^>]*>(?:(?!<\/a>)[\s\S])*<span>Data<\/span>/);
-    expect(html).toContain(">Data</h2>");
-    expect(html).toMatch(/<a [^>]*href="\/data\/outbound"[^>]*>(?:(?!<\/a>)[\s\S])*Outbound/);
-    expect(html).toContain("data.outbound");
-    expect(html).toContain("6 fields, found by <code>company</code>");
-    expect(html).toMatch(/data-slot="breadcrumb-page"[^>]*>Data</);
+    // Data in the bar, lit here, with Sites and Data in their own group (no sites in this config).
+    expect(html).toMatch(
+      /<nav aria-label="Sections"[^>]*>(?:(?!<\/nav>)[\s\S])*<a [^>]*href="\/data"[^>]*aria-current="page"[^>]*>(?:(?!<\/a>)[\s\S])*Data<\/a>/,
+    );
+    // The page's title, with how many collections there are.
+    expect(html).toMatch(/<h1[^>]*>Data<span[^>]*>1<\/span><\/h1>/);
+    const row = html.match(
+      /<tr[^>]*><td[^>]*><div[^>]*><a [^>]*href="\/data\/outbound"[^>]*>(?:(?!<\/tr>)[\s\S])*<\/tr>/,
+    )?.[0];
+    expect(row).toContain(">Outbound</a>");
+    expect(row).toContain(">data.outbound</code>");
+    expect(row).toMatch(/<td[^>]*>6<\/td><td[^>]*><code>company<\/code><\/td>/);
+    expect(row).toContain(">resources/data.ts#outbound</code>");
   });
 
   it("renders a collection's grid with its records as the person, sorted, filtered and limited as the search says", async () => {
@@ -163,7 +170,11 @@ describe("the Data section", () => {
     const heads = [...grid.html.matchAll(/<th [^>]*>(?:<a [^>]*>)?([^<]+)/g)].map(([, text]) => text);
     expect(heads).toEqual(["company", "contact", "stage", "owner", "lastTouched", "seats", "Updated", "By"]);
     expect(grid.html).toContain(">bo</td>");
-    expect(grid.html).toMatch(/data-slot="breadcrumb-page"[^>]*>Outbound</);
+    // Its title under the Data crumb.
+    expect(grid.html).toMatch(
+      /<nav aria-label="Breadcrumb"[^>]*><ol[^>]*><li[^>]*><a [^>]*href="\/data"[^>]*>Data<\/a>/,
+    );
+    expect(grid.html).toMatch(/<h1[^>]*>Outbound/);
     expect(grid.html).toMatch(/Declared in <a [^>]*href="\/resources\?resource=resources%2Fdata\.ts%23outbound"/);
 
     expect(rowKeys((await page(`/data/outbound${searchOf({ order: "-company" })}`)).html)).toEqual([

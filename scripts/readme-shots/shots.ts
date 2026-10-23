@@ -140,30 +140,37 @@ try {
 
   const captured = join(work, "assets");
   mkdirSync(captured);
-  // With the sidebar's panel open: the workflow's runs beside its page.
+  // The graph, a step selected and its details floating over it.
   await still(browser, base, "/workflows/announce", join(captured, "workflow.png"), {
-    sidebar: true,
-    select: "ghost.post.publish",
+    chat: false,
+    select: "ghost.post.create",
     fullPage: true,
   });
-  await still(browser, base, "/inbox", join(captured, "inbox.png"), { sidebar: true, height: 720 });
+  // The workflow's Runs tab, the demo's run open over the list.
+  const runId = runPath.split("/").at(-1)!;
+  await still(browser, base, `/workflows/announce?view=runs&run=${runId}`, join(captured, "runs.png"), {
+    chat: false,
+    height: 720,
+  });
+  // The chat column open beside the bar, the open approval floating over the list.
+  await still(browser, base, "/inbox", join(captured, "inbox.png"), { chat: true, height: 720 });
   await still(browser, base, runPath, join(captured, "run.png"), {
-    sidebar: true,
+    chat: false,
     select: "Review launch copy",
     tab: "Ledger",
     fullPage: true,
   });
-  await still(browser, base, "/sites/launches", join(captured, "site.png"), { sidebar: true, fullPage: true });
+  await still(browser, base, "/sites/launches", join(captured, "site.png"), { chat: false, fullPage: true });
   // The grid sorted by stage, a record open in the form beside it.
   await still(browser, base, "/data/outbound?order=stage&record=Initech", join(captured, "data.png"), {
-    sidebar: true,
+    chat: false,
     fullPage: true,
   });
   say("stills taken; making demo.gif");
   stopIfInterrupted();
   await makeGif(frames, join(captured, "demo.gif"));
   stopIfInterrupted();
-  const files = ["demo.gif", "workflow.png", "inbox.png", "run.png", "site.png", "data.png"];
+  const files = ["demo.gif", "workflow.png", "runs.png", "inbox.png", "run.png", "site.png", "data.png"];
   replaceAssets(captured, files);
   say(`wrote .github/assets: ${files.join(", ")}`);
 } catch (err) {
