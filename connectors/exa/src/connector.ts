@@ -44,8 +44,8 @@ const result = z.object({
   publishedDate: z.string().nullish(),
   /** How close the page is to the query or URL, from 0 to 1. */
   score: z.number().nullish(),
-  image: z.string().optional(),
-  favicon: z.string().optional(),
+  image: z.string().nullish(),
+  favicon: z.string().nullish(),
   text: z.string().optional(),
   highlights: z.array(z.string()).optional(),
   summary: z.string().optional(),

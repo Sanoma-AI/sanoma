@@ -86,6 +86,15 @@ describe("exaDriver", () => {
       });
     });
 
+    it("fails for good on a 200 with no body, without retrying a call Exa answered", async () => {
+      server.use(http.post("*/search", () => new HttpResponse(null, { status: 200 })));
+      await expect(search()).rejects.toMatchObject({
+        name: "DriverError",
+        retryable: false,
+        message: "exa: web.search replied with no body",
+      });
+    });
+
     it("fails for good on an answer that is not text", async () => {
       play("structured", [{ method: "POST", path: "/answer", status: 200, body: { answer: { a: 1 }, citations: [] } }]);
       await expect(call("web.answer", { query: "q" })).rejects.toMatchObject({
@@ -125,6 +134,7 @@ describe("exaDriver", () => {
       await expect(search()).rejects.toMatchObject({
         name: "DriverError",
         retryable: true,
+        status: 408,
         message: "exa: web.search timed out after 200 ms",
       });
     });
@@ -138,6 +148,10 @@ describe("exaDriver", () => {
       });
       expect(sent).toEqual([]);
     });
+  });
+
+  it("refuses a timeout the SDK cannot take when it is made", () => {
+    expect(() => exaDriver({ timeoutMs: 1.5 })).toThrow(RangeError);
   });
 
   it("names the variable when the API key is missing", async () => {

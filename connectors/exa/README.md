@@ -72,7 +72,7 @@ When it is unset, a call fails, not retryable, naming it. The driver declares it
 
 ### Errors and retries
 
-Every operation only reads, so a retried call changes nothing, though each call costs Exa credits. A 408, a 429 (rate limit), a 5xx (Exa overloaded, `SERVICE_OVERLOADED`, or a request past its deadline), a timeout (30 s; `timeoutMs` changes it) or no reply is retryable; any other 4xx is not, such as 401 `INVALID_API_KEY` and 402 `NO_MORE_CREDITS` or a budget spent. `status` is kept, and Exa's message ([error codes](https://exa.ai/docs/reference/error-codes)); `exa-js` drops the error's `tag`, so `vendorCode` is set only when its error carries a `code`. An answer that is not text fails for good.
+Every operation only reads, so a retried call changes nothing, though each call costs Exa credits. A 408, a 429 (rate limit), a 5xx (Exa overloaded, `SERVICE_OVERLOADED`, or a request past its deadline), a timeout (30 s; `timeoutMs` changes it) or no reply is retryable; any other 4xx is not, such as 401 `INVALID_API_KEY` and 402 `NO_MORE_CREDITS` or a budget spent. `status` is kept, and Exa's message ([error codes](https://exa.ai/docs/reference/error-codes)); `exa-js` drops the error's `tag`, so `vendorCode` is set only when its error carries a `code`. A reply with no body, or an answer that is not text, fails for good.
 
 ### Testing the driver
 
@@ -98,7 +98,7 @@ The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/
 
 ## Testing
 
-`@sanoma-ai/connector-exa/fake` is an in-memory Exa that searches nothing, the fake the connector carries: each sandbox run makes one of its own. It makes up to three pages for a query or a URL, from them alone, so one call always finds the same pages (on the first of `includeDomains`, else `example.com`), with the `text`, `highlights` and `summary` asked for. The pages it served stay in `state.pages`, by URL, which `getContents` reads; put a page there to give it a text of your own. A URL on a `.invalid` host cannot be read: `getContents` returns it in `statuses` as `CRAWL_NOT_FOUND`.
+`@sanoma-ai/connector-exa/fake` is an in-memory Exa that searches nothing, the fake the connector carries: each sandbox run makes one of its own. It makes up to three pages for a query or a URL, from them alone, so one call always finds the same pages (on the first of `includeDomains`, else `example.com`, or for `findSimilar` the URL's own host, and never on a domain excluded), with the `text`, `highlights` and `summary` asked for. The pages it served stay in `state.pages`, by URL, which `getContents` reads; put a page there to give it a text of your own. A URL on a `.invalid` host cannot be read: `getContents` returns it in `statuses` as `CRAWL_NOT_FOUND`.
 
 ```ts
 import { withSetup } from "@sanoma-ai/workflows";

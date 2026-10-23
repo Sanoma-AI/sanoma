@@ -20,26 +20,28 @@ const env = z.object({
  */
 const sdk = () => import("exa-js");
 
+type Sdk = Awaited<ReturnType<typeof sdk>>;
+
 /**
- * The DriverError for a call that failed. `exa-js` throws an `ExaError` with Exa's status for a
- * reply (an `ExaTimeoutError`, status 408, past the timeout) and `fetch`'s own error for no reply.
+ * The DriverError for a request that failed. `exa-js` throws an `ExaError` with Exa's status for a
+ * reply, an `ExaTimeoutError` (status 408) past the timeout, and `fetch`'s own error for no reply.
  */
-function failure(
-  op: string,
-  timeoutMs: number,
-  ExaError: Awaited<ReturnType<typeof sdk>>["ExaError"],
-  error: unknown,
-): DriverError {
-  if (error instanceof DriverError) return error;
-  if (error instanceof ExaError && error.name === "TimeoutError") {
-    return new DriverError(`exa: ${op} timed out after ${timeoutMs} ms`, { retryable: true, cause: error });
+function failure(op: string, { ExaError, ExaTimeoutError }: Sdk, error: unknown): DriverError {
+  if (error instanceof ExaTimeoutError) {
+    return new DriverError(`exa: ${op} timed out after ${error.timeout} ms`, {
+      retryable: true,
+      status: error.statusCode,
+      cause: error,
+    });
   }
   if (error instanceof ExaError) {
     const { statusCode: status, message, code } = error;
     // A 429 (rate limit) and a 5xx (overloaded, past its deadline) pass; a 402 (credits or budget spent) does not in a retry's wait.
+    // Exa's `tag` is not kept: `exa-js` reads a `code` only from an error object, which these endpoints do not send.
     return new DriverError(`exa: ${op} failed (${status}): ${message}`, {
       retryable: retryableStatus(status),
       status,
+      cause: error,
       ...(code === undefined ? {} : { vendorCode: code }),
     });
   }
@@ -53,61 +55,70 @@ function failure(
  */
 export function exaDriver(options: ExaDriverOptions = {}) {
   const timeoutMs = options.timeoutMs ?? 30_000;
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1) {
+    throw new RangeError(`exaDriver: timeoutMs must be a whole number of ms, not ${timeoutMs}`);
+  }
+  /** The client for the last key read, made again only when `EXA_API_KEY` changes. */
+  let client: { key: string; exa: Exa } | undefined;
 
-  /** Runs `request` on a client with this call's key, and maps what it throws. */
-  async function calling<T>(op: string, request: (exa: Exa) => Promise<T>): Promise<T> {
+  /** Sends `request` on a client with the key in `EXA_API_KEY`, and maps what fails. */
+  async function calling<T extends object>(op: string, request: (exa: Exa) => Promise<T>): Promise<T> {
     const key = process.env.EXA_API_KEY;
     if (!key) throw new DriverError("exa: EXA_API_KEY is not set", { retryable: false });
-    const { Exa, ExaError } = await sdk();
-    let exa: Exa;
-    try {
-      // Warnings Exa returns about a request are not the worker's to print.
-      exa = new Exa(key, undefined, { timeout: timeoutMs, warnings: "silent" });
-    } catch (error) {
-      // A key no header can carry, such as one with a newline: a retry would fail alike.
-      throw new DriverError(`exa: ${op} could not build its request`, { retryable: false, cause: error });
+    const exaJs = await sdk();
+    if (client?.key !== key) {
+      try {
+        // Warnings Exa returns about a request are not the worker's to print.
+        client = { key, exa: new exaJs.Exa(key, undefined, { timeout: timeoutMs, warnings: "silent" }) };
+      } catch (error) {
+        // A key no header can carry, such as one with a newline: a retry would fail alike.
+        throw new DriverError(`exa: ${op} could not build its request`, { retryable: false, cause: error });
+      }
     }
+    let reply: T | undefined;
     try {
-      return await request(exa);
+      reply = await request(client.exa);
     } catch (error) {
-      throw failure(op, timeoutMs, ExaError, error);
+      throw failure(op, exaJs, error);
     }
+    // A 200 with an empty body: Exa answered, so a retry would only spend credits again.
+    if (typeof reply !== "object" || reply === null) {
+      throw new DriverError(`exa: ${op} replied with no body`, { retryable: false });
+    }
+    return reply;
   }
 
   return defineDriver(
     exaOps,
     {
       web: {
-        // `contents: false` when none is asked for: the SDK would otherwise ask for each page's text.
-        search: ({ query, contents, ...rest }) =>
-          calling("web.search", async (exa) => ({
-            results: (contents
-              ? await exa.search(query, { ...rest, contents })
-              : await exa.search(query, { ...rest, contents: false })
-            ).results,
-          })),
-        getContents: ({ urls, ...contents }) =>
-          calling("web.getContents", async (exa) => {
-            const { results, statuses = [] } = await exa.getContents(urls, contents);
-            return { results, statuses };
-          }),
+        // `contents: false` when none is asked for, as the SDK would otherwise ask for each page's
+        // text. Two calls, not `contents ?? false`: the SDK's overloads take each but not the union.
+        search: async ({ query, contents, ...rest }) => {
+          const { results } = await calling("web.search", (exa) =>
+            contents ? exa.search(query, { ...rest, contents }) : exa.search(query, { ...rest, contents: false }),
+          );
+          return { results };
+        },
+        getContents: async ({ urls, ...contents }) => {
+          const { results, statuses = [] } = await calling("web.getContents", (exa) => exa.getContents(urls, contents));
+          return { results, statuses };
+        },
         // Deprecated in the SDK, which has no other way to find pages like one; the endpoint stands.
-        findSimilar: ({ url, contents, ...rest }) =>
-          calling("web.findSimilar", async (exa) => ({
-            results: (contents
-              ? await exa.findSimilar(url, { ...rest, contents })
-              : await exa.findSimilar(url, { ...rest, contents: false })
-            ).results,
-          })),
-        answer: ({ query, text }) =>
-          calling("web.answer", async (exa) => {
-            const { answer, citations } = await exa.answer(query, { text });
-            // Text, unless the request sends an `outputSchema`, which this one never does.
-            if (typeof answer !== "string") {
-              throw new DriverError("exa: web.answer replied without an answer in text", { retryable: false });
-            }
-            return { answer, citations };
-          }),
+        findSimilar: async ({ url, contents, ...rest }) => {
+          const { results } = await calling("web.findSimilar", (exa) =>
+            contents ? exa.findSimilar(url, { ...rest, contents }) : exa.findSimilar(url, { ...rest, contents: false }),
+          );
+          return { results };
+        },
+        answer: async ({ query, text }) => {
+          const { answer, citations } = await calling("web.answer", (exa) => exa.answer(query, { text }));
+          // Text, unless the request sends an `outputSchema`, which this one never does.
+          if (typeof answer !== "string") {
+            throw new DriverError("exa: web.answer replied without an answer in text", { retryable: false });
+          }
+          return { answer, citations };
+        },
       },
     },
     { env },

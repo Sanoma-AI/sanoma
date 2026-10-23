@@ -25,6 +25,10 @@ const slug = (s: string) =>
     .replaceAll(/[^a-z0-9]+/g, "-")
     .replaceAll(/^-|-$/g, "") || "page";
 
+/** Where the fake's pages are: the first domain the filters include, else `usual` unless they exclude it. */
+const hostFor = (usual: string, filters: { includeDomains?: string[]; excludeDomains?: string[] }) =>
+  filters.includeDomains?.[0] ?? (filters.excludeDomains?.includes(usual) ? `other.${usual}.example` : usual);
+
 /** A page as Exa returns it, with what of it `contents` asks for. */
 function shown(page: FakeExaPage, contents: Omit<Contents, "urls"> = {}, score?: number) {
   const { text, highlights, summary } = contents;
@@ -65,17 +69,21 @@ export function fakeExa(options: FakeOptions = {}) {
           );
         return {
           web: {
-            search: async ({ query, numResults, includeDomains, contents }) => ({
+            search: async ({ query, numResults, contents, ...filters }) => ({
               results: found(
-                `https://${includeDomains?.[0] ?? "example.com"}/${slug(query)}`,
+                `https://${hostFor("example.com", filters)}/${slug(query)}`,
                 (i) => `${query} (${i})`,
                 numResults,
                 contents,
               ),
             }),
-            findSimilar: async ({ url, numResults, excludeSourceDomain, contents }) => {
+            findSimilar: async ({ url, numResults, excludeSourceDomain, contents, ...filters }) => {
               const { hostname, pathname } = new URL(url);
-              const host = excludeSourceDomain ? `similar.${hostname}.example` : hostname;
+              const excluded = excludeSourceDomain ? [hostname] : [];
+              const host = hostFor(hostname, {
+                ...filters,
+                excludeDomains: [...excluded, ...(filters.excludeDomains ?? [])],
+              });
               return {
                 results: found(
                   `https://${host}/like-${slug(pathname)}`,
