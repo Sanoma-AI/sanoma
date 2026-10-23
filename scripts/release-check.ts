@@ -3,7 +3,7 @@
  * take every new version it depends on, as npm has its ranges. An exact pin (`workspace:*`, as
  * `sanoma` pins the runtime) never does, nor a `^` peer range after a 0.x minor bump. Names each
  * package that needs a new version, counting the ones that will pin those in turn, and fails if
- * there is any. `release.yml` runs it before staging; `node scripts/release-check.ts` by hand.
+ * there is any. `release.yml` runs it before publishing; `node scripts/release-check.ts` by hand.
  */
 import { execFileSync } from "node:child_process";
 import semver from "semver";

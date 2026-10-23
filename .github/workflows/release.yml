@@ -1,5 +1,5 @@
 name: Release
-# Run by hand on main (README "Release"): it stages every public package whose version is not yet on npm.
+# Run by hand on main (README "Release"): it publishes every public package whose version is not yet on npm.
 on:
   workflow_dispatch:
 
@@ -37,34 +37,26 @@ jobs:
       # Each package left at its public version takes the new versions it depends on.
       - run: node scripts/release-check.ts
       # Packages already public are skipped without running prepack, so their dependents need this
-      # build; the packages being staged rebuild in their prepack, which keeps the hand path safe.
+      # build; the packages being published rebuild in their prepack, which keeps the hand path safe.
       - run: pnpm build
-      # Staged, not published: the trusted publishers allow `npm stage publish` only, and a
-      # maintainer releases the staged versions with one `pnpm stage approve` (README "Release").
       # --no-git-checks: the first step checks the commit instead. The prepack of each
       # @sanoma-ai/bridge-<platform> downloads the provider-bridge release RELEASE pins.
-      # --report-summary writes each staged version, with its stage id, to pnpm-publish-summary.json.
-      - run: pnpm stage publish -r --no-git-checks --report-summary
-      - name: Staged versions
+      # --report-summary writes each published version to pnpm-publish-summary.json.
+      - run: pnpm publish -r --no-git-checks --report-summary
+      - name: Published versions
         run: |
-          jq -r '.publishedPackages[] | "\(.name)@\(.version) \(.stageId // error("no stage id for \(.name)"))"' pnpm-publish-summary.json > staged.txt
-          cat staged.txt
-          if [ ! -s staged.txt ]; then
-            echo "Nothing staged: every version is already public." >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.publishedPackages[] | "\(.name)@\(.version)"' pnpm-publish-summary.json > published.txt
+          cat published.txt
+          if [ ! -s published.txt ]; then
+            echo "Nothing published: every version is already public." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           {
-            echo "## Staged versions"
+            echo "## Published versions"
             echo
             echo "From $GITHUB_SHA:"
             echo
             echo '```'
-            cat staged.txt
-            echo '```'
-            echo
-            echo "Release them all with one 2FA code, with the repo's pnpm and logged in to npm:"
-            echo
-            echo '```sh'
-            echo "pnpm stage approve $(jq -r '[.publishedPackages[].stageId] | join(" ")' pnpm-publish-summary.json)"
+            cat published.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

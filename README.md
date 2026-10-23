@@ -104,7 +104,7 @@ To dogfood a change from a Sanoma repo of your own before it is published, link 
 
 ## Release
 
-[`release.yml`](.github/workflows/release.yml) stages `sanoma` and the `@sanoma-ai/*` packages on npm with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (no npm token) and a maintainer releases them with one command. Each package has its own version, and a release ships only the packages whose version changed. To release:
+[`release.yml`](.github/workflows/release.yml) publishes `sanoma` and the `@sanoma-ai/*` packages to npm with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (no npm token). Each package has its own version, and a release ships only the packages whose version changed. To release:
 
 1. In a pull request, bump `version` in the `package.json` of each public package that changed since its last release (not the private `@sanoma-ai/testing`); a breaking change in a 0.x package is a minor bump, and a provider-bridge release (`RELEASE` in `packages/bridge/scripts/download-bridge.ts`) is a change to the `@sanoma-ai/bridge-<platform>` packages. Packages that depend on one you bumped need a new version too when their published range leaves the new one out: an exact pin (`workspace:*`, as `sanoma` pins the runtime and `@sanoma-ai/bridge` its binaries), or a peer range (`workspace:^`, published as `^` on the version at that time) after a minor bump. `node scripts/release-check.ts` names each one it finds, counting the ones that pin those in turn, and the workflow runs it first. The pull request's description carries the release notes. What changed in a package since the commit that last set its version:
 
@@ -118,23 +118,17 @@ To dogfood a change from a Sanoma repo of your own before it is published, link 
 gh workflow run release.yml --ref main   # or Actions → Release → Run workflow
 ```
 
-The workflow fails if the commit is not on `main` or its CI did not pass, or if the check above names a package. It [stages](https://docs.npmjs.com/staged-publishing) each package whose version is not yet on npm (`pnpm stage publish -r`): the versions exist on npm but are not public until approved. Its job summary lists every staged version with its stage id and the command that releases them, all with one 2FA code, from a machine logged in to npm (`pnpm login`) with the repo's pnpm (`pnpm stage approve` takes several ids from pnpm 11.25):
+The workflow fails if the commit is not on `main` or its CI did not pass, or if the check above names a package. It publishes each package whose version is not yet on npm (`pnpm publish -r`), in dependency order, and its job summary lists the versions published. The first package that fails to publish stops the rest, and the summary is not written: the publish step's log shows what went public. Fix what failed and run the workflow again, which skips versions already public and publishes the rest (a fix in a package already public needs a new version).
 
-```sh
-pnpm stage approve <stage-id>...   # or no ids, to pick from a list
-```
+Each package needs a trusted publisher on npmjs.com, added once by an owner of the `sanoma-ai` organization under the package's Settings → Trusted publishing → GitHub Actions: owner `Sanoma-AI`, repository `sanoma`, workflow `release.yml`, with "Allow npm publish" on (not "Allow npm dist-tag"), and the package's Publishing access set to "Require two-factor authentication and disallow tokens" (a trusted publisher is not a token). A new package, such as a connector under `connectors/`, needs no change to `release.yml` or any list (`pnpm publish -r` takes every workspace package that is not `private`): it starts at a version of its own (`0.1.0`) and names the `@sanoma-ai/*` packages it peers on as `workspace:^`. npm adds a trusted publisher only to a package that already exists, so a new package is first published once by hand, before the release that carries it, and a new configuration expires unless it is first used within two days.
 
-pnpm releases them in dependency order, so a package whose workspace dependency failed to release is skipped; rerun the command for those. If the workflow fails after staging some packages, its summary has no stage ids, so approve the versions it staged with `pnpm stage approve` and no ids, fix what failed, then run the workflow again, which skips versions already public and stages the rest (a fix in a package already staged needs a new version). A run while any version is still staged fails at it (`E409 409 Conflict - Cannot stage previously published version`): npm does not stage a version again while its stage is pending.
-
-Each package needs a trusted publisher on npmjs.com, added once by an owner of the `sanoma-ai` organization under the package's Settings → Trusted publishing → GitHub Actions: owner `Sanoma-AI`, repository `sanoma`, workflow `release.yml`, with its allowed actions left at stage only (neither direct `npm publish` nor "Allow npm dist-tag", as npm recommends), and the package's Publishing access set to "Require two-factor authentication and disallow tokens". A new package, such as a connector under `connectors/`, needs no change to `release.yml` or any list (`pnpm stage publish -r` takes every workspace package that is not `private`): it starts at a version of its own (`0.1.0`) and names the `@sanoma-ai/*` packages it peers on as `workspace:^`. npm adds a trusted publisher only to a package that already exists, so a new package is first published once by hand, and a new configuration expires unless it is first used within two days.
-
-By hand, as that first publish or as a fallback, from a clean checkout of `main` and logged in to npm as a member of the organization (the workflow's steps, run locally):
+By hand, as that first publish or as a fallback, from a clean checkout of `main` and logged in to npm as a member of the organization (the workflow's steps, run locally, with a 2FA code):
 
 ```sh
 pnpm install --frozen-lockfile
 node scripts/release-check.ts
 pnpm build                  # packages already public skip prepack, and their dependents build against them
-pnpm stage publish -r       # --dry-run first to see each tarball; then pnpm stage approve
+pnpm publish -r             # --dry-run first to see each tarball; one package: pnpm --filter <name> publish
 ```
 
 ## License
