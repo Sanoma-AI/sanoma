@@ -39,8 +39,8 @@ jobs:
       # Packages already public are skipped without running prepack, so their dependents need this
       # build; the packages being published rebuild in their prepack, which keeps the hand path safe.
       - run: pnpm build
-      # The trusted publishers allow `npm publish`: the versions are public as soon as this step
-      # ends. --no-git-checks: the first step checks the commit instead. The prepack of each
+      # The trusted publishers allow `npm publish`: each version is public as soon as it is
+      # published, and the first failure stops the rest. --no-git-checks: the first step checks the commit instead. The prepack of each
       # @sanoma-ai/bridge-<platform> downloads the provider-bridge release RELEASE pins.
       # --report-summary writes each published version to pnpm-publish-summary.json.
       - run: pnpm publish -r --no-git-checks --report-summary
