@@ -104,7 +104,7 @@ To dogfood a change from a Sanoma repo of your own before it is published, link 
 
 ## Release
 
-[`release.yml`](.github/workflows/release.yml) publishes `sanoma` and the `@sanoma-ai/*` packages to npm with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (no npm token, no approval step). Each package has its own version, and a release ships only the packages whose version changed. To release:
+[`release.yml`](.github/workflows/release.yml) publishes `sanoma` and the `@sanoma-ai/*` packages to npm with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (no npm token). Each package has its own version, and a release ships only the packages whose version changed. To release:
 
 1. In a pull request, bump `version` in the `package.json` of each public package that changed since its last release (not the private `@sanoma-ai/testing`); a breaking change in a 0.x package is a minor bump, and a provider-bridge release (`RELEASE` in `packages/bridge/scripts/download-bridge.ts`) is a change to the `@sanoma-ai/bridge-<platform>` packages. Packages that depend on one you bumped need a new version too when their published range leaves the new one out: an exact pin (`workspace:*`, as `sanoma` pins the runtime and `@sanoma-ai/bridge` its binaries), or a peer range (`workspace:^`, published as `^` on the version at that time) after a minor bump. `node scripts/release-check.ts` names each one it finds, counting the ones that pin those in turn, and the workflow runs it first. The pull request's description carries the release notes. What changed in a package since the commit that last set its version:
 
