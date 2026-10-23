@@ -14,7 +14,7 @@ Run each command from the repo's root, the directory holding `sanoma.config.ts`.
 
 ## `sanoma-dev link [<checkout>]`
 
-Links the repo to a sanoma checkout, `../sanoma` beside the repo unless you name one. It checks that the directory is a checkout (`packages/sanoma/package.json` named `sanoma`) and runs `pnpm install --frozen-lockfile` and `pnpm build` in it, every time (about a minute), so the link never runs a stale build. It then links `sanoma` and every `@sanoma-ai/*` package the repo's `package.json` declares (`dependencies` or `devDependencies`, but this kit) that the checkout has: `packages/<name>`, or `connectors/<name>` for `@sanoma-ai/connector-<name>`, one `pnpm link` per package. A declared package the checkout lacks, such as a connector of your own, is named and left installed. It then checks each link (a `link:` override in `pnpm-workspace.yaml`, and `node_modules/<name>` resolving to the package's directory in the checkout), links a failure once more, and exits 1 naming any still unlinked; `sanoma-dev unlink` undoes the links that did take.
+Links the repo to a sanoma checkout, `../sanoma` beside the repo unless you name one. It checks that the directory is a checkout (`packages/sanoma/package.json` named `sanoma`) and runs `pnpm install --frozen-lockfile` and `pnpm build` in it, every time (about a minute), so the link never runs a stale build. It then removes the repo's `.sanoma/app` (see [Generated files](#generated-files)) and links `sanoma` and every `@sanoma-ai/*` package the repo's `package.json` declares (`dependencies` or `devDependencies`, but this kit) that the checkout has: `packages/<name>`, or `connectors/<name>` for `@sanoma-ai/connector-<name>`, one `pnpm link` per package. A declared package the checkout lacks, such as a connector of your own, is named and left installed. It then checks each link (a `link:` override in `pnpm-workspace.yaml`, and `node_modules/<name>` resolving to the package's directory in the checkout), links a failure once more, and exits 1 naming any still unlinked; `sanoma-dev unlink` undoes the links that did take.
 
 `pnpm dev` (`sanoma`) is then [the launcher's dev mode](../sanoma/README.md#dev-mode): it runs the watch build of the linked packages and of the runtime, the app and the bridge they reach in the checkout, and restarts on a new build.
 
@@ -22,7 +22,11 @@ Links the repo to a sanoma checkout, `../sanoma` beside the repo unless you name
 
 ## `sanoma-dev unlink`
 
-Runs `pnpm unlink` for the same packages (and this kit, should you have linked it), then fails, naming each line, when `package.json` or `pnpm-workspace.yaml` still holds a `link:` of `sanoma` or a `@sanoma-ai/*` package (the repo's links of its own packages are left alone). When it passes, no link is left to commit; pnpm may still have rewritten `pnpm-workspace.yaml` or the lockfile, so check `git status`.
+Runs `pnpm unlink` for the same packages (and this kit, should you have linked it) and removes the repo's `.sanoma/app` (see [Generated files](#generated-files)), then fails, naming each line, when `package.json` or `pnpm-workspace.yaml` still holds a `link:` of `sanoma` or a `@sanoma-ai/*` package (the repo's links of its own packages are left alone). When it passes, no link is left to commit; pnpm may still have rewritten `pnpm-workspace.yaml` or the lockfile, so check `git status`.
+
+## Generated files
+
+Everything under the repo's `.sanoma/app` (the app's builds, its route tree, its `tsconfig.json`, the generator's and Vite's caches) is written by the sanoma that last built the repo's app, with paths into its own install or checkout. `link`, before it links, and `unlink`, after it unlinks, remove the directory and say so in one line, so a checkout never reuses what the installed sanoma wrote, nor the installed sanoma what the checkout wrote; the next `sanoma` or `sanoma check` writes it again. A running [dev mode](../sanoma/README.md#dev-mode) stops by itself once the repo no longer links the checkout, so its server does not write the directory again.
 
 ## `sanoma-dev update`
 

@@ -3,12 +3,15 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { devRepo, end, linkedPackages, partialLink, supervise } from "../src/dev.ts";
+import { devRepo, end, linkedPackages, partialLink, supervise, whenUnlinked } from "../src/dev.ts";
 import { waitFor } from "@sanoma-ai/testing";
 
 let dir = "";
 const temp = () => (dir = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-dev-"))));
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => {
+  rmSync(dir, { recursive: true, force: true });
+  vi.unstubAllEnvs();
+});
 
 /** A repo whose `node_modules/@sanoma-ai/<name>` (or `sanoma`) are symlinks into `checkout/packages/`, or real directories. */
 function repoWith(links: Record<string, "linked" | "installed">): { repo: string; checkout: string } {
@@ -206,6 +209,31 @@ describe("supervise", () => {
       await supervised.stop();
     }
     expect(alive(pids[1]!)).toBe(false);
+  });
+});
+
+describe("whenUnlinked", () => {
+  it("is called once the repo no longer links the checkout, not while it still does", async () => {
+    const { repo, checkout } = repoWith({ sanoma: "linked" });
+    // macOS's file events can report the directory's creation to a watch started right after it.
+    await new Promise((r) => setTimeout(r, 300));
+    let unlinked = 0;
+    const stop = whenUnlinked(repo, checkout, () => unlinked++, 100);
+    try {
+      // An install that keeps the link (pnpm writes its state file each time).
+      writeFileSync(join(repo, "node_modules", ".modules.yaml"), "");
+      await new Promise((r) => setTimeout(r, 400));
+      expect(unlinked).toBe(0);
+      // `pnpm unlink`: the link is replaced by the installed package.
+      rmSync(join(repo, "node_modules", "sanoma"));
+      mkdirSync(join(repo, "node_modules", "sanoma"));
+      await waitFor(() => unlinked === 1);
+      writeFileSync(join(repo, "node_modules", ".modules.yaml"), "again");
+      await new Promise((r) => setTimeout(r, 400));
+      expect(unlinked).toBe(1);
+    } finally {
+      stop();
+    }
   });
 });
 

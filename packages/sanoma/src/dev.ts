@@ -101,6 +101,30 @@ export function devRepo(cwd: string, linked: readonly LinkedPackage[] = linkedPa
   return first && dirname(dirname(first.dir));
 }
 
+/**
+ * Calls `onUnlinked` once, when the repo in `cwd` no longer links the checkout `repo` (`devRepo`
+ * says otherwise): checked after `debounceMs` of quiet following a change in its `node_modules`,
+ * which every pnpm link, unlink and install rewrites. Returns what stops the watch.
+ */
+export function whenUnlinked(cwd: string, repo: string, onUnlinked: () => void, debounceMs = 750): () => void {
+  let timer: NodeJS.Timeout | undefined;
+  const check = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (devRepo(cwd) === repo) return;
+      stop();
+      onUnlinked();
+    }, debounceMs);
+  };
+  // A removed node_modules is a change too: its watch reports it, or fails.
+  const watcher = watch(join(cwd, "node_modules"), check).on("error", check);
+  const stop = () => {
+    clearTimeout(timer);
+    watcher.close();
+  };
+  return stop;
+}
+
 export interface SuperviseOptions {
   /** Starts the child, in a process group of its own (`detached: true`); called again for each restart. */
   spawn: () => ChildProcess;
