@@ -1160,15 +1160,15 @@ describe("the page", () => {
     expect(comfortable.html).toContain('data-slot="sidebar-rail"');
     expect(comfortable.html).toMatch(/<button[^>]*aria-label="Collapse the panel"/);
 
-    // Compact: #app marked (the `compact:` variant lowers the graph's box). The sidebar follows
-    // its own cookie.
+    // Compact: #app marked (style.css's `--pane-tall`, the graph box's height, is lower there).
+    // The sidebar follows its own cookie.
     const compact = await page("/workflows/announce", app.url, {
       headers: { cookie: "sanoma_density=compact; sidebar_state=false" },
     });
     expect(compact.status).toBe(200);
     expect(compact.html).toContain('<div id="app" data-density="compact">');
     expect(compact.html).toMatch(
-      /class="[^"]*compact:h-\[440px\][^"]*"><div class="size-full"><div data-slot="skeleton"[^>]*aria-label="Loading the graph"/,
+      /class="h-\(--pane-tall\)"><div class="size-full"><div data-slot="skeleton"[^>]*aria-label="Loading the graph"/,
     );
     expect(sidebarState(compact.html)).toBe("collapsed");
   });

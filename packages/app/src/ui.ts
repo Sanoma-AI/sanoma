@@ -133,6 +133,7 @@ export {
   effectBadge,
   Fact,
   Facts,
+  FloatingCard,
   Nothing,
   Notice,
   PageHeader,

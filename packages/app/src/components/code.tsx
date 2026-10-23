@@ -35,11 +35,11 @@ const gutterMark = new GutterMark();
 const marks = new Compartment();
 
 const theme = EditorView.theme({
-  "&": { height: "100%", color: "var(--foreground)", backgroundColor: "var(--background)" },
+  "&": { height: "100%", color: "var(--foreground)", backgroundColor: "var(--card)" },
   ".cm-scroller": { fontFamily: "inherit", lineHeight: "1.6" },
   ".cm-gutters": {
     color: "var(--muted-foreground)",
-    backgroundColor: "var(--background)",
+    backgroundColor: "var(--card)",
     borderRight: "1px solid var(--border)",
   },
   ".cm-lineNumbers .cm-gutterElement": { paddingLeft: "0.75rem" },

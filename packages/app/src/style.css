@@ -1,7 +1,11 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
+@import "@fontsource-variable/ibm-plex-sans";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/400-italic.css";
+@import "@fontsource-variable/fraunces";
 /* The app's own classes, also when a company repo is the root (it is then installed, where Tailwind does not look). */
 @source "./";
 
@@ -10,42 +14,48 @@
 @custom-variant compact (&:is([data-density=compact] *));
 
 /*
- * The theme: shadcn's neutral tokens, and beside them one pair per operation effect and per tone
- * (`--x` is the badge's background, `--x-foreground` its text). Light is `:root`, dark is
- * `.dark` on <html>, which the theme script in the document head sets before the page paints.
+ * The theme: the brand's palette in shadcn's token names (paper `background`, the bar's `sidebar`,
+ * `card`, the `secondary` track, ink `foreground`, pine `primary`), and beside them one pair per
+ * operation effect and per tone (`--x` is the badge's background, `--x-foreground` its text).
+ * Every text colour is at least 4.5:1 on the fill it sits on, a tone's foreground 3:1 on the
+ * surfaces as a dot. Light is `:root`, dark is `.dark` on <html>, which the theme script in the
+ * document head sets before the page paints. Only these exist as colours: `@theme` below resets
+ * Tailwind's palette, so a tint is a token with an alpha (`bg-primary/10`).
  */
 
 :root {
   color-scheme: light;
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --radius: 0.5rem;
+  --background: oklch(0.975 0.006 153.8);
+  --foreground: oklch(0.219 0.011 163.8);
+  --card: oklch(0.995 0.003 145.6);
+  --card-foreground: oklch(0.219 0.011 163.8);
+  --popover: oklch(0.995 0.003 145.6);
+  --popover-foreground: oklch(0.219 0.011 163.8);
+  --primary: oklch(0.49 0.08 176.5);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.931 0.009 150.7);
+  --secondary-foreground: oklch(0.219 0.011 163.8);
+  --muted: oklch(0.931 0.009 150.7);
+  --muted-foreground: oklch(0.5 0.015 164.4);
+  --accent: oklch(0.931 0.009 150.7);
+  --accent-foreground: oklch(0.219 0.011 163.8);
+  --destructive: oklch(0.518 0.163 27.5);
+  --border: oklch(0.895 0.009 150.7);
+  --input: oklch(0.895 0.009 150.7);
+  --ring: oklch(0.49 0.08 176.5);
+  --sidebar: oklch(0.953 0.007 151.9);
+  --sidebar-foreground: oklch(0.219 0.011 163.8);
+  --sidebar-primary: oklch(0.49 0.08 176.5);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.931 0.009 150.7);
+  --sidebar-accent-foreground: oklch(0.219 0.011 163.8);
+  --sidebar-border: oklch(0.895 0.009 150.7);
+  --sidebar-ring: oklch(0.49 0.08 176.5);
+  /* Behind a dialog or a sheet: the ink, faint, darkening the page. */
+  --overlay: oklch(0.219 0.011 163.8 / 10%);
 
-  /* Effects: pale tints with deep, saturated text, readable on white. */
+  /* Effects: pale tints with deep, saturated text. */
   --effect-read: oklch(0.95 0.012 250);
   --effect-read-foreground: oklch(0.42 0.04 255);
   --effect-write: oklch(0.94 0.035 255);
@@ -64,12 +74,12 @@
    * (common.tsx maps each to one). ok finished or allowed, bad failed or refused, waiting on a
    * person, active running, idle queued, off cancelled or nothing to say.
    */
-  --tone-ok: oklch(0.95 0.045 155);
-  --tone-ok-foreground: oklch(0.46 0.12 155);
-  --tone-bad: oklch(0.94 0.04 25);
-  --tone-bad-foreground: oklch(0.5 0.19 27);
-  --tone-waiting: oklch(0.95 0.06 85);
-  --tone-waiting-foreground: oklch(0.5 0.12 65);
+  --tone-ok: oklch(0.948 0.02 154.9);
+  --tone-ok-foreground: oklch(0.498 0.101 153.8);
+  --tone-bad: oklch(0.937 0.022 24.4);
+  --tone-bad-foreground: oklch(0.518 0.163 27.5);
+  --tone-waiting: oklch(0.953 0.027 87.9);
+  --tone-waiting-foreground: oklch(0.514 0.105 74.7);
   --tone-active: oklch(0.94 0.035 240);
   --tone-active-foreground: oklch(0.47 0.15 245);
   --tone-idle: oklch(0.95 0.015 280);
@@ -77,7 +87,7 @@
   --tone-off: oklch(0.95 0 0);
   --tone-off-foreground: oklch(0.48 0 0);
 
-  /* Source code (code.tsx): muted hues, readable on the background. */
+  /* Source code (code.tsx): muted hues, readable on the card. */
   --code-keyword: oklch(0.5 0.15 260);
   --code-string: oklch(0.5 0.12 150);
   --code-number: oklch(0.55 0.13 60);
@@ -87,32 +97,33 @@
 
 .dark {
   color-scheme: dark;
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: oklch(0.173 0.006 156.5);
+  --foreground: oklch(0.941 0.009 145.5);
+  --card: oklch(0.216 0.01 159.2);
+  --card-foreground: oklch(0.941 0.009 145.5);
+  --popover: oklch(0.216 0.01 159.2);
+  --popover-foreground: oklch(0.941 0.009 145.5);
+  --primary: oklch(0.7 0.101 175.1);
+  --primary-foreground: oklch(0.205 0.018 177);
+  --secondary: oklch(0.261 0.011 156.3);
+  --secondary-foreground: oklch(0.941 0.009 145.5);
+  --muted: oklch(0.261 0.011 156.3);
+  --muted-foreground: oklch(0.72 0.012 158.7);
+  --accent: oklch(0.261 0.011 156.3);
+  --accent-foreground: oklch(0.941 0.009 145.5);
+  --destructive: oklch(0.741 0.123 25.3);
+  --border: oklch(0.299 0.009 159.5);
+  --input: oklch(0.299 0.009 159.5);
+  --ring: oklch(0.7 0.101 175.1);
+  --sidebar: oklch(0.2 0.007 164.1);
+  --sidebar-foreground: oklch(0.941 0.009 145.5);
+  --sidebar-primary: oklch(0.7 0.101 175.1);
+  --sidebar-primary-foreground: oklch(0.205 0.018 177);
+  --sidebar-accent: oklch(0.261 0.011 156.3);
+  --sidebar-accent-foreground: oklch(0.941 0.009 145.5);
+  --sidebar-border: oklch(0.299 0.009 159.5);
+  --sidebar-ring: oklch(0.7 0.101 175.1);
+  --overlay: oklch(0.173 0.006 156.5 / 50%);
 
   /* Effects: deep, low-lightness fills that sit on the dark cards, with light text. */
   --effect-read: oklch(0.3 0.02 255);
@@ -128,12 +139,12 @@
   --effect-access: oklch(0.3 0.08 25);
   --effect-access-foreground: oklch(0.83 0.1 25);
 
-  --tone-ok: oklch(0.3 0.06 155);
-  --tone-ok-foreground: oklch(0.85 0.12 155);
-  --tone-bad: oklch(0.3 0.08 25);
-  --tone-bad-foreground: oklch(0.83 0.1 25);
-  --tone-waiting: oklch(0.33 0.06 75);
-  --tone-waiting-foreground: oklch(0.88 0.11 85);
+  --tone-ok: oklch(0.284 0.034 157.1);
+  --tone-ok-foreground: oklch(0.751 0.116 155.4);
+  --tone-bad: oklch(0.275 0.043 24.7);
+  --tone-bad-foreground: oklch(0.741 0.123 25.3);
+  --tone-waiting: oklch(0.269 0.037 86.7);
+  --tone-waiting-foreground: oklch(0.792 0.12 83.3);
   --tone-active: oklch(0.31 0.07 245);
   --tone-active-foreground: oklch(0.84 0.09 245);
   --tone-idle: oklch(0.3 0.03 280);
@@ -149,17 +160,30 @@
 }
 
 /*
- * The spacing scale's tokens, read as `gap-(--gap-region)` between a page's regions and
- * `gap-(--gap-section)` inside a section. `#app` in both, since the attribute sits on #app itself
- * and an id outweighs it.
+ * The layout's sizes, on `#app`, since the density attribute sits on #app itself and an id
+ * outweighs it. The spacing scale's tokens, read as `gap-(--gap-region)` between a page's regions
+ * and `gap-(--gap-section)` inside a section. A pane's height, read as `h-(--pane)`: the box a
+ * graph or a file's code scrolls in; `--pane` is the Code card's (and the most a policy file's card
+ * grows to), `--pane-tall` the graph's, `--pane-short` a file's code inline in a page. Lower on a
+ * phone; Compact's, at every width, wins over `sm`'s.
  */
 #app {
   --gap-region: --spacing(6);
   --gap-section: --spacing(3);
+  --pane: 420px;
+  --pane-tall: 420px;
+  --pane-short: 280px;
+  @variant sm {
+    --pane: 480px;
+    --pane-tall: 560px;
+    --pane-short: 360px;
+  }
 }
 #app[data-density="compact"] {
   --gap-region: --spacing(3);
   --gap-section: --spacing(2);
+  --pane: 360px;
+  --pane-tall: 440px;
 }
 
 /*
@@ -184,8 +208,15 @@
 }
 
 @theme inline {
-  --font-heading: var(--font-sans);
-  --font-sans: "Geist Variable", sans-serif;
+  /* Only the tokens: Tailwind's default palette (bg-white, text-red-500, …) is off. */
+  --color-*: initial;
+  --font-sans: "IBM Plex Sans Variable", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  /* Display only: the wordmark and, in the app, an empty state's headline. */
+  --font-heading: "Fraunces Variable", serif;
+  /* A chat reply's text (text-reply), the one size off Tailwind's scale. */
+  --text-reply: 0.9375rem;
+  --text-reply--line-height: 1.6;
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -212,6 +243,7 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-overlay: var(--overlay);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);

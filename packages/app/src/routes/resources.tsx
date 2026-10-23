@@ -504,11 +504,11 @@ function Declaration({ resource: { file, span } }: { resource: Pick<DeclaredReso
           Could not read {file}: {error.message}
         </Notice>
       ) : data === undefined ? (
-        <Skeleton role="status" aria-label={`Loading ${file}`} className="h-[280px]" />
+        <Skeleton role="status" aria-label={`Loading ${file}`} className="h-(--pane-short)" />
       ) : data.source === null ? (
         <Notice variant="destructive">{file} can no longer be read.</Notice>
       ) : (
-        <PanelCard className="h-[280px] sm:h-[360px]">
+        <PanelCard>
           <CodePanel source={data.source} highlight={highlight} />
         </PanelCard>
       )}
