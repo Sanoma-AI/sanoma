@@ -14,8 +14,7 @@ import {
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { siteOf } from "#/lib/sites.ts";
 import type { Tone } from "#/lib/tone.ts";
-import type { PanelSection } from "../app-sidebar.tsx";
-import { StatusDot, TipButton, When } from "../common.tsx";
+import { type PanelSection, StatusDot, TipButton, When } from "../common.tsx";
 
 // What the sidebar's panel lists, and the pieces every panel shares.
 

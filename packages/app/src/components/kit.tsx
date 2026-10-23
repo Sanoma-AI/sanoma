@@ -137,7 +137,7 @@ export function Nothing({ title, children, action }: { title: string; children?:
   return (
     <Empty className="border">
       <EmptyHeader>
-        <EmptyTitle>{title}</EmptyTitle>
+        <EmptyTitle className="font-display">{title}</EmptyTitle>
         {children && <EmptyDescription>{children}</EmptyDescription>}
       </EmptyHeader>
       {action && <EmptyContent>{action}</EmptyContent>}
@@ -146,24 +146,47 @@ export function Nothing({ title, children, action }: { title: string; children?:
 }
 
 /**
- * A page's heading row: its <h1>, `title` after `icon` when given, whatever sits beside it, and
- * the page's `action` at the far end.
+ * A page's title row, the top of its frame: the pages above it (`crumbs`, each a link the caller
+ * makes, then a slash), its <h1> (`title` after `icon` when given, then its `count` in muted
+ * text), whatever sits beside it, and the page's `action` at the far end. 18 px regular, with no
+ * rule under it: the page's tabs and its card follow.
  */
-export function PageHeader({ title, icon, children, action }: PageHeaderProps) {
+export function PageHeader({ title, count, crumbs, icon, children, action }: PageHeaderProps) {
   return (
-    <header className="flex flex-wrap items-center gap-x-4 gap-y-2">
-      <h1 className="flex items-center gap-2 text-lg">
-        {icon}
-        {title}
-      </h1>
+    <header className="flex min-h-8 flex-wrap items-center gap-x-4 gap-y-2">
+      <div className="flex min-w-0 items-center gap-2 text-lg">
+        {crumbs && crumbs.length > 0 && (
+          <nav aria-label="Breadcrumb">
+            <ol className="flex items-center gap-2">
+              {crumbs.map((crumb, i) => (
+                <li key={i} className="flex items-center gap-2">
+                  {crumb}
+                  <span aria-hidden="true" className="text-muted-foreground">
+                    /
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </nav>
+        )}
+        <h1 className="flex min-w-0 items-center gap-2">
+          {icon}
+          {title}
+          {count !== undefined && <span className="text-muted-foreground tabular-nums">{count}</span>}
+        </h1>
+      </div>
       {children}
-      {action && <div className="ml-auto">{action}</div>}
+      {action && <div className="ml-auto flex items-center gap-2">{action}</div>}
     </header>
   );
 }
 
 export interface PageHeaderProps {
   title: ReactNode;
+  /** How many the page lists, beside its title. */
+  count?: ReactNode;
+  /** The pages above this one, outermost first, each a link. */
+  crumbs?: ReactNode[];
   icon?: ReactNode;
   children?: ReactNode;
   action?: ReactNode;

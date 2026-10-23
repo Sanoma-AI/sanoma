@@ -22,28 +22,20 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu.tsx";
-import { useSidebar } from "#/components/ui/sidebar.tsx";
-import { useActor } from "../actor.ts";
-import { useDensity } from "./density.tsx";
+import { useActor } from "../../actor.ts";
+import { useDensity } from "../density.tsx";
 
 /**
- * Who you are, the theme and the density, at the foot of the sidebar's section bar: your initials,
- * your name, your groups (and whom you act for, as an agent) and where the name comes from read
- * out to assistive tech and shown atop the menu, with Sign out when the login has one. The menu
- * renders only once opened, in the browser, so the stored theme never reaches the server's markup.
- * Switching to Compact folds the sidebar's panel once (not on a phone, where it is a sheet);
- * switching back leaves the sidebar as it is.
+ * Who you are, the theme and the density, at the foot of the bar: your initials, your name, your
+ * groups (and whom you act for, as an agent) and where the name comes from read out to assistive
+ * tech and shown atop the menu, with Sign out when the login has one. The menu renders only once
+ * opened, in the browser, so the stored theme never reaches the server's markup.
  */
 export function NavUser() {
-  const { isMobile, open, setOpen } = useSidebar();
   const { actor, groups, onBehalfOf, fromServer, error, signOut, setActor } = useActor();
   const { theme, setTheme } = useTheme();
   const { compact, setCompact } = useDensity();
-  const setDensity = (value: string) => {
-    const next = value === "compact";
-    if (next && !compact && !isMobile && open) setOpen(false);
-    setCompact(next);
-  };
+  const setDensity = (value: string) => setCompact(value === "compact");
   // Under the name: why the deployment could not say, or where the name comes from; nothing
   // when there is no name.
   const status =
@@ -58,7 +50,7 @@ export function NavUser() {
     : undefined;
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex size-10 items-center justify-center rounded-md outline-hidden transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring data-popup-open:bg-sidebar-accent">
+      <DropdownMenuTrigger className="flex size-9 items-center justify-center rounded-lg outline-hidden transition-colors hover:bg-secondary/60 focus-visible:ring-2 focus-visible:ring-sidebar-ring data-popup-open:bg-secondary">
         <Avatar className="size-8 rounded-lg">
           <AvatarFallback className="rounded-lg">
             {actor ? actor.slice(0, 2).toUpperCase() : <UserIcon aria-hidden="true" className="size-6" />}
@@ -71,7 +63,7 @@ export function NavUser() {
           {status && <span>{status}</span>}
         </span>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="min-w-56" side={isMobile ? "bottom" : "right"} align="end" sideOffset={4}>
+      <DropdownMenuContent className="min-w-56" side="right" align="end" sideOffset={4}>
         <DropdownMenuGroup>
           <DropdownMenuLabel className="flex flex-col gap-0.5">
             <span className="text-sm text-foreground">{name}</span>

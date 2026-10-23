@@ -172,23 +172,23 @@
 }
 
 /*
- * The sidebar's widths (app-sidebar.tsx): its section bar, and the panel beside it, docked or
- * peeking over the page. On :root, since the peek is portalled out of the sidebar.
+ * The shell's widths (components/shell/): the bar of sections, and the chat column beside it. On
+ * :root, since the phone's sheet holding the bar is portalled out of #app.
  */
 :root {
-  --sidebar-bar-width: 4.5rem;
-  --sidebar-panel-width: 17rem;
+  --bar-width: 4.25rem;
+  --chat-width: 28.75rem;
 }
 
 /*
  * Compact's page: Tailwind's spacing unit itself at three quarters, which every padding, margin,
- * gap and height utility is a multiple of, so the page beside the sidebar tightens at once (its
- * controls and their icons too; the text keeps its size). Everything outside the inset keeps the
- * full unit: the sidebar (its bar and panel, of fixed widths) and the portalled menus, dialogs and
+ * gap and height utility is a multiple of, so the page beside the bar tightens at once (its
+ * controls and their icons too; the text keeps its size). Everything outside the page keeps the
+ * full unit: the bar and the chat column (of fixed widths) and the portalled menus, dialogs and
  * tooltips. The gap tokens above are worked out on #app, in the full unit, and cut further on
  * purpose: the layout's air is where Compact saves most.
  */
-[data-density="compact"] [data-slot="sidebar-inset"] {
+[data-density="compact"] [data-slot="page"] {
   --spacing: 0.1875rem;
 }
 
@@ -197,11 +197,16 @@
   --color-*: initial;
   --font-sans: "IBM Plex Sans Variable", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
-  /* Display only: the wordmark and, in the app, an empty state's headline. */
-  --font-heading: "Fraunces Variable", serif;
-  /* A chat reply's text (text-reply), the one size off Tailwind's scale. */
+  /* Display only: the wordmark and, in the app, an empty state's headline (font-display). */
+  --font-display: "Fraunces Variable", serif;
+  /* shadcn's titles (Card, Dialog, Sheet): the sans, as the body. */
+  --font-heading: "IBM Plex Sans Variable", sans-serif;
+  /* The two sizes off Tailwind's scale: a chat reply's text (text-reply), and the label under a
+     section's icon in the bar (text-bar). */
   --text-reply: 0.9375rem;
   --text-reply--line-height: 1.6;
+  --text-bar: 0.6875rem;
+  --text-bar--line-height: 1;
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);

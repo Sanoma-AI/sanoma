@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound, Outlet } from "@tanstack/react-router";
 import { PlayIcon } from "@phosphor-icons/react/dist/csr/Play";
 import { Badge } from "#/components/ui/badge.tsx";
-import { ButtonLink, loadCode, loadGraph, Notice, PageHeader, pageTitle } from "#/components/common.tsx";
+import { ButtonLink, CrumbLink, loadCode, loadGraph, Notice, PageHeader, pageTitle } from "#/components/common.tsx";
 import {
   configQuery,
   type RunFilter,
@@ -69,12 +69,17 @@ function WorkflowLayout() {
   const { name } = Route.useParams();
   const { runs } = Route.useSearch();
   const workflow = useWorkflow(name);
-  // Titled by the workflow (on a run's pane the last crumb, CrumbHeader's title, is the run), or
+  // Titled by the workflow, under Workflows (on a run's pane too, where the last crumb is the run), or
   // only its name when it is retired. New run opens in the inspector of the pane that shows: none
   // for a retired workflow, which has nothing to start.
   return (
     <>
       <PageHeader
+        crumbs={[
+          <CrumbLink key="workflows" to="/workflows">
+            Workflows
+          </CrumbLink>,
+        ]}
         title={workflow?.title ?? name}
         action={
           workflow && (

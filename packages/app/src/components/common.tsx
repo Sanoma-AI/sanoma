@@ -39,7 +39,6 @@ import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import type { OpEntry } from "@sanoma-ai/workflows/describe";
 import { approverLabel } from "@sanoma-ai/workflows/shared";
 import { configQuery, type SiteCaller } from "../queries.ts";
-import type { PanelSection } from "./app-sidebar.tsx";
 import type { CodeProps } from "./code.tsx";
 import type { GraphProps } from "./graph.tsx";
 import { ButtonLink, effectBadge, PageHeader, type PageHeaderProps, Region, Tip, ToneBadge } from "./kit.tsx";
@@ -49,13 +48,16 @@ import { ButtonLink, effectBadge, PageHeader, type PageHeaderProps, Region, Tip,
 // private ones, some of which read the app (its config, its router's crumbs and sites).
 export * from "./kit.tsx";
 
+/** The sections that had a panel: what a route's `staticData.section` names. */
+export type PanelSection = "inbox" | "workflows" | "sites" | "data" | "permissions";
+
 declare module "@tanstack/react-router" {
   interface StaticDataRouteOption {
     /** The page's name: its breadcrumb, its <h1> (CrumbHeader) and its <title> (pageTitle). */
     crumb?: string;
     /** The page takes the page column's full width, not the reading width the root caps others at. */
     wide?: true;
-    /** The sidebar's section the page is under, whose panel shows beside the bar (`usePanel`). */
+    /** The section the page is under, whose panel it had (`usePanel`). */
     section?: PanelSection;
   }
 }
@@ -479,10 +481,33 @@ export const CodePanel = (props: CodeProps) => (
   </LazyPanel>
 );
 
-/** An app screen's heading row: a `PageHeader` titled by the page's crumb. */
-export function CrumbHeader(props: Omit<PageHeaderProps, "title">) {
-  const crumb = useCrumbs().at(-1)?.label;
-  return <PageHeader {...props} title={crumb} />;
+/**
+ * An app screen's title row: a `PageHeader` titled by the page's crumb, under the crumbs of the
+ * pages above it, each a link.
+ */
+export function CrumbHeader(props: Omit<PageHeaderProps, "title" | "crumbs">) {
+  const crumbs = useCrumbs();
+  return (
+    <PageHeader
+      {...props}
+      title={crumbs.at(-1)?.label}
+      crumbs={crumbs.slice(0, -1).map(({ id, pathname, label }) => (
+        <CrumbLink key={id} to={pathname}>
+          {label}
+        </CrumbLink>
+      ))}
+    />
+  );
+}
+
+/** A page above this one, in a `PageHeader`'s crumbs. */
+export function CrumbLink({ to, children }: { to: string; children: ReactNode }) {
+  return (
+    // Exact: a page above this one is not the page open, so it never takes `aria-current`.
+    <Link to={to} activeOptions={{ exact: true }} className="text-muted-foreground hover:text-foreground">
+      {children}
+    </Link>
+  );
 }
 
 /** A heading inside a card's section. */
