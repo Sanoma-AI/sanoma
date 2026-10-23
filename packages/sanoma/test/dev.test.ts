@@ -3,12 +3,15 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { devRepo, end, linkedPackages, partialLink, supervise } from "../src/dev.ts";
+import { devRepo, end, linkedPackages, partialLink, supervise, whenUnlinked } from "../src/dev.ts";
 import { waitFor } from "@sanoma-ai/testing";
 
 let dir = "";
 const temp = () => (dir = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-dev-"))));
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => {
+  rmSync(dir, { recursive: true, force: true });
+  vi.unstubAllEnvs();
+});
 
 /** A repo whose `node_modules/@sanoma-ai/<name>` (or `sanoma`) are symlinks into `checkout/packages/`, or real directories. */
 function repoWith(links: Record<string, "linked" | "installed">): { repo: string; checkout: string } {
@@ -206,6 +209,52 @@ describe("supervise", () => {
       await supervised.stop();
     }
     expect(alive(pids[1]!)).toBe(false);
+  });
+});
+
+describe("whenUnlinked", () => {
+  it("is called once none of the packages is linked on two looks in a row, not while one is", () => {
+    vi.useFakeTimers();
+    const { repo, checkout } = repoWith({ sanoma: "linked", workflows: "linked" });
+    const sanoma = join(repo, "node_modules", "sanoma");
+    const workflows = join(repo, "node_modules", "@sanoma-ai", "workflows");
+    let unlinked = 0;
+    const stop = whenUnlinked(repo, linkedPackages(repo), () => unlinked++, 100);
+    try {
+      // One of the two unlinked: the other still is.
+      rmSync(workflows);
+      vi.advanceTimersByTime(300);
+      expect(unlinked).toBe(0);
+      // An install that swaps the last link for a moment: one look sees it gone, the next back.
+      rmSync(sanoma);
+      vi.advanceTimersByTime(100);
+      symlinkSync(join(checkout, "packages", "sanoma"), sanoma);
+      vi.advanceTimersByTime(100);
+      expect(unlinked).toBe(0);
+      // `pnpm unlink`: the link is replaced by the installed package.
+      rmSync(sanoma);
+      mkdirSync(sanoma);
+      vi.advanceTimersByTime(100);
+      expect(unlinked).toBe(0);
+      vi.advanceTimersByTime(100);
+      expect(unlinked).toBe(1);
+      vi.advanceTimersByTime(500);
+      expect(unlinked).toBe(1);
+    } finally {
+      stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does nothing when nothing is linked to begin with, as under SANOMA_DEV_REPO", () => {
+    vi.useFakeTimers();
+    const { repo } = repoWith({ sanoma: "installed" });
+    let unlinked = 0;
+    const stop = whenUnlinked(repo, [], () => unlinked++, 100);
+    vi.advanceTimersByTime(500);
+    stop();
+    vi.useRealTimers();
+    expect(unlinked).toBe(0);
   });
 });
 

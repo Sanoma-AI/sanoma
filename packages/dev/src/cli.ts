@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { resolve } from "node:path";
+import { existsSync, rmSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { checkRepo, declared, isCheckout, leftoverLinks, linkSet, notLinked, UsageError } from "./links.ts";
 
@@ -12,7 +13,10 @@ Develops sanoma from the Sanoma repo in the working directory (the one holding s
                                  pnpm link from it, one by one and checked, sanoma and each @sanoma-ai package the
                                  repo declares; \`pnpm dev\` then runs the checkout in dev mode
   sanoma-dev unlink              undo the link, and fail when package.json or pnpm-workspace.yaml still hold a link:
-  sanoma-dev update              pnpm update --latest sanoma and @sanoma-ai/*, then sanoma check; refused while linked`;
+  sanoma-dev update              pnpm update --latest sanoma and @sanoma-ai/*, then sanoma check; refused while linked
+
+link and unlink remove the repo's .sanoma/app before pnpm links or unlinks: the sanoma that ran before
+generated all of it.`;
 
 /** Exit codes: 2 for how the bin was called or what it found, 1 for a failure while running. */
 const USAGE_EXIT = 2;
@@ -31,6 +35,14 @@ const mustPnpm = (cwd: string, args: string[]) => {
 };
 
 const COMMANDS = ["link", "unlink", "update"];
+
+/** Removes the repo's `.sanoma/app`, saying so: see the README's Generated files. */
+function clearGenerated(root: string): void {
+  const app = join(root, ".sanoma", "app");
+  if (!existsSync(app)) return;
+  rmSync(app, { recursive: true, force: true });
+  console.log("removed .sanoma/app");
+}
 
 /** Runs the command line in the working directory; returns the exit code. */
 function main(argv: string[]): number {
@@ -64,6 +76,7 @@ function link(root: string, given: string | undefined): number {
   console.log(`building ${checkout} (about a minute)`);
   mustPnpm(checkout, ["install", "--frozen-lockfile"]);
   mustPnpm(checkout, ["build"]);
+  clearGenerated(root);
   // One directory per pnpm link: one call with several can leave some unlinked, and still exit 0 (#255).
   // The check below, not pnpm's exit code, decides, so a failure part way still points to unlink.
   for (const p of found) pnpm(root, ["link", p.dir]);
@@ -82,6 +95,7 @@ function link(root: string, given: string | undefined): number {
 
 function unlink(root: string): number {
   const names = declared(root);
+  clearGenerated(root);
   if (names.length) mustPnpm(root, ["unlink", ...names]);
   const left = leftoverLinks(root);
   if (left.length) throw new Error(`still linked, do not commit:\n${left.join("\n")}`);

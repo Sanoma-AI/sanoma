@@ -102,9 +102,10 @@ describe("leftoverLinks", () => {
 
 /**
  * Runs the bin in `cwd` with a `pnpm` on PATH that records each of this run's calls, directory and arguments,
- * and exits 3 for `pnpm exec` (a failing `sanoma check`). Its `pnpm link <dir>` does what pnpm's does: adds a
- * `link:` override to `pnpm-workspace.yaml` and points `node_modules/<name>` at the directory, but not, as a racing
- * pnpm may, for the first `SKIP_TIMES` (default every) links of the package `SKIP_LINK` names.
+ * and a `.sanoma/app` it finds where it runs, and exits 3 for `pnpm exec` (a failing `sanoma check`). Its
+ * `pnpm link <dir>` does what pnpm's does: adds a `link:` override to `pnpm-workspace.yaml` and points
+ * `node_modules/<name>` at the directory, but not, as a racing pnpm may, for the first `SKIP_TIMES` (default
+ * every) links of the package `SKIP_LINK` names.
  */
 function sanomaDev(cwd: string, args: string[], env: Record<string, string> = {}) {
   const calls = join(dir, "pnpm-calls");
@@ -113,6 +114,7 @@ function sanomaDev(cwd: string, args: string[], env: Record<string, string> = {}
     join(bin, "pnpm"),
     `#!/bin/sh
 echo "$(pwd -P) $*" >> "${calls}"
+[ -e .sanoma/app ] && echo "$(pwd -P) has .sanoma/app" >> "${calls}"
 [ "$1" = exec ] && exit 3
 [ "$1" = link ] || exit 0
 name=$(sed -E 's/.*"name":"([^"]*)".*/\\1/' "$2/package.json")
@@ -198,6 +200,33 @@ describe("sanoma-dev", () => {
       `${repo} link ${join(checkout, "packages/sanoma")}`,
     ]);
     expect(stdout).toContain(`linked sanoma from ${checkout}`);
+  });
+
+  it("link and unlink remove the repo's generated .sanoma/app before pnpm runs, saying so", () => {
+    const { repo, checkout } = layout({ dependencies: { sanoma: "^0.4.2" } });
+    const generated = () => {
+      write(join(repo, ".sanoma/app/routeTree.gen.ts"), `import "${checkout}/packages/app/src/routes/__root";\n`);
+      write(join(repo, ".sanoma/api.ts"), "");
+    };
+
+    generated();
+    const linked = sanomaDev(repo, ["link"]);
+    expect(linked.status).toBe(0);
+    // The fake pnpm records a .sanoma/app it finds: none.
+    expect(linked.calls.slice(2)).toEqual([`${repo} link ${join(checkout, "packages/sanoma")}`]);
+    expect(linked.stdout).toContain("\nremoved .sanoma/app\n");
+    expect(existsSync(join(repo, ".sanoma/api.ts"))).toBe(true);
+
+    generated();
+    write(join(repo, "pnpm-workspace.yaml"), "");
+    const unlinked = sanomaDev(repo, ["unlink"]);
+    expect(unlinked.status).toBe(0);
+    expect(unlinked.calls).toEqual([`${repo} unlink sanoma`]);
+    expect(unlinked.stdout).toMatch(/^removed \.sanoma\/app\nunlinked sanoma/);
+    expect(existsSync(join(repo, ".sanoma/api.ts"))).toBe(true);
+
+    // Nothing to remove: nothing said.
+    expect(sanomaDev(repo, ["unlink"]).stdout).not.toContain("removed");
   });
 
   it("refuses what is not a checkout, a directory with no sanoma.config.ts, and extra arguments, with exit 2", () => {
