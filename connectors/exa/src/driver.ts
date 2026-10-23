@@ -55,8 +55,9 @@ function failure(op: string, { ExaError, ExaTimeoutError }: Sdk, error: unknown)
  */
 export function exaDriver(options: ExaDriverOptions = {}) {
   const timeoutMs = options.timeoutMs ?? 30_000;
-  if (!Number.isInteger(timeoutMs) || timeoutMs < 1) {
-    throw new RangeError(`exaDriver: timeoutMs must be a whole number of ms, not ${timeoutMs}`);
+  // Checked here, as `exa-js` checks it, so a bad option fails when the driver is made, not as each call's request.
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647) {
+    throw new RangeError(`exaDriver: timeoutMs must be a whole number of ms from 1 to 2147483647, not ${timeoutMs}`);
   }
   /** The client for the last key read, made again only when `EXA_API_KEY` changes. */
   let client: { key: string; exa: Exa } | undefined;
@@ -94,23 +95,20 @@ export function exaDriver(options: ExaDriverOptions = {}) {
       web: {
         // `contents: false` when none is asked for, as the SDK would otherwise ask for each page's
         // text. Two calls, not `contents ?? false`: the SDK's overloads take each but not the union.
-        search: async ({ query, contents, ...rest }) => {
-          const { results } = await calling("web.search", (exa) =>
+        // The runtime's parse of the output keeps `results` and drops the rest of the reply.
+        search: ({ query, contents, ...rest }) =>
+          calling("web.search", (exa) =>
             contents ? exa.search(query, { ...rest, contents }) : exa.search(query, { ...rest, contents: false }),
-          );
-          return { results };
-        },
+          ),
         getContents: async ({ urls, ...contents }) => {
           const { results, statuses = [] } = await calling("web.getContents", (exa) => exa.getContents(urls, contents));
           return { results, statuses };
         },
         // Deprecated in the SDK, which has no other way to find pages like one; the endpoint stands.
-        findSimilar: async ({ url, contents, ...rest }) => {
-          const { results } = await calling("web.findSimilar", (exa) =>
+        findSimilar: ({ url, contents, ...rest }) =>
+          calling("web.findSimilar", (exa) =>
             contents ? exa.findSimilar(url, { ...rest, contents }) : exa.findSimilar(url, { ...rest, contents: false }),
-          );
-          return { results };
-        },
+          ),
         answer: async ({ query, text }) => {
           const { answer, citations } = await calling("web.answer", (exa) => exa.answer(query, { text }));
           // Text, unless the request sends an `outputSchema`, which this one never does.

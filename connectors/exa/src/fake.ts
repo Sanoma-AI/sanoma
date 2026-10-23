@@ -14,7 +14,8 @@ export interface FakeExaState extends Record<string, unknown> {
   pages: Record<string, FakeExaPage>;
 }
 
-type Contents = z.infer<typeof exaOps.web.getContents.input>;
+/** What of a page to return: `contents` of a search, the top-level fields of `getContents`. */
+type Contents = NonNullable<z.infer<typeof exaOps.web.search.input>["contents"]>;
 
 /** How many results the fake returns at most, whatever `numResults` asks. */
 const MAX_RESULTS = 3;
@@ -30,7 +31,7 @@ const hostFor = (usual: string, filters: { includeDomains?: string[]; excludeDom
   filters.includeDomains?.[0] ?? (filters.excludeDomains?.includes(usual) ? `other.${usual}.example` : usual);
 
 /** A page as Exa returns it, with what of it `contents` asks for. */
-function shown(page: FakeExaPage, contents: Omit<Contents, "urls"> = {}, score?: number) {
+function shown(page: FakeExaPage, contents: Contents = {}, score?: number) {
   const { text, highlights, summary } = contents;
   const max = (option: typeof text | typeof highlights) =>
     typeof option === "object" ? option.maxCharacters : undefined;
@@ -94,13 +95,13 @@ export function fakeExa(options: FakeOptions = {}) {
               };
             },
             getContents: async ({ urls, ...contents }) => {
-              const readable = urls.filter((url) => !URL.parse(url)?.hostname.endsWith(".invalid"));
+              const read = urls.map((url) => ({ url, ok: !URL.parse(url)?.hostname.endsWith(".invalid") }));
               return {
-                results: readable.map((url) => shown(page(url), contents)),
-                statuses: urls.map((id) =>
-                  readable.includes(id)
-                    ? { id, status: "success" as const }
-                    : { id, status: "error" as const, error: { tag: "CRAWL_NOT_FOUND", httpStatusCode: 404 } },
+                results: read.filter((r) => r.ok).map((r) => shown(page(r.url), contents)),
+                statuses: read.map(({ url: id, ok }) =>
+                  ok
+                    ? { id, status: "success" }
+                    : { id, status: "error", error: { tag: "CRAWL_NOT_FOUND", httpStatusCode: 404 } },
                 ),
               };
             },
