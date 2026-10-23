@@ -1,17 +1,16 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { checkRepo, declared, isCheckout, leftoverLinks, linkSet, UsageError } from "./links.ts";
+import { checkRepo, declared, isCheckout, leftoverLinks, linkSet, notLinked, UsageError } from "./links.ts";
 
 const USAGE = `usage: sanoma-dev <command>
 
 Develops sanoma from the Sanoma repo in the working directory (the one holding sanoma.config.ts).
 
-  sanoma-dev link [<checkout>]   pnpm link sanoma and each @sanoma-ai package the repo declares from a sanoma
-                                 checkout (default ../sanoma beside the repo), installing and building it first
-                                 when it has no build; \`pnpm dev\` then runs the checkout in dev mode
+  sanoma-dev link [<checkout>]   install and build a sanoma checkout (default ../sanoma beside the repo), then
+                                 pnpm link from it, one by one and checked, sanoma and each @sanoma-ai package the
+                                 repo declares; \`pnpm dev\` then runs the checkout in dev mode
   sanoma-dev unlink              undo the link, and fail when package.json or pnpm-workspace.yaml still hold a link:
   sanoma-dev update              pnpm update --latest sanoma and @sanoma-ai/*, then sanoma check; refused while linked`;
 
@@ -62,17 +61,20 @@ function link(root: string, given: string | undefined): number {
   const { found, missing } = linkSet(root, checkout);
   if (missing.length) console.log(`not in ${checkout}, so not linked: ${missing.join(", ")}`);
   if (!found.length) throw new UsageError("nothing to link: package.json declares no sanoma package the checkout has");
-  // The linked packages and the core packages the linked sanoma loads from the checkout.
-  const built = [
-    ...found.map((p) => p.dir),
-    ...["workflows", "app", "bridge"].map((n) => join(checkout, "packages", n)),
-  ];
-  if (built.some((dir) => !existsSync(join(dir, "dist")))) {
-    console.log(`${checkout} is not built: installing and building it`);
-    mustPnpm(checkout, ["install", "--frozen-lockfile"]);
-    mustPnpm(checkout, ["build"]);
+  console.log(`building ${checkout} (about a minute)`);
+  mustPnpm(checkout, ["install", "--frozen-lockfile"]);
+  mustPnpm(checkout, ["build"]);
+  // One directory per pnpm link: one call with several can leave some unlinked, and still exit 0 (#255).
+  // The check below, not pnpm's exit code, decides, so a failure part way still points to unlink.
+  for (const p of found) pnpm(root, ["link", p.dir]);
+  for (const p of notLinked(root, found)) pnpm(root, ["link", p.dir]);
+  const failed = notLinked(root, found);
+  if (failed.length) {
+    throw new Error(
+      `not linked: ${failed.map((p) => p.name).join(", ")}: pnpm-workspace.yaml has no link: override for it, ` +
+        "or node_modules/<name> is not its directory in the checkout; sanoma-dev unlink undoes the links that took",
+    );
   }
-  mustPnpm(root, ["link", ...found.map((p) => p.dir)]);
   console.log(`linked ${found.map((p) => p.name).join(", ")} from ${checkout}`);
   console.log("pnpm dev now runs the checkout in dev mode; sanoma-dev unlink before you commit");
   return 0;

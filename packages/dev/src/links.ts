@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 
 /** How the bin was called, or what it found where it was called: exit 2. */
@@ -74,18 +74,41 @@ export function linkSet(root: string, checkout: string): { found: Package[]; mis
 /** An `overrides` line of `pnpm-workspace.yaml` linking a package: its name, quoted or not. */
 const OVERRIDE = /^\s*['"]?([^'":\s]+)['"]?\s*:\s*['"]?link:/;
 
+const workspaceLines = (root: string): string[] => {
+  const file = join(root, "pnpm-workspace.yaml");
+  return existsSync(file) ? readFileSync(file, "utf8").split("\n") : [];
+};
+
+const realpath = (path: string) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The packages of `found` a `pnpm link` has not linked into the repo: no `link:` override for the
+ * name in `pnpm-workspace.yaml`, or `node_modules/<name>` is not the package's directory.
+ */
+export function notLinked(root: string, found: Package[]): Package[] {
+  const overridden = new Set(workspaceLines(root).map((line) => OVERRIDE.exec(line)?.[1]));
+  return found.filter(
+    ({ name, dir }) => !overridden.has(name) || realpath(join(root, "node_modules", name)) !== realpath(dir),
+  );
+}
+
 /**
  * What a link of `sanoma` or a `@sanoma-ai/*` package leaves behind that must not be committed:
  * each such `link:` dependency in `package.json`, and each such line of `pnpm-workspace.yaml` (the
  * `overrides` a `pnpm link` adds). Links of other packages are the repo's own business.
  */
 export function leftoverLinks(root: string): string[] {
-  const workspace = join(root, "pnpm-workspace.yaml");
   return [
     ...Object.entries(deps(root))
       .filter(([name, spec]) => ours(name) && spec.startsWith("link:"))
       .map(([name, spec]) => `package.json: "${name}": "${spec}"`),
-    ...(existsSync(workspace) ? readFileSync(workspace, "utf8").split("\n") : [])
+    ...workspaceLines(root)
       .filter((line) => ours(OVERRIDE.exec(line)?.[1] ?? ""))
       .map((line) => `pnpm-workspace.yaml: ${line.trim()}`),
   ];
