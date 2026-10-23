@@ -1,0 +1,29 @@
+[
+  {
+    "method": "POST",
+    "path": "/findSimilar",
+    "status": 200,
+    "body": {
+      "requestId": "00000000000000000000000000000000",
+      "results": [
+        {
+          "id": "https://www.example.com/search-api",
+          "url": "https://www.example.com/search-api",
+          "title": "A web search API for AI applications",
+          "publishedDate": null,
+          "author": null,
+          "score": 0.87
+        },
+        {
+          "id": "https://www.example.org/",
+          "url": "https://www.example.org/",
+          "title": "Search the web with embeddings",
+          "publishedDate": "2024-11-02T00:00:00.000Z",
+          "author": null,
+          "score": 0.84
+        }
+      ],
+      "costDollars": { "total": 0.005 }
+    }
+  }
+]

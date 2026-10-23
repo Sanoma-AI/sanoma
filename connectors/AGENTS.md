@@ -9,11 +9,23 @@ One workspace package per vendor, each built on `@sanoma-ai/workflows`. A connec
 | [`better-auth/`](better-auth/AGENTS.md) | `@sanoma-ai/connector-better-auth`: Better Auth, a visitor login for public sites, on the company's database |
 | [`bluesky/`](bluesky/AGENTS.md)         | `@sanoma-ai/connector-bluesky`: Bluesky (AT Protocol) post operations and an in-memory fake                  |
 | [`docker/`](docker/AGENTS.md)           | `@sanoma-ai/connector-docker`: the local Docker host, a container that runs the company                      |
+| [`exa/`](exa/AGENTS.md)                 | `@sanoma-ai/connector-exa`: Exa web search, page contents, similar pages and answers, and an in-memory fake  |
 | [`ghost/`](ghost/AGENTS.md)             | `@sanoma-ai/connector-ghost`: Ghost Admin API post operations and an in-memory fake                          |
 | [`github/`](github/AGENTS.md)           | `@sanoma-ai/connector-github`: GitHub resources read through its OpenTofu provider                           |
 | [`resend/`](resend/AGENTS.md)           | `@sanoma-ai/connector-resend`: Resend broadcast and email operations and an in-memory fake                   |
 | [`stripe/`](stripe/AGENTS.md)           | `@sanoma-ai/connector-stripe`: Stripe resources read through its OpenTofu provider                           |
 | [`supabase/`](supabase/AGENTS.md)       | `@sanoma-ai/connector-supabase`: Supabase projects (OpenTofu provider), pooler and health                    |
+
+## Integration sources
+
+Where a connector's calls come from, in order; the schemas are hand-written Zod in every case, whatever carries the calls:
+
+1. **Resources** (things a company creates and keeps in sync): the vendor's OpenTofu/Terraform provider through the bridge, as a `tfConnector` record (Docker, GitHub, Stripe, Supabase).
+2. **Operations**: the vendor's officially supported TypeScript SDK as the transport, when one exists and is maintained (Bluesky's `@atproto/api`, Exa's `exa-js`).
+3. No official SDK: a client generated from the vendor's published OpenAPI spec with Hey API, pinned to a commit and cut to the operations called, in `src/generated/`, never edited by hand (Resend).
+4. Neither: a driver hand-written on `fetch`, the last resort (Ghost).
+
+[build-connector](../.agents/skills/build-connector/SKILL.md) walks through making one.
 
 ## Shared connector conventions
 

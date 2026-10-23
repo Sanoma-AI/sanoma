@@ -1,0 +1,12 @@
+[
+  {
+    "method": "POST",
+    "path": "/search",
+    "status": 401,
+    "body": {
+      "requestId": "00000000000000000000000000000000",
+      "error": "Invalid API key",
+      "tag": "INVALID_API_KEY"
+    }
+  }
+]

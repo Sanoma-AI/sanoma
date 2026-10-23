@@ -1,0 +1,32 @@
+[
+  {
+    "method": "POST",
+    "path": "/search",
+    "status": 200,
+    "body": {
+      "requestId": "00000000000000000000000000000000",
+      "searchType": "neural",
+      "results": [
+        {
+          "id": "https://www.example.com/blog/workflow-automation-small-business",
+          "url": "https://www.example.com/blog/workflow-automation-small-business",
+          "title": "Workflow automation for small businesses: where to start",
+          "publishedDate": "2025-03-14T00:00:00.000Z",
+          "author": null,
+          "score": 0.41,
+          "text": "Workflow automation for small businesses: where to start. Most small teams lose hours a week to copying data between tools."
+        },
+        {
+          "id": "https://www.example.org/guides/automate-invoices",
+          "url": "https://www.example.org/guides/automate-invoices",
+          "title": "A guide to automating invoices",
+          "publishedDate": null,
+          "author": "Ada Example",
+          "score": 0.38,
+          "text": "A guide to automating invoices. Send each invoice when the work is done, not at the end of the month."
+        }
+      ],
+      "costDollars": { "total": 0.006 }
+    }
+  }
+]

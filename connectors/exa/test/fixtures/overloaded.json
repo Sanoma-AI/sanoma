@@ -1,0 +1,12 @@
+[
+  {
+    "method": "POST",
+    "path": "/search",
+    "status": 503,
+    "body": {
+      "requestId": "00000000000000000000000000000000",
+      "error": "Service overloaded, please retry",
+      "tag": "SERVICE_OVERLOADED"
+    }
+  }
+]
