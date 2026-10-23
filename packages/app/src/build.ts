@@ -422,7 +422,14 @@ function localesPlugin(repo?: string): Plugin {
         const [, routes, ...deeper] = file.slice(sites.length).split(sep);
         const site = event.endsWith("Dir") && !deeper.length && (routes === undefined || routes === "routes");
         if (!site && !(routes === "site.ts" && !deeper.length)) return;
-        const next = await localesModule(repo);
+        let next: string;
+        try {
+          next = await localesModule(repo);
+        } catch (err) {
+          // A folder gone while it was read: the next event reads again.
+          server.config.logger.warn(`sanoma: reading the sites' languages failed: ${String(err)}`);
+          return;
+        }
         if (next === text) return;
         text = next;
         reloadFile(server, id);

@@ -55,14 +55,7 @@ export const content = new Proxy(
               (await inLocale(kind, options?.locale)).map(({ slug, locale, data }) =>
                 locale === undefined ? { slug, data } : { slug, locale, data },
               ),
-            get: async (slug, options) => {
-              const entries = (await entriesOf(kind)).filter((entry) => entry.slug === slug);
-              const locale = options?.locale;
-              return (
-                (locale !== undefined && entries.find((entry) => entry.locale === locale)) ||
-                entries.find((entry) => entry.locale === undefined)
-              );
-            },
+            get: async (slug, options) => (await inLocale(kind, options?.locale)).find((entry) => entry.slug === slug),
           },
   },
 ) as Content;

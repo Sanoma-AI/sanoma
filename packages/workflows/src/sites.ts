@@ -369,8 +369,10 @@ function siteOptionsOf(
     if (bad !== undefined) return `"${bad}" is not a language tag such as "en", "fr" or "pt-BR"`;
     const twice = locales.find((locale, i) => locales.indexOf(locale) !== i);
     if (twice !== undefined) return `"${twice}" is in \`locales\` twice`;
-    if (!isPublic || loginAt)
+    // When `public` is what is wrong, it is said there.
+    if ((!isPublic && !publicUnread) || loginAt) {
       return "`locales` are for a public site with no login: add `public: true`, or remove `locales`";
+    }
     return undefined;
   };
   const localesMessage = localesAt && localesProblem();
@@ -379,7 +381,7 @@ function siteOptionsOf(
     ...(title !== undefined && { title }),
     ...(isPublic && { public: true as const }),
     ...(login !== undefined && { login }),
-    ...(localesAt && !localesMessage && { locales }),
+    ...(localesAt && !localesMessage && isPublic && !loginAt && { locales }),
     problems,
   };
 }

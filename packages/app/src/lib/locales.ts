@@ -38,11 +38,14 @@ export function pageLanguages(
   href: (to: string, params: Record<string, unknown>) => string,
 ): PageLanguages | "notFound" {
   const site = siteOf(leaf?.fullPath);
-  const locales = site && LOCALES[site];
-  if (!leaf || !locales) return { locales: [] };
-  if (!leaf.fullPath.startsWith(`/sites/${site}/{-$locale}`)) return { locale: locales[0], locales: [] };
+  if (!leaf || !site) return { locales: [] };
+  const locales = Object.hasOwn(LOCALES, site) ? LOCALES[site] : undefined;
+  if (!leaf.fullPath.startsWith(`/sites/${site}/{-$locale}`)) return { locale: locales?.[0], locales: [] };
+  // A site with no languages (or a problem in them) has no URL in one.
   const named = leaf.params.locale;
-  if (named !== undefined && (named === locales[0] || !locales.includes(named as string))) return "notFound";
+  if (named !== undefined && (!locales || named === locales[0] || !locales.includes(named as string)))
+    return "notFound";
+  if (!locales) return { locales: [] };
   return {
     locale: (named as string | undefined) ?? locales[0],
     locales: locales.map((locale, i) => ({
@@ -62,5 +65,8 @@ export const usePageLanguages = (): PageLanguages =>
     structuralSharing: true,
   });
 
+/** A route path without its optional parameters (`{-$locale}`): the page's path when none is given. */
+export const withoutOptional = (path: string): string => path.replace(/\/\{-\$[^}]*\}/g, "");
+
 /** A route path with no required parameter (`$id`; an optional `{-$locale}` is none), so one URL to list or link. */
-export const hasOneUrl = (path: string): boolean => !path.replace(/\{-\$[^}]*\}/g, "").includes("$");
+export const hasOneUrl = (path: string): boolean => !withoutOptional(path).includes("$");

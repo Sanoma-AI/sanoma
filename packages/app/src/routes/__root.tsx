@@ -19,10 +19,12 @@ const Root = lazy(() => import("#/components/app-chrome.tsx"));
 // One root for both hosts (a route tree has one): on a public site's host (`context.site`), a
 // bare document around the site's own pages, with nothing of the app's but its scripts; on the
 // app's, the app's head, loader and chrome.
-/** What the router gives every route, and what the root's `beforeLoad` adds. */
-type RootContext = { queryClient: QueryClient; site?: string; origin?: string } & Partial<PageLanguages>;
+/** What the router gives every route. */
+type RouterContext = { queryClient: QueryClient; site?: string; origin?: string };
+/** That, and what the root's `beforeLoad` adds. */
+type RootContext = RouterContext & Partial<PageLanguages>;
 
-export const Route = createRootRouteWithContext<{ queryClient: QueryClient; site?: string; origin?: string }>()({
+export const Route = createRootRouteWithContext<RouterContext>()({
   // The page's language and its URL in each of its site's: a URL naming a language its site does
   // not have (or its default, which has no prefix) is no page.
   beforeLoad: ({ matches, buildLocation }): PageLanguages => {

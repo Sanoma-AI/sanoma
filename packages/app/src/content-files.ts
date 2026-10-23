@@ -33,8 +33,8 @@ const FRONT_MATTER = /^---[ \t]*\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
  * and each `*.md` directly in it an entry, its slug the file's name (a URL segment too), read by
  * `parseFile`; `<slug>.<locale>.md` is the slug's translation into a language (`LOCALE`), its
  * `locale` set and its front matter laid over its `<slug>.md`'s, so a key it does not repeat (a
- * date, an image, `draft`) is the original's. Subfolders, other files and dotfiles are left alone.
- * Without `drafts`, an entry whose `draft` is `true` is left out. Entries are sorted by file name.
+ * date, an image, `draft`) is the original's, as is the body when it has none. Subfolders, other files and dotfiles are left alone.
+ * Without `drafts`, an entry whose `draft` is `true` is left out. Entries are sorted by slug, a slug's files by name.
  */
 export function readContent(
   repo: string,
@@ -61,10 +61,18 @@ export function readContent(
       if ("message" in read) problems.push(at(file, read.message, read.line, read.column));
       else entries.push({ slug, ...(locale !== undefined && { locale }), ...read });
     }
-    const originals = new Map(entries.filter((e) => e.locale === undefined).map((e) => [e.slug, e.data]));
+    const originals = new Map(entries.filter((e) => e.locale === undefined).map((e) => [e.slug, e]));
     kinds[kind] = entries
-      .map((e) => (e.locale === undefined ? e : { ...e, data: { ...originals.get(e.slug), ...e.data } }))
-      .filter((e) => options.drafts || e.data.draft !== true);
+      .map((e) => {
+        const original = e.locale === undefined ? undefined : originals.get(e.slug);
+        if (!original) return e;
+        // A translation of its front matter alone keeps the original's body.
+        const text = e.body.trim() ? { body: e.body, html: e.html } : { body: original.body, html: original.html };
+        return { ...e, ...text, data: { ...original.data, ...e.data } };
+      })
+      .filter((e) => options.drafts || e.data.draft !== true)
+      // By slug; a slug's files in name order (the sort is stable).
+      .toSorted((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
   }
   return { kinds, problems };
 }

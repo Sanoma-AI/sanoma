@@ -2,7 +2,7 @@ import { isLoopback } from "@sanoma-ai/workflows/shared";
 import { useRouter } from "@tanstack/react-router";
 import { useMemo, useSyncExternalStore } from "react";
 import type { SiteDefinition } from "../site.ts";
-import { hasOneUrl, siteOf } from "./locales.ts";
+import { hasOneUrl, siteOf, withoutOptional } from "./locales.ts";
 
 // A company's sites, for the Sites page, the bar and the crumbs: each site the build mounts
 // under /sites/<name>, named by its `site.ts`, with its pages from the router's tree.
@@ -36,10 +36,11 @@ export interface Site {
 export function useSites(): Site[] {
   const { routesByPath } = useRouter();
   return useMemo(() => {
-    // In path order, by code unit (the same on the server and in any browser's locale): the sites
-    // by name, and each site's home before its other pages.
+    // In path order, by code unit (the same on the server and in any browser's locale), optional
+    // parameters left out: the sites by name, and each site's home before its other pages.
     const sites = new Map<string, Site>();
-    for (const [to, route] of Object.entries(routesByPath).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    const byPath = Object.entries(routesByPath).map(([to, route]) => [withoutOptional(to), to, route] as const);
+    for (const [, to, route] of byPath.toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
       const name = siteOf(to);
       if (name === undefined) continue;
       const site = sites.get(name) ?? {
@@ -50,7 +51,7 @@ export function useSites(): Site[] {
       };
       sites.set(name, site);
       if (!hasOneUrl(to)) continue;
-      const rest = to.slice(`/sites/${name}`.length).replace(/\/\{-\$[^}]*\}/g, "");
+      const rest = withoutOptional(to).slice(`/sites/${name}`.length);
       site.pages.push({ to, label: route.options.staticData?.crumb ?? (rest === "" ? "Home" : rest) });
     }
     return [...sites.values()];

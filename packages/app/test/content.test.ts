@@ -83,7 +83,7 @@ describe("readContent", () => {
     expect(zapier!.html).toContain("<td>Free</td>");
   });
 
-  it("reads `<slug>.<locale>.md` as the slug's translation, its front matter over the original's, in file name order", () => {
+  it("reads `<slug>.<locale>.md` as the slug's translation, its front matter over the original's, by slug", () => {
     const repo = tree("translated", {
       ...posts,
       "content/posts/zapier.fr.md": "---\ntitle: Sanoma et Zapier\n---\nUne comparaison.\n",
@@ -102,8 +102,9 @@ describe("readContent", () => {
     ]);
     const [, fr, original, ptBr] = kinds.posts!;
     expect(fr!.html).toBe("<p>Une comparaison.</p>\n");
-    // What a translation does not repeat is the original's, so its type is too.
+    // What a translation does not repeat is the original's, so its type is too, and with no body its body.
     expect(ptBr!.data).toEqual({ ...original!.data, title: "Sanoma e Zapier" });
+    expect(ptBr!.html).toBe(original!.html);
     // The original's file has no `locale` at all, as before translations.
     expect(Object.hasOwn(original!, "locale")).toBe(false);
   });

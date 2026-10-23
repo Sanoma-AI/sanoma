@@ -398,6 +398,7 @@ describe("readSites", () => {
       ...site("blank", "public: true", 'locales: ["en", ""]'),
       ...site("twice", "public: true", 'locales: ["en", "fr", "en"]'),
       ...site("staff", 'locales: ["en", "fr"]'),
+      ...site("unread", "public: isProd", 'locales: ["en", "fr"]'),
       ...site("members", "public: true", 'login: "auth0"', 'locales: ["en", "fr"]'),
     });
     const sites = describeConfig(config(root, { connectors: [auth0] })).sites;
@@ -422,6 +423,8 @@ describe("readSites", () => {
       members: [[6, loginless]],
       staff: [[4, loginless]],
       twice: [[5, '"en" is in `locales` twice']],
+      // Said once, at `public`.
+      unread: [[4, "`public` is read without running site.ts: write it as `true` or `false`"]],
       www: [],
     });
     // Kept only without a problem.

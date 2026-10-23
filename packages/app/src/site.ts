@@ -132,8 +132,11 @@ export interface SiteDefinition {
  * A site's definition, the default export of `sites/<name>/site.ts`: `export default defineSite({ title: "Help desk" })`,
  * or for visitors `defineSite({ title: "Website", public: true, login: "auth0" })`, or in two
  * languages `defineSite({ title: "Website", public: true, locales: ["en", "fr"] })`. Its type keeps
- * what is written, so `defineMessages` knows the languages.
+ * the languages as written, so `defineMessages` knows them.
  */
-export function defineSite<const S extends SiteDefinition>(site: S): Readonly<S> {
-  return Object.freeze({ ...site });
+export function defineSite<const L extends readonly [string, ...string[]] = never>(
+  site: SiteDefinition & { locales?: L },
+): Readonly<SiteDefinition> & ([L] extends [never] ? unknown : { readonly locales: L }) {
+  return Object.freeze({ ...site }) as Readonly<SiteDefinition> &
+    ([L] extends [never] ? unknown : { readonly locales: L });
 }
