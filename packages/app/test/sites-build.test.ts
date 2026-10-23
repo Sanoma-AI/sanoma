@@ -166,13 +166,16 @@ function sectionAfter(html: string, title: string) {
  */
 const siteClass = ["tracking", "[0.37em]"].join("-");
 
-/** `/sites/hello/styled`: the site's class, and its `sites/hello/style.css` linked from its head. */
+/**
+ * `/sites/hello/styled`: the site's class, and `hidden`, which the app's sidebar overrides with
+ * `md:flex`; its `sites/hello/style.css` linked from its head.
+ */
 const styledPage = `import { createFileRoute } from "@tanstack/react-router";
 import css from "../style.css?url";
 
 export const Route = createFileRoute("/sites/hello/styled")({
   head: () => ({ links: [{ rel: "stylesheet", href: css }] }),
-  component: () => <span className="${siteClass}" />,
+  component: () => <span className="${siteClass} hidden" />,
 });
 `;
 
@@ -186,9 +189,12 @@ const stylesheets = (html: string) =>
 describe("a company's app with its sites", () => {
   // The fixture has no .gitignore, and nor has its copy: nothing tells Tailwind to skip `.sanoma/`.
   const repo = company({
-    // A site's own stylesheet, without Tailwind's preflight, linked by the page using its class.
-    "sites/hello/style.css":
-      '@import "tailwindcss/theme" layer(theme);\n@import "tailwindcss/utilities" layer(utilities);\n',
+    // A site's own stylesheet, the README's recipe, linked by the page using its class.
+    "sites/hello/style.css": [
+      "@layer theme, base, components, utilities;",
+      '@import "tailwindcss/theme" layer(theme);',
+      '@import "tailwindcss/utilities" layer(utilities.hello) source("./");',
+    ].join("\n"),
     "sites/hello/routes/styled.tsx": styledPage,
     "sites/hello/routes/missing.tsx": sitePage(
       "/sites/hello/missing",
@@ -263,7 +269,7 @@ describe("a company's app with its sites", () => {
     expect(missing).not.toContain("field-");
   });
 
-  it("starts a run from a site's RunForm and links to it there, while the app's New run opens the run's page", async (ctx) => {
+  it("starts a run from a site's RunForm and links to it there, while the app's New run opens the run's page; keeps the app's utilities over a site's", async (ctx) => {
     const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
     if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
     const browser = await launch({ executablePath: chrome, headless: true });
@@ -275,6 +281,12 @@ describe("a company's app with its sites", () => {
       await page.setViewport({ width: 1440, height: 900 });
       // The name the app asks for once, kept in the browser, sent with every change.
       await page.evaluateOnNewDocument(() => localStorage.setItem("sanoma.actor", "tester"));
+      // The site's `hidden`, in a layer inside the app's utilities, leaves the sidebar's `md:flex`.
+      // A string, run in the page: this file is typed for Node, without the DOM's globals.
+      await page.goto(new URL("/sites/hello/styled", app.url).href, { waitUntil: "networkidle0" });
+      const sidebar = `getComputedStyle(document.querySelector('[data-slot="sidebar-container"]')).display`;
+      expect(await page.evaluate(sidebar)).toBe("flex");
+
       const site = new URL("/sites/hello/run", app.url).href;
       await page.goto(site, { waitUntil: "networkidle0" });
       await page.type("#field-who", "Ada");
@@ -394,6 +406,8 @@ describe("a company's app with its sites", () => {
     });
     const site = css.find((text) => !text.includes("--sidebar"));
     expect(site).toContain("letter-spacing:.37em");
+    // In a layer inside the app's utilities, which the app's own win over.
+    expect(site).toMatch(/@layer utilities\.hello\{[^]*\.hidden\{display:none\}/);
   });
 
   it("renders content from content/: the list and a post's HTML, from a chunk of its own, and never a draft", async () => {
@@ -438,6 +452,23 @@ describe("a company's app with its sites", () => {
       hello: `http://hello.localhost:${new URL(app.url).port}`,
       members: `http://members.localhost:${new URL(app.url).port}`,
     });
+  });
+
+  it("answers a path no page has, or a post that is not there, on a public host with a plain page titled so, in a document reset for the site", async () => {
+    // No margin, in a layer ahead of every stylesheet, so below the site's; no color-scheme: the site's to say.
+    const styled = (await at("/styled", "hello.localhost")).body;
+    const reset = styled.search(/<style[^>]*>@layer sanoma\{body\{margin:0\}\}<\/style>/);
+    expect(reset).toBeGreaterThan(0);
+    expect(reset).toBeLessThan(styled.search(/<link[^>]*rel="stylesheet"/));
+    expect(styled).not.toContain('name="color-scheme"');
+    for (const path of ["/nope", "/posts/draft"]) {
+      const lost = await at(path, "hello.localhost");
+      expect(lost.status, path).toBe(404);
+      const html = lost.body.replaceAll("<!-- -->", "");
+      expect(html.match(/<title>[^<]*<\/title>/g), path).toEqual(["<title>Page not found</title>"]);
+      expect(html, path).toContain("<h1>Page not found</h1>");
+      expect(html, path).not.toContain("data-slot=");
+    }
   });
 
   it("answers a public host's request for the app's pages, routes, a staff login's routes or a staff server function with a 404", async () => {

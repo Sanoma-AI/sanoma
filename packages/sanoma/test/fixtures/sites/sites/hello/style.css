@@ -1,3 +1,7 @@
-/* The site's own stylesheet: Tailwind's theme and utilities, without its preflight, which would restyle the app around the site. */
+/*
+ * The site's own stylesheet: Tailwind's theme and utilities, without its preflight, which would
+ * restyle the app around the site; its utilities in a layer inside the app's, scanned from here.
+ */
+@layer theme, base, components, utilities;
 @import "tailwindcss/theme" layer(theme);
-@import "tailwindcss/utilities" layer(utilities);
+@import "tailwindcss/utilities" layer(utilities.hello) source("./");

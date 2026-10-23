@@ -16,7 +16,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
-import { createRequire } from "node:module";
+import { createRequire, registerHooks } from "node:module";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { problemLine, SITE_NAME } from "@sanoma-ai/workflows/shared";
@@ -227,6 +227,37 @@ function packageConfig(): InlineConfig {
 }
 
 /**
+ * A site's `@plugin` is a package the repo installs, which Tailwind loads with Node, not Vite, and
+ * which imports its peer, `tailwindcss` (`tailwindcss/plugin`, `tailwindcss/colors`, …), that a
+ * company installing only sanoma has nowhere Node looks. What Node cannot find of `tailwindcss`
+ * it then resolves from the app's install, as the aliases below do for a stylesheet's imports.
+ * Registered once per process.
+ */
+let tailwindHook = false;
+function tailwindFromApp(): void {
+  if (tailwindHook) return;
+  tailwindHook = true;
+  const fromApp = createRequire(defaultRuntimeFrom);
+  const parentURL = pathToFileURL(defaultRuntimeFrom).href;
+  registerHooks({
+    resolve(specifier, context, next) {
+      if (!/^tailwindcss(\/|$)/.test(specifier)) return next(specifier, context);
+      try {
+        return next(specifier, context);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== "MODULE_NOT_FOUND" && code !== "ERR_MODULE_NOT_FOUND") throw err;
+        // A require's default resolution ignores `parentURL`: resolve it as the app's own require
+        // (found there, so it does not come back here). An import, from the app's directory.
+        return context.conditions.includes("require")
+          ? { url: pathToFileURL(fromApp.resolve(specifier)).href, shortCircuit: true }
+          : next(specifier, { ...context, parentURL });
+      }
+    },
+  });
+}
+
+/**
  * A company repo's build: the repo is Vite's root, the app's `src` (real path) Start's source
  * directory, the route tree the app's routes with `sites/` mounted at `/sites`, all of it written
  * under `.sanoma/app`. A site resolves React, TanStack and the app as the app does.
@@ -240,6 +271,7 @@ function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom): InlineConfi
   const srcDirectory = relative(repo, src);
   const fromApp = createRequire(join(src, "router.tsx"));
   const tailwind = installed("tailwindcss");
+  tailwindFromApp();
   return {
     configFile: false,
     root: repo,

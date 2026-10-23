@@ -127,17 +127,25 @@ A site styles its pages with Tailwind's classes and the app's tokens, which the 
 /* sites/www/style.css */
 @layer theme, base, components, utilities;
 @import "tailwindcss/theme" layer(theme);
-@import "tailwindcss/utilities" layer(utilities);
+@import "tailwindcss/utilities" layer(utilities.www) source("./");
+@plugin "@tailwindcss/typography";
 
 .www {
   font-family: Georgia, serif;
   line-height: 1.6;
+}
+
+/* On the site's own host only: the visitor's light or dark, and colours that follow it. */
+[data-site="www"] {
+  color-scheme: light dark;
+  background: light-dark(#f5f6f4, #151a1d);
 }
 ```
 
 ```tsx
 // sites/www/routes/route.tsx
 import { createFileRoute, Outlet } from "@tanstack/react-router";
+import { NotFound } from "../components/not-found.tsx";
 import css from "../style.css?url";
 
 export const Route = createFileRoute("/sites/www")({
@@ -147,12 +155,15 @@ export const Route = createFileRoute("/sites/www")({
       <Outlet />
     </div>
   ),
+  // A path no page has, drawn inside the layout.
+  notFoundComponent: NotFound,
 });
 ```
 
-- It imports `tailwindcss/theme` and `tailwindcss/utilities`, not `tailwindcss`: a site's pages are also shown inside the app at `/sites/<name>`, and Tailwind's preflight would restyle the app around them. The site writes its base rules under a class of its own (`.www` above) instead.
-- `tailwindcss` and its `theme`, `utilities` and `preflight` resolve to the app's install, as the app's own stylesheet does: the repo installs nothing for them. A `@plugin` is a package the repo installs itself.
-- Its theme is Tailwind's default, not the app's: while the site's page is shown inside the app, a class both use where the app's theme differs (`rounded-lg`, `font-sans`) takes the site's value, in the app's chrome too. A site keeps its own tokens under names the app does not use.
+- It imports `tailwindcss/theme` and `tailwindcss/utilities`, not `tailwindcss`: a site's pages are also shown inside the app at `/sites/<name>`, and Tailwind's preflight would restyle the app around them. The site writes its base rules under a class of its own (`.www` above) instead, and rules for its own host under `[data-site="<name>"]`: there the document is `<html data-site="<name>">`, and inside the app it has no `data-site`.
+- Its utilities are a layer inside the app's (`utilities.<name>`), scanned from the site's folder only (`source("./")`): inside the app, the app's own utilities win over the site's, so the site's `hidden` leaves the sidebar's `md:flex` alone. Imported into `utilities` itself, the site's would override the app's responsive variants, and hide the sidebar. A site that uses components from outside its folder names them for the scan (`@source "../../components";`).
+- `tailwindcss` and its `theme`, `utilities` and `preflight` resolve to the app's install, as the app's own stylesheet does: the repo installs nothing for them. A `@plugin` is a package the repo installs itself (`pnpm add @tailwindcss/typography`); what it imports of `tailwindcss` (`tailwindcss/plugin`, `tailwindcss/colors`) resolves to the app's install too.
+- Its theme is Tailwind's default, not the app's: a class both use where the app's theme differs (`rounded-lg`, `font-sans`) takes the app's value while the page is shown inside the app, and the site's on the site's own host. Its theme variables are another matter: one both name (`--font-sans`, once a site's class uses it) takes the site's value inside the app, in the app's chrome too. A site keeps its own tokens under names the app does not use (`--font-body`, not `--font-sans`), so its classes look the same in both and leave the app's alone.
 
 ### Calling operations and workflows
 
@@ -218,6 +229,7 @@ What a visitor reads, in **Markdown** (GFM: tables, task lists, strikethrough).
 // sites/www/routes/blog.$slug.tsx
 import { createFileRoute } from "@tanstack/react-router";
 import { content, notFound } from "sanoma/site";
+import { NotFound } from "../components/not-found.tsx";
 
 export const Route = createFileRoute("/sites/www/blog/$slug")({
   loader: async ({ params }) => {
@@ -225,7 +237,11 @@ export const Route = createFileRoute("/sites/www/blog/$slug")({
     if (!post) throw notFound();
     return post;
   },
+  // Not found, it gives no title: the app's "Page not found" stays.
+  head: ({ loaderData }) => ({ meta: loaderData ? [{ title: loaderData.data.title }] : [] }),
   component: Post,
+  // Drawn here, inside the site's layout.
+  notFoundComponent: NotFound,
 });
 
 function Post() {
@@ -240,6 +256,7 @@ function Post() {
 | `content.posts.get(slug)`       | One file, `{ slug, data, body, html }`: `body` the Markdown after the front matter as written, `html` it rendered at build; `undefined` when there is no such file |
 | `content.<kind>` with no folder | `list()` gives `[]` and `get()` `undefined`; once `.sanoma/content.ts` types `content`, it does not type-check                                                     |
 
+- **Not found:** a loader's `notFound()` is drawn by the nearest route, from the page up, with a `notFoundComponent`, in place of that route: give the page one, as above, and the site's layout one too (`sites/www/routes/route.tsx`), which draws a path no page has inside the layout. A page whose route has none draws in the layout's place when the layout has one, and, with neither, the app's not-found notice takes the page's place (on a public site's own host, [a plain page](#public-sites)). Its head runs with no `loaderData`.
 - **Front matter** is YAML between a first line `---` and the next `---` line, read as YAML 1.2, so an unquoted date stays a string. A file whose front matter is not a mapping is left out, and `sanoma check` reports it at its line.
 - **HTML** is rendered at build with `marked` (GFM), so no Markdown library ships to the browser. Raw HTML in a file passes through: content is reviewed as code is. The kit has no styles for it; give the `article` your own classes.
 - **Drafts:** an entry whose front matter has `draft: true` is there while `sanoma` serves the sites from its dev server, and never in a build: not on a page, not in any file sent to the browser.
@@ -253,11 +270,12 @@ function Post() {
 A public site (`defineSite({ public: true })`) is served at the root of its own host, and at `/sites/<name>` on the app's host as any site is, in the app's chrome, for the people who run it.
 
 - **Its hosts.** `<name>.localhost` on the app's port (a browser sends `*.localhost` to this machine, and the loopback login lets it through), and the domain `startApp`'s `domains` gives it (`{ www: "sanoma.example" }`; the `sanoma` bin reads `SANOMA_DOMAINS`, which a host resource's `domains` sets). A domain naming a site that is missing or not public is warned about and served nowhere. `app.sites` gives each public site served, by name, at `http://<name>.localhost:<port>`; the Sites panel links to the site's domain, else, on a page of this machine, to `<name>.localhost`.
-- **One build, two routings.** On the site's host the router mounts the site at `/`: a page's `<Link to="/sites/www/blog">` is `/blog` there and `/sites/www/blog` on the app's host, and a path outside the site, `/workflows` among them, is the site's not-found page, a 404. The document there is bare (charset and viewport): no app stylesheet, theme, icon, chrome or config, which the app's host loads in chunks of their own. The site's layout sets its own title, icon and stylesheet in its `head`.
+- **One build, two routings.** On the site's host the router mounts the site at `/`: a page's `<Link to="/sites/www/blog">` is `/blog` there and `/sites/www/blog` on the app's host, and a path outside the site, `/workflows` among them, is the site's not-found page, a 404. The document there is bare: charset, viewport, a body with no margin, in a layer ahead of the site's stylesheet so any rule of the site's overrides it, the browser's light scheme (a site whose colours follow the visitor's light or dark, with `light-dark()`, says so in its stylesheet, as above: `[data-site="www"] { color-scheme: light dark; }`, not `:root`, which inside the app would override the app's own), and `<html data-site="<name>">`, which a site's stylesheet may scope its own host's rules to ([A site's own stylesheet](#a-sites-own-stylesheet)); no app stylesheet, theme, icon, chrome or config, which the app's host loads in chunks of their own. The site's layout sets its own icon and stylesheet in its `head`, and each page its title.
+- **Not found and errors.** A page not found there, a path no page has or a loader's `notFound()` ([Content](#content)), answers 404, titled "Page not found" unless a route of the site gives a title: a title in the layout's `head` stays on every page, a page not found too, so give each page its own. Where the site draws no `notFoundComponent` or `errorComponent`, the page is a plain one of the app's (a heading and a line, no app styles), and an error's message stays out of it.
 - **Its front door.** A request to the site's host never reaches the staff login, and its cookie and `x-sanoma-actor` header are ignored there. The site's login (`defineSite({ public: true, login: "<connector>" })`, a connector's login half) answers `/auth/<connector>/*` and verifies a visitor, who acts as `visitor:<connector>:<subject>` in the group `visitors`; anyone else, and everyone on a site with no login, acts as `anonymous`. Only `callFn` (a site's `api`) and `getActor` (`useActor()`, which says nobody for `anonymous`) answer there: any other server function is not there (a change's 404, a read's not-found), nor any other `/auth/` route (404), and a method but GET, HEAD and POST is a 405. Every request there carries `x-sanoma-client-ip` (`CLIENT_IP_HEADER`), set from the socket, a client's own copy overwritten. What a visitor may call is the policy's, by a `permit` ([above](#calling-operations-and-workflows)).
 - **Its login.** `startApp` makes each public site's login half once it listens, before it resolves, with the company's database, a key of its own to sign its cookies with (derived from `SANOMA_SECRETS_KEY` for `login <connector>`, so a login like Better Auth needs no secret set), its stored secrets and the site's origins (`http://<name>.localhost:*`, and `https://<domain>` with a domain); a request that comes first waits for it, and `app.close()` closes it. A public site whose `site.ts` has a problem (its login may be one not read), or whose login fails to start, is served on no host, a 503, and the app's log says why; the app itself starts, so the connector's page, or `SANOMA_SECRETS_KEY` in the environment, can give what the login lacks.
 - **Not on a public host:** the app's chrome and what it provides, so a site there brings its own toasts and has no `useDensity()` (it throws); `RunForm` and the will-ask preview, which read the config and link to the app's pages.
-- **Later:** a `RunForm` on a public page; rate limits; caching headers and prerendering for anonymous pages; the public host's own error and pending views; an anonymous id per session (every anonymous visitor is one principal now).
+- **Later:** a `RunForm` on a public page; rate limits; caching headers and prerendering for anonymous pages; the public host's own pending view; an anonymous id per session (every anonymous visitor is one principal now).
 
 ## Screens
 

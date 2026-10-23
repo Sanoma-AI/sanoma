@@ -19,7 +19,8 @@ const Root = lazy(() => import("#/components/app-chrome.tsx"));
 // app's, the app's head, loader and chrome.
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient; site?: string }>()({
   // Annotated: without it, tsc infers the match's context as `never`.
-  head: ({ match }: { match: { context: { site?: string } } }) => (match.context.site ? BARE_HEAD : APP_HEAD),
+  head: ({ match, matches }: { match: { context: { site?: string } }; matches: Match[] }) =>
+    match.context.site ? (matches.some(isLost) ? LOST_HEAD : BARE_HEAD) : APP_HEAD,
   // Pages show what is happening now: never cache them.
   headers: () => ({ "cache-control": "no-store" }),
   loader: async ({ context }): Promise<Prefs | null> => (context.site ? null : appLoader(context.queryClient)),
@@ -28,13 +29,32 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient; site
   component: RootSwitch,
 });
 
-/** A public site's head: the site's layout sets its own title, icon and stylesheet. */
-const BARE_HEAD = {
-  meta: [{ charSet: "utf-8" }, { name: "viewport", content: "width=device-width, initial-scale=1" }],
-};
+const META = [{ charSet: "utf-8" }, { name: "viewport", content: "width=device-width, initial-scale=1" }];
+
+/**
+ * A public site's head: the site's layout sets its own icon and stylesheet, and its pages their
+ * titles. No color-scheme: the browser's light, unless the site's stylesheet declares its own.
+ */
+const BARE_HEAD = { meta: META };
+
+/**
+ * A public site's page not found: a path no page has (`_notFound`, on the route that draws it), or
+ * a loader's notFound(). Its title, unless a route's head gives one.
+ */
+const LOST_HEAD = { meta: [...META, { title: "Page not found" }] };
+
+// `_notFound` is TanStack's own field (its Match draws the not-found page by it): a rename shows in test/sites-build.test.ts.
+type Match = { status: string; _notFound?: boolean };
+const isLost = ({ status, _notFound }: Match) => _notFound === true || status === "notFound";
+
+/**
+ * A public site's document has a body with no margin, in a layer of its own ahead of the head's
+ * stylesheets, so it comes below any layer of the site's: a site's stylesheet overrides it.
+ */
+const BARE_RESET = "@layer sanoma{body{margin:0}}";
 
 const APP_HEAD = {
-  meta: [...BARE_HEAD.meta, { name: "color-scheme", content: "light dark" }, { title: "Sanoma" }],
+  meta: [...META, { name: "color-scheme", content: "light dark" }, { title: "Sanoma" }],
   links: [
     { rel: "stylesheet", href: css },
     // Without an icon the browser asks for /favicon.ico, and gets a 404.
@@ -126,6 +146,11 @@ function Document({ children }: { children: ReactNode }) {
     // next-themes' script sets the class on <html> before the body paints, so React finds it changed.
     <html lang="en" data-site={site} suppressHydrationWarning={!site}>
       <head>
+        {site && (
+          <style href="sanoma-bare" precedence="sanoma">
+            {BARE_RESET}
+          </style>
+        )}
         <HeadContent />
       </head>
       <body>
