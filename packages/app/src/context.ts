@@ -71,11 +71,14 @@ export interface AppContext {
 
 /**
  * What `startApp` hands each request: the app, and the public site whose host the request came
- * to, when it came to one; the router then mounts that site's routes at `/`.
+ * to, when it came to one; the router then mounts that site's routes at `/`. `origin` is what a
+ * page's absolute URLs start with (`siteOrigin()`): the site's domain when it has one, else the
+ * request's own origin.
  */
 export interface RequestContext {
   app: AppContext;
   site?: string;
+  origin: string;
 }
 
 /** Start's server entry, which `startApp` hands each request with the context: the build's `server.js`, or the dev server's. */

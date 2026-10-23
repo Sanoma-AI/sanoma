@@ -41,6 +41,8 @@ export type { CollectionApi, ListQuery, OpFn, Saved, WorkflowFn } from "@sanoma-
 export { RunForm } from "./form/run-form.tsx";
 export { type ActorState, useActor } from "./actor.ts";
 export { api } from "./queries.ts";
+// A page's absolute URLs, for its canonical link and Open Graph: at the site's domain, else the request's host.
+export { siteOrigin, siteUrl } from "./site-url.ts";
 
 /**
  * The language of the page on screen: its URL's, on a page under `routes/{-$locale}/`, else its

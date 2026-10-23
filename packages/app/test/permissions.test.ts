@@ -95,7 +95,7 @@ const cedar = resolved.policy;
 const description = describeConfig(config);
 
 /** A public site, so the grid shows a visitor's columns. */
-const site = { name: "www", public: true as const, calls: [], problems: [] };
+const site = { name: "www", public: true as const, pages: [], calls: [], problems: [] };
 
 /** The grid under `policy`, as `getPermissions` answers it, `described` as the description says it, beside a public site. */
 const gridOf = (policy: Policy, described = description.policy) =>

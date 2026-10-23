@@ -9,6 +9,7 @@ import { CHAT_COOKIE, chatPref, type ChatPref } from "#/components/shell/prefs.t
 import { type PageLanguages, pageLanguages, usePageLanguages } from "#/lib/locales.ts";
 import { ActorContext, useActorState } from "../actor.ts";
 import { actorQuery, configQuery, waitingRunsQuery } from "../queries.ts";
+import { pageHost, siteOrigin } from "../site-url.ts";
 // Phosphor's regular shield-check, the app's icon.
 import favicon from "../favicon.svg?url";
 import css from "../style.css?url";
@@ -20,7 +21,7 @@ const Root = lazy(() => import("#/components/app-chrome.tsx"));
 // bare document around the site's own pages, with nothing of the app's but its scripts; on the
 // app's, the app's head, loader and chrome.
 /** What the router gives every route. */
-type RouterContext = { queryClient: QueryClient; site?: string; origin?: string };
+type RouterContext = { queryClient: QueryClient; site?: string };
 /** That, and what the root's `beforeLoad` adds. */
 type RootContext = RouterContext & Partial<PageLanguages>;
 
@@ -77,14 +78,16 @@ const BARE_RESET = "@layer sanoma{body{margin:0}}";
 
 /**
  * On a public site's own host, a page in more than one language links to itself in each, and to
- * its default as `x-default`: absolute, as search engines ask, on the page's own origin.
+ * its default as `x-default`: absolute, as search engines ask, at the site's origin (`siteOrigin()`,
+ * its domain when it has one).
  */
-function alternates({ locales = [], origin = "" }: RootContext) {
+function alternates({ locales = [] }: RootContext) {
   if (!locales.length) return [];
+  const origin = siteOrigin();
   return [...locales, { locale: "x-default", href: locales[0]!.href }].map(({ locale, href }) => ({
     rel: "alternate",
     hrefLang: locale,
-    href: origin + href,
+    href: new URL(href, origin).href,
   }));
 }
 
@@ -172,15 +175,16 @@ function cookieValue(name: string) {
 
 function Document({ children }: { children: ReactNode }) {
   // On a public site's host, `data-site` tells the browser's router which site this is, and the
-  // site brings its own look: no theme.
+  // site brings its own look: no theme. `data-origin` is the origin `siteOrigin()` gives in the browser.
   const site = useRouter().options.context.site;
+  const { origin } = pageHost();
   // On a public site's host, the page's language, when its site has languages; else English, the
   // app's, whose chrome is around a site's page on the app's host.
   const { locale } = usePageLanguages();
   const lang = (site && locale) || "en";
   return (
     // next-themes' script sets the class on <html> before the body paints, so React finds it changed.
-    <html lang={lang} data-site={site} suppressHydrationWarning={!site}>
+    <html lang={lang} data-site={site} data-origin={origin} suppressHydrationWarning={!site}>
       <head>
         {site && (
           <style href="sanoma-bare" precedence="sanoma">
