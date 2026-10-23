@@ -7,7 +7,7 @@ import { type ComponentProps, type ReactElement, type ReactNode, useId } from "r
 import { Alert, AlertDescription } from "#/components/ui/alert.tsx";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button, buttonVariants } from "#/components/ui/button.tsx";
-import { CardTitle } from "#/components/ui/card.tsx";
+import { Card, CardTitle } from "#/components/ui/card.tsx";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
 import { cn } from "#/lib/utils.ts";
@@ -186,17 +186,11 @@ export function Region({ title, children }: { title: ReactNode; children: ReactN
 
 /**
  * A selection shown over the right of a page's card (a selected node, an open run, an open
- * approval): a card with the large corner and the one card with a shadow. The caller places it
- * (`className`, e.g. `absolute top-3 right-3 w-80`) in a `relative` parent.
+ * approval): a `Card`, the one with a shadow. The caller places it (`className`, e.g.
+ * `absolute top-3 right-3 w-80`) in a `relative` parent.
  */
-export function FloatingCard({ className, ...props }: ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="floating-card"
-      className={cn("flex flex-col rounded-xl border bg-card text-sm text-card-foreground shadow-lg", className)}
-      {...props}
-    />
-  );
+export function FloatingCard({ className, ...props }: ComponentProps<typeof Card>) {
+  return <Card className={cn("shadow-lg", className)} {...props} />;
 }
 
 /** Label and value pairs, as a description list of `Fact`s: labels in one column, values in the other. */

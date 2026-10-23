@@ -148,7 +148,6 @@ export function WorkflowView({
           <CardHeader className="border-b py-2 compact:py-1 [.border-b]:pb-2 compact:[.border-b]:pb-1">
             <CardHeading className="text-sm">Graph</CardHeading>
           </CardHeader>
-          {/* The row's height: lower on a phone, and when Compact. */}
           <div className="h-(--pane-tall)">
             <GraphPanel graph={graph} show={run ? "end" : "start"} selected={selected} onSelect={select} />
           </div>

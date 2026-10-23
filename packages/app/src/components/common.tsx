@@ -450,9 +450,9 @@ function LazyPanel({ fallback, children }: { fallback: ReactNode; children: Reac
   );
 }
 
-/** A card for a graph or code panel inline in a page: `--pane-short` high, or as `className` says. */
-export function PanelCard({ className, children }: { className?: string; children: ReactNode }) {
-  return <Card className={cn("h-(--pane-short) gap-0 py-0", className)}>{children}</Card>;
+/** A card for a graph or code panel inline in a page, `--pane-short` high. */
+export function PanelCard({ children }: { children: ReactNode }) {
+  return <Card className="h-(--pane-short) gap-0 py-0">{children}</Card>;
 }
 
 /** A graph (a run's, or a workflow's outline) in a LazyPanel, a skeleton of its size holding its place. */
