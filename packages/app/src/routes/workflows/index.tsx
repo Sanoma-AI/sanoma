@@ -118,6 +118,10 @@ function WorkflowsPage() {
             {config.version}
           </code>
         </span>
+        {/* With no policy there is no Permissions page to say so. */}
+        {!config.policy.defined && (
+          <span className="text-sm text-muted-foreground">No policy: every operation call is allowed</span>
+        )}
       </CrumbHeader>
       {config.policy.problems && (
         <Notice variant="destructive">

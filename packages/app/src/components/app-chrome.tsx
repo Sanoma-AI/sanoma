@@ -9,7 +9,7 @@ import { ActorContext, useActorState } from "../actor.ts";
 import { actorQuery } from "../queries.ts";
 import { Bar, PhoneBar } from "./shell/bar.tsx";
 import { ChatColumn } from "./shell/chat.tsx";
-import { rememberChat } from "./shell/prefs.ts";
+import { BESIDE_PAGE, rememberChat } from "./shell/prefs.ts";
 
 // The app's chrome around every page on the app's host: the bar, the chat column, the page, who
 // you are. The root loads it lazily, so a public site's host never does.
@@ -34,12 +34,19 @@ export default function Root() {
   }, [actor.fromServer, actor.actor, said, queryClient]);
   // Only these fields: the root's loader data is new on every navigation, a field is not. Each is
   // taken once, as the chrome mounts (hydration has the server's answer, from the cookie).
-  const chatOpen = useLoaderData({ from: "__root__", select: (data) => data?.chatOpen ?? true });
+  const chatPref = useLoaderData({ from: "__root__", select: (data) => data?.chat });
   const compact = useLoaderData({ from: "__root__", select: (data) => data?.compact ?? false });
-  const [chat, setChat] = useState(chatOpen);
+  const [chat, setChat] = useState(chatPref !== "closed");
+  // Never set: open beside the page, and folded where it would lie over it (the server cannot
+  // know which, so the column hides there by CSS until this folds it).
+  const [unset, setUnset] = useState(chatPref === undefined);
+  useEffect(() => {
+    if (unset && !matchMedia(BESIDE_PAGE).matches) setChat(false);
+  }, [unset]);
   const toggleChat = () => {
     rememberChat(!chat);
     setChat(!chat);
+    setUnset(false);
   };
   // A page that asks for it (a workflow's, for its graph) takes the full width.
   const wide = useMatches({ select: (matches) => matches.some((match) => match.staticData.wide) });
@@ -50,7 +57,7 @@ export default function Root() {
         <DensityProvider defaultCompact={compact}>
           <div className="flex min-h-svh">
             <Bar chat={{ open: chat, toggle: toggleChat }} className="sticky top-0 hidden h-svh self-start md:flex" />
-            {chat && <ChatColumn />}
+            {chat && <ChatColumn besidePageOnly={unset} />}
             {/* The page: its frame (title row, tabs, one card) is its children, the region gap apart. */}
             <main data-slot="page" className="flex min-w-0 flex-1 flex-col">
               <PhoneBar />

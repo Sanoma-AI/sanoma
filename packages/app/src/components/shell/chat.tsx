@@ -3,6 +3,7 @@ import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { Button } from "#/components/ui/button.tsx";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "#/components/ui/empty.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
+import { cn } from "#/lib/utils.ts";
 import { useCrumbs } from "../common.tsx";
 
 // The chat column, beside the bar on the same surface: where the agent will talk with you. Until
@@ -11,14 +12,18 @@ import { useCrumbs } from "../common.tsx";
 /**
  * The chat column (`#chat`, which the bar's Chat controls): an empty state, and at its foot the
  * composer, carrying the page you are on as a chip. In the page's flow from `lg` up; between `md`
- * and `lg`, over the page beside the bar; not on a phone.
+ * and `lg`, over the page beside the bar (not while `besidePageOnly`, until Chat opens it there);
+ * not on a phone.
  */
-export function ChatColumn() {
+export function ChatColumn({ besidePageOnly = false }: { besidePageOnly?: boolean }) {
   return (
     <aside
       id="chat"
       aria-label="Chat"
-      className="hidden h-svh w-(--chat-width) shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground md:fixed md:inset-y-0 md:left-(--bar-width) md:z-20 md:flex md:shadow-lg lg:sticky lg:top-0 lg:self-start lg:shadow-none"
+      className={cn(
+        "hidden h-svh w-(--chat-width) shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground md:fixed md:inset-y-0 md:left-(--bar-width) md:z-20 md:shadow-lg lg:sticky lg:top-0 lg:flex lg:self-start lg:shadow-none",
+        !besidePageOnly && "md:flex",
+      )}
     >
       <Empty className="p-10">
         <EmptyHeader>

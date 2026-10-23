@@ -316,9 +316,13 @@ const section = (html: string, to: string) =>
     .match(/<nav aria-label="Sections"[^>]*>([\s\S]*?)<\/nav>/)?.[1]
     ?.match(new RegExp(`<a [^>]*href="${to}"[^>]*>`))?.[0];
 
-/** The bar's Chat button: whether the chat column is open (`aria-expanded`). */
-const chatOpen = (html: string) =>
-  html.match(/<button[^>]*aria-expanded="(true|false)"[^>]*aria-controls="chat"/)?.[1] === "true";
+/** The bar's Chat button: whether the chat column is open (`aria-expanded`), the column it controls then. */
+function chatOpen(html: string) {
+  const button = html.match(/<button [^>]*>(?:(?!<\/button>)[\s\S])*Chat<\/button>/)?.[0] ?? "";
+  const open = button.includes('aria-expanded="true"');
+  expect(button.includes('aria-controls="chat"')).toBe(open);
+  return open;
+}
 
 /**
  * A page's tabs (`LinkTabs`), in order: each one's label, link, count (when it shows one) and
@@ -828,13 +832,15 @@ describe("the page", () => {
     ]);
     expect(section(html, "/workflows")).toMatch(/data-active="true"[^>]*aria-current="page"/);
     expect(section(html, "/inbox")).not.toMatch(/data-active="true"|aria-current/);
+    // The config has a policy: Permissions says what it does, so the overview says nothing of it.
+    expect(html).not.toContain("No policy");
     // The chat column, open with no cookie: its empty state, and a composer that cannot send yet,
     // carrying the page as a chip.
     expect(chatOpen(html)).toBe(true);
     const column = html.match(/<aside id="chat" aria-label="Chat"[^>]*>([\s\S]*?)<\/aside>/)?.[1];
     expect(column).toContain(">What should change?<");
     expect(column).toContain("The agent is coming");
-    expect(chat).toMatch(
+    expect(column).toMatch(
       /<span[^>]*><span[^>]*>Workflows<\/span><\/span><textarea[^>]*disabled=""[^>]*aria-label="Message the agent"/,
     );
     expect(column).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Send"/);
@@ -1117,8 +1123,11 @@ describe("the page", () => {
       expect(Number(pending)).toBeGreaterThan(0);
       expect(await run(`document.querySelector('${badge}').textContent`)).toBe(`${pending} waiting`);
       // The chat column, open by default, takes room beside the page: the approval sits above the list.
-      const chatButton = 'button[aria-controls="chat"]';
-      const expanded = () => run(`document.querySelector('${chatButton}').getAttribute("aria-expanded")`);
+      const chatButton = '::-p-aria(Chat[role="button"])';
+      const expanded = () =>
+        run(
+          `[...document.querySelectorAll("button")].find((b) => b.textContent === "Chat").getAttribute("aria-expanded")`,
+        );
       const float = '[data-slot="card"].shadow-lg[role="region"]';
       const placed = () => run(`getComputedStyle(document.querySelector('${float}')).position`);
       expect(await tab.$("aside#chat")).not.toBeNull();
@@ -1146,6 +1155,13 @@ describe("the page", () => {
       await tab.click(chatButton);
       await tab.waitForSelector("aside#chat");
       expect(await run("document.cookie")).toContain("sanoma_chat=open");
+      // Never set, on a window too narrow to have it beside the page: folded, not over the page.
+      await run(`document.cookie = "sanoma_chat=; path=/; max-age=0"`);
+      await tab.setViewport({ width: 900, height: 800 });
+      await tab.reload({ waitUntil: "networkidle0" });
+      await tab.waitForFunction(`!document.getElementById("chat")`);
+      expect(await expanded()).toBe("false");
+      expect(await run("document.cookie")).not.toContain("sanoma_chat");
     } finally {
       await browser.close();
     }
@@ -1966,6 +1982,9 @@ describe("an app configured otherwise", () => {
     it("puts the workflows waiting on the principal first in the overview, with their counts", async () => {
       const lead = (await workflowsAs("marketing-lead")).replaceAll("<!-- -->", "");
       expect(tabNamed(lead, "Waiting on you")?.count).toBe(1);
+      // This app's root has no policies: no Permissions in the bar, and the overview says so.
+      expect(section(lead, "/permissions")).toBeUndefined();
+      expect(lead).toContain("No policy: every operation call is allowed");
       // Announce first, its count beside its title, though drift ran last.
       const rows = lead.slice(lead.indexOf("<tbody"));
       expect(rows.indexOf('href="/workflows/announce"')).toBeLessThan(rows.indexOf('href="/workflows/drift"'));
@@ -2045,6 +2064,8 @@ describe("an app whose config no longer has a workflow", () => {
     );
     // Its tabs: the Graph, which says so, and its Runs; no Code or Scenarios to show.
     expect(tabs(about.html).map((t) => t.label)).toEqual(["Graph", "Runs"]);
+    // A view whose tab is not there shows the Graph.
+    expect(tabNamed((await page("/workflows/announce?view=code", retired.url)).html, "Graph")?.selected).toBe(true);
     const runs = await page("/workflows/announce?view=runs", retired.url);
     expect(runs.html).toContain(`href="/workflows/announce?view=runs&amp;run=${runId}"`);
     expect((await page("/workflows/announce?new", retired.url)).html).not.toContain('id="field-title"');

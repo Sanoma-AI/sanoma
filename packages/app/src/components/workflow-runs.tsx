@@ -1,5 +1,5 @@
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { isNotFound, Link, useNavigate } from "@tanstack/react-router";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { approverLabel } from "@sanoma-ai/workflows/shared";
 import { useMemo } from "react";
@@ -141,7 +141,8 @@ function RunsFilterSelect({ filter }: { filter: RunFilter }) {
  * as a short trace, and Open run, its page. Its body scrolls inside the card's height.
  */
 function OpenRun({ id }: { id: string }) {
-  const { data, error } = useQuery(runQuery(id));
+  // A run that is not there stays not there: said at once, not after retries.
+  const { data, error } = useQuery({ ...runQuery(id), retry: (count, err) => !isNotFound(err) && count < 3 });
   const run = data?.run;
   return (
     <FloatingCard role="region" aria-label={runName(id)} className={cn(FLOAT, "order-first gap-0 py-0")}>

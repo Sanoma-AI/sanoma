@@ -5,7 +5,7 @@ import { getCookie } from "@tanstack/react-start/server";
 import { ThemeProvider } from "next-themes";
 import { lazy, type ReactNode } from "react";
 import { DENSITY_COOKIE } from "#/components/density.tsx";
-import { CHAT_COOKIE } from "#/components/shell/prefs.ts";
+import { CHAT_COOKIE, chatPref, type ChatPref } from "#/components/shell/prefs.ts";
 import { ActorContext, useActorState } from "../actor.ts";
 import { actorQuery, configQuery, waitingRunsQuery } from "../queries.ts";
 // Phosphor's regular shield-check, the app's icon.
@@ -63,9 +63,12 @@ const APP_HEAD = {
   ],
 };
 
-/** What the app's root loader returns: whether the chat column was left open, and the density. */
+/**
+ * What the app's root loader returns: whether the chat column was left open or folded (neither
+ * until Chat is first used), and the density.
+ */
 interface Prefs {
-  chatOpen: boolean;
+  chat: ChatPref;
   compact: boolean;
 }
 
@@ -109,7 +112,7 @@ function SiteActor({ children }: { children: ReactNode }) {
 }
 
 /**
- * Whether the chat column was left open (open unless its cookie says closed) and whether the
+ * Whether the chat column was left open or folded (its cookie, unset until Chat is used) and whether the
  * page is Compact (DensityProvider says why a cookie), from the request's cookies on the server
  * and `document.cookie` in the browser. Each takes its value once, as it mounts: the first render
  * is hydration, which has the server's answer; reading it in the browser too keeps a later
@@ -117,11 +120,11 @@ function SiteActor({ children }: { children: ReactNode }) {
  */
 const readPrefs = createIsomorphicFn()
   .server(() => ({
-    chatOpen: getCookie(CHAT_COOKIE) !== "closed",
+    chat: chatPref(getCookie(CHAT_COOKIE)),
     compact: getCookie(DENSITY_COOKIE) === "compact",
   }))
   .client(() => ({
-    chatOpen: cookieValue(CHAT_COOKIE) !== "closed",
+    chat: chatPref(cookieValue(CHAT_COOKIE)),
     compact: cookieValue(DENSITY_COOKIE) === "compact",
   }));
 

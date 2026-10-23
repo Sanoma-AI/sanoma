@@ -87,7 +87,8 @@ export function Bar({ chat, className }: { chat?: { open: boolean; toggle: () =>
           <button
             type="button"
             aria-expanded={chat.open}
-            aria-controls="chat"
+            // The column is not there while folded.
+            aria-controls={chat.open ? "chat" : undefined}
             data-active={chat.open || undefined}
             onClick={chat.toggle}
             className={ITEM}

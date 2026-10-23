@@ -8,7 +8,7 @@ import { ScenarioErrors, Scenarios } from "#/components/scenario.tsx";
 import { useWorkflowRuns, WorkflowRuns } from "#/components/workflow-runs.tsx";
 import { WorkflowView } from "#/components/workflow-view.tsx";
 import { Retired } from "#/components/workflow.tsx";
-import { runQuery, scenariosFor, scenariosQuery, useWorkflow, WorkflowPageSearch } from "#/queries.ts";
+import { type RunFilter, runQuery, scenariosFor, scenariosQuery, useWorkflow, WorkflowPageSearch } from "#/queries.ts";
 
 /**
  * A workflow's page: its header with New run, then its tabs, each a URL (`?view=`): the Graph
@@ -21,23 +21,26 @@ export const Route = createFileRoute("/workflows/$name/")({
   validateSearch: WorkflowPageSearch,
   loaderDeps: ({ search }) => ({ run: search.run }),
   loader: async ({ context: { queryClient }, deps }) => {
-    // A run that cannot be read is the run's card's to say.
-    if (deps.run !== undefined)
-      await queryClient.query({ ...runQuery(deps.run), staleTime: "static" }).catch(() => undefined);
+    if (deps.run === undefined) return;
+    // A run that cannot be read is the run's card's to say. Awaited on the server, so the page
+    // comes with it; in the browser the card shows at once and fills as it comes.
+    const read = queryClient.query({ ...runQuery(deps.run), staleTime: "static" }).catch(() => undefined);
+    if (import.meta.env.SSR) await read;
   },
   component: WorkflowPage,
 });
 
 function WorkflowPage() {
   const { name } = Route.useParams();
-  const { view, run, runs = "all", scenario: wanted } = Route.useSearch();
+  const { view: asked, run, runs = "all", scenario: wanted } = Route.useSearch();
   const workflow = useWorkflow(name);
   const forWorkflow = useMemo(() => scenariosFor(name), [name]);
   const {
     data: { scenarios, errors },
   } = useSuspenseQuery({ ...scenariosQuery(), select: forWorkflow });
-  const { shown } = useWorkflowRuns(name, runs);
   const scenario = scenarios.find((s) => s.name === wanted);
+  // A view whose tab is not there (no scenarios, no code for a retired workflow) is the Graph.
+  const view = (asked === "scenarios" && scenarios.length === 0) || (asked === "code" && !workflow) ? undefined : asked;
   return (
     <>
       <CrumbHeader
@@ -68,13 +71,7 @@ function WorkflowPage() {
         >
           Graph
         </LinkTab>
-        <LinkTab
-          value="runs"
-          link={<Link from={Route.fullPath} to="." search={(prev) => ({ ...prev, view: "runs" })} />}
-          count={shown.length}
-        >
-          Runs
-        </LinkTab>
+        <RunsTab name={name} filter={runs} />
         {workflow && (
           <LinkTab
             value="code"
@@ -104,5 +101,22 @@ function WorkflowPage() {
         <Retired name={name} />
       )}
     </>
+  );
+}
+
+/**
+ * The Runs tab, with how many runs its filter keeps: on its own, so the runs' poll draws the tab
+ * again and not the graph beside it.
+ */
+function RunsTab({ name, filter }: { name: string; filter: RunFilter }) {
+  const { shown } = useWorkflowRuns(name, filter);
+  return (
+    <LinkTab
+      value="runs"
+      link={<Link from={Route.fullPath} to="." search={(prev) => ({ ...prev, view: "runs" })} />}
+      count={shown.length}
+    >
+      Runs
+    </LinkTab>
   );
 }
