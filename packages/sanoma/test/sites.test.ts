@@ -70,7 +70,7 @@ describe("sanoma serve with sites", () => {
       const html = (await site.text()).replaceAll("<!-- -->", "");
       expect(html).toContain("The hello site");
       expect(html).toContain("Hello from the hello site");
-      expect(html).toContain('data-slot="sidebar-wrapper"');
+      expect(html).toContain('<nav aria-label="Sections"');
       expect((await fetch(`${url}/workflows`)).status).toBe(200);
     });
     expect(first).toContain("building the app with 1 site (hello)");
@@ -248,7 +248,7 @@ describe("sanoma with sites: the dev server", () => {
     const html = (await site.text()).replaceAll("<!-- -->", "");
     expect(html).toContain("The hello site");
     expect(html).toContain("Hello from the hello site");
-    expect(html).toContain('data-slot="sidebar-wrapper"');
+    expect(html).toContain('<nav aria-label="Sections"');
     expect((await fetch(`${url}/workflows`)).status).toBe(200);
     const health = await fetch(`${url}/healthz`);
     expect([health.status, await health.text()]).toEqual([200, "ok\n"]);
@@ -258,7 +258,7 @@ describe("sanoma with sites: the dev server", () => {
     expect(own.status).toBe(200);
     expect(own.body).toContain('data-site="hello"');
     expect(own.body.replaceAll("<!-- -->", "")).toContain("Hello from the hello site");
-    expect(own.body).not.toContain("sidebar-wrapper");
+    expect(own.body).not.toContain('aria-label="Sections"');
     expect(existsSync(join(repo, ".sanoma/app/build"))).toBe(false);
   }, 60_000);
 
