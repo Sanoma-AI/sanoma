@@ -68,9 +68,9 @@ export const exaOps = defineConnector(
         input: z.object({
           query: z.string().min(1),
           type: z
-            .enum(["auto", "neural", "fast", "instant", "deep-lite", "deep", "deep-reasoning"])
+            .enum(["auto", "neural", "lite"])
             .optional()
-            .describe("How Exa searches: `auto` by default"),
+            .describe("How Exa searches: `auto` by default, `lite` the cheapest (beta)"),
           category: z
             .enum(["company", "publication", "news", "personal site", "financial report", "people"])
             .optional()

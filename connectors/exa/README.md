@@ -36,7 +36,7 @@ defineWorkflow({
 
 The inputs are Exa's own fields ([API reference](https://exa.ai/docs/reference/search)), cut to these:
 
-- `search`: `query`, `type` (`auto` by default, or `neural`, `fast`, `instant`, `deep-lite`, `deep`, `deep-reasoning`), `category` (`company`, `publication`, `news`, `personal site`, `financial report`, `people`), and the filters below.
+- `search`: `query`, `type` (`auto` by default, `neural`, or `lite`, the cheapest, in beta), `category` (`company`, `publication`, `news`, `personal site`, `financial report`, `people`), and the filters below.
 - `findSimilar`: `url`, `excludeSourceDomain`, and the filters below. `exa-js` marks it deprecated, with no other way to find pages like one; Exa's endpoint still answers.
 - The filters: `numResults` (1 to 100, 10 by default), `includeDomains`, `excludeDomains`, `startPublishedDate` and `endPublishedDate` (ISO 8601), and `contents`, what of each page to return.
 - `getContents`: `urls`, and what `contents` takes, at the top level: `text` (`true`, or `{ maxCharacters }`), `highlights` (`true`, or `{ maxCharacters, query }`), `summary` (`{ query? }`) and `maxAgeHours` (the oldest cached copy to use; 0 fetches the page again, -1 never does).
@@ -56,7 +56,7 @@ import { exa } from "@sanoma-ai/connector-exa";
 export default defineConfig({ workflows, connectors: [exa], policy });
 ```
 
-`./driver` (`exaDriver`; `exaDriver({ timeoutMs })`, 30 s by default, since a deep search or an answer takes several seconds) and `./fake` (`fakeExa`) are internal entries, for tests.
+`./driver` (`exaDriver`; `exaDriver({ timeoutMs })`, 30 s by default, since an answer takes several seconds) and `./fake` (`fakeExa`) are internal entries, for tests.
 
 It calls Exa through [`exa-js`](https://www.npmjs.com/package/exa-js), Exa's own SDK, loaded at the first call (it brings the OpenAI SDK and zod 3 with it). A search with no `contents` asks for none, where the SDK would ask for each page's text.
 
@@ -98,7 +98,7 @@ The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/
 
 ## Testing
 
-`@sanoma-ai/connector-exa/fake` is an in-memory Exa that searches nothing, the fake the connector carries: each sandbox run makes one of its own. It makes up to three pages for a query or a URL, from them alone, so one call always finds the same pages (on the first of `includeDomains`, else `example.com`, or for `findSimilar` the URL's own host, and never on a domain excluded), with the `text`, `highlights` and `summary` asked for. The pages it served stay in `state.pages`, by URL, which `getContents` reads; put a page there to give it a text of your own. A URL on a `.invalid` host cannot be read: `getContents` returns it in `statuses` as `CRAWL_NOT_FOUND`.
+`@sanoma-ai/connector-exa/fake` is an in-memory Exa that searches nothing, the fake the connector carries: each sandbox run makes one of its own. It makes up to three pages for a query or a URL, from them alone, so one call always finds the same pages (on the first of `includeDomains`, else `example.com`, or for `findSimilar` the URL's own host, and never on a domain excluded), with the `text`, `highlights` and `summary` asked for. The pages it served stay in `state.pages`, by URL, which `getContents` reads; put a page there to give it a text of your own. `getContents` returns each page's text when the call asks for none of text, highlights or summary, as Exa does. A URL on a `.invalid` host cannot be read: `getContents` returns it in `statuses` as `CRAWL_NOT_FOUND`.
 
 ```ts
 import { withSetup } from "@sanoma-ai/workflows";

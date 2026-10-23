@@ -4,7 +4,7 @@ import { z } from "zod";
 import { exaOps } from "./connector.ts";
 
 export interface ExaDriverOptions {
-  /** How long one request may take before it fails, retryable. Default 30 seconds: a deep search or an answer takes several. */
+  /** How long one request may take before it fails, retryable. Default 30 seconds: an answer takes several. */
   timeoutMs?: number;
 }
 
@@ -71,9 +71,10 @@ export function exaDriver(options: ExaDriverOptions = {}) {
       try {
         // Warnings Exa returns about a request are not the worker's to print.
         client = { key, exa: new exaJs.Exa(key, undefined, { timeout: timeoutMs, warnings: "silent" }) };
-      } catch (error) {
-        // A key no header can carry, such as one with a newline: a retry would fail alike.
-        throw new DriverError(`exa: ${op} could not build its request`, { retryable: false, cause: error });
+      } catch {
+        // A key no header can carry, such as one with a newline: a retry would fail alike. No
+        // `cause`: the platform's message for it holds the header's value, the key.
+        throw new DriverError(`exa: ${op} could not build its request`, { retryable: false });
       }
     }
     let reply: T | undefined;

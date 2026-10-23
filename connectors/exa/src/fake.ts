@@ -26,9 +26,15 @@ const slug = (s: string) =>
     .replaceAll(/[^a-z0-9]+/g, "-")
     .replaceAll(/^-|-$/g, "") || "page";
 
-/** Where the fake's pages are: the first domain the filters include, else `usual` unless they exclude it. */
-const hostFor = (usual: string, filters: { includeDomains?: string[]; excludeDomains?: string[] }) =>
-  filters.includeDomains?.[0] ?? (filters.excludeDomains?.includes(usual) ? `other.${usual}.example` : usual);
+/** Where the fake's pages are: the first domain the filters include and do not exclude, else `usual`, else one made up. */
+function hostFor(
+  usual: string,
+  { includeDomains, excludeDomains = [] }: { includeDomains?: string[]; excludeDomains?: string[] },
+) {
+  const allowed = (host: string) => !excludeDomains.includes(host);
+  if (includeDomains?.length) return includeDomains.find(allowed) ?? `other.${includeDomains[0]}.example`;
+  return allowed(usual) ? usual : `other.${usual}.example`;
+}
 
 /** A page as Exa returns it, with what of it `contents` asks for. */
 function shown(page: FakeExaPage, contents: Contents = {}, score?: number) {
@@ -97,7 +103,15 @@ export function fakeExa(options: FakeOptions = {}) {
             getContents: async ({ urls, ...contents }) => {
               const read = urls.map((url) => ({ url, ok: !URL.parse(url)?.hostname.endsWith(".invalid") }));
               return {
-                results: read.filter((r) => r.ok).map((r) => shown(page(r.url), contents)),
+                // Like Exa, a page's text when the call asks for none of it.
+                results: read
+                  .filter((r) => r.ok)
+                  .map((r) =>
+                    shown(
+                      page(r.url),
+                      contents.text || contents.highlights || contents.summary ? contents : { text: true },
+                    ),
+                  ),
                 statuses: read.map(({ url: id, ok }) =>
                   ok
                     ? { id, status: "success" }
