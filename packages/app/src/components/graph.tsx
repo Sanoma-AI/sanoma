@@ -58,7 +58,7 @@ type Props<K extends GraphNodeKind> = {
 
 /**
  * The room the view leaves around the graph, in px. Below it, the zoom slider's: its panel sits
- * 15 px from the bottom edge and is 42 px high (size-8 buttons, p-1 and a border), and no node
+ * 15 px from the bottom edge and is 38 px high (size-7 buttons, p-1 and a border), and no node
  * goes under it, at any width.
  */
 const PAD = { x: 24, top: 16, bottom: 64 } as const;

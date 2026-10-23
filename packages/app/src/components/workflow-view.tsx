@@ -148,8 +148,7 @@ export function WorkflowView({
           <CardHeader className="border-b py-2 compact:py-1 [.border-b]:pb-2 compact:[.border-b]:pb-1">
             <CardHeading className="text-sm">Graph</CardHeading>
           </CardHeader>
-          {/* The row's height: lower on a phone, and when Compact. */}
-          <div className="h-[420px] sm:h-[560px] compact:h-[440px]">
+          <div className="h-(--pane-tall)">
             <GraphPanel graph={graph} show={run ? "end" : "start"} selected={selected} onSelect={select} />
           </div>
         </Card>
@@ -175,7 +174,7 @@ export function WorkflowView({
           {run && <TabsTrigger value="ledger">Ledger</TabsTrigger>}
         </TabsList>
         <TabsContent value="code">
-          <Card className="h-[420px] gap-0 overflow-hidden py-0 sm:h-[480px] compact:h-[360px]">
+          <Card className="h-(--pane) gap-0 overflow-hidden py-0">
             {/* Its own boundary: the source's query may have been collected while nothing read
                 it, and its refetch then replaces only this card's content. */}
             <Suspense

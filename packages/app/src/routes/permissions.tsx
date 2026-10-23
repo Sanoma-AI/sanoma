@@ -242,10 +242,7 @@ function PolicyCode({ file, text, span }: { file: string; text: string; span: Sp
       </CardHeader>
       {/* Its lines at the Code view's 1.6 line height, and the view's padding, at most the
           workflow Code card's height. */}
-      <div
-        className="max-h-[420px] text-xs sm:max-h-[480px] compact:max-h-[360px]"
-        style={{ height: `calc(${text.split("\n").length * 1.6}em + 0.5rem)` }}
-      >
+      <div className="max-h-(--pane) text-xs" style={{ height: `calc(${text.split("\n").length * 1.6}em + 0.5rem)` }}>
         <CodePanel source={text} highlight={span && [span]} plain />
       </div>
     </Card>

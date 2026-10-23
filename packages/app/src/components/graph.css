@@ -6,7 +6,7 @@
    utility on a node, edge or panel wins over it. graph.tsx imports it. */
 @import "@xyflow/react/dist/base.css" layer(base);
 
-/* React Flow's colours (the background, its dots, the edges) from the theme's tokens. */
+/* React Flow's colours (the background, its dots, the edges) from the theme's tokens: the page's paper, which the nodes' card stands out on. */
 .react-flow {
   --xy-background-color: var(--background);
   --xy-background-pattern-color: var(--border);

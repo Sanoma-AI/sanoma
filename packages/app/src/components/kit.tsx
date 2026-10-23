@@ -7,7 +7,7 @@ import { type ComponentProps, type ReactElement, type ReactNode, useId } from "r
 import { Alert, AlertDescription } from "#/components/ui/alert.tsx";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button, buttonVariants } from "#/components/ui/button.tsx";
-import { CardTitle } from "#/components/ui/card.tsx";
+import { Card, CardTitle } from "#/components/ui/card.tsx";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "#/components/ui/empty.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "#/components/ui/tooltip.tsx";
 import { cn } from "#/lib/utils.ts";
@@ -32,12 +32,22 @@ export const toneBadge = cva("", {
   },
 });
 
-/** A badge in a tone's colours: what a status means, the same everywhere (the --tone-* tokens). */
+/**
+ * A badge in a tone's colours: what a status means, the same everywhere (the --tone-* tokens).
+ * With `dot`, a status pill: the tone's dot before the label.
+ */
 export function ToneBadge({
   tone,
+  dot = false,
+  children,
   ...props
-}: Omit<ComponentProps<typeof Badge>, "className" | "variant"> & { tone: Tone }) {
-  return <Badge {...props} className={toneBadge({ tone })} />;
+}: Omit<ComponentProps<typeof Badge>, "className" | "variant"> & { tone: Tone; dot?: boolean }) {
+  return (
+    <Badge {...props} className={toneBadge({ tone })}>
+      {dot && <StatusDot tone={tone} className="size-1.5" />}
+      {children}
+    </Badge>
+  );
 }
 
 /** Badge colours by operation effect, one each, the same everywhere (the --effect-* tokens). */
@@ -55,8 +65,8 @@ export const effectBadge = cva("", {
 });
 
 /** A tone as a dot, where a badge would be too much. */
-export function StatusDot({ tone }: { tone: Tone }) {
-  return <span aria-hidden className={cn("size-2.5 shrink-0 rounded-full", TONE_FILL[tone])} />;
+export function StatusDot({ tone, className }: { tone: Tone; className?: string }) {
+  return <span aria-hidden className={cn("size-2.5 shrink-0 rounded-full", TONE_FILL[tone], className)} />;
 }
 
 /**
@@ -142,7 +152,7 @@ export function Nothing({ title, children, action }: { title: string; children?:
 export function PageHeader({ title, icon, children, action }: PageHeaderProps) {
   return (
     <header className="flex flex-wrap items-center gap-x-4 gap-y-2">
-      <h1 className="flex items-center gap-2 font-heading text-2xl font-semibold tracking-tight">
+      <h1 className="flex items-center gap-2 text-lg">
         {icon}
         {title}
       </h1>
@@ -161,7 +171,7 @@ export interface PageHeaderProps {
 
 /** A section's heading, under the page's. */
 export function SectionTitle({ children }: { children: ReactNode }) {
-  return <h2 className="font-heading text-lg font-semibold tracking-tight">{children}</h2>;
+  return <h2 className="text-base font-medium">{children}</h2>;
 }
 
 /** A titled region of a page: its <h2>, and what it holds. */
@@ -172,6 +182,15 @@ export function Region({ title, children }: { title: ReactNode; children: ReactN
       {children}
     </section>
   );
+}
+
+/**
+ * A selection shown over the right of a page's card (a selected node, an open run, an open
+ * approval): a `Card`, the one with a shadow. The caller places it (`className`, e.g.
+ * `absolute top-3 right-3 w-80`) in a `relative` parent.
+ */
+export function FloatingCard({ className, ...props }: ComponentProps<typeof Card>) {
+  return <Card className={cn("shadow-lg", className)} {...props} />;
 }
 
 /** Label and value pairs, as a description list of `Fact`s: labels in one column, values in the other. */
