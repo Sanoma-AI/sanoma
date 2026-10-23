@@ -101,6 +101,37 @@ export function devRepo(cwd: string, linked: readonly LinkedPackage[] = linkedPa
   return first && dirname(dirname(first.dir));
 }
 
+/**
+ * Calls `onUnlinked` once, when none of `packages` is linked into the repo in `cwd` any more: its
+ * `node_modules/<name>` no longer the package's directory on two looks in a row, `intervalMs`
+ * apart, so a link an install swaps for a moment is not taken for an unlink. Nothing when none is
+ * linked to begin with (`SANOMA_DEV_REPO`). Returns what stops the looks.
+ */
+export function whenUnlinked(
+  cwd: string,
+  packages: readonly LinkedPackage[],
+  onUnlinked: () => void,
+  intervalMs = 1000,
+): () => void {
+  const linked = () =>
+    packages.some(({ name, dir }) => {
+      try {
+        return realpathSync(join(cwd, "node_modules", name)) === dir;
+      } catch {
+        return false;
+      }
+    });
+  if (!linked()) return () => {};
+  let misses = 0;
+  const timer = setInterval(() => {
+    misses = linked() ? 0 : misses + 1;
+    if (misses < 2) return;
+    clearInterval(timer);
+    onUnlinked();
+  }, intervalMs);
+  return () => clearInterval(timer);
+}
+
 export interface SuperviseOptions {
   /** Starts the child, in a process group of its own (`detached: true`); called again for each restart. */
   spawn: () => ChildProcess;
