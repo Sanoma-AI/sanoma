@@ -3,7 +3,7 @@
 import type { SiteEntry } from "@sanoma-ai/workflows/describe";
 import type { Published } from "./content-files.ts";
 import { escapeHtml } from "./login/page.ts";
-import { sitePath } from "./site-path.ts";
+import { hasOneUrl, sitePath, withoutOptional } from "./site-path.ts";
 
 /**
  * `/robots.txt` and `/sitemap.xml` on a public site's own host at `origin`, for a GET or HEAD;
@@ -58,7 +58,7 @@ export function sitemapEntries(
     const locales = localized && site.locales?.length ? site.locales : [undefined];
     const url = (locale: string | undefined, slug?: string) => {
       let page = path.replace(LOCALE_SEGMENT, locale === undefined || locale === locales[0] ? "" : `/${locale}`);
-      page = page.replace(/\/\{-\$[^}]*\}/g, "");
+      page = withoutOptional(page);
       if (slug !== undefined) page = page.replace(/\$[^/]+/, slug);
       return new URL(sitePath(site.name, page), origin).href;
     };
@@ -73,7 +73,7 @@ export function sitemapEntries(
           entries.some((e) => e.slug === slug && (e.locale === undefined || (i > 0 && e.locale === locale))),
         ),
       }));
-    } else pages = path.replace(/\{-\$[^}]*\}/g, "").includes("$") ? [] : [{ in: locales }];
+    } else pages = hasOneUrl(path) ? [{ in: locales }] : [];
     return pages.flatMap(({ slug, in: found }) => {
       const alternates =
         found.length > 1

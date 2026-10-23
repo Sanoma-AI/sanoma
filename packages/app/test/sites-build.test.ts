@@ -612,6 +612,9 @@ describe("a company's app with its sites", () => {
     expect(post).toContain(`<meta property="og:url" content="${origin}/posts/hello"/>`);
     expect(post).toContain(`<meta property="og:image" content="${origin}/og.png"/>`);
     expect(post).toMatch(new RegExp(`<html [^>]*data-origin="${origin}"`));
+    // Behind a proxy that ends TLS, in the scheme it says the request came in.
+    const proxied = await at("/posts/hello", "hello.localhost", { headers: { "x-forwarded-proto": "https" } });
+    expect(proxied.body).toContain(`<link rel="canonical" href="${origin.replace("http:", "https:")}/posts/hello"/>`);
     const inApp = await (await fetch(new URL("/sites/hello/posts/hello", app.url))).text();
     expect(inApp).toContain(`<link rel="canonical" href="${app.url}/sites/hello/posts/hello"/>`);
     // The app's host is not a site's: no robots of its own.

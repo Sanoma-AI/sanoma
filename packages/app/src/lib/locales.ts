@@ -64,9 +64,3 @@ export const usePageLanguages = (): PageLanguages =>
     },
     structuralSharing: true,
   });
-
-/** A route path without its optional parameters (`{-$locale}`): the page's path when none is given. */
-export const withoutOptional = (path: string): string => path.replace(/\/\{-\$[^}]*\}/g, "");
-
-/** A route path with no required parameter (`$id`; an optional `{-$locale}` is none), so one URL to list or link. */
-export const hasOneUrl = (path: string): boolean => !withoutOptional(path).includes("$");

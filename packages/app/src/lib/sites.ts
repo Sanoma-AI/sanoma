@@ -2,7 +2,8 @@ import { isLoopback } from "@sanoma-ai/workflows/shared";
 import { useRouter } from "@tanstack/react-router";
 import { useMemo, useSyncExternalStore } from "react";
 import type { SiteDefinition } from "../site.ts";
-import { hasOneUrl, siteOf, withoutOptional } from "./locales.ts";
+import { hasOneUrl, withoutOptional } from "../site-path.ts";
+import { siteOf } from "./locales.ts";
 
 // A company's sites, for the Sites page, the bar and the crumbs: each site the build mounts
 // under /sites/<name>, named by its `site.ts`, with its pages from the router's tree.

@@ -146,7 +146,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       req.headers[CLIENT_IP_HEADER] = req.socket.remoteAddress ?? "";
       const request = new NodeRequest({ req, res });
       // Its URLs are at its domain, when it has one; only there may a crawler index it.
-      const origin = entry.domain ? `https://${entry.domain}` : new URL(request.url).origin;
+      const origin = entry.domain ? `https://${entry.domain}` : requestOrigin(request);
       if (asked !== entry.domain) res.setHeader("x-robots-tag", "noindex");
       const answer = seoFile(request, entry, origin, published) ?? (await site.login.handle?.(request));
       if (answer) return sendNodeResponse(res, answer);
@@ -157,7 +157,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     // own routes, and any it will not let through.
     const answer = await login.handle?.(request);
     if (answer) return sendNodeResponse(res, answer);
-    await responder.respond(req, res, request, { app, origin: new URL(request.url).origin });
+    await responder.respond(req, res, request, { app, origin: requestOrigin(request) });
   }
 
   // The build first, importing nothing and connecting to nothing: a missing or half build is
@@ -277,6 +277,17 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
 
 /** A public site's host on this machine. */
 const localHost = (site: string) => `${site}.localhost`;
+
+/**
+ * A request's origin, in the scheme a proxy that ends TLS says it came in (`x-forwarded-proto`), as
+ * Start's `getRequestUrl({ xForwardedProto: true })`: only the absolute URLs a page writes take it.
+ */
+function requestOrigin(request: Request): string {
+  const url = new URL(request.url);
+  const proto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  if (proto === "http" || proto === "https") url.protocol = proto;
+  return url.origin;
+}
 
 /**
  * Each public site's hosts, to its entry: `<name>.localhost`, and the domain `domains` gives it
