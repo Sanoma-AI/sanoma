@@ -1444,6 +1444,8 @@ describe("the page", () => {
     const opened = await page(`/workflows/announce?view=runs&runs=sandbox&run=${sandboxId}`);
     const short = sandboxId.slice(0, 8);
     expect(floats(opened.html)).toEqual([`Run ${short}`]);
+    // The other tabs keep the filter, not the run, which only Runs shows.
+    expect(tabNamed(opened.html, "Graph")?.href).toBe("/workflows/announce?runs=sandbox");
     expect(opened.html).toMatch(new RegExp(`<tr[^>]*data-state="selected"[^>]*>(?:(?!</tr>)[\\s\\S])*${short}`));
     const float = opened.text.slice(opened.text.indexOf(`aria-label="Run ${short}"`));
     expect(float).toContain(">sandbox · Launch on time<");
@@ -1897,7 +1899,7 @@ describe("an app configured otherwise", () => {
         /data-slot="alert-description"[^>]*><code>policies\/\*\.cedar<\/code> do not hold, so every operation call and run start is refused/,
       );
       expect(permissions.text).toMatch(
-        /data-slot="alert-description"[^>]*><code>policies\/\*\.cedar<\/code> do not hold, so every call is refused/,
+        /data-slot="alert-description"[^>]*><code>policies\/\*\.cedar<\/code> do not hold, so every operation call and run start is refused/,
       );
       expect(warn.mock.calls.flat().join("\n")).toMatch(/files have problems.*\n {2}policies\/bad\.cedar:1:\d+: /s);
     } finally {

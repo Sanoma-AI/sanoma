@@ -22,6 +22,7 @@ import {
   LinkTabs,
   Nothing,
   Notice,
+  PolicyProblems,
   plural,
   ToneBadge,
   VendorLogo,
@@ -98,7 +99,7 @@ const FILTER_LABEL: Record<WorkflowFilter, string> = {
 function WorkflowsPage() {
   const { view, status, workflow, filter = "all" } = Route.useSearch();
   const { data: config } = useSuspenseQuery(configQuery());
-  const { mine } = usePending();
+  const { pending, mine } = usePending();
   const yours = countByWorkflow(mine);
   const { data: last } = useSuspenseQuery(lastRunsQuery());
   const picks: Record<WorkflowFilter, (wf: WorkflowEntry) => boolean> = {
@@ -123,12 +124,7 @@ function WorkflowsPage() {
           <span className="text-sm text-muted-foreground">No policy: every operation call is allowed</span>
         )}
       </CrumbHeader>
-      {config.policy.problems && (
-        <Notice variant="destructive">
-          <code>policies/*.cedar</code> do not hold, so every operation call and run start is refused (
-          <code>sanoma check</code> says why).
-        </Notice>
-      )}
+      {config.policy.problems && <PolicyProblems />}
       <LinkTabs label="Show" value={runs ? "runs" : filter}>
         {WORKFLOW_FILTERS.map((f) => (
           <LinkTab
@@ -145,7 +141,17 @@ function WorkflowsPage() {
           All runs
         </LinkTab>
       </LinkTabs>
-      {runs ? <AllRuns status={status} workflow={workflow} /> : <Overview pick={picks[filter]} />}
+      {runs ? (
+        <AllRuns status={status} workflow={workflow} />
+      ) : (
+        <Overview
+          workflows={config.workflows.filter(picks[filter])}
+          none={config.workflows.length === 0}
+          waiting={countByWorkflow(pending)}
+          yours={yours}
+          last={last}
+        />
+      )}
     </>
   );
 }
@@ -155,29 +161,36 @@ const matches = (wf: WorkflowEntry, query: string) =>
   query === "" || `${wf.title ?? ""} ${wf.name}`.toLocaleLowerCase("en").includes(query.toLocaleLowerCase("en"));
 
 /**
- * The workflows the tab picks (`pick`) as a table, in one card under a find box that filters them
+ * The workflows the tab picks as a table, in one card under a find box that filters them
  * by title or name, in the browser. Those whose runs wait on an approval you may decide come
  * first, then the rest by their last run, those never run last. A row: its title, how it starts,
  * the vendors it calls, its last run and how many approvals its runs wait on (yours among them).
- * It reads each query in one pass and hands each row its share: a poll that changed one row's run
- * draws that row alone.
+ * The page reads each query in one pass and hands each row its share: a poll that changed one
+ * row's run draws that row alone. `none` when the config has no workflows at all.
  */
-function Overview({ pick }: { pick: (wf: WorkflowEntry) => boolean }) {
+function Overview({
+  workflows,
+  none,
+  waiting,
+  yours,
+  last,
+}: {
+  workflows: WorkflowEntry[];
+  none: boolean;
+  waiting: Record<string, number>;
+  yours: Record<string, number>;
+  last: Record<string, RunSummary | undefined>;
+}) {
   const [query, setQuery] = useState("");
-  const { data: workflows } = useSuspenseQuery({ ...configQuery(), select: (config) => config.workflows });
   const { data: vendors } = useSuspenseQuery({ ...configQuery(), select: vendorsByWorkflow });
-  const { pending, mine } = usePending();
-  const waiting = countByWorkflow(pending);
-  const yours = countByWorkflow(mine);
-  const { data: last } = useSuspenseQuery(lastRunsQuery());
-  if (workflows.length === 0)
+  if (none)
     return (
       <Card className="py-0">
         <Nothing className="border-0" title="This config has no workflows" />
       </Card>
     );
   const shown = workflows
-    .filter((wf) => pick(wf) && matches(wf, query.trim()))
+    .filter((wf) => matches(wf, query.trim()))
     .toSorted(
       (a, b) =>
         (yours[b.name] ?? 0) - (yours[a.name] ?? 0) || (last[b.name]?.createdAt ?? 0) - (last[a.name]?.createdAt ?? 0),

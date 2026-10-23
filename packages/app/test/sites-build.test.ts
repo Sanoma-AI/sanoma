@@ -574,7 +574,7 @@ describe("a company's app with its sites", () => {
       );
       // The site's own address, on the app's Sites page.
       const sites = (await (await fetch(new URL("/sites", second.url))).text()).replaceAll("<!-- -->", "");
-      expect(sites).toMatch(/<a href="https:\/\/hello\.example\/" target="_blank"[^>]*>hello\.example<svg/);
+      expect(sites).toMatch(/<a [^>]*href="https:\/\/hello\.example\/"[^>]*target="_blank"[^>]*>hello\.example<svg/);
       expect(loginContexts.at(-1)?.origins).toEqual(["http://members.localhost:*", "https://members.example"]);
     } finally {
       warn.mockRestore();

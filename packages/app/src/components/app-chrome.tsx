@@ -9,7 +9,7 @@ import { ActorContext, useActorState } from "../actor.ts";
 import { actorQuery } from "../queries.ts";
 import { Bar, PhoneBar } from "./shell/bar.tsx";
 import { ChatColumn } from "./shell/chat.tsx";
-import { BESIDE_PAGE, rememberChat } from "./shell/prefs.ts";
+import { BESIDE_PAGE, CHAT_COOKIE, rememberPref } from "./shell/prefs.ts";
 
 // The app's chrome around every page on the app's host: the bar, the chat column, the page, who
 // you are. The root loads it lazily, so a public site's host never does.
@@ -44,7 +44,7 @@ export default function Root() {
     if (unset && !matchMedia(BESIDE_PAGE).matches) setChat(false);
   }, [unset]);
   const toggleChat = () => {
-    rememberChat(!chat);
+    rememberPref(CHAT_COOKIE, chat ? "closed" : "open");
     setChat(!chat);
     setUnset(false);
   };

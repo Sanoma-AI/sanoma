@@ -1,12 +1,10 @@
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
+import { rememberPref } from "./shell/prefs.ts";
 
 // The page's density: comfortable, or Compact for people who live in the app (see DensityProvider).
 
 /** The cookie the density is kept in: `compact` or `comfortable` (and, never set, comfortable). */
 export const DENSITY_COOKIE = "sanoma_density";
-
-/** A year, in seconds. */
-const DENSITY_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
 type Density = { compact: boolean; setCompact: (compact: boolean) => void };
 
@@ -33,7 +31,7 @@ export function DensityProvider({ defaultCompact, children }: { defaultCompact: 
   const [compact, setState] = useState(defaultCompact);
   const setCompact = useCallback((value: boolean) => {
     setState(value);
-    document.cookie = `${DENSITY_COOKIE}=${value ? "compact" : "comfortable"}; path=/; max-age=${DENSITY_COOKIE_MAX_AGE}`;
+    rememberPref(DENSITY_COOKIE, value ? "compact" : "comfortable");
   }, []);
   const density = useMemo(() => ({ compact, setCompact }), [compact, setCompact]);
   return (

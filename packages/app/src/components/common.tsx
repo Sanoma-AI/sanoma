@@ -42,7 +42,7 @@ import { approverLabel } from "@sanoma-ai/workflows/shared";
 import { configQuery, type SiteCaller } from "../queries.ts";
 import type { CodeProps } from "./code.tsx";
 import type { GraphProps } from "./graph.tsx";
-import { ButtonLink, effectBadge, PageHeader, type PageHeaderProps, Region, Tip, ToneBadge } from "./kit.tsx";
+import { ButtonLink, effectBadge, Notice, PageHeader, type PageHeaderProps, Region, Tip, ToneBadge } from "./kit.tsx";
 
 // Small pieces shared by the screens, composed from the shadcn components in ./ui: the kit's, which
 // `sanoma/ui` exports (./kit.tsx, re-exported so a screen imports both from here), then the app's
@@ -415,6 +415,29 @@ export const FLOAT_CARD = "@container/float relative";
 export const FLOAT =
   "m-3 @3xl/float:absolute @3xl/float:top-3 @3xl/float:right-3 @3xl/float:m-0 @3xl/float:max-h-[calc(100%-1.5rem)] @3xl/float:w-(--float-width)";
 export const FLOAT_ROOM = "@3xl/float:pr-[calc(var(--float-width)+1.5rem)]";
+
+/** The policies do not hold: said on Workflows and Permissions, as they then refuse everything. */
+export function PolicyProblems() {
+  return (
+    <Notice variant="destructive">
+      <code>policies/*.cedar</code> do not hold, so every operation call and run start is refused (
+      <code>sanoma check</code> says why).
+    </Notice>
+  );
+}
+
+/**
+ * A list page's one card (`FLOAT_CARD`), `--pane-tall` at least: the list (`children`), and the
+ * item open (`float`, a `FloatingCard` placed with `FLOAT`) over its right, the list left room.
+ */
+export function FloatHost({ float, children }: { float: ReactNode; children: ReactNode }) {
+  return (
+    <Card className={cn(FLOAT_CARD, "min-h-(--pane-tall) gap-0 py-0")}>
+      <div className={cn("flex flex-1 flex-col", float && FLOAT_ROOM)}>{children}</div>
+      {float}
+    </Card>
+  );
+}
 
 /** A segment while its URL shows, or while Link's `disabled` leaves it no href. */
 const SEGMENT = `${CURRENT_LINK} aria-[current=page]:font-semibold aria-disabled:pointer-events-none aria-disabled:opacity-50`;

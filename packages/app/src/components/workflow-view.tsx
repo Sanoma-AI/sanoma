@@ -3,7 +3,7 @@ import { approverLabel } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { InfoIcon } from "@phosphor-icons/react/dist/csr/Info";
-import { type ReactNode, Suspense, useCallback, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useMemo, useRef, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Card } from "#/components/ui/card.tsx";
 import { ItemGroup } from "#/components/ui/item.tsx";
@@ -30,8 +30,8 @@ type Tab = "code" | "ledger";
 /**
  * A workflow's graph, or a run's (`run`, read at `at`), as the workflow's page and a run's page
  * show it:
- * - `children` (the page's notices), then for a run waiting on someone a banner naming who and
- *   for what, which selects the approval's node, or a failed run's error;
+ * - for a run waiting on someone, a banner naming who and for what, which selects the
+ *   approval's node, or a failed run's error;
  * - on the workflow's page, the card `view` names: the graph, or the code at full width;
  * - on a run's page, the graph's card, then Ledger and Code tabs under it;
  * - over the right of the graph's card (or the code's, for a node or New run, the code then
@@ -52,7 +52,6 @@ export function WorkflowView({
   run,
   scenario,
   view = "graph",
-  children,
 }: {
   name: string;
   /** The config's entry; none for a retired workflow, whose runs still draw a graph. */
@@ -61,7 +60,6 @@ export function WorkflowView({
   scenario?: Pick<ScenarioEntry, "steps"> | undefined;
   /** On the workflow's page, its tab (`?view=`): the graph, or the code. */
   view?: "graph" | "code";
-  children?: ReactNode;
 }) {
   const outline = workflow?.outline;
   const steps = outline && "nodes" in outline ? outline.nodes : undefined;
@@ -176,7 +174,6 @@ export function WorkflowView({
 
   return (
     <div className="flex flex-col gap-(--gap-region)">
-      {children}
       {waiting && (
         <Notice>
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">

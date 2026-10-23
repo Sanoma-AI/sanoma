@@ -3,7 +3,7 @@ import { isNotFound, Link, useNavigate } from "@tanstack/react-router";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { approverLabel } from "@sanoma-ai/workflows/shared";
 import { useMemo } from "react";
-import { Card, CardAction, CardContent, CardFooter, CardHeader } from "#/components/ui/card.tsx";
+import { CardAction, CardContent, CardFooter, CardHeader } from "#/components/ui/card.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { cn } from "#/lib/utils.ts";
@@ -25,8 +25,7 @@ import {
   Fact,
   Facts,
   FLOAT,
-  FLOAT_CARD,
-  FLOAT_ROOM,
+  FloatHost,
   FloatingCard,
   Json,
   None,
@@ -82,29 +81,26 @@ export function WorkflowRuns({ name, filter, open }: { name: string; filter: Run
   return (
     <>
       {error && <Notice variant="destructive">Could not refresh the runs: {error.message}</Notice>}
-      <Card className={cn(FLOAT_CARD, "min-h-(--pane-tall) gap-0 py-0")}>
-        <div className={cn("flex flex-1 flex-col", open && FLOAT_ROOM)}>
-          <div className="flex flex-wrap items-center gap-2 p-3">
-            <RunsFilterSelect filter={filter} />
-            {capped && (
-              <span className="text-xs text-muted-foreground">
-                {fromLatest ? "From" : "Showing"} the latest {WORKFLOW_RUNS_LIMIT}
-              </span>
-            )}
-          </div>
-          {shown.length === 0 ? (
-            <Nothing className="border-0 border-t" title={empty} />
-          ) : (
-            <RunsTable
-              runs={shown}
-              className="border-t"
-              link={(run) => ({ to: ".", search: (prev) => ({ ...prev, run: run.runId }) })}
-              selected={open}
-            />
+      <FloatHost float={open && <OpenRun key={open} id={open} />}>
+        <div className="flex flex-wrap items-center gap-2 p-3">
+          <RunsFilterSelect filter={filter} />
+          {capped && (
+            <span className="text-xs text-muted-foreground">
+              {fromLatest ? "From" : "Showing"} the latest {WORKFLOW_RUNS_LIMIT}
+            </span>
           )}
         </div>
-        {open && <OpenRun key={open} id={open} />}
-      </Card>
+        {shown.length === 0 ? (
+          <Nothing className="border-0 border-t" title={empty} />
+        ) : (
+          <RunsTable
+            runs={shown}
+            className="border-t"
+            link={(run) => ({ to: ".", search: (prev) => ({ ...prev, run: run.runId }) })}
+            selected={open}
+          />
+        )}
+      </FloatHost>
     </>
   );
 }

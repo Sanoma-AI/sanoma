@@ -1,21 +1,11 @@
 import { Link, type NavigateOptions } from "@tanstack/react-router";
 import { FlaskIcon } from "@phosphor-icons/react/dist/csr/Flask";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
-import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader } from "#/components/ui/card.tsx";
+import { CardAction, CardContent, CardDescription, CardFooter, CardHeader } from "#/components/ui/card.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { cn } from "#/lib/utils.ts";
 import type { ScenarioEntry, ScenariosResponse } from "../api.ts";
-import {
-  ButtonLink,
-  CardHeading,
-  FLOAT,
-  FLOAT_CARD,
-  FLOAT_ROOM,
-  FloatingCard,
-  Nothing,
-  Notice,
-  plural,
-} from "./common.tsx";
+import { ButtonLink, CardHeading, FLOAT, FloatHost, FloatingCard, Notice, plural } from "./common.tsx";
 import { LinkRow } from "./runs-table.tsx";
 
 // A workflow's scenarios, as its page's Scenarios tab lists them, and why a feature file could
@@ -32,47 +22,41 @@ export function ScenarioErrors({ errors }: Pick<ScenariosResponse, "errors">) {
 }
 
 /**
- * The Scenarios tab: one card, a row per scenario of the workflow, each opening it (`?scenario=`,
- * which also marks the graph and is New run's Sandbox mode) over the card's right.
+ * The Scenarios tab (only while the workflow has scenarios): one card, a row per scenario, each
+ * opening it (`?scenario=`, which also marks the graph and is New run's Sandbox mode) over the
+ * card's right.
  */
 export function Scenarios({ scenarios, open }: { scenarios: ScenarioEntry[]; open: ScenarioEntry | undefined }) {
   return (
-    <Card className={cn(FLOAT_CARD, "min-h-(--pane-tall) gap-0 py-0")}>
-      <div className={cn("flex flex-1 flex-col", open && FLOAT_ROOM)}>
-        {scenarios.length === 0 ? (
-          <Nothing className="border-0" title="No scenarios for this workflow yet" />
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Scenario</TableHead>
-                <TableHead>File</TableHead>
-                <TableHead>Steps</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {scenarios.map((s) => {
-                const opens: NavigateOptions = { to: ".", search: (prev) => ({ ...prev, scenario: s.name }) };
-                return (
-                  <LinkRow key={s.name} link={opens} selected={s.name === open?.name}>
-                    <TableCell className="font-medium">
-                      <Link {...opens} onClick={(e) => e.stopPropagation()}>
-                        {s.name}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      <code>{s.file}</code>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground tabular-nums">{s.steps.length}</TableCell>
-                  </LinkRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        )}
-      </div>
-      {open && <OpenScenario scenario={open} />}
-    </Card>
+    <FloatHost float={open && <OpenScenario scenario={open} />}>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Scenario</TableHead>
+            <TableHead>File</TableHead>
+            <TableHead>Steps</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {scenarios.map((s) => {
+            const opens: NavigateOptions = { to: ".", search: (prev) => ({ ...prev, scenario: s.name }) };
+            return (
+              <LinkRow key={s.name} link={opens} selected={s.name === open?.name}>
+                <TableCell className="font-medium">
+                  <Link {...opens} onClick={(e) => e.stopPropagation()}>
+                    {s.name}
+                  </Link>
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  <code>{s.file}</code>
+                </TableCell>
+                <TableCell className="text-muted-foreground tabular-nums">{s.steps.length}</TableCell>
+              </LinkRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </FloatHost>
   );
 }
 

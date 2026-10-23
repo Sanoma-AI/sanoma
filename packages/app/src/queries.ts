@@ -289,7 +289,7 @@ export const runsQuery = (query: RunsQuery = {}) =>
 
 /**
  * The runs waiting on an approval: every one, up to `getRuns`'s largest page. Under RUNS_KEY, so
- * a decision refreshes it; fresh as long as its poll, so a peek opening does not read it again.
+ * a decision refreshes it; fresh as long as its poll, so a page opening does not read it again.
  */
 export const waitingRunsQuery = () =>
   queryOptions({
@@ -308,8 +308,8 @@ export const pendingOf = (runs: RunSummary[]) =>
 /**
  * The latest runs, whatever their status, whose approvals the Inbox's Decided reads. Under
  * RUNS_KEY, so a decision refreshes it. Polled as `runsRefetchInterval` says (every 5 s while a
- * run can still change, else every 30 s), and fresh for 5 s, so a peek opening reads it at most
- * once in that time.
+ * run can still change, else every 30 s), and fresh for 5 s, so the Inbox's lists read it at
+ * most once in that time.
  */
 export const recentRunsQuery = () =>
   queryOptions({
@@ -421,12 +421,6 @@ export const workflowRuns = (filter: RunFilter, runs: RunSummary[]) => {
   const { match } = FILTERS[filter];
   return match ? runs.filter(match) : runs;
 };
-
-/**
- * The Workflows overview, all of it, for `<Link>`: lit there alone, not on All runs (`?view=runs`,
- * the same route) nor on a filter of it (`?filter=`, which the link would drop).
- */
-export const OVERVIEW = linkOptions({ to: "/workflows", search: {}, activeOptions: { exact: true } });
 
 /** A run's page, under its workflow's: for `<Link>`, `navigate` and `redirect`. */
 export const runLink = (run: Pick<RunSummary, "runId" | "workflow">) =>

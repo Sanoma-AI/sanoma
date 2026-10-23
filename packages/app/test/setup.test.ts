@@ -220,8 +220,10 @@ describe("the connect page", () => {
     expect(text).toContain("The GitHub App is created and its keys are stored.");
     expect(text).toMatch(/<code>SUPABASE_ACCESS_TOKEN<\/code>.*?>set<.*?set by alice/);
     expect(text).toMatch(/<code>GITHUB_TOKEN<\/code>.*?>missing</);
-    // Go live, in the sidebar, leads to the Go live page, whose first step this is.
-    expect(page).toMatch(/<a [^>]*href="\/setup"[^>]*>(?:(?!<\/a>)[\s\S])*<span>Go live<\/span>/);
+    // Go live, in the bar, leads to the Go live page, whose first step this is.
+    expect(page).toMatch(
+      /<nav aria-label="Sections"[^>]*>(?:(?!<\/nav>)[\s\S])*<a [^>]*href="\/setup"[^>]*>(?:(?!<\/a>)[\s\S])*Go live<\/a>/,
+    );
     for (const value of ["sbp_madeup", KEYS.client_secret, KEYS.webhook_secret, "made-up"]) {
       expect(page).not.toContain(value);
     }

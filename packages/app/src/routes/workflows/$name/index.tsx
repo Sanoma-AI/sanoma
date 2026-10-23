@@ -8,24 +8,39 @@ import { ScenarioErrors, Scenarios } from "#/components/scenario.tsx";
 import { useWorkflowRuns, WorkflowRuns } from "#/components/workflow-runs.tsx";
 import { WorkflowView } from "#/components/workflow-view.tsx";
 import { Retired } from "#/components/workflow.tsx";
-import { type RunFilter, runQuery, scenariosFor, scenariosQuery, useWorkflow, WorkflowPageSearch } from "#/queries.ts";
+import {
+  type RunFilter,
+  runQuery,
+  scenariosFor,
+  scenariosQuery,
+  useWorkflow,
+  type WORKFLOW_VIEWS,
+  WorkflowPageSearch,
+  workflowRunsQuery,
+} from "#/queries.ts";
 
 /**
  * A workflow's page: its header with New run, then its tabs, each a URL (`?view=`): the Graph
  * (marked with the scenario `?scenario=` names), with About, a selected node or New run (`?new`)
  * floating over it; its Runs, the one `?run=` names floating over them; its Code; and its
- * Scenarios, when it has any. The layout loads all of it but the open run, and titles the tab. A
- * retired workflow has only its Runs to show.
+ * Scenarios, when it has any. The layout loads the workflow, its source and scenarios, and titles
+ * the tab; this loads its runs (the Runs tab and its count) and the open run. A retired workflow
+ * has only its Runs to show.
  */
 export const Route = createFileRoute("/workflows/$name/")({
   validateSearch: WorkflowPageSearch,
-  loaderDeps: ({ search }) => ({ run: search.run }),
-  loader: async ({ context: { queryClient }, deps }) => {
-    if (deps.run === undefined) return;
+  loaderDeps: ({ search }) => ({ runs: search.runs, run: search.view === "runs" ? search.run : undefined }),
+  loader: async ({ context: { queryClient }, params, deps }) => {
     // A run that cannot be read is the run's card's to say. Awaited on the server, so the page
     // comes with it; in the browser the card shows at once and fills as it comes.
-    const read = queryClient.query({ ...runQuery(deps.run), staleTime: "static" }).catch(() => undefined);
-    if (import.meta.env.SSR) await read;
+    const open =
+      deps.run === undefined
+        ? undefined
+        : queryClient.query({ ...runQuery(deps.run), staleTime: "static" }).catch(() => undefined);
+    await Promise.all([
+      queryClient.query({ ...workflowRunsQuery(params.name, deps.runs), staleTime: "static" }),
+      import.meta.env.SSR && open,
+    ]);
   },
   component: WorkflowPage,
 });
@@ -63,29 +78,18 @@ function WorkflowPage() {
         {workflow?.builtin && <Badge variant="secondary">built-in</Badge>}
       </CrumbHeader>
       <ScenarioErrors errors={errors} />
-      {/* Each tab keeps the rest of the search: the runs' filter, the scenario, New run. */}
       <LinkTabs label="Views" value={view ?? "graph"}>
-        <LinkTab
-          value="graph"
-          link={<Link from={Route.fullPath} to="." search={(prev) => ({ ...prev, view: undefined })} />}
-        >
+        <LinkTab value="graph" link={viewLink(undefined)}>
           Graph
         </LinkTab>
         <RunsTab name={name} filter={runs} />
         {workflow && (
-          <LinkTab
-            value="code"
-            link={<Link from={Route.fullPath} to="." search={(prev) => ({ ...prev, view: "code" })} />}
-          >
+          <LinkTab value="code" link={viewLink("code")}>
             Code
           </LinkTab>
         )}
         {scenarios.length > 0 && (
-          <LinkTab
-            value="scenarios"
-            link={<Link from={Route.fullPath} to="." search={(prev) => ({ ...prev, view: "scenarios" })} />}
-            count={scenarios.length}
-          >
+          <LinkTab value="scenarios" link={viewLink("scenarios")} count={scenarios.length}>
             Scenarios
           </LinkTab>
         )}
@@ -105,17 +109,27 @@ function WorkflowPage() {
 }
 
 /**
+ * A tab's link: its view, keeping the rest of the search (the runs' filter, the scenario, New
+ * run) but the run open on Runs, which no other tab shows.
+ */
+function viewLink(view: (typeof WORKFLOW_VIEWS)[number] | undefined) {
+  return (
+    <Link
+      from={Route.fullPath}
+      to="."
+      search={(prev) => ({ ...prev, view, run: view === "runs" ? prev.run : undefined })}
+    />
+  );
+}
+
+/**
  * The Runs tab, with how many runs its filter keeps: on its own, so the runs' poll draws the tab
  * again and not the graph beside it.
  */
 function RunsTab({ name, filter }: { name: string; filter: RunFilter }) {
   const { shown } = useWorkflowRuns(name, filter);
   return (
-    <LinkTab
-      value="runs"
-      link={<Link from={Route.fullPath} to="." search={(prev) => ({ ...prev, view: "runs" })} />}
-      count={shown.length}
-    >
+    <LinkTab value="runs" link={viewLink("runs")} count={shown.length}>
       Runs
     </LinkTab>
   );

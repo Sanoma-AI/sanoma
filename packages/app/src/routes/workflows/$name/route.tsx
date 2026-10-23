@@ -13,8 +13,8 @@ import {
 
 /**
  * Layout for a workflow's page and its runs' pages, with no component: loads the workflow, its
- * source, its scenarios and its runs (for the Runs tab and its count), which the pages read from
- * the query client, and names the workflow's crumb.
+ * source and its scenarios, which the pages read from the query client, and names the
+ * workflow's crumb.
  */
 export const Route = createFileRoute("/workflows/$name")({
   // The graph takes the page's full width, the inspector floating over its right.
@@ -23,16 +23,14 @@ export const Route = createFileRoute("/workflows/$name")({
   // `?scenario=` is the scenario open (New run's Sandbox mode). The tabs keep them; a middleware
   // retaining them would put them on the links to other workflows too.
   validateSearch: WorkflowSearch,
-  loaderDeps: ({ search }) => ({ runs: search.runs }),
-  loader: async ({ context: { queryClient }, params, deps }) => {
+  loader: async ({ context: { queryClient }, params }) => {
     if (!import.meta.env.SSR) {
       void loadGraph();
       void loadCode();
     }
-    // The runs and the scenarios do not need the config: they load beside it.
+    // The scenarios do not need the config: they load beside it. The workflow page loads its runs.
     const [workflow] = await Promise.all([
       loadWorkflow(queryClient, params.name),
-      queryClient.query({ ...workflowRunsQuery(params.name, deps.runs), staleTime: "static" }),
       queryClient.query({ ...scenariosQuery(), staleTime: "static" }),
     ]);
     return { crumb: workflow?.title ?? params.name };

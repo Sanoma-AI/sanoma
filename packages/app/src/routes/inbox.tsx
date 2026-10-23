@@ -2,8 +2,8 @@ import type { ConfigDescription, OpEntry } from "@sanoma-ai/workflows/describe";
 import { WORKFLOW_ACTION } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { ClientOnly, createFileRoute, Link } from "@tanstack/react-router";
-import { memo, type ReactNode, Suspense } from "react";
-import { Card, CardAction, CardContent, CardFooter, CardHeader } from "#/components/ui/card.tsx";
+import { memo, Suspense } from "react";
+import { CardAction, CardContent, CardFooter, CardHeader } from "#/components/ui/card.tsx";
 import { cn } from "#/lib/utils.ts";
 import { APPROVAL_TONE } from "#/lib/tone.ts";
 import { RUNS_LIMIT, starterName } from "../api.ts";
@@ -14,8 +14,7 @@ import {
   CardHeading,
   CrumbHeader,
   FLOAT,
-  FLOAT_CARD,
-  FLOAT_ROOM,
+  FloatHost,
   FloatingCard,
   LinkTab,
   LinkTabs,
@@ -64,7 +63,6 @@ export const Route = createFileRoute("/inbox")({
 function InboxPage() {
   const { show, approval: wanted } = Route.useSearch();
   const { actor, pending, mine, filter, shown, open, error } = useInbox(show, wanted);
-  const { data: titles } = useSuspenseQuery({ ...configQuery(), select: workflowTitles });
   return (
     <>
       <CrumbHeader count={pending.length} />
@@ -85,9 +83,9 @@ function InboxPage() {
         </LinkTab>
       </LinkTabs>
       {filter === "decided" ? (
-        <Decided wanted={wanted} titles={titles} />
+        <Decided wanted={wanted} />
       ) : (
-        <ListCard open={open}>
+        <FloatHost float={open && <Opened key={approvalKey(open)} entry={open} />}>
           {shown.length === 0 ? (
             <Nothing
               className="border-0"
@@ -113,28 +111,27 @@ function InboxPage() {
               entries={shown}
               show={filter}
               openKey={open && approvalKey(open)}
-              titles={titles}
             />
           )}
           {/* Today is the browser's: the server knows neither its clock nor its time zone. */}
           <ClientOnly>
             <Suspense fallback={null}>
-              <DecidedToday titles={titles} />
+              <DecidedToday />
             </Suspense>
           </ClientOnly>
-        </ListCard>
+        </FloatHost>
       )}
     </>
   );
 }
 
 /** On Decided: the approvals decided in the latest runs, and the one named, else the latest, open over them. */
-function Decided({ wanted, titles }: { wanted: string | undefined; titles: Record<string, string> }) {
+function Decided({ wanted }: { wanted: string | undefined }) {
   const { decided, open, error } = useDecided(wanted);
   return (
     <>
       {error && <Notice variant="destructive">Could not refresh the decided approvals: {error.message}</Notice>}
-      <ListCard open={open}>
+      <FloatHost float={open && <Opened key={approvalKey(open)} entry={open} />}>
         {decided.length === 0 ? (
           <Nothing className="border-0" title={`No decisions in the latest ${RUNS_LIMIT.default} runs`} />
         ) : (
@@ -143,34 +140,20 @@ function Decided({ wanted, titles }: { wanted: string | undefined; titles: Recor
             entries={decided}
             show="decided"
             openKey={open && approvalKey(open)}
-            titles={titles}
           />
         )}
-      </ListCard>
+      </FloatHost>
     </>
   );
 }
 
-/**
- * The page's one card: the list (`children`), and the approval `open` floating over its right,
- * where the card is wide enough (its own width, `@3xl`); above the list where it is not.
- */
-function ListCard({ open, children }: { open: Entry | undefined; children: ReactNode }) {
-  return (
-    <Card className={cn(FLOAT_CARD, "min-h-(--pane-tall) gap-0 py-0")}>
-      <div className={cn("flex flex-1 flex-col", open && FLOAT_ROOM)}>{children}</div>
-      {open && <Opened key={approvalKey(open)} entry={open} />}
-    </Card>
-  );
-}
-
 /** Off Decided, in the browser: the approvals decided since midnight in the latest runs, each opening on Decided. */
-function DecidedToday({ titles }: { titles: Record<string, string> }) {
+function DecidedToday() {
   const { decided } = useDecided(undefined);
   const midnight = new Date().setHours(0, 0, 0, 0);
   const today = decided.filter(({ approval }) => (approval.decidedAt ?? approval.requestedAt) >= midnight);
   if (today.length === 0) return null;
-  return <Approvals label="Decided today" entries={today} show="decided" titles={titles} />;
+  return <Approvals label="Decided today" entries={today} show="decided" />;
 }
 
 /** A group of approvals under `label`, each a row keeping `show`, the one `openKey` names marked. */
@@ -179,14 +162,13 @@ function Approvals({
   entries,
   show,
   openKey,
-  titles,
 }: {
   label: string;
   entries: Entry[];
   show: InboxFilter;
   openKey?: string | undefined;
-  titles: Record<string, string>;
 }) {
+  const { data: titles } = useSuspenseQuery({ ...configQuery(), select: workflowTitles });
   return (
     <section aria-label={label} className="flex flex-col">
       <h2 className="px-4 pt-3 pb-2 text-xs font-medium text-muted-foreground">{label}</h2>

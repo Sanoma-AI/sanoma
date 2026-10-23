@@ -1,11 +1,10 @@
-import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import type { SiteEntry } from "@sanoma-ai/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Card } from "#/components/ui/card.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { usePublicAddress, useSites } from "#/lib/sites.ts";
-import { CrumbHeader, Nothing, pageTitle } from "../components/common.tsx";
+import { CrumbHeader, ExternalLink, Nothing, pageTitle } from "../components/common.tsx";
 import { configQuery } from "../queries.ts";
 
 // `/sites` itself, the one path there no site can take (a site's pages are `/sites/<name>/…`):
@@ -84,10 +83,5 @@ function SitesPage() {
 function PublicAddress({ site }: { site: SiteEntry }) {
   const href = usePublicAddress(site);
   if (!href) return <span className="text-muted-foreground">Public</span>;
-  return (
-    <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1">
-      {new URL(href).host}
-      <ArrowSquareOutIcon aria-hidden="true" className="size-3.5" />
-    </a>
-  );
+  return <ExternalLink href={href}>{new URL(href).host}</ExternalLink>;
 }

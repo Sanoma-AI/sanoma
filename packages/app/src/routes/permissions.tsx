@@ -19,7 +19,7 @@ import {
   Facts,
   loadCode,
   Nothing,
-  Notice,
+  PolicyProblems,
   pageTitle,
   plural,
   ToneBadge,
@@ -87,11 +87,7 @@ function PermissionsPage() {
         </Nothing>
       ) : (
         <>
-          {data.policy.problems && (
-            <Notice variant="destructive">
-              <code>policies/*.cedar</code> do not hold, so every call is refused (<code>sanoma check</code> says why).
-            </Notice>
-          )}
+          {data.policy.problems && <PolicyProblems />}
           <Card className="gap-0 py-0">
             <Table>
               <TableHeader>
