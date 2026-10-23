@@ -1,32 +1,27 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, notFound, Outlet } from "@tanstack/react-router";
-import { PlayIcon } from "@phosphor-icons/react/dist/csr/Play";
-import { Badge } from "#/components/ui/badge.tsx";
-import { ButtonLink, CrumbLink, loadCode, loadGraph, Notice, PageHeader, pageTitle } from "#/components/common.tsx";
+import { createFileRoute, notFound } from "@tanstack/react-router";
+import { loadCode, loadGraph, Notice, pageTitle } from "#/components/common.tsx";
 import {
   configQuery,
-  type RunFilter,
   workflowRunsQuery,
   scenariosQuery,
   sourceQuery,
-  useWorkflow,
   workflowFile,
   workflowNamed,
   WorkflowSearch,
 } from "#/queries.ts";
 
 /**
- * One workflow's page: its header and the pane the URL picks (the workflow's own, or one run's),
- * each a WorkflowView; its runs (components/workflow-runs.tsx) are not listed yet. The panes read
- * what this loader puts in the query client.
+ * Layout for a workflow's page and its runs' pages, with no component: loads the workflow, its
+ * source, its scenarios and its runs (for the Runs tab and its count), which the pages read from
+ * the query client, and names the workflow's crumb.
  */
 export const Route = createFileRoute("/workflows/$name")({
-  // The graph and the inspector side by side: the graph gets what the screen has left.
+  // The graph takes the page's full width, the inspector floating over its right.
   staticData: { wide: true },
-  // On either pane: `?runs=` filters the panel's runs, `?new` opens New run in the inspector, and
-  // `?scenario=` is its Sandbox mode. The panel's own links carry `?runs=` (and drop the others);
-  // a middleware retaining it would put it on the links to other workflows too.
+  // On both pages: `?runs=` filters the Runs tab, `?new` opens New run in the inspector, and
+  // `?scenario=` is the scenario open (New run's Sandbox mode). The tabs keep them; a middleware
+  // retaining them would put them on the links to other workflows too.
   validateSearch: WorkflowSearch,
   loaderDeps: ({ search }) => ({ runs: search.runs }),
   loader: async ({ context: { queryClient }, params, deps }) => {
@@ -34,7 +29,7 @@ export const Route = createFileRoute("/workflows/$name")({
       void loadGraph();
       void loadCode();
     }
-    // The panel's runs and the scenarios do not need the config: they load beside it.
+    // The runs and the scenarios do not need the config: they load beside it.
     const [workflow] = await Promise.all([
       loadWorkflow(queryClient, params.name),
       queryClient.query({ ...workflowRunsQuery(params.name, deps.runs), staleTime: "static" }),
@@ -44,7 +39,6 @@ export const Route = createFileRoute("/workflows/$name")({
   },
   // A workflow that does not exist has no loader data: its name stands in.
   head: ({ loaderData, params }) => pageTitle(loaderData?.crumb ?? params.name),
-  component: WorkflowLayout,
   notFoundComponent: () => <Notice variant="destructive">No workflow {Route.useParams().name}.</Notice>,
 });
 
@@ -63,49 +57,4 @@ async function loadWorkflow(queryClient: QueryClient, name: string) {
   const file = workflowFile(workflow);
   if (file !== undefined) await queryClient.query({ ...sourceQuery(file), staleTime: "static" });
   return workflow;
-}
-
-function WorkflowLayout() {
-  const { name } = Route.useParams();
-  const { runs } = Route.useSearch();
-  const workflow = useWorkflow(name);
-  // Titled by the workflow, under Workflows (on a run's pane too, where the last crumb is the run), or
-  // only its name when it is retired. New run opens in the inspector of the pane that shows: none
-  // for a retired workflow, which has nothing to start.
-  return (
-    <>
-      <PageHeader
-        crumbs={[
-          <CrumbLink key="workflows" to="/workflows">
-            Workflows
-          </CrumbLink>,
-        ]}
-        title={workflow?.title ?? name}
-        action={
-          workflow && (
-            <ButtonLink size="sm">
-              <Link to="." search={(prev) => ({ ...prev, new: true })}>
-                <PlayIcon aria-hidden="true" data-icon="inline-start" />
-                New run
-              </Link>
-            </ButtonLink>
-          )
-        }
-      >
-        {workflow && <code className="text-muted-foreground">{name}</code>}
-        {workflow?.builtin && <Badge variant="secondary">built-in</Badge>}
-      </PageHeader>
-      <RunsError name={name} filter={runs} />
-      <Outlet />
-    </>
-  );
-}
-
-/**
- * Why the panel's runs could not be refreshed, on the page, which shows with the panel folded or
- * on a phone too. It reads only the query's error, so a poll that brings runs draws nothing here.
- */
-function RunsError({ name, filter }: { name: string; filter: RunFilter | undefined }) {
-  const { error } = useQuery(workflowRunsQuery(name, filter));
-  return error && <Notice variant="destructive">Could not refresh the runs: {error.message}</Notice>;
 }

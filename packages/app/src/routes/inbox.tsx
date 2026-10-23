@@ -13,6 +13,9 @@ import {
   ButtonLink,
   CardHeading,
   CrumbHeader,
+  FLOAT,
+  FLOAT_CARD,
+  FLOAT_ROOM,
   FloatingCard,
   LinkTab,
   LinkTabs,
@@ -154,10 +157,8 @@ function Decided({ wanted, titles }: { wanted: string | undefined; titles: Recor
  */
 function ListCard({ open, children }: { open: Entry | undefined; children: ReactNode }) {
   return (
-    <Card className="@container/list relative min-h-(--pane-tall) gap-0 py-0">
-      <div className={cn("flex flex-1 flex-col", open && "@3xl/list:pr-[calc(var(--float-width)+1.5rem)]")}>
-        {children}
-      </div>
+    <Card className={cn(FLOAT_CARD, "min-h-(--pane-tall) gap-0 py-0")}>
+      <div className={cn("flex flex-1 flex-col", open && FLOAT_ROOM)}>{children}</div>
       {open && <Opened key={approvalKey(open)} entry={open} />}
     </Card>
   );
@@ -263,11 +264,7 @@ function Opened({ entry }: { entry: Entry }) {
   const { data: titles } = useSuspenseQuery({ ...configQuery(), select: workflowTitles });
   const { run, approval } = entry;
   return (
-    <FloatingCard
-      role="region"
-      aria-label={approval.title}
-      className="order-first m-3 @3xl/list:absolute @3xl/list:inset-y-3 @3xl/list:right-3 @3xl/list:m-0 @3xl/list:w-(--float-width)"
-    >
+    <FloatingCard role="region" aria-label={approval.title} className={cn(FLOAT, "order-first")}>
       <CardHeader className="border-b">
         <CardHeading>{approval.title}</CardHeading>
         <CardAction>

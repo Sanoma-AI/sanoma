@@ -377,10 +377,10 @@ const FILTERS: Record<RunFilter, { status?: RunStatus; match?: (run: RunSummary)
 };
 
 /**
- * A workflow page's search, on either pane: `?runs=`, its runs' filter (any other value reads as
- * all); `?new`, the New run panel in the inspector (the page's links write `?new=true`, and a bare
- * `?new` typed by hand opens it too); and `?scenario=`, Sandbox mode and the scenario it runs
- * (without it, Live), which also marks the workflow's graph.
+ * A workflow's search, on its page and its runs' pages: `?runs=`, the Runs tab's filter (any other
+ * value reads as all); `?new`, New run in the inspector (the page's links write `?new=true`, and a
+ * bare `?new` typed by hand opens it too); and `?scenario=`, the scenario open on the Scenarios
+ * tab, which marks the workflow's graph and is New run's Sandbox mode (without it, Live).
  */
 export const WorkflowSearch = z.object({
   runs: z.enum(RUN_FILTERS).optional().catch(undefined),
@@ -389,6 +389,18 @@ export const WorkflowSearch = z.object({
     .optional()
     .catch(undefined),
   scenario: z.string().optional().catch(undefined),
+});
+
+/** A workflow page's tabs besides the Graph, which shows without `?view=`. */
+export const WORKFLOW_VIEWS = ["runs", "code", "scenarios"] as const;
+
+/**
+ * The workflow page's own search, beside `WorkflowSearch`: `?view=`, the tab showing (none, the
+ * Graph), and `?run=`, the run open over the Runs tab, by id.
+ */
+export const WorkflowPageSearch = z.object({
+  view: z.enum(WORKFLOW_VIEWS).optional().catch(undefined),
+  run: z.string().optional().catch(undefined),
 });
 
 /** How many runs a workflow's page lists: the latest. */

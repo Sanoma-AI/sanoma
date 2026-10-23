@@ -1,7 +1,7 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { z } from "zod";
 
-// A workflow's runs start from its own page's New run panel now; this keeps old links and
+// A workflow's runs start from New run on its own page now; this keeps old links and
 // bookmarks working.
 export const Route = createFileRoute("/start")({
   validateSearch: z.object({ workflow: z.string().optional().catch(undefined) }),

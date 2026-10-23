@@ -5,9 +5,10 @@ import { Link } from "@tanstack/react-router";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { Children, Fragment, isValidElement, type ReactNode, Suspense } from "react";
 import { Button } from "#/components/ui/button.tsx";
-import { Card, CardAction, CardContent, CardDescription, CardHeader } from "#/components/ui/card.tsx";
+import { CardAction, CardContent, CardDescription, CardHeader } from "#/components/ui/card.tsx";
 import { ItemGroup } from "#/components/ui/item.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
+import { cn } from "#/lib/utils.ts";
 import { starterName } from "../api.ts";
 import type { GraphNode, GraphNodeKind } from "../graph/types.ts";
 import { spanLines } from "../lib/lines.ts";
@@ -20,6 +21,7 @@ import {
   CardHeading,
   Fact,
   Facts,
+  FloatingCard,
   None,
   OpName,
   Section,
@@ -31,7 +33,7 @@ import { LedgerRow } from "./ledger.tsx";
 import { NewRun } from "./new-run.tsx";
 import { WorkflowSections } from "./workflow.tsx";
 
-// The column beside a workflow page's graph: the New run panel, the selected node, or the overview.
+// The floating card over a workflow page's graph: New run, the selected node, or the overview.
 
 /** A node's kind, as the inspector's title names it. Only the kinds a page can select. */
 const KIND_TITLE: Partial<Record<GraphNodeKind, string>> = {
@@ -55,11 +57,11 @@ export interface InspectedRun {
 }
 
 /**
- * What the inspector shows, first match wins: the New run panel while `?new` is set (a workflow
- * the config has only); the selected `node`, with its lines in the source and, on a run, its
- * ledger records and the approval it waits on, which can be decided here; else the overview,
- * About for the workflow's pane and the run's facts and approvals for a run's. A card the graph's
- * height beside it (the view sizes it), scrolling inside.
+ * What the inspector shows, first match wins: New run while `?new` is set (a workflow the config
+ * has only); the selected `node`, with its lines in the source and, on a run, its ledger records
+ * and the approval it waits on, which can be decided here; else the overview, About for the
+ * workflow's page and the run's facts and approvals for a run's. A `FloatingCard` the view places
+ * (`className`), scrolling inside; each but New run closes with `onClose`.
  */
 export function Inspector({
   workflow,
@@ -69,6 +71,7 @@ export function Inspector({
   text,
   onClose,
   onLines,
+  className,
 }: {
   /** The config's entry; none for a retired workflow. */
   workflow: WorkflowEntry | undefined;
@@ -76,15 +79,22 @@ export function Inspector({
   newRun: boolean;
   node: GraphNode | undefined;
   text: SourceText;
-  /** Unselects the node. */
+  /** Closes the card (and unselects the node). */
   onClose: () => void;
   /** Shows the node's lines: opens the Code tab. */
   onLines: () => void;
+  className?: string | undefined;
 }) {
+  const close = (
+    <TipButton tip="Close" size="icon-sm" onClick={onClose}>
+      <XIcon aria-hidden="true" />
+    </TipButton>
+  );
   if (newRun && workflow) {
     return (
       <Panel
         title="New run"
+        className={className}
         action={
           // Drops `?new` and keeps the rest: the mode chosen stays for the next time.
           <ButtonLink variant="ghost" size="icon-sm">
@@ -106,11 +116,8 @@ export function Inspector({
       <Panel
         title={KIND_TITLE[node.kind] ?? node.kind}
         description={describe(node)}
-        action={
-          <TipButton tip="Show the overview" label="Close" size="icon-sm" onClick={onClose}>
-            <XIcon aria-hidden="true" />
-          </TipButton>
-        }
+        className={className}
+        action={close}
       >
         {(node.kind === "op" || node.span) && <NodeFacts node={node} text={text} onLines={onLines} />}
         {run && approval?.status === "pending" && <InspectedApproval run={run.run} approval={approval} />}
@@ -121,7 +128,7 @@ export function Inspector({
   if (run) {
     const { run: summary, approvals } = run;
     return (
-      <Panel title="Run">
+      <Panel title="Run" className={className} action={close}>
         <Facts>
           <Fact label="Started by">{starterName(summary)}</Fact>
           <Fact label="Started">
@@ -143,7 +150,7 @@ export function Inspector({
   }
   if (!workflow) return null;
   return (
-    <Panel title="About">
+    <Panel title="About" className={className} action={close}>
       <WorkflowSections workflow={workflow} />
     </Panel>
   );
@@ -157,15 +164,17 @@ function Panel({
   title,
   description,
   action,
+  className,
   children,
 }: {
   title: string;
   description?: string | undefined;
   action?: ReactNode;
+  className?: string | undefined;
   children: ReactNode;
 }) {
   return (
-    <Card aria-label="Inspector" role="region" className="h-full gap-0 py-0">
+    <FloatingCard aria-label="Inspector" role="region" className={cn("gap-0 py-0", className)}>
       <CardHeader className="border-b py-2 compact:py-1 [.border-b]:pb-2 compact:[.border-b]:pb-1">
         <CardHeading className="self-center text-sm">{title}</CardHeading>
         {description && <CardDescription className="wrap-anywhere">{description}</CardDescription>}
@@ -180,7 +189,7 @@ function Panel({
           </Fragment>
         ))}
       </CardContent>
-    </Card>
+    </FloatingCard>
   );
 }
 

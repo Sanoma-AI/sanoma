@@ -20,10 +20,11 @@ import {
   RequestedBy,
   StatusDot,
   TipButton,
+  When,
 } from "./common.tsx";
 
-// A run's ledger and checks, one row each, as the run page lists them, and the jump from a graph
-// node to its row.
+// A run's ledger and checks, one row each, as the run page lists them, the jump from a graph node
+// to its row, and the ledger as a short trace, as a run's floating card shows it.
 
 /** How long a ledger item stays highlighted after a click on its node in the graph. */
 const HIGHLIGHT_MS = 2_000;
@@ -232,3 +233,51 @@ export const LedgerRow = memo(function LedgerRow({
     </Item>
   );
 });
+
+/** What a ledger record says in a line of the trace. */
+function traceLine(record: LedgerRecord, title: (approval: string) => string): ReactNode {
+  switch (record.type) {
+    case "run.started":
+      return `Started by ${record.actor.id}`;
+    case "op.called":
+      return (
+        <>
+          {record.name && record.name !== record.op && <>{record.name} </>}
+          <code className="text-xs text-muted-foreground">{record.op}</code>
+          {record.error && <span className="text-destructive"> failed</span>}
+        </>
+      );
+    case "approval.requested":
+      return `Asked ${approverLabel(record.approver)}: “${record.title}”`;
+    case "approval.decided":
+      return `${record.by} ${record.decision === "approve" ? "approved" : "rejected"} “${title(record.approval)}”`;
+    case "approval.refused":
+      return `Ignored a message on “${title(record.approval)}”`;
+    case "scenario.seeded":
+      return `Seeded from scenario “${record.scenario}”`;
+    case "sleep.started":
+      return `${record.name ?? "Sleep"} until ${utcText(record.until)}`;
+    case "run.finished":
+      return "Finished";
+    case "run.failed":
+      return <span className="text-destructive">Failed: {record.error.message}</span>;
+  }
+}
+
+/** A run's ledger as a short trace, a line a record: its dot, what happened, and when. */
+export function LedgerTrace({ ledger, titles }: { ledger: LedgerRecord[]; titles: Map<string, string> }) {
+  const title = (approval: string) => titles.get(approval) ?? approval;
+  return (
+    <ol aria-label="Ledger" className="flex flex-col gap-1.5">
+      {ledger.map((record) => (
+        <li key={record.id} className="flex items-start gap-2">
+          <StatusDot tone={ledgerTone(record)} className="mt-1.5" />
+          <span className="min-w-0 flex-1 wrap-anywhere">{traceLine(record, title)}</span>
+          <span className="shrink-0 text-xs text-muted-foreground">
+            <When at={record.at} />
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}

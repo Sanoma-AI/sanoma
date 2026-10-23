@@ -403,6 +403,19 @@ export function LinkTab({
   );
 }
 
+/**
+ * A `FloatingCard` over a page's card: the card is `FLOAT_CARD` (a container, the float's
+ * positioning parent), the float `FLOAT`: over the card's right, `--float-width` wide and as tall
+ * as its content up to the card's height (scrolling inside beyond), from `@3xl`
+ * of the card's own width, and in the flow below that (`order-first` puts it above), so a narrow
+ * page (the chat open on a laptop, a phone) still reads. While it shows, the card's content takes
+ * `FLOAT_ROOM`, so nothing lies under it.
+ */
+export const FLOAT_CARD = "@container/float relative";
+export const FLOAT =
+  "m-3 @3xl/float:absolute @3xl/float:top-3 @3xl/float:right-3 @3xl/float:m-0 @3xl/float:max-h-[calc(100%-1.5rem)] @3xl/float:w-(--float-width)";
+export const FLOAT_ROOM = "@3xl/float:pr-[calc(var(--float-width)+1.5rem)]";
+
 /** A segment while its URL shows, or while Link's `disabled` leaves it no href. */
 const SEGMENT = `${CURRENT_LINK} aria-[current=page]:font-semibold aria-disabled:pointer-events-none aria-disabled:opacity-50`;
 
