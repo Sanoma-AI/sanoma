@@ -4,12 +4,12 @@ import { z } from "zod";
 /** What of each page to return with it; none of them by default. Exa's `ContentsRequest`, cut. */
 const contents = {
   text: z
-    .union([z.boolean(), z.object({ maxCharacters: z.int().positive().optional() })])
+    .union([z.literal(true), z.object({ maxCharacters: z.int().positive().optional() })])
     .optional()
     .describe("The page's text, all of it or up to `maxCharacters`"),
   highlights: z
     .union([
-      z.boolean(),
+      z.literal(true),
       z.object({ maxCharacters: z.int().positive().optional(), query: z.string().min(1).optional() }),
     ])
     .optional()
@@ -68,11 +68,11 @@ export const exaOps = defineConnector(
         input: z.object({
           query: z.string().min(1),
           type: z
-            .enum(["auto", "neural", "fast", "deep", "deep-reasoning", "instant"])
+            .enum(["auto", "neural", "fast", "instant", "deep-lite", "deep", "deep-reasoning"])
             .optional()
             .describe("How Exa searches: `auto` by default"),
           category: z
-            .enum(["company", "research paper", "news", "pdf", "github", "personal site", "people", "financial report"])
+            .enum(["company", "publication", "news", "personal site", "financial report", "people"])
             .optional()
             .describe("The kind of page to look for"),
           ...filters,
@@ -89,8 +89,9 @@ export const exaOps = defineConnector(
           statuses: z.array(
             z.object({
               id: z.string(),
-              status: z.enum(["success", "error"]),
-              error: z.object({ tag: z.string(), httpStatusCode: z.number().nullish() }).nullish(),
+              /** `success`, or `error` with Exa's `tag`, such as `CRAWL_NOT_FOUND`. */
+              status: z.string(),
+              error: z.object({ tag: z.string().optional(), httpStatusCode: z.number().nullish() }).nullish(),
             }),
           ),
         }),

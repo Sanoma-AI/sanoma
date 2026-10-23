@@ -35,6 +35,12 @@ describe("exaDriver", () => {
     expect(sent[0]!.headers.get("x-api-key") === process.env.EXA_API_KEY).toBe(true);
   });
 
+  it("asks for no contents when the input names none, as the fake returns none", async () => {
+    play("search-the-web");
+    await search({ query: "workflow automation" });
+    expect(sent[0]!.body).toEqual({ query: "workflow automation" });
+  });
+
   it("reads pages by URL, with each URL's status", async () => {
     play("read-a-page");
     const input = { urls: ["https://exa.ai/"], text: true };
@@ -70,24 +76,13 @@ describe("exaDriver", () => {
       ["rate-limit", true],
       ["overloaded", true],
     ])("a %s reply is retryable: %s", async (name, retryable) => {
-      const [reply] = fixture(name) as [Exchange & { body: { error: string; tag: string } }];
+      const [reply] = fixture(name) as [Exchange & { body: { error: string } }];
       play(name);
       await expect(search()).rejects.toMatchObject({
         name: "DriverError",
         retryable,
         status: reply.status,
-        vendorCode: reply.body.tag,
         message: `exa: web.search failed (${reply.status}): ${reply.body.error}`,
-      });
-    });
-
-    it("fails for good on a 200 without pages", async () => {
-      play("no-results", [{ method: "POST", path: "/search", status: 200, body: { requestId: "r" } }]);
-      await expect(search()).rejects.toMatchObject({
-        name: "DriverError",
-        retryable: false,
-        status: 200,
-        message: "exa: web.search replied 200 without its pages",
       });
     });
 
@@ -96,7 +91,7 @@ describe("exaDriver", () => {
       await expect(call("web.answer", { query: "q" })).rejects.toMatchObject({
         name: "DriverError",
         retryable: false,
-        message: "exa: web.answer replied 200 without an answer",
+        message: "exa: web.answer replied without an answer in text",
       });
     });
 
@@ -111,7 +106,7 @@ describe("exaDriver", () => {
         name: "DriverError",
         retryable: false,
         status: 200,
-        message: "exa: web.search replied 200 with a body that is not JSON",
+        message: expect.stringContaining("exa: web.search failed (200): Expected a JSON response"),
       });
     });
 

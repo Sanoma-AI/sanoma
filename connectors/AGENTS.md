@@ -16,6 +16,17 @@ One workspace package per vendor, each built on `@sanoma-ai/workflows`. A connec
 | [`stripe/`](stripe/AGENTS.md)           | `@sanoma-ai/connector-stripe`: Stripe resources read through its OpenTofu provider                           |
 | [`supabase/`](supabase/AGENTS.md)       | `@sanoma-ai/connector-supabase`: Supabase projects (OpenTofu provider), pooler and health                    |
 
+## Integration sources
+
+Where a connector's calls come from, in order; the schemas are hand-written Zod in every case, whatever carries the calls:
+
+1. **Resources** (things a company creates and keeps in sync): the vendor's OpenTofu/Terraform provider through the bridge, as a `tfConnector` record (Docker, GitHub, Stripe, Supabase).
+2. **Operations**: the vendor's officially supported TypeScript SDK as the transport, when one exists and is maintained (Bluesky's `@atproto/api`, Exa's `exa-js`).
+3. No official SDK: a client generated from the vendor's published OpenAPI spec with Hey API, pinned to a commit and cut to the operations called, in `src/generated/`, never edited by hand (Resend).
+4. Neither: a driver hand-written on `fetch`, the last resort (Ghost).
+
+[build-connector](../.agents/skills/build-connector/SKILL.md) walks through making one.
+
 ## Shared connector conventions
 
 Keep vendor I/O and credentials in `src/driver.ts`, and simulated behavior in `src/fake.ts`. Handwritten operation schemas live in `src/connector.ts`, as `<vendor>Ops`; provider-backed connectors derive operations and resources from their `tfConnector` record (also `src/connector.ts`) and generated types. `src/index.ts` exports the one `<vendor>` constant, `withSetup(<vendor>Ops, { driver: <vendor>Driver, fake: fake<Vendor> })` (the record's `.connector` for a provider-backed one); `driver.ts` and `fake.ts` import the definition from `connector.ts`, never from `index.ts`, so there is no import cycle. Follow the package source map. Keep the `./driver` and `./fake` entries for the monorepo's tests; workflows reach a driver only through `ctx`, and the lint refuses those entries in workflow files. A login connector attaches `withSetup({ login })`: its login half (`LoginHalf`, in the [workflows README](../packages/workflows/README.md#usage)), which signs visitors in to a public site.
