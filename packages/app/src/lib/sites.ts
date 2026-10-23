@@ -2,6 +2,7 @@ import { isLoopback } from "@sanoma-ai/workflows/shared";
 import { useRouter } from "@tanstack/react-router";
 import { useMemo, useSyncExternalStore } from "react";
 import type { SiteDefinition } from "../site.ts";
+import { hasOneUrl, siteOf, withoutOptional } from "./locales.ts";
 
 // A company's sites, for the Sites page, the bar and the crumbs: each site the build mounts
 // under /sites/<name>, named by its `site.ts`, with its pages from the router's tree.
@@ -17,10 +18,6 @@ const DEFINED: Record<string, SiteDefinition | undefined> = Object.fromEntries(
   ),
 );
 
-/** The site a route path is in (`/sites/<name>…`), by its folder's name. */
-export const siteOf = (path: string | undefined): string | undefined =>
-  path === undefined ? undefined : /^\/sites\/([^/]+)/.exec(path)?.[1];
-
 /** A site on the Sites page: its title and icon, and its pages, the site's home first. */
 export interface Site {
   name: string;
@@ -33,14 +30,17 @@ export interface Site {
  * The build's sites, by name, each with the pages under it (no trailing slash, as typed paths
  * are): a page's label is its route's `staticData.crumb`, else its path under the site. A page
  * with a path parameter is left out: it has no one URL to list (a site of only those lists none).
+ * An optional one is not: a page under `{-$locale}` is listed in the site's default language,
+ * its label without it.
  */
 export function useSites(): Site[] {
   const { routesByPath } = useRouter();
   return useMemo(() => {
-    // In path order, by code unit (the same on the server and in any browser's locale): the sites
-    // by name, and each site's home before its other pages.
+    // In path order, by code unit (the same on the server and in any browser's locale), optional
+    // parameters left out: the sites by name, and each site's home before its other pages.
     const sites = new Map<string, Site>();
-    for (const [to, route] of Object.entries(routesByPath).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    const byPath = Object.entries(routesByPath).map(([to, route]) => [withoutOptional(to), to, route] as const);
+    for (const [, to, route] of byPath.toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
       const name = siteOf(to);
       if (name === undefined) continue;
       const site = sites.get(name) ?? {
@@ -50,8 +50,8 @@ export function useSites(): Site[] {
         pages: [],
       };
       sites.set(name, site);
-      if (to.includes("$")) continue;
-      const rest = to.slice(`/sites/${name}`.length);
+      if (!hasOneUrl(to)) continue;
+      const rest = withoutOptional(to).slice(`/sites/${name}`.length);
       site.pages.push({ to, label: route.options.staticData?.crumb ?? (rest === "" ? "Home" : rest) });
     }
     return [...sites.values()];

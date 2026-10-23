@@ -12,6 +12,7 @@ import {
   apiNameOf,
   BUILT_IN_WORKFLOWS,
   DATA_VENDOR,
+  LOCALE,
   SITE_NAME,
   VISITORS,
   WORKFLOW_ACTION,
@@ -61,6 +62,11 @@ export interface SiteEntry {
   public?: true;
   /** `defineSite({ login })`, the connector whose login half signs visitors in, as written: one that names none is among `problems`. */
   login?: string;
+  /**
+   * `defineSite({ locales })`, a public site's languages, the first its default: kept only when
+   * every one is a `LOCALE`, written once, on a public site with no login; else a problem.
+   */
+  locales?: string[];
   /** The host a public site answers on: set by `startApp` from its `domains`, never by `readSites`. */
   domain?: string;
   /** Its calls, by file and then in the file's order. */
@@ -107,7 +113,6 @@ export function readSites(
 ): SiteEntry[] {
   if (root === undefined) return [];
   const dir = join(root, "sites");
-  if (!isDirectory(dir)) return [];
   const workflows = new Set(description.workflows.map((wf) => wf.name));
   const collections = new Set(description.collections.map((c) => c.name));
   const ops = new Map(description.ops.map((op) => [op.id, op]));
@@ -167,29 +172,49 @@ export function readSites(
     return { call: { kind, target, via, ...at }, ...(problem && { problem }) };
   };
 
-  return readdirSync(dir, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && SITE_NAME.test(d.name) && existsSync(join(dir, d.name, "routes")))
-    .map((d) => d.name)
-    .toSorted()
-    .map((name) => {
-      const files = SITE_DIRS.flatMap((sub) => filesUnder(join(dir, name, sub), isSource)).toSorted();
-      const resolved = files.flatMap((path) => {
-        const file = readSource(path);
-        return typeof file === "string" ? [] : usesIn(file, relative(root, path).split(sep).join("/")).map(resolve);
-      });
-      const siteFile = `sites/${name}/site.ts`;
-      const { problems: optionProblems, ...options } = siteOptionsOf(join(root, siteFile), connectors);
-      const calls = resolved.map((r) => r.call);
-      const problems = [
-        ...resolved.flatMap(({ call, problem }) => {
-          const message = problem ?? (options.public ? refused(call, options.login) : undefined);
-          return message === undefined ? [] : [{ file: call.file, line: call.line, column: call.column, message }];
-        }),
-        ...optionProblems.map((p) => ({ file: siteFile, ...p })),
-      ];
-      return { name, ...options, calls, problems };
+  return siteNames(dir).map((name) => {
+    const files = SITE_DIRS.flatMap((sub) => filesUnder(join(dir, name, sub), isSource)).toSorted();
+    const resolved = files.flatMap((path) => {
+      const file = readSource(path);
+      return typeof file === "string" ? [] : usesIn(file, relative(root, path).split(sep).join("/")).map(resolve);
     });
+    const siteFile = `sites/${name}/site.ts`;
+    const { problems: optionProblems, ...options } = siteOptionsOf(join(root, siteFile), connectors);
+    const calls = resolved.map((r) => r.call);
+    const problems = [
+      ...resolved.flatMap(({ call, problem }) => {
+        const message = problem ?? (options.public ? refused(call, options.login) : undefined);
+        return message === undefined ? [] : [{ file: call.file, line: call.line, column: call.column, message }];
+      }),
+      ...optionProblems.map((p) => ({ file: siteFile, ...p })),
+    ];
+    return { name, ...options, calls, problems };
+  });
 }
+
+/**
+ * Each site's languages (`defineSite({ locales })`, the first its default) under `root`, by name,
+ * for the sites whose `site.ts` gives them without a problem there: what the app's build gives
+ * its router (`virtual:sanoma/locales`). Read as `readSites` reads them, never run.
+ */
+export function siteLocales(root: string): Record<string, string[]> {
+  const none = new Set<string>();
+  return Object.fromEntries(
+    siteNames(join(root, "sites")).flatMap((name) => {
+      const { locales } = siteOptionsOf(join(root, "sites", name, "site.ts"), { vendors: none, logins: none });
+      return locales ? [[name, locales]] : [];
+    }),
+  );
+}
+
+/** The sites in `dir`: each folder with a `routes/` whose name is a URL segment, sorted. */
+const siteNames = (dir: string): string[] =>
+  isDirectory(dir)
+    ? readdirSync(dir, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && SITE_NAME.test(d.name) && existsSync(join(dir, d.name, "routes")))
+        .map((d) => d.name)
+        .toSorted()
+    : [];
 
 /** A use of `api` or a `RunForm`, as written: the name it gives, before it is resolved. */
 type Written = Omit<SiteCall, "target"> & { name: string };
@@ -273,13 +298,14 @@ const unread = (what: string, as: string) => `${what} is read without running si
 /**
  * What `site.ts` says of its site, read without running it, and what is wrong there: its default
  * export must be `defineSite({ … })` written out, so it can be read at all; then `title` when it is
- * a string, `public` and `login`, which must be literals. `login` is kept as written; one on a
+ * a string, `public`, `login` and `locales`, which must be literals. `login` is kept as written; one on a
  * site that is not public, or naming no connector of the config with a login half, is a problem.
+ * `locales` is kept only when it has no problem.
  */
 function siteOptionsOf(
   path: string,
   connectors: SiteConnectors,
-): Pick<SiteEntry, "title" | "public" | "login"> & { problems: LintProblem[] } {
+): Pick<SiteEntry, "title" | "public" | "login" | "locales"> & { problems: LintProblem[] } {
   const file = readSource(path);
   if (typeof file === "string") return { problems: [] };
   const problems: LintProblem[] = [...file.problems];
@@ -329,10 +355,33 @@ function siteOptionsOf(
   };
   const message = loginAt && loginProblem();
   if (message) problem(loginAt, message);
+
+  const localesAt = property("locales");
+  const list = unwrap(localesAt?.value);
+  // A hole or a spread is no string.
+  const tags: (string | undefined)[] | undefined =
+    list?.type === "ArrayExpression" ? list.elements.map((e: Node) => stringValue(e)) : undefined;
+  const locales = tags?.every((tag): tag is string => tag !== undefined) ? tags : undefined;
+  const localesProblem = (): string | undefined => {
+    if (locales === undefined) return unread("`locales`", "an array of strings");
+    if (!locales.length) return "`locales` names a site's languages, its default first: give one or more, or remove it";
+    const bad = locales.find((locale) => !LOCALE.test(locale));
+    if (bad !== undefined) return `"${bad}" is not a language tag such as "en", "fr" or "pt-BR"`;
+    const twice = locales.find((locale, i) => locales.indexOf(locale) !== i);
+    if (twice !== undefined) return `"${twice}" is in \`locales\` twice`;
+    // When `public` is what is wrong, it is said there.
+    if ((!isPublic && !publicUnread) || loginAt) {
+      return "`locales` are for a public site with no login: add `public: true`, or remove `locales`";
+    }
+    return undefined;
+  };
+  const localesMessage = localesAt && localesProblem();
+  if (localesMessage) problem(localesAt, localesMessage);
   return {
     ...(title !== undefined && { title }),
     ...(isPublic && { public: true as const }),
     ...(login !== undefined && { login }),
+    ...(localesAt && !localesMessage && isPublic && !loginAt && { locales }),
     problems,
   };
 }

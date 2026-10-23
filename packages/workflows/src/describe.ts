@@ -63,7 +63,7 @@ export {
   type Rebind,
 } from "./lockfile.ts";
 // What the sites call, read from their source: a workflow's Used by.
-export { readSites, type SiteCall, type SiteEntry } from "./sites.ts";
+export { readSites, type SiteCall, type SiteEntry, siteLocales } from "./sites.ts";
 // The generated SDK, `.sanoma/api.ts`: a site's `api` typed from this description.
 export { API_FILE, generateApi, writeApi, writeGenerated } from "./sdk.ts";
 // The Cedar schema, `.sanoma/schema.cedarschema`: what a company's policies are validated and decided against.

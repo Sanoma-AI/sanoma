@@ -1,11 +1,12 @@
 import { type QueryClient, useQuery } from "@tanstack/react-query";
-import { createRootRouteWithContext, HeadContent, Outlet, Scripts, useRouter } from "@tanstack/react-router";
+import { createRootRouteWithContext, HeadContent, notFound, Outlet, Scripts, useRouter } from "@tanstack/react-router";
 import { createIsomorphicFn } from "@tanstack/react-start";
 import { getCookie } from "@tanstack/react-start/server";
 import { ThemeProvider } from "next-themes";
 import { lazy, type ReactNode } from "react";
 import { DENSITY_COOKIE } from "#/components/density.tsx";
 import { CHAT_COOKIE, chatPref, type ChatPref } from "#/components/shell/prefs.ts";
+import { type PageLanguages, pageLanguages, usePageLanguages } from "#/lib/locales.ts";
 import { ActorContext, useActorState } from "../actor.ts";
 import { actorQuery, configQuery, waitingRunsQuery } from "../queries.ts";
 // Phosphor's regular shield-check, the app's icon.
@@ -18,10 +19,30 @@ const Root = lazy(() => import("#/components/app-chrome.tsx"));
 // One root for both hosts (a route tree has one): on a public site's host (`context.site`), a
 // bare document around the site's own pages, with nothing of the app's but its scripts; on the
 // app's, the app's head, loader and chrome.
-export const Route = createRootRouteWithContext<{ queryClient: QueryClient; site?: string }>()({
+/** What the router gives every route. */
+type RouterContext = { queryClient: QueryClient; site?: string; origin?: string };
+/** That, and what the root's `beforeLoad` adds. */
+type RootContext = RouterContext & Partial<PageLanguages>;
+
+export const Route = createRootRouteWithContext<RouterContext>()({
+  // The page's language and its URL in each of its site's: a URL naming a language its site does
+  // not have (or its default, which has no prefix) is no page.
+  beforeLoad: ({ matches, buildLocation }): PageLanguages => {
+    const languages = pageLanguages(
+      matches.at(-1),
+      // oxlint-disable-next-line typescript/no-explicit-any -- any page's path, typed by none
+      (to, params) => buildLocation({ to: to as any, params: params as any }).publicHref,
+    );
+    if (languages === "notFound") throw notFound();
+    return languages;
+  },
   // Annotated: without it, tsc infers the match's context as `never`.
-  head: ({ match, matches }: { match: { context: { site?: string } }; matches: Match[] }) =>
-    match.context.site ? (matches.some(isLost) ? LOST_HEAD : BARE_HEAD) : APP_HEAD,
+  head: ({ match, matches }: { match: { context: RootContext }; matches: Match[] }) =>
+    match.context.site
+      ? matches.some(isLost)
+        ? LOST_HEAD
+        : { ...BARE_HEAD, links: alternates(match.context) }
+      : APP_HEAD,
   // Pages show what is happening now: never cache them.
   headers: () => ({ "cache-control": "no-store" }),
   loader: async ({ context }): Promise<Prefs | null> => (context.site ? null : appLoader(context.queryClient)),
@@ -53,6 +74,19 @@ const isLost = ({ status, _notFound }: Match) => _notFound === true || status ==
  * stylesheets, so it comes below any layer of the site's: a site's stylesheet overrides it.
  */
 const BARE_RESET = "@layer sanoma{body{margin:0}}";
+
+/**
+ * On a public site's own host, a page in more than one language links to itself in each, and to
+ * its default as `x-default`: absolute, as search engines ask, on the page's own origin.
+ */
+function alternates({ locales = [], origin = "" }: RootContext) {
+  if (!locales.length) return [];
+  return [...locales, { locale: "x-default", href: locales[0]!.href }].map(({ locale, href }) => ({
+    rel: "alternate",
+    hrefLang: locale,
+    href: origin + href,
+  }));
+}
 
 const APP_HEAD = {
   meta: [...META, { name: "color-scheme", content: "light dark" }, { title: "Sanoma" }],
@@ -140,9 +174,13 @@ function Document({ children }: { children: ReactNode }) {
   // On a public site's host, `data-site` tells the browser's router which site this is, and the
   // site brings its own look: no theme.
   const site = useRouter().options.context.site;
+  // On a public site's host, the page's language, when its site has languages; else English, the
+  // app's, whose chrome is around a site's page on the app's host.
+  const { locale } = usePageLanguages();
+  const lang = (site && locale) || "en";
   return (
     // next-themes' script sets the class on <html> before the body paints, so React finds it changed.
-    <html lang="en" data-site={site} suppressHydrationWarning={!site}>
+    <html lang={lang} data-site={site} suppressHydrationWarning={!site}>
       <head>
         {site && (
           <style href="sanoma-bare" precedence="sanoma">

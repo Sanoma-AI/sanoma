@@ -55,6 +55,13 @@ export const WORKFLOW_ACTION = "workflow:";
 /** A site's folder name under `sites/`, its URL segment: what the app mounts and `readSites` reads. */
 export const SITE_NAME = /^[a-z][a-z0-9-]*$/;
 
+/**
+ * A public site's language, as `defineSite({ locales })` names it: a BCP 47 language tag of a
+ * language and subtags (`en`, `fr`, `pt-BR`), which is also its URL segment (`/pt-BR/…`) and a
+ * content file's suffix (`<slug>.pt-BR.md`).
+ */
+export const LOCALE = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
+
 /** A public site's domain: a host name of two labels or more, lowercase (`sanoma.example`). */
 export const DOMAIN_NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 

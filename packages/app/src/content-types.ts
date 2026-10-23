@@ -3,8 +3,10 @@
 
 /** A file under `content/<kind>/`, as `list()` gives it: its name and its front matter. */
 export interface ContentSummary<D> {
-  /** The file's name without `.md`. */
+  /** The file's name without `.md` (and without its language). */
   slug: string;
+  /** The language of a translation, `<slug>.<locale>.md`; absent for `<slug>.md`, the site's default's. */
+  locale?: string;
   /** The front matter: `{}` when the file has none. */
   data: D;
 }
@@ -17,10 +19,18 @@ export interface ContentEntry<D> extends ContentSummary<D> {
   html: string;
 }
 
+/**
+ * Which language to read: `locale` (a page's `params.locale`), each slug's translation into it,
+ * `<slug>.<locale>.md`, else `<slug>.md`; without one, `<slug>.md` alone.
+ */
+export interface ContentOptions {
+  locale?: string | undefined;
+}
+
 /** One kind of content, `content/<kind>/*.md`. */
 export interface ContentKind<D> {
-  /** Every file's slug and front matter, sorted by slug. */
-  list(): Promise<ContentSummary<D>[]>;
-  /** One file, with its body; `undefined` when there is no such file. */
-  get(slug: string): Promise<ContentEntry<D> | undefined>;
+  /** Every slug's file, as `ContentOptions` picks it, with its front matter, sorted by slug. */
+  list(options?: ContentOptions): Promise<ContentSummary<D>[]>;
+  /** One slug's file, as `ContentOptions` picks it, with its body; `undefined` when there is no such file. */
+  get(slug: string, options?: ContentOptions): Promise<ContentEntry<D> | undefined>;
 }

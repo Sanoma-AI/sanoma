@@ -201,6 +201,16 @@ describe("a company's app with its sites", () => {
       'import { RunForm } from "sanoma/site";',
       '<RunForm workflow="missing" />',
     ),
+    // A post with no translation, which sites/intl shows in English in French too.
+    "content/posts/untranslated.md": [
+      "---",
+      "title: Only in English",
+      "description: Not translated.",
+      "publishedAt: 2026-10-02",
+      "---",
+      "",
+      "Words only in English.",
+    ].join("\n"),
   });
   // And sanoma, which the company's node_modules links to.
   const untouched = {
@@ -337,7 +347,7 @@ describe("a company's app with its sites", () => {
 
   it("lists the sites on the Sites page, each with its pages and where it is public, Sites lit in the bar there and on a site's page", async () => {
     const html = (await (await fetch(new URL("/sites", app.url))).text()).replaceAll("<!-- -->", "");
-    expect(html).toMatch(/<h1[^>]*>Sites<span[^>]*>2<\/span><\/h1>/);
+    expect(html).toMatch(/<h1[^>]*>Sites<span[^>]*>3<\/span><\/h1>/);
     /** A site's row in the table, by its title. */
     const row = (title: string) =>
       html.match(new RegExp(`<tr[^>]*>(?:(?!</tr>)[\\s\\S])*>${title}</a>(?:(?!</tr>)[\\s\\S])*</tr>`))?.[0] ?? "";
@@ -356,6 +366,13 @@ describe("a company's app with its sites", () => {
     // Public, though the server cannot know at what address on this machine (the browser can).
     expect(hello).toMatch(/<td[^>]*><span[^>]*>Public<\/span><\/td>/);
     expect(row("Members")).toContain(">sites/members</code>");
+    // A site in two languages: its pages in its default, and its languages, the default first.
+    const intl = row("Intl");
+    expect(linkTag(intl, "Intl")).toContain('href="/sites/intl"');
+    expect(intl).toMatch(
+      /<ul aria-label="Languages"[^>]*><li><code>en<\/code><span[^>]*> default<\/span><\/li><li><code>fr<\/code><\/li><\/ul>/,
+    );
+    expect(hello).toMatch(/<td[^>]*><span[^>]*>One<\/span><\/td>/);
     // The bar's Sites, linking here, lit here and on a site's page; not on the app's other pages.
     const sites = /<a [^>]*href="\/sites"[^>]*>/;
     expect(html.match(sites)?.[0]).toContain('aria-current="page"');
@@ -465,8 +482,86 @@ describe("a company's app with its sites", () => {
     expect((await at("/posts/hello", "hello.localhost")).body).toContain("<h1>Hello, content</h1>");
     expect(app.sites).toEqual({
       hello: `http://hello.localhost:${new URL(app.url).port}`,
+      intl: `http://intl.localhost:${new URL(app.url).port}`,
       members: `http://members.localhost:${new URL(app.url).port}`,
     });
+  });
+
+  it("serves a public site in each of its languages: the default at the root, the others under their prefix, with lang and hreflang", async () => {
+    const origin = `http://intl.localhost:${new URL(app.url).port}`;
+    /** What the page at `path` on intl.localhost says of its language. */
+    const page = async (path: string) => {
+      const { status, body } = await at(path, "intl.localhost");
+      const html = body.replaceAll("<!-- -->", "");
+      return {
+        status,
+        html,
+        lang: html.match(/^<!DOCTYPE html><html lang="([^"]+)"/)?.[1],
+        title: html.match(/<title>([^<]*)<\/title>/)?.[1],
+        h1: html.match(/<h1>([^<]*)<\/h1>/)?.[1],
+        alternates: [...html.matchAll(/<link rel="alternate" hrefLang="([^"]+)" href="([^"]+)"\/>/g)].map(
+          ([, lang, href]) => [lang, href],
+        ),
+        switcher: [
+          ...(html.match(/<nav aria-label="Language">(.*?)<\/nav>/)?.[1] ?? "").matchAll(/href="([^"]+)"/g),
+        ].map(([, href]) => href),
+      };
+    };
+    // The default language, at the root, with no prefix; its strings, its posts and their links.
+    const home = await page("/");
+    expect(home).toMatchObject({
+      status: 200,
+      lang: "en",
+      title: "Welcome to the intl site",
+      h1: "Welcome to the intl site",
+    });
+    expect(home.alternates).toEqual([
+      ["en", `${origin}/`],
+      ["fr", `${origin}/fr`],
+      ["x-default", `${origin}/`],
+    ]);
+    expect(home.switcher).toEqual(["/", "/fr"]);
+    expect(linkTag(home.html, "Read “Hello, content”")).toContain('href="/posts/hello"');
+    // French under /fr: the site's own strings, its links kept in French, a translated post's French.
+    const fr = await page("/fr");
+    expect(fr).toMatchObject({
+      status: 200,
+      lang: "fr",
+      title: "Bienvenue sur le site intl",
+      h1: "Bienvenue sur le site intl",
+    });
+    expect(fr.html).toContain("<p>locale: fr</p>");
+    expect(linkTag(fr.html, "Lire « Bonjour, contenu »")).toContain('href="/fr/posts/hello"');
+    expect(linkTag(fr.html, "Lire « Only in English »")).toContain('href="/fr/posts/untranslated"');
+    const post = await page("/fr/posts/hello");
+    expect(post).toMatchObject({ status: 200, lang: "fr", title: "Bonjour, contenu", h1: "Bonjour, contenu" });
+    expect(post.html).toContain("Un billet de <strong>content/</strong>, traduit.");
+    expect(post.alternates).toEqual([
+      ["en", `${origin}/posts/hello`],
+      ["fr", `${origin}/fr/posts/hello`],
+      ["x-default", `${origin}/posts/hello`],
+    ]);
+    expect((await page("/posts/hello")).h1).toBe("Hello, content");
+    // A post with no translation: the default's, in French pages.
+    const fallback = await page("/fr/posts/untranslated");
+    expect(fallback).toMatchObject({ status: 200, lang: "fr", h1: "Only in English" });
+    // A language the site lacks, and the default's prefix, are no page.
+    for (const path of ["/de", "/en", "/en/posts/hello", "/fr/posts/nope"]) {
+      const lost = await page(path);
+      expect(lost.status, path).toBe(404);
+      expect(lost.title, path).toBe("Page not found");
+    }
+    // A translation is not a post of its own: a page reading content with no language never lists it.
+    expect((await at("/posts", "hello.localhost")).body).not.toContain("Bonjour, contenu");
+    // On the app's host, the same pages under /sites/intl, with no hreflang, in the app's English document.
+    const inApp = (await (await fetch(new URL("/sites/intl/fr/posts/hello", app.url))).text()).replaceAll(
+      "<!-- -->",
+      "",
+    );
+    expect(inApp).toMatch(/^<!DOCTYPE html><html lang="en"/);
+    expect(inApp).toContain("<h1>Bonjour, contenu</h1>");
+    expect(inApp).not.toContain('rel="alternate"');
+    expect(inApp).toContain('<a href="/sites/intl/posts/hello" hrefLang="en">en</a>');
   });
 
   it("answers a path no page has, or a post that is not there, on a public host with a plain page titled so, in a document reset for the site", async () => {
@@ -601,7 +696,8 @@ describe("a company's app with its sites", () => {
       domains: { members: "hello.localhost" },
     });
     try {
-      expect(third.sites).toEqual({});
+      // sites/intl, which has no problem and no login, alone.
+      expect(Object.keys(third.sites)).toEqual(["intl"]);
       for (const host of ["hello.localhost", "members.localhost"]) {
         expect((await rawGet(new URL("/", third.url).href, host)).status, host).toBe(503);
       }
@@ -787,7 +883,7 @@ describe("a build that fails, or leaves a site out", () => {
     const repo = company({
       "sites/Not_A_Segment/routes/index.tsx": sitePage("/sites/Not_A_Segment/", "", '"Refused"'),
     });
-    expect(sitesOf(repo)).toEqual({ sites: ["hello", "members"], refused: ["Not_A_Segment"] });
+    expect(sitesOf(repo)).toEqual({ sites: ["hello", "intl", "members"], refused: ["Not_A_Segment"] });
     const lines: string[] = [];
     const { distDir } = await buildApp(repo, { log: (line) => lines.push(line) });
     expect(lines).toContain(

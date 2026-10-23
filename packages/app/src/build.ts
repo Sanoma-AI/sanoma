@@ -208,6 +208,7 @@ function packageConfig(): InlineConfig {
       ),
       tailwindcss(),
       contentPlugin(),
+      localesPlugin(),
       tanstackStart({ importProtection: { behavior: "error", client: { specifiers: [CLIENT_DENIED] } } }),
       react(),
     ],
@@ -291,6 +292,7 @@ function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom): InlineConfi
       sharedDeps(repo, src),
       runtimeExternal(runtimeFrom),
       contentPlugin(repo),
+      localesPlugin(repo),
       tailwindcss(),
       tanstackStart({
         srcDirectory,
@@ -380,6 +382,56 @@ function contentPlugin(repo?: string): Plugin {
         if (!file.startsWith(dir) || !(event.endsWith("Dir") || file.endsWith(".md"))) return;
         // One read for the types and the module: the dev server's has the drafts too.
         text = contentModule(writeContentTypes(repo), (line) => server.config.logger.warn(line));
+        reloadFile(server, id);
+      });
+    },
+  };
+}
+
+const LOCALES = "virtual:sanoma/locales";
+
+/** `virtual:sanoma/locales`'s text: each site's languages (`siteLocales`). */
+async function localesModule(repo: string): Promise<string> {
+  const { siteLocales } = await import("@sanoma-ai/workflows/describe");
+  return `export default ${JSON.stringify(siteLocales(repo))};`;
+}
+
+/**
+ * `virtual:sanoma/locales`, which the router's `lib/locales.ts` imports: each public site's
+ * languages from its `site.ts` (`siteLocales`, read and never run), by name; without a repo, none.
+ * Read once for every environment; on the dev server, again when a `site.ts` or a folder of
+ * `sites/<name>/` or its `routes/` (which make a site) comes or goes, reloaded when they changed.
+ */
+function localesPlugin(repo?: string): Plugin {
+  const id = `\0${LOCALES}`;
+  let text: string | undefined;
+  return {
+    name: "sanoma:locales",
+    resolveId: (source) => (source === LOCALES ? id : undefined),
+    async load(loaded) {
+      if (loaded !== id) return;
+      if (repo === undefined) return "export default {};";
+      text ??= await localesModule(repo);
+      return text;
+    },
+    configureServer(server) {
+      if (repo === undefined) return;
+      const sites = join(repo, "sites") + sep;
+      server.watcher.on("all", async (event, file) => {
+        if (!file.startsWith(sites)) return;
+        const [, routes, ...deeper] = file.slice(sites.length).split(sep);
+        const site = event.endsWith("Dir") && !deeper.length && (routes === undefined || routes === "routes");
+        if (!site && !(routes === "site.ts" && !deeper.length)) return;
+        let next: string;
+        try {
+          next = await localesModule(repo);
+        } catch (err) {
+          // A folder gone while it was read: the next event reads again.
+          server.config.logger.warn(`sanoma: reading the sites' languages failed: ${String(err)}`);
+          return;
+        }
+        if (next === text) return;
+        text = next;
         reloadFile(server, id);
       });
     },

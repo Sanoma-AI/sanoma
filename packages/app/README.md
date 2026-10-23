@@ -48,7 +48,7 @@ A company repo is an ES module package (`"type": "module"`, as `sanoma init` wri
 
 ### A site's imports
 
-A site's route file imports `createFileRoute` from `@tanstack/react-router` (the route generator rewrites the path there, and only there) and the rest from `sanoma/site`, which is this package's `@sanoma-ai/app/site`: the app's own router's `Link`, `Outlet`, `useNavigate`, `useParams`, `useSearch`, `useRouter`, `useRouterState`, `getRouteApi`, `linkOptions`, `redirect` and `notFound` (and their types), `defineSite`, `api` with `ApiError` and `errorBodyOf` ([Calling operations and workflows](#calling-operations-and-workflows)), `content`, the repo's Markdown ([Content](#content)), and the pieces that talk to the app, `RunForm` and `useActor` ([The kit and RunForm](#the-kit-and-runform)). How a page looks comes from `sanoma/ui`. `sites/<name>/site.ts`, optional, names the site:
+A site's route file imports `createFileRoute` from `@tanstack/react-router` (the route generator rewrites the path there, and only there) and the rest from `sanoma/site`, which is this package's `@sanoma-ai/app/site`: the app's own router's `Link`, `Outlet`, `useNavigate`, `useParams`, `useSearch`, `useRouter`, `useRouterState`, `getRouteApi`, `linkOptions`, `redirect` and `notFound` (and their types), `defineSite`, `api` with `ApiError` and `errorBodyOf` ([Calling operations and workflows](#calling-operations-and-workflows)), `content`, the repo's Markdown ([Content](#content)), a public site's languages, `defineMessages`, `useMessages`, `useLocale` and `useLocales` ([Languages](#languages)), and the pieces that talk to the app, `RunForm` and `useActor` ([The kit and RunForm](#the-kit-and-runform)). How a page looks comes from `sanoma/ui`. `sites/<name>/site.ts`, optional, names the site:
 
 ```ts
 // sites/help/site.ts
@@ -69,7 +69,7 @@ function Home() {
 }
 ```
 
-A site for visitors rather than people says so in `site.ts`: `defineSite({ title: "Website", public: true, login: "auth0" })`. `public: true` makes it a public site, served at the root of its own host to visitors; `login`, for a public site only, names the connector in `sanoma.config.ts` whose login half signs a visitor in (`withSetup`'s `login`, in [the workflows README](https://www.npmjs.com/package/@sanoma-ai/workflows#usage)), and without it every page runs as `anonymous`. `sanoma` reads both without running `site.ts`, so the file's default export must be `defineSite({ … })` written out, each a literal; `sanoma check` names what it cannot read or check. A public site is served at the root of its own host too ([Public sites](#public-sites)).
+A site for visitors rather than people says so in `site.ts`: `defineSite({ title: "Website", public: true, login: "auth0" })`. `public: true` makes it a public site, served at the root of its own host to visitors; `login`, for a public site only, names the connector in `sanoma.config.ts` whose login half signs a visitor in (`withSetup`'s `login`, in [the workflows README](https://www.npmjs.com/package/@sanoma-ai/workflows#usage)), and without it every page runs as `anonymous`. `locales`, for a public site with no login, names its languages ([Languages](#languages)). `sanoma` reads these without running `site.ts`, so the file's default export must be `defineSite({ … })` written out, each a literal; `sanoma check` names what it cannot read or check. A public site is served at the root of its own host too ([Public sites](#public-sites)).
 
 ### The kit and RunForm
 
@@ -256,6 +256,8 @@ function Post() {
 | `content.posts.get(slug)`       | One file, `{ slug, data, body, html }`: `body` the Markdown after the front matter as written, `html` it rendered at build; `undefined` when there is no such file |
 | `content.<kind>` with no folder | `list()` gives `[]` and `get()` `undefined`; once `.sanoma/content.ts` types `content`, it does not type-check                                                     |
 
+- **Translations:** `content/posts/hello.fr.md` is `hello` in French, beside `hello.md`, the site's default language's. Its front matter is laid over the original's, so what it does not repeat (a date, an image, `draft`) is the original's: a draft's translation is a draft unless it says `draft: false`. A translation with front matter alone keeps the original's body. `list({ locale })` and `get(slug, { locale })` give each slug's file in that language, else its `<slug>.md` (an entry's `locale` says which: absent for `<slug>.md`); without `locale`, `<slug>.md` alone, as before translations. A language is a tag such as `fr` or `pt-BR` ([Languages](#languages)).
+
 - **Not found:** a loader's `notFound()` is drawn by the nearest route, from the page up, with a `notFoundComponent`, in place of that route: give the page one, as above, and the site's layout one too (`sites/www/routes/route.tsx`), which draws a path no page has inside the layout. A page whose route has none draws in the layout's place when the layout has one, and, with neither, the app's not-found notice takes the page's place (on a public site's own host, [a plain page](#public-sites)). Its head runs with no `loaderData`.
 - **Front matter** is YAML between a first line `---` and the next `---` line, read as YAML 1.2, so an unquoted date stays a string. A file whose front matter is not a mapping is left out, and `sanoma check` reports it at its line.
 - **HTML** is rendered at build with `marked` (GFM), so no Markdown library ships to the browser. Raw HTML in a file passes through: content is reviewed as code is. The kit has no styles for it; give the `article` your own classes.
@@ -276,6 +278,65 @@ A public site (`defineSite({ public: true })`) is served at the root of its own 
 - **Its login.** `startApp` makes each public site's login half once it listens, before it resolves, with the company's database, a key of its own to sign its cookies with (derived from `SANOMA_SECRETS_KEY` for `login <connector>`, so a login like Better Auth needs no secret set), its stored secrets and the site's origins (`http://<name>.localhost:*`, and `https://<domain>` with a domain); a request that comes first waits for it, and `app.close()` closes it. A public site whose `site.ts` has a problem (its login may be one not read), or whose login fails to start, is served on no host, a 503, and the app's log says why; the app itself starts, so the connector's page, or `SANOMA_SECRETS_KEY` in the environment, can give what the login lacks.
 - **Not on a public host:** the app's chrome and what it provides, so a site there brings its own toasts and has no `useDensity()` (it throws); `RunForm` and the will-ask preview, which read the config and link to the app's pages.
 - **Later:** a `RunForm` on a public page; rate limits; caching headers and prerendering for anonymous pages; the public host's own pending view; an anonymous id per session (every anonymous visitor is one principal now).
+
+### Languages
+
+A public site with no login can be in more than one language. Its `site.ts` names them, the first its default, and its pages go under `routes/{-$locale}/`, TanStack Router's optional path parameter: the default language at `/about`, each other at `/<locale>/about`, on the site's own host and under `/sites/<name>/` on the app's.
+
+```ts
+// sites/www/site.ts
+export default defineSite({ title: "Website", public: true, locales: ["en", "fr"] });
+
+// sites/www/messages.ts: the site's own strings, typed by the default's
+import { defineMessages } from "sanoma/site";
+import site from "./site.ts";
+
+export const messages = defineMessages(site, {
+  en: { blog: "Blog", read: (title: string) => `Read “${title}”` },
+  fr: { blog: "Blog", read: (title: string) => `Lire « ${title} »` },
+});
+```
+
+```tsx
+// sites/www/routes/{-$locale}/blog.index.tsx
+import { createFileRoute } from "@tanstack/react-router";
+import { content, Link, useMessages } from "sanoma/site";
+import { messages } from "../../messages.ts";
+
+export const Route = createFileRoute("/sites/www/{-$locale}/blog/")({
+  loader: ({ params }) => content.posts.list({ locale: params.locale }),
+  head: ({ params }) => ({ meta: [{ title: messages.get(params.locale).blog }] }),
+  component: Blog,
+});
+
+function Blog() {
+  const t = useMessages(messages);
+  return Route.useLoaderData().map((post) => (
+    <Link key={post.slug} to="/sites/www/{-$locale}/blog/$slug" params={{ slug: post.slug }}>
+      {t.read(post.data.title)}
+    </Link>
+  ));
+}
+```
+
+- **URLs.** `params.locale` is the URL's language, `undefined` in the default's. A `Link` keeps the page's language (the router carries `locale` over); `params={{ locale: "fr" }}` names another. A language the site lacks, and the default's own prefix (`/en/…`), are not found. A page outside `{-$locale}` has one URL, in the default language.
+- **Strings.** `defineMessages(site, { <locale>: { … } })` takes every language of the site, each with exactly the default's keys and types, so a key or a language missing or extra fails `sanoma check`; a string with values in it is a function of them, its parameters typed in each language. `useMessages(messages)` gives the strings of the page on screen, `messages.get(params.locale)` those of a language in a loader or a `head`.
+- **The page.** On the site's own host, `<html lang>` is the page's language (`useLocale()` gives it, for `Intl`'s formats, on either host; the app's host keeps `en`, its chrome's), and each page under `{-$locale}` links to itself in every language, `<link rel="alternate" hreflang>` with absolute URLs on the request's origin (its scheme from `x-forwarded-proto`), and to its default as `x-default`. A page is in every language: a post with no translation shows its original under each prefix.
+- **A switcher** is the site's own component: `useLocales()` gives the page on screen in each language, `{ locale, href, current }`, the default first, `href` its path on this host.
+
+```tsx
+export function Switcher() {
+  return useLocales().map(({ locale, href, current }) => (
+    <a key={locale} href={href} hrefLang={locale} aria-current={current ? "page" : undefined}>
+      {locale}
+    </a>
+  ));
+}
+```
+
+- **Content:** a post's translation is `<slug>.<locale>.md` ([Content](#content)).
+- **In the app:** the Sites page lists a site's languages, its default first.
+- **Later:** a visitor's language from `Accept-Language` or a cookie, redirected to; alternates only for the languages a post is translated into; `sanoma check` naming a translation in a language no site has; translated path segments (`/fr/a-propos`); languages on a site with a login; the app's own screens in another language.
 
 ## Screens
 
