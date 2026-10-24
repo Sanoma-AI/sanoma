@@ -475,10 +475,10 @@ describe("readSites", () => {
       ...site("www", "public: true"),
       "sites/www/routes/blog.$slug.tsx": reading("/sites/www/blog/$slug", "content.posts.get(params.slug)"),
       "sites/www/routes/notes.$id.tsx": reading("/sites/www/notes/$id", "content.notes.get(params.id.toLowerCase())"),
-      // No content read by its parameter (a property named like it is not it): not a content page, so nothing to warn of.
+      // No content read by its parameter (a property or another parameter named like it is not it): nothing to warn of.
       "sites/www/routes/tags.$tag.tsx": reading(
         "/sites/www/tags/$tag",
-        '[content.posts.list(), content.settings.get("site"), content.authors.get(post.tag)]',
+        '[content.posts.list(), content.settings.get("site"), content.authors.get(post.tag), content.labels.get(params.locale ?? "en")]',
       ),
       // Its lazy file reads another kind by something else, but its route file gives its kind.
       "sites/www/routes/guides.$slug.tsx": reading("/sites/www/guides/$slug", "content.guides.get(params.slug)"),

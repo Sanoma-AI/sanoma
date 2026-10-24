@@ -54,7 +54,8 @@ export function useLocale(): string {
 }
 
 /**
- * The page on screen in each of its site's languages, the default first: `href` the page's path
+ * The page on screen in each of its site's languages it is in, in the site's order (a content
+ * page only in those its entry is in, so the default may be missing): `href` the page's path
  * on this host (`/about`, `/fr/about` at the root of the site's own; under `/sites/<name>` on the
  * app's), `current` the page's own. What a language switcher links to, as the `hreflang` links
  * the app puts in the page's head do; none for a page not under `routes/{-$locale}/`.

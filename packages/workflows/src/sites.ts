@@ -343,11 +343,15 @@ function readSiteFile(
   return { uses, route: { path: page }, warning: { file, ...at(unfollowed.start), message } };
 }
 
-/** Whether `node` reads the parameter `param`: names it, or `params`, anywhere in it (not as a property's name, `post.slug`). */
+/** Whether `node` reads the parameter `param` anywhere in it: `params.<param>`, or `param` destructured (not another parameter, nor a property's name, `post.slug`). */
 const mentions = (node: Node, param: string): boolean => {
   if (!node) return false;
-  if (node.type === "Identifier") return node.name === param || PARAMS.has(node.name);
-  if (node.type === "MemberExpression" && !node.computed) return mentions(node.object, param);
+  if (node.type === "Identifier") return node.name === param;
+  if (node.type === "MemberExpression") {
+    const path = memberPath(node, PARAMS);
+    if (path) return path[0] === param;
+    if (!node.computed) return mentions(node.object, param);
+  }
   return childrenOf(node).some((child) => mentions(child, param));
 };
 
