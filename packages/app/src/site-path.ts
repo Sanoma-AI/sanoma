@@ -17,3 +17,16 @@ export const LOCALE_SEGMENT = "/{-$locale}";
 
 /** Whether a route path is a page of `site` in its languages: under `/sites/<site>/{-$locale}`. */
 export const isLocalized = (site: string, path: string): boolean => path.startsWith(`/sites/${site}${LOCALE_SEGMENT}`);
+
+/**
+ * A page's `hreflang` links, from its URL in each language it is in, in its site's order: none in
+ * fewer than two, and its default's again as `x-default` when it is in that. The head's and the
+ * sitemap's alike.
+ */
+export function alternatesOf(
+  found: readonly { locale: string; href: string }[],
+  defaultLocale: string | undefined,
+): { locale: string; href: string }[] {
+  if (found.length < 2) return [];
+  return [...found, ...(found[0]!.locale === defaultLocale ? [{ locale: "x-default", href: found[0]!.href }] : [])];
+}

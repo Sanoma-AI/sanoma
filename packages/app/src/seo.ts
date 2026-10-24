@@ -4,7 +4,7 @@ import type { SiteEntry } from "@sanoma-ai/workflows/describe";
 import type { Published } from "./content-files.ts";
 import { escapeHtml } from "./login/page.ts";
 import { inLocale } from "./content-types.ts";
-import { hasOneUrl, isLocalized, LOCALE_SEGMENT, sitePath, withoutOptional } from "./site-path.ts";
+import { alternatesOf, hasOneUrl, isLocalized, LOCALE_SEGMENT, sitePath, withoutOptional } from "./site-path.ts";
 
 /**
  * `/robots.txt` and `/sitemap.xml` on a public site's own host at `origin`, for a GET or HEAD;
@@ -69,12 +69,9 @@ export function sitemapEntries(
     const slugsIn = params.map((param) => entries && new Set(inLocale(entries, param).map(({ slug }) => slug)));
     return slugs.flatMap((slug) => {
       const found = params.flatMap((param, i) =>
-        slug === undefined || slugsIn[i]!.has(slug) ? [{ hreflang: locales[i]!, href: url(slug, param) }] : [],
+        slug === undefined || slugsIn[i]!.has(slug) ? [{ locale: locales[i]!, href: url(slug, param) }] : [],
       );
-      const alternates =
-        found.length > 1
-          ? [...found, ...(found[0]!.hreflang === locales[0] ? [{ hreflang: "x-default", href: found[0]!.href }] : [])]
-          : [];
+      const alternates = alternatesOf(found, locales[0]).map(({ locale, href }) => ({ hreflang: locale, href }));
       return found.map(({ href }) => ({ loc: href, alternates }));
     });
   });

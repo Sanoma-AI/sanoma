@@ -11,6 +11,10 @@ import { isLocalized, withoutOptional } from "../site-path.ts";
 // public host loads no other site's `site.ts`. The root route reads them once per navigation
 // (`pageLanguages`); browser and server alike.
 
+/** Site `site`'s default language, the first of its `locales`; none for a site with none. */
+export const defaultLocaleOf = (site: string | undefined): string | undefined =>
+  site !== undefined && Object.hasOwn(LOCALES, site) ? LOCALES[site]![0] : undefined;
+
 /** The site a route path is in (`/sites/<name>…`), by its folder's name. */
 export const siteOf = (path: string | undefined): string | undefined =>
   path === undefined ? undefined : /^\/sites\/([^/]+)/.exec(path)?.[1];
@@ -31,8 +35,6 @@ export interface PageLanguages {
    * none when it is not under `{-$locale}`. A content page is in those its entry is in (`languagesOf`).
    */
   locales: { locale: string; href: string }[];
-  /** The site's default language, when the page is in it: its `x-default`. */
-  default?: string;
 }
 
 /**
@@ -60,7 +62,6 @@ export async function pageLanguages(
     locales: locales.flatMap((locale, i) =>
       found[i] ? [{ locale, href: href(leaf.fullPath, { ...leaf.params, locale: i === 0 ? undefined : locale }) }] : [],
     ),
-    ...(found[0] && { default: locales[0] }),
   };
 }
 

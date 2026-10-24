@@ -475,8 +475,17 @@ describe("readSites", () => {
       ...site("www", "public: true"),
       "sites/www/routes/blog.$slug.tsx": reading("/sites/www/blog/$slug", "content.posts.get(params.slug)"),
       "sites/www/routes/notes.$id.tsx": reading("/sites/www/notes/$id", "content.notes.get(params.id.toLowerCase())"),
-      // No content entry read: no content page, so nothing to warn of.
-      "sites/www/routes/tags.$tag.tsx": reading("/sites/www/tags/$tag", "content.posts.list()"),
+      // No content read by its parameter (a property named like it is not it): not a content page, so nothing to warn of.
+      "sites/www/routes/tags.$tag.tsx": reading(
+        "/sites/www/tags/$tag",
+        '[content.posts.list(), content.settings.get("site"), content.authors.get(post.tag)]',
+      ),
+      // Its lazy file reads another kind by something else, but its route file gives its kind.
+      "sites/www/routes/guides.$slug.tsx": reading("/sites/www/guides/$slug", "content.guides.get(params.slug)"),
+      "sites/www/routes/guides.$slug.lazy.tsx": reading(
+        "/sites/www/guides/$slug",
+        "content.authors.get(params.slug.split('-')[0])",
+      ).replace("createFileRoute", "createLazyFileRoute"),
       // Not public: it has no sitemap.
       ...site("staff", 'title: "Staff"'),
       "sites/staff/routes/notes.$id.tsx": reading("/sites/staff/notes/$id", "content.notes.get('x')"),
@@ -491,7 +500,7 @@ describe("readSites", () => {
       },
     ]);
     expect(warnings[0]!.message).toMatch(/^the sitemap lists none of this page's entries/);
-    expect(siteContentPages(root)).toEqual({ "/sites/www/blog/$slug": "posts" });
+    expect(siteContentPages(root)).toEqual({ "/sites/www/blog/$slug": "posts", "/sites/www/guides/$slug": "guides" });
   });
 
   it("reads a public site's locales from site.ts, its default first, and makes a problem of what it cannot keep", () => {
