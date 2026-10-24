@@ -20,6 +20,8 @@ export interface CheckResult {
   ok: boolean;
   /** One printable line each: `<file>:<line>:<col>: <message>`, or `<scenario> › <step>: <message>`. */
   problems: string[];
+  /** What is worth fixing but not wrong, one line each, `<file>:<line>:<col>: warning: <message>`: the sites' `warnings`. */
+  warnings: string[];
 }
 
 export interface CheckOptions {
@@ -49,7 +51,7 @@ const LINTED = ["workflows", "resources", "sites"];
  * three, the app built with them and `tsc -p sites/tsconfig.json` (`checkSites`), and what is
  * wrong under `content/` (as `writeSiteFiles` reads it). Their problems in the order tsc, the sites' tsc, oxlint,
  * the policies, the config, the folders refused as sites, the content's problems, the sites' build. Then, unless the policies do not hold, every scenario against the fakes (`runScenarios`), each step that did not hold a
- * problem. `ok` when there are no problems.
+ * problem. `ok` when there are no problems; the sites' `warnings` beside them never make it not.
  */
 export async function check(
   { config, root, resolved }: Loaded,
@@ -96,7 +98,10 @@ export async function check(
     const { failed } = await runScenarios(config, { databaseUrl, log });
     for (const f of failed) problems.push(`${f.scenario} › ${f.step}: ${f.message}`);
   }
-  return { ok: problems.length === 0, problems };
+  const warnings = description.sites.flatMap((site) =>
+    site.warnings.map((w) => problemLine({ ...w, message: `warning: ${w.message}` })),
+  );
+  return { ok: problems.length === 0, problems, warnings };
 }
 
 /**

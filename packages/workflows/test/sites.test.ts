@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { describeConfig, siteLocales } from "../src/describe.ts";
+import { describeConfig, siteContentPages, siteLocales } from "../src/describe.ts";
 import { defineConnector, defineWorkflow, type SanomaConfig, withSetup } from "../src/index.ts";
 import { leads } from "../../app/test/fixtures/company-sites/resources/data.ts";
 import { tree } from "./tree.ts";
@@ -174,6 +174,7 @@ describe("readSites", () => {
               'Add: permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"data.leads.list", resource);',
           },
         ],
+        warnings: [],
       },
     ]);
   });
@@ -299,8 +300,9 @@ describe("readSites", () => {
           { file: index, line: 15, column: 8, message: 'calls workflow "outbound-next", which does not exist' },
           { file: index, line: 16, column: 10, message: 'calls workflow "gone", which does not exist' },
         ],
+        warnings: [],
       },
-      { name: "quiet", pages: [{ path: "/sites/quiet" }], calls: [], problems: [] },
+      { name: "quiet", pages: [{ path: "/sites/quiet" }], calls: [], problems: [], warnings: [] },
     ]);
   });
 
@@ -331,6 +333,7 @@ describe("readSites", () => {
         pages: [{ path: "/sites/broken" }],
         calls: [],
         problems: [expect.objectContaining({ file: "sites/broken/site.ts", line: 4 })],
+        warnings: [],
       },
       {
         name: "dynamic",
@@ -341,6 +344,7 @@ describe("readSites", () => {
           problemAt("dynamic", 5, "`public` is read without running site.ts: write it as `true` or `false`"),
           problemAt("dynamic", 6, "`login` is read without running site.ts: write it as a string"),
         ],
+        warnings: [],
       },
       {
         name: "hidden",
@@ -355,6 +359,7 @@ describe("readSites", () => {
               'its default export is read without running site.ts: write it as `defineSite({ … })` from "sanoma/site", its options an object literal',
           },
         ],
+        warnings: [],
       },
       {
         name: "loginless",
@@ -364,6 +369,7 @@ describe("readSites", () => {
         public: true,
         login: "acme",
         problems: [problemAt("loginless", 6, 'login names "acme", whose connector has no login half')],
+        warnings: [],
       },
       {
         name: "missing",
@@ -373,9 +379,10 @@ describe("readSites", () => {
         public: true,
         login: "okta",
         problems: [problemAt("missing", 6, 'login names "okta", which is not a connector in sanoma.config.ts')],
+        warnings: [],
       },
-      { name: "off", pages: [{ path: "/sites/off" }], calls: [], problems: [] },
-      { name: "open", public: true, pages: [{ path: "/sites/open" }], calls: [], problems: [] },
+      { name: "off", pages: [{ path: "/sites/off" }], calls: [], problems: [], warnings: [] },
+      { name: "open", public: true, pages: [{ path: "/sites/open" }], calls: [], problems: [], warnings: [] },
       // Its login, a connector with a login half, is fine; what is wrong is `public`.
       {
         name: "quoted",
@@ -383,6 +390,7 @@ describe("readSites", () => {
         calls: [],
         login: "auth0",
         problems: [problemAt("quoted", 4, "`public` is read without running site.ts: write it as `true` or `false`")],
+        warnings: [],
       },
       // What is written is read; a spread could make it public.
       {
@@ -397,6 +405,7 @@ describe("readSites", () => {
             "each of `defineSite`'s options is read without running site.ts: write it as a property with its name",
           ),
         ],
+        warnings: [],
       },
       {
         name: "staff",
@@ -405,6 +414,7 @@ describe("readSites", () => {
         title: "Staff",
         login: "auth0",
         problems: [problemAt("staff", 6, "a login is for a public site: add `public: true`, or remove `login`")],
+        warnings: [],
       },
       {
         name: "www",
@@ -414,6 +424,7 @@ describe("readSites", () => {
         pages: [{ path: "/sites/www" }],
         calls: [],
         problems: [],
+        warnings: [],
       },
     ]);
   });
@@ -459,6 +470,30 @@ describe("readSites", () => {
     ]);
   });
 
+  it("warns, on a public site, of a page with one parameter whose content read the sitemap cannot tie to it, and gives the router each content page's kind", () => {
+    const root = tree("warnings", {
+      ...site("www", "public: true"),
+      "sites/www/routes/blog.$slug.tsx": reading("/sites/www/blog/$slug", "content.posts.get(params.slug)"),
+      "sites/www/routes/notes.$id.tsx": reading("/sites/www/notes/$id", "content.notes.get(params.id.toLowerCase())"),
+      // No content entry read: no content page, so nothing to warn of.
+      "sites/www/routes/tags.$tag.tsx": reading("/sites/www/tags/$tag", "content.posts.list()"),
+      // Not public: it has no sitemap.
+      ...site("staff", 'title: "Staff"'),
+      "sites/staff/routes/notes.$id.tsx": reading("/sites/staff/notes/$id", "content.notes.get('x')"),
+    });
+    const warnings = describeConfig(config(root)).sites.flatMap((entry) => entry.warnings);
+    expect(warnings).toEqual([
+      {
+        file: "sites/www/routes/notes.$id.tsx",
+        line: expect.any(Number),
+        column: expect.any(Number),
+        message: expect.stringContaining("`content.<kind>.get(params.id)`"),
+      },
+    ]);
+    expect(warnings[0]!.message).toMatch(/^the sitemap lists none of this page's entries/);
+    expect(siteContentPages(root)).toEqual({ "/sites/www/blog/$slug": "posts" });
+  });
+
   it("reads a public site's locales from site.ts, its default first, and makes a problem of what it cannot keep", () => {
     const root = tree("locales", {
       ...site("www", "public: true", 'locales: ["en", "fr", "pt-BR"]'),
@@ -481,6 +516,7 @@ describe("readSites", () => {
       pages: [{ path: "/sites/www" }],
       calls: [],
       problems: [],
+      warnings: [],
     });
     // Each at its `locales`, the line after `public: true` (and `login`), or the first.
     const problems = Object.fromEntries(sites.map((s) => [s.name, s.problems.map((p) => [p.line, p.message])]));

@@ -1,6 +1,8 @@
 import { useRouterState } from "@tanstack/react-router";
-import LOCALES from "virtual:sanoma/locales";
-import { isLocalized } from "../site-path.ts";
+import LOCALES, { contentPages } from "virtual:sanoma/locales";
+import { content, type UntypedContent } from "../content.ts";
+import type { ContentKind } from "../content-types.ts";
+import { isLocalized, withoutOptional } from "../site-path.ts";
 
 // A public site's languages (`defineSite({ locales })`), as its pages' URLs say them: a site puts
 // its pages under `routes/{-$locale}/`, TanStack's optional path parameter, so `/about` is in its
@@ -24,8 +26,13 @@ export interface LocaleMatch {
 export interface PageLanguages {
   /** The page's language: the URL's, else its site's default; none when its site has no languages. */
   locale?: string;
-  /** The page in each of its site's languages, the default first, `href` on this host; none when it is not under `{-$locale}`. */
+  /**
+   * The page in each of its site's languages it is in, in the site's order, `href` on this host;
+   * none when it is not under `{-$locale}`. A content page is in those its entry is in (`languagesOf`).
+   */
   locales: { locale: string; href: string }[];
+  /** The site's default language, when the page is in it: its `x-default`. */
+  default?: string;
 }
 
 /**
@@ -34,10 +41,10 @@ export interface PageLanguages {
  * language the site does not have (as written: the router matches `/pt-br/` too), or its default,
  * which has no prefix.
  */
-export function pageLanguages(
+export async function pageLanguages(
   leaf: LocaleMatch | undefined,
   href: (to: string, params: Record<string, unknown>) => string,
-): PageLanguages | "notFound" {
+): Promise<PageLanguages | "notFound"> {
   const site = siteOf(leaf?.fullPath);
   if (!leaf || !site) return { locales: [] };
   const locales = Object.hasOwn(LOCALES, site) ? LOCALES[site] : undefined;
@@ -47,13 +54,33 @@ export function pageLanguages(
   if (named !== undefined && (!locales || named === locales[0] || !locales.includes(named as string)))
     return "notFound";
   if (!locales) return { locales: [] };
+  const found = await languagesOf(leaf, locales);
   return {
     locale: (named as string | undefined) ?? locales[0],
-    locales: locales.map((locale, i) => ({
-      locale,
-      href: href(leaf.fullPath, { ...leaf.params, locale: i === 0 ? undefined : locale }),
-    })),
+    locales: locales.flatMap((locale, i) =>
+      found[i] ? [{ locale, href: href(leaf.fullPath, { ...leaf.params, locale: i === 0 ? undefined : locale }) }] : [],
+    ),
+    ...(found[0] && { default: locales[0] }),
   };
+}
+
+/**
+ * Whether the page `leaf` is in each of `locales`: a page whose entries are a content kind's
+ * (`contentPages`, as the sitemap reads them) where its entry is, as its loader reads it,
+ * `content.<kind>.get(slug, { locale: params.locale })` (`inLocale`; the default's URL names
+ * none); any other page in every one.
+ */
+async function languagesOf(leaf: LocaleMatch, locales: string[]): Promise<boolean[]> {
+  const path = leaf.fullPath.replace(/\/$/, "");
+  const kind = Object.hasOwn(contentPages, path) ? contentPages[path] : undefined;
+  const param = /\$([^/]+)/.exec(withoutOptional(path))?.[1];
+  const slug = param === undefined ? undefined : leaf.params[param];
+  if (kind === undefined || typeof slug !== "string") return locales.map(() => true);
+  // Any kind, by name: a company's `content` types only its own.
+  const entries: ContentKind<unknown> = (content as UntypedContent)[kind];
+  return Promise.all(
+    locales.map(async (locale, i) => (await entries.get(slug, { locale: i === 0 ? undefined : locale })) !== undefined),
+  );
 }
 
 /** The page on screen in its site's languages, as the root route's `beforeLoad` found them. */

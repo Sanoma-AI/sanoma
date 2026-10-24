@@ -397,17 +397,18 @@ function contentPlugin(repo?: string): Plugin {
 
 const LOCALES = "virtual:sanoma/locales";
 
-/** `virtual:sanoma/locales`'s text: each site's languages (`siteLocales`). */
+/** `virtual:sanoma/locales`'s text: each site's languages (`siteLocales`), and its content pages' kinds (`siteContentPages`). */
 async function localesModule(repo: string): Promise<string> {
-  const { siteLocales } = await import("@sanoma-ai/workflows/describe");
-  return `export default ${JSON.stringify(siteLocales(repo))};`;
+  const { siteContentPages, siteLocales } = await import("@sanoma-ai/workflows/describe");
+  return `export default ${JSON.stringify(siteLocales(repo))};\nexport const contentPages = ${JSON.stringify(siteContentPages(repo))};`;
 }
 
 /**
  * `virtual:sanoma/locales`, which the router's `lib/locales.ts` imports: each public site's
- * languages from its `site.ts` (`siteLocales`, read and never run), by name; without a repo, none.
- * Read once for every environment; on the dev server, again when a `site.ts` or a folder of
- * `sites/<name>/` or its `routes/` (which make a site) comes or goes, reloaded when they changed.
+ * languages from its `site.ts` (`siteLocales`, read and never run), by name, and the kind each
+ * content page reads (`siteContentPages`); without a repo, none. Read once for every environment;
+ * on the dev server, again when a `site.ts`, a route file or a folder of `sites/<name>/` or its
+ * `routes/` (which make a site) changes, comes or goes, reloaded when they changed.
  */
 function localesPlugin(repo?: string): Plugin {
   const id = `\0${LOCALES}`;
@@ -417,7 +418,7 @@ function localesPlugin(repo?: string): Plugin {
     resolveId: (source) => (source === LOCALES ? id : undefined),
     async load(loaded) {
       if (loaded !== id) return;
-      if (repo === undefined) return "export default {};";
+      if (repo === undefined) return "export default {};\nexport const contentPages = {};";
       text ??= await localesModule(repo);
       return text;
     },
@@ -428,7 +429,8 @@ function localesPlugin(repo?: string): Plugin {
         if (!file.startsWith(sites)) return;
         const [, routes, ...deeper] = file.slice(sites.length).split(sep);
         const site = event.endsWith("Dir") && !deeper.length && (routes === undefined || routes === "routes");
-        if (!site && !(routes === "site.ts" && !deeper.length)) return;
+        const route = routes === "routes" && /\.tsx?$/.test(file);
+        if (!site && !route && !(routes === "site.ts" && !deeper.length)) return;
         let next: string;
         try {
           next = await localesModule(repo);

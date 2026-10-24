@@ -28,8 +28,8 @@ type RootContext = RouterContext & Partial<PageLanguages>;
 export const Route = createRootRouteWithContext<RouterContext>()({
   // The page's language and its URL in each of its site's: a URL naming a language its site does
   // not have (or its default, which has no prefix) is no page.
-  beforeLoad: ({ matches, buildLocation }): PageLanguages => {
-    const languages = pageLanguages(
+  beforeLoad: async ({ matches, buildLocation }): Promise<PageLanguages> => {
+    const languages = await pageLanguages(
       matches.at(-1),
       // oxlint-disable-next-line typescript/no-explicit-any -- any page's path, typed by none
       (to, params) => buildLocation({ to: to as any, params: params as any }).publicHref,
@@ -78,13 +78,14 @@ const BARE_RESET = "@layer sanoma{body{margin:0}}";
 
 /**
  * On a public site's own host, a page in more than one language links to itself in each, and to
- * its default as `x-default`: absolute, as search engines ask, at the site's origin (`siteOrigin()`,
- * its domain when it has one).
+ * its default as `x-default` when it is in that: absolute, as search engines ask, at the site's
+ * origin (`siteOrigin()`, its domain when it has one). As its site's sitemap lists it.
  */
-function alternates({ locales = [] }: RootContext) {
-  if (!locales.length) return [];
+function alternates({ locales = [], default: inDefault }: RootContext) {
+  if (locales.length < 2) return [];
   const origin = siteOrigin();
-  return [...locales, { locale: "x-default", href: locales[0]!.href }].map(({ locale, href }) => ({
+  const all = inDefault ? [...locales, { locale: "x-default", href: locales[0]!.href }] : locales;
+  return all.map(({ locale, href }) => ({
     rel: "alternate",
     hrefLang: locale,
     href: new URL(href, origin).href,
