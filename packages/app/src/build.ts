@@ -21,7 +21,14 @@ import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { problemLine, SITE_NAME } from "@sanoma-ai/workflows/shared";
 import type { InlineConfig, Logger, Plugin, ViteDevServer } from "vite";
-import { CONTENT_TYPES, type ContentProblem, contentTypes, readContent } from "./content-files.ts";
+import {
+  CONTENT_TYPES,
+  type ContentProblem,
+  contentTypes,
+  PUBLISHED_FILE,
+  publishedOf,
+  readContent,
+} from "./content-files.ts";
 import type { ServerEntry } from "./context.ts";
 
 export { CONTENT_TYPES, type ContentProblem, contentTypes, readContent } from "./content-files.ts";
@@ -742,6 +749,8 @@ export async function buildApp(
       );
     }
     copyFileSync(routeTree, join(outDir, "routeTree.gen.ts"));
+    // What its pages show of the content, for the public sites' sitemaps (`startApp`).
+    writeFileSync(join(outDir, PUBLISHED_FILE), JSON.stringify(publishedOf(root)));
     renameSync(outDir, distDir);
   } catch (err) {
     rmSync(outDir, { recursive: true, force: true });

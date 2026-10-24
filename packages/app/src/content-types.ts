@@ -34,3 +34,16 @@ export interface ContentKind<D> {
   /** One slug's file, as `ContentOptions` picks it, with its body; `undefined` when there is no such file. */
   get(slug: string, options?: ContentOptions): Promise<ContentEntry<D> | undefined>;
 }
+
+/**
+ * `entries` in `locale`, as `list({ locale })` and `get(slug, { locale })` read them: each slug's
+ * `<slug>.<locale>.md`, else its `<slug>.md`; without one, the `<slug>.md` files alone. In the
+ * entries' order.
+ */
+export function inLocale<E extends { slug: string; locale?: string }>(entries: readonly E[], locale?: string): E[] {
+  const picked = new Map<string, E>();
+  for (const entry of entries) {
+    if (entry.locale === undefined ? !picked.has(entry.slug) : entry.locale === locale) picked.set(entry.slug, entry);
+  }
+  return [...picked.values()];
+}

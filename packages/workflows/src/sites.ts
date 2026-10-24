@@ -52,6 +52,18 @@ export interface SiteCall {
   page?: string;
 }
 
+/** A page of a site: a route file's path, and for a page per content entry the kind it reads. */
+export interface SitePage {
+  /** As `SiteCall.page` has it: `/sites/www`, `/sites/www/blog/$slug`. */
+  path: string;
+  /**
+   * For a path with one parameter (`$slug`), the content kind whose entries are its pages: the one
+   * kind its file reads by that parameter, `content.<kind>.get(params.slug)` (or `slug`,
+   * destructured) with `content` from `sanoma/site`.
+   */
+  content?: string;
+}
+
 /** A site, `sites/<name>/`, and what it calls. */
 export interface SiteEntry {
   /** Its folder's name, where it is mounted: `/sites/<name>`. */
@@ -69,6 +81,8 @@ export interface SiteEntry {
   locales?: string[];
   /** The host a public site answers on: set by `startApp` from its `domains`, never by `readSites`. */
   domain?: string;
+  /** Its pages, by path: one for each path its `routes/` files give (a layout and its index are one). */
+  pages: SitePage[];
   /** Its calls, by file and then in the file's order. */
   calls: SiteCall[];
   /**
@@ -84,6 +98,8 @@ const SITE_DIRS = ["routes", "components"];
 /** Where `api`, `RunForm` and `defineSite` come from: `sanoma/site`, which re-exports the app's. */
 const SITE_SOURCES: ReadonlySet<string> = new Set(["sanoma/site", "@sanoma-ai/app/site"]);
 const KIND_NAMES = { workflow: "workflow", collection: "collection", op: "operation" } as const;
+/** What a route's loader and head name its path's parameters by. */
+const PARAMS: ReadonlySet<string> = new Set(["params"]);
 /** What makes a route from its id, whose first argument is the id. */
 const ROUTE_MAKERS: ReadonlySet<string> = new Set(["createFileRoute", "createLazyFileRoute"]);
 
@@ -91,7 +107,7 @@ const ROUTE_MAKERS: ReadonlySet<string> = new Set(["createFileRoute", "createLaz
  * The sites under `root`: each folder of `sites/` with a `routes/` whose name is a URL segment,
  * by name (as `@sanoma-ai/app/build`'s `sitesOf` mounts them). Reads `routes/**` and
  * `components/**` (`.ts` and `.tsx`, less tests and declarations) of each with oxc, never running
- * them: each `<RunForm workflow="…" />` and each use of `api`, both imported from `sanoma/site`,
+ * them: each page (`SitePage`, from a route's id), each `<RunForm workflow="…" />` and each use of `api`, both imported from `sanoma/site`,
  * called or passed on (`queryFn: api.data.leads.list`):
  * `api.<name>` and `api.<name>.<method>` are a workflow, `api.data.<collection>.<op>` a collection,
  * and `api.<vendor>.<resource>.<op>` an operation. A name that is not written out (a variable, a
@@ -174,10 +190,15 @@ export function readSites(
 
   return siteNames(dir).map((name) => {
     const files = SITE_DIRS.flatMap((sub) => filesUnder(join(dir, name, sub), isSource)).toSorted();
-    const resolved = files.flatMap((path) => {
+    const read = files.flatMap((path) => {
       const file = readSource(path);
-      return typeof file === "string" ? [] : usesIn(file, relative(root, path).split(sep).join("/")).map(resolve);
+      return typeof file === "string" ? [] : [readSiteFile(file, relative(root, path).split(sep).join("/"))];
     });
+    const resolved = read.flatMap(({ uses }) => uses.map(resolve));
+    const pages = new Map<string, SitePage>();
+    for (const { route } of read) {
+      if (route) pages.set(route.path, { ...pages.get(route.path), ...route });
+    }
     const siteFile = `sites/${name}/site.ts`;
     const { problems: optionProblems, ...options } = siteOptionsOf(join(root, siteFile), connectors);
     const calls = resolved.map((r) => r.call);
@@ -188,7 +209,8 @@ export function readSites(
       }),
       ...optionProblems.map((p) => ({ file: siteFile, ...p })),
     ];
-    return { name, ...options, calls, problems };
+    const sorted = [...pages.keys()].toSorted().map((path) => pages.get(path)!);
+    return { name, ...options, pages: sorted, calls, problems };
   });
 }
 
@@ -219,12 +241,19 @@ const siteNames = (dir: string): string[] =>
 /** A use of `api` or a `RunForm`, as written: the name it gives, before it is resolved. */
 type Written = Omit<SiteCall, "target"> & { name: string };
 
-/** The uses in one file, in its order. */
-function usesIn({ program, at }: SourceFile, file: string): Written[] {
+/**
+ * What one file holds: its uses, in its order, and the page it is, from its route's id, with the
+ * content kind whose entry its one parameter names (`SitePage.content`). A file under `routes/` is
+ * read whole; any other only when it imports `api` or `RunForm`.
+ */
+function readSiteFile({ program, at }: SourceFile, file: string): { uses: Written[]; route?: SitePage } {
   const api = importedAs(program, SITE_SOURCES, "api");
   const runForm = importedAs(program, SITE_SOURCES, "RunForm");
-  if (!api.size && !runForm.size) return [];
+  const content = importedAs(program, SITE_SOURCES, "content");
+  if (!api.size && !runForm.size && !file.includes("/routes/")) return { uses: [] };
   const found: Omit<Written, "page">[] = [];
+  /** Each `content.<kind>.get(arg)`: its kind and its argument. */
+  const gets: { kind: string; arg: Node }[] = [];
   let page: string | undefined;
   const visit = (node: Node) => {
     if (!node) return;
@@ -232,12 +261,14 @@ function usesIn({ program, at }: SourceFile, file: string): Written[] {
       const named = apiPath(node, api);
       // The outermost member of a path on `api`: what it names, called or not; its inner members are not visited.
       if (named) return void found.push({ ...named, via: "api", file, ...at(node.start) });
-    } else if (node.type === "CallExpression" && page === undefined) {
+    } else if (node.type === "CallExpression") {
       const callee = unwrap(node.callee);
-      if (callee?.type === "Identifier" && ROUTE_MAKERS.has(callee.name)) {
+      if (callee?.type === "Identifier" && ROUTE_MAKERS.has(callee.name) && page === undefined) {
         const id = stringValue(node.arguments[0]);
         if (id !== undefined) page = pageOf(id);
       }
+      const kind = contentKind(callee, content);
+      if (kind !== undefined) gets.push({ kind, arg: unwrap(node.arguments[0]) });
     } else if (node.type === "JSXOpeningElement" && node.name.type === "JSXIdentifier" && runForm.has(node.name.name)) {
       const attribute = node.attributes.find(
         (a: Node) => a.type === "JSXAttribute" && a.name.type === "JSXIdentifier" && a.name.name === "workflow",
@@ -249,11 +280,26 @@ function usesIn({ program, at }: SourceFile, file: string): Written[] {
     for (const child of childrenOf(node)) visit(child);
   };
   visit(program);
-  return found.map((use) => (page === undefined ? use : { ...use, page }));
+  const uses = found.map((use) => (page === undefined ? use : { ...use, page }));
+  if (page === undefined) return { uses };
+  // The one parameter's name (not a splat's), and the kinds whose `get` is given it (`params.slug`, or `slug` destructured).
+  const params = page.split("/").filter((segment) => segment.startsWith("$"));
+  if (params.length !== 1 || params[0] === "$") return { uses, route: { path: page } };
+  const param = params[0]!.slice(1);
+  const kinds = new Set(
+    gets
+      .filter(({ arg }) =>
+        arg?.type === "Identifier"
+          ? arg.name === param
+          : arg?.type === "MemberExpression" && memberPath(arg, PARAMS)?.join(".") === param,
+      )
+      .map(({ kind }) => kind),
+  );
+  return { uses, route: { path: page, ...(kinds.size === 1 && { content: [...kinds][0]! }) } };
 }
 
-/** What a member path on `api` names; undefined for a path on anything else, a name not written out, or no name. */
-function apiPath(member: Node, api: ReadonlySet<string>): Pick<Written, "kind" | "name" | "method"> | undefined {
+/** The names of a member path on one of `roots` (`api.data.leads.list` is `data`, `leads`, `list`); undefined for a path on anything else or a name not written out. */
+function memberPath(member: Node, roots: ReadonlySet<string>): string[] | undefined {
   const path: string[] = [];
   let node = member;
   while (node?.type === "MemberExpression") {
@@ -262,7 +308,19 @@ function apiPath(member: Node, api: ReadonlySet<string>): Pick<Written, "kind" |
     path.unshift(key);
     node = unwrap(node.object);
   }
-  if (node?.type !== "Identifier" || !api.has(node.name)) return undefined;
+  return node?.type === "Identifier" && roots.has(node.name) ? path : undefined;
+}
+
+/** The kind of `content.<kind>.get`, a callee on `content` imported from `sanoma/site`; undefined for any other. */
+function contentKind(callee: Node, content: ReadonlySet<string>): string | undefined {
+  const path = callee?.type === "MemberExpression" ? memberPath(callee, content) : undefined;
+  return path?.length === 2 && path[1] === "get" ? path[0] : undefined;
+}
+
+/** What a member path on `api` names; undefined for a path on anything else, a name not written out, or no name. */
+function apiPath(member: Node, api: ReadonlySet<string>): Pick<Written, "kind" | "name" | "method"> | undefined {
+  const path = memberPath(member, api);
+  if (!path?.length) return undefined;
   const [first, second, third] = path as [string, ...string[]];
   if (first === DATA_VENDOR)
     return path.length === 3 ? { kind: "collection", name: second!, method: third } : undefined;

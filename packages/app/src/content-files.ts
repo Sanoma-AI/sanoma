@@ -12,6 +12,24 @@ import type { ContentEntry } from "./content-types.ts";
 /** Where `contentTypes` is written, under a company's root. */
 export const CONTENT_TYPES = join(".sanoma", "content.ts");
 
+/**
+ * Each kind's published entries (drafts left out), what a sitemap lists: each `<slug>.md` by its
+ * slug, each translation by its slug and `locale`. `published.json` in a build.
+ */
+export type Published = Record<string, { slug: string; locale?: string }[]>;
+
+/** The file a build writes its `Published` content to, beside `client/` and `server/`. */
+export const PUBLISHED_FILE = "published.json";
+
+/** `repo`'s published content, each kind's slugs: drafts left out. */
+export const publishedOf = (repo: string): Published =>
+  Object.fromEntries(
+    Object.entries(readContent(repo, { drafts: false }).kinds).map(([kind, entries]) => [
+      kind,
+      entries.map(({ slug, locale }) => ({ slug, ...(locale !== undefined && { locale }) })),
+    ]),
+  );
+
 /** What is wrong with a file or folder under `content/`, at its place. */
 export interface ContentProblem {
   /** From the repo's root, with `/`. */

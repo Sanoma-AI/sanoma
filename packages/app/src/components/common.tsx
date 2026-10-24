@@ -33,7 +33,8 @@ import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle }
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Tabs, TabsList, TabsTrigger } from "#/components/ui/tabs.tsx";
 import { shortId } from "#/lib/apply-plan.ts";
-import { hasOneUrl, siteOf } from "#/lib/locales.ts";
+import { siteOf } from "#/lib/locales.ts";
+import { hasOneUrl } from "#/site-path.ts";
 import { useSites } from "#/lib/sites.ts";
 import { utcText } from "#/lib/time.ts";
 import { cn } from "#/lib/utils.ts";
