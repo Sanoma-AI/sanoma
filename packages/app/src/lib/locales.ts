@@ -11,9 +11,12 @@ import { isLocalized, withoutOptional } from "../site-path.ts";
 // public host loads no other site's `site.ts`. The root route reads them once per navigation
 // (`pageLanguages`); browser and server alike.
 
+/** Site `site`'s languages (`defineSite({ locales })`), its default first; none for a site with none. */
+const localesOf = (site: string | undefined): string[] | undefined =>
+  site !== undefined && Object.hasOwn(LOCALES, site) ? LOCALES[site] : undefined;
+
 /** Site `site`'s default language, the first of its `locales`; none for a site with none. */
-export const defaultLocaleOf = (site: string | undefined): string | undefined =>
-  site !== undefined && Object.hasOwn(LOCALES, site) ? LOCALES[site]![0] : undefined;
+export const defaultLocaleOf = (site: string | undefined): string | undefined => localesOf(site)?.[0];
 
 /** The site a route path is in (`/sites/<name>…`), by its folder's name. */
 export const siteOf = (path: string | undefined): string | undefined =>
@@ -49,7 +52,7 @@ export async function pageLanguages(
 ): Promise<PageLanguages | "notFound"> {
   const site = siteOf(leaf?.fullPath);
   if (!leaf || !site) return { locales: [] };
-  const locales = Object.hasOwn(LOCALES, site) ? LOCALES[site] : undefined;
+  const locales = localesOf(site);
   if (!isLocalized(site, leaf.fullPath)) return { locale: locales?.[0], locales: [] };
   // A site with no languages (or a problem in them) has no URL in one.
   const named = leaf.params.locale;

@@ -38,7 +38,7 @@ export const robotsTxt = (origin: string): string => `User-agent: *\nDisallow:\n
 /** A page in a sitemap: its URL, and its URL in each language it is in (`hreflang`), with `x-default`. */
 export interface SitemapEntry {
   loc: string;
-  alternates: { hreflang: string; href: string }[];
+  alternates: { locale: string; href: string }[];
 }
 
 /**
@@ -71,7 +71,7 @@ export function sitemapEntries(
       const found = params.flatMap((param, i) =>
         slug === undefined || slugsIn[i]!.has(slug) ? [{ locale: locales[i]!, href: url(slug, param) }] : [],
       );
-      const alternates = alternatesOf(found, locales[0]).map(({ locale, href }) => ({ hreflang: locale, href }));
+      const alternates = alternatesOf(found, locales[0]);
       return found.map(({ href }) => ({ loc: href, alternates }));
     });
   });
@@ -84,8 +84,8 @@ export const sitemapXml = (entries: readonly SitemapEntry[]): string =>
       ({ loc, alternates }) =>
         `  <url><loc>${escapeHtml(loc)}</loc>${alternates
           .map(
-            ({ hreflang, href }) =>
-              `<xhtml:link rel="alternate" hreflang="${escapeHtml(hreflang)}" href="${escapeHtml(href)}"/>`,
+            ({ locale, href }) =>
+              `<xhtml:link rel="alternate" hreflang="${escapeHtml(locale)}" href="${escapeHtml(href)}"/>`,
           )
           .join("")}</url>\n`,
     )

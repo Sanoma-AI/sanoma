@@ -225,9 +225,10 @@ function pagesOf(read: readonly { route?: SitePage }[]): Map<string, SitePage> {
   return pages;
 }
 
-/** Each of site `name`'s files under `root`, as `readSiteFile` reads it, by path. */
-const readSiteFiles = (root: string, name: string) =>
-  SITE_DIRS.flatMap((sub) => filesUnder(join(root, "sites", name, sub), isSource))
+/** Each of site `name`'s files under `root` (in `dirs` of it), as `readSiteFile` reads it, by path. */
+const readSiteFiles = (root: string, name: string, dirs = SITE_DIRS) =>
+  dirs
+    .flatMap((sub) => filesUnder(join(root, "sites", name, sub), isSource))
     .toSorted()
     .flatMap((path) => {
       const file = readSource(path);
@@ -242,7 +243,7 @@ const readSiteFiles = (root: string, name: string) =>
 export function siteContentPages(root: string): Record<string, string> {
   return Object.fromEntries(
     siteNames(join(root, "sites")).flatMap((name) =>
-      [...pagesOf(readSiteFiles(root, name)).values()].flatMap(({ path, content }) =>
+      [...pagesOf(readSiteFiles(root, name, ["routes"])).values()].flatMap(({ path, content }) =>
         content ? [[path, content]] : [],
       ),
     ),

@@ -11,7 +11,7 @@ import {
   schemaOf,
   writeGenerated,
 } from "@sanoma-ai/workflows/describe";
-import { problemLine } from "@sanoma-ai/workflows/shared";
+import { problemLine, warningLine } from "@sanoma-ai/workflows/shared";
 import { runScenarios } from "@sanoma-ai/workflows/scenarios";
 import type { Loaded } from "./config.ts";
 import { runtimeFrom, siteBuild } from "./sites.ts";
@@ -98,9 +98,7 @@ export async function check(
     const { failed } = await runScenarios(config, { databaseUrl, log });
     for (const f of failed) problems.push(`${f.scenario} › ${f.step}: ${f.message}`);
   }
-  const warnings = description.sites.flatMap((site) =>
-    site.warnings.map((w) => problemLine({ ...w, message: `warning: ${w.message}` })),
-  );
+  const warnings = description.sites.flatMap((site) => site.warnings.map(warningLine));
   return { ok: problems.length === 0, problems, warnings };
 }
 
