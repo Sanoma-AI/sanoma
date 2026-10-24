@@ -478,7 +478,7 @@ describe("readSites", () => {
       // No content read by its parameter (a property or another parameter named like it is not it): nothing to warn of.
       "sites/www/routes/tags.$tag.tsx": reading(
         "/sites/www/tags/$tag",
-        '[content.posts.list(), content.settings.get("site"), content.authors.get(post.tag), content.labels.get(params.locale ?? "en")]',
+        '[content.posts.list(), content.settings.get("site"), content.authors.get(post.tag), content.labels.get(params.locale ?? "en"), content.posts.get(find({ tag: "x" }))]',
       ),
       // Its lazy file reads another kind by something else, but its route file gives its kind.
       "sites/www/routes/guides.$slug.tsx": reading("/sites/www/guides/$slug", "content.guides.get(params.slug)"),

@@ -225,10 +225,9 @@ function pagesOf(read: readonly { route?: SitePage }[]): Map<string, SitePage> {
   return pages;
 }
 
-/** Each of site `name`'s files under `root` (in `dirs` of it), as `readSiteFile` reads it, by path. */
-const readSiteFiles = (root: string, name: string, dirs = SITE_DIRS) =>
-  dirs
-    .flatMap((sub) => filesUnder(join(root, "sites", name, sub), isSource))
+/** Each of site `name`'s files under `root`, as `readSiteFile` reads it, by path. */
+const readSiteFiles = (root: string, name: string) =>
+  SITE_DIRS.flatMap((sub) => filesUnder(join(root, "sites", name, sub), isSource))
     .toSorted()
     .flatMap((path) => {
       const file = readSource(path);
@@ -243,7 +242,7 @@ const readSiteFiles = (root: string, name: string, dirs = SITE_DIRS) =>
 export function siteContentPages(root: string): Record<string, string> {
   return Object.fromEntries(
     siteNames(join(root, "sites")).flatMap((name) =>
-      [...pagesOf(readSiteFiles(root, name, ["routes"])).values()].flatMap(({ path, content }) =>
+      [...pagesOf(readSiteFiles(root, name)).values()].flatMap(({ path, content }) =>
         content ? [[path, content]] : [],
       ),
     ),
@@ -344,10 +343,11 @@ function readSiteFile(
   return { uses, route: { path: page }, warning: { file, ...at(unfollowed.start), message } };
 }
 
-/** Whether `node` reads the parameter `param` anywhere in it: `params.<param>`, or `param` destructured (not another parameter, nor a property's name, `post.slug`). */
+/** Whether `node` reads the parameter `param` anywhere in it: `params.<param>`, or `param` destructured (not another parameter, nor a property's name, `post.slug` or `{ slug: x }`). */
 const mentions = (node: Node, param: string): boolean => {
   if (!node) return false;
   if (node.type === "Identifier") return node.name === param;
+  if (node.type === "Property" && !node.computed) return mentions(node.value, param);
   if (node.type === "MemberExpression") {
     const path = memberPath(node, PARAMS);
     if (path) return path[0] === param;
