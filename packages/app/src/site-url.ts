@@ -39,8 +39,7 @@ export const siteOrigin = (): string => originOf(pageHost());
  * The absolute URL of a page, for a canonical link or `og:url`, from its path as the route tree
  * spells it (`match.pathname` in a `head`, `/sites/www/blog/hello`): at `siteOrigin()`, and on a
  * public site's own host without `/sites/<name>`, as its links are; without a trailing slash but
- * on `/`, as the router answers it and the sitemap lists it (an index route's `/sites/www/blog/`
- * is `/blog`, which `/blog/` redirects to).
+ * on `/`, as the router answers it and the sitemap lists it.
  */
 export function siteUrl(path: string): string {
   const host = pageHost();
