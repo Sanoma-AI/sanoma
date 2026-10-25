@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-better-auth",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Better Auth as a visitor login for Sanoma's public sites: email and password, on the company's own database",
   "keywords": [
     "auth",
