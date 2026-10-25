@@ -27,6 +27,17 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm build
+      # This runner's @sanoma-ai/postgres-linux-x64 payload, downloaded again only when the script changes.
+      - uses: actions/cache@v4
+        id: postgres
+        with:
+          path: |
+            packages/postgres-bin/linux-x64/postgres.tar.gz
+            packages/postgres-bin/linux-x64/postgres.json
+          key: postgres-linux-x64-${{ hashFiles('packages/sanoma/scripts/download-postgres.ts') }}
+      - if: steps.postgres.outputs.cache-hit != 'true'
+        run: pnpm postgres:download
+      - run: pnpm postgres:download --check
       - run: pnpm test
       - name: Generated bridge client is up to date
         run: pnpm --filter @sanoma-ai/bridge run generate && git diff --exit-code packages/bridge/src/gen && test -z "$(git status --porcelain packages/bridge/src/gen)"
