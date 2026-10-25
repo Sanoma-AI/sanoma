@@ -91,6 +91,11 @@ export interface SiteEntry {
    * make, at its file; then what is wrong in its `site.ts`.
    */
   problems: (LintProblem & { file: string })[];
+  /**
+   * On a public site, each page with one parameter whose file reads content the sitemap cannot
+   * tie to it (`SitePage.content`), so the sitemap lists none of its pages: at the first read.
+   */
+  warnings: (LintProblem & { file: string })[];
 }
 
 /** Where a site's code is: its pages and its components. */
@@ -189,16 +194,9 @@ export function readSites(
   };
 
   return siteNames(dir).map((name) => {
-    const files = SITE_DIRS.flatMap((sub) => filesUnder(join(dir, name, sub), isSource)).toSorted();
-    const read = files.flatMap((path) => {
-      const file = readSource(path);
-      return typeof file === "string" ? [] : [readSiteFile(file, relative(root, path).split(sep).join("/"))];
-    });
+    const read = readSiteFiles(root, name);
     const resolved = read.flatMap(({ uses }) => uses.map(resolve));
-    const pages = new Map<string, SitePage>();
-    for (const { route } of read) {
-      if (route) pages.set(route.path, { ...pages.get(route.path), ...route });
-    }
+    const pages = pagesOf(read);
     const siteFile = `sites/${name}/site.ts`;
     const { problems: optionProblems, ...options } = siteOptionsOf(join(root, siteFile), connectors);
     const calls = resolved.map((r) => r.call);
@@ -210,8 +208,45 @@ export function readSites(
       ...optionProblems.map((p) => ({ file: siteFile, ...p })),
     ];
     const sorted = [...pages.keys()].toSorted().map((path) => pages.get(path)!);
-    return { name, ...options, pages: sorted, calls, problems };
+    // A page's file it warns of, unless another of its files (a lazy one, its layout) gives its kind.
+    const warnings = options.public
+      ? read.flatMap(({ route, warning }) => (warning && !pages.get(route!.path)?.content ? [warning] : []))
+      : [];
+    return { name, ...options, pages: sorted, calls, problems, warnings };
   });
+}
+
+/** A site's pages, by path, from its files: a layout's and its index's (one path) merged. */
+function pagesOf(read: readonly { route?: SitePage }[]): Map<string, SitePage> {
+  const pages = new Map<string, SitePage>();
+  for (const { route } of read) {
+    if (route) pages.set(route.path, { ...pages.get(route.path), ...route });
+  }
+  return pages;
+}
+
+/** Each of site `name`'s files under `root`, as `readSiteFile` reads it, by path. */
+const readSiteFiles = (root: string, name: string) =>
+  SITE_DIRS.flatMap((sub) => filesUnder(join(root, "sites", name, sub), isSource))
+    .toSorted()
+    .flatMap((path) => {
+      const file = readSource(path);
+      return typeof file === "string" ? [] : [readSiteFile(file, relative(root, path).split(sep).join("/"))];
+    });
+
+/**
+ * Each site's pages under `root` whose entries are a content kind's (`SitePage.content`), path to
+ * kind: what the app's build gives its router (`virtual:sanoma/locales`), so a page lists only the
+ * languages its entry is in. Read as `readSites` reads them, never run.
+ */
+export function siteContentPages(root: string): Record<string, string> {
+  return Object.fromEntries(
+    siteNames(join(root, "sites")).flatMap((name) =>
+      [...pagesOf(readSiteFiles(root, name)).values()].flatMap(({ path, content }) =>
+        content ? [[path, content]] : [],
+      ),
+    ),
+  );
 }
 
 /**
@@ -246,14 +281,17 @@ type Written = Omit<SiteCall, "target"> & { name: string };
  * content kind whose entry its one parameter names (`SitePage.content`). A file under `routes/` is
  * read whole; any other only when it imports `api` or `RunForm`.
  */
-function readSiteFile({ program, at }: SourceFile, file: string): { uses: Written[]; route?: SitePage } {
+function readSiteFile(
+  { program, at }: SourceFile,
+  file: string,
+): { uses: Written[]; route?: SitePage; warning?: LintProblem & { file: string } } {
   const api = importedAs(program, SITE_SOURCES, "api");
   const runForm = importedAs(program, SITE_SOURCES, "RunForm");
   const content = importedAs(program, SITE_SOURCES, "content");
   if (!api.size && !runForm.size && !file.includes("/routes/")) return { uses: [] };
   const found: Omit<Written, "page">[] = [];
-  /** Each `content.<kind>.get(arg)`: its kind and its argument. */
-  const gets: { kind: string; arg: Node }[] = [];
+  /** Each `content.<kind>.get(arg)`: its kind, its argument and where it is. */
+  const gets: { kind: string; arg: Node; start: number }[] = [];
   let page: string | undefined;
   const visit = (node: Node) => {
     if (!node) return;
@@ -268,7 +306,7 @@ function readSiteFile({ program, at }: SourceFile, file: string): { uses: Writte
         if (id !== undefined) page = pageOf(id);
       }
       const kind = contentKind(callee, content);
-      if (kind !== undefined) gets.push({ kind, arg: unwrap(node.arguments[0]) });
+      if (kind !== undefined) gets.push({ kind, arg: unwrap(node.arguments[0]), start: node.start });
     } else if (node.type === "JSXOpeningElement" && node.name.type === "JSXIdentifier" && runForm.has(node.name.name)) {
       const attribute = node.attributes.find(
         (a: Node) => a.type === "JSXAttribute" && a.name.type === "JSXIdentifier" && a.name.name === "workflow",
@@ -295,8 +333,28 @@ function readSiteFile({ program, at }: SourceFile, file: string): { uses: Writte
       )
       .map(({ kind }) => kind),
   );
-  return { uses, route: { path: page, ...(kinds.size === 1 && { content: [...kinds][0]! }) } };
+  if (kinds.size === 1) return { uses, route: { path: page, content: [...kinds][0]! } };
+  // A read by the parameter in a form the sitemap does not follow (`params.id.toLowerCase()`, two kinds).
+  const unfollowed = gets.find(({ arg }) => mentions(arg, param));
+  if (!unfollowed) return { uses, route: { path: page } };
+  const message =
+    `the sitemap lists none of this page's entries: it reads content by the page's parameter in a way it cannot follow. ` +
+    `Read one kind by it as written, \`content.<kind>.get(params.${param})\` (or \`${param}\` destructured)`;
+  return { uses, route: { path: page }, warning: { file, ...at(unfollowed.start), message } };
 }
+
+/** Whether `node` reads the parameter `param` anywhere in it: `params.<param>`, or `param` destructured (not another parameter, nor a property's name, `post.slug` or `{ slug: x }`). */
+const mentions = (node: Node, param: string): boolean => {
+  if (!node) return false;
+  if (node.type === "Identifier") return node.name === param;
+  if (node.type === "Property" && !node.computed) return mentions(node.value, param);
+  if (node.type === "MemberExpression") {
+    const path = memberPath(node, PARAMS);
+    if (path) return path[0] === param;
+    if (!node.computed) return mentions(node.object, param);
+  }
+  return childrenOf(node).some((child) => mentions(child, param));
+};
 
 /** The names of a member path on one of `roots` (`api.data.leads.list` is `data`, `leads`, `list`); undefined for a path on anything else or a name not written out. */
 function memberPath(member: Node, roots: ReadonlySet<string>): string[] | undefined {

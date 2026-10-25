@@ -241,8 +241,8 @@ async function runCheck(): Promise<number> {
   own.pathname = `${own.pathname}_check`;
   // Started here, handed to check at once (which handles its failure), awaited before the scenarios.
   const ready = ensurePostgres(databaseUrl, { appName, log });
-  const { ok, problems } = await check(loaded, { databaseUrl: own.toString(), ready, log });
-  for (const problem of problems) console.log(problem);
+  const { ok, problems, warnings } = await check(loaded, { databaseUrl: own.toString(), ready, log });
+  for (const line of [...warnings, ...problems]) console.log(line);
   log(ok ? "ok" : `${problems.length} problem${problems.length === 1 ? "" : "s"}`);
   return ok ? 0 : 1;
 }

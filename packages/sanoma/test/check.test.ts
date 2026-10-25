@@ -29,6 +29,7 @@ describe("check", () => {
     expect(await check(await load(), { databaseUrl, log: (l) => log.push(l) })).toEqual({
       ok: true,
       problems: [],
+      warnings: [],
     });
     // The generated SDK first, before tsc: the sites' tsc reads it.
     expect(log.slice(0, 7)).toEqual([
@@ -121,7 +122,7 @@ export default defineWorkflow({
         { ...loaded, resolved: resolveConfig(loaded.config) },
         { databaseUrl, log: (l) => log.push(l) },
       );
-      expect(result).toEqual({ ok: true, problems: [] });
+      expect(result).toEqual({ ok: true, problems: [], warnings: [] });
       expect(log).toContain("oxlint workflows resources");
     } finally {
       rmSync(own, { recursive: true, force: true });
@@ -151,7 +152,7 @@ export default defineWorkflow({
       // Valid: the scenario runs under it, and publishes.
       writeFileSync(cedar, readFileSync(cedar, "utf8").replace("input.idd", "input.id"));
       const loaded = await loadIn(own);
-      expect(await check(loaded, { databaseUrl, log: () => {} })).toEqual({ ok: true, problems: [] });
+      expect(await check(loaded, { databaseUrl, log: () => {} })).toEqual({ ok: true, problems: [], warnings: [] });
       expect(loaded.resolved.policyProblems).toEqual([]);
     } finally {
       rmSync(own, { recursive: true, force: true });
@@ -175,7 +176,11 @@ export default defineWorkflow({
         join(own, "resources/people.ts"),
         'import { sanoma } from "sanoma/resources";\n\nexport const ada = sanoma.person({ id: "ada" });\nexport const finance = sanoma.group({ name: "finance", members: [ada] });\n',
       );
-      expect(await check(await loadIn(own), { databaseUrl, log: () => {} })).toEqual({ ok: true, problems: [] });
+      expect(await check(await loadIn(own), { databaseUrl, log: () => {} })).toEqual({
+        ok: true,
+        problems: [],
+        warnings: [],
+      });
     } finally {
       rmSync(own, { recursive: true, force: true });
     }

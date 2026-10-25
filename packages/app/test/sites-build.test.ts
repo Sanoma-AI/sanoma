@@ -211,6 +211,8 @@ describe("a company's app with its sites", () => {
       "",
       "Words only in English.",
     ].join("\n"),
+    // A post only in French: no page in English, so its French page links to no other language.
+    "content/posts/only-fr.fr.md": ["---", "title: Seulement en français", "---", "", "Des mots."].join("\n"),
   });
   // And sanoma, which the company's node_modules links to.
   const untouched = {
@@ -547,6 +549,12 @@ describe("a company's app with its sites", () => {
     // A post with no translation: the default's, in French pages.
     const fallback = await page("/fr/posts/untranslated");
     expect(fallback).toMatchObject({ status: 200, lang: "fr", h1: "Only in English" });
+    // A post only in French: its page there links to no other language, as the sitemap lists it.
+    const onlyFr = await page("/fr/posts/only-fr");
+    expect(onlyFr).toMatchObject({ status: 200, lang: "fr", h1: "Seulement en français" });
+    expect(onlyFr.alternates).toEqual([]);
+    expect(onlyFr.switcher).toEqual(["/fr/posts/only-fr"]);
+    expect((await page("/posts/only-fr")).status).toBe(404);
     // A language the site lacks, and the default's prefix, are no page.
     for (const path of ["/de", "/en", "/en/posts/hello", "/fr/posts/nope"]) {
       const lost = await page(path);
@@ -598,6 +606,7 @@ describe("a company's app with its sites", () => {
       [`${intl}/fr`, languages("/", "/fr")],
       [`${intl}/posts/hello`, languages("/posts/hello", "/fr/posts/hello")],
       [`${intl}/fr/posts/hello`, languages("/posts/hello", "/fr/posts/hello")],
+      [`${intl}/fr/posts/only-fr`, []],
       [`${intl}/posts/untranslated`, languages("/posts/untranslated", "/fr/posts/untranslated")],
       [`${intl}/fr/posts/untranslated`, languages("/posts/untranslated", "/fr/posts/untranslated")],
     ]);

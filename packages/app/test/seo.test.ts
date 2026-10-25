@@ -30,9 +30,9 @@ describe("sitemapEntries", () => {
       pages: [{ path: "/sites/www/{-$locale}/blog/$slug", content: "posts" }],
     };
     const alternates = [
-      { hreflang: "en", href: `${origin}/blog/hello` },
-      { hreflang: "fr", href: `${origin}/fr/blog/hello` },
-      { hreflang: "x-default", href: `${origin}/blog/hello` },
+      { locale: "en", href: `${origin}/blog/hello` },
+      { locale: "fr", href: `${origin}/fr/blog/hello` },
+      { locale: "x-default", href: `${origin}/blog/hello` },
     ];
     expect(sitemapEntries(site, origin, { posts: [{ slug: "hello" }, { slug: "hello", locale: "fr" }] })).toEqual([
       { loc: `${origin}/blog/hello`, alternates },

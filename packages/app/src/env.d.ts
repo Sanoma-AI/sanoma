@@ -9,8 +9,12 @@ declare module "virtual:sanoma/content" {
   export default kinds;
 }
 
-/** Each public site's languages, by name, the first its default, as the `sanoma:locales` plugin reads them (`siteLocales`). */
+/**
+ * Each public site's languages, by name, the first its default, and the content kind of each page
+ * whose entries are one's, by path, as the `sanoma:locales` plugin reads them (`siteLocales`, `siteContentPages`).
+ */
 declare module "virtual:sanoma/locales" {
   const locales: Record<string, string[]>;
   export default locales;
+  export const contentPages: Record<string, string>;
 }

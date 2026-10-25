@@ -11,6 +11,7 @@ import {
   isLoopback,
   type LoginHalf,
   problemLine,
+  warningLine,
   readPolicyFiles,
   type ResolvedConfig,
   resolveConfig,
@@ -113,6 +114,9 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     const list = [...lines].map((line) => `  ${line}`).join("\n");
     console.warn(`sanoma app: the config's files have problems (\`sanoma check\` lists them):\n${list}`);
   }
+  const warnings = description.sites.flatMap((site) => site.warnings.map((w) => `  ${warningLine(w)}`));
+  if (warnings.length)
+    console.warn(`sanoma app: warnings in the sites (\`sanoma check\` lists them):\n${warnings.join("\n")}`);
   const hosts = publicHosts(description, options.domains ?? {});
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => {

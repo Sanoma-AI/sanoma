@@ -402,6 +402,10 @@ export function problemLine(p: { file?: string; line?: number; column?: number; 
   return p.line === undefined ? `${p.file}: ${p.message}` : `${p.file}:${p.line}:${p.column ?? 1}: ${p.message}`;
 }
 
+/** A warning as one line, as `problemLine` with `warning: ` before its message: what is worth fixing but not wrong. */
+export const warningLine = (p: Parameters<typeof problemLine>[0]): string =>
+  problemLine({ ...p, message: `warning: ${p.message}` });
+
 /**
  * Whether a host is this machine: `localhost`, `127.x.x.x` or `::1` (bare, or bracketed as a URL's
  * `hostname` has it). The one rule for what the app listens on and answers to, and for where the
