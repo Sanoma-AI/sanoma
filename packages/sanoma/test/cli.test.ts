@@ -55,6 +55,51 @@ describe("sanoma serve", () => {
   }, 60_000);
 });
 
+describe("SANOMA_EVENTS=1, for a parent process", () => {
+  const events = { ...unconfigured, SANOMA_EVENTS: "1" };
+
+  it("prints the ready line after the human one, and stops on the end of stdin", async () => {
+    dir = copyFixture();
+    const { child, finished, output } = startCli(dir, ["app"], events);
+    try {
+      const stdout = await waitFor(
+        () => output().stdout,
+        (out) => out.includes('"event":"ready"'),
+        30_000,
+      );
+      const url = stdout.match(/ at (http:\/\/127\.0\.0\.1:\d+); ctrl-c to stop/)![1]!;
+      // Right after the line a person reads.
+      expect(stdout.split("\n").slice(-3)).toEqual([
+        `sanoma-fixture at ${url}; ctrl-c to stop`,
+        JSON.stringify({ sanoma: 1, event: "ready", url, sites: {} }),
+        "",
+      ]);
+    } finally {
+      child.stdin!.end();
+    }
+    const done = await Promise.race([
+      finished,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("did not exit")), 15_000)),
+    ]);
+    expect(done.code, done.stderr).toBe(0);
+    // One event line: the end of stdin is a stop, not a failure.
+    expect(done.stdout.match(/^\{/gm)).toHaveLength(1);
+  }, 60_000);
+
+  it("prints the error line before exiting 2 on a broken config, and nothing on stdout without the variable", async () => {
+    dir = copyFixture();
+    writeFileSync(join(dir, "sanoma.config.ts"), "export default {};\n");
+    const failed = await runCli(dir, ["app"], events);
+    expect(failed.code).toBe(2);
+    const message = failed.stderr.trimEnd();
+    expect(message).toMatch(/sanoma\.config\.ts must export a config as its default export/);
+    expect(failed.stdout).toBe(`${JSON.stringify({ sanoma: 1, event: "error", message })}\n`);
+    const quiet = await runCli(dir, ["app"], unconfigured);
+    expect(quiet.code).toBe(2);
+    expect(quiet.stdout).toBe("");
+  });
+});
+
 describe("sanoma env", () => {
   it("writes .env.example, and --check says when it is out of date", async () => {
     dir = copyFixture();

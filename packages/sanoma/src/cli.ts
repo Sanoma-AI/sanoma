@@ -7,8 +7,9 @@ import { parseArgs } from "node:util";
 import type { SanomaConfig } from "@sanoma-ai/workflows";
 import { type Loaded, loadConfig, UsageError } from "./config.ts";
 import type { LinkedPackage } from "./dev.ts";
+import { emit, eventsOn } from "./events.ts";
 
-// Only Node's modules and ./config.ts are imported here: each command imports what it runs, so
+// Only Node's modules, ./config.ts and ./events.ts are imported here: each command imports what it runs, so
 // `--help`, `env`, `ledger export` and the dev-mode parent load neither the worker nor the app (the
 // parent loads the app's Node-only build module to see whether there are sites).
 
@@ -33,6 +34,12 @@ app's port (default 3000; 0 for any free port); SANOMA_APP_HOST its address (def
 GitHub sign-in, see .env.example). With sanoma or a @sanoma-ai package linked from a sanoma checkout,
 or SANOMA_DEV_REPO set, \`sanoma\` also runs the watch build of each package it reaches in the checkout and
 restarts on a new build.
+
+For a parent process: SANOMA_EVENTS=1 adds a JSON line on stdout per event, {"sanoma":1,"event":…}: "ready" with the
+app's "url" (the port SANOMA_APP_PORT names) and its "sites" each time it listens, "error" with the "message" before a
+failed exit, and "database" (not printed yet); the end of stdin then stops it as SIGTERM does. sanoma never prompts,
+reads stdin only then, and opens no browser; SIGTERM stops everything it started but a Postgres container; exit 2 is
+a mistake in the call or the config, 1 a failure.
 `;
 
 /** Exit codes: 2 for how the bin was called or what it found, 1 for failed checks and failures while running. */
@@ -146,6 +153,7 @@ async function keep(
     // Each public site at its own host, before the line that says how to stop.
     for (const [name, url] of Object.entries(started.sites ?? {})) console.log(`${name}: ${url}`);
     console.log(`${resolved.appName} at ${started.url}; ctrl-c to stop`);
+    emit({ event: "ready", url: started.url, sites: started.sites ?? {} });
   }
   onSignal(() => started.stop());
   return new Promise(() => {});
@@ -203,7 +211,14 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
   const hot = app && (await siteBuild(cwd).catch(() => undefined))?.sitesOf(cwd).sites.length;
   const child = supervise({
     spawn: () =>
-      spawn(process.execPath, [cli, "serve", "--dev"], { cwd, env: process.env, stdio: "inherit", detached: true }),
+      // Its own stdin, never written: the end of this process's stops this process, which ends the child; the
+      // child's ends when this process does.
+      spawn(process.execPath, [cli, "serve", "--dev"], {
+        cwd,
+        env: process.env,
+        stdio: ["pipe", "inherit", "inherit"],
+        detached: true,
+      }),
     watch: packages.map((p) => join(p.dir, "dist")),
     ignore: hot ? [join(app.dir, "dist", "client"), join(app.dir, "dist", "server")] : [],
     log,
@@ -272,13 +287,14 @@ async function ledgerExport(runId: string, out: string | undefined): Promise<num
 }
 
 /**
- * On the first SIGINT or SIGTERM, stops what runs and exits 0; a second signal exits at once.
- * Returns the same handler, for a caller with a reason of its own to stop.
+ * On the first SIGINT or SIGTERM, or with `SANOMA_EVENTS=1` the end of stdin (a parent process
+ * gone, or done), stops what runs and exits 0; a second signal exits at once. Without the variable
+ * stdin is never read. Returns what stops, once, for a caller with a reason of its own to stop.
  */
 function onSignal(stop: () => Promise<void>): () => void {
   let stopping = false;
-  const handle = () => {
-    if (stopping) process.exit(130);
+  const stopOnce = () => {
+    if (stopping) return;
     stopping = true;
     stop().then(
       () => process.exit(0),
@@ -288,9 +304,11 @@ function onSignal(stop: () => Promise<void>): () => void {
       },
     );
   };
+  const handle = () => (stopping ? process.exit(130) : stopOnce());
   process.once("SIGINT", handle);
   process.once("SIGTERM", handle);
-  return handle;
+  if (eventsOn()) process.stdin.once("end", stopOnce).resume();
+  return stopOnce;
 }
 
 if (import.meta.main) {
@@ -298,6 +316,7 @@ if (import.meta.main) {
     process.exitCode = await main(process.argv.slice(2));
   } catch (err) {
     log(messageOf(err));
+    emit({ event: "error", message: messageOf(err) });
     process.exitCode = err instanceof UsageError ? USAGE_EXIT : 1;
   }
 }
