@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { content, Link } from "sanoma/site";
+import { content, Link, siteUrl } from "sanoma/site";
 
 /** The posts in content/posts, from the build. */
 export const Route = createFileRoute("/sites/hello/posts/")({
   loader: () => content.posts.list(),
+  head: ({ match }) => ({ links: [{ rel: "canonical", href: siteUrl(match.pathname) }] }),
   component: Posts,
 });
 

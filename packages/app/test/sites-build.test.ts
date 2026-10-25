@@ -152,6 +152,9 @@ function linkTag(html: string, text: string) {
   return start < 0 ? undefined : html.slice(start, html.indexOf(">", start) + 1);
 }
 
+/** The page's canonical URL. */
+const canonical = (html: string) => /<link rel="canonical" href="([^"]+)"/.exec(html)?.[1];
+
 /** The page's region or section under the heading `title`, up to the next heading, or the page's end. */
 function sectionAfter(html: string, title: string) {
   const start = html.search(new RegExp(`<h[23][^>]*>${title}</h[23]>`));
@@ -611,7 +614,8 @@ describe("a company's app with its sites", () => {
       [`${intl}/fr/posts/untranslated`, languages("/posts/untranslated", "/fr/posts/untranslated")],
     ]);
     // Not its domain: no response there is to be indexed, its pages' neither.
-    for (const answer of [robots, sitemap, await at("/", "hello.localhost")]) {
+    const home = await at("/", "hello.localhost");
+    for (const answer of [robots, sitemap, home]) {
       expect(answer.headers["x-robots-tag"]).toBe("noindex");
     }
     expect((await at("/sitemap.xml", "hello.localhost", { method: "HEAD" })).body).toBe("");
@@ -626,6 +630,17 @@ describe("a company's app with its sites", () => {
     expect(proxied.body).toContain(`<link rel="canonical" href="${origin.replace("http:", "https:")}/posts/hello"/>`);
     const inApp = await (await fetch(new URL("/sites/hello/posts/hello", app.url))).text();
     expect(inApp).toContain(`<link rel="canonical" href="${app.url}/sites/hello/posts/hello"/>`);
+    // An index route's: no trailing slash, but on the home.
+    const indexes = await Promise.all([
+      at("/posts", "hello.localhost").then(({ body }) => body),
+      ...["/sites/hello/posts", "/sites/hello"].map(async (path) => (await fetch(new URL(path, app.url))).text()),
+    ]);
+    expect([home.body, ...indexes].map(canonical)).toEqual([
+      `${origin}/`,
+      `${origin}/posts`,
+      `${app.url}/sites/hello/posts`,
+      `${app.url}/sites/hello`,
+    ]);
     // The app's host is not a site's: no robots of its own.
     expect((await fetch(new URL("/robots.txt", app.url))).headers.get("x-robots-tag")).toBeNull();
   });
