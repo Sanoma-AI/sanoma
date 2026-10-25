@@ -27,17 +27,16 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm build
-      # Every @sanoma-ai/postgres-<platform> payload, as release.yml's prepacks make them on Linux
-      # (the darwin slicing too), downloaded again only when the script changes; this runner's runs.
+      # Each @sanoma-ai/postgres-<platform> payload, made by its prepack as release.yml makes it; this runner's is checked.
       - uses: actions/cache@v4
         id: postgres
         with:
           path: |
             packages/postgres-bin/*/postgres.tar.gz
             packages/postgres-bin/*/postgres.json
-          key: postgres-${{ hashFiles('packages/sanoma/scripts/download-postgres.ts') }}
+          key: postgres-${{ hashFiles('packages/sanoma/scripts/download-postgres.ts', 'packages/postgres-bin/*/package.json') }}
       - if: steps.postgres.outputs.cache-hit != 'true'
-        run: for p in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-x64; do pnpm postgres:download --platform "$p"; done
+        run: pnpm --filter "./packages/postgres-bin/*" run prepack
       - run: pnpm postgres:download --check
       - run: pnpm test
       - name: Generated bridge client is up to date
