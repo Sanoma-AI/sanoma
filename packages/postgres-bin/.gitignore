@@ -1,0 +1,3 @@
+# Filled by `pnpm postgres:download` or when each package is packed (prepack), removed after (postpack)
+*/postgres.tar.gz
+*/postgres.json

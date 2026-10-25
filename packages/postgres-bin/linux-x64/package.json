@@ -1,0 +1,37 @@
+{
+  "name": "@sanoma-ai/postgres-linux-x64",
+  "version": "0.1.0",
+  "description": "PostgreSQL 18 server binaries for Linux on x64, from which the sanoma launcher starts a company's own database",
+  "keywords": [
+    "embedded",
+    "postgres",
+    "postgresql",
+    "sanoma"
+  ],
+  "homepage": "https://github.com/Sanoma-AI/sanoma/tree/main/packages/postgres-bin",
+  "bugs": "https://github.com/Sanoma-AI/sanoma/issues",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sanoma-AI/sanoma.git",
+    "directory": "packages/postgres-bin/linux-x64"
+  },
+  "files": [
+    "postgres.tar.gz",
+    "postgres.json",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "os": [
+      "linux"
+    ],
+    "cpu": [
+      "x64"
+    ],
+    "access": "public"
+  },
+  "scripts": {
+    "prepack": "node ../../sanoma/scripts/download-postgres.ts --platform linux-x64",
+    "postpack": "rm -f postgres.tar.gz postgres.json"
+  }
+}
