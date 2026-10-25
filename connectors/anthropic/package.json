@@ -1,0 +1,43 @@
+{
+  "name": "@sanoma-ai/connector-anthropic",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Anthropic models for Sanoma's operator agent",
+  "homepage": "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/anthropic#readme",
+  "bugs": "https://github.com/Sanoma-AI/sanoma/issues",
+  "license": "FSL-1.1-ALv2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sanoma-AI/sanoma.git",
+    "directory": "connectors/anthropic"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "prepack": "pnpm run clean && pnpm run build",
+    "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "4.0.88",
+    "@ai-sdk/provider": "4.0.34",
+    "ai": "7.0.153"
+  },
+  "engines": {
+    "node": "24 || >=26"
+  }
+}

@@ -6,6 +6,7 @@ One workspace package per vendor, each built on `@sanoma-ai/workflows`. A connec
 
 | Path                                    | What it is                                                                                                   |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| [`anthropic/`](anthropic/README.md)     | `@sanoma-ai/connector-anthropic`: Anthropic models for the operator agent, empty and private until built     |
 | [`better-auth/`](better-auth/AGENTS.md) | `@sanoma-ai/connector-better-auth`: Better Auth, a visitor login for public sites, on the company's database |
 | [`bluesky/`](bluesky/AGENTS.md)         | `@sanoma-ai/connector-bluesky`: Bluesky (AT Protocol) post operations and an in-memory fake                  |
 | [`docker/`](docker/AGENTS.md)           | `@sanoma-ai/connector-docker`: the local Docker host, a container that runs the company                      |
