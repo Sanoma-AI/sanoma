@@ -1,8 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { Link } from "sanoma/site";
+import { Link, siteUrl } from "sanoma/site";
 
-export const Route = createFileRoute("/sites/hello/")({ component: Hello });
+export const Route = createFileRoute("/sites/hello/")({
+  head: ({ match }) => ({ links: [{ rel: "canonical", href: siteUrl(match.pathname) }] }),
+  component: Hello,
+});
 
 function Hello() {
   const [count, setCount] = useState(0);

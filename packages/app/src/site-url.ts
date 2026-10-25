@@ -1,3 +1,4 @@
+import { trimPathRight } from "@tanstack/react-router";
 import { createIsomorphicFn, getGlobalStartContext } from "@tanstack/react-start";
 import { sitePath } from "./site-path.ts";
 
@@ -37,11 +38,14 @@ export const siteOrigin = (): string => originOf(pageHost());
 /**
  * The absolute URL of a page, for a canonical link or `og:url`, from its path as the route tree
  * spells it (`match.pathname` in a `head`, `/sites/www/blog/hello`): at `siteOrigin()`, and on a
- * public site's own host without `/sites/<name>`, as its links are.
+ * public site's own host without `/sites/<name>`, as its links are; without a trailing slash but
+ * on `/`, as the router answers it and the sitemap lists it (an index route's `/sites/www/blog/`
+ * is `/blog`, which `/blog/` redirects to).
  */
 export function siteUrl(path: string): string {
   const host = pageHost();
-  return new URL(host.site === undefined ? path : sitePath(host.site, path), originOf(host)).href;
+  const page = trimPathRight(path);
+  return new URL(host.site === undefined ? page : sitePath(host.site, page), originOf(host)).href;
 }
 
 function originOf({ origin }: { origin?: string }): string {

@@ -626,6 +626,12 @@ describe("a company's app with its sites", () => {
     expect(proxied.body).toContain(`<link rel="canonical" href="${origin.replace("http:", "https:")}/posts/hello"/>`);
     const inApp = await (await fetch(new URL("/sites/hello/posts/hello", app.url))).text();
     expect(inApp).toContain(`<link rel="canonical" href="${app.url}/sites/hello/posts/hello"/>`);
+    // An index route's path ends in a slash (`/sites/hello/posts/`): its URL is the one the router
+    // answers and the sitemap lists, without it, but on the home.
+    expect((await at("/posts", "hello.localhost")).body).toContain(`<link rel="canonical" href="${origin}/posts"/>`);
+    expect((await at("/", "hello.localhost")).body).toContain(`<link rel="canonical" href="${origin}/"/>`);
+    const indexInApp = await (await fetch(new URL("/sites/hello/posts", app.url))).text();
+    expect(indexInApp).toContain(`<link rel="canonical" href="${app.url}/sites/hello/posts"/>`);
     // The app's host is not a site's: no robots of its own.
     expect((await fetch(new URL("/robots.txt", app.url))).headers.get("x-robots-tag")).toBeNull();
   });

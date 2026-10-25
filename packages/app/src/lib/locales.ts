@@ -1,4 +1,4 @@
-import { useRouterState } from "@tanstack/react-router";
+import { trimPathRight, useRouterState } from "@tanstack/react-router";
 import LOCALES, { contentPages } from "virtual:sanoma/locales";
 import { content, type UntypedContent } from "../content.ts";
 import type { ContentKind } from "../content-types.ts";
@@ -75,7 +75,7 @@ export async function pageLanguages(
  * none); any other page in every one.
  */
 async function languagesOf(leaf: LocaleMatch, locales: string[]): Promise<boolean[]> {
-  const path = leaf.fullPath.replace(/\/$/, "");
+  const path = trimPathRight(leaf.fullPath);
   const kind = Object.hasOwn(contentPages, path) ? contentPages[path] : undefined;
   const param = /\$([^/]+)/.exec(withoutOptional(path))?.[1];
   const slug = param === undefined ? undefined : leaf.params[param];
