@@ -118,10 +118,12 @@ export async function downloadPostgres(
       rmSync(join(root, "share", "locale"), { recursive: true, force: true });
     }
 
-    // Written beside the archive, then renamed over it: a reader never sees half of one.
+    // Written beside the archive, then renamed over it: a reader never sees half of one, nor
+    // (postgres.json gone until the archive is in place) a manifest of another archive.
     // COPYFILE_DISABLE: macOS's tar would otherwise add `._` files for extended attributes.
     run(["tar", "-czf", `${archive}.tmp`, ...readdirSync(root)], root, { COPYFILE_DISABLE: "1" });
     const manifest = { postgres: release.version, sha256: sha256(readFileSync(`${archive}.tmp`)) };
+    rmSync(join(packageDir(platform), "postgres.json"), { force: true });
     renameSync(`${archive}.tmp`, archive);
     writeFileSync(join(packageDir(platform), "postgres.json"), `${JSON.stringify(manifest, null, 2)}\n`);
     return archive;
@@ -185,6 +187,7 @@ export function thinSlice(file: Buffer, cpu: number): Buffer | undefined {
     if (file.readUInt32BE(at) !== cpu) continue;
     const offset = fat64 ? Number(file.readBigUInt64BE(at + 8)) : file.readUInt32BE(at + 8);
     const size = fat64 ? Number(file.readBigUInt64BE(at + 16)) : file.readUInt32BE(at + 12);
+    if (offset + size > file.length) throw new Error(`a universal Mach-O file whose slice runs past its end`);
     return file.subarray(offset, offset + size);
   }
   throw new Error(`a universal Mach-O file without a slice for CPU type 0x${cpu.toString(16)}`);
