@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { fakeHost, hostCheck, hostCheckWorkflows, inProcessHost } from "@sanoma-ai/testing/host";
-import { checkWakeup } from "@sanoma-ai/testing/wakeup";
+import { fakeHost, hostCheck, inProcessHost } from "@sanoma-ai/testing/host";
+import { checkWakeup, wakeupCheckWorkflows } from "@sanoma-ai/testing/wakeup";
 import {
   type CallContext,
   declaredWakeup,
@@ -31,6 +31,7 @@ const ALL_PASS = [
   { name: "a registered wake arrives after `at`", ok: true },
   { name: "a wake registered before a stop drains a queued run after it", ok: true },
   { name: "a replaced generation runs nothing", ok: true },
+  { name: "a wake at a schedule's next fire, while the host is stopped, runs that tick", ok: true },
 ];
 
 let n = 0;
@@ -46,9 +47,11 @@ const callWith =
 
 describe("sanomaOps.wakeup meets the Wakeup contract", () => {
   const root = mkdtempSync(join(tmpdir(), "sanoma-ops-wakeup-"));
+  // An app of its own per run: DBOS fires every tick of the kit's schedule an app missed.
+  writeFileSync(join(root, "package.json"), JSON.stringify({ name: `sanoma-ops-wakeup-${Date.now()}` }));
   const databaseUrl = testDatabaseUrl("sanoma_ops_host");
   const config: SanomaConfig = {
-    workflows: [...hostCheckWorkflows],
+    workflows: [...wakeupCheckWorkflows],
     connectors: [hostCheck],
     root,
     ledger: memoryLedger(),
@@ -92,7 +95,7 @@ describe("sanomaOps.wakeup meets the Wakeup contract", () => {
     return results;
   };
 
-  it("passes every check against the fake", { timeout: 180_000 }, async () => {
+  it("passes every check against the fake", { timeout: 300_000 }, async () => {
     const fake = fakeSanomaOps();
     try {
       expect(await conform(fake.driver)).toEqual(ALL_PASS);
@@ -101,7 +104,7 @@ describe("sanomaOps.wakeup meets the Wakeup contract", () => {
     }
   });
 
-  it("passes every check against the real wakeup service", { timeout: 180_000 }, async () => {
+  it("passes every check against the real wakeup service", { timeout: 300_000 }, async () => {
     const service = await serveWakeup(testDatabaseUrl("sanoma_ops_service"));
     const saved = { url: process.env.SANOMA_OPS_URL, token: process.env.SANOMA_OPS_TOKEN };
     try {
