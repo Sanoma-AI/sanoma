@@ -70,7 +70,7 @@ jobs:
       contents: read
     env:
       IMAGE: docker.io/sanomaai/runtime
-    # Pinned to commits like the publish job: this job can push the image every host runs.
+    # Actions pinned to commits, as in the publish job: this job holds the Docker Hub token.
     steps:
       # Secrets cannot be read in `if:`, so this step reads them and says whether to go on.
       - name: Docker Hub secrets are set
@@ -103,11 +103,16 @@ jobs:
         if: steps.hub.outputs.set
         run: |
           tag="$IMAGE:$(jq -r .version packages/sanoma/package.json)"
-          if docker buildx imagetools inspect "$tag" > /dev/null 2>&1; then
+          if docker buildx imagetools inspect "$tag" > /dev/null 2> "$RUNNER_TEMP/inspect.err"; then
             echo "::notice title=Runtime image skipped::$tag is already on Docker Hub."
             echo "Runtime image skipped: \`$tag\` is already on Docker Hub." >> "$GITHUB_STEP_SUMMARY"
-          else
+          # Only a missing tag (or, before the first push, a missing repository) is a push; any other
+          # error stops here, as pushing then could replace a tag that is there.
+          elif grep -qE ': not found|repository does not exist' "$RUNNER_TEMP/inspect.err"; then
             echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          else
+            cat "$RUNNER_TEMP/inspect.err" >&2
+            exit 1
           fi
       # No layer cache, as in the publish job: a release never restores another run's cache.
       - if: steps.image.outputs.tag
@@ -115,6 +120,8 @@ jobs:
         with:
           context: packages/sanoma/runtime
           platforms: linux/amd64
+          # One image manifest, not an index with an attestation, for a host that pulls it by tag.
+          provenance: false
           push: true
           tags: ${{ steps.image.outputs.tag }}
       - if: steps.image.outputs.tag
