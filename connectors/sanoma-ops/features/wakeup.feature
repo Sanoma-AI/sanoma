@@ -30,7 +30,7 @@ Feature: sanoma-ops wakeups
       """
     Then it returns
       """
-      { "action": "replace", "replace": ["host"] }
+      { "action": "update", "replace": [] }
       """
 
   Scenario: Register

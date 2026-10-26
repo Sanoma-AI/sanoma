@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { type CredentialStatus, errorMessage, memorySecrets, type Principal } from "@sanoma-ai/workflows";
 import { type DataValue, formatOptions, renderDataFile } from "@sanoma-ai/workflows/describe";
 import { secret as secretOf } from "@sanoma-ai/workflows/resources";
+import { mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
 import {
   ApiError,
   type ConnectExistingRequest,
@@ -24,10 +25,11 @@ import { cookie, cookies } from "../login/github.ts";
 import { signer } from "../login/keys.ts";
 import { escapeHtml } from "../login/page.ts";
 
-// Going live, step 1: connect GitHub and Supabase. GitHub through an App the company creates
-// with GitHub's manifest flow (`/setup/github/manifest`, then `/setup/github/callback`), whose
-// keys are stored as encrypted credentials; or, for a personal account, a token of the person's
-// own. Supabase through a pasted access token. Nothing here sends a stored value to a page.
+// Going live, step 1: connect GitHub and Supabase, and sanoma-ops when the config declares its
+// connector. GitHub through an App the company creates with GitHub's manifest flow
+// (`/setup/github/manifest`, then `/setup/github/callback`), whose keys are stored as encrypted
+// credentials; or, for a personal account, a token of the person's own. Supabase and sanoma-ops
+// through a pasted token. Nothing here sends a stored value to a page.
 
 /** Where the App's keys are stored, by what GitHub's conversion calls them. `githubLogin` reads the client's. */
 export const GITHUB_APP = {
@@ -39,12 +41,43 @@ export const GITHUB_APP = {
   pem: "SANOMA_GITHUB_APP_PEM",
 } as const;
 
-/** The tokens the page takes, pasted: the connectors' own variables, so their pages show the same rows. */
-export const SETUP_TOKENS: Record<string, string> = {
-  GITHUB_TOKEN:
-    "A GitHub token of your own, for a personal account: an installation token cannot create a repository there. Needs the repo scope.",
-  SUPABASE_ACCESS_TOKEN: "A Supabase access token (supabase.com/dashboard/account/tokens).",
+/** The resource type whose connector "Connect sanoma-ops" is for. */
+export const SANOMA_OPS_WAKEUP = "sanomaOps.wakeup";
+/** sanoma-ops's account token, which "Connect sanoma-ops" stores. */
+export const OPS_TOKEN = "SANOMA_OPS_TOKEN";
+/** The wakeup service's URL, when one is stored: the worker on the host registers there. */
+export const OPS_URL = "SANOMA_OPS_URL";
+
+/**
+ * The tokens the page takes, pasted: the connectors' own variables, so their pages show the same
+ * rows. One with `needs` is asked for only when the config declares that resource type.
+ */
+export const SETUP_TOKENS: Record<string, { description: string; optional?: true; needs?: string }> = {
+  GITHUB_TOKEN: {
+    description:
+      "A GitHub token of your own, for a personal account: an installation token cannot create a repository there. Needs the repo scope.",
+  },
+  SUPABASE_ACCESS_TOKEN: { description: "A Supabase access token (supabase.com/dashboard/account/tokens)." },
+  [OPS_TOKEN]: {
+    description:
+      "Optional: a wakeup account's token (swa_…), from Sanoma, or from `sanoma wakeup account <label>` on a wakeup service of your own: the wakeup starts the company again when something is due after it stopped.",
+    optional: true,
+    needs: SANOMA_OPS_WAKEUP,
+  },
+  [OPS_URL]: {
+    description:
+      "Optional: the wakeup service's URL, such as your own `sanoma wakeup`. Unset, the connector's default, Sanoma's hosted service.",
+    optional: true,
+    needs: SANOMA_OPS_WAKEUP,
+  },
 };
+
+/** The setup tokens this config asks for. */
+const setupTokens = ({ resolved }: AppContext) =>
+  Object.keys(SETUP_TOKENS).filter((name) => {
+    const { needs } = SETUP_TOKENS[name]!;
+    return needs === undefined || resolved.types.has(needs);
+  });
 
 const CALLBACK = "/setup/github/callback";
 const CONNECT = "/setup/connect";
@@ -54,29 +87,53 @@ const STATE_PATH = "/setup/github";
 const API = "https://api.github.com";
 
 /** What the page shows: the App's slug, and each token's status; never a value. */
-export async function setupStatus({ client }: AppContext): Promise<SetupStatus> {
-  const found = await client.secrets([GITHUB_APP.slug, ...Object.keys(SETUP_TOKENS)]);
+export async function setupStatus(app: AppContext): Promise<SetupStatus> {
+  const names = setupTokens(app);
+  const found = await app.client.secrets([GITHUB_APP.slug, ...names]);
   const slug = found.get(GITHUB_APP.slug);
-  const tokens = Object.entries(SETUP_TOKENS).map(([name, description]): CredentialStatus => {
+  const tokens = names.map((name): CredentialStatus => {
+    const { description, optional = false } = SETUP_TOKENS[name]!;
     const secret = found.get(name);
-    if (!secret) return { name, description, optional: false, status: "missing" };
+    if (!secret) return { name, description, optional, status: "missing" };
     const { source, setBy, setAt } = secret;
-    return { name, description, optional: false, status: "set", source, ...(setBy && { setBy, setAt }) };
+    return { name, description, optional, status: "set", source, ...(setBy && { setBy, setAt }) };
   });
   return { githubApp: slug ? { slug: slug.value, setBy: slug.setBy, setAt: slug.setAt } : null, tokens };
 }
 
-/** Stores a pasted token as the actor: one of `SETUP_TOKENS` only. */
-export async function setSetupToken({ client }: AppContext, actor: Principal, { name, value }: SetCredentialRequest) {
-  if (!Object.hasOwn(SETUP_TOKENS, name)) {
-    const error = `${name} is not a setup token; they are ${Object.keys(SETUP_TOKENS).join(", ")}`;
+/**
+ * Stores a pasted token as the actor: one of the config's setup tokens only. Storing sanoma-ops's
+ * account token also mints the instance's own (`SANOMA_WAKEUP_TOKEN`) when none is stored, and a
+ * new one for another account's, so going live can give the host it from the first apply, and the
+ * wakeup's create registers it.
+ */
+export async function setSetupToken(app: AppContext, actor: Principal, { name, value }: SetCredentialRequest) {
+  const names = setupTokens(app);
+  if (!names.includes(name)) {
+    const error = `${name} is not a setup token; they are ${names.join(", ")}`;
     throw new ApiError(400, {
       error,
       code: "invalid_input",
       issues: [{ path: ["name"], message: error, code: "custom" }],
     });
   }
+  const { client } = app;
+  const before = name === OPS_TOKEN ? (await client.secrets([OPS_TOKEN])).get(OPS_TOKEN)?.value : undefined;
   await client.setSecret(name, value, { by: actor.id });
+  // Another account's: the instance token the old one registered would be refused (a 409).
+  if (name === OPS_TOKEN) await mintWakeupToken(client, actor, before !== undefined && before !== value);
+}
+
+/**
+ * Mints the instance's own token (`SANOMA_WAKEUP_TOKEN`) when sanoma-ops's account token is stored
+ * and it is not, or again when `fresh`, for a new account: storing the account's token does, and
+ * going live, for an account token from the environment or the connector page.
+ */
+export async function mintWakeupToken(client: AppContext["client"], actor: Principal, fresh = false) {
+  const stored = await client.secrets([OPS_TOKEN, WAKEUP_TOKEN]);
+  if (stored.has(OPS_TOKEN) && (fresh || !stored.has(WAKEUP_TOKEN))) {
+    await client.setSecret(WAKEUP_TOKEN, mintInstanceToken(), { by: actor.id });
+  }
 }
 
 /** The manifest the App is created from: its OAuth callback is the login's, its webhook this app's. */

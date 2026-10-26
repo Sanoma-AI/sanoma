@@ -167,6 +167,7 @@ export {
   type WakeupRegistration,
   type WakeupSpec,
   wakeGeneration,
+  wakeupHostTypes,
 } from "./wakeup.ts";
 export {
   type CallOptions,

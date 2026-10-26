@@ -15,6 +15,7 @@ import {
   type Secrets,
 } from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
+import { mintInstanceToken } from "@sanoma-ai/workflows/wakeup-service";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { wakeup } from "../src/connector.ts";
 import { sanomaOpsDriver } from "../src/driver.ts";
@@ -71,9 +72,12 @@ describe("sanomaOps.wakeup meets the Wakeup contract", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  /** Creates an instance for the host through `driver`, then runs the kit, registering through it. */
+  /**
+   * Creates an instance for the host through `driver` with a token minted as /setup mints it, then
+   * runs the kit, registering through it.
+   */
   const conform = async (driver: Driver) => {
-    const call = callWith(memorySecrets());
+    const call = callWith(memorySecrets({ SANOMA_WAKEUP_TOKEN: mintInstanceToken() }));
     const op = (name: string) => (input: object) =>
       driver.ops[`wakeup.${name}`]!(input, call(`sanomaOps.wakeup.${name}`));
     const { id } = (await op("create")({ desired: { host: url } })) as { id: string };

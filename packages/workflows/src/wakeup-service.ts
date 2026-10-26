@@ -6,8 +6,9 @@ import { errorMessage } from "./shared.ts";
 
 /*
  * `@sanoma-ai/workflows/wakeup-service`: the service that wakes stopped instances, server-side
- * only. An account (minted by whoever runs the service) registers an instance by its URL and gets
- * the instance's token; the instance, before it stops, `PUT`s when it wants waking and a
+ * only. An account (minted by whoever runs the service) registers an instance by its URL and the
+ * instance's own token, which the company mints (`mintInstanceToken`) and keeps; the instance,
+ * before it stops, `PUT`s with that token when it wants waking and a
  * generation; the service then calls `GET {url}/wake?generation=N`, retrying until an answer is a
  * 2xx. It makes its two tables itself, in the database it is given (sanoma-ops's own, when it
  * hosts it): never among `db.ts`'s, which every company's database gets.
@@ -95,6 +96,19 @@ export interface WakeupService {
 
 /** A new token: the prefix, then 32 random bytes in base64url. */
 const newToken = (prefix: "swa_" | "swi_") => `${prefix}${generateSecret()}`;
+
+/**
+ * A new instance token (`swi_…`), which the company mints and stores as `SANOMA_WAKEUP_TOKEN`
+ * before anything is applied, so its host is given it from the first apply; the wakeup's create
+ * then registers it with the service. The service never mints one.
+ */
+export const mintInstanceToken = () => newToken("swi_");
+
+/** The secret a company keeps its instance token in: what its host's `secrets` name and its wakeup's driver reads. */
+export const WAKEUP_TOKEN = "SANOMA_WAKEUP_TOKEN";
+
+/** An instance token the service takes: `swi_`, then at least as many base64url characters as a minted one has. */
+export const INSTANCE_TOKEN = /^swi_[\w-]{43,256}$/;
 
 /**
  * The token's sha256, which is all the tables keep: a token is found by its hash (a unique index),
@@ -231,7 +245,10 @@ export async function mintWakeupAccount(databaseUrl: string, label: string): Pro
  * running, and `routes` for whoever serves it (`sanoma wakeup`, or `sanoma serve` with
  * `wakeup: true`). Routes, each JSON and `no-store`:
  *
- * - `POST /wakeup/instances { url }`, an account's token → 201 `{ id, token }`
+ * - `POST /wakeup/instances { url, token }`, an account's token → 201 `{ id }` for a new instance
+ *   token, 200 `{ id }` for one the account registered already, its URL now the given one (a lost
+ *   reply, or a host that moved; its registered wake kept only when the URL is the same), 409 for
+ *   another account's
  * - `GET /wakeup/instances/{id}`, its account's token → `{ id, url, at, generation, calledAt, attempts, lastError }`
  * - `DELETE /wakeup/instances/{id}`, its account's token → 204
  * - `PUT /wakeup/wake { at, generation }`, an instance's own token, which names the instance → 204,
@@ -277,13 +294,28 @@ export async function startWakeupService({
     if (given instanceof Response) return given;
     const checked = instanceUrl(given?.url);
     if ("error" in checked) return problem(400, checked.error);
-    const id = randomUUID();
-    const token = newToken("swi_");
-    await pool.query(
-      `INSERT INTO ${WAKEUP_INSTANCES_TABLE} (id, account_id, url, token_hash) VALUES ($1, $2, $3, $4)`,
-      [id, accountId, checked.url, hashOf(token)],
+    const token = given?.token;
+    if (typeof token !== "string" || !INSTANCE_TOKEN.test(token))
+      return problem(400, "token must be an instance's token: swi_, then 43 or more base64url characters");
+    // The token names the instance: a new one is a new row, one of this account's is moved to the
+    // URL given, and another account's is refused (no row returned).
+    const { rows } = await pool.query<{ id: string; made: boolean }>(
+      `INSERT INTO ${WAKEUP_INSTANCES_TABLE} AS i (id, account_id, url, token_hash) VALUES ($1, $2, $3, $4) ` +
+        "ON CONFLICT (token_hash) DO UPDATE SET url = EXCLUDED.url, " +
+        "at = CASE WHEN i.url = EXCLUDED.url THEN i.at END, " +
+        "generation = CASE WHEN i.url = EXCLUDED.url THEN i.generation ELSE 0 END, " +
+        "called_at = CASE WHEN i.url = EXCLUDED.url THEN i.called_at END, " +
+        "attempts = CASE WHEN i.url = EXCLUDED.url THEN i.attempts ELSE 0 END, " +
+        "next_attempt_at = CASE WHEN i.url = EXCLUDED.url THEN i.next_attempt_at END, " +
+        "last_error = CASE WHEN i.url = EXCLUDED.url THEN i.last_error END " +
+        "WHERE i.account_id = EXCLUDED.account_id RETURNING i.id, i.id = $1 AS made",
+      [randomUUID(), accountId, checked.url, hashOf(token)],
     );
-    return json(201, { id, token });
+    const row = rows[0];
+    if (!row) {
+      return problem(409, "the token is another account's instance's");
+    }
+    return json(row.made ? 201 : 200, { id: row.id });
   }
 
   async function wake(request: Request): Promise<Response> {
@@ -393,19 +425,22 @@ function startLoop({
     }
     // Stopped mid-call: nothing is known of it, so it is called again once its claim lapses.
     if (stopping.signal.aborted) return;
+    // Recorded only on the registration called: one replaced (a newer generation), or moved to
+    // another URL (its generation counted again from 0), is called again.
+    const same = "WHERE id = $1 AND generation = $2 AND url = $3";
     if (error === undefined) {
       await pool.query(
-        `UPDATE ${WAKEUP_INSTANCES_TABLE} SET called_at = $3, attempts = 0, next_attempt_at = NULL, ` +
-          "last_error = NULL WHERE id = $1 AND generation = $2",
-        [row.id, row.generation, now()],
+        `UPDATE ${WAKEUP_INSTANCES_TABLE} SET called_at = $4, attempts = 0, next_attempt_at = NULL, ` +
+          `last_error = NULL ${same}`,
+        [row.id, row.generation, row.url, now()],
       );
       log.info(`wakeup: called ${target}`);
     } else {
       await pool.query(
-        `UPDATE ${WAKEUP_INSTANCES_TABLE} SET attempts = attempts + 1, last_error = $3, ` +
-          `next_attempt_at = $4::timestamptz + least(power(2, attempts), ${MAX_BACKOFF_S}) * interval '1 second' ` +
-          "WHERE id = $1 AND generation = $2",
-        [row.id, row.generation, error, now()],
+        `UPDATE ${WAKEUP_INSTANCES_TABLE} SET attempts = attempts + 1, last_error = $4, ` +
+          `next_attempt_at = $5::timestamptz + least(power(2, attempts), ${MAX_BACKOFF_S}) * interval '1 second' ` +
+          same,
+        [row.id, row.generation, row.url, error, now()],
       );
       log.warn(`wakeup: calling ${target} failed (${error}); it is tried again`);
     }

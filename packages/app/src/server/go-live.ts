@@ -3,9 +3,17 @@ import "@tanstack/react-start/server-only";
 import { createSign } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { APPLY_WORKFLOW, errorMessage, isEnded, type Principal, type Resource } from "@sanoma-ai/workflows";
+import {
+  APPLY_WORKFLOW,
+  errorMessage,
+  isEnded,
+  type Principal,
+  type Resource,
+  wakeupHostTypes,
+} from "@sanoma-ai/workflows";
 import { type DataValue, formatOptions, readLockfile, Reference, renderDataFile } from "@sanoma-ai/workflows/describe";
 import { secret } from "@sanoma-ai/workflows/resources";
+import { WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
 import {
   ApiError,
   INFRA,
@@ -16,7 +24,7 @@ import {
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
-import { GITHUB_APP } from "./setup.ts";
+import { GITHUB_APP, mintWakeupToken, OPS_TOKEN, OPS_URL, SANOMA_OPS_WAKEUP } from "./setup.ts";
 
 // Going live, steps 2 to 6 (step 1 is connect, in setup.ts): choose where the company goes,
 // write `resources/sanoma/infra.ts`, apply the repository and the database, push the local
@@ -25,7 +33,12 @@ import { GITHUB_APP } from "./setup.ts";
 // to choose from, and git.
 
 /** What `infra.ts` declares, by export: the lockfile's keys. */
-const KEYS = { repo: `${INFRA}#repo`, store: `${INFRA}#store`, host: `${INFRA}#host` } as const;
+const KEYS = {
+  repo: `${INFRA}#repo`,
+  store: `${INFRA}#store`,
+  host: `${INFRA}#host`,
+  wakeup: `${INFRA}#wakeup`,
+} as const;
 
 /** The resource types going live declares, besides a host. */
 const REPOSITORY = "github.repository";
@@ -63,6 +76,8 @@ export const SUPABASE_REGIONS = [
 ] as const;
 
 const GITHUB_API = "https://api.github.com";
+/** The wakeup's declaration in `infra.ts`, as `renderInfra` writes it. */
+const WAKEUP_LINE = /^export const wakeup = /m;
 /** The repository's name in `infra.ts` as `renderInfra` writes it. */
 const REPO_NAME = /export const repo = github\.repository\(\{\s*name: "([^"]+)"/;
 const SUPABASE_API = "https://api.supabase.com";
@@ -169,6 +184,8 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
     }
   }
   const host = hostType(app);
+  const cannot = host && (await hostWakeup(app, host)).cannot;
+  if (cannot) errors.push(cannot);
   return {
     owners,
     organizations: organizations.map(({ id, name }) => ({ id, name })),
@@ -185,7 +202,38 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
   };
 }
 
-/** `infra.ts`'s text for the choices: the repository, the database, and the host that runs the company from them. */
+/**
+ * Whether going live declares a wakeup, the one rule the choices and `renderInfra` share: when
+ * the config has sanoma-ops's wakeup type and sanoma-ops is connected (its account token stored),
+ * `secrets` are what the host is given for it (the instance's token, which `goLive` mints first
+ * when none is stored, and `SANOMA_OPS_URL` when one is), or `cannot` says why the type cannot
+ * wake this host's, and none is declared. Neither: no wakeup, and nothing to say.
+ */
+async function hostWakeup(
+  { resolved, client }: AppContext,
+  host: Resource,
+): Promise<{ secrets?: Record<string, DataValue>; cannot?: string }> {
+  const type = resolved.types.get(SANOMA_OPS_WAKEUP);
+  if (!type?.wakeup) return {};
+  const stored = await client.secrets([OPS_TOKEN, OPS_URL]);
+  if (!stored.has(OPS_TOKEN)) return {};
+  const hosts = wakeupHostTypes(type);
+  const id = `${host.vendor}.${host.type}`;
+  if (!hosts.includes(id)) {
+    return {
+      cannot: `sanoma-ops's wakeup cannot wake a ${id} (it wakes ${hosts.join(", ")}): going live declares none, and the host stays up`,
+    };
+  }
+  return {
+    secrets: { [WAKEUP_TOKEN]: secret(WAKEUP_TOKEN), ...(stored.has(OPS_URL) && { [OPS_URL]: secret(OPS_URL) }) },
+  };
+}
+
+/**
+ * `infra.ts`'s text for the choices: the repository, the database, the host that runs the company
+ * from them and, once sanoma-ops is connected, the wakeup that starts the host again, whose
+ * instance token the host is given from the first apply (`hostWakeup`).
+ */
 export async function renderInfra(app: AppContext, { name, organization, region, port }: Omit<GoLiveRequest, "owner">) {
   const host = hostType(app);
   const vendors = app.description.vendors;
@@ -200,6 +248,7 @@ export async function renderInfra(app: AppContext, { name, organization, region,
     if (!pkg) throw new ApiError(409, { error: `The ${vendor} connector names no package to import from` });
     return { source: `${pkg}/resources`, imported: vendor, local: vendor };
   };
+  const wakeup = (await hostWakeup(app, host)).secrets;
   const { inputs } = host.host!;
   const fields = host.schema.shape as Record<string, unknown>;
   const hosted: Record<string, DataValue> = {
@@ -208,11 +257,20 @@ export async function renderInfra(app: AppContext, { name, organization, region,
   };
   hosted[inputs.source] = new Reference("repo");
   hosted[inputs.ref] = "main";
-  hosted[inputs.secrets] = { SANOMA_DATABASE_URL: secret(DATABASE_URL), SANOMA_SECRETS_KEY: secret(SECRETS_KEY) };
+  hosted[inputs.secrets] = {
+    SANOMA_DATABASE_URL: secret(DATABASE_URL),
+    SANOMA_SECRETS_KEY: secret(SECRETS_KEY),
+    ...wakeup,
+  };
   hosted[inputs.port] = port;
   return renderDataFile(
     {
-      imports: [constructors("github"), constructors("supabase"), constructors(host.vendor)],
+      imports: [
+        constructors("github"),
+        constructors("supabase"),
+        constructors(host.vendor),
+        ...(wakeup ? [constructors("sanomaOps")] : []),
+      ],
       exports: [
         { name: "repo", vendor: "github", type: "repository", desired: { name, visibility: "private" } },
         {
@@ -227,6 +285,9 @@ export async function renderInfra(app: AppContext, { name, organization, region,
           },
         },
         { name: "host", vendor: host.vendor, type: host.type, desired: hosted },
+        ...(wakeup
+          ? [{ name: "wakeup", vendor: "sanomaOps", type: "wakeup", desired: { host: new Reference("host") } }]
+          : []),
       ],
     },
     formatOptions(app.resolved.root!),
@@ -256,6 +317,8 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
       error: "The GitHub connector creates the repository with GITHUB_TOKEN: connect a token",
     });
   }
+  // sanoma-ops's token may be the environment's or its connector page's, which mint nothing.
+  await mintWakeupToken(client, actor);
   const text = await renderInfra(app, choices);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, text);
@@ -290,8 +353,8 @@ async function pushToken(app: AppContext, owner: string): Promise<string> {
 
 /**
  * Steps 5 and 6: pushes the local repository's `main`, with `infra.ts` and the lockfile on top,
- * to the repository apply made, then starts apply on the host. Refused until the repository and
- * the database are bound.
+ * to the repository apply made, then starts apply on the host (and its wakeup, when declared).
+ * Refused until the repository and the database are bound.
  */
 export async function goLiveHost(app: AppContext, actor: Principal): Promise<{ runId: string }> {
   const { client, resolved, source } = app;
@@ -311,8 +374,9 @@ export async function goLiveHost(app: AppContext, actor: Principal): Promise<{ r
     throw new ApiError(409, { error: "Check out main, where infra.ts and the lockfile are committed, then push" });
   }
   const owner = (await client.secrets(["GITHUB_OWNER"])).get("GITHUB_OWNER")?.value;
+  const infra = await readFile(join(resolved.root!, INFRA), "utf8");
   // The repository's name as going live wrote it, first in the file.
-  const name = REPO_NAME.exec(await readFile(join(resolved.root!, INFRA), "utf8"))?.[1];
+  const name = REPO_NAME.exec(infra)?.[1];
   if (!owner || !name) throw new ApiError(409, { error: `Cannot tell the repository from ${INFRA} and GITHUB_OWNER` });
   try {
     await source.push({
@@ -324,7 +388,9 @@ export async function goLiveHost(app: AppContext, actor: Principal): Promise<{ r
     if (err instanceof ApiError) throw err;
     throw new ApiError(502, { error: errorMessage(err) });
   }
-  const runId = await client.apply({ only: [KEYS.host] }, { startedBy: actor });
+  // The wakeup, when declared, after the host it names: one apply, in dependency order.
+  const only = WAKEUP_LINE.test(infra) ? [KEYS.host, KEYS.wakeup] : [KEYS.host];
+  const runId = await client.apply({ only }, { startedBy: actor });
   return { runId };
 }
 

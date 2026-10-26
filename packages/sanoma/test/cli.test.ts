@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
+import { mintInstanceToken } from "@sanoma-ai/workflows/wakeup-service";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { copyFixture, ensureBuilt, runCli, serving, startCli } from "./fixture.ts";
 
@@ -80,9 +81,9 @@ describe("sanoma wakeup", () => {
     const made = await fetch(`${url}/wakeup/instances`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}` },
-      body: JSON.stringify({ url: "http://x.test" }),
+      body: JSON.stringify({ url: "http://x.test", token: mintInstanceToken() }),
     });
-    expect([made.status, Object.keys((await made.json()) as object)]).toEqual([201, ["id", "token"]]);
+    expect([made.status, Object.keys((await made.json()) as object)]).toEqual([201, ["id"]]);
     // The body is read once the token is known, and only so far.
     const huge = await fetch(`${url}/wakeup/instances`, {
       method: "POST",

@@ -43,13 +43,18 @@ const OUTCOME = {
 /** The pasted tokens' rows store through the setup function, which takes these names only; nothing clears them here. */
 const SETUP_STORE: CredentialStore = { set: setSetupTokenFn };
 
-/** Going live, step 1: the GitHub App (or a token of your own) and a Supabase token, and what is connected. */
+/**
+ * Going live, step 1: the GitHub App (or a token of your own), a Supabase token and, when the
+ * config declares its connector, sanoma-ops's account token and URL, and what is connected.
+ */
 function ConnectPage() {
   const { github } = Route.useSearch();
   const { data: status } = useSuspenseQuery(setupStatusQuery());
   const token = (name: string) => status.tokens.find((t) => t.name === name);
   const githubToken = token("GITHUB_TOKEN");
   const supabaseToken = token("SUPABASE_ACCESS_TOKEN");
+  // Only when the config declares the sanoma-ops connector.
+  const opsRows = [token("SANOMA_OPS_TOKEN"), token("SANOMA_OPS_URL")].filter((t) => t !== undefined);
   return (
     <>
       <CrumbHeader />
@@ -63,6 +68,18 @@ function ConnectPage() {
       <Region title="Supabase">
         <ItemGroup>{supabaseToken && <CredentialRow credential={supabaseToken} store={SETUP_STORE} />}</ItemGroup>
       </Region>
+      {opsRows.length > 0 && (
+        <Region title="sanoma-ops">
+          <p className="text-sm text-muted-foreground">
+            Scale to zero: the host stops when nothing is due, and the wakeup starts it again in time.
+          </p>
+          <ItemGroup>
+            {opsRows.map((row) => (
+              <CredentialRow key={row.name} credential={row} store={SETUP_STORE} />
+            ))}
+          </ItemGroup>
+        </Region>
+      )}
       <p className="text-sm text-muted-foreground">
         Have a repository or a database already?{" "}
         <Link to="/setup/existing" className="underline underline-offset-4">
