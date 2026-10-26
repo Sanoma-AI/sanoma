@@ -21,10 +21,11 @@ import {
   type GoLiveProgress,
   type GoLiveRequest,
   type GoLiveRun,
+  SETUP_VENDORS,
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
-import { CONNECTED_BY, GITHUB_APP, mintWakeupToken, OPS_URL } from "./setup.ts";
+import { GITHUB_APP, mintWakeupToken, OPS_URL } from "./setup.ts";
 
 // Going live, steps 2 to 6 (step 1 is connect, in setup.ts): choose where the company goes,
 // write `resources/sanoma/infra.ts`, apply the repository and the database, push the local
@@ -107,14 +108,33 @@ function databaseType({ resolved }: AppContext): Resource | undefined {
   return neon?.database ? neon : [...resolved.types.values()].find((type) => type.database);
 }
 
-/** The secrets that say which vendors are connected (`CONNECTED_BY`), and the wakeup service's URL. */
-const connections = ({ client }: AppContext) => client.secrets([...Object.values(CONNECTED_BY), OPS_URL]);
+/** The secrets that say which vendors are connected (`SETUP_VENDORS`' `connectedBy`), and the wakeup service's URL. */
+const connections = ({ client }: AppContext) =>
+  client.secrets([...SETUP_VENDORS.flatMap((v) => v.connectedBy), OPS_URL]);
 type Connections = Awaited<ReturnType<typeof connections>>;
 
+/** True when every token that connects `vendor` is stored; false for a vendor `/setup` does not connect. */
 const isConnected = (stored: Connections, vendor: string) => {
-  const token = CONNECTED_BY[vendor];
-  return token !== undefined && stored.has(token);
+  const tokens = SETUP_VENDORS.find((v) => v.vendor === vendor)?.connectedBy ?? [];
+  return tokens.length > 0 && tokens.every((name) => stored.has(name));
 };
+
+/** What going live chooses now: the database, the host and its wakeup, from what is connected. */
+async function choose(app: AppContext) {
+  const stored = await connections(app);
+  const database = databaseType(app);
+  const host = hostType(app, stored);
+  return { stored, database, host, wakeup: host ? hostWakeup(app, host, stored) : {} };
+}
+
+/** `value` at the dotted `path` of `into`, the objects on the way made. */
+function setPath(into: Record<string, DataValue>, path: string, value: DataValue): void {
+  const keys = path.split(".");
+  const last = keys.pop()!;
+  let at = into;
+  for (const key of keys) at = (at[key] ??= {}) as Record<string, DataValue>;
+  at[last] = value;
+}
 
 /** The config's host type: Cloudflare's once it is connected, else Docker's, else the first. */
 function hostType({ resolved }: AppContext, stored: Connections): Resource | undefined {
@@ -219,10 +239,8 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
       });
     }
   }
-  const stored = await connections(app);
-  const host = hostType(app, stored);
-  const cannot = host && hostWakeup(app, host, stored).cannot;
-  if (cannot) errors.push(cannot);
+  const { host, wakeup } = await choose(app);
+  if (wakeup.cannot) errors.push(wakeup.cannot);
   return {
     owners,
     organizations: organized ? organizations.map(({ id, name }) => ({ id, name })) : null,
@@ -292,11 +310,10 @@ async function sanomaVersion(root: string): Promise<string> {
  */
 export async function renderInfra(
   app: AppContext,
-  { name, organization, region, size, port }: Omit<GoLiveRequest, "owner">,
+  { name, organization, region, size, host: shown, port }: Omit<GoLiveRequest, "owner">,
+  chosen?: Awaited<ReturnType<typeof choose>>,
 ) {
-  const database = databaseType(app);
-  const stored = await connections(app);
-  const host = hostType(app, stored);
+  const { database, host, wakeup } = chosen ?? (await choose(app));
   const vendors = app.description.vendors;
   const missing = missingTypes(app);
   if (missing.length || !host || !database) {
@@ -304,17 +321,22 @@ export async function renderInfra(
       error: `The config's connectors declare no ${missing.join(", ")}: add them to sanoma.config.ts`,
     });
   }
+  // What is connected changed since the page chose (Cloudflare connected meanwhile, say).
+  if (shown !== undefined && shown !== idOf(host)) {
+    throw new ApiError(409, {
+      error: `Going live now runs the company on ${idOf(host)}, not ${shown}: reload the page`,
+    });
+  }
   const constructors = (vendor: string) => {
     const pkg = vendors[vendor]?.package;
     if (!pkg) throw new ApiError(409, { error: `The ${vendor} connector names no package to import from` });
     return { source: `${pkg}/resources`, imported: vendor, local: vendor };
   };
-  const wakeup = hostWakeup(app, host, stored);
 
   const dbInputs = database.database!.inputs;
   const store: Record<string, DataValue> = { ...(hasField(database, "name") && { name }) };
-  store[dbInputs.region] = region;
-  if (dbInputs.size && size) store[dbInputs.size] = size;
+  setPath(store, dbInputs.region, region);
+  if (dbInputs.size && size) setPath(store, dbInputs.size, size);
   Object.assign(store, DATABASE_EXTRAS[idOf(database)]?.({ ...(organization && { organization }) }));
 
   const { inputs } = host.host!;
@@ -323,14 +345,14 @@ export async function renderInfra(
     hosted.image =
       idOf(host) === DOCKER ? RUNTIME_IMAGE : `${PUBLISHED_IMAGE}:${await sanomaVersion(app.resolved.root!)}`;
   }
-  hosted[inputs.source] = new Reference("repo");
-  hosted[inputs.ref] = "main";
-  hosted[inputs.secrets] = {
+  setPath(hosted, inputs.source, new Reference("repo"));
+  setPath(hosted, inputs.ref, "main");
+  setPath(hosted, inputs.secrets, {
     SANOMA_DATABASE_URL: secret(DATABASE_URL),
     SANOMA_SECRETS_KEY: secret(SECRETS_KEY),
     ...wakeup.secrets,
-  };
-  hosted[inputs.port] = port;
+  });
+  setPath(hosted, inputs.port, port);
   const woken = wakeup.type;
   return renderDataFile(
     {
@@ -347,7 +369,11 @@ export async function renderInfra(
                 name: "wakeup",
                 vendor: woken.vendor,
                 type: woken.type,
-                desired: { [woken.wakeup!.inputs.host]: new Reference("host") },
+                desired: (() => {
+                  const desired: Record<string, DataValue> = {};
+                  setPath(desired, woken.wakeup!.inputs.host, new Reference("host"));
+                  return desired;
+                })(),
               },
             ]
           : []),
@@ -380,11 +406,18 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
       error: "The GitHub connector creates the repository with GITHUB_TOKEN: connect a token",
     });
   }
-  // A wakeup's token may be the environment's or its connector page's, which mint nothing.
-  const stored = await connections(app);
-  const host = hostType(app, stored);
-  if (host && hostWakeup(app, host, stored).type) await mintWakeupToken(client, actor);
-  const text = await renderInfra(app, choices);
+  const chosen = await choose(app);
+  // The database's vendor connected: its token is what apply makes the database with.
+  if (
+    chosen.database &&
+    !isConnected(chosen.stored, chosen.database.vendor) &&
+    SETUP_VENDORS.some((v) => v.vendor === chosen.database!.vendor)
+  ) {
+    throw new ApiError(409, { error: `Connect ${chosen.database.title}'s vendor, ${chosen.database.vendor}, first` });
+  }
+  const text = await renderInfra(app, choices, chosen);
+  // Once the request is good: a wakeup's token may be the environment's or its connector page's, which mint nothing.
+  if (chosen.wakeup.type) await mintWakeupToken(client, actor);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, text);
   await source?.commit({

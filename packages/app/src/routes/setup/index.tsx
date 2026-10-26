@@ -65,10 +65,11 @@ function GoLivePage() {
   const { data: progress } = useSuspenseQuery(goLiveProgressQuery());
   const isSet = (name: string) => status.tokens.some((t) => t.name === name && t.status === "set");
   const github = status.githubApp !== null || isSet("GITHUB_TOKEN");
-  // The vendors the config asks tokens of, each connected once its first is stored.
-  const vendors = SETUP_VENDORS.flatMap(({ title, tokens: [first], about }) => {
-    const row = status.tokens.find((t) => t.name === first);
-    return row ? [{ title, about, optional: row.optional, connected: row.status === "set" }] : [];
+  // The vendors the config asks tokens of, each connected once its `connectedBy` are stored.
+  const vendors = SETUP_VENDORS.flatMap(({ title, connectedBy, about }) => {
+    const rows = connectedBy.map((name) => status.tokens.find((t) => t.name === name));
+    if (rows.some((row) => row === undefined)) return [];
+    return [{ title, about, optional: rows[0]!.optional, connected: rows.every((row) => row!.status === "set") }];
   });
   const connected = github && vendors.every((v) => v.optional || v.connected);
   const { run, bound } = progress;
@@ -176,6 +177,7 @@ function ChooseFields({ choices }: { choices: GoLiveChoices }) {
     name: choices.name,
     ...(organizations?.[0] && { organization: organizations[0].id }),
     region: regions?.includes("us-east-1") ? "us-east-1" : (regions?.[0] ?? ""),
+    ...(host && { host: host.type }),
     port: 8080,
   });
   const set = (field: keyof GoLiveRequest) => (e: { target: { value: string } }) => {

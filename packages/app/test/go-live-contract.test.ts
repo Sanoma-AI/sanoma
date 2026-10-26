@@ -187,7 +187,11 @@ describe("going live by contract", () => {
   });
 
   it("runs on Cloudflare once it is connected, the published runtime image, woken by its own alarm first", async () => {
-    const app = contextOf(ALL, { CLOUDFLARE_API_TOKEN: "cf", SANOMA_OPS_TOKEN: `swa_${"a".repeat(43)}` });
+    const app = contextOf(ALL, {
+      CLOUDFLARE_API_TOKEN: "cf",
+      CLOUDFLARE_ACCOUNT_ID: "acct",
+      SANOMA_OPS_TOKEN: `swa_${"a".repeat(43)}`,
+    });
     expect((await goLiveChoices(app)).host).toEqual({
       type: "cloudflare.container",
       title: "cloudflare container",
@@ -202,6 +206,43 @@ describe("going live by contract", () => {
     expect(text).toContain(`    SANOMA_WAKEUP_TOKEN: secret("SANOMA_WAKEUP_TOKEN"),\n  },\n`);
     expect(text).not.toContain("SANOMA_OPS_URL");
     expect(text).not.toContain("sanomaOps");
+  });
+
+  it("stays on Docker with Cloudflare's token but not its account, and refuses a host the page did not show", async () => {
+    const half = contextOf(ALL, { CLOUDFLARE_API_TOKEN: "cf" });
+    expect((await goLiveChoices(half)).host?.type).toBe("docker.container");
+    const connected = contextOf(ALL, { CLOUDFLARE_API_TOKEN: "cf", CLOUDFLARE_ACCOUNT_ID: "acct" });
+    await expect(renderInfra(connected, { ...choices, host: "docker.container" })).rejects.toMatchObject({
+      status: 409,
+      message: "Going live now runs the company on cloudflare.container, not docker.container: reload the page",
+    });
+  });
+
+  it("writes an input at a dotted path as nested fields", async () => {
+    const nested = defineResource({
+      vendor: "nested",
+      type: "db",
+      title: "Nested database",
+      schema: z.object({ name: z.string(), settings: z.object({ region: z.string() }) }),
+      fields: { immutable: [], vendorOwned: [], writeOnly: [] },
+      writable: true,
+      afterCreate: [{ op: "nested.db.storeUrl", input: ({ id, export: name }) => ({ ref: id, export: name }) }],
+      database: {
+        capabilities: { pauses: false, branch: false },
+        inputs: { region: "settings.region" },
+        storeUrl: "nested.db.storeUrl",
+        outputs: () => ({ healthy: true }),
+      },
+    });
+    const types = defineConnector("nested", { db: nested }, { package: "@acme/nested" });
+    const connector = { ...types, db: { ...types.db, ...defineConnector("nested", { db: storeUrl }).db } } as Connector<
+      any,
+      any
+    >;
+    const text = await renderInfra(contextOf([github, connector, docker]), choices);
+    expect(text).toContain(
+      `export const store = nested.db({\n  name: "acme-ops",\n  settings: { region: "aws-eu-central-1" },\n});\n`,
+    );
   });
 
   it("says why no wakeup is declared when none connected wakes the host", async () => {

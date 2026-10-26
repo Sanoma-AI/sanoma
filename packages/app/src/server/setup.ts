@@ -17,6 +17,7 @@ import {
   INFRA,
   PASSWORD_NOTE,
   type SetCredentialRequest,
+  SETUP_VENDORS,
   type SetupStatus,
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
@@ -45,65 +46,53 @@ export const GITHUB_APP = {
 export const OPS_TOKEN = "SANOMA_OPS_TOKEN";
 /** The wakeup service's URL, when one is stored: the worker on the host registers there. */
 export const OPS_URL = "SANOMA_OPS_URL";
-/** Cloudflare's API token, which "Connect Cloudflare" stores. */
-export const CLOUDFLARE_TOKEN = "CLOUDFLARE_API_TOKEN";
 
 /**
  * The tokens the page takes, pasted: the connectors' own variables, so their pages show the same
- * rows. One with a `vendor` is asked for only when the config declares a resource type of that
- * vendor. Cloudflare's are optional: going live runs the company there once they are stored, and
- * on Docker without them.
+ * rows. One of a vendor's (`SETUP_VENDORS`) is asked for only when the config declares a type of
+ * that vendor. Cloudflare's are optional: going live runs the company there once both are
+ * stored, and on Docker without them.
  */
-export const SETUP_TOKENS: Record<string, { description: string; optional?: true; vendor?: string }> = {
+export const SETUP_TOKENS: Record<string, { description: string; optional?: true }> = {
   GITHUB_TOKEN: {
     description:
       "A GitHub token of your own, for a personal account: an installation token cannot create a repository there. Needs the repo scope.",
   },
   SUPABASE_ACCESS_TOKEN: {
     description: "A Supabase access token (supabase.com/dashboard/account/tokens).",
-    vendor: "supabase",
   },
   NEON_API_KEY: {
     description: "An organization API key, from console.neon.tech, Organization settings, API keys.",
-    vendor: "neon",
   },
-  [CLOUDFLARE_TOKEN]: {
+  CLOUDFLARE_API_TOKEN: {
     description:
       "An API token with Workers Scripts Edit, Workers Containers Edit and Account Settings Read, from dash.cloudflare.com/profile/api-tokens.",
     optional: true,
-    vendor: "cloudflare",
   },
   CLOUDFLARE_ACCOUNT_ID: {
     description: "The account id, from the Workers & Pages overview.",
     optional: true,
-    vendor: "cloudflare",
   },
   [OPS_TOKEN]: {
     description:
       "Optional: a wakeup account's token (swa_…), from Sanoma, or from `sanoma wakeup account <label>` on a wakeup service of your own: the wakeup starts the company again when something is due after it stopped.",
     optional: true,
-    vendor: "sanomaOps",
   },
   [OPS_URL]: {
     description:
       "Optional: the wakeup service's URL, such as your own `sanoma wakeup`. Unset, the connector's default, Sanoma's hosted service.",
     optional: true,
-    vendor: "sanomaOps",
   },
 };
 
-/**
- * The token whose being stored says a vendor is connected, for going live's choice of host and
- * wakeup: Cloudflare's host and its wakeup once its API token is, sanoma-ops's wakeup once its
- * account's token is.
- */
-export const CONNECTED_BY: Record<string, string> = { cloudflare: CLOUDFLARE_TOKEN, sanomaOps: OPS_TOKEN };
+/** The vendor a setup token is for, when it is a vendor's (`SETUP_VENDORS`). */
+const vendorOf = (name: string) => SETUP_VENDORS.find((v) => v.tokens.includes(name))?.vendor;
 
 /** The setup tokens this config asks for. */
 const setupTokens = ({ resolved }: AppContext) => {
   const vendors = new Set([...resolved.types.values()].map((type) => type.vendor));
   return Object.keys(SETUP_TOKENS).filter((name) => {
-    const { vendor } = SETUP_TOKENS[name]!;
+    const vendor = vendorOf(name);
     return vendor === undefined || vendors.has(vendor);
   });
 };

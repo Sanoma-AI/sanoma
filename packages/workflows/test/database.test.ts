@@ -56,6 +56,10 @@ describe("a database type", () => {
     expect(project.stateless).toBe(false);
   });
 
+  it("takes a size left undefined, as a spread of optional inputs gives it", () => {
+    expect(projectOf({ inputs: { region: "region", size: undefined } }).database?.inputs.region).toBe("region");
+  });
+
   it("takes a storeUrl in another group of its vendor (Supabase's database.storeUrl)", () => {
     expect(projectOf({ storeUrl: "acme.database.storeUrl" }).database?.storeUrl).toBe("acme.database.storeUrl");
   });

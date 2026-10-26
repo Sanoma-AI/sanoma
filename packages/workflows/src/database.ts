@@ -78,6 +78,7 @@ export function checkDatabase(
     if (typeof capabilities[name] !== "boolean") problems.push(`capabilities.${name} must be true or false`);
   }
   for (const [input, path] of Object.entries(database.inputs ?? {})) {
+    if (input === "size" && path === undefined) continue;
     if (typeof path !== "string" || !hasPath(type.schema, path)) problems.push(`${input} names no field (${path})`);
   }
   if (typeof database.inputs?.region !== "string") problems.push("inputs.region is required");

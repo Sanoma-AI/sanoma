@@ -190,22 +190,45 @@ export interface SetupStatus {
 }
 
 /**
- * The vendors `/setup` connects with pasted tokens, as its pages show them: each one's setup
- * tokens (`SETUP_TOKENS`), the first of which says it is connected, and what connecting it does.
- * A vendor whose tokens the config does not ask for is not shown.
+ * The vendors `/setup` connects with pasted tokens, as the pages show them and going live reads
+ * them: each one's id, its setup tokens (`SETUP_TOKENS`, asked for only when the config declares
+ * a type of the vendor), those that must all be stored for it to be connected (`connectedBy`),
+ * and what connecting it does.
  */
-export const SETUP_VENDORS: readonly { title: string; tokens: readonly string[]; about: string }[] = [
-  { title: "Supabase", tokens: ["SUPABASE_ACCESS_TOKEN"], about: "An access token, which lists and creates projects." },
-  { title: "Neon", tokens: ["NEON_API_KEY"], about: "An organization API key, which creates projects." },
+export const SETUP_VENDORS: readonly {
+  vendor: string;
+  title: string;
+  tokens: readonly string[];
+  connectedBy: readonly string[];
+  about: string;
+}[] = [
   {
+    vendor: "supabase",
+    title: "Supabase",
+    tokens: ["SUPABASE_ACCESS_TOKEN"],
+    connectedBy: ["SUPABASE_ACCESS_TOKEN"],
+    about: "An access token, which lists and creates projects.",
+  },
+  {
+    vendor: "neon",
+    title: "Neon",
+    tokens: ["NEON_API_KEY"],
+    connectedBy: ["NEON_API_KEY"],
+    about: "An organization API key, which creates projects.",
+  },
+  {
+    vendor: "cloudflare",
     title: "Cloudflare",
     tokens: ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
+    connectedBy: ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
     about:
       "Optional: an API token and the account, so the company runs on Cloudflare Containers and stops when nothing is due. Connect it before choosing where the company goes.",
   },
   {
+    vendor: "sanomaOps",
     title: "sanoma-ops",
     tokens: ["SANOMA_OPS_TOKEN", "SANOMA_OPS_URL"],
+    connectedBy: ["SANOMA_OPS_TOKEN"],
     about:
       "Optional: a wakeup account, so the host stops when nothing is due and starts again in time. Connect it before choosing where the company goes, which declares the wakeup.",
   },
@@ -227,6 +250,8 @@ export const GoLiveRequest = z.object({
   organization: z.string().min(1, "Choose a Supabase organization").optional(),
   region: z.string().min(1, "Choose a region"),
   size: z.string().min(1).optional(),
+  /** The host type the page showed (`GoLiveChoices.host`): refused when going live would now choose another. */
+  host: z.string().min(1).optional(),
   port: z.number().int().min(1024, "A port from 1024").max(65535, "A port up to 65535"),
 });
 export type GoLiveRequest = z.infer<typeof GoLiveRequest>;

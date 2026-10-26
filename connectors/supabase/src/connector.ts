@@ -42,7 +42,8 @@ export const supabaseTf = tfConnector({
       title: "Project",
       exists: (state) => state.name != null,
       writable: true,
-      // The company's database: paid projects never pause, and a branch starts empty.
+      // The company's database: it does not pause as the contract means (a paid project never
+      // does; a free one that pauses wakes on a restore, not on a connection), and a branch starts empty.
       database: {
         capabilities: { pauses: false, branch: false },
         inputs: { region: "region" },
