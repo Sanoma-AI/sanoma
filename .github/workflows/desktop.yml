@@ -1,6 +1,5 @@
 name: Desktop
-# The desktop shell's smoke test (packages/desktop/test/e2e): Electron, from the build, opens a
-# fixture company whose launcher is a fake. Only for changes to the shell; ci.yml runs its unit tests.
+# The desktop shell's smoke test (packages/desktop/test/e2e), on Linux under xvfb; ci.yml runs its unit tests.
 on:
   push:
     branches: [main]
@@ -8,6 +7,8 @@ on:
       - packages/desktop/**
       # Its `engines`, which the shipped Node must satisfy.
       - packages/sanoma/template/package.json
+      # `packageManager`: the pnpm the shell stages and installs companies with.
+      - package.json
       - .github/workflows/desktop.yml
   pull_request:
     paths: *paths
@@ -15,7 +16,7 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -24,11 +25,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # `allowBuilds` skips Electron's download in a plain install.
-      - run: node packages/desktop/scripts/electron.ts
-      - run: pnpm --filter @sanoma-ai/desktop run build
-      # The pinned Node for linux-x64, which runs the fake launcher as it runs a company, and this pnpm.
-      - run: pnpm --filter @sanoma-ai/desktop run stage:resources
-      # Ubuntu's AppArmor refuses Chromium's sandbox the user namespaces it needs; the shell keeps its sandbox on.
+      # Ubuntu 24.04's AppArmor refuses Chromium's sandbox the user namespaces it needs; the shell keeps its sandbox on.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # Downloads Electron (skipped by `allowBuilds`), builds, stages the pinned Node and this pnpm, then runs Playwright.
       - run: xvfb-run -a pnpm --filter @sanoma-ai/desktop run test:e2e

@@ -10,7 +10,7 @@
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
     "stage:resources": "node scripts/stage.ts",
-    "test:e2e": "playwright test",
+    "test:e2e": "node scripts/electron.ts && pnpm run build && pnpm run stage:resources && playwright test",
     "start": "node scripts/electron.ts && pnpm run build && pnpm run stage:resources && electron .",
     "dist:dir": "pnpm run build && pnpm run stage:resources && electron-builder --dir",
     "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
