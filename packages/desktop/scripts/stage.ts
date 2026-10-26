@@ -34,7 +34,7 @@ function pnpmPackage(): string {
     }
   }
   throw new Error(
-    `${bin} is not inside a pnpm package: staging copies pnpm's JavaScript package, so run it with a pnpm from corepack or npm (not a standalone binary)`,
+    `${bin} is not inside a pnpm package: staging copies pnpm's JavaScript package, so run it with a pnpm installed from npm (not a standalone binary)`,
   );
 }
 

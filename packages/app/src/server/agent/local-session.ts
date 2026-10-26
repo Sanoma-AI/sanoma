@@ -32,9 +32,9 @@ export interface LocalSessionOptions {
 
 /**
  * The session's environment, the whole of it (never this process's): `PATH` (this Node first, then
- * this process's `PATH`, where pnpm 11 and bash must be), its `HOME`, a UTF-8 locale, and
- * corepack's home kept as this process's, so the session's pnpm is the one this machine already
- * uses (its last known good, pnpm 11), not a download into the session's home. A command adds its
+ * this process's `PATH`, where pnpm 11 and bash must be), its `HOME`, a UTF-8 locale, and, for a
+ * machine whose pnpm comes from corepack, corepack's home kept as this process's, so that pnpm is
+ * the one this machine already uses, not a download into the session's home. A command adds its
  * own; the model's key reaches the agent through the adapter's `auth`, not from here.
  */
 export const sessionEnv = (home: string): Record<string, string> => ({

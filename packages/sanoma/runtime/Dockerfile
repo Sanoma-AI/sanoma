@@ -38,15 +38,14 @@ RUN test -n "$BRIDGE_VERSION" || { echo "BRIDGE_FROM=release needs BRIDGE_VERSIO
 
 FROM bridge-${BRIDGE_FROM} AS bridge
 
-FROM node:24-bookworm-slim
+FROM node:26-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git && rm -rf /var/lib/apt/lists/* \
- && corepack enable
+ && npm install -g pnpm@11 && npm cache clean --force
 COPY --from=bridge /out/provider-bridge /usr/local/bin/provider-bridge
 COPY --chmod=755 entrypoint.sh /usr/local/bin/sanoma-runtime
 ENV SANOMA_BRIDGE_BIN=/usr/local/bin/provider-bridge \
     SANOMA_APP_HOST=0.0.0.0 \
-    PORT=3000 \
-    COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+    PORT=3000
 USER node
 WORKDIR /home/node
 EXPOSE 3000

@@ -18,21 +18,13 @@ const { engines } = JSON.parse(
   readFileSync(new URL("../../../sanoma/template/package.json", import.meta.url), "utf8"),
 ) as { engines: { node: string } };
 
-/** A version as [major, minor, patch]. */
-const parse = (version: string) => [...version.split(".").map(Number), 0, 0].slice(0, 3);
-/** Below zero when version `a` is before `b`. */
-const compare = (a: number[], b: number[]) => a[0]! - b[0]! || a[1]! - b[1]! || a[2]! - b[2]!;
-
-/** Whether `version` satisfies `range`, in the forms the template's engines use: `^X.Y` and `>=X`, joined by `||`. */
-function satisfies(version: string, range: string): boolean {
-  const v = parse(version);
-  return range.split("||").some((part) => {
-    const [, op, floor] = /^\s*(\^|>=)(\d+(?:\.\d+){0,2})\s*$/.exec(part) ?? [];
-    if (!op || !floor) throw new Error(`a range this test does not read: ${part}`);
-    const f = parse(floor);
-    return compare(v, f) >= 0 && (op === ">=" || v[0] === f[0]);
-  });
-}
+/** The lowest Node major the template's engines (`>=X`) allow. */
+const floor = Number(
+  /^>=(\d+)$/.exec(engines.node)?.[1] ??
+    (() => {
+      throw new Error(`an engines range this test does not read: ${engines.node}`);
+    })(),
+);
 
 /** The company windows (`BaseWindow`s, not the start window): whether each shows, where, and its views' pages. */
 const companyWindows = (shell: ElectronApplication) =>
@@ -99,7 +91,7 @@ test("opens a company in one window from progress to app, keeps it running when 
           .find((contents) => contents.getURL().startsWith("http://"))!
           .executeJavaScript("document.getElementById('node').textContent") as Promise<string>,
     );
-    expect(satisfies(node, engines.node), `Node ${node} for ${engines.node}`).toBe(true);
+    expect(Number(node.split(".")[0]), `Node ${node} for ${engines.node}`).toBeGreaterThanOrEqual(floor);
 
     // As the person does: the window closes, and the company goes on running.
     await shell.evaluate(({ BaseWindow }, id) => BaseWindow.fromId(id)!.close(), progress!.id);
