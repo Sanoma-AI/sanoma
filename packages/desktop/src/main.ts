@@ -11,6 +11,7 @@ import {
   ipcMain,
   Menu,
   type MenuItemConstructorOptions,
+  Notification,
   shell,
   type WebContents,
 } from "electron";
@@ -48,11 +49,13 @@ import { type CompanyLog, hidePasswords, openLog } from "./logs.ts";
 import { folderArgument, isCompanyFolder, syncedFolderWarning } from "./places.ts";
 import { runtimeOf } from "./runtime.ts";
 import { type Session, type SessionOptions, startSession } from "./session.ts";
+import { type Newer, readSettings, runCheck, savedNewer } from "./update-check.ts";
 import { fastForward, prepareUpdate } from "./update-company.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const companiesFile = () => join(app.getPath("userData"), "companies.json");
 const logFile = (path: string) => join(app.getPath("logs"), `${slugOf(path)}.log`);
+const settingsFile = () => join(app.getPath("userData"), "settings.json");
 
 /** What the start window shows: the recent companies, and the one starting or stopped. */
 export interface StartState {
@@ -504,6 +507,60 @@ const forFocused = (act: (path: string) => unknown) => () => {
   if (path) void act(path);
 };
 
+/** Its notification, held so that a click on it still reaches the shell once it is shown. */
+let notification: Notification | undefined;
+
+/** Checks one at a time, so two never both notify for the same version; what they found is shown outside the queue. */
+let checking: Promise<unknown> = Promise.resolve();
+function checkForUpdate(asked: boolean) {
+  const current = app.getVersion();
+  const run = checking.then(() => runCheck({ file: settingsFile(), current, asked }));
+  checking = run.catch(() => {});
+  void run.then(
+    (result) => result && showCheck(asked, current, result),
+    (err: unknown) => {
+      const detail = err instanceof Error ? err.message : String(err);
+      if (asked)
+        void dialog.showMessageBox({ type: "warning", message: "Sanoma could not check for a newer version", detail });
+      else console.error(`update check: ${detail}`);
+    },
+  );
+}
+
+/** What a check found (`runCheck`): the Help menu, then a dialog when asked or a notification when due. */
+async function showCheck(asked: boolean, current: string, { found, notify }: { found?: Newer; notify: boolean }) {
+  buildMenu();
+  if (asked) {
+    const { response } = await dialog.showMessageBox(
+      found
+        ? {
+            message: `Sanoma ${found.version} is available`,
+            detail: `You have ${current}. Download it from its release page, then replace Sanoma in Applications.`,
+            buttons: ["Open Release Page", "Later"],
+          }
+        : { message: `Sanoma ${current} is the newest version` },
+    );
+    if (found && response === 0) void shell.openExternal(found.url);
+  } else if (found && notify && Notification.isSupported()) {
+    notification = new Notification({
+      title: `Sanoma ${found.version} is available`,
+      body: "Click to open its release page.",
+    });
+    notification.on("click", () => void shell.openExternal(found.url));
+    notification.show();
+  }
+}
+
+/** The Help menu's update items: the release the last check found, while newer, and the check. */
+function updateItems(): MenuItemConstructorOptions[] {
+  const known = savedNewer(readSettings(settingsFile()), app.getVersion());
+  return [
+    ...(known ? [{ label: `Download Sanoma ${known.version}…`, click: () => void shell.openExternal(known.url) }] : []),
+    { label: "Check for a Newer Sanoma", click: () => checkForUpdate(true) },
+    { type: "separator" },
+  ];
+}
+
 function buildMenu() {
   const recent = readCompanies(companiesFile());
   const template: MenuItemConstructorOptions[] = [
@@ -552,6 +609,7 @@ function buildMenu() {
     {
       role: "help",
       submenu: [
+        ...updateItems(),
         { label: "Show Logs Folder", click: () => void shell.openPath(app.getPath("logs")) },
         { role: "about", label: `About Sanoma ${app.getVersion()}` },
       ],
@@ -615,6 +673,12 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(() => {
     app.setAboutPanelOptions({ applicationName: "Sanoma", applicationVersion: app.getVersion() });
     buildMenu();
+    // The built app only: a checkout's shell (start, the smoke test) shares its settings and asks GitHub only from Help.
+    if (app.isPackaged) {
+      checkForUpdate(false);
+      // Hourly against the saved time, not a day-long timer, which would not count the hours asleep.
+      setInterval(() => checkForUpdate(false), 60 * 60 * 1000);
+    }
     const folder = folderArgument(argsOf(process.argv), process.cwd()) ?? dropped.at(-1);
     if (folder) void openCompany(folder);
     else showStart();

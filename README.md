@@ -88,6 +88,18 @@ A finished run: the graph shows how each step went, and the ledger records each 
 
 Connectors live here under `connectors/`; one moves to its own repo only when someone outside the team maintains it.
 
+## Desktop (preview)
+
+The [desktop app](packages/desktop/README.md) opens a company folder, runs that company's own `sanoma` launcher and shows the app in a window, for people who will not open a terminal. Its macOS preview builds are released on [GitHub Releases](https://github.com/Sanoma-AI/sanoma/releases) as `desktop-v*`, the first being 0.1.0.
+
+1. Download the arm64 build (`Sanoma-<version>-arm64.dmg`) on an Apple silicon Mac, or the x64 one on an Intel Mac, and drag Sanoma to Applications.
+2. The builds are not signed by Apple yet, so the first open is blocked: open Sanoma, dismiss the warning, then go to System Settings → Privacy & Security and click "Open Anyway" next to the message about Sanoma (on macOS 15 and later, Control-click → Open no longer gets past it).
+3. If "Open Anyway" does not appear, run `xattr -dr com.apple.quarantine /Applications/Sanoma.app` in Terminal instead.
+
+The app needs nothing else installed: it ships the Node and the pnpm it runs a company with. git comes with Apple's command line tools, which macOS offers to install the first time `git` runs. It does not update itself: once a day it checks for a newer release and links to it (Help → Check for a Newer Sanoma).
+
+To release it, bump `version` in [`packages/desktop/package.json`](packages/desktop/package.json) (its own version line, apart from npm's) and the notes in [`RELEASE_NOTES.md`](packages/desktop/RELEASE_NOTES.md) in a pull request, merge, wait for CI on `main`, then run `gh workflow run desktop-release.yml --ref main`. [`desktop-release.yml`](.github/workflows/desktop-release.yml) builds the arm64 and x64 dmg and zip on a macOS runner and uploads them to a draft release `desktop-v<version>`; download it in a browser, try it, then publish the draft.
+
 ## Develop
 
 Needs Node 24, or 26 and later (Cucumber, which runs the scenarios, does not support 25), pnpm, and Docker for the workflow tests.

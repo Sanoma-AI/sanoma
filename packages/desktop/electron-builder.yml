@@ -1,9 +1,12 @@
-# The unpacked app (`pnpm --filter @sanoma-ai/desktop dist:dir`); packaging, release and updates come later (#286 D3).
+# The app: `dist` builds a dmg and a zip for each Mac architecture into release/ (desktop-release.yml
+# uploads them to a draft GitHub Release); `dist:dir` builds it unpacked, for this Mac only.
 appId: ai.sanoma.desktop
 productName: Sanoma
 asar: true
 # No native modules: the shell has no runtime dependencies to rebuild.
 npmRebuild: false
+# Releases are uploaded by desktop-release.yml, never by electron-builder.
+publish: null
 directories:
   output: release
 files:
@@ -12,7 +15,8 @@ files:
   - start/**/*
   - package.json
 extraResources:
-  # stage/ is filled by scripts/stage.ts: the pinned Node for the build's architecture, and pnpm.
+  # stage/ is filled by scripts/stage.ts: the pinned Node for each architecture built (`${arch}` is
+  # the build's, so the x64 app carries the x64 Node), and pnpm, the same for both.
   - from: stage/node-${arch}
     to: node
   - from: stage/pnpm
@@ -22,7 +26,24 @@ electronFuses:
   runAsNode: false
 mac:
   category: public.app-category.business
-  target: dir
+  # The Node it ships (24) needs macOS 13.5; Electron 45 alone would open on 13.0.
+  minimumSystemVersion: "13.5"
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  # Unsigned preview: an ad-hoc signature, as Apple silicon reports an app with none as damaged.
+  # Gatekeeper still blocks it once ("Open Anyway"; README "Desktop (preview)").
+  identity: "-"
+  # Library validation rejects an ad-hoc app's frameworks, so the hardened runtime waits for a Developer ID.
+  hardenedRuntime: false
+  # With an Apple Developer account (CSC_LINK, CSC_KEY_PASSWORD, APPLE_ID,
+  # APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID as secrets): drop `identity`, then
+  # hardenedRuntime: true
+  # entitlements: build/entitlements.mac.plist
+  # notarize: true
   # A folder dropped on the Dock icon, or `open -a Sanoma <folder>`, reaches the app (`open-file`).
   extendInfo:
     CFBundleDocumentTypes:
