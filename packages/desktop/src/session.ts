@@ -26,7 +26,7 @@ export interface Session {
   /** Where the app is, once it answers; rejects when the session ends first. */
   ready: Promise<string>;
   /** Resolves when the session ends: the launcher exited, it failed to start, or `stop`. */
-  ended: Promise<Exit & { error?: string }>;
+  ended: Promise<Exit>;
   /** Stops whatever runs (the install or the launcher) and starts nothing more. */
   stop(): Promise<void>;
 }

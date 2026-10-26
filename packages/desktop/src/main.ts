@@ -125,9 +125,13 @@ async function openCompany(dir: string) {
 /** Starts the company unless it runs or is starting; a failure to start says why in a dialog. */
 async function begin(path: string) {
   if (running.has(path) || opening.has(path) || quitting) return;
-  const started = start(path).catch((err: unknown) =>
-    dialog.showErrorBox("The company could not start", err instanceof Error ? err.message : String(err)),
-  );
+  const started = start(path).catch((err: unknown) => {
+    // Before its session (no Node staged, an unreadable folder): the start window says why.
+    shownLog = undefined;
+    const message = `The company could not start: ${err instanceof Error ? err.message : String(err)}`;
+    setState({ company: { path, name: companyName(path) }, phase: "failed", message, progress: [], log: [] });
+    showStart();
+  });
   opening.set(path, started);
   await started;
   opening.delete(path);
@@ -144,11 +148,13 @@ async function claimPort(path: string) {
 }
 
 async function start(path: string) {
+  /** A Restart, whose window stays: closing it meanwhile cancels the start. */
+  const restarting = windows.has(path);
   const claimed = claiming.then(() => claimPort(path));
   claiming = claimed.catch(() => {});
   const { company, moved } = await claimed;
   const { port } = company;
-  if (quitting) return;
+  if (quitting || (restarting && !windows.has(path))) return;
   const log = openLog(app.getPath("logs"), slugOf(path));
   const warnings = [...archWarning(), syncedFolderWarning(path, homedir()) ?? []].flat();
   for (const warning of warnings) log.write("shell", `warning: ${warning}`);
@@ -191,15 +197,24 @@ async function start(path: string) {
   );
   void session.ended.then((exit) => {
     if (running.get(path) === entry) running.delete(path);
-    if (entry.stopping) return log.write("shell", "stopped");
+    if (entry.stopping) {
+      log.write("shell", "stopped");
+      log.close();
+      if (shown()) {
+        shownLog = undefined;
+        setState({ company: undefined, phase: "idle", progress: [], log: [], warnings: [] });
+      }
+      return;
+    }
+    const said = exit.error ?? "the log below says what";
     const why =
-      exit.error ??
-      (exit.code === USAGE_EXIT
-        ? "The company's configuration has a problem: the log below says what. Fix it, then start again."
-        : `The company stopped (${exit.signal ?? `exit code ${exit.code}`}).`);
+      exit.code === USAGE_EXIT
+        ? `The company's configuration has a problem (${said}). Fix it, then start again.`
+        : (exit.error ?? `The company stopped (${exit.signal ?? `exit code ${exit.code}`}).`);
     log.write("shell", why);
+    log.close();
     windows.get(path)?.window.close();
-    show({ phase: "failed", message: why });
+    show({ phase: "failed", message: why, progress: [], warnings });
   });
 }
 
@@ -251,11 +266,13 @@ function guard(contents: WebContents, path: string, webPreferences: Electron.Web
   const outside = (url: string) => {
     if (target(url) === "browser") void shell.openExternal(url);
   };
-  contents.on("will-navigate", (event) => {
+  const navigate = (event: Electron.Event<{ url: string }>) => {
     if (target(event.url) === "window") return;
     event.preventDefault();
     outside(event.url);
-  });
+  };
+  contents.on("will-navigate", navigate);
+  contents.on("will-redirect", navigate);
   contents.setWindowOpenHandler(({ url }) => {
     if (target(url) === "window") {
       return { action: "allow", overrideBrowserWindowOptions: { webPreferences } };
@@ -263,7 +280,11 @@ function guard(contents: WebContents, path: string, webPreferences: Electron.Web
     outside(url);
     return { action: "deny" };
   });
-  contents.on("did-create-window", (child) => guard(child.webContents, path, webPreferences));
+  contents.on("did-create-window", (child) => {
+    guard(child.webContents, path, webPreferences);
+    // A window the app opened goes with the window that opened it.
+    contents.once("destroyed", () => child.isDestroyed() || child.close());
+  });
 }
 
 async function chooseFolder() {
@@ -388,7 +409,7 @@ if (!app.requestSingleInstanceLock()) {
     if (process.platform !== "darwin") app.quit();
   });
   app.on("activate", () => {
-    if (!BrowserWindow.getAllWindows().length) showStart();
+    if (!BrowserWindow.getAllWindows().some((window) => window.isVisible())) showStart();
   });
 
   void app.whenReady().then(() => {

@@ -29,7 +29,9 @@ function pnpmPackage(): string {
       return dir;
     }
   }
-  throw new Error(`${bin} is not inside a pnpm package`);
+  throw new Error(
+    `${bin} is not inside a pnpm package: staging copies pnpm's JavaScript package, so run it with a pnpm from corepack or npm (not a standalone binary)`,
+  );
 }
 
 const versionOf = (dir: string) =>

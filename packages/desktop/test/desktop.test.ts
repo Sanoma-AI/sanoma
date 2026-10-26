@@ -146,7 +146,11 @@ describe("the process manager", () => {
     const port = await freePort();
     const { launched } = fakeLaunch("fail", port);
     await expect(launched.ready).rejects.toThrow("sanoma.config.ts: no workflows");
-    await expect(launched.exited).resolves.toEqual({ code: USAGE_EXIT, signal: null });
+    await expect(launched.exited).resolves.toEqual({
+      code: USAGE_EXIT,
+      signal: null,
+      error: "sanoma.config.ts: no workflows",
+    });
   });
 
   test("stop closes stdin and takes the whole process group down", async () => {
@@ -338,6 +342,9 @@ describe("logs", () => {
     expect(readFileSync(second.file, "utf8").split("\n")).toHaveLength(TAIL_LINES + 6);
     expect(second.tail()).toHaveLength(TAIL_LINES);
     expect(second.tail().at(-1)).toMatch(/stderr line 204$/);
+    second.close();
+    second.write("stdout", "after the end");
+    expect(readFileSync(second.file, "utf8")).not.toContain("after the end");
   });
 });
 

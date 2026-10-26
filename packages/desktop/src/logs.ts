@@ -11,6 +11,8 @@ export interface CompanyLog {
   write(from: string, line: string): void;
   /** The last `TAIL_LINES` lines written, as written. */
   tail(): string[];
+  /** Ends this start's log: later lines (a process its launcher left, still printing) are dropped. */
+  close(): void;
 }
 
 /** A company's log for one start: `<dir>/<slug>.log`, the previous one kept as `<slug>.1.log`. */
@@ -19,14 +21,17 @@ export function openLog(dir: string, slug: string): CompanyLog {
   const file = join(dir, `${slug}.log`);
   if (existsSync(file)) renameSync(file, join(dir, `${slug}.1.log`));
   const lines: string[] = [];
+  let closed = false;
   return {
     file,
     write(from, line) {
+      if (closed) return;
       const text = `${new Date().toISOString()} ${from} ${line}`;
       lines.push(text);
       if (lines.length > TAIL_LINES) lines.shift();
       appendFileSync(file, `${text}\n`);
     },
     tail: () => [...lines],
+    close: () => void (closed = true),
   };
 }

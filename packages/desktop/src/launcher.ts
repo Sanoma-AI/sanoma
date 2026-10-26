@@ -6,10 +6,12 @@ import { eachLine, eventOf, listeningUrlOf } from "./events.ts";
 /** Where a line came from: one of the child's streams. */
 export type Stream = "stdout" | "stderr";
 
-/** How a child ended: its exit code, or the signal that ended it. */
+/** How a child ended: its exit code, or the signal that ended it, and why when it is known. */
 export interface Exit {
   code: number | null;
   signal: NodeJS.Signals | null;
+  /** The launcher's last `error` event, or why the shell could not start it. */
+  error?: string;
 }
 
 /** The exit code a launcher ends with for how it was called or what it found: a config error. */
@@ -189,10 +191,11 @@ export function launch({ node, cli, port, pollMs = 500, ...options }: LaunchOpti
       .catch(() => {})
       .finally(() => (asking = false));
   }, pollMs);
-  void group.exited.then(({ code, signal }) => {
+  const exited = group.exited.then((exit) => {
     clearInterval(poll);
-    const how = signal ? `was stopped (${signal})` : `exited with code ${code}`;
+    const how = exit.signal ? `was stopped (${exit.signal})` : `exited with code ${exit.code}`;
     settle.reject(new Error(lastError ?? `the launcher ${how} before the app answered`));
+    return lastError === undefined ? exit : { ...exit, error: lastError };
   });
-  return { ...group, ready: settle.promise };
+  return { ...group, exited, ready: settle.promise };
 }
