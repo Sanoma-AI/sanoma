@@ -82,13 +82,14 @@ export function runCli(cwd: string, args: string[], env: NodeJS.ProcessEnv): Pro
  * Starts the bin (this checkout's, or `bin`) with `args` in `cwd`; `finished` resolves when it
  * exits, with what it printed. Without NODE_PATH, as a company's install has none: pnpm's vitest
  * shim sets it to the workspace's hoisted packages, where a company's site would find what it
- * must get from the app (Tailwind).
+ * must get from the app (Tailwind). Its stdin is a pipe left open, as a parent process's
+ * (`SANOMA_EVENTS=1` stops on its end).
  */
 export function startCli(cwd: string, args: string[], env: NodeJS.ProcessEnv, bin = cli) {
   const options: SpawnOptions = {
     cwd,
     env: { ...process.env, NODE_PATH: "", ...env },
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe"],
   };
   const child = spawn(process.execPath, [bin, ...args], options);
   let stdout = "";
@@ -105,7 +106,7 @@ export function startCli(cwd: string, args: string[], env: NodeJS.ProcessEnv, bi
 /**
  * The bin (this checkout's, or `bin`) with `args` in `cwd` until it listens: where, its output so
  * far, and `stop` (SIGINT), which resolves to what it printed on stderr, or throws on an exit code
- * but 0.
+ * but 0; the `child` and when it has `finished`, for a stop of another kind.
  */
 export async function serving(cwd: string, args: string[], env: NodeJS.ProcessEnv, bin = cli) {
   const { child, finished, output } = startCli(cwd, args, env, bin);
@@ -127,7 +128,7 @@ export async function serving(cwd: string, args: string[], env: NodeJS.ProcessEn
     );
     const url = stdout.match(listening)?.[1];
     if (url === undefined) throw new Error("sanoma exited before it listened");
-    return { url, stop, output };
+    return { url, stop, output, child, finished };
   } catch (err) {
     child.kill("SIGINT");
     await finished;

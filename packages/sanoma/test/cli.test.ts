@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFile
 import { join } from "node:path";
 import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { copyFixture, ensureBuilt, runCli, startCli } from "./fixture.ts";
+import { copyFixture, ensureBuilt, runCli, serving, startCli } from "./fixture.ts";
 
 // Needs Postgres (`pnpm db:up`) and the packages' builds: the fixture copy loads them as a
 // company repo would, from `dist/`, so `beforeAll` builds those that are stale.
@@ -53,6 +53,41 @@ describe("sanoma serve", () => {
     ]);
     expect(done.code, done.stderr).toBe(0);
   }, 60_000);
+});
+
+describe("SANOMA_EVENTS=1, for a parent process", () => {
+  const events = { ...unconfigured, SANOMA_EVENTS: "1" };
+
+  it("prints the ready line after the human one, and stops on the end of stdin", async () => {
+    dir = copyFixture();
+    const { url, output, child, finished } = await serving(dir, ["app"], events);
+    const ready = JSON.stringify({ sanoma: 1, event: "ready", url, sites: {} });
+    const stdout = await waitFor(
+      () => output().stdout,
+      (out) => out.includes(ready),
+      10_000,
+    );
+    // Right after the line a person reads.
+    expect(stdout.split("\n").slice(-3)).toEqual([`sanoma-fixture at ${url}; ctrl-c to stop`, ready, ""]);
+    child.stdin!.end();
+    const done = await finished;
+    expect(done.code, done.stderr).toBe(0);
+    // One event line: the end of stdin is a stop, not a failure.
+    expect(done.stdout.match(/^\{/gm)).toHaveLength(1);
+  }, 60_000);
+
+  it("prints the error line before exiting 2 on a broken config, and nothing on stdout without the variable", async () => {
+    dir = copyFixture();
+    writeFileSync(join(dir, "sanoma.config.ts"), "export default {};\n");
+    const failed = await runCli(dir, ["app"], events);
+    expect(failed.code).toBe(2);
+    const message = failed.stderr.trimEnd();
+    expect(message).toMatch(/sanoma\.config\.ts must export a config as its default export/);
+    expect(failed.stdout).toBe(`${JSON.stringify({ sanoma: 1, event: "error", message })}\n`);
+    const quiet = await runCli(dir, ["app"], unconfigured);
+    expect(quiet.code).toBe(2);
+    expect(quiet.stdout).toBe("");
+  });
 });
 
 describe("sanoma env", () => {
