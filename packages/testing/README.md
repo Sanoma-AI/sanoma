@@ -205,11 +205,22 @@ Status: early (0.x). License: FSL-1.1-ALv2.
 
 ## A host's conformance
 
-`@sanoma-ai/testing/host` decides whether a host (a resource type with a `host`, see [Hosts](../workflows/README.md#hosts)) runs the company as the runtime needs. `checkHost(host)` drives one declared host through callbacks and a `SanomaClient` on its database, and returns each check as `{ name, ok, error? }`: the app answers `/healthz` at its `url`, a queued run drains, `LISTEN` hears a credential change, a sleep survives a restart (`stop`, then `apply`, through the type's own operations), a new commit on the source shows as drift at the host's `revision` that `apply` clears, and none of the host's `secrets` is in any ledger record. The host's config registers `hostCheck` (a connector whose driver reads `HOST_CHECK_TOKEN`) and `hostCheckWorkflows`, which the checks start runs of.
+`@sanoma-ai/testing/host` decides whether a host (a resource type with a `host`, see [Hosts](../workflows/README.md#hosts)) runs the company as the runtime needs. `checkHost(host)` drives one declared host through callbacks and a `SanomaClient` on its database, and returns each check as `{ name, ok, error? }`: the app answers `/healthz` at its `url`, a queued run drains, `LISTEN` hears a credential change, a sleep survives a restart (`stop`, then `apply`, through the type's own operations), a new commit on the source shows as drift at the host's `revision` that `apply` clears, and none of the host's `secrets` is in any ledger record. A host whose `capabilities.lifetime` is not `long-lived` also gives `suspend` (its runtime stopped as the host stops it, its URL kept), and is checked for what one request to its URL (`/wake`) starts again: a run queued while it was stopped drains, and a sleep that ended while it was stopped continues. The host's config registers `hostCheck` (a connector whose driver reads `HOST_CHECK_TOKEN`) and `hostCheckWorkflows`, which the checks start runs of.
 
 ```ts
 const results = await checkHost({ type, apply, stop, client, secrets, commit, drift });
 expect(results.every((r) => r.ok)).toBe(true);
 ```
 
-`fakeHost(start)` is a host in this process (`testhost.app`, every change a replace, no secret in its state) and `inProcessHost(config, databaseUrl)` a `start` for it: a worker and a server that answers `/healthz`. `testRepository()` is a bare git repository to be a host's source, with `commit()`.
+`fakeHost(start)` is a host in this process (`testhost.app`, every change a replace, no secret in its state) and `inProcessHost(config, databaseUrl)` a `start` for it: a worker and a server that answers `/healthz`, and `GET /wake?generation=N` with 204, recording each as the running host's `wakes`. `fakeHost(start, { lifetime: "stops-on-exit" | "stops-when-quiet", quietAfterMs? })` is one that stops: its URL is a proxy on the declared port in front of the runtime, `stop()` (and, quiet that long, `quietAfterMs`) stops the runtime while the proxy stays, and the next request starts it again, at the same revision with the same secrets, and is forwarded to it; its `type` reports the lifetime, and `wakes()` lists the wakes across its stops. `testRepository()` is a bare git repository to be a host's source, with `commit()`.
+
+## A wakeup's conformance
+
+`@sanoma-ai/testing/wakeup` decides whether a wakeup (a resource type with a `wakeup`, see [Hosts](../workflows/README.md#hosts)) wakes a stopped host when the runtime asked it to, and only then. `checkWakeup(w)` registers wakes through `w.register` (the type's register operation, through its driver) and watches the `/wake` requests the host answers (`w.host.wakes()`), and returns each check as `{ name, ok, error? }`: a wake registered for 2 s from now arrives, not before its `at`; a wake registered before `w.host.stop()` starts the host again, and a run queued while it was stopped drains; and of two registrations, the older generation is never sent, nor when it arrives again after the newer (registration is at least once). The checks register generations 1 to 4, above `from` when given (a wakeup that keeps the last generation it took). The client's config registers `hostCheckWorkflows`.
+
+```ts
+const results = await checkWakeup({ type, host: { url, stop, wakes }, client, register });
+expect(results.every((r) => r.ok)).toBe(true);
+```
+
+`fakeWakeup()` is a wakeup in this process (`testwakeup.timer`, its `host` a reference to a `testhost.app` declaration by its `url`): its driver's `register` arms one timer for the one timer apply created, replacing any armed before unless it is of the same or an older generation, that sends `GET {host}/wake?generation=N` at `at`, again every 250 ms until the host answers. `fire()` sends the armed wake now; `close()` disarms it. Its tests run it over `fakeHost` with `stops-on-exit` and `inProcessHost`.

@@ -23,6 +23,16 @@ export interface WakeupRegistration {
 }
 
 /**
+ * The `generation` of a `GET /wake?generation=N` request: a non-negative integer, in digits
+ * alone; undefined for none or any other.
+ */
+export function wakeGeneration(url: string | URL): number | undefined {
+  const given = new URL(url).searchParams.get("generation") ?? "";
+  const generation = Number(given);
+  return /^\d+$/.test(given) && Number.isSafeInteger(generation) ? generation : undefined;
+}
+
+/**
  * A resource type's `wakeup`: the field it names the host in, the operation the runtime
  * registers each deadline through, and how its state reads.
  */

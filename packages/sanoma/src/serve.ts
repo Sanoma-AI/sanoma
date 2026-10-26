@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { dirname, extname, isAbsolute, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type AppOptions, githubLogin, startApp } from "@sanoma-ai/app";
+import { type AppOptions, githubLogin, type IngressRoute, startApp } from "@sanoma-ai/app";
 import {
   errorMessage,
   isLoopback,
@@ -11,6 +11,7 @@ import {
   SanomaClient,
   type SanomaConfig,
   startWorker,
+  wakeGeneration,
 } from "@sanoma-ai/workflows";
 import { describeConfig, readPeople, schemaOf, writeGenerated } from "@sanoma-ai/workflows/describe";
 import { domainsOf } from "@sanoma-ai/workflows/shared";
@@ -50,11 +51,43 @@ export interface ServeOptions {
   dev?: boolean;
   /** The config, resolved, when the caller has it: the Cedar schema is made from it. */
   resolved?: ResolvedConfig;
+  /** Called with the generation of each `GET /wake` the app answers (`wakeRoute`). Default: nothing. */
+  onWake?: (generation: number) => void | Promise<void>;
 }
 
 /** Starts the app on `port`, with the host and login `appOptions` reads, and the sites built; `url` says where. */
 export async function runApp(config: SanomaConfig, options: ServeOptions): Promise<Served> {
-  return served(config, await appStart(config, options));
+  return served(config, await appStart(config, options), []);
+}
+
+/**
+ * The wakeup's `GET /wake?generation=N`, a machine route with no login: a `generation` that is a
+ * non-negative integer is handed to `onWake` and answered 204, a stale one too (a wake is
+ * harmless: the worker decides what it starts); any other is 400. `onWake` throwing or rejecting is logged,
+ * never the wakeup's failure.
+ */
+export function wakeRoute({ onWake, log }: Pick<ServeOptions, "onWake" | "log">): IngressRoute {
+  return {
+    method: "GET",
+    path: "/wake",
+    async handle(request) {
+      const generation = wakeGeneration(request.url);
+      if (generation === undefined) {
+        return new Response("generation must be a non-negative integer\n", {
+          status: 400,
+          headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
+        });
+      }
+      const failed = (err: unknown) => log(`a wake of generation ${generation} failed: ${errorMessage(err)}`);
+      try {
+        // Not awaited: the wakeup's answer never waits on what the wake starts.
+        void Promise.resolve(onWake?.(generation)).catch(failed);
+      } catch (err) {
+        failed(err);
+      }
+      return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
+    },
+  };
 }
 
 /**
@@ -77,8 +110,9 @@ async function appStart(
   return { ...options, ...sites, ...(sites.dev && { dev: { ...sites.dev, onFileChange: apiWriter(config, log) } }) };
 }
 
-async function served(config: SanomaConfig, options: AppOptions): Promise<Served> {
-  const app = await startApp(config, { ...options, source: sourceOf(config) });
+/** Starts the app with `options`, the checkout as its source, and the machine routes `ingress` (`/wake`). */
+async function served(config: SanomaConfig, options: AppOptions, ingress: IngressRoute[]): Promise<Served> {
+  const app = await startApp(config, { ...options, source: sourceOf(config), ingress });
   return { url: app.url, sites: app.sites, stop: () => app.close() };
 }
 
@@ -230,7 +264,7 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
   const worker = await runWorker(config);
   let app: Served;
   try {
-    app = await served(config, options);
+    app = await served(config, options, [wakeRoute(serveOptions)]);
   } catch (err) {
     await worker.stop().catch(() => {});
     throw err;
