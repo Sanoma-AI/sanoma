@@ -36,4 +36,4 @@ Not yet: updating itself, GitHub sign-in, Windows, signing.
 
 ## Why it ships a Node
 
-Electron's own Node (24.22 in Electron 45) serves a company, but `sanoma check` crashes in it: oxlint's JS plugins pass the source through memory outside V8's heap, which Electron's V8 sandbox refuses. So the shell carries the official Node 24 (`scripts/download-node.ts`, sha256-pinned) in its resources, runs the launcher with it, and points the `node` shim at it, for whatever the company runs.
+Electron's own Node (24.22 in Electron 45) serves a company, but `sanoma check` crashes in it: oxlint's JS plugins pass the source through memory outside V8's heap, which Electron's V8 sandbox refuses. So the shell carries the official Node 26 (`scripts/download-node.ts`, sha256-pinned) in its resources, runs the launcher with it, and points the `node` shim at it, for whatever the company runs.

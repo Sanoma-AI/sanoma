@@ -2,5 +2,5 @@
 # `packageManager`, which stays the one pin.
 
 [tools]
-node = "24"
+node = "26"
 "npm:pnpm" = "11"
