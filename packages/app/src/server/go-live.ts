@@ -9,6 +9,7 @@ import {
   errorMessage,
   isEnded,
   type Principal,
+  type RemoteContext,
   remoteFor,
   type Resource,
   wakeupHostTypes,
@@ -29,7 +30,6 @@ import {
 import type { AppContext } from "../context.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
 import { invalid } from "./core.ts";
-import { secretValues } from "./secrets.ts";
 import { mintWakeupToken, OPS_URL } from "./setup.ts";
 
 // Going live, steps 2 to 6 (step 1 is connect, in setup.ts): choose where the company goes,
@@ -182,6 +182,15 @@ const githubHeaders = (token: string) => ({
 });
 
 /**
+ * The stored credentials alone, as a remote half reads them: going live lists accounts with the
+ * stored `GITHUB_TOKEN` (`connections`), so it pushes with that one too, not one this process's
+ * environment happens to have.
+ */
+const storedSecrets = ({ client }: AppContext): RemoteContext => ({
+  secrets: async (names) => new Map([...(await client.secrets(names))].map(([name, { value }]) => [name, value])),
+});
+
+/**
  * What the page offers: the GitHub accounts the token (its user and organizations) and the App
  * (its installations) can make a repository in, the database type with its regions and the
  * Supabase organizations the token sees when it is Supabase's, and the host type. A list that
@@ -217,7 +226,7 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
     // The accounts the GitHub App is installed on, from the GitHub connector's remote half.
     listed(
       "The GitHub App's installations",
-      async () => (await app.resolved.remotes.get("github")?.owners?.({ secrets: secretValues(app.client) })) ?? [],
+      async () => (await app.resolved.remotes.get("github")?.owners?.(storedSecrets(app))) ?? [],
     ),
     supabase
       ? listed("Supabase's organizations", () =>
@@ -437,7 +446,7 @@ async function pushToken(app: AppContext, url: string): Promise<string> {
   const host = remoteFor(app.resolved.remotes, url);
   if (!host) throw new ApiError(409, { error: `No connector's remote half hosts ${url}` });
   try {
-    return await host.remote.open(host.repo, { secrets: secretValues(app.client) }).token("token");
+    return await host.remote.open(host.repo, storedSecrets(app)).token("token");
   } catch (err) {
     // Neither a token nor the App: something to connect, not GitHub failing.
     if ((err as { vendorCode?: string } | undefined)?.vendorCode === "no_token")

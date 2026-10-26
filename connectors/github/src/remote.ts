@@ -51,9 +51,8 @@ interface Reply {
 
 /** One call to GitHub's REST API, signed in with `token`; a failure to reach it is a retryable `DriverError`. */
 async function send(token: string, method: string, path: string, body?: unknown): Promise<Reply> {
-  let res: Response;
   try {
-    res = await fetch(`${API}${path}`, {
+    const res = await fetch(`${API}${path}`, {
       method,
       headers: {
         authorization: `Bearer ${token}`,
@@ -65,17 +64,21 @@ async function send(token: string, method: string, path: string, body?: unknown)
       ...(body !== undefined && { body: JSON.stringify(body) }),
       signal: AbortSignal.timeout(30_000),
     });
+    // The body too: the timeout may fire while it streams.
+    const text = await res.text();
+    return { status: res.status, headers: res.headers, body: parseJson(text) };
   } catch (cause) {
     throw new DriverError(`github: ${method} ${path}: the request failed`, { retryable: true, cause });
   }
-  const text = await res.text();
-  let parsed: unknown = undefined;
+}
+
+/** `text` as JSON, else the text itself (undefined when empty). */
+function parseJson(text: string): unknown {
   try {
-    parsed = text ? JSON.parse(text) : undefined;
+    return text ? JSON.parse(text) : undefined;
   } catch {
-    parsed = text;
+    return text;
   }
-  return { status: res.status, headers: res.headers, body: parsed };
 }
 
 /** A rate limit: a 429, or a 403 with no requests left or a `retry-after` (GitHub's secondary limits). */
@@ -117,7 +120,7 @@ async function installations(found: Map<string, string>): Promise<z.infer<typeof
   const id = found.get(GITHUB_APP_SECRETS.id);
   const pem = found.get(GITHUB_APP_SECRETS.pem);
   if (!id || !pem) return [];
-  return ok(appJwt(id, pem), "GET", "/app/installations", z.array(Installation));
+  return ok(appJwt(id, pem), "GET", "/app/installations?per_page=100", z.array(Installation));
 }
 
 /** A token, and when it stops working (an installation token's hour), as `githubToken` chooses it. */
@@ -129,11 +132,22 @@ async function mint(
   const found = await secrets([TOKEN, GITHUB_APP_SECRETS.id, GITHUB_APP_SECRETS.pem]);
   const token = found.get(TOKEN);
   if (prefer === "token" && token) return { token };
-  const installation = (await installations(found)).find((i) => i.account.login.toLowerCase() === owner.toLowerCase());
-  if (installation) {
-    const jwt = appJwt(found.get(GITHUB_APP_SECRETS.id)!, found.get(GITHUB_APP_SECRETS.pem)!);
-    const made = await ok(jwt, "POST", `/app/installations/${installation.id}/access_tokens`, AccessToken);
-    return { token: made.token, expiresAt: Date.parse(made.expires_at) };
+  try {
+    const installation = (await installations(found)).find(
+      (i) => i.account.login.toLowerCase() === owner.toLowerCase(),
+    );
+    if (installation) {
+      const jwt = appJwt(found.get(GITHUB_APP_SECRETS.id)!, found.get(GITHUB_APP_SECRETS.pem)!);
+      const made = await ok(jwt, "POST", `/app/installations/${installation.id}/access_tokens`, AccessToken);
+      return { token: made.token, expiresAt: Date.parse(made.expires_at) };
+    }
+  } catch (err) {
+    // The App's keys stored but not working (a deleted App, a bad key, GitHub down): the person's token, when there is one.
+    if (!token) {
+      throw err instanceof DriverError
+        ? err
+        : new DriverError(`github: signing as the GitHub App failed`, { retryable: false, cause: err });
+    }
   }
   if (token) return { token };
   throw new DriverError(`github: no ${TOKEN}, and the GitHub App is not installed on ${owner}`, {
@@ -186,15 +200,22 @@ const Rule = z.object({
 /** A branch name in a path, each `/`-separated part encoded. */
 const branchPath = (branch: string) => branch.split("/").map(encodeURIComponent).join("/");
 
-/** The repository `repo` on GitHub, signed in as `githubToken` says, the token kept while it works. */
+/**
+ * The repository `repo` on GitHub, signed in as `githubToken` says. An installation token is kept
+ * until five minutes before its hour is out (one mint for calls made together); a person's is read
+ * again on every call, so one stored later is used.
+ */
 function openRepo(repo: RepoRef, { secrets }: RemoteContext): SourceHost {
   const base = `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}`;
-  let kept: { token: string; until: number } | undefined;
+  let kept: Promise<{ token: string; expiresAt?: number }> | undefined;
   const token = async (prefer?: "app" | "token") => {
-    if (prefer === undefined && kept && kept.until > Date.now()) return kept.token;
-    const minted = await mint(secrets, repo.owner, prefer ?? "app");
-    // An installation token, five minutes before its hour is out; a person's, for as long as this is open.
-    if (prefer === undefined) kept = { token: minted.token, until: (minted.expiresAt ?? Infinity) - 300_000 };
+    if (prefer !== undefined) return (await mint(secrets, repo.owner, prefer)).token;
+    kept ??= mint(secrets, repo.owner, "app");
+    const minted = await kept.catch((err: unknown) => {
+      kept = undefined;
+      throw err;
+    });
+    if (minted.expiresAt === undefined || minted.expiresAt - 300_000 <= Date.now()) kept = undefined;
     return minted.token;
   };
   const call = async (method: string, path: string, body?: unknown) =>
@@ -202,7 +223,7 @@ function openRepo(repo: RepoRef, { secrets }: RemoteContext): SourceHost {
   const okCall = async <T>(method: string, path: string, schema: z.ZodType<T>, body?: unknown) =>
     ok(await token(), method, `${base}${path}`, schema, body);
 
-  const host: SourceHost = {
+  return {
     token,
     async pullRequestFor(branch) {
       const query = new URLSearchParams({ state: "all", head: `${repo.owner}:${branch}` });
@@ -217,10 +238,13 @@ function openRepo(repo: RepoRef, { secrets }: RemoteContext): SourceHost {
       const path = "/pulls";
       const reply = await call("POST", path, { title, head: branch, base: into, body });
       if (reply.status < 300) return pullOf(read(Pull, reply.body, `POST ${base}${path}`));
-      // Opened already (by an earlier try of the same step): that one.
+      // Opened already (by an earlier try of the same step): that one, when it is into the same base.
       const exists = JSON.stringify(reply.body?.errors ?? "").includes("A pull request already exists");
-      const open = reply.status === 422 && exists ? await host.pullRequestFor(branch) : undefined;
-      if (open?.state === "open") return open;
+      if (reply.status === 422 && exists) {
+        const query = new URLSearchParams({ state: "open", head: `${repo.owner}:${branch}`, base: into });
+        const [open] = await okCall("GET", `/pulls?${query}`, z.array(Pull));
+        if (open) return pullOf(open);
+      }
       throw failed("POST", `${base}${path}`, reply);
     },
     async mergePullRequest(number, { sha, method, title }) {
@@ -253,7 +277,9 @@ function openRepo(repo: RepoRef, { secrets }: RemoteContext): SourceHost {
     async enforcement(branch): Promise<HostEnforcement> {
       const path = `/rules/branches/${branchPath(branch)}`;
       const reply = await call("GET", path);
-      if (reply.status === 403 && !limited(reply)) return { pullRequest: false, check: false, reason: NO_RULES };
+      // GitHub refuses to read rules where the plan has none: "Upgrade to GitHub Pro or make this repository public".
+      const unplanned = reply.status === 403 && !limited(reply) && /upgrade|public/i.test(reply.body?.message ?? "");
+      if (unplanned) return { pullRequest: false, check: false, reason: NO_RULES };
       if (reply.status >= 300) throw failed("GET", `${base}${path}`, reply);
       const rules = read(z.array(Rule), reply.body, `GET ${base}${path}`);
       return {
@@ -266,7 +292,6 @@ function openRepo(repo: RepoRef, { secrets }: RemoteContext): SourceHost {
       };
     },
   };
-  return host;
 }
 
 const Repository = z.object({ name: z.string(), owner: z.object({ login: z.string() }) });
@@ -277,9 +302,9 @@ const PullEvent = z.object({
   pull_request: z.object({
     merged: z.boolean().nullish(),
     merge_commit_sha: z.string().nullish(),
-    head: z.object({ ref: z.string() }),
+    head: z.object({ ref: z.string(), repo: z.object({ full_name: z.string() }).nullish() }),
   }),
-  repository: Repository,
+  repository: Repository.extend({ full_name: z.string() }),
 });
 
 const repoOf = ({ name, owner }: z.infer<typeof Repository>): RepoRef => ({ owner: owner.login, name });
@@ -295,7 +320,8 @@ function eventsOf(event: string | null, payload: unknown): RemoteEvent[] {
   }
   if (event === "pull_request") {
     const pull = read(PullEvent, payload, "a pull_request webhook");
-    if (pull.action !== "closed") return [];
+    // A fork's branch is not the repository's own, though it may share a name.
+    if (pull.action !== "closed" || pull.pull_request.head.repo?.full_name !== pull.repository.full_name) return [];
     const merged = pull.pull_request.merged === true;
     const sha = merged ? pull.pull_request.merge_commit_sha : undefined;
     return [
@@ -313,7 +339,7 @@ function eventsOf(event: string | null, payload: unknown): RemoteEvent[] {
 }
 
 /** Whether `signature` (`X-Hub-Signature-256`) is `body`'s HMAC SHA-256 under `secret`, compared in constant time. */
-function signedBy(secret: string, body: string, signature: string | null): boolean {
+function signedBy(secret: string, body: Buffer, signature: string | null): boolean {
   const expected = Buffer.from(`sha256=${createHmac("sha256", secret).update(body).digest("hex")}`);
   const given = Buffer.from(signature ?? "");
   return given.length === expected.length && timingSafeEqual(given, expected);
@@ -344,8 +370,8 @@ export const githubRemote: RemoteHalf = {
         },
       );
     }
-    const body = await request.text();
-    if (!signedBy(secret, body, request.headers.get("x-hub-signature-256"))) {
+    const raw = Buffer.from(await request.arrayBuffer());
+    if (!signedBy(secret, raw, request.headers.get("x-hub-signature-256"))) {
       throw new DriverError("github: the webhook's signature is missing or wrong", {
         retryable: false,
         status: 401,
@@ -353,6 +379,7 @@ export const githubRemote: RemoteHalf = {
       });
     }
     // An App delivers JSON; a repository's own webhook may send it form-encoded, as `payload`.
+    const body = raw.toString("utf8");
     const form = request.headers.get("content-type")?.startsWith("application/x-www-form-urlencoded");
     const json = form ? new URLSearchParams(body).get("payload") : body;
     let payload: unknown;

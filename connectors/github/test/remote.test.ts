@@ -50,7 +50,7 @@ const pull = (number: number, fields: Record<string, unknown> = {}) => ({
 /** The App's installations, on `login`. */
 const installed = (login: string): Exchange => ({
   method: "GET",
-  path: "/app/installations",
+  path: "/app/installations?per_page=100",
   status: 200,
   body: [{ id: 7, account: { login, type: "Organization" } }],
 });
@@ -161,7 +161,22 @@ describe("githubToken", () => {
     });
   });
 
-  it.skipIf(live)("mints once for a repository opened, while the token lasts", async () => {
+  it.skipIf(live)("takes GITHUB_TOKEN when the App's keys do not work, and fails without it", async () => {
+    const refused: Exchange = {
+      method: "GET",
+      path: "/app/installations?per_page=100",
+      status: 401,
+      body: { message: "A JSON web token could not be decoded" },
+    };
+    play("app-refused", [refused, refused]);
+    expect(await githubToken(only({ ...app, GITHUB_TOKEN: "ghp_person" }).secrets, "acme")).toBe("ghp_person");
+    await expect(githubToken(only(app).secrets, "acme")).rejects.toMatchObject({ status: 401, retryable: false });
+    await expect(
+      githubToken(only({ [GITHUB_APP_SECRETS.id]: "4242", [GITHUB_APP_SECRETS.pem]: "not a key" }).secrets, "acme"),
+    ).rejects.toMatchObject({ code: "driver_failed", message: "github: signing as the GitHub App failed" });
+  });
+
+  it.skipIf(live)("mints once for a repository opened, for calls made together and while the token lasts", async () => {
     play("app-token-kept", [
       installed("acme"),
       minted,
@@ -169,8 +184,7 @@ describe("githubToken", () => {
       { method: "GET", path: "/repos/acme/acme-ops/pulls/12", status: 200, body: pull(12) },
     ]);
     const host = githubRemote.open(acme, only(app));
-    await host.pullRequest(12);
-    await host.pullRequest(12);
+    await Promise.all([host.pullRequest(12), host.pullRequest(12)]);
     expect(sent.slice(2).map((s) => s.headers.get("authorization"))).toEqual([
       "Bearer ghs_minted",
       "Bearer ghs_minted",
@@ -248,7 +262,7 @@ describe("a repository opened", () => {
       },
       {
         method: "GET",
-        path: "/repos/acme/acme-ops/pulls?state=all&head=acme:draft/hire-ada",
+        path: "/repos/acme/acme-ops/pulls?state=open&head=acme:draft/hire-ada&base=main",
         status: 200,
         body: [pull(12)],
       },
@@ -354,6 +368,21 @@ describe("a repository opened", () => {
     });
   });
 
+  it.skipIf(live)("fails on a 403 that is not the plan's", async () => {
+    play("rules-forbidden", [
+      {
+        method: "GET",
+        path: "/repos/acme/acme-ops/rules/branches/main",
+        status: 403,
+        body: { message: "Resource not accessible by integration" },
+      },
+    ]);
+    await expect(githubRemote.open(acme, fromEnv).enforcement("main")).rejects.toMatchObject({
+      status: 403,
+      retryable: false,
+    });
+  });
+
   it.skipIf(live)("is retryable when GitHub fails or limits, and not when it refuses", async () => {
     const host = githubRemote.open(acme, fromEnv);
     const path = "/repos/acme/acme-ops/pulls/12";
@@ -401,7 +430,11 @@ describe("githubRemote.webhook", () => {
       number: 12,
       merged,
       merge_commit_sha: "beef000000000000000000000000000000000000",
-      head: { ref: "draft/hire-ada", sha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678" },
+      head: {
+        ref: "draft/hire-ada",
+        sha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        repo: { full_name: "acme/acme-ops" },
+      },
     },
     repository,
   });
@@ -417,7 +450,7 @@ describe("githubRemote.webhook", () => {
     expect(await hook(delivery("push", push("refs/heads/old", { deleted: true })))).toEqual([]);
   });
 
-  it("maps a closed pull request, merged with its commit or not, and leaves out other actions and events", async () => {
+  it("maps a closed pull request, merged with its commit or not, and leaves out other actions, a fork's and other events", async () => {
     expect(await hook(delivery("pull_request", closed(true)))).toEqual([
       {
         kind: "closed",
@@ -432,6 +465,9 @@ describe("githubRemote.webhook", () => {
       { kind: "closed", repo: acme, branch: "draft/hire-ada", number: 12, merged: false },
     ]);
     expect(await hook(delivery("pull_request", { ...closed(false), action: "opened" }))).toEqual([]);
+    const fork = closed(true);
+    fork.pull_request.head.repo = { full_name: "someone/acme-ops" };
+    expect(await hook(delivery("pull_request", fork))).toEqual([]);
     expect(await hook(delivery("ping", { zen: "Keep it logically awesome." }))).toEqual([]);
   });
 
@@ -452,7 +488,7 @@ describe("githubRemote.owners", () => {
     play("owners", [
       {
         method: "GET",
-        path: "/app/installations",
+        path: "/app/installations?per_page=100",
         status: 200,
         body: [
           { id: 7, account: { login: "acme", type: "Organization" } },
