@@ -39,9 +39,29 @@ export interface Chats {
   upsert(id: string, messages: readonly UIMessage[]): Promise<void>;
   /** The chat's messages in order; none for a chat that has none. */
   load(id: string): Promise<UIMessage[]>;
+  /** The chat `id`, or undefined when there is none. */
+  get(id: string): Promise<Chat | undefined>;
   /** The person's chats, the newest first: the latest 50. */
   list(person: string): Promise<Chat[]>;
 }
+
+/** A row of the chats' table. */
+interface ChatRow {
+  id: string;
+  person: string;
+  engine: string;
+  draft_id: string | null;
+  title: string;
+  created_at: Date;
+}
+
+const COLUMNS = "id, person, engine, draft_id, title, created_at";
+
+const chatOf = ({ draft_id, created_at, ...row }: ChatRow): Chat => ({
+  ...row,
+  ...(draft_id === null ? {} : { draftId: draft_id }),
+  createdAt: created_at.getTime(),
+});
 
 /** The chats' store on the pool `db` gives, the config's database once it is prepared. */
 export function chatStore(db: () => Promise<Pool>): Chats {
@@ -80,19 +100,17 @@ export function chatStore(db: () => Promise<Pool>): Chats {
       ).query<{ message: UIMessage }>(`SELECT message FROM ${MESSAGES} WHERE chat_id = $1 ORDER BY seq, id`, [id]);
       return rows.map((row) => row.message);
     },
+    async get(id) {
+      const { rows } = await (await db()).query<ChatRow>(`SELECT ${COLUMNS} FROM ${CHATS} WHERE id = $1`, [id]);
+      return rows[0] && chatOf(rows[0]);
+    },
     async list(person) {
       const { rows } = await (
         await db()
-      ).query<{ id: string; person: string; engine: string; draft_id: string | null; title: string; created_at: Date }>(
-        `SELECT id, person, engine, draft_id, title, created_at FROM ${CHATS} WHERE person = $1 ` +
-          "ORDER BY created_at DESC, id LIMIT 50",
-        [person],
-      );
-      return rows.map(({ draft_id, created_at, ...row }) => ({
-        ...row,
-        ...(draft_id === null ? {} : { draftId: draft_id }),
-        createdAt: created_at.getTime(),
-      }));
+      ).query<ChatRow>(`SELECT ${COLUMNS} FROM ${CHATS} WHERE person = $1 ORDER BY created_at DESC, id LIMIT 50`, [
+        person,
+      ]);
+      return rows.map(chatOf);
     },
   };
 }

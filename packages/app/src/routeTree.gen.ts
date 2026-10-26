@@ -17,6 +17,7 @@ import { Route as PermissionsRouteImport } from './routes/permissions'
 import { Route as ResourcesRouteImport } from './routes/resources'
 import { Route as StartRouteImport } from './routes/start'
 import { Route as WorkflowsRouteRouteImport } from './routes/workflows/route'
+import { Route as ApiChatRouteImport } from './routes/api/chat'
 import { Route as ConnectorsIndexRouteImport } from './routes/connectors/index'
 import { Route as ConnectorsVendorRouteImport } from './routes/connectors/$vendor'
 import { Route as DataIndexRouteImport } from './routes/data/index'
@@ -73,6 +74,11 @@ const StartRoute = StartRouteImport.update({
 const WorkflowsRouteRoute = WorkflowsRouteRouteImport.update({
   id: '/workflows',
   path: '/workflows',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiChatRoute = ApiChatRouteImport.update({
+  id: '/api/chat',
+  path: '/api/chat',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConnectorsIndexRoute = ConnectorsIndexRouteImport.update({
@@ -171,6 +177,7 @@ export interface FileRoutesByFullPath {
   '/resources': typeof ResourcesRoute
   '/start': typeof StartRoute
   '/workflows/$name': typeof WorkflowsNameRouteRouteWithChildren
+  '/api/chat': typeof ApiChatRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
   '/data/$name': typeof DataNameRoute
   '/runs/$id': typeof RunsIdRoute
@@ -194,6 +201,7 @@ export interface FileRoutesByTo {
   '/permissions': typeof PermissionsRoute
   '/resources': typeof ResourcesRoute
   '/start': typeof StartRoute
+  '/api/chat': typeof ApiChatRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
   '/data/$name': typeof DataNameRoute
   '/runs/$id': typeof RunsIdRoute
@@ -222,6 +230,7 @@ export interface FileRoutesById {
   '/resources': typeof ResourcesRoute
   '/start': typeof StartRoute
   '/workflows/$name': typeof WorkflowsNameRouteRouteWithChildren
+  '/api/chat': typeof ApiChatRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
   '/data/$name': typeof DataNameRoute
   '/runs/$id': typeof RunsIdRoute
@@ -251,6 +260,7 @@ export interface FileRouteTypes {
     | '/resources'
     | '/start'
     | '/workflows/$name'
+    | '/api/chat'
     | '/connectors/$vendor'
     | '/data/$name'
     | '/runs/$id'
@@ -274,6 +284,7 @@ export interface FileRouteTypes {
     | '/permissions'
     | '/resources'
     | '/start'
+    | '/api/chat'
     | '/connectors/$vendor'
     | '/data/$name'
     | '/runs/$id'
@@ -301,6 +312,7 @@ export interface FileRouteTypes {
     | '/resources'
     | '/start'
     | '/workflows/$name'
+    | '/api/chat'
     | '/connectors/$vendor'
     | '/data/$name'
     | '/runs/$id'
@@ -328,6 +340,7 @@ export interface RootRouteChildren {
   PermissionsRoute: typeof PermissionsRoute
   ResourcesRoute: typeof ResourcesRoute
   StartRoute: typeof StartRoute
+  ApiChatRoute: typeof ApiChatRoute
   RunsIdRoute: typeof RunsIdRoute
   SetupConnectRoute: typeof SetupConnectRoute
   SetupExistingRoute: typeof SetupExistingRoute
@@ -394,6 +407,13 @@ declare module '@tanstack/react-router' {
       path: '/workflows'
       fullPath: '/workflows'
       preLoaderRoute: typeof WorkflowsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/chat': {
+      id: '/api/chat'
+      path: '/api/chat'
+      fullPath: '/api/chat'
+      preLoaderRoute: typeof ApiChatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/connectors/': {
@@ -584,6 +604,7 @@ const rootRouteChildren: RootRouteChildren = {
   PermissionsRoute: PermissionsRoute,
   ResourcesRoute: ResourcesRoute,
   StartRoute: StartRoute,
+  ApiChatRoute: ApiChatRoute,
   RunsIdRoute: RunsIdRoute,
   SetupConnectRoute: SetupConnectRoute,
   SetupExistingRoute: SetupExistingRoute,

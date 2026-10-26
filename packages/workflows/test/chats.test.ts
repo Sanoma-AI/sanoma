@@ -26,7 +26,7 @@ const text = (id: string, role: UIMessage["role"], said: string): UIMessage => (
 });
 
 describe("chats", () => {
-  it("opens a chat, attaches its draft, keeps its messages in order and lists the person's chats newest first", async () => {
+  it("opens a chat, attaches its draft, keeps its messages in order, gets it, and lists the person's chats newest first", async () => {
     const person = `ada-${Date.now()}`;
     const first = await client.chats.open({ person, engine: "loop", title: "Add a laptop step" });
     const second = await client.chats.open({ person, engine: "loop", title: "Rename a step", id: `browser-${person}` });
@@ -61,6 +61,8 @@ describe("chats", () => {
       createdAt: expect.any(Number),
     });
     expect(listed[0]).not.toHaveProperty("draftId");
+    expect(await client.chats.get(first)).toEqual(listed[1]);
+    expect(await client.chats.get(`${person}-none`)).toBeUndefined();
     expect(await client.chats.list(`${person}-nobody`)).toEqual([]);
   });
 });

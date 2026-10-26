@@ -38,8 +38,9 @@ const pkgDir = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
 
 // The runtime and what it loads stay outside the server bundle: the server imports them from the
 // consumer's install, so the app and the worker share one copy. (The app imports no connector; a
-// config's connectors reach it only through startApp.)
-const RUNTIME = ["@sanoma-ai/workflows", "@sanoma-ai/bridge", "@dbos-inc/dbos-sdk", "pg", "zod"];
+// config's connectors reach it only through startApp.) `ai` too: the chat's loop and a connector's
+// model half (`ConnectorSetup.model`) then share one AI SDK.
+const RUNTIME = ["@sanoma-ai/workflows", "@sanoma-ai/bridge", "@dbos-inc/dbos-sdk", "pg", "zod", "ai"];
 const isRuntime = (id: string) => RUNTIME.some((name) => id === name || id.startsWith(`${name}/`));
 
 // The browser bundle may import only types from the runtime (DBOS, Postgres), and the values of

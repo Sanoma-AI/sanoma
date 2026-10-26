@@ -26,6 +26,8 @@ import {
 import {
   getActor,
   getAvailableConnectors,
+  getChat,
+  getChats,
   getConfig,
   getCredentials,
   getDriftReport,
@@ -261,6 +263,14 @@ export const credentialsFor = (vendor: string) => (all: CredentialsResponse) => 
  * Who the server says is asking. A login lasts the page's life; the header name is kept in the
  * browser. A resolver that failed is asked again every 10 s, so the nav recovers with it.
  */
+/** The person's chats, newest first (the chat column's list), under `CHATS_KEY`. */
+export const CHATS_KEY = ["chats"] as const;
+export const chatsQuery = () => queryOptions({ queryKey: CHATS_KEY, queryFn: () => getChats() });
+
+/** A chat with its transcript as stored, read when the chat column opens it. */
+export const chatQuery = (id: string) =>
+  queryOptions({ queryKey: [...CHATS_KEY, id], queryFn: () => getChat({ data: { id } }), staleTime: "static" });
+
 export const actorQuery = () =>
   queryOptions({
     queryKey: ["actor"],
