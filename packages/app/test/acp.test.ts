@@ -133,7 +133,10 @@ export default defineWorkflow({
   plant("pi", { signIn: "once", mode: "hello" });
   plant("codex", { signIn: "url", mode: "hello" });
   plant("claude-code", { signIn: "none", mode: "hello" });
-  app = await startApp(testApp.config, { port: 0, source: localGitSource(dir) });
+  app = await startApp(testApp.config, {
+    port: 0,
+    source: localGitSource(dir, { databaseUrl: testApp.config.databaseUrl! }),
+  });
 }, 600_000);
 
 afterAll(async () => {

@@ -13,7 +13,7 @@ export type SanomaEvent =
   | { event: "error"; message: string }
   /** The database: one that answered, started or created on this computer. */
   | { event: "database"; how: "answered" | "started" | "created"; url: string; place: "this-computer" }
-  /** `sanoma check`'s result, after the lines it printed, before its exit (1 when not `ok`). */
+  /** `sanoma check`'s result, after the lines it printed, before its exit (1 when not `ok`), with the repo's Permissions grid (`grid`) unless its policies do not hold. */
   | ({ event: "checked" } & CheckResult);
 
 /** Whether a parent process asked for events (`SANOMA_EVENTS=1`). */

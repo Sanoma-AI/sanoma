@@ -68,6 +68,9 @@ export { readSites, type SiteCall, type SiteEntry, type SitePage, siteContentPag
 export { API_FILE, generateApi, writeApi, writeGenerated } from "./sdk.ts";
 // The Cedar schema, `.sanoma/schema.cedarschema`: what a company's policies are validated and decided against.
 export { SCHEMA_FILE, schemaOf, schemaText, type CedarSchemaJson } from "./schema.ts";
+// The Permissions grid: the app's page and `sanoma check`'s `checked` event compute it the one way.
+export { columnPrincipal, permissionsGrid, type PermissionsGrid, type PermissionsRow } from "./grid.ts";
+export { previewRequests } from "./shared.ts";
 // The apply workflow's plan and report, which the app renders.
 export type { ApplyInput, ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanStep } from "./apply.ts";
 

@@ -20,17 +20,14 @@ import {
   type RunSummary,
   type SanomaError,
 } from "@sanoma-ai/workflows";
+import { apiNameOf, isVisitor } from "@sanoma-ai/workflows/shared";
 import {
-  AGENTS,
-  ANONYMOUS,
-  ANONYMOUS_PRINCIPAL,
-  apiNameOf,
-  groupNamesOf,
-  isVisitor,
-  VISITORS,
-  visitorPrincipal,
-} from "@sanoma-ai/workflows/shared";
-import { type ConfigDescription, type DataValue, formatOptions, setFields } from "@sanoma-ai/workflows/describe";
+  type ConfigDescription,
+  type DataValue,
+  formatOptions,
+  permissionsGrid,
+  setFields,
+} from "@sanoma-ai/workflows/describe";
 import { check, loadScenarios } from "@sanoma-ai/workflows/scenario";
 import { isNotFound, isRedirect, notFound } from "@tanstack/react-router";
 import { z } from "zod";
@@ -46,7 +43,6 @@ import {
   type DecideCall,
   type ErrorResponse,
   type PermissionsResponse,
-  type PermissionsRow,
   type PreviewQuery,
   type RunDetail,
   RunsQuery,
@@ -57,7 +53,6 @@ import {
   startRunSchema,
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
-import { previewRequests } from "../lib/preview.ts";
 import { databaseHost, LOOPBACK } from "../loopback.ts";
 
 // What the server functions do. Server-only: each takes the app context that startApp passes
@@ -408,72 +403,26 @@ export function preview(
   return policy.preview(requests.map((request) => ({ ...request, principal: actor })));
 }
 
-/**
- * Whom the `agents` column's agent acts for: a hold `@hold("on-behalf-of")` asks them. Only an
- * agent acts for someone, so in any other column that hold refuses, as it does a person.
- */
-const ACTS_FOR = "whom it acts for";
-
-/** Whom a column of the grid asks about: someone in the group alone, a visitor, or `anonymous`. */
-const columnPrincipal = (group: string | null): Principal => {
-  if (group === null) return { id: "group:", groups: [] };
-  if (group === ANONYMOUS) return ANONYMOUS_PRINCIPAL;
-  if (group === VISITORS) return visitorPrincipal("grid", "visitor");
-  return { id: `group:${group}`, groups: [group], ...(group === AGENTS && { onBehalfOf: ACTS_FOR }) };
-};
-
 /** Each app's grid, by its resolved config: built from the policy and the description, both read once as the app starts. */
 const grids = new WeakMap<object, PermissionsResponse>();
 
 /**
- * The Permissions page's grid (`getPermissions`): for someone in no group, then for each group,
- * the declared ones, `agents` and `visitors`, then for `anonymous`, what the policy would answer
- * someone in it alone (`{ id: "group:<name>", groups: [name] }`, an agent acting for `ACTS_FOR`, a
- * visitor as a login would make one, `anonymous` itself), the input unknown
- * (`preview`), for the start of each of the config's own workflows, by name, each with the
- * operations it uses, in the order it declares them, then each operation a person may call
- * directly, by id. Nobody's own answer: the actor asking is not used. Then the policy's files
- * as the app read them when it started (`sourcesOf`).
+ * The Permissions page's grid (`getPermissions`): the policy, its grid (`permissionsGrid`, the
+ * one `sanoma check` reports too: nobody's own answer, the actor asking is not used), then the
+ * policy's files as the app read them when it started (`sourcesOf`).
  */
 export function permissions(app: Pick<AppContext, "resolved" | "description" | "policyFiles">): PermissionsResponse {
   let grid = grids.get(app.resolved);
-  if (!grid) grids.set(app.resolved, (grid = gridOf(app)));
+  if (!grid) {
+    const { resolved, description, policyFiles } = app;
+    grid = {
+      policy: description.policy,
+      ...permissionsGrid(resolved, description),
+      files: sourcesOf(policyFiles ?? []),
+    };
+    grids.set(resolved, grid);
+  }
   return grid;
-}
-
-function gridOf(app: Pick<AppContext, "resolved" | "description" | "policyFiles">): PermissionsResponse {
-  const { description } = app;
-  // A visitor's columns only beside a public site, where there are visitors.
-  const visitors = description.sites.some((site) => site.public);
-  const groups = [
-    null,
-    ...groupNamesOf(description.resources).filter((g) => visitors || g !== VISITORS),
-    ...(visitors ? [ANONYMOUS] : []),
-  ];
-  const opsById = new Map(description.ops.map((op) => [op.id, op]));
-  const workflows = description.workflows.filter((w) => !w.builtin);
-  const direct = description.ops.filter((op) => op.direct).toSorted((a, b) => a.id.localeCompare(b.id));
-  // Every row's question, in the grid's order: each workflow's start, then the operations it may
-  // call, as the run form asks them (`previewRequests`); then each direct operation.
-  const asked = workflows.map((w) => previewRequests(w, opsById));
-  const requests: PreviewQuery = [...asked.flat(), ...direct.map(({ id, effect }) => ({ action: { id, effect } }))];
-  const columns = groups.map((group) => preview(app, columnPrincipal(group), requests));
-  const rows = requests.map(({ action: { id } }, i): PermissionsRow => ({
-    id,
-    cells: columns.map((answers) => answers[i]!),
-  }));
-  // Each workflow's rows, as many as it asked: its start, then one per operation it may call.
-  let at = 0;
-  return {
-    policy: description.policy,
-    groups,
-    workflows: workflows.map(({ name, title }, i) => {
-      const [start, ...called] = rows.slice(at, (at += asked[i]!.length));
-      return { ...start!, id: name, ...(title !== undefined && { title }), ops: called };
-    }),
-    ops: rows.slice(at),
-    files: sourcesOf(app.policyFiles ?? []),
-  };
 }
 
 /**

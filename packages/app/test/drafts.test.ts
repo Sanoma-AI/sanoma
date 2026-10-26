@@ -1,71 +1,41 @@
-import { execFileSync } from "node:child_process";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { copyFixture, ensureBuilt } from "../../sanoma/test/fixture.ts";
-import { gitIdentity } from "../../sanoma/test/git.ts";
-import { localGitSource } from "../../sanoma/src/source.ts";
+import type { CheckResult, Source } from "@sanoma-ai/workflows";
+import { describe, expect, it } from "vitest";
 import { checks } from "../src/server/drafts.ts";
 
-// `checks` on drafts of the sanoma package's fixture company, in a git repository of its own: the
-// installed bin as a child in each draft, on the packages' builds (made when stale) and Postgres.
-
-let dir = "";
-const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
-beforeAll(() => {
-  ensureBuilt();
-  gitIdentity(vi.stubEnv);
-  dir = copyFixture();
-  writeFileSync(join(dir, ".gitignore"), ".sanoma/\nnode_modules/\n");
-  git("init", "--quiet", "--initial-branch=main");
-  git("add", "--all");
-  git("commit", "--quiet", "-m", "First");
-}, 600_000);
-afterAll(() => {
-  vi.unstubAllEnvs();
-  rmSync(dir, { recursive: true, force: true });
-});
+// `checks`, a draft's card's: the source's check of the draft (`localGitSource`'s, run for real in
+// `packages/sanoma/test/source.test.ts`), without the grid.
 
 describe("checks", () => {
-  it("runs sanoma check in each draft, one at a time, with the live checkout untouched", async () => {
-    const source = localGitSource(dir);
-    const [ok, broken, unloadable] = await Promise.all([
-      source.draft!("ok"),
-      source.draft!("broken"),
-      source.draft!("unloadable"),
-    ]);
-    writeFileSync(join(broken.root, "workflows", "broken.ts"), 'export const n: number = "one";\n');
-    // Its config prints a passing result as it loads, which does not pass it: the launcher's comes last.
-    const fake = JSON.stringify({ sanoma: 1, event: "checked", ok: true, problems: [], warnings: [] });
-    const config = join(broken.root, "sanoma.config.ts");
-    writeFileSync(config, `console.log(${JSON.stringify(fake)});\n${readFileSync(config, "utf8")}`);
-    await broken.commit({ paths: ["workflows/broken.ts", "sanoma.config.ts"], message: "Break", author: "agent" });
-    // A config that does not load, and says what the check's environment holds (but what macOS adds to every one).
-    const names = 'Object.keys(process.env).filter((n) => !n.startsWith("__CF_")).sort().join(" ")';
-    const says = `throw new Error(\`no config; env \${${names}}\`);\n`;
-    writeFileSync(join(unloadable.root, "sanoma.config.ts"), says);
-    await unloadable.commit({ paths: ["sanoma.config.ts"], message: "Unload", author: "agent" });
-    // A credential of this process never reaches the check.
-    vi.stubEnv("GHOST_ADMIN_API_KEY", "not-for-the-check");
-
-    const databaseUrl = testDatabaseUrl("drafts");
-    const [passed, failed, refused] = await Promise.all([
-      checks(ok.root, databaseUrl),
-      checks(broken.root, databaseUrl),
-      checks(unloadable.root, databaseUrl),
-    ]);
-    expect(passed).toEqual({ ok: true, problems: [], warnings: [] });
-    expect(failed.ok).toBe(false);
-    expect(failed.problems).toContainEqual(expect.stringMatching(/^workflows\/broken\.ts:1:14: .*'string'.*'number'/));
-    expect(refused).toEqual({
+  it("asks the source to check the draft and keeps its result but the grid", async () => {
+    const asked: string[] = [];
+    const checked: CheckResult = {
       ok: false,
-      problems: [expect.stringMatching(/^sanoma check: .*no config; env HOME PATH SANOMA_DATABASE_URL SANOMA_EVENTS$/)],
-      warnings: [],
+      problems: ["workflows/a.ts:1:1: no"],
+      warnings: ["sites/www/routes/index.tsx:1:1: warning: maybe"],
+      grid: { groups: [null], workflows: [], ops: [] },
+    };
+    const source = {
+      root: "/repo",
+      commit: () => undefined,
+      head: () => "HEAD",
+      check: async (id: string) => (asked.push(id), checked),
+    } satisfies Source;
+    expect(await checks({ source }, "chat-1")).toEqual({
+      ok: false,
+      problems: checked.problems,
+      warnings: checked.warnings,
     });
+    expect(asked).toEqual(["chat-1"]);
+  });
 
-    expect(await source.drafts!()).toEqual(["broken", "ok", "unloadable"]);
-    expect(git("status", "--porcelain")).toBe("");
-    expect(git("log", "--format=%s")).toBe("First");
-  }, 300_000);
+  it("is one problem when the repository cannot check a draft", async () => {
+    const source: Source = { root: "/repo", commit: () => undefined, head: () => "HEAD" };
+    for (const app of [{ source }, {}]) {
+      expect(await checks(app, "chat-1")).toEqual({
+        ok: false,
+        problems: ["sanoma check: this instance's repository cannot check a draft"],
+        warnings: [],
+      });
+    }
+  });
 });

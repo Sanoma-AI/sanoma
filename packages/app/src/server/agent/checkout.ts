@@ -89,10 +89,7 @@ export async function commitTurn(
   const message = `${title}: ${textOf(messages.at(-1)!, " ").trim().slice(0, 72)}`;
   const committed = (await draft.commit({ paths: ["."], message, author: principal.id })) !== undefined;
   if (!committed || signal.aborted) return;
-  const [checked, diff] = await Promise.all([
-    checks(draft.root, app.resolved.databaseUrl),
-    drafting(app).diff(chat.id),
-  ]);
+  const [checked, diff] = await Promise.all([checks(app, chat.id), drafting(app).diff(chat.id)]);
   writer.write({ type: "data-draft", id: "draft", data: { branch: draft.branch, ...diff, checks: checked } });
 }
 

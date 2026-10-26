@@ -6,10 +6,8 @@ import { ensureBuilt, testDatabaseUrl, withFake } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import {
   allowAll,
-  cedarPolicy,
   defineConnector,
   defineWorkflow,
-  loadPolicies,
   readPolicyFiles,
   type Policy,
   resolveConfig,
@@ -106,87 +104,15 @@ const gridOf = (policy: Policy, described = description.policy) =>
   });
 
 describe("the Permissions grid", () => {
-  const hold = {
-    answer: "hold",
-    rule: { id: "policies/refunds.cedar#1", file: "policies/refunds.cedar", title: "Refunds need finance" },
-    approver: { group: "finance" },
-  };
-
-  // A visitor, signed in or not, whom no permit lets start a run or call directly.
-  const visitorDenied = [{ answer: "deny" }, { answer: "deny" }];
-
-  it("asks the policy for someone in no group and in each group, the start of each workflow, the operations it uses and each direct operation", () => {
+  // The grid itself is `permissionsGrid`'s (`packages/workflows/test/grid.test.ts`): here what the app adds.
+  it("is the runtime's grid, with the policy as the description says it", () => {
     const grid = gridOf(cedar);
     expect(grid).toMatchObject({
       policy: { defined: true },
       groups: [null, "agents", "finance", "visitors", "anonymous"],
     });
-    expect(grid.workflows).toEqual([
-      {
-        id: "refund",
-        title: "Refund",
-        // Someone in finance is not held: the hold's own approver.
-        cells: [hold, hold, { answer: "allow" }, ...visitorDenied],
-        // The money operation, called only in a run, under the workflow that uses it.
-        ops: [
-          {
-            id: "shop.refunds.create",
-            cells: [
-              { answer: "allow" },
-              {
-                answer: "hold",
-                rule: { id: "agent-refunds", file: "policies/refunds.cedar", title: "Agent refunds need finance" },
-                approver: { group: "finance" },
-              },
-              { answer: "allow" },
-              // In a run a visitor was let start, its calls are anyone's.
-              { answer: "allow" },
-              { answer: "allow" },
-            ],
-          },
-        ],
-      },
-    ]);
-    expect(grid.ops).toEqual([
-      {
-        // A money operation is called only in a run: not a direct row.
-        id: "shop.refunds.list",
-        cells: [
-          { answer: "allow" },
-          {
-            answer: "deny",
-            rule: { id: "no-agent-reads", file: "policies/refunds.cedar", reason: "Agents read no refunds" },
-          },
-          { answer: "allow" },
-          ...visitorDenied,
-        ],
-      },
-    ]);
-  });
-
-  it("shows a visitor's columns only beside a public site", () => {
-    expect(permissions({ resolved: { ...resolved }, description }).groups).toEqual([null, "agents", "finance"]);
-    expect(gridOf(cedar).groups).toEqual([null, "agents", "finance", "visitors", "anonymous"]);
-  });
-
-  it("holds an agent for whom it acts for, and refuses everyone else that hold", () => {
-    const onBehalf = cedarPolicy(
-      resolved,
-      loadPolicies([
-        {
-          file: "policies/agents.cedar",
-          text: '@hold("on-behalf-of")\nforbid (principal, action == Sanoma::Action::"shop.refunds.list", resource);\n',
-        },
-      ]).policies,
-      readPeople(root).people,
-    );
-    const rule = { id: "policies/agents.cedar#1", file: "policies/agents.cedar" };
-    expect(gridOf(onBehalf).ops[0]!.cells).toEqual([
-      { answer: "deny", rule },
-      { answer: "hold", rule, approver: "whom it acts for" },
-      { answer: "deny", rule },
-      ...visitorDenied,
-    ]);
+    expect(grid.workflows.map((w) => w.id)).toEqual(["refund"]);
+    expect(gridOf(allowAll, { defined: false }).policy.defined).toBe(false);
   });
 
   it("serves each policy file's text, with each policy's id and where it is, from the people fixture", () => {
@@ -212,17 +138,6 @@ describe("the Permissions grid", () => {
       ["no-agent-refunds", [8, 10]],
     ]);
     expect(text.slice(...files[0]!.policies[1]!.span)).toMatch(/^@id\("no-agent-refunds"\)[\s\S]*resource\);$/);
-  });
-
-  it("is every cell allow with no policy, but a visitor's start and direct call", () => {
-    const none = gridOf(allowAll, { defined: false });
-    expect(none.policy.defined).toBe(false);
-    const allowed = Array.from({ length: 3 }, () => ({ answer: "allow" }));
-    expect([...none.workflows, ...none.workflows.flatMap((w) => w.ops), ...none.ops].map((row) => row.cells)).toEqual([
-      [...allowed, ...visitorDenied],
-      [...allowed, { answer: "allow" }, { answer: "allow" }],
-      [...allowed, ...visitorDenied],
-    ]);
   });
 });
 

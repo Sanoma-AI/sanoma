@@ -1,22 +1,12 @@
 import type { Approver, PreviewAnswer } from "@sanoma-ai/workflows";
-import type { OpEntry, WorkflowEntry } from "@sanoma-ai/workflows/describe";
 import { WORKFLOW_ACTION } from "@sanoma-ai/workflows/shared";
 import type { PreviewQuery } from "../api.ts";
 
 // The run form's "will ask" line: what the policy would answer the person for a workflow's start
-// and every operation it may call, before the run starts (`previewFn`). The Permissions grid
-// (`gridOf`) asks the same for each group, a row per request.
+// and every operation it may call, before the run starts (`previewFn`), asked as `previewRequests`
+// says (the runtime's, which the Permissions grid asks for each group).
 
-/** What to ask ahead of a run of `workflow`: its start, then each operation it may call, with its effect, in the run (`inRun`). */
-export function previewRequests(workflow: WorkflowEntry, ops: ReadonlyMap<string, OpEntry>): PreviewQuery {
-  return [
-    { action: { id: `${WORKFLOW_ACTION}${workflow.name}` } },
-    ...workflow.ops.map((id) => {
-      const effect = ops.get(id)?.effect;
-      return { action: effect === undefined ? { id } : { id, effect }, inRun: true };
-    }),
-  ];
-}
+export { previewRequests } from "@sanoma-ai/workflows/shared";
 
 const AND = new Intl.ListFormat("en", { type: "conjunction" });
 
