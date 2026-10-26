@@ -374,6 +374,9 @@ importers:
       '@sanoma-ai/connector-resend':
         specifier: workspace:*
         version: link:../../connectors/resend
+      '@sanoma-ai/connector-sanoma-ops':
+        specifier: workspace:*
+        version: link:../../connectors/sanoma-ops
       '@sanoma-ai/connector-stripe':
         specifier: workspace:*
         version: link:../../connectors/stripe

@@ -59,6 +59,8 @@ function GoLivePage() {
   const isSet = (name: string) => status.tokens.some((t) => t.name === name && t.status === "set");
   const github = status.githubApp !== null || isSet("GITHUB_TOKEN");
   const supabase = isSet("SUPABASE_ACCESS_TOKEN");
+  // Only when the config declares the sanoma-ops connector, whose step is optional.
+  const sanomaOps = status.tokens.some((t) => t.name === "SANOMA_OPS_TOKEN");
   const { run, bound } = progress;
   const data = bound.repo && bound.store;
   // The latest run is the host's once it is past the repository and database, or still going.
@@ -89,6 +91,21 @@ function GoLivePage() {
               <ItemDescription>An access token, which lists and creates projects.</ItemDescription>
             </ItemContent>
           </Item>
+          {sanomaOps && (
+            <Item role="listitem" variant="outline" size="xs">
+              <ItemContent>
+                <ItemHeading>
+                  sanoma-ops
+                  <ToneBadge tone={isSet("SANOMA_OPS_TOKEN") ? "ok" : "off"}>
+                    {isSet("SANOMA_OPS_TOKEN") ? "connected" : "not connected"}
+                  </ToneBadge>
+                </ItemHeading>
+                <ItemDescription>
+                  Optional: a wakeup account, so the host stops when nothing is due and starts again in time.
+                </ItemDescription>
+              </ItemContent>
+            </Item>
+          )}
         </ItemGroup>
         <div>
           <ButtonLink variant="outline">

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { sanomaOps } from "@sanoma-ai/connector-sanoma-ops";
 import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
 import { defineConfig, resolveConfig, SanomaClient } from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
@@ -57,7 +58,14 @@ const github = setupServer(
 
 /** The secrets key the app stores under. */
 const KEY = randomBytes(32).toString("base64");
-const NAMES = [...Object.values(GITHUB_APP), "GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN"];
+const NAMES = [
+  ...Object.values(GITHUB_APP),
+  "GITHUB_TOKEN",
+  "SUPABASE_ACCESS_TOKEN",
+  "SANOMA_OPS_TOKEN",
+  "SANOMA_OPS_URL",
+  "SANOMA_WAKEUP_TOKEN",
+];
 let app: App;
 let client: SanomaClient;
 let ctx: AppContext;
@@ -227,6 +235,50 @@ describe("the connect page", () => {
     );
     for (const value of ["sbp_madeup", KEYS.client_secret, KEYS.webhook_secret, "made-up"]) {
       expect(page).not.toContain(value);
+    }
+  });
+});
+
+describe("Connect sanoma-ops", () => {
+  it("is asked for only when the config declares the connector, and mints the instance's token beside the account's", async () => {
+    // Not declared (the config above): no sanoma-ops rows, and its tokens are refused.
+    expect((await setupStatus(ctx)).tokens.map((t) => t.name)).toEqual(["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN"]);
+    await expect(
+      setSetupToken(ctx, { id: "alice" }, { name: "SANOMA_OPS_TOKEN", value: `swa_${"a".repeat(43)}` }),
+    ).rejects.toThrow(/not a setup token/);
+
+    const declared = defineConfig({ ...config, connectors: [sanomaOps] });
+    const opsClient = await SanomaClient.connect(declared);
+    try {
+      const ops: AppContext = { ...ctx, resolved: resolveConfig(declared), client: opsClient };
+      expect((await setupStatus(ops)).tokens).toEqual([
+        expect.objectContaining({ name: "GITHUB_TOKEN" }),
+        expect.objectContaining({ name: "SUPABASE_ACCESS_TOKEN" }),
+        expect.objectContaining({ name: "SANOMA_OPS_TOKEN", optional: false, status: "missing" }),
+        expect.objectContaining({ name: "SANOMA_OPS_URL", optional: true, status: "missing" }),
+      ]);
+      // The connector's own checks: an account's token starts swa_.
+      await expect(
+        setSetupToken(ops, { id: "alice" }, { name: "SANOMA_OPS_TOKEN", value: "not-a-token" }),
+      ).rejects.toThrow(/swa_/);
+      expect((await opsClient.secrets(["SANOMA_WAKEUP_TOKEN"])).size).toBe(0);
+
+      const account = `swa_${"a".repeat(43)}`;
+      await setSetupToken(ops, { id: "alice" }, { name: "SANOMA_OPS_TOKEN", value: account });
+      const minted = (await opsClient.secrets(["SANOMA_WAKEUP_TOKEN"])).get("SANOMA_WAKEUP_TOKEN");
+      expect(minted).toMatchObject({ value: expect.stringMatching(/^swi_[\w-]{43}$/), setBy: "alice" });
+      // Stored again (a new account), the instance keeps its token.
+      await setSetupToken(ops, { id: "alice" }, { name: "SANOMA_OPS_TOKEN", value: `swa_${"b".repeat(43)}` });
+      expect((await opsClient.secrets(["SANOMA_WAKEUP_TOKEN"])).get("SANOMA_WAKEUP_TOKEN")?.value).toBe(minted!.value);
+      await setSetupToken(ops, { id: "alice" }, { name: "SANOMA_OPS_URL", value: "http://127.0.0.1:4100" });
+      expect((await setupStatus(ops)).tokens.slice(2)).toEqual([
+        expect.objectContaining({ name: "SANOMA_OPS_TOKEN", status: "set", setBy: "alice" }),
+        expect.objectContaining({ name: "SANOMA_OPS_URL", status: "set" }),
+      ]);
+      // The instance's token is never among what the page is told.
+      expect(JSON.stringify(await setupStatus(ops))).not.toContain(minted!.value);
+    } finally {
+      await opsClient.close();
     }
   });
 });
