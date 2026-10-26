@@ -234,11 +234,11 @@ export async function mintWakeupAccount(databaseUrl: string, label: string): Pro
  * - `POST /wakeup/instances { url }`, an account's token → 201 `{ id, token }`
  * - `GET /wakeup/instances/{id}`, its account's token → `{ id, url, at, generation, calledAt, attempts, lastError }`
  * - `DELETE /wakeup/instances/{id}`, its account's token → 204
- * - `PUT /wakeup/instances/{id}/wake { at, generation }`, the instance's own token → 204, applied
- *   only when `generation` is newer than the one it has, and waking the loop
+ * - `PUT /wakeup/wake { at, generation }`, an instance's own token, which names the instance → 204,
+ *   applied only when `generation` is newer than the one it has, and waking the loop
  *
- * 401 without a token or with an unknown one, 403 for another account's or instance's, 400 for a
- * bad body, 404 for an unknown id or path.
+ * 401 without a token or with an unknown one, 403 for another account's instance, 400 for a bad
+ * body, 404 for an unknown id or path.
  */
 export async function startWakeupService({
   databaseUrl,
@@ -286,15 +286,15 @@ export async function startWakeupService({
     return json(201, { id, token });
   }
 
-  async function wake(request: Request, id: string): Promise<Response> {
+  async function wake(request: Request): Promise<Response> {
     const token = bearer(request);
     if (!token?.startsWith("swi_")) return problem(401, "an instance's token is needed");
     const { rows } = await pool.query<{ id: string }>(
       `SELECT i.id FROM ${WAKEUP_INSTANCES_TABLE} i ${LIVE} WHERE i.token_hash = $1`,
       [hashOf(token)],
     );
-    if (!rows[0]) return problem(401, "the token is no instance's");
-    if (rows[0].id !== id) return problem(403, "the token is another instance's");
+    const id = rows[0]?.id;
+    if (!id) return problem(401, "the token is no instance's");
     const given = await jsonBody(request);
     if (given instanceof Response) return given;
     const at = given?.at;
@@ -320,13 +320,11 @@ export async function startWakeupService({
     if (path === "/wakeup/instances") {
       return method === "POST" ? register(request) : notAllowed("POST");
     }
-    const match = /^\/wakeup\/instances\/([^/]+)(\/wake)?$/.exec(path);
+    // Its token says which instance it is.
+    if (path === "/wakeup/wake") return method === "PUT" ? wake(request) : notAllowed("PUT");
+    const match = /^\/wakeup\/instances\/([^/]+)$/.exec(path);
     if (!match) return problem(404, "no such route");
     const id = match[1]!;
-    if (match[2]) {
-      // Its token says which instance it is: another id is a 403, whatever it is.
-      return method === "PUT" ? wake(request, id) : notAllowed("PUT");
-    }
     if (method !== "GET" && method !== "DELETE") return notAllowed("GET, DELETE");
     const accountId = await account(request);
     if (accountId instanceof Response) return accountId;

@@ -88,8 +88,9 @@ async function instance(url = "http://instance.test/base/") {
   return { account, id, token };
 }
 
-const wake = (id: string, token: string, at: Date | string, generation: number) =>
-  send("PUT", `/wakeup/instances/${id}/wake`, {
+/** A registration: its token names the instance. */
+const wake = (token: string, at: Date | string, generation: number) =>
+  send("PUT", "/wakeup/wake", {
     token,
     body: { at: typeof at === "string" ? at : at.toISOString(), generation },
   });
@@ -172,20 +173,20 @@ describe("startWakeupService", () => {
     expect(await status("GET", "/wakeup/instances/nope", { token: mine.account.token })).toBe(404);
     expect(await status("GET", "/wakeup/elsewhere", { token: mine.account.token })).toBe(404);
     expect(await status("GET", "/wakeup/instances", { token: mine.account.token })).toBe(405);
-    expect(await status("POST", `/wakeup/instances/${mine.id}/wake`, { token: mine.token })).toBe(405);
+    expect(await status("POST", "/wakeup/wake", { token: mine.token })).toBe(405);
     const at = later(60_000);
-    expect((await wake(mine.id, mine.account.token, at, 1)).status).toBe(401);
-    expect((await wake(mine.id, "swi_nope", at, 1)).status).toBe(401);
-    expect((await wake(mine.id, theirs.token, at, 1)).status).toBe(403);
-    expect((await wake(unknown, mine.token, at, 1)).status).toBe(403);
+    expect((await wake(mine.account.token, at, 1)).status).toBe(401);
+    expect((await wake("swi_nope", at, 1)).status).toBe(401);
+    // The old route, by id, is gone: the token alone names the instance.
+    expect(await status("PUT", `/wakeup/instances/${mine.id}/wake`, { token: mine.token })).toBe(404);
     // Deleted: its token is no instance's, and its account finds nothing.
     expect(await status("DELETE", `/wakeup/instances/${mine.id}`, { token: mine.account.token })).toBe(204);
     expect(await status("GET", `/wakeup/instances/${mine.id}`, { token: mine.account.token })).toBe(404);
-    expect((await wake(mine.id, mine.token, at, 1)).status).toBe(401);
+    expect((await wake(mine.token, at, 1)).status).toBe(401);
     // Revoked: neither the account's token nor its instances' is taken.
     await service!.revokeAccount(theirs.account.id);
     expect(await status("GET", `/wakeup/instances/${theirs.id}`, { token: theirs.account.token })).toBe(401);
-    expect((await wake(theirs.id, theirs.token, at, 1)).status).toBe(401);
+    expect((await wake(theirs.token, at, 1)).status).toBe(401);
   });
 
   it("takes an http(s) URL with no user, query or fragment, kept without its trailing slash", async () => {
@@ -227,10 +228,10 @@ describe("startWakeupService", () => {
     await start();
     const { account, id, token } = await instance();
     const first = later(3_600_000);
-    expect((await wake(id, token, first, 2)).status).toBe(204);
+    expect((await wake(token, first, 2)).status).toBe(204);
     // Older, and equal: nothing changes.
-    expect((await wake(id, token, later(60_000), 1)).status).toBe(204);
-    expect((await wake(id, token, later(60_000), 2)).status).toBe(204);
+    expect((await wake(token, later(60_000), 1)).status).toBe(204);
+    expect((await wake(token, later(60_000), 2)).status).toBe(204);
     const shown = async () => (await send("GET", `/wakeup/instances/${id}`, { token: account.token })).json;
     expect(await shown()).toMatchObject({ at: first.toISOString(), generation: 2 });
     for (const body of [
@@ -244,7 +245,7 @@ describe("startWakeupService", () => {
       { at: first.toISOString(), generation: "3" },
       [],
     ]) {
-      const res = await send("PUT", `/wakeup/instances/${id}/wake`, { token, body });
+      const res = await send("PUT", "/wakeup/wake", { token, body });
       expect(res.status, JSON.stringify(body)).toBe(400);
     }
     expect(await shown()).toMatchObject({ at: first.toISOString(), generation: 2 });
@@ -255,7 +256,7 @@ describe("startWakeupService", () => {
     // Nothing waits: the loop sleeps its longest, which only the registration cuts short.
     await pause(200);
     const { account, id, token } = await instance();
-    expect((await wake(id, token, ago(1_000), 3)).status).toBe(204);
+    expect((await wake(token, ago(1_000), 3)).status).toBe(204);
     await vi.waitFor(() => expect(calls).toEqual(["http://instance.test/base/wake?generation=3"]), { timeout: 2_000 });
     await vi.waitFor(async () =>
       expect((await send("GET", `/wakeup/instances/${id}`, { token: account.token })).json).toMatchObject({
@@ -265,7 +266,7 @@ describe("startWakeupService", () => {
       }),
     );
     // Woken again, by a registration that changes nothing: it is not called twice.
-    expect((await wake(id, token, ago(1_000), 3)).status).toBe(204);
+    expect((await wake(token, ago(1_000), 3)).status).toBe(204);
     await pause(300);
     expect(calls).toHaveLength(1);
     expect(lines).toEqual([{ level: "info", line: "wakeup: called http://instance.test/base/wake?generation=3" }]);
@@ -273,14 +274,14 @@ describe("startWakeupService", () => {
 
   it("calls an instance when its time comes, not before, and not at a time it moved from", async () => {
     await start();
-    const { id, token } = await instance();
-    await wake(id, token, later(400), 1);
+    const { token } = await instance();
+    await wake(token, later(400), 1);
     // Moved later before it fires: the earlier time calls nothing.
-    await wake(id, token, later(3_600_000), 2);
+    await wake(token, later(3_600_000), 2);
     await pause(800);
     expect(calls).toEqual([]);
     const other = await instance("http://soon.test");
-    await wake(other.id, other.token, later(500), 1);
+    await wake(other.token, later(500), 1);
     await pause(200);
     expect(calls).toEqual([]);
     await vi.waitFor(() => expect(calls).toEqual(["http://soon.test/wake?generation=1"]), { timeout: 2_000 });
@@ -302,7 +303,7 @@ describe("startWakeupService", () => {
       (await pool.query(`SELECT attempts, last_error, next_attempt_at, called_at FROM ${WAKEUP_INSTANCES_TABLE}`))
         .rows[0];
     /** The same registration again, which changes nothing and wakes the loop. */
-    const poke = () => wake(id, token, plus(-1), 1);
+    const poke = () => wake(token, plus(-1), 1);
     await poke();
     await vi.waitFor(async () => expect(await row()).toMatchObject({ attempts: 1, last_error: "answered 503" }));
     expect((await row()).next_attempt_at).toEqual(plus(1));
@@ -339,15 +340,15 @@ describe("startWakeupService", () => {
 
   it("calls a newer registration made during a call, rather than counting the call as its", async () => {
     await start();
-    const { id, token } = await instance();
+    const { token } = await instance();
     const release = Promise.withResolvers<void>();
     answer = async (url) => {
       if (url.endsWith("generation=1")) await release.promise;
       return new Response(null, { status: 204 });
     };
-    await wake(id, token, ago(1_000), 1);
+    await wake(token, ago(1_000), 1);
     await vi.waitFor(() => expect(calls).toHaveLength(1));
-    await wake(id, token, ago(500), 2);
+    await wake(token, ago(500), 2);
     release.resolve();
     await vi.waitFor(() =>
       expect(calls).toEqual([
@@ -369,7 +370,7 @@ describe("startWakeupService", () => {
       await pool.query(`UPDATE ${WAKEUP_INSTANCES_TABLE} SET at = $2, generation = 1 WHERE id = $1`, [id, ago(1_000)]);
       const put = (route: (typeof second.routes)[number]) =>
         route.handle(
-          new Request(`http://wakeup.test/wakeup/instances/${id}/wake`, {
+          new Request("http://wakeup.test/wakeup/wake", {
             method: "PUT",
             headers: { authorization: `Bearer ${token}` },
             body: JSON.stringify({ at: ago(1_000).toISOString(), generation: 1 }),
@@ -406,17 +407,17 @@ describe("startWakeupService", () => {
     }
     // One registration wakes the loop for all twelve.
     const last = await instance("http://i12.test");
-    await wake(last.id, last.token, ago(1_000), 1);
+    await wake(last.token, ago(1_000), 1);
     await vi.waitFor(() => expect(calls).toHaveLength(13), { timeout: 5_000 });
     expect(most).toBe(8);
   });
 
   it("stops at once, abandoning a call in flight, which is called again once its claim lapses", async () => {
     await start();
-    const { id, token } = await instance();
+    const { token } = await instance();
     answer = (_url, signal) =>
       new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason)));
-    await wake(id, token, ago(1_000), 1);
+    await wake(token, ago(1_000), 1);
     await vi.waitFor(() => expect(calls).toHaveLength(1));
     const started = Date.now();
     await service!.stop();

@@ -1,0 +1,10 @@
+[
+  {
+    "method": "POST",
+    "path": "/wakeup/instances",
+    "status": 400,
+    "body": {
+      "error": "url must be an http(s) URL with no user, password, query or fragment"
+    }
+  }
+]
