@@ -6,12 +6,13 @@ import { approverLabel } from "@sanoma-ai/workflows/shared";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { getToolName, isToolUIPart } from "ai";
-import { Suspense } from "react";
+import { memo, Suspense } from "react";
 import { toast } from "sonner";
 import { Card, CardContent, CardFooter, CardHeader } from "#/components/ui/card.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { useActor } from "../../actor.ts";
-import { type ChatMessage, type DraftCard, heldRunOf } from "../../lib/chat.ts";
+import { pendingApprovals } from "../../api.ts";
+import { type ChatMessage, type DraftCard, heldRunOf, textOf } from "../../lib/chat.ts";
 import { decidableBy } from "../../lib/decidable.ts";
 import { approvalKey, configQuery, runQuery } from "../../queries.ts";
 import { ApprovalDecision, ApprovalDetails } from "../approval.tsx";
@@ -24,8 +25,11 @@ import { CardHeading, plural, TipButton } from "../common.tsx";
 type Part = ChatMessage["parts"][number];
 type ToolPart = Extract<Part, { toolCallId: string }>;
 
-/** The agent's reply: its parts in order (steps grouped into one list), its draft's card last, and Copy. */
-export function Reply({ message, live }: { message: ChatMessage; live: boolean }) {
+/**
+ * The agent's reply: its parts in order (steps grouped into one list), its draft's card last, and
+ * Copy. Memoized: a streamed chunk redraws only the reply it belongs to.
+ */
+export const Reply = memo(function Reply({ message, live }: { message: ChatMessage; live: boolean }) {
   const blocks: ({ steps: ToolPart[] } | { part: Part })[] = [];
   let draft: DraftCard | undefined;
   for (const part of message.parts) {
@@ -36,7 +40,7 @@ export function Reply({ message, live }: { message: ChatMessage; live: boolean }
       else blocks.push({ steps: [part] });
     } else blocks.push({ part });
   }
-  const text = message.parts.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("\n\n");
+  const text = textOf(message);
   return (
     <div className="flex flex-col gap-3">
       {blocks.map((block, i) =>
@@ -61,7 +65,7 @@ export function Reply({ message, live }: { message: ChatMessage; live: boolean }
       )}
     </div>
   );
-}
+});
 
 function ReplyPart({ part }: { part: Part }) {
   if (part.type === "text") return <p className="text-reply whitespace-pre-wrap">{part.text}</p>;
@@ -198,7 +202,7 @@ function HeldCard({ runId }: { runId: string }) {
     );
   }
   const { run } = data;
-  const approval = data.approvals.find((a) => a.status === "pending") ?? data.approvals.at(-1);
+  const approval = pendingApprovals(data)[0] ?? data.approvals.at(-1);
   if (!approval) return null;
   const entry = { run, approval };
   if (approval.status === "pending" && decidableBy(actor, groups, people)([entry]).length === 0) {

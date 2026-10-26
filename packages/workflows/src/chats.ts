@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { UIMessage } from "ai";
 import type { Pool } from "pg";
 import { CHAT_MESSAGES_TABLE as MESSAGES, CHATS_TABLE as CHATS } from "./db.ts";
@@ -26,10 +25,10 @@ export interface Chat {
 /** The chats' store, `SanomaClient.chats`. */
 export interface Chats {
   /**
-   * Opens a chat for `person` on `engine`, titled `title`, and returns its id: `id` when given (a
-   * browser's chat id), else a new one. An id another chat has is refused (`invalid_input`).
+   * Opens the chat `id` (the browser's) for `person` on `engine`, titled `title`. An id another
+   * chat has is refused (`invalid_input`).
    */
-  open(chat: { person: string; engine: string; title: string; id?: string }): Promise<string>;
+  open(chat: { id: string; person: string; engine: string; title: string }): Promise<void>;
   /** Records the draft the chat edits. */
   attach(id: string, draftId: string): Promise<void>;
   /**
@@ -66,7 +65,7 @@ const chatOf = ({ draft_id, created_at, ...row }: ChatRow): Chat => ({
 /** The chats' store on the pool `db` gives, the config's database once it is prepared. */
 export function chatStore(db: () => Promise<Pool>): Chats {
   return {
-    async open({ person, engine, title, id = randomUUID() }) {
+    async open({ id, person, engine, title }) {
       const { rows } = await (
         await db()
       ).query(
@@ -74,7 +73,6 @@ export function chatStore(db: () => Promise<Pool>): Chats {
         [id, person, engine, title],
       );
       if (!rows.length) throw new SanomaError("invalid_input", `Chat ${id} exists already; open it with another id`);
-      return id;
     },
     async attach(id, draftId) {
       await (await db()).query(`UPDATE ${CHATS} SET draft_id = $2 WHERE id = $1`, [id, draftId]);

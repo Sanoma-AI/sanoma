@@ -28,9 +28,9 @@ const text = (id: string, role: UIMessage["role"], said: string): UIMessage => (
 describe("chats", () => {
   it("opens a chat, attaches its draft, keeps its messages in order, gets it, and lists the person's chats newest first", async () => {
     const person = `ada-${Date.now()}`;
-    const first = await client.chats.open({ person, engine: "loop", title: "Add a laptop step" });
-    const second = await client.chats.open({ person, engine: "loop", title: "Rename a step", id: `browser-${person}` });
-    expect(second).toBe(`browser-${person}`);
+    const [first, second] = [`first-${person}`, `second-${person}`];
+    await client.chats.open({ id: first, person, engine: "loop", title: "Add a laptop step" });
+    await client.chats.open({ id: second, person, engine: "loop", title: "Rename a step" });
     await expect(client.chats.open({ person, engine: "loop", title: "Again", id: second })).rejects.toSatisfy(
       (err) => errorCode(err) === "invalid_input",
     );

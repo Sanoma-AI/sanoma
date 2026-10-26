@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useSyncExternalStore } from "react";
-import { ACTOR_COOKIE, ACTOR_KEY, type ActorInfo } from "./api.ts";
+import { ACTOR_COOKIE, ACTOR_HEADER, ACTOR_KEY, type ActorInfo } from "./api.ts";
 
 // Who you are. With the default loopback login there is none: the page asks once, keeps the name
 // in this browser, and sends it with every change. It keeps it in a cookie too, so that the server
@@ -19,6 +19,12 @@ export function loadActor(): string | null {
   } catch {
     return null;
   }
+}
+
+/** The headers that say who is asking: the name this browser keeps, URI-encoded so any name fits. */
+export function actorHeaders(): Record<string, string> {
+  const name = loadActor();
+  return name ? { [ACTOR_HEADER]: encodeURIComponent(name) } : {};
 }
 
 function saveActor(name: string | null) {

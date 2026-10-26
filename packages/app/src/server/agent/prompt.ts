@@ -27,7 +27,7 @@ export async function instructions(app: AppContext, principal: Principal, chat: 
     RULES,
     `The company: ${description.appName}. You act for ${principal.id}. This chat is ${chat.id}.`,
   ];
-  const guide = await companyGuide(app);
+  const [guide, drafts] = await Promise.all([companyGuide(app), openDrafts(app, principal)]);
   if (guide) sections.push(`The company's AGENTS.md:\n\n${guide}`);
   const byVendor = Map.groupBy(description.ops, (op) => op.vendor);
   const connectors = [...byVendor].map(([vendor, ops]) => {
@@ -39,7 +39,6 @@ export async function instructions(app: AppContext, principal: Principal, chat: 
   });
   if (connectors.length)
     sections.push(`The installed connectors and their operations' effects:\n${connectors.join("\n")}`);
-  const drafts = await openDrafts(app, principal);
   sections.push(
     drafts.length
       ? `${principal.id}'s open drafts (branches not yet merged or deleted):\n${drafts.map((c) => `- draft/${c.draftId}: ${c.title}`).join("\n")}`
@@ -58,6 +57,9 @@ async function companyGuide({ source, resolved }: AppContext): Promise<string | 
 /** The person's chats whose drafts are still open (`Source.drafts`). */
 async function openDrafts({ source, client }: AppContext, principal: Principal): Promise<Chat[]> {
   if (!source?.drafts) return [];
-  const open = new Set(await source.drafts());
-  return (await client.chats.list(principal.id)).filter((c) => c.draftId !== undefined && open.has(c.draftId));
+  const [open, chats] = await Promise.all([
+    source.drafts().then((ids) => new Set(ids)),
+    client.chats.list(principal.id),
+  ]);
+  return chats.filter((c) => c.draftId !== undefined && open.has(c.draftId));
 }

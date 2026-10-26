@@ -8,6 +8,7 @@ import {
   type CheckResult,
   type Draft,
   errorCode,
+  isDirect,
   isEnded,
   type Principal,
   type Source,
@@ -36,8 +37,8 @@ export interface ToolsTurn {
 const READ_LIMIT = 100_000;
 /** The most lines a listing or a search gives. */
 const LINES_LIMIT = 500;
-/** How often a held lookup looks at its run. */
-const HELD_POLL_MS = 1000;
+/** How often a held lookup looks at its run: first after a second, then less often, to every 10 s. */
+const HELD_POLL_MS = [1000, 10_000] as const;
 
 const git = promisify(execFile);
 
@@ -48,10 +49,10 @@ export function loopTools(turn: ToolsTurn) {
   /** The checks since the last edit, for the card. */
   let checked: CheckResult | undefined;
 
-  const source = (): Source & Required<Pick<Source, "draft" | "diff">> => {
+  const source = (): Drafting => {
     const repo = app.source;
     if (!repo?.draft || !repo.diff) throw new Error("This instance has no repository to draft a change in");
-    return repo as Source & Required<Pick<Source, "draft" | "diff">>;
+    return repo as Drafting;
   };
   /** The chat's draft, opened (and attached to the chat) by the first call. */
   const draft = () =>
@@ -183,8 +184,9 @@ export function loopTools(turn: ToolsTurn) {
         input: z.record(z.string(), z.unknown()).default({}).describe("Its input"),
       }),
       async *execute({ op, input }, { toolCallId, abortSignal }): AsyncGenerator<HeldOutput | { output: unknown }> {
-        if (app.resolved.ops.get(op)?.effect !== "read") {
-          throw new Error(`${op} is not a lookup: only an operation whose effect is read is`);
+        const declared = app.resolved.ops.get(op);
+        if (declared?.effect !== "read" || !isDirect(declared, app.resolved.types)) {
+          throw new Error(`${op} is not a lookup: only a read your instructions list as one is`);
         }
         let output: unknown;
         try {
@@ -194,8 +196,9 @@ export function loopTools(turn: ToolsTurn) {
           const runId = heldRun(err);
           if (runId === undefined) throw err;
           yield { held: { runId } };
-          while (!isEnded((await app.client.run(runId))?.status ?? "failed")) {
-            await sleep(HELD_POLL_MS, undefined, { signal: abortSignal });
+          for (let wait: number = HELD_POLL_MS[0]; !isEnded((await app.client.run(runId))?.status ?? "failed");) {
+            await sleep(wait, undefined, { signal: abortSignal });
+            wait = Math.min(wait * 2, HELD_POLL_MS[1]);
           }
           output = await app.client.result(runId);
         }
@@ -208,8 +211,11 @@ export function loopTools(turn: ToolsTurn) {
 /** Our loop's tools, as the chat's messages type them. */
 export type LoopTools = ReturnType<typeof loopTools>;
 
+/** A repository the chat can draft in. */
+type Drafting = Source & Required<Pick<Source, "draft" | "diff">>;
+
 /** The held call's run a direct call's `approval_pending` names. */
-export const heldRun = (err: unknown): string | undefined => {
+const heldRun = (err: unknown): string | undefined => {
   const runId = (err as { data?: { runId?: unknown } }).data?.runId;
   return errorCode(err) === "approval_pending" && typeof runId === "string" ? runId : undefined;
 };

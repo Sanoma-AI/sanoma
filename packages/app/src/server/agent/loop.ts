@@ -31,7 +31,7 @@ const tokensOver =
     steps.reduce((sum, step) => sum + (step.usage.totalTokens ?? 0), 0) >= limit;
 
 /** The loop's agent on `model`, told `system`, with `tools`. */
-export const loopAgent = (model: LanguageModel, system: string, tools: LoopTools) =>
+const loopAgent = (model: LanguageModel, system: string, tools: LoopTools) =>
   new ToolLoopAgent({
     model,
     instructions: system,
@@ -63,14 +63,15 @@ export async function run({ chat, messages, principal, app, signal }: EngineTurn
             "No connector gives the agent a model: install one with a model, such as @sanoma-ai/connector-anthropic",
         });
       }
-      const model = (await modelRegistry(app)).languageModel(`${vendor}/default`);
+      const [registry, system] = await Promise.all([modelRegistry(app), instructions(app, principal, chat)]);
+      const model = registry.languageModel(`${vendor}/default`);
       const tools = loopTools({
         app,
         chat,
         principal,
         showDraft: (data) => writer.write({ type: "data-draft", id: "draft", data }),
       });
-      const agent = loopAgent(model, await instructions(app, principal, chat), tools);
+      const agent = loopAgent(model, system, tools);
       writer.merge(
         await createAgentUIStream({
           agent,

@@ -5,7 +5,7 @@ import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { DefaultChatTransport, generateId, isToolUIPart } from "ai";
+import { generateId } from "ai";
 import { type FormEvent, useMemo, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import {
@@ -20,9 +20,8 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "#/
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import { cn } from "#/lib/utils.ts";
-import { loadActor, useActor } from "../../actor.ts";
-import { ACTOR_HEADER } from "../../api.ts";
-import { type ChatMessage, errorParts } from "../../lib/chat.ts";
+import { actorHeaders, useActor } from "../../actor.ts";
+import { type ChatMessage, chatTransport, errorParts, textOf, unfinished } from "../../lib/chat.ts";
 import { CHATS_KEY, chatQuery, chatsQuery } from "../../queries.ts";
 import { useCrumbs } from "../common.tsx";
 import { Reply } from "./chat-parts.tsx";
@@ -105,25 +104,13 @@ function ChatPane({ id, known, onSend }: { id: string; known: boolean; onSend: (
 /** The conversation: its messages, a turn's error, Continue after a turn that stopped short, and the composer. */
 function Conversation({ id, initial, onSend }: { id: string; initial: ChatMessage[]; onSend: () => void }) {
   const queryClient = useQueryClient();
-  const transport = useMemo(
-    () =>
-      new DefaultChatTransport<ChatMessage>({
-        api: "/api/chat",
-        headers: (): Record<string, string> => {
-          const name = loadActor();
-          return name ? { [ACTOR_HEADER]: encodeURIComponent(name) } : {};
-        },
-        // Only the new message: the server reads the rest from the chat's transcript.
-        prepareSendMessagesRequest: (request) => ({ body: { id: request.id, message: request.messages.at(-1) } }),
-      }),
-    [],
-  );
+  const transport = useMemo(() => chatTransport("/api/chat", actorHeaders), []);
   const { messages, sendMessage, status, error } = useChat<ChatMessage>({
     id,
     messages: initial,
     transport,
-    // Its title in the list, and its transcript as stored now.
-    onFinish: () => void queryClient.invalidateQueries({ queryKey: CHATS_KEY }),
+    // Its title in the list (the open transcript is useChat's own, read again when next opened).
+    onFinish: () => void queryClient.invalidateQueries({ queryKey: CHATS_KEY, exact: true }),
   });
   const busy = status === "submitted" || status === "streaming";
   const send = (text: string) => {
@@ -137,9 +124,7 @@ function Conversation({ id, initial, onSend }: { id: string; initial: ChatMessag
         {messages.map((message, i) =>
           message.role === "user" ? (
             <div key={message.id} className="ml-8 self-end rounded-xl bg-card px-3 py-2 ring-1 ring-border">
-              <p className="whitespace-pre-wrap">
-                {message.parts.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("\n")}
-              </p>
+              <p className="whitespace-pre-wrap">{textOf(message, "\n")}</p>
             </div>
           ) : (
             <Reply key={message.id} message={message} live={busy && i === messages.length - 1} />
@@ -167,14 +152,7 @@ function Conversation({ id, initial, onSend }: { id: string; initial: ChatMessag
 function stoppedShort(messages: ChatMessage[]): boolean {
   const last = messages.at(-1);
   if (!last) return false;
-  if (last.role === "user") return true;
-  return last.parts.some((part) =>
-    isToolUIPart(part)
-      ? part.state === "input-streaming" ||
-        part.state === "input-available" ||
-        (part.state === "output-available" && part.preliminary === true)
-      : part.type === "text" && part.state === "streaming",
-  );
+  return last.role === "user" || last.parts.some(unfinished);
 }
 
 /** A turn's error as text: the server's own message when it sent one, and the connector page where a missing key is set. */

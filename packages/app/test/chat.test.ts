@@ -8,7 +8,7 @@ import type { LanguageModelV4CallOptions, LanguageModelV4StreamPart } from "@ai-
 import { ensureBuilt as ensureAppBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import { defineConnector, defineDriver, isEnded, withSetup } from "@sanoma-ai/workflows";
-import { customProvider, DefaultChatTransport, getToolName, isToolUIPart, readUIMessageStream } from "ai";
+import { customProvider, getToolName, isToolUIPart, readUIMessageStream } from "ai";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -17,7 +17,7 @@ import { gitIdentity } from "../../sanoma/test/git.ts";
 import { localGitSource } from "../../sanoma/src/source.ts";
 import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
-import type { ChatMessage } from "../src/lib/chat.ts";
+import { type ChatMessage, chatTransport } from "../src/lib/chat.ts";
 import { allowedPath } from "../src/server/agent/checkout.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app. The chat's route, end to end, on our loop: a mock
@@ -191,13 +191,12 @@ afterAll(async () => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
-/** The browser's transport, as the chat column makes it, as `actor`: only the new message is sent. */
+/** The browser's transport, the chat column's (`chatTransport`), as `actor`: only the new message is sent. */
 const transport = (actor = "ada") =>
-  new DefaultChatTransport<ChatMessage>({
-    api: new URL("/api/chat", app!.url).href,
-    headers: { [ACTOR_HEADER]: actor, origin: new URL(app!.url).origin },
-    prepareSendMessagesRequest: (request) => ({ body: { id: request.id, message: request.messages.at(-1) } }),
-  });
+  chatTransport(new URL("/api/chat", app!.url).href, () => ({
+    [ACTOR_HEADER]: actor,
+    origin: new URL(app!.url).origin,
+  }));
 
 const userMessage = (text: string): ChatMessage => ({
   id: randomUUID(),

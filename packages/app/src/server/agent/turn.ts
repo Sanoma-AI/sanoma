@@ -1,9 +1,9 @@
 import type { Chat, Principal } from "@sanoma-ai/workflows";
-import { TypeValidationError, validateUIMessages } from "ai";
+import { safeValidateUIMessages } from "ai";
 import { z } from "zod";
 import { ApiError } from "../../api.ts";
 import type { AppContext } from "../../context.ts";
-import type { ChatMessage } from "../../lib/chat.ts";
+import { type ChatMessage, textOf } from "../../lib/chat.ts";
 import { type ActorContext, parse, requireActor, toApiError } from "../core.ts";
 import { run as loop } from "./loop.ts";
 import { type Engine, settle, written } from "./transcript.ts";
@@ -27,11 +27,11 @@ const ChatRequest = z.object({
 const stops = new Map<string, AbortController>();
 
 /**
- * `POST /api/chat`: a turn of the person's chat. Opens the chat on its first message (the engine
- * the request names, titled by the message), stops a turn of it under way, loads its transcript,
- * settles what a turn a restart cut short left unfinished, validates the messages with the new one
- * last (`validateUIMessages`, a 400 for one it refuses), writes the new one, and answers with its
- * engine's stream. A chat of someone else is a 404.
+ * `POST /api/chat`: a turn of the person's chat. Validates the new message (`safeValidateUIMessages`,
+ * a 400 for one it refuses, or one the chat has already), opens the chat on its first message
+ * (the engine the request names, titled by the message), stops a turn of it under way, loads its
+ * transcript and settles what a turn a restart cut short left unfinished, writes the new message,
+ * and answers with its engine's stream. A chat of someone else is a 404.
  */
 export async function postChat(request: Request, context: ActorContext & { site?: string }): Promise<Response> {
   const { app } = context;
@@ -44,21 +44,22 @@ export async function postChat(request: Request, context: ActorContext & { site?
     if (chat && chat.person !== principal.id) throw new ApiError(404, { error: `No chat ${body.id}` });
     const engine = ENGINES[chat?.engine ?? body.engine];
     if (!engine) throw invalid(`No engine ${body.engine}: the engines are ${Object.keys(ENGINES).join(", ")}`);
-    // The new message is checked before a turn under way is stopped for it: a new one, by the person.
-    const message = (await validated([body.message]))[0]!;
+    // The new message is checked before a turn under way is stopped for it: a new one, by the
+    // person. The transcript, written by this app, is not validated again.
+    const checked = await safeValidateUIMessages<ChatMessage>({ messages: [body.message] });
+    if (!checked.success) throw invalid(`Not a chat message: ${checked.error.message}`);
+    const message = checked.data[0]!;
     if (message.role !== "user") throw invalid("A chat takes the person's messages only");
-    const known = async () => (chat ? await chats.load(chat.id) : []);
-    if ((await known()).some((m) => m.id === message.id)) throw invalid(`The chat has a message ${message.id} already`);
+    const stored = chat ? await chats.load(chat.id) : [];
+    if (stored.some((m) => m.id === message.id)) throw invalid(`The chat has a message ${message.id} already`);
     stops.get(body.id)?.abort();
-    await written(body.id);
-    const history = await settle(app, await known());
-    const messages = await validated([...history, message]);
+    // A turn still writing its reply: read the transcript again once it has.
+    const writing = written(body.id);
+    if (writing) await writing;
+    const history = (await settle(app, writing ? await chats.load(body.id) : stored)) as ChatMessage[];
+    const messages = [...history, message];
     if (!chat) {
-      const title =
-        message.parts
-          .find((p) => p.type === "text")
-          ?.text.trim()
-          .slice(0, 80) || "A chat";
+      const title = textOf(message, " ").trim().slice(0, 80) || "A chat";
       const opened = { id: body.id, person: principal.id, engine: body.engine, title };
       await chats.open(opened);
       chat = { ...opened, createdAt: Date.now() };
@@ -70,8 +71,8 @@ export async function postChat(request: Request, context: ActorContext & { site?
     const response = await engine({ chat, messages, principal, app, signal: stop.signal });
     const id = chat.id;
     const forget = () => stops.get(id) === stop && stops.delete(id);
-    const writing = written(id);
-    if (writing) void writing.finally(forget);
+    const replying = written(id);
+    if (replying) void replying.finally(forget);
     else forget();
     return response;
   } catch (err) {
@@ -82,19 +83,16 @@ export async function postChat(request: Request, context: ActorContext & { site?
 
 const invalid = (error: string) => new ApiError(400, { error, code: "invalid_input" });
 
-/** `messages` as chat messages (`validateUIMessages`), or a 400 saying why not. */
-const validated = (messages: unknown[]) =>
-  validateUIMessages<ChatMessage>({ messages }).catch((err: unknown) => {
-    throw TypeValidationError.isInstance(err) ? invalid(`Not a chat message: ${err.message}`) : err;
-  });
-
-/** The person's chat `id` with its transcript, as stored; null when they have none of that id. */
+/** The person's chat `id` with its transcript; null when they have none of that id. */
 export async function chatFor(
-  { client }: AppContext,
+  app: AppContext,
   principal: Principal,
   id: string,
 ): Promise<{ chat: Chat; messages: ChatMessage[] } | null> {
+  const { client } = app;
   const chat = await client.chats.get(id);
   if (chat?.person !== principal.id) return null;
-  return { chat, messages: (await client.chats.load(id)) as ChatMessage[] };
+  // As the next turn will take it: what a restart cut short settled, unless a turn is under way.
+  const stored = await client.chats.load(id);
+  return { chat, messages: (written(id) ? stored : await settle(app, stored)) as ChatMessage[] };
 }
