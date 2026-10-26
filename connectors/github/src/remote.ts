@@ -95,17 +95,10 @@ function failed(method: string, path: string, reply: Reply, vendorCode?: string)
   });
 }
 
-/** The body of a 2xx answer, read with `schema`; anything else a `DriverError`, with `codes`' `vendorCode` for its status. */
-async function ok<T>(
-  token: string,
-  method: string,
-  path: string,
-  schema: z.ZodType<T>,
-  body?: unknown,
-  codes: Record<number, string> = {},
-): Promise<T> {
+/** The body of a 2xx answer, read with `schema`; anything else a `DriverError`. */
+async function ok<T>(token: string, method: string, path: string, schema: z.ZodType<T>, body?: unknown): Promise<T> {
   const reply = await send(token, method, path, body);
-  if (reply.status >= 300) throw failed(method, path, reply, codes[reply.status]);
+  if (reply.status >= 300) throw failed(method, path, reply);
   return read(schema, reply.body, `${method} ${path}`);
 }
 
@@ -131,13 +124,18 @@ function jwtOf(found: Map<string, string>): string | undefined {
 
 const installations = (jwt: string) => ok(jwt, "GET", "/app/installations?per_page=100", z.array(Installation));
 
-/** An installation token of the App, when its keys are among `found` and it is installed on `owner`. */
-async function appToken(found: Map<string, string>, owner: string): Promise<Minted | undefined> {
+/**
+ * An installation token of the App, when its keys are among `found` and it is installed on
+ * `owner`; for the repository `name` alone when given, which GitHub refuses (422) when the
+ * installation does not cover it.
+ */
+async function appToken(found: Map<string, string>, owner: string, name?: string): Promise<Minted | undefined> {
   const jwt = jwtOf(found);
   if (!jwt) return undefined;
   const installation = (await installations(jwt)).find((i) => i.account.login.toLowerCase() === owner.toLowerCase());
   if (!installation) return undefined;
-  const made = await ok(jwt, "POST", `/app/installations/${installation.id}/access_tokens`, AccessToken);
+  const scope = name === undefined ? undefined : { repositories: [name] };
+  const made = await ok(jwt, "POST", `/app/installations/${installation.id}/access_tokens`, AccessToken, scope);
   return { token: made.token, expiresAt: Date.parse(made.expires_at) };
 }
 
@@ -147,12 +145,17 @@ interface Minted {
   expiresAt?: number;
 }
 
-/** The token `githubToken` chooses, with its expiry. */
-async function mint(secrets: RemoteContext["secrets"], owner: string, prefer: "app" | "token"): Promise<Minted> {
+/** The token `githubToken` chooses (an installation token for the repository `name` alone, when given), with its expiry. */
+async function mint(
+  secrets: RemoteContext["secrets"],
+  owner: string,
+  prefer: "app" | "token",
+  name?: string,
+): Promise<Minted> {
   const found = await secrets([TOKEN, GITHUB_APP_SECRETS.id, GITHUB_APP_SECRETS.pem]);
   const token = found.get(TOKEN);
   if (prefer === "token" && token) return { token };
-  const app = await appToken(found, owner).catch((err: unknown) => {
+  const app = await appToken(found, owner, name).catch((err: unknown) => {
     // The App's keys stored but not working (a deleted App, a bad key, GitHub down): the person's token, when there is one.
     if (token) return undefined;
     throw err instanceof DriverError
@@ -221,10 +224,10 @@ function openRepo(repo: RepoRef, { secrets }: RemoteContext): SourceHost {
   let kept: Promise<Minted> | undefined;
   let until = 0;
   const token = async (prefer?: "app" | "token") => {
-    if (prefer !== undefined) return (await mint(secrets, repo.owner, prefer)).token;
+    if (prefer !== undefined) return (await mint(secrets, repo.owner, prefer, repo.name)).token;
     if (kept && Date.now() >= until) kept = undefined;
     if (!kept) {
-      kept = mint(secrets, repo.owner, "app");
+      kept = mint(secrets, repo.owner, "app", repo.name);
       until = Infinity;
     }
     const minted = await kept.catch((err: unknown) => {
@@ -235,17 +238,25 @@ function openRepo(repo: RepoRef, { secrets }: RemoteContext): SourceHost {
     until = Math.min(until, (minted.expiresAt ?? Date.now() + 600_000) - 300_000);
     return minted.token;
   };
-  const call = async (method: string, path: string, body?: unknown) =>
-    send(await token(), method, `${base}${path}`, body);
+  const call = async (method: string, path: string, body?: unknown) => {
+    const reply = await send(await token(), method, `${base}${path}`, body);
+    // A token revoked or rotated since it was kept: the next call takes a fresh one.
+    if (reply.status === 401) kept = undefined;
+    return reply;
+  };
   const okCall = async <T>(
     method: string,
     path: string,
     schema: z.ZodType<T>,
     body?: unknown,
-    codes?: Record<number, string>,
-  ) => ok(await token(), method, `${base}${path}`, schema, body, codes);
+    codes: Record<number, string> = {},
+  ) => {
+    const reply = await call(method, path, body);
+    if (reply.status >= 300) throw failed(method, `${base}${path}`, reply, codes[reply.status]);
+    return read(schema, reply.body, `${method} ${base}${path}`);
+  };
 
-  return {
+  const host: SourceHost = {
     token,
     async pullRequestFor(branch) {
       const query = new URLSearchParams({ state: "all", head: `${repo.owner}:${branch}` });
@@ -273,8 +284,15 @@ function openRepo(repo: RepoRef, { secrets }: RemoteContext): SourceHost {
       const body = { sha, merge_method: method, ...(title && { commit_title: title }) };
       // 409: the branch moved on from `sha`; 405: GitHub will not merge it (a conflict, a rule).
       const codes = { 409: "head_moved", 405: "not_mergeable" };
-      const merged = await okCall("PUT", `/pulls/${number}/merge`, z.object({ sha: z.string() }), body, codes);
-      return { sha: merged.sha };
+      try {
+        return { sha: (await okCall("PUT", `/pulls/${number}/merge`, z.object({ sha: z.string() }), body, codes)).sha };
+      } catch (err) {
+        // A retry after a merge whose answer was lost: GitHub refuses it, but the pull request is merged.
+        if (!(err instanceof DriverError) || err.vendorCode === undefined) throw err;
+        const pull = await host.pullRequest(number);
+        if (pull.state === "merged" && pull.mergeSha) return { sha: pull.mergeSha };
+        throw err;
+      }
     },
     async closePullRequest(number) {
       await okCall("PATCH", `/pulls/${number}`, Pull, { state: "closed" });
@@ -291,7 +309,7 @@ function openRepo(repo: RepoRef, { secrets }: RemoteContext): SourceHost {
         state,
         context: CONTEXT,
         // GitHub refuses a description longer than 140 characters.
-        description: description.length > 140 ? `${description.slice(0, 139)}…` : description,
+        description: [...description].length > 140 ? `${[...description].slice(0, 139).join("")}…` : description,
         ...(targetUrl && { target_url: targetUrl }),
       });
     },
@@ -313,6 +331,7 @@ function openRepo(repo: RepoRef, { secrets }: RemoteContext): SourceHost {
       };
     },
   };
+  return host;
 }
 
 const Repository = z.object({ name: z.string(), owner: z.object({ login: z.string() }) });
@@ -366,8 +385,9 @@ function signedBy(secret: string, body: Buffer, signature: string | null): boole
   return given.length === expected.length && timingSafeEqual(given, expected);
 }
 
-/** A clone URL of a repository on GitHub: `https://github.com/o/r(.git)` or `git@github.com:o/r(.git)`. */
-const GITHUB_URL = /^(?:https:\/\/github\.com\/|git@github\.com:)([A-Za-z0-9-]+)\/([\w.-]+?)(?:\.git)?\/?$/i;
+/** A clone URL of a repository on GitHub: `https://github.com/o/r(.git)`, `git@github.com:o/r(.git)` or `ssh://git@github.com/o/r(.git)`. */
+const GITHUB_URL =
+  /^(?:https:\/\/(?:www\.)?github\.com\/|(?:ssh:\/\/)?git@github\.com[:/])([\w-]+)\/([\w.-]+?)(?:\.git)?\/?$/i;
 
 /**
  * GitHub's remote half: `matches` a GitHub clone URL, `open`s a repository (its pull requests,

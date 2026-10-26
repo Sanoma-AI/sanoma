@@ -174,9 +174,10 @@ export interface HostEnforcement {
 }
 
 /**
- * One repository on a host, opened by its remote half with the company's credentials. Every
- * call reads them when made, so a token stored later is used; a failure is a `DriverError`
- * (retryable as the host's status says).
+ * One repository on a host, opened by its remote half with the company's credentials, read when
+ * a call needs them; a half may keep a token for a few minutes (its README says how long), so a
+ * token stored later is used soon after. A failure is a `DriverError` (retryable as the host's
+ * status says).
  */
 export interface SourceHost {
   /**

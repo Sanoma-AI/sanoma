@@ -186,7 +186,7 @@ const githubHeaders = (token: string) => ({
  * with the stored `GITHUB_TOKEN` (`connections`), so it pushes with that one too, not one this
  * process's environment happens to have.
  */
-const githubRemote = (app: AppContext) => ({
+const githubOf = (app: AppContext) => ({
   remote: app.resolved.remotes.get("github"),
   context: { secrets: secretValues(app.client, { environment: false }) },
 });
@@ -226,7 +226,7 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
       : [],
     // The accounts the GitHub App is installed on, from the GitHub connector's remote half.
     listed("The GitHub App's installations", async () => {
-      const { remote, context } = githubRemote(app);
+      const { remote, context } = githubOf(app);
       return (await remote?.owners?.(context)) ?? [];
     }),
     supabase
@@ -444,8 +444,11 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
  * `GITHUB_TOKEN`, else an installation token of the GitHub App installed on the owner.
  */
 async function pushToken(app: AppContext, repo: RepoRef): Promise<string> {
-  const { remote, context } = githubRemote(app);
-  if (!remote) throw new ApiError(409, { error: "The GitHub connector is not among the config's connectors" });
+  const { remote, context } = githubOf(app);
+  if (!remote)
+    throw new ApiError(409, {
+      error: "The GitHub connector has no remote half: install @sanoma-ai/connector-github of this release",
+    });
   try {
     return await remote.open(repo, context).token("token");
   } catch (err) {

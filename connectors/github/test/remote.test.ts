@@ -94,6 +94,8 @@ describe("githubRemote.matches", () => {
       "https://github.com/acme/acme-ops.git",
       "git@github.com:acme/acme-ops.git",
       "git@github.com:acme/acme-ops",
+      "ssh://git@github.com/acme/acme-ops.git",
+      "https://www.github.com/acme/acme-ops",
     ]) {
       expect(githubRemote.matches(url), url).toEqual(acme);
     }
@@ -188,10 +190,42 @@ describe("githubToken", () => {
     ]);
     const host = githubRemote.open(acme, only(app));
     await Promise.all([host.pullRequest(12), host.pullRequest(12)]);
+    // Minted for this repository alone.
+    expect(sent[1]!.body).toEqual({ repositories: ["acme-ops"] });
     expect(sent.slice(2).map((s) => s.headers.get("authorization"))).toEqual([
       "Bearer ghs_minted",
       "Bearer ghs_minted",
     ]);
+  });
+
+  it.skipIf(live)("drops a token GitHub no longer takes, and mints again", async () => {
+    play("app-token-revoked", [
+      installed("acme"),
+      minted,
+      { method: "GET", path: "/repos/acme/acme-ops/pulls/12", status: 401, body: { message: "Bad credentials" } },
+      installed("acme"),
+      minted,
+      { method: "GET", path: "/repos/acme/acme-ops/pulls/12", status: 200, body: pull(12) },
+    ]);
+    const host = githubRemote.open(acme, only(app));
+    await expect(host.pullRequest(12)).rejects.toMatchObject({ status: 401 });
+    expect(await host.pullRequest(12)).toMatchObject({ number: 12 });
+  });
+
+  it.skipIf(live)("takes GITHUB_TOKEN for a repository the App's installation does not cover", async () => {
+    play("app-not-this-repo", [
+      installed("acme"),
+      {
+        method: "POST",
+        path: "/app/installations/7/access_tokens",
+        status: 422,
+        body: {
+          message:
+            "There is at least one repository that does not exist or is not accessible to the parent installation.",
+        },
+      },
+    ]);
+    expect(await githubRemote.open(acme, only({ ...app, GITHUB_TOKEN: "ghp_person" })).token()).toBe("ghp_person");
   });
 });
 
@@ -287,19 +321,36 @@ describe("a repository opened", () => {
       sha: "beef000000000000000000000000000000000000",
     });
     expect(sent[0]!.body).toEqual({ sha, merge_method: "squash", commit_title: "Hire Ada (#12)" });
-    play("merge-moved", [merge(409, { message: "Head branch was modified. Review and try the merge again." })]);
+    const unmerged: Exchange = { method: "GET", path: "/repos/acme/acme-ops/pulls/12", status: 200, body: pull(12) };
+    play("merge-moved", [
+      merge(409, { message: "Head branch was modified. Review and try the merge again." }),
+      unmerged,
+    ]);
     await expect(host.mergePullRequest(12, { sha, method: "squash" })).rejects.toMatchObject({
       code: "driver_failed",
       vendorCode: "head_moved",
       status: 409,
       retryable: false,
     });
-    play("merge-refused", [merge(405, { message: "Pull Request is not mergeable" })]);
+    play("merge-refused", [merge(405, { message: "Pull Request is not mergeable" }), unmerged]);
     await expect(host.mergePullRequest(12, { sha, method: "squash" })).rejects.toMatchObject({
       vendorCode: "not_mergeable",
       status: 405,
       retryable: false,
       message: "github: PUT /repos/acme/acme-ops/pulls/12/merge answered 405: Pull Request is not mergeable",
+    });
+    // A retry after a merge whose answer was lost: merged, with its commit.
+    play("merge-again", [
+      merge(405, { message: "Pull Request is not mergeable" }),
+      {
+        method: "GET",
+        path: "/repos/acme/acme-ops/pulls/12",
+        status: 200,
+        body: pull(12, { state: "closed", merged_at: "2026-10-26T20:04:17Z" }),
+      },
+    ]);
+    expect(await host.mergePullRequest(12, { sha, method: "squash" })).toEqual({
+      sha: "f00d000000000000000000000000000000000000",
     });
   });
 
