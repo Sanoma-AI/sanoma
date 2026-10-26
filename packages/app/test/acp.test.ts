@@ -343,26 +343,18 @@ describe("the chat on a person's own agent", () => {
   }, 60_000);
 
   it("is never reached by an agent, which no login admits (the engine refuses one too)", async () => {
-    const response = await fetch(new URL("/api/chat", app!.url), {
-      method: "POST",
-      headers: { "content-type": "application/json", ...headers("bot") },
-      body: JSON.stringify({
-        id: `bot-${RUN}`,
-        engine: "acp-opencode",
-        message: { id: randomUUID(), role: "user", parts: [{ type: "text", text: "Hi" }] },
-      }),
-    });
+    const response = await post(`bot-${RUN}`, "acp-opencode", "bot");
     expect(response.status).toBe(403);
     expect(await response.json()).toMatchObject({ code: "not_admitted" });
     expect(logged("opencode").filter((entry) => String(entry.prompt ?? "").endsWith("bot: Hi"))).toEqual([]);
   });
 });
 
-/** Opens the chat `id` on `engine` as ada, with fetch: the response as it came. */
-const post = (id: string, engine: string) =>
+/** Opens the chat `id` on `engine` as `actor`, with fetch: the response as it came. */
+const post = (id: string, engine: string, actor = "ada") =>
   fetch(new URL("/api/chat", app!.url), {
     method: "POST",
-    headers: { "content-type": "application/json", ...headers("ada") },
+    headers: { "content-type": "application/json", ...headers(actor) },
     body: JSON.stringify({
       id,
       engine,

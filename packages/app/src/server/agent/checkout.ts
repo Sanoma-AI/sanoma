@@ -3,8 +3,9 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import type { Chat, Draft, Source } from "@sanoma-ai/workflows";
 import type { UIMessageStreamWriter } from "ai";
 import type { AppContext } from "../../context.ts";
-import type { ChatMessage } from "../../lib/chat.ts";
+import { type ChatMessage, textOf } from "../../lib/chat.ts";
 import { checks } from "../drafts.ts";
+import type { EngineTurn } from "./transcript.ts";
 
 /** Where an agent may never write in a checkout: git's own files, and the install (`node_modules`, a link to the live one in a draft). */
 const OFF_LIMITS = new Set([".git", "node_modules"]);
@@ -31,6 +32,16 @@ export async function allowedPath(worktree: string, path: string): Promise<strin
   return OFF_LIMITS.has(relative(root, full).split(sep)[0]!.toLowerCase()) ? undefined : full;
 }
 
+/** What an agent is told when the checkout rule refuses `path`. */
+export const outsideCheckout = (path: string) => `${path} is outside your checkout, or under .git or node_modules`;
+
+/** `path` under `root` as the checkout rule allows it, or the refusal the agent reads. */
+export async function mustAllow(root: string, path: string): Promise<string> {
+  const full = await allowedPath(root, path);
+  if (full === undefined) throw new Error(outsideCheckout(path));
+  return full;
+}
+
 /** What a coding agent is told when the checkout rule refuses a shell command. */
 export const NO_SHELL =
   "No shell commands in this chat until previews exist: edit the files; the checks run after your turn";
@@ -51,6 +62,9 @@ export function drafting(app: AppContext): Drafting {
   return repo as Drafting;
 }
 
+/** Where the coding agents' installs and sign-ins are kept across restarts. */
+export const agentHome = (app: AppContext) => join(drafting(app).root, ".sanoma", "agent-home");
+
 /** The chat's draft, opened (or found open), and attached to the chat's row the first time. */
 export async function openDraft(app: AppContext, chat: Chat): Promise<Draft> {
   const opened = await drafting(app).draft(chat.id);
@@ -63,19 +77,17 @@ export async function openDraft(app: AppContext, chat: Chat): Promise<Draft> {
 
 /**
  * The end of a coding agent's turn, however it ended (an error too): what it changed committed on
- * the chat's draft as `author`, then, unless a new message stopped it (the next turn shows the
- * card), the draft's card (`data-draft`) from its checks and its diff.
+ * the chat's draft as the person, under `title` and their message, then, unless a new message
+ * stopped it (the next turn shows the card), the draft's card (`data-draft`) from its checks and its diff.
  */
 export async function commitTurn(
-  app: AppContext,
-  chat: Chat,
+  { app, chat, messages, principal, signal }: EngineTurn,
   draft: Draft,
-  author: string,
-  message: string,
-  signal: AbortSignal,
+  title: string,
   writer: UIMessageStreamWriter<ChatMessage>,
 ) {
-  const committed = (await draft.commit({ paths: ["."], message, author })) !== undefined;
+  const message = `${title}: ${textOf(messages.at(-1)!, " ").trim().slice(0, 72)}`;
+  const committed = (await draft.commit({ paths: ["."], message, author: principal.id })) !== undefined;
   if (!committed || signal.aborted) return;
   const [checked, diff] = await Promise.all([
     checks(draft.root, app.resolved.databaseUrl),

@@ -1,6 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
 import * as acp from "@agentclientprotocol/sdk";
 import type { Principal } from "@sanoma-ai/workflows";
@@ -10,8 +9,8 @@ import { z } from "zod";
 import { ApiError } from "../../api.ts";
 import { type ChatMessage, pathOf, type SignInCard, textOf } from "../../lib/chat.ts";
 import { type ActorContext, parse, requireActor, toApiError } from "../core.ts";
-import { allowedPath, commitTurn, drafting, NO_SHELL, openDraft } from "./checkout.ts";
-import { Command, type Exit, sessionEnv } from "./local-session.ts";
+import { agentHome, allowedPath, commitTurn, mustAllow, NO_SHELL, openDraft, outsideCheckout } from "./checkout.ts";
+import { Command, type Exit, exitText, sessionEnv } from "./local-session.ts";
 import { harnessInstructions } from "./prompt.ts";
 import { chatResponse, type Engine, type EngineTurn } from "./transcript.ts";
 
@@ -48,12 +47,14 @@ interface OwnAgent {
   bin: string;
   args: readonly string[];
   signIn: SignIn;
+  /** Offered only with `SANOMA_OWN_AGENTS_UNSETTLED=1`: its vendor's terms for a hosted instance are not settled. */
+  unsettled?: true;
 }
 
 /**
  * The agents, by the name their engine takes (`acp-<name>`), with the versions spike S3 ran
  * (2026-10-25). Claude Code and Codex wait on their vendors' terms for a hosted instance
- * (`OWN_AGENTS_UNSETTLED`).
+ * (`unsettled`).
  */
 export const OWN_AGENTS = {
   copilot: {
@@ -87,6 +88,7 @@ export const OWN_AGENTS = {
     bin: "claude-agent-acp",
     args: [],
     signIn: { method: "claude-ai-login" },
+    unsettled: true,
   },
   codex: {
     title: "Codex",
@@ -94,14 +96,22 @@ export const OWN_AGENTS = {
     bin: "codex-acp",
     args: [],
     signIn: { authenticate: "chat-gpt-device-code" },
+    unsettled: true,
   },
 } satisfies Record<string, OwnAgent>;
 
 /** An agent's name, its engine's being `acp-<name>`. */
 export type OwnAgentName = keyof typeof OWN_AGENTS;
 
-/** The agents offered only with `SANOMA_OWN_AGENTS_UNSETTLED=1`: their vendors' terms for a hosted instance are not settled. */
-export const OWN_AGENTS_UNSETTLED: readonly OwnAgentName[] = ["claude-code", "codex"];
+/** The engines of the agents this instance offers (`acp-<name>`): the `unsettled` ones only while `SANOMA_OWN_AGENTS_UNSETTLED=1`. Read at each request. */
+export function ownEngines(): Partial<Record<`acp-${OwnAgentName}`, Engine>> {
+  const all = process.env.SANOMA_OWN_AGENTS_UNSETTLED === "1";
+  return Object.fromEntries(
+    Object.entries(OWN_AGENTS as Record<OwnAgentName, OwnAgent>)
+      .filter(([, agent]) => all || !agent.unsettled)
+      .map(([name]) => [`acp-${name}`, acpEngine(name as OwnAgentName)]),
+  );
+}
 
 /** What this client says it can do: files and terminals (ours, by the checkout rule), terminal sign-in methods, and links to show. */
 const CAPABILITIES: acp.ClientCapabilities = {
@@ -121,8 +131,11 @@ const SIGN_IN_WAIT = 15 * 60_000;
 /** How long an agent has to stop after `session/cancel` before it is killed. */
 const CANCEL_GRACE = 3_000;
 
-/** How long a failed turn waits to see whether its agent exited, to say so. */
-const EXIT_WAIT = 1_000;
+/** How often, at most, the card shows what a vendor's sign-in printed, in ms. */
+const CARD_EVERY = 250;
+
+/** Why a turn or its sign-in ended early: the person sent another message. */
+const STOPPED = "a new message stopped it";
 
 /** Commands on this machine the agent and what it starts must not reach: a vendor CLI's token, the Keychain, a browser. */
 const SHIMS = ["gh", "security", "open", "xdg-open"];
@@ -134,7 +147,7 @@ const installs = new Map<string, Promise<void>>();
 const pasting = new Map<string, { person: string; paste: (code: string) => void }>();
 
 /** The engine for `name`: a turn of a chat through that person's own agent, its transcript written as it goes. */
-export const acpEngine =
+const acpEngine =
   (name: OwnAgentName): Engine =>
   async (turn) => {
     const stream = createUIMessageStream<ChatMessage>({
@@ -148,94 +161,91 @@ export const acpEngine =
 const isPerson = (principal: Principal) =>
   !isVisitor(principal) && !principal.groups?.includes(AGENTS_GROUP) && principal.onBehalfOf === undefined;
 
-async function runTurn(
-  name: OwnAgentName,
-  { app, chat, messages, principal, signal }: EngineTurn,
-  writer: UIMessageStreamWriter<ChatMessage>,
-) {
+async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMessageStreamWriter<ChatMessage>) {
+  const { app, chat, messages, principal, signal } = engineTurn;
   const agent: OwnAgent = OWN_AGENTS[name];
   if (!isPerson(principal)) {
     throw new Error(`${agent.title} runs on a person's own plan, and ${principal.id} is not a person`);
   }
-  const repo = drafting(app);
   // Kept across restarts: the installs, and each person's sign-ins.
-  const home = join(repo.root, ".sanoma", "agent-home");
+  const home = agentHome(app);
   const draft = await openDraft(app, chat);
   writer.write({ type: "start", messageId: generateId() });
-  const said = messages.at(-1)!;
-  const turn = new AcpTurn(agent, { chatId: chat.id, person: principal.id, root: draft.root }, writer, signal);
+  const relay = new Relay(writer);
+  let turn: AcpTurn | undefined;
   try {
     const dir = join(home, "acp", name);
     // A new message does not wait for a first install: it goes on, for the next turn.
     await untilAborted(install(agent, dir, home), signal);
     const personal = join(home, "people", personDir(principal.id));
-    await mkdir(personal, { recursive: true });
+    const bins = join(dir, "node_modules", ".bin");
+    const [shimmed] = await Promise.all([shims(home), mkdir(personal, { recursive: true })]);
     const env = sessionEnv(personal);
-    turn.env = { ...env, PATH: [await shims(home), join(dir, "node_modules", ".bin"), env.PATH].join(":") };
-    turn.install = dir;
+    turn = new AcpTurn(agent, relay, signal, {
+      chatId: chat.id,
+      person: principal.id,
+      root: draft.root,
+      bins,
+      env: { ...env, PATH: [shimmed, bins, env.PATH].join(":") },
+    });
     const instructions = harnessInstructions(app, principal, chat, messages.slice(0, -1));
-    await turn.run(`${instructions}\n\n${principal.id}: ${textOf(said)}`);
+    await turn.run(`${instructions}\n\n${principal.id}: ${textOf(messages.at(-1)!)}`);
   } catch (err) {
     // A dead or missing agent is said in the reply; a stopped turn says nothing.
-    if (!signal.aborted) turn.relay.say(`${agent.title} could not answer: ${errorMessage(err)}`);
+    if (!signal.aborted) relay.say(`${agent.title} could not answer: ${errorMessage(err)}`);
   } finally {
-    await turn.stop();
+    await turn?.stop();
   }
-  turn.relay.end();
-  await commitTurn(
-    app,
-    chat,
-    draft,
-    principal.id,
-    `${agent.title}: ${textOf(said, " ").trim().slice(0, 72)}`,
-    signal,
-    writer,
-  );
+  relay.end();
+  await commitTurn(engineTurn, draft, agent.title, writer);
   writer.write({ type: "finish" });
 }
 
 /** A turn's child and what it asked for: one ACP connection, its terminals and its sign-in. */
 class AcpTurn {
   readonly agent: OwnAgent;
+  readonly relay: Relay;
+  readonly signal: AbortSignal;
   readonly chatId: string;
   readonly person: string;
   /** The draft's checkout: where the agent works. */
   readonly root: string;
-  readonly writer: UIMessageStreamWriter<ChatMessage>;
-  readonly signal: AbortSignal;
-  readonly relay: Relay;
-  /** The child's environment and its install's directory, once installed. */
-  env: Record<string, string> = {};
-  install = "";
+  /** The install's bins, and the child's environment. */
+  readonly bins: string;
+  readonly env: Record<string, string>;
   /** Every process the turn started (the agent, its terminals, a sign-in), killed when it ends. */
   readonly #commands = new Set<Command>();
   readonly #terminals = new Map<string, Command>();
 
   constructor(
     agent: OwnAgent,
-    { chatId, person, root }: { chatId: string; person: string; root: string },
-    writer: UIMessageStreamWriter<ChatMessage>,
+    relay: Relay,
     signal: AbortSignal,
+    {
+      chatId,
+      person,
+      root,
+      bins,
+      env,
+    }: { chatId: string; person: string; root: string; bins: string; env: Record<string, string> },
   ) {
     this.agent = agent;
+    this.relay = relay;
+    this.signal = signal;
     this.chatId = chatId;
     this.person = person;
     this.root = root;
-    this.writer = writer;
-    this.signal = signal;
-    this.relay = new Relay(writer);
+    this.bins = bins;
+    this.env = env;
   }
 
   /** Starts the agent, opens a session in the draft and prompts it with `text`; a sign-in it asks for instead is the card. */
   async run(text: string) {
     if (this.signal.aborted) return;
-    const child = this.#start(join(this.install, "node_modules", ".bin", this.agent.bin), this.agent.args, {
-      protocol: true,
-    });
+    const child = this.#start(join(this.bins, this.agent.bin), this.agent.args, { protocol: true });
     const connection = this.#client().connect(acp.ndJsonStream(child.stdin!, child.stdout!));
-    const died = (exit: Exit) =>
-      new Error(`it stopped (${exit.signal ?? `exit code ${exit.exitCode}`})${tail(child.output())}`);
-    // A dead child fails what waits on it, not a hang.
+    const died = (exit: Exit) => new Error(`it stopped (${exitText(exit)})${tail(child.output())}`);
+    // A dead child fails what waits on it, not a hang (its stdout ends only after this).
     void child.exited.then((exit) => connection.close(died(exit)));
     const { agent } = connection;
     let sessionId: string | undefined;
@@ -262,21 +272,17 @@ class AcpTurn {
         // Some agents list their methods only with the error.
         await this.#signIn(agent, [...(init.authMethods ?? []), ...(data?.authMethods ?? [])]);
       }
-    } catch (err) {
-      // Its output closes the connection before its exit is seen: how it died, when it did.
-      const exit = await Promise.race([child.exited, delay(EXIT_WAIT)]);
-      throw exit ? died(exit) : err;
     } finally {
       this.signal.removeEventListener("abort", cancel);
     }
   }
 
-  /** Kills every process the turn started, and waits (a moment at most) for them to go, so nothing writes after the commit. */
+  /** Kills every process the turn started, and waits for them to go, so nothing writes after the commit. */
   async stop() {
     const commands = [...this.#commands];
     this.#commands.clear();
     for (const command of commands) command.kill();
-    await Promise.race([Promise.all(commands.map((command) => command.exited)), delay(EXIT_WAIT)]);
+    await Promise.all(commands.map((command) => command.exited));
   }
 
   /** `args` run as `command` (in the draft unless `cwd` says), with the turn's environment and `env`, in a process group of its own. */
@@ -287,7 +293,7 @@ class AcpTurn {
       cwd = this.root,
       env,
       ...options
-    }: { cwd?: string; env?: Record<string, string>; stdin?: boolean; protocol?: boolean } = {},
+    }: { cwd?: string; env?: Record<string, string>; stdin?: boolean; protocol?: boolean; limit?: number } = {},
   ) {
     const started = new Command(command, args, { cwd, env: { ...this.env, ...env }, ...options });
     this.#commands.add(started);
@@ -318,8 +324,7 @@ class AcpTurn {
         const env = Object.fromEntries((params.env ?? []).map(({ name, value }) => [name, value]));
         // A command line with no arguments is bash's to read, as an agent's shell tool writes one.
         const [command, args] = params.args?.length ? [params.command, params.args] : ["bash", ["-c", params.command]];
-        const terminal = this.#start(command, args, { cwd, env });
-        terminal.limit = params.outputByteLimit ?? undefined;
+        const terminal = this.#start(command, args, { cwd, env, limit: params.outputByteLimit ?? undefined });
         const terminalId = generateId();
         this.#terminals.set(terminalId, terminal);
         return { terminalId };
@@ -375,7 +380,7 @@ class AcpTurn {
     if (!named.length) return refuse("An edit names its file: say which file in your checkout");
     for (const path of named) {
       if ((await allowedPath(this.root, path)) === undefined) {
-        return refuse(`${path} is outside your checkout, or under .git or node_modules`);
+        return refuse(outsideCheckout(path));
       }
     }
     const allow = offered("allow_once");
@@ -385,15 +390,10 @@ class AcpTurn {
   }
 
   /** `path` as the checkout rule allows it in the draft; a request error naming it otherwise. */
-  async #allowed(path: string): Promise<string> {
-    const full = await allowedPath(this.root, path);
-    if (full === undefined) {
-      throw acp.RequestError.invalidParams(
-        undefined,
-        `${path} is outside your checkout, or under .git or node_modules`,
-      );
-    }
-    return full;
+  #allowed(path: string): Promise<string> {
+    return mustAllow(this.root, path).catch((err: Error) => {
+      throw acp.RequestError.invalidParams(undefined, err.message);
+    });
   }
 
   #terminal(id: string): Command {
@@ -404,7 +404,7 @@ class AcpTurn {
 
   /** Writes the sign-in card, in place. */
   #card(card: Omit<SignInCard, "agent">) {
-    this.writer.write({ type: "data-signIn", id: "sign-in", data: { agent: this.agent.title, ...card } });
+    this.relay.writer.write({ type: "data-signIn", id: "sign-in", data: { agent: this.agent.title, ...card } });
   }
 
   /**
@@ -417,51 +417,61 @@ class AcpTurn {
    */
   async #signIn(agent: acp.ClientContext, methods: acp.AuthMethod[]) {
     const { signIn, title } = this.agent;
+    if ("once" in signIn) {
+      const { bin, args, after } = signIn.once;
+      const line = [`HOME=${quote(this.env.HOME!)}`, quote(join(this.bins, bin)), ...args.map(quote)];
+      this.#card({ state: "once", command: line.join(" "), ...(after && { after }) });
+      return;
+    }
     this.#card({ state: "waiting" });
     try {
       if ("authenticate" in signIn) {
         await this.#waiting(agent.request("authenticate", { methodId: signIn.authenticate }));
-      } else if ("once" in signIn) {
-        const { bin, args, after } = signIn.once;
-        const line = [
-          `HOME=${quote(this.env.HOME!)}`,
-          quote(join(this.install, "node_modules", ".bin", bin)),
-          ...args.map(quote),
-        ];
-        this.#card({ state: "once", command: line.join(" "), ...(after && { after }) });
-        return;
+      } else if ("run" in signIn) {
+        await this.#login(signIn.run);
       } else {
-        const method =
-          "method" in signIn
-            ? methods.find((m) => m.id === signIn.method && "type" in m && m.type === "terminal")
-            : undefined;
-        if ("method" in signIn && !method) throw new Error(`${title} offers no sign-in ${signIn.method}`);
-        const args = "run" in signIn ? signIn.run : ((method as acp.AuthMethodTerminal).args ?? []);
-        const env = (method as acp.AuthMethodTerminal | undefined)?.env;
-        await this.#login(join(this.install, "node_modules", ".bin", this.agent.bin), args, env);
+        const method = methods.find(
+          (m): m is acp.AuthMethodTerminal => m.id === signIn.method && "type" in m && m.type === "terminal",
+        );
+        if (!method) throw new Error(`${title} offers no sign-in ${signIn.method}`);
+        await this.#login(method.args ?? [], method.env);
       }
       this.#card({ state: "done" });
     } catch (err) {
       // What the vendor printed is not kept: its code is the person's.
-      this.#card({ state: "failed", text: this.signal.aborted ? "a new message stopped it" : errorMessage(err) });
+      this.#card({ state: "failed", text: this.signal.aborted ? STOPPED : errorMessage(err) });
     }
   }
 
-  /** Runs the vendor's sign-in command, relaying what it prints and taking a code pasted on the card. */
-  async #login(command: string, args: readonly string[], env?: Record<string, string>) {
-    const login = this.#start(command, args, { env, stdin: true });
+  /** Runs the agent's sign-in with `args`, relaying what it prints (now and then) and taking a code pasted on the card. */
+  async #login(args: readonly string[], env?: Record<string, string>) {
+    const login = this.#start(join(this.bins, this.agent.bin), args, { env, stdin: true });
+    let shown = "";
+    let timer: NodeJS.Timeout | undefined;
     const show = () => {
+      timer = undefined;
       const text = stripVTControlCharacters(login.output()).trim();
       const url = text.match(/https:\/\/[^\s"'<>]+/g)?.at(-1);
-      this.#card({ state: "waiting", text, ...(url && { url }), ...(/paste .*code/i.test(text) && { asks: true }) });
+      const card: Omit<SignInCard, "agent"> = {
+        state: "waiting",
+        text,
+        ...(url && { url }),
+        ...(/paste .*code/i.test(text) && { asks: true }),
+      };
+      if (JSON.stringify(card) === shown) return;
+      shown = JSON.stringify(card);
+      this.#card(card);
     };
-    login.onOutput = show;
+    login.onOutput = () => {
+      timer ??= setTimeout(show, CARD_EVERY);
+    };
     const waiting = { person: this.person, paste: (code: string) => login.write(`${code}\n`) };
     pasting.set(this.chatId, waiting);
     try {
-      const { exitCode, signal } = await this.#waiting(login.exited);
-      if (exitCode !== 0) throw new Error(`it stopped (${signal ?? `exit code ${exitCode}`})`);
+      const exit = await this.#waiting(login.exited);
+      if (exit.exitCode !== 0) throw new Error(`it stopped (${exitText(exit)})`);
     } finally {
+      clearTimeout(timer);
       // Its own entry only: a later turn of the chat may be waiting for a code by now.
       if (pasting.get(this.chatId) === waiting) pasting.delete(this.chatId);
       login.kill();
@@ -470,15 +480,7 @@ class AcpTurn {
 
   /** `promise`, unless the turn stops or the person is away longer than the card waits. */
   #waiting<T>(promise: Promise<T>): Promise<T> {
-    return new Promise<T>((done, fail) => {
-      const stop = () => fail(new Error("a new message stopped it"));
-      const timer = setTimeout(() => fail(new Error("nobody signed in within 15 minutes")), SIGN_IN_WAIT);
-      this.signal.addEventListener("abort", stop, { once: true });
-      promise.then(done, fail).finally(() => {
-        clearTimeout(timer);
-        this.signal.removeEventListener("abort", stop);
-      });
-    });
+    return untilAborted(promise, this.signal, { ms: SIGN_IN_WAIT, text: "nobody signed in within 15 minutes" });
   }
 }
 
@@ -626,8 +628,10 @@ async function install(agent: OwnAgent, dir: string, home: string): Promise<void
       const env = sessionEnv(home);
       const npm = ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error", ...agent.packages];
       await new Command("npm", npm, { cwd: dir, env }).done();
-      if (agent.setup)
-        await new Command("node", [join(dir, agent.setup)], { cwd: dirname(join(dir, agent.setup)), env }).done();
+      if (agent.setup) {
+        const setup = join(dir, agent.setup);
+        await new Command("node", [setup], { cwd: dirname(setup), env }).done();
+      }
       await writeFile(marker, wanted);
     })();
     installs.set(dir, running);
@@ -639,13 +643,17 @@ async function install(agent: OwnAgent, dir: string, home: string): Promise<void
   await running;
 }
 
-/** `promise`, or the turn's stop when it comes first (`promise` goes on). */
-function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+/** `promise`, or a failure when the turn stops (or `timeout` passes) first; `promise` goes on. */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal, timeout?: { ms: number; text: string }): Promise<T> {
   return new Promise<T>((done, fail) => {
-    const stop = () => fail(new Error("a new message stopped it"));
+    const stop = () => fail(new Error(STOPPED));
     if (signal.aborted) return stop();
+    const timer = timeout && setTimeout(() => fail(new Error(timeout.text)), timeout.ms);
     signal.addEventListener("abort", stop, { once: true });
-    promise.then(done, fail).finally(() => signal.removeEventListener("abort", stop));
+    promise.then(done, fail).finally(() => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", stop);
+    });
   });
 }
 

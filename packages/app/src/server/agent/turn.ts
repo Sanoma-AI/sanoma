@@ -5,7 +5,7 @@ import { ApiError } from "../../api.ts";
 import type { AppContext } from "../../context.ts";
 import { type ChatMessage, type EngineName, textOf } from "../../lib/chat.ts";
 import { type ActorContext, parse, requireActor, toApiError } from "../core.ts";
-import { acpEngine, OWN_AGENTS, OWN_AGENTS_UNSETTLED, type OwnAgentName } from "./acp.ts";
+import { ownEngines } from "./acp.ts";
 import { harnessEngine } from "./harness.ts";
 import { run as loop } from "./loop.ts";
 import { type Engine, settle, written } from "./transcript.ts";
@@ -14,25 +14,16 @@ import { type Engine, settle, written } from "./transcript.ts";
 // from the transcript) and the engines by name. A turn runs in this process, not as a run: a
 // restart loses the turn, not the transcript or the draft, and "continue" picks up.
 
-/** Every engine, by the name a chat's row keeps (`ENGINE_NAMES`): our loop, the coding agents through `HarnessAgent`, and a person's own over ACP. */
-const ALL: Readonly<Record<EngineName, Engine>> = {
-  loop,
-  pi: harnessEngine("pi"),
-  "claude-code": harnessEngine("claude-code"),
-  ...(Object.fromEntries(
-    Object.keys(OWN_AGENTS).map((agent) => [`acp-${agent}`, acpEngine(agent as OwnAgentName)]),
-  ) as Record<`acp-${OwnAgentName}`, Engine>),
-};
+/** Our own loop, and the coding agents through `HarnessAgent` on the company's key. */
+const OURS = { loop, pi: harnessEngine("pi"), "claude-code": harnessEngine("claude-code") };
 
 /**
- * The engines this instance offers, by name: all of them, but Claude Code's and Codex's own
- * (`OWN_AGENTS_UNSETTLED`) only while `SANOMA_OWN_AGENTS_UNSETTLED=1`, until their vendors' terms
- * for a hosted instance are settled. Read at each request.
+ * The engines this instance offers, by the name a chat's row keeps (`ENGINE_NAMES`): our loop, the
+ * coding agents through `HarnessAgent`, and a person's own over ACP (`ownEngines`, which leaves out
+ * Claude Code's and Codex's own unless `SANOMA_OWN_AGENTS_UNSETTLED=1`). Read at each request.
  */
 export function engines(): Partial<Record<EngineName, Engine>> {
-  if (process.env.SANOMA_OWN_AGENTS_UNSETTLED === "1") return ALL;
-  const unsettled = new Set<string>(OWN_AGENTS_UNSETTLED.map((agent) => `acp-${agent}`));
-  return Object.fromEntries(Object.entries(ALL).filter(([name]) => !unsettled.has(name)));
+  return { ...OURS, ...ownEngines() };
 }
 
 /** What the browser sends: the chat's id (its own, for a new chat) and the person's new message. */

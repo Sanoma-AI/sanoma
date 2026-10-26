@@ -17,7 +17,7 @@ import { z } from "zod";
 import type { AppContext } from "../../context.ts";
 import type { DraftCard, HeldOutput } from "../../lib/chat.ts";
 import { checks } from "../drafts.ts";
-import { allowedPath, drafting, openDraft } from "./checkout.ts";
+import { drafting, mustAllow, openDraft } from "./checkout.ts";
 
 // Our loop's tools: reading the repository, editing the chat's draft (opened by the first edit,
 // committed at each), its checks, and lookups through the policy. No shell: the draft sits in the
@@ -215,13 +215,6 @@ const heldRun = (err: unknown): string | undefined => {
   const runId = (err as { data?: { runId?: unknown } }).data?.runId;
   return errorCode(err) === "approval_pending" && typeof runId === "string" ? runId : undefined;
 };
-
-/** `path` under `root` as the checkout rule allows it, or the refusal the model reads. */
-async function mustAllow(root: string, path: string): Promise<string> {
-  const full = await allowedPath(root, path);
-  if (full === undefined) throw new Error(`${path} is outside your checkout, or under .git or node_modules`);
-  return full;
-}
 
 /** `full`, inside `root`, as a path from the repository's root with `/`; empty for the root itself. */
 async function inRepo(root: string, full: string): Promise<string> {

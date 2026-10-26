@@ -14,7 +14,7 @@ import type { AppContext } from "../../context.ts";
 import { type ChatMessage, ENGINE_NAMES, noKeyText, pathOf, textOf } from "../../lib/chat.ts";
 import { modelRegistry } from "../models.ts";
 import { secretValues } from "../secrets.ts";
-import { allowedPath, commitTurn, drafting, NO_SHELL, openDraft } from "./checkout.ts";
+import { agentHome, allowedPath, commitTurn, NO_SHELL, openDraft, outsideCheckout } from "./checkout.ts";
 import { freePort, LocalSession } from "./local-session.ts";
 import { harnessInstructions } from "./prompt.ts";
 import { chatResponse, type Engine, type EngineTurn } from "./transcript.ts";
@@ -85,14 +85,11 @@ export const harnessEngine =
     return chatResponse(app, chat, stream);
   };
 
-async function runTurn(
-  name: RuntimeName,
-  { app, chat, messages, principal, signal }: EngineTurn,
-  writer: UIMessageStreamWriter<ChatMessage>,
-) {
+async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStreamWriter<ChatMessage>) {
+  const { app, chat, messages, principal, signal } = turn;
   const runtime: Runtime = RUNTIMES[name];
   // Kept across restarts: a bridge installs its agent under it once.
-  const home = join(drafting(app).root, ".sanoma", "agent-home");
+  const home = agentHome(app);
   // The key first: a turn without it opens no draft.
   const auth = await authFor(app);
   // The agent works in the chat's draft from its first turn.
@@ -161,8 +158,7 @@ async function runTurn(
   } finally {
     await local.destroy();
   }
-  const message = `${ENGINE_NAMES[name]}: ${textOf(said, " ").trim().slice(0, 72)}`;
-  await commitTurn(app, chat, draft, principal.id, message, signal, writer);
+  await commitTurn(turn, draft, ENGINE_NAMES[name], writer);
   if (failed) throw failed.err;
   writer.write({ type: "finish" });
 }
@@ -206,7 +202,7 @@ async function answer(root: string, approvalId: string, toolName: string, kind: 
     return deny(`${toolName} is not available in this chat: edit the files in your checkout`);
   }
   if ((await allowedPath(root, path)) === undefined) {
-    return deny(`${path} is outside your checkout, or under .git or node_modules`);
+    return deny(outsideCheckout(path));
   }
   return { type: "tool-approval-response" as const, approvalId, approved: true };
 }

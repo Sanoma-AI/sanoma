@@ -242,8 +242,7 @@ function Composer({
 }) {
   const page = useCrumbs().at(-1)?.label;
   const [text, setText] = useState("");
-  const { data: offered = ALWAYS } = useQuery({ ...enginesQuery(), enabled: engine !== undefined });
-  const names = offered.filter((name): name is EngineName => Object.hasOwn(ENGINE_NAMES, name));
+  const { data: names = ALWAYS } = useQuery({ ...enginesQuery(), enabled: engine !== undefined });
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
