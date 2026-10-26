@@ -50,6 +50,16 @@ describe("decidableBy", () => {
     expect(ids(decidableBy("bo", ["finance"], finance("ada", "bo"))(entries))).toEqual(["ada", "cy"]);
   });
 
+  it("leaves out an approval no longer pending: decided, rejected or withdrawn", () => {
+    const settled = (["approved", "rejected", "withdrawn"] as const).map((status) => {
+      const e = entry("cy");
+      return { ...e, approval: { ...e.approval, status } };
+    });
+    expect(
+      decidableBy("ada", ["finance"], finance("ada"))([...settled, entry("ada")]).map((e) => e.approval.status),
+    ).toEqual(["pending"]);
+  });
+
   it("lists nothing for someone outside the group, or while the page knows no name", () => {
     expect(decidableBy("cy", [], finance("ada"))(entries)).toEqual([]);
     expect(decidableBy(undefined, ["finance"], finance("ada"))(entries)).toEqual([]);

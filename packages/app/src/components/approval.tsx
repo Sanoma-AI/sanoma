@@ -84,7 +84,8 @@ export function ApprovalDetails({
         )}
         {approval.decidedBy && (
           <Fact label="Decided">
-            {approval.status} by {approval.decidedBy}
+            {/* Only an approved one is withdrawn once decided. */}
+            {approval.status === "withdrawn" ? "approved" : approval.status} by {approval.decidedBy}
             {approval.alone ? ALONE : null}
             {approval.decidedAt ? (
               <>
@@ -92,6 +93,17 @@ export function ApprovalDetails({
               </>
             ) : null}
             {approval.note ? <DecisionNote note={approval.note} /> : null}
+          </Fact>
+        )}
+        {approval.status === "withdrawn" && (
+          <Fact label="Withdrawn">
+            {approval.withdrawnReason}
+            {/* Withdrawn while pending: its decidedAt is when. */}
+            {!approval.decidedBy && approval.decidedAt ? (
+              <>
+                , <When at={approval.decidedAt} />
+              </>
+            ) : null}
           </Fact>
         )}
       </Facts>

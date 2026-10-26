@@ -29,6 +29,7 @@ export const APPROVAL_TONE: Record<ApprovalState["status"], Tone> = {
   pending: "waiting",
   approved: "ok",
   rejected: "bad",
+  withdrawn: "off",
 };
 
 export const DECISION_TONE: Record<RecordedDecision["kind"], Tone> = { allow: "ok", deny: "bad", approve: "waiting" };

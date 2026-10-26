@@ -185,9 +185,9 @@ function sameCall(node: OutlineNode, step: CallStep): boolean {
   }
 }
 
-/** A held call not recorded yet: waiting on its approval, or running once approved. */
+/** A held call not recorded yet: waiting on its approval, running once approved, or stopped by a rejection or withdrawal. */
 function heldTone(status: ApprovalState["status"], ended: boolean): Tone {
-  if (status === "rejected") return "bad";
+  if (status === "rejected" || status === "withdrawn") return APPROVAL_TONE[status];
   if (ended) return "off";
   return status === "approved" ? "active" : "waiting";
 }
