@@ -6,7 +6,7 @@ import { dbosStatusesOf } from "./client.ts";
 import { declaredWakeup, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { storedSecrets, watchCredentials } from "./credentials.ts";
 import { claimWakeup, DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase } from "./db.ts";
-import { deadlineRegistry, type Deadlines, idle, type SelfStop, stopWhenIdle } from "./deadlines.ts";
+import { deadlineRegistry, type Deadlines, idle, onOwnQueue, type SelfStop, stopWhenIdle } from "./deadlines.ts";
 import type { WorkflowDefinition } from "./define.ts";
 import { credentialsOf, unconfigured, unconfiguredSummary } from "./env.ts";
 import { errorInfo, parseOrThrow, PolicyDeniedError } from "./errors.ts";
@@ -48,7 +48,7 @@ export interface Worker {
  * nine hours. 100,000 is a year of that; a run that crashes its process at every recovery is still
  * given up on, after as many restarts.
  */
-export const MAX_RECOVERY_ATTEMPTS = 100_000;
+const MAX_RECOVERY_ATTEMPTS = 100_000;
 
 // DBOS registrations are process-wide and survive shutdown, so a name is registered once, and
 // its function reads the state of the worker running when a run starts, definition and all; the
@@ -101,8 +101,9 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   // Check everything before touching the state a running worker reads.
   const resolved = resolveConfig(config);
   setLogLevel(options.logLevel);
-  // Read once: whether this worker stops itself when idle, registering its next deadline there.
-  const wakeup = await declaredWakeup(config);
+  // Read once, when it matters: a worker stops itself, registering its next deadline there, only
+  // when its caller hears it stop (`onStopped`).
+  const wakeup = options.onStopped || config.wakeup === true ? await declaredWakeup(config) : undefined;
   // The wakeup service wakes the instances that stop: one that runs it must not stop with its worker.
   if (config.wakeup === true && wakeup) {
     throw new Error(
@@ -118,8 +119,6 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   // The config's own, or a Postgres store made for this worker, which `stop` then closes.
   const ledger = ownedLedger(resolved);
   const secrets = lazyPool(resolved.databaseUrl, "secrets");
-  // Only a worker someone restarts stops itself: one whose caller hears it stop.
-  const wakeupRow = wakeup && options.onStopped && lazyPool(resolved.databaseUrl, "wakeup");
   let stopRule: { close(): void } | undefined;
   let stopping: Promise<void> | undefined;
   const horizonMs = options.idleHorizonMs ?? 60_000;
@@ -163,7 +162,6 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
           () => secrets.close(),
           () => ledger.close(),
           async () => resolved.dataStore?.close(),
-          async () => wakeupRow?.close(),
         ]) {
           await close().catch((error: unknown) => (failed ??= { error }));
         }
@@ -217,12 +215,13 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     if (resolved.policyProblems.length && !options.quiet) {
       warn(`the policies do not hold, so every call and start is refused:\n  ${resolved.policyProblems.join("\n  ")}`);
     }
-    if (wakeup && wakeupRow) {
+    if (wakeup && options.onStopped) {
       const owner = randomUUID();
-      await claimWakeup(await wakeupRow.db(), owner);
+      await claimWakeup(await secrets.db(), owner);
       const registerId = wakeup.type.wakeup!.register;
       stopRule = stopWhenIdle({
-        db: () => wakeupRow.db(),
+        // The row is one more of the runtime's tables: the secrets' pool, on the same database.
+        db: () => secrets.db(),
         owner,
         wakeup: wakeup.binding ?? wakeup.id,
         // `resolveConfig` checked the operation is the config's (`checkWakeupOps`).
@@ -286,9 +285,7 @@ async function warnAboutStrandedRuns({ appName, version, queueName }: ResolvedCo
   });
   const otherVersion = runs.filter((r) => r.applicationVersion && r.applicationVersion !== version);
   // Recovery moves a worker's own runs to DBOS's internal queues, which are fine.
-  const otherQueue = runs.filter(
-    (r) => !otherVersion.includes(r) && r.queueName && r.queueName !== queueName && !r.queueName.startsWith("_dbos_"),
-  );
+  const otherQueue = runs.filter((r) => !otherVersion.includes(r) && !onOwnQueue(r.queueName, queueName));
   if (!otherVersion.length && !otherQueue.length) return;
   const ids = [...otherVersion, ...otherQueue].map((r) => r.workflowID);
   warn(

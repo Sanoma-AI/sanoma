@@ -278,7 +278,7 @@ export function visitorPrincipal(login: string, subject: string): Principal {
 export const ANONYMOUS_PRINCIPAL: Principal = Object.freeze({ id: ANONYMOUS, groups: [] });
 
 /** The runtime's own agents (scenarios, the host check, scheduled runs), declared whether a data file names them or not. */
-export const RUNTIME_AGENTS: readonly string[] = ["scenarios", "host-check", "schedule"];
+export const RUNTIME_AGENTS: readonly string[] = ["scenarios", "host-check", "schedule", "wakeup"];
 
 /** The declared resources of one of the runtime's people types, by `desired`. */
 const peopleOfType = <T>(resources: readonly PeopleResource[], type: "person" | "agent" | "group") =>

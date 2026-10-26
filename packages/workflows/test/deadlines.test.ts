@@ -12,7 +12,6 @@ import {
   defineDriver,
   defineResource,
   defineWorkflow,
-  MAX_RECOVERY_ATTEMPTS,
   memoryLedger,
   resolveConfig,
   SanomaClient,
@@ -165,7 +164,7 @@ function useWorker(name: string, files: Record<string, string>) {
     /** Cancels every run left unfinished, so the next test's worker recovers none. */
     async cancelAll() {
       const runs = await ctx.raw.listWorkflows({ status: ["PENDING", "ENQUEUED", "DELAYED"], loadInput: false });
-      for (const run of runs) await ctx.raw.cancelWorkflow(run.workflowID);
+      if (runs.length) await ctx.raw.cancelWorkflows(runs.map((r) => r.workflowID));
     },
   };
   beforeAll(async () => {
@@ -353,10 +352,6 @@ describe("a worker's deadlines", () => {
     await Promise.all([worker.stop(), worker.stop()]);
     expect(await worker.idle()).toBe(false);
   });
-
-  it("raises DBOS's recovery attempts well past its default of 100", () => {
-    expect(MAX_RECOVERY_ATTEMPTS).toBeGreaterThan(10_000);
-  });
 });
 
 describe("the stop rule", () => {
@@ -380,7 +375,7 @@ describe("the stop rule", () => {
           idempotencyKey: `wakeup:resources/infra.ts#wake:${before + 1}`,
           opId: "acme.wakeup.register",
           attempt: 1,
-          by: "sanoma",
+          by: "wakeup",
         }),
       },
     ]);

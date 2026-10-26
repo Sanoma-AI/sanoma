@@ -2,10 +2,11 @@ import { DBOS } from "@dbos-inc/dbos-sdk";
 import { dbosStatusesOf } from "./client.ts";
 import type { Db } from "./db.ts";
 import { nextWakeupGeneration, recordWakeupRegistration, recordWakeupStop } from "./db.ts";
+import type { ResolvedConfig } from "./config.ts";
 import { warn } from "./log.ts";
 import type { CallContext, DriverFn, Op } from "./op.ts";
 import type { Secrets } from "./secret.ts";
-import { errorMessage } from "./shared.ts";
+import { errorMessage, RUNTIME_AGENTS } from "./shared.ts";
 import type { WakeupRegistration } from "./wakeup.ts";
 
 // What a worker knows of its own runs that DBOS cannot tell it: which are executing and which are
@@ -83,11 +84,14 @@ export function deadlineRegistry(): DeadlineRegistry {
 }
 
 /** The worker `idle` asks about: the app, the version it runs, and its queue. */
-export interface IdleScope {
-  appName: string;
-  version: string;
-  queueName: string;
-}
+export type IdleScope = Pick<ResolvedConfig, "appName" | "version" | "queueName">;
+
+/**
+ * True when a run on `queue` (none for a run started outside a queue) is this worker's to run: on
+ * its own queue, or on one of DBOS's, where recovery puts runs.
+ */
+export const onOwnQueue = (queue: string | undefined, queueName: string): boolean =>
+  !queue || queue === queueName || queue.startsWith("_dbos_");
 
 /**
  * True when nothing this worker would run can run within `horizonMs`: no run of its is executing
@@ -106,7 +110,7 @@ export async function idle(deadlines: Deadlines, scope: IdleScope, horizonMs: nu
     loadInput: false,
     loadOutput: false,
   });
-  const ours = runs.filter((r) => !r.queueName || r.queueName === scope.queueName || r.queueName.startsWith("_dbos_"));
+  const ours = runs.filter((r) => onOwnQueue(r.queueName, scope.queueName));
   if (
     ours.some(
       (r) => r.status === "PENDING" && r.applicationVersion === scope.version && !deadlines.waitOf(r.workflowID),
@@ -145,8 +149,9 @@ export interface StopRule {
   onStopped?: ((stopped: SelfStop) => void) | undefined;
 }
 
-/** Who the runtime calls a wakeup's register as. */
-export const RUNTIME_ACTOR = "sanoma";
+/** Who the runtime calls a wakeup's register as: one of its own agents. */
+const WAKEUP_AGENT = "wakeup";
+if (!RUNTIME_AGENTS.includes(WAKEUP_AGENT)) throw new Error(`${WAKEUP_AGENT} must be one of RUNTIME_AGENTS`);
 
 /**
  * Checks every `everyMs` whether the worker is `idle`; when it is, counts the wakeup row's
@@ -172,7 +177,9 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
     const db = await rule.db();
     const generation = await nextWakeupGeneration(db, rule.owner, at);
     if (generation === undefined) {
-      problem("another worker registers this instance's wakeups now, so this one keeps running");
+      // A worker claims the row only when it starts, so this one never gets it back.
+      warn("another worker registers this instance's wakeups now, so this one keeps running and stops checking");
+      closed = true;
       return false;
     }
     if (at !== null) {
@@ -190,7 +197,6 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
     if (closed || !(await rule.idle()) || rule.deadlines.nextDeadline()?.toISOString() !== next?.toISOString())
       return false;
     await recordWakeupStop(db, rule.owner, generation);
-    closed = true;
     await rule.stop().catch((err: unknown) => warn(`the worker could not stop cleanly: ${errorMessage(err)}`));
     rule.onStopped?.({ at, generation });
     return true;
@@ -227,6 +233,6 @@ async function registerWakeup({ register: { op, fn }, secrets, wakeup }: StopRul
   if (!fn) throw new Error(`${op.id} has no driver: the connector package must attach one`);
   // Every database counts generations from 0, so the key names the wakeup too.
   const key = `wakeup:${wakeup}:${registration.generation}`;
-  const context: CallContext = { idempotencyKey: key, runId: key, opId: op.id, attempt: 1, secrets, by: RUNTIME_ACTOR };
+  const context: CallContext = { idempotencyKey: key, runId: key, opId: op.id, attempt: 1, secrets, by: WAKEUP_AGENT };
   await fn(op.input.parse(registration), context);
 }

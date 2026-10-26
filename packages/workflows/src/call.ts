@@ -588,7 +588,7 @@ async function sleep(run: Run, raw: unknown, at: Placed) {
         (req.days ?? 0) * 86_400_000;
   const ms = until - started;
   await write(run, entry(run, { type: "sleep.started", ...at, until }, { seq, at: started }));
-  // A time already past waits not at all, and adds no step. A sandbox run never waits.
+  // A time already past waits not at all, and adds no sleep step. A sandbox run never waits.
   if (ms > 0 && run.sandbox === undefined) {
     await run.state.deadlines.waiting(run.id, { kind: "sleep", until }, () => DBOS.sleep(ms));
   }

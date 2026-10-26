@@ -135,7 +135,7 @@ export {
 export { ApprovalMessage, APPROVALS_EVENT, decisionEventOf } from "./approvals.ts";
 export { RUNTIME_VERSION } from "./version.ts";
 export type { RunArgs } from "./run.ts";
-export { MAX_RECOVERY_ATTEMPTS, startWorker, type Worker, type WorkerOptions } from "./worker.ts";
+export { startWorker, type Worker, type WorkerOptions } from "./worker.ts";
 export type { DeadlineSource, Deadlines, SelfStop, Wait } from "./deadlines.ts";
 // Whether a wake is the one the instance's worker last registered, for the `/wake` route.
 export { shouldWake } from "./db.ts";
