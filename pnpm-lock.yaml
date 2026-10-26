@@ -223,6 +223,9 @@ importers:
 
   packages/app:
     dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: 2.0.2
+        version: 2.0.2(zod@4.6.5)
       '@ai-sdk/harness':
         specifier: 1.0.158
         version: 1.0.158(ws@8.22.0)(zod@4.6.5)
@@ -600,6 +603,11 @@ importers:
         version: 4.6.5
 
 packages:
+
+  '@agentclientprotocol/sdk@2.0.2':
+    resolution: {integrity: sha512-jLywRB42hZMRMc4aUgt0uRjkY9FQnMdybv4XgLl+ddi75QuJn8Vbl0+CHcVHJDC0+WDfi1KQXRWtHaR5vp6gHw==}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.0.0
 
   '@ai-sdk/anthropic@4.0.88':
     resolution: {integrity: sha512-7h/rI3jLCfLbQsjVt37Q5PCEGOHrpVgrO2zl+y///UpUcWfiRDcqk8DL7br//OFxiEhyxgeIoU/5ulsN1llOyg==}
@@ -5635,6 +5643,10 @@ packages:
         optional: true
 
 snapshots:
+
+  '@agentclientprotocol/sdk@2.0.2(zod@4.6.5)':
+    dependencies:
+      zod: 4.6.5
 
   '@ai-sdk/anthropic@4.0.88(zod@4.6.5)':
     dependencies:

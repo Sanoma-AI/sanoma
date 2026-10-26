@@ -18,6 +18,7 @@ import { Route as ResourcesRouteImport } from './routes/resources'
 import { Route as StartRouteImport } from './routes/start'
 import { Route as WorkflowsRouteRouteImport } from './routes/workflows/route'
 import { Route as ApiChatRouteImport } from './routes/api/chat'
+import { Route as ApiSignInRouteImport } from './routes/api/sign-in'
 import { Route as ConnectorsIndexRouteImport } from './routes/connectors/index'
 import { Route as ConnectorsVendorRouteImport } from './routes/connectors/$vendor'
 import { Route as DataIndexRouteImport } from './routes/data/index'
@@ -79,6 +80,11 @@ const WorkflowsRouteRoute = WorkflowsRouteRouteImport.update({
 const ApiChatRoute = ApiChatRouteImport.update({
   id: '/api/chat',
   path: '/api/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSignInRoute = ApiSignInRouteImport.update({
+  id: '/api/sign-in',
+  path: '/api/sign-in',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConnectorsIndexRoute = ConnectorsIndexRouteImport.update({
@@ -178,6 +184,7 @@ export interface FileRoutesByFullPath {
   '/start': typeof StartRoute
   '/workflows/$name': typeof WorkflowsNameRouteRouteWithChildren
   '/api/chat': typeof ApiChatRoute
+  '/api/sign-in': typeof ApiSignInRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
   '/data/$name': typeof DataNameRoute
   '/runs/$id': typeof RunsIdRoute
@@ -202,6 +209,7 @@ export interface FileRoutesByTo {
   '/resources': typeof ResourcesRoute
   '/start': typeof StartRoute
   '/api/chat': typeof ApiChatRoute
+  '/api/sign-in': typeof ApiSignInRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
   '/data/$name': typeof DataNameRoute
   '/runs/$id': typeof RunsIdRoute
@@ -231,6 +239,7 @@ export interface FileRoutesById {
   '/start': typeof StartRoute
   '/workflows/$name': typeof WorkflowsNameRouteRouteWithChildren
   '/api/chat': typeof ApiChatRoute
+  '/api/sign-in': typeof ApiSignInRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
   '/data/$name': typeof DataNameRoute
   '/runs/$id': typeof RunsIdRoute
@@ -261,6 +270,7 @@ export interface FileRouteTypes {
     | '/start'
     | '/workflows/$name'
     | '/api/chat'
+    | '/api/sign-in'
     | '/connectors/$vendor'
     | '/data/$name'
     | '/runs/$id'
@@ -285,6 +295,7 @@ export interface FileRouteTypes {
     | '/resources'
     | '/start'
     | '/api/chat'
+    | '/api/sign-in'
     | '/connectors/$vendor'
     | '/data/$name'
     | '/runs/$id'
@@ -313,6 +324,7 @@ export interface FileRouteTypes {
     | '/start'
     | '/workflows/$name'
     | '/api/chat'
+    | '/api/sign-in'
     | '/connectors/$vendor'
     | '/data/$name'
     | '/runs/$id'
@@ -341,6 +353,7 @@ export interface RootRouteChildren {
   ResourcesRoute: typeof ResourcesRoute
   StartRoute: typeof StartRoute
   ApiChatRoute: typeof ApiChatRoute
+  ApiSignInRoute: typeof ApiSignInRoute
   RunsIdRoute: typeof RunsIdRoute
   SetupConnectRoute: typeof SetupConnectRoute
   SetupExistingRoute: typeof SetupExistingRoute
@@ -414,6 +427,13 @@ declare module '@tanstack/react-router' {
       path: '/api/chat'
       fullPath: '/api/chat'
       preLoaderRoute: typeof ApiChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/sign-in': {
+      id: '/api/sign-in'
+      path: '/api/sign-in'
+      fullPath: '/api/sign-in'
+      preLoaderRoute: typeof ApiSignInRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/connectors/': {
@@ -605,6 +625,7 @@ const rootRouteChildren: RootRouteChildren = {
   ResourcesRoute: ResourcesRoute,
   StartRoute: StartRoute,
   ApiChatRoute: ApiChatRoute,
+  ApiSignInRoute: ApiSignInRoute,
   RunsIdRoute: RunsIdRoute,
   SetupConnectRoute: SetupConnectRoute,
   SetupExistingRoute: SetupExistingRoute,

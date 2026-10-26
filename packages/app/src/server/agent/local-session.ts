@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { Readable } from "node:stream";
+import { Readable, Writable } from "node:stream";
 import {
   harnessSessionDataDirectoryPath,
   harnessStateDirectoryPath,
@@ -195,6 +195,101 @@ function killGroup(group: number) {
     process.kill(-group, "SIGKILL");
   } catch {
     // Gone already.
+  }
+}
+
+/** How a `Command` ended: its exit code, or the signal that killed it. */
+export interface Exit {
+  exitCode: number | null;
+  signal: string | null;
+}
+
+/** The most of a command's output a `Command` keeps when it is given no limit, in bytes. */
+const OUTPUT_KEPT = 1 << 20;
+
+/**
+ * A command run on this machine in a process group of its own (killed whole by `kill`), with the
+ * environment it is given and nothing of this process's: what it prints kept (the last `limit`
+ * bytes, from a character's start), or, as a `protocol`, its stdout and stdin left to the caller
+ * and only its stderr kept. An ACP agent, a terminal it asks for, a vendor's sign-in, an install.
+ */
+export class Command {
+  /** Its stdin and stdout as web streams, for a `protocol`. */
+  readonly stdin?: WritableStream<Uint8Array>;
+  readonly stdout?: ReadableStream<Uint8Array>;
+  readonly exited: Promise<Exit>;
+  /** How it ended, once it has. */
+  status?: Exit;
+  /** The most of its output kept, in bytes. */
+  limit?: number;
+  /** Whether output was dropped to keep within `limit`. */
+  truncated = false;
+  /** Called whenever it prints. */
+  onOutput?: () => void;
+  readonly #write?: Writable;
+  readonly #group?: number;
+  #output = Buffer.alloc(0);
+
+  constructor(
+    command: string,
+    args: readonly string[],
+    { cwd, env, stdin, protocol }: { cwd: string; env: Record<string, string>; stdin?: boolean; protocol?: boolean },
+  ) {
+    const child = spawnChild(command, args, {
+      cwd,
+      env,
+      stdio: [stdin || protocol ? "pipe" : "ignore", "pipe", "pipe"],
+      detached: true,
+    });
+    this.#group = child.pid;
+    if (protocol) {
+      this.stdin = Writable.toWeb(child.stdin!) as WritableStream<Uint8Array>;
+      this.stdout = web(child.stdout!);
+    } else {
+      this.#write = child.stdin ?? undefined;
+      child.stdout!.on("data", this.#print);
+    }
+    child.stdin?.on("error", () => {});
+    child.stderr!.on("data", this.#print);
+    this.exited = new Promise((done) => {
+      child.on("error", (err) => {
+        this.#print(Buffer.from(`${err.message}\n`));
+        done((this.status = { exitCode: 127, signal: null }));
+      });
+      child.on("close", (exitCode, signal) => done((this.status ??= { exitCode, signal })));
+    });
+  }
+
+  #print = (chunk: Buffer) => {
+    const kept = Buffer.concat([this.#output, chunk]);
+    const limit = this.limit ?? OUTPUT_KEPT;
+    let start = Math.max(0, kept.length - limit);
+    // Not from the middle of a character: past its continuation bytes.
+    while (start < kept.length && start > 0 && (kept[start]! & 0xc0) === 0x80) start++;
+    if (start > 0) this.truncated = true;
+    this.#output = kept.subarray(start);
+    this.onOutput?.();
+  };
+
+  /** What it printed and was kept, as text. */
+  output = () => this.#output.toString("utf8");
+
+  /** Writes `text` to its stdin, when it was given one. */
+  write(text: string) {
+    this.#write?.write(text);
+  }
+
+  /** Kills its process group: what it started too. */
+  kill() {
+    if (this.#group !== undefined) killGroup(this.#group);
+  }
+
+  /** Resolves when it exits 0; an error with the end of what it printed otherwise. */
+  async done(): Promise<void> {
+    const { exitCode, signal } = await this.exited;
+    if (exitCode === 0) return;
+    const said = this.output().trim().split("\n").slice(-5).join("\n");
+    throw new Error(`${signal ?? `exit code ${exitCode}`}${said ? `: ${said}` : ""}`);
   }
 }
 

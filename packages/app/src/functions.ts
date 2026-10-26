@@ -40,7 +40,7 @@ import { availableConnectors } from "./server/available.ts";
 import { goLive, goLiveChoices, goLiveHost, goLiveProgress } from "./server/go-live.ts";
 import { connectExisting, setSetupToken, setupStatus } from "./server/setup.ts";
 import { withPrincipal } from "./middleware.ts";
-import { chatFor } from "./server/agent/turn.ts";
+import { chatFor, engines } from "./server/agent/turn.ts";
 
 // The page's reads and changes, as server functions: the app's only HTTP surface. Each parses its
 // argument and calls the server core (server/core.ts). Failures, the actor header and the actor
@@ -178,6 +178,11 @@ export const connectExistingFn = createServerFn(CHANGE)
 export const getChats = createServerFn(READ)
   .middleware([withPrincipal])
   .handler(({ context }) => context.app.client.chats.list(context.principal.id));
+
+/** The engines a new chat can open on here, by name (`ENGINE_NAMES`): the composer's choice. */
+export const getEngines = createServerFn(READ)
+  .middleware([withPrincipal])
+  .handler(() => Object.keys(engines()));
 
 /** The person's chat with its transcript, or null. */
 export const getChat = createServerFn(READ)

@@ -5,6 +5,7 @@ import { ApiError } from "../../api.ts";
 import type { AppContext } from "../../context.ts";
 import { type ChatMessage, type EngineName, textOf } from "../../lib/chat.ts";
 import { type ActorContext, parse, requireActor, toApiError } from "../core.ts";
+import { acpEngine, OWN_AGENTS, OWN_AGENTS_UNSETTLED, type OwnAgentName } from "./acp.ts";
 import { harnessEngine } from "./harness.ts";
 import { run as loop } from "./loop.ts";
 import { type Engine, settle, written } from "./transcript.ts";
@@ -13,12 +14,26 @@ import { type Engine, settle, written } from "./transcript.ts";
 // from the transcript) and the engines by name. A turn runs in this process, not as a run: a
 // restart loses the turn, not the transcript or the draft, and "continue" picks up.
 
-/** The engines, by the name a chat's row keeps (`ENGINE_NAMES`): our loop, and the coding agents through `HarnessAgent`. */
-export const ENGINES: Readonly<Record<EngineName, Engine>> = {
+/** Every engine, by the name a chat's row keeps (`ENGINE_NAMES`): our loop, the coding agents through `HarnessAgent`, and a person's own over ACP. */
+const ALL: Readonly<Record<EngineName, Engine>> = {
   loop,
   pi: harnessEngine("pi"),
   "claude-code": harnessEngine("claude-code"),
+  ...(Object.fromEntries(
+    Object.keys(OWN_AGENTS).map((agent) => [`acp-${agent}`, acpEngine(agent as OwnAgentName)]),
+  ) as Record<`acp-${OwnAgentName}`, Engine>),
 };
+
+/**
+ * The engines this instance offers, by name: all of them, but Claude Code's and Codex's own
+ * (`OWN_AGENTS_UNSETTLED`) only while `SANOMA_OWN_AGENTS_UNSETTLED=1`, until their vendors' terms
+ * for a hosted instance are settled. Read at each request.
+ */
+export function engines(): Partial<Record<EngineName, Engine>> {
+  if (process.env.SANOMA_OWN_AGENTS_UNSETTLED === "1") return ALL;
+  const unsettled = new Set<string>(OWN_AGENTS_UNSETTLED.map((agent) => `acp-${agent}`));
+  return Object.fromEntries(Object.entries(ALL).filter(([name]) => !unsettled.has(name)));
+}
 
 /** What the browser sends: the chat's id (its own, for a new chat) and the person's new message. */
 const ChatRequest = z.object({
@@ -48,8 +63,9 @@ export async function postChat(request: Request, context: ActorContext & { site?
     let chat = await chats.get(body.id);
     if (chat && chat.person !== principal.id) throw new ApiError(404, { error: `No chat ${body.id}` });
     const named = chat?.engine ?? body.engine;
-    const engine = Object.hasOwn(ENGINES, named) ? ENGINES[named as EngineName] : undefined;
-    if (!engine) throw invalid(`No engine ${named}: the engines are ${Object.keys(ENGINES).join(", ")}`);
+    const offered = engines();
+    const engine = Object.hasOwn(offered, named) ? offered[named as EngineName] : undefined;
+    if (!engine) throw invalid(`No engine ${named}: the engines are ${Object.keys(offered).join(", ")}`);
     // The new message is checked before a turn under way is stopped for it: a new one, by the
     // person. The transcript, written by this app, is not validated again.
     const checked = await safeValidateUIMessages<ChatMessage>({ messages: [body.message] });

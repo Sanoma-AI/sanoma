@@ -17,7 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu.tsx";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "#/components/ui/empty.tsx";
-import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
+import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import { cn } from "#/lib/utils.ts";
@@ -28,10 +28,11 @@ import {
   ENGINE_NAMES,
   type EngineName,
   errorParts,
+  ownPlan,
   textOf,
   unfinished,
 } from "../../lib/chat.ts";
-import { CHATS_KEY, chatQuery, chatsQuery } from "../../queries.ts";
+import { CHATS_KEY, chatQuery, chatsQuery, enginesQuery } from "../../queries.ts";
 import { useCrumbs } from "../common.tsx";
 import { Reply } from "./chat-parts.tsx";
 
@@ -146,7 +147,7 @@ function Conversation({ id, initial, onSend }: { id: string; initial: ChatMessag
               <p className="whitespace-pre-wrap">{textOf(message, "\n")}</p>
             </div>
           ) : (
-            <Reply key={message.id} message={message} live={busy && i === messages.length - 1} />
+            <Reply key={message.id} message={message} live={busy && i === messages.length - 1} chat={id} />
           ),
         )}
         {status === "submitted" && <Spinner aria-label="Waiting for the agent" />}
@@ -199,6 +200,13 @@ function TurnError({ message }: { message: string }) {
   );
 }
 
+/** An engine as the composer's choice. */
+const engineOption = (name: EngineName) => (
+  <NativeSelectOption key={name} value={name}>
+    {ENGINE_NAMES[name]}
+  </NativeSelectOption>
+);
+
 function EmptyChat() {
   return (
     <Empty className="p-6">
@@ -217,7 +225,8 @@ function EmptyChat() {
 
 /**
  * The composer: the page as a chip, the message, the engine a new chat opens on (`engine`, only
- * then), Send (Enter; Shift+Enter for a new line).
+ * then: those the server offers, a person's own agents in a group of their own), Send (Enter;
+ * Shift+Enter for a new line).
  */
 function Composer({
   busy,
@@ -230,6 +239,9 @@ function Composer({
 }) {
   const page = useCrumbs().at(-1)?.label;
   const [text, setText] = useState("");
+  const { data: offered = ["loop"] } = useQuery({ ...enginesQuery(), enabled: engine !== undefined });
+  const names = offered.filter((name): name is EngineName => Object.hasOwn(ENGINE_NAMES, name));
+
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
     if (busy || !text.trim()) return;
@@ -266,11 +278,12 @@ function Composer({
             value={engine.value}
             onChange={(e) => engine.set(e.target.value as EngineName)}
           >
-            {Object.entries(ENGINE_NAMES).map(([name, label]) => (
-              <NativeSelectOption key={name} value={name}>
-                {label}
-              </NativeSelectOption>
-            ))}
+            {names.filter((name) => !ownPlan(name)).map(engineOption)}
+            {names.some(ownPlan) && (
+              <NativeSelectOptGroup label="Your own plan">
+                {names.filter(ownPlan).map(engineOption)}
+              </NativeSelectOptGroup>
+            )}
           </NativeSelect>
         )}
         <Button type="submit" size="icon-sm" variant="secondary" disabled={busy || !text.trim()} aria-label="Send">

@@ -1,7 +1,10 @@
 import { lstat, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Chat, Draft, Source } from "@sanoma-ai/workflows";
+import type { UIMessageStreamWriter } from "ai";
 import type { AppContext } from "../../context.ts";
+import type { ChatMessage } from "../../lib/chat.ts";
+import { checks } from "../drafts.ts";
 
 /** Where an agent may never write in a checkout: git's own files, and the install (`node_modules`, a link to the live one in a draft). */
 const OFF_LIMITS = new Set([".git", "node_modules"]);
@@ -28,6 +31,10 @@ export async function allowedPath(worktree: string, path: string): Promise<strin
   return OFF_LIMITS.has(relative(root, full).split(sep)[0]!.toLowerCase()) ? undefined : full;
 }
 
+/** What a coding agent is told when the checkout rule refuses a shell command. */
+export const NO_SHELL =
+  "No shell commands in this chat until previews exist: edit the files; the checks run after your turn";
+
 /** Whether the absolute path `full` is `dir` or under it, by their paths as given. */
 export function within(dir: string, full: string): boolean {
   const inside = relative(dir, full);
@@ -52,6 +59,29 @@ export async function openDraft(app: AppContext, chat: Chat): Promise<Draft> {
     chat.draftId = chat.id;
   }
   return opened;
+}
+
+/**
+ * The end of a coding agent's turn, however it ended (an error too): what it changed committed on
+ * the chat's draft as `author`, then, unless a new message stopped it (the next turn shows the
+ * card), the draft's card (`data-draft`) from its checks and its diff.
+ */
+export async function commitTurn(
+  app: AppContext,
+  chat: Chat,
+  draft: Draft,
+  author: string,
+  message: string,
+  signal: AbortSignal,
+  writer: UIMessageStreamWriter<ChatMessage>,
+) {
+  const committed = (await draft.commit({ paths: ["."], message, author })) !== undefined;
+  if (!committed || signal.aborted) return;
+  const [checked, diff] = await Promise.all([
+    checks(draft.root, app.resolved.databaseUrl),
+    drafting(app).diff(chat.id),
+  ]);
+  writer.write({ type: "data-draft", id: "draft", data: { branch: draft.branch, ...diff, checks: checked } });
 }
 
 /** The real path of `dir`: of its nearest ancestor that exists, with the rest joined on. */

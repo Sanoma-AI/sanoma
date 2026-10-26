@@ -7,13 +7,20 @@ import { promisify } from "node:util";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ensureBuilt, repo as checkout, serving } from "./fixture.ts";
+import { gitIdentity } from "./git.ts";
 
 // Needs Postgres (`pnpm db:up`), the packages' builds, and pnpm with the registry or a warm store
 // (`--prefer-offline`): with no lockfile, the company's third-party dependencies resolve as a
 // customer's do. This checkout's packages install as tarballs, under node_modules as from npm,
 // where a linked checkout would hide issue #220; the installed bin runs the dev server.
 // No SANOMA_DEV_REPO from the shell: the bin as installed, not in dev mode.
-const env = { SANOMA_DATABASE_URL: testDatabaseUrl("sanoma-packed"), SANOMA_APP_PORT: "0", SANOMA_DEV_REPO: "" };
+const env = {
+  SANOMA_DATABASE_URL: testDatabaseUrl("sanoma-packed"),
+  SANOMA_APP_PORT: "0",
+  SANOMA_DEV_REPO: "",
+  // A chat's draft commits as someone.
+  ...gitIdentity(),
+};
 const run = promisify(execFile);
 const fixture = fileURLToPath(new URL("./fixtures/sites/", import.meta.url));
 
@@ -144,4 +151,61 @@ describe("sanoma from packed tarballs: the dev server", () => {
     // The typography plugin's class, in the site's own layer.
     expect(await css.text()).toMatch(/@layer utilities\.hello\b[\s\S]*\.prose \{/);
   }, 60_000);
+
+  // The chat's third engine as a company runs it: OpenCode installed on first use under the
+  // company's .sanoma/agent-home, on its free model, in a draft of the company's own repository.
+  it.runIf(process.env.SANOMA_LIVE === "1")(
+    "runs a chat turn on a person's own OpenCode, which drafts the A4 request, with the draft card",
+    async () => {
+      const git = (...args: string[]) => run("git", args, { cwd: dir, env: { ...process.env, ...env } });
+      writeFileSync(
+        join(dir, "workflows/offboarding.ts"),
+        `import { defineWorkflow, z } from "sanoma";
+
+export default defineWorkflow({
+  name: "offboarding",
+  title: "Offboard someone",
+  trigger: "manual",
+  input: z.object({ person: z.string().min(1) }),
+  uses: [],
+  run: async (ctx, { person }) => ({ done: [\`Removed \${person}'s accounts\`] }),
+});
+`,
+      );
+      writeFileSync(join(dir, ".gitignore"), ".sanoma/\nnode_modules/\nvendor/\n");
+      await git("init", "--quiet", "--initial-branch=main");
+      await git("add", "--all");
+      await git("commit", "--quiet", "-m", "First");
+      const { url } = server!;
+      const started = Date.now();
+      const id = `packed-${Date.now()}`;
+      const text =
+        "Add a laptop step to offboarding: in workflows/offboarding.ts, add `Collected ${person}'s laptop` to the done list.";
+      const response = await fetch(`${url}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: url, "x-sanoma-actor": "ada" },
+        body: JSON.stringify({
+          id,
+          engine: "acp-opencode",
+          message: { id: `m-${id}`, role: "user", parts: [{ type: "text", text }] },
+        }),
+      });
+      expect(response.status, stderr()).toBe(200);
+      // The reply's stream, read to its end: its draft card among its chunks.
+      const chunks = (await response.text())
+        .split("\n")
+        .filter((line) => line.startsWith("data: {"))
+        .map((line) => JSON.parse(line.slice("data: ".length)) as { type: string; data?: unknown });
+      console.log(
+        `OpenCode in a packed company: the first turn, its install included, took ${Date.now() - started} ms`,
+      );
+      expect(chunks.find((chunk) => chunk.type === "data-draft")?.data, stderr()).toMatchObject({
+        branch: `draft/${id}`,
+        files: ["workflows/offboarding.ts"],
+      });
+      const { stdout } = await git("show", `draft/${id}:workflows/offboarding.ts`);
+      expect(stdout).toContain("laptop");
+    },
+    900_000,
+  );
 });
