@@ -12,6 +12,7 @@ Describe Sanoma the way the [README's opening](README.md#sanoma) does (workflow 
 | Runtime, people, Cedar policies, approvals, ledger, workflow analysis | [workflows](packages/workflows/AGENTS.md)                              |
 | Web app, server functions, forms, graphs                              | [app](packages/app/AGENTS.md)                                          |
 | Dogfooding a checkout from a company repo: `sanoma-dev`               | [dev](packages/dev/AGENTS.md)                                          |
+| The desktop shell (Electron) that runs a company folder in a window   | [desktop](packages/desktop/AGENTS.md)                                  |
 | Test workers, fakes, recorded HTTP replay, scenarios                  | [testing](packages/testing/AGENTS.md)                                  |
 | Provider bridge, schema generation, provider replay                   | [bridge](packages/bridge/AGENTS.md)                                    |
 | Vendor connectors                                                     | [connector conventions](connectors/AGENTS.md), then the vendor package |
