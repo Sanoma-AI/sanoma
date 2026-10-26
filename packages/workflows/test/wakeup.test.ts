@@ -1,4 +1,3 @@
-import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { describeConfig } from "../src/describe.ts";
@@ -6,7 +5,6 @@ import {
   declaredWakeup,
   defineConnector,
   defineResource,
-  defineWorkflow,
   type HostSpec,
   resolveConfig,
   type SanomaConfig,
@@ -213,26 +211,6 @@ describe("startWorker", () => {
     await expect(startWorker(configAt(root, { wakeup: true }))).rejects.toThrow(
       /^The config runs the wakeup service \(`wakeup: true`\) and declares a wakeup of its own/,
     );
-  });
-
-  it("warns once for each workflow on a schedule, which it does not run yet", async () => {
-    const nightly = defineWorkflow({
-      name: "nightly",
-      trigger: { schedule: "0 3 * * *", timezone: "Europe/Amsterdam" },
-      input: z.object({}),
-      uses: [],
-      run: async () => 1,
-    });
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const worker = await startWorker({
-      workflows: [nightly],
-      connectors: [defineConnector("none", {})],
-      databaseUrl: testDatabaseUrl("wakeup"),
-    });
-    await worker.stop();
-    expect(warn.mock.calls.filter(([line]) => String(line).includes("on a schedule"))).toEqual([
-      ["sanoma: the workflow nightly is on a schedule, which the worker does not run yet: start it by hand"],
-    ]);
   });
 });
 

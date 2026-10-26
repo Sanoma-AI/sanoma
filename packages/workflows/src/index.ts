@@ -139,6 +139,7 @@ export { startWorker, type Worker, type WorkerOptions } from "./worker.ts";
 export type { DeadlineSource, Deadlines, SelfStop, Wait } from "./deadlines.ts";
 // Whether a wake is the one the instance's worker last registered, for the `/wake` route.
 export { shouldWake } from "./db.ts";
+export { nextFire, nextScheduledFire } from "./schedules.ts";
 // `secret` itself is at `@sanoma-ai/workflows/resources`, for data files; this is the drivers' side.
 export {
   generateSecret,
@@ -189,6 +190,7 @@ export {
   personOf,
   principalOf,
   RUNTIME_AGENTS,
+  SCHEDULE_AGENT,
   credentialReady,
   DEFAULT_SLEEP_NAME,
   ENDED_STATUSES,

@@ -34,6 +34,7 @@ import {
   getGoLiveChoices,
   getGoLiveProgress,
   getLastRuns,
+  getNextFires,
   getPermissions,
   getRun,
   getRuns,
@@ -327,6 +328,19 @@ export const recentRunsQuery = () =>
     ...runsQuery({ limit: RUNS_LIMIT.default }),
     refetchInterval: runsRefetchInterval(5_000),
     staleTime: 5_000,
+  });
+
+/** When each workflow on a schedule fires next (`nextFires`), asked again once the earliest has passed. */
+export const nextFiresQuery = () =>
+  queryOptions({
+    queryKey: ["next-fires"],
+    queryFn: () => getNextFires(),
+    staleTime: 60_000,
+    refetchInterval: (query) => {
+      const earliest = Math.min(...Object.values(query.state.data ?? {}).map(Date.parse));
+      // A timer holds 24.8 days at most; a minute at least, the fastest a cron fires.
+      return Math.min(Math.max(earliest - Date.now() + 1_000, 60_000), 86_400_000);
+    },
   });
 
 /**

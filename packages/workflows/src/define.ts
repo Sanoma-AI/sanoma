@@ -238,7 +238,8 @@ export function jsonSchemaOf(
 /**
  * How a workflow starts: `manual` (by hand, or from code), or on a schedule, `schedule` a cron
  * expression of five fields (minute, hour, day of month, month, day of week) read in `timezone`,
- * an IANA time zone (`Europe/Amsterdam`), UTC without one.
+ * an IANA time zone (`Europe/Amsterdam`), UTC without one. A scheduled run is started by the
+ * runtime's `schedule` agent with the input `{}`, as the policy allows; it can still be started by hand.
  */
 export type Trigger = "manual" | { readonly schedule: string; readonly timezone?: string };
 
@@ -268,6 +269,12 @@ export function defineWorkflow<const U extends readonly Use[], S extends z.ZodTy
     throw new Error(`Workflow name "${def.name}" must be lowercase letters, digits and dashes`);
   }
   checkTrigger(def.name, def.trigger);
+  // A scheduled run starts with no input of its own.
+  if (def.trigger !== "manual" && !acceptsEmpty(def.input)) {
+    throw new Error(
+      `Workflow "${def.name}": a scheduled run starts with the input {}, which its input schema refuses: make each field optional or give it a default`,
+    );
+  }
   const file = callerFile();
   if (file === undefined) {
     throw new Error(
@@ -276,6 +283,15 @@ export function defineWorkflow<const U extends readonly Use[], S extends z.ZodTy
     );
   }
   return Object.freeze({ kind: "workflow", ...def, file });
+}
+
+/** True when `{}` parses: a schema zod can check only asynchronously is taken as accepting it, and the run parses it. */
+function acceptsEmpty(schema: z.ZodType): boolean {
+  try {
+    return schema.safeParse({}).success;
+  } catch {
+    return true;
+  }
 }
 
 /** Throws what is wrong with a workflow's `trigger`: not `manual` or a schedule, five fields, in a time zone there is. */

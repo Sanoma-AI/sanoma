@@ -1,4 +1,4 @@
-import { DBOS } from "@dbos-inc/dbos-sdk";
+import { DBOS, type ScheduledWorkflowFn } from "@dbos-inc/dbos-sdk";
 import { randomUUID } from "node:crypto";
 import { awaitApproval } from "./approvals.ts";
 import { buildCtx, decideStart, isInfrastructureError, startHoldOf } from "./call.ts";
@@ -15,8 +15,9 @@ import { dbosLogger, quietIfSandbox, setLogLevel, warn } from "./log.ts";
 import { lineStartsOf, readSource } from "./ast.ts";
 import { callsOf, outlineWithSource } from "./outline.ts";
 import { currentRun, type Run, type RunArgs, type WorkerState, type WorkflowOutline } from "./run.ts";
+import { applyScheduled, nextScheduledFire, type ScheduledStarter, scheduledStarter } from "./schedules.ts";
 import type { Source } from "./source.ts";
-import { errorMessage, WORKFLOW_ACTION } from "./shared.ts";
+import { approverLabel, errorMessage, WORKFLOW_ACTION } from "./shared.ts";
 
 export interface Worker {
   /**
@@ -52,9 +53,9 @@ const MAX_RECOVERY_ATTEMPTS = 100_000;
 
 // DBOS registrations are process-wide and survive shutdown, so a name is registered once, and
 // its function reads the state of the worker running when a run starts, definition and all; the
-// run keeps that state.
+// run keeps that state. Each registered function, by name, is what a schedule fires.
 let current: WorkerState | undefined;
-const registered = new Set<string>();
+const registered = new Map<string, ScheduledWorkflowFn>();
 
 export interface WorkerOptions {
   /** The least severe level of the runtime's and DBOS's messages to show, for the whole process: `warn` by default. */
@@ -88,6 +89,11 @@ export interface WorkerOptions {
    * worker on the next request or wake (`shouldWake`), since a stopped one cannot launch again.
    */
   onStopped?: (stopped: SelfStop) => void;
+  /**
+   * Apply the workflows' schedules (`trigger: { schedule }`): on by default. `runScenarios` turns
+   * it off, on a database of its own, so no schedule is applied there to start a live run.
+   */
+  schedules?: boolean;
 }
 
 /**
@@ -109,12 +115,6 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     throw new Error(
       "The config runs the wakeup service (`wakeup: true`) and declares a wakeup of its own: an instance that runs the service must not stop, so leave out one of them",
     );
-  }
-  if (!options.quiet) {
-    for (const wf of resolved.workflows.values()) {
-      if (wf.trigger !== "manual")
-        warn(`the workflow ${wf.name} is on a schedule, which the worker does not run yet: start it by hand`);
-    }
   }
   // The config's own, or a Postgres store made for this worker, which `stop` then closes.
   const ledger = ownedLedger(resolved);
@@ -180,10 +180,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   let launched = false;
   try {
     for (const name of resolved.workflows.keys()) {
-      if (!registered.has(name)) {
-        register(name);
-        registered.add(name);
-      }
+      if (!registered.has(name)) registered.set(name, register(name));
     }
     current = state;
     // Before DBOS's pool connects, so its connections start with the database's idle-transaction
@@ -203,6 +200,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     // DBOS gives runs queued without a version only to the app's latest version, which is the
     // newest one registered. A worker started on code seen before (a rollback) is not it.
     const latest = (await DBOS.getLatestApplicationVersion()).versionName;
+    const isLatest = latest === resolved.version || options.promote === true;
     if (latest !== resolved.version) {
       if (options.promote) await DBOS.setLatestApplicationVersion(resolved.version);
       else {
@@ -213,6 +211,12 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       }
     }
     await DBOS.registerQueue(resolved.queueName);
+    // The schedules are the latest version's: an older worker leaves them as the newer set them.
+    if (isLatest && options.schedules !== false) {
+      await applyScheduled(resolved, registered, () => secrets.db());
+      // A schedule's next tick is a deadline: a worker that stops when quiet registers it with its wakeup.
+      state.deadlines.addSource(() => nextScheduledFire(resolved, new Date()));
+    }
     await warnAboutStrandedRuns(resolved);
     const summary = unconfiguredSummary(worker.unconfigured, resolved.driversByVendor.size);
     if (summary && !options.quiet) warn(summary);
@@ -301,30 +305,46 @@ async function warnAboutStrandedRuns({ appName, version, queueName }: ResolvedCo
   );
 }
 
-/** Registers the name with DBOS: its runs take the definition of that name from the running worker. */
-function register(name: string) {
-  DBOS.registerWorkflow((args: RunArgs) => quietIfSandbox(args.sandbox !== undefined, () => runWorkflow(name, args)), {
-    name,
-    maxRecoveryAttempts: MAX_RECOVERY_ATTEMPTS,
-  });
+/**
+ * Registers the name with DBOS: its runs take the definition of that name from the running worker.
+ * A start passes its `RunArgs`; a schedule's tick passes the time it is for (and DBOS's context).
+ */
+function register(name: string): ScheduledWorkflowFn {
+  const fn = DBOS.registerWorkflow(
+    (start: RunArgs | Date) =>
+      start instanceof Date
+        ? runWorkflow(name, start)
+        : quietIfSandbox(start.sandbox !== undefined, () => runWorkflow(name, start)),
+    { name, maxRecoveryAttempts: MAX_RECOVERY_ATTEMPTS },
+  );
+  return fn as unknown as ScheduledWorkflowFn;
 }
 
 /**
  * One run of the workflow registered as `name`, on the state of the worker running when it
- * starts, counted busy in its deadlines but while it waits.
+ * starts, counted busy in its deadlines but while it waits: started with its `RunArgs`, or by its
+ * schedule for the time `start`, as the `schedule` agent with the input `{}`, the policy deciding
+ * that start at the top of the run.
  */
-async function runWorkflow(name: string, args: RunArgs): Promise<unknown> {
+async function runWorkflow(name: string, start: RunArgs | Date): Promise<unknown> {
   const state = current;
   // A stopped worker's state stays current while DBOS shuts down.
   if (!state || state.stopped) throw new Error(`Run of "${name}" started with no worker running`);
-  return state.deadlines.running(DBOS.workflowID!, () => runOn(state, name, args));
+  return state.deadlines.running(DBOS.workflowID!, () => runOn(state, name, start));
 }
 
-async function runOn(state: WorkerState, name: string, { input, startedBy, sandbox, hold }: RunArgs): Promise<unknown> {
+async function runOn(state: WorkerState, name: string, start: RunArgs | Date): Promise<unknown> {
   const wf = state.workflows.get(name);
   const outline = state.outlines.get(name);
   // Registered by an earlier worker in this process, whose config had it; this one's has not.
   if (!wf || !outline) throw new Error(`Run of "${name}" refused: this worker's config has no workflow of that name`);
+  let scheduled: ({ at: Date } & ScheduledStarter) | undefined;
+  let args: RunArgs;
+  if (start instanceof Date) {
+    scheduled = { at: start, ...(await scheduledStarter(state)) };
+    args = { input: {}, startedBy: scheduled.startedBy };
+  } else args = start;
+  const { input, startedBy, sandbox, hold } = args;
   const run: Run = {
     id: DBOS.workflowID!,
     workflow: wf.name,
@@ -338,25 +358,42 @@ async function runOn(state: WorkerState, name: string, { input, startedBy, sandb
     outline,
     state,
   };
-  await write(run, entry(run, { type: "run.started", input }));
+  await write(
+    run,
+    entry(run, { type: "run.started", input, ...(scheduled && { scheduledFor: scheduled.at.toISOString() }) }),
+  );
   let output: unknown;
   try {
     try {
       // The one parse of the input: the client checked it, but sent it as given.
       const parsed = parseOrThrow(wf.input, input, `The input does not match ${wf.name}'s schema`);
+      const action = `${WORKFLOW_ACTION}${wf.name}`;
+      /** The policy's answer to this start, in a step; a deny fails the run. */
+      const decide = async () => {
+        const decision = await DBOS.runStep(
+          async () => decideStart(state.policy, wf.name, parsed, startedBy, run.approvals),
+          { name: `policy:${action}` },
+        );
+        if (decision.kind === "deny") throw new PolicyDeniedError(action, decision.reason);
+        return decision;
+      };
+      if (scheduled) {
+        if (scheduled.refused) throw new Error(`The schedule agent was not admitted: ${scheduled.refused}`);
+        // A schedule has no one to wait for, and its next tick would start another run meanwhile.
+        const decision = await decide();
+        if (decision.kind === "approve") {
+          throw new PolicyDeniedError(
+            action,
+            `it needs ${approverLabel(decision.approver)} to approve it, and a scheduled start waits for no approval`,
+          );
+        }
+      }
       // The policy held the start: the body waits for each hold's approval in turn, the policy
       // asked again once one is approved, and a rejection or a deny fails the run.
-      const action = `${WORKFLOW_ACTION}${wf.name}`;
       for (let next = hold; next;) {
         const held = { op: action, input, reasons: next.reasons };
         await awaitApproval(run, next.title, { approver: next.approver, covers: [action] }, undefined, held);
-        const decision = await DBOS.runStep(
-          async () => decideStart(state.policy, wf.name, parsed, startedBy, run.approvals),
-          {
-            name: `policy:${action}`,
-          },
-        );
-        if (decision.kind === "deny") throw new PolicyDeniedError(action, decision.reason);
+        const decision = await decide();
         next = decision.kind === "approve" ? startHoldOf(wf.name, decision) : undefined;
       }
       if (sandbox !== undefined) {

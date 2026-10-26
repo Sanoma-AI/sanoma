@@ -17,8 +17,9 @@ export const RUNTIME_VERSION = (
  * 2: calls run in program order; a decision event per approval (2026-10-07).
  * 3: a start the policy holds waits on its approval before the body (2026-10-21).
  * 4: a sleep for a duration reads DBOS's clock for its start (2026-10-25).
+ * 5: a scheduled run admits its starter and asks the policy in two steps before the body (2026-10-25).
  */
-export const STEP_LAYOUT = 4;
+export const STEP_LAYOUT = 5;
 
 let dbosVersion: string | undefined;
 

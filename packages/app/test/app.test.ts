@@ -59,6 +59,7 @@ import {
   fileSource,
   lastRuns,
   listRuns,
+  nextFires,
   parse,
   readStartRun,
   requireActor,
@@ -447,6 +448,18 @@ describe("the server functions", () => {
     expect(await availableConnectors()).toEqual({
       connectors: [],
       error: "Could not search npm: registry.npmjs.org answered 503 to /-/v1/search",
+    });
+  });
+
+  it("says when each workflow on a schedule fires next, in its time zone, and nothing for one started by hand", () => {
+    const workflows = [
+      { name: "nightly", trigger: { schedule: "0 9 * * *", timezone: "Europe/Amsterdam" } },
+      { name: "hourly", trigger: { schedule: "0 * * * *" } },
+      { name: "by-hand", trigger: "manual" },
+    ];
+    expect(nextFires({ description: { workflows } as never }, new Date("2026-10-25T10:30:00Z"))).toEqual({
+      nightly: "2026-10-26T08:00:00.000Z",
+      hourly: "2026-10-25T11:00:00.000Z",
     });
   });
 
@@ -1268,6 +1281,7 @@ describe("the page", () => {
     // Over it, the inspector, with nothing selected: About, what it may call, which closes.
     expect(floats(found.html)).toEqual(["Inspector"]);
     expect(found.html).toMatch(/<h2>About</);
+    expect(found.html).toMatch(/<h3[^>]*>Starts<\/h3><p>By hand<\/p>/);
     expect(found.html).toMatch(/<h3[^>]*>Operations it may call<\/h3>/);
     expect(found.html).toMatch(/<button[^>]*aria-label="Close"/);
     // The source waits behind Code, and no tab is a Ledger: the workflow's page has no run.

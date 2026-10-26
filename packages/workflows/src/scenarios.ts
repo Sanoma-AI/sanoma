@@ -88,8 +88,9 @@ export async function runScenarios(
   const passed: string[] = [];
   if (scenarios.length === 0) return { passed, failed };
 
-  // Quiet: the scenarios call the fakes alone, so no vendor need be configured.
-  const worker = await startWorker(shared, { promote: true, quiet: true });
+  // Quiet: the scenarios call the fakes alone, so no vendor need be configured; and no schedule
+  // is applied, since a tick's run would be live.
+  const worker = await startWorker(shared, { promote: true, quiet: true, schedules: false });
   try {
     const client = await SanomaClient.connect(shared);
     try {
