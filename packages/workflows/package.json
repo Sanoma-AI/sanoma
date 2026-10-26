@@ -66,6 +66,10 @@
     "./shared": {
       "types": "./dist/shared.d.ts",
       "default": "./dist/shared.js"
+    },
+    "./wakeup-service": {
+      "types": "./dist/wakeup-service.d.ts",
+      "default": "./dist/wakeup-service.js"
     }
   },
   "publishConfig": {

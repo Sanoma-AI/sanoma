@@ -15,6 +15,7 @@ import {
 } from "@sanoma-ai/workflows";
 import { describeConfig, readPeople, schemaOf, writeGenerated } from "@sanoma-ai/workflows/describe";
 import { domainsOf } from "@sanoma-ai/workflows/shared";
+import type { WakeupService } from "@sanoma-ai/workflows/wakeup-service";
 import { UsageError } from "./config.ts";
 import { runtimeFrom, siteBuild } from "./sites.ts";
 import { localGitSource } from "./source.ts";
@@ -257,15 +258,27 @@ export async function appOptions(readSecrets?: ReadSecrets): Promise<Pick<AppOpt
   }
 }
 
-/** The sites' build, the worker, then the app, in this process; `stop` stops the app, then the worker. */
+/**
+ * The sites' build, the worker, the wakeup service when the config runs it (`wakeup: true`), then
+ * the app, serving the service's routes, in this process; `stop` stops the app, the service, then
+ * the worker.
+ */
 export async function serve(config: SanomaConfig, serveOptions: ServeOptions): Promise<Served> {
   // Read and built before the worker starts, so a mistake in the variables or a site starts nothing.
   const options = await appStart(config, serveOptions);
   const worker = await runWorker(config);
+  let wakeup: WakeupService | undefined;
   let app: Served;
   try {
-    app = await served(config, options, [wakeRoute(serveOptions)]);
+    if (config.wakeup === true) {
+      const { databaseUrl } = serveOptions.resolved ?? resolveConfig(config);
+      const { log } = serveOptions;
+      const { startWakeupService } = await import("@sanoma-ai/workflows/wakeup-service");
+      wakeup = await startWakeupService({ databaseUrl, log: { info: log, warn: log } });
+    }
+    app = await served(config, options, [wakeRoute(serveOptions), ...(wakeup?.routes ?? [])]);
   } catch (err) {
+    await wakeup?.stop().catch(() => {});
     await worker.stop().catch(() => {});
     throw err;
   }
@@ -276,7 +289,11 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
       try {
         await app.stop();
       } finally {
-        await worker.stop();
+        try {
+          await wakeup?.stop();
+        } finally {
+          await worker.stop();
+        }
       }
     },
   };

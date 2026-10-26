@@ -55,6 +55,61 @@ describe("sanoma serve", () => {
   }, 60_000);
 });
 
+describe("sanoma wakeup", () => {
+  it("serves the wakeup service's routes and /healthz alone, and stops on SIGINT", async () => {
+    dir = copyFixture();
+    const { url, stop, output } = await serving(dir, ["wakeup"], unconfigured);
+    expect(output().stdout).toBe(`the wakeup service at ${url}; ctrl-c to stop\n`);
+    const health = await fetch(`${url}/healthz`);
+    expect([health.status, await health.text()]).toEqual([200, "ok\n"]);
+    const res = await fetch(`${url}/wakeup/instances`, {
+      method: "POST",
+      body: JSON.stringify({ url: "http://x.test" }),
+    });
+    expect([res.status, res.headers.get("cache-control"), await res.json()]).toEqual([
+      401,
+      "no-store",
+      { error: "an account's token is needed" },
+    ]);
+    // Nothing of the app.
+    expect((await fetch(`${url}/workflows`)).status).toBe(404);
+    // An account minted beside it registers an instance.
+    const minted = await runCli(dir, ["wakeup", "account", "acme"], unconfigured);
+    expect(minted.code, minted.stderr).toBe(0);
+    const { token } = JSON.parse(minted.stdout) as { token: string };
+    const made = await fetch(`${url}/wakeup/instances`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+      body: JSON.stringify({ url: "http://x.test" }),
+    });
+    expect([made.status, Object.keys((await made.json()) as object)]).toEqual([201, ["id", "token"]]);
+    // The body is read once the token is known, and only so far.
+    const huge = await fetch(`${url}/wakeup/instances`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+      body: "x".repeat(100_000),
+    });
+    expect(huge.status).toBe(413);
+    expect((await runCli(dir, ["wakeup", "account"], unconfigured)).code).toBe(2);
+    await stop();
+  }, 60_000);
+
+  it("is mounted in sanoma serve by wakeup: true, ahead of the login", async () => {
+    dir = copyFixture();
+    const file = join(dir, "sanoma.config.ts");
+    writeFileSync(
+      file,
+      readFileSync(file, "utf8").replace("connectors: [ghost],", "connectors: [ghost],\n  wakeup: true,"),
+    );
+    const { url, stop } = await serving(dir, ["serve"], unconfigured);
+    const res = await fetch(`${url}/wakeup/instances/00000000-0000-4000-8000-000000000000`, {
+      headers: { host: "wakeup.example" },
+    });
+    expect([res.status, await res.json()]).toEqual([401, { error: "an account's token is needed" }]);
+    await stop();
+  }, 60_000);
+});
+
 describe("SANOMA_EVENTS=1, for a parent process", () => {
   const events = { ...unconfigured, SANOMA_EVENTS: "1" };
 
