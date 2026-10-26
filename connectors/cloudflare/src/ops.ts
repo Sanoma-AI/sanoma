@@ -328,6 +328,9 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       if (expect && (expect.action !== fresh.action || expect.replace.join() !== fresh.replace.join())) {
         throw refused(`container.update: the plan changed (${expect.action}, now ${fresh.action})`, "plan_changed");
       }
+      if (fresh.action !== "update" && fresh.action !== "none") {
+        throw refused(`container.update: the plan is a ${fresh.action}, not an update`, "plan_changed");
+      }
       if (fresh.action === "none") {
         const found = await read({ id });
         if (found.state) return { id, state: found.state };
@@ -471,11 +474,9 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
       return { id, state };
     },
     delete: async ({ id }: { id: string }, { secrets }: CallContext) => {
-      const token = await secrets.get(WAKEUP_TOKEN);
-      if (token) {
-        const answer = await route(id, "DELETE", token);
-        if (answer.status !== 204 && answer.status !== 404) throw failed(answer);
-      }
+      // Without the token it is still asked: a host that is gone answers 404, one that holds a wake refuses.
+      const answer = await route(id, "DELETE", (await secrets.get(WAKEUP_TOKEN)) ?? "");
+      if (answer.status !== 204 && answer.status !== 404) throw failed(answer);
       return { id, gone: true as const };
     },
     register: async (registration: WakeupRegistration, call: CallContext) => {

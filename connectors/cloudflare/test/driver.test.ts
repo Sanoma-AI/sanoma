@@ -169,6 +169,21 @@ describe.skipIf(live)("cloudflareDriver", () => {
       ).rejects.toMatchObject({ name: "DriverError", retryable: false, vendorCode: "plan_changed" });
     });
 
+    it("refuses an update that is a replace, without uploading", async () => {
+      play(
+        "update-is-a-replace",
+        only("update-to-a-new-image", (_, i) => i < 3),
+      );
+      await expect(
+        op("container.update", { id: "company", desired: { ...desired, name: "elsewhere" } }),
+      ).rejects.toMatchObject({
+        retryable: false,
+        vendorCode: "plan_changed",
+        message: expect.stringContaining("replace"),
+      });
+      expect(sent.map((r) => r.method)).toEqual(["GET", "GET", "GET"]);
+    });
+
     it("reads what the Worker runs from its bindings, and no secret's value", async () => {
       play("read-only", [
         ...only("update-to-a-new-image", (_, i) => i < 3),
@@ -384,6 +399,19 @@ describe.skipIf(live)("cloudflareDriver", () => {
       play("alarm-delete", [wake(204, null, "DELETE"), wake(404, "There is nothing here yet", "DELETE")]);
       expect(await op("alarm.delete", { id: URL_OF })).toEqual({ id: URL_OF, gone: true });
       expect(await op("alarm.delete", { id: URL_OF })).toEqual({ id: URL_OF, gone: true });
+    });
+
+    it("asks a host to delete its wake without the stored token too: gone counts, a refusal fails", async () => {
+      play("alarm-delete-without-token", [
+        wake(404, "There is nothing here yet", "DELETE"),
+        wake(401, { error: "the token is not this host's SANOMA_WAKEUP_TOKEN" }, "DELETE"),
+      ]);
+      expect(await op("alarm.delete", { id: URL_OF }, callWith())).toEqual({ id: URL_OF, gone: true });
+      await expect(op("alarm.delete", { id: URL_OF }, callWith())).rejects.toMatchObject({
+        retryable: false,
+        status: 401,
+      });
+      expect(sent.map((r) => r.headers.get("authorization"))).toEqual(["Bearer", "Bearer"]);
     });
   });
 });

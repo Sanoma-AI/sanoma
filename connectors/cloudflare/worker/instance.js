@@ -21,6 +21,8 @@ const START_TIMEOUT_MS = 10 * 60 * 1000;
 const TRY_MS = 5_000;
 /** How long between two tries of a starting container's `/healthz`. */
 const POLL_MS = 250;
+/** The longest wait between two tries. */
+const MAX_POLL_MS = 1_000;
 /** Where the wake is kept, in the object's storage. */
 const WAKE_KEY = "wake";
 /** The binding that names the object, in the Worker's env. */
@@ -98,7 +100,13 @@ export class Instance {
       redirect: "manual",
       ...(body && { duplex: "half" }),
     });
-    return this.ctx.container.getTcpPort(this.port).fetch(forwarded);
+    try {
+      return await this.ctx.container.getTcpPort(this.port).fetch(forwarded);
+    } catch (error) {
+      // Stopped since it started (it crashed, or Cloudflare stopped it): the next request starts it again.
+      this.#ready = false;
+      return problem(503, `the company's container did not answer: ${error?.message ?? error}`);
+    }
   }
 
   /** What the Worker runs, and whether its container does. */
@@ -117,16 +125,19 @@ export class Instance {
     this.#ready = false;
     const container = this.ctx.container;
     const labels = { revision: this.env.SANOMA_REVISION ?? "", image: await imageLabel(this.env.SANOMA_IMAGE ?? "") };
-    if (container.running) {
-      // One it cannot say it started at these is not kept either.
-      const info = await container.inspect();
-      const same = info && info.labels?.revision === labels.revision && (info.labels?.image ?? "") === labels.image;
-      if (!same) await container.destroy("a new revision or image");
-    }
     const until = Date.now() + START_TIMEOUT_MS;
     let last;
+    let wait = POLL_MS;
+    let checked = false;
     while (Date.now() < until) {
       try {
+        if (!checked && container.running) {
+          // One running from before: kept only if it says it started at these (a deploy otherwise).
+          const info = await container.inspect();
+          const same = info && info.labels?.revision === labels.revision && (info.labels?.image ?? "") === labels.image;
+          if (!same) await container.destroy("a new revision or image");
+        }
+        checked = true;
         if (!container.running) {
           container.start({ env: containerEnv(this.env), enableInternet: true, labels });
         }
@@ -145,7 +156,9 @@ export class Instance {
         // Not listening yet, or not yet free to start again after a destroy.
         last = error?.message ?? String(error);
       }
-      await sleep(POLL_MS);
+      // Doubling to a second: a container that crashes as it starts is not started four times a second.
+      await sleep(wait);
+      wait = Math.min(wait * 2, MAX_POLL_MS);
     }
     throw new Error(`no answer from /healthz on port ${this.port} in ${START_TIMEOUT_MS / 1000} s (${last})`);
   }

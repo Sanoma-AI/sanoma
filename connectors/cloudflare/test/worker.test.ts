@@ -149,6 +149,23 @@ describe("the Worker's object", () => {
     expect(calls).toEqual([`timeout ${INACTIVITY_MS}`, "destroy", "start r2", `timeout ${INACTIVITY_MS}`]);
   });
 
+  it("answers 503 when the container stops under a request, and checks it again on the next", async () => {
+    const { ctx, sent } = stubCtx({
+      answer: (r) => {
+        if (new URL(r.url).pathname === "/healthz") return new Response("ok");
+        throw new Error("the container is not running");
+      },
+    });
+    const object = new Instance(ctx, ENV);
+    const answer = await object.fetch(new Request("https://x.workers.dev/api/x"));
+    expect(answer.status).toBe(503);
+    expect(await answer.json()).toEqual({
+      error: "the company's container did not answer: the container is not running",
+    });
+    await object.fetch(new Request("https://x.workers.dev/api/x"));
+    expect(sent.filter((r) => new URL(r.url).pathname === "/healthz")).toHaveLength(2);
+  });
+
   it("answers its health without starting the container, unless asked to", async () => {
     const { ctx, container } = stubCtx();
     const health = await new Instance(ctx, ENV).fetch(new Request("https://x.workers.dev/__sanoma/health"));

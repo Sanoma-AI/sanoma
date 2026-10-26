@@ -189,7 +189,7 @@ try {
 
   await quiet();
   const begun = Date.now();
-  const res = await fetch(`${url}${HEALTH_PATH}`);
+  const res = await fetch(`${url}${HEALTH_PATH}?start=1`);
   console.log(`cold wake: ${HEALTH_PATH} answered ${res.status} after ${((Date.now() - begun) / 1000).toFixed(1)} s`);
 } finally {
   if (url) await op("alarm.delete", { id: url }).catch((error) => console.error(`alarm.delete: ${error}`));
