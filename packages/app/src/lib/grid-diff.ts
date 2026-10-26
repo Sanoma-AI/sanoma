@@ -1,6 +1,6 @@
 import type { PreviewAnswer } from "@sanoma-ai/workflows";
 import type { PermissionsGrid, PermissionsRow } from "@sanoma-ai/workflows/describe";
-import { approverLabel } from "@sanoma-ai/workflows/shared";
+import { ANONYMOUS, approverLabel } from "@sanoma-ai/workflows/shared";
 
 // One Permissions grid against another (a change's branch against main): the columns and rows
 // of both, aligned by group and by row, and each cell's answer before and after. Pure, so the
@@ -126,13 +126,15 @@ export function diffGrids(before: PermissionsGrid, after: PermissionsGrid): Grid
 /**
  * The diff with its unchanged rows left out: a workflow stays when anything under it changed,
  * with only the operations that did. `maxRows` caps the lines (a workflow and each operation
- * under it are a line each), workflows first.
+ * under it are a line each), workflows first; a workflow changed only under it stays only with
+ * room for one of its operations too.
  */
 export function onlyChanged(diff: GridDiff, maxRows = Infinity): GridDiff {
   let left = maxRows;
   const take = (rows: DiffRow[]): DiffRow[] =>
     rows.flatMap((row) => {
-      if (row.status === "same" || left <= 0) return [];
+      const ownSame = row.cells.every((c) => c.change === "same");
+      if (row.status === "same" || left < (row.status === "changed" && ownSame ? 2 : 1)) return [];
       left--;
       return [row.ops ? { ...row, ops: take(row.ops) } : row];
     });
@@ -164,23 +166,31 @@ export const CHANGE_WORDS: Record<CellChange, string> = {
   removed: "removed",
 };
 
-const columnWords = (group: string | null) => group ?? "no group";
+/** Whom a column is about, in words. */
+export const someoneIn = (group: string | null) =>
+  group === ANONYMOUS ? "anonymous" : `someone in ${group ?? "no group"}`;
+
+/** A column's heading: the group's name, or what the two columns of no group are. */
+export const columnLabel = (group: string | null) =>
+  group === null ? "No group" : group === ANONYMOUS ? "Anonymous" : group;
 
 const count = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /**
  * The diff in one line's parts: how many cells loosened, tightened or changed, each new or
- * removed column by name, and how many rows are new or removed ("3 loosened · new column finance").
+ * removed column by name, and how many rows are new or removed ("3 loosened · new column finance"),
+ * a new or removed workflow one row with the operations under it.
  */
 export function diffSummary(diff: GridDiff): string[] {
-  const rows = [...diff.workflows, ...diff.workflows.flatMap((w) => w.ops ?? []), ...diff.ops];
+  const kept = diff.workflows.filter((w) => w.status === "same" || w.status === "changed");
+  const rows = [...diff.workflows, ...kept.flatMap((w) => w.ops ?? []), ...diff.ops];
   const rowsThat = (status: DiffRow["status"]) => rows.filter((row) => row.status === status).length;
   return [
     ...(["looser", "tighter", "changed"] as const)
       .filter((change) => diff.counts[change] > 0)
       .map((change) => `${diff.counts[change]} ${CHANGE_WORDS[change]}`),
-    ...diff.groups.filter((g) => g.status === "added").map((g) => `new column ${columnWords(g.group)}`),
-    ...diff.groups.filter((g) => g.status === "removed").map((g) => `removed column ${columnWords(g.group)}`),
+    ...diff.groups.filter((g) => g.status === "added").map((g) => `new column ${columnLabel(g.group)}`),
+    ...diff.groups.filter((g) => g.status === "removed").map((g) => `removed column ${columnLabel(g.group)}`),
     ...(rowsThat("added") > 0 ? [count(rowsThat("added"), "new row")] : []),
     ...(rowsThat("removed") > 0 ? [count(rowsThat("removed"), "removed row")] : []),
   ];

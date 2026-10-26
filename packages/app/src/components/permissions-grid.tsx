@@ -1,9 +1,8 @@
 import type { PreviewAnswer } from "@sanoma-ai/workflows";
-import { ANONYMOUS } from "@sanoma-ai/workflows/shared";
 import { Link } from "@tanstack/react-router";
 import { Fragment, type ReactNode } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
-import { answerWords } from "#/lib/grid-diff.ts";
+import { answerWords, columnLabel } from "#/lib/grid-diff.ts";
 import { PREVIEW_TONE } from "#/lib/tone.ts";
 import { cn } from "#/lib/utils.ts";
 import { ToneBadge } from "./kit.tsx";
@@ -22,12 +21,6 @@ export interface TableRowOf<R> {
   title?: string;
   ops?: R[];
 }
-
-/** Whom a column is about, in words. */
-export const someoneIn = (group: Group) => (group === ANONYMOUS ? "anonymous" : `someone in ${group ?? "no group"}`);
-
-/** A column's heading: the group's name, or what the two columns of no group are. */
-export const columnLabel = (group: Group) => (group === null ? "No group" : group === ANONYMOUS ? "Anonymous" : group);
 
 export interface PermissionsTableProps<R extends TableRowOf<R>> {
   groups: readonly Group[];
@@ -131,12 +124,10 @@ export function Mark({
   what,
   open,
   muted = false,
-}: {
-  cell: PreviewAnswer;
-  what?: string;
-  open?: (() => void) | undefined;
-  muted?: boolean;
-}) {
+}: { cell: PreviewAnswer; muted?: boolean } & (
+  | { what: string; open: (() => void) | undefined }
+  | { what?: undefined; open?: undefined }
+)) {
   const label = answerWords(cell);
   if (muted || cell.answer === "allow") return <span className="text-muted-foreground">{label}</span>;
   const button = open && {

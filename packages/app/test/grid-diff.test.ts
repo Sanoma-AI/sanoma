@@ -250,7 +250,8 @@ describe("diffGrids", () => {
       ["shop.gone", "removed"],
     ]);
     expect(diff.ops[1]!.cells).toEqual([{ before: deny, change: "removed" }]);
-    expect(diffSummary(diff)).toEqual(["1 loosened", "3 new rows", "1 removed row"]);
+    // The new workflow is one new row with its operation, the second occurrence another.
+    expect(diffSummary(diff)).toEqual(["1 loosened", "2 new rows", "1 removed row"]);
 
     // Only what changed: the refund for its operations, only those that did; at most two lines.
     const changed = onlyChanged(diff);
@@ -263,6 +264,9 @@ describe("diffGrids", () => {
       workflows: [{ id: "refund", ops: [{ status: "changed" }] }],
       ops: [],
     });
+    // No room for an operation under the refund, whose own cells are the same: it goes too, and
+    // the new payout, its own cells new, takes the one line.
+    expect(onlyChanged(diff, 1)).toMatchObject({ workflows: [{ id: "payout", ops: [] }], ops: [] });
   });
 
   it("leaves blank a cell neither grid has: a removed row's, in a new column", () => {

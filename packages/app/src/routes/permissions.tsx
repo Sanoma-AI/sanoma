@@ -7,7 +7,8 @@ import { useRef, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardHeader } from "#/components/ui/card.tsx";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "#/components/ui/sheet.tsx";
-import { type Group, type Kind, Mark, PermissionsTable, someoneIn } from "#/components/permissions-grid.tsx";
+import { type Group, type Kind, Mark, PermissionsTable } from "#/components/permissions-grid.tsx";
+import { someoneIn } from "#/lib/grid-diff.ts";
 import type { PermissionsResponse, PermissionsRow } from "../api.ts";
 import {
   CardHeading,
