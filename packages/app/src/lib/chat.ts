@@ -18,10 +18,44 @@ export interface DraftCard {
 }
 
 /**
- * The engines a chat can open on, by the name its row keeps, with the name the chat shows: our
- * loop, or an existing coding agent through `HarnessAgent` on the company's key.
+ * A sign-in card's data, the `data-signIn` part a person's own agent writes (by the id `sign-in`,
+ * updated in place) when its vendor asks the person to sign in: `waiting` with what the vendor
+ * printed or said (its link, `url`, and its code among it; `asks` when it wants a code pasted
+ * back), then `done` or `failed`; or `once`, the command to run once on this computer, for a
+ * vendor whose sign-in needs a real terminal. The sign-in is the person's: the app never opens the
+ * link or enters the code, and the card keeps neither once it ends.
  */
-export const ENGINE_NAMES = { loop: "Sanoma", pi: "Pi", "claude-code": "Claude Code" } as const;
+export interface SignInCard {
+  /** The vendor's name for its agent. */
+  agent: string;
+  state: "waiting" | "done" | "failed" | "once";
+  text?: string;
+  url?: string;
+  asks?: boolean;
+  command?: string;
+  /** What to do in the command's own terminal once it starts, for `once`. */
+  after?: string;
+}
+
+/**
+ * The engines a chat can open on, by the name its row keeps, with the name the chat shows: our
+ * loop, an existing coding agent through `HarnessAgent` on the company's key, or a person's own
+ * coding agent over ACP on their own plan (`acp-<agent>`, `ownPlan`). The server offers the ones it
+ * runs (`getEngines`): Claude Code's and Codex's own only with `SANOMA_OWN_AGENTS_UNSETTLED=1`.
+ */
+export const ENGINE_NAMES = {
+  loop: "Sanoma",
+  pi: "Pi",
+  "claude-code": "Claude Code",
+  "acp-copilot": "Copilot (your plan)",
+  "acp-opencode": "OpenCode (your plan)",
+  "acp-pi": "Pi (your plan)",
+  "acp-claude-code": "Claude Code (your plan)",
+  "acp-codex": "Codex (your plan)",
+} as const;
+
+/** Whether an engine spends the person's own plan: their own agent over ACP. */
+export const ownPlan = (engine: string) => engine.startsWith("acp-");
 
 /** The file a coding agent's built-in call names: the cross-harness `file_path`, or an adapter's own field. */
 export function pathOf(input: unknown): string | undefined {
@@ -34,7 +68,7 @@ export function pathOf(input: unknown): string | undefined {
 export type EngineName = keyof typeof ENGINE_NAMES;
 
 /** The data parts of a chat message, by name: `data-<name>`. */
-export type ChatData = { draft: DraftCard };
+export type ChatData = { draft: DraftCard; signIn: SignInCard };
 
 /**
  * A message of the operator agent's chat: our loop's tools typed (`InferAgentUIMessage` of its

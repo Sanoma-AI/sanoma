@@ -61,6 +61,7 @@
     "typecheck:ui": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "2.0.2",
     "@ai-sdk/harness": "1.0.158",
     "@ai-sdk/harness-claude-code": "1.0.162",
     "@ai-sdk/harness-pi": "1.0.160",

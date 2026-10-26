@@ -6,13 +6,15 @@ import { approverLabel } from "@sanoma-ai/workflows/shared";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { getToolName, isToolUIPart } from "ai";
-import { memo, Suspense } from "react";
+import { type FormEvent, memo, Suspense, useState } from "react";
 import { toast } from "sonner";
+import { Button } from "#/components/ui/button.tsx";
 import { Card, CardContent, CardFooter, CardHeader } from "#/components/ui/card.tsx";
+import { Input } from "#/components/ui/input.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
-import { useActor } from "../../actor.ts";
+import { actorHeaders, useActor } from "../../actor.ts";
 import { pendingApprovals } from "../../api.ts";
-import { type ChatMessage, type DraftCard, heldRunOf, pathOf, textOf } from "../../lib/chat.ts";
+import { type ChatMessage, type DraftCard, heldRunOf, pathOf, type SignInCard, textOf } from "../../lib/chat.ts";
 import { decidableBy } from "../../lib/decidable.ts";
 import { approvalKey, configQuery, runQuery } from "../../queries.ts";
 import { ApprovalDecision, ApprovalDetails } from "../approval.tsx";
@@ -20,20 +22,32 @@ import { CardHeading, plural, TipButton } from "../common.tsx";
 
 // What the chat draws of the agent's reply, per app.md's Chat: plain text at the reply size, the
 // steps as a quiet checked list, a held lookup as the Inbox's approval card, and the draft as a
-// small card. Any engine's reply: a tool part of another engine is a step by its name.
+// small card, and a person's own agent's sign-in as its card. Any engine's reply: a tool part of
+// another engine is a step by its title or name.
 
 type Part = ChatMessage["parts"][number];
 type ToolPart = Extract<Part, { toolCallId: string }>;
 
 /**
- * The agent's reply: its parts in order (steps grouped into one list), its draft's card last, and
- * Copy. Memoized: a streamed chunk redraws only the reply it belongs to.
+ * The agent's reply in the chat `chat`: its parts in order (steps grouped into one list), a
+ * sign-in's card, its draft's card last, and Copy. Memoized: a streamed chunk redraws only the
+ * reply it belongs to.
  */
-export const Reply = memo(function Reply({ message, live }: { message: ChatMessage; live: boolean }) {
+export const Reply = memo(function Reply({
+  message,
+  live,
+  chat,
+}: {
+  message: ChatMessage;
+  live: boolean;
+  chat: string;
+}) {
   const blocks: ({ steps: ToolPart[] } | { part: Part })[] = [];
   let draft: DraftCard | undefined;
+  let signIn: SignInCard | undefined;
   for (const part of message.parts) {
     if (part.type === "data-draft") draft = part.data;
+    else if (part.type === "data-signIn") signIn = part.data;
     else if (isToolUIPart(part) && heldRunOf(part.output) === undefined) {
       const last = blocks.at(-1);
       if (last && "steps" in last) last.steps.push(part);
@@ -46,6 +60,7 @@ export const Reply = memo(function Reply({ message, live }: { message: ChatMessa
       {blocks.map((block, i) =>
         "steps" in block ? <Steps key={i} steps={block.steps} live={live} /> : <ReplyPart key={i} part={block.part} />,
       )}
+      {signIn && <SignInCardView card={signIn} chat={chat} live={live} />}
       {draft && <DraftCardView draft={draft} />}
       {text && !live && (
         <div className="-ml-1.5 flex">
@@ -138,6 +153,7 @@ function stepLabel(step: ToolPart): string {
     case "lookup":
       return `Looked up ${String(input.op ?? "")}`;
     default: {
+      if (step.title) return step.title;
       const file = pathOf(input);
       return file === undefined ? getToolName(step) : `${getToolName(step)} ${file}`;
     }
@@ -189,6 +205,110 @@ function DraftCardView({ draft }: { draft: DraftCard }) {
       <CardFooter className="border-t text-xs text-muted-foreground">
         Merge the branch to apply it. The live instance keeps running the old code until it restarts.
       </CardFooter>
+    </Card>
+  );
+}
+
+/** `url` when it is an https link that parses (the vendor wrote it), else undefined. */
+function httpsLink(url: string | undefined): URL | undefined {
+  try {
+    const link = new URL(url ?? "");
+    return link.protocol === "https:" ? link : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A person's own agent's sign-in: the vendor's link and what it printed (its code among it), a
+ * field for a code the vendor asks to have pasted back (written to its sign-in, `POST
+ * /api/sign-in`), or the command to run once on this computer; then whether it finished. The
+ * sign-in is the person's: the app opens no link and enters no code.
+ */
+function SignInCardView({ card, chat, live }: { card: SignInCard; chat: string; live: boolean }) {
+  const { agent, state } = card;
+  const [code, setCode] = useState("");
+  const [sent, setSent] = useState<string>();
+  const paste = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!code.trim()) return;
+    const response = await fetch("/api/sign-in", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...actorHeaders() },
+      body: JSON.stringify({ chat, code }),
+    }).catch(() => undefined);
+    setCode("");
+    setSent(response?.ok ? `Sent to ${agent}'s sign-in.` : `${agent}'s sign-in is not waiting for a code any more.`);
+  };
+  // An https link only, and one that parses: the vendor wrote it.
+  const link = httpsLink(card.url);
+  return (
+    <Card size="sm" role="region" aria-label={`Sign in to ${agent}`}>
+      <CardHeader>
+        <CardHeading>Sign in to {agent}</CardHeading>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        {state === "waiting" && !live ? (
+          <p className="text-muted-foreground">
+            The sign-in stopped before it finished. Send your message again to start over.
+          </p>
+        ) : state === "waiting" ? (
+          <>
+            <p className="text-muted-foreground">
+              This sign-in is yours, on your own {agent} plan. Sanoma opens no link, enters no code and reads nothing{" "}
+              {agent} gives back. The chat waits until you finish.
+            </p>
+            {card.text ? (
+              <pre className="overflow-x-auto font-mono text-xs whitespace-pre-wrap">{card.text}</pre>
+            ) : (
+              <p className="flex items-center gap-2 text-muted-foreground">
+                <Spinner /> Starting {agent}'s sign-in…
+              </p>
+            )}
+            {link && (
+              <a href={link.href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4">
+                Open {link.host} to sign in
+              </a>
+            )}
+            {card.asks && (
+              <form onSubmit={(e) => void paste(e)} className="flex gap-2">
+                <Input
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  aria-label={`The code ${agent} gave you`}
+                  placeholder="Paste the code here"
+                  autoComplete="off"
+                />
+                <Button type="submit" size="sm" variant="secondary" disabled={!code.trim()}>
+                  Send
+                </Button>
+              </form>
+            )}
+            {sent && <p className="text-muted-foreground">{sent}</p>}
+          </>
+        ) : state === "once" ? (
+          <>
+            <p>
+              {agent} signs in only in a terminal of its own. Run this once on this computer, then send your message
+              again:
+            </p>
+            <pre className="overflow-x-auto font-mono text-xs whitespace-pre-wrap">{card.command}</pre>
+            {card.after && (
+              <p>
+                Then type <code>{card.after}</code> in it and sign in.
+              </p>
+            )}
+          </>
+        ) : state === "done" ? (
+          <p className="flex items-center gap-1.5">
+            <CheckIcon aria-hidden="true" /> Signed in to {agent}. Send your message again.
+          </p>
+        ) : (
+          <p className="text-destructive">
+            The sign-in did not finish: {card.text}. Send your message again to start over.
+          </p>
+        )}
+      </CardContent>
     </Card>
   );
 }

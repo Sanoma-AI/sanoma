@@ -12,10 +12,9 @@ import {
 } from "ai";
 import type { AppContext } from "../../context.ts";
 import { type ChatMessage, ENGINE_NAMES, noKeyText, pathOf, textOf } from "../../lib/chat.ts";
-import { checks } from "../drafts.ts";
 import { modelRegistry } from "../models.ts";
 import { secretValues } from "../secrets.ts";
-import { allowedPath, drafting, openDraft } from "./checkout.ts";
+import { agentHome, allowedPath, commitTurn, NO_SHELL, openDraft, outsideCheckout } from "./checkout.ts";
 import { freePort, LocalSession } from "./local-session.ts";
 import { harnessInstructions } from "./prompt.ts";
 import { chatResponse, type Engine, type EngineTurn } from "./transcript.ts";
@@ -65,9 +64,6 @@ const RUNTIMES = {
 /** The runtimes' names, each an engine a chat's row keeps. */
 export type RuntimeName = keyof typeof RUNTIMES;
 
-/** What the agent is told when a shell command or a path outside the checkout rule is refused. */
-const NO_SHELL = "No shell commands in this chat until previews exist: edit the files; the checks run after your turn";
-
 /** A bridge's first session, by its runtime: it installs the bridge under the shared home, so the next ones wait for it. */
 const installing = new Map<RuntimeName, Promise<unknown>>();
 
@@ -89,15 +85,11 @@ export const harnessEngine =
     return chatResponse(app, chat, stream);
   };
 
-async function runTurn(
-  name: RuntimeName,
-  { app, chat, messages, principal, signal }: EngineTurn,
-  writer: UIMessageStreamWriter<ChatMessage>,
-) {
+async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStreamWriter<ChatMessage>) {
+  const { app, chat, messages, principal, signal } = turn;
   const runtime: Runtime = RUNTIMES[name];
-  const repo = drafting(app);
   // Kept across restarts: a bridge installs its agent under it once.
-  const home = join(repo.root, ".sanoma", "agent-home");
+  const home = agentHome(app);
   // The key first: a turn without it opens no draft.
   const auth = await authFor(app);
   // The agent works in the chat's draft from its first turn.
@@ -166,14 +158,7 @@ async function runTurn(
   } finally {
     await local.destroy();
   }
-  // What it changed is kept on the draft, and shown, however the turn ended (an error too); a turn a
-  // new message stopped leaves the card to the next.
-  const message = `${ENGINE_NAMES[name]}: ${textOf(said, " ").trim().slice(0, 72)}`;
-  const committed = (await draft.commit({ paths: ["."], message, author: principal.id })) !== undefined;
-  if (committed && !signal.aborted) {
-    const [checked, diff] = await Promise.all([checks(draft.root, app.resolved.databaseUrl), repo.diff(chat.id)]);
-    writer.write({ type: "data-draft", id: "draft", data: { branch: draft.branch, ...diff, checks: checked } });
-  }
+  await commitTurn(turn, draft, ENGINE_NAMES[name], writer);
   if (failed) throw failed.err;
   writer.write({ type: "finish" });
 }
@@ -217,7 +202,7 @@ async function answer(root: string, approvalId: string, toolName: string, kind: 
     return deny(`${toolName} is not available in this chat: edit the files in your checkout`);
   }
   if ((await allowedPath(root, path)) === undefined) {
-    return deny(`${path} is outside your checkout, or under .git or node_modules`);
+    return deny(outsideCheckout(path));
   }
   return { type: "tool-approval-response" as const, approvalId, approved: true };
 }

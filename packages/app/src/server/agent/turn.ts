@@ -5,6 +5,7 @@ import { ApiError } from "../../api.ts";
 import type { AppContext } from "../../context.ts";
 import { type ChatMessage, type EngineName, textOf } from "../../lib/chat.ts";
 import { type ActorContext, parse, requireActor, toApiError } from "../core.ts";
+import { ownEngines } from "./acp.ts";
 import { harnessEngine } from "./harness.ts";
 import { run as loop } from "./loop.ts";
 import { type Engine, settle, written } from "./transcript.ts";
@@ -13,12 +14,17 @@ import { type Engine, settle, written } from "./transcript.ts";
 // from the transcript) and the engines by name. A turn runs in this process, not as a run: a
 // restart loses the turn, not the transcript or the draft, and "continue" picks up.
 
-/** The engines, by the name a chat's row keeps (`ENGINE_NAMES`): our loop, and the coding agents through `HarnessAgent`. */
-export const ENGINES: Readonly<Record<EngineName, Engine>> = {
-  loop,
-  pi: harnessEngine("pi"),
-  "claude-code": harnessEngine("claude-code"),
-};
+/** Our own loop, and the coding agents through `HarnessAgent` on the company's key. */
+const OURS = { loop, pi: harnessEngine("pi"), "claude-code": harnessEngine("claude-code") };
+
+/**
+ * The engines this instance offers, by the name a chat's row keeps (`ENGINE_NAMES`): our loop, the
+ * coding agents through `HarnessAgent`, and a person's own over ACP (`ownEngines`, which leaves out
+ * Claude Code's and Codex's own unless `SANOMA_OWN_AGENTS_UNSETTLED=1`). Read at each request.
+ */
+export function engines(): Partial<Record<EngineName, Engine>> {
+  return { ...OURS, ...ownEngines() };
+}
 
 /** What the browser sends: the chat's id (its own, for a new chat) and the person's new message. */
 const ChatRequest = z.object({
@@ -48,8 +54,9 @@ export async function postChat(request: Request, context: ActorContext & { site?
     let chat = await chats.get(body.id);
     if (chat && chat.person !== principal.id) throw new ApiError(404, { error: `No chat ${body.id}` });
     const named = chat?.engine ?? body.engine;
-    const engine = Object.hasOwn(ENGINES, named) ? ENGINES[named as EngineName] : undefined;
-    if (!engine) throw invalid(`No engine ${named}: the engines are ${Object.keys(ENGINES).join(", ")}`);
+    const offered = engines();
+    const engine = Object.hasOwn(offered, named) ? offered[named as EngineName] : undefined;
+    if (!engine) throw invalid(`No engine ${named}: the engines are ${Object.keys(offered).join(", ")}`);
     // The new message is checked before a turn under way is stopped for it: a new one, by the
     // person. The transcript, written by this app, is not validated again.
     const checked = await safeValidateUIMessages<ChatMessage>({ messages: [body.message] });
