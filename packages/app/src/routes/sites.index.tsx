@@ -6,6 +6,7 @@ import { Card } from "#/components/ui/card.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { usePublicAddress, useSites } from "#/lib/sites.ts";
 import { CrumbHeader, Nothing, pageTitle } from "../components/common.tsx";
+import { SiteIcon } from "../components/site-icon.tsx";
 import { configQuery } from "../queries.ts";
 
 // `/sites` itself, the one path there no site can take (a site's pages are `/sites/<name>/…`):
@@ -17,8 +18,8 @@ export const Route = createFileRoute("/sites/")({
 });
 
 /**
- * The company's sites, with how many, as a table in one card: each site under its title (and
- * icon) and folder, its pages (those with no path parameter, its home first), a public site's own
+ * The company's sites, with how many, as a table in one card: each site under its icon, title
+ * and folder, its pages (those with no path parameter, its home first), a public site's own
  * address, where visitors see it at the root of its host, and its languages.
  */
 /** The config's public sites, by name. */
@@ -50,36 +51,39 @@ function SitesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sites.map(({ name, title, icon: Icon, pages }) => (
-                <TableRow key={name}>
-                  <TableCell className="align-top font-medium">
-                    <div className="flex items-center gap-2">
-                      {Icon && <Icon aria-hidden="true" className="size-4" />}
-                      {pages[0] ? <Link to={pages[0].to}>{title}</Link> : title}
-                      <code className="text-xs font-normal text-muted-foreground">sites/{name}</code>
-                    </div>
-                  </TableCell>
-                  <TableCell className="align-top whitespace-normal">
-                    <ul aria-label={`${title}'s pages`} className="flex flex-wrap gap-x-3 gap-y-1">
-                      {pages.map(({ to, label }) => (
-                        <li key={to}>
-                          <Link to={to}>{label}</Link>
-                        </li>
-                      ))}
-                    </ul>
-                  </TableCell>
-                  <TableCell className="align-top">
-                    {publicSites.has(name) ? (
-                      <PublicAddress site={publicSites.get(name)!} />
-                    ) : (
-                      <span className="text-muted-foreground">In the app only</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="align-top">
-                    <Languages locales={publicSites.get(name)?.locales} />
-                  </TableCell>
-                </TableRow>
-              ))}
+              {sites.map((site) => {
+                const { name, title, pages } = site;
+                return (
+                  <TableRow key={name}>
+                    <TableCell className="align-top font-medium">
+                      <div className="flex items-center gap-2 [&_svg]:size-4">
+                        <SiteIcon site={site} />
+                        {pages[0] ? <Link to={pages[0].to}>{title}</Link> : title}
+                        <code className="text-xs font-normal text-muted-foreground">sites/{name}</code>
+                      </div>
+                    </TableCell>
+                    <TableCell className="align-top whitespace-normal">
+                      <ul aria-label={`${title}'s pages`} className="flex flex-wrap gap-x-3 gap-y-1">
+                        {pages.map(({ to, label }) => (
+                          <li key={to}>
+                            <Link to={to}>{label}</Link>
+                          </li>
+                        ))}
+                      </ul>
+                    </TableCell>
+                    <TableCell className="align-top">
+                      {publicSites.has(name) ? (
+                        <PublicAddress site={publicSites.get(name)!} />
+                      ) : (
+                        <span className="text-muted-foreground">In the app only</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="align-top">
+                      <Languages locales={publicSites.get(name)?.locales} />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}

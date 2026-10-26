@@ -2,18 +2,32 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Card } from "#/components/ui/card.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
-import { CrumbHeader, Nothing } from "../../components/common.tsx";
+import { ButtonLink, CrumbHeader, Nothing } from "../../components/common.tsx";
 import { LinkRow } from "../../components/runs-table.tsx";
+import { useSites } from "#/lib/sites.ts";
 import { configQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/data/")({ component: DataPage });
 
-/** Every collection of the config, with how many there are, as a table in one card: a row opens its grid. */
+/**
+ * Every collection of the config, with how many there are, as a table in one card: a row opens its
+ * grid. With sites, the header leads to the Sites page, which the bar has no tile for.
+ */
 function DataPage() {
   const { data: collections } = useSuspenseQuery({ ...configQuery(), select: (config) => config.collections });
+  const sites = useSites().length > 0;
   return (
     <>
-      <CrumbHeader count={collections.length} />
+      <CrumbHeader
+        count={collections.length}
+        action={
+          sites && (
+            <ButtonLink variant="outline" size="sm">
+              <Link to="/sites">Sites</Link>
+            </ButtonLink>
+          )
+        }
+      />
       <Card className="gap-0 py-0">
         {collections.length === 0 ? (
           <Nothing className="border-0" title="This config has no collections">

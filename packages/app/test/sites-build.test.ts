@@ -152,6 +152,20 @@ function linkTag(html: string, text: string) {
   return start < 0 ? undefined : html.slice(start, html.indexOf(">", start) + 1);
 }
 
+/** The bar's items, in its groups: each group's links, `[href, label]`, in order. */
+const barGroups = (html: string) =>
+  (html.match(/<nav aria-label="Sections"[^>]*>([\s\S]*?)<\/nav>/)?.[1] ?? "")
+    .split("</ul>")
+    .map((group) => [...group.matchAll(/<a [^>]*href="([^"]+)"[^>]*>(?:(?!<\/a>)[\s\S])*>([^<>]+)<\/a>/g)])
+    .map((links) => links.map(([, href, label]) => [href, label]))
+    .filter((links) => links.length > 0);
+
+/** The opening tag of the bar's link to `to`. */
+const tile = (html: string, to: string) =>
+  html
+    .match(/<nav aria-label="Sections"[^>]*>([\s\S]*?)<\/nav>/)?.[1]
+    ?.match(new RegExp(`<a [^>]*href="${to}"[^>]*>`))?.[0];
+
 /** The page's canonical URL. */
 const canonical = (html: string) => /<link rel="canonical" href="([^"]+)"/.exec(html)?.[1];
 
@@ -263,8 +277,32 @@ describe("a company's app with its sites", () => {
     const html = (await site.text()).replaceAll("<!-- -->", "");
     expect(html).toContain("The hello site");
     expect(html).toContain("Hello from the hello site");
-    // The app's bar and chat column beside it.
-    expect(html).toContain('<nav aria-label="Sections"');
+    // The app's bar and chat column beside it: a tile per site, in one group (the root's: the
+    // fixture has no apps) between Inbox and Workflows and Setup, each to its home, this one's lit.
+    expect(barGroups(html)).toEqual([
+      [
+        ["/inbox", "Inbox"],
+        ["/workflows", "Workflows"],
+      ],
+      [
+        ["/sites/hello", "Hello desk"],
+        ["/sites/intl", "Intl"],
+        ["/sites/members", "Members"],
+      ],
+      [
+        ["/data", "Data"],
+        ["/resources", "Resources"],
+        ["/connectors", "Connectors"],
+        ["/apps", "Apps"],
+        ["/permissions", "Permissions"],
+        ["/setup", "Go live"],
+      ],
+    ]);
+    expect(tile(html, "/sites/hello")).toContain('aria-current="page"');
+    expect(tile(html, "/sites/members")).not.toContain("aria-current");
+    // Lit on the site's other pages too.
+    const styled = (await (await fetch(new URL("/sites/hello/styled", app.url))).text()).replaceAll("<!-- -->", "");
+    expect(tile(styled, "/sites/hello")).toContain('aria-current="page"');
     expect(html).toContain('<aside id="chat" aria-label="Chat"');
     const workflows = await fetch(new URL("/workflows", app.url));
     expect(workflows.status).toBe(200);
@@ -303,6 +341,10 @@ describe("a company's app with its sites", () => {
       await page.goto(new URL("/sites/hello/styled", app.url).href, { waitUntil: "networkidle0" });
       const bar = `getComputedStyle(document.querySelector('nav[aria-label="Sections"]').parentElement).display`;
       expect(await page.evaluate(bar)).toBe("flex");
+      // The site's tile draws the Lucide icon its site.ts names once the browser loads it; another
+      // site, which names none, keeps the default for its kind.
+      await page.waitForSelector('nav a[href="/sites/hello"] svg.lucide-life-buoy');
+      expect(await page.$('nav a[href="/sites/members"] svg.lucide')).toBeNull();
 
       const site = new URL("/sites/hello/run", app.url).href;
       await page.goto(site, { waitUntil: "networkidle0" });
@@ -350,7 +392,7 @@ describe("a company's app with its sites", () => {
     }
   });
 
-  it("lists the sites on the Sites page, each with its pages and where it is public, Sites lit in the bar there and on a site's page", async () => {
+  it("lists the sites on the Sites page, each with its pages and where it is public, reached from Data's header", async () => {
     const html = (await (await fetch(new URL("/sites", app.url))).text()).replaceAll("<!-- -->", "");
     expect(html).toMatch(/<h1[^>]*>Sites<span[^>]*>3<\/span><\/h1>/);
     /** A site's row in the table, by its title. */
@@ -378,13 +420,10 @@ describe("a company's app with its sites", () => {
       /<ul aria-label="Languages"[^>]*><li><code>en<\/code><span[^>]*> default<\/span><\/li><li><code>fr<\/code><\/li><\/ul>/,
     );
     expect(hello).toMatch(/<td[^>]*><span[^>]*>One<\/span><\/td>/);
-    // The bar's Sites, linking here, lit here and on a site's page; not on the app's other pages.
-    const sites = /<a [^>]*href="\/sites"[^>]*>/;
-    expect(html.match(sites)?.[0]).toContain('aria-current="page"');
-    const site = (await (await fetch(new URL("/sites/hello/", app.url))).text()).replaceAll("<!-- -->", "");
-    expect(site.match(sites)?.[0]).toContain('aria-current="page"');
-    const workflows = (await (await fetch(new URL("/workflows", app.url))).text()).replaceAll("<!-- -->", "");
-    expect(workflows.match(sites)?.[0]).not.toContain("aria-current");
+    // No tile in the bar for this page: Data's header leads here.
+    expect(html).not.toMatch(/<nav aria-label="Sections"(?:(?!<\/nav>)[\s\S])*href="\/sites"/);
+    const data = (await (await fetch(new URL("/data", app.url))).text()).replaceAll("<!-- -->", "");
+    expect(linkTag(data, ">Sites</a>")).toContain('href="/sites"');
   });
 
   it("gives a site's `sanoma/site` imports the app's one router and React", async () => {

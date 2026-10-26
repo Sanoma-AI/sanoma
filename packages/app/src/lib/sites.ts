@@ -5,7 +5,7 @@ import type { SiteDefinition } from "../site.ts";
 import { hasOneUrl, sitePath, withoutOptional } from "../site-path.ts";
 import { siteOf } from "./locales.ts";
 
-// A company's sites, for the Sites page, the bar and the crumbs: each site the build mounts
+// A company's sites, for the bar, the Sites page and the crumbs: each site the build mounts
 // under /sites/<name>, named by its `site.ts`, with its pages from the router's tree.
 
 /**
@@ -19,11 +19,15 @@ const DEFINED: Record<string, SiteDefinition | undefined> = Object.fromEntries(
   ),
 );
 
-/** A site on the Sites page: its title and icon, and its pages, the site's home first. */
+/** A site in the bar and on the Sites page: its title and icon, and its pages, the site's home first. */
 export interface Site {
   name: string;
   title: string;
   icon: SiteDefinition["icon"];
+  /** `defineSite({ public: true })`: its default icon is a globe, not a window. */
+  public: boolean;
+  /** The app folder it is under (`apps/<app>/sites/`); left out for the root's own sites. */
+  app?: string;
   pages: { to: string; label: string }[];
 }
 
@@ -48,6 +52,7 @@ export function useSites(): Site[] {
         name,
         title: DEFINED[name]?.title ?? name,
         icon: DEFINED[name]?.icon,
+        public: DEFINED[name]?.public === true,
         pages: [],
       };
       sites.set(name, site);

@@ -865,13 +865,14 @@ describe("the page", () => {
     const html = await res.text();
     expect(html).toContain('<div id="app">');
     expect(html).toMatch(/<h1[^>]*>Workflows<span[^>]*>4<\/span><\/h1>/);
-    // The bar: Chat, then the sections in their groups (Data and Permissions, as the config has
-    // collections and a policy; no Sites, as the package's own build has none), the current lit.
+    // The bar: Chat, then Inbox and Workflows, no site tiles (the package's own build has no
+    // sites), then Setup (with Data and Permissions, as the config has collections and a policy),
+    // the current lit.
     expect(barGroups(html)).toEqual([
       ["Inbox", "Workflows"],
-      ["Data"],
-      ["Resources", "Connectors", "Permissions", "Go live"],
+      ["Data", "Resources", "Connectors", "Apps", "Permissions", "Go live"],
     ]);
+    expect(section(html, "/apps")).toBeDefined();
     expect(section(html, "/workflows")).toMatch(/data-active="true"[^>]*aria-current="page"/);
     expect(section(html, "/inbox")).not.toMatch(/data-active="true"|aria-current/);
     // At its foot, what the window is, the test database being on this machine, its tip the host.
