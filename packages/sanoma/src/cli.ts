@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { parseArgs } from "node:util";
+import { parseArgs, parseEnv } from "node:util";
 import type { SanomaConfig } from "@sanoma-ai/workflows";
-import { type Loaded, loadConfig, UsageError } from "./config.ts";
+import { type Loaded, type LoadedConfig, loadConfig, UsageError } from "./config.ts";
 import type { LinkedPackage } from "./dev.ts";
 import { emit, eventsOn } from "./events.ts";
+import type { EnsuredPostgres } from "./postgres.ts";
 
 // Only Node's modules, ./config.ts and ./events.ts are imported here: each command imports what it runs, so
 // `--help`, `env`, `ledger export` and the dev-mode parent load neither the worker nor the app (the
@@ -17,29 +18,31 @@ const USAGE = `usage: sanoma [command]
 
 Runs the repo in the working directory, from its sanoma.config.ts (after its .env, when there is one).
 
-  sanoma                              the worker and the app; starts Postgres in Docker when nothing answers, and
-                                      serves the repo's sites/, when it has any, from a dev server that shows each
+  sanoma                              the worker and the app, on the company's own Postgres unless a URL is named,
+                                      and the repo's sites/, when it has any, from a dev server that shows each
                                       edit as it is saved. In an empty directory, first starts a company there: the
                                       template, .env, an install and a git repository
   sanoma worker                       the worker alone, for a deployment
   sanoma app                          the app alone (built with the sites), for a deployment
   sanoma check                        typecheck, lint, read the config, build and typecheck the sites, run every
-                                      scenario; exit 1 on a problem
+                                      scenario on a database of its own; exit 1 on a problem
   sanoma env [--check]                write .env.example from the drivers' variables; --check exits 1 when it is out of date
   sanoma ledger export <runId> [--out <file>]
                                       a run's ledger records as JSON lines
 
-SANOMA_DATABASE_URL names Postgres (default postgresql://postgres:dbos@localhost:5433/sanoma); SANOMA_APP_PORT the
-app's port (default 3000; 0 for any free port); SANOMA_APP_HOST its address (default 127.0.0.1; any other needs
+SANOMA_DATABASE_URL names Postgres, used as it is. Without it, sanoma, check and ledger export start the company's
+own PostgreSQL 18 in .sanoma/postgres (its records: deleting it deletes them), or use the one another sanoma runs
+there; worker and app only use one that runs. SANOMA_APP_PORT the app's port (default 3000; 0 for any free port); SANOMA_APP_HOST its address (default 127.0.0.1; any other needs
 GitHub sign-in, see .env.example). With sanoma or a @sanoma-ai package linked from a sanoma checkout,
 or SANOMA_DEV_REPO set, \`sanoma\` also runs the watch build of each package it reaches in the checkout and
 restarts on a new build.
 
 For a parent process: SANOMA_EVENTS=1 adds a JSON line on stdout per event, {"sanoma":1,"event":…}: "ready" with the
 app's "url" (where it listens, on the port SANOMA_APP_PORT names) and its "sites" each time it listens, "error" with the
-"message" when it cannot start or stop, and "database" (not printed yet); the end of stdin then stops it as SIGTERM
-does. sanoma never prompts, reads stdin only then, and opens no browser; SIGTERM stops everything it started but a
-Postgres container; exit 2 is a mistake in the call or the config, 1 a failure.
+"message" when it cannot start or stop, and "database" with "how" ("answered", "started" or "created"), "url" and
+"place" once the company's own Postgres answers; the end of stdin then stops it as SIGTERM does. sanoma never
+prompts, reads stdin only then, and opens no browser; SIGTERM stops everything it started, the app, the worker, then
+the Postgres it started unless another client is connected; exit 2 is a mistake in the call or the config, 1 a failure.
 `;
 
 /** Exit codes: 2 for how the bin was called or what it found, 1 for failed checks and failures while running. */
@@ -86,11 +89,13 @@ export async function main(argv: string[]): Promise<number> {
       return serveCommand(values.dev ?? false);
     case "worker": {
       const { runWorker } = await import("./serve.ts");
-      return keep(await load(), runWorker);
+      return keep(await load({ postgres: "find" }), runWorker);
     }
     case "app": {
       const { runApp } = await import("./serve.ts");
-      return keep(await load(), (config, resolved) => runApp(config, { port: port(), log, resolved }));
+      return keep(await load({ postgres: "find" }), (config, resolved) =>
+        runApp(config, { port: port(), log, resolved }),
+      );
     }
     case "check":
       return runCheck();
@@ -124,34 +129,76 @@ const parse = (argv: string[]) =>
 
 const port = () => Number(process.env.SANOMA_APP_PORT ?? 3000);
 
+/** A config loaded with its database made to answer (`withPostgres`). */
+interface Running extends Loaded {
+  postgres: EnsuredPostgres;
+}
+
 /**
  * The config, loaded and resolved, with its policy from `policies/**\/*.cedar` (`policyAt`): a
  * problem with them is a `UsageError`, so nothing starts on policies that do not hold. Without
- * `policies`, they are left to the caller (`check` reports them).
+ * `policies`, they are left to the caller (`check` reports them). With `postgres`, its database
+ * answers first (`withPostgres`: "start" starts the company's own, "find" only finds it running),
+ * so the config resolves on it.
  */
-async function load({ policies = true } = {}): Promise<Loaded> {
+async function load(options: { policies?: boolean; postgres: "start" | "find" }): Promise<Running>;
+async function load(options?: { policies?: boolean }): Promise<Loaded>;
+async function load({ policies = true, postgres }: { policies?: boolean; postgres?: "start" | "find" } = {}): Promise<
+  Loaded | Running
+> {
   const loaded = await loadConfig();
+  const ensured = postgres && (await withPostgres(namedDatabaseUrl(loaded.config), loaded.root, postgres === "start"));
   const { resolveConfig } = await import("@sanoma-ai/workflows");
-  const resolved = resolveConfig(loaded.config);
-  if (policies && resolved.policyProblems.length) {
-    throw new UsageError(`The policies do not hold:\n${resolved.policyProblems.join("\n")}`);
+  try {
+    const resolved = resolveConfig(loaded.config);
+    if (policies && resolved.policyProblems.length) {
+      throw new UsageError(`The policies do not hold:\n${resolved.policyProblems.join("\n")}`);
+    }
+    return { ...loaded, resolved, ...(ensured && { postgres: ensured }) };
+  } catch (err) {
+    await ensured?.stop().catch(() => {});
+    throw err;
   }
-  return { ...loaded, resolved };
+}
+
+/** The database URL the config or the environment names, an empty value as none: else the company's own. */
+const namedDatabaseUrl = (config: LoadedConfig["config"]) =>
+  config.databaseUrl ?? (process.env.SANOMA_DATABASE_URL || undefined);
+
+/**
+ * Makes the database `named` answer, or with none the company's own in `root` (`ensurePostgres`),
+ * and names it in this process's `SANOMA_DATABASE_URL`, which the runtime reads and every child
+ * inherits; never in `.env`. The company's own is a `database` event.
+ */
+async function withPostgres(named: string | undefined, root: string, start: boolean): Promise<EnsuredPostgres> {
+  const { ensurePostgres } = await import("./postgres.ts");
+  const postgres = await ensurePostgres(named, { root, log, start });
+  process.env.SANOMA_DATABASE_URL = postgres.databaseUrl;
+  if (named === undefined) {
+    emit({ event: "database", how: postgres.how, url: postgres.databaseUrl, place: "this-computer" });
+  }
+  return postgres;
 }
 
 /**
  * Starts what `start` starts over the loaded config, prints what runs (and where, when it
- * listens), and stops it on SIGINT or SIGTERM, then exits 0. The worker names the vendors not
+ * listens), and stops it on SIGINT or SIGTERM, then the Postgres `load` started, then exits 0. The worker names the vendors not
  * configured yet itself, in one line.
  */
 async function keep(
-  { config, resolved }: Loaded,
+  { config, resolved, postgres }: Running,
   start: (
     config: SanomaConfig,
     resolved: Loaded["resolved"],
   ) => Promise<{ stop(): Promise<void>; url?: string; sites?: Record<string, string> }>,
 ): Promise<never> {
-  const started = await start(config, resolved);
+  let started: Awaited<ReturnType<typeof start>>;
+  try {
+    started = await start(config, resolved);
+  } catch (err) {
+    await postgres.stop().catch(() => {});
+    throw err;
+  }
   const running = `${resolved.appName} running ${[...resolved.workflows.keys()].join(", ")}`;
   if (started.url === undefined) {
     console.log(`${running}; ctrl-c to stop`);
@@ -162,20 +209,18 @@ async function keep(
     console.log(`${resolved.appName} at ${started.url}; ctrl-c to stop`);
     emit({ event: "ready", url: started.url, sites: started.sites ?? {} });
   }
-  onSignal(() => started.stop());
+  // Postgres last, once the worker and the app have closed their connections.
+  onSignal(() => started.stop().finally(() => postgres.stop()));
   return new Promise(() => {});
 }
 
 /**
- * `sanoma serve` (and `sanoma` outside dev mode): Postgres, then the worker and the app in this
- * process. With `devServer` (`sanoma`), a repo's sites are served from Vite's dev server, not built.
+ * `sanoma serve` (and `sanoma` outside dev mode): Postgres (the company's own unless one is
+ * named), then the worker and the app in this process. With `devServer` (`sanoma`), a repo's sites are served from Vite's dev server, not built.
  */
 async function serveCommand(devServer: boolean): Promise<never> {
-  const loaded = await load();
+  const loaded = await load({ postgres: "start" });
   (await import("./key.ts")).ensureSecretsKey(process.cwd(), log);
-  const { appName, databaseUrl } = loaded.resolved;
-  const { ensurePostgres } = await import("./postgres.ts");
-  await ensurePostgres(databaseUrl, { appName, log });
   const { serve } = await import("./serve.ts");
   return keep(loaded, (config, resolved) => serve(config, { port: port(), log, dev: devServer, resolved }));
 }
@@ -197,12 +242,19 @@ async function serveStarted(cwd: string): Promise<number> {
  * source from Vite's dev server, which updates it in place: a new build of the app's pages (its
  * `dist/client` and `dist/server`) restarts nothing.
  * Each runs in a process group of its own, so a terminal's ctrl-c reaches this process alone, and
- * its `stop` is the one path that ends them.
+ * its `stop` is the one path that ends them. The company's own Postgres, when neither the
+ * environment nor `.env` names a URL, is this process's (`withPostgres`, the config unread: one
+ * the config names is the child's), so a restart keeps it; the child inherits its URL.
  */
 async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<never> {
   const { partialLink, startWatchers, supervise, whenUnlinked } = await import("./dev.ts");
   const cwd = process.cwd();
   log(`dev mode: ${repo}; building ${packages.map((p) => p.name).join(", ") || "nothing"} as it changes`);
+  const dotenv = join(cwd, ".env");
+  const named =
+    process.env.SANOMA_DATABASE_URL ||
+    (existsSync(dotenv) && parseEnv(readFileSync(dotenv, "utf8")).SANOMA_DATABASE_URL);
+  const postgres = named ? undefined : await withPostgres(undefined, cwd, true);
   const fromTarballs = partialLink(cwd);
   if (fromTarballs.length) {
     log(
@@ -234,6 +286,7 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
     unwatch();
     await child.stop();
     await watchers.stop();
+    await postgres?.stop();
   });
   // Once the repo is unlinked (`sanoma-dev unlink`, an install), the checkout's server must not
   // keep running in it, nor start again on the checkout's next build: it would write its own
@@ -254,19 +307,20 @@ async function writeApiCommand(): Promise<number> {
   return 0;
 }
 
-/** `sanoma check`: Postgres made to answer while tsc, oxlint and the config are read; the scenarios on `<database>_check`. */
+/** `sanoma check`: Postgres made to answer, then the checks, the scenarios on `<database>_check`; Postgres stopped after when it started it. */
 async function runCheck(): Promise<number> {
-  const loaded = await load({ policies: false });
-  const { appName, databaseUrl } = loaded.resolved;
-  const [{ ensurePostgres }, { check }] = await Promise.all([import("./postgres.ts"), import("./check.ts")]);
-  const own = new URL(databaseUrl);
-  own.pathname = `${own.pathname}_check`;
-  // Started here, handed to check at once (which handles its failure), awaited before the scenarios.
-  const ready = ensurePostgres(databaseUrl, { appName, log });
-  const { ok, problems, warnings } = await check(loaded, { databaseUrl: own.toString(), ready, log });
-  for (const line of [...warnings, ...problems]) console.log(line);
-  log(ok ? "ok" : `${problems.length} problem${problems.length === 1 ? "" : "s"}`);
-  return ok ? 0 : 1;
+  const loaded = await load({ policies: false, postgres: "start" });
+  try {
+    const { check } = await import("./check.ts");
+    const own = new URL(loaded.postgres.databaseUrl);
+    own.pathname = `${own.pathname}_check`;
+    const { ok, problems, warnings } = await check(loaded, { databaseUrl: own.toString(), log });
+    for (const line of [...warnings, ...problems]) console.log(line);
+    log(ok ? "ok" : `${problems.length} problem${problems.length === 1 ? "" : "s"}`);
+    return ok ? 0 : 1;
+  } finally {
+    await loaded.postgres.stop();
+  }
 }
 
 async function env(checkOnly: boolean): Promise<number> {
@@ -282,15 +336,20 @@ async function env(checkOnly: boolean): Promise<number> {
 }
 
 async function ledgerExport(runId: string, out: string | undefined): Promise<number> {
-  const { config } = await loadConfig();
-  const { exportLedger } = await import("./ledger.ts");
-  const text = await exportLedger(config, runId);
-  if (out === undefined) process.stdout.write(text);
-  else {
-    writeFileSync(out, text);
-    log(`wrote ${out}`);
+  const loaded = await loadConfig();
+  const postgres = await withPostgres(namedDatabaseUrl(loaded.config), loaded.root, true);
+  try {
+    const { exportLedger } = await import("./ledger.ts");
+    const text = await exportLedger(loaded.config, runId);
+    if (out === undefined) process.stdout.write(text);
+    else {
+      writeFileSync(out, text);
+      log(`wrote ${out}`);
+    }
+    return 0;
+  } finally {
+    await postgres.stop();
   }
-  return 0;
 }
 
 /**
