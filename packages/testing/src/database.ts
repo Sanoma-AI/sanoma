@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import {
   type CallContext,
+  databaseUrlSecret,
   defineConnector,
   defineDriver,
   defineResource,
@@ -238,7 +239,7 @@ const typeDriver = defineDriver(types, {
 const storeDriver = defineDriver(store, {
   database: {
     storeUrl: async ({ id, export: name }, { secrets }: CallContext) => {
-      const secret = `SANOMA_DATABASE_URL_${name.toUpperCase()}`;
+      const secret = databaseUrlSecret(name);
       await secrets.ensure(secret, () => testDatabaseUrl(id));
       return { secret };
     },

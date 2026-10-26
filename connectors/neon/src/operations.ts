@@ -1,6 +1,6 @@
 import type { CallContext, PlanAction } from "@sanoma-ai/workflows";
-import { databaseUrlSecret, DriverError, retryableStatus } from "@sanoma-ai/workflows";
-import { canonicalSize, limitsOf, project, sizeOf } from "./connector.ts";
+import { DriverError, retryableStatus, storeDatabaseUrl } from "@sanoma-ai/workflows";
+import { canonicalSize, DEFAULT_SIZE, fields, limitsOf, project, sizeOf } from "./connector.ts";
 
 // The connector's operations over Neon's API (`NeonApi`): the driver's calls it through the SDK,
 // the fake's answers from its state. Both go through `neonOperations`, so they plan, store the
@@ -98,9 +98,9 @@ export const refused = (message: string, vendorCode?: string) =>
 export const retryable = (status: number) => retryableStatus(status) || status === 423;
 
 /** The fields a project's state holds that only Neon sets: unknown in a create's plan. */
-const SET_BY_NEON = project.fields.vendorOwned;
+const SET_BY_NEON = fields.vendorOwned;
 /** The fields Neon cannot change in place: a project does not move or change its major version. */
-const IMMUTABLE = project.fields.immutable as readonly ("region" | "pg_version")[];
+const IMMUTABLE = fields.immutable;
 
 /** A compute that has started once: active, or idle (suspended) since. */
 const started = (endpoint: ApiEndpoint | undefined) =>
@@ -111,12 +111,14 @@ function stateOf(p: ApiProject, branch: ApiBranch | undefined, endpoint: ApiEndp
   return {
     name: p.name,
     region: p.region_id,
-    ...(endpoint && { size: sizeOf(endpoint.autoscaling_limit_min_cu, endpoint.autoscaling_limit_max_cu) }),
     pg_version: p.pg_version,
     id: p.id,
-    ...(endpoint && { host: endpoint.host }),
     ...(branch && { default_branch_id: branch.id }),
-    ...(endpoint && { default_endpoint_id: endpoint.id }),
+    ...(endpoint && {
+      size: sizeOf(endpoint.autoscaling_limit_min_cu, endpoint.autoscaling_limit_max_cu),
+      host: endpoint.host,
+      default_endpoint_id: endpoint.id,
+    }),
     healthy: started(endpoint),
   };
 }
@@ -127,19 +129,22 @@ interface Planned {
   action: PlanAction;
   planned?: Record<string, unknown>;
   state?: State;
+  /** For an update, the state it leaves: only the name and size change in place. */
+  next?: State;
   unknown: string[];
   replace: string[];
 }
 
+/** The state a compute is going to: Neon answers a suspend or a start before it is done. */
+const goingTo = (endpoint: ApiEndpoint) => ({ state: endpoint.pending_state ?? endpoint.current_state });
+
 /**
- * The connector's operations over `api()`, made on each call: the project type's (`project.*`,
- * with `health` and `storeUrl`), `branch.create` and `branch.delete`, `endpoint.suspend` and
- * `endpoint.start`.
+ * The connector's operations over `neon`: the project type's (`project.*`, with `health` and
+ * `storeUrl`), `branch.create` and `branch.delete`, `endpoint.suspend` and `endpoint.start`.
  */
-export function neonOperations(api: () => NeonApi) {
+export function neonOperations(neon: NeonApi) {
   /** A project's default branch, and that branch's read-write compute: either may be missing. */
   const defaults = async (projectId: string) => {
-    const neon = api();
     // One after the other, so a recording holds them in one order.
     const branches = await neon.branches(projectId);
     const endpoints = await neon.endpoints(projectId);
@@ -147,8 +152,17 @@ export function neonOperations(api: () => NeonApi) {
     const endpoint = endpoints.find((e) => e.branch_id === branch?.id && e.type === "read_write");
     return { branch, endpoint };
   };
+  /** The direct (unpooled) URI of a project's database, of its default branch unless `branchId`. */
+  const directUri = (projectId: string, branchId?: string) =>
+    neon.connectionUri({
+      projectId,
+      ...(branchId && { branch_id: branchId }),
+      database_name: DATABASE,
+      role_name: ROLE,
+      pooled: false,
+    });
   const read = async ({ id }: { id: string }) => {
-    const found = await api().getProject(id);
+    const found = await neon.getProject(id);
     if (!found) return { id, gone: true };
     const { branch, endpoint } = await defaults(id);
     return { id, gone: false, state: stateOf(found, branch, endpoint) };
@@ -160,27 +174,26 @@ export function neonOperations(api: () => NeonApi) {
     const want = project.schema.parse(desired);
     if (!state) {
       const unknown = [...SET_BY_NEON, ...(want.pg_version === undefined ? ["pg_version"] : [])];
-      const planned = { size: "0.25", ...want, ...Object.fromEntries(unknown.map((f) => [f, null])) };
+      const planned = { size: DEFAULT_SIZE, ...want, ...Object.fromEntries(unknown.map((f) => [f, null])) };
       return { action: "create", planned, unknown, replace: [] };
     }
     const replace = IMMUTABLE.filter((f) => want[f] !== undefined && want[f] !== state[f]);
     if (replace.length) return { action: "replace", planned: { ...state, ...want }, state, unknown: [], replace };
-    const size = want.size === undefined ? state.size : canonicalSize(want.size);
-    const planned = { ...state, name: want.name, size };
-    const action = want.name !== state.name || size !== state.size ? "update" : "none";
-    return { action, planned, state, ...none };
+    const next = { ...state, name: want.name, size: want.size === undefined ? state.size : canonicalSize(want.size) };
+    const action = next.name !== state.name || next.size !== state.size ? "update" : "none";
+    return { action, planned: next, state, next, ...none };
   };
   return {
     project: {
       import: read,
       read,
       plan: async (input: { id?: string; desired?: Record<string, unknown> }) => {
-        const { state: _, ...out } = await plan(input);
+        const { state: _, next: __, ...out } = await plan(input);
         return out;
       },
       create: async ({ desired }: { desired: Record<string, unknown> }) => {
         const { name, region, size, pg_version } = project.schema.parse(desired);
-        const made = await api().createProject({
+        const made = await neon.createProject({
           project: {
             name,
             region_id: region,
@@ -205,7 +218,7 @@ export function neonOperations(api: () => NeonApi) {
         if (expect && (expect.action !== fresh.action || expect.replace.join() !== fresh.replace.join())) {
           throw refused(`project.update: the plan changed (${expect.action}, now ${fresh.action})`, "plan_changed");
         }
-        const { state, planned } = fresh;
+        const { state, next } = fresh;
         if (!state) throw refused(`project.update: there is no project ${id}`, "gone");
         if (fresh.action === "replace") {
           // Making a new project would leave the company's data in the old one.
@@ -214,45 +227,31 @@ export function neonOperations(api: () => NeonApi) {
             "immutable",
           );
         }
-        if (fresh.action === "none") return { id, state };
-        const size = planned!.size as string | undefined;
-        const resize = size !== state.size && size !== undefined;
-        await api().updateProject(id, {
-          project: { name: String(planned!.name), ...(resize && { default_endpoint_settings: limitsOf(size) }) },
+        if (fresh.action === "none" || !next) return { id, state };
+        const resize = next.size !== state.size && next.size !== undefined;
+        const limits = limitsOf(next.size);
+        await neon.updateProject(id, {
+          project: { name: next.name, ...(resize && { default_endpoint_settings: limits }) },
         });
         if (resize && state.default_endpoint_id) {
-          await api().updateEndpoint(id, state.default_endpoint_id, { endpoint: limitsOf(size) });
+          await neon.updateEndpoint(id, state.default_endpoint_id, { endpoint: limits });
         }
-        const after = await read({ id });
-        if (!after.state) throw refused(`project.update: the project ${id} is gone`, "gone");
-        return { id, state: after.state };
+        return { id, state: next };
       },
       delete: async ({ id }: { id: string }) => {
-        await api().deleteProject(id);
+        await neon.deleteProject(id);
         return { id, gone: true as const };
       },
       health: async ({ id }: { id: string }) => {
         const { endpoint } = await defaults(id);
         return { healthy: started(endpoint), state: endpoint?.current_state ?? "none" };
       },
-      storeUrl: async ({ id, export: name }: { id: string; export: string }, { secrets }: CallContext) => {
-        const secret = databaseUrlSecret(name);
-        // Direct, not pooled: a transaction-mode pooler does not carry LISTEN, which DBOS needs.
-        const url = await api().connectionUri({
-          projectId: id,
-          database_name: DATABASE,
-          role_name: ROLE,
-          pooled: false,
-        });
-        // The store only adds: a URL stored before for another project or password is refused, not kept.
-        if ((await secrets.ensure(secret, () => url)) !== url) {
-          throw refused(
-            `project.storeUrl: ${secret} holds another URL (another project or password); delete it to store this one`,
-            "stale",
-          );
-        }
-        return { secret };
-      },
+      // Direct, not pooled: Neon's pooler runs in transaction mode, which does not carry LISTEN, which DBOS needs.
+      storeUrl: async ({ id, export: name }: { id: string; export: string }, { secrets }: CallContext) =>
+        storeDatabaseUrl(secrets, name, await directUri(id), {
+          where: "neon: project.storeUrl",
+          others: "another project or password",
+        }),
     },
     branch: {
       create: async ({
@@ -264,7 +263,6 @@ export function neonOperations(api: () => NeonApi) {
         name: string;
         expiresAt?: string;
       }) => {
-        const neon = api();
         const made = await neon.createBranch(projectId, {
           branch: {
             name,
@@ -273,31 +271,19 @@ export function neonOperations(api: () => NeonApi) {
           endpoints: [{ type: "read_write" }],
         });
         // Neon sends the URI when the branch has one database and one role, as a project made here does.
-        const url =
-          made.connection_uris?.[0]?.connection_uri ??
-          (await neon.connectionUri({
-            projectId,
-            branch_id: made.branch.id,
-            database_name: DATABASE,
-            role_name: ROLE,
-            pooled: false,
-          }));
+        const url = made.connection_uris?.[0]?.connection_uri ?? (await directUri(projectId, made.branch.id));
         return { id: made.branch.id, url };
       },
       delete: async ({ project: projectId, id }: { project: string; id: string }) => {
-        await api().deleteBranch(projectId, id);
+        await neon.deleteBranch(projectId, id);
         return { id, gone: true as const };
       },
     },
     endpoint: {
-      suspend: async ({ project: projectId, id }: { project: string; id: string }) => {
-        const endpoint = await api().suspendEndpoint(projectId, id);
-        return { state: endpoint.pending_state ?? endpoint.current_state };
-      },
-      start: async ({ project: projectId, id }: { project: string; id: string }) => {
-        const endpoint = await api().startEndpoint(projectId, id);
-        return { state: endpoint.pending_state ?? endpoint.current_state };
-      },
+      suspend: async ({ project: projectId, id }: { project: string; id: string }) =>
+        goingTo(await neon.suspendEndpoint(projectId, id)),
+      start: async ({ project: projectId, id }: { project: string; id: string }) =>
+        goingTo(await neon.startEndpoint(projectId, id)),
     },
   };
 }

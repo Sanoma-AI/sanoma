@@ -1,6 +1,6 @@
 import { DriverError } from "@sanoma-ai/workflows";
 import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
-import { neonOps, REGIONS } from "./connector.ts";
+import { limitsOf, neonOps, REGIONS } from "./connector.ts";
 import {
   type ApiBranch,
   type ApiEndpoint,
@@ -113,10 +113,8 @@ function fakeApi(state: FakeNeonState): NeonApi {
       const branch = { id: next("br-fake"), default: false, ...body };
       p.branches[branch.id] = branch;
       const main = Object.values(p.endpoints).find((e) => p.branches[e.branch_id]?.default);
-      const endpoint = compute(p, branch.id, {
-        autoscaling_limit_min_cu: main?.autoscaling_limit_min_cu ?? 0.25,
-        autoscaling_limit_max_cu: main?.autoscaling_limit_max_cu ?? 0.25,
-      });
+      const { autoscaling_limit_min_cu, autoscaling_limit_max_cu } = main ?? limitsOf();
+      const endpoint = compute(p, branch.id, { autoscaling_limit_min_cu, autoscaling_limit_max_cu });
       return { branch: { ...branch }, connection_uris: [{ connection_uri: uri(p, endpoint, false) }] };
     },
     async deleteBranch(projectId, branchId) {
@@ -150,7 +148,7 @@ export function fakeNeon(options: FakeOptions = {}) {
     neonOps,
     {
       initial: (): FakeNeonState => ({ seq: 0, projects: {} }),
-      ops: (state) => neonOperations(() => fakeApi(state)),
+      ops: (state) => neonOperations(fakeApi(state)),
     },
     options,
   );

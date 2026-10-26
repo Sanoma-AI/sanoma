@@ -48,8 +48,11 @@ const projectSchema = z.object({
   healthy: z.boolean().optional().describe("Whether its default compute has started once: active, or idle (paused)"),
 });
 
+/** A compute's size when a declaration gives none: Neon's smallest. */
+export const DEFAULT_SIZE = "0.25";
+
 /** The compute's autoscaling limits a declared `size` gives: one size for both, or a range. */
-export function limitsOf(size = "0.25"): { autoscaling_limit_min_cu: number; autoscaling_limit_max_cu: number } {
+export function limitsOf(size = DEFAULT_SIZE): { autoscaling_limit_min_cu: number; autoscaling_limit_max_cu: number } {
   const [min, max = min] = size.split("-").map(Number) as [number, number?];
   return { autoscaling_limit_min_cu: min, autoscaling_limit_max_cu: max };
 }
@@ -63,11 +66,12 @@ export function canonicalSize(size: string): string {
   return sizeOf(min, max);
 }
 
-const fields = {
+/** A project's fields: what Neon sets, and what it cannot change in place. */
+export const fields = {
   immutable: ["region", "pg_version"],
   vendorOwned: ["id", "host", "default_branch_id", "default_endpoint_id", "healthy"],
   writeOnly: [],
-};
+} as const;
 
 /**
  * `neon.project({ name, region, size?, pg_version? })`: a Neon project, the company's database,

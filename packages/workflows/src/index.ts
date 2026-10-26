@@ -166,6 +166,7 @@ export {
   type DatabaseOutputs,
   type DatabaseSpec,
   databaseUrlSecret,
+  storeDatabaseUrl,
 } from "./database.ts";
 export type { Chat, Chats } from "./chats.ts";
 export {

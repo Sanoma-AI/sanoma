@@ -1,7 +1,8 @@
 import type { z } from "zod";
 import { hasPath } from "./host.ts";
-import type { Op } from "./op.ts";
+import { DriverError, type Op } from "./op.ts";
 import type { AfterCreate, Resource } from "./resource.ts";
+import type { Secrets } from "./secret.ts";
 import { RESOURCE_OPS } from "./wakeup.ts";
 
 // The `Database` contract: what a resource type that holds the company's database (a Neon
@@ -55,6 +56,28 @@ export interface DatabaseSpec {
  */
 export const databaseUrlSecret = (exportName: string): string =>
   `SANOMA_DATABASE_URL_${exportName.replaceAll(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase()}`;
+
+/**
+ * A `storeUrl`'s store: `url` as `databaseUrlSecret(exportName)`, whose name it returns. The store
+ * only adds: a secret that holds another URL (another database, or a password since changed) is
+ * refused, not kept, with a `DriverError` (`stale`) that begins `where` and names what else it
+ * could be (`others`).
+ */
+export async function storeDatabaseUrl(
+  secrets: Secrets,
+  exportName: string,
+  url: string,
+  { where, others }: { where: string; others: string },
+): Promise<{ secret: string }> {
+  const secret = databaseUrlSecret(exportName);
+  if ((await secrets.ensure(secret, () => url)) !== url) {
+    throw new DriverError(`${where}: ${secret} holds another URL (${others}); delete it to store this one`, {
+      retryable: false,
+      vendorCode: "stale",
+    });
+  }
+  return { secret };
+}
 
 /**
  * Throws what is wrong with a resource type's `database`: a type apply cannot change (not

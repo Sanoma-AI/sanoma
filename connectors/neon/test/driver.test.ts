@@ -129,7 +129,7 @@ describe.skipIf(live)("neonDriver", () => {
     expect(project.schema.safeParse({ ...DESIRED, size: "0.25-2" }).success).toBe(true);
   });
 
-  it("renames and resizes a project: the project's default and its compute, then reads it", async () => {
+  it("renames and resizes a project: the project's default and its compute", async () => {
     play("update");
     const desired = { name: "acme", region: "aws-us-east-1", size: "1" };
     const updated = await op("project.update", { id: P, desired, expect: { action: "update", replace: [] } });

@@ -77,33 +77,31 @@ function sdkApi(timeoutMs: number): NeonApi {
     if (client?.key !== key) client = { key, api: createApiClient({ apiKey: key, timeout: timeoutMs }) };
     return client.api;
   };
-  /**
-   * One request: its reply's `data`, or `undefined` for Neon's 404 where `absent` says it means
-   * no such object; any other failure a `DriverError`.
-   */
-  async function send<T>(where: string, request: (api: Api<unknown>) => Promise<{ data: T }>): Promise<T>;
-  async function send<T>(
-    where: string,
-    request: (api: Api<unknown>) => Promise<{ data: T }>,
-    absent: true,
-  ): Promise<T | undefined>;
-  async function send<T>(where: string, request: (api: Api<unknown>) => Promise<{ data: T }>, absent = false) {
+  /** One request: its reply's `data`, every failure a `DriverError`. */
+  const send = async <T>(where: string, request: (api: Api<unknown>) => Promise<{ data: T }>): Promise<T> => {
     const api = await connect();
     try {
       return (await request(api)).data;
     } catch (error) {
-      if (absent && isAbsent(error)) return undefined;
       throw failure(where, error, timeoutMs);
     }
-  }
+  };
+  /** One request whose 404 means no such object: `undefined` then. */
+  const sendOrAbsent = <T>(where: string, request: (api: Api<unknown>) => Promise<{ data: T }>) =>
+    send(where, (api) =>
+      request(api).catch((error: unknown) => {
+        if (isAbsent(error)) return { data: undefined };
+        throw error;
+      }),
+    );
   return {
     createProject: (body) => send("POST /projects", (api) => api.createProject(body)),
-    getProject: async (id) => (await send(`GET /projects/${id}`, (api) => api.getProject(id), true))?.project,
+    getProject: async (id) => (await sendOrAbsent(`GET /projects/${id}`, (api) => api.getProject(id)))?.project,
     async updateProject(id, body) {
       await send(`PATCH /projects/${id}`, (api) => api.updateProject(id, body));
     },
     async deleteProject(id) {
-      await send(`DELETE /projects/${id}`, (api) => api.deleteProject(id), true);
+      await sendOrAbsent(`DELETE /projects/${id}`, (api) => api.deleteProject(id));
     },
     branches: async (projectId) =>
       (
@@ -127,10 +125,8 @@ function sdkApi(timeoutMs: number): NeonApi {
         (api) => api.createProjectBranch(projectId, body as BranchCreateRequest),
       ),
     async deleteBranch(projectId, branchId) {
-      await send(
-        `DELETE /projects/${projectId}/branches/${branchId}`,
-        (api) => api.deleteProjectBranch({ projectId, branchId }),
-        true,
+      await sendOrAbsent(`DELETE /projects/${projectId}/branches/${branchId}`, (api) =>
+        api.deleteProjectBranch({ projectId, branchId }),
       );
     },
     suspendEndpoint: async (projectId, endpointId) =>
@@ -154,10 +150,5 @@ function sdkApi(timeoutMs: number): NeonApi {
  */
 export function neonDriver(options: NeonDriverOptions = {}) {
   const timeoutMs = options.timeoutMs ?? 30_000;
-  const api = sdkApi(timeoutMs);
-  return defineDriver(
-    neonOps,
-    neonOperations(() => api),
-    { env },
-  );
+  return defineDriver(neonOps, neonOperations(sdkApi(timeoutMs)), { env });
 }

@@ -1,4 +1,4 @@
-import { type CallContext, databaseUrlSecret, type Driver, DriverError, type DriverFn } from "@sanoma-ai/workflows";
+import { type CallContext, type Driver, DriverError, type DriverFn, storeDatabaseUrl } from "@sanoma-ai/workflows";
 
 // The operations the provider's project does not carry, over Supabase's Management API
 // (https://api.supabase.com/api/v1): the driver's `ManagementApi` calls it, the fake's answers
@@ -88,7 +88,6 @@ export function withManagement(driver: Driver, api: () => ManagementApi): Driver
     },
     "pooler.get": ({ ref }: { ref: string }) => pooler(ref),
     "database.storeUrl": async ({ ref, export: name }: { ref: string; export: string }, { secrets }: CallContext) => {
-      const secret = databaseUrlSecret(name);
       const password = await secrets.get(PASSWORD_SECRET);
       if (password === undefined) {
         throw new DriverError(`supabase: database.storeUrl: the secret ${PASSWORD_SECRET} is not set`, {
@@ -97,14 +96,10 @@ export function withManagement(driver: Driver, api: () => ManagementApi): Driver
       }
       const { host, port, user, database } = await pooler(ref);
       const url = `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database)}?sslmode=require`;
-      // The store only adds: a URL stored before for another project or password is refused, not kept.
-      if ((await secrets.ensure(secret, () => url)) !== url) {
-        throw new DriverError(
-          `supabase: database.storeUrl: ${secret} holds another URL (another project, pooler or password); delete it to store this one`,
-          { retryable: false, vendorCode: "stale" },
-        );
-      }
-      return { secret };
+      return storeDatabaseUrl(secrets, name, url, {
+        where: "supabase: database.storeUrl",
+        others: "another project, pooler or password",
+      });
     },
   };
   return Object.freeze({ ...driver, ops: Object.freeze(ops) });
