@@ -44,16 +44,15 @@ export async function postChat(request: Request, context: ActorContext & { site?
     if (chat && chat.person !== principal.id) throw new ApiError(404, { error: `No chat ${body.id}` });
     const engine = ENGINES[chat?.engine ?? body.engine];
     if (!engine) throw invalid(`No engine ${body.engine}: the engines are ${Object.keys(ENGINES).join(", ")}`);
+    // The new message is checked before a turn under way is stopped for it: a new one, by the person.
+    const message = (await validated([body.message]))[0]!;
+    if (message.role !== "user") throw invalid("A chat takes the person's messages only");
+    const known = async () => (chat ? await chats.load(chat.id) : []);
+    if ((await known()).some((m) => m.id === message.id)) throw invalid(`The chat has a message ${message.id} already`);
     stops.get(body.id)?.abort();
     await written(body.id);
-    const history = chat ? await settle(app, await chats.load(body.id)) : [];
-    const messages = await validateUIMessages<ChatMessage>({ messages: [...history, body.message] }).catch(
-      (err: unknown) => {
-        throw TypeValidationError.isInstance(err) ? invalid(`Not a chat message: ${err.message}`) : err;
-      },
-    );
-    const message = messages.at(-1)!;
-    if (message.role !== "user") throw invalid("A chat takes the person's messages only");
+    const history = await settle(app, await known());
+    const messages = await validated([...history, message]);
     if (!chat) {
       const title =
         message.parts
@@ -70,7 +69,10 @@ export async function postChat(request: Request, context: ActorContext & { site?
     stops.set(chat.id, stop);
     const response = await engine({ chat, messages, principal, app, signal: stop.signal });
     const id = chat.id;
-    void written(id)?.finally(() => stops.get(id) === stop && stops.delete(id));
+    const forget = () => stops.get(id) === stop && stops.delete(id);
+    const writing = written(id);
+    if (writing) void writing.finally(forget);
+    else forget();
     return response;
   } catch (err) {
     const { status, body } = toApiError(err, "a chat turn");
@@ -79,6 +81,12 @@ export async function postChat(request: Request, context: ActorContext & { site?
 }
 
 const invalid = (error: string) => new ApiError(400, { error, code: "invalid_input" });
+
+/** `messages` as chat messages (`validateUIMessages`), or a 400 saying why not. */
+const validated = (messages: unknown[]) =>
+  validateUIMessages<ChatMessage>({ messages }).catch((err: unknown) => {
+    throw TypeValidationError.isInstance(err) ? invalid(`Not a chat message: ${err.message}`) : err;
+  });
 
 /** The person's chat `id` with its transcript, as stored; null when they have none of that id. */
 export async function chatFor(

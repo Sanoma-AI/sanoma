@@ -188,8 +188,8 @@ export function loopTools(turn: ToolsTurn) {
         }
         let output: unknown;
         try {
-          // The tool call's id is the call's, so asking again finds the same held run.
-          output = await app.client.call(op, input, { actor: principal, id: toolCallId });
+          // The chat's and the tool call's ids are the call's, so asking again finds the same held run.
+          output = await app.client.call(op, input, { actor: principal, id: `${chat.id}:${toolCallId}` });
         } catch (err) {
           const runId = heldRun(err);
           if (runId === undefined) throw err;

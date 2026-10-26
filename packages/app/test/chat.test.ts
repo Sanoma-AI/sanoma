@@ -293,7 +293,7 @@ describe("the chat", () => {
       runId ??= output?.held?.runId;
     });
     await waitFor(() => runId, Boolean, 30_000);
-    expect(runId).toBe(`call:ada:${RUN}-12-0`);
+    expect(runId).toBe(`call:ada:${id}:${RUN}-12-0`);
     await waitFor(async () => {
       const stored = (await chats.load(id)) as ChatMessage[];
       return toolParts(stored.at(-1))[0]?.output !== undefined;
@@ -335,12 +335,20 @@ describe("the chat", () => {
     expect(JSON.stringify(model.doStreamCalls.at(-1)!.prompt)).toContain("Acme Ltd");
   }, 300_000);
 
-  it("refuses another person's chat, a message that is not one, and a request that is not same-origin", async () => {
+  it("refuses another person's chat, a message that is not one or that the chat has, and a request that is not same-origin", async () => {
     const someone = await post({ id, message: userMessage("Hi") }, { [ACTOR_HEADER]: "lead" });
     expect(someone.status).toBe(404);
     const malformed = await post({ id: `other-${RUN}`, message: { role: "user" } }, { [ACTOR_HEADER]: "ada" });
     expect(malformed.status).toBe(400);
     expect(await malformed.json()).toMatchObject({ code: "invalid_input" });
+    // A message the chat has already, by its id: refused, the chat as it was.
+    const stored = await testApp.client.chats.load(id);
+    const again = await post(
+      { id, message: { ...stored[0], parts: [{ type: "text", text: "Hi" }] } },
+      { [ACTOR_HEADER]: "ada" },
+    );
+    expect(again.status).toBe(400);
+    expect(await testApp.client.chats.load(id)).toEqual(stored);
     const nobody = await post({ id: `other-${RUN}`, message: userMessage("Hi") });
     expect(nobody.status).toBe(400);
     const elsewhere = await post(
@@ -368,6 +376,8 @@ describe("allowedPath", () => {
         "/etc/passwd",
         "out/x",
         ".git/config",
+        ".GIT/config",
+        "Node_Modules/x/index.js",
         "node_modules/x/index.js",
         "workflows/../../x",
       ]) {

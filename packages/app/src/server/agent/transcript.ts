@@ -78,8 +78,8 @@ const shapeOf = (message: UIMessage): string =>
 
 /**
  * The transcript with what a turn left unfinished settled, as its last message has it after a
- * restart cut the turn short: a held lookup's result once its run has ended (still held, as its
- * result, while it waits), a tool call with no result failed as interrupted, text and reasoning done.
+ * restart cut the turn short: a held lookup's result once its run has ended (still held while it
+ * waits), a tool call with no result failed as interrupted, text and reasoning done.
  */
 export async function settle(app: AppContext, messages: UIMessage[]): Promise<UIMessage[]> {
   const last = messages.at(-1);
@@ -91,7 +91,9 @@ export async function settle(app: AppContext, messages: UIMessage[]): Promise<UI
       if (part.state === "output-available" && part.preliminary) {
         const runId = heldRunOf(part.output);
         const run = runId === undefined ? undefined : await app.client.run(runId);
-        if (!run || !isEnded(run.status)) return { ...part, preliminary: false };
+        // Still waiting: held as it was, for the next turn to settle once the run has ended.
+        if (run && !isEnded(run.status)) return part;
+        if (!run) return { ...part, preliminary: false };
         try {
           return { ...part, preliminary: false, output: { output: await app.client.result(run.runId) } };
         } catch (err) {

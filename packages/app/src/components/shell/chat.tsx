@@ -77,7 +77,8 @@ export function ChatColumn({ besidePageOnly = false }: { besidePageOnly?: boolea
           New chat
         </Button>
       </div>
-      <ChatPane key={id} id={id} known={known} />
+      {/* Kept open once you write in it: a newer chat in the list does not take its place. */}
+      <ChatPane key={id} id={id} known={known} onSend={() => setPicked(id)} />
     </aside>
   );
 }
@@ -86,10 +87,10 @@ export function ChatColumn({ besidePageOnly = false }: { besidePageOnly?: boolea
  * A chat: its transcript as stored when it is one you have had (as it was when opened, so the
  * first message of a new one does not read it back), then the conversation over it.
  */
-function ChatPane({ id, known }: { id: string; known: boolean }) {
+function ChatPane({ id, known, onSend }: { id: string; known: boolean; onSend: () => void }) {
   const [stored] = useState(known);
   const { data, error } = useQuery({ ...chatQuery(id), enabled: stored });
-  if (!stored) return <Conversation id={id} initial={[]} />;
+  if (!stored) return <Conversation id={id} initial={[]} onSend={onSend} />;
   if (error) return <p className="p-4 text-destructive">Could not read the chat: {error.message}</p>;
   if (data === undefined) {
     return (
@@ -98,11 +99,11 @@ function ChatPane({ id, known }: { id: string; known: boolean }) {
       </div>
     );
   }
-  return <Conversation id={id} initial={data?.messages ?? []} />;
+  return <Conversation id={id} initial={data?.messages ?? []} onSend={onSend} />;
 }
 
 /** The conversation: its messages, a turn's error, Continue after a turn that stopped short, and the composer. */
-function Conversation({ id, initial }: { id: string; initial: ChatMessage[] }) {
+function Conversation({ id, initial, onSend }: { id: string; initial: ChatMessage[]; onSend: () => void }) {
   const queryClient = useQueryClient();
   const transport = useMemo(
     () =>
@@ -125,7 +126,10 @@ function Conversation({ id, initial }: { id: string; initial: ChatMessage[] }) {
     onFinish: () => void queryClient.invalidateQueries({ queryKey: CHATS_KEY }),
   });
   const busy = status === "submitted" || status === "streaming";
-  const send = (text: string) => void sendMessage({ text });
+  const send = (text: string) => {
+    onSend();
+    void sendMessage({ text });
+  };
   return (
     <>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4" aria-live="polite">

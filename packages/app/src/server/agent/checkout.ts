@@ -23,7 +23,8 @@ export async function allowedPath(worktree: string, path: string): Promise<strin
   if (full === undefined) return undefined;
   const inside = relative(root, full);
   if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) return undefined;
-  return OFF_LIMITS.has(inside.split(sep)[0]!) ? undefined : full;
+  // Lower-cased: on a case-insensitive file system (macOS's default) `.GIT` is `.git`.
+  return OFF_LIMITS.has(inside.split(sep)[0]!.toLowerCase()) ? undefined : full;
 }
 
 /** The real path of `dir`: of its nearest ancestor that exists, with the rest joined on. */
