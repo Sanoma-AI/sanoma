@@ -3,4 +3,4 @@
 
 [tools]
 node = "24"
-pnpm = "11"
+"npm:pnpm" = "11"
