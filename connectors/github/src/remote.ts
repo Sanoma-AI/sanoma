@@ -95,10 +95,17 @@ function failed(method: string, path: string, reply: Reply, vendorCode?: string)
   });
 }
 
-/** The body of a 2xx answer, read with `schema`; anything else a `DriverError`. */
-async function ok<T>(token: string, method: string, path: string, schema: z.ZodType<T>, body?: unknown): Promise<T> {
+/** The body of a 2xx answer, read with `schema`; anything else a `DriverError`, with `codes`' `vendorCode` for its status. */
+async function ok<T>(
+  token: string,
+  method: string,
+  path: string,
+  schema: z.ZodType<T>,
+  body?: unknown,
+  codes: Record<number, string> = {},
+): Promise<T> {
   const reply = await send(token, method, path, body);
-  if (reply.status >= 300) throw failed(method, path, reply);
+  if (reply.status >= 300) throw failed(method, path, reply, codes[reply.status]);
   return read(schema, reply.body, `${method} ${path}`);
 }
 
@@ -115,40 +122,44 @@ function read<T>(schema: z.ZodType<T>, body: unknown, what: string): T {
 const Installation = z.object({ id: z.number(), account: z.object({ login: z.string(), type: z.string() }) });
 const AccessToken = z.object({ token: z.string(), expires_at: z.string() });
 
-/** The App's installations, when its keys are among `found`; none without them. */
-async function installations(found: Map<string, string>): Promise<z.infer<typeof Installation>[]> {
+/** A JWT of the App, when its keys are among `found`. */
+function jwtOf(found: Map<string, string>): string | undefined {
   const id = found.get(GITHUB_APP_SECRETS.id);
   const pem = found.get(GITHUB_APP_SECRETS.pem);
-  if (!id || !pem) return [];
-  return ok(appJwt(id, pem), "GET", "/app/installations?per_page=100", z.array(Installation));
+  return id && pem ? appJwt(id, pem) : undefined;
 }
 
-/** A token, and when it stops working (an installation token's hour), as `githubToken` chooses it. */
-async function mint(
-  secrets: RemoteContext["secrets"],
-  owner: string,
-  prefer: "app" | "token",
-): Promise<{ token: string; expiresAt?: number }> {
+const installations = (jwt: string) => ok(jwt, "GET", "/app/installations?per_page=100", z.array(Installation));
+
+/** An installation token of the App, when its keys are among `found` and it is installed on `owner`. */
+async function appToken(found: Map<string, string>, owner: string): Promise<Minted | undefined> {
+  const jwt = jwtOf(found);
+  if (!jwt) return undefined;
+  const installation = (await installations(jwt)).find((i) => i.account.login.toLowerCase() === owner.toLowerCase());
+  if (!installation) return undefined;
+  const made = await ok(jwt, "POST", `/app/installations/${installation.id}/access_tokens`, AccessToken);
+  return { token: made.token, expiresAt: Date.parse(made.expires_at) };
+}
+
+/** A token, with when an installation token's hour is out. */
+interface Minted {
+  token: string;
+  expiresAt?: number;
+}
+
+/** The token `githubToken` chooses, with its expiry. */
+async function mint(secrets: RemoteContext["secrets"], owner: string, prefer: "app" | "token"): Promise<Minted> {
   const found = await secrets([TOKEN, GITHUB_APP_SECRETS.id, GITHUB_APP_SECRETS.pem]);
   const token = found.get(TOKEN);
   if (prefer === "token" && token) return { token };
-  try {
-    const installation = (await installations(found)).find(
-      (i) => i.account.login.toLowerCase() === owner.toLowerCase(),
-    );
-    if (installation) {
-      const jwt = appJwt(found.get(GITHUB_APP_SECRETS.id)!, found.get(GITHUB_APP_SECRETS.pem)!);
-      const made = await ok(jwt, "POST", `/app/installations/${installation.id}/access_tokens`, AccessToken);
-      return { token: made.token, expiresAt: Date.parse(made.expires_at) };
-    }
-  } catch (err) {
+  const app = await appToken(found, owner).catch((err: unknown) => {
     // The App's keys stored but not working (a deleted App, a bad key, GitHub down): the person's token, when there is one.
-    if (!token) {
-      throw err instanceof DriverError
-        ? err
-        : new DriverError(`github: signing as the GitHub App failed`, { retryable: false, cause: err });
-    }
-  }
+    if (token) return undefined;
+    throw err instanceof DriverError
+      ? err
+      : new DriverError("github: signing as the GitHub App failed", { retryable: false, cause: err });
+  });
+  if (app) return app;
   if (token) return { token };
   throw new DriverError(`github: no ${TOKEN}, and the GitHub App is not installed on ${owner}`, {
     retryable: false,
@@ -201,27 +212,38 @@ const Rule = z.object({
 const branchPath = (branch: string) => branch.split("/").map(encodeURIComponent).join("/");
 
 /**
- * The repository `repo` on GitHub, signed in as `githubToken` says. An installation token is kept
- * until five minutes before its hour is out (one mint for calls made together); a person's is read
- * again on every call, so one stored later is used.
+ * The repository `repo` on GitHub, signed in as `githubToken` says. The token is kept for the calls
+ * made together and after them, an installation token until five minutes before its hour is out and
+ * a person's for five minutes, so a token or an installation set later is used soon after.
  */
 function openRepo(repo: RepoRef, { secrets }: RemoteContext): SourceHost {
   const base = `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}`;
-  let kept: Promise<{ token: string; expiresAt?: number }> | undefined;
+  let kept: Promise<Minted> | undefined;
+  let until = 0;
   const token = async (prefer?: "app" | "token") => {
     if (prefer !== undefined) return (await mint(secrets, repo.owner, prefer)).token;
-    kept ??= mint(secrets, repo.owner, "app");
+    if (kept && Date.now() >= until) kept = undefined;
+    if (!kept) {
+      kept = mint(secrets, repo.owner, "app");
+      until = Infinity;
+    }
     const minted = await kept.catch((err: unknown) => {
       kept = undefined;
       throw err;
     });
-    if (minted.expiresAt === undefined || minted.expiresAt - 300_000 <= Date.now()) kept = undefined;
+    // An installation token until five minutes before its hour is out; a person's for five minutes.
+    until = Math.min(until, (minted.expiresAt ?? Date.now() + 600_000) - 300_000);
     return minted.token;
   };
   const call = async (method: string, path: string, body?: unknown) =>
     send(await token(), method, `${base}${path}`, body);
-  const okCall = async <T>(method: string, path: string, schema: z.ZodType<T>, body?: unknown) =>
-    ok(await token(), method, `${base}${path}`, schema, body);
+  const okCall = async <T>(
+    method: string,
+    path: string,
+    schema: z.ZodType<T>,
+    body?: unknown,
+    codes?: Record<number, string>,
+  ) => ok(await token(), method, `${base}${path}`, schema, body, codes);
 
   return {
     token,
@@ -248,12 +270,11 @@ function openRepo(repo: RepoRef, { secrets }: RemoteContext): SourceHost {
       throw failed("POST", `${base}${path}`, reply);
     },
     async mergePullRequest(number, { sha, method, title }) {
-      const path = `/pulls/${number}/merge`;
-      const reply = await call("PUT", path, { sha, merge_method: method, ...(title && { commit_title: title }) });
-      if (reply.status === 409) throw failed("PUT", `${base}${path}`, reply, "head_moved");
-      if (reply.status === 405) throw failed("PUT", `${base}${path}`, reply, "not_mergeable");
-      if (reply.status >= 300) throw failed("PUT", `${base}${path}`, reply);
-      return { sha: read(z.object({ sha: z.string() }), reply.body, `PUT ${base}${path}`).sha };
+      const body = { sha, merge_method: method, ...(title && { commit_title: title }) };
+      // 409: the branch moved on from `sha`; 405: GitHub will not merge it (a conflict, a rule).
+      const codes = { 409: "head_moved", 405: "not_mergeable" };
+      const merged = await okCall("PUT", `/pulls/${number}/merge`, z.object({ sha: z.string() }), body, codes);
+      return { sha: merged.sha };
     },
     async closePullRequest(number) {
       await okCall("PATCH", `/pulls/${number}`, Pull, { state: "closed" });
@@ -391,8 +412,8 @@ export const githubRemote: RemoteHalf = {
     return eventsOf(request.headers.get("x-github-event"), payload);
   },
   async owners({ secrets }) {
-    const found = await secrets([GITHUB_APP_SECRETS.id, GITHUB_APP_SECRETS.pem]);
-    return (await installations(found)).map(({ account }) => ({
+    const jwt = jwtOf(await secrets([GITHUB_APP_SECRETS.id, GITHUB_APP_SECRETS.pem]));
+    return (jwt ? await installations(jwt) : []).map(({ account }) => ({
       login: account.login,
       kind: account.type === "Organization" ? ("organization" as const) : ("user" as const),
     }));

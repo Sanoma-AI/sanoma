@@ -9,8 +9,7 @@ import {
   errorMessage,
   isEnded,
   type Principal,
-  type RemoteContext,
-  remoteFor,
+  type RepoRef,
   type Resource,
   wakeupHostTypes,
 } from "@sanoma-ai/workflows";
@@ -30,6 +29,7 @@ import {
 import type { AppContext } from "../context.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
 import { invalid } from "./core.ts";
+import { secretValues } from "./secrets.ts";
 import { mintWakeupToken, OPS_URL } from "./setup.ts";
 
 // Going live, steps 2 to 6 (step 1 is connect, in setup.ts): choose where the company goes,
@@ -182,12 +182,13 @@ const githubHeaders = (token: string) => ({
 });
 
 /**
- * The stored credentials alone, as a remote half reads them: going live lists accounts with the
- * stored `GITHUB_TOKEN` (`connections`), so it pushes with that one too, not one this process's
- * environment happens to have.
+ * The GitHub connector's remote half over the stored credentials alone: going live lists accounts
+ * with the stored `GITHUB_TOKEN` (`connections`), so it pushes with that one too, not one this
+ * process's environment happens to have.
  */
-const storedSecrets = ({ client }: AppContext): RemoteContext => ({
-  secrets: async (names) => new Map([...(await client.secrets(names))].map(([name, { value }]) => [name, value])),
+const githubRemote = (app: AppContext) => ({
+  remote: app.resolved.remotes.get("github"),
+  context: { secrets: secretValues(app.client, { environment: false }) },
 });
 
 /**
@@ -224,10 +225,10 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
         )
       : [],
     // The accounts the GitHub App is installed on, from the GitHub connector's remote half.
-    listed(
-      "The GitHub App's installations",
-      async () => (await app.resolved.remotes.get("github")?.owners?.(storedSecrets(app))) ?? [],
-    ),
+    listed("The GitHub App's installations", async () => {
+      const { remote, context } = githubRemote(app);
+      return (await remote?.owners?.(context)) ?? [];
+    }),
     supabase
       ? listed("Supabase's organizations", () =>
           fetchJson<{ id: string; name: string }[]>(`${SUPABASE_API}/v1/organizations`, {
@@ -439,14 +440,14 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
 }
 
 /**
- * The token a push to the repository at `url` signs in with, from its host's remote half: the
- * stored `GITHUB_TOKEN`, else an installation token of the GitHub App installed on the owner.
+ * The token a push to `repo` signs in with, from the GitHub connector's remote half: the stored
+ * `GITHUB_TOKEN`, else an installation token of the GitHub App installed on the owner.
  */
-async function pushToken(app: AppContext, url: string): Promise<string> {
-  const host = remoteFor(app.resolved.remotes, url);
-  if (!host) throw new ApiError(409, { error: `No connector's remote half hosts ${url}` });
+async function pushToken(app: AppContext, repo: RepoRef): Promise<string> {
+  const { remote, context } = githubRemote(app);
+  if (!remote) throw new ApiError(409, { error: "The GitHub connector is not among the config's connectors" });
   try {
-    return await host.remote.open(host.repo, storedSecrets(app)).token("token");
+    return await remote.open(repo, context).token("token");
   } catch (err) {
     // Neither a token nor the App: something to connect, not GitHub failing.
     if ((err as { vendorCode?: string } | undefined)?.vendorCode === "no_token")
@@ -483,8 +484,11 @@ export async function goLiveHost(app: AppContext, actor: Principal): Promise<{ r
   const name = REPO_NAME.exec(infra)?.[1];
   if (!owner || !name) throw new ApiError(409, { error: `Cannot tell the repository from ${INFRA} and GITHUB_OWNER` });
   try {
-    const url = `https://github.com/${owner}/${name}.git`;
-    await source.push({ url, token: await pushToken(app, url), ref: "main" });
+    await source.push({
+      url: `https://github.com/${owner}/${name}.git`,
+      token: await pushToken(app, { owner, name }),
+      ref: "main",
+    });
   } catch (err) {
     if (err instanceof ApiError) throw err;
     throw new ApiError(502, { error: errorMessage(err) });

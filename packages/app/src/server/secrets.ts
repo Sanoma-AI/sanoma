@@ -1,16 +1,17 @@
 import type { ModelContext, SanomaClient } from "@sanoma-ai/workflows";
 
 /**
- * A connector's login or model half's `secrets`: each name's value from this process's
+ * A connector's login, model or remote half's `secrets`: each name's value from this process's
  * environment, which wins, else its stored credential (`SanomaClient.secrets`), which is read only
- * for the names the environment leaves unset, so a key set there needs no database.
+ * for the names the environment leaves unset, so a key set there needs no database. With
+ * `environment: false`, the stored credentials alone.
  */
-export function secretValues(client: SanomaClient): ModelContext["secrets"] {
+export function secretValues(client: SanomaClient, { environment = true } = {}): ModelContext["secrets"] {
   return async (names) => {
     const found = new Map<string, string>();
     const rest: string[] = [];
     for (const name of names) {
-      const value = process.env[name];
+      const value = environment ? process.env[name] : undefined;
       if (value) found.set(name, value);
       else rest.push(name);
     }

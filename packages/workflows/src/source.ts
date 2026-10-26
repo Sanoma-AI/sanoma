@@ -182,7 +182,8 @@ export interface SourceHost {
   /**
    * A token that writes to the repository: the company's app's on the host when it is installed
    * on the owner, else a person's token (`prefer: "token"` asks for that one first). It is never
-   * logged; a push signs in with it.
+   * logged; a push signs in with it. A `DriverError` whose `vendorCode` is `no_token` when there is
+   * neither.
    */
   token(prefer?: "app" | "token"): Promise<string>;
   /** The pull request of `branch`: the open one, else the latest; undefined when it has none. */

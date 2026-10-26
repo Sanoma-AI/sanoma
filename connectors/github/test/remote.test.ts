@@ -21,16 +21,28 @@ const { play, sent } = replay({
   scrub,
 });
 
-/** The secrets as the app reads them: here from the environment, which the replay sets. */
-const fromEnv = {
-  secrets: async (names: readonly string[]) =>
-    new Map(names.flatMap((name) => (process.env[name] ? [[name, process.env[name]] as const] : []))),
-};
-/** Secrets that are exactly `values`. */
-const only = (values: Record<string, string>) => ({
+/** Secrets that are exactly `values`, read when asked. */
+const only = (values: Record<string, string | undefined>) => ({
   secrets: async (names: readonly string[]) =>
     new Map(names.flatMap((name) => (values[name] ? [[name, values[name]] as const] : []))),
 });
+/** The secrets as the app reads them: here from the environment, which the replay sets. */
+const fromEnv = only(process.env);
+
+/** The App's keys: a key pair of its own, made once. */
+const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+const pem = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
+const app = { [GITHUB_APP_SECRETS.id]: "4242", [GITHUB_APP_SECRETS.pem]: pem };
+
+/** The App's id a request's JWT is signed by, or "nobody" when the signature does not verify. */
+const signer = (headers: Headers) => {
+  const [head, body, signature] = headers.get("authorization")!.replace("Bearer ", "").split(".");
+  const verified = createVerify("RSA-SHA256").update(`${head}.${body}`).verify(publicKey, signature!, "base64url");
+  return verified ? JSON.parse(Buffer.from(body!, "base64url").toString()).iss : "nobody";
+};
+
+/** A branch head the hand-written replies name. */
+const HEAD = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
 
 const sanoma = { owner: "Sanoma-AI", name: "sanoma" };
 const acme = { owner: "acme", name: "acme-ops" };
@@ -42,7 +54,7 @@ const pull = (number: number, fields: Record<string, unknown> = {}) => ({
   state: "open",
   merged_at: null,
   merge_commit_sha: "f00d000000000000000000000000000000000000",
-  head: { ref: "draft/hire-ada", sha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678" },
+  head: { ref: "draft/hire-ada", sha: HEAD },
   base: { ref: "main" },
   ...fields,
 });
@@ -108,15 +120,6 @@ describe("githubRemote.matches", () => {
 });
 
 describe("githubToken", () => {
-  const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
-  const pem = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
-  const app = { [GITHUB_APP_SECRETS.id]: "4242", [GITHUB_APP_SECRETS.pem]: pem };
-  /** The App's id a request's JWT is signed by, or "nobody" when the signature does not verify. */
-  const signer = (headers: Headers) => {
-    const [head, body, signature] = headers.get("authorization")!.replace("Bearer ", "").split(".");
-    const verified = createVerify("RSA-SHA256").update(`${head}.${body}`).verify(publicKey, signature!, "base64url");
-    return verified ? JSON.parse(Buffer.from(body!, "base64url").toString()).iss : "nobody";
-  };
   const minted: Exchange = {
     method: "POST",
     path: "/app/installations/7/access_tokens",
@@ -240,7 +243,7 @@ describe("a repository opened", () => {
       number: 12,
       url: "https://github.com/acme/acme-ops/pull/12",
       branch: "draft/hire-ada",
-      head: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+      head: HEAD,
       state: "open",
     });
     expect(sent[0]!.body).toEqual({ title: "Hire Ada", head: "draft/hire-ada", base: "main", body: "Adds Ada." });
@@ -272,7 +275,7 @@ describe("a repository opened", () => {
 
   it.skipIf(live)("squash-merges at the head it was given, and names a moved head and a refused merge", async () => {
     const host = githubRemote.open(acme, fromEnv);
-    const sha = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+    const sha = HEAD;
     play("merge", [
       merge(200, {
         sha: "beef000000000000000000000000000000000000",
@@ -319,7 +322,7 @@ describe("a repository opened", () => {
   });
 
   it.skipIf(live)("sets the sanoma status on a commit, its description cut to GitHub's 140 characters", async () => {
-    const sha = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+    const sha = HEAD;
     play("status", [
       { method: "POST", path: `/repos/acme/acme-ops/statuses/${sha}`, status: 201, body: { id: 1, state: "pending" } },
       { method: "POST", path: `/repos/acme/acme-ops/statuses/${sha}`, status: 201, body: { id: 2, state: "failure" } },
@@ -418,7 +421,7 @@ describe("githubRemote.webhook", () => {
   const push = (ref: string, fields: Record<string, unknown> = {}) => ({
     ref,
     before: "0".repeat(40),
-    after: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    after: HEAD,
     deleted: false,
     repository,
     ...fields,
@@ -432,7 +435,7 @@ describe("githubRemote.webhook", () => {
       merge_commit_sha: "beef000000000000000000000000000000000000",
       head: {
         ref: "draft/hire-ada",
-        sha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        sha: HEAD,
         repo: { full_name: "acme/acme-ops" },
       },
     },
@@ -441,7 +444,7 @@ describe("githubRemote.webhook", () => {
 
   it("maps a push to a branch, and leaves out a tag or a deleted branch", async () => {
     expect(await hook(delivery("push", push("refs/heads/main")))).toEqual([
-      { kind: "pushed", repo: acme, branch: "main", head: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678" },
+      { kind: "pushed", repo: acme, branch: "main", head: HEAD },
     ]);
     expect(
       await hook(delivery("push", push("refs/heads/draft/hire-ada"), secret, "application/x-www-form-urlencoded")),
@@ -483,8 +486,6 @@ describe("githubRemote.webhook", () => {
 
 describe("githubRemote.owners", () => {
   it.skipIf(live)("lists the accounts the App is installed on, and none without its keys", async () => {
-    const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
-    const pem = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
     play("owners", [
       {
         method: "GET",
@@ -496,8 +497,7 @@ describe("githubRemote.owners", () => {
         ],
       },
     ]);
-    const app = only({ [GITHUB_APP_SECRETS.id]: "4242", [GITHUB_APP_SECRETS.pem]: pem });
-    expect(await githubRemote.owners!(app)).toEqual([
+    expect(await githubRemote.owners!(only(app))).toEqual([
       { login: "acme", kind: "organization" },
       { login: "ada", kind: "user" },
     ]);
