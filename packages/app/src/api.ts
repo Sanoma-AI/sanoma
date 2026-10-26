@@ -43,10 +43,10 @@ export type Place = "this-computer" | "live";
 
 /**
  * What `getConfig` answers: the description, less the workflows' sources, and where this instance
- * is: its `place`, and its database's host (only the host, never the URL), which the bar's badge
- * says as its tip.
+ * is: its `place`, and its database's host (only the host, never the URL; none when it cannot be
+ * read), which the bar's badge says as its tip.
  */
-export type AppConfig = ConfigDescription & { place: Place; databaseHost: string };
+export type AppConfig = ConfigDescription & { place: Place; databaseHost?: string };
 
 /**
  * Who the server says is asking. With a login provider (`fromServer`), it is whoever signed in,

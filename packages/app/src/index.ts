@@ -211,7 +211,6 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     resolved,
     description,
     policyFiles,
-    // The client connected, so the URL parses.
     place: placeOf(resolved.databaseUrl),
     client,
     login,

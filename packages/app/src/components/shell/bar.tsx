@@ -157,13 +157,19 @@ const PLACES: Record<Place, { label: string; tone: Tone }> = {
 
 /**
  * What the open window is, from what this instance connects to (`placeOf`): This computer or
- * Live, its tip the database's host and nothing more (the default socket's is none).
+ * Live, its tip the database's host and nothing more (the default socket's is none, an unreadable URL's unknown).
  */
 function PlaceBadge() {
   const { data } = useSuspenseQuery({ ...configQuery(), select: selectPlace });
   const { label, tone } = PLACES[data.place];
   return (
-    <Tip tip={`Database on ${data.databaseHost || "a local socket"}`}>
+    <Tip
+      tip={
+        data.databaseHost === undefined
+          ? "Database host unknown"
+          : `Database on ${data.databaseHost || "a local socket"}`
+      }
+    >
       <Badge
         tabIndex={0}
         className={cn(toneBadge({ tone }), "h-auto max-w-full rounded-md text-center text-bar whitespace-normal")}

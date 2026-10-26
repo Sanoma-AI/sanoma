@@ -62,21 +62,29 @@ export function hostName(header: string): string {
 }
 
 /**
- * The host of the database at `databaseUrl`, lowercased: the URL's, else its `?host=` (a Unix
- * socket's directory, or a server's name); none when it gives neither (the default socket).
+ * The host of the database at `databaseUrl`, lowercased, as pg reads it: `?host=` before the URL's
+ * own (a server's name, or a socket's directory, percent-encoded or not), or pg's bare socket form
+ * `/dir dbname`; none for the default socket; undefined when the string is no URL to read.
  */
-export function databaseHost(databaseUrl: string): string {
-  const url = new URL(databaseUrl);
-  return (url.hostname || url.searchParams.get("host") || "").toLowerCase();
+export function databaseHost(databaseUrl: string): string | undefined {
+  if (databaseUrl.startsWith("/")) return databaseUrl.split(" ")[0];
+  const url = URL.parse(databaseUrl);
+  if (!url) return undefined;
+  const host = url.searchParams.get("host") || url.hostname;
+  try {
+    return decodeURIComponent(host).toLowerCase();
+  } catch {
+    return host.toLowerCase();
+  }
 }
 
 /**
  * Where an instance on the database at `databaseUrl` is: this computer when the database's host is
- * a loopback name or a socket (none, or a path), else live.
+ * a loopback name or a socket (none, or a path), else live, and live when it cannot tell.
  */
 export const placeOf = (databaseUrl: string): Place => {
   const host = databaseHost(databaseUrl);
-  return host === "" || host.startsWith("/") || isLoopback(host) ? "this-computer" : "live";
+  return host !== undefined && (host === "" || host.startsWith("/") || isLoopback(host)) ? "this-computer" : "live";
 };
 
 /** The 403 for a request that reached a loopback-only app under some other name (DNS rebinding). */

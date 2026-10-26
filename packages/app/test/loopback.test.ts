@@ -55,18 +55,24 @@ describe("what the open window is (placeOf)", () => {
       "postgresql://u:p@LOCALHOST:5433/db",
       "postgresql:///db",
       "postgresql:///db?host=/var/run/postgresql",
+      "postgresql://u:p@%2Fvar%2Frun%2Fpostgresql/db",
+      "/var/run/postgresql sanoma",
     ]) {
       expect(placeOf(url), url).toBe("this-computer");
     }
   });
 
-  it("is live for any other host, one that starts like a loopback name too", () => {
+  it("is live for any other host, one that starts like a loopback name too, and when it cannot tell", () => {
     for (const url of [
       "postgresql://u:p@ep-cool-name.eu-central-1.aws.neon.tech/neondb?sslmode=require",
       "postgres://u:p@db.example.com:5432/x",
       "postgresql://u:p@localhost.example.com/db",
       "postgresql://u:p@10.0.0.5/db",
       "postgresql:///db?host=db.example.com",
+      // pg connects to `?host=` over the URL's own.
+      "postgresql://u:p@localhost/db?host=db.example.com",
+      // No URL to read: live, the safe side.
+      "not a url",
     ]) {
       expect(placeOf(url), url).toBe("live");
     }
