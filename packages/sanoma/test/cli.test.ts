@@ -83,7 +83,12 @@ describe("sanoma wakeup", () => {
       body: JSON.stringify({ url: "http://x.test" }),
     });
     expect([made.status, Object.keys((await made.json()) as object)]).toEqual([201, ["id", "token"]]);
-    const huge = await fetch(`${url}/wakeup/instances`, { method: "POST", body: "x".repeat(100_000) });
+    // The body is read once the token is known, and only so far.
+    const huge = await fetch(`${url}/wakeup/instances`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+      body: "x".repeat(100_000),
+    });
     expect(huge.status).toBe(413);
     expect((await runCli(dir, ["wakeup", "account"], unconfigured)).code).toBe(2);
     await stop();

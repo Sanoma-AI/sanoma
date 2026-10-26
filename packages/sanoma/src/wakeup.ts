@@ -1,6 +1,8 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { errorMessage } from "@sanoma-ai/workflows";
 import { startWakeupService, type WakeupRoute } from "@sanoma-ai/workflows/wakeup-service";
+import { NodeRequest, sendNodeResponse } from "srvx/node";
 import type { Stoppable } from "./serve.ts";
 
 // `sanoma wakeup`: the wakeup service alone, over a plain Node server: its routes and `/healthz`.
@@ -10,37 +12,9 @@ export interface WakeupServed extends Stoppable {
   url: string;
 }
 
-/** The route a path falls under: `route.path` itself, or a path under it. */
+/** The route a path falls under: `route.path` itself, or a path under it, as the app's `ingress` matches. */
 const routeAt = (routes: readonly WakeupRoute[], path: string) =>
   routes.find((route) => path === route.path || path.startsWith(`${route.path}/`));
-
-/** The most a request's body may hold: a registration is a few hundred bytes. */
-const MAX_BODY = 64 * 1024;
-
-class TooLarge extends Error {}
-
-/** `req` as a fetch `Request`, its body read whole, up to `MAX_BODY` (else `TooLarge`). */
-async function requestOf(req: IncomingMessage, origin: string): Promise<Request> {
-  const headers = new Headers();
-  for (const [name, value] of Object.entries(req.headers)) {
-    for (const one of [value ?? []].flat()) headers.append(name, one);
-  }
-  const method = req.method ?? "GET";
-  if (method === "GET" || method === "HEAD") return new Request(new URL(req.url ?? "/", origin), { method, headers });
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > MAX_BODY) throw new TooLarge();
-    chunks.push(chunk as Buffer);
-  }
-  return new Request(new URL(req.url ?? "/", origin), { method, headers, body: Buffer.concat(chunks) });
-}
-
-async function send(res: ServerResponse, response: Response): Promise<void> {
-  res.writeHead(response.status, Object.fromEntries(response.headers));
-  res.end(Buffer.from(await response.arrayBuffer()));
-}
 
 const text = (res: ServerResponse, status: number, body: string) => {
   res.writeHead(status, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
@@ -61,12 +35,11 @@ export async function runWakeup(
     if (path === "/healthz" && (req.method === "GET" || req.method === "HEAD")) return text(res, 200, "ok\n");
     const route = routeAt(service.routes, path);
     if (!route) return text(res, 404, "not found\n");
-    requestOf(req, "http://wakeup")
-      .then((request) => route.handle(request))
-      .then((response) => send(res, response))
+    route
+      .handle(new NodeRequest({ req, res }))
+      .then((response) => sendNodeResponse(res, response))
       .catch((err: unknown) => {
-        if (err instanceof TooLarge) return text(res, 413, "the body is too large\n");
-        log(`sanoma wakeup: a request failed: ${err instanceof Error ? err.message : String(err)}`);
+        log(`sanoma wakeup: a request failed: ${errorMessage(err)}`);
         if (res.headersSent) res.destroy();
         else text(res, 500, "internal error\n");
       });

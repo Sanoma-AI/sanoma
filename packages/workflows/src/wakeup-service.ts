@@ -1,6 +1,7 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { connectMaking, createTable, type Db, openPool } from "./db.ts";
 import { info, warn } from "./log.ts";
+import { generateSecret } from "./secret.ts";
 import { errorMessage } from "./shared.ts";
 
 /*
@@ -29,7 +30,9 @@ const TABLES: readonly [what: string, ddl: string][] = [
       `account_id uuid NOT NULL REFERENCES ${WAKEUP_ACCOUNTS_TABLE} (id), url text NOT NULL, ` +
       "token_hash text UNIQUE NOT NULL, at timestamptz, generation bigint NOT NULL DEFAULT 0, " +
       "called_at timestamptz, attempts integer NOT NULL DEFAULT 0, next_attempt_at timestamptz, " +
-      "last_error text, created_at timestamptz NOT NULL DEFAULT now())",
+      "last_error text, created_at timestamptz NOT NULL DEFAULT now()); " +
+      `CREATE INDEX IF NOT EXISTS ${WAKEUP_INSTANCES_TABLE}_at ON ${WAKEUP_INSTANCES_TABLE} (at) WHERE at IS NOT NULL; ` +
+      `CREATE INDEX IF NOT EXISTS ${WAKEUP_INSTANCES_TABLE}_account ON ${WAKEUP_INSTANCES_TABLE} (account_id)`,
   ],
 ];
 
@@ -47,6 +50,10 @@ const MAX_BACKOFF_S = 300;
  * stopped, or the write failed) is tried again once it lapses.
  */
 const CLAIM_S = 30;
+/** How many due rows a round takes: few enough to be called well within their claim. */
+const ROUND_ROWS = CONCURRENCY * 2;
+/** The most a request's body may hold: a registration is a few hundred bytes. */
+const MAX_BODY = 64 * 1024;
 
 /** The shape of `@sanoma-ai/app`'s `IngressRoute`, which `startApp`'s `ingress` takes. */
 export interface WakeupRoute {
@@ -80,7 +87,7 @@ export interface WakeupService {
 }
 
 /** A new token: the prefix, then 32 random bytes in base64url. */
-const newToken = (prefix: "swa_" | "swi_") => `${prefix}${randomBytes(32).toString("base64url")}`;
+const newToken = (prefix: "swa_" | "swi_") => `${prefix}${generateSecret()}`;
 
 /**
  * The token's sha256, which is all the tables keep: a token is found by its hash (a unique index),
@@ -92,8 +99,11 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 
-const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: HEADERS });
-const problem = (status: number, error: string) => json(status, { error });
+const json = (status: number, body: unknown) => Response.json(body, { status, headers: HEADERS });
+const problem = (status: number, error: string, headers: Record<string, string> = {}) =>
+  Response.json({ error }, { status, headers: { ...HEADERS, ...headers } });
+/** 405, naming the methods the path answers. */
+const notAllowed = (allow: string) => problem(405, `this path answers ${allow} only`, { allow });
 const noContent = () => new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
 
 /** The request's bearer token, or undefined without one. */
@@ -102,10 +112,29 @@ function bearer(request: Request): string | undefined {
   return match?.[1];
 }
 
-/** The request's JSON object, or undefined when its body is not one. */
-async function jsonBody(request: Request): Promise<Record<string, unknown> | undefined> {
+/** The request's body as text, or undefined once it holds more than `MAX_BODY` bytes. */
+async function bodyText(request: Request): Promise<string | undefined> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (let read = await reader.read(); !read.done; read = await reader.read()) {
+    size += read.value.length;
+    if (size > MAX_BODY) {
+      await reader.cancel();
+      return undefined;
+    }
+    chunks.push(read.value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+/** The request's JSON object, undefined when its body is not one, or a 413 for one too large. */
+async function jsonBody(request: Request): Promise<Record<string, unknown> | undefined | Response> {
+  const text = await bodyText(request);
+  if (text === undefined) return problem(413, "the body is too large");
   try {
-    const parsed: unknown = JSON.parse(await request.text());
+    const parsed: unknown = JSON.parse(text);
     return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
       : undefined;
@@ -153,11 +182,15 @@ const WAITING = "i.at IS NOT NULL AND (i.called_at IS NULL OR i.called_at < i.at
 /** Of an account not revoked. */
 const LIVE = `JOIN ${WAKEUP_ACCOUNTS_TABLE} a ON a.id = i.account_id AND a.revoked_at IS NULL`;
 
-/** The service's two tables, made in the database at `databaseUrl` (the database too) when missing. */
-async function makeTables(databaseUrl: string): Promise<void> {
+/**
+ * Runs `use` on a connection to `databaseUrl` once the service's two tables are there: the
+ * database and the tables made when missing.
+ */
+async function withTables<T>(databaseUrl: string, use: (db: Db) => Promise<T>): Promise<T> {
   const conn = await connectMaking(databaseUrl);
   try {
     for (const [what, ddl] of TABLES) await createTable(conn, ddl, what);
+    return await use(conn);
   } finally {
     await conn.end().catch(() => undefined);
   }
@@ -180,13 +213,7 @@ async function insertAccount(db: Db, label: string): Promise<{ id: string; token
  * tables made when missing): what `sanoma wakeup account <label>` prints.
  */
 export async function mintWakeupAccount(databaseUrl: string, label: string): Promise<{ id: string; token: string }> {
-  await makeTables(databaseUrl);
-  const conn = await connectMaking(databaseUrl);
-  try {
-    return await insertAccount(conn, label);
-  } finally {
-    await conn.end().catch(() => undefined);
-  }
+  return withTables(databaseUrl, (db) => insertAccount(db, label));
 }
 
 /**
@@ -209,7 +236,7 @@ export async function startWakeupService({
   fetch = globalThis.fetch,
   log = { info, warn },
 }: WakeupServiceOptions): Promise<WakeupService> {
-  await makeTables(databaseUrl);
+  await withTables(databaseUrl, async () => {});
   const pool = openPool(databaseUrl, "wakeup service");
   const loop = startLoop({ pool, now, fetch, log });
 
@@ -226,6 +253,7 @@ export async function startWakeupService({
 
   /** The account's instance `id`, or a 404, or a 403 when it is another account's. */
   async function owned(accountId: string, id: string): Promise<InstanceRow | Response> {
+    if (!UUID.test(id)) return problem(404, "no such instance");
     const { rows } = await pool.query<InstanceRow>(`SELECT * FROM ${WAKEUP_INSTANCES_TABLE} WHERE id = $1`, [id]);
     const row = rows[0];
     if (!row) return problem(404, "no such instance");
@@ -235,7 +263,9 @@ export async function startWakeupService({
   async function register(request: Request): Promise<Response> {
     const accountId = await account(request);
     if (accountId instanceof Response) return accountId;
-    const checked = instanceUrl((await jsonBody(request))?.url);
+    const given = await jsonBody(request);
+    if (given instanceof Response) return given;
+    const checked = instanceUrl(given?.url);
     if ("error" in checked) return problem(400, checked.error);
     const id = randomUUID();
     const token = newToken("swi_");
@@ -256,6 +286,7 @@ export async function startWakeupService({
     if (!rows[0]) return problem(401, "the token is no instance's");
     if (rows[0].id !== id) return problem(403, "the token is another instance's");
     const given = await jsonBody(request);
+    if (given instanceof Response) return given;
     const at = given?.at;
     const generation = given?.generation;
     if (typeof at !== "string" || Number.isNaN(Date.parse(at))) return problem(400, "at must be an ISO 8601 date-time");
@@ -282,13 +313,12 @@ export async function startWakeupService({
     if (!match) return problem(404, "no such route");
     const id = match[1]!;
     if (match[2]) {
-      if (method !== "PUT") return notAllowed("PUT");
-      return UUID.test(id) ? wake(request, id) : problem(404, "no such instance");
+      // Its token says which instance it is: another id is a 403, whatever it is.
+      return method === "PUT" ? wake(request, id) : notAllowed("PUT");
     }
     if (method !== "GET" && method !== "DELETE") return notAllowed("GET, DELETE");
     const accountId = await account(request);
     if (accountId instanceof Response) return accountId;
-    if (!UUID.test(id)) return problem(404, "no such instance");
     const row = await owned(accountId, id);
     if (row instanceof Response) return row;
     if (method === "GET") return json(200, shownInstance(row));
@@ -312,13 +342,6 @@ export async function startWakeupService({
     },
   };
 }
-
-/** 405, naming the methods the path answers. */
-const notAllowed = (allow: string) =>
-  new Response(JSON.stringify({ error: `this path answers ${allow} only` }), {
-    status: 405,
-    headers: { ...HEADERS, allow },
-  });
 
 interface Due {
   id: string;
@@ -384,8 +407,8 @@ function startLoop({
     const { rows } = await pool.query<Due>(
       `UPDATE ${WAKEUP_INSTANCES_TABLE} SET next_attempt_at = $1::timestamptz + interval '${CLAIM_S} seconds' ` +
         `WHERE id IN (SELECT i.id FROM ${WAKEUP_INSTANCES_TABLE} i ${LIVE} WHERE ${WAITING} ` +
-        "AND i.at <= $1 AND (i.next_attempt_at IS NULL OR i.next_attempt_at <= $1) FOR UPDATE OF i SKIP LOCKED) " +
-        "RETURNING id, url, generation",
+        "AND i.at <= $1 AND (i.next_attempt_at IS NULL OR i.next_attempt_at <= $1) " +
+        `ORDER BY i.at LIMIT ${ROUND_ROWS} FOR UPDATE OF i SKIP LOCKED) RETURNING id, url, generation`,
       [now()],
     );
     const queue = [...rows];

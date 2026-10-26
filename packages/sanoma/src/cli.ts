@@ -138,7 +138,8 @@ const parse = (argv: string[]) =>
     },
   });
 
-const port = () => Number(process.env.SANOMA_APP_PORT ?? 3000);
+/** `SANOMA_APP_PORT`, or `fallback` when it is unset. */
+const port = (fallback = 3000) => Number(process.env.SANOMA_APP_PORT ?? fallback);
 
 /**
  * The config, loaded and resolved, with its policy from `policies/**\/*.cedar` (`policyAt`): a
@@ -381,7 +382,7 @@ async function wakeupCommand(): Promise<never> {
   try {
     const { runWakeup } = await import("./wakeup.ts");
     const host = process.env.SANOMA_APP_HOST || "127.0.0.1";
-    served = await runWakeup(postgres.databaseUrl, { host, port: Number(process.env.SANOMA_APP_PORT || 3100), log });
+    served = await runWakeup(postgres.databaseUrl, { host, port: port(3100), log });
   } catch (err) {
     await postgres.stop().catch(() => {});
     throw err;
