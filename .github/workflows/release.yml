@@ -40,7 +40,8 @@ jobs:
       # build; the packages being published rebuild in their prepack, which keeps the hand path safe.
       - run: pnpm build
       # --no-git-checks: the first step checks the commit instead. The prepack of each
-      # @sanoma-ai/bridge-<platform> downloads the provider-bridge release RELEASE pins.
+      # @sanoma-ai/bridge-<platform> downloads the provider-bridge release RELEASE pins, and of each
+      # @sanoma-ai/postgres-<platform> zonky's jar from Maven Central (unzip and xz on the runner).
       # --report-summary writes each published version to pnpm-publish-summary.json.
       - run: pnpm publish -r --no-git-checks --report-summary
       - name: Published versions

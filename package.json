@@ -7,6 +7,7 @@
     "db:up": "docker compose up -d --wait",
     "db:down": "docker compose down",
     "bridge:download": "pnpm --filter @sanoma-ai/bridge run bridge:download",
+    "postgres:download": "node packages/sanoma/scripts/download-postgres.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p scripts/readme-shots/tsconfig.json && pnpm --filter @sanoma-ai/app run typecheck:ui",
     "build": "pnpm --filter @sanoma-ai/workflows run build && pnpm -r --filter \"./packages/*\" --filter \"./connectors/*\" --filter \"!@sanoma-ai/workflows\" run build",
     "lint": "oxlint --deny-warnings",

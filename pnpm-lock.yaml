@@ -374,6 +374,16 @@ importers:
 
   packages/dev: {}
 
+  packages/postgres-bin/darwin-arm64: {}
+
+  packages/postgres-bin/darwin-x64: {}
+
+  packages/postgres-bin/linux-arm64: {}
+
+  packages/postgres-bin/linux-x64: {}
+
+  packages/postgres-bin/win32-x64: {}
+
   packages/sanoma:
     dependencies:
       '@sanoma-ai/app':

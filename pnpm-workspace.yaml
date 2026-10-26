@@ -1,6 +1,7 @@
 packages:
   - packages/*
   - packages/bridge-bin/*
+  - packages/postgres-bin/*
   - connectors/*
 allowBuilds:
   lefthook: false
