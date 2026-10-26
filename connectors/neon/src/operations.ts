@@ -1,6 +1,6 @@
 import type { CallContext, PlanAction } from "@sanoma-ai/workflows";
-import { DriverError } from "@sanoma-ai/workflows";
-import { limitsOf, project, sizeOf } from "./connector.ts";
+import { databaseUrlSecret, DriverError, retryableStatus } from "@sanoma-ai/workflows";
+import { canonicalSize, limitsOf, project, sizeOf } from "./connector.ts";
 
 // The connector's operations over Neon's API (`NeonApi`): the driver's calls it through the SDK,
 // the fake's answers from its state. Both go through `neonOperations`, so they plan, store the
@@ -91,14 +91,16 @@ export const ROLE = "neondb_owner";
 export const refused = (message: string, vendorCode?: string) =>
   new DriverError(`neon: ${message}`, { retryable: false, ...(vendorCode && { vendorCode }) });
 
-/** The secret that holds the URL of the project a data file exports as `name`: `store` → `SANOMA_DATABASE_URL_STORE`. */
-const databaseUrlSecret = (name: string) =>
-  `SANOMA_DATABASE_URL_${name.replaceAll(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase()}`;
+/**
+ * Whether a call that Neon answered `status` is worth retrying: the runtime's rule, and a 423,
+ * which Neon answers while the project's earlier operations (a new compute's start) still run.
+ */
+export const retryable = (status: number) => retryableStatus(status) || status === 423;
 
 /** The fields a project's state holds that only Neon sets: unknown in a create's plan. */
-const SET_BY_NEON = ["id", "host", "default_branch_id", "default_endpoint_id", "healthy"] as const;
+const SET_BY_NEON = project.fields.vendorOwned;
 /** The fields Neon cannot change in place: a project does not move or change its major version. */
-const IMMUTABLE = ["region", "pg_version"] as const;
+const IMMUTABLE = project.fields.immutable as readonly ("region" | "pg_version")[];
 
 /** A compute that has started once: active, or idle (suspended) since. */
 const started = (endpoint: ApiEndpoint | undefined) =>
@@ -163,7 +165,7 @@ export function neonOperations(api: () => NeonApi) {
     }
     const replace = IMMUTABLE.filter((f) => want[f] !== undefined && want[f] !== state[f]);
     if (replace.length) return { action: "replace", planned: { ...state, ...want }, state, unknown: [], replace };
-    const size = want.size === undefined ? state.size : resized(want.size);
+    const size = want.size === undefined ? state.size : canonicalSize(want.size);
     const planned = { ...state, name: want.name, size };
     const action = want.name !== state.name || size !== state.size ? "update" : "none";
     return { action, planned, state, ...none };
@@ -299,9 +301,3 @@ export function neonOperations(api: () => NeonApi) {
     },
   };
 }
-
-/** A declared size as Neon would read it back: `0.50` is `0.5`, `1-1` is `1`. */
-const resized = (size: string) => {
-  const { autoscaling_limit_min_cu: min, autoscaling_limit_max_cu: max } = limitsOf(size);
-  return sizeOf(min, max);
-};

@@ -160,7 +160,13 @@ export {
   type Source,
 } from "./source.ts";
 export type { HostCapabilities, HostLifetime, HostOutputs, HostSpec } from "./host.ts";
-export { checkDatabase, type DatabaseCapabilities, type DatabaseOutputs, type DatabaseSpec } from "./database.ts";
+export {
+  checkDatabase,
+  type DatabaseCapabilities,
+  type DatabaseOutputs,
+  type DatabaseSpec,
+  databaseUrlSecret,
+} from "./database.ts";
 export type { Chat, Chats } from "./chats.ts";
 export {
   checkWakeup,

@@ -146,7 +146,7 @@
   },
   {
     "method": "GET",
-    "path": "/api/v2/projects/spring-example-302709/branches",
+    "path": "/api/v2/projects/spring-example-302709/branches?limit=10000",
     "status": 200,
     "body": {
       "branches": [

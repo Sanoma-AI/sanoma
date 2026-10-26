@@ -1,4 +1,11 @@
-import { type Connector, defineConnector, defineResource, type OpSpec, vendorInfo } from "@sanoma-ai/workflows";
+import {
+  compareDeclared,
+  type Connector,
+  defineConnector,
+  defineResource,
+  type OpSpec,
+  vendorInfo,
+} from "@sanoma-ai/workflows";
 import { z } from "zod";
 
 /*
@@ -25,6 +32,10 @@ const projectSchema = z.object({
   size: z
     .string()
     .regex(/^\d+(\.\d+)?(-\d+(\.\d+)?)?$/, "a size in compute units, such as `0.25`, or a range such as `0.25-2`")
+    .refine((size) => {
+      const { autoscaling_limit_min_cu: min, autoscaling_limit_max_cu: max } = limitsOf(size);
+      return min >= 0.25 && max >= min;
+    }, "a size is 0.25 compute units or more, and a range's minimum is no more than its maximum")
     .optional()
     .describe(
       "Its compute's size in compute units (CU), such as `0.25` (the default), or `min-max` to autoscale between them",
@@ -46,6 +57,18 @@ export function limitsOf(size = "0.25"): { autoscaling_limit_min_cu: number; aut
 /** A compute's `size` as its limits read: one number when they are the same, else `min-max`. */
 export const sizeOf = (min: number, max: number) => (min === max ? String(min) : `${min}-${max}`);
 
+/** A declared size as Neon reads it back: `0.50` is `0.5`, `1-1` is `1`. */
+export function canonicalSize(size: string): string {
+  const { autoscaling_limit_min_cu: min, autoscaling_limit_max_cu: max } = limitsOf(size);
+  return sizeOf(min, max);
+}
+
+const fields = {
+  immutable: ["region", "pg_version"],
+  vendorOwned: ["id", "host", "default_branch_id", "default_endpoint_id", "healthy"],
+  writeOnly: [],
+};
+
 /**
  * `neon.project({ name, region, size?, pg_version? })`: a Neon project, the company's database,
  * which meets the `Database` contract: its compute pauses after five minutes without queries and
@@ -58,11 +81,14 @@ export const project = defineResource({
   type: "project",
   title: "Project",
   schema: projectSchema,
-  fields: {
-    immutable: ["region", "pg_version"],
-    vendorOwned: ["id", "host", "default_branch_id", "default_endpoint_id", "healthy"],
-    writeOnly: [],
-  },
+  fields,
+  // A size compares as Neon reads it back, so `0.50` declared is no drift from `0.5`.
+  normalize: (state, desired) =>
+    compareDeclared(
+      fields,
+      typeof state.size === "string" ? { ...state, size: canonicalSize(state.size) } : state,
+      desired,
+    ),
   writable: true,
   // It holds the company's data: apply asks before it deletes one.
   stateless: false,

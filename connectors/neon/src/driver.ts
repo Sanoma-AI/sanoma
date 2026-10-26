@@ -1,8 +1,8 @@
-import { defineDriver, DriverError, errorMessage, retryableStatus } from "@sanoma-ai/workflows";
+import { defineDriver, DriverError, errorMessage } from "@sanoma-ai/workflows";
 import type { Api, BranchCreateRequest } from "@neondatabase/api-client";
 import { z } from "zod";
 import { neonOps } from "./connector.ts";
-import { type NeonApi, neonOperations, refused } from "./operations.ts";
+import { type NeonApi, neonOperations, refused, retryable } from "./operations.ts";
 
 export interface NeonDriverOptions {
   /** How long one request to Neon may take, in milliseconds. Default 30 000. */
@@ -38,9 +38,8 @@ const isAxiosFailure = (error: unknown): error is AxiosFailure =>
 const Problem = z.object({ code: z.string().optional(), message: z.string() });
 
 /**
- * The `DriverError` for a request that failed. No `cause`: an axios error carries its request's
- * headers, the key among them. A 423 is retryable as well as the runtime's rule: Neon answers it
- * while the project's earlier operations (a create's compute start) still run.
+ * The `DriverError` for a request that failed, retryable as `retryable` says. No `cause`: an axios
+ * error carries its request's headers, the key among them.
  */
 function failure(where: string, error: unknown, timeoutMs: number): DriverError {
   if (!isAxiosFailure(error)) {
@@ -57,7 +56,7 @@ function failure(where: string, error: unknown, timeoutMs: number): DriverError 
   const { status, data } = response;
   const problem = Problem.safeParse(data).data;
   return new DriverError(`neon: ${where}: ${problem?.message ?? `HTTP ${status}`}`, {
-    retryable: retryableStatus(status) || status === 423,
+    retryable: retryable(status),
     status,
     ...(problem?.code && { vendorCode: problem.code }),
   });
@@ -68,7 +67,7 @@ const isAbsent = (error: unknown) =>
   isAxiosFailure(error) && error.response?.status === 404 && Problem.safeParse(error.response.data).success;
 
 /** Neon's API through the SDK with the key in `NEON_API_KEY`, read on each call: each failure a `DriverError`. */
-function sdkApi(timeoutMs: number): () => NeonApi {
+function sdkApi(timeoutMs: number): NeonApi {
   /** The client for the last key read, made again only when `NEON_API_KEY` changes. */
   let client: { key: string; api: Api<unknown> } | undefined;
   const connect = async () => {
@@ -97,7 +96,7 @@ function sdkApi(timeoutMs: number): () => NeonApi {
       throw failure(where, error, timeoutMs);
     }
   }
-  return () => ({
+  return {
     createProject: (body) => send("POST /projects", (api) => api.createProject(body)),
     getProject: async (id) => (await send(`GET /projects/${id}`, (api) => api.getProject(id), true))?.project,
     async updateProject(id, body) {
@@ -107,7 +106,12 @@ function sdkApi(timeoutMs: number): () => NeonApi {
       await send(`DELETE /projects/${id}`, (api) => api.deleteProject(id), true);
     },
     branches: async (projectId) =>
-      (await send(`GET /projects/${projectId}/branches`, (api) => api.listProjectBranches({ projectId }))).branches,
+      (
+        await send(
+          `GET /projects/${projectId}/branches`, // Neon's most per page: a project's preview branches must not push the default one off it.
+          (api) => api.listProjectBranches({ projectId, limit: 10_000 }),
+        )
+      ).branches,
     endpoints: async (projectId) =>
       (await send(`GET /projects/${projectId}/endpoints`, (api) => api.listProjectEndpoints(projectId))).endpoints,
     async updateEndpoint(projectId, endpointId, body) {
@@ -141,7 +145,7 @@ function sdkApi(timeoutMs: number): () => NeonApi {
           api.startProjectEndpoint(projectId, endpointId),
         )
       ).endpoint,
-  });
+  };
 }
 
 /**
@@ -150,5 +154,10 @@ function sdkApi(timeoutMs: number): () => NeonApi {
  */
 export function neonDriver(options: NeonDriverOptions = {}) {
   const timeoutMs = options.timeoutMs ?? 30_000;
-  return defineDriver(neonOps, neonOperations(sdkApi(timeoutMs)), { env });
+  const api = sdkApi(timeoutMs);
+  return defineDriver(
+    neonOps,
+    neonOperations(() => api),
+    { env },
+  );
 }

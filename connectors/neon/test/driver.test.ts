@@ -2,6 +2,7 @@ import { live, replay } from "@sanoma-ai/testing/replay";
 import { type CallContext, DriverError, memorySecrets, type Secrets } from "@sanoma-ai/workflows";
 import { delay, http, HttpResponse } from "msw";
 import { describe, expect, it, vi } from "vitest";
+import { project } from "../src/connector.ts";
 import { neonDriver } from "../src/driver.ts";
 import { replayOptions, TEST_KEY } from "./replay.ts";
 
@@ -71,7 +72,7 @@ describe.skipIf(live)("neonDriver", () => {
     expect(await op("project.read", { id: P })).toEqual({ id: P, gone: false, state: STATE });
     expect(sent.map((s) => s.path)).toEqual([
       `${PROJECTS}/${P}`,
-      `${PROJECTS}/${P}/branches`,
+      `${PROJECTS}/${P}/branches?limit=10000`,
       `${PROJECTS}/${P}/endpoints`,
     ]);
     play("read-gone");
@@ -118,6 +119,14 @@ describe.skipIf(live)("neonDriver", () => {
     expect(await op("project.plan", { id: P, desired: { ...DESIRED, size: "0.25-0.25" } })).toMatchObject({
       action: "none",
     });
+  });
+
+  it("compares a size as Neon reads it back, and refuses one Neon does not take", () => {
+    const desired = { ...DESIRED, size: "0.50" };
+    expect(project.normalize({ ...STATE, size: "0.5" }, desired)).toEqual(project.normalize(desired, desired));
+    for (const size of ["0", "0.1", "2-1", "big"])
+      expect(project.schema.safeParse({ ...DESIRED, size }).success).toBe(false);
+    expect(project.schema.safeParse({ ...DESIRED, size: "0.25-2" }).success).toBe(true);
   });
 
   it("renames and resizes a project: the project's default and its compute, then reads it", async () => {

@@ -1,4 +1,4 @@
-import { type CallContext, type Driver, DriverError, type DriverFn } from "@sanoma-ai/workflows";
+import { type CallContext, databaseUrlSecret, type Driver, DriverError, type DriverFn } from "@sanoma-ai/workflows";
 
 // The operations the provider's project does not carry, over Supabase's Management API
 // (https://api.supabase.com/api/v1): the driver's `ManagementApi` calls it, the fake's answers
@@ -38,10 +38,6 @@ export interface ManagementApi {
 
 /** The services `project.health` reads when none are named: what a worker needs. */
 const HEALTH_SERVICES = ["db", "pooler"] as const;
-
-/** The secret that holds the database URL of the project a data file exports as `name`: `store` → `SANOMA_DATABASE_URL_STORE`. */
-const databaseUrlSecret = (name: string) =>
-  `SANOMA_DATABASE_URL_${name.replaceAll(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase()}`;
 
 /** The secret the project's declared `database_password` names, which the URL is built with. */
 const PASSWORD_SECRET = "SUPABASE_DB_PASSWORD";

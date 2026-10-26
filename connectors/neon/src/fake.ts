@@ -1,4 +1,4 @@
-import { DriverError, retryableStatus } from "@sanoma-ai/workflows";
+import { DriverError } from "@sanoma-ai/workflows";
 import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
 import { neonOps, REGIONS } from "./connector.ts";
 import {
@@ -9,6 +9,7 @@ import {
   type Limits,
   type NeonApi,
   neonOperations,
+  retryable,
   ROLE,
 } from "./operations.ts";
 
@@ -32,7 +33,7 @@ const PG_VERSION = 17;
 
 /** A `DriverError` as the driver makes one of Neon's answer `status`. */
 const fail = (status: number, message: string) =>
-  new DriverError(`neon: ${message}`, { retryable: retryableStatus(status) || status === 423, status });
+  new DriverError(`neon: ${message}`, { retryable: retryable(status), status });
 
 /** A URL of `endpoint`, as Neon gives one: with the role's password, through its pooler when `pooled`. */
 const uri = (p: FakeNeonProject, endpoint: ApiEndpoint, pooled: boolean) => {
