@@ -72,6 +72,18 @@ export interface AppOptions {
    * Nothing checks who is asking, so each checks its own token; never give one a page's path.
    */
   ingress?: readonly IngressRoute[];
+  /**
+   * Called right before each change a worker must run that the app makes: a run's start (drift,
+   * apply and a held call are starts) and an approval's decision; never for a read
+   * (`ClientOptions.onWrite`). `sanoma serve` starts its worker again with it once the worker
+   * stopped itself. Must not throw.
+   */
+  onWrite?: () => void;
+  /**
+   * Called as each request arrives, but a host's probe (`/healthz`): a machine route's too, and
+   * a page's polls. `sanoma serve` counts the app quiet from the last one. Must not throw.
+   */
+  onRequest?: () => void;
 }
 
 /** One of `AppOptions.ingress`: a machine route, such as the wakeup's `/wake`. */
@@ -172,6 +184,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
       return void res.end(req.method === "HEAD" ? undefined : "ok\n");
     }
+    options.onRequest?.();
     // A machine route, before the login too: it checks its own token.
     const route = path === undefined ? undefined : ingressAt(path);
     if (route?.method !== undefined && route.method !== req.method) {
@@ -238,7 +251,10 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     await mustBeFile(serverEntry);
     load = async () => builtResponder(files, await loadServerEntry(serverEntry));
   }
-  const [loaded, connected] = await Promise.allSettled([load(), SanomaClient.connect(config)]);
+  const [loaded, connected] = await Promise.allSettled([
+    load(),
+    SanomaClient.connect(config, options.onWrite && { onWrite: options.onWrite }),
+  ]);
   if (loaded.status === "rejected" && connected.status === "rejected") {
     throw new AggregateError(
       [loaded.reason, connected.reason],

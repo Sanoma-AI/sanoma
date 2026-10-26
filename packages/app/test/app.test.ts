@@ -1579,6 +1579,20 @@ describe("the page", () => {
     expect(await rawStatus(app.url, "/machinesx", { host: "10.0.0.7:3000" })).toBe(403);
   });
 
+  it("tells onRequest of each request as it arrives, a machine route's and a page's, but a host's probe", async () => {
+    const onRequest = vi.fn<() => void>();
+    const counted = await startApp(config, { ingress: [machineRoute], onRequest });
+    try {
+      await fetch(new URL("/healthz", counted.url));
+      expect(onRequest).not.toHaveBeenCalled();
+      await fetch(new URL("/machine?generation=1", counted.url));
+      await fetch(new URL("/workflows", counted.url));
+      expect(onRequest).toHaveBeenCalledTimes(2);
+    } finally {
+      await counted.close();
+    }
+  });
+
   it("answers a host's probe at /healthz before the login, whatever name it is addressed to", async () => {
     expect(await rawStatus(app.url, "/healthz", { host: "10.0.0.7:3000" })).toBe(200);
     const res = await fetch(new URL("/healthz?from=docker", app.url));
