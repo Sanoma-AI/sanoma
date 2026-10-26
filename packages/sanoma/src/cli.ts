@@ -317,8 +317,10 @@ async function runCheck(): Promise<number> {
     const { check } = await import("./check.ts");
     const own = new URL(loaded.resolved.databaseUrl);
     own.pathname = `${own.pathname}_check`;
-    const { ok, problems, warnings } = await check(loaded, { databaseUrl: own.toString(), log });
+    const result = await check(loaded, { databaseUrl: own.toString(), log });
+    const { ok, problems, warnings } = result;
     for (const line of [...warnings, ...problems]) console.log(line);
+    emit({ event: "checked", ...result });
     log(ok ? "ok" : `${problems.length} problem${problems.length === 1 ? "" : "s"}`);
     return ok ? 0 : 1;
   } finally {

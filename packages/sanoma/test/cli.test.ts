@@ -130,10 +130,12 @@ GHOST_ADMIN_API_KEY=
 });
 
 describe("sanoma check", () => {
-  it("passes the fixture: Postgres, tsc, oxlint, the config and its scenario, then ok and exit 0", async () => {
+  it("passes the fixture: Postgres, tsc, oxlint, the config and its scenario, then ok, the checked event and exit 0", async () => {
     dir = copyFixture();
-    const ok = await runCli(dir, ["check"], unconfigured);
+    const ok = await runCli(dir, ["check"], { ...unconfigured, SANOMA_EVENTS: "1" });
     expect(ok.code, `${ok.stdout}${ok.stderr}`).toBe(0);
+    const checked = { sanoma: 1, event: "checked", ok: true, problems: [], warnings: [] };
+    expect(ok.stdout.endsWith(`${JSON.stringify(checked)}\n`)).toBe(true);
     // The lines check prints, not all of stdout: on a fresh database DBOS logs "Created database …" there.
     expect(ok.stderr).toContain("passed hello/hello.feature › A post goes out");
     expect(ok.stderr.trimEnd().split("\n").at(-1)).toBe("ok");
