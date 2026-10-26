@@ -32,7 +32,7 @@ import {
   textOf,
   unfinished,
 } from "../../lib/chat.ts";
-import { CHATS_KEY, chatQuery, chatsQuery, enginesQuery } from "../../queries.ts";
+import { CHATS_KEY, chatQuery, chatsQuery } from "../../queries.ts";
 import { useCrumbs } from "../common.tsx";
 import { Reply } from "./chat-parts.tsx";
 
@@ -200,8 +200,10 @@ function TurnError({ message }: { message: string }) {
   );
 }
 
-/** The engines every server offers: the composer's choices until it hears which ones this one does. */
-const ALWAYS = (Object.keys(ENGINE_NAMES) as EngineName[]).filter((name) => !ownPlan(name));
+/** The engines, the composer's choices: ours on the company's key, then a person's own (`ownPlan`). */
+const NAMES = Object.keys(ENGINE_NAMES) as EngineName[];
+const OURS = NAMES.filter((name) => !ownPlan(name));
+const OWN = NAMES.filter(ownPlan);
 
 /** An engine as the composer's choice. */
 const engineOption = (name: EngineName) => (
@@ -228,8 +230,7 @@ function EmptyChat() {
 
 /**
  * The composer: the page as a chip, the message, the engine a new chat opens on (`engine`, only
- * then: those the server offers, a person's own agents in a group of their own), Send (Enter;
- * Shift+Enter for a new line).
+ * then: a person's own agents in a group of their own), Send (Enter; Shift+Enter for a new line).
  */
 function Composer({
   busy,
@@ -242,7 +243,6 @@ function Composer({
 }) {
   const page = useCrumbs().at(-1)?.label;
   const [text, setText] = useState("");
-  const { data: names = ALWAYS } = useQuery({ ...enginesQuery(), enabled: engine !== undefined });
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
@@ -280,12 +280,8 @@ function Composer({
             value={engine.value}
             onChange={(e) => engine.set(e.target.value as EngineName)}
           >
-            {names.filter((name) => !ownPlan(name)).map(engineOption)}
-            {names.some(ownPlan) && (
-              <NativeSelectOptGroup label="Your own plan">
-                {names.filter(ownPlan).map(engineOption)}
-              </NativeSelectOptGroup>
-            )}
+            {OURS.map(engineOption)}
+            <NativeSelectOptGroup label="Your own plan">{OWN.map(engineOption)}</NativeSelectOptGroup>
           </NativeSelect>
         )}
         <Button type="submit" size="icon-sm" variant="secondary" disabled={busy || !text.trim()} aria-label="Send">

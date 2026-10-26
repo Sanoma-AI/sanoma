@@ -31,7 +31,6 @@ import {
   getConfig,
   getCredentials,
   getDriftReport,
-  getEngines,
   getGoLiveChoices,
   getGoLiveProgress,
   getLastRuns,
@@ -264,10 +263,6 @@ export const credentialsFor = (vendor: string) => (all: CredentialsResponse) => 
 /** The person's chats, newest first (the chat column's list), under `CHATS_KEY`. */
 export const CHATS_KEY = ["chats"] as const;
 export const chatsQuery = () => queryOptions({ queryKey: CHATS_KEY, queryFn: () => getChats() });
-
-/** The engines a new chat can open on (the composer's choice), read once. */
-export const enginesQuery = () =>
-  queryOptions({ queryKey: ["engines"], queryFn: () => getEngines(), staleTime: Number.POSITIVE_INFINITY });
 
 /** A chat with its transcript as stored, read when the chat column opens it. */
 export const chatQuery = (id: string) =>

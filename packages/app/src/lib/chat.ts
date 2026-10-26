@@ -40,8 +40,7 @@ export interface SignInCard {
 /**
  * The engines a chat can open on, by the name its row keeps, with the name the chat shows: our
  * loop, an existing coding agent through `HarnessAgent` on the company's key, or a person's own
- * coding agent over ACP on their own plan (`acp-<agent>`, `ownPlan`). The server offers the ones it
- * runs (`getEngines`): Claude Code's and Codex's own only with `SANOMA_OWN_AGENTS_UNSETTLED=1`.
+ * coding agent over ACP on their own plan (`acp-<agent>`, `ownPlan`).
  */
 export const ENGINE_NAMES = {
   loop: "Sanoma",

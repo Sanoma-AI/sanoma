@@ -24,7 +24,6 @@ import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { type ChatMessage, chatTransport, type EngineName, type SignInCard } from "../src/lib/chat.ts";
 import { OWN_AGENTS, type OwnAgentName } from "../src/server/agent/acp.ts";
-import { engines } from "../src/server/agent/turn.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app. The chat's third engine, end to end: a person's
 // own coding agent over ACP, through `POST /api/chat` as the browser's transport reads it. No vendor
@@ -133,7 +132,7 @@ export default defineWorkflow({
   plant("copilot", { signIn: "terminal", mode: "hello" });
   plant("pi", { signIn: "once", mode: "hello" });
   plant("codex", { signIn: "url", mode: "hello" });
-  plant("claude-code", { signIn: "terminal", mode: "hello" });
+  plant("claude-code", { signIn: "none", mode: "hello" });
   app = await startApp(testApp.config, { port: 0, source: localGitSource(dir) });
 }, 600_000);
 
@@ -350,6 +349,31 @@ describe("the chat on a person's own agent", () => {
     expect(textOfReply(reply)).toBe("");
   }, 60_000);
 
+  it("shows Codex's sign-in as the link and code it sends, done when the person finishes", async () => {
+    let shown: SignInCard | undefined;
+    const reply = await send(`codex-${RUN}`, "acp-codex", "Hi", (snapshot) => {
+      const card = cardOf(snapshot);
+      if (!card?.url || shown) return;
+      shown = card;
+      // The person finishes on the vendor's page.
+      writeFileSync(join(install("codex"), "fake.json.finished"), "");
+    });
+    expect(shown).toEqual({
+      agent: "Codex",
+      state: "waiting",
+      url: "https://example.test/device",
+      text: "Sign in and enter this code: FAKE-0002",
+    });
+    expect(cardOf(reply)).toEqual({ agent: "Codex", state: "done" });
+    expect(logged("codex")).toEqual(
+      expect.arrayContaining([{ authenticate: "chat-gpt-device-code" }, { elicitation: "accept" }]),
+    );
+  }, 60_000);
+
+  it("answers on Claude Code's own", async () => {
+    expect(textOfReply(await send(`claude-${RUN}`, "acp-claude-code", "Hi"))).toBe("Hello.");
+  }, 60_000);
+
   it("is never reached by an agent, which no login admits (the engine refuses one too)", async () => {
     const response = await post(`bot-${RUN}`, "acp-opencode", "bot");
     expect(response.status).toBe(403);
@@ -359,7 +383,7 @@ describe("the chat on a person's own agent", () => {
 });
 
 /** Opens the chat `id` on `engine` as `actor`, with fetch: the response as it came. */
-const post = (id: string, engine: string, actor = "ada") =>
+const post = (id: string, engine: string, actor: string) =>
   fetch(new URL("/api/chat", app!.url), {
     method: "POST",
     headers: { "content-type": "application/json", ...headers(actor) },
@@ -369,47 +393,6 @@ const post = (id: string, engine: string, actor = "ada") =>
       message: { id: randomUUID(), role: "user", parts: [{ type: "text", text: "Hi" }] },
     }),
   });
-
-describe("Claude Code's and Codex's own, behind SANOMA_OWN_AGENTS_UNSETTLED", () => {
-  it("are not offered without it: a chat on one is a 400", async () => {
-    vi.stubEnv("SANOMA_OWN_AGENTS_UNSETTLED", undefined);
-    expect(Object.keys(engines())).toEqual(["loop", "pi", "claude-code", "acp-copilot", "acp-opencode", "acp-pi"]);
-    for (const engine of ["acp-claude-code", "acp-codex"]) {
-      const response = await post(`${engine}-off-${RUN}`, engine);
-      expect(response.status).toBe(400);
-      expect(await response.json()).toMatchObject({ error: expect.stringMatching(new RegExp(`^No engine ${engine}`)) });
-    }
-  });
-
-  it("are with it: Codex's sign-in is the link and code it sends, done when the person finishes", async () => {
-    vi.stubEnv("SANOMA_OWN_AGENTS_UNSETTLED", "1");
-    try {
-      expect(Object.keys(engines())).toContain("acp-claude-code");
-      let shown: SignInCard | undefined;
-      const reply = await send(`codex-${RUN}`, "acp-codex", "Hi", (snapshot) => {
-        const card = cardOf(snapshot);
-        if (!card?.url || shown) return;
-        shown = card;
-        // The person finishes on the vendor's page.
-        writeFileSync(join(install("codex"), "fake.json.finished"), "");
-      });
-      expect(shown).toEqual({
-        agent: "Codex",
-        state: "waiting",
-        url: "https://example.test/device",
-        text: "Sign in and enter this code: FAKE-0002",
-      });
-      expect(cardOf(reply)).toEqual({ agent: "Codex", state: "done" });
-      expect(logged("codex")).toEqual(
-        expect.arrayContaining([{ authenticate: "chat-gpt-device-code" }, { elicitation: "accept" }]),
-      );
-      const claude = await post(`claude-on-${RUN}`, "acp-claude-code");
-      expect(claude.status).toBe(200);
-    } finally {
-      vi.stubEnv("SANOMA_OWN_AGENTS_UNSETTLED", undefined);
-    }
-  }, 60_000);
-});
 
 describe.runIf(process.env.SANOMA_LIVE === "1")("the chat on the vendors' own agents", () => {
   it("installs OpenCode, which runs the A4 request on its free model in the draft, with the draft card", async () => {
