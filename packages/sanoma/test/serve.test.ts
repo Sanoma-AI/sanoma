@@ -151,7 +151,7 @@ describe("wakeRoute", () => {
     expect(onWake).not.toHaveBeenCalled();
   });
 
-  it("logs an onWake that throws, and still answers 204", async () => {
+  it("logs an onWake that throws or rejects, and still answers 204", async () => {
     const log = vi.fn<(line: string) => void>();
     const res = await wake(
       "?generation=2",
@@ -162,5 +162,8 @@ describe("wakeRoute", () => {
     );
     expect(res.status).toBe(204);
     expect(log).toHaveBeenCalledWith("a wake of generation 2 failed: no worker");
+    const rejected = await wake("?generation=3", () => Promise.reject(new Error("still starting")), log);
+    expect(rejected.status).toBe(204);
+    await vi.waitFor(() => expect(log).toHaveBeenCalledWith("a wake of generation 3 failed: still starting"));
   });
 });

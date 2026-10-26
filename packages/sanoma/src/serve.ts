@@ -52,18 +52,18 @@ export interface ServeOptions {
   /** The config, resolved, when the caller has it: the Cedar schema is made from it. */
   resolved?: ResolvedConfig;
   /** Called with the generation of each `GET /wake` the app answers (`wakeRoute`). Default: nothing. */
-  onWake?: (generation: number) => void;
+  onWake?: (generation: number) => void | Promise<void>;
 }
 
 /** Starts the app on `port`, with the host and login `appOptions` reads, and the sites built; `url` says where. */
 export async function runApp(config: SanomaConfig, options: ServeOptions): Promise<Served> {
-  return served(config, await appStart(config, options), [wakeRoute(options)]);
+  return served(config, await appStart(config, options), []);
 }
 
 /**
  * The wakeup's `GET /wake?generation=N`, a machine route with no login: a `generation` that is a
  * non-negative integer is handed to `onWake` and answered 204, a stale one too (a wake is
- * harmless: the worker decides what it starts); any other is 400. `onWake` throwing is logged,
+ * harmless: the worker decides what it starts); any other is 400. `onWake` throwing or rejecting is logged,
  * never the wakeup's failure.
  */
 export function wakeRoute({ onWake, log }: Pick<ServeOptions, "onWake" | "log">): IngressRoute {
@@ -78,10 +78,12 @@ export function wakeRoute({ onWake, log }: Pick<ServeOptions, "onWake" | "log">)
           headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
         });
       }
+      const failed = (err: unknown) => log(`a wake of generation ${generation} failed: ${errorMessage(err)}`);
       try {
-        onWake?.(generation);
+        // Not awaited: the wakeup's answer never waits on what the wake starts.
+        void Promise.resolve(onWake?.(generation)).catch(failed);
       } catch (err) {
-        log(`a wake of generation ${generation} failed: ${errorMessage(err)}`);
+        failed(err);
       }
       return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
     },

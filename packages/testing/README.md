@@ -223,4 +223,4 @@ const results = await checkWakeup({ type, host: { url, stop, wakes }, client, re
 expect(results.every((r) => r.ok)).toBe(true);
 ```
 
-`fakeWakeup()` is a wakeup in this process (`testwakeup.timer`, its `host` a reference to a `testhost.app` declaration by its `url`): its driver's `register` arms one timer for the one timer apply created, replacing any armed before unless it is of an older generation, that sends `GET {host}/wake?generation=N` at `at`, again every 250 ms until the host answers. `fire()` sends the armed wake now; `close()` disarms it. Its tests run it over `fakeHost` with `stops-on-exit` and `inProcessHost`.
+`fakeWakeup()` is a wakeup in this process (`testwakeup.timer`, its `host` a reference to a `testhost.app` declaration by its `url`): its driver's `register` arms one timer for the one timer apply created, replacing any armed before unless it is of the same or an older generation, that sends `GET {host}/wake?generation=N` at `at`, again every 250 ms until the host answers. `fire()` sends the armed wake now; `close()` disarms it. Its tests run it over `fakeHost` with `stops-on-exit` and `inProcessHost`.

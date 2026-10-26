@@ -189,7 +189,7 @@ const MAX_DELAY_MS = 2 ** 31 - 1;
 
 /**
  * A wakeup in this process: `testwakeup.timer` with a driver whose `register` arms one timer for
- * the one timer it created (apply's `create`), replacing any armed before unless it is of an
+ * the one timer it created (apply's `create`), replacing any armed before unless it is of the same or an
  * older generation (which changes nothing), which sends
  * `GET {host}/wake?generation=N` at `at`, again every 250 ms until the host answers 2xx. `fire()`
  * sends the armed wake now; `close()` disarms it. `connector` is for a config; `driver` for
@@ -197,8 +197,8 @@ const MAX_DELAY_MS = 2 ** 31 - 1;
  */
 export function fakeWakeup() {
   const timers = new Map<string, z.output<typeof timerSchema>>();
-  let armed: { registration: WakeupRegistration; url: string; timeout?: NodeJS.Timeout } | undefined;
-  /** The newest generation registered: an older one, a late retry, changes nothing. */
+  let armed: { registration: WakeupRegistration; url: string; timeout?: NodeJS.Timeout; sending?: boolean } | undefined;
+  /** The newest generation registered: it again, or an older one (a late retry), changes nothing. */
   let newest = -1;
   const disarm = () => {
     clearTimeout(armed?.timeout);
@@ -211,13 +211,16 @@ export function fakeWakeup() {
   };
   /** Sends the wake `pending` names, while it is still the one armed, until the host answers. */
   const send = async (pending: NonNullable<typeof armed>) => {
-    if (armed !== pending) return;
+    // One request at a time: the one in flight sends again if it is not answered.
+    if (armed !== pending || pending.sending) return;
     const due = Date.parse(pending.registration.at) - Date.now();
     if (due > 0) return later(pending, due);
-    const answered = await fetch(new URL(`/wake?generation=${pending.registration.generation}`, pending.url)).then(
-      (res) => res.ok,
-      () => false,
-    );
+    pending.sending = true;
+    const answered = await (async () => {
+      const res = await fetch(new URL(`/wake?generation=${pending.registration.generation}`, pending.url));
+      return res.ok;
+    })().catch(() => false);
+    pending.sending = false;
     if (armed !== pending) return;
     if (answered) armed = undefined;
     else later(pending, RETRY_MS);
@@ -263,7 +266,7 @@ export function fakeWakeup() {
             retryable: false,
           });
         }
-        if (registration.generation < newest) return {};
+        if (registration.generation <= newest) return {};
         newest = registration.generation;
         disarm();
         const pending = (armed = { registration, url: only.host });
@@ -282,7 +285,7 @@ export function fakeWakeup() {
       if (!pending) return;
       clearTimeout(pending.timeout);
       pending.registration = { ...pending.registration, at: new Date(0).toISOString() };
-      await send(pending);
+      void send(pending);
       await waitFor(() => armed !== pending, Boolean, 60_000);
     },
     /** Disarms the armed wake, if any. */

@@ -204,11 +204,12 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
       if (!host.suspend) throw new Error(`a host that is ${spec.capabilities.lifetime} needs suspend to be checked`);
       await host.suspend();
     };
-    // One request, as a wakeup sends it: generation 0 is older than any the worker registers.
+    // A request, as a wakeup sends it, until the host answers 204 (one starting may answer 503
+    // first): generation 0 is older than any the worker registers.
     const wake = async () => {
-      const { url } = spec.outputs(applied);
-      const res = await fetch(new URL("/wake?generation=0", url));
-      if (res.status !== 204) throw new Error(`${url}/wake answered ${res.status}`);
+      const at = new URL("/wake?generation=0", spec.outputs(applied).url);
+      const answer = () => fetch(at).then((res) => res.status, errorMessage);
+      await waitFor(answer, (status) => status === 204, timeoutMs);
     };
     await check("a queued run drains after a stop and a wake", async () => {
       await suspend();
@@ -542,7 +543,11 @@ export function fakeHost(start: StartHost, { lifetime = "long-lived", quietAfter
     let running: Running | Proxy;
     if (reused) {
       running = reused;
-      await reused.replace(begin);
+      // A runtime that does not start leaves no host, as a container's failed replace does.
+      await reused.replace(begin).catch(async (err: unknown) => {
+        await remove(declared.name);
+        throw err;
+      });
     } else {
       await remove(declared.name);
       running = lifetime === "long-lived" ? await begin() : await proxy(begin, declared.port, quietAfterMs);
