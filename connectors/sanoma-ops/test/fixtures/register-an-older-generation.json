@@ -1,0 +1,37 @@
+[
+  {
+    "method": "POST",
+    "path": "/wakeup/instances",
+    "status": 201,
+    "body": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "token": "swi_recorded0001"
+    }
+  },
+  {
+    "method": "PUT",
+    "path": "/wakeup/instances/00000000-0000-4000-8000-000000000001/wake",
+    "status": 204,
+    "body": null
+  },
+  {
+    "method": "PUT",
+    "path": "/wakeup/instances/00000000-0000-4000-8000-000000000001/wake",
+    "status": 204,
+    "body": null
+  },
+  {
+    "method": "GET",
+    "path": "/wakeup/instances/00000000-0000-4000-8000-000000000001",
+    "status": 200,
+    "body": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "url": "https://company.example.test",
+      "at": "2099-01-01T00:00:00.000Z",
+      "generation": 2,
+      "calledAt": null,
+      "attempts": 0,
+      "lastError": null
+    }
+  }
+]
