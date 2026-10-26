@@ -7,6 +7,7 @@ import { MockLanguageModelV4 } from "ai/test";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { type App, startApp } from "../src/index.ts";
 import { modelRegistry } from "../src/server/models.ts";
+import { secretValues } from "../src/server/secrets.ts";
 
 // The app's models: the registry over the connectors' model halves, on a mock model and on
 // Anthropic's with no key (so nothing is sent), and Anthropic's key on its connector page, which
@@ -70,6 +71,28 @@ describe("modelRegistry", () => {
     });
     await expect(modelRegistry({ resolved, client })).rejects.toThrow("no models today");
     expect((await modelRegistry({ resolved, client })).languageModel("mock/default")).toBe(mockModel);
+  });
+});
+
+describe("secretValues", () => {
+  it("takes the environment's value first, and reads the stored ones only for the names it leaves unset", async () => {
+    // Made-up names and values: nothing here is a credential.
+    vi.stubEnv("SANOMA_TEST_ENV_KEY", "from-env");
+    vi.stubEnv("SANOMA_TEST_STORED_KEY", "");
+    const stored = vi.fn<SanomaClient["secrets"]>(
+      async (names) => new Map(names.map((name) => [name, { value: "stored", source: "stored" }])),
+    );
+    const secrets = secretValues({ secrets: stored } as unknown as SanomaClient);
+    expect(await secrets(["SANOMA_TEST_ENV_KEY", "SANOMA_TEST_STORED_KEY"])).toEqual(
+      new Map([
+        ["SANOMA_TEST_ENV_KEY", "from-env"],
+        ["SANOMA_TEST_STORED_KEY", "stored"],
+      ]),
+    );
+    expect(stored).toHaveBeenCalledExactlyOnceWith(["SANOMA_TEST_STORED_KEY"]);
+    await secrets(["SANOMA_TEST_ENV_KEY"]);
+    expect(stored).toHaveBeenCalledOnce();
+    vi.unstubAllEnvs();
   });
 });
 

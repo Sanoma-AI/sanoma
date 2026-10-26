@@ -13,15 +13,23 @@ const KEY = "ANTHROPIC_API_KEY";
  * Anthropic's models through the AI SDK's adapter (`@ai-sdk/anthropic`), with every model id it
  * knows and `default` for `ANTHROPIC_DEFAULT_MODEL`. The key is read through `secrets` at each
  * request, the environment's first, then the stored one, so a key set on the connector page is
- * used from the next call; without one a call fails with a `LoadAPIKeyError` saying where to set
- * it, and sends nothing.
+ * used from the next call; without one, or when it cannot be read, a call fails with a
+ * `LoadAPIKeyError` saying so, and sends nothing. `ANTHROPIC_BASE_URL` is the adapter's, read from
+ * the environment once, when the provider is made.
  */
 export function anthropicModel({ secrets }: ModelContext): ProviderV4 {
   const anthropic = createAnthropic({
     // The adapter needs a key when it builds a request's headers; `fetch` puts the real one in.
     apiKey: "read at each request",
     fetch: async (url, init) => {
-      const key = (await secrets([KEY])).get(KEY);
+      let key: string | undefined;
+      try {
+        key = (await secrets([KEY])).get(KEY);
+      } catch (error) {
+        // Not the adapter's to read as a failed request to Anthropic, which it would retry and
+        // blame on Anthropic's API: no `cause`, whose network code (the database's) it looks for.
+        throw new LoadAPIKeyError({ message: `anthropic: ${KEY} could not be read: ${(error as Error).message}` });
+      }
       if (!key) {
         const what = anthropicEnv.shape[KEY].description;
         throw new LoadAPIKeyError({

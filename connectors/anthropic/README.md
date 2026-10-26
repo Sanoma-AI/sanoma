@@ -22,7 +22,7 @@ The connector has no operations. It attaches a model half (`withSetup({ model })
 | ------------------- | -------------------------------------------------------- |
 | `ANTHROPIC_API_KEY` | An API key, from the API Keys page of the Claude Console |
 
-The driver declares it, with no operations, so the app's connector page asks for it and stores it encrypted. The model half reads it at each request, the environment's first, then the stored one: a key set on the page is used from the next call. Without one, a call fails with the AI SDK's `LoadAPIKeyError`, "anthropic is not configured: ANTHROPIC_API_KEY (…); set it on the connector page", and sends nothing. `ANTHROPIC_BASE_URL`, read by the adapter, points it at another endpoint.
+The driver declares it, with no operations, so the app's connector page asks for it and stores it encrypted. The model half reads it at each request, the environment's first, then the stored one: a key set on the page is used from the next call. Without one, a call fails with the AI SDK's `LoadAPIKeyError`, "anthropic is not configured: ANTHROPIC_API_KEY (…); set it on the connector page", and sends nothing. A key that cannot be read (the database down) fails the call alike, not retried. `ANTHROPIC_BASE_URL`, the adapter's own, points it at another endpoint: read from the app's environment once, when its registry is made, so a change needs a restart.
 
 ## Testing
 

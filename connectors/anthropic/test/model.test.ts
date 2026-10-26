@@ -71,4 +71,16 @@ describe("anthropicModel", () => {
     await generateText({ model, prompt: "Say hello." });
     expect(new Headers(sent.mock.calls[0]![1]?.headers).get("x-api-key")).toBe(KEY);
   });
+
+  it("fails a call once, as a key not read, when the secrets cannot be read", async () => {
+    const sent = stubFetch();
+    const down = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:5433"), { code: "ECONNREFUSED" });
+    const secrets = vi.fn<(names: readonly string[]) => Promise<Map<string, string>>>().mockRejectedValue(down);
+    const failed = generateText({ model: anthropicModel({ secrets }).languageModel("default"), prompt: "Say hello." });
+    await expect(failed).rejects.toThrow(LoadAPIKeyError);
+    await expect(failed).rejects.toThrow("anthropic: ANTHROPIC_API_KEY could not be read: connect ECONNREFUSED");
+    // Not retried as a request that could not reach Anthropic.
+    expect(secrets).toHaveBeenCalledOnce();
+    expect(sent).not.toHaveBeenCalled();
+  });
 });
