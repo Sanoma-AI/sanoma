@@ -21,7 +21,7 @@ import { mintInstanceToken } from "@sanoma-ai/workflows/wakeup-service";
 import { alarm, container } from "../src/connector.ts";
 import { cloudflareDriver } from "../src/driver.ts";
 import { cloudflare } from "../src/index.ts";
-import { HEALTH_PATH, INACTIVITY_MS, WAKE_PATH } from "../src/worker.ts";
+import { HEALTH_PATH, INACTIVITY_MS } from "../src/worker.ts";
 
 const NEEDS = [
   "CLOUDFLARE_API_TOKEN",
@@ -157,14 +157,15 @@ try {
   });
   report("host", hostResults);
 
-  // The wakes the object rang, as its wake route shows each: polled, since they happen at Cloudflare.
+  // The wakes the object rang, as the alarm's `rang` shows each: polled, since they happen at Cloudflare.
   const wakes: Wake[] = [];
   const poll = setInterval(async () => {
     try {
-      const res = await fetch(`${url}${WAKE_PATH}`, { headers: { authorization: `Bearer ${token}` } });
-      const held = (await res.json()) as { generation: number; rang?: string };
-      if (held.rang && !wakes.some((w) => w.generation === held.generation)) {
-        wakes.push({ generation: held.generation, at: new Date(held.rang) });
+      const { state } = (await op("alarm.read", { id: url })) as {
+        state?: { generation: number; rang: string | null };
+      };
+      if (state?.rang && !wakes.some((w) => w.generation === state.generation)) {
+        wakes.push({ generation: state.generation, at: new Date(state.rang) });
       }
     } catch {
       // The next poll asks again.

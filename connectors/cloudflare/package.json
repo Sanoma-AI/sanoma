@@ -62,7 +62,8 @@
     "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
   "dependencies": {
-    "cloudflare": "^7.3.0"
+    "cloudflare": "^7.3.0",
+    "srvx": "^0.11.22"
   },
   "devDependencies": {
     "@sanoma-ai/testing": "workspace:*",

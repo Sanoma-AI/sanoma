@@ -50,13 +50,13 @@ export const wakeup = cloudflare.alarm({ host });
 
 The host's outputs are `{ url, revision, healthy }`. Its capabilities: stops when quiet, a public URL, it runs an image rather than building one, no fixed egress. `healthy` is the application existing and the Worker answering `/__sanoma/health`, which does not start a stopped container: a stopped host is healthy, and a read or a drift check leaves it stopped.
 
-The alarm's only field is `host`, the container it wakes (its URL); its state is `{ host, at, generation, healthy }`, the wake it holds and whether the host's Worker took the company's token. `register` takes `{ at, generation }`, an ISO 8601 time and a generation from 1, and the Worker keeps it only when it is newer, so a retry or a late duplicate changes nothing. It names no host: on the host, the worker reads the host's URL from `SANOMA_HOST_URL`, which the Worker gives the container; off it, from the credential `alarm.create` stored.
+The alarm's only field is `host`, the container it wakes (its URL); its state is `{ host, at, generation, rang, healthy }`, the wake it holds, when its alarm last rang the host's `/wake` for it, and whether the host's Worker took the company's token. `register` takes `{ at, generation }`, an ISO 8601 time and a generation from 1, and the Worker keeps it only when it is newer, so a retry or a late duplicate changes nothing. It names no host: on the host, the worker reads the host's URL from `SANOMA_HOST_URL`, which the Worker gives the container; off it, from the credential `alarm.create` stored.
 
 The logo is Cloudflare's cloud from [Simple Icons](https://simpleicons.org/?q=cloudflare) (CC0), there only to identify the service an operation calls.
 
 ## The Worker
 
-The package ships the Worker it uploads, `worker/`: `index.js`, which exports the Durable Object class `SanomaInstance` over `DurableObject` from `cloudflare:workers`, and `instance.js`, the object's code with no imports, which the fake runs in Node so both kits check the code Cloudflare runs. Every request to the Worker goes to its one object, which:
+The package ships the Worker it uploads, `worker/`: `index.js`, which exports the Durable Object class `SanomaInstance` over `DurableObject` from `cloudflare:workers`, and `instance.js`, the object's code with no imports (typed by `instance.d.ts`), which the fake runs in Node so both kits check the code Cloudflare runs. Every request to the Worker goes to its one object, which:
 
 - starts the container on a request at the revision and image the Worker's `SANOMA_REVISION` and `SANOMA_IMAGE` name, with the Worker's text bindings (plain and secret) as its environment and both as labels (the image's as a digest, since a label holds 64 bytes); a running container that does not carry both is destroyed and started again (a deploy);
 - waits for the container's `/healthz` (up to ten minutes, the clone and install included), sets its inactivity timeout to ten minutes, and proxies the request to its `port`;

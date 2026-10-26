@@ -316,7 +316,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
       const call = callWith();
       play("alarm", [wake(200, { at: null, generation: 0 })]);
       const made = await op("alarm.create", { desired: { host: `${URL_OF}/` } }, call);
-      expect(made).toEqual({ id: URL_OF, state: { host: URL_OF, at: null, generation: 0, healthy: true } });
+      expect(made).toEqual({ id: URL_OF, state: { host: URL_OF, at: null, generation: 0, rang: null, healthy: true } });
       const token = await call.secrets.get("SANOMA_WAKEUP_TOKEN");
       expect(token).toMatch(/^swi_/);
       expect(await call.secrets.get("SANOMA_HOST_URL")).toBe(URL_OF);
@@ -350,7 +350,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(await op("alarm.read", { id: URL_OF }, callWith())).toEqual({
         id: URL_OF,
         gone: false,
-        state: { host: URL_OF, at: null, generation: 0, healthy: false },
+        state: { host: URL_OF, at: null, generation: 0, rang: null, healthy: false },
       });
     });
 

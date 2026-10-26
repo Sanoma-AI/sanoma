@@ -8,8 +8,8 @@ import {
   type WakeupRegistration,
 } from "@sanoma-ai/workflows";
 import { domainsOf, domainsText } from "@sanoma-ai/workflows/shared";
-import { mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
-import { container } from "./connector.ts";
+import { instanceUrl, mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
+import { alarm, container } from "./connector.ts";
 import {
   HEALTH_PATH,
   MAIN_MODULE,
@@ -145,10 +145,6 @@ const same = (field: (typeof COMPARED)[number], a: unknown, b: unknown) =>
     ? domainsText((a ?? {}) as Record<string, string>) === domainsText((b ?? {}) as Record<string, string>)
     : a === b;
 
-/** Throws the failure of a `send` a plan or change made, refusing a URL that answered nothing. */
-const unanswered = (where: string, cause: unknown) =>
-  new DriverError(`cloudflare: ${where}: no answer (${errorMessage(cause)})`, { retryable: true, cause });
-
 /**
  * `{ revision }` when the Worker answers, else why not; with `start`, once its container answers
  * too, which starts it. A read asks without: a stopped host is healthy, and stays stopped.
@@ -214,7 +210,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     const found = id === undefined ? undefined : await inspect(id, false);
     if (!desired) return { action: found ? "delete" : "none", ...NONE };
     const { secrets, ...planned } = desired;
-    const unknown = ["id", "url", "healthy"];
+    const unknown = [...container.fields.vendorOwned];
     if (!found) return { action: "create", planned, unknown, replace: [] };
     const { state } = found;
     if (planned.name !== state.name) return { action: "replace", planned, unknown, replace: ["name"] };
@@ -222,7 +218,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       // `domains` left out is compared too: removing them is a change.
       COMPARED.some(
         (field) => (field in planned || field === "domains") && !same(field, planned[field], state[field]),
-      ) || sorted(Object.keys((secrets ?? {}) as object)) !== sorted(found.secrets);
+      ) || sorted(Object.keys(secrets ?? {})) !== sorted(found.secrets);
     if (!changed) return { action: "none", planned: state, ...NONE };
     return { action: "update", planned: { ...state, ...planned }, ...NONE };
   };
@@ -244,13 +240,14 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
   /** Makes the Worker and its application match `desired`, and waits for it: a create and an update alike. */
   const put = async (desired: Record<string, unknown>, { secrets: store }: CallContext) => {
     const declared = container.schema.parse(await resolveSecrets(desired, store));
-    const { name, image, source, ref, revision, secrets = {}, port, domains } = declared;
+    const { name, image, source, ref, revision, port, domains } = declared;
+    const secrets = declared.secrets ?? {};
     if (!revision) {
       throw refused(
         `container ${name}: no revision: apply sets it from ${ref} once its source exists (apply again after a repository it creates)`,
       );
     }
-    const taken = Object.keys(secrets ?? {}).filter((key) => RESERVED.has(key));
+    const taken = Object.keys(secrets).filter((key) => RESERVED.has(key));
     if (taken.length)
       throw refused(`container ${name}: ${taken.join(", ")} is the Worker's own; name the secret otherwise`);
     const cf = api();
@@ -276,7 +273,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     const bindings: Binding[] = [
       { type: "durable_object_namespace", name: NAMESPACE, class_name: OBJECT_CLASS },
       ...Object.entries(text).map(([key, value]) => ({ type: "plain_text" as const, name: key, text: value })),
-      ...Object.entries(secrets ?? {}).map(([key, value]) => ({
+      ...Object.entries(secrets).map(([key, value]) => ({
         type: "secret_text" as const,
         name: key,
         text: value,
@@ -352,14 +349,22 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
   };
 }
 
-/** A host's URL as the alarm keeps it: no trailing slash. */
-const hostUrl = (host: unknown) => String(host).replace(/\/+$/, "");
+/** A host's URL as the alarm keeps it (`instanceUrl`, the wakeup service's rule), or as given when that refuses it. */
+const hostUrl = (host: unknown) => {
+  const checked = instanceUrl(host);
+  return "url" in checked ? checked.url : String(host);
+};
 
-/** An alarm's state: the host's, its registered wake, and whether the host's Worker took this company's token. */
-const alarmState = (host: string, wake: { at?: unknown; generation?: unknown } | undefined, healthy: boolean) => ({
+/** An alarm's state: the host's, its registered wake and when it last rang, and whether the host's Worker took this company's token. */
+const alarmState = (
+  host: string,
+  wake: { at?: unknown; generation?: unknown; rang?: unknown } | undefined,
+  healthy: boolean,
+) => ({
   host,
   at: typeof wake?.at === "string" ? wake.at : null,
   generation: typeof wake?.generation === "number" ? wake.generation : 0,
+  rang: typeof wake?.rang === "string" ? wake.rang : null,
   healthy,
 });
 
@@ -378,13 +383,6 @@ const failed = ({ where, status, own }: Answer, advice?: string) =>
     retryable: retryableStatus(status),
     status,
   });
-
-/** The company's token, which `alarm.create` minted. */
-const tokenOf = async ({ secrets }: CallContext, op: string) => {
-  const token = await secrets.get(WAKEUP_TOKEN);
-  if (!token) throw refused(`alarm.${op}: ${WAKEUP_TOKEN} is not set: apply the alarm, which mints it`);
-  return token;
-};
 
 const NO_TOKEN = `add ${WAKEUP_TOKEN} to the host's secrets (secret("${WAKEUP_TOKEN}", { generate: true })) and apply the host`;
 
@@ -408,7 +406,7 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
         ...(body !== undefined && { body: JSON.stringify(body) }),
       });
     } catch (cause) {
-      throw unanswered(where, cause);
+      throw new DriverError(`cloudflare: ${where}: no answer (${errorMessage(cause)})`, { retryable: true, cause });
     }
     const json: unknown = res.status === 204 ? undefined : await res.json().catch(() => undefined);
     const error = (json as { error?: unknown } | undefined)?.error;
@@ -436,25 +434,21 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
   const plan = async (
     { id, desired }: { id?: string; desired?: Record<string, unknown> },
     call: CallContext,
-  ): Promise<Planned & { state?: ReturnType<typeof alarmState> }> => {
+  ): Promise<Planned> => {
     const state = id === undefined ? undefined : (await read({ id }, call)).state;
     if (!desired) return { action: state ? "delete" : "none", ...NONE };
     const planned = { host: hostUrl(desired.host) };
-    if (!state) return { action: "create", planned, unknown: ["at", "generation", "healthy"], replace: [] };
+    const unknown = [...alarm.fields.vendorOwned];
+    if (!state) return { action: "create", planned, unknown, replace: [] };
     // The alarm is the host's object's: a new host is a new alarm.
-    if (planned.host !== state.host) {
-      return { action: "replace", planned, unknown: ["at", "generation", "healthy"], replace: ["host"] };
-    }
-    return { action: "none", planned: state, state, ...NONE };
+    if (planned.host !== state.host) return { action: "replace", planned, unknown, replace: ["host"] };
+    return { action: "none", planned: state, ...NONE };
   };
 
   return {
     import: read,
     read,
-    plan: async (input: { id?: string; desired?: Record<string, unknown> }, call: CallContext) => {
-      const { state: _, ...out } = await plan(input, call);
-      return out;
-    },
+    plan,
     create: async ({ desired }: { desired: Record<string, unknown> }, { secrets }: CallContext) => {
       const host = hostUrl(desired.host);
       const token = await secrets.ensure(WAKEUP_TOKEN, mintInstanceToken);
@@ -470,11 +464,11 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
       return { id: host, state };
     },
     update: async ({ id, desired }: { id: string; desired: Record<string, unknown> }, call: CallContext) => {
-      const fresh = await plan({ id, desired }, call);
-      if (fresh.action !== "none" || !fresh.state) {
-        throw refused(`alarm.update: a new host is a new alarm (${fresh.action})`, "plan_changed");
+      const { state } = await read({ id }, call);
+      if (!state || hostUrl(desired.host) !== state.host) {
+        throw refused(`alarm.update: a new host is a new alarm`, "plan_changed");
       }
-      return { id, state: fresh.state };
+      return { id, state };
     },
     delete: async ({ id }: { id: string }, { secrets }: CallContext) => {
       const token = await secrets.get(WAKEUP_TOKEN);
@@ -485,7 +479,8 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
       return { id, gone: true as const };
     },
     register: async (registration: WakeupRegistration, call: CallContext) => {
-      const token = await tokenOf(call, "register");
+      const token = await call.secrets.get(WAKEUP_TOKEN);
+      if (!token) throw refused(`alarm.register: ${WAKEUP_TOKEN} is not set: apply the alarm, which mints it`);
       const host = await call.secrets.get(HOST_URL);
       if (!host) throw refused(`alarm.register: ${HOST_URL} is not set: apply the alarm, which stores it`);
       const answer = await route(hostUrl(host), "PUT", token, registration);

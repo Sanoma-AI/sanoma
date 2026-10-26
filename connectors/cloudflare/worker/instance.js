@@ -16,7 +16,9 @@ export const HEALTH_PATH = "/__sanoma/health";
 /** How long the container keeps running after the last request: Cloudflare stops it then. */
 export const INACTIVITY_MS = 10 * 60 * 1000;
 /** How long a start may take to answer `/healthz`: a cold start clones the source and installs it. */
-export const START_TIMEOUT_MS = 10 * 60 * 1000;
+const START_TIMEOUT_MS = 10 * 60 * 1000;
+/** How long one try of a starting container's `/healthz` may take. */
+const TRY_MS = 5_000;
 /** How long between two tries of a starting container's `/healthz`. */
 const POLL_MS = 250;
 /** Where the wake is kept, in the object's storage. */
@@ -30,7 +32,7 @@ const json = (status, body) =>
 const problem = (status, error) => json(status, { error });
 
 /** The Worker's text bindings (plain text and secrets): the container's environment. */
-export function containerEnv(env) {
+function containerEnv(env) {
   return Object.fromEntries(Object.entries(env).filter(([, value]) => typeof value === "string"));
 }
 
@@ -41,14 +43,14 @@ export async function imageLabel(image) {
 }
 
 /** True when two strings are equal, in a time that does not tell how much of them is. */
-export function sameToken(given, expected) {
+function sameToken(given, expected) {
   let differ = given.length ^ expected.length;
   for (let i = 0; i < expected.length; i++) differ |= (given.charCodeAt(i) ^ expected.charCodeAt(i)) | 0;
   return differ === 0;
 }
 
 /** A registration, `{ at, generation }`, from a PUT's JSON body; undefined when it is none. */
-export function parseRegistration(body) {
+function parseRegistration(body) {
   if (typeof body !== "object" || body === null) return undefined;
   const { at, generation } = body;
   if (typeof at !== "string" || Number.isNaN(Date.parse(at))) return undefined;
@@ -128,7 +130,11 @@ export class Instance {
         if (!container.running) {
           container.start({ env: containerEnv(this.env), enableInternet: true, labels });
         }
-        const res = await container.getTcpPort(this.port).fetch("http://container/healthz");
+        // A try of its own time: a hung one would hold every request past the deadline.
+        const res = await container
+          .getTcpPort(this.port)
+          .fetch("http://container/healthz", { signal: AbortSignal.timeout(TRY_MS) });
+        await res.body?.cancel();
         if (res.ok) {
           await container.setInactivityTimeout(INACTIVITY_MS);
           this.#ready = true;
@@ -177,6 +183,7 @@ export class Instance {
     await this.ensureRunning();
     const at = `http://container/wake?generation=${wake.generation}`;
     const res = await this.ctx.container.getTcpPort(this.port).fetch(at);
+    await res.body?.cancel();
     if (!res.ok) {
       console.error(`GET /wake?generation=${wake.generation} answered ${res.status}`);
       throw new Error(`the container answered /wake with ${res.status}`);

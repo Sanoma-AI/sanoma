@@ -91,6 +91,10 @@ const alarmSchema = z.object({
     .describe("The host's URL, whose Worker holds the alarm: a data file names the host's declaration"),
   at: z.string().nullish().describe("When the instance asked to be woken last, null until it has"),
   generation: z.number().int().nullish().describe("The generation of that registration, 0 until one"),
+  rang: z
+    .string()
+    .nullish()
+    .describe("When the alarm last rang the host's /wake for that registration, null until it has"),
   healthy: z.boolean().nullish().describe("Whether the host's Worker answers its wake route with this company's token"),
 });
 
@@ -108,14 +112,13 @@ export const alarm = defineResource({
   schema: alarmSchema,
   fields: {
     immutable: ["host"],
-    vendorOwned: ["at", "generation", "healthy"],
+    vendorOwned: ["at", "generation", "rang", "healthy"],
     writeOnly: [],
     references: { host: { type: ["cloudflare.container"], by: ["url"] } },
   },
   bindingId: (state) => String(state.host),
   writable: true,
-  // The host's object holds the registered wake: apply asks before it deletes one.
-  stateless: false,
+  // The host's object holds the registered wake: apply asks before it deletes one (not stateless).
   wakeup: {
     inputs: { host: "host" },
     register: "cloudflare.alarm.register",

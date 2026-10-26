@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import * as names from "../src/worker.ts";
-import type { InstanceModule, ObjectState } from "../src/worker.ts";
+import { imageLabel, Instance, INACTIVITY_MS, type ObjectState, worker } from "../worker/instance.js";
 
 // The Worker's own code, `worker/instance.js`, over a stubbed `ctx`: the routes of its object,
 // the start of its container, the proxy and the alarm. The kits run it over the fake's `ctx`
@@ -17,11 +16,6 @@ vi.mock("cloudflare:workers", () => ({
     }
   },
 }));
-
-const code = (name: string) => import(new URL(`../worker/${name}`, import.meta.url).href);
-const { Instance, worker, imageLabel, ...constants } = (await code("instance.js")) as InstanceModule & {
-  imageLabel(image: string): Promise<string>;
-} & Record<string, unknown>;
 
 const TOKEN = "swi_the-company-token";
 const ENV = {
@@ -51,7 +45,7 @@ function stubCtx({
       calls.push(`start ${options.labels.revision}`);
       container.running = true;
     }),
-    inspect: vi.fn<ObjectState["container"]["inspect"]>(async () => (container.running ? { image: "", labels } : null)),
+    inspect: vi.fn<ObjectState["container"]["inspect"]>(async () => (container.running ? { labels } : null)),
     destroy: vi.fn<ObjectState["container"]["destroy"]>(async () => {
       calls.push("destroy");
       container.running = false;
@@ -90,15 +84,6 @@ const wake = (method: string, { token = TOKEN, body }: { token?: string; body?: 
   });
 
 describe("the Worker's object", () => {
-  it("names its routes and bindings as the connector does", () => {
-    expect(constants).toMatchObject({
-      WAKE_PATH: names.WAKE_PATH,
-      HEALTH_PATH: names.HEALTH_PATH,
-      NAMESPACE: names.NAMESPACE,
-      INACTIVITY_MS: names.INACTIVITY_MS,
-    });
-  });
-
   it("holds a wake only with the company's token, and only a newer generation", async () => {
     const { ctx, storage, alarm, container } = stubCtx();
     const object = new Instance(ctx, ENV);
@@ -132,7 +117,7 @@ describe("the Worker's object", () => {
       );
     const answers = await Promise.all([ask(), ask()]);
     expect(await Promise.all(answers.map((a) => a.text()))).toEqual(["/api/x ok", "/api/x ok"]);
-    expect(calls).toEqual(["start r2", `timeout ${10 * 60 * 1000}`]);
+    expect(calls).toEqual(["start r2", `timeout ${INACTIVITY_MS}`]);
     const [options] = vi.mocked(ctx.container.start).mock.calls[0]!;
     expect(options).toEqual({
       env: {
@@ -158,10 +143,10 @@ describe("the Worker's object", () => {
     const { ctx, calls } = stubCtx({ running: true, labels });
     const object = new Instance(ctx, ENV);
     // The object restarted with its container running: the timeout is set again.
-    expect(calls).toEqual([`timeout ${10 * 60 * 1000}`]);
+    expect(calls).toEqual([`timeout ${INACTIVITY_MS}`]);
     const health = await object.fetch(new Request("https://sanoma-company.acme.workers.dev/__sanoma/health?start=1"));
     expect(await health.json()).toEqual({ revision: "r2", running: true });
-    expect(calls).toEqual([`timeout ${10 * 60 * 1000}`, "destroy", "start r2", `timeout ${10 * 60 * 1000}`]);
+    expect(calls).toEqual([`timeout ${INACTIVITY_MS}`, "destroy", "start r2", `timeout ${INACTIVITY_MS}`]);
   });
 
   it("answers its health without starting the container, unless asked to", async () => {
@@ -215,7 +200,7 @@ describe("the Worker's object", () => {
   });
 
   it("exports the object class over the platform's DurableObject from its entry module", async () => {
-    const entry = (await code("index.js")) as {
+    const entry = (await import(new URL("../worker/index.js", import.meta.url).href)) as {
       SanomaInstance: new (ctx: unknown, env: unknown) => unknown;
       default: unknown;
     };

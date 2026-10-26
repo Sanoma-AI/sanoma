@@ -1,11 +1,11 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { Readable } from "node:stream";
 import { DriverError, errorMessage, retryableStatus, wakeGeneration } from "@sanoma-ai/workflows";
 import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
+import { NodeRequest, sendNodeResponse } from "srvx/node";
 import { cloudflareOps } from "./connector.ts";
-import { alarmOps, type Application, type CloudflareApi, containerOps, type ReadBinding } from "./ops.ts";
-import { type Instance, loadInstance, OBJECT_CLASS, type ObjectState } from "./worker.ts";
+import { alarmOps, type Application, type CloudflareApi, containerOps, type ReadBinding, scriptOf } from "./ops.ts";
+import { Instance, OBJECT_CLASS, type ObjectState, worker } from "./worker.ts";
 
 /** A `GET /wake?generation=N` a container answered: the generation it was given, and when. */
 export interface FakeWake {
@@ -36,9 +36,9 @@ export interface FakeCloudflareOptions extends FakeOptions {
 export interface FakeCloudflareState extends Record<string, unknown> {
   seq: number;
   /** The Workers, by script name: their bindings, a secret's without its text. */
-  scripts: Record<string, { bindings: ReadBinding[]; compatibility_date: string; subdomain: boolean }>;
+  scripts: Record<string, { bindings: ReadBinding[]; subdomain: boolean }>;
   /** The container applications, by id. */
-  applications: Record<string, Application & { name: string; rollouts: number }>;
+  applications: Record<string, Application & { name: string }>;
 }
 
 /** How long the fake waits before it rings an alarm again that threw, and how often: Cloudflare retries six times. */
@@ -46,8 +46,8 @@ const RETRY_MS = 250;
 const RETRIES = 6;
 /** setTimeout's longest delay: a longer one fires at once. */
 const MAX_DELAY_MS = 2 ** 31 - 1;
-/** Headers a proxy does not pass on. */
-const HOP = new Set(["connection", "keep-alive", "transfer-encoding", "upgrade", "content-length", "content-encoding"]);
+/** Headers `fetch` refuses to send, or that no longer hold once it decoded a body. */
+const HOP = ["connection", "keep-alive", "transfer-encoding", "upgrade", "content-length", "content-encoding"];
 
 const fail = (status: number, code: number, message: string) =>
   new DriverError(`cloudflare: ${message}`, { retryable: retryableStatus(status), status, vendorCode: String(code) });
@@ -78,35 +78,6 @@ const stubContainer: StartContainer = async () => {
     stop: () => new Promise<void>((done) => server.close(() => done())),
   };
 };
-
-/** A Node request as a Fetch one, for the Worker. */
-function requestOf(req: IncomingMessage, origin: string): Request {
-  const headers = new Headers();
-  for (const [name, value] of Object.entries(req.headers)) {
-    if (value === undefined || HOP.has(name)) continue;
-    for (const v of [value].flat()) headers.append(name, v);
-  }
-  const body = req.method === "GET" || req.method === "HEAD" ? undefined : (Readable.toWeb(req) as ReadableStream);
-  return new Request(new URL(req.url ?? "/", origin), {
-    method: req.method,
-    headers,
-    body,
-    ...(body && { duplex: "half" }),
-  } as RequestInit);
-}
-
-/** Sends a Fetch answer back over Node's. */
-async function respond(res: ServerResponse, answer: Response) {
-  const headers: Record<string, string | string[]> = {};
-  answer.headers.forEach((value, name) => {
-    if (!HOP.has(name) && name !== "set-cookie") headers[name] = value;
-  });
-  const cookies = answer.headers.getSetCookie();
-  if (cookies.length) headers["set-cookie"] = cookies;
-  res.writeHead(answer.status, headers);
-  if (!answer.body) return void res.end();
-  Readable.fromWeb(answer.body as import("node:stream/web").ReadableStream).pipe(res);
-}
 
 /**
  * One Durable Object of a Worker, in this process: the `ctx` `worker/instance.js` runs over
@@ -198,7 +169,7 @@ function fakeObject(start: StartContainer, image: () => string | undefined, star
           if (running === mine) running = undefined;
         });
       },
-      inspect: async () => (running ? { image: image() ?? "", labels: { ...running.labels } } : null),
+      inspect: async () => (running ? { labels: { ...running.labels } } : null),
       destroy,
       getTcpPort: (port) => ({
         async fetch(input, init) {
@@ -207,13 +178,19 @@ function fakeObject(start: StartContainer, image: () => string | undefined, star
           const runtime = await running.runtime;
           const request = new Request(input, init);
           const { pathname, search } = new URL(request.url);
-          return fetch(new URL(pathname + search, runtime.url), {
+          const headers = new Headers(request.headers);
+          for (const name of HOP) headers.delete(name);
+          const answer = await fetch(new URL(pathname + search, runtime.url), {
             method: request.method,
-            headers: request.headers,
+            headers,
             body: request.body,
             redirect: "manual",
+            signal: request.signal,
             ...(request.body && { duplex: "half" }),
           } as RequestInit);
+          const back = new Headers(answer.headers);
+          for (const name of HOP) back.delete(name);
+          return new Response(answer.body, { status: answer.status, statusText: answer.statusText, headers: back });
         },
       }),
       async setInactivityTimeout(ms) {
@@ -287,7 +264,6 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
   const dispatch = async (state: FakeCloudflareState, script: string, request: Request): Promise<Response> => {
     const env = envs.get(script);
     if (!env || !state.scripts[script]?.subdomain) return nothingHere();
-    const { worker } = await loadInstance();
     return worker.fetch(request, env);
   };
   const scriptAt = (url: string) => [...servers].find(([, s]) => s.url === new URL(url).origin)?.[0];
@@ -297,9 +273,8 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
     const found = servers.get(script);
     if (found) return found.url;
     const server = createServer((req, res) => {
-      const url = servers.get(script)!.url;
-      void dispatch(state, script, requestOf(req, url)).then(
-        (answer) => respond(res, answer),
+      void dispatch(state, script, new NodeRequest({ req, res })).then(
+        (answer) => sendNodeResponse(res, answer),
         (err: unknown) => {
           if (res.headersSent) return void res.destroy();
           res.writeHead(500, { "content-type": "text/plain" }).end(`${errorMessage(err)}\n`);
@@ -321,7 +296,7 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
       async bindings(script) {
         return structuredClone(state.scripts[script]?.bindings);
       },
-      async upload(script, { modules, main_module, compatibility_date, bindings, containers, migrations }) {
+      async upload(script, { modules, main_module, bindings, containers, migrations }) {
         if (!modules.some((m) => m.name === main_module)) throw fail(400, 10021, `no module named ${main_module}`);
         if (!containers.some((c) => c.class_name === OBJECT_CLASS)) {
           throw fail(400, 10021, `${OBJECT_CLASS} is no container's: its object would have no ctx.container`);
@@ -330,7 +305,6 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         if (!known && !migrations?.new_sqlite_classes.includes(OBJECT_CLASS)) {
           throw fail(400, 10061, `Cannot create binding for class ${OBJECT_CLASS}: it is not a Durable Object yet`);
         }
-        const { Instance } = await loadInstance();
         const env: Record<string, unknown> = {};
         for (const binding of bindings) {
           if (binding.type === "durable_object_namespace") {
@@ -352,7 +326,6 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
                 ? { type, name, namespace_id }
                 : { type, name, ...("text" in rest && { text: rest.text }) },
           ),
-          compatibility_date,
           subdomain: state.scripts[script]?.subdomain ?? false,
         };
         const object = objects.get(script) ?? fakeObject(start, () => appOf(script)?.image, started);
@@ -380,13 +353,13 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
           throw fail(400, 1000, `no Durable Object namespace ${namespaceId}`);
         if (appOf(name)) throw fail(409, 1001, `an application named ${name} exists`);
         const id = `00000000-0000-4000-8000-${String(++state.seq).padStart(12, "0")}`;
-        state.applications[id] = { id, name, image, rollouts: 0 };
+        state.applications[id] = { id, name, image };
         return { id, image };
       },
       async rollout(id, image) {
         const found = state.applications[id];
         if (!found) throw fail(404, 1002, `no application ${id}`);
-        Object.assign(found, { image, rollouts: found.rollouts + 1 });
+        found.image = image;
         await objects.get(found.name)?.stop();
       },
       async deleteApplication(id) {
@@ -414,7 +387,7 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
     options,
   );
   const named = (name?: string) =>
-    [...objects].filter(([script]) => name === undefined || script === `sanoma-${name}`).map(([, o]) => o);
+    [...objects].filter(([script]) => name === undefined || script === scriptOf(name)).map(([, o]) => o);
   const close = async () => {
     for (const object of objects.values()) await object.remove();
     objects.clear();

@@ -86,7 +86,7 @@ describe("cloudflare.alarm meets the Wakeup contract on the fake", () => {
 
   it("passes every check", { timeout: 300_000 }, async () => {
     const made = (await op("alarm.create")({ desired: { host: url } })) as { id: string };
-    expect(made).toMatchObject({ id: url, state: { host: url, at: null, generation: 0, healthy: true } });
+    expect(made).toMatchObject({ id: url, state: { host: url, at: null, generation: 0, rang: null, healthy: true } });
     const results = await checkWakeup({
       type: alarm,
       host: { url, stop: () => fake.stop("company"), wakes: () => fake.wakes() },

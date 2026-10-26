@@ -10,7 +10,7 @@ Source of the Cloudflare connector: the two resource types, their operations ove
 | [`ops.ts`](ops.ts)             | `containerOps` and `alarmOps` over `CloudflareApi`: the upload and its bindings, plans, the wait for a revision, the wake route, refusals |
 | [`driver.ts`](driver.ts)       | `cloudflareDriver`: `CloudflareApi` over the `cloudflare` SDK and `fetch`, failures mapped to `DriverError`, the credentials' `env`       |
 | [`fake.ts`](fake.ts)           | `fakeCloudflare`: an in-memory account whose Workers serve on this machine and run `worker/instance.js` over an in-process `ctx`          |
-| [`worker.ts`](worker.ts)       | The Worker's modules as uploaded, its routes' and binding's names, and `loadInstance`, the object's code loaded in Node                   |
+| [`worker.ts`](worker.ts)       | The Worker's modules as uploaded, and `worker/instance.js`'s routes, names and object, re-exported for the package                        |
 | [`steps.ts`](steps.ts)         | `cloudflareSteps`: Cloudflare's steps for Gherkin tests (`defineSteps`)                                                                   |
 | [`resources.ts`](resources.ts) | The constructors data files import: `cloudflare.container`, `cloudflare.alarm`                                                            |
 | [`index.ts`](index.ts)         | The package root: `cloudflare` with its driver, fake and steps attached (`withSetup`)                                                     |
