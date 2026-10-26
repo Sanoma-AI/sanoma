@@ -61,6 +61,15 @@ Feature: sanoma-ops wakeups
       { "state": { "at": "2099-01-01T00:00:00.000Z", "generation": 2 } }
       """
 
+  Scenario: Register after a delete
+    Given a sanoma-ops wakeup for "https://company.example.test"
+    When sanomaOps.wakeup.delete is called with
+      | id | $wakeup.id |
+    And sanomaOps.wakeup.register is called with
+      | at         | 2099-01-01T00:00:00Z |
+      | generation | 1                    |
+    Then it fails with status 401
+
   Scenario: Delete
     Given a sanoma-ops wakeup for "https://company.example.test"
     When sanomaOps.wakeup.delete is called with
