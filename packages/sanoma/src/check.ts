@@ -25,14 +25,8 @@ export interface CheckResult {
 }
 
 export interface CheckOptions {
-  /** The Postgres the scenarios' worker runs on: a database of its own, never the config's. */
+  /** The Postgres the scenarios' worker runs on, answering already: a database of its own, never the config's. */
   databaseUrl: string;
-  /**
-   * Settles once Postgres answers at `databaseUrl`'s server (the bin's `ensurePostgres`, started
-   * before `check`): awaited only before the scenarios, so tsc, oxlint and the config's reading
-   * do not wait on it. A failure is the check's only when there are scenarios to run.
-   */
-  ready?: Promise<unknown>;
   log: (line: string) => void;
 }
 
@@ -55,10 +49,8 @@ const LINTED = ["workflows", "resources", "sites"];
  */
 export async function check(
   { config, root, resolved }: Loaded,
-  { databaseUrl, ready = Promise.resolve(), log }: CheckOptions,
+  { databaseUrl, log }: CheckOptions,
 ): Promise<CheckResult> {
-  // Awaited below when there are scenarios; otherwise its failure is nobody's.
-  ready.catch(() => {});
   log("config");
   const policies = resolved.policyProblems;
   const description = describeConfig(config);
@@ -93,7 +85,6 @@ export async function check(
   } else if (policies.length) {
     log("no scenarios: the policies do not hold");
   } else {
-    await ready;
     log("scenarios");
     const { failed } = await runScenarios(config, { databaseUrl, log });
     for (const f of failed) problems.push(`${f.scenario} › ${f.step}: ${f.message}`);

@@ -32,7 +32,8 @@ export interface PostgresBinOptions {
  */
 export function postgresBin({
   env = process.env,
-  platform = `${process.platform}-${process.arch}`,
+  // Windows on arm64 runs the x64 build, which its package installs there too.
+  platform = process.platform === "win32" ? "win32-x64" : `${process.platform}-${process.arch}`,
   from = import.meta.url,
   cache = cacheDir(platform, env),
 }: PostgresBinOptions = {}): string {

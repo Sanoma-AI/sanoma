@@ -163,9 +163,8 @@ describe("sanoma --help and mistakes", () => {
     writeFileSync(join(dir, "policies/x.cedar"), "permit (principal, action, resource);\n");
     const policies = await runCli(dir, ["worker"], env);
     expect(policies.code).toBe(2);
-    // After the line saying the database answers, which it does before the config resolves.
     expect(policies.stderr).toMatch(
-      /^Postgres answers at .*\nThe policies do not hold:\npolicies\/x\.cedar:1:1: policies\/x\.cedar#1: a permit is allowed only for visitors/,
+      /^The policies do not hold:\npolicies\/x\.cedar:1:1: policies\/x\.cedar#1: a permit is allowed only for visitors/,
     );
     rmSync(join(dir, "sanoma.config.ts"));
     const missing = await runCli(dir, ["env"], env);

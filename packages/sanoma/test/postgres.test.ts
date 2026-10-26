@@ -130,6 +130,17 @@ describe("ensurePostgres with a URL named", () => {
     expect(ran()).toEqual([]);
   });
 
+  it("takes it unprobed with start false, as a deployment's worker or app does", async () => {
+    stubPostgres();
+    await expect(
+      ensurePostgres("postgresql://u:p@10.255.255.1:5432/x", { root: dir, start: false }),
+    ).resolves.toMatchObject({
+      how: "answered",
+      databaseUrl: "postgresql://u:p@10.255.255.1:5432/x",
+    });
+    expect(vi.mocked(pg.Client)).not.toHaveBeenCalled();
+  });
+
   it("says where the records of the old default are, when it is that URL", async () => {
     stubPostgres();
     await expect(ensurePostgres(OLD_DEFAULT_URL, { root: dir })).rejects.toThrow(

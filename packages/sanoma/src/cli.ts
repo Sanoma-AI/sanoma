@@ -220,9 +220,11 @@ async function keep(
  */
 async function serveCommand(devServer: boolean): Promise<never> {
   const loaded = await load({ postgres: "start" });
-  (await import("./key.ts")).ensureSecretsKey(process.cwd(), log);
-  const { serve } = await import("./serve.ts");
-  return keep(loaded, (config, resolved) => serve(config, { port: port(), log, dev: devServer, resolved }));
+  return keep(loaded, async (config, resolved) => {
+    (await import("./key.ts")).ensureSecretsKey(process.cwd(), log);
+    const { serve } = await import("./serve.ts");
+    return serve(config, { port: port(), log, dev: devServer, resolved });
+  });
 }
 
 /**

@@ -39,7 +39,7 @@ export interface EnsurePostgresOptions {
   root: string;
   /** Receives a line per step. */
   log?: (line: string) => void;
-  /** Without it, only a cluster that runs already is found: a `UsageError` when none does. */
+  /** Without it, a URL named is taken as it is, unprobed, and only a cluster of the company's own that runs already is found: a `UsageError` when none does. */
   start?: boolean;
   /** The directory holding PostgreSQL's `bin/`; default `postgresBin()`, read only to start one. */
   bin?: string;
@@ -55,6 +55,8 @@ export const OLD_DEFAULT_URL = "postgresql://postgres:dbos@localhost:5433/sanoma
 const PROBE_TIMEOUT_MS = 2000;
 /** How long Postgres has to answer once started, and another launcher to finish starting it. */
 const WAIT_MS = 60_000;
+/** How long a launcher waits for another to make and start the cluster: an extraction, `initdb` and a start. */
+const LOCK_WAIT_MS = 5 * 60_000;
 
 /** The URL with its password hidden, for a message. */
 export function masked(databaseUrl: string): string {
@@ -79,6 +81,8 @@ export async function ensurePostgres(
   { root, log = () => {}, start = true, bin }: EnsurePostgresOptions,
 ): Promise<EnsuredPostgres> {
   if (databaseUrl !== undefined) {
+    // A deployment's worker or app: its database's own to answer, as the runtime retries.
+    if (!start) return { how: "answered", databaseUrl, stop: async () => {} };
     if (await answers(new URL(databaseUrl), PROBE_TIMEOUT_MS)) {
       log(`Postgres answers at ${masked(databaseUrl)}`);
       return { how: "answered", databaseUrl, stop: async () => {} };
@@ -119,7 +123,9 @@ export async function ensurePostgres(
     const pg = bin ?? postgresBin();
     const how = existsSync(cluster.data) ? "started" : "created";
     if (how === "created") await initdb(pg, cluster);
-    else clearStale(cluster);
+    else if (!existsSync(cluster.password)) {
+      throw new Error(`${cluster.password} is missing: it is the password of the records in ${cluster.data}`);
+    } else clearStale(cluster);
     const port = await portOf(cluster);
     const url = urlOf(cluster, port);
     log(`starting Postgres in ${cluster.dir} on port ${port}`);
@@ -204,8 +210,9 @@ function clearStale(cluster: Cluster): void {
   const pm = postmaster(cluster);
   if (!pm || !alive(pm.pid)) return;
   const ps = spawnSync("ps", ["-o", "comm=", "-p", String(pm.pid)], { encoding: "utf8" });
-  if (/(^|\/)postgres$/.test((ps.stdout ?? "").trim())) {
-    throw new Error(`Postgres (pid ${pm.pid}) runs in ${cluster.data} but does not answer; see ${cluster.log}`);
+  // Without `ps` to tell, the process may be the server: never a second one on its data.
+  if (ps.error || /(^|\/)postgres$/.test(ps.stdout.trim())) {
+    throw new Error(`Postgres (pid ${pm.pid}) may run in ${cluster.data} but does not answer; see ${cluster.log}`);
   }
   rmSync(pm.file, { force: true });
 }
@@ -224,10 +231,10 @@ function alive(pid: number): boolean {
 /**
  * Runs `fn` holding the cluster's `starting` lock: the file made exclusively (`wx`), this pid in
  * it, removed after. A lock whose process is gone (or, empty, older than a few seconds) is
- * stale and taken over; a live one is waited for, up to twice `WAIT_MS`.
+ * stale and taken over; a live one is waited for, up to `LOCK_WAIT_MS`.
  */
 async function locked<T>(cluster: Cluster, fn: () => Promise<T>): Promise<T> {
-  const deadline = Date.now() + 2 * WAIT_MS;
+  const deadline = Date.now() + LOCK_WAIT_MS;
   for (;;) {
     try {
       const fd = openSync(cluster.lock, "wx");
