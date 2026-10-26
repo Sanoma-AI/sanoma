@@ -4,7 +4,7 @@ import { opIdsOf } from "./define.ts";
 import { SanomaError } from "./errors.ts";
 import type { Fake, ResourceFake } from "./fake.ts";
 import { entry, type LedgerRecord, write } from "./ledger.ts";
-import type { DriverFn } from "./op.ts";
+import type { CallContext, DriverFn, Op } from "./op.ts";
 import type { Run } from "./run.ts";
 import { memorySecrets } from "./secret.ts";
 import { type Given, loadScenarios, type Scenario } from "./scenario.ts";
@@ -58,7 +58,7 @@ export function seedResource(
   scenario: string,
   copy: ResourceFake,
   given: Extract<Given, { resource: string }>,
-): Extract<LedgerRecord, { type: "scenario.seeded" }>["seeds"][number] {
+): Seeds[number] {
   const { resource, type, name } = given;
   try {
     if ("gone" in given) {
@@ -77,16 +77,81 @@ export function seedResource(
   }
 }
 
+/** What a scenario's `Given` steps seeded, as its `scenario.seeded` record has it. */
+export type Seeds = Extract<LedgerRecord, { type: "scenario.seeded" }>["seeds"];
+
+/**
+ * Where a scenario's `Given` steps go (`applyGivens`): a sandbox run's own fakes (`run`), or the
+ * instance a demo runs (`instance`), its collections in the config's database and every vendor
+ * on its one fake, which every run shares, so a fault, injected into a call some other run would
+ * make, is refused there.
+ */
+export interface GivenTarget {
+  kind: "run" | "instance";
+  /** What a `Given` operation is called through, by operation id. */
+  drivers: ReadonlyMap<string, DriverFn>;
+  /** The fakes, by vendor id: what a `Given` resource is put in, and a `run`'s faults injected into. */
+  fakes: ReadonlyMap<string, Fake<unknown>>;
+  /** The operations by id, for a fault's vendor. */
+  ops: ReadonlyMap<string, Op>;
+  /** The context of the call the `i`th `Given` makes. */
+  call(i: number, op: string): CallContext;
+}
+
+/**
+ * Applies the scenario's `Given` steps to the target: calls each operation through its drivers,
+ * puts or removes each resource in its vendor's fake, then, for a `run`, injects the faults.
+ * Checks first that every operation it seeds has a driver there, that every resource's vendor has
+ * a fake holding resources, and, for an `instance`, that it injects no fault. Returns what it
+ * seeded, in order.
+ */
+export async function applyGivens(scenario: Pick<Scenario, "name" | "given">, target: GivenTarget): Promise<Seeds> {
+  const { name, given } = scenario;
+  const fault = given.find((g) => "fault" in g);
+  if (fault && target.kind === "instance") {
+    throw new SanomaError(
+      "invalid_input",
+      `Scenario "${name}" injects a fault ("${fault.step}"), but its Givens go to the instance, whose fakes every run shares`,
+      { scenario: name, step: fault.step },
+    );
+  }
+  const missing = [...new Set(given.flatMap((g) => ("op" in g && !target.drivers.has(g.op) ? [g.op] : [])))];
+  if (missing.length) {
+    throw new SanomaError(
+      "invalid_input",
+      `Scenario "${name}" seeds ${missing.join(", ")}, but no fake its connectors attach implements ${missing.length > 1 ? "them" : "it"}`,
+      { scenario: name, missing },
+    );
+  }
+  const plain = missingResourceFake(scenario, target.fakes);
+  if (plain) throw plain;
+  const seeded: Seeds = [];
+  for (const [i, g] of given.entries()) {
+    if ("fault" in g) continue;
+    if ("op" in g) {
+      const output = await target.drivers.get(g.op)!(g.input, target.call(i, g.op));
+      seeded.push({ op: g.op, input: g.input, output });
+      continue;
+    }
+    // Checked above: the vendor's fake holds resources.
+    seeded.push(seedResource(name, target.fakes.get(g.vendor) as Fake<unknown> & ResourceFake, g));
+  }
+  for (const g of given) {
+    if ("fault" in g) target.fakes.get(target.ops.get(g.op)!.vendor)![g.fault](g.op);
+  }
+  return seeded;
+}
+
 /**
  * Seeds a sandbox run of the scenario `name`, from the worker, in one step: reads the scenario,
- * checks that it runs this workflow, makes the run's own fakes (each vendor's maker, called once
- * for the run), checks that every operation the workflow uses or the scenario seeds has one and
- * that every resource it seeds has a fake holding resources, calls each `Given` operation
- * through them, puts or removes each `Given` resource in them, injects the faults into them,
- * then puts their functions on the run. The run then calls those only, so sandbox runs share no
- * state when the makers make a new fake each. The step's checkpoint never stands in for them: a
- * run whose seeding is replayed from it has none, and fails, since a sandbox run does not
- * survive a worker restart.
+ * checks that it runs this workflow, picks the run's fakes, checks that every operation the
+ * workflow uses has one, then applies the scenario's `Given` steps to them
+ * (`applyGivens`) and puts their functions on the run. The run then calls those only. Its fakes
+ * are its own (each vendor's maker, called once for the run), so sandbox runs share no state when
+ * the makers make a new fake each; on an instance that runs on fakes (`instanceFakes`) they are
+ * the instance's, which its sandbox runs share, as its live drivers are. The step's checkpoint
+ * never stands in for a run's own: a run whose seeding is replayed from it has none, and fails,
+ * since a sandbox run does not survive a worker restart; on an instance's fakes it goes on with them.
  */
 export async function seedSandbox(run: Run, name: string): Promise<void> {
   const { state } = run;
@@ -103,19 +168,22 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
         throw new SanomaError("invalid_input", `No scenario named "${name}"${why}`, { scenario: name });
       }
       if (scenario.workflow !== run.workflow) {
-        throw new SanomaError("invalid_input", `Scenario "${name}" runs ${scenario.workflow}, not ${run.workflow}`, {
+        const runs = scenario.workflow === undefined ? "is a world, which runs nothing" : `runs ${scenario.workflow}`;
+        throw new SanomaError("invalid_input", `Scenario "${name}" ${runs}, not ${run.workflow}`, {
           scenario: name,
-          workflow: scenario.workflow,
+          ...(scenario.workflow !== undefined && { workflow: scenario.workflow }),
         });
       }
-      const fakes = new Map([...state.fakes].map(([vendor, make]) => [vendor, make()]));
-      const drivers = indexDrivers(
-        [...fakes.values()].map((f) => f.driver),
-        state.ops,
-      );
-      const uses = opIdsOf(state.workflows.get(run.workflow)!);
-      const seeding = scenario.given.flatMap((g) => ("op" in g ? [g.op] : []));
-      const missing = [...new Set([...uses, ...seeding])].filter((id) => !drivers.has(id));
+      const instance = state.instanceFakes;
+      const fakes = instance ?? new Map([...state.fakes].map(([vendor, make]) => [vendor, make()]));
+      const drivers = instance
+        ? state.drivers
+        : indexDrivers(
+            [...fakes.values()].map((f) => f.driver),
+            state.ops,
+          );
+      // What the scenario seeds is checked by `applyGivens`.
+      const missing = opIdsOf(state.workflows.get(run.workflow)!).filter((id) => !drivers.has(id));
       if (missing.length) {
         throw new SanomaError(
           "invalid_input",
@@ -123,28 +191,20 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
           { scenario: name, missing },
         );
       }
-      const plain = missingResourceFake(scenario, fakes);
-      if (plain) throw plain;
-      const seeded: Extract<LedgerRecord, { type: "scenario.seeded" }>["seeds"] = [];
-      for (const [i, given] of scenario.given.entries()) {
-        if ("fault" in given) continue;
-        if ("op" in given) {
-          const call = { idempotencyKey: `${run.id}:seed:${i}`, runId: run.id, opId: given.op, attempt: 1, secrets };
-          const output = await drivers.get(given.op)!(given.input, call);
-          seeded.push({ op: given.op, input: given.input, output });
-          continue;
-        }
-        // Checked above: the vendor's fake holds resources.
-        seeded.push(seedResource(name, fakes.get(given.vendor) as Fake<unknown> & ResourceFake, given));
-      }
-      for (const given of scenario.given) {
-        if ("fault" in given) fakes.get(state.ops.get(given.op)!.vendor)![given.fault](given.op);
-      }
+      const seeded = await applyGivens(scenario, {
+        kind: instance ? "instance" : "run",
+        drivers,
+        fakes,
+        ops: state.ops,
+        call: (i, opId) => ({ idempotencyKey: `${run.id}:seed:${i}`, runId: run.id, opId, attempt: 1, secrets }),
+      });
       copies = drivers;
       return { seeds: seeded };
     },
     { name: "sandbox:seed" },
   );
+  // Replayed on an instance that runs on fakes: they are the instance's, still there in this process.
+  if (!copies && state.instanceFakes) copies = state.drivers;
   if (!copies) {
     // Replayed from its checkpoint (after a worker restart, or in a fork), so the run has no fakes.
     // The records written before the restart hold the seqs from here on: the failure goes after them.
