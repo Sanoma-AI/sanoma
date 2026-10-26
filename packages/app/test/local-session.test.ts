@@ -42,7 +42,14 @@ describe("LocalSession", () => {
       const names = env
         .map((line) => line.split("=")[0])
         .filter((name) => !["PWD", "SHLVL", "_", "OLDPWD"].includes(name!));
-      expect(names.toSorted()).toEqual(["HOME", "LANG", "PATH", "WORK_DIR"]);
+      expect(names.toSorted()).toEqual([
+        "COREPACK_ENABLE_DOWNLOAD_PROMPT",
+        "COREPACK_HOME",
+        "HOME",
+        "LANG",
+        "PATH",
+        "WORK_DIR",
+      ]);
       expect(env).toContain(`HOME=${home}`);
       expect(ran.stdout).not.toContain("from this process");
     } finally {

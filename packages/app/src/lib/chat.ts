@@ -17,6 +17,21 @@ export interface DraftCard {
   checks?: CheckResult;
 }
 
+/**
+ * The engines a chat can open on, by the name its row keeps, with the name the chat shows: our
+ * loop, or an existing coding agent through `HarnessAgent` on the company's key.
+ */
+export const ENGINE_NAMES = { loop: "Sanoma", pi: "Pi", "claude-code": "Claude Code", codex: "Codex" } as const;
+
+/**
+ * The engines a new chat offers. Not Codex: its adapter asks for no permission (it runs every
+ * command and edit unasked), so the checkout rule cannot answer for it (vercel/ai#22550).
+ */
+export const OFFERED_ENGINES = ["loop", "pi", "claude-code"] as const satisfies readonly EngineName[];
+
+/** An engine's name, as a chat's row keeps it. */
+export type EngineName = keyof typeof ENGINE_NAMES;
+
 /** The data parts of a chat message, by name: `data-<name>`. */
 export type ChatData = { draft: DraftCard };
 
@@ -69,11 +84,15 @@ export const unfinished = (part: UIMessage["parts"][number]): boolean =>
 
 /**
  * The chat's transport to `POST /api/chat` (`api`), as the chat column makes it: only the new
- * message is sent, the server reading the rest from the chat's transcript.
+ * message is sent, the server reading the rest from the chat's transcript, with the engine a new
+ * chat opens on when the send names one (`sendMessage(message, { body: { engine } })`; a chat
+ * keeps the one it opened on).
  */
 export const chatTransport = (api: string, headers: () => Record<string, string>) =>
   new DefaultChatTransport<ChatMessage>({
     api,
     headers,
-    prepareSendMessagesRequest: (request) => ({ body: { id: request.id, message: request.messages.at(-1) } }),
+    prepareSendMessagesRequest: ({ id, messages, body }) => ({
+      body: { id, message: messages.at(-1), ...(body?.engine !== undefined && { engine: body.engine }) },
+    }),
   });

@@ -1,7 +1,8 @@
 import { spawn as spawnChild } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 import {
   harnessSessionDataDirectoryPath,
@@ -31,13 +32,17 @@ export interface LocalSessionOptions {
 
 /**
  * The session's environment, the whole of it (never this process's): `PATH` (this Node first, then
- * this process's `PATH`, where pnpm 11 and bash must be), its `HOME` and a UTF-8 locale. A command
- * adds its own; the model's key reaches the agent through the adapter's `auth`, not from here.
+ * this process's `PATH`, where pnpm 11 and bash must be), its `HOME`, a UTF-8 locale, and
+ * corepack's home kept as this process's, so the session's pnpm is the one this machine already
+ * uses (its last known good, pnpm 11), not a download into the session's home. A command adds its
+ * own; the model's key reaches the agent through the adapter's `auth`, not from here.
  */
 export const sessionEnv = (home: string): Record<string, string> => ({
   PATH: [dirname(process.execPath), process.env.PATH || "/usr/bin:/bin"].join(":"),
   HOME: home,
   LANG: "C.UTF-8",
+  COREPACK_HOME: process.env.COREPACK_HOME || join(homedir(), ".cache", "node", "corepack"),
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
 });
 
 /**

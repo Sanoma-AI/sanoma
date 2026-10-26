@@ -483,7 +483,8 @@ function sharedDeps(repo: string, src: string): Plugin {
 /**
  * The server bundle holds everything but the runtime, which it imports by absolute URL from
  * `runtimeFrom`'s resolution (pg and DBOS through `@sanoma-ai/workflows`', the harness adapters
- * through the app's), so it needs nothing from the company's install. Build only: dev's server resolves as Node does.
+ * through the app's), so it needs nothing from the company's install. Build only: dev's server
+ * resolves as Node does.
  */
 function runtimeExternal(runtimeFrom: string): Plugin {
   return {
