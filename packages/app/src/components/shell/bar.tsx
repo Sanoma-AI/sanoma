@@ -155,7 +155,7 @@ const PLACES: Record<Place, { label: string; tone: Tone }> = {
 
 /**
  * What the open window is, from what this instance connects to (`placeOf`): This computer or
- * Live, its tip the database's host and nothing more (a Unix socket's is none).
+ * Live, its tip the database's host and nothing more (the default socket's is none).
  */
 function PlaceBadge({ place, databaseHost }: Pick<AppConfig, "place" | "databaseHost">) {
   const { label, tone } = PLACES[place];

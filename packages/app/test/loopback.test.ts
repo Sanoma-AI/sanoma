@@ -47,11 +47,13 @@ describe("the loopback login's hosts", () => {
 });
 
 describe("what the open window is (placeOf)", () => {
-  it("is this computer when the database's host is a loopback name or none (a Unix socket)", () => {
+  it("is this computer when the database's host is a loopback name, in any case, or a socket (none, or a path)", () => {
     for (const url of [
       "postgresql://postgres:dbos@localhost:5433/sanoma",
       "postgres://u:p@127.0.0.1/db",
       "postgresql://u:p@[::1]:5432/db",
+      "postgresql://u:p@LOCALHOST:5433/db",
+      "postgresql:///db",
       "postgresql:///db?host=/var/run/postgresql",
     ]) {
       expect(placeOf(url), url).toBe("this-computer");
@@ -64,6 +66,7 @@ describe("what the open window is (placeOf)", () => {
       "postgres://u:p@db.example.com:5432/x",
       "postgresql://u:p@localhost.example.com/db",
       "postgresql://u:p@10.0.0.5/db",
+      "postgresql:///db?host=db.example.com",
     ]) {
       expect(placeOf(url), url).toBe("live");
     }

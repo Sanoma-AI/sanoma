@@ -57,7 +57,7 @@ import {
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { previewRequests } from "../lib/preview.ts";
-import { LOOPBACK } from "../loopback.ts";
+import { databaseHost, LOOPBACK } from "../loopback.ts";
 
 // What the server functions do. Server-only: each takes the app context that startApp passes
 // with every request. Every expected failure is an ApiError.
@@ -128,7 +128,7 @@ export const readStartRun = (data: StartRunRequest): StartRunRequest =>
 export const appConfig = (app: AppContext): AppConfig => ({
   ...withoutSources(app.description),
   place: app.place,
-  databaseHost: new URL(app.resolved.databaseUrl).hostname,
+  databaseHost: databaseHost(app.resolved.databaseUrl),
 });
 
 /**

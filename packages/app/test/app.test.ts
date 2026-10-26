@@ -432,7 +432,7 @@ describe("the server functions", () => {
     const body = appConfig(ctx);
     // The test database is on this machine; of its URL, only the host is sent.
     expect(body.place).toBe("this-computer");
-    expect(body.databaseHost).toBe(new URL(ctx.resolved.databaseUrl).hostname);
+    expect(body.databaseHost).toBe(new URL(ctx.resolved.databaseUrl).hostname.toLowerCase());
     expect(JSON.stringify(body)).not.toContain(ctx.resolved.databaseUrl);
     expect(body.appName).toBe("sanoma");
     expect(body.version).toMatch(/^sanoma@/);
@@ -840,7 +840,7 @@ describe("the page", () => {
     expect(section(html, "/workflows")).toMatch(/data-active="true"[^>]*aria-current="page"/);
     expect(section(html, "/inbox")).not.toMatch(/data-active="true"|aria-current/);
     // At its foot, what the window is, the test database being on this machine, its tip the host.
-    expect(html).toMatch(/>This computer<\/span><span [^>]*hidden="">Database on [^<:/@]+<\/span>/);
+    expect(html).toMatch(/>This computer<\/span><span [^>]*hidden="">Database on [^<@]+<\/span>/);
     // The config has a policy: Permissions says what it does, so the overview says nothing of it.
     expect(html).not.toContain("No policy");
     // The chat column, open with no cookie: its empty state, and a composer that cannot send yet,

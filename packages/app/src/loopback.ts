@@ -62,12 +62,21 @@ export function hostName(header: string): string {
 }
 
 /**
+ * The host of the database at `databaseUrl`, lowercased: the URL's, else its `?host=` (a Unix
+ * socket's directory, or a server's name); none when it gives neither (the default socket).
+ */
+export function databaseHost(databaseUrl: string): string {
+  const url = new URL(databaseUrl);
+  return (url.hostname || url.searchParams.get("host") || "").toLowerCase();
+}
+
+/**
  * Where an instance on the database at `databaseUrl` is: this computer when the database's host is
- * a loopback name or none (a Unix socket), else live.
+ * a loopback name or a socket (none, or a path), else live.
  */
 export const placeOf = (databaseUrl: string): Place => {
-  const host = new URL(databaseUrl).hostname;
-  return host === "" || isLoopback(host) ? "this-computer" : "live";
+  const host = databaseHost(databaseUrl);
+  return host === "" || host.startsWith("/") || isLoopback(host) ? "this-computer" : "live";
 };
 
 /** The 403 for a request that reached a loopback-only app under some other name (DNS rebinding). */
