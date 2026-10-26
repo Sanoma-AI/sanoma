@@ -17,6 +17,22 @@ export interface DraftCard {
   checks?: CheckResult;
 }
 
+/**
+ * The engines a chat can open on, by the name its row keeps, with the name the chat shows: our
+ * loop, or an existing coding agent through `HarnessAgent` on the company's key.
+ */
+export const ENGINE_NAMES = { loop: "Sanoma", pi: "Pi", "claude-code": "Claude Code" } as const;
+
+/** The file a coding agent's built-in call names: the cross-harness `file_path`, or an adapter's own field. */
+export function pathOf(input: unknown): string | undefined {
+  const fields = (input ?? {}) as Record<string, unknown>;
+  const path = [fields.file_path, fields.path, fields.notebook_path].find((value) => typeof value === "string");
+  return path as string | undefined;
+}
+
+/** An engine's name, as a chat's row keeps it. */
+export type EngineName = keyof typeof ENGINE_NAMES;
+
 /** The data parts of a chat message, by name: `data-<name>`. */
 export type ChatData = { draft: DraftCard };
 
@@ -69,11 +85,15 @@ export const unfinished = (part: UIMessage["parts"][number]): boolean =>
 
 /**
  * The chat's transport to `POST /api/chat` (`api`), as the chat column makes it: only the new
- * message is sent, the server reading the rest from the chat's transcript.
+ * message is sent, the server reading the rest from the chat's transcript, with the engine a new
+ * chat opens on when the send names one (`sendMessage(message, { body: { engine } })`; a chat
+ * keeps the one it opened on).
  */
 export const chatTransport = (api: string, headers: () => Record<string, string>) =>
   new DefaultChatTransport<ChatMessage>({
     api,
     headers,
-    prepareSendMessagesRequest: (request) => ({ body: { id: request.id, message: request.messages.at(-1) } }),
+    prepareSendMessagesRequest: ({ id, messages, body }) => ({
+      body: { id, message: messages.at(-1), engine: body?.engine },
+    }),
   });

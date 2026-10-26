@@ -429,8 +429,11 @@ function onSignal(stop: () => Promise<void>): () => void {
     );
   };
   const handle = () => (stopping ? process.exit(130) : stopOnce());
-  process.once("SIGINT", handle);
-  process.once("SIGTERM", handle);
+  // `on`, not `once`: the second signal must find the handler still there, and a dependency's
+  // signal-exit (Pi's, in the app) re-sends a signal it finds no other listener for, which would
+  // kill the process before `stop` ends.
+  process.on("SIGINT", handle);
+  process.on("SIGTERM", handle);
   if (eventsOn()) process.stdin.once("end", stopOnce).once("error", stopOnce).resume();
   return stopOnce;
 }

@@ -3,8 +3,9 @@ import { safeValidateUIMessages } from "ai";
 import { z } from "zod";
 import { ApiError } from "../../api.ts";
 import type { AppContext } from "../../context.ts";
-import { type ChatMessage, textOf } from "../../lib/chat.ts";
+import { type ChatMessage, type EngineName, textOf } from "../../lib/chat.ts";
 import { type ActorContext, parse, requireActor, toApiError } from "../core.ts";
+import { harnessEngine } from "./harness.ts";
 import { run as loop } from "./loop.ts";
 import { type Engine, settle, written } from "./transcript.ts";
 
@@ -12,8 +13,12 @@ import { type Engine, settle, written } from "./transcript.ts";
 // from the transcript) and the engines by name. A turn runs in this process, not as a run: a
 // restart loses the turn, not the transcript or the draft, and "continue" picks up.
 
-/** The engines, by the name a chat's row keeps. */
-export const ENGINES: Readonly<Record<string, Engine>> = { loop };
+/** The engines, by the name a chat's row keeps (`ENGINE_NAMES`): our loop, and the coding agents through `HarnessAgent`. */
+export const ENGINES: Readonly<Record<EngineName, Engine>> = {
+  loop,
+  pi: harnessEngine("pi"),
+  "claude-code": harnessEngine("claude-code"),
+};
 
 /** What the browser sends: the chat's id (its own, for a new chat) and the person's new message. */
 const ChatRequest = z.object({
@@ -43,7 +48,7 @@ export async function postChat(request: Request, context: ActorContext & { site?
     let chat = await chats.get(body.id);
     if (chat && chat.person !== principal.id) throw new ApiError(404, { error: `No chat ${body.id}` });
     const named = chat?.engine ?? body.engine;
-    const engine = ENGINES[named];
+    const engine = Object.hasOwn(ENGINES, named) ? ENGINES[named as EngineName] : undefined;
     if (!engine) throw invalid(`No engine ${named}: the engines are ${Object.keys(ENGINES).join(", ")}`);
     // The new message is checked before a turn under way is stopped for it: a new one, by the
     // person. The transcript, written by this app, is not validated again.

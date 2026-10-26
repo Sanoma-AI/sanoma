@@ -1,5 +1,7 @@
 import { lstat, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import type { Chat, Draft, Source } from "@sanoma-ai/workflows";
+import type { AppContext } from "../../context.ts";
 
 /** Where an agent may never write in a checkout: git's own files, and the install (`node_modules`, a link to the live one in a draft). */
 const OFF_LIMITS = new Set([".git", "node_modules"]);
@@ -21,10 +23,35 @@ export async function allowedPath(worktree: string, path: string): Promise<strin
   // A link is followed to what it names, which must be inside too; a broken one names nothing.
   if ((await lstat(full).catch(() => undefined))?.isSymbolicLink()) full = await realpath(full).catch(() => undefined);
   if (full === undefined) return undefined;
-  const inside = relative(root, full);
-  if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) return undefined;
+  if (!within(root, full)) return undefined;
   // Lower-cased: on a case-insensitive file system (macOS's default) `.GIT` is `.git`.
-  return OFF_LIMITS.has(inside.split(sep)[0]!.toLowerCase()) ? undefined : full;
+  return OFF_LIMITS.has(relative(root, full).split(sep)[0]!.toLowerCase()) ? undefined : full;
+}
+
+/** Whether the absolute path `full` is `dir` or under it, by their paths as given. */
+export function within(dir: string, full: string): boolean {
+  const inside = relative(dir, full);
+  return inside !== ".." && !inside.startsWith(`..${sep}`) && !isAbsolute(inside);
+}
+
+/** A repository a chat can draft in. */
+export type Drafting = Source & Required<Pick<Source, "draft" | "diff">>;
+
+/** The instance's repository, as every engine drafts in it; an error when it has none to draft in. */
+export function drafting(app: AppContext): Drafting {
+  const repo = app.source;
+  if (!repo?.draft || !repo.diff) throw new Error("This instance has no repository to draft a change in");
+  return repo as Drafting;
+}
+
+/** The chat's draft, opened (or found open), and attached to the chat's row the first time. */
+export async function openDraft(app: AppContext, chat: Chat): Promise<Draft> {
+  const opened = await drafting(app).draft(chat.id);
+  if (chat.draftId !== chat.id) {
+    await app.client.chats.attach(chat.id, chat.id);
+    chat.draftId = chat.id;
+  }
+  return opened;
 }
 
 /** The real path of `dir`: of its nearest ancestor that exists, with the rest joined on. */

@@ -11,14 +11,13 @@ import {
   isDirect,
   isEnded,
   type Principal,
-  type Source,
 } from "@sanoma-ai/workflows";
 import { tool } from "ai";
 import { z } from "zod";
 import type { AppContext } from "../../context.ts";
 import type { DraftCard, HeldOutput } from "../../lib/chat.ts";
 import { checks } from "../drafts.ts";
-import { allowedPath } from "./checkout.ts";
+import { allowedPath, drafting, openDraft } from "./checkout.ts";
 
 // Our loop's tools: reading the repository, editing the chat's draft (opened by the first edit,
 // committed at each), its checks, and lookups through the policy. No shell: the draft sits in the
@@ -49,21 +48,10 @@ export function loopTools(turn: ToolsTurn) {
   /** The checks since the last edit, for the card. */
   let checked: CheckResult | undefined;
 
-  const source = (): Drafting => {
-    const repo = app.source;
-    if (!repo?.draft || !repo.diff) throw new Error("This instance has no repository to draft a change in");
-    return repo as Drafting;
-  };
+  const source = () => drafting(app);
   /** The chat's draft, opened (and attached to the chat) by the first call. */
   const draft = () =>
-    (opening ??= (async () => {
-      const opened = await source().draft(chat.id);
-      if (chat.draftId !== chat.id) {
-        await app.client.chats.attach(chat.id, chat.id);
-        chat.draftId = chat.id;
-      }
-      return opened;
-    })().catch((err: unknown) => {
+    (opening ??= openDraft(app, chat).catch((err: unknown) => {
       opening = undefined;
       throw err;
     }));
@@ -221,9 +209,6 @@ export function loopTools(turn: ToolsTurn) {
 
 /** Our loop's tools, as the chat's messages type them. */
 export type LoopTools = ReturnType<typeof loopTools>;
-
-/** A repository the chat can draft in. */
-type Drafting = Source & Required<Pick<Source, "draft" | "diff">>;
 
 /** The held call's run a direct call's `approval_pending` names. */
 const heldRun = (err: unknown): string | undefined => {

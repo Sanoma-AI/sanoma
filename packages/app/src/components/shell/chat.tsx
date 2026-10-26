@@ -17,11 +17,20 @@ import {
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu.tsx";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "#/components/ui/empty.tsx";
+import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
 import { cn } from "#/lib/utils.ts";
 import { actorHeaders, useActor } from "../../actor.ts";
-import { type ChatMessage, chatTransport, errorParts, textOf, unfinished } from "../../lib/chat.ts";
+import {
+  type ChatMessage,
+  chatTransport,
+  ENGINE_NAMES,
+  type EngineName,
+  errorParts,
+  textOf,
+  unfinished,
+} from "../../lib/chat.ts";
 import { CHATS_KEY, chatQuery, chatsQuery } from "../../queries.ts";
 import { useCrumbs } from "../common.tsx";
 import { Reply } from "./chat-parts.tsx";
@@ -42,7 +51,7 @@ export function ChatColumn({ besidePageOnly = false }: { besidePageOnly?: boolea
   const [picked, setPicked] = useState<string>();
   const [fresh] = useState(generateId);
   const id = picked ?? chats[0]?.id ?? fresh;
-  const known = chats.some((chat) => chat.id === id);
+  const chat = chats.find((c) => c.id === id);
   return (
     <aside
       id="chat"
@@ -58,26 +67,31 @@ export function ChatColumn({ besidePageOnly = false }: { besidePageOnly?: boolea
             render={<Button variant="ghost" size="sm" className="min-w-0" disabled={!chats.length} />}
           >
             <ChatCircleIcon aria-hidden="true" data-icon="inline-start" />
-            <span className="truncate">{chats.find((chat) => chat.id === id)?.title ?? "New chat"}</span>
+            <span className="truncate">{chat?.title ?? "New chat"}</span>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="min-w-64">
             <DropdownMenuGroup>
               <DropdownMenuLabel>Your chats</DropdownMenuLabel>
-              {chats.map((chat) => (
-                <DropdownMenuItem key={chat.id} onClick={() => setPicked(chat.id)}>
-                  <span className="truncate">{chat.title}</span>
+              {chats.map((c) => (
+                <DropdownMenuItem key={c.id} onClick={() => setPicked(c.id)}>
+                  <span className="truncate">{c.title}</span>
                 </DropdownMenuItem>
               ))}
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button variant="ghost" size="sm" onClick={() => setPicked(generateId())}>
+        {chat && (
+          <span className="shrink-0 text-xs text-muted-foreground" title="The engine answering this chat">
+            {ENGINE_NAMES[chat.engine as EngineName] ?? chat.engine}
+          </span>
+        )}
+        <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setPicked(generateId())}>
           <PlusIcon aria-hidden="true" data-icon="inline-start" />
           New chat
         </Button>
       </div>
       {/* Kept open once you write in it: a newer chat in the list does not take its place. */}
-      <ChatPane key={id} id={id} known={known} onSend={() => setPicked(id)} />
+      <ChatPane key={id} id={id} known={chat !== undefined} onSend={() => setPicked(id)} />
     </aside>
   );
 }
@@ -113,9 +127,14 @@ function Conversation({ id, initial, onSend }: { id: string; initial: ChatMessag
     onFinish: () => void queryClient.invalidateQueries({ queryKey: CHATS_KEY, exact: true }),
   });
   const busy = status === "submitted" || status === "streaming";
+  // A new chat opens on the engine chosen in the composer; it keeps that one after.
+  const [engine, setEngine] = useState<EngineName>("loop");
+  const fresh = messages.length === 0;
   const send = (text: string) => {
     onSend();
-    void sendMessage({ text });
+    // Every message names it: the server opens a new chat on it (one whose first send failed, too)
+    // and keeps an open chat's own.
+    void sendMessage({ text }, { body: { engine } });
   };
   return (
     <>
@@ -142,7 +161,7 @@ function Conversation({ id, initial, onSend }: { id: string; initial: ChatMessag
         )}
       </div>
       <div className="p-3">
-        <Composer busy={busy} onSend={send} />
+        <Composer busy={busy} onSend={send} engine={fresh ? { value: engine, set: setEngine } : undefined} />
       </div>
     </>
   );
@@ -196,8 +215,19 @@ function EmptyChat() {
   );
 }
 
-/** The composer: the page as a chip, the message, Send (Enter; Shift+Enter for a new line). */
-function Composer({ busy, onSend }: { busy: boolean; onSend: (text: string) => void }) {
+/**
+ * The composer: the page as a chip, the message, the engine a new chat opens on (`engine`, only
+ * then), Send (Enter; Shift+Enter for a new line).
+ */
+function Composer({
+  busy,
+  onSend,
+  engine,
+}: {
+  busy: boolean;
+  onSend: (text: string) => void;
+  engine?: { value: EngineName; set: (engine: EngineName) => void };
+}) {
   const page = useCrumbs().at(-1)?.label;
   const [text, setText] = useState("");
   const submit = (e?: FormEvent) => {
@@ -227,7 +257,22 @@ function Composer({ busy, onSend }: { busy: boolean; onSend: (text: string) => v
         placeholder="Ask anything…"
         className="min-h-0 resize-none rounded-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
       />
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-2">
+        {engine && (
+          <NativeSelect
+            size="sm"
+            className="mr-auto"
+            aria-label="Engine"
+            value={engine.value}
+            onChange={(e) => engine.set(e.target.value as EngineName)}
+          >
+            {Object.entries(ENGINE_NAMES).map(([name, label]) => (
+              <NativeSelectOption key={name} value={name}>
+                {label}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        )}
         <Button type="submit" size="icon-sm" variant="secondary" disabled={busy || !text.trim()} aria-label="Send">
           {busy ? <Spinner /> : <ArrowUpIcon aria-hidden="true" />}
         </Button>
