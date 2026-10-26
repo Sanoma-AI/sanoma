@@ -36,8 +36,8 @@ or SANOMA_DEV_REPO set, \`sanoma\` also runs the watch build of each package it 
 restarts on a new build.
 
 For a parent process: SANOMA_EVENTS=1 adds a JSON line on stdout per event, {"sanoma":1,"event":…}: "ready" with the
-app's "url" (the port SANOMA_APP_PORT names) and its "sites" each time it listens, "error" with the "message" before a
-failed exit, and "database" (not printed yet); the end of stdin then stops it as SIGTERM does. sanoma never prompts,
+app's "url" (the port SANOMA_APP_PORT names) and its "sites" each time it listens, "error" with the "message" when it
+cannot start or stop, and "database" (not printed yet); the end of stdin then stops it as SIGTERM does. sanoma never prompts,
 reads stdin only then, and opens no browser; SIGTERM stops everything it started but a Postgres container; exit 2 is
 a mistake in the call or the config, 1 a failure.
 `;
@@ -48,6 +48,13 @@ const USAGE_EXIT = 2;
 const log = (line: string) => console.error(line);
 
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/** A failure to start or stop: its message on stderr, and as an `error` event. */
+function fail(err: unknown): void {
+  const message = messageOf(err);
+  log(message);
+  emit({ event: "error", message });
+}
 
 /** Runs the command line; returns the exit code, or never, for a command that serves until a signal. */
 export async function main(argv: string[]): Promise<number> {
@@ -211,12 +218,12 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
   const hot = app && (await siteBuild(cwd).catch(() => undefined))?.sitesOf(cwd).sites.length;
   const child = supervise({
     spawn: () =>
-      // Its own stdin, never written: the end of this process's stops this process, which ends the child; the
-      // child's ends when this process does.
+      // With SANOMA_EVENTS=1, a stdin of its own that nothing writes: the end of this process's
+      // stdin stops this process, which ends the child; the child's ends when this process does.
       spawn(process.execPath, [cli, "serve", "--dev"], {
         cwd,
         env: process.env,
-        stdio: ["pipe", "inherit", "inherit"],
+        stdio: [eventsOn() ? "pipe" : "inherit", "inherit", "inherit"],
         detached: true,
       }),
     watch: packages.map((p) => join(p.dir, "dist")),
@@ -299,8 +306,9 @@ function onSignal(stop: () => Promise<void>): () => void {
     stop().then(
       () => process.exit(0),
       (err: unknown) => {
-        log(messageOf(err));
-        process.exit(1);
+        fail(err);
+        // Once stdout has taken the line: a pipe's writes are asynchronous on macOS.
+        process.stdout.write("", () => process.exit(1));
       },
     );
   };
@@ -315,8 +323,7 @@ if (import.meta.main) {
   try {
     process.exitCode = await main(process.argv.slice(2));
   } catch (err) {
-    log(messageOf(err));
-    emit({ event: "error", message: messageOf(err) });
+    fail(err);
     process.exitCode = err instanceof UsageError ? USAGE_EXIT : 1;
   }
 }

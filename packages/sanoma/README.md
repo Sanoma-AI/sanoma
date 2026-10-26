@@ -114,7 +114,7 @@ Exit codes: 2 for a mistake in the call or the repo (no `sanoma.config.ts`, an u
 A parent process, such as a desktop shell, runs `sanoma` with `SANOMA_EVENTS=1` and reads its stdout line by line: beside the lines a person reads, each event is one JSON object on a line of its own, `{"sanoma":1,"event":…}`; logs stay on stderr.
 
 - `{"sanoma":1,"event":"ready","url":"http://127.0.0.1:3000","sites":{"www":"http://www.localhost:3000"}}`: the app listens, right after the `at <url>; ctrl-c to stop` line, each time it starts (in [dev mode](#dev-mode), after each restart); `url` is at the port `SANOMA_APP_PORT` names, and `sites` is `{}` without public sites. `sanoma worker` has no address and prints none.
-- `{"sanoma":1,"event":"error","message":"…"}`: the launcher fails, with the message it printed on stderr, then exits 2 for a mistake in the call or the config, 1 for a failure.
+- `{"sanoma":1,"event":"error","message":"…"}`: the launcher cannot start or stop, with the message it printed on stderr, then exits 2 for a mistake in the call or the config, 1 for a failure. In dev mode a child that fails prints it too, and the launcher waits for the next build to start it again. A command's own findings (`sanoma check`'s problems) are its output, not an event.
 - `{"sanoma":1,"event":"database",…}`: reserved for where the database is; not printed yet.
 
 With the variable, the end of stdin (the parent closing it, or exiting) stops `sanoma` as SIGTERM does, so the parent keeps stdin open while it runs. `sanoma` never prompts and, without the variable, never reads stdin; it opens no browser. SIGTERM stops everything it started (the app, then the worker; in dev mode its child and the watch builds), but a [Postgres container](#postgres), and it exits 0.

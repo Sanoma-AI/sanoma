@@ -106,7 +106,7 @@ export function startCli(cwd: string, args: string[], env: NodeJS.ProcessEnv, bi
 /**
  * The bin (this checkout's, or `bin`) with `args` in `cwd` until it listens: where, its output so
  * far, and `stop` (SIGINT), which resolves to what it printed on stderr, or throws on an exit code
- * but 0.
+ * but 0; the `child` and when it has `finished`, for a stop of another kind.
  */
 export async function serving(cwd: string, args: string[], env: NodeJS.ProcessEnv, bin = cli) {
   const { child, finished, output } = startCli(cwd, args, env, bin);
@@ -128,7 +128,7 @@ export async function serving(cwd: string, args: string[], env: NodeJS.ProcessEn
     );
     const url = stdout.match(listening)?.[1];
     if (url === undefined) throw new Error("sanoma exited before it listened");
-    return { url, stop, output };
+    return { url, stop, output, child, finished };
   } catch (err) {
     child.kill("SIGINT");
     await finished;

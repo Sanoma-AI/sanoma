@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFile
 import { join } from "node:path";
 import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { copyFixture, ensureBuilt, runCli, startCli } from "./fixture.ts";
+import { copyFixture, ensureBuilt, runCli, serving, startCli } from "./fixture.ts";
 
 // Needs Postgres (`pnpm db:up`) and the packages' builds: the fixture copy loads them as a
 // company repo would, from `dist/`, so `beforeAll` builds those that are stale.
@@ -60,27 +60,17 @@ describe("SANOMA_EVENTS=1, for a parent process", () => {
 
   it("prints the ready line after the human one, and stops on the end of stdin", async () => {
     dir = copyFixture();
-    const { child, finished, output } = startCli(dir, ["app"], events);
-    try {
-      const stdout = await waitFor(
-        () => output().stdout,
-        (out) => out.includes('"event":"ready"'),
-        30_000,
-      );
-      const url = stdout.match(/ at (http:\/\/127\.0\.0\.1:\d+); ctrl-c to stop/)![1]!;
-      // Right after the line a person reads.
-      expect(stdout.split("\n").slice(-3)).toEqual([
-        `sanoma-fixture at ${url}; ctrl-c to stop`,
-        JSON.stringify({ sanoma: 1, event: "ready", url, sites: {} }),
-        "",
-      ]);
-    } finally {
-      child.stdin!.end();
-    }
-    const done = await Promise.race([
-      finished,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("did not exit")), 15_000)),
-    ]);
+    const { url, output, child, finished } = await serving(dir, ["app"], events);
+    const ready = JSON.stringify({ sanoma: 1, event: "ready", url, sites: {} });
+    const stdout = await waitFor(
+      () => output().stdout,
+      (out) => out.includes(ready),
+      10_000,
+    );
+    // Right after the line a person reads.
+    expect(stdout.split("\n").slice(-3)).toEqual([`sanoma-fixture at ${url}; ctrl-c to stop`, ready, ""]);
+    child.stdin!.end();
+    const done = await finished;
     expect(done.code, done.stderr).toBe(0);
     // One event line: the end of stdin is a stop, not a failure.
     expect(done.stdout.match(/^\{/gm)).toHaveLength(1);
