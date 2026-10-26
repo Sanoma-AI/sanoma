@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { _electron as electron, expect, test } from "@playwright/test";
+import { _electron as electron, type ElectronApplication, expect, test } from "@playwright/test";
 import { slugOf } from "../../src/companies.ts";
 
 const pkg = fileURLToPath(new URL("../../", import.meta.url));
@@ -40,15 +40,16 @@ test("opens a company, shows its app on the shipped Node, and stops it with the 
   // Outside the workspace, so its `pnpm install` is the company's own.
   const company = join(work, "fixture");
   cpSync(fileURLToPath(new URL("../fixtures/company", import.meta.url)), company, { recursive: true });
-  const shell = await electron.launch({
-    executablePath,
-    args: [pkg, company, `--user-data-dir=${join(work, "user-data")}`],
-  });
+  let shell: ElectronApplication | undefined;
   let logs: string | undefined;
   try {
+    shell = await electron.launch({
+      executablePath,
+      args: [pkg, company, `--user-data-dir=${join(work, "user-data")}`],
+    });
     logs = await shell.evaluate(({ app }) => app.getPath("logs"));
     /** The company's window, once it shows the app (the start window shows a file). */
-    const companyWindow = () => shell.windows().find((page) => page.url().startsWith("http://"));
+    const companyWindow = () => shell!.windows().find((page) => page.url().startsWith("http://"));
     await expect.poll(() => companyWindow()?.url(), { timeout: 45_000 }).toBeDefined();
     const window = companyWindow()!;
     const started = JSON.parse(readFileSync(join(company, "started.json"), "utf8")) as {
@@ -56,6 +57,7 @@ test("opens a company, shows its app on the shipped Node, and stops it with the 
       node: string;
       execPath: string;
     };
+    // The ready event's URL (SANOMA_EVENTS=1), not the human line's.
     expect(window.url()).toBe(`http://127.0.0.1:${started.port}/`);
     expect(started.execPath).toBe(join(pkg, "stage", `node-${process.arch}`, "node"));
     await expect(window.locator("#node")).toHaveText(started.node);
@@ -69,7 +71,7 @@ test("opens a company, shows its app on the shipped Node, and stops it with the 
     });
     await expect.poll(() => existsSync(join(company, "stopped")), { timeout: 15_000 }).toBe(true);
   } finally {
-    await shell.close();
+    await shell?.close();
     rmSync(work, { recursive: true, force: true });
     // The shell's log of this start (on macOS, ~/Library/Logs/Sanoma, outside the user data dir).
     if (logs) rmSync(join(logs, `${slugOf(company)}.log`), { force: true });

@@ -4,15 +4,13 @@ name: Desktop
 on:
   push:
     branches: [main]
-    paths:
+    paths: &paths
       - packages/desktop/**
+      # Its `engines`, which the shipped Node must satisfy.
       - packages/sanoma/template/package.json
       - .github/workflows/desktop.yml
   pull_request:
-    paths:
-      - packages/desktop/**
-      - packages/sanoma/template/package.json
-      - .github/workflows/desktop.yml
+    paths: *paths
 
 jobs:
   smoke:

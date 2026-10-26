@@ -6,7 +6,8 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "test/e2e",
-  timeout: 60_000,
+  // The steps wait up to 45 s (install and start) and 15 s (stop), then quit stops the shell.
+  timeout: 120_000,
   workers: 1,
   forbidOnly: !!process.env.CI,
   reporter: process.env.CI ? [["list"], ["github"]] : "list",
