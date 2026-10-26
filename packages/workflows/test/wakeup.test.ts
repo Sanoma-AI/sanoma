@@ -71,9 +71,11 @@ const register = (input: z.ZodType = registration) =>
     wakeup: { register: { effect: "write", idempotent: true, input, output: z.object({}), target: () => "w" } },
   });
 
+/** The resource types alone, without the wakeup's `register`. */
+const acmeTypes = () => defineConnector("acme", { service, wakeup: wakeupOf() }, { package: "@acme/connector" });
 /** The connector as its package would export it: the types, with `register` merged into the wakeup's group. */
 const acmeWith = (ops = register()) => {
-  const types = defineConnector("acme", { service, wakeup: wakeupOf() }, { package: "@acme/connector" });
+  const types = acmeTypes();
   return { ...types, wakeup: { ...types.wakeup, ...ops.wakeup } } as typeof types;
 };
 
@@ -109,8 +111,7 @@ describe("a wakeup type", () => {
   });
 
   it("is refused by resolveConfig when its connector lacks its register, or that takes no { at, generation }", () => {
-    const types = defineConnector("acme", { service, wakeup: wakeupOf() }, { package: "@acme/connector" });
-    expect(() => resolveConfig({ workflows: [], connectors: [types] })).toThrow(
+    expect(() => resolveConfig({ workflows: [], connectors: [acmeTypes()] })).toThrow(
       "acme.wakeup: its wakeup's register, acme.wakeup.register, is no operation of its connector",
     );
     expect(() =>
@@ -140,7 +141,7 @@ describe("declaredWakeup", () => {
     expect(describeConfig(configAt(root)).problems).toEqual([]);
   });
 
-  it("is undefined with none, and with two, which describeConfig reports at each", async () => {
+  it("is undefined with none, and with two, which the data files' problems name at each", async () => {
     expect(await declaredWakeup(configAt(rootWith({ "resources/infra.ts": `${IMPORT}${SERVICE}` })))).toBeUndefined();
     const root = rootWith({
       "resources/infra.ts": [

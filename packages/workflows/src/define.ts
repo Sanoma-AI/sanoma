@@ -302,9 +302,9 @@ function checkTrigger(name: string, trigger: unknown): void {
 
 const isTimeZone = (zone: unknown): boolean => {
   // An offset (`+05:30`), which Intl takes too, is no zone: it has no daylight saving time.
-  if (typeof zone !== "string" || zone === "" || /^[+-]/.test(zone)) return false;
+  if (typeof zone !== "string" || /^[+-]/.test(zone)) return false;
   try {
-    return new Intl.DateTimeFormat("en", { timeZone: zone }).resolvedOptions().timeZone !== "";
+    return Boolean(new Intl.DateTimeFormat("en", { timeZone: zone }));
   } catch {
     return false;
   }

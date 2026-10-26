@@ -20,7 +20,6 @@ import {
 import { apiNameProblem } from "./sdk.ts";
 import { apiNameOf, BUILT_IN_WORKFLOWS, DATA_VENDOR, problemLine } from "./shared.ts";
 import { readSites, type SiteEntry } from "./sites.ts";
-import { twoWakeups, wakeupsAmong } from "./wakeup.ts";
 
 // `@sanoma-ai/workflows/describe`: what a UI renders from, apart from the main entry.
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
@@ -323,11 +322,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     collections,
     resources: dataFiles.resources,
     orphans: dataFiles.orphans,
-    problems: [
-      ...dataFiles.problems,
-      ...domainProblems(resolved.root, dataFiles.resources, resources, sites, read),
-      ...wakeupProblems(resolved.root, dataFiles.resources, resources, read),
-    ],
+    problems: [...dataFiles.problems, ...domainProblems(resolved.root, dataFiles.resources, resources, sites, read)],
     policy: {
       defined: resolved.policy !== allowAll,
       ...(resolved.policy.version === undefined ? {} : { version: resolved.policy.version }),
@@ -379,20 +374,6 @@ function problemAt(
 ): ResourceProblem {
   const file = read(join(root, resource.file));
   return { file: resource.file, ...(typeof file === "string" ? {} : file.at(resource.span[0])), message };
-}
-
-/** A problem at each declared wakeup when there are several: an instance registers with one. */
-function wakeupProblems(
-  root: string | undefined,
-  declared: readonly DeclaredResource[],
-  types: ReadonlyMap<string, Resource>,
-  read: (path: string) => SourceFile | string,
-): ResourceProblem[] {
-  const wakeups = wakeupsAmong(declared, types);
-  if (wakeups.length < 2 || root === undefined) return [];
-  return wakeups.map(({ id, declared: resource }) =>
-    problemAt(root, resource, read, twoWakeups(wakeups.filter((w) => w.id !== id).map((w) => w.id))),
-  );
 }
 
 /**

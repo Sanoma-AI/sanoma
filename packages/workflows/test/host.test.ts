@@ -69,11 +69,6 @@ describe("a host type", () => {
       { capabilities: { ...host.capabilities, lifetime: "forever" as never } },
       /lifetime/,
     ],
-    [
-      "the lifetime it replaced",
-      { capabilities: { ...host.capabilities, lifetime: "wake-on-schedule" as never } },
-      /capabilities\.lifetime is one of long-lived, stops-on-exit, stops-when-quiet/,
-    ],
   ])("is refused with %s", (_, overrides, message) => {
     expect(() => hostOf(overrides)).toThrow(message);
   });

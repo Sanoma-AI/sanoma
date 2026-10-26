@@ -134,12 +134,13 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   if (warnings.length)
     console.warn(`sanoma app: warnings in the sites (\`sanoma check\` lists them):\n${warnings.join("\n")}`);
   const hosts = publicHosts(description, options.domains ?? {});
-  const ingress = options.ingress ?? [];
-  for (const [i, route] of ingress.entries()) {
+  const ingress = new Map<string, IngressRoute>();
+  for (const route of options.ingress ?? []) {
     if (!route.path.startsWith("/") || route.path === "/healthz")
       throw new Error(`An ingress route's path starts with / and is not /healthz, unlike "${route.path}"`);
-    if (ingress.slice(0, i).some((other) => other.path === route.path))
+    if (ingress.has(route.path))
       throw new Error(`Two ingress routes have the path ${route.path}: give each path one route`);
+    ingress.set(route.path, route);
   }
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => {
@@ -160,7 +161,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       return void res.end(req.method === "HEAD" ? undefined : "ok\n");
     }
     // A machine route, before the login too: it checks its own token.
-    const route = ingress.find((r) => r.path === path);
+    const route = path === undefined ? undefined : ingress.get(path);
     if (route?.method !== undefined && route.method !== req.method) {
       res.writeHead(405, { allow: route.method, "content-type": "text/plain; charset=utf-8" });
       return void res.end(`${path} answers ${route.method} only\n`);

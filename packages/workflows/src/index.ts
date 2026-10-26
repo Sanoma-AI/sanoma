@@ -53,7 +53,14 @@ export {
   type ResourceSpec,
   withoutWriteOnly,
 } from "./resource.ts";
-export { defineConfig, resolveConfig, resolveDatabaseUrl, type ResolvedConfig, type SanomaConfig } from "./config.ts";
+export {
+  declaredWakeup,
+  defineConfig,
+  resolveConfig,
+  resolveDatabaseUrl,
+  type ResolvedConfig,
+  type SanomaConfig,
+} from "./config.ts";
 // `sanoma` itself (the people types' constructors) is at `@sanoma-ai/workflows/resources`, for data files.
 // `collection()` itself is at `@sanoma-ai/workflows/data`, for `resources/data.ts`; this tells one apart, as the launcher does.
 export { isCollection } from "./collection.ts";
@@ -151,7 +158,6 @@ export type { HostCapabilities, HostLifetime, HostOutputs, HostSpec } from "./ho
 export {
   checkWakeup,
   type DeclaredWakeup,
-  declaredWakeup,
   type WakeupOutputs,
   type WakeupRegistration,
   type WakeupSpec,

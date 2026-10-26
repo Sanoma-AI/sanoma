@@ -1,5 +1,4 @@
 import type { z } from "zod";
-import type { SanomaConfig } from "./config.ts";
 import { hasPath } from "./host.ts";
 import type { Op } from "./op.ts";
 import type { Resource } from "./resource.ts";
@@ -113,44 +112,4 @@ export interface DeclaredWakeup {
   declared: DeclaredResource;
   /** The vendor's id of the object the lockfile binds it to; absent when unbound. */
   binding?: string;
-}
-
-/** Each declared resource whose type carries a `wakeup`, in the data files' order. */
-export function wakeupsAmong(
-  resources: readonly DeclaredResource[],
-  types: ReadonlyMap<string, Resource>,
-): DeclaredWakeup[] {
-  return resources.flatMap((declared) => {
-    const type = types.get(`${declared.vendor}.${declared.type}`);
-    if (!type?.wakeup) return [];
-    return [{ id: declared.id, type, declared, ...(declared.binding !== undefined && { binding: declared.binding }) }];
-  });
-}
-
-/** The problem at each of several declared wakeups, `describeConfig`'s: an instance has one. */
-export const twoWakeups = (others: readonly string[]): string =>
-  `an instance has one wakeup: leave out this one or ${others.join(", ")}`;
-
-/** Every wakeup the config's data files declare, read without running them (server-side). */
-export async function declaredWakeups(config: SanomaConfig): Promise<DeclaredWakeup[]> {
-  // Loaded here, not with this module: `resource.ts` imports it, and the reader loads oxc.
-  const [{ readDataFiles }, { connectorsOf, rootOf }, { resourceTypesOf }] = await Promise.all([
-    import("./resources.ts"),
-    import("./config.ts"),
-    import("./resource.ts"),
-  ]);
-  const connectors = connectorsOf(config);
-  const types = resourceTypesOf(connectors);
-  return wakeupsAmong(readDataFiles(rootOf(config), connectors, types).resources, types);
-}
-
-/**
- * The one wakeup the config's data files declare, or undefined: with none, with several (which
- * `describeConfig` reports as a problem at each), and with one whose declaration, or its host's,
- * has a problem (the reader leaves those out, and reports them). Undefined means the instance has
- * no wakeup, so it must not stop. Server-side: it reads the data files and the lockfile.
- */
-export async function declaredWakeup(config: SanomaConfig): Promise<DeclaredWakeup | undefined> {
-  const found = await declaredWakeups(config);
-  return found.length === 1 ? found[0] : undefined;
 }

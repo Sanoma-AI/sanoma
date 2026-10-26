@@ -5,9 +5,9 @@ import { warn } from "./log.ts";
 import { errorMessage } from "./shared.ts";
 
 // The runtime's own tables live in the config's database, beside DBOS's: the credentials, the
-// ledger, the collections' records and the wakeup's row. What they share is here: the one preparation of a
-// database, a pool that opens once it is prepared and survives a dropped connection, and a table
-// creation two processes may race.
+// ledger, the collections' records and the wakeup's row. What they share is here: the one
+// preparation of a database, a pool that opens once it is prepared and survives a dropped
+// connection, and a table creation two processes may race.
 
 /** A connection or a pool: what the queries take. */
 export type Db = Pick<Pool | Client, "query">;

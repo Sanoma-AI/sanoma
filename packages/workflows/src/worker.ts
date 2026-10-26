@@ -2,7 +2,7 @@ import { DBOS } from "@dbos-inc/dbos-sdk";
 import { awaitApproval } from "./approvals.ts";
 import { buildCtx, decideStart, isInfrastructureError, startHoldOf } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
-import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
+import { declaredWakeup, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { storedSecrets, watchCredentials } from "./credentials.ts";
 import { DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase } from "./db.ts";
 import type { WorkflowDefinition } from "./define.ts";
@@ -14,7 +14,6 @@ import { lineStartsOf, readSource } from "./ast.ts";
 import { callsOf, outlineWithSource } from "./outline.ts";
 import { currentRun, type Run, type RunArgs, type WorkerState, type WorkflowOutline } from "./run.ts";
 import type { Source } from "./source.ts";
-import { declaredWakeups } from "./wakeup.ts";
 import { errorMessage, WORKFLOW_ACTION } from "./shared.ts";
 
 export interface Worker {
@@ -65,7 +64,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   const resolved = resolveConfig(config);
   setLogLevel(options.logLevel);
   // The wakeup service wakes the instances that stop: one that runs it must not stop with its worker.
-  if (config.wakeup === true && (await declaredWakeups(config)).length) {
+  if (config.wakeup === true && (await declaredWakeup(config))) {
     throw new Error(
       "The config runs the wakeup service (`wakeup: true`) and declares a wakeup of its own: an instance that runs the service must not stop, so leave out one of them",
     );
