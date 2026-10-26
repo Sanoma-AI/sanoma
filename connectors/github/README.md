@@ -1,6 +1,6 @@
 # @sanoma-ai/connector-github
 
-GitHub resources for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows): repositories, branch protection rules and team memberships, read through the [`integrations/github`](https://github.com/integrations/terraform-provider-github) OpenTofu provider (6.13.0) on [provider-bridge](https://github.com/Sanoma-AI/provider-bridge). It reads only: there is no create, update or delete yet.
+GitHub resources for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows): repositories, branch protection rules and team memberships, read through the [`integrations/github`](https://github.com/integrations/terraform-provider-github) OpenTofu provider (6.13.0) on [provider-bridge](https://github.com/Sanoma-AI/provider-bridge), and the company repository's pull requests, through its [remote half](#remote-half).
 
 ## Usage
 
@@ -34,6 +34,29 @@ A branch protection rule names its repository by the declared repository itself 
 The fields are the provider's attributes, by their names. A list block of at most one item (`pages`, `security_and_analysis`, `template`) is one object. Only declared fields are compared for drift; sets (`topics`, and five lists in a branch protection rule) are compared in any order.
 
 The logo is GitHub's mark from [Octicons](https://primer.style/octicons/) (`mark-github`, MIT), there only to identify the service an operation calls.
+
+## Remote half
+
+The `github` connector carries GitHub's remote half (`githubRemote`, `withSetup(..., { remote })`): what a change is reviewed and merged through when the company's repository is on GitHub. `ResolvedConfig.remotes` holds it under `github`, and `remoteFor(remotes, url)` from `@sanoma-ai/workflows` finds it for a clone URL, `https://github.com/<owner>/<repo>(.git)` or `git@github.com:<owner>/<repo>(.git)`. `open(repo, { secrets })` gives the repository's `SourceHost` (the type is in `@sanoma-ai/workflows`):
+
+| Method                                                       | GitHub's REST API                                                                                                                                                                                          |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pullRequestFor(branch)`, `pullRequest(number)`              | `GET /repos/{owner}/{repo}/pulls?state=all&head={owner}:{branch}` (the open one, else the latest), `GET …/pulls/{number}`                                                                                  |
+| `openPullRequest({ branch, base, title, body })`             | `POST …/pulls`; the open one when the branch has one already                                                                                                                                               |
+| `mergePullRequest(number, { sha, method: "squash", title })` | `PUT …/pulls/{number}/merge` at `sha`; a `DriverError` with `vendorCode` `head_moved` on 409 (the branch moved on), `not_mergeable` on 405                                                                 |
+| `closePullRequest(number)`, `deleteBranch(branch)`           | `PATCH …/pulls/{number}`, `DELETE …/git/refs/heads/{branch}` (nothing when it is gone)                                                                                                                     |
+| `setStatus({ sha, state, description, targetUrl })`          | `POST …/statuses/{sha}` with context `sanoma`, the description cut to GitHub's 140 characters                                                                                                              |
+| `enforcement(base)`                                          | `GET …/rules/branches/{base}`: `pullRequest` when a ruleset requires a pull request, `check` when one requires the `sanoma` status check; a 403 (a private repository on Free) is neither, with the reason |
+
+Every call is plain `fetch` with GitHub's media type and `X-GitHub-Api-Version: 2022-11-28`. A failure is a `DriverError` with GitHub's status and message, retryable on a server error or a rate limit. A commit status works with a person's token and with the App; check runs would need an App, so the half sets statuses only.
+
+**Tokens**, read through `secrets` on every call (the app's are the environment's, then the stored credentials), never logged: `githubToken(secrets, owner, prefer)` mints an installation token of the company's GitHub App when its keys are stored (`SANOMA_GITHUB_APP_ID`, `SANOMA_GITHUB_APP_PEM`, which the app's **Create GitHub App** stores; `GITHUB_APP_SECRETS` names them) and the App is installed on the owner, signed with `appJwt`, and otherwise takes `GITHUB_TOKEN`; `prefer: "token"` tries `GITHUB_TOKEN` first, as going live's push does. An opened repository keeps its token while it works (an installation token's hour). With neither, a call fails, not retryable, `vendorCode` `no_token`. A `GITHUB_TOKEN` for the company's repository needs, as a fine-grained token on it: Contents, Pull requests and Commit statuses: write (Metadata: read comes with them), and the App the same.
+
+**Webhooks:** `webhook(request, { secrets })` verifies `X-Hub-Signature-256` (HMAC SHA-256 of the body under `SANOMA_GITHUB_WEBHOOK_SECRET`, compared in constant time) and throws a `DriverError` (`bad_signature`, status 401) for a missing or wrong one, or `no_webhook_secret` when the secret is not stored. A `push` to a branch is `{ kind: "pushed", repo, branch, head }`; a `pull_request` `closed` is `{ kind: "closed", repo, branch, number, merged, sha }`, `sha` the merge commit when merged; any other event or action, a tag's push and a deleted branch are `[]`. A JSON body and a form-encoded `payload` are both read.
+
+`owners({ secrets })` lists the accounts the App is installed on (`GET /app/installations`, signed as the App), what going live offers besides the token's own.
+
+`@sanoma-ai/connector-github/remote` exports `githubRemote`, `githubToken`, `appJwt` and `GITHUB_APP_SECRETS`.
 
 ## Resource types
 
