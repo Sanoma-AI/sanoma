@@ -481,9 +481,8 @@ function siteOptionsOf(
     options?.properties.findLast((p: Node) => isWritten(p) && keyName(p.key) === name);
 
   const title = stringValue(property("title")?.value);
-  const iconAt = property("icon");
-  const icon = stringValue(iconAt?.value);
-  if (iconAt && icon === undefined) problem(iconAt, unread("`icon`", "a string, a Lucide icon's name"));
+  // Cosmetic: one that is not a string (tsc refuses it) is shown as none, never a problem that stops a site.
+  const icon = stringValue(property("icon")?.value);
   const publicAt = property("public");
   const flag = unwrap(publicAt?.value);
   const isPublic = flag?.type === "Literal" && flag.value === true;

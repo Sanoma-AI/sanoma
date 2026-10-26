@@ -50,8 +50,8 @@ export function filesUnder(dir: string, keep: (name: string) => boolean): string
 /** Where a company's apps are, under its root: `apps/<app>/`. */
 export const APPS_DIR = "apps";
 
-/** Each directory's company root (the nearest one with a `sanoma.config.ts`, short of a `node_modules`), cached. */
-const roots = new Map<string, string | null>();
+/** Each directory's company root (the nearest one with a `sanoma.config.ts`, short of a `node_modules`), once found. */
+const roots = new Map<string, string>();
 
 /** Whether `dir` is a company's root: it holds a `sanoma.config.ts`. */
 const isCompany = (dir: string) => existsSync(join(dir, "sanoma.config.ts"));
@@ -66,7 +66,7 @@ const isCompany = (dir: string) => existsSync(join(dir, "sanoma.config.ts"));
 export function appOfFile(file: string | undefined): string | undefined {
   if (file === undefined) return undefined;
   const dir = dirname(resolve(file));
-  let root = roots.get(dir);
+  let root: string | null | undefined = roots.get(dir);
   if (root === undefined) {
     root =
       upFrom<string | null>(dir, (d) => (basename(d) === "node_modules" ? null : isCompany(d) ? d : undefined)) ?? null;
@@ -74,7 +74,8 @@ export function appOfFile(file: string | undefined): string | undefined {
     if (root !== null && basename(dirname(root)) === APPS_DIR && isCompany(dirname(dirname(root)))) {
       root = dirname(dirname(root));
     }
-    roots.set(dir, root);
+    // Found roots only: a directory that is no company's yet may become one (`sanoma` in an empty folder).
+    if (root !== null) roots.set(dir, root);
   }
   if (root === null) return undefined;
   const [top, app, ...rest] = relative(root, file).split(sep);

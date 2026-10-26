@@ -58,8 +58,11 @@ export async function loadConfig(cwd = process.cwd()): Promise<LoadedConfig> {
   // A `workflows` or `collections` that is no list is resolveConfig's to explain.
   if (config.workflows === undefined || Array.isArray(config.workflows)) {
     const workflows = new Set(config.workflows);
-    for (const path of kindDirs(root, "workflows").flatMap((dir) => filesUnder(dir, isSource))) {
-      const { default: wf } = (await importReal(path)) as { default?: unknown };
+    const paths = kindDirs(root, "workflows").flatMap((dir) => filesUnder(dir, isSource));
+    // Imported at once, added in the files' order.
+    const modules = (await Promise.all(paths.map(importReal))) as { default?: unknown }[];
+    for (const [i, { default: wf }] of modules.entries()) {
+      const path = paths[i]!;
       if (wf === undefined) continue;
       if (!isWorkflow(wf)) {
         throw new UsageError(

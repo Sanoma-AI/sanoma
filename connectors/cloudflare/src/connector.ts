@@ -1,5 +1,5 @@
 import { type Connector, defineConnector, defineResource, type OpSpec, vendorInfo } from "@sanoma-ai/workflows";
-import { DOMAIN_NAME, SITE_NAME } from "@sanoma-ai/workflows/shared";
+import { DOMAIN_NAME, SITE_KEY } from "@sanoma-ai/workflows/shared";
 import { z } from "zod";
 
 /*
@@ -38,7 +38,7 @@ const containerSchema = z.object({
     ),
   port: z.number().int().min(1).max(65_535).describe("The port the runtime listens on in the container (its `PORT`)"),
   domains: z
-    .record(z.string().regex(SITE_NAME), z.string().regex(DOMAIN_NAME))
+    .record(z.string().regex(SITE_KEY), z.string().regex(DOMAIN_NAME))
     // Empty, it would read back as none, a change on every plan.
     .refine((domains) => Object.keys(domains).length > 0, "leave `domains` out rather than empty")
     .nullish()

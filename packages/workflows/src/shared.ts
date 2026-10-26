@@ -97,11 +97,8 @@ export const writtenName = ({ name, app }: { name: string; app?: string }): stri
  */
 export const siteKey = (app: string | undefined, site: string): string => (app === undefined ? site : `${app}/${site}`);
 
-/** Whether `key` is a site's key (`siteKey`): a `SITE_NAME`, or an `APP_NAME`, `/` and a `SITE_NAME`. */
-export function isSiteKey(key: string): boolean {
-  const [first = "", site, ...rest] = key.split("/");
-  return site === undefined ? SITE_NAME.test(first) : !rest.length && APP_NAME.test(first) && SITE_NAME.test(site);
-}
+/** A site's key (`siteKey`): a `SITE_NAME`, or an `APP_NAME`, `/` and a `SITE_NAME`, as a host's `domains` names a site. */
+export const SITE_KEY = /^([a-z][a-z0-9]*\/)?[a-z][a-z0-9-]*$/;
 
 /** A site's folder, relative to the root, by its key: `sites/<name>`, or an app's `apps/<app>/sites/<name>`. */
 export function siteDir(key: string): string {
@@ -134,7 +131,7 @@ export function domainsOf(text: string): Record<string, string> {
   const domains: Record<string, string> = {};
   for (const pair of text.split(",")) {
     const [site = "", domain = "", ...rest] = pair.trim().split("=");
-    if (!isSiteKey(site) || !DOMAIN_NAME.test(domain) || rest.length || Object.hasOwn(domains, site)) {
+    if (!SITE_KEY.test(site) || !DOMAIN_NAME.test(domain) || rest.length || Object.hasOwn(domains, site)) {
       throw new Error(
         `SANOMA_DOMAINS has "${pair}": write <site>=<hostname>, each site once, such as www=sanoma.example`,
       );

@@ -8,7 +8,7 @@ import { describeConfig, generateApi, readPeople, schemaOf, schemaText } from ".
 import { lintWorkflow } from "../src/lint.ts";
 import { loadScenarios } from "../src/scenario.ts";
 import { appOfFile } from "../src/paths.ts";
-import { apiNameOf } from "../src/shared.ts";
+import { apiNameOf, domainsOf, siteDir } from "../src/shared.ts";
 import { resolveConfig } from "../src/index.ts";
 import { rootWith } from "./harness.ts";
 import fixture from "./fixtures/company-apps/sanoma.config.ts";
@@ -56,6 +56,15 @@ describe("apps", () => {
     });
     expect(appOfFile(join(merged, "apps/crm/workflows/a.ts"))).toBe("crm");
     expect(appOfFile(join(merged, "node_modules/x/apps/y/z.ts"))).toBeUndefined();
+  });
+
+  it("names an app's site by its key, in a host's domains too", () => {
+    expect(domainsOf("crm/pipeline=crm.acme.test,www=acme.test")).toEqual({
+      "crm/pipeline": "crm.acme.test",
+      www: "acme.test",
+    });
+    expect(() => domainsOf("My-CRM/pipeline=crm.acme.test")).toThrow(/^SANOMA_DOMAINS has/);
+    expect([siteDir("crm/pipeline"), siteDir("www")]).toEqual(["apps/crm/sites/pipeline", "sites/www"]);
   });
 
   it("refuses people an app declares: they are the company's", () => {
