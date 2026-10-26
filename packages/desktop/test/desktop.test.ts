@@ -6,13 +6,17 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import {
+  afterFailure,
   type Company,
   companyName,
   partitionOf,
   portFor,
   readCompanies,
+  recentOf,
   remember,
   slugOf,
+  toReopen,
+  updated,
   writeCompanies,
 } from "../src/companies.ts";
 import { eventOf, listeningUrlOf } from "../src/events.ts";
@@ -22,6 +26,7 @@ import { hidePasswords, openLog, TAIL_LINES } from "../src/logs.ts";
 import { folderArgument, syncedFolderWarning } from "../src/places.ts";
 import { startSession } from "../src/session.ts";
 import { shims, writeShims } from "../src/shims.ts";
+import { DEFAULT_SIZE, windowBounds } from "../src/window-state.ts";
 
 const fixture = (name: string) => fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
 const temp = () => mkdtempSync(join(tmpdir(), "sanoma-desktop-"));
@@ -301,6 +306,46 @@ describe("companies.json", () => {
     expect(await portFor(list, "/a", isFree)).toEqual({ port: 3103, moved: true });
   });
 
+  test("keeps each window's bounds and whether it is open, dropping either when it is not of its kind", () => {
+    const file = join(temp(), "companies.json");
+    const bounds = { x: 10, y: 20, width: 900, height: 700 };
+    let list = [at("/a", 3100, "2"), at("/b", 3101, "1")];
+    list = updated(list, "/a", { bounds, open: true });
+    list = updated(list, "/missing", { open: true });
+    writeCompanies(file, list);
+    expect(readCompanies(file)).toEqual([{ ...at("/a", 3100, "2"), bounds, open: true }, at("/b", 3101, "1")]);
+    writeFileSync(file, JSON.stringify([{ ...at("/a", 3100, "2"), bounds: { x: 1 }, open: "yes" }]));
+    expect(readCompanies(file)).toEqual([at("/a", 3100, "2")]);
+  });
+
+  test("opens at launch the companies open at the last Quit whose folders hold one", () => {
+    const list = [
+      { ...at("/a", 3100, "3"), open: true },
+      at("/b", 3101, "2"),
+      { ...at("/gone", 3102, "1"), open: true },
+    ];
+    expect(toReopen(list, (dir) => dir !== "/gone")).toEqual(["/a"]);
+    expect(toReopen(updated(list, "/a", { open: false }), () => true)).toEqual(["/gone"]);
+  });
+
+  test("marks the running companies in Recent", () => {
+    const list = [at("/a", 3100, "2"), at("/b", 3101, "1")];
+    expect(recentOf(list, new Set(["/b"])).map((c) => [c.path, c.running])).toEqual([
+      ["/a", false],
+      ["/b", true],
+    ]);
+  });
+
+  test("forgets a failed start whose folder holds no company, such as a failed clone, and keeps any other", () => {
+    const list = [at("/clone", 3100, "2"), at("/a", 3101, "1")];
+    expect(afterFailure(list, "/clone", (dir) => dir !== "/clone").map((c) => c.path)).toEqual(["/a"]);
+    expect(afterFailure(list, "/a", (dir) => dir !== "/clone")).toEqual(list);
+    const real = temp();
+    expect(afterFailure([at(real, 3100, "1")], real)).toEqual([]);
+    writeFileSync(join(real, "sanoma.config.ts"), "export default {};\n");
+    expect(afterFailure([at(real, 3100, "1")], real)).toHaveLength(1);
+  });
+
   test("names, partitions and log names", () => {
     const repo = temp();
     expect(companyName(repo)).toMatch(/^sanoma-desktop-/);
@@ -309,6 +354,34 @@ describe("companies.json", () => {
     expect(partitionOf("/x/acme")).toMatch(/^persist:company-[0-9a-f]{40}$/);
     expect(partitionOf("/x/acme")).not.toBe(partitionOf("/y/acme"));
     expect(slugOf("/x/Acme Co")).toMatch(/^acme-co-[0-9a-f]{6}$/);
+  });
+});
+
+describe("window state", () => {
+  const screen = { x: 0, y: 25, width: 1440, height: 875 };
+  const second = { x: 1440, y: 0, width: 1920, height: 1080 };
+
+  test("opens a window at its saved bounds while enough of it is on a display", () => {
+    const saved = { x: 100, y: 80, width: 900, height: 700 };
+    expect(windowBounds(saved, [screen])).toEqual(saved);
+    expect(windowBounds({ ...saved, x: 2000 }, [screen, second])).toEqual({ ...saved, x: 2000 });
+    // Half off the edge: enough of it is there to grab.
+    expect(windowBounds({ ...saved, x: 1000 }, [screen])).toEqual({ ...saved, x: 1000 });
+  });
+
+  test("at the default size the first time, or when its display is gone", () => {
+    expect(windowBounds(undefined, [screen])).toEqual(DEFAULT_SIZE);
+    expect(windowBounds({ x: 2000, y: 80, width: 900, height: 700 }, [screen])).toEqual(DEFAULT_SIZE);
+    expect(windowBounds({ x: 1400, y: 80, width: 900, height: 700 }, [screen])).toEqual(DEFAULT_SIZE);
+  });
+
+  test("no larger than its display", () => {
+    expect(windowBounds({ x: 0, y: 25, width: 1920, height: 1080 }, [screen])).toEqual({
+      x: 0,
+      y: 25,
+      width: 1440,
+      height: 875,
+    });
   });
 });
 
