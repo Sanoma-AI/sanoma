@@ -209,9 +209,9 @@ describe("runScenarios, as sanoma check runs them", () => {
     expect(failed).toEqual([]);
     expect(passed).toEqual(["A researched lead is contacted", "A company with no lead is left alone"]);
     expect(lines.filter((l) => l.startsWith("skipped"))).toEqual([
-      "skipped broken.feature › A flaky blog: a world",
-      "skipped moments.feature › The launch copy waits for review: a moment",
-      "skipped world.feature › Acme's pipeline: a world",
+      "skipped scenarios/broken.feature › A flaky blog: a world",
+      "skipped scenarios/moments.feature › The launch copy waits for review: a moment",
+      "skipped scenarios/world.feature › Acme's pipeline: a world",
     ]);
   });
 });

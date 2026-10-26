@@ -553,7 +553,7 @@ describe("parseFeature", () => {
         `Feature: A\n  Scenario: Runs\n    When announce runs\n\n  Scenario: Forgot\n    Given a post titled "Old news" exists\n`,
       ),
     ).toBe(
-      'x.feature:5: scenario "Forgot" has no When: say which workflow runs, such as "When <workflow> runs with" (a feature with no When in any scenario is of worlds)',
+      'scenarios/x.feature:5: scenario "Forgot" has no When: say which workflow runs, such as "When <workflow> runs with" (a feature with no When in any scenario is of worlds)',
     );
   });
 
@@ -563,11 +563,13 @@ describe("parseFeature", () => {
         `Feature: A\n  Scenario: Idle\n    Given resend.broadcast.create fails once\n    Then the run succeeds\n`,
       ),
     ).toBe(
-      'x.feature:2: scenario "Idle" has no When, so it is a world, Givens only, but it checks a run ("the run succeeds"): say which workflow runs, such as "When <workflow> runs with"',
+      'scenarios/x.feature:2: scenario "Idle" has no When, so it is a world, Givens only, but it checks a run ("the run succeeds"): say which workflow runs, such as "When <workflow> runs with"',
     );
     expect(
       await thrown(`Feature: A\n  Scenario: Idle\n    Given "Review launch copy" is approved by marketing-lead\n`),
-    ).toMatch(/^x\.feature:2: scenario "Idle" has no When, so it is a world, Givens only, but it decides an approval/);
+    ).toMatch(
+      /^scenarios\/x\.feature:2: scenario "Idle" has no When, so it is a world, Givens only, but it decides an approval/,
+    );
   });
 
   it("reads @moment(<person>,<path>) into a moment, and refuses one with no When, a malformed one and a second", async () => {
@@ -578,14 +580,14 @@ describe("parseFeature", () => {
     expect(
       await thrown(`Feature: A\n  @moment(leon,/inbox)\n  Scenario: Idle\n    Given a post titled "Old news" exists\n`),
     ).toMatch(
-      /^x\.feature:3: scenario "Idle" has no When, so it is a world, Givens only, but it is a moment, which starts a run/,
+      /^scenarios\/x\.feature:3: scenario "Idle" has no When, so it is a world, Givens only, but it is a moment, which starts a run/,
     );
     expect(await thrown(`Feature: A\n  @moment(leon)\n  Scenario: S\n    When announce runs\n`)).toBe(
-      "x.feature:3: @moment(leon) needs a person and a path, as in @moment(alex,/sites/portal/requests), with no space: a tag has none",
+      "scenarios/x.feature:3: @moment(leon) needs a person and a path, as in @moment(alex,/sites/portal/requests), with no space: a tag has none",
     );
     expect(
       await thrown(`@moment(ada,/inbox)\nFeature: A\n  @moment(leon,/inbox)\n  Scenario: S\n    When announce runs\n`),
-    ).toBe("x.feature:4: @moment(ada,/inbox) and @moment(leon,/inbox): a moment has one person and one page");
+    ).toBe("scenarios/x.feature:4: @moment(ada,/inbox) and @moment(leon,/inbox): a moment has one person and one page");
   });
 
   it("refuses a scenario with no When, a second When, and a doc string that is not JSON", async () => {
