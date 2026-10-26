@@ -7,7 +7,7 @@ import type { DeclaredResource } from "./resources.ts";
 // The `Wakeup` contract: what a resource type that wakes a stopped instance at a time declares
 // about itself, beside `Host`. Declaring one in a data file is the whole switch: the worker then
 // registers its next deadline with it before it stops, and the wakeup calls the host's
-// `GET {url}/wake?generation=N` then. Only the contract is here; the worker's side comes later.
+// `GET {url}/wake?generation=N` then. The contract is here; the worker's side is `deadlines.ts`.
 
 /** What a wakeup's state says of it. */
 export interface WakeupOutputs {

@@ -111,7 +111,10 @@ export async function awaitApproval(
     ),
   );
   for (;;) {
-    const raw = await DBOS.recv<unknown>(topicOf(state.id), { timeoutSeconds: 24 * 60 * 60 });
+    // A decision comes from a request (`SanomaClient.decide`), which wakes a stopped worker: no deadline.
+    const raw = await run.state.deadlines.waiting(run.id, { kind: "approval" }, () =>
+      DBOS.recv<unknown>(topicOf(state.id), { timeoutSeconds: 24 * 60 * 60 }),
+    );
     if (raw === null || raw === undefined) {
       warn(`run ${run.id}: approval ${state.id} ("${title}") is still waiting for ${approverLabel(state.approver)}`);
       continue;

@@ -567,29 +567,29 @@ async function all(run: Run, list: unknown, node: string): Promise<unknown[]> {
 
 /**
  * Waits, durably, until the time or for the duration the request names, and records when it
- * ends. For a duration that is the record's `at` plus the duration, one read of the runtime's
- * clock (`Date.now()`, which adds no DBOS call): a replay may compute another, but the store keeps
- * the first record with the id, so the record says what the first execution waited for.
+ * ends. For a duration that is the record's `at` plus the duration. The start is DBOS's clock
+ * (`DBOS.now()`, a step), so a replay reads back the first execution's and computes the same
+ * deadline: the one the worker's deadlines register while the run waits.
  */
 async function sleep(run: Run, raw: unknown, at: Placed) {
   const req = checkSleep(raw);
   const seq = run.seq++;
-  const started = Date.now();
-  let until: number;
-  let ms: number;
-  if ("until" in req) {
-    until = typeof req.until === "number" ? req.until : Date.parse(req.until);
-    ms = until - (await DBOS.now());
-  } else {
-    ms =
-      (req.ms ?? 0) +
-      (req.seconds ?? 0) * 1_000 +
-      (req.minutes ?? 0) * 60_000 +
-      (req.hours ?? 0) * 3_600_000 +
-      (req.days ?? 0) * 86_400_000;
-    until = started + ms;
-  }
+  const started = await DBOS.now();
+  const until =
+    "until" in req
+      ? typeof req.until === "number"
+        ? req.until
+        : Date.parse(req.until)
+      : started +
+        (req.ms ?? 0) +
+        (req.seconds ?? 0) * 1_000 +
+        (req.minutes ?? 0) * 60_000 +
+        (req.hours ?? 0) * 3_600_000 +
+        (req.days ?? 0) * 86_400_000;
+  const ms = until - started;
   await write(run, entry(run, { type: "sleep.started", ...at, until }, { seq, at: started }));
   // A time already past waits not at all, and adds no step. A sandbox run never waits.
-  if (ms > 0 && run.sandbox === undefined) await DBOS.sleep(ms);
+  if (ms > 0 && run.sandbox === undefined) {
+    await run.state.deadlines.waiting(run.id, { kind: "sleep", until }, () => DBOS.sleep(ms));
+  }
 }

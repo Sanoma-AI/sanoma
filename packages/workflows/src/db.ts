@@ -291,3 +291,62 @@ export async function createTable(db: Db, ddl: string, what: string): Promise<vo
     throw new Error(`could not prepare the ${what} table: ${errorMessage(err)}`, { cause: err });
   }
 }
+
+// The wakeup row's reads and writes. Every write after the claim names the owner: a worker
+// another process has replaced since (a second instance on the database) changes nothing.
+
+/** Makes `owner` the worker that registers the instance's wakeups. */
+export async function claimWakeup(db: Db, owner: string): Promise<void> {
+  await db.query(`UPDATE ${WAKEUP_TABLE} SET owner = $1 WHERE id = 1`, [owner]);
+}
+
+/**
+ * Counts the row's generation up and records `at` (null for no deadline), while `owner` still
+ * owns it: the new generation, or undefined when another worker owns the row now.
+ */
+export async function nextWakeupGeneration(db: Db, owner: string, at: string | null): Promise<number | undefined> {
+  const { rows } = await db.query<{ generation: string }>(
+    `UPDATE ${WAKEUP_TABLE} SET generation = generation + 1, at = $2 WHERE id = 1 AND owner = $1 RETURNING generation`,
+    [owner, at],
+  );
+  return rows[0] && Number(rows[0].generation);
+}
+
+/** Records how registering `generation` went: `registered_at`, or the error as `last_error`. */
+export async function recordWakeupRegistration(
+  db: Db,
+  owner: string,
+  generation: number,
+  error?: string,
+): Promise<void> {
+  await db.query(
+    error === undefined
+      ? `UPDATE ${WAKEUP_TABLE} SET registered_at = now(), last_error = NULL WHERE id = 1 AND owner = $1 AND generation = $2`
+      : `UPDATE ${WAKEUP_TABLE} SET last_error = $3 WHERE id = 1 AND owner = $1 AND generation = $2`,
+    error === undefined ? [owner, generation] : [owner, generation, error],
+  );
+}
+
+/** Records that the worker stops now, with `generation` registered. */
+export async function recordWakeupStop(db: Db, owner: string, generation: number): Promise<void> {
+  await db.query(`UPDATE ${WAKEUP_TABLE} SET stopped_at = now() WHERE id = 1 AND owner = $1 AND generation = $2`, [
+    owner,
+    generation,
+  ]);
+}
+
+/**
+ * True when `generation` is the wakeup row's: the wake `/wake?generation=N` asks for is the one
+ * the worker last registered, not one a later stop replaced. For the route's supervisor, which
+ * decides on its own what a wake means when no wakeup is declared.
+ */
+export async function shouldWake(databaseUrl: string, generation: number): Promise<boolean> {
+  await prepareDatabase(databaseUrl);
+  const conn = await connect(databaseUrl);
+  try {
+    const { rows } = await conn.query<{ generation: string }>(`SELECT generation FROM ${WAKEUP_TABLE} WHERE id = 1`);
+    return rows[0] !== undefined && Number(rows[0].generation) === generation;
+  } finally {
+    await conn.end().catch(() => undefined);
+  }
+}

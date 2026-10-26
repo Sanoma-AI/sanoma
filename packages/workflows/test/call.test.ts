@@ -440,7 +440,8 @@ describe("ctx.sleep", () => {
       expect(records[1]).toMatchObject({ until, seq: 1, id: `${runId}:sleep.started:1` });
     }
     expect(await c().result(short!)).toBe("rested");
-    expect(await steps(short!)).toEqual(["DBOS.sleep"]);
+    // The start is DBOS's clock, read as a step, so a replay computes the same deadline.
+    expect(await steps(short!)).toEqual(["DBOS.now", "DBOS.sleep"]);
   });
 
   it("records when the sleep ends, before it waits: the time asked for, or the start plus the duration", async () => {
@@ -470,7 +471,7 @@ describe("ctx.sleep", () => {
     const records = await c().ledger(runId);
     expect(types(records)).toEqual(["run.started", "sleep.started", "run.finished"]);
     expect(records[1]).toEqual(first);
-    expect(await steps(runId)).toEqual(["DBOS.sleep"]);
+    expect(await steps(runId)).toEqual(["DBOS.now", "DBOS.sleep"]);
   });
 });
 

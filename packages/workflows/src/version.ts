@@ -16,8 +16,9 @@ export const RUNTIME_VERSION = (
  * package release, so a run in flight on the old layout is not replayed against the new one.
  * 2: calls run in program order; a decision event per approval (2026-10-07).
  * 3: a start the policy holds waits on its approval before the body (2026-10-21).
+ * 4: a sleep for a duration reads DBOS's clock for its start (2026-10-25).
  */
-export const STEP_LAYOUT = 3;
+export const STEP_LAYOUT = 4;
 
 let dbosVersion: string | undefined;
 

@@ -19,6 +19,7 @@ import {
   SanomaClient,
   startWorker,
 } from "../src/index.ts";
+import { deadlineRegistry } from "../src/deadlines.ts";
 import { currentGroup, entry, write, writeFailure } from "../src/ledger.ts";
 import type { Run } from "../src/run.ts";
 import { minimal, noop } from "./fixtures/minimal.ts";
@@ -297,6 +298,7 @@ const runOn = (ledger: LedgerStore): Run => ({
     workflows: new Map(),
     outlines: new Map(),
     stopped: false,
+    deadlines: deadlineRegistry(),
   },
 });
 

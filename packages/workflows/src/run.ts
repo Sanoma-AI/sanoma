@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Collection } from "./collection.ts";
+import type { DeadlineRegistry } from "./deadlines.ts";
 import type { ApprovalState, Approver, Principal, WorkflowDefinition } from "./define.ts";
 import type { Fake } from "./fake.ts";
 import type { LedgerStore } from "./ledger.ts";
@@ -75,6 +76,8 @@ export interface WorkerState {
    * how it really ends (see `isInfrastructureError`).
    */
   stopped: boolean;
+  /** Which of its runs are executing and which wait, until when: what the worker's `idle` reads. */
+  deadlines: DeadlineRegistry;
 }
 
 /** What a run keeps in memory. Rebuilt the same way when DBOS replays the run. */
