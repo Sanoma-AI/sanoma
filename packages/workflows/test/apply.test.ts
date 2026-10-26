@@ -4,6 +4,8 @@ import { tfConnector } from "@sanoma-ai/bridge/connector";
 import { type BridgeState, stateBridge } from "@sanoma-ai/bridge/fake";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
+import { fakeHost, testRepository } from "@sanoma-ai/testing/host";
+import { fakeWakeup } from "@sanoma-ai/testing/wakeup";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { LOCKFILE, readLockfile, serializeLockfile, writeLockfile } from "../src/describe.ts";
@@ -13,6 +15,7 @@ import {
   defineWorkflow,
   type LedgerRecord,
   memoryLedger,
+  memorySecrets,
   type PlanStep,
   type Principal,
   resolveConfig,
@@ -483,5 +486,63 @@ describe("the apply workflow on a vendor that replaces", () => {
       error: expect.stringContaining("was planned to replace, and now plans to update"),
     });
     expect(resultOf(report, deploys)).toMatchObject({ status: "done" });
+  });
+});
+
+describe("the apply workflow on a wakeup", () => {
+  const root = rootWithPolicy();
+  const repo = testRepository();
+  writeFileSync(
+    join(root, "resources/infra.ts"),
+    [
+      'import { testhost } from "@sanoma-ai/testing-host/resources";',
+      'import { testwakeup } from "@sanoma-ai/testing-wakeup/resources";',
+      "",
+      `export const app = testhost.app({ name: "company", source: ${JSON.stringify(repo.url)}, ref: "main", port: 0 });`,
+      'export const wake = testwakeup.timer({ name: "wake", host: app });',
+      "",
+    ].join("\n"),
+  );
+  const host = fakeHost(async () => ({ url: "http://127.0.0.1:4100", stop: async () => {} }));
+  const wakeup = fakeWakeup();
+  const app = useTestApp(
+    { workflows: [], connectors: [host.connector, wakeup.connector], ledger: memoryLedger(), root },
+    { databaseUrl: testDatabaseUrl("apply-wakeup"), source: recordingSource(root).source },
+  );
+  const timer = async () =>
+    (
+      (await wakeup.driver.ops["timer.read"]!(
+        { id: "wake" },
+        {
+          idempotencyKey: "read",
+          runId: "test",
+          opId: "testwakeup.timer.read",
+          attempt: 1,
+          secrets: memorySecrets({}),
+        },
+      )) as { state?: Record<string, unknown> }
+    ).state;
+  beforeAll(() => repo.commit());
+  afterAll(async () => {
+    await host.close();
+    repo.remove();
+  });
+
+  async function apply(input: ApplyInput = {}) {
+    return app.client.applyReport(await app.client.apply(input, { startedBy: alice }));
+  }
+
+  it("gives a wakeup its host's URL from the host's state: made in the same run, then found", async () => {
+    const made = await apply();
+    expect(actions(made)).toEqual([
+      ["infra.ts#app", "create"],
+      ["infra.ts#wake", "create"],
+    ]);
+    expect(resultOf(made, "resources/infra.ts#app")!.host!.url).toBe("http://127.0.0.1:4100");
+    expect(await timer()).toEqual({ name: "wake", host: "http://127.0.0.1:4100" });
+    // Found the next time, so the wakeup is as declared, and drift says so.
+    expect(actions(await apply({ only: ["resources/infra.ts#wake"] }))).toEqual([["infra.ts#wake", "none"]]);
+    const drift = await app.client.driftReport(await app.client.drift({ startedBy: alice }));
+    expect(drift.resources.find((r) => r.id === "resources/infra.ts#wake")).toMatchObject({ status: "clean" });
   });
 });
