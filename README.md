@@ -147,6 +147,12 @@ pnpm build                  # packages already public skip prepack, and their de
 pnpm publish -r             # --dry-run first to see each tarball; one package: pnpm --filter <name> publish
 ```
 
+The [runtime image](packages/sanoma/README.md#hosting-it-yourself) a container host runs is [`sanomaai/runtime`](https://hub.docker.com/r/sanomaai/runtime) on Docker Hub, tagged with the `sanoma` version and never `latest`. After the packages publish, `release.yml` pushes the tag when Docker Hub does not have it, logged in with the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (unset, it skips with a notice). A tag is never replaced, so a change to `packages/sanoma/runtime/` ships with a new `sanoma` version. By hand, after `docker login`, when `docker buildx imagetools inspect sanomaai/runtime:<version>` finds no such tag:
+
+```sh
+docker buildx build --platform linux/amd64 --provenance=false -t sanomaai/runtime:<version> --push packages/sanoma/runtime
+```
+
 ## License
 
 [Functional Source License 1.1, Apache 2.0 future license](LICENSE) (FSL-1.1-ALv2). You may use, modify and self-host Sanoma for any purpose except offering it as a competing commercial product or service. Each version becomes available under Apache-2.0 two years after its release.
