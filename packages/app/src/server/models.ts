@@ -12,7 +12,7 @@ const registries = new WeakMap<ResolvedConfig, WeakMap<SanomaClient, Promise<Mod
 
 /**
  * The app's models: one AI SDK registry over the provider each connector's model half makes
- * (`ConnectorSetup.model`), once per resolved config, so `languageModel("anthropic/<model-id>")`
+ * (`ConnectorSetup.model`), once per resolved config and client, so `languageModel("anthropic/<model-id>")`
  * resolves, and `<vendor>/default` is the connector's own default. A connector's model reads its
  * key when called (`secretValues`: the environment's, then the stored one), so one without a key
  * is in the registry and fails when first called, saying where to set it. A maker that throws

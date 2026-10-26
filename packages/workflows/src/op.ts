@@ -323,11 +323,12 @@ export interface ConnectorSetup {
    */
   login?: (context: LoginContext) => LoginHalf | Promise<LoginHalf>;
   /**
-   * Makes the connector's AI SDK provider, the vendor's adapter as the transport: once per
-   * resolved config, by the app, whose registry names its models `<vendor>/<model-id>`. It
-   * answers `languageModel("default")` with the connector's own default model, and reads its
-   * credentials through `context.secrets` when a model is called, so a key set on the connector
-   * page later is used, and a missing one fails that call.
+   * Makes the connector's AI SDK provider, the vendor's adapter as the transport: by the app,
+   * once per resolved config and client (again after one that throws), whose registry names its
+   * models `<vendor>/<model-id>`. It answers `languageModel("default")` with the connector's own
+   * default model, and reads its credentials through `context.secrets` when a model is called, so
+   * a key set on the connector page later is used (unless the environment sets one, which wins),
+   * and a missing one fails that call.
    */
   model?: (context: ModelContext) => ProviderV4 | Promise<ProviderV4>;
 }

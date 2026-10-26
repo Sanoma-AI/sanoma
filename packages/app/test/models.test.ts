@@ -4,7 +4,7 @@ import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
 import { defineConnector, resolveConfig, type SanomaClient, withSetup } from "@sanoma-ai/workflows";
 import { customProvider, generateText, NoSuchProviderError } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { type App, startApp } from "../src/index.ts";
 import { modelRegistry } from "../src/server/models.ts";
 import { secretValues } from "../src/server/secrets.ts";
@@ -34,6 +34,10 @@ const config = { workflows: [], connectors: [anthropic, mock], databaseUrl: test
 const client = { secrets: async () => new Map() } as unknown as SanomaClient;
 
 describe("modelRegistry", () => {
+  // The environment wins over the secrets: a key exported in the shell must not reach Anthropic.
+  beforeEach(() => vi.stubEnv("ANTHROPIC_API_KEY", undefined));
+  afterEach(() => vi.unstubAllEnvs());
+
   it("resolves `<vendor>/<model-id>` over every connector with a model half, made once per resolved config", async () => {
     const resolved = resolveConfig(config);
     const registry = await modelRegistry({ resolved, client });
