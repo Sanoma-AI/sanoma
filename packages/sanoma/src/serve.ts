@@ -15,7 +15,7 @@ import {
 } from "@sanoma-ai/workflows";
 import { describeConfig, readPeople, schemaOf, writeGenerated } from "@sanoma-ai/workflows/describe";
 import { domainsOf } from "@sanoma-ai/workflows/shared";
-import { startWakeupService, type WakeupService } from "@sanoma-ai/workflows/wakeup-service";
+import type { WakeupService } from "@sanoma-ai/workflows/wakeup-service";
 import { UsageError } from "./config.ts";
 import { runtimeFrom, siteBuild } from "./sites.ts";
 import { localGitSource } from "./source.ts";
@@ -273,6 +273,7 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
     if (config.wakeup === true) {
       const { databaseUrl } = serveOptions.resolved ?? resolveConfig(config);
       const { log } = serveOptions;
+      const { startWakeupService } = await import("@sanoma-ai/workflows/wakeup-service");
       wakeup = await startWakeupService({ databaseUrl, log: { info: log, warn: log } });
     }
     app = await served(config, options, [wakeRoute(serveOptions), ...(wakeup?.routes ?? [])]);

@@ -30,9 +30,16 @@ const TABLES: readonly [what: string, ddl: string][] = [
       `account_id uuid NOT NULL REFERENCES ${WAKEUP_ACCOUNTS_TABLE} (id), url text NOT NULL, ` +
       "token_hash text UNIQUE NOT NULL, at timestamptz, generation bigint NOT NULL DEFAULT 0, " +
       "called_at timestamptz, attempts integer NOT NULL DEFAULT 0, next_attempt_at timestamptz, " +
-      "last_error text, created_at timestamptz NOT NULL DEFAULT now()); " +
-      `CREATE INDEX IF NOT EXISTS ${WAKEUP_INSTANCES_TABLE}_at ON ${WAKEUP_INSTANCES_TABLE} (at) WHERE at IS NOT NULL; ` +
-      `CREATE INDEX IF NOT EXISTS ${WAKEUP_INSTANCES_TABLE}_account ON ${WAKEUP_INSTANCES_TABLE} (account_id)`,
+      "last_error text, created_at timestamptz NOT NULL DEFAULT now())",
+  ],
+  // Each on its own, so one another process made first does not skip the next.
+  [
+    "wakeup instances",
+    `CREATE INDEX IF NOT EXISTS ${WAKEUP_INSTANCES_TABLE}_at ON ${WAKEUP_INSTANCES_TABLE} (at) WHERE at IS NOT NULL`,
+  ],
+  [
+    "wakeup instances",
+    `CREATE INDEX IF NOT EXISTS ${WAKEUP_INSTANCES_TABLE}_account ON ${WAKEUP_INSTANCES_TABLE} (account_id)`,
   ],
 ];
 
@@ -94,6 +101,9 @@ const newToken = (prefix: "swa_" | "swi_") => `${prefix}${generateSecret()}`;
  * so the secret itself is never compared, and a guess's timing says nothing an attacker can steer.
  */
 const hashOf = (token: string) => createHash("sha256").update(token).digest("hex");
+
+/** A date-time as `Date.toISOString` writes one, or with an offset: four-digit years only. */
+const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -289,7 +299,8 @@ export async function startWakeupService({
     if (given instanceof Response) return given;
     const at = given?.at;
     const generation = given?.generation;
-    if (typeof at !== "string" || Number.isNaN(Date.parse(at))) return problem(400, "at must be an ISO 8601 date-time");
+    if (typeof at !== "string" || !ISO_DATE_TIME.test(at) || Number.isNaN(Date.parse(at)))
+      return problem(400, "at must be an ISO 8601 date-time");
     // A new instance has generation 0, so a registration counts from 1.
     if (typeof generation !== "number" || !Number.isSafeInteger(generation) || generation < 1)
       return problem(400, "generation must be an integer, 1 or more");
@@ -375,7 +386,8 @@ function startLoop({
     let error: string | undefined;
     try {
       const signal = AbortSignal.any([stopping.signal, AbortSignal.timeout(CALL_TIMEOUT_MS)]);
-      const res = await fetch(target, { signal });
+      // A redirect is no answer: it could send the service anywhere, so it is tried again as a failure.
+      const res = await fetch(target, { signal, redirect: "manual" });
       await res.body?.cancel().catch(() => undefined);
       if (!res.ok) error = `answered ${res.status}`;
     } catch (err) {

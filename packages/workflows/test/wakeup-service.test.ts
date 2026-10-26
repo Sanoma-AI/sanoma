@@ -235,6 +235,8 @@ describe("startWakeupService", () => {
     expect(await shown()).toMatchObject({ at: first.toISOString(), generation: 2 });
     for (const body of [
       { at: "soon", generation: 3 },
+      { at: "2026", generation: 3 },
+      { at: "+275760-09-13T00:00:00Z", generation: 3 },
       { generation: 3 },
       { at: first.toISOString(), generation: 0 },
       { at: first.toISOString(), generation: -1 },
