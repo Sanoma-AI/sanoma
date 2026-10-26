@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-sanoma-ops",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The hosted wakeup on sanoma-ops for Sanoma: wakes a stopped instance at the time it registered",
   "keywords": [
     "connector",
