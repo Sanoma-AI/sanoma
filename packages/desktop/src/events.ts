@@ -27,6 +27,37 @@ export function eventOf(
   return undefined;
 }
 
+/** `url` with its user and password replaced by `***`; as it was when it has neither or is no URL. */
+const withoutUserinfo = (url: string) => url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#]*@/i, "$1***@");
+
+/** `value` with the userinfo of each `url` field in it, at any depth, replaced (`withoutUserinfo`). */
+const redact = (value: unknown): unknown =>
+  Array.isArray(value)
+    ? value.map(redact)
+    : isRecord(value)
+      ? Object.fromEntries(
+          Object.entries(value).map(([key, field]) => [
+            key,
+            key === "url" && typeof field === "string" ? withoutUserinfo(field) : redact(field),
+          ]),
+        )
+      : value;
+
+/**
+ * A line as the log may keep it: an event line (`{"sanoma":1,…}`) with the userinfo of its `url`
+ * fields replaced by `***`, as the `database` event's URL carries the cluster's password; any
+ * other line as it is.
+ */
+export function redactedLine(line: string): string {
+  if (!line.startsWith("{")) return line;
+  try {
+    const parsed: unknown = JSON.parse(line);
+    return isRecord(parsed) && parsed.sanoma === 1 ? JSON.stringify(redact(parsed)) : line;
+  } catch {
+    return line;
+  }
+}
+
 /** The line a launcher without events prints once the app listens (sanoma 0.6.0 and before). */
 const LISTENING = / at (http:\/\/\S+); ctrl-c to stop$/;
 

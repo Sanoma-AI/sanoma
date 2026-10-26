@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
+import { redactedLine } from "./events.ts";
 
 /** How many lines `tail` keeps: what the start window shows when a company stops. */
 export const TAIL_LINES = 200;
@@ -7,7 +8,7 @@ export const TAIL_LINES = 200;
 export interface CompanyLog {
   /** `<dir>/<slug>.log`. */
   file: string;
-  /** Appends a line, timestamped and marked with where it came from. */
+  /** Appends a line, timestamped and marked with where it came from, an event's URLs without their passwords. */
   write(from: string, line: string): void;
   /** The last `TAIL_LINES` lines written, as written. */
   tail(): string[];
@@ -26,7 +27,8 @@ export function openLog(dir: string, slug: string): CompanyLog {
     file,
     write(from, line) {
       if (closed) return;
-      const text = `${new Date().toISOString()} ${from} ${line}`;
+      // No password reaches the file or the start window: the `database` event's URL carries one.
+      const text = `${new Date().toISOString()} ${from} ${redactedLine(line)}`;
       lines.push(text);
       if (lines.length > TAIL_LINES) lines.shift();
       appendFileSync(file, `${text}\n`);
